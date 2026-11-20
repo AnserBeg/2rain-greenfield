@@ -178,14 +178,56 @@ test(
           const moveCard = (label: string) =>
             `aria-label="Move card: ${label}"`;
 
-          // The buyer is a company-scoped principal of the first company.
-          const membership = await pool.query(
-            'UPDATE platform.current_policy_memberships SET legal_entity_id=$4 WHERE tenant_id=$1 AND environment_id=$2 AND principal_id=$3 AND revoked_at IS NULL',
-            [tenantId, environmentId, principalId, COMPANY],
-          );
-          assert.ok(membership.rowCount);
+          // A company-scoped membership cannot list companies, so it cannot
+          // open any workspace page (Lists included). Its Board reads are
+          // proven at the query gateway; pages use the unscoped buyer.
+          const scopeBuyer = async (company: string | null) => {
+            const updated = await pool.query(
+              'UPDATE platform.current_policy_memberships SET legal_entity_id=$4 WHERE tenant_id=$1 AND environment_id=$2 AND principal_id=$3 AND revoked_at IS NULL',
+              [tenantId, environmentId, principalId, company],
+            );
+            assert.ok(updated.rowCount);
+          };
+          const boardRead = (company: string) =>
+            app.runtime.entry.run({ headers: {} }, (view) =>
+              app.runtime.queryGateway.invoke(view, {
+                schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+                queryId: board.body.listQuery.queryId,
+                arguments: {
+                  [scope]: company,
+                  boardPage: {
+                    surfaceId: board.surfaceId,
+                    revisionId: board.revisionId,
+                    stages: [openState.stateId],
+                    filters: [],
+                  },
+                },
+              }),
+            );
+          const originalRole = (
+            await pool.query<{ role_id: string }>(
+              'SELECT role_id FROM platform.current_policy_memberships WHERE tenant_id=$1 AND environment_id=$2 AND principal_id=$3 AND revoked_at IS NULL',
+              [tenantId, environmentId, principalId],
+            )
+          ).rows[0]!.role_id;
 
           await t.test('a company-scoped read and move', async () => {
+            await scopeBuyer(COMPANY);
+            const scoped = await boardRead(COMPANY);
+            assert.deepEqual(
+              scoped.records.map((r) => r.recordId),
+              [alpha],
+            );
+            // The scoped buyer names the other company: refused, or no card of it.
+            const crossed = await boardRead(other).catch(
+              (error: unknown) => error as Error,
+            );
+            assert.ok(
+              crossed instanceof Error ||
+                !crossed.records.some((r) => r.recordId === beta),
+              JSON.stringify(crossed),
+            );
+            await scopeBuyer(null);
             const page = await get(COMPANY);
             assert.equal(page.status, 200, page.html.slice(-600));
             assert.match(page.html, /Alpha one/u);
@@ -242,8 +284,6 @@ test(
           await t.test(
             'a cross-company read and move are refused',
             async () => {
-              const page = await get(other);
-              assert.doesNotMatch(page.html, /Beta one/u);
               const before = await revision(beta);
               const task = await open(COMPANY, beta);
               assert.doesNotMatch(task.html, /Destination and action/u);
@@ -311,6 +351,10 @@ test(
               const task = await open(COMPANY, alphaTwo);
               assert.equal(task.status, 403);
               assert.match(task.html, /No move is available for this card/u);
+              await pool.query(
+                'UPDATE platform.current_policy_memberships SET role_id=$4 WHERE tenant_id=$1 AND environment_id=$2 AND principal_id=$3 AND revoked_at IS NULL',
+                [tenantId, environmentId, principalId, originalRole],
+              );
             },
           );
 
