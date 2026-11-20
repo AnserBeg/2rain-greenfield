@@ -1,4 +1,4 @@
-# ADR-0088. Build reports from governed record queries
+# ADR-0089. Build reports from governed record queries
 
 **Proposed for Fable’s design read · 2026-11-20.** An office worker can open **Customize → Add report** on Invoices or on a record type their company built, choose what one row represents, group it and publish the report. A colleague can run it with their own grants and export exactly the totals they can see. The rentals ERP inventory (§C) supplies the use cases for datasets, approved measures, charts and CSV. Receivables aging and customer statements in parked PR #34 are downstream examples. [Packet and walkthrough](../execution/packets/REPORTS-1.md) · [Plan §§6.6, 8.5–8.6, 9.2, 10.2, 12.2 and 12.8](../greenfield-north-star-erp-platform-plan.md)
 

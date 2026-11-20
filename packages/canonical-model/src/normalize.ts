@@ -207,6 +207,18 @@ export function normalizeApplicationPackage(
 
   const normalizedCandidate = {
     ...(authored.languageVersion === 'v6' &&
+      authored.connectorBindings && {
+        connectorBindings: [...authored.connectorBindings].sort((a, b) =>
+          compareCodeUnits(a.fieldId, b.fieldId),
+        ),
+      }),
+    ...(authored.languageVersion === 'v6' &&
+      authored.mapPlacements && {
+        mapPlacements: [...authored.mapPlacements].sort((a, b) =>
+          compareCodeUnits(a.placementId, b.placementId),
+        ),
+      }),
+    ...(authored.languageVersion === 'v6' &&
       authored.billingPlans && {
         billingPlans: authored.billingPlans
           .map(normalizeBillingPlan)
@@ -2875,7 +2887,11 @@ function validateComparisonValue(
   if (!field) return;
   const value = comparison.value;
   if (value.kind === 'queryParameterReference') return;
-  const expectedKind: Record<FieldType['kind'], CanonicalScalar['kind']> = {
+  const expectedKind: Record<
+    FieldType['kind'],
+    CanonicalScalar['kind'] | null
+  > = {
+    addressFieldType: null,
     booleanFieldType: 'booleanValue',
     dateFieldType: 'dateValue',
     dateTimeFieldType: 'dateTimeValue',

@@ -1,6 +1,6 @@
 # REPORTS-1 · Build and run a report on a company’s own record type
 
-**Slice 0 · Design proposed, 2026-11-20.** The owner chartered the reusable capability and a design read before code. This docs-only packet touches no Critical path. The orchestrator’s Fable read of [ADR-0088](../../decisions/ADR-0088-declared-reports.md) precedes slice 1.
+**Slice 0 · Design proposed, 2026-11-20.** The owner chartered the reusable capability and a design read before code. This docs-only packet touches no Critical path. The orchestrator’s Fable read of [ADR-0089](../../decisions/ADR-0089-declared-reports.md) precedes slice 1.
 
 ## Slice plan
 
