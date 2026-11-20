@@ -219,13 +219,35 @@ export class PostgresDocumentGateway implements DocumentGateway {
     signal: AbortSignal,
     deadline = documentDeadline(signal),
   ): Promise<DocumentMetadata> {
+    if (!uuid.test(retryKey))
+      throw new DocumentRequestError(400, 'Invalid PDF retry key.');
+    const receipt = await this.withRecord(
+      view,
+      target,
+      [DOCUMENT_PERMISSIONS.view],
+      deadline,
+      async (client, record) => {
+        const { rows } = await client.query<{
+          metadata: DocumentMetadata | null;
+        }>(
+          'SELECT platform.read_generated_document_receipt($1,$2,$3,$4,$5) AS metadata',
+          [
+            record.scope,
+            record.entity.entityId,
+            record.recordId,
+            scopedUploadId(view, retryKey),
+            templateId,
+          ],
+        );
+        return rows[0]!.metadata;
+      },
+    );
+    if (receipt) return receipt;
     if (!this.scanner || !this.scannerPool)
       throw new DocumentRequestError(
         503,
         'PDF generation requires an active document content scanner.',
       );
-    if (!uuid.test(retryKey))
-      throw new DocumentRequestError(400, 'Invalid PDF retry key.');
     const template = this.activeTemplate(view, target, templateId);
     const rendered = await this.renderTemplate(
       view,
@@ -364,8 +386,8 @@ export class PostgresDocumentGateway implements DocumentGateway {
         ),
         brand: await this.companyBrand.resolve(view, target.companyId, context),
       }),
-      { retry: false },
-    );
+      { retry: false, deadline },
+    ).catch((error) => documentDatabaseError(error, deadline));
     if (inputs.record.revision !== initial.revision) throw unavailableBinding();
 
     const input = {
@@ -390,8 +412,9 @@ export class PostgresDocumentGateway implements DocumentGateway {
       async (client, record) => {
         checkSameRecord(initial, record);
         if (!preview) await this.authorizeAttach(client, view, record);
-        await this.authorizeGenerated(client, view, record, sources, true);
+        await this.authorizeGenerated(client, view, record, sources);
       },
+      { lockSources: true },
     );
     return { input, bytes, brandRevision: brand.revision, ...sources };
   }
@@ -401,7 +424,6 @@ export class PostgresDocumentGateway implements DocumentGateway {
     view: RequestRuntimeView,
     governing: GoverningRecord,
     generated: Pick<GeneratedDocumentSource, 'queries' | 'companyBrandSource'>,
-    verifyRevision: boolean,
   ) {
     const { storage, documentFields, policy } = await this.release(
       view.release.releaseId,
@@ -429,7 +451,8 @@ export class PostgresDocumentGateway implements DocumentGateway {
         );
         if (
           current.classification !== field.classification ||
-          current.fieldKind !== field.fieldKind
+          current.fieldKind !== field.fieldKind ||
+          current.currencyCode !== field.currencyCode
         )
           throw unavailableBinding();
       }
@@ -438,24 +461,24 @@ export class PostgresDocumentGateway implements DocumentGateway {
         query.permissionId,
         ...(source.companyId ? [LEGAL_ENTITY_READ_SCOPE_PERMISSION_ID] : []),
       ]);
-      if (!source.rows.length) return;
       const revisions = await withModuleRuntimeRole(client, async () =>
         client.query<{ id: string; revision: string }>(
           `SELECT ${identifier(entity.recordIdentity.column)} AS id,
                   ${identifier(entity.optimisticRevision.column)}::text AS revision
              FROM north_star_module.${identifier(entity.physicalTableName)}
             WHERE tenant_id = $1 AND environment_id = $2
-              AND ${identifier(entity.recordIdentity.column)} = ANY($3::uuid[])
+              AND ($6::boolean OR ${identifier(entity.recordIdentity.column)} = ANY($3::uuid[]))
               AND ${identifier(entity.archive.archivedAtColumn)} IS NULL
               AND ${entity.legalEntity ? identifier(entity.legalEntity.column) + ' = $4::uuid' : '$4::uuid IS NULL'}
               AND ${relation ? identifier(relation.relationColumn.physicalName) + ' = $5::uuid' : '$5::uuid IS NULL'}
-            ORDER BY ${identifier(entity.recordIdentity.column)} FOR SHARE`,
+            ORDER BY ${identifier(entity.recordIdentity.column)} LIMIT 101 FOR SHARE`,
           [
             view.tenantId,
             view.environmentId,
             source.rows.map(({ recordId }) => recordId),
             source.companyId,
             relation ? governing.recordId : null,
+            relation !== null,
           ],
         ),
       );
@@ -463,10 +486,9 @@ export class PostgresDocumentGateway implements DocumentGateway {
         revisions.rows.map(({ id, revision }) => [id, Number(revision)]),
       );
       if (
+        byId.size !== source.rows.length ||
         source.rows.some(
-          ({ recordId, revision }) =>
-            !byId.has(recordId) ||
-            (verifyRevision && byId.get(recordId) !== revision),
+          ({ recordId, revision }) => byId.get(recordId) !== revision,
         )
       )
         throw unavailableBinding();
@@ -604,6 +626,7 @@ export class PostgresDocumentGateway implements DocumentGateway {
         );
         return result.rows[0]!.metadata;
       },
+      { lockSources: generated !== null },
     );
     if (receipt) return receipt;
     const clean = await scanStage(
@@ -657,7 +680,10 @@ export class PostgresDocumentGateway implements DocumentGateway {
               );
               return result.rows[0]!.metadata;
             },
-            deadline.beginPublicationCommit,
+            {
+              onCommitStart: deadline.beginPublicationCommit,
+              lockSources: generated !== null,
+            },
           ),
       },
       this.operations,
@@ -712,7 +738,7 @@ export class PostgresDocumentGateway implements DocumentGateway {
     permissions: readonly string[],
     deadline: DocumentDeadline,
     work: (client: PoolClient, record: GoverningRecord) => Promise<T>,
-    onCommitStart?: () => void,
+    options: { onCommitStart?: () => void; lockSources?: boolean } = {},
   ): Promise<T> {
     const context = trustedContextForRequestRuntimeView(view);
     deadline.remainingMilliseconds();
@@ -858,7 +884,7 @@ export class PostgresDocumentGateway implements DocumentGateway {
               FROM north_star_module.${identifier(entity.physicalTableName)}
              WHERE tenant_id = $1 AND environment_id = $2
                AND ${identifier(entity.recordIdentity.column)} = $3
-               AND ${identifier(entity.archive.archivedAtColumn)} IS NULL FOR SHARE`,
+               AND ${identifier(entity.archive.archivedAtColumn)} IS NULL FOR ${options.lockSources ? 'UPDATE' : 'SHARE'}`,
             [view.tenantId, view.environmentId, target.recordId],
           ),
         );
@@ -882,7 +908,7 @@ export class PostgresDocumentGateway implements DocumentGateway {
         });
       },
       deadline.remainingMilliseconds,
-      onCommitStart,
+      options.onCommitStart,
     ).catch((error) => documentDatabaseError(error, deadline));
   }
 }

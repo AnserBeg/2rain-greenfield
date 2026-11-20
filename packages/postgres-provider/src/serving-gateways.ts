@@ -1,3 +1,5 @@
+import { BILLING_QUOTE_CAPABILITY } from '../../canonical-model/src/billing.js';
+import { billingQuoteReadModel } from './billing-quote.js';
 import { LedgerDocumentBrandResolver } from './document-company-brand.js';
 import type { DocumentScanner } from './document-content.js';
 import {
@@ -108,6 +110,7 @@ export function composeServingGateways(
     options.monotonicMilliseconds,
   );
   const readModels = {
+    [BILLING_QUOTE_CAPABILITY]: billingQuoteReadModel(runtimePool),
     [FULFILLMENT_CAPABILITY_ID]: fulfillmentReadModel,
     [COMMERCIAL_CAPABILITY_ID]: commercialReadModelWithInventoryCost,
     [VALUATION_CAPABILITY_ID]: inventoryValuationReadModel,
@@ -187,6 +190,9 @@ export function composeServingGateways(
                       {
                         classification: field.classification,
                         fieldKind: field.fieldType.kind,
+                        ...(field.fieldType.kind === 'moneyFieldType' && {
+                          currencyCode: field.fieldType.currencyCode,
+                        }),
                       },
                     ] as const,
                   ]

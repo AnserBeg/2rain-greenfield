@@ -110,8 +110,10 @@ function renderSource(input: DocumentPdfInput, outputLimit: number): string {
 
       let y;
       let pages = 0;
-      function page() {
+      pdf.on('pageAdded', () => {
         if (++pages > 20) throw new Error('PDF page limit');
+      });
+      function page() {
         pdf.addPage();
         y = 46;
       }
@@ -174,7 +176,7 @@ function renderSource(input: DocumentPdfInput, outputLimit: number): string {
         for (let index = 0; index < pages; index++) {
           pdf.switchToPage(index);
           font(9, false, input.ink);
-          pdf.text(String(index + 1) + ' / ' + String(pages), 46, pdf.page.height - 46,
+          pdf.text(String(index + 1) + ' / ' + String(pages), 46, pdf.page.height - 58,
             { width, align: 'right', lineBreak: false });
         }
       }

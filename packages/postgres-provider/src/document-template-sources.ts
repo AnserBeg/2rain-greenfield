@@ -18,6 +18,7 @@ import {
   type SemanticQueryGateway,
   type SemanticRecordDto,
 } from '../../runtime/src/semantic-query-gateway.js';
+import { readCivilDate } from '../../runtime/src/civil-date.js';
 import { documentDigest } from './document-content.js';
 import type { DocumentPdfInput } from './document-pdf.js';
 
@@ -28,6 +29,7 @@ export interface DocumentFieldAuthority {
   readonly classification:
     'public' | 'internal' | 'confidential' | 'restricted';
   readonly fieldKind: string;
+  readonly currencyCode?: string;
 }
 
 interface FieldSource extends DocumentFieldAuthority {
@@ -208,7 +210,10 @@ export async function readDocumentTemplateSources(
         queryId,
         arguments: argumentsForQuery,
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        signal.throwIfAborted();
+        if (error instanceof Error && 'code' in error && error.code === '57014')
+          throw new DocumentRequestError(408, 'The file response expired.');
         throw unavailableBinding();
       });
     signal.throwIfAborted();
@@ -262,7 +267,6 @@ export async function readDocumentTemplateSources(
         record,
         header.fields.get(block.fieldId)!,
         template,
-        template.currencyFieldId,
       );
       blocks.push({
         kind: 'text',
@@ -280,12 +284,7 @@ export async function readDocumentTemplateSources(
         rows: table.rows.map((row) =>
           block.columns.map(({ fieldId }) =>
             safeDocumentPdfText(
-              formatField(
-                row,
-                table.fields.get(fieldId)!,
-                template,
-                block.currencyFieldId,
-              ),
+              formatField(row, table.fields.get(fieldId)!, template),
             ),
           ),
         ),
@@ -313,7 +312,6 @@ function formatField(
   record: SemanticRecordDto,
   field: FieldSource,
   template: DocumentTemplateRevision,
-  currencyFieldId: string | null,
 ): string {
   const value = record.values[field.fieldId];
   const { locale, currency, numberGrouping, dateStyle, timeZone } =
@@ -342,11 +340,7 @@ function formatField(
       )
         throw unavailableBinding();
       const money = field.fieldKind === 'moneyFieldType';
-      if (
-        money &&
-        (!currencyFieldId || record.values[currencyFieldId] !== currency)
-      )
-        throw unavailableBinding();
+      if (money && field.currencyCode !== currency) throw unavailableBinding();
       const fraction = exact.split('.')[1]?.length ?? 0;
       const formatter = new Intl.NumberFormat(locale, {
         useGrouping: numberGrouping,
@@ -362,13 +356,15 @@ function formatField(
     case 'dateFieldType':
     case 'dateTimeFieldType': {
       if (typeof value !== 'string') throw unavailableBinding();
-      const isDate = field.fieldKind === 'dateFieldType';
-      const date = new Date(isDate ? value + 'T00:00:00Z' : value);
+      const civil = readCivilDate(field.fieldKind, value);
+      if (!civil && field.fieldKind === 'dateFieldType')
+        throw unavailableBinding();
+      const date = civil ?? new Date(value);
       if (!Number.isFinite(date.getTime())) throw unavailableBinding();
       return new Intl.DateTimeFormat(locale, {
         dateStyle,
-        ...(isDate ? {} : { timeStyle: 'short' }),
-        timeZone: isDate ? 'UTC' : timeZone,
+        ...(civil ? {} : { timeStyle: 'short' }),
+        timeZone: civil ? 'UTC' : timeZone,
       }).format(date);
     }
     default:

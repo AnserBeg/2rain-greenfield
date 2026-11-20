@@ -5,7 +5,11 @@ import {
   type LayoutTarget,
   recordTypeEntityId,
 } from '@north-star/customization';
-import { templatePatchFromForm } from './document-template-form.js';
+import {
+  canReviseTemplateInForm,
+  templatePatchFromForm,
+  unsupportedTemplateLayout,
+} from './document-template-form.js';
 import type { DocumentTemplateTarget } from '../../../packages/customization/src/targets.js';
 import { slug } from '../../../packages/customization/src/apply.js';
 
@@ -1391,6 +1395,9 @@ function documentTemplateForm(
       <button>Draft retirement</button></form></li>`;
     })
     .join('');
+  if (current && !canReviseTemplateInForm(current, target))
+    return `<h1>Document templates for ${escapeHtml(target.label)}</h1>
+      <p>${unsupportedTemplateLayout}</p><ul>${active}</ul><a href="/?customize">Back to Customize</a>`;
   const identityOptions = target.queries.flatMap((query) =>
     query.fields
       .filter(

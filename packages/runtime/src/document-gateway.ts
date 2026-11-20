@@ -46,8 +46,9 @@ export function documentDeadline(
   signal = new AbortController().signal,
   now = () => performance.now(),
   beginPublicationCommit?: () => void,
+  durationMilliseconds = DOCUMENT_RESPONSE_MILLISECONDS,
 ): DocumentDeadline {
-  const expires = now() + DOCUMENT_RESPONSE_MILLISECONDS;
+  const expires = now() + durationMilliseconds;
   return {
     signal,
     beginPublicationCommit,

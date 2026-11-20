@@ -7,6 +7,7 @@ import {
   compileInSandbox,
   parseCustomizationPatch,
   parseSerializedRelease,
+  type SerializedRelease,
 } from '../../packages/customization/src/index.js';
 
 import type { ArchivedRunner } from './archived-runtime-process.js';
@@ -19,12 +20,13 @@ export {
 export async function assertArchivedTenantEnvelope(
   run: ArchivedRunner,
   entity = 'northstar.app:entity.item',
-) {
-  const patch = parseCustomizationPatch({
+  change: unknown = {
     kind: 'addField',
     entity,
     field: { label: 'Inspection notes', type: 'text' },
-  });
+  },
+): Promise<SerializedRelease> {
+  const patch = parseCustomizationPatch(change);
   assert.ok(patch.status === 'parsed');
   // The historical runner supplies both compilers with the same base, policy,
   // and parent bytes independently of changes to the current lineage.
@@ -50,7 +52,7 @@ console.log(JSON.stringify({ request, release: result.steps[0].release }));
     patch.patch,
   )) as {
     request: Parameters<typeof compileInSandbox>[0];
-    release: unknown;
+    release: SerializedRelease;
   };
   const current = await compileInSandbox(request);
   assert.ok(current.status === 'compiled', JSON.stringify(current));
@@ -67,4 +69,5 @@ console.log(JSON.stringify({ request, release: result.steps[0].release }));
     canonicalize(historical),
     'both tenant runners reproduce the entire v6 envelope',
   );
+  return historical;
 }

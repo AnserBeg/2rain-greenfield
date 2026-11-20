@@ -95,6 +95,7 @@ export function compileDocumentTemplates(
         definition,
         header,
         revision.currencyFieldId,
+        revision.format.currency,
         revision.layout.flatMap((block) =>
           block.kind === 'field' ? [block.fieldId] : [],
         ),
@@ -102,7 +103,7 @@ export function compileDocumentTemplates(
     )
       return refusal(
         revisionId,
-        'Money bindings must also select their declared currency field.',
+        'Money bindings use the currency declared by the field type.',
       );
     for (const block of revision.layout) {
       if (
@@ -133,6 +134,7 @@ export function compileDocumentTemplates(
           definition,
           query,
           block.currencyFieldId,
+          revision.format.currency,
           block.columns.map(({ fieldId }) => fieldId),
         )
       )
@@ -179,16 +181,23 @@ function currencyIsBound(
   definition: Definition,
   query: NonNullable<ReturnType<typeof sourceQuery>>,
   currencyFieldId: string | null,
+  currency: string,
   fields: readonly string[],
 ) {
-  if (currencyFieldId === null)
-    return fields.every(
-      (id) =>
-        selectedField(definition, query, id)?.fieldType.kind !==
-        'moneyFieldType',
+  const moneyTypes = fields.flatMap((id) => {
+    const field = selectedField(definition, query, id);
+    return field?.fieldType.kind === 'moneyFieldType' ? [field.fieldType] : [];
+  });
+  // Canonical Money has a fixed currency code. An arbitrary text value has no
+  // authority to reinterpret its amount.
+  if (moneyTypes.length)
+    return (
+      currencyFieldId === null &&
+      moneyTypes.every((field) => field.currencyCode === currency)
     );
   return (
+    currencyFieldId === null ||
     selectedField(definition, query, currencyFieldId)?.fieldType.kind ===
-    'textFieldType'
+      'textFieldType'
   );
 }

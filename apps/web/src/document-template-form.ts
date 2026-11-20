@@ -6,6 +6,49 @@ import type {
   DocumentTemplateTarget,
 } from '../../../packages/customization/src/targets.js';
 
+export const unsupportedTemplateLayout =
+  'This template layout cannot be edited in this form.';
+
+export function canReviseTemplateInForm(
+  revision: DocumentTemplateRevision,
+  target: DocumentTemplateTarget,
+): boolean {
+  if (revision.layout[0]?.kind !== 'heading') return false;
+  const order = { heading: 0, text: 1, field: 2, table: 3 } as const;
+  const header = target.queries.find(
+    ({ queryId }) => queryId === revision.headerQueryId,
+  );
+  const hasField = (
+    fields: readonly DocumentTemplateChoice[] | undefined,
+    fieldId: string,
+  ) => fields?.some((field) => field.fieldId === fieldId) === true;
+  if (
+    !hasField(header?.fields, revision.identityFieldId) ||
+    (revision.currencyFieldId &&
+      !hasField(header?.fields, revision.currencyFieldId))
+  )
+    return false;
+  return revision.layout.every((block, index) => {
+    if (
+      index > 0 &&
+      (order[block.kind] < order[revision.layout[index - 1]!.kind] ||
+        (block.kind !== 'field' &&
+          block.kind === revision.layout[index - 1]!.kind))
+    )
+      return false;
+    if (block.kind === 'field') return hasField(header?.fields, block.fieldId);
+    if (block.kind !== 'table') return true;
+    const table = target.tables.find(
+      ({ queryId, relationId }) =>
+        queryId === block.queryId && relationId === block.parentRelationId,
+    );
+    return (
+      block.columns.every(({ fieldId }) => hasField(table?.fields, fieldId)) &&
+      (!block.currencyFieldId || hasField(table?.fields, block.currencyFieldId))
+    );
+  });
+}
+
 export function templatePatchFromForm(
   form: Readonly<Record<string, string>>,
   target: DocumentTemplateTarget | undefined,
@@ -16,6 +59,8 @@ export function templatePatchFromForm(
   );
   if (form.previousRevisionId && !previous)
     throw new Error('The template revision has changed.');
+  if (previous && !canReviseTemplateInForm(previous, target))
+    throw new Error(unsupportedTemplateLayout);
   const label = (form.label ?? '').trim();
   const [headerQueryId, identityFieldId] = (form.identity ?? '').split('/');
   const header = target.queries.find(
@@ -43,13 +88,24 @@ export function templatePatchFromForm(
       );
     return findField(header.fields, fieldId);
   };
+  const previousFields = previous?.layout.filter(
+    (block) => block.kind === 'field',
+  );
+  const currentLabel = (
+    field: { fieldId: string; label: string },
+    prior?: { fieldId: string; label: string },
+  ) => (prior?.fieldId === field.fieldId ? prior.label : field.label);
   const layout: DocumentTemplateRevision['layout'] = [
     { kind: 'heading', text: form.heading ?? '' },
     ...(form.body?.trim() ? [{ kind: 'text' as const, text: form.body }] : []),
-    ...selected('field_').map((entry) => ({
-      kind: 'field' as const,
-      ...fromHeader(entry),
-    })),
+    ...selected('field_').map((entry, index) => {
+      const field = fromHeader(entry);
+      return {
+        kind: 'field' as const,
+        ...field,
+        label: currentLabel(field, previousFields?.[index]),
+      };
+    }),
   ];
   const columns = selected('column_');
   if (columns.length) {
@@ -64,12 +120,21 @@ export function templatePatchFromForm(
         throw new Error('Choose columns from one line table.');
       return findField(table.fields, fieldId);
     };
+    const previousTable = previous?.layout.find(
+      (block) => block.kind === 'table',
+    );
     layout.push({
       kind: 'table',
       queryId: table.queryId,
       parentRelationId: table.relationId,
       label: form.tableLabel ?? '',
-      columns: columns.map(fromTable),
+      columns: columns.map((entry, index) => {
+        const field = fromTable(entry);
+        return {
+          ...field,
+          label: currentLabel(field, previousTable?.columns[index]),
+        };
+      }),
       currencyFieldId: form.lineCurrency
         ? fromTable(form.lineCurrency).fieldId
         : null,

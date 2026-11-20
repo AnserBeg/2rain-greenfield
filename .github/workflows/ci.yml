@@ -189,6 +189,9 @@ jobs:
       - name: Run PostgreSQL shard 2
         if: matrix.shard == 2
         run: corepack pnpm test:postgres:2
+      - name: Build the compiled application for the PostgreSQL production smoke test
+        if: matrix.shard == 3
+        run: corepack pnpm build
       - name: Run PostgreSQL shard 3
         if: matrix.shard == 3
         run: corepack pnpm test:postgres:3

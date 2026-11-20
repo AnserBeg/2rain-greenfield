@@ -12,6 +12,7 @@ import { DOCUMENT_RESPONSE_MILLISECONDS } from '../../../packages/canonical-mode
 export function mountDocumentHttp(
   entry: AuthenticatedRequestRuntimeEntryAdapter,
   gateway: DocumentGateway,
+  responseMilliseconds = DOCUMENT_RESPONSE_MILLISECONDS,
 ) {
   let reads = 0;
   let writes = 0;
@@ -58,9 +59,14 @@ export function mountDocumentHttp(
     if (read) reads++;
     const controller = new AbortController();
     let publicationCommitting = false;
-    const deadline = documentDeadline(controller.signal, undefined, () => {
-      publicationCommitting = true;
-    });
+    const deadline = documentDeadline(
+      controller.signal,
+      undefined,
+      () => {
+        publicationCommitting = true;
+      },
+      responseMilliseconds,
+    );
     let settle: () => void;
     const responseDone = new Promise<void>((resolve) => {
       settle = resolve;
@@ -80,7 +86,7 @@ export function mountDocumentHttp(
       );
       if (response.headersSent) response.destroy();
       else documentError(response, 408, 'The file response expired.');
-    }, DOCUMENT_RESPONSE_MILLISECONDS);
+    }, responseMilliseconds);
     const { remainingMilliseconds } = deadline;
 
     try {

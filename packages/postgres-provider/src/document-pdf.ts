@@ -1,6 +1,6 @@
-import { Worker } from 'node:worker_threads';
 import { createRequire } from 'node:module';
-import { pathToFileURL } from 'node:url';
+import { Worker } from 'node:worker_threads';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DocumentRequestError } from '../../runtime/src/document-gateway.js';
 
 export interface DocumentPdfInput {
@@ -23,7 +23,6 @@ export interface DocumentPdfInput {
 }
 
 export const DOCUMENT_PDF_MAX_BYTES = 1024 * 1024;
-const resolvePackage = createRequire(import.meta.url).resolve;
 
 export async function renderDocumentPdf(
   input: DocumentPdfInput,
@@ -52,6 +51,13 @@ async function runRenderer(
   if (Buffer.byteLength(JSON.stringify(input)) > 512 * 1024)
     throw renderRefusal();
   const extension = import.meta.url.endsWith('.ts') ? 'ts' : 'js';
+  // tsx also loads this source through CJS, where import.meta.resolve is absent.
+  // Plain Node uses the production ESM hook for provider-local dependencies.
+  const resolveDependency =
+    extension === 'ts'
+      ? (name: string) =>
+          pathToFileURL(createRequire(import.meta.url).resolve(name)).href
+      : (name: string) => import.meta.resolve(name);
   const worker = new Worker(
     new URL(`./document-pdf-worker.${extension}`, import.meta.url),
     {
@@ -59,8 +65,10 @@ async function runRenderer(
       execArgv: [],
       resourceLimits: { maxOldGenerationSizeMb: 40, stackSizeMb: 2 },
       workerData: {
-        engine: pathToFileURL(resolvePackage('quickjs-emscripten')).href,
-        pdfkit: resolvePackage('pdfkit/js/pdfkit.standalone.js'),
+        engine: resolveDependency('quickjs-emscripten'),
+        pdfkit: fileURLToPath(
+          resolveDependency('pdfkit/js/pdfkit.standalone.js'),
+        ),
         input,
         outputLimit: DOCUMENT_PDF_MAX_BYTES,
       },
