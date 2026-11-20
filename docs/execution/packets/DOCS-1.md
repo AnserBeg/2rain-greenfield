@@ -13,7 +13,7 @@ Slice 2 implements document templates and PDF generation from [ADR-0078](../../d
 
 - Template sources are direct Q0 record reads and scoped child lists. Money uses the currency declared by its field type. Module reads return stored dates as civil text. Record pages and PDFs use the same calendar day. Layout uses the built-in Latin-script PDF fonts.
 - The company-brand resolver uses the company record name and the Ledger print palette without a logo. Shared records use the Ledger name. Each issued PDF saves brand revision `platform-default`.
-- Local demo issuance uses the demo scanner. SQL requires the governing Record grants, including mandatory child queries. PO approval settings may be withheld. SQL checks exact file categories and takes write limits and retention from the release. The scanner refuses verdict access after a policy change or release switch. Customer upload requests and signatures remain gated.
+- Local demo issuance uses the demo scanner. SQL requires the governing Record grants and every read-model dependency whose compiled declaration does not say `required: false`; an absent flag is mandatory and fails closed. The PO read model declares its purchasing-settings and approval reads `required: false`, because its provider leaves the approval figures empty when either read is withheld. That flag changes the first-party PO release bytes (pre-tenant rebaseline). Releases whose dependencies omit it compile byte-identically, which the archived-compiler comparison proves. Older binaries parse read models strictly, so they refuse a flagged query catalog at query time; no query-catalog rung is added. SQL checks exact file categories and takes write limits and retention from the release. The scanner refuses verdict access after a policy change or release switch. Customer upload requests and signatures remain gated.
 
 ## Test it yourself
 
@@ -29,14 +29,14 @@ Hosted CI exercises the compiled app, SQL authority, the preceding reader and pe
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "DOCS-1",
-  "base": "08edc207bcd5be1982c9c0bcf1723172df9cb7ad", "head": "60d424377f890042992514a60251fc36a3df8823",
+  "base": "08edc207bcd5be1982c9c0bcf1723172df9cb7ad", "head": "40cc6a496714cd0d89714159629e51d4b848b090",
   "changedPaths": [
-    ".github/workflows/ci.yml", ".github/workflows/evidence.yml", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts",
+    ".github/workflows/ci.yml", ".github/workflows/evidence.yml", "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts",
     "apps/web/src/document-http.ts", "apps/web/src/document-template-form.ts", "apps/web/src/surface-client.ts", "apps/web/src/surface-composition.ts",
     "db/migrations/0052_generated_document_sources.sql", "db/schema.snapshot.json", "packages/canonical-model/src/document-template-schema.ts", "packages/canonical-model/src/documents.ts",
     "packages/canonical-model/src/index.ts", "packages/canonical-model/src/normalize.ts", "packages/canonical-model/src/schemas.ts", "packages/compiler/src/compiler.ts",
     "packages/compiler/src/document-templates.ts", "packages/compiler/src/documents.ts", "packages/compiler/src/projections.ts", "packages/customization/src/apply.ts",
-    "packages/customization/src/patch.ts", "packages/customization/src/render.ts", "packages/customization/src/targets.ts", "packages/postgres-provider/package.json",
+    "packages/customization/src/patch.ts", "packages/customization/src/render.ts", "packages/customization/src/targets.ts", "packages/domain/src/purchasing/approval-workspace.ts", "packages/postgres-provider/package.json",
     "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/document-attachments.ts", "packages/postgres-provider/src/document-company-brand.ts", "packages/postgres-provider/src/document-content.ts",
     "packages/postgres-provider/src/document-pdf-worker.ts", "packages/postgres-provider/src/document-pdf.ts", "packages/postgres-provider/src/document-publication.ts", "packages/postgres-provider/src/document-template-sources.ts",
     "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/request-context.ts", "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/postgres-provider/src/serving-gateways.ts",
