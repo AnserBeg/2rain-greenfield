@@ -1,6 +1,6 @@
 # CI-3 — tiered packet and main CI
 
-Status: independent read REVISE at `e07f0fc9` (B1 red-main deadlock, N1 serialized main, N2 decision records). All three are fixed; integration full run and controls pending.
+Status: independent read REVISE at `e07f0fc9` (B1 red-main deadlock, N1 serialized main, N2 decision records). All three are fixed and the GitHub controls are complete. The full run on the integration commit is pending; the `CI tier: full` line moves to it in a docs-only change after merge, because the record cannot name a run of the commit that contains it.
 
 CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44777281191
 
@@ -17,11 +17,13 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44777281
 - The [migration-only diff and full reachability control](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44777294642) withholds the agent artifact after quality checks finish. The promotion summary links to the full attempt.
 - The [unmapped root file](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44777295892) exercises automatic promotion. The dispatch summary links to the full run.
 - [The Customize documentation replay](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44774127523) reproduces all seven paths and blobs in the change accepted at `31c79749`. Use run creation to the completion of reachability for elapsed time including queues.
-- Two GitHub pushes three seconds apart use the main policy on an isolated ref, with only the branch matcher changed. [First](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44774534056) and [second](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44774541169).
+- Three GitHub pushes two seconds apart use the main policy on an isolated ref, with only the branch matcher changed: [first](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44788711857), [second](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44788716685) and [third](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44788722149). They were created at 18:00:48, 18:00:50 and 18:00:52Z and their first jobs started at 18:21:30, 18:23:38 and 18:24:06Z. Their last jobs finished at 19:23:04, 19:23:08 and 19:33:29Z, so all three were executing jobs together from 18:24:06Z to 19:23:04Z. Each is attempt 1 and concluded success, with 25 successful jobs and the promotion job skipped. None was cancelled or held.
 
 - Local controls made the assertions fail independently when the red-main or missing-full refusal, dispatch status retry, or doctrine-only token exemption was removed.
 
 - GitHub returned a [404 on the first status read](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44773230084/job/136419749586) after creating the child. The transport check retries the same ID and propagates success, failure or sustained invisibility.
+
+- The integration full run 44788639976 on `4b13bf2e` was green except the Customization rules browser runner. That job hit its 20-minute limit after Chromium took 12.0 minutes to install. Its green durations on main on 2026-11-20 were 7.2 to 17.9 minutes, with a median of 9.1 (runs 44695527059 to 44792438982 plus 44772964755 and 44784440585). The slowest was 17.9 minutes in 44710878757, including 7.5 minutes of Chromium install against the usual 0.3 to 0.7. The slow install is a recurring tail, so this job's limit is raised to 30 minutes, the observed maximum plus about half. No other limit changes.
 
 ## Decisions
 

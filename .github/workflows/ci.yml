@@ -663,7 +663,8 @@ jobs:
     if: needs.select.outputs.promote == 'false' && needs.select.outputs.tier == 'full'
     name: Customization rules browser runner
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # Main's slowest green was 17.9 minutes, 7.5 of them installing Chromium.
+    timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
