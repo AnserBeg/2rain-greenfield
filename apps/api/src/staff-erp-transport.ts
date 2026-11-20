@@ -136,6 +136,8 @@ export function erpTransport(
       res.setHeader('set-cookie', cookie(flowCookie, flow, 300));
       // The same-origin form may follow its POST redirect to the fixed identity origin.
       secureResponse(res, r.identityOrigin);
+      // A native form needs its Origin on the POST. Keep the referrer on this host.
+      res.setHeader('referrer-policy', 'same-origin');
       res.setHeader('content-type', 'text/html; charset=utf-8');
       res.end(
         '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Staff sign-in</title></head><body><main><h1>Staff sign-in</h1><form method="post" action="/auth/signin"><input type="hidden" name="_csrf" value="' +

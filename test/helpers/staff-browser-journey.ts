@@ -68,9 +68,19 @@ async function journey() {
         // The stored invite has already been spent, even with a new browser transaction.
         await assert.rejects(identity.begin(secret(), { invite: invitation }));
         await page.getByRole('link', { name: 'Sign in to the ERP' }).click();
+        const startLogin = page.waitForResponse(
+          (res) =>
+            res.request().method() === 'POST' &&
+            res.url() === r.erpOrigin + '/auth/signin',
+        );
         await page
           .getByRole('button', { name: 'Continue to staff sign-in' })
           .click();
+        assert.equal(
+          (await startLogin).status(),
+          303,
+          'the ERP login POST must redirect',
+        );
         const button = page.getByRole('button', {
           name: 'Sign in with a passkey',
         });
