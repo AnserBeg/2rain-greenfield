@@ -634,11 +634,7 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
       url.searchParams.set('mode', mode);
       return url;
     };
-    const more = document.createElement('button');
-    more.type = 'button';
-    more.textContent = 'Show more files';
-    more.hidden = true;
-    panel.append(more);
+    const more = panel.querySelector('[data-documents-more]');
     let next = null;
     let generation = 0;
     const refresh = async (after = null) => {

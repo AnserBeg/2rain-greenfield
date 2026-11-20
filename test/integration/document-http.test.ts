@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import test from 'node:test';
@@ -84,7 +86,7 @@ test(
   },
 );
 
-test('classic PDFs are accepted up to the parser page-tree depth limit', async () => {
+test('classic PDFs are accepted up to the parser page-tree depth limit', async (t) => {
   const { validateDocumentContent } =
     await import('../../packages/postgres-provider/src/document-content.js');
   function pdfWithPageTree(depth: number) {
@@ -113,5 +115,30 @@ test('classic PDFs are accepted up to the parser page-tree depth limit', async (
   await assert.rejects(
     validateDocumentContent(pdfWithPageTree(65), 'application/pdf'),
     { status: 415 },
+  );
+  const entry = './dist/packages/postgres-provider/src/document-content.js';
+  await t.test(
+    'the compiled provider runs the bounded PDF worker',
+    { skip: existsSync(entry) ? false : 'requires the production build' },
+    () => {
+      const probe = `
+        import { register } from 'node:module';
+        import { readFileSync } from 'node:fs';
+        register('./scripts/production-resolve.mjs', import.meta.url);
+        const { validateDocumentContent } = await import(process.argv[1]);
+        process.stdout.write(await validateDocumentContent(readFileSync(0), 'application/pdf'));
+      `;
+      assert.equal(
+        execFileSync(
+          process.execPath,
+          ['--input-type=module', '-e', probe, entry],
+          {
+            input: pdfWithPageTree(1),
+            encoding: 'utf8',
+          },
+        ),
+        'application/pdf',
+      );
+    },
   );
 });
