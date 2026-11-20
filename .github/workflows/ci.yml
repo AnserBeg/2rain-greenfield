@@ -28,10 +28,11 @@ on:
 permissions:
   contents: read
 
+# Main runs one group per commit: every push runs full in parallel and none is
+# cancelled or held behind an earlier push. Packet refs cancel superseded runs.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ inputs.merge_sha && format('pr-{0}', inputs.pr_number) || github.ref }}-${{ github.ref != 'refs/heads/main' && inputs.tier || 'auto' }}
+  group: ci-${{ github.workflow }}-${{ inputs.merge_sha && format('pr-{0}', inputs.pr_number) || github.ref }}-${{ github.ref == 'refs/heads/main' && !inputs.merge_sha && format('sha-{0}', github.sha) || github.ref != 'refs/heads/main' && inputs.tier || 'auto' }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' || inputs.merge_sha != '' }}
-  queue: ${{ github.ref == 'refs/heads/main' && inputs.merge_sha == '' && 'max' || 'single' }}
 
 env:
   CI: '1'

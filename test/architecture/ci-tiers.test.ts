@@ -417,3 +417,63 @@ printf 'completed\\t%s\\n' "$CHILD"
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('main pushes run in parallel per commit while packet refs cancel superseded runs', () => {
+  const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
+  const block = workflow.match(/^concurrency:\n((?: {2}[^\n]*\n)+)/mu)?.[1];
+  assert.ok(block);
+  const keys = Object.fromEntries(
+    [...block.matchAll(/^ {2}([\w-]+): (.*)$/gmu)].map((m) => [m[1], m[2]]),
+  );
+  // Nothing may hold a main run behind another one.
+  assert.deepEqual(Object.keys(keys).sort(), ['cancel-in-progress', 'group']);
+  // Evaluate the GitHub expressions; absent inputs compare like ''.
+  const evaluate = (text: string, ref: string, sha: string, inputs = {}) =>
+    String(text).replace(/\$\{\{(.*?)\}\}/gu, (_, expression: string) =>
+      String(
+        new Function(
+          'github',
+          'inputs',
+          'format',
+          `return (${expression
+            .replaceAll(/(?<![=!])==(?!=)/gu, '===')
+            .replaceAll('!=', '!==')
+            .replaceAll('!===', '!==')});`,
+        )(
+          { workflow: 'CI', ref, sha },
+          { tier: '', merge_sha: '', pr_number: '', ...inputs },
+          (pattern: string, ...args: string[]) =>
+            pattern.replace(/\{(\d)\}/gu, (_m, i: string) => args[Number(i)]),
+        ),
+      ),
+    );
+  const policy = (ref: string, sha: string, inputs = {}) => ({
+    group: evaluate(keys.group, ref, sha, inputs),
+    cancel: evaluate(keys['cancel-in-progress'], ref, sha, inputs),
+  });
+  const main = 'refs/heads/main';
+  const pr = 'refs/pull/7/merge';
+  assert.deepEqual(policy(main, 'a'), {
+    group: 'ci-CI-refs/heads/main-sha-a',
+    cancel: 'false',
+  });
+  assert.notEqual(policy(main, 'a').group, policy(main, 'b').group);
+  assert.equal(policy(pr, 'a').group, policy(pr, 'b').group);
+  assert.equal(policy(pr, 'a').cancel, 'true');
+  const packet = 'refs/heads/packet/X';
+  assert.equal(
+    policy(packet, 'a', { tier: 'full' }).group,
+    policy(packet, 'b', { tier: 'full' }).group,
+  );
+  assert.notEqual(
+    policy(packet, 'a', { tier: 'full' }).group,
+    policy(packet, 'a', { tier: 'quick' }).group,
+  );
+  // A promotion dispatched on main still cancels its own superseded promotion.
+  const promoted = { merge_sha: 'm', pr_number: '7', tier: 'full' };
+  assert.deepEqual(policy(main, 'a', promoted), {
+    group: 'ci-CI-pr-7-auto',
+    cancel: 'true',
+  });
+  assert.equal(policy(main, 'b', promoted).group, 'ci-CI-pr-7-auto');
+});
