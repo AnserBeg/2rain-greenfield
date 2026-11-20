@@ -124,18 +124,17 @@ export function dateTimeScalars(
     value?.zoneSource.kind === 'companyBusinessCalendar'
       ? value.zoneSource
       : null;
-  const parts: Record<'instant' | DateTimeComponent, string | number | null> =
-    {
-      instant: value?.instant ?? null,
-      civil: value?.civil ?? null,
-      offsetSeconds: value?.offsetSeconds ?? null,
-      zone: value?.zone ?? null,
-      tzdbVersion: value?.tzdbVersion ?? null,
-      zoneSource: value?.zoneSource.kind ?? null,
-      companyId: company?.companyId ?? null,
-      calendarId: company?.calendarId ?? null,
-      dayBoundary: company?.dayBoundary ?? null,
-    };
+  const parts: Record<'instant' | DateTimeComponent, string | number | null> = {
+    instant: value?.instant ?? null,
+    civil: value?.civil ?? null,
+    offsetSeconds: value?.offsetSeconds ?? null,
+    zone: value?.zone ?? null,
+    tzdbVersion: value?.tzdbVersion ?? null,
+    zoneSource: value?.zoneSource.kind ?? null,
+    companyId: company?.companyId ?? null,
+    calendarId: company?.calendarId ?? null,
+    dayBoundary: company?.dayBoundary ?? null,
+  };
   return {
     [fieldId]: parts.instant,
     ...Object.fromEntries(

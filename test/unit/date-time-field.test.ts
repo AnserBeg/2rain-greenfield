@@ -53,7 +53,11 @@ const fieldId = appointment.fieldId;
 const patch = (input: unknown) =>
   customization.CustomizationPatchSchema.parse(input);
 
-const note = { kind: 'addField', entity: equipment, field: { label: 'Note', type: 'text' } };
+const note = {
+  kind: 'addField',
+  entity: equipment,
+  field: { label: 'Note', type: 'text' },
+};
 /** Compiles through the isolated sandbox; a forged edit lands on the applied definition. */
 async function compile(
   chain: unknown[],
@@ -66,7 +70,10 @@ async function compile(
       chain: chain.map(patch),
       tip: customization.serializeRelease(tip),
     });
-  const applied = customization.applyCustomizationPatches(base, chain.map(patch));
+  const applied = customization.applyCustomizationPatches(
+    base,
+    chain.map(patch),
+  );
   assert.ok(applied.status === 'applied', JSON.stringify(applied));
   const authored = structuredClone(applied.authored) as Record<string, any>;
   mutate(authored);
@@ -92,7 +99,9 @@ test('typed entry refuses the Toronto gap, asks for an offset in the repeat and 
   assert.equal(gap.status, 'refused');
   assert.ok(gap.status === 'refused' && gap.code === 'DATE_TIME_NONEXISTENT');
   const repeat = resolveTypedEntry('2026-11-01T01:30', zone);
-  assert.ok(repeat.status === 'refused' && repeat.code === 'DATE_TIME_AMBIGUOUS');
+  assert.ok(
+    repeat.status === 'refused' && repeat.code === 'DATE_TIME_AMBIGUOUS',
+  );
   assert.deepEqual('offsets' in repeat && repeat.offsets, [-14400, -18000]);
   for (const [offset, instant] of [
     [-14400, '2026-11-01T05:30:00.000Z'],
@@ -144,7 +153,14 @@ console.log(JSON.stringify([formatRecordZone(value), formatCivilDate('2026-03-08
     const [record, civil, process] = JSON.parse(
       execFileSync(
         globalThis.process.execPath,
-        ['--import', 'tsx', '--input-type=module', '-e', script, JSON.stringify(saved)],
+        [
+          '--import',
+          'tsx',
+          '--input-type=module',
+          '-e',
+          script,
+          JSON.stringify(saved),
+        ],
         { env: { ...globalThis.process.env, TZ: zone }, encoding: 'utf8' },
       ),
     ) as string[];
@@ -208,7 +224,9 @@ test('the declaration binds one logical field on the same three catalogs at the 
           {
             floor: projection.requiredRuntimeCapability?.minimumVersion,
             payload: artifact
-              ? (JSON.parse(new TextDecoder().decode(artifact.canonicalBytes)) as Record<string, unknown>)
+              ? (JSON.parse(
+                  new TextDecoder().decode(artifact.canonicalBytes),
+                ) as Record<string, unknown>)
               : null,
           },
         ];
@@ -269,8 +287,13 @@ test('first-party records, lines and forged non-instant scalars are named gaps',
   assert.match(
     refusalOf(
       await compile([recordType, appointment], (def) => {
-        const field = def.fields.find((f: { fieldId: string }) => f.fieldId === fieldId);
-        field.fieldType = { ...field.fieldType, timezoneSemantics: 'offsetDateTime' };
+        const field = def.fields.find(
+          (f: { fieldId: string }) => f.fieldId === fieldId,
+        );
+        field.fieldType = {
+          ...field.fieldType,
+          timezoneSemantics: 'offsetDateTime',
+        };
       }),
     ),
     /millisecond UTC instant/u,
@@ -284,7 +307,8 @@ const consumers: [string, (def: Record<string, any>) => void, RegExp][] = [
     'list filter',
     (def) => {
       const list = def.surfaces.find(
-        (s: { surfaceId: string }) => s.surfaceId === `${NS}:surface.custom_equipment_list`,
+        (s: { surfaceId: string }) =>
+          s.surfaceId === `${NS}:surface.custom_equipment_list`,
       ).list;
       list.filters.push({
         filterId: `${NS}:filter.custom_equipment_list_service_at`,
@@ -300,7 +324,8 @@ const consumers: [string, (def: Record<string, any>) => void, RegExp][] = [
     'metric card sum',
     (def) => {
       const query = def.queries.find(
-        (q: { queryId: string }) => q.queryId === `${NS}:query.custom_equipment_list`,
+        (q: { queryId: string }) =>
+          q.queryId === `${NS}:query.custom_equipment_list`,
       );
       query.listSumFields = [fieldId];
     },
@@ -364,7 +389,12 @@ test('presence is admitted on the whole value; comparison and length operands ar
           schemaVersion,
           kind: 'comparison',
           operator: 'equal',
-          left: { schemaVersion, kind: 'field', fieldId: status, select: 'value' },
+          left: {
+            schemaVersion,
+            kind: 'field',
+            fieldId: status,
+            select: 'value',
+          },
           right: {
             schemaVersion,
             kind: 'literal',
@@ -445,7 +475,11 @@ test('a saved list view filtering on the field refuses when saved, and a sort by
 
 test('with the member active and after its field retires, adding a field and arranging the list still compile', async () => {
   const later = [
-    { kind: 'addField', entity: equipment, field: { label: 'Bay', type: 'text' } },
+    {
+      kind: 'addField',
+      entity: equipment,
+      field: { label: 'Bay', type: 'text' },
+    },
     {
       kind: 'arrangeLayout',
       surface: `${NS}:surface.custom_equipment_list`,
@@ -454,8 +488,9 @@ test('with the member active and after its field retires, adding a field and arr
   ];
   lastRelease(await compile([recordType, appointment, ...later]));
   const retired = await compile([recordType, appointment, ...later], (def) => {
-    def.fields.find((f: { fieldId: string }) => f.fieldId === fieldId).lifecycle =
-      'retired';
+    def.fields.find(
+      (f: { fieldId: string }) => f.fieldId === fieldId,
+    ).lifecycle = 'retired';
   });
   lastRelease(retired);
 });

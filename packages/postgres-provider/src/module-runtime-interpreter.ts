@@ -1649,7 +1649,11 @@ function rejectStrayDateTimeValues(
   input: MutationInput,
 ): MutationInput {
   for (const [fieldId, value] of Object.entries(input.patch)) {
-    if (isRecord(value) && !dateTimeCheck(entity, fieldId) && !hasAddress(entity, fieldId))
+    if (
+      isRecord(value) &&
+      !dateTimeCheck(entity, fieldId) &&
+      !hasAddress(entity, fieldId)
+    )
       throw failure(
         'MODULE_FIELD_VALUE_INVALID',
         'operation input field violates its compiled value contract',

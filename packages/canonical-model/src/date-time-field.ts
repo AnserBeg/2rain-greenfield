@@ -138,9 +138,7 @@ export type DateTimeEntryRefusal =
       readonly offsets: readonly number[];
     };
 
-export function parseCivil(
-  text: string,
-): CivilDateTime | DateTimeEntryRefusal {
+export function parseCivil(text: string): CivilDateTime | DateTimeEntryRefusal {
   const match = civilPattern.exec(text);
   if (!match)
     return {

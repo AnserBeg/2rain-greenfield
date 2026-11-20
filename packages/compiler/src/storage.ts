@@ -733,7 +733,8 @@ export function lowerStorageTargetV1(
         .flatMap((field) => storageFieldsWith(field, dateTimeDeclarations))
         .map((field) => {
           const component = dateTimeComponentSpecs.get(field);
-          if (component) return lowerDateTimeComponent(field, component, mappings);
+          if (component)
+            return lowerDateTimeComponent(field, component, mappings);
           const previousColumn = previousColumns.get(field.fieldId);
           const deferRequiredTightening =
             field.presence === 'required' &&
@@ -2154,7 +2155,9 @@ export function buildStorageTransitionEnvelope(
     // every capture column, and its capture check is added NOT VALID after
     // the index, so a ceiling refusal leaves only inert columns behind.
     const oldCaptureChecks = new Set(
-      (oldEntity.dateTimeCaptureChecks ?? []).map((check) => check.physicalName),
+      (oldEntity.dateTimeCaptureChecks ?? []).map(
+        (check) => check.physicalName,
+      ),
     );
     for (const check of entity.dateTimeCaptureChecks ?? []) {
       if (oldCaptureChecks.has(check.physicalName)) continue;
@@ -2178,7 +2181,8 @@ export function buildStorageTransitionEnvelope(
           index.indexKind === 'dateTimeWindow' &&
           index.columnNames.includes(check.columns.instant),
       );
-      if (!window) throw new Error('validated dateTime window index is missing');
+      if (!window)
+        throw new Error('validated dateTime window index is missing');
       const createWindow = element(
         'createIndex',
         entity.entityId,
@@ -2854,7 +2858,10 @@ interface DateTimeComponentSpec {
   readonly component: DateTimeComponent;
   readonly logicalFieldId: string;
   readonly postgresqlType: string;
-  readonly contract: Pick<ModuleFieldContract, 'bounds' | 'fieldKind' | 'temporal'>;
+  readonly contract: Pick<
+    ModuleFieldContract,
+    'bounds' | 'fieldKind' | 'temporal'
+  >;
 }
 // Synthesized component fields carry their physical contract here, so they
 // flow through the same planner paths as ordinary optional columns.
@@ -2870,12 +2877,19 @@ const DATE_TIME_COMPONENT_CONTRACTS: Record<
     contract: {
       bounds: NO_BOUNDS,
       fieldKind: 'dateTimeFieldType',
-      temporal: { precision: 'millisecond', timezoneSemantics: 'localWallTime' },
+      temporal: {
+        precision: 'millisecond',
+        timezoneSemantics: 'localWallTime',
+      },
     },
   },
   offsetSeconds: {
     postgresqlType: 'integer',
-    contract: { bounds: NO_BOUNDS, fieldKind: 'integerFieldType', temporal: NO_TEMPORAL },
+    contract: {
+      bounds: NO_BOUNDS,
+      fieldKind: 'integerFieldType',
+      temporal: NO_TEMPORAL,
+    },
   },
   zone: text(64),
   tzdbVersion: text(16),
@@ -2887,7 +2901,10 @@ const DATE_TIME_COMPONENT_CONTRACTS: Record<
     contract: {
       bounds: NO_BOUNDS,
       fieldKind: 'timeFieldType',
-      temporal: { precision: 'millisecond', timezoneSemantics: 'localWallTime' },
+      temporal: {
+        precision: 'millisecond',
+        timezoneSemantics: 'localWallTime',
+      },
     },
   },
 };
@@ -2989,7 +3006,8 @@ function dateTimeColumnNames(
 ): StorageDateTimeCaptureCheckTarget['columns'] {
   const physical = (id: string) => {
     const column = columns.find((c) => c.canonicalFieldId === id);
-    if (!column) throw new Error(`dateTime storage is incomplete for ${fieldId}`);
+    if (!column)
+      throw new Error(`dateTime storage is incomplete for ${fieldId}`);
     return column.physicalName;
   };
   return {

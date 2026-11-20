@@ -2805,8 +2805,7 @@ function dateTimeEntryRefusal(
   const details = error.details as Record<string, string>;
   if (!details.reason?.startsWith('DATE_TIME_')) return null;
   const values = (input.values ?? input.patch) as
-    | Record<string, unknown>
-    | undefined;
+    Record<string, unknown> | undefined;
   if (!values || typeof values !== 'object') return null;
   const entered = values[error.subjectId] as Record<string, unknown> | null;
   return {

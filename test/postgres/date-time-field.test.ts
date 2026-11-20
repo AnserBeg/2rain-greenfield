@@ -77,7 +77,10 @@ test(
               recordId: randomUUID(),
               legalEntityId: COMPANY,
               relations: {},
-              values: { [`${NS}:field.custom_equipment_name`]: name, ...values },
+              values: {
+                [`${NS}:field.custom_equipment_name`]: name,
+                ...values,
+              },
             });
           const earlier = await create('Earlier boiler');
           assert.equal(earlier.outcome, 'succeeded', JSON.stringify(earlier));
@@ -275,8 +278,9 @@ test(
             },
           });
           assert.equal(
-            SavedDateTimeSchema.parse(moved.readBack!.values[appointment.fieldId])
-              .instant,
+            SavedDateTimeSchema.parse(
+              moved.readBack!.values[appointment.fieldId],
+            ).instant,
             '2026-11-02T17:15:00.000Z',
           );
 
@@ -300,13 +304,24 @@ test(
           const civilColumn = columns.find(
             (c) => c.typname === 'timestamp(3) without time zone',
           )!.attname;
-          const offsetColumn = columns.find((c) => c.typname === 'integer')!
-            .attname;
+          const offsetColumn = columns.find(
+            (c) => c.typname === 'integer',
+          )!.attname;
           for (const [label, sql] of [
-            ['partial capture', `UPDATE north_star_module.${table} SET ${civilColumn} = NULL WHERE record_id = $1`],
-            ['inconsistent offset', `UPDATE north_star_module.${table} SET ${offsetColumn} = ${offsetColumn} + 3600 WHERE record_id = $1`],
+            [
+              'partial capture',
+              `UPDATE north_star_module.${table} SET ${civilColumn} = NULL WHERE record_id = $1`,
+            ],
+            [
+              'inconsistent offset',
+              `UPDATE north_star_module.${table} SET ${offsetColumn} = ${offsetColumn} + 3600 WHERE record_id = $1`,
+            ],
           ] as const)
-            await assert.rejects(pool.query(sql, [id]), { code: '23514' }, label);
+            await assert.rejects(
+              pool.query(sql, [id]),
+              { code: '23514' },
+              label,
+            );
           // Company-sourced field: the current company calendar decides.
           await pool.query(
             `UPDATE platform.inventory_tenant_calendars SET time_zone = 'America/Toronto'`,
@@ -322,12 +337,14 @@ test(
           assert.deepEqual(capture.zoneSource, {
             kind: 'companyBusinessCalendar',
             companyId: COMPANY,
-            calendarId: capture.zoneSource.kind === 'companyBusinessCalendar'
-              ? capture.zoneSource.calendarId
-              : '',
-            dayBoundary: capture.zoneSource.kind === 'companyBusinessCalendar'
-              ? capture.zoneSource.dayBoundary
-              : '',
+            calendarId:
+              capture.zoneSource.kind === 'companyBusinessCalendar'
+                ? capture.zoneSource.calendarId
+                : '',
+            dayBoundary:
+              capture.zoneSource.kind === 'companyBusinessCalendar'
+                ? capture.zoneSource.dayBoundary
+                : '',
           });
           const companyGap = await create('Company gap', {
             [due.fieldId]: value('2026-03-08T02:30'),
@@ -391,54 +408,73 @@ test(
               [plain.releaseId],
             )
           ).rows[0]!;
-          await withArchivedCustomizationRuntime(previousReader, async (run) => {
-            const historical = await archivedTenantEnvelope(run);
-            assert.equal(persisted.content_hash, historical.releaseRoot);
-            assert.equal(
-              persisted.desired_state.toString('base64'),
-              historical.normalizedDefinitionBytesBase64,
-            );
-            const parse = (await run(
-              `import {readFileSync} from 'node:fs';import {parseCustomizationPatch} from './packages/customization/src/patch.ts';console.log(JSON.stringify(parseCustomizationPatch(JSON.parse(readFileSync(process.argv[2],'utf8')))));`,
-              { kind: 'changeSet', patches: [
-                { kind: 'addRecordType', label: 'Visits', fields: [{ label: 'Name', type: 'text' }] },
-                { ...appointment, target: { kind: 'tenantRecordType', recordTypeId: `${NS}:entity.custom_visits` } },
-              ] },
-            )) as { status: string; missingCapability?: string };
-            assert.equal(parse.status, 'unsupported');
-            assert.equal(parse.missingCapability, 'addDateTimeField');
-            const read = () =>
-              archivedRuntimeRead(run, {
-                databaseUrl,
-                identity: app.runtime.identity,
-              });
-            assert.equal((await read()).outcome, 'loaded');
-            const record = await opened.service.draft(
-              {
-                kind: 'addRecordType',
-                label: 'Equipment',
-                companyOwnership: 'entityOwned',
-                fields: [{ label: 'Name', type: 'text', required: true }],
-              },
-              'visualBuilder',
-            );
-            assert.ok(record.status === 'drafted');
-            await opened.service.approve(record.patchId);
-            await opened.service.activate(record.patchId);
-            assert.equal((await read()).outcome, 'loaded');
-            const field = await opened.service.draft(appointment, 'visualBuilder');
-            assert.ok(field.status === 'drafted', JSON.stringify(field));
-            await opened.service.approve(field.patchId);
-            await opened.service.activate(field.patchId);
-            const refusal = await read();
-            assert.equal(refusal.code, 'UNSUPPORTED_RUNTIME_CAPABILITY');
-            assert.match(
-              refusal.message ?? '',
-              new RegExp(
-                `surface-manifest requires version ${String(DATE_TIME_FIELD_READER)}`,
-              ),
-            );
-          });
+          await withArchivedCustomizationRuntime(
+            previousReader,
+            async (run) => {
+              const historical = await archivedTenantEnvelope(run);
+              assert.equal(persisted.content_hash, historical.releaseRoot);
+              assert.equal(
+                persisted.desired_state.toString('base64'),
+                historical.normalizedDefinitionBytesBase64,
+              );
+              const parse = (await run(
+                `import {readFileSync} from 'node:fs';import {parseCustomizationPatch} from './packages/customization/src/patch.ts';console.log(JSON.stringify(parseCustomizationPatch(JSON.parse(readFileSync(process.argv[2],'utf8')))));`,
+                {
+                  kind: 'changeSet',
+                  patches: [
+                    {
+                      kind: 'addRecordType',
+                      label: 'Visits',
+                      fields: [{ label: 'Name', type: 'text' }],
+                    },
+                    {
+                      ...appointment,
+                      target: {
+                        kind: 'tenantRecordType',
+                        recordTypeId: `${NS}:entity.custom_visits`,
+                      },
+                    },
+                  ],
+                },
+              )) as { status: string; missingCapability?: string };
+              assert.equal(parse.status, 'unsupported');
+              assert.equal(parse.missingCapability, 'addDateTimeField');
+              const read = () =>
+                archivedRuntimeRead(run, {
+                  databaseUrl,
+                  identity: app.runtime.identity,
+                });
+              assert.equal((await read()).outcome, 'loaded');
+              const record = await opened.service.draft(
+                {
+                  kind: 'addRecordType',
+                  label: 'Equipment',
+                  companyOwnership: 'entityOwned',
+                  fields: [{ label: 'Name', type: 'text', required: true }],
+                },
+                'visualBuilder',
+              );
+              assert.ok(record.status === 'drafted');
+              await opened.service.approve(record.patchId);
+              await opened.service.activate(record.patchId);
+              assert.equal((await read()).outcome, 'loaded');
+              const field = await opened.service.draft(
+                appointment,
+                'visualBuilder',
+              );
+              assert.ok(field.status === 'drafted', JSON.stringify(field));
+              await opened.service.approve(field.patchId);
+              await opened.service.activate(field.patchId);
+              const refusal = await read();
+              assert.equal(refusal.code, 'UNSUPPORTED_RUNTIME_CAPABILITY');
+              assert.match(
+                refusal.message ?? '',
+                new RegExp(
+                  `surface-manifest requires version ${String(DATE_TIME_FIELD_READER)}`,
+                ),
+              );
+            },
+          );
         } finally {
           await opened.close();
           await app.close();
@@ -524,23 +560,47 @@ test(
           await fill(1_001, 'other');
           const count = async () =>
             Number(
-              (await pool.query<{ n: string }>(`SELECT count(*) AS n FROM ${table}`))
-                .rows[0]!.n,
+              (
+                await pool.query<{ n: string }>(
+                  `SELECT count(*) AS n FROM ${table}`,
+                )
+              ).rows[0]!.n,
             );
           assert.equal(await count(), 10_001);
           const sourceRoot = (await opened.service.status()).activeReleaseRoot;
-          const field = await opened.service.draft(appointment, 'visualBuilder');
+          const field = await opened.service.draft(
+            appointment,
+            'visualBuilder',
+          );
           assert.ok(field.status === 'drafted', JSON.stringify(field));
           await opened.service.approve(field.patchId);
-          await assert.rejects(opened.service.activate(field.patchId), (error) => {
-            assert.equal((error as { code?: string }).code, 'DATE_TIME_WINDOW_CEILING_EXCEEDED');
-            assert.match(String((error as Error).message), /custom_equipment holds more than 10000 rows/u);
-            assert.match(String((error as Error).message), /custom_equipment_service_at/u);
-            return true;
-          });
+          await assert.rejects(
+            opened.service.activate(field.patchId),
+            (error) => {
+              assert.equal(
+                (error as { code?: string }).code,
+                'DATE_TIME_WINDOW_CEILING_EXCEEDED',
+              );
+              assert.match(
+                String((error as Error).message),
+                /custom_equipment holds more than 10000 rows/u,
+              );
+              assert.match(
+                String((error as Error).message),
+                /custom_equipment_service_at/u,
+              );
+              return true;
+            },
+          );
           // The verified source keeps serving: it reads and writes as before.
-          assert.equal((await opened.service.status()).activeReleaseRoot, sourceRoot);
-          const read = await world.read('custom_equipment', seeded.readBack!.recordId);
+          assert.equal(
+            (await opened.service.status()).activeReleaseRoot,
+            sourceRoot,
+          );
+          const read = await world.read(
+            'custom_equipment',
+            seeded.readBack!.recordId,
+          );
           assert.equal(read.values[appointment.fieldId], undefined);
           const updated = await world.invoke('custom_equipment_update', {
             recordId: seeded.readBack!.recordId,
@@ -577,7 +637,10 @@ test(
             `writer blocking at the 10,000-row ceiling: longest write ${longest.toFixed(1)} ms during a ${activation.toFixed(0)} ms activation`,
           );
           assert.ok(longest < 2_000, `writer blocked ${longest} ms`);
-          assert.notEqual((await opened.service.status()).activeReleaseRoot, sourceRoot);
+          assert.notEqual(
+            (await opened.service.status()).activeReleaseRoot,
+            sourceRoot,
+          );
         } finally {
           await opened.close();
           await app.close();

@@ -24,7 +24,9 @@ export function dateTimeBindings(
   return new Map(
     (Array.isArray(bindings) ? bindings : []).flatMap((binding) => {
       const parsed = DateTimeBindingSchema.safeParse(binding);
-      return parsed.success ? [[parsed.data.fieldId, parsed.data] as const] : [];
+      return parsed.success
+        ? [[parsed.data.fieldId, parsed.data] as const]
+        : [];
     }),
   );
 }

@@ -928,8 +928,9 @@ function definitionFromSnapshotRows(
       floor < DATE_TIME_FIELD_READER ||
       !dateTimeBound.every(
         (p) =>
-          canonicalize((p.payload as Record<string, unknown>).dateTimeBindings) ===
-          canonicalize(bindings),
+          canonicalize(
+            (p.payload as Record<string, unknown>).dateTimeBindings,
+          ) === canonicalize(bindings),
       )
     )
       throw malformedProjection(

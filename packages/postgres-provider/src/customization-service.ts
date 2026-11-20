@@ -2324,7 +2324,9 @@ export class PostgresCustomizationService {
       this.connection.materializerPool,
       this.connection.modulePool,
       {},
-      ceiling === undefined ? {} : { dateTimeWindowRowCeiling: Number(ceiling) },
+      ceiling === undefined
+        ? {}
+        : { dateTimeWindowRowCeiling: Number(ceiling) },
     );
   }
 
