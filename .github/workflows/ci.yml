@@ -2,86 +2,92 @@ name: CI
 on: workflow_dispatch
 permissions:
   contents: read
+env:
+  CI: '1'
+  REACHABILITY_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
 jobs:
-  coverage:
-    name: Regenerate document language decisions
+  quality:
+    name: Clean install, quality, and build
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: 1fd92456a6f94513796a2d056d2c90e0583f6fb0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+          fetch-depth: 0
+          ref: d5655975559a540d74c323e22be569af32875b8e
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .node-version
-      - run: corepack enable
-      - run: corepack pnpm install --frozen-lockfile
-      - name: Produce the coverage decisions from the ledger
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install frozen dependencies
+        run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      - name: Regenerate and compare the schema snapshot
         run: |
-          cat > "$RUNNER_TEMP/regenerate-document-coverage.cjs" <<'NODE'
-          const assert = require('node:assert/strict');
-          const { readFileSync, writeFileSync } = require('node:fs');
-          const { resolve } = require('node:path');
-          const {
-            deriveLanguageCoverageLedger,
-            deriveLanguageCoverageDecisionId,
-            deriveDecisionSetDigest,
-            deriveObligationSetDigest,
-            encodeLanguageCoverageObservationSnapshot,
-            observeLanguageCoverage,
-          } = require(resolve('test/helpers/language-conformance-ledger.ts'));
-          const { languageCoverageApplicationPackages } = require(resolve('test/helpers/language-coverage-packages.ts'));
-          const { lowerStorageTargetV1 } = require(resolve('packages/compiler/src/index.ts'));
-          const { normalizeApplicationPackage } = require(resolve('packages/canonical-model/src/index.ts'));
-          const path = 'test/fixtures/g2/language-conformance/coverage-decisions.json';
-          const document = JSON.parse(readFileSync(path, 'utf8'));
-          const ledger = deriveLanguageCoverageLedger(process.cwd());
-          const applicationPackages = languageCoverageApplicationPackages();
-          const storageTargets = applicationPackages.map((definition) => lowerStorageTargetV1(normalizeApplicationPackage(definition)));
-          const observed = observeLanguageCoverage(ledger, { applicationPackages, storageTargets });
-          const observationSnapshot = encodeLanguageCoverageObservationSnapshot(ledger, observed);
-          const oldSnapshot = document.observationSnapshot;
-          const defectIds = new Set(document.acceptedButUnhonoredObligationIds);
-          const known = new Set(ledger.obligations.map(({ id }) => id));
-          assert.ok([...defectIds].every((id) => known.has(id)));
-          const templateObligations = ledger.obligations.filter(({ id }) => id.includes('documentTemplate'));
-          assert.ok(templateObligations.length > 0);
-          const observedTemplates = templateObligations.filter(({ id }) => observed.has(id)).map(({ id }) => id);
-          assert.deepEqual(observedTemplates, [
-            'authoredLanguage:$.documentTemplatePointers.$presence="absent"',
-            'authoredLanguage:$.documentTemplateRevisions.$presence="absent"',
-          ]);
-          assert.equal(observed.size, oldSnapshot.observedCount + observedTemplates.length);
-          const priorLedger = { ...ledger, obligations: ledger.obligations.filter(({ id }) => !id.includes('documentTemplate')) };
-          assert.equal(priorLedger.obligations.length, oldSnapshot.obligationCount);
-          document.decisions = document.decisions.map(({ decisionId, ...body }) => {
-            const obligationSetDigest = deriveDecisionSetDigest(ledger, observed, body.category);
-            assert.equal(deriveDecisionSetDigest(priorLedger, observed, body.category), body.obligationSetDigest);
-            const updated = {
-              ...body,
-              ledgerDigest: ledger.digest,
-              obligationSetDigest,
-              acceptedButUnhonoredSetDigest: deriveObligationSetDigest(defectIds),
-              rationale: body.category === 'unobserved'
-                ? body.rationale + ' DOCS-1 adds optional v6 document-template declarations. The first-party coverage fixtures leave them absent. The PostgreSQL issuance test exercises templates in customized releases.'
-                : body.category === 'observedOutsideRelationScope'
-                  ? body.rationale + ' The DOCS-1 first-party fixtures observe both optional template declarations absent.'
-                  : body.rationale,
-            };
-            return { ...updated, decisionId: deriveLanguageCoverageDecisionId(decisionId.split('@')[0], updated) };
-          });
-          document.ledgerDigest = ledger.digest;
-          document.observationSnapshot = observationSnapshot;
-          writeFileSync(path, JSON.stringify(document, null, 2) + '\n');
-          console.log('Obligations:', oldSnapshot.obligationCount, '->', observationSnapshot.obligationCount);
-          console.log('Observed:', oldSnapshot.observedCount, '->', observationSnapshot.observedCount);
-          console.log('Optional template obligations:', templateObligations.length);
-          console.log('Ledger:', ledger.digest);
-          NODE
-          node --import tsx "$RUNNER_TEMP/regenerate-document-coverage.cjs"
-          corepack pnpm exec prettier --write test/fixtures/g2/language-conformance/coverage-decisions.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+          node --import tsx test/helpers/regenerate-schema-snapshot.ts
+          git diff --exit-code -- db/schema.snapshot.json
+      - name: Begin executed-file evidence run
+        run: node --import tsx test/helpers/begin-reachability-run.ts
+      - name: Check formatting
+        run: corepack pnpm format
+      - name: Lint
+        run: corepack pnpm lint
+      - name: Typecheck
+        run: corepack pnpm typecheck
+      - name: Build
+        run: corepack pnpm build
+      - name: Check mutation manifests still name live production text
+        run: corepack pnpm check:expected-red
+      - name: Prove the expected-red gate can fail
+        run: corepack pnpm check:expected-red-controls
+      - name: Run unit tests
+        run: corepack pnpm test:unit
+      - name: Run compiler tests
+        run: corepack pnpm test:compiler
+      - name: Run integration tests
+        run: corepack pnpm test:integration
+      - name: Run agent tests
+        run: corepack pnpm test:agent
+      - name: Run architecture and hygiene tests
+        run: corepack pnpm test:architecture
+      - name: Check compiled demo release freshness
+        run: corepack pnpm check:demo-release
+      - name: Check compiled application release freshness
+        run: corepack pnpm check:app-release
+      - name: Run web surface contracts
+        run: corepack pnpm test:contracts
+      - name: Check language coverage obligations
+        run: corepack pnpm check:language-coverage
+      - name: Retain quality executed-file evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: document-template-coverage-decisions
-          path: test/fixtures/g2/language-conformance/coverage-decisions.json
+          name: reachability-quality-${{ github.sha }}
+          path: |
+            test-results/reachability/unit.json
+            test-results/reachability/compiler.json
+            test-results/reachability/integration.json
+            test-results/reachability/agent.json
+            test-results/reachability/architecture.json
+            test-results/reachability/contracts.json
           if-no-files-found: error
+          retention-days: 7
+      - name: Check patch whitespace and repository cleanliness
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [[ -n "$BASE_SHA" ]]; then
+            git diff --check "$BASE_SHA...HEAD"
+          else
+            git show --check --format= HEAD
+          fi
+          git diff --exit-code
+          test -z "$(git status --porcelain --untracked-files=all)"
+      - name: Retain compiled scaffold
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: scaffold-dist-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
