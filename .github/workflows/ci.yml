@@ -197,7 +197,6 @@ jobs:
             test-results/reachability/unit.json
             test-results/reachability/compiler.json
             test-results/reachability/integration.json
-            test-results/reachability/agent.json
             test-results/reachability/architecture.json
             test-results/reachability/contracts.json
             test-results/reachability/quick-node.json
