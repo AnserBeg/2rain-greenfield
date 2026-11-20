@@ -77,9 +77,7 @@ import {
   SEMANTIC_OPERATION_REQUEST_VERSION,
   SemanticOperationGateway,
   SemanticOperationMediationAuthority,
-  type SemanticOperationExecutionRequest,
   type SemanticOperationExecutor,
-  type SemanticOperationNonAcceptedRequest,
   type SemanticOperationResultEnvelope,
 } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import { SHARED_LIST_QUERY_VERSION } from '../../packages/runtime/src/list-behavior/index.js';
@@ -1613,7 +1611,7 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
   );
 });
 
-test('v3 inventory reads require issued legal-entity scope and preserve generic operations', async () => {
+test('v3 inventory reads require issued legal-entity scope and preserve generic operations', async (t) => {
   const definition = inventoryApplicationDefinition();
   const emptyInventory = emptyDefinition(ordinaryModuleV1());
   const empty = mustCompile(moduleInput(emptyInventory));
@@ -1830,10 +1828,7 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
           humanActorIssuer(),
         );
         const queryGateway = new SemanticQueryGateway(policy, interpreter);
-        const recordingExecutor = new RecordingForwardingOperationExecutor(
-          interpreter,
-        );
-        const gateway = operationGatewayFor(policy, recordingExecutor);
+        const gateway = operationGatewayFor(policy, interpreter);
         const activePointer = await pool.query<{
           fence: string;
           pointer_id: string;
@@ -1894,6 +1889,9 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
           gatewayCreateRecordId,
           'DIRECT-OPERAND-GATEWAY',
         );
+        const createExecution = t.mock.method(interpreter, 'execute', {
+          times: 1,
+        });
         const gatewayCreated = await operation(
           gateway,
           view,
@@ -1902,7 +1900,7 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
           APPLICATION_NAMESPACE,
         );
         assert.equal(gatewayCreated.outcome, 'succeeded');
-        const gatewayExecution = recordingExecutor.calls.at(-1);
+        const gatewayExecution = createExecution.mock.calls[0]?.arguments[0];
         assert.ok(gatewayExecution);
 
         // The exact gateway-built request is accepted when handed straight to
@@ -3548,25 +3546,6 @@ function operationGatewayFor(
   const gateway = new SemanticOperationGateway(policy, interpreter, mediation);
   operationMediationByGateway.set(gateway, mediation);
   return gateway;
-}
-
-class RecordingForwardingOperationExecutor implements SemanticOperationExecutor {
-  readonly calls: SemanticOperationExecutionRequest[] = [];
-
-  constructor(private readonly delegate: SemanticOperationExecutor) {}
-
-  execute(
-    request: SemanticOperationExecutionRequest,
-  ): Promise<SemanticOperationResultEnvelope> {
-    this.calls.push(request);
-    return this.delegate.execute(request);
-  }
-
-  recordNonAccepted(
-    request: SemanticOperationNonAcceptedRequest,
-  ): Promise<void> {
-    return this.delegate.recordNonAccepted(request);
-  }
 }
 
 function inventoryTransactionCreateInput(
