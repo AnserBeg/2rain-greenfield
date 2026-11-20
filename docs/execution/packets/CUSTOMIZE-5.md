@@ -31,6 +31,12 @@ Status: executable, merged on CI green. Critical paths touched: `db/migrations/0
 - The viewer-zone switch follows slice 1 (packet allows it).
 - PDF text not proven: no document generator is on `main` (DOCS-1 slice 2 is unmerged). The no-viewer formatter is proven in UTC processes and at the list/export reader; templates must bind it when they land.
 
+**Test it yourself (slice 1, under ten minutes).** `corepack pnpm dev`, sign in as manager, open **Customize**.
+1. Draft and activate a record type **Service job** with a Name, then **New date and time field** → *Appointment*, time zone *Chosen on each record*. Activate.
+2. New Service job: Appointment `2026-03-08 02:30`, zone `America/Toronto`, save → refused (the clocks skip that time), your entry is still in the form.
+3. Enter `2026-11-01 01:30` Toronto → the form asks for UTC−04:00 or UTC−05:00. Choose UTC−05:00 → the Record shows **November 1, 2026, 01:30 UTC−05:00 America/Toronto**. Save a second job at 01:30 UTC−04:00; sort the list by Appointment: the −04:00 job comes first.
+4. Add a second field with *Company business calendar*: entries resolve in the tenant calendar zone (Edmonton in the demo) and record the company.
+
 **Controls** (`test/evidence/CUSTOMIZE-5.expected-red.json`): consumer refusal, comparison refusal, reader floor, ceiling probe, capture all-or-none; each reds its own test.
 
 ## Test it yourself
