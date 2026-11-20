@@ -4,14 +4,17 @@ import test from 'node:test';
 
 import { observabilityTestFiles } from '../helpers/reachability-producers.js';
 
-test('CI captures focused observability evidence after other heavy jobs', () => {
+test('CI captures focused observability evidence from its own checkout', () => {
   const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
 
-  assert.match(workflow, /^ {2}observability:$/mu);
-  assert.match(workflow, /^ {4}needs:\n {6}- browser\n {6}- postgres$/mu);
-  assert.ok(workflow.includes('OBSERVABILITY_EVIDENCE_DIR'));
+  const job = workflow.match(
+    /^ {2}observability:\n([\s\S]*?)(?=^ {2}[\w-]+:)/mu,
+  )?.[1];
+  assert.ok(job);
+  assert.doesNotMatch(job, /^ {4}needs:|uses: actions\/download-artifact/mu);
+  assert.ok(job.includes('OBSERVABILITY_EVIDENCE_DIR'));
   assert.ok(
-    workflow.includes(
+    job.includes(
       'node --import tsx test/helpers/run-observability-producer.ts',
     ),
   );
@@ -20,9 +23,7 @@ test('CI captures focused observability evidence after other heavy jobs', () => 
     'test/integration/observability-ci-contract.test.ts',
     'test/postgres/observability-health.test.ts',
   ]);
-  assert.ok(workflow.includes('test-results/observability/tests.tap'));
-  assert.ok(
-    workflow.includes('name: observability-evidence-${{ github.sha }}'),
-  );
-  assert.ok(workflow.includes('if: always()'));
+  assert.ok(job.includes('test-results/observability/tests.tap'));
+  assert.ok(job.includes('name: observability-evidence-${{ github.sha }}'));
+  assert.ok(job.includes('if: always()'));
 });
