@@ -68,6 +68,9 @@ async function journey() {
         // The stored invite has already been spent, even with a new browser transaction.
         await assert.rejects(identity.begin(secret(), { invite: invitation }));
         await page.getByRole('link', { name: 'Sign in to the ERP' }).click();
+        await page
+          .getByRole('button', { name: 'Continue to staff sign-in' })
+          .click();
         const button = page.getByRole('button', {
           name: 'Sign in with a passkey',
         });
@@ -326,14 +329,23 @@ async function journey() {
            FROM platform.current_policy_roles WHERE tenant_id=$1 AND environment_id=$2 AND role_key='staff-member'`,
           [r.tenantId, r.environmentId],
         );
-        await assert.rejects(
-          sign(
-            ownerKey,
-            { action: 'recover', subject: member, reason: 'attended test' },
-            ownerSession.value,
-          ),
-          /Staff access could not be verified/,
+        await pool.query(
+          `INSERT INTO platform.current_policy_permission_grants(tenant_id,environment_id,role_id,permission_id,resource_id)
+           SELECT tenant_id,environment_id,role_id,'northstar.test:approve','northstar.test:invoice'
+           FROM platform.current_policy_roles WHERE tenant_id=$1 AND environment_id=$2 AND role_key='staff-owner'`,
+          [r.tenantId, r.environmentId],
         );
+        const refuseRecovery = (reason: string) =>
+          assert.rejects(
+            sign(
+              ownerKey,
+              { action: 'recover', subject: member, reason: 'attended test' },
+              ownerSession.value,
+            ),
+            /Staff access could not be verified/,
+            reason,
+          );
+        await refuseRecovery('recovery must match the permission resource');
         assert.equal(
           (
             await pool.query(
@@ -356,6 +368,19 @@ async function journey() {
           "UPDATE platform.current_policy_permission_grants SET revoked_at=now() WHERE tenant_id=$1 AND environment_id=$2 AND permission_id='northstar.test:approve'",
           [r.tenantId, r.environmentId],
         );
+        for (const change of [
+          'set_release_approver_eligibility',
+          'set_release_executor_authority',
+        ]) {
+          const setMember = (enabled: boolean) =>
+            pool.query(
+              `SELECT platform.${change}($1,$2,$3,$4,gen_random_uuid())`,
+              [r.tenantId, member, enabled, owner],
+            );
+          await setMember(true);
+          await refuseRecovery('recovery must cover ' + change);
+          await setMember(false);
+        }
         const memberVerifier = await startBrowserLogin(r, ca);
         const memberLogin = await sign(memberCredential, {
           action: 'signin',
@@ -413,6 +438,59 @@ async function journey() {
         );
         await assert.rejects(identity.account(memberLogin.identity));
         await assert.rejects(identity.signout(memberHandle, false, 'erp'));
+        const recoveryFlow = secret();
+        const recoveryOptions = await identity.begin(recoveryFlow, {
+          invite: recovered,
+        });
+        assert.ok('rp' in recoveryOptions);
+        const registration = await page.evaluate(async (json) => {
+          const credential = (await navigator.credentials.create({
+            publicKey: PublicKeyCredential.parseCreationOptionsFromJSON(
+              JSON.parse(json),
+            ),
+          })) as PublicKeyCredential;
+          return credential.toJSON();
+        }, JSON.stringify(recoveryOptions));
+        // Authority changes after the invitation and valid registration challenge were issued.
+        const ownerMembership = (
+          await pool.query<{ membership_id: string }>(
+            `UPDATE platform.current_policy_memberships m SET revoked_at=now() FROM platform.current_policy_roles r
+           WHERE m.tenant_id=r.tenant_id AND m.environment_id=r.environment_id AND m.role_id=r.role_id
+             AND m.principal_id=$1 AND r.role_key='staff-owner' AND m.revoked_at IS NULL RETURNING m.membership_id`,
+            [owner],
+          )
+        ).rows;
+        assert.equal(ownerMembership.length, 1);
+        await assert.rejects(
+          identity.finish(
+            recoveryFlow,
+            registration as Parameters<typeof identity.finish>[1],
+          ),
+          /Staff access could not be verified/,
+          'recovery enrollment must recheck issuer authority',
+        );
+        assert.equal(
+          (
+            await pool.query(
+              'SELECT FROM platform.staff_credentials WHERE principal_id=$1 AND revoked_at IS NULL',
+              [member],
+            )
+          ).rowCount,
+          0,
+        );
+        assert.equal(
+          (
+            await pool.query(
+              'SELECT FROM platform.staff_invitations WHERE token_digest=$1 AND retired_at IS NULL',
+              [digest(recovered)],
+            )
+          ).rowCount,
+          1,
+        );
+        await pool.query(
+          'UPDATE platform.current_policy_memberships SET revoked_at=NULL WHERE membership_id=$1',
+          [ownerMembership[0]!.membership_id],
+        );
         await enroll(recovered);
         await sign(
           ownerKey,

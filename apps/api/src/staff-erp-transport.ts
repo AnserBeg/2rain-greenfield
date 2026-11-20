@@ -3,6 +3,8 @@ import { request as httpsRequest } from 'node:https';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   check,
+  attemptBucket,
+  clientAddress,
   cookie,
   cookieValue,
   csrf,
@@ -17,6 +19,7 @@ import {
   type StaffRealm,
 } from './staff-protocol.js';
 
+const flowCookie = '__Host-erp-flow';
 const loginCookie = '__Host-erp-login';
 export const sessionCookie = '__Host-erp-session';
 const callbackScript = `const handoff=location.hash.slice(1);history.replaceState(null,'','/auth/callback');
@@ -58,8 +61,30 @@ async function backchannel(
   });
   return JSON.parse(result) as Record<string, unknown>;
 }
-export function erpTransport(r: StaffRealm, pool: Pool, ca?: Buffer) {
+async function csrfForm(req: IncomingMessage, handle: string) {
+  check(
+    req.headers['content-type']?.split(';')[0] ===
+      'application/x-www-form-urlencoded',
+  );
+  let payload = '';
+  for await (const part of req) {
+    payload += String(part);
+    check(payload.length <= 512);
+  }
+  const form = new URLSearchParams(payload);
+  check(form.get('_csrf') === csrf(handle));
+  return form;
+}
+export function erpTransport(
+  r: StaffRealm,
+  pool: Pool,
+  rateKey: Buffer,
+  trustedIngress: readonly string[] = [],
+  ca?: Buffer,
+) {
   validateRealm(r);
+  check(rateKey.length >= 32);
+  const sourceOf = clientAddress(trustedIngress);
   return async (req: IncomingMessage, res: ServerResponse) => {
     secureResponse(res);
     check(req.headers.host === new URL(r.erpOrigin).host);
@@ -107,13 +132,40 @@ export function erpTransport(r: StaffRealm, pool: Pool, ca?: Buffer) {
       req.method === 'GET' &&
       (url.pathname === '/auth/signin' || (!handle && url.pathname === '/'))
     ) {
+      const flow = cookieValue(req.headers.cookie, flowCookie) ?? secret();
+      res.setHeader('set-cookie', cookie(flowCookie, flow, 300));
+      // The same-origin form may follow its POST redirect to the fixed identity origin.
+      secureResponse(res, r.identityOrigin);
+      res.setHeader('content-type', 'text/html; charset=utf-8');
+      res.end(
+        '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Staff sign-in</title></head><body><main><h1>Staff sign-in</h1><form method="post" action="/auth/signin"><input type="hidden" name="_csrf" value="' +
+          csrf(flow) +
+          '"><button>Continue to staff sign-in</button></form></main></body></html>',
+      );
+      return null;
+    }
+    if (url.pathname === '/auth/signin') {
+      sameOriginPost(req, r.erpOrigin);
+      const flow = cookieValue(req.headers.cookie, flowCookie);
+      check(flow);
+      await csrfForm(req, flow);
+      const bucket = attemptBucket(rateKey, 'erp-login', sourceOf(req));
       const verifier = secret();
       const binding = digest(verifier);
       const { rows } = await pool.query<{ keep: boolean }>(
-        'SELECT platform.staff_start_login($1,$2,$3,$4) AS keep',
-        [r.tenantId, r.environmentId, binding, handle ? digest(handle) : null],
+        'SELECT platform.staff_start_login($1,$2,$3,$4,$5) AS keep',
+        [
+          r.tenantId,
+          r.environmentId,
+          binding,
+          handle ? digest(handle) : null,
+          bucket,
+        ],
       );
-      const cookies = [cookie(loginCookie, verifier, 300)];
+      const cookies = [
+        cookie(loginCookie, verifier, 300),
+        cookie(flowCookie, '', 0),
+      ];
       if (handle && !rows[0]?.keep) cookies.push(cookie(sessionCookie, '', 0));
       res.setHeader('set-cookie', cookies);
       res.writeHead(303, {
@@ -126,13 +178,7 @@ export function erpTransport(r: StaffRealm, pool: Pool, ca?: Buffer) {
     check(handle);
     if (req.method !== 'GET') sameOriginPost(req, r.erpOrigin);
     if (req.method === 'POST' && url.pathname === '/auth/signout') {
-      let payload = '';
-      for await (const part of req) {
-        payload += String(part);
-        check(payload.length <= 512);
-      }
-      const form = new URLSearchParams(payload);
-      check(form.get('_csrf') === csrf(handle));
+      const form = await csrfForm(req, handle);
       await backchannel(
         r,
         '/end-session',
