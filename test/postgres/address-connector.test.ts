@@ -216,9 +216,11 @@ test(
                 "SELECT state,latitude,longitude FROM platform.address_geocodes WHERE record_id=$1 AND attempts=1 AND state='held'",
                 [recordId],
               );
-              assert.deepEqual(late.rows, [
-                { state: 'held', latitude: null, longitude: null },
-              ]);
+              assert.deepEqual(
+                late.rows,
+                [{ state: 'held', latitude: null, longitude: null }],
+                'the late geocode was accepted after the source address changed',
+              );
               assert.deepEqual(await gateway.pin(view, t, b.mapQueryId), {
                 status: 'locating',
               });
@@ -267,6 +269,7 @@ test(
                 {
                   status: 'unavailable',
                 },
+                'the other company received a provider pin for this shared record',
               );
               assert.equal(
                 (await gateway.pin(view, t, b.mapQueryId)).status,

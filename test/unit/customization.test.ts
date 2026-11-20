@@ -2367,6 +2367,26 @@ test('addAddressField and addMapPlacement replay on a compatible base and identi
   const chain = [add, map];
   const original = await compileInSandbox(sandboxRequest(chain));
   assert.ok(original.status === 'compiled', JSON.stringify(original));
+  const family = PROJECTION_FAMILY_IDS.surfaceManifest;
+  const floors = original.steps.map(({ release }) => {
+    const manifest =
+      parseSerializedRelease(release).compiled.bundle.releaseManifest;
+    const requirement = manifest.projections.find(
+      (p) => p.familyId === family,
+    )!.requiredRuntimeCapability;
+    assert.equal(unsupportedRuntimeCapability(family, requirement), null);
+    assert.match(
+      unsupportedRuntimeCapability(family, requirement, {
+        [family]: {
+          capabilityId: requirement.capabilityId,
+          maximumSupportedVersion: requirement.minimumVersion - 1,
+        },
+      }) ?? '',
+      /requires version/u,
+    );
+    return requirement.minimumVersion;
+  });
+  assert.deepEqual(floors, [30, 31]);
   const source = original.steps.at(-1)!.release;
   const replay = (next: typeof compatible) =>
     compileInSandbox({
