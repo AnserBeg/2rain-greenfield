@@ -1,3 +1,4 @@
+import { measureParity } from './proof-metrics.js';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -18,6 +19,28 @@ import {
   SpendMeter,
   type ModelAdapter,
 } from '../../packages/operations-agent/src/index.js';
+
+import {
+  assistantRoute,
+  DEFAULT_ANTHROPIC_MODEL,
+  SONNET_MODEL,
+} from '../../packages/operations-agent/src/anthropic-model.js';
+
+test('the measured create route is independent of the module and honours overrides', () => {
+  assert.deepEqual(assistantRoute('Create a delivery slip named Ridge.'), {
+    modelId: SONNET_MODEL,
+    effort: 'low',
+  });
+  for (const text of ['What is its name?', 'Create a slip then post it.'])
+    assert.deepEqual(assistantRoute(text), {
+      modelId: DEFAULT_ANTHROPIC_MODEL,
+      effort: 'high',
+    });
+  assert.deepEqual(assistantRoute('Create a slip.', 'chosen'), {
+    modelId: 'chosen',
+    effort: 'high',
+  });
+});
 
 const PLANTED = 'sk-planted-test-value-0123456789';
 
@@ -332,5 +355,87 @@ test('task 3 rule v2: a paid invoice may be named as paid, never as unpaid', () 
     task3AnswerFailures('INV-000002 and INV-000003 are unpaid.', context).some(
       (failure) => /52.5/u.test(failure),
     ),
+  );
+});
+
+test('switching model prices retains the spend, including subsequent expensive turns', () => {
+  const original = new SpendMeter(
+    { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 },
+    1,
+  );
+  const fast = original.atPrices({
+    input: 2,
+    output: 10,
+    cacheRead: 0.1,
+    cacheWrite: 2.5,
+  });
+  fast.charge({
+    inputTokens: 200_000,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  });
+  assert.equal(original.usd, 0.4);
+  assert.equal(original.outputBudget(130_000), 0);
+  original.charge({
+    inputTokens: 150_000,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  });
+  assert.equal(fast.exhausted(), true);
+});
+
+test('module parity uses within-task spread and requires three timed attempts on every declaration', () => {
+  const declarations = [
+    { id: 1, group: 'first-party' },
+    { id: 2, group: 'generated' },
+    { id: 3, group: 'first-party' },
+    { id: 4, group: 'generated' },
+  ] as const;
+  const rows = declarations.flatMap(({ id }) =>
+    [1, 2, 3].map((attempt) => {
+      const seconds = (id <= 2 ? 1 : 20) + attempt;
+      return {
+        task: id,
+        attempt,
+        pass: true,
+        timing: { cardSeconds: seconds, elapsedSeconds: seconds + 2 },
+      };
+    }),
+  );
+  const shifted = (card: number, elapsed: number) =>
+    rows.map((r) =>
+      r.task % 2
+        ? r
+        : {
+            ...r,
+            timing: {
+              cardSeconds: r.timing.cardSeconds + card,
+              elapsedSeconds: r.timing.elapsedSeconds + elapsed,
+            },
+          },
+    );
+  const within = measureParity(declarations, shifted(1, 1));
+  assert.deepEqual(within.spread, { card: 1, elapsed: 1 });
+  assert.equal(within.pass, true);
+  assert.equal(measureParity(declarations, shifted(1.1, 1)).pass, false);
+  assert.equal(measureParity(declarations, shifted(0, 1.1)).pass, false);
+  assert.equal(measureParity(declarations, rows.slice(1)).pass, false);
+  assert.equal(
+    measureParity(
+      declarations,
+      rows.map((r, i) => (i === 3 ? { ...r, pass: false } : r)),
+    ).pass,
+    false,
+  );
+  assert.equal(
+    measureParity(
+      declarations,
+      rows.map((r, i) =>
+        i ? r : { ...r, timing: { cardSeconds: null, elapsedSeconds: 2 } },
+      ),
+    ).pass,
+    false,
   );
 });
