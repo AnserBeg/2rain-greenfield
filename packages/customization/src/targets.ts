@@ -133,8 +133,10 @@ export interface MetricListTarget {
 type Json = Record<string, unknown>;
 
 export function customizationTargets(definition: {
-  readonly documentTemplatePointers?: readonly DocumentTemplatePointer[];
-  readonly documentTemplateRevisions?: readonly DocumentTemplateRevision[];
+  readonly documentTemplatePointers?:
+    readonly DocumentTemplatePointer[] | undefined;
+  readonly documentTemplateRevisions?:
+    readonly DocumentTemplateRevision[] | undefined;
   readonly calculatedDisplayFields?: LayoutDefinition['calculatedDisplayFields'];
   readonly entities: readonly Json[];
   readonly fields: readonly Json[];
