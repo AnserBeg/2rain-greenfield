@@ -13,7 +13,7 @@ export function documentPdfText(bytes: Buffer): string {
       const stream = inflateSync(
         bytes.subarray(start, start + Number(match[1])),
       ).toString('latin1');
-      return [...stream.matchAll(/\[([^\[\]]*)\]\s+TJ\b/gu)].map((text) =>
+      return [...stream.matchAll(/\[([^[\]]*)\]\s+TJ\b/gu)].map((text) =>
         [...text[1]!.matchAll(/<([a-f0-9]+)>/giu)]
           .map((part) => Buffer.from(part[1]!, 'hex').toString('latin1'))
           .join(''),
