@@ -122,7 +122,7 @@ test.afterAll(async () => {
 
 // The original grammar fixture predates opt-in Board views. The activated Board
 // exercises full and compact anatomy in customize.composed-application.spec.ts.
-for (const archetype of SURFACE_ARCHETYPES.filter(a=>a !== 'board')) {
+for (const archetype of SURFACE_ARCHETYPES.filter((a) => a !== 'board')) {
   test(`compact ${archetype} journey renders the compiled definition through SurfaceRuntime`, async ({
     page,
   }) => {

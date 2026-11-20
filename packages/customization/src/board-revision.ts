@@ -39,7 +39,7 @@ export interface BoardTarget {
     label: string;
     revisionId: string;
     lifecycle: string;
-    states:string[];
+    states: string[];
   }[];
 }
 export function boardTargets(def: BoardSource): BoardTarget[] {
@@ -55,7 +55,7 @@ export function boardTargets(def: BoardSource): BoardTarget[] {
               surfaceId: String(surface.surfaceId),
               label: String(surface.label),
               revisionId: board.revisionId,
-              states:board.body.grouping.stages.map(s=>s.stateId),
+              states: board.body.grouping.stages.map((s) => s.stateId),
               lifecycle: String(surface.lifecycle ?? 'active'),
             },
           ]

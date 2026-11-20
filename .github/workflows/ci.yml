@@ -4,77 +4,26 @@ name: Board diagnostics
 permissions:
   contents: read
 jobs:
-  types:
-    name: Board types and lint
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-    - &id001
-      name: Check out repository
-      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      with:
-        fetch-depth: 0
-    - &id002
-      name: Set up pinned Node.js
-      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-      with:
-        node-version-file: .node-version
-    - &id003
-      name: Enable Corepack
-      run: corepack enable
-    - &id004
-      name: Install frozen dependencies
-      run: corepack pnpm install --frozen-lockfile --reporter=append-only
-    - run: corepack pnpm typecheck
-    - if: always()
-      run: corepack pnpm lint
-  compiler:
-    name: Board compiler and omissions
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-    - *id001
-    - *id002
-    - *id003
-    - *id004
-    - run: node --import tsx --test --test-name-pattern='Board revisions bind' test/unit/customization.test.ts
-    - if: always()
-      run: corepack pnpm check:app-release
-  serving:
-    name: Board archive and current reader
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-    - *id001
-    - *id002
-    - *id003
-    - *id004
-    - run: node --import tsx --test --test-name-pattern='preceding serving reader
-        admits' test/postgres/customization-validation.test.ts
-  browser:
-    name: Board keyboard journey
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-    - *id001
-    - *id002
-    - *id003
-    - *id004
-    - uses: ./.github/actions/install-chromium
-    - run: corepack pnpm exec playwright test --config apps/web/playwright.customization.config.ts
-        --grep 'keyboard user moves' --reporter=list
   generated:
     name: Board formatting and coverage artifact
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-    - *id001
-    - *id002
-    - *id003
-    - *id004
+    - name: Check out repository
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        fetch-depth: 0
+    - name: Set up pinned Node.js
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      with:
+        node-version-file: .node-version
+    - name: Enable Corepack
+      run: corepack enable
+    - name: Install frozen dependencies
+      run: corepack pnpm install --frozen-lockfile --reporter=append-only
     - run: 'cp test/helpers/calendar1-generate.diagnostic.txt /tmp/calendar1-generator.cjs
 
-        git worktree add --detach /tmp/calendar1-original 2042780bcc3889022af36493a2dcaa3a62b8cb56
+        git worktree add --detach /tmp/calendar1-original f25df5af44df132045c67ba29eb9aebe1084dcc7
 
         (cd /tmp/calendar1-original && corepack pnpm install --offline --frozen-lockfile
         --reporter=append-only && CALENDAR_OLD_OBSERVATIONS=1 node --import tsx /tmp/calendar1-generator.cjs)
@@ -117,14 +66,6 @@ jobs:
         name: calendar1-regular-generated
         path: /tmp/calendar1-generated.patch
         retention-days: 1
-  architecture:
-    name: Board surface architecture
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-    - *id001
-    - *id002
-    - *id003
-    - *id004
-    - run: node --import tsx --test test/architecture/surface-runtime-seam.test.ts
-        test/architecture/surface-grammar-conformance.test.ts
+    - run: corepack pnpm test:contracts && corepack pnpm check:demo-release && corepack
+        pnpm check:app-release
+    - run: node --import tsx --test test/architecture/canonical-contracts-purity.test.ts

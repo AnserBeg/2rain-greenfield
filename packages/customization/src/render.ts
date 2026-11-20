@@ -134,8 +134,7 @@ export function renderReleaseDiff(input: {
       );
   }
   for (const s of to.surfaces) {
-    const board = s.board as
-      SurfaceBoard | undefined;
+    const board = s.board as SurfaceBoard | undefined;
     if (
       !board ||
       (
@@ -145,7 +144,7 @@ export function renderReleaseDiff(input: {
     )
       continue;
     lines.push(
-      `${s.lifecycle === 'retired' ? 'Retires' : 'Publishes'} Board “${String(s.label)}” for ${entityLabel(to, board.body.entityId)}. Stages are ${board.body.grouping.stages.map((v) => v.label).join(', ')}. Available moves are ${board.body.moves.map((v) => v.label).join(', ') || 'none'}. Card facts are ${board.body.facts.map(f=>f.label).join(', ') || 'none'}.`,
+      `${s.lifecycle === 'retired' ? 'Retires' : 'Publishes'} Board “${String(s.label)}” for ${entityLabel(to, board.body.entityId)}. Stages are ${board.body.grouping.stages.map((v) => v.label).join(', ')}. Available moves are ${board.body.moves.map((v) => v.label).join(', ') || 'none'}. Card facts are ${board.body.facts.map((f) => f.label).join(', ') || 'none'}.`,
     );
   }
   for (const field of to.documentFields ?? []) {

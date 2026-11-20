@@ -298,7 +298,7 @@ const surfaceSlotRegistry: Readonly<Record<string, SurfaceSlotRegistration>> =
       renderer: renderBoardSlot,
     },
     'board:columns': {
-      mutationIntents:{board:['command']},
+      mutationIntents: { board: ['command'] },
       className: 'board-columns-slot',
       ownsDataResolution: true,
       renderer: renderBoardSlot,
@@ -562,29 +562,40 @@ function collectionSwitcher(context: SurfaceComponentContext) {
   if (!boards.length || !list) return '';
   const state =
     context.data?.status === 'READY'
-      ? context.data.boardListState ?? context.data.declaredList?.state
+      ? (context.data.boardListState ?? context.data.declaredList?.state)
       : undefined;
   return `<nav class="collection-views" aria-label="Collection views">${[
     list,
     ...boards,
   ]
     .map((s) => {
-      const params = new URL(surfaceHref(s,undefined,false,context),'http://surface-runtime.local').searchParams;
-      if(s.board) {
-        params.set('collection',owner);
-        const company=context.legalEntitySelection?.[0];
-        if(company) params.set('collectionCompany',company);
+      const params = new URL(
+        surfaceHref(s, undefined, false, context),
+        'http://surface-runtime.local',
+      ).searchParams;
+      if (s.board) {
+        params.set('collection', owner);
+        const company = context.legalEntitySelection?.[0];
+        if (company) params.set('collectionCompany', company);
       }
       if (state) {
         const view = list.list?.views.find((v) => v.viewId === state.viewId);
-        const compatible = view && !view.before && !view.open && !view.supply && !view.band;
-        if (compatible) params.set('view',view.viewId);
-        if(s.board && (state.search || state.referenceScope || state.includeArchived || state.sortIsExplicit || (view && !compatible)))
-          params.set('resetListOptions','yes');
+        const compatible =
+          view && !view.before && !view.open && !view.supply && !view.band;
+        if (compatible) params.set('view', view.viewId);
+        if (
+          s.board &&
+          (state.search ||
+            state.referenceScope ||
+            state.includeArchived ||
+            state.sortIsExplicit ||
+            (view && !compatible))
+        )
+          params.set('resetListOptions', 'yes');
         for (const [key, value] of Object.entries(state.filterValues))
           params.set(key, value);
       }
-      const href='/?'+params.toString();
+      const href = '/?' + params.toString();
       return `<a href="${escapeHtml(href)}"${context.surface.surfaceId === s.surfaceId ? ' aria-current="page"' : ''}>${escapeHtml(s === list ? 'List' : s.label)}</a>`;
     })
     .join(' ')}</nav>`;
@@ -611,12 +622,11 @@ function renderBoardSlot(context: SurfaceComponentContext) {
 function renderListTitle(context: SurfaceComponentContext): string {
   const form = relatedSurface(context, 'form');
   const archiveToggle = renderArchiveToggle(context);
-  return (
-    slotPanel(
-      context,
-      `<header class="surface-heading surface-heading--slot"><div><h1>${escapeHtml(entityLabel(context.surface))}</h1></div><div class="surface-heading__actions">${declaredStatusRoles(context.surface)}${archiveToggle}${form ? `<a class="primary-action" href="${escapeHtml(surfaceHref(form, undefined, false, context))}">New</a>` : ''}</div></header>` + collectionSwitcher(context),
-      'surface-title-slot',
-    )
+  return slotPanel(
+    context,
+    `<header class="surface-heading surface-heading--slot"><div><h1>${escapeHtml(entityLabel(context.surface))}</h1></div><div class="surface-heading__actions">${declaredStatusRoles(context.surface)}${archiveToggle}${form ? `<a class="primary-action" href="${escapeHtml(surfaceHref(form, undefined, false, context))}">New</a>` : ''}</div></header>` +
+      collectionSwitcher(context),
+    'surface-title-slot',
   );
 }
 
@@ -2136,9 +2146,12 @@ function slotRegistrationSupportsIntent(
   slot: CompiledSurfaceSlot,
   intent: SurfaceOperationIntent,
 ): boolean {
-  const role=surface.archetype==='board' && surface.board ? 'board' : surface.surfaceRole;
-  if (role!=='board' && role!=='form' && role!=='record') return false;
-  const registration=surfaceSlotRegistry[`${surface.archetype}:${slot.slot}`];
+  const role =
+    surface.archetype === 'board' && surface.board
+      ? 'board'
+      : surface.surfaceRole;
+  if (role !== 'board' && role !== 'form' && role !== 'record') return false;
+  const registration = surfaceSlotRegistry[`${surface.archetype}:${slot.slot}`];
   return registration?.mutationIntents?.[role]?.includes(intent) ?? false;
 }
 

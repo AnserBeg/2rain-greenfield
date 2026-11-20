@@ -1,6 +1,12 @@
-import {applyBoardRevision} from './board-revision.js';
-import {applyLayoutRevision,placeAddedLayoutField} from './layout-revision.js';
-import type {BoardSource,LayoutDefinition} from '@north-star/canonical-model';
+import { applyBoardRevision } from './board-revision.js';
+import {
+  applyLayoutRevision,
+  placeAddedLayoutField,
+} from './layout-revision.js';
+import type {
+  BoardSource,
+  LayoutDefinition,
+} from '@north-star/canonical-model';
 import {
   CUSTOMIZABLE_FIRST_PARTY_ENTITY_LOCALS,
   isNarrowableOperationId,

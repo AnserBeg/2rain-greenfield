@@ -1,3 +1,4 @@
+import { compareCodeUnits } from './diagnostics.js';
 import { z } from 'zod';
 import { canonicalizeAndHash } from './canonicalize.js';
 import { STATUS_ROLES } from './constants.js';
@@ -78,10 +79,12 @@ export interface BoardSource {
   operations?: readonly Row[];
   stateMachines?: readonly Row[];
 }
-const scopeCardinality = (query:Row) =>
-  (query.legalEntityScope as {cardinality?:string} | undefined)?.cardinality;
-const selectedFields = (query:Row) =>
-  (query.selections as {field:Ref}[]).map(selection=>selection.field.targetId);
+const scopeCardinality = (query: Row) =>
+  (query.legalEntityScope as { cardinality?: string } | undefined)?.cardinality;
+const selectedFields = (query: Row) =>
+  (query.selections as { field: Ref }[]).map(
+    (selection) => selection.field.targetId,
+  );
 const target = (ref: unknown) => (ref as Ref | undefined)?.targetId;
 export const boardDigest = (body: BoardBody) =>
   canonicalizeAndHash(body).contentHash;
@@ -127,11 +130,17 @@ export function boardForList(
     canonicalizeAndHash(ownerQuery.filter ?? null).contentHash !==
       canonicalizeAndHash(query.filter ?? null).contentHash ||
     scopeCardinality(ownerQuery) !== scopeCardinality(query) ||
-    canonicalizeAndHash(selectedFields(ownerQuery)).contentHash !== canonicalizeAndHash(selectedFields(query)).contentHash
+    canonicalizeAndHash(selectedFields(ownerQuery)).contentHash !==
+      canonicalizeAndHash(selectedFields(query)).contentHash
   )
     return null;
-  const scope=(query.legalEntityScope as {operand:{parameterId:string}}|undefined);
-  if((query.parameters as {parameterId:string}[]|undefined)?.some(p=>p.parameterId!==scope?.operand.parameterId))
+  const scope = query.legalEntityScope as
+    { operand: { parameterId: string } } | undefined;
+  if (
+    (query.parameters as { parameterId: string }[] | undefined)?.some(
+      (p) => p.parameterId !== scope?.operand.parameterId,
+    )
+  )
     return null;
   const machine = def.stateMachines?.find(
     (m) => target(m.entity) === entityId && m.lifecycle !== 'retired',
@@ -145,7 +154,8 @@ export function boardForList(
       def.queries.some(
         (q) =>
           q.queryId === target(s.dataSource) &&
-          q.queryType === 'get' && q.lifecycle !== 'retired' &&
+          q.queryType === 'get' &&
+          q.lifecycle !== 'retired' &&
           target(q.sourceEntity) === entityId,
       ),
   );
@@ -192,7 +202,8 @@ export function boardForList(
             def.queries.some(
               (q) =>
                 q.queryId === target(op.readBack) &&
-                q.queryType === 'get' && q.lifecycle !== 'retired' &&
+                q.queryType === 'get' &&
+                q.lifecycle !== 'retired' &&
                 target(q.sourceEntity) === entityId,
             ) &&
             (op.effect as Row).kind === 'transitionStateEffect' &&
@@ -207,8 +218,8 @@ export function boardForList(
           label: String(op.label ?? t.label ?? t.transitionId),
         })),
     )
-    .sort((a, b) => a.operationId.localeCompare(b.operationId, 'en'));
-  const result=BoardBodySchema.safeParse({
+    .sort((a, b) => compareCodeUnits(a.operationId, b.operationId));
+  const result = BoardBodySchema.safeParse({
     version: 1,
     entityId,
     listSurfaceId,
@@ -226,7 +237,7 @@ export function boardForList(
       stages: [...machine.states]
         .sort(
           (a, b) =>
-            a.orderKey - b.orderKey || a.stateId.localeCompare(b.stateId, 'en'),
+            a.orderKey - b.orderKey || compareCodeUnits(a.stateId, b.stateId),
         )
         .map((state) => {
           const role = status.statusRoles?.find(

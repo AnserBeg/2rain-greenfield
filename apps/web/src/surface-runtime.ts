@@ -294,25 +294,57 @@ export async function renderSurfaceRuntimeWithData(
   const selection = selectSurface(view, requestUrl);
   if ('statusCode' in selection) {
     if (selection.statusCode !== 404) return selection;
-    const url=new URL(requestUrl,'http://surface-runtime.local');
-    const id=url.searchParams.get('surface');
+    const url = new URL(requestUrl, 'http://surface-runtime.local');
+    const id = url.searchParams.get('surface');
     if (!id?.includes(':surface.custom_board_')) return selection;
-    const manifest=readCompiledSurfaceManifest(view);
-    const retired=manifest.surfaces.find(surface=>surface.surfaceId===id)?.board;
-    const ownerId=retired?.body.listSurfaceId ?? url.searchParams.get('collection');
-    const owner=manifest.surfaces.find(surface=>surface.surfaceId===ownerId && surface.archetype==='list' && surface.lifecycle==='active');
-    let back='';
+    const manifest = readCompiledSurfaceManifest(view);
+    const retired = manifest.surfaces.find(
+      (surface) => surface.surfaceId === id,
+    )?.board;
+    const ownerId =
+      retired?.body.listSurfaceId ?? url.searchParams.get('collection');
+    const owner = manifest.surfaces.find(
+      (surface) =>
+        surface.surfaceId === ownerId &&
+        surface.archetype === 'list' &&
+        surface.lifecycle === 'active',
+    );
+    let back = '';
     if (owner) {
-      const binding=readCompiledSurfaceDataBinding(view,owner);
-      const scope=binding.query.legalEntityScope;
-      const company=scope ? url.searchParams.get('collectionCompany') : null;
-      if (await gateways.queryGateway.previewEligibility(view,owner.dataSourceQueryId,company)==='eligible') {
-        const href=surfaceHref(owner,undefined,false,{view,legalEntitySelection:company?[company]:[]});
-        back='<a href="'+escapeHtml(href)+'">Open '+escapeHtml(owner.label)+'</a>';
+      const binding = readCompiledSurfaceDataBinding(view, owner);
+      const scope = binding.query.legalEntityScope;
+      const company = scope ? url.searchParams.get('collectionCompany') : null;
+      if (
+        (await gateways.queryGateway.previewEligibility(
+          view,
+          owner.dataSourceQueryId,
+          company,
+        )) === 'eligible'
+      ) {
+        const href = surfaceHref(owner, undefined, false, {
+          view,
+          legalEntitySelection: company ? [company] : [],
+        });
+        back =
+          '<a href="' +
+          escapeHtml(href) +
+          '">Open ' +
+          escapeHtml(owner.label) +
+          '</a>';
       }
     }
-    return {statusCode:404,html:shellDocument(view,manifest.surfaces.filter(s=>s.lifecycle==='active'),manifest.navigation,null,
-      '<section role="alert"><h1>View not available</h1>'+back+'</section>')};
+    return {
+      statusCode: 404,
+      html: shellDocument(
+        view,
+        manifest.surfaces.filter((s) => s.lifecycle === 'active'),
+        manifest.navigation,
+        null,
+        '<section role="alert"><h1>View not available</h1>' +
+          back +
+          '</section>',
+      ),
+    };
   }
   let binding: CompiledSurfaceDataBinding;
   try {
@@ -537,12 +569,20 @@ export async function renderSurfaceRuntimeWithData(
         legalEntityScopeArguments(binding, url),
         gateways,
       );
-      const slots = await boardSlots(context,feedback && 'record' in feedback ? feedback.record.recordId : undefined);
+      const slots = await boardSlots(
+        context,
+        feedback && 'record' in feedback ? feedback.record.recordId : undefined,
+      );
       return rendered(() =>
         renderSelectedSurface(
           view,
           selection,
-          { status: 'READY', records: [], boardSlots: slots, boardListState:readDeclaredListState(context.owner.list!,url) },
+          {
+            status: 'READY',
+            records: [],
+            boardSlots: slots,
+            boardListState: readDeclaredListState(context.owner.list!, url),
+          },
           feedback,
           offeredOperations,
           200,
@@ -1502,7 +1542,12 @@ export async function submitSurfaceRuntimeIntent(
   if (
     !operation ||
     (boardOperation && boardOperation !== operation) ||
-    !surfaceSupportsRuntimeIntent(view,selection.selected,selection.surfaces,operation.intent)
+    !surfaceSupportsRuntimeIntent(
+      view,
+      selection.selected,
+      selection.surfaces,
+      operation.intent,
+    )
   ) {
     return operationDiagnostic('OPERATION_UNSUPPORTED', 422);
   }
@@ -1668,12 +1713,16 @@ export async function submitSurfaceRuntimeIntent(
     'http://surface-runtime.local',
   ).searchParams.get('record');
   if (boardOperation && selection.selected.board) {
-    const url=new URL(requestUrl,'http://surface-runtime.local');
-    const body=selection.selected.board.body;
-    const stage=result.readBack.values[body.grouping.stateFieldId];
-    if(typeof stage==='string' && body.grouping.stages.some(s=>s.stateId===stage)) url.searchParams.set('stage',stage);
+    const url = new URL(requestUrl, 'http://surface-runtime.local');
+    const body = selection.selected.board.body;
+    const stage = result.readBack.values[body.grouping.stateFieldId];
+    if (
+      typeof stage === 'string' &&
+      body.grouping.stages.some((s) => s.stateId === stage)
+    )
+      url.searchParams.set('stage', stage);
     url.searchParams.delete('cards');
-    return renderSurfaceRuntimeWithData(view,url.href,gateways,feedback);
+    return renderSurfaceRuntimeWithData(view, url.href, gateways, feedback);
   }
   if (
     gateways.applicationExtension?.refreshAfterOperation({

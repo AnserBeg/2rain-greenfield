@@ -2,11 +2,14 @@ import { performance } from 'node:perf_hooks';
 
 import { expect, test } from '@playwright/test';
 
-import {parseServerTiming} from '../../../../packages/postgres-provider/src/request-work-meter.js';
-import {randomUUID} from 'node:crypto';
-import {mock} from 'node:test';
-import {SEMANTIC_OPERATION_REQUEST_VERSION,SemanticOperationGateway} from '../../../../packages/runtime/src/semantic-operation-gateway.js';
-import {SEMANTIC_QUERY_REQUEST_VERSION} from '../../../../packages/runtime/src/semantic-query-gateway.js';
+import { parseServerTiming } from '../../../../packages/postgres-provider/src/request-work-meter.js';
+import { randomUUID } from 'node:crypto';
+import { mock } from 'node:test';
+import {
+  SEMANTIC_OPERATION_REQUEST_VERSION,
+  SemanticOperationGateway,
+} from '../../../../packages/runtime/src/semantic-operation-gateway.js';
+import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../../../packages/runtime/src/semantic-query-gateway.js';
 import {
   openCustomizeService,
   startComposedApplication,
@@ -541,28 +544,56 @@ test('a keyboard user moves a card through its reviewed Task with JavaScript dis
         if (draft.status !== 'drafted') throw new Error(JSON.stringify(draft));
         await opened.service.approve(draft.patchId);
         await opened.service.activate(draft.patchId);
-        const {runtime}=app;
-        const identity={headers:{cookie:'northstar-demo-actor=manager'}};
-        const recordId=randomUUID();
-        const createCard=(name:string,recordId:string)=>runtime.entry.run(identity,async view=>{
-          const result=await runtime.operationGateway.invoke(view,{
-            schemaVersion:SEMANTIC_OPERATION_REQUEST_VERSION,
-            operationId:'northstar.app:operation.custom_opportunity_create',
-            idempotencyKey:randomUUID(), confirmationGrant:null,
-            input:{recordId,values:{'northstar.app:field.custom_opportunity_name':name}},
-          },runtime.operationMediation.issueInvocation(view,'UI'));
-          if (!result.readBack) throw new Error('The Opportunity fixture could not be created.');
-          return result.readBack;
-        });
-        const card=await createCard('Westside renewal',recordId);
-        const before=()=>runtime.entry.run(identity,async view=>{
-          const result=await runtime.queryGateway.invoke(view,{schemaVersion:SEMANTIC_QUERY_REQUEST_VERSION,
-            queryId:'northstar.app:query.custom_opportunity_get',arguments:{recordId}});
-          if (!result.records[0]) throw new Error('The Opportunity is unavailable.');
-          return result.records[0];
-        });
-        const invocation=mock.method(SemanticOperationGateway.prototype,'invoke');
-        const moves=()=>invocation.mock.calls.filter(call=>(call.arguments[1] as {operationId:string}).operationId==='northstar.app:operation.custom_opportunity_action_mark_won');
+        const { runtime } = app;
+        const identity = {
+          headers: { cookie: 'northstar-demo-actor=manager' },
+        };
+        const recordId = randomUUID();
+        const createCard = (name: string, recordId: string) =>
+          runtime.entry.run(identity, async (view) => {
+            const result = await runtime.operationGateway.invoke(
+              view,
+              {
+                schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+                operationId:
+                  'northstar.app:operation.custom_opportunity_create',
+                idempotencyKey: randomUUID(),
+                confirmationGrant: null,
+                input: {
+                  recordId,
+                  values: {
+                    'northstar.app:field.custom_opportunity_name': name,
+                  },
+                },
+              },
+              runtime.operationMediation.issueInvocation(view, 'UI'),
+            );
+            if (!result.readBack)
+              throw new Error('The Opportunity fixture could not be created.');
+            return result.readBack;
+          });
+        const card = await createCard('Westside renewal', recordId);
+        const before = () =>
+          runtime.entry.run(identity, async (view) => {
+            const result = await runtime.queryGateway.invoke(view, {
+              schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+              queryId: 'northstar.app:query.custom_opportunity_get',
+              arguments: { recordId },
+            });
+            if (!result.records[0])
+              throw new Error('The Opportunity is unavailable.');
+            return result.records[0];
+          });
+        const invocation = mock.method(
+          SemanticOperationGateway.prototype,
+          'invoke',
+        );
+        const moves = () =>
+          invocation.mock.calls.filter(
+            (call) =>
+              (call.arguments[1] as { operationId: string }).operationId ===
+              'northstar.app:operation.custom_opportunity_action_mark_won',
+          );
         const chooser = page.getByRole('group', {
           name: 'Add view',
           exact: true,
@@ -590,15 +621,24 @@ test('a keyboard user moves a card through its reviewed Task with JavaScript dis
         await page
           .getByRole('link', { name: 'Pipeline', exact: true })
           .press('Enter');
-        const grid = page.locator('.surface-grid[data-surface-archetype="board"]');
-        for (const slot of ['surface-title-slot','saved-views-slot','board-selector-slot','board-columns-slot'])
-          await expect(grid.locator('.'+slot)).toHaveCount(1);
+        const grid = page.locator(
+          '.surface-grid[data-surface-archetype="board"]',
+        );
+        for (const slot of [
+          'surface-title-slot',
+          'saved-views-slot',
+          'board-selector-slot',
+          'board-columns-slot',
+        ])
+          await expect(grid.locator('.' + slot)).toHaveCount(1);
         await expect(grid.locator('.board-column:visible')).toHaveCount(1);
         const boardUrl = page.url();
-        const measure=async()=>{
-          const response=await page.goto(boardUrl);
+        const measure = async () => {
+          const response = await page.goto(boardUrl);
           expect(response?.status()).toBe(200);
-          const work=parseServerTiming(await response!.headerValue('server-timing'));
+          const work = parseServerTiming(
+            await response!.headerValue('server-timing'),
+          );
           expect(work).not.toBeNull();
           expect(work!.transactions).toBeLessThanOrEqual(2);
           expect(work!.statements).toBeLessThanOrEqual(40);
@@ -606,7 +646,7 @@ test('a keyboard user moves a card through its reviewed Task with JavaScript dis
           expect(work!.repeats).toBe(0);
           return work!;
         };
-        const sparse=await measure();
+        const sparse = await measure();
         const other = await context.newPage();
         await other.goto(boardUrl);
         for (const tab of [page, other]) {
@@ -657,24 +697,39 @@ test('a keyboard user moves a card through its reviewed Task with JavaScript dis
             .locator('html')
             .evaluate((el) => el.scrollWidth <= el.clientWidth),
         ).toBe(true);
-        for(let n=0;n<11;n++)await createCard('Prospect '+String(n+1),randomUUID());
-        const full=await measure();
+        for (let n = 0; n < 11; n++)
+          await createCard('Prospect ' + String(n + 1), randomUUID());
+        const full = await measure();
         expect(full.statements).toBe(sparse.statements);
-        process.stdout.write('Board page work '+JSON.stringify({sparse,full})+'\n');
-        const compactCards=page.locator('.board-column:visible li');
+        process.stdout.write(
+          'Board page work ' + JSON.stringify({ sparse, full }) + '\n',
+        );
+        const compactCards = page.locator('.board-column:visible li');
         await expect(compactCards).toHaveCount(10);
-        await page.getByRole('link',{name:'More Open cards'}).press('Enter');
+        await page
+          .getByRole('link', { name: 'More Open cards' })
+          .press('Enter');
         await expect(compactCards).toHaveCount(1);
-        await page.setViewportSize({width:1280,height:840});
+        await page.setViewportSize({ width: 1280, height: 840 });
         await page.goto(boardUrl);
         await expect(page.locator('.board-column:visible')).toHaveCount(2);
-        await page.goto(app.baseUrl+'/?customize');
-        await page.getByRole('button',{name:'Roll back the latest change'}).press('Enter');
-        await expect(page.locator('[data-customize-result="rolledBack"]')).toBeVisible({timeout:180_000});
+        await page.goto(app.baseUrl + '/?customize');
+        await page
+          .getByRole('button', { name: 'Roll back the latest change' })
+          .press('Enter');
+        await expect(
+          page.locator('[data-customize-result="rolledBack"]'),
+        ).toBeVisible({ timeout: 180_000 });
         await page.goto(boardUrl);
-        await expect(page.getByRole('heading',{name:'View not available'})).toBeVisible();
-        await page.getByRole('link',{name:'Open Opportunity'}).press('Enter');
-        await expect(page.getByRole('link',{name:'Pipeline',exact:true})).toHaveCount(0);
+        await expect(
+          page.getByRole('heading', { name: 'View not available' }),
+        ).toBeVisible();
+        await page
+          .getByRole('link', { name: 'Open Opportunity' })
+          .press('Enter');
+        await expect(
+          page.getByRole('link', { name: 'Pipeline', exact: true }),
+        ).toHaveCount(0);
         expect((await before()).revision).toBe(moved.revision);
       } finally {
         mock.restoreAll();

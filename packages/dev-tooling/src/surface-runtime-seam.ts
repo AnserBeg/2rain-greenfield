@@ -701,8 +701,16 @@ function scanForBypass(
         'SURF001_RUNTIME_BYPASS',
         'only SurfaceRuntime and its closed registry may delegate to the launcher interpreter',
       );
-    if (repoPath !== paths.surfaceRuntime && /from ['"][^'"]*\/board\.js['"]/u.test(source))
-      add(violations,repoPath,'SURF001_RUNTIME_BYPASS','only SurfaceRuntime may delegate to the Board interpreter');
+    if (
+      repoPath !== paths.surfaceRuntime &&
+      /from ['"][^'"]*\/board\.js['"]/u.test(source)
+    )
+      add(
+        violations,
+        repoPath,
+        'SURF001_RUNTIME_BYPASS',
+        'only SurfaceRuntime may delegate to the Board interpreter',
+      );
     // The editor's controls are part of the generic editor delegate, not a
     // second surface authority: nothing but that editor may render them.
     if (

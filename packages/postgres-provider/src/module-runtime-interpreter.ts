@@ -542,7 +542,14 @@ export class PostgresModuleRuntimeInterpreter
           }
         });
       },
-      undefined,
+      request.definition.effect.kind === 'archiveRecordEffect'
+        ? async (client) => {
+            await client.query(
+              'SELECT platform.lock_record_allocations($1,$2)',
+              [request.definition.effect.entity.targetId, parsedInput.recordId],
+            );
+          }
+        : undefined,
       async (client) => {
         if (
           !authorize &&
@@ -841,6 +848,12 @@ async function prepareMutation(
   );
   if (!prior) {
     throw failure('MODULE_RECORD_NOT_FOUND', 'module record was not found');
+  }
+  if (kind === 'archiveRecordEffect') {
+    await client.query(
+      'SELECT north_star_internal.require_record_archivable($1,$2)',
+      [entity.entityId, input.recordId],
+    );
   }
   if (prior.revision !== input.expectedRevision) {
     throw failure(
@@ -2953,19 +2966,34 @@ async function listRecords(
 }
 
 // The immutable surface projection is shared by warm views of the same release.
-const boardBindingsByManifest = new WeakMap<object, Map<string,SurfaceBoard>>();
-function admittedBoard(manifest:Readonly<Record<string,ImmutableJsonValue>>,surfaceId:unknown) {
+const boardBindingsByManifest = new WeakMap<
+  object,
+  Map<string, SurfaceBoard>
+>();
+function admittedBoard(
+  manifest: Readonly<Record<string, ImmutableJsonValue>>,
+  surfaceId: unknown,
+) {
   if (typeof surfaceId !== 'string') return undefined;
-  let bindings=boardBindingsByManifest.get(manifest);
+  let bindings = boardBindingsByManifest.get(manifest);
   if (!bindings) {
-    bindings=new Map();
-    for (const value of Array.isArray(manifest.surfaces) ? manifest.surfaces : []) {
-      const surface=requireRecord(value,'surface');
-      if (surface.lifecycle==='active' && surface.archetype==='board' && typeof surface.surfaceId==='string') {
-        bindings.set(surface.surfaceId,SurfaceBoardSchema.parse(surface.board));
+    bindings = new Map();
+    for (const value of Array.isArray(manifest.surfaces)
+      ? manifest.surfaces
+      : []) {
+      const surface = requireRecord(value, 'surface');
+      if (
+        surface.lifecycle === 'active' &&
+        surface.archetype === 'board' &&
+        typeof surface.surfaceId === 'string'
+      ) {
+        bindings.set(
+          surface.surfaceId,
+          SurfaceBoardSchema.parse(surface.board),
+        );
       }
     }
-    boardBindingsByManifest.set(manifest,bindings);
+    boardBindingsByManifest.set(manifest, bindings);
   }
   return bindings.get(surfaceId);
 }
@@ -2986,10 +3014,15 @@ async function readBoardPage(
     request.view.projections.surface.payload,
     'surface manifest',
   );
-  const board=admittedBoard(manifest,window.surfaceId);
-  if (!board || board.revisionId!==window.revisionId || board.body.listQueryId!==definition.queryId || board.body.entityId!==entity.entityId)
-    throw failure('MODULE_LIST_FIELD_INVALID','The Board binding changed.');
-  const {body}=board;
+  const board = admittedBoard(manifest, window.surfaceId);
+  if (
+    !board ||
+    board.revisionId !== window.revisionId ||
+    board.body.listQueryId !== definition.queryId ||
+    board.body.entityId !== entity.entityId
+  )
+    throw failure('MODULE_LIST_FIELD_INVALID', 'The Board binding changed.');
+  const { body } = board;
   const stages = window.stages;
   const perStage = Math.min(10, definition.maximumResultCount - 1);
   const maxStages = Math.min(
@@ -3059,13 +3092,13 @@ async function readBoardPage(
   // The row ceiling bounds ranking. The statement deadline also bounds finding
   // sparse authorized rows on an existing table without a covering index.
   await client.query('SAVEPOINT board_page_read');
-  let result:QueryResult<QueryResultRow>;
+  let result: QueryResult<QueryResultRow>;
   try {
     await client.query(`/* Board read work ceiling */ SELECT set_config('statement_timeout',
       least(750,coalesce(nullif(setting::integer,0),750))::text,true)
       FROM pg_catalog.pg_settings WHERE name='statement_timeout'`);
-    result=await client.query<QueryResultRow>(
-    `WITH candidates AS MATERIALIZED (
+    result = await client.query<QueryResultRow>(
+      `WITH candidates AS MATERIALIZED (
       SELECT * FROM north_star_module.${quoted(entity.physicalTableName)} WHERE ${scopePredicates.join(' AND ')} ORDER BY ${id} LIMIT 513
     ), inspected AS MATERIALIZED (SELECT * FROM candidates ORDER BY ${id} LIMIT 512),
     ranked AS (
@@ -3074,12 +3107,19 @@ async function readBoardPage(
     ), coverage AS (SELECT EXISTS(SELECT 1 FROM candidates OFFSET 512) AS board_partial)
     SELECT ranked.*, coverage.board_partial FROM coverage LEFT JOIN ranked ON ranked.board_rank <= ${parameter(values, perStage + 1)}
     ORDER BY ranked.${id}`,
-    values,
-  );
+      values,
+    );
   } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code==='57014' && error.message.includes('statement timeout')) {
-      return {...queryResult(definition.queryId,'exact',[],null),
-        boardCoverage:{revisionId:board.revisionId,scanLimitReached:true}};
+    if (
+      error instanceof Error &&
+      'code' in error &&
+      error.code === '57014' &&
+      error.message.includes('statement timeout')
+    ) {
+      return {
+        ...queryResult(definition.queryId, 'exact', [], null),
+        boardCoverage: { revisionId: board.revisionId, scanLimitReached: true },
+      };
     }
     throw error;
   } finally {

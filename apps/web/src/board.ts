@@ -63,9 +63,9 @@ const hidden = (name: string, value: string | number) =>
   `<input type="hidden" name="${h(name)}" value="${h(String(value))}">`;
 const link = (url: URL, changes: Record<string, string | null>) => {
   const params = new URLSearchParams(url.search);
-  for (const [name,value] of Object.entries(changes)) {
-    if(value === null) params.delete(name);
-    else params.set(name,value);
+  for (const [name, value] of Object.entries(changes)) {
+    if (value === null) params.delete(name);
+    else params.set(name, value);
   }
   return '/?' + params.toString();
 };
@@ -95,8 +95,12 @@ export function boardContext(
   const owner = surfaces.find(
     (s) => s.surfaceId === board.body.listSurfaceId && s.lifecycle === 'active',
   );
-  const record=surfaces.find(s=>s.surfaceId===board.body.recordSurfaceId && s.lifecycle==='active');
-  if (!owner?.list || !record) throw new Error('The Board collection is unavailable.');
+  const record = surfaces.find(
+    (s) =>
+      s.surfaceId === board.body.recordSurfaceId && s.lifecycle === 'active',
+  );
+  if (!owner?.list || !record)
+    throw new Error('The Board collection is unavailable.');
   const company = binding.query.legalEntityScope
     ? url.searchParams.get(binding.query.legalEntityScope.operand.parameterId)
     : null;
@@ -217,7 +221,7 @@ function recordMoves(
     );
   });
 }
-export async function boardSlots(c: BoardContext,focusRecordId?:string) {
+export async function boardSlots(c: BoardContext, focusRecordId?: string) {
   const { body } = c.board;
   const { url } = c;
   const stages = body.grouping.stages;
@@ -235,7 +239,10 @@ export async function boardSlots(c: BoardContext,focusRecordId?:string) {
   );
   const cursor = url.searchParams.get('cards');
   let after: string | undefined;
-  let message = url.searchParams.get('resetListOptions')==='yes' ? '<p role="status">List-only search, filters and sorting were reset for this Board.</p>' : '';
+  let message =
+    url.searchParams.get('resetListOptions') === 'yes'
+      ? '<p role="status">List-only search, filters and sorting were reset for this Board.</p>'
+      : '';
   if (cursor) {
     const anchor = unseal(bindingKey(c, 'page'), cursor);
     if (
@@ -267,8 +274,13 @@ export async function boardSlots(c: BoardContext,focusRecordId?:string) {
       ),
     ),
   );
-  const canReadRecord = await c.gateways.queryGateway.previewEligibility(c.view,body.getQueryId,c.company) === 'eligible';
-  let focusCard=false;
+  const canReadRecord =
+    (await c.gateways.queryGateway.previewEligibility(
+      c.view,
+      body.getQueryId,
+      c.company,
+    )) === 'eligible';
+  let focusCard = false;
   const columns = pageStages
     .map((stage) => {
       const matches = page.records.filter(
@@ -286,10 +298,10 @@ export async function boardSlots(c: BoardContext,focusRecordId?:string) {
           ? `<ul>${cards
               .map((r) => {
                 const title = String(r.values[body.titleFieldId] ?? r.recordId);
-                const movable=recordMoves(c,r,moves).length>0;
-                if(movable && r.recordId===focusRecordId)focusCard=true;
+                const movable = recordMoves(c, r, moves).length > 0;
+                if (movable && r.recordId === focusRecordId) focusCard = true;
                 const controls = movable
-                  ? `<form method="post" action="${h(link(url, {}))}">${hidden('boardAction', 'open')}${hidden('recordId', r.recordId)}${hidden('expectedRevision', r.revision)}${hidden('sourceState', stage.stateId)}<button id="move-${h(r.recordId)}"${r.recordId===focusRecordId?' autofocus':''} aria-label="Move card: ${h(title)}">Move card</button></form>`
+                  ? `<form method="post" action="${h(link(url, {}))}">${hidden('boardAction', 'open')}${hidden('recordId', r.recordId)}${hidden('expectedRevision', r.revision)}${hidden('sourceState', stage.stateId)}<button id="move-${h(r.recordId)}"${r.recordId === focusRecordId ? ' autofocus' : ''} aria-label="Move card: ${h(title)}">Move card</button></form>`
                   : '';
                 const facts = body.facts
                   .filter((f) => r.values[f.fieldId] != null)
@@ -298,7 +310,7 @@ export async function boardSlots(c: BoardContext,focusRecordId?:string) {
                       `<div><dt>${h(f.label)}</dt><dd>${h(String(r.displayValues?.[f.fieldId] ?? r.values[f.fieldId]))}</dd></div>`,
                   )
                   .join('');
-                return `<li>${canReadRecord ? `<a href="${h(surfaceHref(c.record,r.recordId,false,{view:c.view,legalEntitySelection:c.company ? [c.company] : []}))}">${h(title)}</a>` : h(title)}<span class="status-pill"${stage.role ? ` data-status-role="${h(stage.role)}"` : ''}>${h(stage.label)}</span>${facts ? `<dl>${facts}</dl>` : ''}${controls}</li>`;
+                return `<li>${canReadRecord ? `<a href="${h(surfaceHref(c.record, r.recordId, false, { view: c.view, legalEntitySelection: c.company ? [c.company] : [] }))}">${h(title)}</a>` : h(title)}<span class="status-pill"${stage.role ? ` data-status-role="${h(stage.role)}"` : ''}>${h(stage.label)}</span>${facts ? `<dl>${facts}</dl>` : ''}${controls}</li>`;
               })
               .join('')}</ul>`
           : page.partial
@@ -315,7 +327,7 @@ export async function boardSlots(c: BoardContext,focusRecordId?:string) {
     )
     .join(' ');
   return {
-    title: `<h1 id="board-heading" tabindex="-1"${focusRecordId && !focusCard?' autofocus':''}>${h(c.surface.label)}</h1>`,
+    title: `<h1 id="board-heading" tabindex="-1"${focusRecordId && !focusCard ? ' autofocus' : ''}>${h(c.surface.label)}</h1>`,
     savedViews: tabs ? `<nav aria-label="Saved views">${tabs}</nav>` : '',
     stageSelector: `<nav aria-label="Select stage">${stages.map((s) => `<a href="${h(link(url, { stage: s.stateId, cards: null }))}"${s.stateId === stages[index]!.stateId ? ' aria-current="true"' : ''}>${h(s.label)}</a>`).join(' ')}</nav>`,
     columns: message + `<div class="board-columns">${columns}</div>`,

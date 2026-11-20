@@ -466,7 +466,7 @@ test(
           assert.ok(draft.status === 'drafted', JSON.stringify(draft));
           await opened.service.approve(draft.patchId);
           await withArchivedCustomizationRuntime(
-            '2042780bcc3889022af36493a2dcaa3a62b8cb56',
+            'f25df5af44df132045c67ba29eb9aebe1084dcc7',
             async (run) => {
               await assertArchivedTenantEnvelope(run);
               const read = () =>
@@ -480,19 +480,24 @@ test(
               assert.equal(refused.code, 'UNSUPPORTED_RUNTIME_CAPABILITY');
               assert.ok(
                 refused.message?.includes(
-                  'surface-manifest requires version ' + BOARD_READER + ' and this runtime supports ' + (BOARD_READER-1),
+                  'surface-manifest requires version ' +
+                    BOARD_READER +
+                    ' and this runtime supports ' +
+                    (BOARD_READER - 1),
                 ),
                 refused.message,
               );
               const url = new URL('/', app.baseUrl);
               url.searchParams.set('surface', revision.surfaceId);
               const response = await fetch(url);
-              const html=await response.text();
-              assert.equal(response.status,200,html.match(/data-diagnostic-code="[^"]+"/u)?.[0] ?? html.replace(/<[^>]+>/gu,' ').slice(-900));
-              assert.match(
-                html,
-                /<h1[^>]*>Purchase order board<\/h1>/u,
+              const html = await response.text();
+              assert.equal(
+                response.status,
+                200,
+                html.match(/data-diagnostic-code="[^"]+"/u)?.[0] ??
+                  html.replace(/<[^>]+>/gu, ' ').slice(-900),
               );
+              assert.match(html, /<h1[^>]*>Purchase order board<\/h1>/u);
             },
           );
         } finally {

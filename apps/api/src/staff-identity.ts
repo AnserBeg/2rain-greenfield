@@ -1,12 +1,13 @@
 import {
   StaffAccessRefused,
+  attemptBucket,
   check,
   opaque,
   digest,
   secret,
   type StaffRealm,
 } from './staff-protocol.js';
-import { createHmac, randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import {
   generateAuthenticationOptions,
   generateRegistrationOptions,
@@ -353,23 +354,16 @@ export class StaffIdentity {
     return scoped(this.pool, this.realm, work);
   }
   async spend(category: string, identifier: string, limit: number) {
-    const key = createHmac('sha256', this.rateKey)
-      .update(category)
-      .update('\0')
-      .update(identifier)
-      .digest();
-    const allowed = await this.scoped(async (c) =>
-      c.query(
-        `INSERT INTO platform.staff_attempts AS a
-      (tenant_id,environment_id,bucket,window_start,attempts) VALUES($1,$2,$3,clock_timestamp(),1)
-      ON CONFLICT (tenant_id,environment_id,bucket) DO UPDATE SET
-      window_start=CASE WHEN a.window_start+interval '15 minutes'<=clock_timestamp() THEN clock_timestamp() ELSE a.window_start END,
-      attempts=CASE WHEN a.window_start+interval '15 minutes'<=clock_timestamp() THEN 1 ELSE a.attempts+1 END
-      WHERE a.window_start+interval '15 minutes'<=clock_timestamp() OR a.attempts<$4 RETURNING 1`,
-        [this.realm.tenantId, this.realm.environmentId, key, limit],
-      ),
+    const key = attemptBucket(this.rateKey, category, identifier);
+    const result = await this.scoped((c) =>
+      c.query('SELECT platform.staff_spend_attempt($1,$2,$3,$4) AS allowed', [
+        this.realm.tenantId,
+        this.realm.environmentId,
+        key,
+        limit,
+      ]),
     );
-    check(allowed.rowCount);
+    check(result.rows[0]?.allowed);
   }
   async begin(
     browser: string,
@@ -663,13 +657,7 @@ export class StaffIdentity {
       c.query(
         `UPDATE platform.staff_attempts SET attempts=GREATEST(1,attempts-1),window_start=
       CASE WHEN attempts=1 THEN '-infinity' ELSE window_start END WHERE bucket=$1`,
-        [
-          createHmac('sha256', this.rateKey)
-            .update('completion')
-            .update('\0')
-            .update(limitKey)
-            .digest(),
-        ],
+        [attemptBucket(this.rateKey, 'completion', limitKey)],
       ),
     );
     return result;
