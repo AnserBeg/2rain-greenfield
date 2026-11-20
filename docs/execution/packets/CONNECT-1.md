@@ -41,11 +41,8 @@ Open [ADR-0080](../../decisions/ADR-0080-connector-framework.md) and trace three
 - Deliver the same signed bounce twice. Both acknowledgements refer to one captured event
   and one scoped message transition.
 
-## Slice 1 storage decision pending
+## Slice 1 storage and proofs
 
-The draft stores Address as `jsonb` under the existing storage payload version.
-ADR-0011 freezes the field mapping. ADR-0027 and the posting adapter require the active
-release's exact v3 storage target. An Address field on Party changes that same release target.
-A versioned compound storage target therefore requires a decision on posting registration.
-An alternative needs a specified lowering from a logical Address to existing scalar columns.
-The branch has not merged. The older-reader, byte-parity and end-to-end demo proofs remain open.
+- On main at `2042780b`, the Party “Dispatch note” tenant patch preserved one posted movement and one receipt. The compiler’s decimal mapping round-tripped geographic bounds and seven fractional places. [Prerequisite CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44728026806)
+- One logical Address owns scalar text and coordinate columns under v3 storage. The company installation owns expiring provider coordinates.
+- ADR-0085 requires named compatible and conflicting replay tests for both connector patch kinds. UPGRADE-2 owns the shared replay inventory.

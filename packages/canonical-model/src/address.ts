@@ -93,3 +93,16 @@ export const AddressProjectionSchema = z.strictObject({
   layouts: z.array(LayoutBodySchema).max(128),
 });
 export type AddressProjection = z.infer<typeof AddressProjectionSchema>;
+
+// Only the logical field ID is authorable. '#' cannot occur in an authored ID.
+export const ADDRESS_COMPONENTS = {
+  text: 512, line1: 160, line2: 160, line3: 160, line4: 160,
+  city: 120, region: 120, postalCode: 24, country: 2,
+  placeNamespace: 32, placeId: 256, latitude: 0, longitude: 0,
+  revision: 36, sourceDigest: 64, geocodeStatus: 16,
+} as const;
+export type AddressComponent = keyof typeof ADDRESS_COMPONENTS;
+export const addressComponents = Object.keys(ADDRESS_COMPONENTS) as AddressComponent[];
+export function addressColumnId(fieldId: string, component: AddressComponent): string {
+  return component === 'text' ? fieldId : fieldId + '#address.' + component;
+}

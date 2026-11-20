@@ -229,6 +229,8 @@ The read gives a user pin precedence. A change to the address or manual pin adva
 revision. A late geocode must match the exact record, revision, release and installation.
 A selected suggestion or copied geocode cannot be relabelled as user content to evade expiry.
 
+**2026-11-20 storage amendment.** One stable Address field ID owns scalar columns for typed text, components, revision, source digest, status and an optional user pin in `numeric(11,8)`. A record write replaces them atomically. Provider pins and delivery status belong to the matching company installation and source revision.
+
 A null or omitted value is absent. Require nonblank typed text in any present value.
 A required Address therefore needs text alone, including during an outage. Adding a required
 field must pass the existing storage admission rules for populated record types. A malformed

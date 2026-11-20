@@ -27,6 +27,7 @@ CREATE TABLE platform.address_geocodes (
  tenant_id uuid NOT NULL, environment_id uuid NOT NULL, company_id uuid NOT NULL, installation_id uuid NOT NULL,
  outbox_id uuid NOT NULL, field_id text NOT NULL, entity_id text NOT NULL, record_id uuid NOT NULL, address_revision uuid NOT NULL,
  principal_id uuid NOT NULL, release_id uuid NOT NULL, release_root text NOT NULL, fence bigint NOT NULL,
+ source_digest text NOT NULL CHECK(source_digest ~ '^[0-9a-f]{64}$'),
  state text NOT NULL DEFAULT 'queued' CHECK(state IN ('queued','working','ready','failed','held')),
  attempts smallint NOT NULL DEFAULT 0 CHECK(attempts BETWEEN 0 AND 4),
  available_at timestamptz NOT NULL DEFAULT clock_timestamp(), created_at timestamptz NOT NULL DEFAULT clock_timestamp(),

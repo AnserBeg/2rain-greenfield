@@ -1,3 +1,5 @@
+import { addressColumns, addressScalars, hasAddress, readAddress } from './address-storage.js';
+import { addressColumnId, addressComponents } from '@north-star/canonical-model';
 import { enqueueAddress } from './address-geocodes.js';
 import { AddressWriteSchema, SavedAddressSchema } from '@north-star/canonical-model';
 import { createHash, randomUUID } from 'node:crypto';
@@ -502,7 +504,7 @@ export class PostgresModuleRuntimeInterpreter
             );
             // The host assigns a new field revision inside the idempotent write.
             // Retrying the operation returns the original revision through its receipt.
-            const addressInputs = currentEntity.columns.filter(c => c.fieldContract.fieldKind === 'addressFieldType' && numbered.patch[c.canonicalFieldId] != null);
+            const addressInputs = currentEntity.columns.filter(c => numbered.patch[c.canonicalFieldId] != null && hasAddress(currentEntity, c.canonicalFieldId));
             const prior = addressInputs.length && request.definition.effect.kind === 'updateRecordEffect'
               ? await loadRawRecord(client,currentEntity,numbered.recordId,false,[],true) : null;
             const requests = addressInputs.map(c=>{
@@ -536,7 +538,7 @@ export class PostgresModuleRuntimeInterpreter
               currentStorage,
               currentEntity,
               request,
-              input,
+              expandAddressInputs(currentEntity, input),
               request.readBackDefinition.selections,
             );
             return Object.freeze({
@@ -563,7 +565,7 @@ export class PostgresModuleRuntimeInterpreter
           for(const address of accepted.addresses){
             const selection=address.locateFor;
             if (selection && (!accepted.owner || selection.companyId === accepted.owner))
-              await enqueueAddress(client,request.view,selection.companyId,currentEntity.entityId,parsedInput.recordId,address.fieldId,address.value.revision,accepted.outboxId,selection.installationId);
+              await enqueueAddress(client,request.view,selection.companyId,currentEntity.entityId,parsedInput.recordId,address.fieldId,address.value.revision,accepted.outboxId,selection.installationId,addressScalars(address.value).sourceDigest!);
           }
         }
         return {command:accepted.command,mutationResult:accepted.mutationResult};
@@ -1463,6 +1465,16 @@ async function assignDocumentNumbers(
     patch[field.fieldId] = number;
   }
   return Object.freeze({ ...input, patch: Object.freeze(patch) });
+}
+
+function expandAddressInputs(entity: StorageEntity, input: MutationInput): MutationInput {
+  const patch = {...input.patch};
+  for (const [id,value] of Object.entries(input.patch)) {
+    if (!hasAddress(entity,id)) continue;
+    const parts = addressScalars(value === null ? null : SavedAddressSchema.parse(value));
+    for (const component of addressComponents) patch[addressColumnId(id,component)] = parts[component];
+  }
+  return {...input, patch};
 }
 
 async function insertRecord(
@@ -5090,8 +5102,6 @@ function visibleFieldExpression(
 ): string {
   const value = qualified(tableAlias, column.physicalName);
   switch (column.fieldContract.fieldKind) {
-    case 'addressFieldType':
-      return `concat_ws(' ', ${value}->>'text', (SELECT string_agg(line, ' ') FROM jsonb_array_elements_text(${value}->'lines') AS line), ${value}->>'city', ${value}->>'region', ${value}->>'postalCode', ${value}->>'country')`;
     case 'booleanFieldType':
       return `CASE WHEN ${value} IS NULL THEN NULL WHEN ${value} THEN 'Yes' ELSE 'No' END`;
     case 'enumFieldType':
@@ -5106,6 +5116,11 @@ function foldedVisibleFieldExpression(
   column: StorageEntity['columns'][number],
   tableAlias: string,
 ): string {
+  if (hasAddress(entity, column.canonicalFieldId)) {
+    const parts = addressColumns(entity,column.canonicalFieldId);
+    const text = [parts.text,parts.line1,parts.line2,parts.line3,parts.line4,parts.city,parts.region,parts.postalCode,parts.country];
+    return `north_star_module.${unicodeCaseFoldFunctionName}(concat_ws(' ', ${text.map(name=>qualified(tableAlias,name)).join(', ')}))`;
+  }
   if (
     column.fieldContract.fieldKind === 'textFieldType' &&
     (entity.foldedColumns ?? []).some(
@@ -5654,7 +5669,6 @@ function scalarMatchesField(
   field: StorageEntity['columns'][number]['fieldContract'],
 ): boolean {
   const expected: Record<typeof field.fieldKind, CanonicalScalar['kind']> = {
-    addressFieldType: 'unsupported',
     booleanFieldType: 'booleanValue',
     dateFieldType: 'dateValue',
     dateTimeFieldType: 'dateTimeValue',
@@ -5896,9 +5910,9 @@ function rawRecord(entity: StorageEntity, row: QueryResultRow): RawRecord {
     throw failure('MODULE_RECORD_MALFORMED', 'record revision is invalid');
   }
   const values = Object.fromEntries(
-    entity.columns.map((column) => [
+    entity.columns.filter(c=>!c.canonicalFieldId.includes('#address.')).map((column) => [
       column.canonicalFieldId,
-      immutableDatabaseValue(row[column.physicalName]),
+      hasAddress(entity,column.canonicalFieldId) ? readAddress(addressColumns(entity,column.canonicalFieldId),row) : immutableDatabaseValue(row[column.physicalName]),
     ]),
   );
   return Object.freeze({
@@ -6948,7 +6962,6 @@ function parameter(values: unknown[], value: unknown): string {
 }
 
 function databaseValue(value: ImmutableJsonValue): unknown {
-  if (isRecord(value) && SavedAddressSchema.safeParse(value).success) return JSON.stringify(value);
   if (Array.isArray(value) || isRecord(value)) {
     throw failure(
       'MODULE_VALUE_UNSUPPORTED',

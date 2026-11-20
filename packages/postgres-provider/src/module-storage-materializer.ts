@@ -53,7 +53,6 @@ const storageTargetPayloadV3Version: Exclude<
 const unicodeCaseFoldFunctionName = 'nsm_unicode_case_fold_v1';
 const postedStockBalanceFunctionName = 'nsm_posted_stock_balance_v1';
 const allowedTypes = [
-  /^jsonb$/,
   /^boolean$/,
   /^date$/,
   /^numeric$/,

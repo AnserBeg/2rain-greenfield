@@ -1,8 +1,9 @@
+import {addressColumns,readAddress,addressScalars} from './address-storage.js';
 import { randomUUID } from 'node:crypto';
 import { withModuleRuntimeRole } from './module-runtime-interpreter.js';
 import type { AddressGateway, AddressInstallation } from '../../runtime/src/address-gateway.js';
 import type { Pool, PoolClient } from 'pg';
-import { AddressProjectionSchema, CoordinatesSchema, SavedAddressSchema , } from '@north-star/canonical-model';
+import { AddressProjectionSchema, CoordinatesSchema, } from '@north-star/canonical-model';
 import type { RequestRuntimeView, CurrentPolicyGateway } from '../../runtime/src/request-runtime-view.js';
 import { authorizeCurrentPolicy, issueLegalEntityReadScope, trustedContextForRequestRuntimeView } from '../../runtime/src/request-runtime-view.js';
 import { parsePinnedOperationCatalog, OPERATION_BOUNDARY_PERMISSION_ID } from '../../runtime/src/semantic-operation-gateway.js';
@@ -16,7 +17,7 @@ import type { StorageTargetPayloadV1 } from '@north-star/compiler';
 type Entity=StorageTargetPayloadV1['entities'][number];
 interface Install extends InstallationIdentity {provider:'fake'|'google'; enrichment:boolean; period_calls:number; period_budget_micros:string}
 export interface AddressTarget { fieldId:string;recordId:string;companyId:string }
-interface Job extends AddressTarget { installationId:string;revision:string;claim:string;releaseId:string;fence:string;outbox:string;attempts:number }
+interface Job extends AddressTarget { installationId:string;revision:string;claim:string;entityId:string;sourceDigest:string;releaseRoot:string;releaseId:string;fence:string;outbox:string;attempts:number }
 const key=(v:RequestRuntimeView,c:string)=>[v.tenantId,v.environmentId,c];
 const denied=()=>new AddressProviderError('unconfigured');
 const ident=(v:string)=>{if(!/^[a-z][a-z0-9_]{0,62}$/u.test(v)) throw denied();return '"'+v+'"';};
@@ -51,11 +52,11 @@ async function reserve(client:PoolClient,i:Install) {
 }
 // The caller has validated and committed the governed record's new field revision
 // within this same transaction. The deferred FK resolves when trust writes the outbox.
-export async function enqueueAddress(client:PoolClient,view:RequestRuntimeView,company:string,entityId:string,recordId:string,fieldId:string,revision:string,outbox:string,installationId:string) {
-  await client.query(`INSERT INTO platform.address_geocodes(tenant_id,environment_id,company_id,installation_id,outbox_id,field_id,entity_id,record_id,address_revision,principal_id,release_id,release_root,fence)
-    SELECT tenant_id,environment_id,company_id,installation_id,$4,$5,$6,$7,$8,$9,$10,$11,$12 FROM platform.address_installations
+export async function enqueueAddress(client:PoolClient,view:RequestRuntimeView,company:string,entityId:string,recordId:string,fieldId:string,revision:string,outbox:string,installationId:string,sourceDigest:string) {
+  await client.query(`INSERT INTO platform.address_geocodes(tenant_id,environment_id,company_id,installation_id,outbox_id,field_id,entity_id,record_id,address_revision,principal_id,release_id,release_root,fence,source_digest)
+    SELECT tenant_id,environment_id,company_id,installation_id,$4,$5,$6,$7,$8,$9,$10,$11,$12,$14 FROM platform.address_installations
     WHERE tenant_id=$1 AND environment_id=$2 AND company_id=$3 AND enabled AND enrichment AND installation_id=$13`,
-    [...key(view,company),outbox,fieldId,entityId,recordId,revision,view.principalId,view.release.releaseId,view.release.contentHash,view.pointer.fence,installationId]);
+    [...key(view,company),outbox,fieldId,entityId,recordId,revision,view.principalId,view.release.releaseId,view.release.contentHash,view.pointer.fence,installationId,sourceDigest]);
 }
 
 export class PostgresAddresses implements AddressGateway {
@@ -122,14 +123,13 @@ export class PostgresAddresses implements AddressGateway {
   // Lock the physical row from the pinned storage descriptor. An old response
   // cannot race a committed edit or carry a shared record's pin across companies.
   private async address(c:PoolClient,view:RequestRuntimeView,t:AddressTarget,entity:Entity) {
-    const col=entity.columns.find(f=>f.canonicalFieldId===t.fieldId && f.fieldContract.fieldKind==='addressFieldType');
-    if(!col)throw denied();
+    const columns=addressColumns(entity,t.fieldId);
     const company=entity.legalEntity;
-    const r=await withModuleRuntimeRole(c,()=>c.query(`SELECT ${ident(col.physicalName)} AS value FROM north_star_module.${ident(entity.physicalTableName)}
+    const r=await withModuleRuntimeRole(c,()=>c.query(`SELECT ${Object.values(columns).map(ident).join(', ')} FROM north_star_module.${ident(entity.physicalTableName)}
       WHERE tenant_id=$1 AND environment_id=$2 AND ${ident(entity.recordIdentity.column)}=$3 AND ${ident(entity.archive.archivedAtColumn)} IS NULL
       ${company?'AND '+ident(company.column)+'=$4':''} FOR SHARE`,[view.tenantId,view.environmentId,t.recordId,...(company?[t.companyId]:[])]));
     if(r.rows.length!==1) throw denied();
-    return SavedAddressSchema.safeParse(r.rows[0].value).data;
+    return readAddress(columns,r.rows[0]);
   }
   async suggest(view:RequestRuntimeView,t:AddressTarget,queryId:string,text:string,session:string) {
     const {entity,binding}=await this.authorize(view,t,true);
@@ -169,18 +169,19 @@ export class PostgresAddresses implements AddressGateway {
         ORDER BY available_at,outbox_id FOR UPDATE SKIP LOCKED LIMIT 1)
         UPDATE platform.address_geocodes g SET state='working',claim_id=$4,available_at=clock_timestamp()+interval '30 seconds'
         FROM next WHERE (g.tenant_id,g.environment_id,g.company_id,g.installation_id,g.outbox_id,g.field_id)=(next.tenant_id,next.environment_id,next.company_id,next.installation_id,next.outbox_id,next.field_id)
-        RETURNING g.company_id AS "companyId",g.installation_id AS "installationId",g.address_revision AS revision,g.release_id AS "releaseId",g.fence,g.record_id AS "recordId",g.field_id AS "fieldId",g.outbox_id AS outbox,g.attempts,g.claim_id AS claim`,[view.tenantId,view.environmentId,view.principalId,claim]);return r.rows[0];
+        RETURNING g.company_id AS "companyId",g.installation_id AS "installationId",g.address_revision AS revision,g.release_id AS "releaseId",g.entity_id AS "entityId",g.release_root AS "releaseRoot",g.source_digest AS "sourceDigest",g.fence,g.record_id AS "recordId",g.field_id AS "fieldId",g.outbox_id AS outbox,g.attempts,g.claim_id AS claim`,[view.tenantId,view.environmentId,view.principalId,claim]);return r.rows[0];
     });
     if(!job)return false;
     const jobKey=[...key(view,job.companyId),job.installationId,job.outbox,job.fieldId,job.claim];
     const condition='tenant_id=$1 AND environment_id=$2 AND company_id=$3 AND installation_id=$4 AND outbox_id=$5 AND field_id=$6 AND claim_id=$7';
     try {
-      if(view.release.releaseId!==job.releaseId||view.pointer.fence!==Number(job.fence)||job.attempts>=4)throw denied();
+      if(view.release.contentHash!==job.releaseRoot||view.release.releaseId!==job.releaseId||view.pointer.fence!==Number(job.fence)||job.attempts>=4)throw denied();
       const {entity}=await this.authorize(view,job,true);
+      if(entity.entityId!==job.entityId) throw denied();
       const checked=async(c:PoolClient)=>{
         await active(c,view);const i=await installation(c,view,job.companyId);
         const address=await this.address(c,view,job,entity);
-        if(i?.installationId!==job.installationId||!i.enrichment||address?.revision!==job.revision||address.pin)throw denied();
+        if(i?.installationId!==job.installationId||!i.enrichment||!address||address.revision!==job.revision||addressScalars(address).sourceDigest!==job.sourceDigest||address.pin)throw denied();
         return {i,address};
       };
       const {i,address}=await this.tx(view,async c=>{

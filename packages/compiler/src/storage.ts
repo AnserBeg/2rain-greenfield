@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import {
+  ADDRESS_COMPONENTS, addressComponents, addressColumnId,
   languageHasMaterializedStateFields,
   type NormalizedApplicationPackage,
 } from '@north-star/canonical-model';
@@ -251,7 +252,7 @@ export interface StorageTargetPayloadV1 {
     version: typeof BACKFILL_ADMISSIBILITY_VERSION;
   };
   entities: StorageEntityTarget[];
-  fieldTypeTable: readonly ((typeof POSTGRESQL_FIELD_TYPE_TABLE)[number] | {canonicalType:'addressFieldType';postgresqlType:'jsonb'})[];
+  fieldTypeTable: typeof POSTGRESQL_FIELD_TYPE_TABLE;
   kind: 'storageTargetPayload';
   physicalMapping: {
     digest: 'sha256';
@@ -473,7 +474,6 @@ export interface ModuleFieldContract {
   enumOptionIds: string[];
   fieldId: string;
   fieldKind:
-    | 'addressFieldType'
     | 'booleanFieldType'
     | 'dateFieldType'
     | 'dateTimeFieldType'
@@ -703,7 +703,7 @@ export function lowerStorageTargetV1(
           column,
         ]),
       );
-      const columns = (fieldsByEntity.get(entity.entityId) ?? []).map(
+      const columns = (fieldsByEntity.get(entity.entityId) ?? []).flatMap(storageFields).map(
         (field) => {
           const previousColumn = previousColumns.get(field.fieldId);
           const deferRequiredTightening =
@@ -1282,8 +1282,7 @@ export function lowerStorageTargetV1(
       version: BACKFILL_ADMISSIBILITY_VERSION,
     },
     entities,
-    fieldTypeTable: entities.some(e=>e.columns.some(c=>c.fieldContract.fieldKind==='addressFieldType')) ?
-      [{canonicalType:'addressFieldType',postgresqlType:'jsonb'},...POSTGRESQL_FIELD_TYPE_TABLE] : POSTGRESQL_FIELD_TYPE_TABLE,
+    fieldTypeTable: POSTGRESQL_FIELD_TYPE_TABLE,
     kind: 'storageTargetPayload',
     physicalMapping: {
       digest: 'sha256',
@@ -2681,7 +2680,7 @@ export function validateStorageRendererStatements(
 }
 
 export function postgresqlTypeFor(fieldType: FieldType): string {
-  if (fieldType.kind === 'addressFieldType') return 'jsonb';
+  if (fieldType.kind === 'addressFieldType') throw new Error('Lower the logical Address to its scalar fields first.');
   switch (fieldType.kind) {
     case 'booleanFieldType':
       return 'boolean';
@@ -2711,6 +2710,21 @@ function isUnicodeFoldableField(field: Field): boolean {
     field.fieldType.kind === 'textFieldType' ||
     field.fieldType.kind === 'enumFieldType'
   );
+}
+
+function storageFields(field: Field): Field[] {
+  if (field.fieldType.kind !== 'addressFieldType') return [field];
+  const schemaVersion = field.fieldType.schemaVersion;
+  return addressComponents.map(component => ({
+    ...field,
+    fieldId: addressColumnId(field.fieldId, component),
+    presence: component === 'text' ? field.presence : 'optional',
+    defaultSemantics: component === 'text' ? field.defaultSemantics : 'nullable',
+    searchable: false,
+    fieldType: component === 'latitude' || component === 'longitude'
+      ? {kind:'exactDecimalFieldType', precision:11, scale:8, representation:'canonicalString', schemaVersion}
+      : {kind:'textFieldType', maximumLength:ADDRESS_COMPONENTS[component], schemaVersion},
+  }));
 }
 
 function lowerColumn(
@@ -2776,6 +2790,7 @@ function columnShapeFingerprint(
 }
 
 function fieldContract(field: Field): ModuleFieldContract {
+  if (field.fieldType.kind === "addressFieldType") throw new Error("An Address must be lowered before deriving scalar contracts.");
   const precision =
     'precision' in field.fieldType &&
     typeof field.fieldType.precision === 'number'

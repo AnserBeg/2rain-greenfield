@@ -46,6 +46,7 @@ test('inventory platform authority is limited to calendars and release-recorded 
         assert.equal(
           migrated.applied.at(-1),
           '0048_document_attachment_authority.sql',
+'0049_address_connectors.sql',
         );
         assert.equal(migrated.verified.length, migrations.length);
         await seedTenant(admin, tenantA, environmentA, 'tenant-a');
