@@ -17,10 +17,20 @@ Slice 0 established [ADR-0080](../../decisions/ADR-0080-connector-framework.md) 
 - [PostgreSQL and mutation controls](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44761638148) exercise outage save, late edits, installation replacement, release rollback and two enabled companies reading one shared record. The controls are `late-address-response` and `shared-record-company-pin`.
 - Critical paths include release verification and migration 0052 with connector RLS and grants. The unread Critical diff exceeds 400 lines and the orchestrator owes the trunk read.
 
+## Slice 1 fix round (2026-11-20 review of `032b87c0`, verdict REVISE)
+
+Migration `0055_address_connector_authority.sql` revokes every runtime grant on the four address tables; scoped SECURITY DEFINER functions take tenant, environment and principal from the trusted context and check company membership live.
+- **Join point:** `platform.address_configure` is the single entry point that enables, reconfigures, switches or pauses a provider. It requires `northstar.runtime:permission.connector_configure` on `northstar.runtime:connector.address`, live and in a membership covering the company (the local demo grants it to the manager). SIGNIN-1 slice 2b adds its passkey decision proof there, outside the local demo.
+- Any member reads its company's installation, so a buyer locates, sees pins and gets suggestions. A pin matches record, field, revision and installation, never the current release fence; a retired field has no binding.
+- One installation per company and provider account: pausing, re-enabling and switching back keep its quota and key-file identity. Configure takes the company's advisory lock, then its rows `FOR UPDATE`; a replaced installation is recorded `paused`.
+- `platform.address_sweep` scrubs expired provider coordinates (30 days) in batches, `SKIP LOCKED`, under a READ COMMITTED guard; the demo worker runs it each tick.
+- Reader 32 refuses through this tree's production loader capped at 31 (`withArchivedCustomizationRuntime` prepare hook); the loader's Address agreement is `addressProjectionRefusal`, one comparator per line.
+- Controls: 28 entries in `test/evidence/CONNECT-1.expected-red.json`, one per guard, mostly in `test/postgres/address-authority.test.ts` (one subtest each).
+
 ## Test it yourself
 
 In the local demo as Manager, open `/?customize=address`, enable **Demo Maps** for a company and leave **Locate saved addresses** checked. Under **Customize**, draft, approve and activate a new address field on Item, then a map placement on its record page. Save an address on an item and reopen it to see its pin.
-For the outage and delayed-response cases, run `node --import tsx --test test/postgres/address-connector.test.ts` with Docker available.
+For the outage and delayed-response cases, run `node --import tsx --test test/postgres/address-connector.test.ts` with Docker available. As Buyer, open the same item: its pin shows, and **Company settings** refuses to enable a provider. The authority, quota, expiry and late-reply guards run with `CI=1 node --import tsx --test test/postgres/address-authority.test.ts`.
 
 ```record-claim
 {
