@@ -540,7 +540,14 @@ export class PostgresModuleRuntimeInterpreter
           }
         });
       },
-      undefined,
+      request.definition.effect.kind === 'archiveRecordEffect'
+        ? async (client) => {
+            await client.query(
+              'SELECT platform.lock_record_allocations($1,$2)',
+              [request.definition.effect.entity.targetId, parsedInput.recordId],
+            );
+          }
+        : undefined,
       async (client) => {
         if (
           !authorize &&
@@ -839,6 +846,12 @@ async function prepareMutation(
   );
   if (!prior) {
     throw failure('MODULE_RECORD_NOT_FOUND', 'module record was not found');
+  }
+  if (kind === 'archiveRecordEffect') {
+    await client.query('SELECT platform.require_record_archivable($1,$2)', [
+      entity.entityId,
+      input.recordId,
+    ]);
   }
   if (prior.revision !== input.expectedRevision) {
     throw failure(

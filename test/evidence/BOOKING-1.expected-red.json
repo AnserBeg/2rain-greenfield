@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "packet": "BOOKING-1",
+  "entries": [
+    {
+      "name": "unit-exclusion",
+      "claim": "Overlapping occupied intervals on one unit exclude each other.",
+      "file": "db/migrations/0048_booking_commitments.sql",
+      "original": "WHERE (kind = 'unit' AND state IN ('hold','confirmed'))",
+      "replacement": "WHERE (kind = 'unit' AND state = 'confirmed')",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "two companies racing for a shared unit commit one claim, one receipt and one event",
+          "expected": "the conflicting unit hold acquired capacity"
+        }
+      ]
+    },
+    {
+      "name": "pool-capacity",
+      "claim": "A locked pool refuses a negative remaining quantity.",
+      "file": "db/migrations/0048_booking_commitments.sql",
+      "original": "SELECT FROM segments WHERE remaining < 0",
+      "replacement": "SELECT FROM segments WHERE false AND remaining < 0",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "last pool quantity, dated capacity reductions and rescheduling serialize at the resource lock",
+          "expected": "the pool admitted demand beyond its dated capacity"
+        }
+      ]
+    },
+    {
+      "name": "date-clamp",
+      "claim": "A date-only hold made today occupies capacity from its decision.",
+      "file": "db/migrations/0048_booking_commitments.sql",
+      "original": "IF date_only THEN occupied_start := decision;",
+      "replacement": "IF date_only THEN occupied_start := start_at;",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "post-lock today and Change interval retain the agreement and clamp occupation",
+          "expected": "the hold occupied time before the decision"
+        }
+      ]
+    },
+    {
+      "name": "equality",
+      "claim": "Expiry wins at the post-lock decision instant.",
+      "file": "db/migrations/0048_booking_commitments.sql",
+      "original": "AND state='hold' AND deadline<=decision ORDER BY",
+      "replacement": "AND state='hold' AND deadline<decision ORDER BY",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "expiry wins at equality after a lock wait and a backward clock cannot revive the claim",
+          "expected": "confirmation won at the expiry deadline"
+        }
+      ]
+    }
+  ]
+}

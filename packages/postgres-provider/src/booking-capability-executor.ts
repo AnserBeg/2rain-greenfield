@@ -31,8 +31,10 @@ const callKeys = {
   changeInterval: ['bookingId', 'bookingRevision', 'interval'],
   setCapacity: ['resourceId', 'capacityRevision', 'quantity', 'reason'],
 } as const;
-function refused(): never {
-  throw new Error('booking.endpointUnavailable');
+function refused(reason = 'booking.endpointUnavailable'): never {
+  throw Object.assign(new Error(reason), {
+    code: 'SEMANTIC_OPERATION_INPUT_INVALID',
+  });
 }
 
 class BookingCapabilityExecutor implements RegisteredCapabilityOperationExecutor {
@@ -87,7 +89,9 @@ class BookingCapabilityExecutor implements RegisteredCapabilityOperationExecutor
     const queryScope = request.readBackDefinition.legalEntityScope;
     if (Boolean(scope.company) !== Boolean(queryScope)) return refused();
     const authorization: Authorization = Object.freeze({
-      decisionInput: scope.company ? { legalEntityId: scope.company } : {},
+      decisionInput: scope.company
+        ? { legalEntityId: scope.company }
+        : Object.freeze({}),
       legalEntityReadScopeIds: scope.company ? [scope.company] : [],
       readBackArguments: {
         recordId: input.recordId,
@@ -157,7 +161,7 @@ class BookingCapabilityExecutor implements RegisteredCapabilityOperationExecutor
         return response.rows[0]!.result;
       },
     );
-    if (result.refused) throw new Error(result.refused);
+    if (result.refused) return refused(result.refused);
     let record: SemanticOperationResultEnvelope['readBack'] = null;
     try {
       const read = await this.service.queryGateway.invoke(request.view, {

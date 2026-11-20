@@ -1,5 +1,7 @@
 import {
   BOOKING_OPERATION_READER,
+  bookingCatalogTerms,
+  bookingDeclarationProblem,
   hasBookingOperations,
 } from '@north-star/canonical-model';
 import {
@@ -689,6 +691,28 @@ function verifyCompiledRelease(
       projectionManifest,
       projectionPayloadBytes,
     );
+    if (
+      reference.familyId === PROJECTION_FAMILY_IDS.operationCatalog &&
+      revision.languageVersion === 'v6'
+    ) {
+      const terms = bookingCatalogTerms(layoutDefinition);
+      const catalog = decodeCanonicalObject(
+        projectionPayloadBytes[0]!,
+        'PROJECTION_CHUNK_NOT_CANONICAL',
+      );
+      if (
+        (terms.length > 0 &&
+          bookingDeclarationProblem(
+            parseNormalizedApplicationPackageJson(revision.desiredState),
+          )) ||
+        canonicalize(terms) !== canonicalize(bookingCatalogTerms(catalog))
+      ) {
+        throw integrity(
+          'BOOKING_PROJECTION_CONTRACT_MISMATCH',
+          'booking operations disagree with the released declarations',
+        );
+      }
+    }
     if (
       reference.familyId === PROJECTION_FAMILY_IDS.surfaceManifest &&
       revision.languageVersion === 'v6'

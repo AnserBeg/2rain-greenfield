@@ -32,6 +32,11 @@ export class PostgresWorkflowWorker {
 
   async poll(): Promise<void> {
     const failures: unknown[] = [];
+    try {
+      await this.workerPool.query('SELECT platform.booking_sweep_due(16)');
+    } catch (error) {
+      failures.push(error);
+    }
     for (const scope of await this.#consumer.scopes()) {
       try {
         await this.#consumer.claim(scope);
