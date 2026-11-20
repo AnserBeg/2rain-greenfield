@@ -75,24 +75,29 @@ export const MapPlacementSchema = z.strictObject({
   surfaceId: id,
   sectionId: z.string().min(1).max(512),
 });
-export const AddressProjectionSchema = z.strictObject({
-  kind: z.literal('connectorPayload'),
-  schemaVersion: z.literal(CONNECTOR_PAYLOAD),
-  bindings: z
-    .array(
-      AddressBindingSchema.extend({
-        recordQueryId: id,
-        editOperationIds: z.array(id).min(1),
-        suggestQueryId: id,
-        geocodeOperationId: id,
-        mapQueryId: id,
-      }),
-    )
-    .min(1)
-    .max(128),
-  placements: z.array(MapPlacementSchema).max(128),
-  layouts: z.array(LayoutBodySchema).max(128),
-});
+export const AddressProjectionSchema = z
+  .strictObject({
+    kind: z.literal('connectorPayload'),
+    schemaVersion: z.literal(CONNECTOR_PAYLOAD),
+    bindings: z
+      .array(
+        AddressBindingSchema.extend({
+          recordQueryId: id,
+          editOperationIds: z.array(id).min(1),
+          suggestQueryId: id,
+          geocodeOperationId: id,
+          mapQueryId: id,
+        }),
+      )
+      .max(128),
+    retiredFieldIds: z.array(id).min(1).max(128).optional(),
+    placements: z.array(MapPlacementSchema).max(128),
+    layouts: z.array(LayoutBodySchema).max(128),
+  })
+  .refine(
+    (payload) =>
+      payload.bindings.length > 0 || !!payload.retiredFieldIds?.length,
+  );
 export type AddressProjection = z.infer<typeof AddressProjectionSchema>;
 
 // Component storage IDs are derived from the complete logical ID, independently of labels and layouts.

@@ -4,12 +4,15 @@ import { test } from 'node:test';
 import { randomUUID } from 'node:crypto';
 import {
   AddressInputSchema,
+  addressColumnId,
+  addressComponents,
   normalizeApplicationPackage,
 } from '@north-star/canonical-model';
 import {
   applyCustomizationPatches,
   parseCustomizationPatch,
 } from '../../packages/customization/src/index.js';
+import { lowerStorageTargetV1 } from '../../packages/compiler/src/storage.js';
 import { compileAddressBindings } from '../../packages/compiler/src/address.js';
 import { addressProvider } from '../../packages/postgres-provider/src/address-provider.js';
 
@@ -109,4 +112,54 @@ test('typed text alone satisfies Address presence and a user pin must be finite 
       AddressInputSchema.safeParse({ ...value, ...extra }).success,
       false,
     );
+});
+
+test('retiring a logical Address withdraws its binding and map while retaining every scalar for rollback', () => {
+  const add = patch('item');
+  const surfaceId = 'northstar.app:surface.item_detail';
+  const map = {
+    kind: 'addMapPlacement' as const,
+    schemaVersion: 'v6' as const,
+    fieldId: add.fieldId,
+    surfaceId,
+    placementId: 'northstar.app:placement.custom_site_map',
+    sectionId:
+      surfaceId + '/detail/northstar.app:slot.item_detail_sections/details',
+  };
+  const result = applyCustomizationPatches(base, [add, map]);
+  assert.ok(result.status === 'applied');
+  const definition = normalizeApplicationPackage(result.authored);
+  const serving = compileAddressBindings(definition);
+  assert.ok(serving && 'payload' in serving);
+  assert.deepEqual(
+    serving.payload.placements.map((p) => p.placementId),
+    [map.placementId],
+  );
+  const field = definition.fields.find((f) => f.fieldId === add.fieldId)!;
+  const activeStorage = lowerStorageTargetV1(definition);
+  const retired = {
+    ...definition,
+    fields: definition.fields.map((f) =>
+      f === field ? { ...f, lifecycle: 'retired' as const } : f,
+    ),
+  };
+  const projection = compileAddressBindings(retired);
+  assert.ok(projection && 'payload' in projection);
+  assert.deepEqual(projection.payload.retiredFieldIds, [add.fieldId]);
+  assert.deepEqual(projection.payload.bindings, []);
+  assert.deepEqual(projection.payload.placements, []);
+  const fieldIds = new Set(
+    addressComponents.map((component) =>
+      addressColumnId(add.fieldId, component),
+    ),
+  );
+  const columns = (storage: typeof activeStorage) =>
+    storage.entities
+      .find((entity) => entity.entityId === add.entity)!
+      .columns.filter((column) => fieldIds.has(column.canonicalFieldId));
+  assert.equal(columns(activeStorage).length, fieldIds.size);
+  assert.deepEqual(
+    columns(lowerStorageTargetV1(retired, activeStorage)),
+    columns(activeStorage),
+  );
 });

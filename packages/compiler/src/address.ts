@@ -18,6 +18,11 @@ export function compileAddressBindings(
   const declarations = def.connectorBindings ?? [];
   const placements = def.mapPlacements ?? [];
   if (!fields.length && !declarations.length && !placements.length) return null;
+  const retired = new Set<string>(
+    fields
+      .filter((field) => field.lifecycle === 'retired')
+      .map((field) => field.fieldId),
+  );
   const bound = new Set<string>();
   const bindings: AddressProjection['bindings'] = [];
   for (const declaration of declarations) {
@@ -25,6 +30,14 @@ export function compileAddressBindings(
     const field = fields.find(
       (f) => f.fieldId === fieldId && f.entity.targetId === entityId,
     );
+    if (!field || bound.has(fieldId))
+      return {
+        subjectId: fieldId,
+        message:
+          'An Address binding must identify one field on its owning record.',
+      };
+    bound.add(fieldId);
+    if (retired.has(fieldId)) continue;
     const detail = def.surfaces.find(
       (s) =>
         s.surfaceRole === 'record' &&
@@ -49,10 +62,7 @@ export function compileAddressBindings(
         op.effect.entity.targetId === entityId,
     );
     if (
-      !field ||
-      field.lifecycle !== 'active' ||
       field.classification !== 'internal' ||
-      bound.has(fieldId) ||
       !detail ||
       !layout ||
       !operations.length
@@ -62,7 +72,6 @@ export function compileAddressBindings(
         message:
           'An Address needs a unique, eligible record field with an authorized edit and detail read.',
       };
-    bound.add(fieldId);
     const local = fieldId.split(':field.')[1];
     const ns = def.package.namespace;
     bindings.push({
@@ -74,7 +83,9 @@ export function compileAddressBindings(
       geocodeOperationId: ns + ':operation.address_geocode_' + local,
     });
   }
-  const unbound = fields.find((f) => !bound.has(f.fieldId));
+  const unbound = fields.find(
+    (f) => !retired.has(f.fieldId) && !bound.has(f.fieldId),
+  );
   if (unbound)
     return {
       subjectId: unbound.fieldId,
@@ -82,7 +93,10 @@ export function compileAddressBindings(
     };
   const layouts = new Map<string, AddressProjection['layouts'][number]>();
   const ids = new Set<string>();
-  for (const p of placements) {
+  const activePlacements = placements.filter(
+    (placement) => !retired.has(placement.fieldId),
+  );
+  for (const p of activePlacements) {
     const binding = bindings.find((b) => b.fieldId === p.fieldId);
     const surface = def.surfaces.find(
       (s) => s.surfaceId === p.surfaceId && s.surfaceRole === 'record',
@@ -109,7 +123,8 @@ export function compileAddressBindings(
       kind: 'connectorPayload',
       schemaVersion: 'northstar.connector-payload/v1',
       bindings,
-      placements,
+      placements: activePlacements,
+      ...(retired.size && { retiredFieldIds: [...retired].sort() }),
       layouts: [...layouts.values()],
     }),
   };
