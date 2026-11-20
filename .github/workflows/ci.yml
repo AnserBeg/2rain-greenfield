@@ -189,6 +189,8 @@ jobs:
         env:
           CI_FILES: ${{ needs.select.outputs.files }}
         run: corepack pnpm exec bash scripts/run-suite.sh quick-browser --normalize-playwright -- playwright test --config apps/web/playwright.quick.config.ts
+      - name: CI-3 control withholds the agent evidence after every quality check
+        run: rm test-results/reachability/agent.json
       - name: Retain quality executed-file evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -197,6 +199,7 @@ jobs:
             test-results/reachability/unit.json
             test-results/reachability/compiler.json
             test-results/reachability/integration.json
+            test-results/reachability/agent.json
             test-results/reachability/architecture.json
             test-results/reachability/contracts.json
             test-results/reachability/quick-node.json
