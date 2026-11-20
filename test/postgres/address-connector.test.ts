@@ -326,7 +326,43 @@ test(
           );
           await opened.service.approve(draft.patchId);
           await opened.service.activate(draft.patchId);
-          assert.deepEqual((await world.read('item', recordId)).values, before);
+          const restored = await world.read('item', recordId);
+          assert.deepEqual(restored.values, before);
+          const manual = {
+            schemaVersion: 'northstar.address-value/v1',
+            text: 'Surveyed site',
+            city: 'Edmonton',
+            pin: {
+              kind: 'user',
+              latitude: '53.54612450',
+              longitude: '-113.49382290',
+            },
+          };
+          await world.invoke('item_update', {
+            recordId,
+            expectedRevision: restored.revision,
+            patch: { [address.fieldId]: manual },
+          });
+          const stored = await world.read('item', recordId);
+          const value = SavedAddressSchema.parse(
+            stored.values[address.fieldId],
+          );
+          assert.deepEqual(value, { ...manual, revision: value.revision });
+          const invalid = {
+            ...manual,
+            text: 'Invalid pin',
+            pin: { ...manual.pin, latitude: '91' },
+          };
+          const refused = await world.invoke('item_update', {
+            recordId,
+            expectedRevision: stored.revision,
+            patch: { [address.fieldId]: invalid },
+          });
+          assert.notEqual(refused.outcome, 'succeeded');
+          assert.deepEqual(
+            (await world.read('item', recordId)).values[address.fieldId],
+            value,
+          );
         } finally {
           await opened.close();
           await app.close();
