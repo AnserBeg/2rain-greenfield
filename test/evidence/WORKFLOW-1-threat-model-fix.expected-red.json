@@ -41,7 +41,7 @@
       "claim": "A workflow write leaves no semantic operation receipt after the automation actor loses its current grant.",
       "file": "packages/postgres-provider/src/workflow-gateway.ts",
       "original": "          actorDecision.decision !== 'ALLOW'\n",
-      "replacement": "          (call.kind === 'query' && actorDecision.decision !== 'ALLOW')\n",
+      "replacement": "          (actorDecision.decision !== 'ALLOW' &&\n            (call.kind !== 'operation' ||\n              (binding.scopeMode !== 'membershipOnly' &&\n                !operations.some(\n                  (operation) =>\n                    operation.operationId === call.id &&\n                    operation.permissionId === request.permissionId,\n                ))))\n",
       "test": {
         "files": ["test/postgres/workflow-consumer.test.ts"]
       },
