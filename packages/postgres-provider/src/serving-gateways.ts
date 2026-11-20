@@ -1,3 +1,5 @@
+import { BILLING_QUOTE_CAPABILITY } from '../../canonical-model/src/billing.js';
+import { billingQuoteReadModel } from './billing-quote.js';
 import type { DocumentScanner } from './document-content.js';
 import {
   PostgresDocumentGateway,
@@ -19,13 +21,14 @@ import type { TrustedRequestContext } from '@north-star/runtime';
 import {
   SemanticOperationGateway,
   parsePinnedOperationCatalog,
-  SemanticOperationMediationAuthority,
+  type SemanticOperationMediationAuthority,
 } from '../../runtime/src/semantic-operation-gateway.js';
 import {
   SemanticQueryGateway,
   type RegisteredQueryLatencyInstrumentation,
 } from '../../runtime/src/semantic-query-gateway.js';
 import {
+  capabilityMediationAuthority,
   createRegisteredCapabilityExecutors,
   registeredCapabilityIdsFromOperationCatalog,
   type PinnedCapabilityProjection,
@@ -91,7 +94,9 @@ export function composeServingGateways(
           (await servingFor(releaseId)).policy,
       },
     );
-  const operationMediation = new SemanticOperationMediationAuthority();
+  const operationMediation = capabilityMediationAuthority(
+    options.capabilityOperationExecutorFactories ?? [],
+  );
   const documentPublication = new PostgresDocumentPublication();
   const denialRecorder = new PostgresSemanticQueryDenialRecorder(
     runtimePool,
@@ -107,6 +112,7 @@ export function composeServingGateways(
     options.monotonicMilliseconds,
   );
   const readModels = {
+    [BILLING_QUOTE_CAPABILITY]: billingQuoteReadModel(runtimePool),
     [FULFILLMENT_CAPABILITY_ID]: fulfillmentReadModel,
     [COMMERCIAL_CAPABILITY_ID]: commercialReadModelWithInventoryCost,
     [VALUATION_CAPABILITY_ID]: inventoryValuationReadModel,

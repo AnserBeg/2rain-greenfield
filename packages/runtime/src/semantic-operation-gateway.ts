@@ -381,7 +381,7 @@ export function evaluateRegisteredOperationPrecondition(
 }
 
 interface ConfirmationGrantClaims {
-  readonly grantId: string;
+  readonly grantId: string | null;
   readonly releaseFence: number;
   readonly environmentId: string;
   readonly expectedRevision: number | null;
@@ -397,6 +397,9 @@ interface ConfirmationGrantClaims {
 
 /** Server-owned authority for trusted channel attribution and signed grants. */
 export class SemanticOperationMediationAuthority {
+  constructor(
+    private readonly singleUseCapabilities: ReadonlySet<string> = new Set(),
+  ) {}
   readonly #confirmationKey = randomBytes(32);
   readonly #issuedInvocations = new WeakMap<object, IssuedRequestRuntimeView>();
 
@@ -435,7 +438,11 @@ export class SemanticOperationMediationAuthority {
     }
     const binding = operationTargetBinding(input);
     const claims: ConfirmationGrantClaims = Object.freeze({
-      grantId: randomUUID(),
+      grantId:
+        isRegisteredCapabilityOperation(definition) &&
+        this.singleUseCapabilities.has(definition.effect.capability.targetId)
+          ? randomUUID()
+          : null,
       releaseFence: view.pointer.fence,
       environmentId: view.environmentId,
       expectedRevision: binding.expectedRevision,
@@ -503,7 +510,7 @@ export class SemanticOperationMediationAuthority {
     ) {
       throw new SemanticOperationConfirmationStaleError(definition.operationId);
     }
-    return claims.grantId;
+    return claims.grantId ?? undefined;
   }
 
   #verifiedClaims(token: string): ConfirmationGrantClaims {
@@ -2218,7 +2225,7 @@ function isConfirmationGrantClaims(
   ].sort();
   if (Object.keys(value).sort().join('\0') !== keys.join('\0')) return false;
   return (
-    isUuid(value.grantId) &&
+    (value.grantId === null || isUuid(value.grantId)) &&
     Number.isSafeInteger(value.releaseFence) &&
     isUuid(value.environmentId) &&
     (value.expectedRevision === null ||

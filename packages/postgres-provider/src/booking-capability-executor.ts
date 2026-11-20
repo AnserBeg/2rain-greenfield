@@ -254,6 +254,7 @@ class BookingCapabilityExecutor implements RegisteredCapabilityOperationExecutor
 export const BOOKING_CAPABILITY_EXECUTOR_FACTORY: PostgresCapabilityOperationExecutorFactory =
   {
     capabilityId: BOOKING_CAPABILITY,
+    singleUseConfirmation: true,
     verificationRefusal: {
       code: 'SEMANTIC_OPERATION_INPUT_INVALID',
       reason: 'booking.endpointUnavailable',

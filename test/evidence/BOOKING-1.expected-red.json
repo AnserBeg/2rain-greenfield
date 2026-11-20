@@ -49,7 +49,7 @@
     {
       "name": "date-clamp",
       "claim": "A date-only hold made today occupies capacity from its decision.",
-      "file": "db/migrations/0051_booking_authority.sql",
+      "file": "db/migrations/0052_booking_authority.sql",
       "original": "IF date_only THEN occupied_start := decision;",
       "replacement": "IF date_only THEN occupied_start := start_at;",
       "test": {
@@ -81,7 +81,7 @@
     {
       "name": "equality",
       "claim": "Expiry wins at the post-lock decision instant.",
-      "file": "db/migrations/0051_booking_authority.sql",
+      "file": "db/migrations/0052_booking_authority.sql",
       "original": "WHERE resource_key=diary AND state='hold' AND deadline<=decision ORDER BY",
       "replacement": "WHERE resource_key=diary AND state='hold' AND deadline<decision ORDER BY",
       "test": {
