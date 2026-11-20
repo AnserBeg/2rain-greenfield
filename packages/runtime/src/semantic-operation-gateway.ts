@@ -227,6 +227,8 @@ export interface RegisteredOperationSystemInput {
 }
 
 export interface SemanticOperationResultEnvelope {
+  /** The registered operation's committed receipt, visible with its owner. */
+  readonly capabilityResult?: ImmutableJsonValue;
   readonly kind: 'semanticOperationResult';
   readonly operationId: string;
   readonly outcome: 'succeeded' | 'unsupported';

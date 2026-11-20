@@ -172,7 +172,7 @@ DECLARE
   end_at := north_star_internal.booking_boundary(end_local,zone_name,(entered->>'endOffsetSeconds')::integer);
   IF end_at <= decision OR end_at <= start_at THEN RAISE EXCEPTION 'booking.elapsedInterval'; END IF;
   occupied_start := start_at;
-  IF date_only AND start_local::date < (decision AT TIME ZONE zone_name)::date AND previous_agreement IS NULL THEN
+  IF date_only AND start_local::date < (decision AT TIME ZONE zone_name)::date AND (previous_agreement IS NULL OR start_at<>lower(previous_agreement)) THEN
     RAISE EXCEPTION 'booking.startInPast'; END IF;
   IF start_at < decision THEN
     IF date_only THEN occupied_start := decision;
@@ -380,7 +380,7 @@ DECLARE previous platform.booking_commitments; fact platform.booking_commitments
     PERFORM north_star_internal.booking_record_change(previous,fact,source.release_id,actor,'expireHold',expiry_key,
       jsonb_build_object('bookingId',fact.booking_id,'revision',previous.revision),'hold expired',previous.deadline,decision); END LOOP; END $$;
 
-CREATE FUNCTION platform.booking_sweep_due(max_resources integer) RETURNS integer
+CREATE FUNCTION north_star_internal.booking_sweep_due(max_resources integer) RETURNS integer
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE diary platform.booking_resources; decision timestamptz; processed integer := 0; BEGIN
   IF current_setting('transaction_isolation') <> 'read committed' THEN RAISE EXCEPTION 'booking.requiresReadCommitted'; END IF;
@@ -395,7 +395,7 @@ DECLARE diary platform.booking_resources; decision timestamptz; processed intege
     processed := processed+1; END LOOP;
   RETURN processed; END $$;
 
-CREATE FUNCTION platform.booking_apply(r uuid,expected_fence bigint,action text,key uuid,input jsonb,actor jsonb)
+CREATE FUNCTION north_star_internal.booking_apply(r uuid,expected_fence bigint,action text,key uuid,input jsonb,actor jsonb)
 RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp SET timezone='UTC' AS $$
 DECLARE
   t uuid := north_star_internal.trusted_tenant_id();
@@ -527,6 +527,27 @@ DECLARE
     WHEN raise_exception THEN IF SQLERRM LIKE 'booking.%' AND SQLERRM <> 'booking.evidenceMismatch' THEN RETURN jsonb_build_object('refused',SQLERRM); ELSE RAISE; END IF; END;
 EXCEPTION WHEN no_data_found OR too_many_rows THEN RAISE EXCEPTION 'booking.endpointUnavailable'; END $$;
 
+-- This pack writes only its platform facts. Its declared module write roots
+-- are empty for every compiled storage target. Module business records are
+-- locked and read as endpoints. Count tuple writes, including trigger writes.
+CREATE FUNCTION north_star_internal.booking_module_writes() RETURNS numeric
+LANGUAGE sql VOLATILE SET search_path = pg_catalog, pg_temp AS $$
+  SELECT coalesce(sum(n_tup_ins+n_tup_upd+n_tup_del),0) FROM pg_stat_xact_user_tables
+  WHERE schemaname='north_star_module'
+$$;
+CREATE FUNCTION platform.booking_apply(r uuid,expected_fence bigint,action text,key uuid,input jsonb,actor jsonb)
+RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp SET timezone='UTC' AS $$
+DECLARE prior numeric := north_star_internal.booking_module_writes(); answer jsonb; BEGIN
+  answer := north_star_internal.booking_apply(r,expected_fence,action,key,input,actor);
+  IF north_star_internal.booking_module_writes() <> prior THEN RAISE EXCEPTION 'booking.unexpectedModuleWrite'; END IF;
+  RETURN answer; END $$;
+CREATE FUNCTION platform.booking_sweep_due(max_resources integer) RETURNS integer
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp SET timezone='UTC' AS $$
+DECLARE prior numeric := north_star_internal.booking_module_writes(); answer integer; BEGIN
+  answer := north_star_internal.booking_sweep_due(max_resources);
+  IF north_star_internal.booking_module_writes() <> prior THEN RAISE EXCEPTION 'booking.unexpectedModuleWrite'; END IF;
+  RETURN answer; END $$;
+
 DO $access$
 DECLARE tab text; routine regprocedure; BEGIN
   FOREACH tab IN ARRAY ARRAY['booking_resources','booking_owner_cursors','booking_receipts','booking_pool_capacity','booking_history','booking_commitments'] LOOP
@@ -551,13 +572,13 @@ LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS 
            AND f.resource_key=d.resource_key AND f.state IN ('hold','confirmed')))
    ORDER BY d.resource_key FOR UPDATE OF d
 $$;
-CREATE FUNCTION platform.require_record_archivable(entity text,record uuid) RETURNS void
+CREATE FUNCTION north_star_internal.require_record_archivable(entity text,record uuid) RETURNS void
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$ BEGIN
   IF EXISTS (SELECT FROM platform.booking_commitments f JOIN platform.booking_resources d USING (tenant_id,environment_id,resource_key)
     JOIN platform.booking_owner_cursors o USING (tenant_id,environment_id,owner_key)
     WHERE f.tenant_id=north_star_internal.trusted_tenant_id() AND f.environment_id=north_star_internal.trusted_environment_id()
       AND ((d.entity_id,d.record_id)=(entity,record) OR (o.entity_id,o.record_id)=(entity,record))
       AND f.state IN ('hold','confirmed')) THEN RAISE EXCEPTION 'booking.activeAllocation'; END IF; END $$;
-REVOKE ALL ON FUNCTION platform.lock_record_allocations(text,uuid),platform.require_record_archivable(text,uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION platform.lock_record_allocations(text,uuid),north_star_internal.require_record_archivable(text,uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION platform.lock_record_allocations(text,uuid) TO north_star_runtime;
-GRANT EXECUTE ON FUNCTION platform.require_record_archivable(text,uuid) TO north_star_module_runtime;
+GRANT EXECUTE ON FUNCTION north_star_internal.require_record_archivable(text,uuid) TO north_star_module_runtime;

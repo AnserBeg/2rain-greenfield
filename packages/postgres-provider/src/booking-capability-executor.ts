@@ -51,7 +51,8 @@ class BookingCapabilityExecutor implements RegisteredCapabilityOperationExecutor
       !booking ||
       !object(input) ||
       typeof input.recordId !== 'string' ||
-      !Number.isSafeInteger(input.expectedRevision) ||
+      typeof input.expectedRevision !== 'number' ||
+      !Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1 ||
       !object(input.arguments) ||
       request.readBackDefinition.sourceEntityId !== booking.ownerEntity ||
       request.readBackDefinition.queryType !== 'get' ||
@@ -134,6 +135,11 @@ class BookingCapabilityExecutor implements RegisteredCapabilityOperationExecutor
         const response = await client.query<{
           result: {
             refused?: string;
+            bookingId?: string;
+            revision: number;
+            state: string;
+            deadline: string;
+            resourceKey: string;
             changeDocumentId: string;
             domainEventId: string;
             invocationId: string;
@@ -184,6 +190,9 @@ class BookingCapabilityExecutor implements RegisteredCapabilityOperationExecutor
       operationId: request.definition.operationId,
       outcome: 'succeeded',
       readBack: record,
+      ...(record ? {capabilityResult: result.bookingId
+        ? {bookingId:result.bookingId,revision:result.revision,state:result.state,deadline:result.deadline}
+        : {resourceKey:result.resourceKey,revision:result.revision}} : {}),
       trust: {
         changeDocumentId: result.changeDocumentId,
         domainEventId: result.domainEventId,

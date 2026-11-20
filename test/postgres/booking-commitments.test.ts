@@ -395,7 +395,7 @@ test('booking commitment writer', async (t) => {
               [tenant, environment],
             );
             await assert.rejects(
-              admin.query('SELECT platform.require_record_archivable($1,$2)', [
+              admin.query('SELECT north_star_internal.require_record_archivable($1,$2)', [
                 'example.booking:entity.visit',
                 owner(18),
               ]),
@@ -421,7 +421,7 @@ test('booking commitment writer', async (t) => {
           CREATE TRIGGER booking_drop_outbox BEFORE INSERT ON platform.trust_outbox FOR EACH ROW EXECUTE FUNCTION public.suppress_booking_outbox()`);
           try {
             await assert.rejects(
-              call(left, 'hold', hold(19, 9, window('09:00', '10:00'))),
+              call(left, 'hold', hold(19, 10, window('09:00', '10:00'))),
               /booking.evidenceMismatch/u,
             );
             const result = await admin.query(
