@@ -49,6 +49,12 @@ journaled, exclude the query from the workflow SDK. WORKFLOW-1 keeps its present
 
 ## Who can connect a company
 
+Real email and maps calls stay in explicitly enabled local demo mode until SIGNIN-1 slice 2
+proves the decision and verification boundaries. In the pilot, connecting a provider and
+confirming an outward send each require a consumed proof for the exact reviewed terms.
+Connector consent, installation, delivery and document gates still apply.
+[Staff decision authority](ADR-0081-staff-sign-in-and-decision-authority.md#human-decisions-and-activation-evidence)
+
 An authorized administrator chooses a registered provider in company settings, binds the
 required credential slots, checks the account identity and enables the approved operations.
 Display the company, provider account, allowed purposes, status and last check. Enabling,
