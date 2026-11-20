@@ -5,7 +5,7 @@
     {
       "name": "billing-direct-privileges",
       "claim": "The serving role has no direct rate or assignment table grant.",
-      "file": "db/migrations/0056_billing_publication.sql",
+      "file": "db/migrations/0057_billing_publication.sql",
       "original": "REVOKE ALL ON platform.billing_rate_tables, platform.billing_list_assignments FROM north_star_runtime;",
       "replacement": "REVOKE ALL ON platform.billing_list_assignments FROM north_star_runtime;",
       "test": {
