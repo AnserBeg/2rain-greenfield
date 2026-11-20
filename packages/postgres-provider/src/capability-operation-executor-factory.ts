@@ -1,6 +1,9 @@
 import type { Pool } from 'pg';
 
-import type { RegisteredCapabilityOperationExecutor } from '../../runtime/src/semantic-operation-gateway.js';
+import {
+  type RegisteredCapabilityOperationExecutor,
+  SemanticOperationMediationAuthority,
+} from '../../runtime/src/semantic-operation-gateway.js';
 import type { SemanticQueryGateway } from '../../runtime/src/semantic-query-gateway.js';
 import type { TrustedActorEnvelopeIssuer } from './trust/trusted-actor-envelope.js';
 
@@ -10,6 +13,8 @@ export interface PinnedCapabilityProjection {
 }
 
 export interface PostgresCapabilityOperationExecutorContext {
+  readonly approvalPool?: Pool;
+  readonly verifyConfirmation?: SemanticOperationMediationAuthority['assertConfirmationGrant'];
   readonly actorIssuer: TrustedActorEnvelopeIssuer;
   readonly currentInstant: () => string;
   readonly pool: Pool;
@@ -27,10 +32,23 @@ export interface CapabilityVerificationRefusalExpectation {
 /** Product assembly supplies module-owned factories; generic code knows IDs only. */
 export interface PostgresCapabilityOperationExecutorFactory {
   readonly capabilityId: string;
+  readonly singleUseConfirmation?: boolean;
   readonly verificationRefusal: CapabilityVerificationRefusalExpectation;
   create(
     context: PostgresCapabilityOperationExecutorContext,
   ): RegisteredCapabilityOperationExecutor;
+}
+
+export function capabilityMediationAuthority(
+  factories: readonly PostgresCapabilityOperationExecutorFactory[],
+) {
+  return new SemanticOperationMediationAuthority(
+    new Set(
+      factories
+        .filter((factory) => factory.singleUseConfirmation)
+        .map((factory) => factory.capabilityId),
+    ),
+  );
 }
 
 export function createRegisteredCapabilityExecutors(

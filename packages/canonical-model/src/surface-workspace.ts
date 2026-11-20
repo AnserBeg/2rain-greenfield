@@ -1,3 +1,5 @@
+import { boardDigest, boardForList, boardWithStages } from './board.js';
+import { SURFACE_SLOTS } from './constants.js';
 import { baseLayout, layoutProblem } from './layout.js';
 import type { VersionedNormalizedApplicationPackage } from './schemas.js';
 import { CanonicalModelError, diagnostic } from './diagnostics.js';
@@ -31,6 +33,41 @@ export function validateSurfaceWorkspaces(
     ]);
   };
   for (const surface of model.surfaces) {
+    const board = 'board' in surface ? surface.board : undefined;
+    if (surface.archetype === 'board' || board) {
+      if (!board || surface.archetype !== 'board')
+        return fail(
+          surface.surfaceId,
+          'A v6 Board must declare its view binding.',
+        );
+      const { body } = board;
+      const source = boardForList(model, body.listSurfaceId);
+      const expected =
+        source &&
+        boardWithStages(
+          source,
+          body.grouping.stages.map((s) => s.stateId),
+        );
+      const slots = [...surface.slots]
+        .sort((a, b) => a.orderKey - b.orderKey)
+        .map((s) => s.slot);
+      if (
+        !expected ||
+        boardDigest(expected) !== board.resultDigest ||
+        boardDigest(body) !== board.resultDigest ||
+        body.listQueryId !== surface.dataSource.targetId ||
+        board.predecessor === board.revisionId ||
+        surface.surfaceRole !== undefined ||
+        slots.join() !== SURFACE_SLOTS.board.join() ||
+        !('workspace' in surface) ||
+        surface.workspace?.membership !== 'contextual' ||
+        surface.workspace.ownerSurfaceId !== body.listSurfaceId
+      )
+        fail(
+          surface.surfaceId,
+          'Board stages, moves, owner, slots or authorized read bindings have changed.',
+        );
+    }
     if ('layouts' in surface && surface.layouts) {
       const modes = new Set<string>();
       for (const layout of surface.layouts) {

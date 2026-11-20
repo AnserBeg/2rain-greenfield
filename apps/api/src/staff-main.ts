@@ -79,6 +79,9 @@ async function main() {
       realm,
       rateKey,
       ...(trustedIngress ? { trustedIngress } : {}),
+      ...(process.env.STAFF_APPROVAL_DATABASE_URL
+        ? { approvalDatabaseUrl: process.env.STAFF_APPROVAL_DATABASE_URL }
+        : {}),
       runtimeDatabaseUrl: setting('STAFF_RUNTIME_DATABASE_URL'),
       ...(process.env.STAFF_IDENTITY_CA_FILE
         ? { identityCa: await readFile(process.env.STAFF_IDENTITY_CA_FILE) }

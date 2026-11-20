@@ -1696,7 +1696,7 @@ silently degrading.
 One doctrine governs every screen: users customize content, never grammar.
 The platform owns a closed set of screen archetypes; every module —
 first-party, generated, or tenant-authored — renders as content inside them.
-A user who learns the five shapes once has learned every future module,
+A user who learns the six shapes once has learned every future module,
 including ones that do not exist yet.
 
 | Archetype | Fixed anatomy |
@@ -1704,6 +1704,7 @@ including ones that do not exist yet.
 | Home | role-shaped exception cards and setup checklist; never an empty dashboard |
 | List | title, saved-view tabs, spreadsheet-grade grid (sort, filter, all-visible-value search, paging), bulk bar |
 | Record | breadcrumb; title + status chip; command bar (primary action first, destructive behind overflow); key facts; sections and child tables; activity rail |
+| Board | title, saved-view tabs, stage selector, named stage columns with record cards and Move card |
 | Task | one decision per screen, scan-first input, large touch targets; receiving, picking, shipping, counting |
 
 Task presentation may retain its originating Record context using the bounded
