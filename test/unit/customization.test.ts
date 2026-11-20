@@ -1,3 +1,4 @@
+import type { CompiledPopup } from '../../packages/canonical-model/src/popup-actions.js';
 import assert from 'node:assert/strict';
 import { fork } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -18,6 +19,7 @@ import {
   CanonicalModelError,
   normalizeApplicationPackage,
   type SurfaceList,
+  type SurfaceComposition,
   type SurfaceLayout,
 } from '../../packages/canonical-model/src/index.js';
 import {
@@ -2301,4 +2303,97 @@ test('record layout retains the file catalog and raises the Surface floor above 
       index === 1 ? 'Item identification' : undefined,
     );
   }
+});
+
+test('addPopupActionRevision replay accepts a compatible base move and refuses a changed operation contract', async () => {
+  const model = normalizeApplicationPackage(authored);
+  const targets = customizationTargets(
+    model as unknown as Parameters<typeof customizationTargets>[0],
+  );
+  const option = targets.popupActions!.find(
+    (o) => o.target.kind === 'operation' && o.label === 'Place order',
+  )!;
+  assert.ok(option);
+  const revision = patch({
+    kind: 'addPopupActionRevision',
+    schemaVersion: 'v6',
+    surface: option.surface,
+    slot: option.slot,
+    actionId: 'northstar.app:action.custom_place',
+    revisionId: '342fb85d-3a18-49d8-820a-48b205338922',
+    predecessor: null,
+    status: 'active',
+    label: { schemaVersion: 'v6', text: 'Send to vendor' },
+    target: option.target,
+    inputs: option.fields.map((f) => ({
+      schemaVersion: 'v6',
+      contractVersion: f.contractVersion,
+      binding: f.id,
+      source: { schemaVersion: 'v6', kind: 'userEntry' },
+    })),
+  });
+  assert.ok(revision.kind === 'addPopupActionRevision');
+  const compiled = await compileInSandbox(sandboxRequest([revision]));
+  assert.ok(compiled.status === 'compiled', JSON.stringify(compiled));
+  const step = compiled.steps[0]!;
+  const { projectionPayload } = await import('../compiler/helpers.js');
+  const release = parseSerializedRelease(step.release);
+  const { POPUP_READER } =
+    await import('../../packages/canonical-model/src/popup-actions.js');
+  const surface = release.compiled.bundle.releaseManifest.projections.find(
+    (p) => p.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
+  )!;
+  assert.equal(surface.requiredRuntimeCapability.minimumVersion, POPUP_READER);
+  const manifest = projectionPayload(
+    release.compiled,
+    PROJECTION_FAMILY_IDS.surfaceManifest,
+  ) as {
+    surfaces: {
+      surfaceId: string;
+      popupActions?: CompiledPopup[];
+    }[];
+  };
+  const button = manifest.surfaces.find((s) => s.surfaceId === option.surface)!
+    .popupActions![0]!;
+  assert.deepEqual(button.task?.conditions, option.task?.conditions);
+  assert.deepEqual(button.task?.steps, option.task?.steps);
+  assert.equal(button.task?.description, option.task?.description);
+  assert.match(step.rendered.text, /Send to vendor/u);
+  assert.equal(
+    applyCustomizationPatches(authored, [
+      revision,
+      { ...revision, revisionId: 'b90ad679-317a-4866-a8e8-7c70d82a2278' },
+    ]).status,
+    'refused',
+  );
+  const moved = structuredClone(authored);
+  (moved.fields as { fieldId: string; label: string }[]).find((f) =>
+    f.fieldId.endsWith('item_sku'),
+  )!.label = 'Stock number';
+  const replay = (base: typeof moved) =>
+    compileInSandbox({
+      ...sandboxRequest([revision]),
+      base,
+      tip: step.release,
+      upgradeBaseRoot: tip.compiled.releaseRoot,
+    });
+  const compatible = await replay(moved);
+  assert.ok(compatible.status === 'compiled', JSON.stringify(compatible));
+  const recordPage = (
+    moved.surfaces as {
+      surfaceId: string;
+      composition: SurfaceComposition;
+    }[]
+  ).find((s) => s.surfaceId === revision.surface)!;
+  recordPage.composition.actions.find(
+    (a) => a.actionId === option.task!.actionId,
+  )!.inputs[0]!.required = true;
+  assert.doesNotThrow(() => normalizeApplicationPackage(moved));
+  const conflict = await replay(moved);
+  assert.ok(
+    conflict.status === 'rejected' &&
+      conflict.code === 'CUSTOMIZE_UPGRADE_CONFLICT',
+    JSON.stringify(conflict),
+  );
+  assert.match(JSON.stringify(conflict), /contract changed/u);
 });

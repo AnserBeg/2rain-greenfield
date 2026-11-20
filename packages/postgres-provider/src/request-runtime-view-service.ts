@@ -1,3 +1,4 @@
+import { popupBindingsProblem } from './popup-admission.js';
 import {
   BOOKING_OPERATION_READER,
   hasBookingOperations,
@@ -995,6 +996,13 @@ function definitionFromSnapshotRows(
       throw malformedProjection('formula/rule projection has invalid bindings');
     }
   }
+  const popupProblem = popupBindingsProblem(
+    surface.payload,
+    surface.requiredRuntimeCapability?.minimumVersion ?? 0,
+    operation.payload,
+    query.payload,
+  );
+  if (popupProblem) throw malformedProjection(popupProblem);
   const problem = layoutBindingsProblem(
     surface.payload,
     surface.requiredRuntimeCapability?.minimumVersion ?? 0,

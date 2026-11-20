@@ -1,3 +1,5 @@
+import { CompiledPopupSchema } from '../../../packages/runtime/src/popup-actions.js';
+import type { CompiledPopup } from '../../../packages/canonical-model/src/popup-actions.js';
 import {
   SurfaceLayoutSchema,
   type SurfaceLayout,
@@ -299,6 +301,7 @@ export function formFieldIds(
 }
 
 export interface CompiledSurfaceDefinition {
+  readonly popupActions?: readonly CompiledPopup[];
   readonly layouts?: readonly SurfaceLayout[];
   readonly list?: SurfaceList;
   /**
@@ -1130,6 +1133,13 @@ function parseSurface(
     ...(value.list === undefined
       ? {}
       : { list: SurfaceListSchema.parse(value.list) }),
+    ...(value.popupActions === undefined
+      ? {}
+      : {
+          popupActions: CompiledPopupSchema.array()
+            .min(1)
+            .parse(value.popupActions),
+        }),
     ...(value.layouts === undefined
       ? {}
       : {

@@ -1,3 +1,4 @@
+import { compiledPopups } from './popup-actions.js';
 import { baseLayout, layoutProblem } from './layout.js';
 import type { VersionedNormalizedApplicationPackage } from './schemas.js';
 import { CanonicalModelError, diagnostic } from './diagnostics.js';
@@ -31,6 +32,13 @@ export function validateSurfaceWorkspaces(
     ]);
   };
   for (const surface of model.surfaces) {
+    if ('popupActions' in surface && surface.popupActions) {
+      try {
+        compiledPopups(model, surface);
+      } catch (error) {
+        fail(surface.surfaceId, String(error));
+      }
+    }
     if ('layouts' in surface && surface.layouts) {
       const modes = new Set<string>();
       for (const layout of surface.layouts) {

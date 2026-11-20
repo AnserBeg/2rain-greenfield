@@ -434,3 +434,181 @@ test(
     );
   },
 );
+
+test(
+  'a released record button opens a no-script Task, checks grants and revisions, and commits once through its declared gateway operation',
+  { timeout: 600_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'customize-popup',
+      async ({ connection, pool }) => {
+        const options = {
+          databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
+          tenantSlug: 'customize-popup',
+        };
+        const app = await startComposedApplication({ ...options, port: 0 });
+        const opened = await openCustomizeService(options);
+        try {
+          const surface = 'northstar.app:surface.item_detail',
+            field = 'northstar.app:field.item_description',
+            operation = 'northstar.app:operation.item_update';
+          const target = (await opened.service.targets()).popupActions?.find(
+            (o) => o.surface === surface && o.target.kind === 'update',
+          );
+          assert.ok(target, 'Customize offers the Item update Task');
+          const customize = new URL('/?customize', app.baseUrl);
+          const post = async (url: URL, values: Record<string, string>) =>
+            (
+              await fetch(url, {
+                method: 'POST',
+                headers: { origin: url.origin },
+                body: new URLSearchParams(values),
+              })
+            ).text();
+          const formKey = surface + '/' + operation;
+          const editor = await (
+            await fetch(
+              new URL(
+                '/?customize&popup=' + encodeURIComponent(formKey),
+                app.baseUrl,
+              ),
+            )
+          ).text();
+          assert.match(editor, /Button label/u);
+          const draft = await post(customize, {
+            action: 'draft',
+            kind: 'addPopupActionRevision',
+            popup: formKey,
+            contract: target.target.contractVersion,
+            label: 'Edit item note',
+            predecessor: '',
+            button: '',
+            ['source:' + field]: 'entry',
+          });
+          const patchId =
+            /data-customize-result="drafted" data-patch-id="([^"]+)"/u.exec(
+              draft,
+            )?.[1];
+          assert.ok(patchId, draft.slice(-2500));
+          await opened.service.approve(patchId);
+          await withArchivedCustomizationRuntime(
+            '17618776dd058bbb8efec032eae13a00a5d5398b',
+            async (run) => {
+              await assertArchivedTenantEnvelope(run);
+              const read = () =>
+                archivedRuntimeRead(run, {
+                  databaseUrl: options.databaseUrl,
+                  identity: app.runtime.identity,
+                });
+              assert.equal((await read()).outcome, 'loaded');
+              await opened.service.activate(patchId);
+              const refusal = await read();
+              assert.equal(refusal.code, 'UNSUPPORTED_RUNTIME_CAPABILITY');
+              assert.match(
+                refusal.message ?? '',
+                /surface-manifest requires version 30 and this runtime supports 29/u,
+              );
+            },
+          );
+          const option = (await opened.service.targets()).popupActions!.find(
+            (o) => o.surface === surface && o.target.kind === 'update',
+          )!;
+          const revision = option.existing[0]!;
+          const record = app.seededRecords.find((r) =>
+            r.operationId.endsWith(':operation.item_create'),
+          )!;
+          const url = new URL('/', app.baseUrl);
+          url.searchParams.set('surface', surface);
+          url.searchParams.set('record', record.recordId);
+          const actualUrl = new URL((await fetch(url)).url);
+          const receiptCount = async () =>
+            Number(
+              (
+                await pool.query(
+                  'SELECT count(*) FROM platform.semantic_operation_receipts WHERE tenant_id=$1 AND action_id=$2',
+                  [app.runtime.identity.tenantId, operation],
+                )
+              ).rows[0].count,
+            );
+          const start = await receiptCount();
+          const button = { compositionAction: revision.actionId };
+          const page = await (await fetch(actualUrl)).text();
+          assert.ok(
+            page.includes('value="' + revision.actionId + '"'),
+            'the record offers its custom action',
+          );
+          const open = async () => {
+            const html = await post(actualUrl, button);
+            assert.match(html, /<dialog open[^>]*data-task-fallback="page"/u);
+            assert.ok(
+              html.includes(operation) && html.includes(record.recordId),
+            );
+            const token = /name="taskToken" value="([^"]+)"/u.exec(html)?.[1];
+            assert.ok(token);
+            return { ...button, taskToken: token };
+          };
+          const first = await open(),
+            stale = await open();
+          assert.equal(await receiptCount(), start);
+          const result = await post(actualUrl, {
+            ...first,
+            taskStage: 'apply',
+            [field]: 'Dock three',
+          });
+          assert.match(result, /Edit item note: done/u);
+          assert.equal(await receiptCount(), start + 1);
+          await post(actualUrl, { ...first, taskStage: 'retry' });
+          assert.equal(await receiptCount(), start + 1);
+          const old = await post(actualUrl, {
+            ...stale,
+            taskStage: 'apply',
+            [field]: 'Stale value',
+          });
+          assert.doesNotMatch(old, /Edit item note: done/u);
+          assert.equal(await receiptCount(), start + 1);
+          const after = await (await fetch(actualUrl)).text();
+          assert.match(after, /Dock three/u);
+          assert.doesNotMatch(after, /Stale value/u);
+          const restrict = await opened.service.draft(
+            {
+              kind: 'narrowPermission',
+              roleKey: 'local-demo-full-release',
+              target: { kind: 'operation', id: operation },
+            },
+            'visualBuilder',
+          );
+          assert.ok(restrict.status === 'drafted', JSON.stringify(restrict));
+          await opened.service.approve(restrict.patchId);
+          await opened.service.activate(restrict.patchId);
+          const denied = await opened.service.draft(
+            {
+              ...revision,
+              kind: 'addPopupActionRevision',
+              revisionId: randomUUID(),
+              predecessor: revision.revisionId,
+            },
+            'visualBuilder',
+          );
+          assert.ok(
+            denied.status === 'refused' &&
+              denied.code === 'CUSTOMIZE_POPUP_OPERATION_DENIED',
+            JSON.stringify(denied),
+          );
+          assert.ok(
+            !(await (await fetch(actualUrl)).text()).includes(
+              'value="' + revision.actionId + '"',
+            ),
+          );
+          assert.doesNotMatch(
+            await post(actualUrl, button),
+            /name="taskToken"/u,
+          );
+        } finally {
+          await opened.close();
+          await app.close();
+        }
+      },
+      LINEAGE_INSTALL_VOLUME,
+    );
+  },
+);

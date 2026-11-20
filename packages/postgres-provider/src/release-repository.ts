@@ -1,4 +1,8 @@
 import {
+  popupDeclarationProblem,
+  popupBindingsProblem,
+} from './popup-admission.js';
+import {
   BOOKING_OPERATION_READER,
   bookingCatalogTerms,
   bookingDeclarationProblem,
@@ -581,6 +585,11 @@ function verifyCompiledRelease(
     layoutDefinition,
   );
   const needsLayout =
+    (isRecord(layoutDefinition) &&
+      Array.isArray(layoutDefinition.surfaces) &&
+      layoutDefinition.surfaces.some(
+        (s) => isRecord(s) && Object.hasOwn(s, 'popupActions'),
+      )) ||
     declaredLayouts(isRecord(layoutDefinition) ? layoutDefinition.surfaces : [])
       .length > 0;
   const surfaceReference = manifest.projections.find(
@@ -721,6 +730,13 @@ function verifyCompiledRelease(
         projectionPayloadBytes[0]!,
         'PROJECTION_CHUNK_NOT_CANONICAL',
       );
+      const popupProblem = popupDeclarationProblem(
+        layoutDefinition,
+        payload,
+        reference.requiredRuntimeCapability.minimumVersion,
+      );
+      if (popupProblem)
+        throw integrity('POPUP_PROJECTION_CONTRACT_MISMATCH', popupProblem);
       const problem = layoutDeclarationProblem(
         layoutDefinition,
         payload,
@@ -774,6 +790,14 @@ function verifyCompiledRelease(
         ? decodeCanonicalObject(bytes, 'PROJECTION_CHUNK_NOT_CANONICAL')
         : null;
     };
+    const popupProblem = popupBindingsProblem(
+      payload(PROJECTION_FAMILY_IDS.surfaceManifest),
+      surfaceReference!.requiredRuntimeCapability.minimumVersion,
+      payload(PROJECTION_FAMILY_IDS.operationCatalog),
+      payload(PROJECTION_FAMILY_IDS.queryCatalog),
+    );
+    if (popupProblem)
+      throw integrity('POPUP_PROJECTION_CONTRACT_MISMATCH', popupProblem);
     const problem = layoutBindingsProblem(
       payload(PROJECTION_FAMILY_IDS.surfaceManifest),
       surfaceReference!.requiredRuntimeCapability.minimumVersion,

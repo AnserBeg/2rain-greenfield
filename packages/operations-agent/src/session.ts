@@ -1,3 +1,7 @@
+import {
+  availablePopups,
+  CompiledPopupSchema,
+} from '../../runtime/src/popup-actions.js';
 /**
  * One operations-agent session: the handler behind the five model-facing
  * tools (ADR-0009, plan §9.2). It holds no authority of its own. Reads enter
@@ -498,6 +502,37 @@ export class OperationsAgentSession {
           lines.push(
             `The page is showing record ${record.recordId}; "this", "it" and "here" mean that record.`,
           );
+          if (named.popupActions) {
+            const offered = await availablePopups(
+              view,
+              CompiledPopupSchema.array().parse(named.popupActions),
+              record,
+              this.#options.companyId,
+              this.#options.runtime.operationGateway,
+            );
+            if (offered.length)
+              lines.push(
+                asData(
+                  'record-data',
+                  JSON.stringify({
+                    availableRecordActions: offered.map(
+                      ({ revision, task }) => ({
+                        actionId: revision.actionId,
+                        label: revision.label.text,
+                        operationId: revision.target.operationId,
+                        inputs: revision.inputs.map((i) => ({
+                          binding: i.binding,
+                          source: i.source.kind,
+                          type:
+                            task?.inputs.find((t) => t.inputId === i.binding)
+                              ?.type ?? 'text',
+                        })),
+                      }),
+                    ),
+                  }),
+                ),
+              );
+          }
           this.#touch(named.entityId, record, false);
           this.#learn(named.entityId, [record], record.recordId);
           // Its text is data the model reads, never instructions (X11).
@@ -2401,6 +2436,7 @@ function screenFacts(
   screen: AgentScreen,
 ): {
   text: string;
+  popupActions?: unknown;
   recordId: string | null;
   entityId: string;
   getQueryId: string | null;
@@ -2412,6 +2448,7 @@ function screenFacts(
           surfaceId: string;
           label?: string;
           archetype?: string;
+          popupActions?: unknown;
           dataSourceQueryId?: string;
         }[];
       }
@@ -2442,6 +2479,7 @@ function screenFacts(
       ? screen.recordId.toLowerCase()
       : null;
   return {
+    ...(surface.popupActions ? { popupActions: surface.popupActions } : {}),
     text: `Screen: the person is on "${surface.label ?? localName(surface.surfaceId)}" (${surface.archetype ?? 'page'}${entity ? `, ${localName(entity)}` : ''}).`,
     recordId: record,
     entityId: entity ?? '',

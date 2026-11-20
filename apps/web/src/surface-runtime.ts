@@ -1,3 +1,4 @@
+import { availablePopups } from '../../../packages/runtime/src/popup-actions.js';
 import {
   compositionRelationTargets,
   loadSurfaceComposition,
@@ -656,6 +657,31 @@ export async function renderSurfaceRuntimeWithData(
       }
       if (
         data.status === 'READY' &&
+        data.records[0] &&
+        selection.selected.popupActions
+      ) {
+        const offered = await availablePopups(
+          view,
+          selection.selected.popupActions,
+          data.records[0],
+          compositionScope,
+          gateways.operationGateway,
+        );
+        const buttons = offered
+          .map(
+            (p) =>
+              `<form method="post" action="${escapeHtml(url.pathname + url.search)}"><input type="hidden" name="compositionAction" value="${escapeHtml(p.revision.actionId)}"><button class="secondary-action">${escapeHtml(p.revision.label.text)}</button></form>`,
+          )
+          .join('');
+        data = {
+          ...data,
+          popupButtons: buttons
+            ? `<details class="action-overflow"><summary>Custom actions</summary>${buttons}</details>`
+            : '',
+        };
+      }
+      if (
+        data.status === 'READY' &&
         !selection.selected.composition &&
         selection.selected.surfaceRole === 'record' &&
         gateways.applicationExtension
@@ -1236,12 +1262,16 @@ export async function submitSurfaceRuntimeIntent(
   assertRequestRuntimeView(view);
   const selection = selectSurface(view, requestUrl);
   if ('statusCode' in selection) return selection;
+  const popup = selection.selected.popupActions?.find(
+    (p) => p.task && p.revision.actionId === submission.compositionAction,
+  );
   const fragment = transport === 'task-fragment';
   if (
     fragment &&
     (!submission.compositionAction ||
-      selection.selected.composition?.presentation?.task?.mode !==
-        'nativeDialog')
+      (!popup &&
+        selection.selected.composition?.presentation?.task?.mode !==
+          'nativeDialog'))
   )
     return { statusCode: 409, html: '' };
   let binding: CompiledSurfaceDataBinding;
@@ -1253,7 +1283,7 @@ export async function submitSurfaceRuntimeIntent(
   // Existing continuations carry their own pinned authority and reauthorization.
   // Entry must not turn a committed, redacted Task/draft replay into a new failure.
   const entry =
-    (selection.selected.composition &&
+    ((selection.selected.composition || popup) &&
       submission.compositionAction &&
       submission.taskToken) ||
     (selection.selected.documentEditor && submission.draftSession)
@@ -1277,7 +1307,10 @@ export async function submitSurfaceRuntimeIntent(
       new URL(requestUrl, 'http://surface-runtime.local'),
     ),
   );
-  if (selection.selected.composition && submission.compositionAction) {
+  if (
+    (selection.selected.composition || popup) &&
+    submission.compositionAction
+  ) {
     const workspaceContext = await loadWorkspaceContextBar(
       view,
       selection,
@@ -1307,7 +1340,7 @@ export async function submitSurfaceRuntimeIntent(
             {
               status: 'READY',
               records: [data.record],
-              composition: data,
+              ...(selection.selected.composition ? { composition: data } : {}),
               ...(fragment && outcome?.inline ? {} : { compositionTask: html }),
             },
             null,
@@ -1336,9 +1369,23 @@ export async function submitSurfaceRuntimeIntent(
     };
     const step: { render?: () => ReturnType<typeof renderStep> } = {};
     const deferred = Object.freeze({ html: '', statusCode: 0 });
+    const base = selection.selected.composition;
+    const taskSurface = popup?.task
+      ? {
+          ...selection.selected,
+          composition: {
+            kind: 'surfaceComposition' as const,
+            schemaVersion: 'v6' as const,
+            fields: [],
+            children: [],
+            ...base,
+            actions: [...(base?.actions ?? []), popup.task],
+          },
+        }
+      : selection.selected;
     const answered = await submitCompositionAction(
       view,
-      selection.selected,
+      taskSurface,
       requestUrl,
       submission,
       gateways,
@@ -1633,8 +1680,9 @@ function renderSelectedSurface(
       </div>
     </header>`;
   const nativeTask =
-    selected.composition?.presentation?.task?.mode === 'nativeDialog';
-  const body = `${nativeTask ? recordTaskRegion(fragment?.outcome ?? '') : ''}${pageHeading}
+    selected.composition?.presentation?.task?.mode === 'nativeDialog' ||
+    !!selected.popupActions;
+  const body = `${nativeTask ? recordTaskRegion(fragment?.outcome ?? (data.status === 'READY' && !selected.slots.some((s) => s.slot === 'childTables') ? (data.compositionTask ?? '') : '')) : ''}${pageHeading}
     <div class="surface-grid" data-surface-archetype="${escapeHtml(selected.archetype)}">
       ${renderedSlots.map((result) => result.html).join('')}
     </div>`;

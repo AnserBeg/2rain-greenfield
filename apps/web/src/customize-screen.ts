@@ -1,3 +1,8 @@
+import { randomUUID } from 'node:crypto';
+import type {
+  PopupRevision,
+  PopupOption,
+} from '../../../packages/canonical-model/src/popup-actions.js';
 import { layoutDigest } from '@north-star/canonical-model';
 import {
   layoutCommand,
@@ -57,6 +62,7 @@ interface CustomizationStatus {
   readonly patches: readonly ScreenPatch[];
 }
 interface CustomizationTargets {
+  readonly popupActions?: readonly PopupOption[];
   readonly layouts?: readonly LayoutTarget[];
   readonly documentTargets?: readonly {
     readonly entityId: string;
@@ -246,6 +252,16 @@ export async function renderCustomizeScreen(
           'Activating',
           '<h1>Activating your change</h1><p role="status">Activation is still running. This takes about a minute.</p><a href="/?customize">Check progress</a>',
         );
+      const popup = url.searchParams.get('popup');
+      if (popup)
+        return page(
+          'Customize a record button',
+          popupEditor(
+            (await loadTargets()).popupActions ?? [],
+            popup,
+            url.searchParams.get('button'),
+          ),
+        );
       const layout = url.searchParams.get('layout');
       if (layout) {
         const target = (await loadTargets()).layouts?.find(
@@ -285,25 +301,30 @@ export async function renderCustomizeScreen(
       case 'draft':
         return drafted(
           await service.draft(
-            submission.kind === 'addLayoutRevision'
-              ? layoutSubmission(
-                  (await loadTargets()).layouts ?? [],
+            submission.kind === 'addPopupActionRevision'
+              ? popupSubmission(
+                  (await loadTargets()).popupActions ?? [],
                   submission,
                 )
-              : patchFromForm(
-                  submission,
-                  submission.kind === 'addValidation'
-                    ? (await loadTargets()).validationTargets?.find(
-                        ({ entityId }) => entityId === submission.entity,
-                      )
-                    : undefined,
-                  submission.kind === 'addCalculatedDisplayField'
-                    ? (await loadTargets()).calculatedDisplayTargets?.find(
-                        ({ recordSurfaceId }) =>
-                          recordSurfaceId === submission.surface,
-                      )
-                    : undefined,
-                ),
+              : submission.kind === 'addLayoutRevision'
+                ? layoutSubmission(
+                    (await loadTargets()).layouts ?? [],
+                    submission,
+                  )
+                : patchFromForm(
+                    submission,
+                    submission.kind === 'addValidation'
+                      ? (await loadTargets()).validationTargets?.find(
+                          ({ entityId }) => entityId === submission.entity,
+                        )
+                      : undefined,
+                    submission.kind === 'addCalculatedDisplayField'
+                      ? (await loadTargets()).calculatedDisplayTargets?.find(
+                          ({ recordSurfaceId }) =>
+                            recordSurfaceId === submission.surface,
+                        )
+                      : undefined,
+                  ),
             'visualBuilder',
             undefined,
             actor,
@@ -453,6 +474,7 @@ async function overview(
     fieldForm(targets),
     documentFieldForm(targets),
     choiceForm(targets),
+    popupPicker(targets.popupActions ?? []),
     layoutPicker(targets.layouts ?? []),
     arrangePicker(targets),
     savedViewPicker(targets),
@@ -1116,6 +1138,8 @@ function describe(patch: PatchSummary): string {
       return `New line table "${label}"`;
     case 'declareLifecycle':
       return 'New states and actions';
+    case 'addPopupActionRevision':
+      return `Record button “${label}”`;
     case 'addLayoutRevision':
       return 'Arranged form or record page';
     case 'changeSet':
@@ -1311,4 +1335,140 @@ function layoutSubmission(
     destination: form.destination,
     label: form.label,
   });
+}
+
+function popupKey(o: PopupOption) {
+  return [
+    o.surface,
+    o.target.kind === 'update' ? o.target.operationId : o.target.taskId,
+  ].join('/');
+}
+
+function popupPicker(options: readonly PopupOption[]) {
+  if (!options.length) return '';
+  const edit = options.flatMap((o) =>
+    o.existing
+      .filter(
+        (r) =>
+          r.status === 'active' &&
+          r.target.contractVersion === o.target.contractVersion,
+      )
+      .map(
+        (r) =>
+          `<li><a href="/?customize&amp;popup=${encodeURIComponent(popupKey(o))}&amp;button=${encodeURIComponent(r.actionId)}">Edit ${escapeHtml(r.label.text)} on ${escapeHtml(o.page)}</a></li>`,
+      ),
+  );
+  return `<form method="get"><fieldset><legend>Add a record button</legend><input type="hidden" name="customize" value=""><label>Page and action <select name="popup">${options.map((o) => `<option value="${escapeHtml(popupKey(o))}">${escapeHtml(o.page)} — ${escapeHtml(o.label)}</option>`).join('')}</select></label><button>Choose fields</button></fieldset></form>${edit.length ? `<ul>${edit.join('')}</ul>` : ''}`;
+}
+
+function popupEditor(
+  options: readonly PopupOption[],
+  key: string,
+  actionId: string | null,
+) {
+  const o = options.find((v) => popupKey(v) === key);
+  const prior = o?.existing.find(
+    (r) => r.actionId === actionId && r.status === 'active',
+  );
+  if (!o || (actionId && !prior)) return 'Choose an available record action.';
+  const hidden = (name: string, value: string) =>
+    `<input type="hidden" name="${name}" value="${escapeHtml(value)}">`;
+  const choice = (val: string, label: string, selected: boolean) =>
+    `<option value="${escapeHtml(val)}"${selected ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+  const fields = o.fields.map((f) => {
+    const source = prior?.inputs.find((i) => i.binding === f.id)?.source;
+    return `<fieldset><legend>${escapeHtml(f.label)}</legend><label>Input source <select name="source:${escapeHtml(f.id)}">${o.target.kind === 'update' ? choice('', 'Leave out', !source) : ''}${choice('entry', 'Ask the person', source?.kind === 'userEntry')}${
+      f.automatic
+        ? choice('constant', 'Fixed text', source?.kind === 'constant') +
+          o.sources
+            .filter(
+              (s) =>
+                (s.maximumLength ?? Infinity) <=
+                  (f.maximumLength ?? Infinity) &&
+                (!f.required || s.required),
+            )
+            .map((s) =>
+              choice(
+                s.id,
+                'From record · ' + s.label,
+                source?.kind === 'recordField' && source.fieldId === s.id,
+              ),
+            )
+            .join('')
+        : ''
+    }</select></label>${f.automatic ? `<label>Fixed text <input name="constant:${escapeHtml(f.id)}" maxlength="${f.maximumLength ?? 2000}" value="${escapeHtml(source?.kind === 'constant' ? source.value : '')}"></label>` : ''}</fieldset>`;
+  });
+  return `<h1>${escapeHtml(o.page)} · ${escapeHtml(o.label)}</h1><form method="post">${hidden('action', 'draft')}${hidden('kind', 'addPopupActionRevision')}${hidden('popup', key)}${hidden('contract', o.target.contractVersion)}${hidden('predecessor', prior?.revisionId ?? '')}${hidden('button', prior?.actionId ?? '')}<label>Button label <input name="label" required maxlength="80" value="${escapeHtml(prior?.label.text ?? o.label)}"></label>${fields.join('')}<button>Draft button</button>${prior ? '<button name="retire" value="yes" formnovalidate>Draft retirement</button>' : ''}</form>${backLink()}`;
+}
+
+function popupSubmission(
+  options: readonly PopupOption[],
+  form: CustomizeScreenSubmission,
+) {
+  const o = options.find(
+    (o) =>
+      popupKey(o) === form.popup && form.contract === o.target.contractVersion,
+  );
+  if (!o)
+    throw new Error('The action contract changed. Reopen the button editor.');
+  const prior = o.existing.find((r) => r.actionId === form.button);
+  if ((form.button && !prior) || (prior?.revisionId ?? '') !== form.predecessor)
+    throw new Error('The button has changed. Reopen the button editor.');
+  const schemaVersion = 'v6' as const;
+  const revisionId = randomUUID();
+  if (prior && form.retire === 'yes')
+    return {
+      ...prior,
+      kind: 'addPopupActionRevision',
+      revisionId,
+      predecessor: prior.revisionId,
+      status: 'retired',
+    };
+  const inputs: PopupRevision['inputs'] = [];
+  for (const f of o.fields) {
+    const key = form['source:' + f.id];
+    if (!key) continue;
+    const from = o.sources.find((s) => s.id === key);
+    const source: PopupRevision['inputs'][number]['source'] =
+      key === 'entry'
+        ? { kind: 'userEntry', schemaVersion }
+        : key === 'constant'
+          ? {
+              kind: 'constant',
+              type: 'text',
+              value: form['constant:' + f.id] ?? '',
+              schemaVersion,
+            }
+          : from
+            ? {
+                kind: 'recordField',
+                schemaVersion,
+                fieldId: from.id,
+                contractVersion: from.contractVersion,
+              }
+            : (() => {
+                throw new Error('Choose an available source.');
+              })();
+    inputs.push({
+      schemaVersion,
+      binding: f.id,
+      contractVersion: f.contractVersion,
+      source,
+    });
+  }
+  return {
+    kind: 'addPopupActionRevision',
+    schemaVersion,
+    actionId:
+      prior?.actionId ??
+      o.surface.split(':')[0] + ':action.custom_' + randomUUID(),
+    revisionId,
+    predecessor: prior?.revisionId ?? null,
+    status: 'active',
+    surface: o.surface,
+    slot: o.slot,
+    label: { schemaVersion, text: form.label },
+    target: o.target,
+    inputs,
+  };
 }
