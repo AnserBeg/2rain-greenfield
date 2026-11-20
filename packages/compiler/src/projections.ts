@@ -22,6 +22,7 @@ import {
   DOCUMENT_FILES_SURFACE_FLOOR,
   DOCUMENTS_PAYLOAD_VERSION,
 } from '../../canonical-model/src/documents.js';
+import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../canonical-model/src/surface-workspace.js';
 import type { compileDocuments } from './documents.js';
 
 import {
@@ -949,8 +950,15 @@ function surfaceManifestPayload(
         (column) => column.relation,
       ),
   );
-  const surfaceFloor =
-    extendedEditor || declaredRelationList
+  const lineCreateValues = original.surfaces.some(
+    (surface) =>
+      'documentEditor' in surface &&
+      (surface.documentEditor as SurfaceDocumentEditor | undefined)
+        ?.lineCreateValues !== undefined,
+  );
+  const surfaceFloor = lineCreateValues
+    ? LINE_CREATE_VALUES_SURFACE_FLOOR
+    : extendedEditor || declaredRelationList
       ? 26
       : hasMetrics(original)
         ? 25

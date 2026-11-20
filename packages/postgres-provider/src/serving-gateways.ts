@@ -57,6 +57,8 @@ import { FULFILLMENT_CAPABILITY_ID } from './fulfillment.js';
 import { COMMERCIAL_CAPABILITY_ID } from '../../domain/src/sales/definition.js';
 import { fulfillmentReadModel } from './fulfillment-read-model.js';
 import { receivingReadModel } from './receiving-read-model.js';
+import { inventoryCountReadModel } from './inventory-count-read-model.js';
+import { INVENTORY_POSTING_CAPABILITY_ID } from './inventory-posting-service.js';
 import { RECEIVING_CAPABILITY_ID } from './goods-receipt.js';
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -108,6 +110,7 @@ export function composeServingGateways(
     [VALUATION_CAPABILITY_ID]: inventoryValuationReadModel,
     // A receipt's lines with what each can still reverse (ORDER-PARITY).
     [RECEIVING_CAPABILITY_ID]: receivingReadModel,
+    [INVENTORY_POSTING_CAPABILITY_ID]: inventoryCountReadModel,
   };
   // Release-scoped state -- the policy bindings of a release's permissions
   // and the capability executors pinned to its id, root and projections --
