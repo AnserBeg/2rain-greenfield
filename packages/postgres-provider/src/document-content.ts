@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { decode } from 'jpeg-js';
-import { PDFArray, PDFDict, PDFDocument, PDFName, PDFStream } from 'pdf-lib';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { crc32, inflateSync } from 'node:zlib';
 import {
   DOCUMENT_BLOB_MAX_BYTES,
@@ -39,6 +40,7 @@ const imagePixels = 16 * 1024 * 1024;
 export async function validateDocumentContent(
   bytes: Buffer,
   declared: string,
+  signal?: AbortSignal,
 ): Promise<string> {
   try {
     let detected: string;
@@ -60,7 +62,7 @@ export async function validateDocumentContent(
         throw new Error('JPEG dimensions');
     } else if (bytes.subarray(0, 5).toString('ascii') === '%PDF-') {
       detected = 'application/pdf';
-      await validatePdf(bytes);
+      await validatePdf(bytes, signal);
     } else {
       throw new Error('unknown type');
     }
@@ -218,86 +220,42 @@ function validatePng(bytes: Buffer): void {
   throw new Error('PNG trailer missing');
 }
 
-const disallowedPdfNames = new Set([
-  'A',
-  'AA',
-  'AcroForm',
-  'AF',
-  'Annot',
-  'Annots',
-  'EmbeddedFile',
-  'EmbeddedFiles',
-  'Encrypt',
-  'Filespec',
-  'GoToE',
-  'GoToR',
-  'ImportData',
-  'JavaScript',
-  'JS',
-  'Launch',
-  'Movie',
-  'ObjStm',
-  'OpenAction',
-  'Prev',
-  'RichMedia',
-  'Sound',
-  'SubmitForm',
-  'URI',
-  'XFA',
-  'XRef',
-  'XRefStm',
-]);
-
-async function validatePdf(bytes: Buffer): Promise<void> {
-  if (!/^%PDF-1\.[0-7][\r\n]/u.test(bytes.subarray(0, 16).toString('latin1')))
-    throw new Error('PDF header');
-  const trailer =
-    /startxref[\r\n\t ]+(\d{1,8})[\r\n\t ]+%%EOF[\r\n\t ]*$/u.exec(
-      bytes.subarray(-128).toString('latin1'),
-    );
-  if (
-    !trailer ||
-    bytes.toString('ascii', Number(trailer[1]), Number(trailer[1]) + 4) !==
-      'xref'
-  )
-    throw new Error('PDF cross-reference table');
-  // A single classic PDF revision keeps the parser out of compressed object
-  // streams and prevents an earlier object from supplying active content.
-  const source = bytes.toString('latin1');
-  if (source.indexOf('%%EOF') !== source.lastIndexOf('%%EOF'))
-    throw new Error('incremental PDF');
-  for (const match of source.matchAll(/\/([a-zA-Z0-9#_.-]{1,128})/gu)) {
-    const name = match[1]!.replace(/#([0-9a-f]{2})/giu, (_, hex: string) =>
-      String.fromCharCode(Number.parseInt(hex, 16)),
-    );
-    if (disallowedPdfNames.has(name))
-      throw new Error('unsupported PDF content');
-  }
-  const document = await PDFDocument.load(bytes, {
-    updateMetadata: false,
-    throwOnInvalidObject: true,
-  });
-  if (
-    document.isEncrypted ||
-    document.getPageCount() < 1 ||
-    document.getPageCount() > 1000
-  )
-    throw new Error('PDF page tree');
-  const objects = document.context.enumerateIndirectObjects();
-  if (objects.length > 10_000) throw new Error('PDF object count');
-  const walk = (value: unknown, depth: number): void => {
-    if (depth > 64) throw new Error('PDF object nesting');
-    if (value instanceof PDFName && disallowedPdfNames.has(value.decodeText()))
-      throw new Error('unsupported PDF content');
-    if (value instanceof PDFStream) walk(value.dict, depth + 1);
-    if (value instanceof PDFDict) {
-      for (const [key, item] of value.entries()) {
-        walk(key, depth + 1);
-        walk(item, depth + 1);
-      }
-    }
-    if (value instanceof PDFArray)
-      for (const item of value.asArray()) walk(item, depth + 1);
+// The OS address-space limit also covers native buffers and mappings. A worker
+// heap limit alone cannot bound those allocations. prlimit execs the worker in place.
+async function validatePdf(bytes: Buffer, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
+  const worker = spawn(
+    'prlimit',
+    [
+      '--as=1073741824',
+      '--cpu=4',
+      '--core=0',
+      '--',
+      process.execPath,
+      '--jitless',
+      '--max-old-space-size=96',
+      fileURLToPath(new URL('./document-pdf-worker.mjs', import.meta.url)),
+    ],
+    { stdio: ['pipe', 'ignore', 'ignore'], env: {} },
+  );
+  const stop = () => {
+    worker.kill('SIGKILL');
   };
-  for (const [, object] of objects) walk(object, 0);
+  const timer = setTimeout(stop, 5000);
+  signal?.addEventListener('abort', stop, { once: true });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      worker.once('error', reject);
+      worker.once('close', (code) =>
+        code === 0 ? resolve() : reject(new Error('PDF worker refused input')),
+      );
+      // An early refusal closes the pipe; the worker exit supplies the verdict.
+      worker.stdin.on('error', () => undefined);
+      worker.stdin.end(bytes);
+    });
+    signal?.throwIfAborted();
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', stop);
+  }
 }

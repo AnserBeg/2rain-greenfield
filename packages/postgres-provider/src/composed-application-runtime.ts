@@ -141,7 +141,7 @@ export type ComposedApplicationRuntimeOptions = (
   readonly databaseUrl: string;
   readonly documents?: {
     readonly scanner?: DocumentScanner;
-    readonly demo?: true;
+    readonly demo?: { readonly systemIdentifier: string };
   };
   readonly environmentSlug?: string;
   readonly inventoryScopeProvisioning?: InventoryScopeProvisioning;
@@ -299,10 +299,27 @@ export async function createComposedApplicationRuntime(
   adminPool.on('error', () => undefined);
 
   let runtimePool: pg.Pool | undefined;
+  let scannerPool: pg.Pool | undefined;
   let materializerPool: pg.Pool | undefined;
   let modulePool: pg.Pool | undefined;
   let evidencePool: pg.Pool | undefined;
   try {
+    if (options.documents?.demo) {
+      const expected = options.documents.demo.systemIdentifier;
+      if (
+        !options.localDemoIdentity ||
+        !expected ||
+        !(
+          await adminPool.query(
+            "SELECT FROM pg_control_system() WHERE system_identifier::text = $1 AND current_database() = 'postgres'",
+            [expected],
+          )
+        ).rowCount
+      )
+        throw new TypeError(
+          'The demo scanner requires a verified isolated demo database.',
+        );
+    }
     await migrate(adminPool, options.migrationsDirectory);
     if (
       options.localDemoIdentity &&
@@ -419,6 +436,12 @@ export async function createComposedApplicationRuntime(
         : options.documents?.demo && options.localDemoIdentity
           ? DEMO_DOCUMENT_SCANNER
           : undefined;
+    if (scanner)
+      scannerPool = rolePool(
+        options.databaseUrl,
+        'north_star_document_scanner',
+        2,
+      );
     const {
       operationGateway,
       operationMediation,
@@ -432,7 +455,7 @@ export async function createComposedApplicationRuntime(
       serving,
       metrics,
       options,
-      options.documents ? { scanner } : undefined,
+      options.documents ? { scanner, scannerPool } : undefined,
     );
     const entry = new AuthenticatedRequestRuntimeEntryAdapter(
       new AuthenticatedRequestEntryAdapter(
@@ -451,6 +474,7 @@ export async function createComposedApplicationRuntime(
       materializerPool,
       modulePool,
       evidencePool,
+      ...(scannerPool ? [scannerPool] : []),
       adminPool,
     ];
     let closed = false;
@@ -491,7 +515,14 @@ export async function createComposedApplicationRuntime(
     });
   } catch (error) {
     await Promise.all(
-      [runtimePool, materializerPool, modulePool, evidencePool, adminPool]
+      [
+        runtimePool,
+        materializerPool,
+        modulePool,
+        evidencePool,
+        scannerPool,
+        adminPool,
+      ]
         .filter((pool): pool is pg.Pool => pool !== undefined)
         .map((pool) => pool.end().catch(() => undefined)),
     );

@@ -59,11 +59,15 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 
 try {
   const workflowScheduler = workflowSchedulerConfig(process.env);
+  const demoScanner = process.env.NORTH_STAR_DOCUMENT_DEMO_SCANNER === '1';
+  if (demoScanner && !managesContainer)
+    throw new Error('The demo scanner requires a managed local demo database.');
   if (managesContainer) await ensureLocalPostgres();
+  const demoCluster = demoScanner ? await isolatedDemoCluster() : undefined;
   application = await startComposedApplication({
     databaseUrl,
-    ...(process.env.NORTH_STAR_DOCUMENT_DEMO_SCANNER === '1'
-      ? { documentDemoScanner: true }
+    ...(demoCluster
+      ? { documentDemoScanner: { systemIdentifier: demoCluster } }
       : {}),
     ...(workflowScheduler ? { workflowScheduler } : {}),
     host: process.env.HOST ?? '127.0.0.1',
@@ -227,6 +231,54 @@ async function stopContainer(): Promise<void> {
     if (/no such (container|object)/iu.test(stderr)) return;
     throw error;
   }
+}
+
+/** Match the actual database connection to the separately inspected local dev container. */
+async function isolatedDemoCluster(): Promise<string> {
+  const inspect = await execFileAsync(
+    'docker',
+    ['container', 'inspect', container.name],
+    { encoding: 'utf8' },
+  );
+  const [local] = JSON.parse(inspect.stdout) as {
+    Config: { Image: string };
+    Mounts: { Name?: string; Destination: string }[];
+    NetworkSettings: {
+      Ports: Record<string, { HostIp: string; HostPort: string }[]>;
+    };
+  }[];
+  const ports = local?.NetworkSettings.Ports['5432/tcp'];
+  if (
+    local?.Config.Image !== postgresImage ||
+    !local.Mounts.some(
+      (mount) =>
+        mount.Name === container.volume &&
+        mount.Destination === '/var/lib/postgresql/data',
+    ) ||
+    ports?.length !== 1 ||
+    ports[0]?.HostIp !== '127.0.0.1' ||
+    ports[0].HostPort !== String(databasePort)
+  )
+    throw new Error(
+      'The demo scanner requires the isolated local demo container.',
+    );
+  const result = await execFileAsync(
+    'docker',
+    [
+      'exec',
+      container.name,
+      'psql',
+      '-XAt',
+      '-U',
+      'postgres',
+      '-d',
+      'postgres',
+      '-c',
+      'SELECT system_identifier FROM pg_control_system()',
+    ],
+    { encoding: 'utf8' },
+  );
+  return result.stdout.trim();
 }
 
 async function docker(arguments_: readonly string[]): Promise<void> {

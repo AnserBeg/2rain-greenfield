@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { AuthenticatedRequestRuntimeEntryAdapter } from '@north-star/runtime/request-runtime-view';
 import {
   DocumentRequestError,
+  DOCUMENT_PAGE_SIZE,
   type DocumentGateway,
 } from '../../../packages/runtime/src/document-gateway.js';
 import { DOCUMENT_RESPONSE_MILLISECONDS } from '../../../packages/canonical-model/src/documents.js';
@@ -66,11 +67,14 @@ export function mountDocumentHttp(
       if (response.headersSent) response.destroy();
       else documentError(response, 408, 'The file response expired.');
     }, DOCUMENT_RESPONSE_MILLISECONDS);
-    const assertDeadline = () => {
+    const remainingMilliseconds = () => {
       controller.signal.throwIfAborted();
-      if (performance.now() >= expires)
+      const remaining = expires - performance.now();
+      if (remaining <= 0)
         throw new DocumentRequestError(408, 'The file response expired.');
+      return Math.ceil(remaining);
     };
+    const deadline = { signal: controller.signal, remainingMilliseconds };
 
     try {
       const target = {
@@ -79,7 +83,7 @@ export function mountDocumentHttp(
         companyId: url.searchParams.get('company'),
       };
       await entry.run({ headers: request.headers }, async (view) => {
-        assertDeadline();
+        remainingMilliseconds();
         if (upload) {
           const metadata = await gateway.upload(
             view,
@@ -104,7 +108,7 @@ export function mountDocumentHttp(
               for await (const chunk of request.iterator({
                 destroyOnReturn: false,
               })) {
-                assertDeadline();
+                remainingMilliseconds();
                 const bytes = Buffer.isBuffer(chunk)
                   ? chunk
                   : Buffer.from(chunk);
@@ -118,15 +122,32 @@ export function mountDocumentHttp(
               }
               return Buffer.concat(chunks, size);
             },
-            controller.signal,
+            deadline,
           );
-          assertDeadline();
+          remainingMilliseconds();
           return json(response, 201, metadata);
         }
         if (list) {
-          const rows = await gateway.list(view, target);
-          assertDeadline();
-          return json(response, 200, rows);
+          const after = url.searchParams.get('after');
+          const limit = Number(
+            url.searchParams.get('limit') ?? DOCUMENT_PAGE_SIZE,
+          );
+          if (
+            !Number.isInteger(limit) ||
+            limit < 1 ||
+            limit > DOCUMENT_PAGE_SIZE
+          )
+            throw new DocumentRequestError(400, 'Invalid file page size.');
+          const rows = await gateway.list(
+            view,
+            target,
+            { after, limit: limit + 1 },
+            deadline,
+          );
+          if (rows.length > limit)
+            response.setHeader('x-next-document-link', rows[limit - 1]!.linkId);
+          remainingMilliseconds();
+          return json(response, 200, rows.slice(0, limit));
         }
         await gateway.read(
           view,
@@ -134,7 +155,7 @@ export function mountDocumentHttp(
           url.searchParams.get('link') ?? '',
           url.searchParams.get('version') ?? '',
           (metadata, bytes) => {
-            assertDeadline();
+            remainingMilliseconds();
             const filename = encodeURIComponent(metadata.fileName).replaceAll(
               "'",
               '%27',
@@ -147,6 +168,7 @@ export function mountDocumentHttp(
             );
             response.end(bytes);
           },
+          deadline,
         );
       });
     } catch (error) {

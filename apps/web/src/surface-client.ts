@@ -634,13 +634,26 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
       url.searchParams.set('mode', mode);
       return url;
     };
-    const refresh = async () => {
-      const response = await fetch(requestURL('list'), { cache: 'no-store' });
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.textContent = 'Show more files';
+    more.hidden = true;
+    panel.append(more);
+    let next = null;
+    let generation = 0;
+    const refresh = async (after = null) => {
+      const request = ++generation;
+      const url = requestURL('list');
+      if (after) url.searchParams.set('after', after);
+      const response = await fetch(url, { cache: 'no-store' });
       if (!response.ok) throw new Error('Files are unavailable for this record.');
       const records = await response.json();
+      if (request !== generation) return;
+      next = response.headers.get('x-next-document-link');
+      more.hidden = !next;
       for (const field of panel.querySelectorAll('[data-document-field]')) {
         const list = field.querySelector('[data-document-rows]');
-        list.replaceChildren();
+        if (!after) list.replaceChildren();
         const files = records.filter((record) => (record.fieldId || '') === field.dataset.documentField);
         for (const file of files) {
           const item = document.createElement('li');
@@ -661,7 +674,7 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
           }
           list.append(item);
         }
-        if (!files.length) {
+        if (!list.childElementCount && !next) {
           const item = document.createElement('li');
           item.textContent = 'No files yet';
           list.append(item);
@@ -669,6 +682,11 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
       }
     };
     const showError = (error) => { status.textContent = error.message || 'Files are unavailable.'; };
+    more.addEventListener('click', async () => {
+      more.disabled = true;
+      try { await refresh(next); } catch (error) { showError(error); }
+      finally { more.disabled = false; }
+    });
     panel.addEventListener('toggle', () => {
       if (panel.open) void refresh().catch(showError);
     });

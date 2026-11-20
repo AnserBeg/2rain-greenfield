@@ -1,3 +1,4 @@
+import type { DocumentScanner } from '../../../packages/postgres-provider/src/document-content.js';
 import { CAPABILITY_EXECUTOR_FACTORIES } from './erp-capabilities.js';
 import { localDemoActor } from '../../../packages/runtime/src/local-demo-actor.js';
 import {
@@ -59,7 +60,8 @@ export interface ComposedApplicationServerOptions {
    */
   readonly compiledApplication?: unknown;
   readonly databaseUrl: string;
-  readonly documentDemoScanner?: true;
+  readonly documentScanner?: DocumentScanner;
+  readonly documentDemoScanner?: { readonly systemIdentifier: string };
   readonly host?: string;
   readonly port?: number;
   readonly rollbackReleaseRoot?: string;
@@ -361,6 +363,7 @@ export async function openComposedApplicationRuntime(
     | 'rollbackReleaseRoot'
     | 'tenantSlug'
     | 'documentDemoScanner'
+    | 'documentScanner'
     | 'workflowScheduler'
   >,
 ): Promise<ComposedApplicationRuntime> {
@@ -390,7 +393,12 @@ export async function openComposedApplicationRuntime(
       },
     },
     databaseUrl: options.databaseUrl,
-    documents: options.documentDemoScanner ? { demo: true } : {},
+    documents: {
+      ...(options.documentScanner ? { scanner: options.documentScanner } : {}),
+      ...(options.documentDemoScanner
+        ? { demo: options.documentDemoScanner }
+        : {}),
+    },
     inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
     localDemoIdentity: true,
     ...(options.workflowScheduler
