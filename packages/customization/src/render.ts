@@ -4,9 +4,11 @@ import {
   type LayoutDefinition,
   type SurfaceLayout,
 } from '@north-star/canonical-model';
+import { arrangeableLayoutFields } from './layout-revision.js';
 import { createHash } from 'node:crypto';
 
 import type { CalculatedDisplayField } from '@north-star/canonical-model';
+import type { WorkflowDefinition } from '../../canonical-model/src/schemas.js';
 import type { ReleaseDiffEnvelope } from '@north-star/compiler';
 
 /**
@@ -22,6 +24,7 @@ export const RENDERED_DIFF_VERSION =
 type Json = Record<string, unknown>;
 
 export interface DiffDefinition extends LayoutDefinition {
+  readonly workflows?: readonly WorkflowDefinition[];
   readonly documentFields?: readonly {
     readonly fieldId: string;
     readonly entityId: string;
@@ -92,6 +95,43 @@ export function renderReleaseDiff(input: {
         ?.label ?? entityId,
     );
   const lines: string[] = [];
+  for (const workflow of to.workflows ?? []) {
+    const previous = from.workflows?.find(
+      ({ workflowId }) => workflowId === workflow.workflowId,
+    );
+    if (
+      previous?.bodyDigest === workflow.bodyDigest &&
+      JSON.stringify(previous.grants) === JSON.stringify(workflow.grants)
+    )
+      continue;
+    const operations = workflow.grants.operations.map((operationId) =>
+      String(
+        to.operations?.find(
+          (operation) => operation.operationId === operationId,
+        )?.label ?? operationId,
+      ),
+    );
+    const summary = [
+      `${previous ? 'Updates' : 'Adds'} workflow “${workflow.workflowId}”. A posted goods receipt starts it.`,
+      ...(operations.length
+        ? [`Operations it may request: ${operations.join(', ')}.`]
+        : []),
+      ...(workflow.grants.queries.length
+        ? [`Reads: ${workflow.grants.queries.join(', ')}.`]
+        : []),
+    ];
+    lines.push(summary.join(' '));
+  }
+  for (const workflow of from.workflows ?? []) {
+    if (
+      !to.workflows?.some(
+        ({ workflowId }) => workflowId === workflow.workflowId,
+      )
+    )
+      lines.push(
+        `Removes workflow “${workflow.workflowId}” from future receipt events.`,
+      );
+  }
   for (const field of to.documentFields ?? []) {
     if (from.documentFields?.some(({ fieldId }) => fieldId === field.fieldId))
       continue;
@@ -328,7 +368,9 @@ export function renderReleaseDiff(input: {
         .map((id) => {
           const section = body.sections.find((s) => s.id === id);
           if (!section) return body.blocks.find((b) => b.id === id)!.label.text;
-          const fields = section.fields.map((f) => f.label.text);
+          const fields = arrangeableLayoutFields(body, section).map(
+            (f) => f.label.text,
+          );
           return fields.length
             ? section.label.text + ' (' + fields.join(', ') + ')'
             : section.label.text;
@@ -341,7 +383,7 @@ export function renderReleaseDiff(input: {
     for (const mode of modes) {
       const previous = oldLayouts.find((l) => l.body.mode === mode);
       const next = newLayouts.find((l) => l.body.mode === mode);
-      if (previous?.revisionId === next?.revisionId) continue;
+      if (previous?.resultLayoutDigest === next?.resultLayoutDigest) continue;
       const oldBody = previous?.body ?? baseLayout(from, before, mode);
       const newBody = next?.body ?? baseLayout(to, after, mode);
       if (!oldBody || !newBody)

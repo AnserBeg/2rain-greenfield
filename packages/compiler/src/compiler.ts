@@ -26,6 +26,7 @@ import {
   validateUnboundPermissionAcknowledgement,
 } from './conformance.js';
 import { compilerDiagnostic, finalizeDiagnostics } from './diagnostics.js';
+import { WorkflowGrantBindingError } from './workflows.js';
 import { compileDocuments } from './documents.js';
 import { requiredFormulaValidationOperationReader } from '../../canonical-model/src/formula-validation-reader.js';
 import { compileCalculatedDisplayFields } from './calculated-display-plan.js';
@@ -42,6 +43,7 @@ import {
 } from './hash.js';
 import {
   legalEntityScopeCatalogEntry,
+  appendWorkflowProjection,
   lowerBaseProjectionPayloads,
   queryParameterCatalogEntries,
   requiredProjectionFamily,
@@ -500,6 +502,25 @@ function compileApplicationInternal(
     ),
     packageRevision,
   );
+  try {
+    appendWorkflowProjection(basePlans, packageRevision);
+  } catch (error) {
+    if (!(error instanceof WorkflowGrantBindingError)) throw error;
+    return failure(
+      [
+        {
+          ...compilerDiagnostic(
+            'COMPILER_TYPE_INVALID',
+            'typeCheck',
+            '$.workflows',
+            error.grantId,
+          ),
+          rule: 'Workflow grant does not resolve to a supported callable.',
+        },
+      ],
+      maximumDiagnostics,
+    );
+  }
   if (conformanceMode === 'current') {
     const resolveStorageDiagnostics = validateResolveStorageConformance(
       packageRevision,

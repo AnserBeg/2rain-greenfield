@@ -6,6 +6,11 @@ import {
   type UntrustedRequestInput,
 } from './request-context.js';
 import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents.js';
+import {
+  WORKFLOW_PROJECTION_FAMILY,
+  WORKFLOW_RUNTIME_CAPABILITY,
+  WORKFLOW_SURFACE_FLOOR,
+} from '../../canonical-model/src/workflows.js';
 
 export const REQUEST_RUNTIME_VIEW_VERSION =
   'northstar.request-runtime-view/v1' as const;
@@ -38,7 +43,8 @@ export type RequestRuntimeProjectionFamily =
   | (typeof REQUEST_RUNTIME_PROJECTION_FAMILIES)[keyof typeof REQUEST_RUNTIME_PROJECTION_FAMILIES]
   | typeof REQUEST_RUNTIME_FORMULA_RULE_FAMILY
   | typeof CONNECTOR_FAMILY
-  | typeof DOCUMENTS_PROJECTION_FAMILY;
+  | typeof DOCUMENTS_PROJECTION_FAMILY
+  | typeof WORKFLOW_PROJECTION_FAMILY;
 
 export type ImmutableJsonValue =
   | boolean
@@ -155,6 +161,10 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
   >
 > = Object.freeze({
   [CONNECTOR_FAMILY]: Object.freeze({capabilityId:'northstar.runtime:capability.connector',maximumSupportedVersion:1}),
+  [WORKFLOW_PROJECTION_FAMILY]: {
+    capabilityId: WORKFLOW_RUNTIME_CAPABILITY,
+    maximumSupportedVersion: 1,
+  },
   [DOCUMENTS_PROJECTION_FAMILY]: Object.freeze({
     capabilityId: 'northstar.runtime:capability.documents',
     maximumSupportedVersion: 1,
@@ -209,6 +219,7 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 25 adds Today metric cards.
     // 26 adds header relations, relation List columns and shared or lifecycle-less editors.
     // 27 adds internal document attachments. 28 adds record and form layout revisions.
+    // 29 adds workflows, 30 Address fields and 31 map placements.
     maximumSupportedVersion: ADDRESS_MAP_READER,
   },
 });

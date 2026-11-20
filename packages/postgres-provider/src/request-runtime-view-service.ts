@@ -9,7 +9,15 @@ import {
   DOCUMENTS_PAYLOAD_VERSION,
   DOCUMENTS_PROJECTION_FAMILY,
 } from '../../canonical-model/src/documents.js';
-import { DocumentsProjectionSchema } from '../../canonical-model/src/schemas.js';
+import {
+  DocumentsProjectionSchema,
+  WorkflowProjectionSchema,
+} from '../../canonical-model/src/schemas.js';
+import {
+  WORKFLOW_PAYLOAD_VERSION,
+  WORKFLOW_PROJECTION_FAMILY,
+  WORKFLOW_SURFACE_FLOOR,
+} from '../../canonical-model/src/workflows.js';
 import {
   CHUNK_DESCRIPTOR_VERSION,
   CHUNKING_SCHEME_VERSION,
@@ -18,6 +26,7 @@ import {
   PROJECTION_MANIFEST_VERSION,
   RELEASE_MANIFEST_VERSION,
   SUPPORTED_SURFACE_MANIFEST_PAYLOAD_VERSIONS,
+  workflowSdkBindingDigest,
 } from '@north-star/compiler';
 import {
   ReleaseInvalidationFenceState,
@@ -194,6 +203,10 @@ const maximumFillAttempts = 4;
 
 const supportedProjectionSchemas = Object.freeze({
   [CONNECTOR_FAMILY]: Object.freeze({payloadKind:'connectorPayload',payloadSchemaVersions:Object.freeze([CONNECTOR_PAYLOAD])}),
+  [WORKFLOW_PROJECTION_FAMILY]: Object.freeze({
+    payloadKind: 'workflowPayload',
+    payloadSchemaVersions: Object.freeze([WORKFLOW_PAYLOAD_VERSION]),
+  }),
   [DOCUMENTS_PROJECTION_FAMILY]: Object.freeze({
     payloadKind: 'documentsPayload',
     payloadSchemaVersions: Object.freeze([DOCUMENTS_PAYLOAD_VERSION]),
@@ -903,6 +916,43 @@ function definitionFromSnapshotRows(
       throw malformedProjection(
         'documents projection has invalid catalog bindings or reader floor',
       );
+    }
+  }
+  const referencesWorkflows = references.some(
+    (entry) => isRecord(entry) && entry.familyId === WORKFLOW_PROJECTION_FAMILY,
+  );
+  if (
+    referencesWorkflows !==
+    projectionLinks.some(
+      ({ familyId }) => familyId === WORKFLOW_PROJECTION_FAMILY,
+    )
+  ) {
+    throw malformedProjection(
+      'workflow projection and persisted links disagree',
+    );
+  }
+  if (referencesWorkflows) {
+    try {
+      const workflow = WorkflowProjectionSchema.parse(
+        projectionFor(WORKFLOW_PROJECTION_FAMILY).payload,
+      );
+      if (
+        (surface.requiredRuntimeCapability?.minimumVersion ?? 0) <
+          WORKFLOW_SURFACE_FLOOR ||
+        workflow.workflows.some(
+          ({ grants, sdkDigest }) =>
+            workflowSdkBindingDigest(
+              grants,
+              operation.payload,
+              query.payload,
+            ) !== sdkDigest,
+        )
+      )
+        throw new Error(
+          'workflow projection has an inconsistent reader floor or SDK',
+        );
+    } catch {
+      throw malformedProjection('workflow projection has invalid bindings');
     }
   }
   const declaresRuleProjection = references.some(

@@ -46,8 +46,8 @@ export type AddressInput = z.infer<typeof AddressInputSchema>;
 export type SavedAddress = z.infer<typeof SavedAddressSchema>;
 export type Coordinates = z.infer<typeof CoordinatesSchema>;
 
-export const ADDRESS_FIELD_READER = 29;
-export const ADDRESS_MAP_READER = 30;
+export const ADDRESS_FIELD_READER = 30;
+export const ADDRESS_MAP_READER = 31;
 export const CONNECTOR_FAMILY =
   'northstar.compiler:projection-family.connector';
 export const CONNECTOR_PAYLOAD = 'northstar.connector-payload/v1';

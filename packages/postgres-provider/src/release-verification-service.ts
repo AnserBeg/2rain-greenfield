@@ -1,3 +1,13 @@
+import {
+  assertWorkflowEvidence,
+  persistWorkflowDefinitions,
+  verifyWorkflowDefinitions,
+  withWorkflowVerifierTransaction,
+  type WorkflowBinding,
+} from './workflow-admission.js';
+import { WorkflowProjectionSchema } from '../../canonical-model/src/schemas.js';
+import { WORKFLOW_SURFACE_FLOOR } from '../../canonical-model/src/workflows.js';
+import { workflowSdkBindingDigest } from '@north-star/compiler';
 import { createHash, randomUUID } from 'node:crypto';
 
 import {
@@ -98,6 +108,7 @@ const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 export interface ReleaseVerificationBinding {
+  readonly workflows?: readonly WorkflowBinding[];
   readonly artifactClosureDigest: string;
   readonly findings: readonly VerificationConstructibilityFinding[];
   readonly plan: VerificationPlanPayloadV1;
@@ -276,12 +287,14 @@ export class PostgresReleaseVerificationService {
     private readonly pool: Pool,
     private readonly providerErrorMappings: readonly ModuleProviderErrorMapping[] = [],
     private readonly capabilityOperationExecutorFactories: readonly PostgresCapabilityOperationExecutorFactory[] = [],
+    private readonly workflowVerifierPool?: Pool,
   ) {}
 
   async #executeAndPersist(
     context: TrustedRequestContext,
     command: ExecuteReleaseVerificationCommand,
     executor: VerificationScenarioExecutor,
+    view?: IssuedRequestRuntimeView,
   ): Promise<DurableReleaseVerificationEvidence> {
     assertClosedCommand(command);
     assertUuid(command.evidenceId, 'evidenceId');
@@ -295,6 +308,25 @@ export class PostgresReleaseVerificationService {
     );
     if (existing) return existing;
 
+    const workflowPool = binding.workflows
+      ? this.workflowVerifierPool
+      : undefined;
+    if (binding.workflows && (!workflowPool || !view))
+      throw failure(
+        'WORKFLOW_VERIFIER_REQUIRED',
+        'The candidate requires a workflow verifier connection',
+      );
+    const workflows =
+      binding.workflows && view
+        ? await withTrustedRequestTransaction(this.pool, context, (client) =>
+            verifyWorkflowDefinitions(
+              client,
+              context,
+              view,
+              binding.workflows!,
+            ),
+          )
+        : null;
     const derive = verificationScenarioDeriver(
       command.compiledRelease,
       binding,
@@ -320,14 +352,15 @@ export class PostgresReleaseVerificationService {
       );
     }
 
-    await withTrustedRequestTransaction(this.pool, context, async (client) => {
+    const persist = async (client: PoolClient) => {
+      if (workflowPool) await client.query('SET LOCAL ROLE north_star_runtime');
       const candidate = await client.query<{ content_hash: string }>(
         `SELECT content_hash
-           FROM platform.tenant_releases
-          WHERE tenant_id = $1
-            AND environment_id = $2
-            AND release_id = $3
-            AND verification_evidence_id = $4`,
+         FROM platform.tenant_releases
+        WHERE tenant_id = $1
+          AND environment_id = $2
+          AND release_id = $3
+          AND verification_evidence_id = $4`,
         [
           context.tenantId,
           context.environmentId,
@@ -342,7 +375,12 @@ export class PostgresReleaseVerificationService {
         );
       }
       await insertEvidence(client, context, command.evidenceId, executed);
-    });
+      if (workflows)
+        await persistWorkflowDefinitions(client, context, command, workflows);
+    };
+    if (workflowPool)
+      await withWorkflowVerifierTransaction(workflowPool, context, persist);
+    else await withTrustedRequestTransaction(this.pool, context, persist);
 
     const stored = await this.read(
       context,
@@ -431,9 +469,12 @@ export class PostgresReleaseVerificationService {
       binding,
       executorProvider,
       actorIssuer,
-      (executor) =>
-        this.#executeAndPersist(context, command, (scenario) =>
-          executor.execute(scenario),
+      (executor, view) =>
+        this.#executeAndPersist(
+          context,
+          command,
+          (scenario) => executor.execute(scenario),
+          view,
         ),
     );
   }
@@ -444,7 +485,10 @@ export class PostgresReleaseVerificationService {
     binding: ReleaseVerificationBinding,
     executorProvider: SemanticOperationExecutor & SemanticQueryExecutor,
     actorIssuer: TrustedActorEnvelopeIssuer,
-    execute: (executor: SemanticVerificationExecutor) => Promise<TResult>,
+    execute: (
+      executor: SemanticVerificationExecutor,
+      view: IssuedRequestRuntimeView,
+    ) => Promise<TResult>,
   ): Promise<TResult> {
     const policy = new VerificationAllowPolicy();
     const mediation = new SemanticOperationMediationAuthority();
@@ -507,7 +551,7 @@ export class PostgresReleaseVerificationService {
       return (async () => {
         try {
           await executor.verifyLegalEntityScopeOmissions();
-          return await execute(executor);
+          return await execute(executor, view);
         } finally {
           await executor.archiveProbeRecords();
         }
@@ -522,9 +566,33 @@ export class PostgresReleaseVerificationService {
   ): Promise<DurableReleaseVerificationEvidence | null> {
     assertUuid(evidenceId, 'evidenceId');
     const binding = releaseVerificationBinding(compiledRelease);
-    return withTrustedRequestTransaction(this.pool, context, (client) =>
-      readDurableVerificationEvidence(client, context, evidenceId, binding),
+    const evidence = await withTrustedRequestTransaction(
+      this.pool,
+      context,
+      (client) =>
+        readDurableVerificationEvidence(client, context, evidenceId, binding),
     );
+    if (evidence && binding.workflows) {
+      if (!this.workflowVerifierPool)
+        throw failure(
+          'WORKFLOW_VERIFIER_REQUIRED',
+          'The candidate requires a workflow verifier connection',
+        );
+      const workflows = binding.workflows;
+      await withWorkflowVerifierTransaction(
+        this.workflowVerifierPool,
+        context,
+        (client) =>
+          assertWorkflowEvidence(
+            client,
+            context,
+            evidenceId,
+            binding.releaseRoot,
+            workflows,
+          ),
+      );
+    }
+    return evidence;
   }
 
   private async assertStagedCandidate(
@@ -553,6 +621,28 @@ export class PostgresReleaseVerificationService {
           'verification execution requires the exact staged candidate identity and root',
         );
       }
+      const desired = await client.query<{ workflows: unknown }>(
+        `SELECT convert_from(revision.desired_state, 'UTF8')::jsonb->'workflows' AS workflows
+           FROM platform.tenant_releases release
+           JOIN platform.app_package_revisions revision
+             ON (revision.tenant_id, revision.revision_id) =
+                (release.tenant_id, release.app_package_revision_id)
+          WHERE (release.tenant_id, release.environment_id, release.release_id) = ($1, $2, $3)`,
+        [context.tenantId, context.environmentId, command.releaseId],
+      );
+      const expected =
+        binding.workflows?.map(({ sdkDigest: _sdkDigest, ...workflow }) => {
+          void _sdkDigest;
+          return workflow;
+        }) ?? null;
+      if (
+        canonicalize(desired.rows[0]?.workflows ?? null) !==
+        canonicalize(expected)
+      )
+        throw failure(
+          'WORKFLOW_PROJECTION_MISMATCH',
+          'Workflow declarations and the candidate projection disagree',
+        );
       const persistedArtifacts = await client.query<CandidateArtifactRow>(
         `SELECT artifact_kind, content_hash, domain_tag, media_type,
                 canonical_bytes
@@ -575,6 +665,11 @@ export class PostgresReleaseVerificationFederationService {
     command: FederateReleaseVerificationCommand,
   ): Promise<DurableReleaseVerificationEvidence> {
     const binding = releaseVerificationBinding(command.compiledRelease);
+    if (binding.workflows)
+      throw failure(
+        'WORKFLOW_VERIFIER_REQUIRED',
+        'Workflow releases require verification in the target environment',
+      );
     const client = await this.administrativePool.connect();
     let federated: DurableReleaseVerificationEvidence | null = null;
     try {
@@ -736,7 +831,45 @@ export function releaseVerificationBinding(
     );
   }
   assertFormulaScenarioCoverage(compiledRelease, plan);
+  const projections = compiledRelease.bundle.releaseManifest.projections;
+  const workflowReference = projections.find(
+    ({ familyId }) => familyId === PROJECTION_FAMILY_IDS.workflow,
+  );
+  const workflows = workflowReference
+    ? WorkflowProjectionSchema.parse(
+        compiledProjectionPayload(
+          compiledRelease,
+          PROJECTION_FAMILY_IDS.workflow,
+        ),
+      ).workflows
+    : undefined;
+  if (workflows) {
+    const surfaceFloor =
+      projections.find(
+        ({ familyId }) => familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
+      )?.requiredRuntimeCapability.minimumVersion ?? 0;
+    const operations = compiledProjectionPayload(
+      compiledRelease,
+      PROJECTION_FAMILY_IDS.operationCatalog,
+    );
+    const queries = compiledProjectionPayload(
+      compiledRelease,
+      PROJECTION_FAMILY_IDS.queryCatalog,
+    );
+    if (
+      surfaceFloor < WORKFLOW_SURFACE_FLOOR ||
+      workflows.some(
+        ({ grants, sdkDigest }) =>
+          workflowSdkBindingDigest(grants, operations, queries) !== sdkDigest,
+      )
+    )
+      throw failure(
+        'WORKFLOW_PROJECTION_MISMATCH',
+        'Workflow SDK or reader floor does not match the candidate',
+      );
+  }
   return Object.freeze({
+    ...(workflows ? { workflows } : {}),
     artifactClosureDigest: digestCanonical(
       'northstar.release-artifact-closure/v1',
       [...compiledRelease.bundle.releaseManifest.artifactClosure].toSorted(),
