@@ -29,7 +29,7 @@ Hosted CI covers PostgreSQL issuance, stored brand provenance, live source restr
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "DOCS-1",
-  "base": "94b233007c03481398bdeb55413e69a31f81092f", "head": "4b5211bfac0418b85ef1a3c3145f0d7d5e027ec5",
+  "base": "94b233007c03481398bdeb55413e69a31f81092f", "head": "262076c79176fcd68cb1baa61d6b63f7cd91a935",
   "changedPaths": [
     ".github/workflows/evidence.yml", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts",
     "apps/web/src/document-http.ts", "apps/web/src/document-template-form.ts", "apps/web/src/surface-client.ts",
@@ -43,9 +43,10 @@ Hosted CI covers PostgreSQL issuance, stored brand provenance, live source restr
     "packages/postgres-provider/src/document-publication.ts", "packages/postgres-provider/src/document-template-sources.ts", "packages/postgres-provider/src/request-runtime-view-service.ts",
     "packages/postgres-provider/src/serving-gateways.ts", "packages/runtime/src/document-gateway.ts", "packages/runtime/src/request-runtime-view.ts",
     "packages/runtime/src/semantic-operation-gateway.ts", "packages/runtime/src/semantic-query-gateway.ts", "pnpm-lock.yaml",
-    "test/architecture/release-persistence-boundary.test.ts", "test/evidence/DOCS-1.expected-red.json", "test/integration/document-pdf.test.ts",
-    "test/postgres/document-templates.test.ts", "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts",
-    "test/postgres/module-storage-transition.test.ts", "test/postgres/request-runtime-view.test.ts", "test/postgres/trust-substrate.test.ts"
+    "test/architecture/release-persistence-boundary.test.ts", "test/architecture/repository-hygiene.test.ts", "test/evidence/DOCS-1.expected-red.json",
+    "test/integration/document-pdf.test.ts", "test/postgres/document-templates.test.ts", "test/postgres/inventory-storage.test.ts",
+    "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts", "test/postgres/request-runtime-view.test.ts",
+    "test/postgres/trust-substrate.test.ts"
   ],
   "symbols": [
     {"path": "packages/compiler/src/document-templates.ts", "name": "compileDocumentTemplates"},
