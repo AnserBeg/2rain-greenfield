@@ -104,6 +104,7 @@ export const reachabilityProducers = [
   nodeProducer('postgres-1', 'postgres', 'test:postgres:1', [
     'test/postgres/agent-dev-tasks.test.ts',
     'test/postgres/customization-display.test.ts',
+    'test/postgres/customization-formulas.test.ts',
     'test/postgres/document-numbering.test.ts',
     'test/postgres/workflow-consumer.test.ts',
   ]),
@@ -115,10 +116,9 @@ export const reachabilityProducers = [
   ]),
   nodeProducer('postgres-4', 'postgres', 'test:postgres:4', [
     'test/postgres/customization-live.test.ts',
+    'test/postgres/customization-validation.test.ts',
   ]),
   nodeProducer('postgres-5', 'postgres', 'test:postgres:5', [
-    'test/postgres/customization-formulas.test.ts',
-    'test/postgres/customization-validation.test.ts',
     'test/postgres/customization-world.test.ts',
     'test/postgres/locations.test.ts',
   ]),
