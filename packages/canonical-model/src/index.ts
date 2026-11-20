@@ -175,3 +175,11 @@ export const platformContract = Object.freeze({
 export { CalculatedDisplayFieldDefinitionSchema } from './schemas.js';
 export type { CalculatedDisplayField } from './calculated-display-schema.js';
 export type { FormulaValidationRule } from './formula-validation-schema.js';
+export {
+  DocumentTemplatePointerSchema,
+  DocumentTemplateRevisionSchema,
+  documentPalettePasses,
+  type DocumentTemplateLogo,
+  type DocumentTemplatePointer,
+  type DocumentTemplateRevision,
+} from './document-template-schema.js';

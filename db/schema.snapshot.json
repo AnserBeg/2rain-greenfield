@@ -3726,6 +3726,20 @@
     },
     {
       "schema": "platform",
+      "relation": "document_versions",
+      "ordinal_position": 19,
+      "column_name": "generated_source",
+      "data_type": "jsonb",
+      "is_nullable": true,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "platform",
       "relation": "environments",
       "ordinal_position": 1,
       "column_name": "tenant_id",
@@ -15867,6 +15881,20 @@
       "initially_deferred": false,
       "validated": true,
       "no_inherit": true,
+      "is_local": true,
+      "inheritance_count": 0
+    },
+    {
+      "schema": "platform",
+      "relation": "document_versions",
+      "domain": null,
+      "name": "generated_document_source_shape",
+      "type": "c",
+      "definition": "CHECK (generated_source IS NULL OR (field_id IS NULL AND category_id IS NULL AND jsonb_typeof(generated_source) = 'object'::text AND generated_source ?& ARRAY['templateId'::text, 'revisionId'::text, 'issuedIdentity'::text, 'releaseRoot'::text, 'renderer'::text, 'recordId'::text, 'queries'::text, 'logo'::text, 'inputDigest'::text] AND (generated_source ->> 'recordId'::text) = record_id::text AND (generated_source ->> 'inputDigest'::text) ~ '^[0-9a-f]{64}$'::text AND jsonb_typeof(generated_source -> 'queries'::text) = 'array'::text AND jsonb_array_length(generated_source -> 'queries'::text) >= 1 AND jsonb_array_length(generated_source -> 'queries'::text) <= 25) IS TRUE)",
+      "deferrable": false,
+      "initially_deferred": false,
+      "validated": true,
+      "no_inherit": false,
       "is_local": true,
       "inheritance_count": 0
     },

@@ -3,7 +3,10 @@ import {
   DOCUMENTS_PAYLOAD_VERSION,
   documentAttachOperation,
   documentAttachPermission,
+  documentGenerateOperation,
 } from '../../canonical-model/src/documents.js';
+
+import { compileDocumentTemplates } from './document-templates.js';
 
 export function compileDocuments(
   definition: VersionedNormalizedApplicationPackage,
@@ -11,7 +14,10 @@ export function compileDocuments(
   if (definition.languageVersion !== 'v6') return null;
   const fields = definition.documentFields ?? [];
   const categories = definition.documentCategories ?? [];
-  if (fields.length === 0 && categories.length === 0) return null;
+  const templates = compileDocumentTemplates(definition);
+  if (templates.message) return templates;
+  if (fields.length === 0 && categories.length === 0 && !templates.templates)
+    return null;
 
   const calculatedFields = definition.calculatedDisplayFields ?? [];
   const ids = new Set(
@@ -84,29 +90,46 @@ export function compileDocuments(
   }
 
   const bindings = [];
-  for (const entityId of new Set(fields.map((field) => field.entityId))) {
+  const templateEntityIds = new Set(
+    (templates.templates?.revisions ?? []).map(({ entityId }) => entityId),
+  );
+  const activeTemplateEntities = new Set(
+    (templates.templates?.revisions ?? [])
+      .filter((revision) =>
+        templates.templates!.pointers.some(
+          ({ activeRevisionId }) => activeRevisionId === revision.revisionId,
+        ),
+      )
+      .map(({ entityId }) => entityId),
+  );
+  const fileEntityIds = new Set(fields.map(({ entityId }) => entityId));
+  for (const entityId of new Set([...fileEntityIds, ...templateEntityIds])) {
     const entity = definition.entities.find(
       (entry) => entry.entityId === entityId,
     );
     const surfaces = definition.surfaces.filter(
       (entry) => entry.surfaceRole === 'record' && entry.lifecycle === 'active',
     );
-    const query = definition.queries.find(
+    const recordQueries = definition.queries.filter(
       (entry) =>
         entry.sourceEntity.targetId === entityId &&
         entry.queryType === 'get' &&
         entry.tier === 'q0' &&
         entry.lifecycle === 'active' &&
-        !entry.readModel &&
         surfaces.some(
           (surface) => surface.dataSource.targetId === entry.queryId,
         ),
     );
+    const query =
+      recordQueries.find((entry) => !entry.readModel) ??
+      (templateEntityIds.has(entityId) ? recordQueries[0] : undefined);
     if (!entity || entity.lifecycle !== 'active' || !query) {
+      if (!activeTemplateEntities.has(entityId) && !fileEntityIds.has(entityId))
+        continue;
       return {
         subjectId: entityId,
         message:
-          'A file field needs an active record with a governed Record read.',
+          'Documents need an active record type with a governed Record read.',
       };
     }
     bindings.push({
@@ -114,6 +137,9 @@ export function compileDocuments(
       queryId: query.queryId,
       attachPermissionId: documentAttachPermission(entityId),
       attachOperationId: documentAttachOperation(entityId),
+      ...(activeTemplateEntities.has(entityId) && {
+        generateOperationId: documentGenerateOperation(entityId),
+      }),
       surfaceIds: surfaces
         .filter((surface) => surface.dataSource.targetId === query.queryId)
         .map((surface) => surface.surfaceId),
@@ -126,6 +152,7 @@ export function compileDocuments(
       bindings,
       fields,
       categories,
+      ...(templates.templates && { templates: templates.templates }),
     },
   };
 }

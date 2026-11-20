@@ -1,3 +1,4 @@
+import { DOCUMENT_TEMPLATES_SURFACE_FLOOR } from '../../packages/canonical-model/src/documents.js';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
@@ -210,7 +211,7 @@ test('the capability comparison binds the family to its capability, then compare
   // capability on one side alone reds here rather than in production.
   assert.deepEqual(SUPPORTED_RUNTIME_CAPABILITIES[surface], {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
-    maximumSupportedVersion: 27,
+    maximumSupportedVersion: DOCUMENT_TEMPLATES_SURFACE_FLOOR,
   });
 });
 
@@ -811,7 +812,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
               ],
               {
                 capabilityId: 'northstar.runtime:capability.surface-manifest',
-                maximumSupportedVersion: 27,
+                maximumSupportedVersion: DOCUMENT_TEMPLATES_SURFACE_FLOOR,
               },
             );
           },
@@ -835,7 +836,9 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                   versionContext,
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
-              /requires version 999 and this runtime supports 27/,
+              new RegExp(
+                `requires version 999 and this runtime supports ${DOCUMENT_TEMPLATES_SURFACE_FLOOR}`,
+              ),
             );
           },
         );
@@ -864,7 +867,9 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                   versionContext,
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
-              /requires version 999 and this runtime supports 27/,
+              new RegExp(
+                `requires version 999 and this runtime supports ${DOCUMENT_TEMPLATES_SURFACE_FLOOR}`,
+              ),
             );
           },
         );

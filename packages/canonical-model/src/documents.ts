@@ -1,4 +1,8 @@
 export const DOCUMENT_FILES_SURFACE_FLOOR = 27;
+// Allocate from origin/main again at integration.
+export const DOCUMENT_TEMPLATES_SURFACE_FLOOR = 28;
+export const DOCUMENT_TEMPLATE_MAX_ROWS = 100;
+export const DOCUMENT_TEMPLATE_RENDERER = 'pdfkit-0.17.2/quickjs/v1';
 export const DOCUMENTS_PROJECTION_FAMILY =
   'northstar.compiler:projection-family.documents' as const;
 export const DOCUMENT_ATTACH_CAPABILITY =
@@ -28,4 +32,9 @@ export function documentAttachPermission(entityId: string): string {
 export function documentAttachOperation(entityId: string): string {
   const [namespace, local] = entityId.split(':entity.');
   return `${namespace}:operation.document_attach_${local}`;
+}
+
+export function documentGenerateOperation(entityId: string): string {
+  const [namespace, local] = entityId.split(':entity.');
+  return `${namespace}:operation.document_generate_${local}`;
 }

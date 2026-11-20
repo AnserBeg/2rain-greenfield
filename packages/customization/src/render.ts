@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 
 import type { CalculatedDisplayField } from '@north-star/canonical-model';
+import type {
+  DocumentTemplatePointer,
+  DocumentTemplateRevision,
+} from '../../canonical-model/src/document-template-schema.js';
 import type { ReleaseDiffEnvelope } from '@north-star/compiler';
 
 /**
@@ -16,6 +20,8 @@ export const RENDERED_DIFF_VERSION =
 type Json = Record<string, unknown>;
 
 export interface DiffDefinition {
+  readonly documentTemplatePointers?: readonly DocumentTemplatePointer[];
+  readonly documentTemplateRevisions?: readonly DocumentTemplateRevision[];
   readonly documentFields?: readonly {
     readonly fieldId: string;
     readonly entityId: string;
@@ -86,6 +92,55 @@ export function renderReleaseDiff(input: {
         ?.label ?? entityId,
     );
   const lines: string[] = [];
+  const activeTemplates = (definition: DiffDefinition) =>
+    new Map(
+      (definition.documentTemplatePointers ?? []).flatMap(
+        ({ templateId, activeRevisionId }) => {
+          const revision = definition.documentTemplateRevisions?.find(
+            ({ revisionId }) => revisionId === activeRevisionId,
+          );
+          return revision ? [[templateId, revision] as const] : [];
+        },
+      ),
+    );
+  const beforeTemplates = activeTemplates(from);
+  const afterTemplates = activeTemplates(to);
+  for (const [templateId, revision] of afterTemplates) {
+    if (beforeTemplates.get(templateId)?.revisionId === revision.revisionId)
+      continue;
+    const { format, branding } = revision;
+    lines.push(
+      `Selects revision ${revision.revisionId} of “${revision.label}” (${revision.documentKind}) on ${entityLabel(to, revision.entityId)}.`,
+      `Prints on ${format.pageSize} using ${format.locale}, ${format.timeZone}, ${format.dateStyle} dates, ${format.currency} and ${format.numberGrouping ? 'grouped' : 'ungrouped'} numbers. ${revision.pageNumbers ? 'Shows page numbers.' : 'Omits page numbers.'}`,
+      `Displays “${branding.displayName}” with ink ${branding.ink} and accent ${branding.accent}.${branding.logo ? ` Uses image version ${branding.logo.versionId} on record ${branding.logo.recordId}.` : ''}`,
+      `Reads issued identity ${revision.identityFieldId} through ${revision.headerQueryId}.` +
+        (revision.currencyFieldId
+          ? ` Checks currency using ${revision.currencyFieldId}.`
+          : ''),
+    );
+    for (const block of revision.layout) {
+      if (block.kind === 'table') {
+        lines.push(
+          `Shows table “${block.label}” from ${block.queryId} through ${block.parentRelationId}, using ${block.columns.map(({ label, fieldId }) => `“${label}” (${fieldId})`).join(', ')}.` +
+            (block.currencyFieldId
+              ? ` Checks currency using ${block.currencyFieldId}.`
+              : ''),
+        );
+      } else if (block.kind === 'field') {
+        lines.push(
+          `Shows “${block.label}” from ${block.fieldId} through ${revision.headerQueryId}.`,
+        );
+      } else {
+        lines.push(`Shows ${block.kind} “${block.text}”.`);
+      }
+    }
+  }
+  for (const [templateId, revision] of beforeTemplates) {
+    if (!afterTemplates.has(templateId))
+      lines.push(
+        `Retires “${revision.label}” from PDF generation. Issued PDFs stay in retention.`,
+      );
+  }
   for (const field of to.documentFields ?? []) {
     if (from.documentFields?.some(({ fieldId }) => fieldId === field.fieldId))
       continue;

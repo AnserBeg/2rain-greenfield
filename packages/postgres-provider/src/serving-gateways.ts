@@ -3,6 +3,7 @@ import {
   PostgresDocumentGateway,
   documentPermissionBindings,
 } from './document-attachments.js';
+import type { DocumentFieldAuthority } from './document-template-sources.js';
 import { PostgresDocumentPublication } from './document-publication.js';
 import type pg from 'pg';
 import { parseNormalizedApplicationPackageJson } from '@north-star/canonical-model';
@@ -170,6 +171,25 @@ export function composeServingGateways(
       ),
       policy,
       queryGateway,
+      documentFields: documentOptions
+        ? new Map(
+            parseNormalizedApplicationPackageJson(
+              release.normalizedDefinitionBytes,
+            ).fields.flatMap((field) =>
+              field.lifecycle === 'active'
+                ? [
+                    [
+                      field.fieldId,
+                      {
+                        classification: field.classification,
+                        fieldKind: field.fieldType.kind,
+                      },
+                    ] as const,
+                  ]
+                : [],
+            ),
+          )
+        : null,
       storage: (() => {
         if (!documentOptions) return null;
         const payload = release.projection(
@@ -228,6 +248,7 @@ export interface ServingRelease {
 }
 
 interface ReleaseServing {
+  readonly documentFields: ReadonlyMap<string, DocumentFieldAuthority> | null;
   readonly storage: StorageTargetPayloadV1 | null;
   readonly operationGateway: SemanticOperationGateway;
   readonly policy: PostgresCurrentPolicyGateway;

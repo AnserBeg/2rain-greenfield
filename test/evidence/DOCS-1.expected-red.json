@@ -42,7 +42,7 @@
       "name": "documents-publication-audit",
       "claim": "Every published version is accounted for by a committed attachment audit row.",
       "file": "packages/postgres-provider/src/document-attachments.ts",
-      "original": "            await client.query(\n              `INSERT INTO platform.document_attachment_audit (tenant_id, environment_id, link_id, operation_id)\n         VALUES ($1,$2,$3,$4)`,\n              [\n                view.tenantId,\n                view.environmentId,\n                linkId,\n                documentAttachOperation(record.entity.entityId),\n              ],\n            );\n",
+      "original": "            await client.query(\n              `INSERT INTO platform.document_attachment_audit (tenant_id, environment_id, link_id, operation_id)\n         VALUES ($1,$2,$3,$4)`,\n              [\n                view.tenantId,\n                view.environmentId,\n                linkId,\n                generated\n                  ? documentGenerateOperation(record.entity.entityId)\n                  : documentAttachOperation(record.entity.entityId),\n              ],\n            );\n",
       "replacement": "",
       "test": {
         "files": ["test/postgres/document-attachments.test.ts"],
@@ -71,6 +71,24 @@
           "file": "test/postgres/document-attachments.test.ts",
           "name": "internal files use live record authority, scoped dedupe, bounded ingress and immutable audit",
           "expected": "the stored-byte quota allowed publication"
+        }
+      ]
+    },
+    {
+      "name": "generated-pdf-source-revocation",
+      "claim": "When a reader loses a bound source, its issued PDF cannot be downloaded.",
+      "file": "packages/postgres-provider/src/document-attachments.ts",
+      "original": "        if (generatedSource)\n          await this.authorizeGenerated(\n            client,\n            view,\n            record,\n            generatedSource,\n            false,\n          );\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/document-templates.test.ts"],
+        "namePattern": "^approved template revisions publish governed PDFs, refuse hidden sources, and retire$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-templates.test.ts",
+          "name": "approved template revisions publish governed PDFs, refuse hidden sources, and retire",
+          "expected": "a revoked source query still returned a generated PDF"
         }
       ]
     }

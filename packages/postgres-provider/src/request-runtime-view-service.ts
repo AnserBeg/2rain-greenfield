@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { canonicalize } from '@north-star/canonical-model';
 import {
   DOCUMENT_FILES_SURFACE_FLOOR,
+  DOCUMENT_TEMPLATES_SURFACE_FLOOR,
   DOCUMENTS_PAYLOAD_VERSION,
   DOCUMENTS_PROJECTION_FAMILY,
 } from '../../canonical-model/src/documents.js';
@@ -855,7 +856,9 @@ function definitionFromSnapshotRows(
   const catalogs = [agent, operation, query, surface];
   const consumesDocuments = catalogs.some(
     ({ payload }) =>
-      isRecord(payload) && Object.hasOwn(payload, 'documentBindings'),
+      isRecord(payload) &&
+      (Object.hasOwn(payload, 'documentBindings') ||
+        Object.hasOwn(payload, 'documentTemplatePointers')),
   );
   if (
     referencesDocuments !== consumesDocuments ||
@@ -873,13 +876,20 @@ function definitionFromSnapshotRows(
     if (
       !parsed.success ||
       (surface.requiredRuntimeCapability?.minimumVersion ?? 0) <
-        DOCUMENT_FILES_SURFACE_FLOOR ||
+        (parsed.data.templates
+          ? DOCUMENT_TEMPLATES_SURFACE_FLOOR
+          : DOCUMENT_FILES_SURFACE_FLOOR) ||
       !catalogs.every(
         ({ payload }) =>
           isRecord(payload) &&
           Object.hasOwn(payload, 'documentBindings') &&
           canonicalize(payload.documentBindings) ===
-            canonicalize(parsed.data.bindings),
+            canonicalize(parsed.data.bindings) &&
+          (parsed.data.templates
+            ? Object.hasOwn(payload, 'documentTemplatePointers') &&
+              canonicalize(payload.documentTemplatePointers) ===
+                canonicalize(parsed.data.templates.pointers)
+            : !Object.hasOwn(payload, 'documentTemplatePointers')),
       )
     ) {
       throw malformedProjection(

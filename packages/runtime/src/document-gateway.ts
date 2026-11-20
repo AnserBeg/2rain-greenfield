@@ -36,6 +36,19 @@ export class DocumentRequestError extends Error {
 
 export interface DocumentGateway {
   readonly scannerLabel: string | null;
+  generate?(
+    view: RequestRuntimeView,
+    target: DocumentTarget,
+    templateId: string,
+    retryKey: string,
+    signal: AbortSignal,
+  ): Promise<DocumentMetadata>;
+  previewTemplate?(
+    view: RequestRuntimeView,
+    target: DocumentTarget,
+    templateId: string,
+    signal: AbortSignal,
+  ): Promise<Buffer>;
   list(
     view: RequestRuntimeView,
     target: DocumentTarget,

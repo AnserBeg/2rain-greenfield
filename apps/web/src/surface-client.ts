@@ -672,6 +672,35 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
     panel.addEventListener('toggle', () => {
       if (panel.open) void refresh().catch(showError);
     });
+    for (const form of panel.querySelectorAll('[data-document-generate]')) {
+      let retryKey = null;
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const button = form.querySelector('button');
+        const url = requestURL('generate');
+        retryKey ??= window.crypto.randomUUID();
+        url.searchParams.set('retryKey', retryKey);
+        url.searchParams.set('template', form.dataset.documentGenerate);
+        button.disabled = true;
+        status.textContent = 'Generating PDF…';
+        try {
+          const csrf = document.querySelector('meta[name=erp-csrf]')?.content;
+          const response = await fetch(url, { method: 'POST', headers: csrf ? { 'x-erp-csrf': csrf } : {} });
+          if (!response.ok) {
+            const refusal = await response.json();
+            if (response.status === 409) retryKey = null;
+            throw new Error(refusal.message);
+          }
+          retryKey = null;
+          await refresh();
+          status.textContent = 'PDF attached.';
+        } catch (error) {
+          showError(error);
+        } finally {
+          button.disabled = false;
+        }
+      });
+    }
     for (const form of panel.querySelectorAll('[data-document-upload]')) {
       let retryKey = null;
       const input = form.elements.namedItem('file');

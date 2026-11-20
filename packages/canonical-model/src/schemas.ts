@@ -1,5 +1,9 @@
 import { z } from 'zod';
 import { DOCUMENTS_PAYLOAD_VERSION } from './documents.js';
+import {
+  DocumentTemplatePointerSchema,
+  DocumentTemplateRevisionSchema,
+} from './document-template-schema.js';
 
 import {
   CANONICALIZATION_PROFILE_VERSION,
@@ -2815,24 +2819,45 @@ const documentCategories = z
   .max(128)
   .optional();
 
-export const DocumentsProjectionSchema = z.strictObject({
-  kind: z.literal('documentsPayload'),
-  schemaVersion: z.literal(DOCUMENTS_PAYLOAD_VERSION),
-  fields: z.array(DocumentFieldDefinitionSchema).min(1).max(128),
-  categories: z.array(DocumentCategoryDefinitionSchema).max(128),
-  bindings: z
-    .array(
-      z.strictObject({
-        entityId: CanonicalIdSchema,
-        queryId: CanonicalIdSchema,
-        attachPermissionId: CanonicalIdSchema,
-        attachOperationId: CanonicalIdSchema,
-        surfaceIds: z.array(CanonicalIdSchema).min(1),
-      }),
-    )
-    .min(1)
-    .max(128),
-});
+const documentTemplateRevisions = z
+  .array(DocumentTemplateRevisionSchema)
+  .min(1)
+  .max(128)
+  .optional();
+const documentTemplatePointers = z
+  .array(DocumentTemplatePointerSchema)
+  .min(1)
+  .max(128)
+  .optional();
+
+export const DocumentsProjectionSchema = z
+  .strictObject({
+    kind: z.literal('documentsPayload'),
+    schemaVersion: z.literal(DOCUMENTS_PAYLOAD_VERSION),
+    fields: z.array(DocumentFieldDefinitionSchema).max(128),
+    templates: z
+      .strictObject({
+        revisions: z.array(DocumentTemplateRevisionSchema).min(1).max(128),
+        pointers: z.array(DocumentTemplatePointerSchema).min(1).max(128),
+      })
+      .optional(),
+    categories: z.array(DocumentCategoryDefinitionSchema).max(128),
+    bindings: z
+      .array(
+        z.strictObject({
+          entityId: CanonicalIdSchema,
+          queryId: CanonicalIdSchema,
+          attachPermissionId: CanonicalIdSchema,
+          attachOperationId: CanonicalIdSchema,
+          surfaceIds: z.array(CanonicalIdSchema).min(1),
+        }),
+      )
+      .max(128),
+  })
+  .refine(
+    (value) =>
+      value.templates || (value.fields.length > 0 && value.bindings.length > 0),
+  );
 
 const v6NormalizedShape = {
   ...v5NormalizedShape,
@@ -2841,6 +2866,8 @@ const v6NormalizedShape = {
   operations: z.array(normalizedV6OperationDefinition),
   documentFields,
   documentCategories,
+  documentTemplateRevisions,
+  documentTemplatePointers,
   formulaRules,
   calculatedDisplayFields,
   operationRoleNarrowings,
@@ -2974,6 +3001,8 @@ const v6AuthoredShape = {
   operations: z.array(authoredV6OperationDefinition),
   documentFields,
   documentCategories,
+  documentTemplateRevisions,
+  documentTemplatePointers,
   formulaRules,
   calculatedDisplayFields,
   operationRoleNarrowings,

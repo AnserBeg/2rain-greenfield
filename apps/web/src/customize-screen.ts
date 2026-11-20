@@ -1,4 +1,10 @@
 import { recordTypeEntityId } from '@north-star/customization';
+import {
+  documentTemplateForm,
+  documentTemplateSelector,
+  templatePatchFromForm,
+} from './document-template-form.js';
+import type { DocumentTemplateTarget } from '../../../packages/customization/src/targets.js';
 import { slug } from '../../../packages/customization/src/apply.js';
 
 /*
@@ -51,6 +57,7 @@ interface CustomizationStatus {
   readonly patches: readonly ScreenPatch[];
 }
 interface CustomizationTargets {
+  readonly documentTemplateTargets?: readonly DocumentTemplateTarget[];
   readonly documentTargets?: readonly {
     readonly entityId: string;
     readonly label: string;
@@ -239,6 +246,16 @@ export async function renderCustomizeScreen(
           'Activating',
           '<h1>Activating your change</h1><p role="status">Activation is still running. This takes about a minute.</p><a href="/?customize">Check progress</a>',
         );
+      const template = url.searchParams.get('documentTemplate');
+      if (template) {
+        const target = (await loadTargets()).documentTemplateTargets?.find(
+          ({ entityId }) => entityId === template,
+        );
+        return page(
+          'Document templates',
+          documentTemplateForm(target, url.searchParams.get('revision')),
+        );
+      }
       const arrange = url.searchParams.get('arrange');
       if (arrange)
         return page('Arrange a list', await arrangeForm(loadTargets, arrange));
@@ -269,20 +286,27 @@ export async function renderCustomizeScreen(
       case 'draft':
         return drafted(
           await service.draft(
-            patchFromForm(
-              submission,
-              submission.kind === 'addValidation'
-                ? (await loadTargets()).validationTargets?.find(
+            submission.kind === 'addDocumentTemplateRevision'
+              ? templatePatchFromForm(
+                  submission,
+                  (await loadTargets()).documentTemplateTargets?.find(
                     ({ entityId }) => entityId === submission.entity,
-                  )
-                : undefined,
-              submission.kind === 'addCalculatedDisplayField'
-                ? (await loadTargets()).calculatedDisplayTargets?.find(
-                    ({ recordSurfaceId }) =>
-                      recordSurfaceId === submission.surface,
-                  )
-                : undefined,
-            ),
+                  ),
+                )
+              : patchFromForm(
+                  submission,
+                  submission.kind === 'addValidation'
+                    ? (await loadTargets()).validationTargets?.find(
+                        ({ entityId }) => entityId === submission.entity,
+                      )
+                    : undefined,
+                  submission.kind === 'addCalculatedDisplayField'
+                    ? (await loadTargets()).calculatedDisplayTargets?.find(
+                        ({ recordSurfaceId }) =>
+                          recordSurfaceId === submission.surface,
+                      )
+                    : undefined,
+                ),
             'visualBuilder',
             undefined,
             actor,
@@ -431,6 +455,7 @@ async function overview(
     extendRecordTypeForm(targets),
     fieldForm(targets),
     documentFieldForm(targets),
+    documentTemplateSelector(targets.documentTemplateTargets ?? []),
     choiceForm(targets),
     arrangePicker(targets),
     savedViewPicker(targets),
@@ -815,6 +840,13 @@ export function patchFromForm(
     };
   };
   switch (form.kind) {
+    case 'retireDocumentTemplate':
+      return {
+        kind: form.kind,
+        schemaVersion: 'northstar.document-template-retire/v1',
+        templateId: form.templateId,
+        previousRevisionId: form.previousRevisionId,
+      };
     case 'addDocumentField': {
       const entityId = String(form.entity ?? '');
       const [namespace, entity] = entityId.split(':entity.');
@@ -1086,6 +1118,10 @@ function describe(patch: PatchSummary): string {
       return `New field "${label}"`;
     case 'addDocumentField':
       return `New files field "${label}"`;
+    case 'addDocumentTemplateRevision':
+      return `Document template “${label}”`;
+    case 'retireDocumentTemplate':
+      return 'Retire a document template';
     case 'addChoice':
       return `New choice "${label}"`;
     case 'addLink':

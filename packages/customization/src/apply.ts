@@ -191,6 +191,9 @@ function applyOne(
       return saveListView(authored, patch);
     case 'addMetricCard':
       return addMetricCard(authored, patch);
+    case 'addDocumentTemplateRevision':
+    case 'retireDocumentTemplate':
+      return applyDocumentTemplate(authored, patch);
     case 'addDocumentField':
     case 'addUploadCategory':
       return addDocumentDeclaration(authored, patch);
@@ -1465,6 +1468,64 @@ function statePrecondition(fieldId: string, stateId: string): Json {
     schemaVersion: version,
     value: { kind: 'textValue', schemaVersion: version, value: stateId },
   };
+}
+
+function applyDocumentTemplate(
+  authored: Json,
+  patch: Extract<
+    SingleCustomizationPatch,
+    { kind: 'addDocumentTemplateRevision' | 'retireDocumentTemplate' }
+  >,
+): Outcome | null {
+  const pointers = authored.documentTemplatePointers
+    ? list(authored, 'documentTemplatePointers')
+    : [];
+  const revisions = authored.documentTemplateRevisions
+    ? list(authored, 'documentTemplateRevisions')
+    : [];
+  const pointer = pointers.find(
+    ({ templateId }) => templateId === patch.templateId,
+  );
+  if (
+    pointer?.activeRevisionId === null ||
+    (pointer?.activeRevisionId ?? null) !== patch.previousRevisionId
+  ) {
+    return refusal(
+      'CUSTOMIZE_TARGET_NOT_FOUND',
+      'Choose the current active template revision.',
+    );
+  }
+
+  if (patch.kind === 'retireDocumentTemplate') {
+    pointer!.activeRevisionId = null;
+    return null;
+  }
+
+  const { kind: _kind, previousRevisionId: _previous, ...revision } = patch;
+  if (
+    ![revision.templateId, revision.revisionId].every(
+      (id) => isTenantId(id) && id.split(':')[0] === namespaceOf(authored),
+    ) ||
+    revisions.some(({ revisionId }) => revisionId === revision.revisionId)
+  ) {
+    return refusal(
+      'CUSTOMIZE_TARGET_NOT_FOUND',
+      'Use unique stable tenant IDs for the template and revision.',
+    );
+  }
+  authored.documentTemplateRevisions = [
+    ...revisions,
+    { ...revision, schemaVersion: version },
+  ];
+  authored.documentTemplatePointers = [
+    ...pointers.filter(({ templateId }) => templateId !== revision.templateId),
+    {
+      schemaVersion: version,
+      templateId: revision.templateId,
+      activeRevisionId: revision.revisionId,
+    },
+  ];
+  return null;
 }
 
 function addDocumentDeclaration(

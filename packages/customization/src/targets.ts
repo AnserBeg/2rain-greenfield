@@ -1,3 +1,7 @@
+import type {
+  DocumentTemplatePointer,
+  DocumentTemplateRevision,
+} from '../../canonical-model/src/document-template-schema.js';
 import { displayTypeForField } from '../../canonical-model/src/calculated-display-bindings.js';
 import type { CalculatedDisplayTarget } from './calculated-display-draft.js';
 import { isNarrowableOperationId } from '@north-star/canonical-model';
@@ -19,7 +23,30 @@ import type { LiteralValidationTarget } from './validation-draft.js';
  * arrange. The Customize screen offers only these; the patch is still checked
  * again when it is applied.
  */
+export interface DocumentTemplateChoice {
+  readonly fieldId: string;
+  readonly label: string;
+  readonly kind: string;
+}
+
+export interface DocumentTemplateTarget {
+  readonly entityId: string;
+  readonly label: string;
+  readonly queries: ReadonlyArray<{
+    readonly queryId: string;
+    readonly fields: readonly DocumentTemplateChoice[];
+  }>;
+  readonly tables: ReadonlyArray<{
+    readonly queryId: string;
+    readonly relationId: string;
+    readonly label: string;
+    readonly fields: readonly DocumentTemplateChoice[];
+  }>;
+  readonly templates: readonly DocumentTemplateRevision[];
+}
+
 export interface CustomizationTargets {
+  readonly documentTemplateTargets?: readonly DocumentTemplateTarget[];
   readonly documentTargets?: readonly {
     readonly entityId: string;
     readonly label: string;
@@ -101,6 +128,8 @@ export interface MetricListTarget {
 type Json = Record<string, unknown>;
 
 export function customizationTargets(definition: {
+  readonly documentTemplatePointers?: readonly DocumentTemplatePointer[];
+  readonly documentTemplateRevisions?: readonly DocumentTemplateRevision[];
   readonly calculatedDisplayFields?:
     readonly { displaySinks: readonly { surfaceId: string }[] }[] | undefined;
   readonly entities: readonly Json[];
@@ -161,6 +190,97 @@ export function customizationTargets(definition: {
       label: String(entity.label),
     }))
     .sort((left, right) => left.label.localeCompare(right.label));
+  const queryChoices = (query: Json) => ({
+    queryId: String(query.queryId),
+    fields: ((query.selections ?? []) as Json[]).flatMap(({ field }) => {
+      const member = definition.fields.find(
+        ({ fieldId }) => fieldId === (field as Json)?.targetId,
+      );
+      return member?.lifecycle === 'active' &&
+        ['public', 'internal'].includes(String(member.classification))
+        ? [
+            {
+              fieldId: String(member.fieldId),
+              label: String(member.label),
+              kind: String((member.fieldType as Json).kind),
+            },
+          ]
+        : [];
+    }),
+  });
+  const recordQueries = definition.queries.filter(
+    (query) =>
+      query.tier === 'q0' &&
+      query.lifecycle === 'active' &&
+      !query.readModel &&
+      (query.filter as Json)?.kind === 'booleanPredicate' &&
+      (query.filter as Json)?.value === true &&
+      ((query.parameters ?? []) as Json[]).length ===
+        (query.legalEntityScope ? 1 : 0),
+  );
+  const documentTemplateTargets: DocumentTemplateTarget[] =
+    definition.languageVersion === 'v6'
+      ? definition.entities.flatMap((entity) => {
+          const entityId = String(entity.entityId);
+          const label = String(entity.label);
+          if (
+            entity.lifecycle !== 'active' ||
+            !definition.queries.some(
+              (query) =>
+                query.queryType === 'get' &&
+                query.tier === 'q0' &&
+                query.lifecycle === 'active' &&
+                recordQueryIds.has(query.queryId) &&
+                (query.sourceEntity as Json).targetId === entityId,
+            )
+          )
+            return [];
+          const queries = recordQueries
+            .filter(
+              (query) =>
+                query.queryType === 'get' &&
+                (query.sourceEntity as Json).targetId === entityId,
+            )
+            .map(queryChoices)
+            .filter(({ fields }) =>
+              fields.some(
+                ({ kind }) =>
+                  kind === 'textFieldType' || kind === 'integerFieldType',
+              ),
+            );
+          if (!queries.length) return [];
+          const tables = (definition.relations ?? []).flatMap((relation) => {
+            if (
+              relation.ownership !== 'parentScopedChild' ||
+              relation.lifecycle !== 'active' ||
+              (relation.targetEntity as Json).targetId !== entityId
+            )
+              return [];
+            const childId = String((relation.sourceEntity as Json).targetId);
+            return recordQueries
+              .filter(
+                (query) =>
+                  query.queryType === 'list' &&
+                  (query.sourceEntity as Json).targetId === childId,
+              )
+              .map((query) => ({
+                ...queryChoices(query),
+                relationId: String(relation.relationId),
+                label: entityLabel.get(childId) ?? childId,
+              }))
+              .filter(({ fields }) => fields.length);
+          });
+          const templates = (definition.documentTemplateRevisions ?? []).filter(
+            (revision) =>
+              revision.entityId === entityId &&
+              definition.documentTemplatePointers?.some(
+                ({ activeRevisionId }) =>
+                  activeRevisionId === revision.revisionId,
+              ),
+          );
+          return [{ entityId, label, queries, tables, templates }];
+        })
+      : [];
   const validationTargets =
     definition.languageVersion === 'v6'
       ? recordTypes.flatMap(({ entityId, label }) => {
@@ -559,6 +679,7 @@ export function customizationTargets(definition: {
     lists,
     recordTypes,
     ...(documentTargets.length > 0 ? { documentTargets } : {}),
+    ...(documentTemplateTargets.length > 0 ? { documentTemplateTargets } : {}),
     ...(metricLists.length ? { metricLists } : {}),
   });
 }

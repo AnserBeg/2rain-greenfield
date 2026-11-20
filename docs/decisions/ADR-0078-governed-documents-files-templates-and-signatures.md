@@ -181,7 +181,7 @@ branded printouts and in-place signing. The implementation follows the
 ## Templates and PDF
 
 - `DocumentTemplateDefinition` is a versioned object with a stable template ID, an admitted
-  record type, document kind (quote, purchase order or invoice), page layout, typed
+  record type, document kind (quote, purchase order, invoice, work order or contract), page layout, typed
   bindings, and branding. Each revision pins locale, time zone, currency, date and
   number formats, and page size. The issued identity comes from the governed source
   operation or query and is stored with the version. Preview has no issued identity.
@@ -205,14 +205,15 @@ branded printouts and in-place signing. The implementation follows the
   that disclosure. A template approval or signer grant alone cannot release restricted data.
   Tenant template approval binds the exact revision and shows the target type, visible
   content and branding, and bound query fields before activation.
-- Render server-side with pinned PDFKit in a separate unprivileged Linux process.
-  PDFKit draws directly to a PDF stream. Start the process in a fresh network
-  namespace without network interfaces attached. Deny socket creation with seccomp,
-  mount the packaged runtime read-only, and pass only the input and output pipes.
-  Enforce OS memory and CPU limits and a host monotonic deadline. Refuse to render
-  if isolation cannot be set up. Pass typed values, bundled font bytes and checked
-  image bytes into the worker. Bound input rows and
-  image expansion and cap runtime, memory, pages and output bytes. Before publishing, apply
+- Render server-side with pinned PDFKit in the ADR-0073 QuickJS WebAssembly isolate or in
+  a separate unprivileged Linux process. The isolate supplies no host I/O or callbacks and
+  enforces heap, CPU and wall-time limits. A separate process requires a fresh network
+  namespace with no network interfaces attached, seccomp denial of socket creation, a
+  read-only packaged runtime, pipe-only input and output, and OS memory and CPU limits.
+  Refuse rendering if the chosen boundary is unavailable. The isolated renderer receives
+  only formatted values, predefined fonts and checked image bytes. Bound input rows,
+  image expansion, runtime, memory, pages and output bytes.
+  Before publishing, apply
   the file content gate and recheck the pinned release, recorded source revisions, current
   grants and target state. Store the resulting bytes as a normal version, together with
   template revision, source query and record revisions, release root and renderer version.

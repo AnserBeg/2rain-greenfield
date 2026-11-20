@@ -3018,6 +3018,33 @@ export function renderDocumentSection(
       record: target.recordId,
       ...(target.companyId ? { company: target.companyId } : {}),
     });
+  const templates = declaration?.templates;
+  const actions = (templates?.pointers ?? [])
+    .flatMap(({ templateId, activeRevisionId }) => {
+      const template = templates?.revisions.find(
+        (revision) =>
+          revision.revisionId === activeRevisionId &&
+          revision.entityId === target.entityId,
+      );
+      if (
+        !template ||
+        !declaration?.bindings.some(
+          ({ entityId, surfaceIds }) =>
+            entityId === target.entityId &&
+            surfaceIds.some((id) => id === target.surfaceId),
+        )
+      )
+        return [];
+      const preview = new URLSearchParams(path.slice(path.indexOf('?') + 1));
+      preview.set('mode', 'template-preview');
+      preview.set('template', templateId);
+      return [
+        `<form data-document-generate="${escapeHtml(templateId)}"><span>${escapeHtml(template.label)}</span>
+      <a href="/documents?${escapeHtml(preview.toString())}" target="_blank" rel="noopener">Preview template</a>
+      ${scannerLabel ? '<button type="submit">Generate PDF</button>' : ''}</form>`,
+      ];
+    })
+    .join('');
   const section = (field?: (typeof fields)[number]) => {
     const categories =
       declaration?.categories.filter(
@@ -3033,5 +3060,5 @@ export function renderDocumentSection(
       : '';
     return `<div data-document-field="${id}"><h3>${label}</h3>${field ? `<p>Up to ${field.maxCount} files${field.required ? ' · Required for document tasks' : ''}</p>` : ''}<ul data-document-rows></ul>${form}</div>`;
   };
-  return `<section class="panel data-panel"><details data-documents="${escapeHtml(path)}"><summary><h2>Files</h2></summary>${scannerLabel ? `<p>${escapeHtml(scannerLabel)}</p>` : ''}<p role="status" data-documents-status></p>${section()}${fields.map((field) => section(field)).join('')}</details></section>`;
+  return `<section class="panel data-panel"><details data-documents="${escapeHtml(path)}"><summary><h2>Files</h2></summary>${scannerLabel ? `<p>${escapeHtml(scannerLabel)}</p>` : ''}<p role="status" data-documents-status></p>${actions}${section()}${fields.map((field) => section(field)).join('')}</details></section>`;
 }

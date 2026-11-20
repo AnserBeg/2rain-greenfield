@@ -2479,6 +2479,7 @@ function patchDisplayLabel(patch: CustomizationPatch): string | null {
     case 'addLineTable':
     case 'addDocumentField':
     case 'addUploadCategory':
+    case 'addDocumentTemplateRevision':
     case 'saveListView':
     case 'addMetricCard':
       return patch.label;

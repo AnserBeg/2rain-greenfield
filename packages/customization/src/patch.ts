@@ -6,6 +6,7 @@ import {
   type FormulaValidationRule,
 } from '@north-star/canonical-model';
 import { z } from 'zod';
+import { DocumentTemplateRevisionSchema } from '../../canonical-model/src/document-template-schema.js';
 import {
   DocumentCategoryDefinitionSchema,
   DocumentFieldDefinitionSchema,
@@ -197,6 +198,17 @@ const ChangeMemberSchema = z.discriminatedUnion('kind', [
   declareLifecycle,
   arrangeLayout,
   saveListView,
+  DocumentTemplateRevisionSchema.extend({
+    kind: z.literal('addDocumentTemplateRevision'),
+    schemaVersion: z.literal('northstar.document-template-revision/v1'),
+    previousRevisionId: canonicalId.nullable(),
+  }),
+  z.strictObject({
+    kind: z.literal('retireDocumentTemplate'),
+    schemaVersion: z.literal('northstar.document-template-retire/v1'),
+    templateId: canonicalId,
+    previousRevisionId: canonicalId,
+  }),
   DocumentFieldDefinitionSchema.extend({
     kind: z.literal('addDocumentField'),
     schemaVersion: z.literal('northstar.document-field/v1'),
@@ -303,6 +315,8 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'addMetricCard',
   'addDocumentField',
   'addUploadCategory',
+  'addDocumentTemplateRevision',
+  'retireDocumentTemplate',
   'narrowPermission',
   'unNarrowPermission',
   'changeSet',

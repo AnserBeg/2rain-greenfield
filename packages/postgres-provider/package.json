@@ -34,6 +34,7 @@
     "@north-star/runtime": "workspace:*",
     "jpeg-js": "0.4.4",
     "pdf-lib": "1.17.1",
+    "pdfkit": "0.17.2",
     "pg": "^8.22.0",
     "quickjs-emscripten": "0.32.0"
   },

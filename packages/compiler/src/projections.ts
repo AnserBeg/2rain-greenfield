@@ -20,6 +20,7 @@ import {
 import { requiredFormulaValidationOperationReader } from '../../canonical-model/src/formula-validation-reader.js';
 import {
   DOCUMENT_FILES_SURFACE_FLOOR,
+  DOCUMENT_TEMPLATES_SURFACE_FLOOR,
   DOCUMENTS_PAYLOAD_VERSION,
 } from '../../canonical-model/src/documents.js';
 import type { compileDocuments } from './documents.js';
@@ -353,6 +354,9 @@ export function lowerBaseProjectionPayloads(
         projection.payload = {
           ...(projection.payload as object),
           documentBindings: documents.bindings,
+          ...(documents.templates && {
+            documentTemplatePointers: documents.templates.pointers,
+          }),
         };
       }
       if (projection.familyId === PROJECTION_FAMILY_IDS.surfaceManifest) {
@@ -360,7 +364,9 @@ export function lowerBaseProjectionPayloads(
           ...projection.requiredRuntimeCapability,
           minimumVersion: Math.max(
             projection.requiredRuntimeCapability.minimumVersion,
-            DOCUMENT_FILES_SURFACE_FLOOR,
+            documents.templates
+              ? DOCUMENT_TEMPLATES_SURFACE_FLOOR
+              : DOCUMENT_FILES_SURFACE_FLOOR,
           ),
         };
       }

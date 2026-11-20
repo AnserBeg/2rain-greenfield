@@ -6,7 +6,7 @@ import {
 } from './request-context.js';
 import {
   DOCUMENTS_PROJECTION_FAMILY,
-  DOCUMENT_FILES_SURFACE_FLOOR,
+  DOCUMENT_TEMPLATES_SURFACE_FLOOR,
 } from '../../canonical-model/src/documents.js';
 
 export const REQUEST_RUNTIME_VIEW_VERSION =
@@ -208,7 +208,7 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 24 adds tenant-authored saved List layouts.
     // 25 adds Today metric cards.
     // 26 adds header relations, relation List columns and shared or lifecycle-less editors.
-    maximumSupportedVersion: DOCUMENT_FILES_SURFACE_FLOOR,
+    maximumSupportedVersion: DOCUMENT_TEMPLATES_SURFACE_FLOOR,
   },
 });
 

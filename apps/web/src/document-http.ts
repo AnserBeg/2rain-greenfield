@@ -21,6 +21,12 @@ export function mountDocumentHttp(
   ) => {
     const mode = url.searchParams.get('mode');
     const upload = request.method === 'POST' && mode === 'upload';
+    const generate =
+      request.method === 'POST' && mode === 'generate' && gateway.generate;
+    const templatePreview =
+      request.method === 'GET' &&
+      mode === 'template-preview' &&
+      gateway.previewTemplate;
     const byteRead =
       request.method === 'GET' && (mode === 'download' || mode === 'preview');
     const list = request.method === 'GET' && mode === 'list';
@@ -30,21 +36,23 @@ export function mountDocumentHttp(
       "default-src 'none'; sandbox; frame-ancestors 'none'",
     );
     response.setHeader('x-content-type-options', 'nosniff');
-    if (!(upload || byteRead || list) || (upload && !sameOrigin)) {
+    const write = upload || Boolean(generate);
+    const read = byteRead || Boolean(templatePreview);
+    if (!(write || read || list) || (write && !sameOrigin)) {
       documentError(
         response,
-        upload ? 403 : 405,
+        write ? 403 : 405,
         'This file request is unavailable.',
       );
       return;
     }
-    if ((upload && writes >= 2) || (byteRead && reads >= 2)) {
+    if ((write && writes >= 2) || (read && reads >= 2)) {
       response.setHeader('retry-after', '1');
       documentError(response, 429, 'File transfers are busy. Try again.');
       return;
     }
-    if (upload) writes++;
-    if (byteRead) reads++;
+    if (write) writes++;
+    if (read) reads++;
     const controller = new AbortController();
     const expires = performance.now() + DOCUMENT_RESPONSE_MILLISECONDS;
     let settle: () => void;
@@ -80,6 +88,35 @@ export function mountDocumentHttp(
       };
       await entry.run({ headers: request.headers }, async (view) => {
         assertDeadline();
+        if (generate) {
+          const metadata = await generate.call(
+            gateway,
+            view,
+            target,
+            url.searchParams.get('template') ?? '',
+            url.searchParams.get('retryKey') ?? '',
+            controller.signal,
+          );
+          assertDeadline();
+          return json(response, 201, metadata);
+        }
+        if (templatePreview) {
+          const bytes = await templatePreview.call(
+            gateway,
+            view,
+            target,
+            url.searchParams.get('template') ?? '',
+            controller.signal,
+          );
+          assertDeadline();
+          response.setHeader('content-type', 'application/pdf');
+          response.setHeader('content-length', bytes.length);
+          response.setHeader(
+            'content-disposition',
+            'inline; filename="template-preview.pdf"',
+          );
+          return response.end(bytes);
+        }
         if (upload) {
           const metadata = await gateway.upload(
             view,
@@ -164,8 +201,8 @@ export function mountDocumentHttp(
       await responseDone;
       clearTimeout(timer);
       response.off('close', close);
-      if (upload) writes--;
-      if (byteRead) reads--;
+      if (write) writes--;
+      if (read) reads--;
     }
   };
 }
