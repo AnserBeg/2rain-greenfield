@@ -366,7 +366,7 @@ test(
               await activate({
                 kind: 'narrowPermission',
                 target: { kind: 'operation', id: markWon },
-                roleKey: 'local-demo-full-release',
+                roleKey: 'local-demo-manager',
               });
               const after = await open(COMPANY, alphaTwo, manager);
               assert.doesNotMatch(after.html, /Mark won/u);
