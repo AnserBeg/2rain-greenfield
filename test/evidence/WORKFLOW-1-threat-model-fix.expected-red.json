@@ -38,10 +38,10 @@
     },
     {
       "name": "workflow-revoked-automation-grant",
-      "claim": "A workflow write leaves no semantic operation receipt after the automation actor loses its current grant.",
+      "claim": "The workflow writer's live authority check prevents writes after a grant is revoked or the pinned operation excludes the actor's role.",
       "file": "packages/postgres-provider/src/workflow-gateway.ts",
       "original": "          actorDecision.decision !== 'ALLOW'\n",
-      "replacement": "          (call.kind === 'query' && actorDecision.decision !== 'ALLOW')\n",
+      "replacement": "          (actorDecision.decision !== 'ALLOW' &&\n            (call.kind !== 'operation' ||\n              (binding.scopeMode !== 'membershipOnly' &&\n                !operations.some(\n                  (operation) =>\n                    operation.operationId === call.id &&\n                    operation.permissionId === request.permissionId,\n                ))))\n",
       "test": {
         "files": ["test/postgres/workflow-consumer.test.ts"]
       },
@@ -50,6 +50,11 @@
           "file": "test/postgres/workflow-consumer.test.ts",
           "name": "R3 a workflow write cannot outlive the automation actor’s grants",
           "expected": "an actor without a current grant must leave no committed operation receipt"
+        },
+        {
+          "file": "test/postgres/workflow-consumer.test.ts",
+          "name": "the pinned role restriction applies to both workflow principals",
+          "expected": "the excluded role authorized a workflow write"
         }
       ]
     },

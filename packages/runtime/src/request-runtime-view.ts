@@ -1,3 +1,5 @@
+import { BILLING_READER } from '../../canonical-model/src/billing.js';
+import { BOOKING_OPERATION_READER } from '@north-star/canonical-model';
 import {
   assertTrustedRequestContext,
   type AuthenticatedRequestEntryAdapter,
@@ -8,7 +10,6 @@ import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents
 import {
   WORKFLOW_PROJECTION_FAMILY,
   WORKFLOW_RUNTIME_CAPABILITY,
-  WORKFLOW_SURFACE_FLOOR,
 } from '../../canonical-model/src/workflows.js';
 
 export const REQUEST_RUNTIME_VIEW_VERSION =
@@ -176,7 +177,7 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.operation]: {
     capabilityId: 'northstar.runtime:capability.operation-catalog',
-    maximumSupportedVersion: 4,
+    maximumSupportedVersion: BOOKING_OPERATION_READER,
   },
   [REQUEST_RUNTIME_FORMULA_RULE_FAMILY]: {
     capabilityId: 'northstar.runtime:capability.formula-rule',
@@ -216,8 +217,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 25 adds Today metric cards.
     // 26 adds header relations, relation List columns and shared or lifecycle-less editors.
     // 27 adds internal document attachments. 28 adds record and form layout revisions.
-    // 29 adds verified workflow declarations.
-    maximumSupportedVersion: WORKFLOW_SURFACE_FLOOR,
+    // 29 adds verified workflow declarations. 30 adds billing declarations and service quotes.
+    maximumSupportedVersion: BILLING_READER,
   },
 });
 

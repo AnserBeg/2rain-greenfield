@@ -1,3 +1,9 @@
+import {
+  BOOKING_OPERATION_READER,
+  bookingDeclarationProblem,
+  bookingCatalogTerms,
+  hasBookingOperations,
+} from '@north-star/canonical-model';
 import { CALCULATED_DISPLAY_QUERY_READER } from '../../canonical-model/src/calculated-display-projection.js';
 import {
   CANONICALIZATION_PROFILE_VERSION,
@@ -9,6 +15,7 @@ import {
   canonicalLanguageProfileFor,
   languageHasMaterializedStateFields,
   languageHasV3Features,
+  canonicalize,
   canonicalizeAndHash,
   parseNormalizedApplicationPackageJson,
   type CanonicalDiagnostic,
@@ -25,6 +32,7 @@ import {
   validateUnboundPermissionAcknowledgement,
 } from './conformance.js';
 import { compilerDiagnostic, finalizeDiagnostics } from './diagnostics.js';
+import { billingBindingProblem } from './billing.js';
 import { WorkflowGrantBindingError } from './workflows.js';
 import { compileDocuments } from './documents.js';
 import { requiredFormulaValidationOperationReader } from '../../canonical-model/src/formula-validation-reader.js';
@@ -407,6 +415,22 @@ function compileApplicationInternal(
   }
 
   const formula = compileLiteralFormulaRules(packageRevision);
+  const billingProblem = billingBindingProblem(packageRevision);
+  if (billingProblem)
+    return failure(
+      [
+        {
+          ...compilerDiagnostic(
+            'COMPILER_TYPE_INVALID',
+            'typeCheck',
+            '$.billingPlans',
+            null,
+          ),
+          rule: billingProblem,
+        },
+      ],
+      maximumDiagnostics,
+    );
   const documents = compileDocuments(packageRevision);
   if (documents?.message) {
     return failure(
@@ -2249,9 +2273,11 @@ function verifyCompleteness(
   if (
     ruleProjection.length !==
       Number(Boolean(declaredRules || declaredDisplays)) ||
-    (declaredRules &&
-      operationFloor !==
-        requiredFormulaValidationOperationReader(declaredRules)) ||
+    (hasBookingOperations(packageRevision)
+      ? operationFloor !== BOOKING_OPERATION_READER
+      : declaredRules &&
+        operationFloor !==
+          requiredFormulaValidationOperationReader(declaredRules)) ||
     (declaredDisplays && queryFloor !== CALCULATED_DISPLAY_QUERY_READER) ||
     ((declaredRules || declaredDisplays) &&
       (ruleReference?.instanceId !==
@@ -2273,6 +2299,25 @@ function verifyCompleteness(
   const byFamily = new Map(
     emitted.map((entry) => [entry.reference.familyId, entry.payload] as const),
   );
+  const bookingProblem = bookingDeclarationProblem(packageRevision);
+  if (
+    bookingProblem ||
+    canonicalize(bookingCatalogTerms(packageRevision)) !==
+      canonicalize(
+        bookingCatalogTerms(
+          byFamily.get(PROJECTION_FAMILY_IDS.operationCatalog),
+        ),
+      )
+  ) {
+    diagnostics.push(
+      compilerDiagnostic(
+        'COMPILER_PROJECTION_INVARIANT_FAILED',
+        'verifyCompleteness',
+        '$.operations.booking',
+        bookingProblem ?? packageRevision.package.packageId,
+      ),
+    );
+  }
   const emittedStorage = byFamily.get(
     PROJECTION_FAMILY_IDS.storageTarget,
   ) as StorageTargetPayload;
