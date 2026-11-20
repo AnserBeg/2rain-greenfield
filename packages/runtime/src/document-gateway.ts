@@ -1,3 +1,4 @@
+import { DOCUMENT_RESPONSE_MILLISECONDS } from '../../canonical-model/src/documents.js';
 import type { RequestRuntimeView } from './request-runtime-view.js';
 
 export interface DocumentTarget {
@@ -34,11 +35,38 @@ export class DocumentRequestError extends Error {
   }
 }
 
+export interface DocumentDeadline {
+  readonly signal: AbortSignal;
+  /** Throws on cancellation or expiry, even if the event loop delayed the timer. */
+  remainingMilliseconds(): number;
+}
+
+export function documentDeadline(
+  signal = new AbortController().signal,
+  now = () => performance.now(),
+): DocumentDeadline {
+  const expires = now() + DOCUMENT_RESPONSE_MILLISECONDS;
+  return {
+    signal,
+    remainingMilliseconds() {
+      signal.throwIfAborted();
+      const remaining = expires - now();
+      if (remaining <= 0)
+        throw new DocumentRequestError(408, 'The file response expired.');
+      return Math.ceil(remaining);
+    },
+  };
+}
+
+export const DOCUMENT_PAGE_SIZE = 50;
+
 export interface DocumentGateway {
   readonly scannerLabel: string | null;
   list(
     view: RequestRuntimeView,
     target: DocumentTarget,
+    page?: { after: string | null; limit: number },
+    deadline?: DocumentDeadline,
   ): Promise<readonly DocumentMetadata[]>;
   read(
     view: RequestRuntimeView,
@@ -46,6 +74,7 @@ export interface DocumentGateway {
     linkId: string,
     versionId: string,
     deliver: (metadata: DocumentMetadata, bytes: Buffer) => void,
+    deadline?: DocumentDeadline,
   ): Promise<void>;
   upload(
     view: RequestRuntimeView,
@@ -53,5 +82,6 @@ export interface DocumentGateway {
     upload: DocumentUpload,
     receive: (maximumBytes: number) => Promise<Buffer>,
     signal: AbortSignal,
+    deadline?: DocumentDeadline,
   ): Promise<DocumentMetadata>;
 }

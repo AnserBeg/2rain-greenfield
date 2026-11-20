@@ -193,7 +193,8 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
           '0045_staff_signin.sql',
           '0046_workflow_approval_target_scope.sql',
           '0047_staff_session_integrity.sql',
-          '0048_billing_rate_tables.sql',
+          '0048_document_attachment_authority.sql',
+          '0049_billing_rate_tables.sql',
         ]);
         assert.equal(migrationResult.verified.length, allMigrations.length);
         await seedScope(admin);
