@@ -36,10 +36,12 @@ DECLARE node record; closure jsonb; locked jsonb; pass integer; live boolean; BE
     IF pass=1 THEN locked := closure;
     ELSIF closure<>locked THEN RAISE EXCEPTION 'booking.endpointChanged' USING ERRCODE='40001'; END IF; END LOOP; END $$;
 
--- An active allocation prevents archiving either endpoint (ADR-0082). The
--- archive caller is already authorized for the record, so the guard does not
--- depend on what that caller can see. Both routines are reached only from the
--- generic archive path, and neither returns allocation detail.
+-- An active allocation prevents archiving either endpoint (ADR-0082), so
+-- neither guard depends on what the caller can see. require_record_archivable,
+-- the only one that raises on an allocation, runs after the archive is
+-- authorized for the record. lock_record_allocations runs before that and is
+-- also directly callable by the runtime role, but it returns nothing and
+-- raises only on the isolation level.
 CREATE OR REPLACE FUNCTION platform.lock_record_allocations(entity text,record uuid) RETURNS void
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$ BEGIN
   PERFORM north_star_internal.booking_require_isolation();

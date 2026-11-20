@@ -42,7 +42,7 @@ The staff server accepts the issuer login through `STAFF_APPROVAL_DATABASE_URL`.
 The targeted check of `46d5a072` closed all nine items and found four more.
 
 1. Endpoint locks now run descendants before ancestors (longest ownership path to a root, descending), then by entity and record. That is the generic writer's child-then-parent order, so a booking no longer deadlocks against an ordinary update or archive of its child.
-2. An active allocation refuses archive of either endpoint whatever the caller can see. This deliberately reverses the visibility filter added for review item 2. The archive caller is already authorized for the record, and neither routine returns allocation detail.
+2. An active allocation refuses archive of either endpoint whatever the caller can see. This deliberately reverses the visibility filter added for review item 2. `require_record_archivable`, the only routine that raises on an allocation, runs after the archive is authorized for the record. `lock_record_allocations` runs before authorization and is directly callable by the runtime role, but it returns nothing and raises only on the isolation level.
 3. New tests refuse a workflow hold without an attested grant and prove the archive lock is taken for a caller whose grant names another resource.
 4. ADR-0082 and the runtime authority map record that `attest_booking_approval` trusts the issuer's scope arguments, with scope enforced at consumption.
 
