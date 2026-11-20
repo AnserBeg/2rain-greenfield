@@ -1,5 +1,5 @@
 import { addressColumns, addressScalars, hasAddress, readAddress } from './address-storage.js';
-import { addressColumnId, addressComponents } from '@north-star/canonical-model';
+import { addressColumnId, addressComponents, addressJson } from '@north-star/canonical-model';
 import { enqueueAddress } from './address-geocodes.js';
 import { AddressWriteSchema, SavedAddressSchema } from '@north-star/canonical-model';
 import { createHash, randomUUID } from 'node:crypto';
@@ -516,7 +516,7 @@ export class PostgresModuleRuntimeInterpreter
               }
               return {fieldId:c.canonicalFieldId,locateFor,value:{...value,revision:randomUUID()}};
             });
-            const input = requests.length ? {...numbered, patch:{...numbered.patch,...Object.fromEntries(requests.map(r=>[r.fieldId,r.value]))}} : numbered;
+            const input = requests.length ? {...numbered, patch:{...numbered.patch,...Object.fromEntries(requests.map(r=>[r.fieldId,addressJson(r.value)]))}} : numbered;
             const preparation = await prepareMutation(
               client,
               request,
@@ -5910,9 +5910,9 @@ function rawRecord(entity: StorageEntity, row: QueryResultRow): RawRecord {
     throw failure('MODULE_RECORD_MALFORMED', 'record revision is invalid');
   }
   const values = Object.fromEntries(
-    entity.columns.filter(c=>!c.canonicalFieldId.includes('#address.')).map((column) => [
+    entity.columns.filter(c=>!c.canonicalFieldId.startsWith('northstar.connector:field.scalar_')).map((column) => [
       column.canonicalFieldId,
-      hasAddress(entity,column.canonicalFieldId) ? readAddress(addressColumns(entity,column.canonicalFieldId),row) : immutableDatabaseValue(row[column.physicalName]),
+      hasAddress(entity,column.canonicalFieldId) ? addressJson(readAddress(addressColumns(entity,column.canonicalFieldId),row)) : immutableDatabaseValue(row[column.physicalName]),
     ]),
   );
   return Object.freeze({
@@ -6974,7 +6974,7 @@ function databaseValue(value: ImmutableJsonValue): unknown {
 function immutableDatabaseValue(value: unknown): ImmutableJsonValue {
   if (isRecord(value)) {
     const address = SavedAddressSchema.safeParse(value);
-    if (address.success) return address.data;
+    if (address.success) return addressJson(address.data);
   }
   if (
     value === null ||

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { LayoutBodySchema } from './layout.js';
 import { z } from 'zod';
 
@@ -94,15 +95,36 @@ export const AddressProjectionSchema = z.strictObject({
 });
 export type AddressProjection = z.infer<typeof AddressProjectionSchema>;
 
-// Only the logical field ID is authorable. '#' cannot occur in an authored ID.
+// Component storage IDs are derived from the complete logical ID, independently of labels and layouts.
 export const ADDRESS_COMPONENTS = {
-  text: 512, line1: 160, line2: 160, line3: 160, line4: 160,
-  city: 120, region: 120, postalCode: 24, country: 2,
-  placeNamespace: 32, placeId: 256, latitude: 0, longitude: 0,
-  revision: 36, sourceDigest: 64, geocodeStatus: 16,
+  text: 512,
+  line1: 160,
+  line2: 160,
+  line3: 160,
+  line4: 160,
+  city: 120,
+  region: 120,
+  postalCode: 24,
+  country: 2,
+  placeNamespace: 32,
+  placeId: 256,
+  latitude: 0,
+  longitude: 0,
+  revision: 36,
+  sourceDigest: 64,
+  geocodeStatus: 16,
 } as const;
 export type AddressComponent = keyof typeof ADDRESS_COMPONENTS;
-export const addressComponents = Object.keys(ADDRESS_COMPONENTS) as AddressComponent[];
-export function addressColumnId(fieldId: string, component: AddressComponent): string {
-  return component === 'text' ? fieldId : fieldId + '#address.' + component;
+export const addressComponents = Object.keys(
+  ADDRESS_COMPONENTS,
+) as AddressComponent[];
+export function addressColumnId(
+  fieldId: string,
+  component: AddressComponent,
+): string {
+  return component === 'text' ? fieldId : 'northstar.connector:field.scalar_' + createHash('sha256').update(fieldId).digest('hex') + '.' + component.toLowerCase();
+}
+
+export function addressJson(value: unknown) {
+  return z.json().parse(value);
 }

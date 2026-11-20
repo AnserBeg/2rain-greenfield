@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import {
-  ADDRESS_COMPONENTS, addressComponents, addressColumnId,
+  CanonicalIdSchema, ADDRESS_COMPONENTS, addressComponents, addressColumnId,
   languageHasMaterializedStateFields,
   type NormalizedApplicationPackage,
 } from '@north-star/canonical-model';
@@ -1735,6 +1735,7 @@ export function buildStorageTransitionEnvelope(
   candidate: StorageTargetPayloadV1,
   binding: TransitionBinding,
 ): StorageTransitionEnvelope | { diagnostic: CompilerDiagnostic } {
+  const sourceFields = new Map<string,Field>(packageRevision.fields.flatMap(storageFields).map(field => [field.fieldId,field]));
   const previousEntities = new Map(
     previous.entities.map((entity) => [entity.entityId, entity]),
   );
@@ -1905,9 +1906,7 @@ export function buildStorageTransitionEnvelope(
     }
     for (const [fieldId, field] of newFields) {
       const oldField = oldFields.get(fieldId);
-      const sourceField = packageRevision.fields.find(
-        (entry) => entry.fieldId === fieldId,
-      )!;
+      const sourceField = sourceFields.get(fieldId)!;
       if (
         oldField &&
         oldField.shapeFingerprint !== field.shapeFingerprint &&
@@ -2717,7 +2716,7 @@ function storageFields(field: Field): Field[] {
   const schemaVersion = field.fieldType.schemaVersion;
   return addressComponents.map(component => ({
     ...field,
-    fieldId: addressColumnId(field.fieldId, component),
+    fieldId: CanonicalIdSchema.parse(addressColumnId(field.fieldId, component)),
     presence: component === 'text' ? field.presence : 'optional',
     defaultSemantics: component === 'text' ? field.defaultSemantics : 'nullable',
     searchable: false,

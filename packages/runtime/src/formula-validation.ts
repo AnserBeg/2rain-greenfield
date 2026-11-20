@@ -50,6 +50,10 @@ function readField(
   if (!Object.hasOwn(values, fieldId)) return unreadable;
   const value = values[fieldId];
   if (value === null) return { status: 'absent' };
+  if (type.kind === 'address') {
+    const text = typeof value === 'string' ? value : value && typeof value === 'object' && 'text' in value ? value.text : null;
+    return typeof text === 'string' && text.trim() ? {status:'present',scalar:{kind:'text',value:text}} : malformed;
+  }
   if (type.kind === 'boolean') {
     return typeof value === 'boolean'
       ? { status: 'present', scalar: { kind: 'boolean', value } }

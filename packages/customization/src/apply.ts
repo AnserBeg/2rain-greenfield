@@ -181,7 +181,8 @@ function applyOne(
     case 'addMapPlacement': {
       if (!isTenantId(patch.placementId) || !patch.placementId.startsWith(namespaceOf(authored) + ':placement.'))
         return refusal('CUSTOMIZE_TARGET_NOT_FOUND', 'Use a tenant map placement ID.');
-      const {kind: _kind, ...placement} = patch;
+      const {schemaVersion,placementId,sectionId,surfaceId,fieldId} = patch;
+      const placement = {schemaVersion,placementId,sectionId,surfaceId,fieldId};
       authored.mapPlacements = [...(authored.mapPlacements as Json[] ?? []), placement];
       return null;
     }

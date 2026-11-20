@@ -3,8 +3,19 @@ import {addressColumnId, addressComponents, canonicalize, SavedAddressSchema, ty
 import type {StorageTargetPayloadV1} from '@north-star/compiler';
 type Entity = StorageTargetPayloadV1['entities'][number];
 
+const addressFieldSets = new WeakMap<Entity, ReadonlySet<string>>();
 export function hasAddress(entity: Entity, id: string) {
-  return entity.columns.some(c => c.canonicalFieldId === addressColumnId(id, 'revision'));
+  let found = addressFieldSets.get(entity);
+  if (!found) {
+    const ids=new Set(entity.columns.map(c=>c.canonicalFieldId));
+    const addresses=new Set<string>();
+    if (entity.columns.some(c=>c.canonicalFieldId.startsWith('northstar.connector:field.scalar_'))) {
+      for (const field of ids) if(ids.has(addressColumnId(field,'revision'))) addresses.add(field);
+    }
+    found=addresses;
+    addressFieldSets.set(entity,found);
+  }
+  return found.has(id);
 }
 
 export function addressColumns(entity: Entity, id: string) {
@@ -35,7 +46,7 @@ export function readAddress(columns:Record<AddressComponent,string>, row: Record
   const lines = [get('line1'),get('line2'),get('line3'),get('line4')].filter(x=>x!=null);
   return SavedAddressSchema.parse({schemaVersion:'northstar.address-value/v1', text:get('text'), revision:get('revision'),
     ...(lines.length && {lines}), ...Object.fromEntries(['city','region','postalCode','country'].flatMap(k=>get(k as AddressComponent)==null?[]:[[k,get(k as AddressComponent)]])),
-    ...(get('placeId') && {place:{namespace:get('placeNamespace'),id:get('placeId')}}),
+    ...(get('placeId') != null && {place:{namespace:get('placeNamespace'),id:get('placeId')}}),
     ...(get('latitude')!=null && {pin:{kind:'user',latitude:get('latitude'),longitude:get('longitude')}})
   });
 }
