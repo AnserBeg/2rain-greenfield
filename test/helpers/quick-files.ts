@@ -13,12 +13,6 @@ export function quickFiles() {
   )
     throw new Error('Missing quick CI file selection');
   const files: string[] = selected;
-  const nodeFiles = files.filter(
-    (file) =>
-      !fixedQuickFile(file) &&
-      file !== contractFile &&
-      file.endsWith('.test.ts'),
-  );
   const browserFiles = files.filter((file) => file.endsWith('.spec.ts'));
-  return { files, nodeFiles, browserFiles };
+  return { files, browserFiles };
 }

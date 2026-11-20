@@ -12,6 +12,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { quickSelection } from '../helpers/quick-ci.js';
 
 // The selector and merge gate also run on a clean checkout before pnpm install.
 function probe(module: string, expression: string, cwd = process.cwd()) {
@@ -260,5 +261,22 @@ esac
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a newly selected unit or compiler file outside the fixed argv is scheduled by name', () => {
+  const paths = [
+    'test/compiler/new.test.ts',
+    'test/unit/new.test.ts',
+    'test/architecture/new.test.ts',
+    'test/unit/request-work-meter.test.ts',
+  ];
+  const old = process.env.CI_FILES;
+  try {
+    process.env.CI_FILES = JSON.stringify(paths);
+    assert.deepEqual(quickSelection().nodeFiles, paths.slice(0, 2));
+  } finally {
+    if (old === undefined) delete process.env.CI_FILES;
+    else process.env.CI_FILES = old;
   }
 });
