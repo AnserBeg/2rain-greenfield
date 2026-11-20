@@ -1,4 +1,7 @@
 name: CI
+# GitHub assigns run-name before a diff can be read. An automatic promotion
+# dispatches a named full run and propagates its exact result to the request.
+run-name: CI ${{ (github.ref == 'refs/heads/main' || inputs.tier == 'full' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository)) && 'full' || 'quick' }} · ${{ inputs.merge_sha || github.sha }}
 
 on:
   pull_request:
@@ -6,13 +9,26 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      tier:
+        description: Packet tier (quick promotes on shared or unknown changes)
+        type: choice
+        options: [quick, full]
+        default: quick
+      expected_head:
+        description: Ref SHA bound by automatic promotion
+        type: string
+      merge_sha:
+        description: Synthetic PR merge commit bound by automatic promotion
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.ref != 'refs/heads/main' && inputs.tier || 'auto' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  queue: ${{ github.ref == 'refs/heads/main' && 'max' || 'single' }}
 
 env:
   CI: '1'
@@ -23,7 +39,58 @@ defaults:
     shell: bash
 
 jobs:
+  select:
+    name: Select CI tier and covered tests
+    runs-on: ubuntu-24.04
+    outputs:
+      tier: ${{ steps.select.outputs.tier }}
+      promote: ${{ steps.select.outputs.promote }}
+      files: ${{ steps.select.outputs.files }}
+      browser: ${{ steps.select.outputs.browser }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - id: select
+        run: node .github/scripts/ci-selection.mjs
+
+  promote:
+    name: Run full CI on the selected commit
+    needs: select
+    if: needs.select.outputs.promote == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      actions: write
+    steps:
+      # No checkout or packet code runs with the dispatch token.
+      - name: Dispatch full and follow its conclusion
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PACKET_REF: ${{ github.head_ref || github.ref_name }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          MERGE_SHA: ${{ github.event_name == 'pull_request' && github.sha || '' }}
+        run: |
+          run_id=$(gh api -X POST "repos/$GH_REPO/actions/workflows/ci.yml/dispatches" \
+            -f "ref=$PACKET_REF" -f 'inputs[tier]=full' -f "inputs[expected_head]=$EXPECTED_HEAD" \
+            -f "inputs[merge_sha]=$MERGE_SHA" -F return_run_details=true --jq .workflow_run_id)
+          [[ "$run_id" =~ ^[0-9]+$ ]]
+          echo "Full CI: https://github.com/$GH_REPO/actions/runs/$run_id" >> "$GITHUB_STEP_SUMMARY"
+          while true; do
+            state=$(gh api "repos/$GH_REPO/actions/runs/$run_id" --jq '[.status, .conclusion] | @tsv')
+            if [[ "$state" == completed$'\t'* ]]; then
+              [[ "$state" == completed$'\t'success ]]
+              break
+            fi
+            sleep 30
+          done
+
   postgres-composed:
+    needs: select
+    if: needs.select.outputs.promote == 'false' && needs.select.outputs.tier == 'full'
     name: PostgreSQL composed application
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -32,6 +99,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
       - name: Set up pinned Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -50,13 +119,16 @@ jobs:
           retention-days: 7
 
   quality:
+    needs: select
+    if: needs.select.outputs.promote == 'false'
     name: Clean install, quality, and build
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: ${{ needs.select.outputs.tier == 'quick' && 35 || 15 }}
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ inputs.merge_sha || github.sha }}
           fetch-depth: 0
       - name: Set up pinned Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -68,6 +140,8 @@ jobs:
         run: corepack pnpm install --frozen-lockfile --reporter=append-only
       - name: Begin executed-file evidence run
         run: node --import tsx test/helpers/begin-reachability-run.ts
+      - name: Check packet CI tier declarations
+        run: node scripts/check-record-ci-tier.mjs
       - name: Check formatting
         run: corepack pnpm format
       - name: Lint
@@ -85,8 +159,10 @@ jobs:
       - name: Run compiler tests
         run: corepack pnpm test:compiler
       - name: Run integration tests
+        if: needs.select.outputs.tier == 'full'
         run: corepack pnpm test:integration
       - name: Run agent tests
+        if: needs.select.outputs.tier == 'full'
         run: corepack pnpm test:agent
       - name: Run architecture and hygiene tests
         run: corepack pnpm test:architecture
@@ -95,9 +171,24 @@ jobs:
       - name: Check compiled application release freshness
         run: corepack pnpm check:app-release
       - name: Run web surface contracts
+        if: needs.select.outputs.tier == 'full' || contains(fromJSON(needs.select.outputs.files), 'apps/web/test/surface-runtime-contract.test.ts')
         run: corepack pnpm test:contracts
       - name: Check language coverage obligations
+        if: needs.select.outputs.tier == 'full'
         run: corepack pnpm check:language-coverage
+      - name: Run the selected node tests
+        if: needs.select.outputs.tier == 'quick'
+        env:
+          CI_FILES: ${{ needs.select.outputs.files }}
+        run: node --import tsx .github/scripts/run-quick-node.mjs
+      - name: Install Chromium for selected specs
+        if: needs.select.outputs.browser == 'true'
+        uses: ./.github/actions/install-chromium
+      - name: Run the selected browser specs
+        if: needs.select.outputs.browser == 'true'
+        env:
+          CI_FILES: ${{ needs.select.outputs.files }}
+        run: corepack pnpm exec bash scripts/run-suite.sh quick-browser --normalize-playwright -- playwright test --config apps/web/playwright.quick.config.ts
       - name: Retain quality executed-file evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -109,12 +200,16 @@ jobs:
             test-results/reachability/agent.json
             test-results/reachability/architecture.json
             test-results/reachability/contracts.json
+            test-results/reachability/quick-node.json
+            test-results/reachability/quick-browser.json
           if-no-files-found: error
           retention-days: 7
       - name: Check patch whitespace and repository cleanliness
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_MERGE: ${{ inputs.merge_sha }}
         run: |
+          if [[ -n "$PR_MERGE" ]]; then BASE_SHA=$(git rev-parse HEAD^1); fi
           if [[ -n "$BASE_SHA" ]]; then
             git diff --check "$BASE_SHA...HEAD"
           else
@@ -131,12 +226,16 @@ jobs:
           retention-days: 7
 
   performance:
+    needs: select
+    if: needs.select.outputs.promote == 'false' && needs.select.outputs.tier == 'full'
     name: Exclusive compiler performance budget
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
       - name: Set up pinned Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -158,6 +257,8 @@ jobs:
           retention-days: 7
 
   postgres:
+    needs: select
+    if: needs.select.outputs.promote == 'false' && needs.select.outputs.tier == 'full'
     name: PostgreSQL schema and isolation (shard ${{ matrix.shard }})
     strategy:
       fail-fast: false
@@ -169,6 +270,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ inputs.merge_sha || github.sha }}
           fetch-depth: ${{ matrix.shard == 2 && '1' || '0' }}
       - name: Set up pinned Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -219,12 +321,16 @@ jobs:
   # install the composed release in most tests, so they run beside the other
   # PostgreSQL tests, under the same bound.
   postgres-commercial:
+    needs: select
+    if: needs.select.outputs.promote == 'false' && needs.select.outputs.tier == 'full'
     name: PostgreSQL commercial workflows
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
       - name: Set up pinned Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -248,12 +354,16 @@ jobs:
   # The sales-side workflows run beside the commercial ones rather than after
   # them, under the same bound (INTEGRATION).
   postgres-sales:
+    needs: select
+    if: needs.select.outputs.promote == 'false' && needs.select.outputs.tier == 'full'
     name: PostgreSQL sales workflows
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
       - name: Set up pinned Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -277,12 +387,16 @@ jobs:
   # The inventory files run beside the other PostgreSQL tests rather than after
   # them, under the same bound (INTEGRATION).
   postgres-inventory:
+    needs: select
+    if: needs.select.outputs.promote == 'false' && needs.select.outputs.tier == 'full'
     name: PostgreSQL inventory
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
       - name: Set up pinned Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -304,12 +418,16 @@ jobs:
           retention-days: 7
 
   postgres-inventory-posting:
+    needs: select
+    if: needs.select.outputs.promote == 'false' && needs.select.outputs.tier == 'full'
     name: PostgreSQL inventory posting
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
       - name: Set up pinned Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -331,12 +449,16 @@ jobs:
           retention-days: 7
 
   browser:
+    needs: select
+    if: needs.select.outputs.promote == 'false' && needs.select.outputs.tier == 'full'
     name: Browser runner
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
       - name: Set up pinned Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -365,12 +487,16 @@ jobs:
   # apps/web/playwright.shared.ts decides which job runs a spec, by its file
   # name.
   browser-operations:
+    needs: select
+    if: needs.select.outputs.promote == 'false' && needs.select.outputs.tier == 'full'
     name: Operations browser runner
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
       - name: Set up pinned Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -397,12 +523,16 @@ jobs:
   # than after them, under the same bound (INTEGRATION: the union's operations
   # specs alone passed the 20-minute bound).
   browser-inventory:
+    needs: select
+    if: needs.select.outputs.promote == 'false' && needs.select.outputs.tier == 'full'
     name: Inventory browser runner
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
       - name: Set up pinned Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -427,12 +557,16 @@ jobs:
 
   # The composed journeys include release promotion, recovery, and replay.
   browser-composed:
+    needs: select
+    if: needs.select.outputs.promote == 'false' && needs.select.outputs.tier == 'full'
     name: Composed application browser runner
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
       - name: Set up pinned Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -467,12 +601,16 @@ jobs:
           retention-days: 7
 
   browser-customization:
+    needs: select
+    if: needs.select.outputs.promote == 'false' && needs.select.outputs.tier == 'full'
     name: Customization browser runner
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
       - name: Set up pinned Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -496,6 +634,8 @@ jobs:
           retention-days: 7
 
   browser-rules:
+    needs: select
+    if: needs.select.outputs.promote == 'false' && needs.select.outputs.tier == 'full'
     name: Customization rules browser runner
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -503,6 +643,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ inputs.merge_sha || github.sha }}
           fetch-depth: 0
       - name: Set up pinned Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -527,6 +668,8 @@ jobs:
           retention-days: 7
 
   security:
+    needs: select
+    if: needs.select.outputs.promote == 'false'
     name: Dependency and secret scans (${{ matrix.history }})
     strategy:
       fail-fast: false
@@ -538,6 +681,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ inputs.merge_sha || github.sha }}
           fetch-depth: 0
       - name: Set up pinned Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -562,12 +706,16 @@ jobs:
           retention-days: 7
 
   observability:
+    needs: select
+    if: needs.select.outputs.promote == 'false' && needs.select.outputs.tier == 'full'
     name: Observability evidence
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
       - name: Set up pinned Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -602,9 +750,14 @@ jobs:
           retention-days: 7
 
   reachability:
-    name: Executed-file reachability
-    if: ${{ !cancelled() }}
+    name: Executed-file reachability (${{ needs.select.outputs.tier }} ${{ inputs.merge_sha || github.sha }})
+    if: ${{ !cancelled() && needs.select.outputs.promote != 'true' }}
+    env:
+      CI_TIER: ${{ needs.select.outputs.tier }}
+      CI_FILES: ${{ needs.select.outputs.files }}
     needs:
+      - select
+      - promote
       - security
       - quality
       - performance
@@ -626,6 +779,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
       - name: Check required job conclusions
         env:
           CI_JOB_RESULTS: ${{ toJSON(needs) }}

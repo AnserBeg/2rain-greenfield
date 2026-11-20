@@ -410,7 +410,7 @@ test('declared unfiltered producers are wired to CI and their evidence paths', (
         readFileSync('test/helpers/prepare-reachability-evidence.ts', 'utf8'),
         /ensureReachabilityRun\(\{ repositoryRoot \}\)/u,
       );
-      assert.doesNotMatch(job, /^ {4}needs:/mu);
+      assert.match(job, /^ {4}needs: select$/mu);
     } else {
       assert.match(job, /test\/helpers\/begin-reachability-run\.ts/u);
     }
@@ -640,6 +640,14 @@ test('CI aggregates only after every evidence-producing job succeeds', () => {
     ['postgres-composed', 'success', 'failure', false],
   ] as const) {
     const jobs = {
+      ...Object.fromEntries(
+        reachabilityProducers.map((p) => [p.ciJob, { result: 'success' }]),
+      ),
+      select: {
+        result: 'success',
+        outputs: { tier: 'full', promote: 'false' },
+      },
+      promote: { result: 'skipped' },
       quality: { result: 'success' },
       security: { result: 'success' },
       postgres: { result: 'success' },

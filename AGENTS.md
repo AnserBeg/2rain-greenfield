@@ -74,12 +74,19 @@ continues. Mechanics: `mission-cadence`.
 
 - **Nothing waits for a review.** While pre-tenant (no `rulings/first-tenant.md`,
   ADR-0066's switch) a vertical merges on CI green; review reads `main` afterwards.
-- **Critical set** (by path; nobody classifies their own diff out of it):
-  `packages/postgres-provider/src/inventory-posting-service.ts`,
-  `stock-serializer.ts`, the posting trigger and rebuild in
-  `module-storage-materializer.ts`, `release-activation.ts`,
-  `release-verification-service.ts`, the trust substrate under
-  `platform-runtime/src/trust/`, `db/migrations/**`, and RLS/grant SQL.
+- **Critical set.** Git pathspecs below include the posting-trigger/rebuild container and SQL files. Also Critical is RLS/grant SQL embedded in executable files.
+
+<!-- critical-pathspecs -->
+`packages/postgres-provider/src/inventory-posting-service.ts`
+`packages/postgres-provider/src/stock-serializer.ts`
+`packages/postgres-provider/src/module-storage-materializer.ts`
+`packages/platform-runtime/src/release-activation.ts`
+`packages/postgres-provider/src/release-verification-service.ts`
+`packages/platform-runtime/src/trust/**`
+`db/migrations/**`
+`*.sql`
+<!-- end-critical-pathspecs -->
+
 - **A read is owed** — one fresh-naive Codex arm the orchestrator launches over
   the Critical diff on `main` since the last read — when that diff passes 400
   changed lines, and before a stage gate, the week-6 decision or the first tenant.
@@ -92,10 +99,8 @@ continues. Mechanics: `mission-cadence`.
 
 ## 5. Gates
 
-- **CI green at the pushed SHA is the acceptance matrix** (`.github/workflows/ci.yml`).
-  Locally run focused tests only; a heavy suite (PostgreSQL, browser, the
-  matrix) runs locally only when CI cannot answer the question, batched (owner,
-  2026-11-17: full local runs stall the machine).
+- **Packet CI** runs quick on mapped changes and full on shared or unknown paths. Request final full with `gh workflow run ci.yml --ref <candidate-ref> -f tier=full`. Before pushing main run `node scripts/check-merge-window.mjs <id> <integration-SHA>`. Main queues every full run. [CI evidence and tier mapping](docs/execution/evidence-on-demand.md).
+- Run focused tests locally. CI owns the heavy suites.
 - Integration is a `--no-ff` merge of the packet into `main`; the packet tip is
   the second parent (`check-review-record.sh` reads it). Every merge records one
   review-log row: `merged — no Critical path` or `merged — unread`.

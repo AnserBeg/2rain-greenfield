@@ -241,6 +241,12 @@ export type ReachabilityProducerId =
   (typeof reachabilityProducers)[number]['id'];
 
 export function getReachabilityProducer(id: string): ReachabilityProducer {
+  if (id === 'quick-browser')
+    return playwrightProducer(
+      id,
+      'unused',
+      'apps/web/playwright.quick.config.ts',
+    );
   const producer = reachabilityProducers.find(
     (candidate) => candidate.id === id,
   );
