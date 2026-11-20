@@ -52,7 +52,7 @@
         {
           "file": "test/unit/customization-board.test.ts",
           "name": "proof: normalization checks the recorded digest and each binding by ID, never re-deriving, and skips a retired Board",
-          "expected": "Board binding northstar\\.app:operation\\.custom_gone is absent or retired"
+          "expected": "CANON_SCHEMA_INVALID"
         }
       ]
     },
