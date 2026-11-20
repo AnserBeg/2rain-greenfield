@@ -280,3 +280,51 @@ test('a newly selected unit or compiler file outside the fixed argv is scheduled
     else process.env.CI_FILES = old;
   }
 });
+
+test('the promotion waits through an initial 404 and forwards the exact child conclusion', () => {
+  const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
+  const shell = workflow.match(
+    /- name: Follow the dispatched run\n[\s\S]*?        run: \|\n((?:          [^\n]*\n)+)/u,
+  )?.[1];
+  assert.ok(shell);
+  const dir = mkdtempSync(join(tmpdir(), 'ci-3-promotion-'));
+  const calls = join(dir, 'calls');
+  try {
+    writeFileSync(
+      join(dir, 'gh'),
+      `#!/bin/sh
+[ "$1" = api ] && [ "$2" = repos/fixture/repo/actions/runs/42 ] || exit 2
+echo read >> "$CALLS"
+[ "$(wc -l < "$CALLS")" -gt 1 ] && [ "$CHILD" != invisible ] || exit 1
+printf 'completed\\t%s\\n' "$CHILD"
+`,
+      { mode: 0o755 },
+    );
+    writeFileSync(join(dir, 'sleep'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    for (const [conclusion, exit, count] of [
+      ['success', 0, 2],
+      ['failure', 1, 2],
+      ['invisible', 1, 12],
+    ] as const) {
+      writeFileSync(calls, '');
+      const child = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', shell], {
+        env: {
+          ...process.env,
+          PATH: `${dir}:${process.env.PATH}`,
+          CALLS: calls,
+          GH_REPO: 'fixture/repo',
+          RUN_ID: '42',
+          CHILD: conclusion,
+        },
+        timeout: 5000,
+      });
+      assert.equal(child.status, exit);
+      assert.equal(
+        readFileSync(calls, 'utf8').trim().split('\n').length,
+        count,
+      );
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
