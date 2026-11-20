@@ -16,6 +16,8 @@ import {
 import { identityHandler } from '../../apps/api/src/staff-identity-http.js';
 import {
   assertPilotDatabase,
+  csrf,
+  secret,
   type StaffRealm,
 } from '../../apps/api/src/staff-protocol.js';
 import {
@@ -47,6 +49,7 @@ export function startBrowserLogin(
   prior?: string,
 ) {
   const erp = new URL(realm.erpOrigin);
+  const flow = secret();
   return new Promise<string>((resolve, reject) => {
     const req = request(
       {
@@ -55,9 +58,15 @@ export function startBrowserLogin(
         servername: erp.hostname,
         ca,
         path: '/auth/signin',
+        method: 'POST',
         headers: {
           host: erp.host,
-          ...(prior ? { cookie: '__Host-erp-session=' + prior } : {}),
+          origin: realm.erpOrigin,
+          'content-type': 'application/x-www-form-urlencoded',
+          cookie:
+            '__Host-erp-flow=' +
+            flow +
+            (prior ? '; __Host-erp-session=' + prior : ''),
         },
       },
       (res) => {
@@ -71,7 +80,7 @@ export function startBrowserLogin(
       },
     );
     req.on('error', reject);
-    req.end();
+    req.end(new URLSearchParams({ _csrf: csrf(flow) }).toString());
   });
 }
 
@@ -181,11 +190,13 @@ export async function withStaffBrowser<T>(
         await assertPilotDatabase(idPool, 'north_star_identity', r);
         const identity = new StaffIdentity(idPool, r, randomBytes(32));
         id.on('request', identityHandler(identity));
+        const rateKey = randomBytes(32);
         const instances = [];
         for (let i = 0; i < 2; i++) {
           const pilot = await createPilotApplication({
             runtimeDatabaseUrl: db('north_star_runtime'),
             realm: r,
+            rateKey,
             identityCa: tls.cert,
           });
           cleanup.push(pilot.close);

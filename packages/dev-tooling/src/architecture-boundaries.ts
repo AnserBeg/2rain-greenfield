@@ -429,14 +429,31 @@ function scanPlainAuthorityViolations(
     'source declares writable inventory balance state',
     /\b(?:currentQuantity|writableInventoryBalance|setInventoryBalance|patchInventoryBalance)\b/g,
   );
-  addPatternViolations(
-    violations,
-    repoPath,
-    source,
-    'AUTH006_HARD_DELETE',
-    'source declares an ordinary hard-delete path',
-    /\b(?:hardDeleteBusinessRecord|physicalDeleteBusinessRecord|purgeBusinessData)\b|\bDELETE\s+FROM\b/gi,
-  );
+  // Login transactions hold five-minute browser verifiers. Only their scoped
+  // retention statement and its generated schema definition may delete rows.
+  const loginRetention =
+    /^db\/migrations\/\d{4}_staff_login_creation\.sql$/u.test(repoPath) ||
+    repoPath === 'db/schema.snapshot.json';
+  const ordinaryDeletes =
+    /\b(?:hardDeleteBusinessRecord|physicalDeleteBusinessRecord|purgeBusinessData)\b|\bDELETE\s+FROM\b/gi;
+  for (const match of source.matchAll(ordinaryDeletes)) {
+    if (
+      loginRetention &&
+      source.startsWith(
+        'DELETE FROM platform.staff_login_transactions WHERE binding IN (',
+        match.index,
+      )
+    )
+      continue;
+    addViolation(
+      violations,
+      repoPath,
+      source,
+      match.index,
+      'AUTH006_HARD_DELETE',
+      'source declares an ordinary hard-delete path: ' + match[0],
+    );
+  }
   addPatternViolations(
     violations,
     repoPath,
