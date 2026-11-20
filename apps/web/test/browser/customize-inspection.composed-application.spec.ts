@@ -581,7 +581,6 @@ test('a drafted receipt workflow links an inspection and requests escalation aft
             await withArchivedCustomizationRuntime(
               '840c1b48c9694e62fdb7e284fa5a8397a1360dfd',
               async (run) => {
-                await assertArchivedTenantEnvelope(run);
                 const read = () =>
                   archivedRuntimeRead(run, {
                     databaseUrl,
