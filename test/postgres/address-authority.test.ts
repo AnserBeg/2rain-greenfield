@@ -314,6 +314,27 @@ test(
           );
 
           await t.test(
+            'outside a store claimed for the local demo, enabling a provider refuses',
+            async () => {
+              // SIGNIN-1 slice 2b's passkey proof joins platform.address_configure.
+              await pool.query(
+                "UPDATE north_star_internal.staff_store_mode SET mode='pilot'",
+              );
+              try {
+                await assert.rejects(
+                  configure(COMPANY, 'dispatch'),
+                  AddressProviderError,
+                  'a provider was enabled outside a store claimed for the local demo',
+                );
+              } finally {
+                await pool.query(
+                  "UPDATE north_star_internal.staff_store_mode SET mode='demo'",
+                );
+              }
+            },
+          );
+
+          await t.test(
             'a non-manager buyer locates, reads pins and gets suggestions',
             async () => {
               const item = await newItem('Buyer site');

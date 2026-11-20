@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
+import { applicationWithoutLineCreateValues } from '../helpers/application-without-line-create-values.js';
 
 import {
   openCustomizeService,
@@ -27,6 +28,7 @@ test(
         const options = {
           databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
           tenantSlug: 'customize-relation-guard',
+          compiledApplication: applicationWithoutLineCreateValues().release,
         };
         const app = await startComposedApplication({ ...options, port: 0 });
         const opened = await openCustomizeService(options);

@@ -22,6 +22,7 @@ const invoiceLines = child(
   'customer_invoice_line_invoice',
 );
 const billLines = child('vendor_bill_line', 'vendor_bill_line_bill');
+const countLines = child('stock_count_line', 'stock_count_line_session');
 const reads: Record<string, readonly ChildRead[]> = {
   goods_receipt_post: [
     child('goods_receipt_line', 'goods_receipt_line_receipt'),
@@ -32,6 +33,11 @@ const reads: Record<string, readonly ChildRead[]> = {
       'inventory_transaction_line_transaction',
     ),
   ],
+  stock_count_start: [countLines],
+  stock_count_review: [countLines],
+  stock_count_post: [countLines],
+  stock_count_reopen: [],
+  stock_count_cancel: [],
   shipment_post: [child('shipment_line', 'shipment_line_shipment')],
   purchase_order_submit: [purchaseLines, approvals],
   purchase_order_release: [purchaseLines, approvals],

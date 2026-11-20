@@ -25,6 +25,26 @@ async function main() {
   };
   validateRealm(realm);
   check(!process.env.NORTH_STAR_LOCAL_DEMO_IDENTITY);
+  if (mode === 'decisions' || mode === 'activate') {
+    const pool = new pg.Pool({
+      connectionString: setting('STAFF_ACTIVATION_DATABASE_URL'),
+      max: 2,
+    });
+    try {
+      const { runDecisionVerifier } = await import('./staff-decisions.js');
+      const attempt = process.argv[3];
+      if (mode === 'activate') check(attempt);
+      const outcomes = await runDecisionVerifier(
+        pool,
+        realm,
+        mode === 'activate' ? attempt : undefined,
+      );
+      process.stdout.write(JSON.stringify(outcomes) + '\n');
+    } finally {
+      await pool.end();
+    }
+    return;
+  }
   if (mode === 'bootstrap' || mode === 'recover-owner') {
     const { bootstrapStaff } = await import('./staff-identity.js');
     const name = setting('STAFF_OWNER_NAME'),

@@ -10,6 +10,8 @@ Slice 0 established [ADR-0080](../../decisions/ADR-0080-connector-framework.md) 
 4. CI selects the deterministic fake even when the configuration requests Google. Google static imagery remains disabled under ADR-0080. User-entered coordinates and company-owned provider coordinates have separate lifetimes.
 5. ADR-0085 replay admission for both patch kinds has a named test in `test/unit/customization.test.ts`. It replays across a compatible base change and refuses field-label and map-section conflicts. UPGRADE-2 owns the shared allowlist inventory.
 
+SIGNIN-1 slice 2b opens when the canonical pending connection and send records and their writers land. Outside the local demo, provider enablement must go through a proof-gateable function with no runtime table-write grant.
+
 ## Gates and controls
 
 - [Prerequisite CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44728026806) exercised Party posting after an ordinary custom text field and PostgreSQL coordinate bounds and precision.
@@ -19,13 +21,13 @@ Slice 0 established [ADR-0080](../../decisions/ADR-0080-connector-framework.md) 
 
 ## Slice 1 fix round (2026-11-20 review of `032b87c0`, verdict REVISE)
 
-Migration `0055_address_connector_authority.sql` revokes every runtime grant on the four address tables; scoped SECURITY DEFINER functions take tenant, environment and principal from the trusted context and check company membership live.
-- **Join point:** `platform.address_configure` is the single entry point that enables, reconfigures, switches or pauses a provider. It requires `northstar.runtime:permission.connector_configure` on `northstar.runtime:connector.address`, live and in a membership covering the company (the local demo grants it to the manager). SIGNIN-1 slice 2b adds its passkey decision proof there, outside the local demo.
+Migration `0056_address_connector_authority.sql` revokes every runtime grant on the four address tables; scoped SECURITY DEFINER functions take tenant, environment and principal from the trusted context and check company membership live.
+- **Join point:** `platform.address_configure` is the single entry point that enables, reconfigures, switches or pauses a provider. It requires `northstar.runtime:permission.connector_configure` on `northstar.runtime:connector.address`, live and in a membership covering the company (the local demo grants it to the manager), and refuses unless the store is claimed for the local demo; no store mode grants a direct table write any more. SIGNIN-1 slice 2b adds its passkey decision proof there, outside the local demo.
 - Any member reads its company's installation, so a buyer locates, sees pins and gets suggestions. A pin matches record, field, revision and installation, never the current release fence; a retired field has no binding.
 - One installation per company and provider account: pausing, re-enabling and switching back keep its quota and key-file identity. Configure takes the company's advisory lock, then its rows `FOR UPDATE`; a replaced installation is recorded `paused`.
 - `platform.address_sweep` scrubs expired provider coordinates (30 days) in batches, `SKIP LOCKED`, under a READ COMMITTED guard; the demo worker runs it each tick.
 - Reader 32 refuses through this tree's production loader capped at 31 (`withArchivedCustomizationRuntime` prepare hook); the loader's Address agreement is `addressProjectionRefusal`, one comparator per line.
-- Controls: 28 entries in `test/evidence/CONNECT-1.expected-red.json`, one per guard, mostly in `test/postgres/address-authority.test.ts` (one subtest each).
+- Controls: 29 entries in `test/evidence/CONNECT-1.expected-red.json`, one per guard, mostly in `test/postgres/address-authority.test.ts` (one subtest each).
 
 ## Test it yourself
 

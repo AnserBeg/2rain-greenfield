@@ -65,7 +65,7 @@ test('migrations upgrade accepted G1 and converge with the checked-in snapshot',
     const migrations = await loadMigrations(checkedInMigrations);
     assert.equal(
       migrations.at(-1)?.name,
-      '0055_address_connector_authority.sql',
+      '0056_address_connector_authority.sql',
     );
     const admin = await pool.connect();
     try {
@@ -131,7 +131,8 @@ test('migrations upgrade accepted G1 and converge with the checked-in snapshot',
         '0052_address_connectors.sql',
         '0053_booking_authority.sql',
         '0054_workflow_retry_authority.sql',
-        '0055_address_connector_authority.sql',
+        '0055_staff_decision_proofs.sql',
+        '0056_address_connector_authority.sql',
       ]);
       assert.equal(upgraded.verified.length, migrations.length);
       await assertSchemaMatchesSnapshot(admin, checkedInSnapshot);

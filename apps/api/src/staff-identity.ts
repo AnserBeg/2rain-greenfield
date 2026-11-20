@@ -50,17 +50,55 @@ export async function scoped<T>(
 }
 
 type Action =
-  'signin' | 'invite' | 'recover' | 'deactivate' | 'spare' | 'revoke-key';
+  | 'decision'
+  | 'signin'
+  | 'invite'
+  | 'recover'
+  | 'deactivate'
+  | 'spare'
+  | 'revoke-key';
 interface Intent {
   action: Action;
+  decision?: DecisionSelection;
+  reviewed?: string;
   sessionDigest?: string;
   name?: string;
   contact?: string;
   subject?: string;
   reason?: string;
 }
+interface DecisionSelection {
+  kind: 'release' | 'customize' | 'retry';
+  company: string | null;
+  targets: string[];
+}
+function selection(input: Record<string, unknown>): DecisionSelection {
+  const { kind, company, targets } = input;
+  const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iu;
+  check(kind === 'release' || kind === 'customize' || kind === 'retry');
+  check(
+    company === null || (typeof company === 'string' && uuid.test(company)),
+  );
+  check(
+    Array.isArray(targets) &&
+      targets.length > 0 &&
+      targets.length <= 32 &&
+      targets.every((id: unknown) => typeof id === 'string' && uuid.test(id)),
+  );
+  return { kind, company, targets: targets as string[] };
+}
 function intentFrom(input: Record<string, unknown>): Intent {
   switch (input.action) {
+    case 'decision':
+      check(
+        typeof input.reviewed === 'string' &&
+          /^[a-f0-9]{64}$/u.test(input.reviewed),
+      );
+      return {
+        action: 'decision',
+        decision: selection(input),
+        reviewed: input.reviewed,
+      };
     case 'signin':
     case 'spare':
       return { action: input.action };
@@ -365,6 +403,64 @@ export class StaffIdentity {
     );
     check(result.rows[0]?.allowed);
   }
+  async receipt(reference: unknown, identity: string) {
+    return this.scoped(
+      async (c) =>
+        (
+          await c.query<{ receipt: unknown }>(
+            'SELECT platform.staff_read_decision_receipt($1,$2,$3,$4) AS receipt',
+            [
+              this.realm.tenantId,
+              this.realm.environmentId,
+              digest(identity),
+              field(reference, 36),
+            ],
+          )
+        ).rows[0]!.receipt,
+    );
+  }
+  async choices(identity: string) {
+    return this.scoped(
+      async (c) =>
+        (
+          await c.query<{
+            kind: string;
+            target: string;
+            company: string | null;
+            label: string;
+          }>('SELECT * FROM platform.staff_review_choices($1,$2,$3)', [
+            this.realm.tenantId,
+            this.realm.environmentId,
+            digest(identity),
+          ])
+        ).rows,
+    );
+  }
+  async review(input: Record<string, unknown>, identity: string) {
+    const { company, kind, targets } = selection(input);
+    return this.scoped(
+      async (client) =>
+        (
+          await client.query<{ terms: unknown; digest: string }>(
+            {
+              release:
+                'SELECT * FROM platform.staff_review_release($1,$2,$3,$4,$5)',
+              customize:
+                'SELECT * FROM platform.staff_review_customize($1,$2,$3,$4,$5)',
+              retry:
+                'SELECT * FROM platform.staff_review_retry($1,$2,$3,$4,$5)',
+            }[kind],
+            [
+              this.realm.tenantId,
+              this.realm.environmentId,
+              digest(identity),
+              company,
+              targets,
+            ],
+          )
+        ).rows[0]!,
+    );
+  }
   async begin(
     browser: string,
     input: Record<string, unknown>,
@@ -378,6 +474,12 @@ export class StaffIdentity {
       check(identity);
       await this.account(identity);
       intent.sessionDigest = digest(identity).toString('hex');
+    }
+    if (intent.action === 'decision') {
+      check(
+        identity &&
+          (await this.review(input, identity)).digest === intent.reviewed,
+      );
     }
     const binding =
       intent.action === 'signin' && !token
@@ -602,6 +704,25 @@ export class StaffIdentity {
             )
           ).rowCount,
         );
+        if (tx.intent.action === 'decision') {
+          const choice = tx.intent.decision;
+          check(choice && tx.intent.reviewed);
+          const issued = await c.query<{ proof: string }>(
+            'SELECT platform.staff_issue_decision($1,$2,$3,$4,$5,$6,$7,$8,$9) AS proof',
+            [
+              this.realm.tenantId,
+              this.realm.environmentId,
+              digest(oldIdentity),
+              actor,
+              choice.company,
+              choice.kind,
+              choice.targets,
+              tx.intent.reviewed,
+              tx.expires_at,
+            ],
+          );
+          return { proof: issued.rows[0]!.proof };
+        }
         return this.manage(c, actor, reply.id, tx.intent);
       }
       check(tx.application_binding);

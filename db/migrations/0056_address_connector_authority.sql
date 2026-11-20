@@ -19,6 +19,45 @@ DROP FUNCTION platform.address_company_access(uuid,uuid,uuid,boolean);
 REVOKE ALL ON platform.address_installations, platform.address_installation_history,
   platform.address_quota, platform.address_geocodes FROM PUBLIC, north_star_runtime;
 
+-- SIGNIN-1's store writers without any address grant: no store mode grants a
+-- direct connector write. platform.address_configure checks the demo claim.
+-- A pilot still gives release approval and activation to the independent verifier.
+CREATE OR REPLACE FUNCTION north_star_internal.staff_configure_store_writers(store_mode text) RETURNS void
+LANGUAGE plpgsql SET search_path=pg_catalog,pg_temp AS $$ DECLARE
+  kernel_table regclass; policy_name name; BEGIN
+  IF store_mode IS DISTINCT FROM 'pilot' THEN RETURN; END IF;
+  REVOKE INSERT ON platform.release_approvals,platform.release_activation_attempts,platform.release_activation_phase_receipts,
+    platform.release_activation_history,platform.release_activation_swap_receipts,platform.release_activation_attempt_outcomes,
+    platform.release_activation_outbox,platform.release_activation_verification_receipts,platform.release_activation_reconciliation_starts,
+    platform.release_activation_reconciliation_alarms,platform.customization_patches FROM north_star_runtime;
+  REVOKE UPDATE ON platform.active_release_pointers FROM north_star_runtime;
+  REVOKE EXECUTE ON FUNCTION platform.workflow_decide_approval(uuid,integer,bigint,text,text) FROM north_star_runtime;
+  GRANT INSERT ON platform.release_approvals,platform.release_activation_attempts,platform.release_activation_phase_receipts,
+    platform.release_activation_history,platform.release_activation_swap_receipts,platform.release_activation_attempt_outcomes,
+    platform.release_activation_outbox,platform.release_activation_verification_receipts,platform.release_activation_reconciliation_starts,
+    platform.release_activation_reconciliation_alarms TO north_star_activation_verifier;
+  GRANT UPDATE (release_id,fence) ON platform.active_release_pointers TO north_star_activation_verifier;
+  -- Activation uses the existing tenant and environment policies on these kernel
+  -- records. Sharing their predicates preserves the scope on retries and recovery.
+  FOREACH kernel_table IN ARRAY ARRAY[
+    'north_star_internal.module_storage_catalog_receipts','north_star_internal.module_storage_generations',
+    'platform.active_release_pointers','platform.app_package_revisions','platform.fresh_tenant_install_evidence',
+    'platform.fresh_tenant_intermediate_release_admissions','platform.release_activation_attempt_outcomes',
+    'platform.release_activation_attempts','platform.release_activation_authority_epochs','platform.release_activation_control_events',
+    'platform.release_activation_history','platform.release_activation_outbox','platform.release_activation_phase_receipts',
+    'platform.release_activation_preparations','platform.release_activation_reconciliation_alarms',
+    'platform.release_activation_reconciliation_starts','platform.release_activation_swap_receipts',
+    'platform.release_activation_verification_receipts','platform.release_approvals','platform.release_approver_eligibility_events',
+    'platform.release_executor_authority_events','platform.tenant_release_admissions','platform.tenant_releases',
+    'platform.transition_preparation_receipts']::regclass[] LOOP
+    EXECUTE format('GRANT SELECT ON %s TO north_star_activation_verifier',kernel_table);
+    FOR policy_name IN SELECT polname FROM pg_policy WHERE polrelid=kernel_table
+      AND polroles=ARRAY['north_star_runtime'::regrole::oid]
+      AND (polcmd='r' OR (polcmd='a' AND has_table_privilege('north_star_activation_verifier',kernel_table,'INSERT'))
+           OR (polcmd='w' AND has_any_column_privilege('north_star_activation_verifier',kernel_table,'UPDATE'))) LOOP
+      EXECUTE format('ALTER POLICY %I ON %s TO north_star_runtime,north_star_activation_verifier',policy_name,kernel_table); END LOOP; END LOOP; END $$;
+REVOKE ALL ON FUNCTION north_star_internal.staff_configure_store_writers(text) FROM PUBLIC;
+
 -- The sweeper scrubs expired provider coordinates and records why.
 ALTER TABLE platform.address_geocodes DROP CONSTRAINT address_geocodes_reason_check,
   ADD CONSTRAINT address_geocodes_reason_check CHECK (reason IN
@@ -106,6 +145,9 @@ DECLARE
   IF tenant IS NULL OR environment IS NULL OR principal IS NULL
      OR NOT north_star_internal.address_may_configure(scope_company) THEN
     RAISE EXCEPTION 'address.configureDenied' USING ERRCODE = '42501'; END IF;
+  -- Until SIGNIN-1 slice 2b, only a store claimed for the local demo may enable.
+  IF NOT EXISTS (SELECT FROM north_star_internal.staff_store_mode WHERE mode = 'demo') THEN
+    RAISE EXCEPTION 'address.configureNeedsDecisionProof' USING ERRCODE = '42501'; END IF;
   PERFORM pg_advisory_xact_lock(hashtextextended(
     'north_star.address_installation:' || tenant || ':' || environment || ':' || scope_company, 0));
   SELECT i.installation_id INTO current_id FROM platform.address_installations i
