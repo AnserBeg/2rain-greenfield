@@ -25,7 +25,7 @@ The pop-up regression uses a running server and HTML form posts. Opening two ite
 The purchase-order button inherits the approval gate. Its review shows the fixed supplier reference. Editing invalidates the previous confirmation and the current confirmation invokes Place order.
 Restricting Item update removes the offer from the record and the assistant, blocks a new binding and refuses a submitted action ID. A historical binary loads the original release and refuses the declaring release. The tenant compiler reproduces the complete envelope without the declaration.
 The named addPopupActionRevision replay in customization.test.ts accepts a field label change on the new base and refuses a changed target Task contract. Admission also checks the operation binding and the advertised Surface floor.
-Declaring releases require reader 34, after Board views at 33. The tenant Cabinet test opens a page without a base Task, reviews a record-sourced value and checks the exact update received by the gateway.
+Reader 34 serves the original release and refuses pop-ups at 35. The tenant Cabinet test reviews a record-sourced value and checks the exact gateway update. The UPGRADE-2 allowlist fixture replays a compatible base and identifies a retired tenant target.
 
 **Try it yourself.** In Customize, choose **Add a record button**, select the item update, name it **Edit item note** and set Description to **Ask the person**. Draft, approve and activate it. Open an item, choose **Custom actions → Edit item note**, change the description and save. Refresh the item to see the saved text. The same steps work with JavaScript disabled.
 
@@ -33,18 +33,19 @@ Declaring releases require reader 34, after Board views at 33. The tenant Cabine
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "UI-COMPOSE-1",
-  "base": "8e3603b8e734a14ed350f2f2f7f64d1e2b034eb7",
-  "head": "a77a6efd2fcb9b37f10ed8919b0e103572a1cd58",
+  "base": "faf1b947c95c86403c838fcdbc0ff337d988c684",
+  "head": "f7ce0c39d7dd432b3e254c69b55c064875a95aad",
   "changedPaths": [
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/surface-composition.ts",
     "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts", "packages/canonical-model/src/popup-actions.ts",
     "packages/canonical-model/src/schemas.ts", "packages/canonical-model/src/surface-workspace.ts", "packages/compiler/src/projections.ts",
     "packages/customization/src/ai-draft.ts", "packages/customization/src/apply.ts", "packages/customization/src/patch.ts",
     "packages/customization/src/popup-revision.ts", "packages/customization/src/render.ts", "packages/customization/src/targets.ts",
-    "packages/operations-agent/src/session.ts", "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/popup-admission.ts",
-    "packages/postgres-provider/src/release-repository.ts", "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/runtime/src/popup-actions.ts",
-    "packages/runtime/src/request-runtime-view.ts", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/integration/surface-data-binding.test.ts",
-    "test/postgres/customization-validation.test.ts", "test/postgres/request-runtime-view.test.ts", "test/unit/customization.test.ts"
+    "packages/customization/src/upgrade-diagnostics.ts", "packages/customization/src/upgrade-replay.ts", "packages/operations-agent/src/session.ts",
+    "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/popup-admission.ts", "packages/postgres-provider/src/release-repository.ts",
+    "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/runtime/src/popup-actions.ts", "packages/runtime/src/request-runtime-view.ts",
+    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/integration/surface-data-binding.test.ts", "test/postgres/customization-validation.test.ts",
+    "test/postgres/request-runtime-view.test.ts", "test/unit/customization-upgrade.test.ts", "test/unit/customization.test.ts"
   ],
   "symbols": [
     {"path":"packages/canonical-model/src/popup-actions.ts","name":"resolvePopup"},
