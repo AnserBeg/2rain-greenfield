@@ -1,4 +1,5 @@
 import process from 'node:process';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { URL } from 'node:url';
 
@@ -26,6 +27,7 @@ export default async function* nodeTestEvidenceReporter(source) {
   const argv = process.argv.slice(1);
 
   const counts = new Map();
+  const durations = new Map();
   // One authority with the expected-red reporter. The ledger decides
   // creditability from the event stream — a file that reported zero executed
   // tests cannot then contribute a synthetic pass — rather than from the shape
@@ -34,8 +36,9 @@ export default async function* nodeTestEvidenceReporter(source) {
   let suiteSucceeded;
   for await (const event of source) {
     executed.observe(event);
-    if (event.type === 'test:summary' && event.data.file === undefined) {
-      suiteSucceeded = event.data.success;
+    if (event.type === 'test:summary') {
+      if (event.data.file === undefined) suiteSucceeded = event.data.success;
+      else durations.set(resolve(event.data.file), event.data.duration_ms);
     }
   }
   for (const { file } of executed.credited()) {
@@ -50,7 +53,11 @@ export default async function* nodeTestEvidenceReporter(source) {
     runner: 'node:test',
     suiteSucceeded: suiteSucceeded === true,
     files: [...counts]
-      .map(([path, realResultCount]) => ({ path, realResultCount }))
+      .map(([path, realResultCount]) => ({
+        path,
+        realResultCount,
+        durationMs: durations.get(path),
+      }))
       .sort((left, right) => left.path.localeCompare(right.path)),
   };
   yield `${JSON.stringify(evidence, null, 2)}\n`;
