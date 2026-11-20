@@ -1,43 +1,49 @@
 # CONNECT-1 — company connectors for addresses, maps and email
 
-Slice 0 is the docs-only design amended after Fable’s read. The orchestrator authorized slice 1.
-Critical paths touched by CONNECT-1 in this slice are empty.
+Slice 0 established [ADR-0080](../../decisions/ADR-0080-connector-framework.md) after Fable’s read. Slice 1 implements Address and Maps. Email remains slice 2 and depends on DOCS-1 and N2-03.
 
-## Design claims and decisions
+## Claims and decisions
 
-1. A company enables an account-scoped installation. A release binds typed operations,
-   inbound mappings and health checks. Only the host resolves credentials and calls providers.
-2. The trust outbox links the business commit to one delivery intent per effect. Reconciliation
-   handles an unknown outcome after provider acceptance. Verified inbound events invoke
-   scoped Semantic Operations under stable keys.
-3. A worker can save typed address text during an outage. A later pin must match the current
-   address revision. Email confirmation binds recipients and an exact DOCS-1 version.
-4. Address and email each take the next implemented surface rung at merge, per DOCS-1's ruling.
-   A deploy must support every patch parser and surface floor already used by a tenant.
-5. The charter named ADR-0076. Main uses it for cross-field validation, CUSTOMIZE-3 uses
-   ADR-0077, DOCS-1 uses ADR-0078 and UI-COMPOSE-1 uses ADR-0079. Connectors take ADR-0080.
+1. A business user adds one Address field and places its map on an eligible office or tenant-authored record. An address requires surface reader 31 and a separate map placement requires 32.
+2. The ADR-0080 storage amendment keeps one logical ID over existing text and `numeric(11,8)` columns. Text, user coordinates, revision, status and source digest commit together. Retirement withdraws its connector and map while retaining its columns. Rollback hides the field, and reactivation restores its value. An invalid manual pin leaves both text and coordinates intact.
+3. A host worker resolves an enabled company installation, delivers an outbox intent after save and rechecks the active release, record, address revision, source digest and installation after provider I/O. Only the current company’s unexpired enrichment supplies a provider pin.
+4. CI selects the deterministic fake even when the configuration requests Google. Google static imagery remains disabled under ADR-0080. User-entered coordinates and company-owned provider coordinates have separate lifetimes.
+5. ADR-0085 replay admission for both patch kinds has a named test in `test/unit/customization.test.ts`. It replays across a compatible base change and refuses field-label and map-section conflicts. UPGRADE-2 owns the shared allowlist inventory.
 
-## Slices and gates
+## Gates and controls
 
-0. Amended ADR-0080, including the sign-in gate and measured first-party and tenant absence parity.
-1. Address and Maps on an office record and a tenant-authored record, including delayed
-   geocoding and provider failure. CI uses deterministic fakes.
-2. Email through the same contract. The document action depends on DOCS-1 and N2-03.
-   N2-04 exercises retries, duplicates, bounces, secrets, replay and recovery with a fake.
-
-Slice 1 scope needs an orchestrator ruling. The current patch writer accepts Party and refuses
-Goods Receipt and Purchase Order Line with `CUSTOMIZE_TARGET_IN_TIER_B_DEPENDENCY_SET`.
-[ADR-0079](../../decisions/ADR-0079-form-and-record-composition.md#slots-and-section-identity) excludes their sections. The charter also requests addresses on any record type.
+- [Prerequisite CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44728026806) exercised Party posting after an ordinary custom text field and PostgreSQL coordinate bounds and precision.
+- [Packet CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44762142200) at `ba16020e` covers the checked-in first-party release, the historical tenant envelope, prior-reader refusal, refused types, schema replay and the application suites.
+- [PostgreSQL and mutation controls](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44761638148) exercise outage save, late edits, installation replacement, release rollback and two enabled companies reading one shared record. The controls are `late-address-response` and `shared-record-company-pin`.
+- Critical paths include release verification and migration 0052 with connector RLS and grants. The unread Critical diff exceeds 400 lines and the orchestrator owes the trunk read.
 
 ## Test it yourself
 
-Run `scripts/check-records.sh` at the repository root and expect exit status zero.
-Open [ADR-0080](../../decisions/ADR-0080-connector-framework.md) and trace three cases.
+In the local demo as Manager, open `/?customize=address`, enable **Demo Maps** for a company and leave **Locate saved addresses** checked. Under **Customize**, draft, approve and activate a new address field on Item, then a map placement on its record page. Save an address on an item and reopen it to see its pin.
+For the outage and delayed-response cases, run `node --import tsx --test test/postgres/address-connector.test.ts` with Docker available.
 
-- Save address A during an outage, edit it to B and let A's result arrive. B remains
-  the saved address and only B's result can supply its pin.
-- Compare the two roots in the ADR’s absence probe. The tenant release used the isolated runner.
-- Stop the sender after provider acceptance. Recovery uses the original key within its
-  safe window, or holds the send for reconciliation when acceptance cannot be determined.
-- Deliver the same signed bounce twice. Both acknowledgements refer to one captured event
-  and one scoped message transition.
+```record-claim
+{
+  "schemaVersion": "northstar.record-claim/v1", "packet": "CONNECT-1",
+  "base": "eda6d12ffc4d38ba84146b712c3bbeed1eabb729", "head": "ba16020e957550a0f39e789064aa1b4046398071",
+  "changedPaths": [
+    "apps/api/src/composition-root.ts", "apps/web/src/address-context.ts", "apps/web/src/address-field.ts", "apps/web/src/address-settings.ts",
+    "apps/web/src/app-server.ts", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/document-editor.ts",
+    "apps/web/src/list-declaration.ts", "apps/web/src/surface-client.ts", "apps/web/src/surface-composition.ts", "apps/web/src/surface-contract.ts",
+    "apps/web/src/surface-runtime.ts", "db/migrations/0052_address_connectors.sql", "db/schema.snapshot.json", "package.json",
+    "packages/canonical-model/src/address.ts", "packages/canonical-model/src/formula-validation-bindings.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/normalize.ts",
+    "packages/canonical-model/src/schemas.ts", "packages/compiler/src/address.ts", "packages/compiler/src/compiler.ts", "packages/compiler/src/diff.ts",
+    "packages/compiler/src/formula-validation-examples.ts", "packages/compiler/src/projections.ts", "packages/compiler/src/protocol.ts", "packages/compiler/src/storage.ts",
+    "packages/customization/src/apply.ts", "packages/customization/src/patch.ts", "packages/postgres-provider/package.json", "packages/postgres-provider/src/address-geocodes.ts",
+    "packages/postgres-provider/src/address-provider.ts", "packages/postgres-provider/src/address-storage.ts", "packages/postgres-provider/src/composed-application-runtime.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts",
+    "packages/postgres-provider/src/release-verification-service.ts", "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/postgres-provider/src/serving-gateways.ts", "packages/runtime/src/address-gateway.ts",
+    "packages/runtime/src/formula-validation.ts", "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-operation-gateway.ts", "packages/runtime/src/semantic-query-gateway.ts",
+    "pnpm-lock.yaml", "test/architecture/release-persistence-boundary.test.ts", "test/architecture/repository-hygiene.test.ts", "test/architecture/tenant-completeness.manifest.json",
+    "test/architecture/tenant-completeness.test.ts", "test/evidence/CONNECT-1.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/reachability-producers.ts",
+    "test/integration/field-kind-round-trip.test.ts", "test/postgres/address-connector.test.ts", "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts",
+    "test/postgres/module-storage-transition.test.ts", "test/postgres/request-runtime-view.test.ts", "test/postgres/trust-substrate.test.ts", "test/unit/address-connector.test.ts",
+    "test/unit/customization.test.ts"
+  ],
+  "symbols": [{"path":"packages/compiler/src/address.ts","name":"compileAddressBindings"},{"path":"packages/postgres-provider/src/address-storage.ts","name":"readAddress"}]
+}
+```

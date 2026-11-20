@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 
 import {
+  CanonicalIdSchema,
+  ADDRESS_COMPONENTS,
+  addressComponents,
+  addressColumnId,
   languageHasMaterializedStateFields,
   type NormalizedApplicationPackage,
 } from '@north-star/canonical-model';
@@ -702,8 +706,9 @@ export function lowerStorageTargetV1(
           column,
         ]),
       );
-      const columns = (fieldsByEntity.get(entity.entityId) ?? []).map(
-        (field) => {
+      const columns = (fieldsByEntity.get(entity.entityId) ?? [])
+        .flatMap(storageFields)
+        .map((field) => {
           const previousColumn = previousColumns.get(field.fieldId);
           const deferRequiredTightening =
             field.presence === 'required' &&
@@ -720,8 +725,7 @@ export function lowerStorageTargetV1(
               ? 'uuid'
               : undefined,
           );
-        },
-      );
+        });
       const resolveMatchFieldIds = new Set<string>(
         (queriesByEntity.get(entity.entityId) ?? []).flatMap((query) =>
           query.queryType === 'resolve'
@@ -1734,6 +1738,11 @@ export function buildStorageTransitionEnvelope(
   candidate: StorageTargetPayloadV1,
   binding: TransitionBinding,
 ): StorageTransitionEnvelope | { diagnostic: CompilerDiagnostic } {
+  const sourceFields = new Map<string, Field>(
+    packageRevision.fields
+      .flatMap(storageFields)
+      .map((field) => [field.fieldId, field]),
+  );
   const previousEntities = new Map(
     previous.entities.map((entity) => [entity.entityId, entity]),
   );
@@ -1904,9 +1913,7 @@ export function buildStorageTransitionEnvelope(
     }
     for (const [fieldId, field] of newFields) {
       const oldField = oldFields.get(fieldId);
-      const sourceField = packageRevision.fields.find(
-        (entry) => entry.fieldId === fieldId,
-      )!;
+      const sourceField = sourceFields.get(fieldId)!;
       if (
         oldField &&
         oldField.shapeFingerprint !== field.shapeFingerprint &&
@@ -2679,6 +2686,8 @@ export function validateStorageRendererStatements(
 }
 
 export function postgresqlTypeFor(fieldType: FieldType): string {
+  if (fieldType.kind === 'addressFieldType')
+    throw new Error('Lower the logical Address to its scalar fields first.');
   switch (fieldType.kind) {
     case 'booleanFieldType':
       return 'boolean';
@@ -2708,6 +2717,33 @@ function isUnicodeFoldableField(field: Field): boolean {
     field.fieldType.kind === 'textFieldType' ||
     field.fieldType.kind === 'enumFieldType'
   );
+}
+
+function storageFields(field: Field): Field[] {
+  if (field.fieldType.kind !== 'addressFieldType') return [field];
+  const schemaVersion = field.fieldType.schemaVersion;
+  return addressComponents.map((component) => ({
+    ...field,
+    fieldId: CanonicalIdSchema.parse(addressColumnId(field.fieldId, component)),
+    presence: component === 'text' ? field.presence : 'optional',
+    defaultSemantics:
+      component === 'text' ? field.defaultSemantics : 'nullable',
+    searchable: false,
+    fieldType:
+      component === 'latitude' || component === 'longitude'
+        ? {
+            kind: 'exactDecimalFieldType',
+            precision: 11,
+            scale: 8,
+            representation: 'canonicalString',
+            schemaVersion,
+          }
+        : {
+            kind: 'textFieldType',
+            maximumLength: ADDRESS_COMPONENTS[component],
+            schemaVersion,
+          },
+  }));
 }
 
 function lowerColumn(
@@ -2773,6 +2809,10 @@ function columnShapeFingerprint(
 }
 
 function fieldContract(field: Field): ModuleFieldContract {
+  if (field.fieldType.kind === 'addressFieldType')
+    throw new Error(
+      'An Address must be lowered before deriving scalar contracts.',
+    );
   const precision =
     'precision' in field.fieldType &&
     typeof field.fieldType.precision === 'number'
