@@ -1,55 +1,60 @@
 # SIGNIN-1 — staff sign-in and authority for human decisions
 
-Slice 1 uses passkeys and session-bound ERP entry. The [previous correction record](https://github.com/AnserBeg/2rain-greenfield/blob/13902266/docs/execution/packets/SIGNIN-1.md) covers the eight corrections in Sol’s narrow read.
+Slice 2a adds reviewed staff decisions. [Slice 1 and its gates](https://github.com/AnserBeg/2rain-greenfield/blob/17618776/docs/execution/packets/SIGNIN-1.md) · [Accepted design](../../decisions/ADR-0081-staff-sign-in-and-decision-authority.md)
 
-## Final slice 1 corrections
+## Decisions
 
-| Item | Verified behavior |
-| --- | --- |
-| ERP landing and retention | Four anonymous landing GETs leave zero rows. Login starts on a same-origin POST with the browser's CSRF token. The shared limiter admits 30 starts per client per 15 minutes. Each admitted start removes expired and consumed transactions in its realm. |
-| Expiry | The accepted residual needs both a database crash and a backwards host clock. Session checks run inside the protected transaction. Independently committing its time observation would require a separate coordinated writer. [ADR-0081](../../decisions/ADR-0081-staff-sign-in-and-decision-authority.md#sessions-and-request-entry) |
-| Handoff | A database trigger witnesses consumption before an expired handoff is refused. Rollback restores the verifier for a valid handoff. A second live ERP handle is refused and the original handle succeeds. |
-| Recovery | Valid passkey ceremonies refuse a different permission resource, uncovered release approver eligibility and uncovered executor authority. A recovery started while its issuer has authority is refused at enrollment after revocation. The credential count stays zero and the invitation stays available. |
+- Release approval freezes the verified candidate, preparation, reviewed diff, source pointer and fence. The isolated activation verifier consumes the evidence and creates the prebound attempt in one transaction. The activation kernel checks current authority, performs the swap and reads back the generation.
+- Customize uses the same release approval, with the exact patch payloads, bases and reviewed diff in the proof. A fresh passkey confirmation binds the principal, assurance, authentication time and decision time.
+- Retry records the company, suspended run, occurrence, definition, journal and original and restored fences. WORKFLOW-1’s join is the transaction that writes its retry decision and resumes the run. It must consume a fresh proof and reconcile effects there before pilot scheduling opens.
+- Release and Customize cover every company on the environment pointer and require an unscoped membership. Retry takes the company from the event and checks the operator’s live membership. A reviewed batch binds each named target and its ordered aggregate.
+- Slice 2b stays closed pending CONNECT-1’s canonical connection and outward-send records and their writers. Pilot enablement requires a proof-consuming function. Real provider calls remain limited to the local demo.
+- This slice uses a forward database migration and the existing surface reader. The orchestrator owns the independent post-merge read.
 
 ## Gates and test it yourself
 
-The architecture check admits the transient login cleanup in its migration and schema snapshot. Its fixture flags business deletes in both files and login deletion in application code.
-
-The landing regression failed on `13902266`. Temporarily removing the rollback, prior-handle, resource, release approver, release executor and enrollment protections in isolated checkouts made the corresponding assertions fail. [Targeted controls](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44716635434) · [Packet CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44720371650)
-
-Run `node --import tsx --test test/postgres/staff-signin.test.ts` and `node --import tsx test/helpers/staff-browser-journey.ts`. Both use temporary databases. The browser completes sign-in through the ERP landing and identity origins, and reports the signed-in purchase-order page budget. The orchestrator owns the targeted check and the start of slice 2.
+Run `node --import tsx --test test/postgres/release-approval.test.ts`. The staff subtest checks release and Customize decisions, refuses activation after membership loss, then observes a verified swap. The Retry case runs in `test/postgres/workflow-consumer.test.ts`. [Staff pilot instructions](../../operations/staff-signin.md#approvals-and-activation)
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "SIGNIN-1",
-  "base": "2042780bcc3889022af36493a2dcaa3a62b8cb56",
-  "head": "1b1092a7514095ccfbe708ee6d9e97a0c48c0816",
+  "base": "17618776dd058bbb8efec032eae13a00a5d5398b",
+  "head": "928b6e99c35d60c1929690f68cacfa89501325a9",
   "changedPaths": [
-    "apps/api/src/pilot-composition-root.ts",
-    "apps/api/src/staff-erp-transport.ts",
+    "apps/api/src/staff-decisions.ts",
     "apps/api/src/staff-identity-http.ts",
     "apps/api/src/staff-identity.ts",
     "apps/api/src/staff-main.ts",
     "apps/api/src/staff-protocol.ts",
-    "db/migrations/0049_staff_login_creation.sql",
+    "db/migrations/0051_staff_decision_proofs.sql",
     "db/schema.snapshot.json",
-    "docs/decisions/ADR-0081-staff-sign-in-and-decision-authority.md",
+    "docs/execution/packets/CONNECT-1.md",
     "docs/operations/staff-signin.md",
-    "packages/dev-tooling/src/architecture-boundaries.ts",
-    "test/architecture/dependency-boundaries.test.ts",
+    "packages/postgres-provider/src/composed-application-runtime.ts",
+    "packages/postgres-provider/src/release-activation-service.ts",
+    "packages/postgres-provider/src/release-approval-service.ts",
+    "packages/postgres-provider/src/request-context.ts",
     "test/architecture/release-persistence-boundary.test.ts",
-    "test/helpers/staff-browser-fixture.ts",
-    "test/helpers/staff-browser-journey.ts",
+    "test/architecture/tenant-completeness.manifest.json",
+    "test/architecture/tenant-completeness.test.ts",
+    "test/helpers/staff-decision-checks.ts",
     "test/postgres/inventory-storage.test.ts",
     "test/postgres/migrations.test.ts",
     "test/postgres/module-storage-transition.test.ts",
-    "test/postgres/staff-signin.test.ts",
-    "test/postgres/trust-substrate.test.ts"
+    "test/postgres/release-approval.test.ts",
+    "test/postgres/trust-substrate.test.ts",
+    "test/postgres/workflow-consumer.test.ts"
   ],
   "symbols": [
-    {"path":"apps/api/src/staff-erp-transport.ts","name":"erpTransport"},
-    {"path":"apps/api/src/staff-protocol.ts","name":"attemptBucket"}
+    {
+      "path": "apps/api/src/staff-decisions.ts",
+      "name": "applyStaffDecision"
+    },
+    {
+      "path": "apps/api/src/staff-decisions.ts",
+      "name": "runDecisionVerifier"
+    }
   ]
 }
 ```
