@@ -48,13 +48,9 @@ const component = z.discriminatedUnion('kind', [
     minimumDuration: z
       .strictObject({ period, count: z.int().min(1).max(744) })
       .optional(),
-    minimumScope: z
-      .enum(['perEnrollment', 'perPricingWindow'])
-      .default('perEnrollment'),
+    minimumScope: z.enum(['perEnrollment', 'perPricingWindow']).optional(),
     cap: id.optional(),
-    partialTime: z
-      .enum(['wholeStarted', 'prorateShortestTail'])
-      .default('wholeStarted'),
+    partialTime: z.enum(['wholeStarted', 'prorateShortestTail']).optional(),
   }),
   z.strictObject({
     ...common,
@@ -70,8 +66,8 @@ const component = z.discriminatedUnion('kind', [
       z.strictObject({
         kind: z.literal('recurring'),
         cadence,
-        fixedFeeDuringPause: z.enum(['suspend', 'continue']).default('suspend'),
-        feeProration: proration.default('activeCoverage'),
+        fixedFeeDuringPause: z.enum(['suspend', 'continue']).optional(),
+        feeProration: proration.optional(),
       }),
     ]),
   }),
@@ -82,7 +78,7 @@ const component = z.discriminatedUnion('kind', [
     streamId: id,
     unit: id,
     overageRate: id,
-    allowanceProration: proration.default('activeCoverage'),
+    allowanceProration: proration.optional(),
     allowanceBasis: z.discriminatedUnion('kind', [
       z.strictObject({ kind: z.literal('perCycle'), quantity: id }),
       z.strictObject({ kind: z.literal('perPricingWindow'), quantity: id }),
@@ -102,7 +98,7 @@ export const BillingPlanSchema = z
     currency,
     serviceUnit: id,
     schedule,
-    pricingWindow: civilPeriod.default('month'),
+    pricingWindow: civilPeriod.optional(),
     bindings: z
       .strictObject({
         quoteQueryId: id,
@@ -197,12 +193,9 @@ export const BillingPlansSchema = z
     )
       ctx.addIssue({ code: 'custom', message: 'Duplicate rate plan version' });
   });
-export type BillingPlan = z.infer<typeof BillingPlanSchema>;
+export type AuthoredBillingPlan = z.infer<typeof BillingPlanSchema>;
+export type { BillingPlan, TimeComponent } from './billing-normalization.js';
 export type BillingSchedule = z.infer<typeof schedule>;
-export type TimeComponent = Extract<
-  BillingPlan['components'][number],
-  { kind: 'time' }
->;
 export const BillingRateTableSchema = z.strictObject({
   schemaVersion: z.literal('northstar.billing-rate-table/v1'),
   version: id,

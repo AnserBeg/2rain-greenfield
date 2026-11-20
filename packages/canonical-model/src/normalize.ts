@@ -1,3 +1,4 @@
+import { normalizeBillingPlan } from './billing-normalization.js';
 import {
   validateSurfaceCompositions,
   normalizeSurfaceComposition,
@@ -208,6 +209,7 @@ export function normalizeApplicationPackage(
     ...(authored.languageVersion === 'v6' &&
       authored.billingPlans && {
         billingPlans: authored.billingPlans
+          .map(normalizeBillingPlan)
           .map((p) => ({
             ...p,
             components: [...p.components].sort((a, b) =>

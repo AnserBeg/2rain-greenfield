@@ -87,6 +87,8 @@ const suiteDefinitions = [
   {
     discoveryPattern: 'test/integration/**/*.test.ts',
     expectedFiles: [
+      'test/integration/billing-quote.test.ts',
+      'test/integration/billing-release.test.ts',
       'test/integration/catalog-runtime.test.ts',
       'test/integration/disclosure-tier-round-trip.test.ts',
       'test/integration/document-http.test.ts',
@@ -185,6 +187,7 @@ const suiteDefinitions = [
     expectedFiles: [
       'test/postgres/agent-dev-tasks.test.ts',
       'test/postgres/agent-tasks.test.ts',
+      'test/postgres/billing-terms.test.ts',
       'test/postgres/catalog-extras.test.ts',
       'test/postgres/catalog-runtime.test.ts',
       'test/postgres/current-policy.test.ts',

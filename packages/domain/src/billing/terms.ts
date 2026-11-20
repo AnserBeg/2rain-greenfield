@@ -1,3 +1,4 @@
+import { normalizeBillingPlan } from '../../../canonical-model/src/billing-normalization.js';
 import { canonicalizeAndHash } from '../../../canonical-model/src/canonicalize.js';
 import {
   BillingPlanSchema,
@@ -10,7 +11,7 @@ import { decimal } from './fraction.js';
 
 export const digest = (v: unknown) => canonicalizeAndHash(v).contentHash;
 export function compileRatePlan(input: unknown) {
-  const p = BillingPlanSchema.parse(input);
+  const p = normalizeBillingPlan(BillingPlanSchema.parse(input));
   p.slots.sort((a, b) => (a.id < b.id ? -1 : 1));
   p.components.sort((a, b) => (a.id < b.id ? -1 : 1));
   return { plan: p, digest: digest(p) };
