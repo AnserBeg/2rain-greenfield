@@ -1,3 +1,4 @@
+import { SurfaceBoardSchema } from './board.js';
 import { SurfaceLayoutSchema } from './layout.js';
 import { z } from 'zod';
 import { DOCUMENTS_PAYLOAD_VERSION } from './documents.js';
@@ -2173,6 +2174,7 @@ export const SurfaceLauncherSchema = z.strictObject({
 });
 export type SurfaceLauncher = z.infer<typeof SurfaceLauncherSchema>;
 const normalizedV6SurfaceDefinition = normalizedSurfaceDefinition.extend({
+  board: SurfaceBoardSchema.optional(),
   layouts: z.array(SurfaceLayoutSchema).min(1).max(2).optional(),
   composition: SurfaceCompositionSchema.optional(),
   workspace: SurfaceWorkspaceSchema.optional(),

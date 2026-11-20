@@ -1,3 +1,4 @@
+import { BoardViewRevisionSchema } from './board-revision.js';
 import { LayoutRevisionSchema } from './layout-revision.js';
 import {
   CalculatedDisplayFieldDefinitionSchema,
@@ -191,6 +192,7 @@ const saveListView = z.strictObject({
 });
 
 const ChangeMemberSchema = z.discriminatedUnion('kind', [
+  BoardViewRevisionSchema,
   addRecordType,
   addField,
   addChoice,
@@ -305,6 +307,7 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'declareLifecycle',
   'arrangeLayout',
   'addLayoutRevision',
+  'addBoardViewRevision',
   'saveListView',
   'addValidation',
   'addCalculatedDisplayField',

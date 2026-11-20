@@ -1,4 +1,9 @@
 import {
+  boardBindingsProblem,
+  boardDeclarationProblem,
+  hasBoardDeclaration,
+} from './board-admission.js';
+import {
   layoutDeclarationProblem,
   layoutBindingsProblem,
   declaredLayouts,
@@ -575,6 +580,7 @@ function verifyCompiledRelease(
     layoutDefinition,
   );
   const needsLayout =
+    hasBoardDeclaration(layoutDefinition) ||
     declaredLayouts(isRecord(layoutDefinition) ? layoutDefinition.surfaces : [])
       .length > 0;
   const surfaceReference = manifest.projections.find(
@@ -693,11 +699,17 @@ function verifyCompiledRelease(
         projectionPayloadBytes[0]!,
         'PROJECTION_CHUNK_NOT_CANONICAL',
       );
-      const problem = layoutDeclarationProblem(
-        layoutDefinition,
-        payload,
-        reference.requiredRuntimeCapability.minimumVersion,
-      );
+      const problem =
+        boardDeclarationProblem(
+          layoutDefinition,
+          payload,
+          reference.requiredRuntimeCapability.minimumVersion,
+        ) ??
+        layoutDeclarationProblem(
+          layoutDefinition,
+          payload,
+          reference.requiredRuntimeCapability.minimumVersion,
+        );
       if (problem)
         throw integrity('LAYOUT_PROJECTION_CONTRACT_MISMATCH', problem);
     }
@@ -746,12 +758,19 @@ function verifyCompiledRelease(
         ? decodeCanonicalObject(bytes, 'PROJECTION_CHUNK_NOT_CANONICAL')
         : null;
     };
-    const problem = layoutBindingsProblem(
-      payload(PROJECTION_FAMILY_IDS.surfaceManifest),
-      surfaceReference!.requiredRuntimeCapability.minimumVersion,
-      payload(PROJECTION_FAMILY_IDS.operationCatalog),
-      payload(PROJECTION_FAMILY_IDS.queryCatalog),
-    );
+    const problem =
+      boardBindingsProblem(
+        payload(PROJECTION_FAMILY_IDS.surfaceManifest),
+        surfaceReference!.requiredRuntimeCapability.minimumVersion,
+        payload(PROJECTION_FAMILY_IDS.operationCatalog),
+        payload(PROJECTION_FAMILY_IDS.queryCatalog),
+      ) ??
+      layoutBindingsProblem(
+        payload(PROJECTION_FAMILY_IDS.surfaceManifest),
+        surfaceReference!.requiredRuntimeCapability.minimumVersion,
+        payload(PROJECTION_FAMILY_IDS.operationCatalog),
+        payload(PROJECTION_FAMILY_IDS.queryCatalog),
+      );
     if (problem)
       throw integrity('LAYOUT_PROJECTION_CONTRACT_MISMATCH', problem);
   }
