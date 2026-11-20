@@ -2,8 +2,13 @@ import type {
   BillingPeriod,
   TimeComponent,
 } from '../../../canonical-model/src/billing.js';
-import { BillingCalendar, covered, hourMs, type Span } from './calendar.js';
-import { decimal, Fraction, integer, zero } from './fraction.js';
+import {
+  type BillingCalendar,
+  covered,
+  hourMs,
+  type Span,
+} from './calendar.js';
+import { decimal, type Fraction, integer, zero } from './fraction.js';
 
 const descending = ['month', 'fourWeek', 'week', 'day', 'hour'] as const;
 export const periodDays = (

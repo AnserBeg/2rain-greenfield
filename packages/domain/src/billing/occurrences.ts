@@ -2,7 +2,7 @@ import type {
   BillingPeriod,
   BillingSchedule,
 } from '../../../canonical-model/src/billing.js';
-import { BillingCalendar, hourMs, monthShift } from './calendar.js';
+import { type BillingCalendar, hourMs, monthShift } from './calendar.js';
 import { periodDays } from './cover.js';
 
 export interface Occurrence {

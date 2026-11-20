@@ -337,10 +337,13 @@ test('governed terms and scoped source facts produce a quote through the install
       );
       const alteredId = randomUUID();
       await create(
-        { ...facts, serviceId: alteredId, tables: [version] },
+        { ...facts, serviceId: alteredId, tables: [{ values: { fee: '0' } }] },
         alteredId,
       );
-      await assert.rejects(() => get(alteredId));
+      await assert.rejects(
+        () => get(alteredId),
+        /Service facts cannot supply commercial terms or allocations/,
+      );
     },
     'demo',
     0,

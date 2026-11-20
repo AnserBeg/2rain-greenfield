@@ -22,7 +22,7 @@ import {
   timeline,
   type CoverBlock,
 } from './cover.js';
-import { decimal, Fraction, integer, one, zero } from './fraction.js';
+import { decimal, type Fraction, integer, one, zero } from './fraction.js';
 import { occurrences, pricingWindows, type Occurrence } from './occurrences.js';
 import {
   compileRatePlan,
