@@ -122,7 +122,12 @@ export function addressColumnId(
   fieldId: string,
   component: AddressComponent,
 ): string {
-  return component === 'text' ? fieldId : 'northstar.connector:field.scalar_' + createHash('sha256').update(fieldId).digest('hex') + '.' + component.toLowerCase();
+  return component === 'text'
+    ? fieldId
+    : 'northstar.connector:field.scalar_' +
+        createHash('sha256').update(fieldId).digest('hex') +
+        '.' +
+        component.toLowerCase();
 }
 
 export function addressJson(value: unknown) {

@@ -1,4 +1,7 @@
-import { addressColumnId, addressComponents } from '@north-star/canonical-model';
+import {
+  addressColumnId,
+  addressComponents,
+} from '@north-star/canonical-model';
 import { compileAddressBindings } from './address.js';
 import {
   BOOKING_OPERATION_READER,
@@ -2331,11 +2334,15 @@ function verifyCompleteness(
         entity.columns.map((field) => field.canonicalFieldId),
       )
     : [...collectStorageFields(emittedStorage).keys()];
-  const expectedFields = new Set(packageRevision.fields.flatMap(field =>
-    field.fieldType.kind === 'addressFieldType'
-      ? addressComponents.map(component => addressColumnId(field.fieldId, component))
-      : [field.fieldId]
-  ));
+  const expectedFields = new Set(
+    packageRevision.fields.flatMap((field) =>
+      field.fieldType.kind === 'addressFieldType'
+        ? addressComponents.map((component) =>
+            addressColumnId(field.fieldId, component),
+          )
+        : [field.fieldId],
+    ),
+  );
   if (!setsEqual(new Set(storageFieldIds), expectedFields)) {
     diagnostics.push(
       compilerDiagnostic(

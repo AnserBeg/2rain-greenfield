@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { addressEditor, selectedPlace } from './address-context.js';
 import {
-  AddressWriteSchema, addressJson,
+  AddressWriteSchema,
+  addressJson,
   AddressInputSchema,
   SavedAddressSchema,
 } from '@north-star/canonical-model';
@@ -106,20 +107,22 @@ export function addressFromForm(
       binding.fieldId,
       account.installationId,
     );
-  return addressJson(AddressWriteSchema.parse({
-    ...(place && { place }),
-    ...(account?.enrichment && {
-      locateFor: {
-        installationId: account.installationId,
-        companyId: account.companyId,
-      },
+  return addressJson(
+    AddressWriteSchema.parse({
+      ...(place && { place }),
+      ...(account?.enrichment && {
+        locateFor: {
+          installationId: account.installationId,
+          companyId: account.companyId,
+        },
+      }),
+      schemaVersion: 'northstar.address-value/v1',
+      text,
+      ...components,
+      ...(lines?.length && { lines }),
+      ...((latitude || longitude) && {
+        pin: { kind: 'user', latitude, longitude },
+      }),
     }),
-    schemaVersion: 'northstar.address-value/v1',
-    text,
-    ...components,
-    ...(lines?.length && { lines }),
-    ...((latitude || longitude) && {
-      pin: { kind: 'user', latitude, longitude },
-    }),
-  }));
+  );
 }

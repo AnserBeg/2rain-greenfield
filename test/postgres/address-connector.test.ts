@@ -6,6 +6,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import {
+  COMPOSED_APPLICATION_INVENTORY_SCOPE,
   openCustomizeService,
   startComposedApplication,
 } from '../../apps/api/src/composition-root.js';
@@ -14,6 +15,7 @@ import {
   AddressProjectionSchema,
   SavedAddressSchema,
 } from '@north-star/canonical-model';
+import { provisionInventoryScope } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { OperationsAgentSession } from '../../packages/operations-agent/src/session.js';
 import { COMPANY, worldOver } from '../agent/agent-world.js';
 import {
@@ -119,116 +121,209 @@ test(
             JSON.stringify(response.content),
           );
           assert.match(JSON.stringify(response.content), /15 Jasper Street/u);
-          await app.runtime.entry.run({ headers }, async (view) => {
-            const b = AddressProjectionSchema.parse(
-              view.projections.connector?.payload,
-            ).bindings[0]!;
-            const t = { fieldId: b.fieldId, recordId, companyId: COMPANY };
-            assert.deepEqual(
-              await app.runtime.addresses.pin(view, t, b.mapQueryId),
-              { status: 'unavailable' },
-            );
-            const gateway = app.runtime.addresses;
-            const install = await gateway.configure(view, COMPANY, {
-              provider: 'fake',
-              account: 'dispatch',
-              enrichment: true,
-              calls: 50,
-              budgetMicros: 0,
-              enabled: true,
-            });
-            assert.ok(install);
-            const write = async (text: string, revision: number) => {
-              const changed = await world.invoke('item_update', {
-                recordId,
-                expectedRevision: revision,
-                patch: {
-                  [address.fieldId]: {
-                    schemaVersion: 'northstar.address-value/v1',
-                    text,
-                    locateFor: { companyId: COMPANY, installationId: install },
-                  },
-                },
+          const before = await app.runtime.entry.run(
+            { headers },
+            async (view) => {
+              const b = AddressProjectionSchema.parse(
+                view.projections.connector?.payload,
+              ).bindings[0]!;
+              const t = { fieldId: b.fieldId, recordId, companyId: COMPANY };
+              assert.deepEqual(
+                await app.runtime.addresses.pin(view, t, b.mapQueryId),
+                { status: 'unavailable' },
+              );
+              const gateway = app.runtime.addresses;
+              let install = await gateway.configure(view, COMPANY, {
+                provider: 'fake',
+                account: 'dispatch',
+                enrichment: true,
+                calls: 50,
+                budgetMicros: 0,
+                enabled: true,
               });
-              assert.equal(
-                changed.outcome,
-                'succeeded',
-                JSON.stringify(changed),
+              assert.ok(install);
+              const write = async (text: string, revision: number) => {
+                const changed = await world.invoke('item_update', {
+                  recordId,
+                  expectedRevision: revision,
+                  patch: {
+                    [address.fieldId]: {
+                      schemaVersion: 'northstar.address-value/v1',
+                      text,
+                      locateFor: {
+                        companyId: COMPANY,
+                        installationId: install!,
+                      },
+                    },
+                  },
+                });
+                assert.equal(
+                  changed.outcome,
+                  'succeeded',
+                  JSON.stringify(changed),
+                );
+                assert.equal(
+                  SavedAddressSchema.parse(
+                    changed.readBack?.values[address.fieldId],
+                  ).text,
+                  text,
+                );
+                return changed.readBack!.revision;
+              };
+              let revision = await write(
+                'Address A',
+                result.readBack!.revision,
               );
-              assert.equal(
-                SavedAddressSchema.parse(
-                  changed.readBack?.values[address.fieldId],
-                ).text,
-                text,
+              const unavailable = testContext.mock.method(
+                FakeAddressProvider.prototype,
+                'geocode',
+                async () => {
+                  throw new AddressProviderError('unavailable');
+                },
               );
-              return changed.readBack!.revision;
-            };
-            let revision = await write('Address A', result.readBack!.revision);
-            const unavailable = testContext.mock.method(
-              FakeAddressProvider.prototype,
-              'geocode',
-              async () => {
-                throw new AddressProviderError('unavailable');
-              },
-            );
-            assert.equal(await gateway.workOne(view), true);
-            assert.equal(unavailable.mock.callCount(), 1);
-            const originalRead = await world.read('item', recordId);
-            assert.equal(
-              SavedAddressSchema.parse(originalRead.values[address.fieldId])
-                .text,
-              'Address A',
-            );
-            unavailable.mock.restore();
+              assert.equal(await gateway.workOne(view), true);
+              assert.equal(unavailable.mock.callCount(), 1);
+              const originalRead = await world.read('item', recordId);
+              assert.equal(
+                SavedAddressSchema.parse(originalRead.values[address.fieldId])
+                  .text,
+                'Address A',
+              );
+              unavailable.mock.restore();
 
-            // Resolve B only after C has committed, in the real worker's I/O window.
-            revision = await write('Address B', revision);
-            const fake = new FakeAddressProvider();
-            const geocode = fake.geocode.bind(fake);
-            const delayed = testContext.mock.method(
-              FakeAddressProvider.prototype,
-              'geocode',
-              async (text: string) => {
-                assert.equal(text, 'Address B');
-                revision = await write('Address C', revision);
-                return geocode(text);
-              },
-            );
-            // A's retry is still queued; identify B without depending on elapsed time.
-            await pool.query(
-              "UPDATE platform.address_geocodes SET available_at='infinity' WHERE attempts>0 AND record_id=$1",
-              [recordId],
-            );
-            assert.equal(await gateway.workOne(view), true);
-            assert.equal(delayed.mock.callCount(), 1);
-            delayed.mock.restore();
-            const late = await pool.query(
-              "SELECT state,latitude,longitude FROM platform.address_geocodes WHERE record_id=$1 AND attempts=1 AND state='held'",
-              [recordId],
-            );
-            assert.deepEqual(late.rows, [
-              { state: 'held', latitude: null, longitude: null },
-            ]);
-            assert.deepEqual(await gateway.pin(view, t, b.mapQueryId), {
-              status: 'locating',
-            });
-            assert.equal(await gateway.workOne(view), true);
-            const pin = await gateway.pin(view, t, b.mapQueryId);
-            assert.equal(pin.status, 'ready');
-            assert.ok(pin.status === 'ready');
-            const current = await geocode('Address C');
-            assert.equal(Number(pin.pin.latitude), Number(current.latitude));
-            assert.equal(Number(pin.pin.longitude), Number(current.longitude));
-            // A shared master's text is the same while installation-specific coordinates stay private.
-            const otherCompany = randomUUID();
-            const foreignTarget = { ...t, companyId: otherCompany };
-            const foreign = await gateway
-              .pin(view, foreignTarget, b.mapQueryId)
-              .catch(() => ({ status: 'denied' as const }));
-            assert.ok(
-              foreign.status === 'unavailable' || foreign.status === 'denied',
-            );
-          });
+              // Resolve B only after C has committed, in the real worker's I/O window.
+              revision = await write('Address B', revision);
+              const fake = new FakeAddressProvider();
+              const geocode = fake.geocode.bind(fake);
+              const delayed = testContext.mock.method(
+                FakeAddressProvider.prototype,
+                'geocode',
+                async (text: string) => {
+                  assert.equal(text, 'Address B');
+                  revision = await write('Address C', revision);
+                  return geocode(text);
+                },
+              );
+              // A's retry is still queued; identify B without depending on elapsed time.
+              await pool.query(
+                "UPDATE platform.address_geocodes SET available_at='infinity' WHERE attempts>0 AND record_id=$1",
+                [recordId],
+              );
+              assert.equal(await gateway.workOne(view), true);
+              assert.equal(delayed.mock.callCount(), 1);
+              delayed.mock.restore();
+              const late = await pool.query(
+                "SELECT state,latitude,longitude FROM platform.address_geocodes WHERE record_id=$1 AND attempts=1 AND state='held'",
+                [recordId],
+              );
+              assert.deepEqual(late.rows, [
+                { state: 'held', latitude: null, longitude: null },
+              ]);
+              assert.deepEqual(await gateway.pin(view, t, b.mapQueryId), {
+                status: 'locating',
+              });
+              assert.equal(await gateway.workOne(view), true);
+              const pin = await gateway.pin(view, t, b.mapQueryId);
+              assert.equal(pin.status, 'ready');
+              assert.ok(pin.status === 'ready');
+              const current = await geocode('Address C');
+              assert.equal(Number(pin.pin.latitude), Number(current.latitude));
+              assert.equal(
+                Number(pin.pin.longitude),
+                Number(current.longitude),
+              );
+              // A shared master's text is the same while installation-specific coordinates stay private.
+              const otherCompany = randomUUID();
+              await provisionInventoryScope(
+                pool,
+                app.runtime.identity,
+                view.release.contentHash,
+                {
+                  ...COMPOSED_APPLICATION_INVENTORY_SCOPE,
+                  legalEntityId: otherCompany,
+                  entityCode: 'OTHER-SITE',
+                  entityName: 'Other company',
+                },
+              );
+              const otherInstallation = await gateway.configure(
+                view,
+                otherCompany,
+                {
+                  provider: 'fake',
+                  account: 'other-dispatch',
+                  enrichment: true,
+                  calls: 50,
+                  budgetMicros: 0,
+                  enabled: true,
+                },
+              );
+              assert.ok(otherInstallation && otherInstallation !== install);
+              assert.deepEqual(
+                await gateway.pin(
+                  view,
+                  { ...t, companyId: otherCompany },
+                  b.mapQueryId,
+                ),
+                {
+                  status: 'unavailable',
+                },
+              );
+              assert.equal(
+                (await gateway.pin(view, t, b.mapQueryId)).status,
+                'ready',
+              );
+              for (const change of ['installation', 'release'] as const) {
+                revision = await write('Change ' + change, revision);
+                const saved = (await world.read('item', recordId)).values;
+                const savedRevision = SavedAddressSchema.parse(
+                  saved[address.fieldId],
+                ).revision;
+                const interrupted = testContext.mock.method(
+                  FakeAddressProvider.prototype,
+                  'geocode',
+                  async (text: string) => {
+                    if (change === 'installation') {
+                      install = await gateway.configure(view, COMPANY, {
+                        provider: 'fake',
+                        account: 'replacement',
+                        enrichment: true,
+                        calls: 50,
+                        budgetMicros: 0,
+                        enabled: true,
+                      });
+                      assert.ok(install);
+                    } else {
+                      await opened.service.rollback();
+                    }
+                    return geocode(text);
+                  },
+                );
+                assert.equal(await gateway.workOne(view), true);
+                assert.equal(interrupted.mock.callCount(), 1);
+                interrupted.mock.restore();
+                const rejected = await pool.query(
+                  'SELECT state,latitude,longitude FROM platform.address_geocodes WHERE record_id=$1 AND address_revision=$2',
+                  [recordId, savedRevision],
+                );
+                assert.deepEqual(rejected.rows, [
+                  { state: 'held', latitude: null, longitude: null },
+                ]);
+                if (change === 'release') return saved;
+              }
+              throw new Error(
+                'Expected the rollback during the provider response',
+              );
+            },
+          );
+          // All scalar components disappear from the logical record and return together.
+          const rolledBack = (await world.read('item', recordId)).values;
+          assert.deepEqual(
+            Object.keys(before).filter((key) => !(key in rolledBack)),
+            [address.fieldId],
+          );
+          await opened.service.approve(draft.patchId);
+          await opened.service.activate(draft.patchId);
+          assert.deepEqual((await world.read('item', recordId)).values, before);
         } finally {
           await opened.close();
           await app.close();

@@ -2,6 +2,7 @@ import {
   addressColumns,
   addressScalars,
   hasAddress,
+  isAddressComponent,
   readAddress,
 } from './address-storage.js';
 import {
@@ -6015,10 +6016,7 @@ function rawRecord(entity: StorageEntity, row: QueryResultRow): RawRecord {
   }
   const values = Object.fromEntries(
     entity.columns
-      .filter(
-        (c) =>
-          !c.canonicalFieldId.startsWith('northstar.connector:field.scalar_'),
-      )
+      .filter((column) => !isAddressComponent(entity, column.canonicalFieldId))
       .map((column) => [
         column.canonicalFieldId,
         hasAddress(entity, column.canonicalFieldId)

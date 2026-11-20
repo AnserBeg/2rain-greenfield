@@ -10,24 +10,45 @@ import {
 import type { StorageTargetPayloadV1 } from '@north-star/compiler';
 type Entity = StorageTargetPayloadV1['entities'][number];
 
-const addressFieldSets = new WeakMap<Entity, ReadonlySet<string>>();
-export function hasAddress(entity: Entity, id: string) {
-  let found = addressFieldSets.get(entity);
-  if (!found) {
-    const ids = new Set(entity.columns.map((c) => c.canonicalFieldId));
-    const addresses = new Set<string>();
-    if (
-      entity.columns.some((c) =>
-        c.canonicalFieldId.startsWith('northstar.connector:field.scalar_'),
-      )
-    ) {
-      for (const field of ids)
-        if (ids.has(addressColumnId(field, 'revision'))) addresses.add(field);
+interface AddressFieldSets {
+  logical: Set<string>;
+  components: Set<string>;
+}
+const addressFieldSets = new WeakMap<Entity, AddressFieldSets>();
+
+function fieldsFor(entity: Entity): AddressFieldSets {
+  const cached = addressFieldSets.get(entity);
+  if (cached) return cached;
+  const fields: AddressFieldSets = {
+    logical: new Set(),
+    components: new Set(),
+  };
+  const ids = new Set(entity.columns.map((column) => column.canonicalFieldId));
+  if (
+    entity.columns.some((column) =>
+      column.canonicalFieldId.startsWith('northstar.connector:field.scalar_'),
+    )
+  ) {
+    for (const id of ids) {
+      if (!ids.has(addressColumnId(id, 'revision'))) continue;
+      const components = addressComponents
+        .filter((component) => component !== 'text')
+        .map((component) => addressColumnId(id, component));
+      if (!components.every((componentId) => ids.has(componentId))) continue;
+      fields.logical.add(id);
+      for (const componentId of components) fields.components.add(componentId);
     }
-    found = addresses;
-    addressFieldSets.set(entity, found);
   }
-  return found.has(id);
+  addressFieldSets.set(entity, fields);
+  return fields;
+}
+
+export function hasAddress(entity: Entity, id: string) {
+  return fieldsFor(entity).logical.has(id);
+}
+
+export function isAddressComponent(entity: Entity, id: string) {
+  return fieldsFor(entity).components.has(id);
 }
 
 export function addressColumns(entity: Entity, id: string) {

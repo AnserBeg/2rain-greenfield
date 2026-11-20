@@ -181,9 +181,7 @@ export class PostgresAddresses implements AddressGateway {
   constructor(
     private readonly pool: Pool,
     private readonly queries: SemanticQueryGateway,
-    private readonly release: (
-      id: string,
-    ) =>
+    private readonly release: (id: string) =>
       | Promise<{
           policy: CurrentPolicyGateway;
           storage: StorageTargetPayloadV1 | null;

@@ -2869,7 +2869,10 @@ function validateComparisonValue(
   if (!field) return;
   const value = comparison.value;
   if (value.kind === 'queryParameterReference') return;
-  const expectedKind: Record<FieldType['kind'], CanonicalScalar['kind'] | null> = {
+  const expectedKind: Record<
+    FieldType['kind'],
+    CanonicalScalar['kind'] | null
+  > = {
     addressFieldType: null,
     booleanFieldType: 'booleanValue',
     dateFieldType: 'dateValue',
