@@ -1492,6 +1492,9 @@ export function registerInventoryContractCases(
         'stock_count_line_variance_quantity',
         'stock_count_line_unit_id',
         'stock_count_line_reversal_of_movement_id',
+        // STOCK-COUNTS: what was found, entered while counting; review copies
+        // it into the counted quantity.
+        'stock_count_line_physical_quantity',
       ]);
       for (const victim of [
         'stock_count_line_expected_quantity',

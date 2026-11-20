@@ -37,6 +37,7 @@ import {
   firstPartyAuthored,
   compiledApplication,
 } from '../helpers/customization-fixture.js';
+import { applicationWithoutLineCreateValues } from '../helpers/application-without-line-create-values.js';
 import { withOrderEntryFixture } from '../helpers/order-entry-fixture.js';
 
 const id = (name: string) => 'northstar.app:' + name;
@@ -91,8 +92,10 @@ const plan = BillingPlanSchema.parse({
   },
 });
 function release(mode: 'bound' | 'legacy' | 'declaration' = 'bound') {
+  const compatibility =
+    mode === 'declaration' ? applicationWithoutLineCreateValues() : undefined;
   const p = parseAuthoredApplicationPackageJson(
-    JSON.stringify(firstPartyAuthored),
+    JSON.stringify(compatibility?.authored ?? firstPartyAuthored),
   );
   const source = p.queries.find((q) => q.queryId === sourceId)!;
   if (source.queryType !== 'get')
@@ -180,7 +183,9 @@ function release(mode: 'bound' | 'legacy' | 'declaration' = 'bound') {
             ],
           }
         : boundInput;
-  const old = parseCompiledApplication(compiledApplication);
+  const old = parseCompiledApplication(
+    compatibility?.release ?? compiledApplication,
+  );
   const bytes = normalizedBytes(JSON.parse(JSON.stringify(input))),
     ack = readUnboundPermissionAcknowledgementFor(
       authoredPath,

@@ -207,6 +207,8 @@ test(
           'purchase_order_number',
           'sales_order_number',
           'shipment_number',
+          // STOCK-COUNTS: a stock count's CNT number.
+          'stock_count_number',
           // PAYABLES: bills, vendor payments and vendor credits.
           'vendor_bill_number',
           'vendor_credit_number',
@@ -258,9 +260,7 @@ test(
               numbered.some((entry) => entry.fieldId === scenario.subjectId),
           )
           .map((scenario) => executed.has(scenario.scenarioId)),
-        // Eleven, as the compile states: PAYABLES' ten and the stock
-        // document's (INVENTORY-PARITY).
-        [true, true, true, true, true, true, true, true, true, true, true],
+        Array.from({ length: 12 }, () => true),
         'each number’s uniqueness probe executed',
       );
       const derivationCodes = (

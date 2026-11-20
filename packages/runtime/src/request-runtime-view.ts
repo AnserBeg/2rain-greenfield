@@ -228,7 +228,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 29 adds workflows, 30 billing, 31 Address fields and 32 map placements.
     // 33 adds Board lifecycle views and form-based moves.
     // 34 reads the versioned placement rule on replayed layouts.
-    // 35 binds agreed billing intervals to selected source fields.
+    // 35 adds draft line create values.
+    // 36 binds agreed billing intervals to selected source fields.
     maximumSupportedVersion: BILLING_INTERVAL_READER,
   },
 });

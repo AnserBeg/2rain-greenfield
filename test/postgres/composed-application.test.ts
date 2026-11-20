@@ -4055,10 +4055,11 @@ async function assertBoundedFreshTenantInstallEvidence(
   // lists: the price list (14), its prices (11), its customers (9) and the
   // search exclusion of the price list a sales line records (1); then 1 for
   // counter sales: the search exclusion of the order's counter flag.
+  // Stock counts add 5 field probes and retire 2 companion relation probes.
   assert.equal(
     servingScenarioCount,
-    671,
-    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, 72 for payables, 6 for replenishment, 5 for locations, 17 for catalog extras, 32 for approvals (21 request, 10 settings, one supplier-reference exclusion), and 38 for sales extras (2 credit control, 35 price lists, 1 counter sales)',
+    674,
+    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, 72 for payables, 6 for replenishment, 5 for locations, 17 for catalog extras, 32 for approvals (21 request, 10 settings, one supplier-reference exclusion), and 38 for sales extras (2 credit control, 35 price lists, 1 counter sales), and 3 for stock counts',
   );
   await assertFreshInstallLineageEvidence(
     pool,
@@ -6418,10 +6419,11 @@ async function assertExactPartitionEvidence(
   // exclusion): 633, 535. SALES-EXTRAS' 2 search exclusions on Party, which has
   // a generic create, its price lists' 35 (each entity has one) and the counter
   // flag's search exclusion on the sales order execute: 671, 573.
+  // The net 3 new stock count probes execute through generic create.
   assert.equal(
     evidence.results.length,
-    573,
-    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, payables 72, replenishment 6, locations 5, catalog extras 17, approvals 11 (ten settings scenarios and one supplier-reference exclusion), credit control 2, price lists 35 and counter sales 1',
+    576,
+    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, payables 72, replenishment 6, locations 5, catalog extras 17, approvals 11 (ten settings scenarios and one supplier-reference exclusion), credit control 2, price lists 35 and counter sales 1 and stock counts 3',
   );
   assert.equal(
     derivations.length,
