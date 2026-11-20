@@ -273,6 +273,7 @@ export const STRUCTURAL_LIMITS_V0 = Object.freeze({
 export const QUERY_PARAMETER_LIMIT_V3 = 64 as const;
 
 export const SURFACE_ARCHETYPES = [
+  'board',
   'home',
   'list',
   'record',
@@ -287,6 +288,7 @@ export const SURFACE_ARCHETYPES = [
  * required floor until G2-P5d burns down the admitted module debt.
  */
 export const SURFACE_SLOTS = Object.freeze({
+  board: ['title', 'savedViews', 'stageSelector', 'columns'],
   home: ['exceptions', 'setupChecklist'],
   list: ['title', 'savedViews', 'dataGrid', 'bulkActions'],
   record: [

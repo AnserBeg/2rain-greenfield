@@ -22,13 +22,14 @@ import type { TrustedRequestContext } from '@north-star/runtime';
 import {
   SemanticOperationGateway,
   parsePinnedOperationCatalog,
-  SemanticOperationMediationAuthority,
+  type SemanticOperationMediationAuthority,
 } from '../../runtime/src/semantic-operation-gateway.js';
 import {
   SemanticQueryGateway,
   type RegisteredQueryLatencyInstrumentation,
 } from '../../runtime/src/semantic-query-gateway.js';
 import {
+  capabilityMediationAuthority,
   createRegisteredCapabilityExecutors,
   registeredCapabilityIdsFromOperationCatalog,
   type PinnedCapabilityProjection,
@@ -75,6 +76,7 @@ export function composeServingGateways(
   options: {
     readonly providerErrorMappings: readonly ModuleProviderErrorMapping[];
     readonly capabilityOperationExecutorFactories?: readonly PostgresCapabilityOperationExecutorFactory[];
+    readonly approvalPool?: pg.Pool;
     readonly localDemoIdentity?: true;
     readonly monotonicMilliseconds?: () => number;
   },
@@ -96,7 +98,9 @@ export function composeServingGateways(
           (await servingFor(releaseId)).policy,
       },
     );
-  const operationMediation = new SemanticOperationMediationAuthority();
+  const operationMediation = capabilityMediationAuthority(
+    options.capabilityOperationExecutorFactories ?? [],
+  );
   const documentPublication = new PostgresDocumentPublication();
   const denialRecorder = new PostgresSemanticQueryDenialRecorder(
     runtimePool,
@@ -163,6 +167,9 @@ export function composeServingGateways(
         actorIssuer,
         currentInstant: () => new Date().toISOString(),
         pool: runtimePool,
+        verifyConfirmation:
+          operationMediation.assertConfirmationGrant.bind(operationMediation),
+        ...(options.approvalPool ? { approvalPool: options.approvalPool } : {}),
         projection: release.projection,
         queryGateway: routed.queryGateway ?? queryGateway,
         releaseContentHash: release.releaseRoot,

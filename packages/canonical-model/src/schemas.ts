@@ -1,5 +1,6 @@
 import { AddressBindingSchema, MapPlacementSchema } from './address.js';
 import { BillingPlansSchema } from './billing.js';
+import { SurfaceBoardSchema } from './board.js';
 import { BookingOperationBinding } from './booking.js';
 import { SurfaceLayoutSchema } from './layout.js';
 import { z } from 'zod';
@@ -2208,6 +2209,7 @@ export const SurfaceLauncherSchema = z.strictObject({
 });
 export type SurfaceLauncher = z.infer<typeof SurfaceLauncherSchema>;
 const normalizedV6SurfaceDefinition = normalizedSurfaceDefinition.extend({
+  board: SurfaceBoardSchema.optional(),
   layouts: z.array(SurfaceLayoutSchema).min(1).max(2).optional(),
   composition: SurfaceCompositionSchema.optional(),
   workspace: SurfaceWorkspaceSchema.optional(),

@@ -40,6 +40,7 @@ test('Task dialog presentation retains the Record archetype and explicit page fa
     fallback: 'page',
   });
   assert.deepEqual([...SURFACE_ARCHETYPES].sort(), [
+    'board',
     'builder',
     'home',
     'list',

@@ -1,3 +1,4 @@
+import { boardBindingsProblem } from './board-admission.js';
 import {
   ADDRESS_FIELD_READER,
   ADDRESS_MAP_READER,
@@ -1040,12 +1041,19 @@ function definitionFromSnapshotRows(
       throw malformedProjection('formula/rule projection has invalid bindings');
     }
   }
-  const problem = layoutBindingsProblem(
-    surface.payload,
-    surface.requiredRuntimeCapability?.minimumVersion ?? 0,
-    operation.payload,
-    query.payload,
-  );
+  const problem =
+    boardBindingsProblem(
+      surface.payload,
+      surface.requiredRuntimeCapability?.minimumVersion ?? 0,
+      operation.payload,
+      query.payload,
+    ) ??
+    layoutBindingsProblem(
+      surface.payload,
+      surface.requiredRuntimeCapability?.minimumVersion ?? 0,
+      operation.payload,
+      query.payload,
+    );
   if (problem) throw malformedProjection(problem);
   return Object.freeze({
     environmentId: context.environmentId,
