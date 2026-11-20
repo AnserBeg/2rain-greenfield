@@ -1,5 +1,8 @@
+import type { ReplayOrigin } from './upgrade-diagnostics.js';
 import {
   applyLayoutRevision,
+  currentLayout,
+  type LayoutReplay,
   placeAddedLayoutField,
 } from './layout-revision.js';
 import type { LayoutDefinition } from '@north-star/canonical-model';
@@ -85,13 +88,31 @@ type Json = Record<string, unknown>;
 export function applyCustomizationPatches(
   base: Readonly<Json>,
   patches: readonly CustomizationPatch[],
+  origins?: readonly ReplayOrigin[],
 ): CustomizationApplication {
   const authored = structuredClone(base) as Json;
   const previous: SingleCustomizationPatch[] = [];
   for (const [index, change] of patches.entries()) {
     const members = change.kind === 'changeSet' ? change.patches : [change];
     for (const patch of members) {
-      const outcome = applyOne(authored, patch, previous);
+      let layoutReplay: LayoutReplay | undefined;
+      const origin = origins?.[index];
+      if (patch.kind === 'addLayoutRevision' && origin?.differentBase) {
+        const parent = origin.parent as unknown as LayoutDefinition;
+        const surface = parent?.surfaces.find(
+          (s) => s.surfaceId === patch.surface,
+        );
+        const target = surface && currentLayout(parent, surface, patch.mode);
+        if (!target)
+          return {
+            status: 'refused',
+            code: 'CUSTOMIZE_LAYOUT_CONFLICT',
+            message: 'The recorded layout authoring parent is missing.',
+            patchIndex: index,
+          };
+        layoutReplay = { source: target.body, findings: [], blocked: [] };
+      }
+      const outcome = applyOne(authored, patch, previous, layoutReplay);
       if (outcome) return Object.freeze({ ...outcome, patchIndex: index });
       previous.push(patch);
     }
@@ -170,10 +191,11 @@ export function checkCreateTimeLinks(
   return null;
 }
 
-function applyOne(
+export function applyOne(
   authored: Json,
   patch: SingleCustomizationPatch,
   previous: readonly SingleCustomizationPatch[],
+  layoutReplay?: LayoutReplay,
 ): Outcome | null {
   switch (patch.kind) {
     case 'addRecordType':
@@ -218,6 +240,7 @@ function applyOne(
       const problem = applyLayoutRevision(
         authored as unknown as LayoutDefinition,
         patch,
+        layoutReplay,
       );
       return problem ? refusal('CUSTOMIZE_LAYOUT_CONFLICT', problem) : null;
     }

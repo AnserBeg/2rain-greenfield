@@ -1,4 +1,7 @@
-import { BOOKING_OPERATION_READER } from '@north-star/canonical-model';
+import {
+  BOOKING_OPERATION_READER,
+  REPLAYED_LAYOUT_READER,
+} from '@north-star/canonical-model';
 import {
   assertTrustedRequestContext,
   type AuthenticatedRequestEntryAdapter,
@@ -9,7 +12,6 @@ import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents
 import {
   WORKFLOW_PROJECTION_FAMILY,
   WORKFLOW_RUNTIME_CAPABILITY,
-  WORKFLOW_SURFACE_FLOOR,
 } from '../../canonical-model/src/workflows.js';
 
 export const REQUEST_RUNTIME_VIEW_VERSION =
@@ -218,7 +220,7 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 26 adds header relations, relation List columns and shared or lifecycle-less editors.
     // 27 adds internal document attachments. 28 adds record and form layout revisions.
     // 29 adds verified workflow declarations.
-    maximumSupportedVersion: WORKFLOW_SURFACE_FLOOR,
+    maximumSupportedVersion: REPLAYED_LAYOUT_READER,
   },
 });
 

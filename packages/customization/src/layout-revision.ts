@@ -1,3 +1,4 @@
+import type { ReplayConflict } from './upgrade-diagnostics.js';
 import { randomUUID } from 'node:crypto';
 import {
   baseLayout,
@@ -121,21 +122,27 @@ export function placeAddedLayoutField(def: LayoutDefinition, fieldId: string) {
         // Publishing screens for a historical query-only field binds its existing placement.
         Object.assign(existing, field, { label: existing.label });
       } else {
-        const predecessor = section.fields[index - 1];
-        const destination = body.sections.find((s) =>
-          s.fields.some((f) => f.id === predecessor?.id),
-        );
-        if (destination)
-          destination.fields.splice(
-            destination.fields.findIndex((f) => f.id === predecessor!.id) + 1,
-            0,
-            field,
-          );
-        else body.sections[0]!.fields.push(field);
+        placeAfterBasePredecessor(body, section.fields, index);
       }
       layout.resultLayoutDigest = layoutDigest(body);
     }
   }
+}
+
+function placeAfterBasePredecessor(
+  body: LayoutBody,
+  baseFields: LayoutBody['sections'][number]['fields'],
+  index: number,
+) {
+  const predecessor = baseFields[index - 1];
+  const field = baseFields[index]!;
+  const destination = body.sections.find((section) =>
+    section.fields.some((f) => f.id === predecessor?.id),
+  );
+  if (destination) {
+    const at = destination.fields.findIndex((f) => f.id === predecessor!.id);
+    destination.fields.splice(at + 1, 0, field);
+  } else body.sections[0]!.fields.push(field);
 }
 
 function locate(b: LayoutBody, id: string) {
@@ -184,8 +191,8 @@ function insertAt(ids: string[], p: z.infer<typeof positionSchema>) {
   if (i < 0) throw new Error('The sibling anchor is outside the destination.');
   return i + Number('after' in p);
 }
-function applyEdit(b: LayoutBody, e: Edit) {
-  if (expectation(b, e) !== e.expected)
+function applyEdit(b: LayoutBody, e: Edit, verifyDigest = true) {
+  if (verifyDigest && expectation(b, e) !== e.expected)
     throw new Error(
       'The source binding, placement or previous value has changed.',
     );
@@ -227,6 +234,81 @@ function applyEdit(b: LayoutBody, e: Edit) {
   }
   b.sections.sort((a, c) => b.order.indexOf(a.id) - b.order.indexOf(c.id));
 }
+export type LayoutReplayFinding = ReplayConflict & { editIndex: number };
+export interface LayoutReplay {
+  source: LayoutBody;
+  findings: LayoutReplayFinding[];
+  blocked: { editIndex: number; blockedBy: number }[];
+}
+
+function structuralConflict(
+  sourceBody: LayoutBody,
+  body: LayoutBody,
+  edit: Edit,
+): ReplayConflict | undefined {
+  const destination = edit.kind === 'move' ? edit.destination : edit.parent;
+  const anchor =
+    'position' in edit && !('edge' in edit.position)
+      ? 'before' in edit.position
+        ? edit.position.before
+        : edit.position.after
+      : undefined;
+  const ids = new Set(
+    [edit.id, destination, anchor].filter((id): id is string => !!id),
+  );
+  for (const id of ids) {
+    if (id === body.slotId) continue;
+    const before = locate(sourceBody, id);
+    const after = locate(body, id);
+    if (!before && !after && edit.kind === 'createSection' && id === edit.id)
+      continue;
+    const expected = before?.parent ?? null;
+    const observed = after?.parent ?? null;
+    if (!after)
+      return { code: 'RETIRED_TARGET', subject: id, expected, observed };
+    if (!before || observed !== expected)
+      return { code: 'MOVED_MEMBER', subject: id, expected, observed };
+    if ('binding' in before.item) {
+      const old = before.item;
+      const next = after.item;
+      if (
+        !('binding' in next) ||
+        old.contractDigest !== next.contractDigest ||
+        old.required !== next.required ||
+        old.editorInput !== next.editorInput ||
+        old.tier !== next.tier
+      )
+        return {
+          code: 'INCOMPATIBLE_TYPE',
+          subject: id,
+          expected: old,
+          observed: next,
+        };
+    }
+    // Ignore additions and removals elsewhere. A touched member crossing an existing
+    // sibling has moved even if its parent ID still matches.
+    const peers = before.siblings.filter((peer) =>
+      after.siblings.includes(peer),
+    );
+    const actual = after.siblings.filter((peer) => peers.includes(peer));
+    if (
+      peers
+        .slice(0, peers.indexOf(id))
+        .some((peer) => actual.indexOf(peer) > actual.indexOf(id)) ||
+      peers
+        .slice(peers.indexOf(id) + 1)
+        .some((peer) => actual.indexOf(peer) < actual.indexOf(id))
+    )
+      return {
+        code: 'MOVED_MEMBER',
+        subject: id,
+        expected: peers,
+        observed: actual,
+      };
+  }
+  return;
+}
+
 export function draftLayoutRevision(
   target: LayoutTarget,
   intents: LayoutIntent[],
@@ -255,29 +337,76 @@ export function draftLayoutRevision(
 export function applyLayoutRevision(
   def: LayoutDefinition,
   patch: LayoutRevision,
+  replay?: LayoutReplay,
 ): string | null {
   const s = def.surfaces.find((v) => v.surfaceId === patch.surface);
   const target = s && currentLayout(def, s, patch.mode);
-  if (!s || !target) return 'This surface and mode cannot be arranged.';
+  if (!s || !target) {
+    replay?.findings.push({
+      code: 'RETIRED_TARGET',
+      subject: patch.surface,
+      expected: patch.mode,
+      observed: null,
+      editIndex: 0,
+    });
+    return 'This surface and mode cannot be arranged.';
+  }
   if (
     target.predecessor !== patch.predecessor ||
     patch.predecessor === patch.revisionId
   )
     return 'The predecessor of this layout revision differs.';
   const body = structuredClone(target.body);
+  const original = replay && structuredClone(replay.source);
+  const base = baseLayout(def, s, patch.mode)!;
+  const setAside = new Set<string>();
+  if (original) {
+    const known = new Set(
+      original.sections.flatMap((section) => section.fields.map((f) => f.id)),
+    );
+    for (const section of body.sections) {
+      for (const field of section.fields)
+        if (!known.has(field.id)) setAside.add(field.id);
+      section.fields = section.fields.filter((f) => !setAside.has(f.id));
+    }
+  }
+  const failed = new Map<string, number>();
   try {
-    for (const edit of patch.edits) {
+    for (const [editIndex, edit] of patch.edits.entries()) {
+      if (original && replay) {
+        const refs = [edit.id, edit.parent];
+        if (edit.kind === 'move') refs.push(edit.destination);
+        if ('position' in edit && !('edge' in edit.position))
+          refs.push(
+            'before' in edit.position
+              ? edit.position.before
+              : edit.position.after,
+          );
+        const blockedBy = refs
+          .map((id) => failed.get(id))
+          .find((index) => index !== undefined);
+        const conflict = structuralConflict(original, body, edit);
+        applyEdit(original, edit, false);
+        if (blockedBy !== undefined || conflict) {
+          if (blockedBy !== undefined)
+            replay.blocked.push({ editIndex, blockedBy });
+          else replay.findings.push({ ...conflict!, editIndex });
+          if (edit.kind !== 'rename')
+            failed.set(edit.id, blockedBy ?? editIndex);
+          continue;
+        }
+      }
       const section = body.sections.find((s) => s.id === edit.parent);
       const field = section?.fields.find((f) => f.id === edit.id);
       if (!section || !field) {
-        applyEdit(body, edit);
+        applyEdit(body, edit, !original);
         continue;
       }
       const visible = arrangeableLayoutFields(body, section);
       if (!visible.some((f) => f.id === field.id))
         return `${field.label.text} has no input in the document editor.`;
       const oldPosition = visible.findIndex((f) => f.id === field.id);
-      applyEdit(body, edit);
+      applyEdit(body, edit, !original);
       if (
         edit.kind === 'move' &&
         edit.destination === section.id &&
@@ -288,10 +417,18 @@ export function applyLayoutRevision(
   } catch (error) {
     return (error as Error).message;
   }
+  if (replay?.findings.length)
+    return 'The layout conflicts with the destination.';
+  for (const section of base.sections) {
+    for (const [index, field] of section.fields.entries())
+      if (setAside.has(field.id))
+        placeAfterBasePredecessor(body, section.fields, index);
+  }
   const layout = {
     body,
+    ...(replay ? { placementRuleVersion: 1 as const } : {}),
     revisionId: patch.revisionId,
-    resultLayoutDigest: patch.resultLayoutDigest,
+    resultLayoutDigest: replay ? layoutDigest(body) : patch.resultLayoutDigest,
   };
   const problem = layoutProblem(layout, baseLayout(def, s, patch.mode));
   if (problem) return problem;

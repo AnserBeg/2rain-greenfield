@@ -12,6 +12,12 @@ import {
 } from '@north-star/canonical-model';
 import {
   compileInSandbox,
+  UPGRADE_CODES_V1,
+  UPGRADE_PATCH_KINDS,
+  unadmittedKind,
+  type ReplayDiagnostics,
+  type ReplayOrigin,
+  type UpgradeCode,
   CUSTOMIZATION_PATCH_VERSION,
   parseCustomizationPatch,
   parseSerializedRelease,
@@ -101,19 +107,8 @@ export const AUTHORING_CHANNELS = [
 ] as const;
 export type AuthoringChannel = (typeof AUTHORING_CHANNELS)[number];
 
-const UPGRADE_PATCH_KINDS: ReadonlySet<string> = new Set([
-  'addValidation',
-  'addCalculatedDisplayField',
-  'addField',
-  'arrangeLayout',
-  'saveListView',
-  'addMetricCard',
-  'narrowPermission',
-  'unNarrowPermission',
-  'saveWorkflow',
-]);
-
 export type CustomizationRefusalCode =
+  | UpgradeCode
   | 'CUSTOMIZE_TARGET_NOT_FOUND'
   | 'CUSTOMIZE_NOT_STARTED'
   | 'CUSTOMIZE_BASE_STALE'
@@ -210,6 +205,8 @@ export type DraftOutcome =
   | {
       readonly code?: string;
       readonly issues?: readonly string[];
+      readonly replayDiagnostics?: ReplayDiagnostics;
+      readonly report?: UpgradeReport;
       readonly message: string;
       readonly missingCapability?: string;
       readonly status: 'invalid' | 'refused' | 'rejected' | 'unsupported';
@@ -242,6 +239,17 @@ export interface UpgradeRecord {
   readonly patchIds: readonly MintedUuid[];
 }
 
+export interface UpgradeReport extends ReplayDiagnostics {
+  version: 'northstar.upgrade-report/v1';
+  tenantId: string;
+  environmentId: string;
+  upgradeId: string;
+  sourceReleaseId: string;
+  sourceFence: string;
+  targetVersion: string;
+  targetRoot: string;
+  approvalMode: 'Manual';
+}
 export type UpgradePreparation =
   | { readonly status: 'current' }
   | {
@@ -249,6 +257,7 @@ export type UpgradePreparation =
       readonly upgradeId: MintedUuid;
       readonly renderedDiff: string;
       readonly releaseRoot: string;
+      readonly report?: UpgradeReport;
     }
   | Exclude<DraftOutcome, { status: 'drafted' }>;
 
@@ -367,7 +376,10 @@ export class PostgresCustomizationService {
             'CUSTOMIZE_NOT_STARTED',
             'there is no live release',
           );
-        const sourceReleaseId = pointer.releaseId;
+        const serving=await readVerifiedServing(this.connection.runtimePool,context);
+        if (!serving || serving.releaseId!==pointer.releaseId || serving.fence!==pointer.fence)
+          throw new CustomizationServiceRefusal('CUSTOMIZE_ACTIVATION_UNVERIFIED','The current swap requires verification or recovery.');
+        const sourceReleaseId = serving.releaseId;
         let result: UpgradePreparation;
         try {
           await this.#repair(admin, context);
@@ -381,13 +393,29 @@ export class PostgresCustomizationService {
             error instanceof PersistedReleaseConflict;
           result = {
             status: 'refused',
-            code: known ? error.code : 'CUSTOMIZE_UPGRADE_FAILED',
+            code:
+              known && Object.hasOwn(UPGRADE_CODES_V1, error.code)
+                ? error.code
+                : 'WHOLE_PACKAGE_FAILURE',
             message: known
               ? error.message
               : 'The platform upgrade could not be prepared.',
           };
         }
         const baseReleaseRoot = this.#tip.compiled.releaseRoot;
+        const target = parseNormalizedApplicationPackageJson(
+          this.#tip.normalizedDefinitionBytes,
+        ).package;
+        const reportIdentity = {
+          version: 'northstar.upgrade-report/v1' as const,
+          tenantId: context.tenantId,
+          environmentId: context.environmentId,
+          sourceReleaseId,
+          sourceFence: String(pointer.fence),
+          targetVersion: target.version,
+          targetRoot: baseReleaseRoot,
+          approvalMode: 'Manual' as const,
+        };
         if (result.status === 'current' || result.status === 'drafted') {
           await withTrustedRequestTransaction(
             this.connection.runtimePool,
@@ -403,11 +431,47 @@ export class PostgresCustomizationService {
                 ],
               ),
           );
-          return result;
+          return result.status === 'drafted'
+            ? {
+                ...result,
+                report: {
+                  ...reportIdentity,
+                  upgradeId: result.upgradeId,
+                  findings: [],
+                  blocked: [],
+                },
+              }
+            : result;
         }
+        const code =
+          result.code && Object.hasOwn(UPGRADE_CODES_V1, result.code)
+            ? (result.code as UpgradeCode)
+            : 'WHOLE_PACKAGE_FAILURE';
+        const { replayDiagnostics, ...outcome } = result;
+        const report: UpgradeReport = {
+          ...reportIdentity,
+          upgradeId: createHash('sha256')
+            .update(canonicalize(reportIdentity))
+            .digest('hex'),
+          ...(replayDiagnostics ?? {
+            findings: [
+              {
+                code,
+                subject: target.packageId,
+                expected: baseReleaseRoot,
+                observed: result.message,
+              },
+            ],
+            blocked: [],
+          }),
+        };
         const diagnostic: UpgradeRefusal = {
-          ...result,
-          code: result.code ?? 'CUSTOMIZE_UPGRADE_FAILED',
+          ...outcome,
+          code,
+          report,
+          issues: [...report.findings, ...report.blocked].map((issue) =>
+            JSON.stringify(issue),
+          ),
           sourceReleaseId,
           baseReleaseRoot,
         };
@@ -433,17 +497,31 @@ export class PostgresCustomizationService {
       return { status: 'current' as const };
     if (!baseReleaseId || !active.chain.length)
       throw new CustomizationServiceRefusal(
-        'CUSTOMIZE_BASE_MOVED',
+        'WHOLE_PACKAGE_FAILURE',
         'The platform upgrade has no recorded base or patch chain.',
       );
     const unsupported = active.chain.find(
       (record) => !UPGRADE_PATCH_KINDS.has(record.kind),
     );
-    if (unsupported)
-      throw new CustomizationServiceRefusal(
-        'CUSTOMIZE_BASE_MOVED',
-        `The platform upgrade cannot replay ${unsupported.kind} (change ${unsupported.patchId}).`,
-      );
+    if (unsupported) {
+      const finding = {
+        code: 'KIND_NOT_ADMITTED' as const,
+        subject: unsupported.kind,
+        expected: 'admitted',
+        observed: null,
+        patchId: unsupported.patchId,
+        patchKind: unsupported.kind,
+        patchIndex: active.chain.indexOf(unsupported),
+        memberIndex: 0,
+        editIndex: 0,
+      };
+      return {
+        status: 'refused',
+        code: finding.code,
+        message: `The platform upgrade cannot replay ${unsupported.kind}.`,
+        replayDiagnostics: { findings: [finding], blocked: [] },
+      };
+    }
     this.#assertAuthoredBase();
     const sourceBase = parseNormalizedApplicationPackageJson(
       (await this.#loadRelease(context, active.baseReleaseId))
@@ -459,35 +537,28 @@ export class PostgresCustomizationService {
         targetBase.normalizationProfileVersion
     ) {
       throw new CustomizationServiceRefusal(
-        'CUSTOMIZE_BASE_MOVED',
+        'WHOLE_PACKAGE_FAILURE',
         'the upgrade changes the package or language identity',
       );
     }
+    const patches=await this.#readPatches(context,active.chain,true);
     const source = (await this.#reproduce(context, active)).candidate;
     const sourceDefinition = parseNormalizedApplicationPackageJson(
       source.normalizedDefinitionBytes,
     );
-    const retiredRule = retypedFormulaRule(
-      sourceDefinition,
-      targetBase,
-      sourceBase,
-    );
-    if (retiredRule)
-      throw new CustomizationServiceRefusal(
-        'CUSTOMIZE_BASE_MOVED',
-        `The upgrade retires or retypes a target of validation rule ${retiredRule}.`,
-      );
-    assertCalculatedDisplayCompatibility(
-      sourceDefinition,
-      targetBase,
-      sourceBase,
-    );
     const replay = await this.#compile(
-      await this.#readPatches(context, active.chain),
+      patches,
       this.#tip,
       source,
       0,
       true,
+      undefined,
+      await this.#origins(
+        context,
+        active.chain,
+        this.#tip.compiled.releaseRoot,
+        true,
+      ),
     );
     if (replay.status !== 'compiled') return replay;
     const step = replay.steps[0]!;
@@ -495,14 +566,23 @@ export class PostgresCustomizationService {
     const candidateDefinition = parseNormalizedApplicationPackageJson(
       candidate.normalizedDefinitionBytes,
     );
-    const retypedRule = retypedFormulaRule(
+    const inheritedRule = retypedFormulaRule(
       sourceDefinition,
-      candidateDefinition,
+      targetBase,
+      sourceBase,
     );
+    assertCalculatedDisplayCompatibility(
+      sourceDefinition,
+      targetBase,
+      sourceBase,
+    );
+    const retypedRule =
+      inheritedRule ??
+      retypedFormulaRule(sourceDefinition, candidateDefinition);
     assertCalculatedDisplayCompatibility(sourceDefinition, candidateDefinition);
     if (retypedRule)
       throw new CustomizationServiceRefusal(
-        'CUSTOMIZE_BASE_MOVED',
+        'INCOMPATIBLE_TYPE',
         `The upgrade retires or retypes a target of validation rule ${retypedRule}.`,
       );
     await this.#assertActiveRestrictionRoles(
@@ -548,6 +628,21 @@ export class PostgresCustomizationService {
         candidateReleaseId: identity.releaseId,
         candidateRevisionId: identity.revisionId,
         patchIds: active.chain.map((record) => record.patchId),
+        ...('surfaces' in candidateDefinition && {
+          layoutEvidence: candidateDefinition.surfaces.flatMap((surface) =>
+            'layouts' in surface && surface.layouts
+              ? surface.layouts
+                  .filter((layout) => layout.placementRuleVersion)
+                  .map((layout) => ({
+                    surfaceId: surface.surfaceId,
+                    mode: layout.body.mode,
+                    revisionId: layout.revisionId,
+                    placementRuleVersion: layout.placementRuleVersion,
+                    resultLayoutDigest: layout.resultLayoutDigest,
+                  }))
+              : [],
+          ),
+        }),
       }),
     );
     await withTrustedRequestTransaction(
@@ -1260,6 +1355,14 @@ export class PostgresCustomizationService {
       await this.#loadRelease(context, active.baseReleaseId),
       reproduced.candidate,
       active.chain.length,
+      false,
+      undefined,
+      await this.#origins(
+        context,
+        active.chain,
+        this.#tip.compiled.releaseRoot,
+        false,
+      ),
     );
     if (compiled.status !== 'compiled') return compiled;
     const { steps } = compiled;
@@ -1928,6 +2031,12 @@ export class PostgresCustomizationService {
         0,
         true,
         [upgrade.compilerAcknowledgement],
+        await this.#origins(
+          context,
+          source.chain,
+          base.compiled.releaseRoot,
+          true,
+        ),
       );
       if (replay.status !== 'compiled') {
         throw new CustomizationServiceRefusal(
@@ -1957,6 +2066,7 @@ export class PostgresCustomizationService {
       offset,
       false,
       chain.slice(offset).map((record) => record.compilerAcknowledgement),
+      await this.#origins(context, chain, base.compiled.releaseRoot, false),
     );
     if (compiled.status !== 'compiled') {
       throw new CustomizationServiceRefusal(
@@ -2157,6 +2267,35 @@ export class PostgresCustomizationService {
     );
   }
 
+  async #origins(
+    context: TrustedRequestContext,
+    chain: readonly PatchRecord[],
+    targetRoot: string,
+    upgrade: boolean,
+  ): Promise<ReplayOrigin[]> {
+    const origins: ReplayOrigin[] = [];
+    for (const [index, row] of chain.entries()) {
+      const differentBase = row.baseReleaseRoot !== targetRoot;
+      const needsParent =
+        (upgrade &&
+          chain[index - 1]?.resultingRevisionId !== row.parentRevisionId) ||
+        (differentBase && row.kind === 'addLayoutRevision');
+      const parent = needsParent
+        ? (canonicalAuthoredProjection(
+            parseNormalizedApplicationPackageJson(
+              await this.#desiredState(context, row.parentRevisionId),
+            ),
+          ) as unknown as Record<string, unknown>)
+        : undefined;
+      origins.push({
+        patchId: row.patchId,
+        differentBase,
+        ...(parent && { parent }),
+      });
+    }
+    return origins;
+  }
+
   async #compile(
     chain: readonly CustomizationPatch[],
     base: ParsedRelease = this.#tip,
@@ -2164,6 +2303,7 @@ export class PostgresCustomizationService {
     startAt = 0,
     upgrade = false,
     pins?: readonly (AcknowledgementInput | null | undefined)[],
+    origins?: readonly ReplayOrigin[],
   ): Promise<
     | { readonly status: 'compiled'; readonly steps: readonly SandboxStep[] }
     | Exclude<DraftOutcome, { status: 'drafted' }>
@@ -2189,6 +2329,7 @@ export class PostgresCustomizationService {
                 ),
               ) as unknown as Record<string, unknown>),
         chain,
+        ...(origins && { origins }),
         tip: serializeRelease(parent),
         startAt,
         ...(upgrade ? { upgradeBaseRoot: base.compiled.releaseRoot } : {}),
@@ -2198,6 +2339,9 @@ export class PostgresCustomizationService {
     if (response.status === 'compiled') return response;
     return Object.freeze({
       ...(response.code ? { code: response.code } : {}),
+      ...(response.replayDiagnostics && {
+        replayDiagnostics: response.replayDiagnostics,
+      }),
       ...(response.missingCapability
         ? { missingCapability: response.missingCapability }
         : {}),
@@ -2399,6 +2543,7 @@ export class PostgresCustomizationService {
   async #readPatches(
     context: TrustedRequestContext,
     records: readonly PatchRecord[],
+    upgrade = false,
   ): Promise<CustomizationPatch[]> {
     if (!records.length) return [];
     return withTrustedRequestTransaction(
@@ -2427,9 +2572,14 @@ export class PostgresCustomizationService {
               record.payloadDigest
           ) {
             try {
-              const parsed = parseCustomizationPatch(
-                JSON.parse(payload.toString('utf8')),
-              );
+              const raw: unknown = JSON.parse(payload.toString('utf8'));
+              const missing = upgrade && unadmittedKind(raw);
+              if (missing)
+                throw new CustomizationServiceRefusal(
+                  'KIND_NOT_ADMITTED',
+                  `The platform upgrade cannot replay ${missing} (change ${record.patchId}).`,
+                );
+              const parsed = parseCustomizationPatch(raw);
               if (
                 parsed.status === 'parsed' &&
                 parsed.patch.kind === record.kind
@@ -2539,7 +2689,7 @@ function assertCalculatedDisplayCompatibility(
   const retyped = retypedCalculatedDisplayField(...comparison);
   if (retyped)
     throw new CustomizationServiceRefusal(
-      'CUSTOMIZE_BASE_MOVED',
+      'INCOMPATIBLE_TYPE',
       `The upgrade retires or retypes a target of calculated display field ${retyped}.`,
     );
 }

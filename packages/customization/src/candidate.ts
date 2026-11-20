@@ -1,4 +1,9 @@
 import {
+  replayCustomizationPatches,
+  type ReplayFailure,
+} from './upgrade-replay.js';
+import type { ReplayOrigin } from './upgrade-diagnostics.js';
+import {
   canonicalize,
   normalizeApplicationPackage,
   parseNormalizedApplicationPackageJson,
@@ -52,6 +57,7 @@ export interface CustomizationCompileFailure {
 
 export type CustomizationCandidateResult =
   | CustomizationCandidate
+  | ReplayFailure
   | CustomizationCompileFailure
   | (CustomizationRefusal & { readonly patchIndex: number })
   | (UnsupportedCustomization & { readonly patchIndex: number });
@@ -65,6 +71,8 @@ export type CustomizationCandidateResult =
  */
 export function compileCustomizationCandidate(input: {
   readonly acknowledgement: AcknowledgementInput;
+  readonly upgradeReplay?: boolean;
+  readonly origins?: readonly ReplayOrigin[];
   readonly historical?: boolean;
   readonly base: Readonly<Record<string, unknown>>;
   readonly chain: readonly CustomizationPatch[];
@@ -77,11 +85,13 @@ export function compileCustomizationCandidate(input: {
 }): CustomizationCandidateResult {
   // Admission applies to the new change. A recorded prefix must still replay.
   const change = input.chain.at(-1);
-  if (change && !input.historical) {
+  if (change && !input.historical && !input.upgradeReplay) {
     const refusal = checkCreateTimeLinks(change);
     if (refusal) return { ...refusal, patchIndex: input.chain.length - 1 };
   }
-  const applied = applyCustomizationPatches(input.base, input.chain);
+  const applied = input.upgradeReplay
+    ? replayCustomizationPatches(input.base, input.chain, input.origins)
+    : applyCustomizationPatches(input.base, input.chain, input.origins);
   if (applied.status !== 'applied') return applied;
   let normalizedDefinitionBytes: Uint8Array;
   try {

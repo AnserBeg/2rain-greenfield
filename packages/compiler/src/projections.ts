@@ -2,7 +2,10 @@ import {
   BOOKING_OPERATION_READER,
   hasBookingOperations,
 } from '@north-star/canonical-model';
-import { LAYOUT_READER } from '@north-star/canonical-model';
+import {
+  LAYOUT_READER,
+  REPLAYED_LAYOUT_READER,
+} from '@north-star/canonical-model';
 import {
   CALCULATED_DISPLAY_QUERY_READER,
   type CalculatedDisplayProjectionEntry,
@@ -1012,21 +1015,26 @@ function surfaceManifestPayload(
         (column) => column.relation,
       ),
   );
-  const surfaceFloor = original.surfaces.some(
-    (s) => 'layouts' in s && s.layouts,
-  )
-    ? LAYOUT_READER
-    : extendedEditor || declaredRelationList
-      ? 26
-      : hasMetrics(original)
-        ? 25
-        : hasSavedListLayouts(original)
-          ? 24
-          : recordFieldPresentation
-            ? 23
-            : rankedDefaultsOrChainedTasks
-              ? 22
-              : null;
+  const replayedLayout = original.surfaces.some(
+    (s) =>
+      'layouts' in s &&
+      s.layouts?.some((layout) => layout.placementRuleVersion === 1),
+  );
+  const surfaceFloor = replayedLayout
+    ? REPLAYED_LAYOUT_READER
+    : original.surfaces.some((s) => 'layouts' in s && s.layouts)
+      ? LAYOUT_READER
+      : extendedEditor || declaredRelationList
+        ? 26
+        : hasMetrics(original)
+          ? 25
+          : hasSavedListLayouts(original)
+            ? 24
+            : recordFieldPresentation
+              ? 23
+              : rankedDefaultsOrChainedTasks
+                ? 22
+                : null;
   const payloadSchemaVersion = composed
     ? COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION
     : navigation

@@ -1,3 +1,7 @@
+import {
+  UPGRADE_CODES_V1,
+  type UpgradeFinding,
+} from './upgrade-diagnostics.js';
 import { getHeapStatistics } from 'node:v8';
 
 import {
@@ -66,60 +70,61 @@ function compileChain(
       chain: request.chain.slice(0, length),
       parent,
       ...(request.historical ? { historical: true } : {}),
+      ...(request.origins && { origins: request.origins }),
+      upgradeReplay: !!request.upgradeBaseRoot,
       sandbox,
     });
-    if (request.upgradeBaseRoot && result.status !== 'compiled') {
-      if (!('patchIndex' in result)) {
-        const details = result.diagnostics.length ? result.diagnostics : [null];
-        return {
-          code: 'CUSTOMIZE_UPGRADE_CONFLICT',
-          status: 'rejected',
-          message: result.message,
-          diagnostics: details.map((detail) => ({
-            code: 'CUSTOMIZE_UPGRADE_CONFLICT',
-            firstPartyBase: request.upgradeBaseRoot,
-            ...(detail && typeof detail === 'object' && 'subjectId' in detail
-              ? { firstPartySubject: detail.subjectId }
-              : {}),
-            reason: result.message,
-            details: detail ? [detail] : [],
-          })),
-        };
-      }
-      const patchIndex = result.patchIndex;
-      const tenantPatch = request.chain[patchIndex]!;
-      let firstPartySubject: string | undefined;
-      if (tenantPatch.kind === 'addField') {
-        const collision = (
-          (request.base.fields ?? []) as Record<string, unknown>[]
-        ).find(
-          (field) =>
-            (field.entity as { targetId?: string } | undefined)?.targetId ===
-              tenantPatch.entity &&
-            String(field.label).toLowerCase() ===
-              tenantPatch.field.label.trim().toLowerCase(),
-        );
-        firstPartySubject = String(collision?.fieldId ?? tenantPatch.entity);
-      } else if (tenantPatch.kind === 'arrangeLayout') {
-        firstPartySubject = tenantPatch.surface;
-      }
+    if (result.status === 'replayConflict') {
+      const { findings, blocked } = result;
+      const code = findings[0]!.code;
       return {
-        code: 'CUSTOMIZE_UPGRADE_CONFLICT',
-        diagnostics: [
-          {
-            code: 'CUSTOMIZE_UPGRADE_CONFLICT',
-            firstPartyBase: request.upgradeBaseRoot,
-            firstPartySubject,
-            tenantPatch,
-            patchIndex,
-            reason: result.message,
-            details: [],
-          },
-        ],
-        message:
-          'a recorded tenant patch conflicts with the new first-party base',
-        patchIndex,
+        code,
+        message: UPGRADE_CODES_V1[code],
         status: 'rejected',
+        replayDiagnostics: { findings, blocked },
+        diagnostics: findings,
+      };
+    }
+    if (request.upgradeBaseRoot && result.status === 'rejected') {
+      const findings: UpgradeFinding[] = (
+        result.diagnostics.length ? result.diagnostics : [null]
+      ).map((raw) => {
+        const detail = raw as { subjectId?: string; message?: string } | null;
+        const subject = detail?.subjectId ?? request.upgradeBaseRoot!;
+        const patchIndex = request.chain.findIndex(
+          (p) => p.kind === 'addValidation' && p.rule.ruleId === subject,
+        );
+        const patch = request.chain[patchIndex];
+        if (
+          patch?.kind === 'addValidation' &&
+          /satisfying and violating/u.test(detail?.message ?? '')
+        )
+          return {
+            code: 'UNSATISFIABLE_RULE',
+            subject,
+            expected: patch.rule.ruleId,
+            observed: detail,
+            patchIndex,
+            patchKind: patch.kind,
+            memberIndex: 0,
+            editIndex: 0,
+            ...(request.origins?.[patchIndex] && {
+              patchId: request.origins[patchIndex]!.patchId,
+            }),
+          };
+        return {
+          code: 'WHOLE_PACKAGE_FAILURE',
+          subject,
+          expected: request.upgradeBaseRoot,
+          observed: detail ?? result.message,
+        };
+      });
+      return {
+        status: 'rejected',
+        code: findings[0]!.code,
+        message: result.message,
+        diagnostics: findings,
+        replayDiagnostics: { findings, blocked: [] },
       };
     }
     if (result.status === 'refused') {
