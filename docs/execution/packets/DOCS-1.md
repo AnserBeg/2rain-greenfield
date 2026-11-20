@@ -1,6 +1,8 @@
 # DOCS-1 — governed files and generated PDFs
 
-Slice 2 implements document templates and PDF generation from [ADR-0078](../../decisions/ADR-0078-governed-documents-files-templates-and-signatures.md). Slice 1a attached internal files to first-party and tenant records. Fable closed the design read before implementation. The Critical candidate uses migration 0052 and Surface reader 31 after Billing. Recheck both at integration. The branch waits for the targeted follow-up.
+Slice 2 implements document templates and PDF generation from [ADR-0078](../../decisions/ADR-0078-governed-documents-files-templates-and-signatures.md). Slice 1a attached internal files to first-party and tenant records. Fable closed the design read before implementation. After merging main at `fff2166f`, the Critical candidate uses migration 0056 and Surface reader 36. Recheck both at integration. The query-catalog reader rung for optional read-model dependencies awaits an orchestrator ruling on the preceding binary's boot path (see Decisions).
+
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44819597278
 
 ## Claims
 
@@ -13,7 +15,11 @@ Slice 2 implements document templates and PDF generation from [ADR-0078](../../d
 
 - Template sources are direct Q0 record reads and scoped child lists. Money uses the currency declared by its field type. Module reads return stored dates as civil text. Record pages and PDFs use the same calendar day. Layout uses the built-in Latin-script PDF fonts.
 - The company-brand resolver uses the company record name and the Ledger print palette without a logo. Shared records use the Ledger name. Each issued PDF saves brand revision `platform-default`.
-- Local demo issuance uses the demo scanner. SQL requires the governing Record grants and every read-model dependency whose compiled declaration does not say `required: false`; an absent flag is mandatory and fails closed. The PO read model declares its purchasing-settings and approval reads `required: false`, because its provider leaves the approval figures empty when either read is withheld. That flag changes the first-party PO release bytes (pre-tenant rebaseline). Releases whose dependencies omit it compile byte-identically, which the archived-compiler comparison proves. Older binaries parse read models strictly, so they refuse a flagged query catalog at query time; no query-catalog rung is added. SQL checks exact file categories and takes write limits and retention from the release. The scanner refuses verdict access after a policy change or release switch. Customer upload requests and signatures remain gated.
+- Local demo issuance uses the demo scanner. SQL requires the governing Record grants and every read-model dependency whose compiled declaration does not say `required: false`; an absent flag is mandatory and fails closed. The PO read model declares its purchasing-settings and approval reads `required: false`, because its provider leaves the approval figures empty when either read is withheld; a test withholds each and the Record and its attachment stay readable. That flag changes the first-party PO release bytes (pre-tenant rebaseline). Releases whose dependencies omit it compile byte-identically, which the archived-compiler comparison proves. SQL checks exact file categories and takes write limits and retention from the release. The scanner refuses verdict access after a policy change or release switch. Customer upload requests and signatures remain gated.
+- Named asymmetry: the PO provider also tolerates a withheld `received`, `bills` or `billLines` read, but those dependencies stay mandatory for attachments (orchestrator ruling). A person who can open the PO without vendor-bill or received-quantity read sees the Record and not its files; this fails closed.
+- Accepted debt: the company-brand resolver in the generic document SQL names `northstar.app:query.legal_entity_get`, `northstar.app:field.legal_entity_name` and `northstar.app:entity.legal_entity`. The branding slice removes them.
+- The generated-receipt function applies no file-category policy: a generated version has no field or category and `generated_source` is its authority. The former clause could not be killed by any test, so it was removed.
+- Reader contract (open): a flagged query catalog needs a query-catalog reader rung so the preceding binary refuses by name. The preceding serving loader checks capabilities before decoding any catalog and never parses the stored definition. Its boot path does: `composeServingGateways` builds the boot policy through `releasePolicyBindings`, which strict-parses the active release's stored definition before the request view service exists, and the local demo also parses it in `provisionLocalDemoReleaseAuthorization`. A rung added now cannot change that already-built binary, so the rung is held for an orchestrator ruling.
 
 ## Test it yourself
 
@@ -24,28 +30,29 @@ Slice 2 implements document templates and PDF generation from [ADR-0078](../../d
 
 ## Gates and controls
 
-Hosted CI exercises the compiled app, SQL authority, the preceding reader and persisted file-only parity. Local proofs cover actual issuance, exact digest, elapsed COMMIT and isolated mutations. The PDF integration test exercises the renderer’s network boundary and output limits. Expected-red controls cover query and company-brand read revocation, parser and subprocess limits, SQL pagination, the API scanner guard and the HTTP commit outcome.
+Hosted CI exercises the compiled app, SQL authority, the preceding reader and persisted file-only parity. Local proofs cover actual issuance, exact digest, elapsed COMMIT and isolated mutations. The PDF integration test exercises the renderer’s network boundary and output limits. Expected-red controls cover query and company-brand read revocation, the optional dependency flag in both directions, parser and subprocess limits, SQL pagination, the API scanner guard and the HTTP commit outcome.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "DOCS-1",
-  "base": "08edc207bcd5be1982c9c0bcf1723172df9cb7ad", "head": "40cc6a496714cd0d89714159629e51d4b848b090",
+  "base": "fff2166fa326f871c11a34d4da623707878e7636", "head": "daef377d2ab0ea5a22e351bc7fba3870b494cf57",
   "changedPaths": [
-    ".github/workflows/ci.yml", ".github/workflows/evidence.yml", "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts",
-    "apps/web/src/document-http.ts", "apps/web/src/document-template-form.ts", "apps/web/src/surface-client.ts", "apps/web/src/surface-composition.ts",
-    "db/migrations/0052_generated_document_sources.sql", "db/schema.snapshot.json", "packages/canonical-model/src/document-template-schema.ts", "packages/canonical-model/src/documents.ts",
-    "packages/canonical-model/src/index.ts", "packages/canonical-model/src/normalize.ts", "packages/canonical-model/src/schemas.ts", "packages/compiler/src/compiler.ts",
-    "packages/compiler/src/document-templates.ts", "packages/compiler/src/documents.ts", "packages/compiler/src/projections.ts", "packages/customization/src/apply.ts",
-    "packages/customization/src/patch.ts", "packages/customization/src/render.ts", "packages/customization/src/targets.ts", "packages/domain/src/purchasing/approval-workspace.ts", "packages/postgres-provider/package.json",
-    "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/document-attachments.ts", "packages/postgres-provider/src/document-company-brand.ts", "packages/postgres-provider/src/document-content.ts",
-    "packages/postgres-provider/src/document-pdf-worker.ts", "packages/postgres-provider/src/document-pdf.ts", "packages/postgres-provider/src/document-publication.ts", "packages/postgres-provider/src/document-template-sources.ts",
-    "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/request-context.ts", "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/postgres-provider/src/serving-gateways.ts",
-    "packages/runtime/src/civil-date.ts", "packages/runtime/src/document-gateway.ts", "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-operation-gateway.ts",
-    "packages/runtime/src/semantic-query-gateway.ts", "pnpm-lock.yaml", "test/architecture/release-persistence-boundary.test.ts", "test/architecture/repository-hygiene.test.ts",
-    "test/evidence/DOCS-1.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/archived-customization-runtime.ts", "test/helpers/document-pdf-text.ts",
-    "test/integration/document-http.test.ts", "test/integration/document-pdf.test.ts", "test/postgres/document-attachments.test.ts", "test/postgres/document-templates.test.ts",
-    "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts", "test/postgres/request-runtime-view.test.ts",
-    "test/postgres/trust-substrate.test.ts", "test/unit/customize-screen.test.ts"
+    ".github/workflows/ci.yml", ".github/workflows/evidence.yml", "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json",
+    "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/document-http.ts", "apps/web/src/document-template-form.ts",
+    "apps/web/src/surface-client.ts", "apps/web/src/surface-composition.ts", "db/migrations/0056_generated_document_sources.sql", "db/schema.snapshot.json",
+    "packages/canonical-model/src/document-template-schema.ts", "packages/canonical-model/src/documents.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/normalize.ts",
+    "packages/canonical-model/src/schemas.ts", "packages/compiler/src/compiler.ts", "packages/compiler/src/document-templates.ts", "packages/compiler/src/documents.ts",
+    "packages/compiler/src/projections.ts", "packages/customization/src/apply.ts", "packages/customization/src/patch.ts", "packages/customization/src/render.ts",
+    "packages/customization/src/targets.ts", "packages/customization/src/upgrade-diagnostics.ts", "packages/customization/src/upgrade-replay.ts", "packages/domain/src/purchasing/approval-workspace.ts",
+    "packages/postgres-provider/package.json", "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/document-attachments.ts", "packages/postgres-provider/src/document-company-brand.ts",
+    "packages/postgres-provider/src/document-content.ts", "packages/postgres-provider/src/document-pdf-worker.ts", "packages/postgres-provider/src/document-pdf.ts", "packages/postgres-provider/src/document-publication.ts",
+    "packages/postgres-provider/src/document-template-sources.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/request-context.ts", "packages/postgres-provider/src/request-runtime-view-service.ts",
+    "packages/postgres-provider/src/serving-gateways.ts", "packages/runtime/src/civil-date.ts", "packages/runtime/src/document-gateway.ts", "packages/runtime/src/request-runtime-view.ts",
+    "packages/runtime/src/semantic-operation-gateway.ts", "packages/runtime/src/semantic-query-gateway.ts", "pnpm-lock.yaml", "test/architecture/release-persistence-boundary.test.ts",
+    "test/architecture/repository-hygiene.test.ts", "test/evidence/DOCS-1.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/archived-customization-runtime.ts",
+    "test/helpers/document-pdf-text.ts", "test/integration/document-http.test.ts", "test/integration/document-pdf.test.ts", "test/postgres/document-attachments.test.ts",
+    "test/postgres/document-templates.test.ts", "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts",
+    "test/postgres/request-runtime-view.test.ts", "test/postgres/trust-substrate.test.ts", "test/unit/customization-upgrade.test.ts", "test/unit/customize-screen.test.ts"
   ],
   "symbols": [
     {"path": "packages/compiler/src/document-templates.ts", "name": "compileDocumentTemplates"},
