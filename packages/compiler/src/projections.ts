@@ -35,6 +35,7 @@ import {
   DOCUMENT_FILES_SURFACE_FLOOR,
   DOCUMENTS_PAYLOAD_VERSION,
 } from '../../canonical-model/src/documents.js';
+import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../canonical-model/src/surface-workspace.js';
 import type { compileDocuments } from './documents.js';
 import {
   WORKFLOW_PAYLOAD_VERSION,
@@ -1073,6 +1074,12 @@ function surfaceManifestPayload(
         (column) => column.relation,
       ),
   );
+  const lineCreateValues = original.surfaces.some(
+    (surface) =>
+      'documentEditor' in surface &&
+      (surface.documentEditor as SurfaceDocumentEditor | undefined)
+        ?.lineCreateValues !== undefined,
+  );
   const replayedLayout = original.surfaces.some(
     (s) =>
       'layouts' in s &&
@@ -1080,23 +1087,25 @@ function surfaceManifestPayload(
         (layout) => layout.placementRuleVersion === 1,
       ),
   );
-  const surfaceFloor = replayedLayout
-    ? REPLAYED_LAYOUT_READER
-    : original.surfaces.some((s) => s.archetype === 'board')
-      ? BOARD_READER
-      : original.surfaces.some((s) => 'layouts' in s && s.layouts)
-        ? LAYOUT_READER
-        : extendedEditor || declaredRelationList
-          ? 26
-          : hasMetrics(original)
-            ? 25
-            : hasSavedListLayouts(original)
-              ? 24
-              : recordFieldPresentation
-                ? 23
-                : rankedDefaultsOrChainedTasks
-                  ? 22
-                  : null;
+  const surfaceFloor = lineCreateValues
+    ? LINE_CREATE_VALUES_SURFACE_FLOOR
+    : replayedLayout
+      ? REPLAYED_LAYOUT_READER
+      : original.surfaces.some((s) => s.archetype === 'board')
+        ? BOARD_READER
+        : original.surfaces.some((s) => 'layouts' in s && s.layouts)
+          ? LAYOUT_READER
+          : extendedEditor || declaredRelationList
+            ? 26
+            : hasMetrics(original)
+              ? 25
+              : hasSavedListLayouts(original)
+                ? 24
+                : recordFieldPresentation
+                  ? 23
+                  : rankedDefaultsOrChainedTasks
+                    ? 22
+                    : null;
   const payloadSchemaVersion = composed
     ? COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION
     : navigation

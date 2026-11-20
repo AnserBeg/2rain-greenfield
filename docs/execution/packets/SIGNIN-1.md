@@ -11,6 +11,10 @@ Slice 1 uses passkeys and session-bound ERP entry. The [previous correction reco
 | Handoff | A database trigger witnesses consumption before an expired handoff is refused. Rollback restores the verifier for a valid handoff. A second live ERP handle is refused and the original handle succeeds. |
 | Recovery | Valid passkey ceremonies refuse a different permission resource, uncovered release approver eligibility and uncovered executor authority. A recovery started while its issuer has authority is refused at enrollment after revocation. The credential count stays zero and the invitation stays available. |
 
+## Slice 2b: provider enablement and outward sends
+
+Slice 2b is the part of slice 2 that enables providers and opens outward sends. It waits for CONNECT-1's canonical pending-send records and joins proof consumption to CONNECT-1's writer ([ADR-0088](../../decisions/ADR-0088-governed-communications-and-reminders.md)).
+
 ## Gates and test it yourself
 
 The architecture check admits the transient login cleanup in its migration and schema snapshot. Its fixture flags business deletes in both files and login deletion in application code.

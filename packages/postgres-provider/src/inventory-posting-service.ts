@@ -296,9 +296,14 @@ const companionDerivedInventoryPostingInputDigestVersion = 4 as const;
  * input already covers -- so it carried no information, and it was the one
  * kernel-derived value still in the version-4 input. Corrected IN PLACE at
  * version 4 rather than cut as version 5, because ADR-0063 section 4 proves
- * no version-4 receipt exists in released data: `postStockCount` has no
+ * no version-4 receipt existed in released data: `postStockCount` had no
  * production caller. The standard version 2 keeps its role, because version 2
  * receipts ARE released data.
+ *
+ * STOCK-COUNTS ends that premise: a stock count's Post on the posting route
+ * is `postStockCount`'s first production caller, so version-4 receipts are
+ * now released data and version 4 is frozen. Any change to the stock-count digest
+ * input needs a new version with its own `CHECK` migration (ADR-0063, amended).
  *
  * A stored version-3 receipt is still DECODED under version 3 -- nothing is
  * rewritten and nothing is removed. What it may not do is have a fresh version-3
@@ -1435,6 +1440,15 @@ export class PostgresInventoryPostingService {
       }
       if (isStockCountPosting(posting)) {
         await assertStockCountCompensationAvailable(
+          client,
+          this.#binding,
+          context,
+          posting,
+        );
+        // STOCK-COUNTS. A count's expected is the ledger at its location as of
+        // its own instant, read under the stock locks taken at BEGIN, so the
+        // posted variance leaves on-hand at what was counted.
+        await assertCountExpectedIsLedger(
           client,
           this.#binding,
           context,
@@ -3040,6 +3054,10 @@ function validateStockCountCommand(
   }
   const naturalKeys = new Set<string>();
   const evidenceIds = new Set<string>();
+  // STOCK-COUNTS. An initial count or a correction names each item once:
+  // every line's expected is the whole ledger for its item, so a second line
+  // for the same item would post its variance twice.
+  const countedItems = new Set<string>();
   for (const line of command.lines) {
     exactKeys(line, [
       'countedQuantity',
@@ -3057,6 +3075,12 @@ function validateStockCountCommand(
       throw inputError('stock-count lines repeat a stockCountLineId');
     }
     evidenceIds.add(line.stockCountLineId.toLowerCase());
+    if (command.kind !== 'reversal') {
+      if (countedItems.has(line.itemId.toLowerCase())) {
+        throw inputError('a stock count names each item once');
+      }
+      countedItems.add(line.itemId.toLowerCase());
+    }
     const expected = decimalToScaled(
       line.expectedQuantity,
       'line.expectedQuantity',
@@ -4212,6 +4236,34 @@ function preserved(
         JSON.stringify(current[column] ?? null),
     reason,
   );
+}
+
+/**
+ * STOCK-COUNTS. The physical columns of fields a release MAY declare, named by
+ * explicit local id -- never every field the binding holds, which would derive
+ * a proof list from the row it proves. A release that does not declare a field
+ * has no such column; a column the row carries and no proof covers is refused
+ * by `assertPersistedRowVerified`.
+ */
+function declaredColumns(
+  entity: EntityBinding,
+  localIds: readonly string[],
+): string[] {
+  return localIds.flatMap((localId) => {
+    const field = entity.fields.get(localId);
+    return field ? [field.name] : [];
+  });
+}
+
+/**
+ * STOCK-COUNTS, review round 1 (C6). A row as each column's exact JSON text,
+ * for a preservation proof: a numeric(38,18) read through `to_jsonb` arrives
+ * as a JavaScript number, and 1.000000000000000001 and ...002 are one number.
+ * The keys are the row's columns, so the coverage equality reads them as
+ * before; each value is the column's jsonb text, compared as a string.
+ */
+function exactRowSql(alias: string): string {
+  return `(SELECT jsonb_object_agg(exact_column.key, exact_column.value::text) FROM jsonb_each(to_jsonb(${alias})) AS exact_column)`;
 }
 
 function preservedColumns(
@@ -6102,7 +6154,7 @@ async function assertCompanionIdentitiesPersisted(
             source.${quoted(binding.stockCountStateColumn)} AS "sourceState",
             source.${quoted(binding.stockCountActorColumn)} AS "sourceActorId",
             to_char(source.${quoted(binding.stockCountRecordedAtColumn)} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "sourceRecordedAt",
-            to_jsonb(source) AS "sourcePersistedRow",
+            ${exactRowSql('source')} AS "sourcePersistedRow",
             to_jsonb(companion) AS "companionPersistedRow",
             companion.tenant_id::text AS "companionTenantId",
             companion.environment_id::text AS "companionEnvironmentId",
@@ -6216,6 +6268,12 @@ async function assertCompanionIdentitiesPersisted(
           binding.stockCountReasonNarrativeColumn,
           binding.stockCountSupersedesColumn,
           requiredField(binding.stockCount, 'stock_count_number').name,
+          // STOCK-COUNTS. A count's type and counting mode are evidence the
+          // count carried before Post, and no posting writes them.
+          ...declaredColumns(binding.stockCount, [
+            'stock_count_count_type',
+            'stock_count_counting_mode',
+          ]),
         ],
       ),
     ],
@@ -6354,7 +6412,7 @@ async function assertCompanionIdentitiesPersisted(
             companion.${quoted(binding.transactionLineToLocationColumn)}::text AS "companionToLocationId",
             companion.${quoted(binding.transactionLine.revisionColumn)}::integer AS "companionRevision",
             (SELECT relation.relname FROM pg_catalog.pg_class AS relation WHERE relation.oid = companion.tableoid) AS "observedCompanionRelation",
-            to_jsonb(source) AS "sourcePersistedRow",
+            ${exactRowSql('source')} AS "sourcePersistedRow",
             to_jsonb(companion) AS "companionPersistedRow"
        FROM ${table(binding, binding.stockCountLine)} AS source
        JOIN ${table(binding, binding.transactionLine)} AS companion
@@ -6446,6 +6504,11 @@ async function assertCompanionIdentitiesPersisted(
             binding.stockCountLineVarianceColumn,
             binding.stockCountLineUnitColumn,
             binding.stockCountLineReversalColumn,
+            // STOCK-COUNTS. The physical count entered while counting; Review
+            // copied it into counted, and no posting writes it.
+            ...declaredColumns(binding.stockCountLine, [
+              'stock_count_line_physical_quantity',
+            ]),
           ],
         ),
       ],
@@ -6882,7 +6945,7 @@ async function lockAndAssertStockCountEvidence(
             source.${quoted(binding.stockCountSupersedesColumn)}::text AS "supersedesStockCountId",
             source.${quoted(binding.stockCountRelationToTransactionColumn)}::text AS "transactionId",
             source.${quoted(binding.stockCount.revisionColumn)}::integer AS revision,
-            to_jsonb(source) AS "priorRow"
+            ${exactRowSql('source')} AS "priorRow"
        FROM ${table(binding, binding.stockCount)} AS source
       WHERE tenant_id = $1 AND environment_id = $2
         AND ${quoted(binding.stockCount.legalEntityColumn!)} = $3
@@ -6900,9 +6963,9 @@ async function lockAndAssertStockCountEvidence(
   const state = row?.state;
   // PUR-2a. The companion identity is a POST-TIME OUTPUT, so a reviewed count
   // must not already name one: the kernel writes it at post time, so a reviewed
-  // source carrying one was written by something else. (The kernel is the only
-  // writer WITHIN a posting; generic writers remain open -- see
-  // `companion-writers-not-closed`.) An
+  // source carrying one was written by something else. (STOCK-COUNTS retired
+  // both companion relations from every generic input and form, so no generic
+  // writer reaches them; this fence is the backstop.) An
   // already-posted count is the replay case, and there the stored identity
   // must be exactly the derived one.
   const expectedCompanionId =
@@ -6958,7 +7021,7 @@ async function lockAndAssertStockCountEvidence(
             source.${quoted(binding.stockCountLineUnitColumn)} AS "unitId",
             source.${quoted(binding.stockCountLineReversalColumn)}::text AS "reversalOfMovementId",
             source.${quoted(binding.stockCountLineRelationToTransactionLineColumn)}::text AS "transactionLineId",
-            to_jsonb(source) AS "priorRow"
+            ${exactRowSql('source')} AS "priorRow"
        FROM ${table(binding, binding.stockCountLine)} AS source
       WHERE tenant_id = $1 AND environment_id = $2
         AND ${quoted(binding.stockCountLine.legalEntityColumn!)} = $3
@@ -7156,6 +7219,96 @@ async function assertStockCountCompensationAvailable(
         'INVENTORY_COUNT_COMPENSATION_CONFLICT',
         `reversal line ${line.stockCountLineId} is not the exact inverse of its superseded movement`,
         { stockCountLineId: line.stockCountLineId },
+      );
+    }
+  }
+}
+
+/**
+ * STOCK-COUNTS. A count's expected quantity is what the ledger holds for the
+ * line's item at the count's location in its legal entity, summed over every
+ * live movement effective at or before the count's own instant. An initial
+ * count and a correction must carry exactly that, so the variance they post
+ * leaves on-hand at the counted quantity as of that instant; a stale expected
+ * -- a movement posted for the item since the count was reviewed -- is refused
+ * with INVENTORY_COUNT_EXPECTED_STALE, and the posting's transaction rolls
+ * back: no movement, count transition or accepted receipt is committed (the
+ * failed invocation itself may be recorded).
+ *
+ * Two consequences of "at or before the count's instant", both deliberate:
+ * a movement effective at the same instant (a fixed test clock, two postings
+ * inside one tick) is included in the sum; and a movement dated after the
+ * count never makes it stale, because the count speaks only of its own
+ * instant. The first is a statement about this inclusive sum only, not about
+ * the kernel's full movement order: there, equal effective and recorded times
+ * fall to the later keys of the same-instant tuple, which need not place that
+ * movement before this posting's. Read under the stock-identity locks every
+ * posting takes at BEGIN, so no other posting for these items at this
+ * location can change the sum before this posting commits.
+ *
+ * A reversal is exempt. `assertStockCountCompensationAvailable` checks each
+ * of its lines against the one movement that line names (same item, location
+ * and unit, the exact negative quantity, a movement of the reversed count).
+ * That is a per-line check, not a proof that the lines reverse every movement
+ * of the reversed count exactly once; the route derives them from that
+ * count's movements (`deriveReversalLines`).
+ */
+async function assertCountExpectedIsLedger(
+  client: PoolClient,
+  binding: PostingStorageBinding,
+  context: TrustedRequestContext,
+  posting: Extract<ParsedPosting, { postingRole: 'correction' | 'count' }>,
+): Promise<void> {
+  const { command } = posting;
+  if (command.kind === 'reversal') return;
+  const column = (local: string) =>
+    quoted(requiredField(binding.movement, local).name);
+  const itemColumn = column('inventory_movement_item_id');
+  const posted = await client.query<{
+    itemId: string;
+    postedQuantity: string;
+  }>(
+    `SELECT ${itemColumn}::text AS "itemId",
+            COALESCE(sum(${column('inventory_movement_quantity_delta')}), 0)::text AS "postedQuantity"
+       FROM ${table(binding, binding.movement)}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND ${quoted(binding.movement.legalEntityColumn!)} = $3
+        AND ${column('inventory_movement_location_id')} = $4
+        AND ${itemColumn}::text = ANY($5::text[])
+        AND ${column('inventory_movement_effective_at')} <= $6::timestamptz
+        AND ${quoted(binding.movement.archiveColumn)} IS NULL
+      GROUP BY ${itemColumn}`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.locationId,
+      command.lines.map((line) => line.itemId),
+      command.effectiveAt,
+    ],
+  );
+  const ledger = new Map(
+    posted.rows.map((row) => [
+      String(row.itemId).toLowerCase(),
+      databaseDecimalToScaled(String(row.postedQuantity)),
+    ]),
+  );
+  for (const line of command.lines) {
+    const postedQuantity = ledger.get(line.itemId) ?? 0n;
+    if (
+      postedQuantity !==
+      decimalToScaled(line.expectedQuantity, 'line.expectedQuantity')
+    ) {
+      throw postingError(
+        'INVENTORY_COUNT_EXPECTED_STALE',
+        `stock-count line ${line.stockCountLineId} expects ${line.expectedQuantity}, but the ledger holds ${scaledToDecimal(postedQuantity)} for its item at the count's location as of ${command.effectiveAt}; review the count again`,
+        {
+          expectedQuantity: line.expectedQuantity,
+          itemId: line.itemId,
+          locationId: command.locationId,
+          postedQuantity: scaledToDecimal(postedQuantity),
+          stockCountLineId: line.stockCountLineId,
+        },
       );
     }
   }
@@ -8724,39 +8877,22 @@ async function validateReceiptReplay(
   idempotencyKey: string,
   client: PoolClient,
 ): Promise<InventoryPostingResultV1> {
-  let digestPosting = posting;
-  if (receipt.input_digest_version === 5 && posting.postingRole === 'receipt') {
-    // Version 5 includes authorization evidence in its immutable preimage.
-    // Reconstruct that historical evidence, not today's policy revision. The
-    // gateway still authorizes every retry against current grants before here.
-    // No business input is replaced, and no recorded digest is rewritten.
-    const evidence = await client.query<{
-      policy_version: string;
-      policy_evaluator_version: string;
-    }>(
-      `SELECT policy_version, policy_evaluator_version
-         FROM platform.trust_action_invocations
-        WHERE tenant_id=$1 AND environment_id=$2 AND invocation_id=$3
-          AND outcome='SUCCEEDED' AND policy_decision='ALLOW'`,
-      [context.tenantId, context.environmentId, receipt.invocation_id],
-    );
-    if (evidence.rows.length !== 1)
-      throw postingError(
-        'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT',
-        'recorded receipt authorization evidence is missing',
-      );
-    digestPosting = {
-      ...posting,
-      command: {
-        ...posting.command,
-        authorization: {
-          decision: 'ALLOW',
-          evaluatorVersion: evidence.rows[0]!.policy_evaluator_version,
-          policyVersion: evidence.rows[0]!.policy_version,
-        },
-      },
-    };
-  }
+  // Versions 4 and 5 include authorization evidence in their immutable
+  // preimage. Reconstruct that historical evidence, not today's policy
+  // revision. The gateway still authorizes every retry against current
+  // grants before here. No business input is replaced, and no recorded
+  // digest is rewritten.
+  const digestPosting = digestCoversAuthorization(
+    receipt.input_digest_version,
+    posting,
+  )
+    ? await withRecordedAuthorization(
+        client,
+        context,
+        posting,
+        receipt.invocation_id,
+      )
+    : posting;
   const inputDigest = digestCommand(
     digestPosting,
     receipt.input_digest_version,
@@ -8798,15 +8934,98 @@ async function persistAdditionalReceipt(
       client,
     );
   const result = Object.freeze({ ...replay, replayed: true });
+  // This receipt records
+  // the ORIGINAL posting's invocation (`result.trust.invocationId`), and its
+  // replay digests the command with that invocation's authorization evidence
+  // (`validateReceiptReplay`). So its digest is computed with the same
+  // evidence and the caller's own business fields; with today's evidence a
+  // duplicate of this key after a policy change could never match it.
+  const storedDigest = digestCoversAuthorization(inputDigest.version, posting)
+    ? Object.freeze({
+        value: digestCommand(
+          await withRecordedAuthorization(
+            client,
+            context,
+            posting,
+            result.trust.invocationId,
+          ),
+          inputDigest.version,
+        ),
+        version: inputDigest.version,
+      })
+    : inputDigest;
   await insertReceipt(
     client,
     context,
     registration,
     idempotencyKey,
-    inputDigest,
+    storedDigest,
     result,
   );
   return result;
+}
+
+/**
+ * Whether a receipt digest of this version covers the caller's authorization
+ * evidence: versions 4 (a stock count) and 5 (a receipt). A receipt of such a version is digested with the
+ * evidence of the invocation it records, whether it is replayed
+ * (`validateReceiptReplay`) or stored for another key
+ * (`persistAdditionalReceipt`).
+ */
+function digestCoversAuthorization(
+  version: number,
+  posting: ParsedPosting,
+): boolean {
+  return (
+    // STOCK-COUNTS, review round 1: version 4 is the caller's command less
+    // its key and the derived identities (`callerStockCountInput`), so its
+    // authorization is in the preimage, and the count route rebuilds a
+    // retried Post with the policy version current at the retry. The
+    // preimage is unchanged; only the evidence it is computed with is the
+    // recorded invocation's.
+    (version === companionDerivedInventoryPostingInputDigestVersion &&
+      isStockCountPosting(posting)) ||
+    (version === 5 && posting.postingRole === 'receipt')
+  );
+}
+
+/**
+ * The posting with its authorization evidence replaced by the evidence the
+ * accepted invocation `invocationId` recorded. Only the authorization evidence
+ * is replaced; the posting keeps its own family, role and command shape.
+ */
+async function withRecordedAuthorization(
+  client: PoolClient,
+  context: TrustedRequestContext,
+  posting: ParsedPosting,
+  invocationId: string,
+): Promise<ParsedPosting> {
+  const evidence = await client.query<{
+    policy_version: string;
+    policy_evaluator_version: string;
+  }>(
+    `SELECT policy_version, policy_evaluator_version
+       FROM platform.trust_action_invocations
+      WHERE tenant_id=$1 AND environment_id=$2 AND invocation_id=$3
+        AND outcome='SUCCEEDED' AND policy_decision='ALLOW'`,
+    [context.tenantId, context.environmentId, invocationId],
+  );
+  if (evidence.rows.length !== 1)
+    throw postingError(
+      'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT',
+      'recorded receipt authorization evidence is missing',
+    );
+  return {
+    ...posting,
+    command: {
+      ...posting.command,
+      authorization: {
+        decision: 'ALLOW',
+        evaluatorVersion: evidence.rows[0]!.policy_evaluator_version,
+        policyVersion: evidence.rows[0]!.policy_version,
+      },
+    },
+  } as ParsedPosting;
 }
 
 async function insertReceipt(

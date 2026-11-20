@@ -1,5 +1,6 @@
 import { withoutInventoryValuation } from '../helpers/without-inventory-valuation.js';
 import assert from 'node:assert/strict';
+import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../packages/canonical-model/src/surface-workspace.js';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import test from 'node:test';
@@ -325,7 +326,10 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // (SALES-EXTRAS' price lists) and Tasks of more than five steps whose
   // per-row steps read their own row's read-backs (its counter sales)
   // require 22 (SALES-EXTRAS numbered it 15 in parallel; INTEGRATION).
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 22);
+  assert.equal(
+    groupedManifest.requiredRuntimeCapability.minimumVersion,
+    LINE_CREATE_VALUES_SURFACE_FLOOR,
+  );
   // Each half of 22 holds it alone: without the price lists' tiers the
   // counter sale's Tasks still require it; without both, the floor is 21.
   const floorWithout = (counterSales: boolean) => {
@@ -341,7 +345,7 @@ test('compiled navigation stays flat within budget and groups mounted modules be
               tiers?: unknown;
             };
           }>
-        >;
+        > & { lineCreateValues?: unknown };
         composition?: {
           actions: Array<{ actionId: string }>;
           presentation?: {
@@ -352,6 +356,7 @@ test('compiled navigation stays flat within budget and groups mounted modules be
     };
     for (const surface of source.surfaces) {
       const editor = surface.documentEditor;
+      if (editor) delete editor.lineCreateValues;
       if (editor)
         for (const key of ['headerFields', 'lineFields'] as const) {
           // A field the tiers alone derive (the line's price list) goes.
