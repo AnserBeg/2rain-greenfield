@@ -2652,7 +2652,7 @@ function renderApprovalPlan(plan: ApprovalPlan): string {
   };
   return `<article class="panel" data-workflow-approval>
     <h3>${escapeHtml(plan.summary)}</h3>
-    <dl><dt>Company</dt><dd><code>${escapeHtml(plan.companyId)}</code></dd>
+    <dl><dt>Company</dt><dd>${plan.companyId === null ? 'Tenant-wide' : `<code>${escapeHtml(plan.companyId)}</code>`}</dd>
         <dt>Operation</dt><dd><code>${escapeHtml(plan.operationId)}</code></dd></dl>
     <h4>Exact inputs</h4>
     <pre class="workflow-plan-input"><code>${escapeHtml(JSON.stringify(plan.input, null, 2))}</code></pre>
