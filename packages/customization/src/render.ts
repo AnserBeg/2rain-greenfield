@@ -93,9 +93,19 @@ export function renderReleaseDiff(input: {
     );
   const lines: string[] = [];
   for (const s of to.surfaces) {
-    const board = s.board as import('@north-star/canonical-model').SurfaceBoard | undefined;
-    if (!board || (from.surfaces.find(old => old.surfaceId === s.surfaceId)?.board as typeof board)?.revisionId === board.revisionId) continue;
-    lines.push(`${s.lifecycle === 'retired' ? 'Retires' : 'Publishes'} Board “${String(s.label)}” for ${entityLabel(to,board.body.entityId)}. Stages: ${board.body.grouping.stages.map(v => v.label).join(', ')}. Moves: ${board.body.moves.map(v => v.label).join(', ') || 'none'}.`);
+    const board = s.board as
+      import('@north-star/canonical-model').SurfaceBoard | undefined;
+    if (
+      !board ||
+      (
+        from.surfaces.find((old) => old.surfaceId === s.surfaceId)
+          ?.board as typeof board
+      )?.revisionId === board.revisionId
+    )
+      continue;
+    lines.push(
+      `${s.lifecycle === 'retired' ? 'Retires' : 'Publishes'} Board “${String(s.label)}” for ${entityLabel(to, board.body.entityId)}. Stages: ${board.body.grouping.stages.map((v) => v.label).join(', ')}. Moves: ${board.body.moves.map((v) => v.label).join(', ') || 'none'}.`,
+    );
   }
   for (const field of to.documentFields ?? []) {
     if (from.documentFields?.some(({ fieldId }) => fieldId === field.fieldId))

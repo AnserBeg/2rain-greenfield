@@ -189,10 +189,17 @@ function applyOne(
     case 'declareLifecycle':
       return declareLifecycle(authored, patch);
     case 'addBoardViewRevision': {
-      const problem = previous.some(p => p.kind === 'addBoardViewRevision' && p.revisionId === patch.revisionId)
+      const problem = previous.some(
+        (p) =>
+          p.kind === 'addBoardViewRevision' &&
+          p.revisionId === patch.revisionId,
+      )
         ? 'This Board revision ID has already been used.'
-        : applyBoardRevision(authored as unknown as BoardSource & {surfaces: Json[]}, patch);
-      return problem ? refusal('CUSTOMIZE_BOARD_CONFLICT',problem) : null;
+        : applyBoardRevision(
+            authored as unknown as BoardSource & { surfaces: Json[] },
+            patch,
+          );
+      return problem ? refusal('CUSTOMIZE_BOARD_CONFLICT', problem) : null;
     }
     case 'addLayoutRevision': {
       if (

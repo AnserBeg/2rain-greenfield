@@ -935,12 +935,19 @@ function definitionFromSnapshotRows(
       throw malformedProjection('formula/rule projection has invalid bindings');
     }
   }
-  const problem = boardBindingsProblem(surface.payload,surface.requiredRuntimeCapability?.minimumVersion ?? 0,operation.payload,query.payload) ?? layoutBindingsProblem(
-    surface.payload,
-    surface.requiredRuntimeCapability?.minimumVersion ?? 0,
-    operation.payload,
-    query.payload,
-  );
+  const problem =
+    boardBindingsProblem(
+      surface.payload,
+      surface.requiredRuntimeCapability?.minimumVersion ?? 0,
+      operation.payload,
+      query.payload,
+    ) ??
+    layoutBindingsProblem(
+      surface.payload,
+      surface.requiredRuntimeCapability?.minimumVersion ?? 0,
+      operation.payload,
+      query.payload,
+    );
   if (problem) throw malformedProjection(problem);
   return Object.freeze({
     environmentId: context.environmentId,

@@ -4,6 +4,7 @@ import {
   randomUUID,
   timingSafeEqual,
 } from 'node:crypto';
+import { surfaceHref } from './component-registry.js';
 import type { BoardBody, SurfaceBoard } from '@north-star/canonical-model';
 import type {
   ImmutableJsonValue,
@@ -72,6 +73,7 @@ interface BoardContext {
   surface: CompiledSurfaceDefinition;
   board: SurfaceBoard;
   owner: CompiledSurfaceDefinition;
+  record: CompiledSurfaceDefinition;
   binding: CompiledSurfaceDataBinding;
   url: URL;
   scope: Readonly<Record<string, ImmutableJsonValue>>;
@@ -91,7 +93,8 @@ export function boardContext(
   const owner = surfaces.find(
     (s) => s.surfaceId === board.body.listSurfaceId && s.lifecycle === 'active',
   );
-  if (!owner?.list) throw new Error('The Board collection is unavailable.');
+  const record=surfaces.find(s=>s.surfaceId===board.body.recordSurfaceId && s.lifecycle==='active');
+  if (!owner?.list || !record) throw new Error('The Board collection is unavailable.');
   const company = binding.query.legalEntityScope
     ? url.searchParams.get(binding.query.legalEntityScope.operand.parameterId)
     : null;
@@ -99,6 +102,7 @@ export function boardContext(
     view,
     surface,
     owner,
+    record,
     board,
     binding,
     url,
@@ -261,6 +265,7 @@ export async function boardSlots(c: BoardContext) {
       ),
     ),
   );
+  const canReadRecord = await c.gateways.queryGateway.previewEligibility(c.view,body.getQueryId,c.company) === 'eligible';
   const columns = pageStages
     .map((stage) => {
       const matches = page.records.filter(
@@ -288,7 +293,7 @@ export async function boardSlots(c: BoardContext) {
                       `<div><dt>${h(f.label)}</dt><dd>${h(String(r.displayValues?.[f.fieldId] ?? r.values[f.fieldId]))}</dd></div>`,
                   )
                   .join('');
-                return `<li><a href="${h(link(url, { surface: body.recordSurfaceId, record: r.recordId, cards: null, stage: null, view: null }))}">${h(title)}</a><span class="status-chip" data-status-role="${h(stage.role ?? 'neutral')}">● ${h(stage.label)}</span>${facts ? `<dl>${facts}</dl>` : ''}${controls}</li>`;
+                return `<li>${canReadRecord ? `<a href="${h(surfaceHref(c.record,r.recordId,false,{view:c.view,legalEntitySelection:c.company ? [c.company] : []}))}">${h(title)}</a>` : h(title)}<span class="status-chip" data-status-role="${h(stage.role ?? 'neutral')}">● ${h(stage.label)}</span>${facts ? `<dl>${facts}</dl>` : ''}${controls}</li>`;
               })
               .join('')}</ul>`
           : page.partial

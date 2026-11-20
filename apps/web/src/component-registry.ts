@@ -181,6 +181,7 @@ export type SurfaceDataRenderState =
     }
   | {
       readonly records: readonly SemanticRecordDto[];
+      readonly boardListState?: DeclaredListRenderData['state'];
       readonly boardSlots?: Readonly<Record<string, string>>;
       readonly documentEditorSlots?: Readonly<Record<string, string>>;
       readonly documentsSection?: string;
@@ -560,24 +561,27 @@ function collectionSwitcher(context: SurfaceComponentContext) {
   if (!boards.length || !list) return '';
   const state =
     context.data?.status === 'READY'
-      ? context.data.declaredList?.state
+      ? context.data.boardListState ?? context.data.declaredList?.state
       : undefined;
   return `<nav class="collection-views" aria-label="Collection views">${[
     list,
     ...boards,
   ]
     .map((s) => {
-      let href = surfaceHref(s, undefined, false, context);
+      const params = new URL(surfaceHref(s,undefined,false,context),'http://surface-runtime.local').searchParams;
+      if(s.board) {
+        params.set('collection',owner);
+        const company=context.legalEntitySelection?.[0];
+        if(company) params.set('collectionCompany',company);
+      }
       if (state) {
-        const params = new URL(href, 'http://surface-runtime.local')
-          .searchParams;
         const view = list.list?.views.find((v) => v.viewId === state.viewId);
         if (view && !view.before && !view.open && !view.supply && !view.band)
           params.set('view', view.viewId);
         for (const [key, value] of Object.entries(state.filterValues))
           params.set(key, value);
-        href = '/?' + params.toString();
       }
+      const href='/?'+params.toString();
       return `<a href="${escapeHtml(href)}"${context.surface.surfaceId === s.surfaceId ? ' aria-current="page"' : ''}>${escapeHtml(s === list ? 'List' : s.label)}</a>`;
     })
     .join(' ')}</nav>`;
@@ -593,7 +597,7 @@ function renderBoardSlot(context: SurfaceComponentContext) {
     context.slot.slot === 'title' &&
     context.feedback &&
     'record' in context.feedback
-      ? `<p role="status" data-board-result>${escapeHtml(context.feedback.label)} completed.</p>`
+      ? `<p role="status" tabindex="-1" autofocus data-board-result>${escapeHtml(context.feedback.label)} completed.</p>`
       : '';
   return slotPanel(
     context,
@@ -607,9 +611,9 @@ function renderListTitle(context: SurfaceComponentContext): string {
   return (
     slotPanel(
       context,
-      `<header class="surface-heading surface-heading--slot"><div><h1>${escapeHtml(entityLabel(context.surface))}</h1></div><div class="surface-heading__actions">${declaredStatusRoles(context.surface)}${archiveToggle}${form ? `<a class="primary-action" href="${escapeHtml(surfaceHref(form, undefined, false, context))}">New</a>` : ''}</div></header>`,
+      `<header class="surface-heading surface-heading--slot"><div><h1>${escapeHtml(entityLabel(context.surface))}</h1></div><div class="surface-heading__actions">${declaredStatusRoles(context.surface)}${archiveToggle}${form ? `<a class="primary-action" href="${escapeHtml(surfaceHref(form, undefined, false, context))}">New</a>` : ''}</div></header>` + collectionSwitcher(context),
       'surface-title-slot',
-    ) + collectionSwitcher(context)
+    )
   );
 }
 
@@ -2120,7 +2124,7 @@ function slotRegistrationSupportsIntent(
   );
 }
 
-function surfaceHref(
+export function surfaceHref(
   surface: CompiledSurfaceDefinition,
   recordId?: string,
   includeArchived = false,
