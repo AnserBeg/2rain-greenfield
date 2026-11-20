@@ -8,7 +8,7 @@ Status â€” built on `packet/CALENDAR-1-board-v2` from main `5d315668` (docs E1â€
 2. Normalization checks only the recorded digest and each referenced ID's contract. A retired Board is not validated. Nothing derives a Board outside authoring.
 3. On the authoring base, the choices must reproduce the exact recorded digest. On another base, replay checks each binding by stable ID. A missing binding is `RETIRED_TARGET` and a changed one `INCOMPATIBLE_TYPE`, each naming the ID. Only the last revision of each Board surface is checked.
 4. Labels and Ledger roles render from the active release: the compiler emits `boardPresentation` beside the digested `board` member, and the diff renders it from the approved release.
-5. Serving admission refuses a Board under rung 36, a rung-36 claim without a Board, and a forged move. It skips retired Boards.
+5. Serving admission refuses a Board under rung 36, a rung-36 claim without a Board, and a forged move. It skips retired Boards. A List that no longer passes the authoring gates still lets its Board retire.
 6. The Board offers only moves the person is granted, in the chosen company. A forged or ungranted confirmation returns 403. A scan-ceiling or timeout read renders "Narrow the search", never "No cards".
 
 ## Decisions
@@ -24,21 +24,21 @@ Status â€” built on `packet/CALENDAR-1-board-v2` from main `5d315668` (docs E1â€
 
 ## Controls
 
-[Manifest](../../../test/evidence/CALENDAR-1-board-v2.expected-red.json). These 10 unit controls were reproduced locally and restored: re-derived facts, the fact contract read from List columns, a retired Board validated, the normalization self-digest, a superseded revision bound, a conflict left unattributed (7 kills), the apply self-digest, the authoring exact digest, an understated serving floor, and a retired Board checked at serving. The three PostgreSQL controls run under `check-expected-red.sh --run`: an unscoped company read, an admitted forged confirm and an offered ungranted move.
+[Manifest](../../../test/evidence/CALENDAR-1-board-v2.expected-red.json). These 10 unit controls were reproduced locally and restored: re-derived facts, the fact contract read from List columns, a retired Board validated, the normalization self-digest, a superseded revision bound, a conflict left unattributed (7 kills), the apply self-digest, the authoring exact digest, an understated serving floor, and a retired Board checked at serving. The three PostgreSQL controls (an unscoped company read, an admitted forged confirm and an offered ungranted move) are declared but **not yet reproduced**. The PostgreSQL proofs first execute in CI. Some proofs have no control because nothing in the code removes them: label-only replay and the confirmation-change replay hold because the member has no label or confirmation field (the strict schema and the no-label assertion guard this), and 'not offered until chosen' holds because the body carries only recorded moves.
 
 ## Test it yourself
 
 1. Run `corepack pnpm dev`. In **Customize â†’ Add view**, choose **Purchase orders â†’ Add Board view**. Keep the offered stages, leave **Cancel order** checked and the three default facts ticked. Then draft, approve and activate.
 2. In **Customize**, arrange the Purchase orders List: hide **Order date** and relabel **Expected**. Draft, approve and activate. The change should compile, and the Board should still show both facts under the new label.
 3. Edit the Board and choose **Draft retirement**, then activate. Add a field to Purchase orders. It should compile.
-4. Run `node --import tsx --test test/unit/customization-board.test.ts`. Expect 17 passing tests.
+4. Run `node --import tsx --test test/unit/customization-board.test.ts`. Expect 18 passing tests.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CALENDAR-1-board-v2",
   "base": "5d315668741e4f0cd4e71fc284e731beac1ff940",
-  "head": "c8792ffc33af05127446771c8e4132f766bd4fcc",
+  "head": "864fabec27ead932aad0637bf145a3a16dd2d2f4",
   "changedPaths": [
     "apps/web/src/board.ts", "apps/web/src/customize-screen.ts", "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts",
     "package.json", "packages/canonical-model/src/board.ts", "packages/canonical-model/src/surface-workspace.ts",
@@ -46,7 +46,7 @@ Status â€” built on `packet/CALENDAR-1-board-v2` from main `5d315668` (docs E1â€
     "packages/customization/src/board-revision.ts", "packages/customization/src/render.ts", "packages/customization/src/upgrade-replay.ts",
     "packages/postgres-provider/src/board-admission.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts",
     "packages/runtime/src/request-runtime-view.ts", "test/evidence/CALENDAR-1-board-v2.expected-red.json",
-    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/postgres/board-policy.test.ts",
+    "test/architecture/repository-hygiene.test.ts", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/reachability-producers.ts", "test/postgres/board-policy.test.ts",
     "test/postgres/customization-validation.test.ts", "test/postgres/request-runtime-view.test.ts",
     "test/unit/customization-board.test.ts", "test/unit/customization-upgrade.test.ts", "test/unit/customization.test.ts"
   ],
