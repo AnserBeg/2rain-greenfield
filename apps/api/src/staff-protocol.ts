@@ -45,6 +45,7 @@ export async function assertPilotDatabase(
     NOT (rolsuper OR rolbypassrls OR rolinherit OR rolcreaterole OR rolcreatedb OR rolreplication)
     AND NOT EXISTS (SELECT FROM pg_roles WHERE rolname='north_star_fixture_proof_issuer')
     AND NOT EXISTS (SELECT FROM pg_roles r WHERE (r.rolsuper OR r.rolbypassrls OR r.rolcreaterole
+      OR ($1='north_star_activation_verifier' AND r.rolname='north_star_runtime')
       OR r.rolname IN ('north_star_identity','north_star_activation_verifier','north_star_workflow_verifier','north_star_module_materializer'))
       AND r.rolname <> current_user AND pg_has_role(current_user,r.oid,'MEMBER'))
     AND NOT EXISTS (SELECT FROM pg_roles accessible WHERE EXISTS (

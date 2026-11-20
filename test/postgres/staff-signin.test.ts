@@ -307,6 +307,20 @@ test('staff sign-in integrity under the pilot database roles', async (suite) => 
       const owner = { name: 'Owner', contact: 'attended' };
       await bootstrapStaff(pool, realm, owner);
       await checkConnectorWrites(false);
+      const verifier = 'north_star_activation_verifier';
+      const authority = await pool.query(
+        `SELECT pg_has_role($1,'north_star_runtime','MEMBER') AS runtime,
+                has_table_privilege($1,'platform.address_geocodes','INSERT') AS maps,
+                has_table_privilege($1,'platform.tenant_releases','INSERT') AS publish,
+                has_column_privilege($1,'platform.active_release_pointers','fence','UPDATE') AS activate`,
+        [verifier],
+      );
+      assert.deepEqual(authority.rows[0], {
+        runtime: false,
+        maps: false,
+        publish: false,
+        activate: true,
+      });
       const p = (
         await pool.query<{ principal_id: string }>(
           "UPDATE platform.staff_accounts SET status='active' RETURNING principal_id",

@@ -1,7 +1,10 @@
 -- Release and Customize decisions apply to the entire environment (company_id NULL).
 -- Workflow Retry takes its company from the recorded event instance.
 CREATE ROLE north_star_activation_verifier LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
-GRANT north_star_runtime TO north_star_activation_verifier WITH INHERIT TRUE, SET FALSE;
+GRANT USAGE ON SCHEMA platform,north_star_internal TO north_star_activation_verifier;
+GRANT EXECUTE ON FUNCTION platform.staff_realm_configured(uuid,uuid,text,text,text),
+  platform.lock_release_activation_attempt(uuid,uuid,uuid),platform.lock_release_activation_authority_epoch(uuid),
+  platform.read_tenant_release_artifacts(uuid) TO north_star_activation_verifier;
 
 ALTER TABLE platform.release_activation_preparations ADD COLUMN reviewed_diff text
   CHECK (octet_length(reviewed_diff) <= 1048576 AND rendered_diff_evidence_digest =
@@ -231,7 +234,8 @@ GRANT EXECUTE ON FUNCTION platform.staff_consume_decision(uuid,uuid,uuid,text,uu
 -- Direct connector setup is available only after the installer claims demo mode.
 -- A pilot also gives release approval and activation to the independent verifier.
 CREATE FUNCTION north_star_internal.staff_configure_store_writers(store_mode text) RETURNS void
-LANGUAGE plpgsql SET search_path=pg_catalog,pg_temp AS $$ BEGIN
+LANGUAGE plpgsql SET search_path=pg_catalog,pg_temp AS $$ DECLARE
+  kernel_table regclass; policy_name name; BEGIN
   IF store_mode = 'demo' THEN
     GRANT INSERT ON platform.address_installations,platform.address_installation_history TO north_star_runtime;
     GRANT UPDATE (enabled,enrichment,period_calls,period_budget_micros) ON platform.address_installations TO north_star_runtime;
@@ -250,7 +254,26 @@ LANGUAGE plpgsql SET search_path=pg_catalog,pg_temp AS $$ BEGIN
     platform.release_activation_history,platform.release_activation_swap_receipts,platform.release_activation_attempt_outcomes,
     platform.release_activation_outbox,platform.release_activation_verification_receipts,platform.release_activation_reconciliation_starts,
     platform.release_activation_reconciliation_alarms TO north_star_activation_verifier;
-  GRANT UPDATE ON platform.active_release_pointers TO north_star_activation_verifier; END $$;
+  GRANT UPDATE (release_id,fence) ON platform.active_release_pointers TO north_star_activation_verifier;
+  -- Activation uses the existing tenant and environment policies on these kernel
+  -- records. Sharing their predicates preserves the scope on retries and recovery.
+  FOREACH kernel_table IN ARRAY ARRAY[
+    'north_star_internal.module_storage_catalog_receipts','north_star_internal.module_storage_generations',
+    'platform.active_release_pointers','platform.app_package_revisions','platform.fresh_tenant_install_evidence',
+    'platform.fresh_tenant_intermediate_release_admissions','platform.release_activation_attempt_outcomes',
+    'platform.release_activation_attempts','platform.release_activation_authority_epochs','platform.release_activation_control_events',
+    'platform.release_activation_history','platform.release_activation_outbox','platform.release_activation_phase_receipts',
+    'platform.release_activation_preparations','platform.release_activation_reconciliation_alarms',
+    'platform.release_activation_reconciliation_starts','platform.release_activation_swap_receipts',
+    'platform.release_activation_verification_receipts','platform.release_approvals','platform.release_approver_eligibility_events',
+    'platform.release_executor_authority_events','platform.tenant_release_admissions','platform.tenant_releases',
+    'platform.transition_preparation_receipts']::regclass[] LOOP
+    EXECUTE format('GRANT SELECT ON %s TO north_star_activation_verifier',kernel_table);
+    FOR policy_name IN SELECT polname FROM pg_policy WHERE polrelid=kernel_table
+      AND polroles=ARRAY['north_star_runtime'::regrole::oid]
+      AND (polcmd='r' OR (polcmd='a' AND has_table_privilege('north_star_activation_verifier',kernel_table,'INSERT'))
+           OR (polcmd='w' AND has_any_column_privilege('north_star_activation_verifier',kernel_table,'UPDATE'))) LOOP
+      EXECUTE format('ALTER POLICY %I ON %s TO north_star_runtime,north_star_activation_verifier',policy_name,kernel_table); END LOOP; END LOOP; END $$;
 REVOKE ALL ON FUNCTION north_star_internal.staff_configure_store_writers(text) FROM PUBLIC;
 CREATE FUNCTION north_star_internal.staff_store_writers_trigger() RETURNS trigger LANGUAGE plpgsql
 SET search_path=pg_catalog,pg_temp AS $$ BEGIN
@@ -291,7 +314,7 @@ RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,
     AND t=nullif(current_setting('north_star.tenant_id',true),'')::uuid AND e=nullif(current_setting('north_star.environment_id',true),'')::uuid)
 $$;
 REVOKE ALL ON FUNCTION platform.staff_activation_approved(uuid,uuid,uuid) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION platform.staff_activation_approved(uuid,uuid,uuid) TO north_star_runtime;
+GRANT EXECUTE ON FUNCTION platform.staff_activation_approved(uuid,uuid,uuid) TO north_star_runtime,north_star_activation_verifier;
 
 -- The kernel holds the release authority epoch and verifies the approver's live
 -- eligibility at CAS. Serialize the separate staff membership check there too.
@@ -307,7 +330,7 @@ RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_
     WHERE m.tenant_id=t AND m.environment_id=e AND m.principal_id=actor AND m.legal_entity_id IS NULL
     AND m.revoked_at IS NULL AND r.revoked_at IS NULL); END $$;
 REVOKE ALL ON FUNCTION platform.staff_activation_member(uuid,uuid,uuid) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION platform.staff_activation_member(uuid,uuid,uuid) TO north_star_runtime;
+GRANT EXECUTE ON FUNCTION platform.staff_activation_member(uuid,uuid,uuid) TO north_star_runtime,north_star_activation_verifier;
 
 ALTER TABLE platform.release_activation_verification_receipts ADD COLUMN verifier_login name;
 CREATE FUNCTION north_star_internal.staff_verification_provenance() RETURNS trigger LANGUAGE plpgsql

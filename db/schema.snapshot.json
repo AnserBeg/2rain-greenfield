@@ -40930,7 +40930,7 @@
       "language": "plpgsql",
       "owner": "postgres",
       "result_type": "void",
-      "definition": "CREATE OR REPLACE FUNCTION north_star_internal.staff_configure_store_writers(store_mode text)\n RETURNS void\n LANGUAGE plpgsql\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$ BEGIN\n  IF store_mode = 'demo' THEN\n    GRANT INSERT ON platform.address_installations,platform.address_installation_history TO north_star_runtime;\n    GRANT UPDATE (enabled,enrichment,period_calls,period_budget_micros) ON platform.address_installations TO north_star_runtime;\n    RETURN; END IF;\n  REVOKE INSERT ON platform.address_installations,platform.address_installation_history FROM north_star_runtime;\n  REVOKE UPDATE (enabled,enrichment,period_calls,period_budget_micros) ON platform.address_installations FROM north_star_runtime;\n  IF store_mode IS DISTINCT FROM 'pilot' THEN RETURN; END IF;\n  REVOKE INSERT ON platform.release_approvals,platform.release_activation_attempts,platform.release_activation_phase_receipts,\n    platform.release_activation_history,platform.release_activation_swap_receipts,platform.release_activation_attempt_outcomes,\n    platform.release_activation_outbox,platform.release_activation_verification_receipts,platform.release_activation_reconciliation_starts,\n    platform.release_activation_reconciliation_alarms,platform.customization_patches FROM north_star_runtime;\n  REVOKE UPDATE (execution_fence,status,reason) ON platform.workflow_runs FROM north_star_workflow_worker;\n  REVOKE UPDATE ON platform.active_release_pointers FROM north_star_runtime;\n  REVOKE EXECUTE ON FUNCTION platform.workflow_decide_approval(uuid,integer,bigint,text,text) FROM north_star_runtime;\n  GRANT INSERT ON platform.release_approvals,platform.release_activation_attempts,platform.release_activation_phase_receipts,\n    platform.release_activation_history,platform.release_activation_swap_receipts,platform.release_activation_attempt_outcomes,\n    platform.release_activation_outbox,platform.release_activation_verification_receipts,platform.release_activation_reconciliation_starts,\n    platform.release_activation_reconciliation_alarms TO north_star_activation_verifier;\n  GRANT UPDATE ON platform.active_release_pointers TO north_star_activation_verifier; END $function$\n",
+      "definition": "CREATE OR REPLACE FUNCTION north_star_internal.staff_configure_store_writers(store_mode text)\n RETURNS void\n LANGUAGE plpgsql\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$ DECLARE\n  kernel_table regclass; policy_name name; BEGIN\n  IF store_mode = 'demo' THEN\n    GRANT INSERT ON platform.address_installations,platform.address_installation_history TO north_star_runtime;\n    GRANT UPDATE (enabled,enrichment,period_calls,period_budget_micros) ON platform.address_installations TO north_star_runtime;\n    RETURN; END IF;\n  REVOKE INSERT ON platform.address_installations,platform.address_installation_history FROM north_star_runtime;\n  REVOKE UPDATE (enabled,enrichment,period_calls,period_budget_micros) ON platform.address_installations FROM north_star_runtime;\n  IF store_mode IS DISTINCT FROM 'pilot' THEN RETURN; END IF;\n  REVOKE INSERT ON platform.release_approvals,platform.release_activation_attempts,platform.release_activation_phase_receipts,\n    platform.release_activation_history,platform.release_activation_swap_receipts,platform.release_activation_attempt_outcomes,\n    platform.release_activation_outbox,platform.release_activation_verification_receipts,platform.release_activation_reconciliation_starts,\n    platform.release_activation_reconciliation_alarms,platform.customization_patches FROM north_star_runtime;\n  REVOKE UPDATE (execution_fence,status,reason) ON platform.workflow_runs FROM north_star_workflow_worker;\n  REVOKE UPDATE ON platform.active_release_pointers FROM north_star_runtime;\n  REVOKE EXECUTE ON FUNCTION platform.workflow_decide_approval(uuid,integer,bigint,text,text) FROM north_star_runtime;\n  GRANT INSERT ON platform.release_approvals,platform.release_activation_attempts,platform.release_activation_phase_receipts,\n    platform.release_activation_history,platform.release_activation_swap_receipts,platform.release_activation_attempt_outcomes,\n    platform.release_activation_outbox,platform.release_activation_verification_receipts,platform.release_activation_reconciliation_starts,\n    platform.release_activation_reconciliation_alarms TO north_star_activation_verifier;\n  GRANT UPDATE (release_id,fence) ON platform.active_release_pointers TO north_star_activation_verifier;\n  -- Activation uses the existing tenant and environment policies on these kernel\n  -- records. Sharing their predicates preserves the scope on retries and recovery.\n  FOREACH kernel_table IN ARRAY ARRAY[\n    'north_star_internal.module_storage_catalog_receipts','north_star_internal.module_storage_generations',\n    'platform.active_release_pointers','platform.app_package_revisions','platform.fresh_tenant_install_evidence',\n    'platform.fresh_tenant_intermediate_release_admissions','platform.release_activation_attempt_outcomes',\n    'platform.release_activation_attempts','platform.release_activation_authority_epochs','platform.release_activation_control_events',\n    'platform.release_activation_history','platform.release_activation_outbox','platform.release_activation_phase_receipts',\n    'platform.release_activation_preparations','platform.release_activation_reconciliation_alarms',\n    'platform.release_activation_reconciliation_starts','platform.release_activation_swap_receipts',\n    'platform.release_activation_verification_receipts','platform.release_approvals','platform.release_approver_eligibility_events',\n    'platform.release_executor_authority_events','platform.tenant_release_admissions','platform.tenant_releases',\n    'platform.transition_preparation_receipts']::regclass[] LOOP\n    EXECUTE format('GRANT SELECT ON %s TO north_star_activation_verifier',kernel_table);\n    FOR policy_name IN SELECT polname FROM pg_policy WHERE polrelid=kernel_table\n      AND polroles=ARRAY['north_star_runtime'::regrole::oid]\n      AND (polcmd='r' OR (polcmd='a' AND has_table_privilege('north_star_activation_verifier',kernel_table,'INSERT'))\n           OR (polcmd='w' AND has_any_column_privilege('north_star_activation_verifier',kernel_table,'UPDATE'))) LOOP\n      EXECUTE format('ALTER POLICY %I ON %s TO north_star_runtime,north_star_activation_verifier',policy_name,kernel_table); END LOOP; END LOOP; END $function$\n",
       "security_definer": false,
       "leakproof": false,
       "strict": false,
@@ -43630,6 +43630,15 @@
       "name": "lock_release_activation_attempt",
       "identity_arguments": "requested_tenant_id uuid, requested_environment_id uuid, requested_activation_attempt_id uuid",
       "grantor": "postgres",
+      "grantee": "north_star_activation_verifier",
+      "privilege_type": "EXECUTE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "name": "lock_release_activation_attempt",
+      "identity_arguments": "requested_tenant_id uuid, requested_environment_id uuid, requested_activation_attempt_id uuid",
+      "grantor": "postgres",
       "grantee": "north_star_runtime",
       "privilege_type": "EXECUTE",
       "is_grantable": false
@@ -43640,6 +43649,15 @@
       "identity_arguments": "requested_tenant_id uuid, requested_environment_id uuid, requested_activation_attempt_id uuid",
       "grantor": "postgres",
       "grantee": "postgres",
+      "privilege_type": "EXECUTE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "name": "lock_release_activation_authority_epoch",
+      "identity_arguments": "requested_tenant_id uuid",
+      "grantor": "postgres",
+      "grantee": "north_star_activation_verifier",
       "privilege_type": "EXECUTE",
       "is_grantable": false
     },
@@ -43703,6 +43721,15 @@
       "identity_arguments": "scope text, entity text, record_key uuid, link uuid, version uuid",
       "grantor": "postgres",
       "grantee": "postgres",
+      "privilege_type": "EXECUTE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "name": "read_tenant_release_artifacts",
+      "identity_arguments": "requested_release_id uuid",
+      "grantor": "postgres",
+      "grantee": "north_star_activation_verifier",
       "privilege_type": "EXECUTE",
       "is_grantable": false
     },
@@ -43819,6 +43846,15 @@
       "name": "staff_activation_approved",
       "identity_arguments": "t uuid, e uuid, approval uuid",
       "grantor": "postgres",
+      "grantee": "north_star_activation_verifier",
+      "privilege_type": "EXECUTE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "name": "staff_activation_approved",
+      "identity_arguments": "t uuid, e uuid, approval uuid",
+      "grantor": "postgres",
       "grantee": "north_star_runtime",
       "privilege_type": "EXECUTE",
       "is_grantable": false
@@ -43837,6 +43873,15 @@
       "name": "staff_activation_member",
       "identity_arguments": "t uuid, e uuid, actor uuid",
       "grantor": "postgres",
+      "grantee": "north_star_activation_verifier",
+      "privilege_type": "EXECUTE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "name": "staff_activation_member",
+      "identity_arguments": "t uuid, e uuid, actor uuid",
+      "grantor": "postgres",
       "grantee": "north_star_runtime",
       "privilege_type": "EXECUTE",
       "is_grantable": false
@@ -44036,6 +44081,15 @@
       "identity_arguments": "t uuid, e uuid, identity_key bytea, evidence uuid",
       "grantor": "postgres",
       "grantee": "postgres",
+      "privilege_type": "EXECUTE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "name": "staff_realm_configured",
+      "identity_arguments": "t uuid, e uuid, rp text, id_origin text, expected_application_origin text",
+      "grantor": "postgres",
+      "grantee": "north_star_activation_verifier",
       "privilege_type": "EXECUTE",
       "is_grantable": false
     },
@@ -45388,6 +45442,13 @@
     {
       "schema": "north_star_internal",
       "grantor": "postgres",
+      "grantee": "north_star_activation_verifier",
+      "privilege_type": "USAGE",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_internal",
+      "grantor": "postgres",
       "grantee": "north_star_module_materializer",
       "privilege_type": "USAGE",
       "is_grantable": false
@@ -45417,6 +45478,13 @@
       "schema": "north_star_internal",
       "grantor": "postgres",
       "grantee": "postgres",
+      "privilege_type": "USAGE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "grantor": "postgres",
+      "grantee": "north_star_activation_verifier",
       "privilege_type": "USAGE",
       "is_grantable": false
     },
