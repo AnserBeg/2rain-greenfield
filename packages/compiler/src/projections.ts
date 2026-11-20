@@ -7,6 +7,8 @@ import {
   BOARD_READER,
   BOOKING_OPERATION_READER,
   LAYOUT_READER,
+  REPLAYED_LAYOUT_READER,
+  type SurfaceLayout,
   hasBookingOperations,
 } from '@north-star/canonical-model';
 import {
@@ -1078,25 +1080,32 @@ function surfaceManifestPayload(
       (surface.documentEditor as SurfaceDocumentEditor | undefined)
         ?.lineCreateValues !== undefined,
   );
+  const replayedLayout = original.surfaces.some(
+    (s) =>
+      'layouts' in s &&
+      (s.layouts as SurfaceLayout[] | undefined)?.some(
+        (layout) => layout.placementRuleVersion === 1,
+      ),
+  );
   const surfaceFloor = lineCreateValues
     ? LINE_CREATE_VALUES_SURFACE_FLOOR
-    : original.surfaces.some((surface) => surface.archetype === 'board')
-      ? BOARD_READER
-      : original.surfaces.some(
-            (surface) => 'layouts' in surface && surface.layouts,
-          )
-        ? LAYOUT_READER
-        : extendedEditor || declaredRelationList
-          ? 26
-          : hasMetrics(original)
-            ? 25
-            : hasSavedListLayouts(original)
-              ? 24
-              : recordFieldPresentation
-                ? 23
-                : rankedDefaultsOrChainedTasks
-                  ? 22
-                  : null;
+    : replayedLayout
+      ? REPLAYED_LAYOUT_READER
+      : original.surfaces.some((s) => s.archetype === 'board')
+        ? BOARD_READER
+        : original.surfaces.some((s) => 'layouts' in s && s.layouts)
+          ? LAYOUT_READER
+          : extendedEditor || declaredRelationList
+            ? 26
+            : hasMetrics(original)
+              ? 25
+              : hasSavedListLayouts(original)
+                ? 24
+                : recordFieldPresentation
+                  ? 23
+                  : rankedDefaultsOrChainedTasks
+                    ? 22
+                    : null;
   const payloadSchemaVersion = composed
     ? COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION
     : navigation

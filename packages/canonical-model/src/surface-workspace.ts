@@ -8,7 +8,7 @@ import {
   searchChildProblem,
 } from './picker-eligibility.js';
 
-export const LINE_CREATE_VALUES_SURFACE_FLOOR = 34;
+export const LINE_CREATE_VALUES_SURFACE_FLOOR = 35;
 
 /** Typed declarations also prove their cross-entity and contextual references. */
 export function validateSurfaceWorkspaces(

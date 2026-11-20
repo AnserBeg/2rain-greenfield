@@ -2,6 +2,7 @@ import {
   canonicalize,
   layoutDigest,
   LAYOUT_READER,
+  REPLAYED_LAYOUT_READER,
   SurfaceLayoutSchema,
 } from '@north-star/canonical-model';
 
@@ -17,6 +18,14 @@ export function declaredLayouts(surfaces: unknown) {
       String(a.surfaceId).localeCompare(String(b.surfaceId), 'en'),
     );
 }
+function wrongReplayFloor(declaring: readonly Row[], floor: number) {
+  const replayed = declaring.some((s) =>
+    rows(s.layouts).some((layout) => layout.placementRuleVersion === 1),
+  );
+  return replayed
+    ? floor < REPLAYED_LAYOUT_READER
+    : floor === REPLAYED_LAYOUT_READER;
+}
 /** Called on the immutable release before publication and on the actual serving bindings. */
 export function layoutBindingsProblem(
   manifest: unknown,
@@ -27,6 +36,7 @@ export function layoutBindingsProblem(
   const surfaces = rows(row(manifest).surfaces);
   const declaring = surfaces.filter((s) => Object.hasOwn(s, 'layouts'));
   if (
+    wrongReplayFloor(declaring, floor) ||
     (!declaring.length && floor === LAYOUT_READER) ||
     (declaring.length && floor < LAYOUT_READER)
   )
@@ -156,6 +166,7 @@ export function layoutDeclarationProblem(
 ) {
   const declarations = declaredLayouts(row(definition).surfaces);
   if (
+    wrongReplayFloor(declarations, floor) ||
     (declarations.length && floor < LAYOUT_READER) ||
     (!declarations.length && floor === LAYOUT_READER) ||
     canonicalize(declarations) !==

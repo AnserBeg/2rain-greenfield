@@ -1462,11 +1462,8 @@ test('upgrade diagnostics name the missing tenant target and the new first-party
   assert.deepEqual(first, second);
   assert.equal(first.status, 'rejected');
   assert.ok(first.status === 'rejected');
-  assert.equal(first.code, 'CUSTOMIZE_UPGRADE_CONFLICT');
-  assert.match(
-    JSON.stringify(first.diagnostics),
-    /firstPartyBase.*tenantPatch.*item_list.*There is no screen/u,
-  );
+  assert.equal(first.code, 'RETIRED_TARGET');
+  assert.match(JSON.stringify(first.diagnostics), /RETIRED_TARGET.*item_list/u);
 });
 
 test('an upgrade compiles field, layout and metric intent as one transition from the prior live tenant release', async () => {
@@ -1585,12 +1582,12 @@ test('a whole-package upgrade rejection keeps the compiler subject without attri
   assert.ok(response.status === 'rejected', JSON.stringify(response));
   assert.equal('patchIndex' in response, false);
   const diagnostics = response.diagnostics as {
-    firstPartySubject?: string;
+    subject?: string;
     tenantPatch?: unknown;
     patchIndex?: number;
   }[];
   assert.ok(
-    diagnostics.some((d) => d.firstPartySubject === permissionId),
+    diagnostics.some((d) => d.subject === permissionId),
     JSON.stringify(diagnostics),
   );
   assert.ok(
@@ -2439,14 +2436,23 @@ test('addAddressField and addMapPlacement replay on a compatible base and identi
     data.mapPlacements.map((p) => p.sectionId),
     [compatible.sectionId],
   );
-  for (const base of [
-    variant('Delivery site', false),
-    variant('Stock number', true),
-  ]) {
+  for (const [base, code, subject] of [
+    [
+      variant('Delivery site', false),
+      'FIELD_COLLISION',
+      'northstar.app:field.item_sku',
+    ],
+    [variant('Stock number', true), 'RETIRED_TARGET', compatible.sectionId],
+  ] as const) {
     const rejected = await replay(base);
     assert.ok(rejected.status === 'rejected', JSON.stringify(rejected));
-    assert.equal(rejected.code, 'CUSTOMIZE_UPGRADE_CONFLICT');
-    assert.match(JSON.stringify(rejected.diagnostics), new RegExp(base.root));
+    assert.equal(rejected.code, code);
+    assert.equal(rejected.replayDiagnostics?.findings[0]?.subject, subject);
+    assert.partialDeepStrictEqual(rejected.diagnostics?.[0], {
+      firstPartyBase: base.root,
+      code,
+      subject,
+    });
   }
 });
 
