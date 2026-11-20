@@ -204,7 +204,7 @@ test('check-records rejects a new packet missing the tier attached to its CI run
   }
 });
 
-test('the token command refuses red main and an integration without exact full evidence', () => {
+test('the token command requires exact full evidence on red main or a Critical integration', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ci-3-window-'));
   const repo = join(dir, 'repo');
   const git = (...args: string[]) =>
@@ -251,6 +251,7 @@ test('the token command refuses red main and an integration without exact full e
     git('init', '--quiet', '--bare', join(dir, 'origin.git'));
     git('remote', 'add', 'origin', join(dir, 'origin.git'));
     git('push', '--quiet', 'origin', 'main');
+    const docsHead = git('rev-parse', 'HEAD');
     git('switch', '-qc', 'packet/fixture');
     mkdirSync(join(repo, 'db/migrations'), { recursive: true });
     writeFileSync(join(repo, 'db/migrations/change.sql'), 'SELECT 1;');
@@ -263,36 +264,85 @@ test('the token command refuses red main and an integration without exact full e
       probe(windowGate, `m.docsOnly('${docsBase}', 'HEAD')`, repo),
       false,
     );
+    // A non-Critical integration on the same origin/main isolates the red-main term.
+    git('switch', '-q', '--detach', docsHead);
+    git('switch', '-qc', 'packet/ordinary');
+    writeFileSync(join(repo, 'ordinary.ts'), 'export const ordinary = 1;\n');
+    git('add', 'ordinary.ts');
+    git('commit', '-qm', 'ordinary packet');
+    git('switch', '-q', '--detach', docsHead);
+    git('merge', '--quiet', '--no-ff', 'packet/ordinary', '-m', 'ordinary');
+    const ordinary = git('rev-parse', 'HEAD');
+    assert.equal(
+      probe(selector, `m.criticalDiff('${docsHead}', '${ordinary}')`, repo),
+      false,
+    );
+    writeFileSync(join(dir, 'token'), '');
     writeFileSync(
       join(dir, 'gh'),
       `#!/bin/sh
 case "$2" in
-  *branch=main*) printf '{"workflow_runs":[{"status":"completed","conclusion":"%s","html_url":"fixture"}]}' "$MAIN_RESULT" ;;
+  *branch=main*) printf '{"workflow_runs":[{"status":"completed","conclusion":"%s","html_url":"main-fixture"}]}' "$MAIN_RESULT" ;;
+  *head_sha="$FULL_FOR&"*) printf '{"workflow_runs":[{"id":7,"run_attempt":1,"event":"workflow_dispatch","head_sha":"%s","status":"completed","conclusion":"success","html_url":"full-fixture"}]}' "$FULL_FOR" ;;
   *head_sha=*) echo '{"workflow_runs":[]}' ;;
+  */runs/7/attempts/1/jobs*) printf '{"jobs":[{"name":"Executed-file reachability (full %s)","conclusion":"success"}]}' "$FULL_FOR" ;;
   *) exit 2 ;;
 esac
 `,
       { mode: 0o755 },
     );
-    for (const [state, reason] of [
-      ['failure', /Merge window closed by main CI/u],
-      ['success', /Missing green full CI on exact integration commit/u],
+    for (const [main, sha, full, status, reason] of [
+      // Red or cancelled main demands the exact full green instead of refusing outright.
+      [
+        'failure',
+        ordinary,
+        'none',
+        1,
+        /Missing green full CI.*\(main CI failure/u,
+      ],
+      [
+        'cancelled',
+        ordinary,
+        'none',
+        1,
+        /Missing green full CI.*\(main CI cancelled/u,
+      ],
+      [
+        'failure',
+        ordinary,
+        ordinary,
+        0,
+        /Full CI: full-fixture[\s\S]*Merge window open/u,
+      ],
+      ['failure', ordinary, candidate, 1, /Missing green full CI/u],
+      ['success', ordinary, 'none', 0, /Merge window open/u],
+      // Critical needs the exact full whatever main says.
+      [
+        'success',
+        candidate,
+        'none',
+        1,
+        /Missing green full CI on exact integration commit/u,
+      ],
+      ['success', candidate, candidate, 0, /Merge window open/u],
     ] as const) {
       const check = spawnSync(
         process.execPath,
-        [resolve(windowGate), 'fixture', candidate],
+        [resolve(windowGate), 'fixture', sha],
         {
           cwd: repo,
           encoding: 'utf8',
           env: {
             ...process.env,
-            MAIN_RESULT: state,
+            MAIN_RESULT: main,
+            FULL_FOR: full,
+            MERGE_WINDOW_FILE: join(dir, 'token'),
             PATH: `${dir}:${process.env.PATH}`,
           },
         },
       );
-      assert.equal(check.status, 1);
-      assert.match(check.stderr, reason);
+      assert.equal(check.status, status, `${main} ${full}: ${check.stderr}`);
+      assert.match(status ? check.stderr : check.stdout, reason);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });

@@ -75,11 +75,14 @@ function checkWindow(packet, candidate) {
         `repos/{owner}/{repo}/actions/runs/${run.id}/attempts/${run.run_attempt - 1}`,
       ),
   );
-  if (latest.conclusion !== 'success')
-    throw new Error(
-      `Merge window closed by main CI: ${latest.html_url} (${latest.conclusion})`,
+  // A red or cancelled main must not deadlock its own fix or revert. It
+  // raises the bar instead: the exact candidate needs a full green.
+  const redMain = latest.conclusion !== 'success';
+  if (redMain)
+    console.log(
+      `Main CI is not green: ${latest.html_url} (${latest.conclusion}); exact full CI required`,
     );
-  if (criticalDiff(base, candidate)) {
+  if (redMain || criticalDiff(base, candidate)) {
     const runs = workflowRuns(
       `head_sha=${candidate}&event=workflow_dispatch&status=success`,
     );
@@ -96,11 +99,12 @@ function checkWindow(packet, candidate) {
     }
     if (!green)
       throw new Error(
-        `Missing green full CI on exact integration commit ${candidate}`,
+        `Missing green full CI on exact integration commit ${candidate}${redMain ? ` (main CI ${latest.conclusion}: ${latest.html_url})` : ''}`,
       );
   }
   const owner = readFileSync(
-    '/home/rvham/2rain-missions/merge-window.txt',
+    process.env.MERGE_WINDOW_FILE ??
+      '/home/rvham/2rain-missions/merge-window.txt',
     'utf8',
   ).trim();
   if (
