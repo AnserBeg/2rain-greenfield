@@ -4,25 +4,86 @@ permissions:
   contents: read
 env:
   CI: '1'
+  REACHABILITY_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
 jobs:
-  pdf-diagnostics:
-    name: PDF issuance and renderer
+  quality:
+    name: Clean install, quality, and build
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .node-version
-      - run: corepack enable
-      - run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install frozen dependencies
+        run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      - name: Begin executed-file evidence run
+        run: node --import tsx test/helpers/begin-reachability-run.ts
+      - name: Check formatting
+        run: corepack pnpm format
+      - name: Lint
+        run: corepack pnpm lint
       - name: Typecheck
         run: corepack pnpm typecheck
-      - name: Document renderer
-        if: always()
-        run: node --import tsx --test test/integration/document-pdf.test.ts
-      - name: Template issuance
-        if: always()
-        run: node --import tsx --test test/postgres/document-templates.test.ts
+      - name: Build
+        run: corepack pnpm build
+      - name: Check mutation manifests still name live production text
+        run: corepack pnpm check:expected-red
+      - name: Prove the expected-red gate can fail
+        run: corepack pnpm check:expected-red-controls
+      - name: Run unit tests
+        run: corepack pnpm test:unit
+      - name: Run compiler tests
+        run: corepack pnpm test:compiler
+      - name: Run integration tests
+        run: corepack pnpm test:integration
+      - name: Run agent tests
+        run: corepack pnpm test:agent
+      - name: Run architecture and hygiene tests
+        run: corepack pnpm test:architecture
+      - name: Check compiled demo release freshness
+        run: corepack pnpm check:demo-release
+      - name: Check compiled application release freshness
+        run: corepack pnpm check:app-release
+      - name: Run web surface contracts
+        run: corepack pnpm test:contracts
+      - name: Check language coverage obligations
+        run: corepack pnpm check:language-coverage
+      - name: Retain quality executed-file evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: reachability-quality-${{ github.sha }}
+          path: |
+            test-results/reachability/unit.json
+            test-results/reachability/compiler.json
+            test-results/reachability/integration.json
+            test-results/reachability/agent.json
+            test-results/reachability/architecture.json
+            test-results/reachability/contracts.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Check patch whitespace and repository cleanliness
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [[ -n "$BASE_SHA" ]]; then
+            git diff --check "$BASE_SHA...HEAD"
+          else
+            git show --check --format= HEAD
+          fi
+          git diff --exit-code
+          test -z "$(git status --porcelain --untracked-files=all)"
+      - name: Retain compiled scaffold
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: scaffold-dist-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
