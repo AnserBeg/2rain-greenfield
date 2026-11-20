@@ -510,7 +510,7 @@ test('tenant line tables use the document editor with or without company scope a
     label: 'Review source',
   };
   const accepted = await compileInSandbox(
-    sandboxRequest([change([header, lifecycle, lines])]),
+    surfaceCompatibilityRequest([change([header, lifecycle, lines])]),
   );
   assert.equal(
     accepted.status,
@@ -585,7 +585,9 @@ test('tenant line tables use the document editor with or without company scope a
     ],
     [header, ...links, lines, lifecycle],
   ]) {
-    const extended = await compileInSandbox(sandboxRequest([change(members)]));
+    const extended = await compileInSandbox(
+      surfaceCompatibilityRequest([change(members)]),
+    );
     assert.equal(
       extended.status,
       'compiled',
@@ -613,7 +615,10 @@ test('tenant line tables use the document editor with or without company scope a
     assert.equal(unsupportedRuntimeCapability(family, requirement), null);
   }
   const visual = await compileInSandbox(
-    sandboxRequest([patch(header), change([...links, lines, lifecycle])]),
+    surfaceCompatibilityRequest([
+      patch(header),
+      change([...links, lines, lifecycle]),
+    ]),
   );
   assert.deepEqual(visual, {
     message:
@@ -670,6 +675,45 @@ function sandboxRequest(chain: readonly CustomizationPatch[]) {
     chain,
     tip: serializeRelease(tip),
   };
+}
+
+// Measure each customization floor with lower-floor first-party surfaces.
+let surfaceCompatibilityBase:
+  Pick<ReturnType<typeof sandboxRequest>, 'base' | 'tip'> | undefined;
+function surfaceCompatibilityRequest(chain: readonly CustomizationPatch[]) {
+  if (!surfaceCompatibilityBase) {
+    const base = structuredClone(authored);
+    for (const { documentEditor } of base.surfaces as {
+      documentEditor?: { lineCreateValues?: unknown };
+    }[]) {
+      if (documentEditor) delete documentEditor.lineCreateValues;
+    }
+    const normalized = normalizeApplicationPackage(base);
+    const normalizedDefinitionBytes = new TextEncoder().encode(
+      canonicalize(normalized),
+    );
+    const compiled = compileApplicationRelease(
+      {
+        kind: 'compilerInput',
+        dependencies: [],
+        expectedActiveRelease: null,
+        limits: { ...DEFAULT_COMPILER_LIMITS },
+        normalizedDefinitionBytes,
+        profile: {
+          ...MODULE_COMPILER_PROFILE,
+          languageVersion: normalized.languageVersion,
+          normalizationProfileVersion: normalized.normalizationProfileVersion,
+        },
+      },
+      acknowledgement,
+    );
+    assert.ok(compiled.status === 'compiled', JSON.stringify(compiled));
+    surfaceCompatibilityBase = {
+      base,
+      tip: serializeRelease({ compiled, normalizedDefinitionBytes }),
+    };
+  }
+  return { acknowledgement, ...surfaceCompatibilityBase, chain };
 }
 
 test('a change set compiles only its final definition and refuses a broken dependency order', async () => {
@@ -1154,7 +1198,9 @@ test('Today compiles only declared numeric measures of a direct List', async () 
     label: 'Catalog prices in CAD',
     sumField: 'northstar.app:field.item_price_cad',
   };
-  const compiled = await compileInSandbox(sandboxRequest([patch(card)]));
+  const compiled = await compileInSandbox(
+    surfaceCompatibilityRequest([patch(card)]),
+  );
   assert.equal(compiled.status, 'compiled', JSON.stringify(compiled));
   assert.match(compiled.steps[0]!.rendered.text, /sums Price \(CAD\) in/u);
   const { projections } = parseSerializedRelease(compiled.steps[0]!.release)
@@ -1210,7 +1256,7 @@ test('a saved Location view compiles its own columns, sort and declared filter',
     ],
   };
   const saved = patch(baseView);
-  const compiled = await compileInSandbox(sandboxRequest([saved]));
+  const compiled = await compileInSandbox(surfaceCompatibilityRequest([saved]));
   assert.equal(compiled.status, 'compiled', JSON.stringify(compiled));
   const { projections } = parseSerializedRelease(compiled.steps[0]!.release)
     .compiled.bundle.releaseManifest;
@@ -1327,7 +1373,7 @@ test('a saved Location view compiles its own columns, sort and declared filter',
   );
 
   const refused = await compileInSandbox(
-    sandboxRequest([
+    surfaceCompatibilityRequest([
       patch({
         ...baseView,
         filters: [

@@ -21,7 +21,7 @@ test('a count of one location starts from posted stock, is reviewed against the 
     await page.goto(url);
     expect(await stock(page)).toEqual({ 'CAL-WH': '13', 'VAN-WH': '6' });
 
-    // Inventory -> Stock counts -> New: pick the location, a reason and a
+    // Stock -> Stock counts -> New: pick the location, a reason and a
     // narrative; the server numbers the count when it is saved.
     await openNew(page);
     await pick(page, 'Location', 'Vancouver', 'Vancouver warehouse');
@@ -135,27 +135,29 @@ test('a count of one location starts from posted stock, is reviewed against the 
   });
 });
 
-/** Inventory -> Stock counts, from the menu. */
+/** Stock -> Stock counts, from the menu. */
 async function openCounts(page: Page) {
-  const inventory = page
+  const counts = page
     .getByRole('navigation', { name: 'Release navigation' })
-    .locator('.navigation-tree > li')
-    .getByRole('group')
-    .filter({ hasText: 'Inventory' });
-  const counts = inventory.getByRole('link', {
-    name: 'Stock counts',
-    exact: true,
-  });
-  // A group already open on this page stays open; clicking it would close it.
-  if (!(await counts.isVisible()))
-    await inventory.getByText('Inventory', { exact: true }).click();
+    .getByRole('link', { name: 'Stock counts', exact: true });
+  if (!(await counts.isVisible())) {
+    const stockGroup = page
+      .getByRole('navigation', { name: 'Release navigation' })
+      .getByRole('group')
+      .filter({
+        has: page
+          .locator(':scope > summary')
+          .getByText('Stock', { exact: true }),
+      });
+    await stockGroup.getByText('Stock', { exact: true }).click();
+  }
   await counts.click();
   await expect(
     page.getByRole('heading', { level: 1, name: 'Stock counts' }),
   ).toBeVisible();
 }
 
-/** Inventory -> Stock counts -> New. */
+/** Stock -> Stock counts -> New. */
 async function openNew(page: Page) {
   await openCounts(page);
   await page.getByRole('link', { name: 'New', exact: true }).click();
@@ -222,9 +224,27 @@ async function command(
   await dialog
     .getByRole('button', { name: `Confirm ${label}`, exact: true })
     .click();
-  await expect(dialog.locator('[data-task-result]')).toContainText(
-    `${label}: done`,
-  );
+  await expect
+    .poll(
+      async () => {
+        const result = page.locator('[data-task-result]');
+        if (await result.count()) return result.last().textContent();
+        return page
+          .locator('[data-diagnostic-code]:visible')
+          .evaluateAll((nodes) =>
+            nodes
+              .map((node) =>
+                [
+                  node.getAttribute('data-diagnostic-code'),
+                  node.textContent,
+                ].join(' '),
+              )
+              .join(', '),
+          );
+      },
+      { timeout: 30_000 },
+    )
+    .toContain(`${label}: done`);
   await expect(page).toHaveURL(url);
   await expect(page.locator('body')).toHaveAttribute(
     'data-count-journey',

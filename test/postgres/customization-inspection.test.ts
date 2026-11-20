@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../packages/canonical-model/src/surface-workspace.js';
 
 import {
   openCustomizeService,
@@ -81,7 +82,7 @@ test(
           );
           assert.equal((await opened.service.status()).patches.length, 1);
           await opened.service.approve(drafted.patchId);
-          // The last main before Inspection included the floor-25 Today reader.
+          // The archived Today reader must refuse both releases once the base requires line create values.
           await withArchivedCustomizationRuntime(
             '8839f668293dc06f9d9ba4def3611697323f3760',
             async (run) => {
@@ -90,17 +91,14 @@ test(
                   databaseUrl: options.databaseUrl,
                   identity: app.runtime.identity,
                 });
-              assert.deepEqual(await read(), {
-                outcome: 'loaded',
-                root: app.runtime.releaseRoot,
-              });
-              await opened.service.activate(drafted.patchId);
-              assert.deepEqual(await read(), {
+              const refusal = {
                 outcome: 'refused',
                 code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
-                message:
-                  'runtime capability northstar.runtime:capability.surface-manifest requires version 26 and this runtime supports 25',
-              });
+                message: `runtime capability northstar.runtime:capability.surface-manifest requires version ${LINE_CREATE_VALUES_SURFACE_FLOOR} and this runtime supports 25`,
+              };
+              assert.deepEqual(await read(), refusal);
+              await opened.service.activate(drafted.patchId);
+              assert.deepEqual(await read(), refusal);
             },
           );
           const world = worldOver(app.runtime, String(connection.database));

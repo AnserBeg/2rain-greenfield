@@ -183,7 +183,6 @@ const suiteDefinitions = [
     ],
     expectedFiles: [
       'test/postgres/agent-dev-tasks.test.ts',
-      'test/postgres/inventory-stock-counts.test.ts',
       'test/postgres/agent-tasks.test.ts',
       'test/postgres/catalog-extras.test.ts',
       'test/postgres/catalog-runtime.test.ts',
@@ -198,6 +197,7 @@ const suiteDefinitions = [
       'test/postgres/declared-list.test.ts',
       'test/postgres/document-attachments.test.ts',
       'test/postgres/document-numbering.test.ts',
+      'test/postgres/inventory-stock-counts.test.ts',
       'test/postgres/location-runtime.test.ts',
       'test/postgres/locations.test.ts',
       'test/postgres/migrations.test.ts',

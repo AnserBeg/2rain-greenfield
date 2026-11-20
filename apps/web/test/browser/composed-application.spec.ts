@@ -201,7 +201,7 @@ composedTest.describe('composed application journeys', () => {
   );
 
   composedTest(
-    'saves scoped forms and two required scoped relations',
+    'saves scoped inventory documents and their owned lines',
     async ({ composedApplication, page }) => {
       composedTest.setTimeout(journeyTimeoutMilliseconds.repairedFormAnatomy);
       await scopedFormPersistenceJourney(
@@ -1042,6 +1042,7 @@ async function inventoryNavigationJourney(
     'Buying worklist',
     'Stock by item',
     'Stock by location',
+    'Stock counts',
     'Companies',
     'Customers and suppliers',
     'Contact roles',
@@ -1054,7 +1055,6 @@ async function inventoryNavigationJourney(
     'Stock movements',
     'Period locks',
     'Inventory transactions',
-    'Stock counts',
   ]);
   // Inside the collapsed Sales and Purchasing groups: hidden text names
   // nothing, so each link is found by its text rather than its accessible name.
@@ -1122,6 +1122,7 @@ async function inventoryNavigationJourney(
       'Buying worklist',
       'Stock by item',
       'Stock by location',
+      'Stock counts',
     ],
   );
   await inventoryNavigation.getByText('Stock', { exact: true }).click();
@@ -1216,10 +1217,10 @@ async function inventoryNavigationJourney(
     ).toHaveCount(0);
     await inventoryNavigation.getByText('Stock', { exact: true }).click();
   }
+  // The List reads the stock documents query, so entry selects the company
+  // under that query's operand (STOCK-COUNTS).
   await page.goto(surfaceUrl(baseUrl, 'inventory_transaction_list'));
-  await expect(page).toHaveURL(
-    /inventory_transaction_list_legal_entity_scope=/u,
-  );
+  await expect(page).toHaveURL(/inventory_document_list_legal_entity_scope=/u);
 }
 
 async function inventoryRecordNavigationJourney(
@@ -1871,11 +1872,12 @@ async function scopedInventoryJourney(
  *
  * The transaction form left this set with INVENTORY-PARITY: it is the stock
  * document editor now, whose form, controls and Save draft are proved by
- * `inventory-documents.spec.ts` and by the journeys below.
+ * `inventory-documents.spec.ts` and by the journeys below. The count form
+ * left it with STOCK-COUNTS for the same reason: it is the stock count editor
+ * (`inventory-stock-counts.spec.ts`).
  */
 const repairedInventoryForms = [
   'inventory_transaction_line_form',
-  'stock_count_form',
   'stock_count_line_form',
 ] as const;
 
@@ -2010,118 +2012,111 @@ async function scopedFormPersistenceJourney(
     numberA,
   );
 
-  // The hardest current specimen: stock_count_line has TWO required relations,
-  // both targeting legal-entity-scoped lists. Create its parent through one
-  // scoped picker, then create the line through both scoped pickers.
-  await createScopedStockCountLineWithRelations(
-    page,
-    baseUrl,
-    numberA,
-    numberB,
-  );
+  // A count line names its count through one scoped picker, and no form
+  // offers the posting kernel's companion relations (STOCK-COUNTS).
+  const countId = await createScopedStockCountLine(page, baseUrl);
 
   // A scoped generic create refuses anything but exactly one well-formed
-  // company. The stock count form is the specimen now that the transaction
-  // form is the stock document editor.
-  const stockCountScopeParameterId =
-    await loadSurfaceScopeParameterId('stock_count_form');
+  // company. The stock count line form is the specimen now that the stock
+  // count form is the count editor, as the transaction form is the stock
+  // document editor. Like every Inventory form it carries a workspace entry
+  // (its owner is the counts List), so two companies, or one the entry does
+  // not offer, are refused there before any operand is read or authorized;
+  // with none, entry does not default a form, and the create itself refuses.
+  const lineScopeParameterId = await loadSurfaceScopeParameterId(
+    'stock_count_line_form',
+  );
   const multipleScopeUrl = new URL(
     scopedSurfaceUrl(
       baseUrl,
-      'stock_count_form',
-      stockCountScopeParameterId,
+      'stock_count_line_form',
+      lineScopeParameterId,
       browserLegalEntityId,
     ),
   );
   multipleScopeUrl.searchParams.append(
-    stockCountScopeParameterId,
+    lineScopeParameterId,
     browserAlternateLegalEntityId,
   );
-  await expectScopedStockCountCreateRefusal(
+  await expectScopedStockCountLineCreateRefusal(
     page,
     baseUrl,
-    stockCountScopeParameterId,
+    lineScopeParameterId,
     multipleScopeUrl.href,
-    numberA,
-    'COUNT-SCOPE-MULTIPLE',
-    'OPERATION_INPUT_INVALID',
+    countId,
+    'WORKSPACE_COMPANY_UNAVAILABLE',
   );
-  await expectScopedStockCountCreateRefusal(
+  await expectScopedStockCountLineCreateRefusal(
     page,
     baseUrl,
-    stockCountScopeParameterId,
-    surfaceUrl(baseUrl, 'stock_count_form'),
-    numberA,
-    'COUNT-SCOPE-OMITTED',
+    lineScopeParameterId,
+    surfaceUrl(baseUrl, 'stock_count_line_form'),
+    countId,
     'OPERATION_INPUT_INVALID',
   );
-  await expectScopedStockCountCreateRefusal(
+  await expectScopedStockCountLineCreateRefusal(
     page,
     baseUrl,
-    stockCountScopeParameterId,
+    lineScopeParameterId,
     scopedSurfaceUrl(
       baseUrl,
-      'stock_count_form',
-      stockCountScopeParameterId,
+      'stock_count_line_form',
+      lineScopeParameterId,
       'not-a-uuid',
     ),
-    numberA,
-    'COUNT-SCOPE-MALFORMED',
-    // The authorization boundary refuses malformed scope before it can reach
-    // provider input parsing; it must never inherit the demo role's ALLOW.
-    'OPERATION_PERMISSION_DENIED',
+    countId,
+    // A malformed company is not one the entry offers: refused before it can
+    // reach authorization or provider input parsing, so it can never inherit
+    // the demo role's ALLOW.
+    'WORKSPACE_COMPANY_UNAVAILABLE',
   );
 }
 
-async function createScopedStockCountLineWithRelations(
+/**
+ * A stock count in one company, saved as a draft in the count editor, and a
+ * line created through the generic line form under the same company: its
+ * count chosen through the scoped Session picker, and no picker for the
+ * kernel's companion line (STOCK-COUNTS). Returns the count's id.
+ */
+async function createScopedStockCountLine(
   page: Page,
   baseUrl: string,
-  transactionNumber: string,
-  foreignTransactionNumber: string,
-): Promise<void> {
-  const stockCountScopeParameterId =
+): Promise<string> {
+  const countScopeParameterId =
     await loadSurfaceScopeParameterId('stock_count_form');
   await page.goto(
     scopedSurfaceUrl(
       baseUrl,
       'stock_count_form',
-      stockCountScopeParameterId,
+      countScopeParameterId,
       browserLegalEntityId,
     ),
   );
-  const transactionPicker = page.getByRole('combobox', {
-    exact: true,
-    name: 'Transaction',
-  });
-  await expect(transactionPicker).toBeVisible();
   await expect(
-    transactionPicker.locator('option', { hasText: transactionNumber }),
-  ).toHaveCount(1);
-  await expect(
-    transactionPicker.locator('option', { hasText: foreignTransactionNumber }),
-  ).toHaveCount(0);
-  await fillStockCountForm(page, transactionNumber, 'COUNT-SCOPE-A');
-  const stockCountId = await page
-    .locator('form#surface-record-form input[name="recordId"]')
-    .inputValue();
+    page.getByRole('heading', { level: 1, name: 'New Stock count' }),
+  ).toBeVisible();
+  await pickEditorRecord(page, 'Location', 'Calgary', 'Calgary warehouse');
   await page
-    .locator('[data-platform-slot="record:commandBar"]')
-    .getByRole('button', { name: 'Save' })
+    .getByLabel('Narrative', { exact: true })
+    .fill('Scoped stock count');
+  await page
+    .getByRole('button', { name: 'Remove line 1', exact: true })
     .click();
-  await expect(page.getByRole('status')).toContainText('Create complete');
-  await expect(page.locator('[data-diagnostic-code]')).toHaveCount(0);
-  await expect(page.locator('[data-relation-freeze]')).toContainText(
-    'Transaction',
-  );
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await expect(page).toHaveURL(/stock_count_detail/u);
+  await expect(
+    page.getByRole('heading', { level: 1, name: /^CNT-\d{6}$/u }),
+  ).toBeVisible();
+  const countId = new URL(page.url()).searchParams.get('record')!;
 
-  const stockCountLineScopeParameterId = await loadSurfaceScopeParameterId(
+  const lineScopeParameterId = await loadSurfaceScopeParameterId(
     'stock_count_line_form',
   );
   await page.goto(
     scopedSurfaceUrl(
       baseUrl,
       'stock_count_line_form',
-      stockCountLineScopeParameterId,
+      lineScopeParameterId,
       browserLegalEntityId,
     ),
   );
@@ -2129,25 +2124,12 @@ async function createScopedStockCountLineWithRelations(
     exact: true,
     name: 'Session',
   });
-  const transactionLinePicker = page.getByRole('combobox', {
-    exact: true,
-    name: 'Transaction line',
-  });
   await expect(sessionPicker).toBeVisible();
-  await expect(transactionLinePicker).toBeVisible();
-  await sessionPicker.selectOption(stockCountId);
   await expect(
-    transactionLinePicker.locator(
-      `option[value="${browserTransactionLineId}"]`,
-    ),
-  ).toHaveCount(1);
-  await transactionLinePicker.selectOption(browserTransactionLineId);
-  await page.getByLabel('Line number', { exact: true }).fill('1');
-  await page.getByLabel('Item', { exact: true }).fill(demoItemId);
-  await page.getByLabel('Expected quantity', { exact: true }).fill('5');
-  await page.getByLabel('Counted quantity', { exact: true }).fill('5');
-  await page.getByLabel('Variance quantity', { exact: true }).fill('0');
-  await page.getByLabel('Unit', { exact: true }).fill('EA');
+    page.getByRole('combobox', { exact: true, name: 'Transaction line' }),
+  ).toHaveCount(0);
+  await sessionPicker.selectOption(countId);
+  await fillStockCountLineForm(page);
   await page
     .locator('[data-platform-slot="record:commandBar"]')
     .getByRole('button', { name: 'Save' })
@@ -2159,33 +2141,21 @@ async function createScopedStockCountLineWithRelations(
     frozenRelations.getByRole('heading', { name: 'Locked after creation' }),
   ).toBeVisible();
   await expect(frozenRelations).toContainText('Session');
-  await expect(frozenRelations).toContainText('Transaction line');
+  await expect(frozenRelations).not.toContainText('Transaction line');
   await expect(frozenRelations).not.toContainText('Stock Count Line Session');
   await expect(frozenRelations).toContainText('cannot be changed later');
   await expect(sessionPicker).toHaveCount(0);
-  await expect(transactionLinePicker).toHaveCount(0);
+  return countId;
 }
 
-/** A stock count's create form, its transaction chosen by number. */
-async function fillStockCountForm(
-  page: Page,
-  transactionNumber: string,
-  countNumber: string,
-): Promise<void> {
-  await page
-    .getByRole('combobox', { exact: true, name: 'Transaction' })
-    .selectOption({ label: transactionNumber });
-  await page.getByLabel('Number', { exact: true }).fill(countNumber);
-  await page
-    .getByRole('combobox', { exact: true, name: 'Kind' })
-    .selectOption({ label: 'initial' });
-  await page
-    .getByRole('combobox', { exact: true, name: 'State' })
-    .selectOption({ label: 'draft' });
-  await page.getByLabel('Location', { exact: true }).fill(demoLocationId);
-  await page
-    .getByLabel('Counted at', { exact: true })
-    .fill('2026-07-30T12:00:00.000Z');
+/** A count line's generic create form: product, figures and unit. */
+async function fillStockCountLineForm(page: Page): Promise<void> {
+  await page.getByLabel('Line number', { exact: true }).fill('1');
+  await page.getByLabel('Item', { exact: true }).fill(demoItemId);
+  await page.getByLabel('Expected quantity', { exact: true }).fill('0');
+  await page.getByLabel('Counted quantity', { exact: true }).fill('0');
+  await page.getByLabel('Variance quantity', { exact: true }).fill('0');
+  await page.getByLabel('Unit', { exact: true }).fill('EA');
 }
 
 /**
@@ -2318,24 +2288,26 @@ async function expectScopedInventoryTransactions(
   await expect(page.getByText(hiddenNumber, { exact: true })).toHaveCount(0);
 }
 
-async function expectScopedStockCountCreateRefusal(
+async function expectScopedStockCountLineCreateRefusal(
   page: Page,
   baseUrl: string,
   scopeParameterId: string,
   action: string,
-  transactionNumber: string,
-  countNumber: string,
-  diagnosticCode: 'OPERATION_INPUT_INVALID' | 'OPERATION_PERMISSION_DENIED',
+  countId: string,
+  diagnosticCode: 'OPERATION_INPUT_INVALID' | 'WORKSPACE_COMPANY_UNAVAILABLE',
 ): Promise<void> {
   await page.goto(
     scopedSurfaceUrl(
       baseUrl,
-      'stock_count_form',
+      'stock_count_line_form',
       scopeParameterId,
       browserLegalEntityId,
     ),
   );
-  await fillStockCountForm(page, transactionNumber, countNumber);
+  await page
+    .getByRole('combobox', { exact: true, name: 'Session' })
+    .selectOption(countId);
+  await fillStockCountLineForm(page);
   await page
     .locator('form#surface-record-form')
     .evaluate(
@@ -2353,7 +2325,6 @@ async function expectScopedStockCountCreateRefusal(
 
 const inventoryFormHeadings = Object.freeze({
   inventory_transaction_line_form: 'Inventory transaction line',
-  stock_count_form: 'Stock count',
   stock_count_line_form: 'Stock count line',
 });
 

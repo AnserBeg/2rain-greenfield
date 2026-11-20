@@ -696,6 +696,35 @@ const POSTED_STOCK_BALANCE_MODULE_FIELD_RULES = Object.freeze([
     },
   },
 ] as const satisfies readonly PostedStockBalanceModuleFieldRule[]);
+const STOCK_COUNT_WORKFLOW_FIELDS = new Set([
+  'stock_count_count_type',
+  'stock_count_counting_mode',
+  'stock_count_line_physical_quantity',
+]);
+
+function stockCountFieldRules(
+  rules: readonly InventoryMovementModuleFieldRule[],
+  workflow: boolean,
+): readonly InventoryMovementModuleFieldRule[] {
+  if (workflow) return rules;
+  return rules
+    .filter((rule) => !STOCK_COUNT_WORKFLOW_FIELDS.has(rule.fieldLocalId))
+    .map((rule) =>
+      rule.fieldLocalId === 'stock_count_state' && rule.shape.kind === 'enum'
+        ? {
+            ...rule,
+            shape: {
+              ...rule.shape,
+              options: rule.shape.options.filter(
+                (option) =>
+                  option.optionLocalId !== 'stock_count_state_cancelled',
+              ),
+            },
+          }
+        : rule,
+    );
+}
+
 const STOCK_COUNT_MODULE_FIELD_RULES = Object.freeze([
   {
     fieldLocalId: 'stock_count_number',
@@ -1767,6 +1796,7 @@ function validatePinnedStockCountTerminalGuard(
 
 function validatePinnedInventoryCountRelations(
   packageRevision: NormalizedApplicationPackage,
+  stockCountWorkflow: boolean,
   diagnostics: CompilerDiagnostic[],
 ): void {
   const namespace = packageRevision.package.namespace;
@@ -1791,7 +1821,7 @@ function validatePinnedInventoryCountRelations(
       'inventory_transaction',
       'reference',
       false, // PUR-2a: kernel-written companion. ADR-0060.
-      'retired',
+      stockCountWorkflow ? 'retired' : 'active',
     ],
     [
       'stock_count_supersedes',
@@ -1815,7 +1845,7 @@ function validatePinnedInventoryCountRelations(
       'inventory_transaction_line',
       'reference',
       false, // PUR-2a: kernel-written companion. ADR-0060.
-      'retired',
+      stockCountWorkflow ? 'retired' : 'active',
     ],
   ] as const;
   for (const [
@@ -2168,7 +2198,27 @@ export function validateModuleConformance(
   const diagnostics: CompilerDiagnostic[] = [];
   validateRequiredInventoryEntitySet(packageRevision, diagnostics);
   validateRecordedTimeProjectionRetention(packageRevision, diagnostics);
-  validatePinnedInventoryCountRelations(packageRevision, diagnostics);
+  // The workflow is an extension to the original count evidence storage.
+  // Require the complete extension whenever there is a workflow operation
+  // or one of its evidence fields. Historical definitions keep their shape.
+  const stockCountWorkflow =
+    packageRevision.fields.some((field) =>
+      STOCK_COUNT_WORKFLOW_FIELDS.has(
+        canonicalFieldLocalId(field.fieldId) ?? '',
+      ),
+    ) ||
+    packageRevision.operations.some(
+      (operation) =>
+        operation.effect.kind === 'registeredCapabilityEffect' &&
+        /:operation\.stock_count_(start|review|post|reopen|cancel)$/u.test(
+          operation.operationId,
+        ),
+    );
+  validatePinnedInventoryCountRelations(
+    packageRevision,
+    stockCountWorkflow,
+    diagnostics,
+  );
   const storageById = new Map(
     packageRevision.storageMappings.map((mapping) => [
       mapping.storageMappingId,
@@ -2285,7 +2335,10 @@ export function validateModuleConformance(
       validatePinnedInventoryCountEntity(
         packageRevision,
         entity.entityId,
-        STOCK_COUNT_MODULE_FIELD_RULES,
+        stockCountFieldRules(
+          STOCK_COUNT_MODULE_FIELD_RULES,
+          stockCountWorkflow,
+        ),
         diagnostics,
       );
       validatePinnedStockCountTerminalGuard(
@@ -2298,7 +2351,10 @@ export function validateModuleConformance(
       validatePinnedInventoryCountEntity(
         packageRevision,
         entity.entityId,
-        STOCK_COUNT_LINE_MODULE_FIELD_RULES,
+        stockCountFieldRules(
+          STOCK_COUNT_LINE_MODULE_FIELD_RULES,
+          stockCountWorkflow,
+        ),
         diagnostics,
       );
     }
