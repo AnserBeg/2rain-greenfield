@@ -546,12 +546,19 @@ test(
               ),
             );
           const revokeGrant = (permissionId: string) =>
-            pool.query(
+            pool.query<{ role_id: string }>(
               `UPDATE platform.current_policy_permission_grants SET revoked_at = clock_timestamp()
-            WHERE tenant_id = $1 AND environment_id = $2 AND permission_id = $4
+            WHERE tenant_id = $1 AND environment_id = $2 AND permission_id = $4 AND revoked_at IS NULL
               AND role_id IN (SELECT role_id FROM platform.current_policy_memberships
-              WHERE tenant_id = $1 AND environment_id = $2 AND principal_id = $3)`,
+              WHERE tenant_id = $1 AND environment_id = $2 AND principal_id = $3 AND revoked_at IS NULL)
+            RETURNING role_id`,
               [tenantId, environmentId, principalId, permissionId],
+            );
+          const restoreGrant = (permissionId: string, roles: string[]) =>
+            pool.query(
+              `UPDATE platform.current_policy_permission_grants SET revoked_at = NULL
+              WHERE (tenant_id,environment_id,permission_id) = ($1,$2,$3) AND role_id = ANY($4::uuid[])`,
+              [tenantId, environmentId, permissionId, roles],
             );
           const companyDraft = issuedPo.generated_source;
           const expectedDate = 'Nov 18, 2026';
@@ -574,6 +581,80 @@ test(
               'Order date: ' + expectedDate,
             ),
             'PDF did not preserve the Record business day',
+          );
+          await t.test(
+            'PO attachments stay visible when purchasing settings are withheld',
+            async () => {
+              const attachmentUrl = new URL(poUrl);
+              attachmentUrl.searchParams.set('mode', 'upload');
+              attachmentUrl.searchParams.set('retryKey', randomUUID());
+              attachmentUrl.searchParams.set('fileName', 'order-evidence.pdf');
+              const uploaded = await fetch(attachmentUrl, {
+                method: 'POST',
+                headers: {
+                  origin: attachmentUrl.origin,
+                  'content-type': 'application/pdf',
+                },
+                body: new Uint8Array(issuedPo.bytes),
+              });
+              assert.equal(uploaded.status, 201, await uploaded.clone().text());
+              const attachment = (await uploaded.json()) as DocumentMetadata;
+              const read = () =>
+                directRead(orderId, attachment, 'purchase_order');
+              assert.equal((await read()).rowCount, 1);
+              const permission = id('permission', 'purchasing_settings_read');
+              const revoked = await revokeGrant(permission);
+              assert.ok(revoked.rowCount);
+              try {
+                assert.match(
+                  await (await fetch(record)).text(),
+                  /Nov 18, 2026/u,
+                );
+                assert.equal((await read()).rowCount, 1);
+              } finally {
+                await restoreGrant(
+                  permission,
+                  revoked.rows.map(({ role_id }) => role_id),
+                );
+              }
+            },
+          );
+          await t.test(
+            'an issuer without download authority receives the same receipt on retry',
+            async () => {
+              const permission = 'northstar.documents:permission.download';
+              const revoked = await revokeGrant(permission);
+              assert.ok(revoked.rowCount);
+              try {
+                const policyVersion = async () =>
+                  (
+                    await pool.query<{ policy_version: string }>(
+                      'SELECT policy_version FROM platform.current_policy_epochs WHERE (tenant_id,environment_id) = ($1,$2)',
+                      [tenantId, environmentId],
+                    )
+                  ).rows[0]!.policy_version;
+                const epoch = await policyVersion();
+                const retryKey = randomUUID();
+                const issue = () =>
+                  request(poUrl, 'generate', undefined, retryKey);
+                const first = await issue();
+                assert.equal(first.status, 201, await first.clone().text());
+                const issued = (await first.json()) as DocumentMetadata;
+                assert.equal(
+                  (await request(poUrl, 'download', issued)).status,
+                  404,
+                );
+                const retry = await issue();
+                assert.equal(retry.status, 201, await retry.clone().text());
+                assert.deepEqual(await retry.json(), issued);
+                assert.equal(await policyVersion(), epoch);
+              } finally {
+                await restoreGrant(
+                  permission,
+                  revoked.rows.map(({ role_id }) => role_id),
+                );
+              }
+            },
           );
           const company = await app.runtime.entry.run({}, (view) =>
             app.runtime.queryGateway.invoke(view, {

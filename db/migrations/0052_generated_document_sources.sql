@@ -98,6 +98,9 @@ RETURNS boolean LANGUAGE sql STABLE SET search_path = pg_catalog, pg_temp AS $$
       SELECT value AS q FROM jsonb_array_elements(app->'queries')
       WHERE value->>'queryId' = reference.value->>'targetId'
     ) dependency ON true
+    -- The commercial PO provider allows either approval dependency to be withheld.
+    WHERE (required.q #>> '{readModel,binding}' = 'northstar.sales:read_model.commercial_purchase_order'
+      AND reference.key IN ('settings', 'approvals')) IS NOT TRUE
   )
   SELECT NOT EXISTS (
     SELECT FROM required
@@ -441,15 +444,17 @@ RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg
 CREATE FUNCTION platform.read_generated_document_receipt(scope text, entity text, record_key uuid,
   upload uuid, template text)
 RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
-DECLARE i record; v platform.document_versions; BEGIN
+DECLARE i record; v platform.document_versions; fields jsonb; BEGIN
   SELECT * INTO i FROM platform.document_identity();
   SELECT * INTO v FROM platform.document_versions
-    WHERE (tenant_id,environment_id,actor_id,upload_id) = (i.tenant_id,i.environment_id,i.principal_id,upload);
+    WHERE (tenant_id,environment_id,actor_id,upload_id) = (i.tenant_id,i.environment_id,i.principal_id,upload)
+      AND generated_source IS NOT NULL AND template IS NOT NULL;
   IF NOT FOUND THEN RETURN NULL; END IF;
   IF (v.owner_scope,v.entity_id,v.record_id,v.generated_source->>'templateId')
       IS DISTINCT FROM (scope,entity,record_key,template) THEN
     RAISE EXCEPTION 'This upload ID already has different input.' USING ERRCODE = 'D0409'; END IF;
-  IF platform.document_fields(scope,entity,'download') IS NULL
+  fields := platform.document_fields(scope,entity,'upload');
+  IF fields IS NULL
      OR platform.document_generated_allowed(v.generated_source,v.release_id,scope,entity,record_key,false)
          IS DISTINCT FROM true
      OR platform.document_record_revision(i.tenant_id,i.environment_id,
@@ -457,19 +462,39 @@ DECLARE i record; v platform.document_versions; BEGIN
     RAISE EXCEPTION 'Unavailable PDF receipt' USING ERRCODE = 'D0404'; END IF;
   RETURN (SELECT platform.document_metadata(v,b.content_type,b.byte_length)
     FROM platform.document_blobs b
-    WHERE (b.tenant_id,b.environment_id,b.owner_scope,b.digest) = (v.tenant_id,v.environment_id,v.owner_scope,v.digest)); END $$;
+    WHERE (b.tenant_id,b.environment_id,b.owner_scope,b.digest) = (v.tenant_id,v.environment_id,v.owner_scope,v.digest)
+      AND EXISTS (SELECT FROM platform.document_file_policy(fields,v.field_id,v.category_id,b.content_type,b.byte_length) admitted
+        WHERE admitted IS NOT NULL AND (admitted->>'retention') IS NOT DISTINCT FROM v.retention_class)); END $$;
 
 REVOKE ALL ON FUNCTION platform.read_generated_document_receipt(text,text,uuid,uuid,text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION platform.read_generated_document_receipt(text,text,uuid,uuid,text) TO north_star_runtime;
 
+CREATE FUNCTION platform.document_scan_stage(t uuid,e uuid,p uuid,upload uuid,hash text)
+RETURNS platform.document_upload_staging LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$ DECLARE
+  s platform.document_upload_staging; fence_now bigint; policy_now bigint; BEGIN
+  IF current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'Document screening requires READ COMMITTED' USING ERRCODE = '25001'; END IF;
+  -- Match publication's lock order. The scanner role has no request identity;
+  -- the exact staged uploader and the locked policy epoch bind its authority.
+  SELECT fence INTO fence_now FROM platform.active_release_pointers
+    WHERE (tenant_id,environment_id) = (t,e) FOR SHARE;
+  SELECT policy_version INTO policy_now FROM platform.current_policy_epochs
+    WHERE (tenant_id,environment_id) = (t,e) FOR SHARE;
+  SELECT * INTO s FROM platform.document_upload_staging WHERE
+    (tenant_id,environment_id,principal_id,upload_id,digest) = (t,e,p,upload,hash) FOR UPDATE;
+  IF NOT FOUND OR fence_now IS NULL
+     OR (s.authority_fence,s.authority_policy_version) IS DISTINCT FROM (fence_now,coalesce(policy_now,0))
+     OR platform.document_record_revision(t,e,platform.document_storage(t,e),
+       s.entity_id,s.owner_scope,s.record_id) IS NULL THEN
+    RAISE EXCEPTION 'Unavailable stage' USING ERRCODE = 'D0409'; END IF;
+  RETURN s; END $$;
+
+REVOKE ALL ON FUNCTION platform.document_scan_stage(uuid,uuid,uuid,uuid,text) FROM PUBLIC;
+
 CREATE OR REPLACE FUNCTION platform.lock_document_scan(t uuid,e uuid,p uuid,upload uuid,hash text,policy text)
 RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$ DECLARE
   s platform.document_upload_staging; BEGIN
-  SELECT * INTO STRICT s FROM platform.document_upload_staging WHERE
-    (tenant_id,environment_id,principal_id,upload_id,digest) = (t,e,p,upload,hash) FOR UPDATE;
-  IF NOT (platform.document_record_revision(t,e,platform.document_storage(t,e),
-      s.entity_id,s.owner_scope,s.record_id) IS NOT NULL) THEN
-    RAISE EXCEPTION 'Unavailable stage' USING ERRCODE = 'D0409'; END IF;
+  s := platform.document_scan_stage(t,e,p,upload,hash);
   IF s.scan_clean IS FALSE THEN RETURN false; END IF;
   IF s.expires_at <= clock_timestamp() THEN RAISE EXCEPTION 'This staged upload expired.' USING ERRCODE = 'D0409'; END IF;
   IF s.scan_policy = policy THEN RETURN s.scan_clean; END IF;
@@ -478,10 +503,9 @@ RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, 
 
 CREATE OR REPLACE FUNCTION platform.record_document_scan(t uuid,e uuid,p uuid,upload uuid,hash text,policy text,clean boolean)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$ BEGIN
+  PERFORM platform.document_scan_stage(t,e,p,upload,hash);
   UPDATE platform.document_upload_staging AS s SET scan_clean = clean, scan_digest = hash, scan_policy = policy
     WHERE (tenant_id,environment_id,principal_id,upload_id,digest) = (t,e,p,upload,hash)
-      AND platform.document_record_revision(t,e,platform.document_storage(t,e),
-      s.entity_id,s.owner_scope,s.record_id) IS NOT NULL
       AND clean IS NOT NULL AND scan_clean IS DISTINCT FROM false AND retired_at IS NULL;
   IF NOT FOUND THEN RAISE EXCEPTION 'Unavailable stage' USING ERRCODE = 'D0409'; END IF; END $$;
 

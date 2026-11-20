@@ -1174,7 +1174,7 @@ test(
           );
           await t.test(
             'a committed uploader revocation makes staged authority unusable after regrant',
-            async () => {
+            async (t) => {
               const { tenantId, environmentId, principalId } =
                 screening.identity;
               const runtime = rolePool(
@@ -1189,6 +1189,7 @@ test(
               );
               const context = await trustedContext(screening.identity);
               const uploadId = randomUUID();
+              const unscannedId = randomUUID();
               const hash = createHash('sha256').update(pixel).digest('hex');
               const run = <T>(
                 operation: Parameters<
@@ -1204,12 +1205,38 @@ test(
                 );
               const permission =
                 'northstar.runtime:permission.semantic-query-boundary';
+              const scanArgs = (id: string) => [
+                tenantId,
+                environmentId,
+                principalId,
+                id,
+                hash,
+                'fixture/v1',
+              ];
+              const readScan = (id: string) =>
+                scanner.query<{ clean: boolean | null }>(
+                  'SELECT platform.lock_document_scan($1,$2,$3,$4,$5,$6) AS clean',
+                  scanArgs(id),
+                );
+              const recordScan = (id: string) =>
+                scanner.query(
+                  'SELECT platform.record_document_scan($1,$2,$3,$4,$5,$6,true)',
+                  scanArgs(id),
+                );
               try {
-                await run((client) =>
-                  client.query(
-                    "SELECT platform.stage_document_upload('shared','northstar.app:entity.item',$1,$2,NULL,NULL,'revoked.png','image/png',$3)",
-                    [recordId, uploadId, pixel],
-                  ),
+                for (const id of [uploadId, unscannedId]) {
+                  await run((client) =>
+                    client.query(
+                      "SELECT platform.stage_document_upload('shared','northstar.app:entity.item',$1,$2,NULL,NULL,'revoked.png','image/png',$3)",
+                      [recordId, id, pixel],
+                    ),
+                  );
+                }
+                await recordScan(uploadId);
+                assert.equal((await readScan(uploadId)).rows[0]?.clean, true);
+                assert.equal(
+                  (await readScan(unscannedId)).rows[0]?.clean,
+                  null,
                 );
                 const grants = await pool.query<{ role_id: string }>(
                   `UPDATE platform.current_policy_permission_grants SET revoked_at=clock_timestamp()
@@ -1220,16 +1247,24 @@ test(
                   [tenantId, environmentId, permission, principalId],
                 );
                 assert.ok(grants.rowCount);
-                await scanner.query(
-                  'SELECT platform.record_document_scan($1,$2,$3,$4,$5,$6,true)',
-                  [
-                    tenantId,
-                    environmentId,
-                    principalId,
-                    uploadId,
-                    hash,
-                    'fixture/v1',
-                  ],
+                await t.test(
+                  'scanner cannot reuse a verdict while the uploader grant is revoked',
+                  async () => {
+                    await assert.rejects(readScan(uploadId), { code: 'D0409' });
+                  },
+                );
+                await t.test(
+                  'scanner cannot record a verdict while the uploader grant is revoked',
+                  async () => {
+                    await assert.rejects(recordScan(unscannedId), {
+                      code: 'D0409',
+                    });
+                    const stage = await pool.query(
+                      'SELECT scan_clean FROM platform.document_upload_staging WHERE upload_id=$1',
+                      [unscannedId],
+                    );
+                    assert.deepEqual(stage.rows, [{ scan_clean: null }]);
+                  },
                 );
                 await assert.rejects(publish(), { code: 'D0404' });
                 await pool.query(
@@ -1470,6 +1505,51 @@ test(
           const published = (await uploads
             .find(({ status }) => status === 201)!
             .json()) as DocumentMetadata;
+          const scope = COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId;
+          const uploadId = (
+            await pool.query<{ upload_id: string }>(
+              'SELECT upload_id FROM platform.document_versions WHERE version_id = $1',
+              [published.versionId],
+            )
+          ).rows[0]!.upload_id;
+          const generatedReceipt = async (templateId: string | null) => {
+            const runtime = rolePool(
+              options.databaseUrl,
+              'north_star_runtime',
+              1,
+            );
+            try {
+              const context = await trustedContext(app.runtime.identity);
+              return await withTrustedRequestTransaction(
+                runtime,
+                context,
+                async (client) => {
+                  const receipt = await client.query<{
+                    metadata: DocumentMetadata | null;
+                  }>(
+                    'SELECT platform.read_generated_document_receipt($1,$2,$3,$4,$5) AS metadata',
+                    [scope, entityId, equipment.recordId, uploadId, templateId],
+                  );
+                  return receipt.rows[0]!.metadata;
+                },
+              );
+            } finally {
+              await runtime.end();
+            }
+          };
+          await t.test(
+            'the generated receipt cannot return ordinary upload metadata',
+            async () => {
+              const list = await fetch(listUrl(fieldUrl));
+              assert.equal(list.status, 200);
+              assert.deepEqual(await list.json(), [published]);
+              assert.equal(await generatedReceipt(null), null);
+              assert.equal(
+                await generatedReceipt('northstar.app:template.custom_pdf'),
+                null,
+              );
+            },
+          );
           await t.test(
             'the SQL boundary applies the compiled category count and retention',
             async () => {
@@ -1665,6 +1745,7 @@ test(
                 (await fetch(byteUrl(fieldUrl, published, 'download'))).status,
                 404,
               );
+              assert.equal(await generatedReceipt(null), null);
             },
           );
           assert.equal(
