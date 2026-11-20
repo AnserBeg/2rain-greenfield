@@ -40,17 +40,19 @@
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "WORKFLOW-1",
-  "base": "47594bc60c4349d9a8b76dcdefe81503119aeaf8",
-  "head": "281842989c902ac63987e20049725e8cb64b6c57",
+  "base": "f25df5af44df132045c67ba29eb9aebe1084dcc7",
+  "head": "983be7d6a073cd19079056d1deaa920e57d4a80b",
   "changedPaths": [
-    "db/migrations/0050_workflow_retry_authority.sql", "db/schema.snapshot.json",
-    "packages/postgres-provider/src/current-policy.ts", "packages/postgres-provider/src/release-verification-service.ts",
-    "packages/postgres-provider/src/workflow-execution.ts", "packages/postgres-provider/src/workflow-gateway.ts",
-    "test/architecture/release-persistence-boundary.test.ts", "test/evidence/WORKFLOW-1-slice3-fix.expected-red.json",
-    "test/evidence/WORKFLOW-1-threat-model-fix.expected-red.json", "test/integration/workflow-admission.test.ts",
-    "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts",
-    "test/postgres/module-storage-transition.test.ts", "test/postgres/releases.test.ts",
-    "test/postgres/trust-substrate.test.ts", "test/postgres/workflow-consumer.test.ts"
+    "db/migrations/0051_workflow_retry_authority.sql", "db/schema.snapshot.json",
+    "learnings.md", "packages/postgres-provider/src/current-policy.ts",
+    "packages/postgres-provider/src/release-verification-service.ts", "packages/postgres-provider/src/workflow-execution.ts",
+    "packages/postgres-provider/src/workflow-gateway.ts", "test/architecture/release-persistence-boundary.test.ts",
+    "test/architecture/tenant-completeness.manifest.json", "test/architecture/tenant-completeness.test.ts",
+    "test/evidence/WORKFLOW-1-slice3-fix.expected-red.json", "test/evidence/WORKFLOW-1-threat-model-fix.expected-red.json",
+    "test/integration/workflow-admission.test.ts", "test/postgres/inventory-storage.test.ts",
+    "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts",
+    "test/postgres/releases.test.ts", "test/postgres/trust-substrate.test.ts",
+    "test/postgres/workflow-consumer.test.ts"
   ],
   "symbols": [
     {"path": "packages/postgres-provider/src/current-policy.ts", "name": "PostgresCurrentPolicyGateway"},
