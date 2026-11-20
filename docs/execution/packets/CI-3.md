@@ -1,6 +1,6 @@
 # CI-3 — tiered packet and main CI
 
-Status: awaiting independent pre-merge read. The CI link tests the workflow at `b1fe527d`. The declared head also tests dispatch visibility.
+Status: awaiting independent pre-merge read. The CI link tests the workflow at `b1fe527d`. The declared head also covers dispatch visibility and the documentation-only token exemption.
 
 CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44777281191
 
@@ -18,7 +18,7 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44777281
 - [The Customize documentation replay](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44774127523) reproduces all seven paths and blobs in the change accepted at `31c79749`. Use run creation to the completion of reachability for elapsed time including queues.
 - Two GitHub pushes three seconds apart use the main policy on an isolated ref, with only the branch matcher changed. [First](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44774534056) and [second](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44774541169).
 
-- Locally, thirteen focused mutations each made its corresponding assertion fail, including removal of the red-main and missing-full refusals from the token command.
+- Local controls made the assertions fail independently when the red-main or missing-full refusal, dispatch status retry, or doctrine-only token exemption was removed.
 
 - GitHub returned a [404 on the first status read](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44773230084/job/136419749586) after creating the child. The transport check retries the same ID and propagates success, failure or sustained invisibility.
 
@@ -37,7 +37,7 @@ Run `node --import tsx --test test/architecture/ci-tiers.test.ts test/architectu
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CI-3",
   "base": "032b87c00df3ee22184685050b9cecc01c62cc59",
-  "head": "7d5609c296b41956c8b403b9fcfd4bd41cc4af71",
+  "head": "811820bf392ec6865fe734f03c6990656c5fd061",
   "changedPaths": [
     ".github/scripts/check-ci-results.mjs",
     ".github/scripts/ci-selection.mjs",
@@ -51,7 +51,9 @@ Run `node --import tsx --test test/architecture/ci-tiers.test.ts test/architectu
     "scripts/check-merge-window.mjs",
     "scripts/check-record-ci-tier.mjs",
     "scripts/check-records.sh",
+    "scripts/non-executable-pathspec.json",
     "test/architecture/ci-tiers.test.ts",
+    "test/architecture/record-claim-fidelity.ts",
     "test/architecture/repository-hygiene.test.ts",
     "test/architecture/test-reachability.test.ts",
     "test/helpers/check-reachability.ts",
