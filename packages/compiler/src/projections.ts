@@ -1,3 +1,4 @@
+import { BILLING_READER } from '../../canonical-model/src/billing.js';
 import { LAYOUT_READER } from '@north-star/canonical-model';
 import {
   CALCULATED_DISPLAY_QUERY_READER,
@@ -369,6 +370,11 @@ export function lowerBaseProjectionPayloads(
     plans.push(
       plan(PROJECTION_FAMILY_IDS.documents, namespace, packageScope, documents),
     );
+  }
+  if(verificationPackageRevision.languageVersion==='v6' && verificationPackageRevision.billingPlans){
+    const surface=plans.find(p=>p.familyId===PROJECTION_FAMILY_IDS.surfaceManifest)!;
+    surface.payload={...(surface.payload as object),billingPlans:verificationPackageRevision.billingPlans};
+    surface.requiredRuntimeCapability={...surface.requiredRuntimeCapability,minimumVersion:Math.max(BILLING_READER,surface.requiredRuntimeCapability.minimumVersion)};
   }
   return plans;
 }

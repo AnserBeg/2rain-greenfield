@@ -206,6 +206,22 @@ export function normalizeApplicationPackage(
 
   const normalizedCandidate = {
     ...(authored.languageVersion === 'v6' &&
+      authored.billingPlans && {
+        billingPlans: authored.billingPlans
+          .map((p) => ({
+            ...p,
+            components: [...p.components].sort((a, b) =>
+              compareCodeUnits(a.id, b.id),
+            ),
+            slots: [...p.slots].sort((a, b) => compareCodeUnits(a.id, b.id)),
+          }))
+          .sort(
+            (a, b) =>
+              compareCodeUnits(a.id, b.id) ||
+              compareCodeUnits(a.version, b.version),
+          ),
+      }),
+    ...(authored.languageVersion === 'v6' &&
       authored.documentFields && {
         documentFields: authored.documentFields
           .map((field) => ({
