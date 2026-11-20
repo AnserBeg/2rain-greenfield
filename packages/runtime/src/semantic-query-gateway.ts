@@ -1550,6 +1550,7 @@ export function registeredSemanticQueryFromPinnedView(
       'kind',
       'queries',
       'schemaVersion',
+      ...(Object.hasOwn(payload, 'addressBindings') ? ['addressBindings'] : []),
       ...(Object.hasOwn(payload, 'documentBindings')
         ? ['documentBindings']
         : []),

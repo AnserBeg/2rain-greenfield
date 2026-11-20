@@ -466,7 +466,7 @@ test(
           assert.ok(draft.status === 'drafted', JSON.stringify(draft));
           await opened.service.approve(draft.patchId);
           await withArchivedCustomizationRuntime(
-            'eda6d12ffc4d38ba84146b712c3bbeed1eabb729',
+            '032b87c00df3ee22184685050b9cecc01c62cc59',
             async (run) => {
               await assertArchivedTenantEnvelope(run);
               const read = () =>

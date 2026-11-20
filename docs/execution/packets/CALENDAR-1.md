@@ -29,7 +29,7 @@ The amendment merged at `2915711e`. The next completed main run containing it pa
 
 ## Slice 1a · Board form
 
-Board uses Surface reader 31 above Billing reader 30. It adds no migration.
+Board uses Surface reader 33 above Maps reader 32. It adds no migration.
 
 The tenant fixture publishes an Opportunity board with a declared Open → Won transition. The first-party fixture publishes a Purchase order board with its existing Cancel order operation. Both use version 1 lifecycle-state grouping and cap each card at three key facts.
 

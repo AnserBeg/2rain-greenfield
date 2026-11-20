@@ -5,7 +5,7 @@ import { STATUS_ROLES } from './constants.js';
 import type { SurfaceComposition, SurfaceList } from './schemas.js';
 
 // Assigned against main immediately before integration.
-export const BOARD_READER = 31;
+export const BOARD_READER = 33;
 const id = z.string().min(5).max(180);
 const text = z.string().min(1).max(240);
 const field = z.strictObject({ fieldId: id, label: text });

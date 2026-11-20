@@ -1,3 +1,8 @@
+import { addressEditor } from './address-context.js';
+import {
+  AddressInputSchema,
+  SavedAddressSchema,
+} from '@north-star/canonical-model';
 import type { LayoutBody } from '@north-star/canonical-model';
 import { DocumentsProjectionSchema } from '../../../packages/canonical-model/src/schemas.js';
 import {
@@ -184,6 +189,8 @@ export type SurfaceDataRenderState =
       readonly boardListState?: DeclaredListRenderData['state'];
       readonly boardSlots?: Readonly<Record<string, string>>;
       readonly documentEditorSlots?: Readonly<Record<string, string>>;
+      readonly addressLayout?: LayoutBody;
+      readonly addressMaps?: Readonly<Record<string, string>>;
       readonly documentsSection?: string;
       readonly receiving?: ReceivingSection;
       readonly receivingNavigation?: ReceivingNavigation;
@@ -1366,6 +1373,7 @@ export function renderLayoutSection(
   ) => string | undefined,
   escape: (value: string) => string,
   mode: 'form' | 'detail',
+  mapHtml = '',
 ): string {
   const wrap = (html: string) =>
     mode === 'form'
@@ -1391,7 +1399,7 @@ export function renderLayoutSection(
     label = escape(section.label.text);
   return mode === 'form'
     ? `<fieldset class="form-field--wide" data-layout-section="${id}"><legend>${label}</legend>${content}</fieldset>`
-    : `<section class="panel" data-composition-fields data-layout-section="${id}"><h2>${label}</h2>${content}</section>`;
+    : `<section class="panel" data-composition-fields data-layout-section="${id}"><h2>${label}</h2>${content}${mapHtml}</section>`;
 }
 
 function renderLayoutDetailSection(
@@ -1399,6 +1407,7 @@ function renderLayoutDetailSection(
   section: LayoutBody['sections'][number],
   record: SemanticRecordDto,
   cells?: Readonly<Record<string, string>>,
+  map?: string,
 ): string {
   return renderLayoutSection(
     section,
@@ -1411,6 +1420,7 @@ function renderLayoutDetailSection(
     },
     escapeHtml,
     'detail',
+    map,
   );
 }
 
@@ -1419,9 +1429,11 @@ function renderSections(context: SurfaceComponentContext): string {
     context.data?.status === 'READY'
       ? (context.data.documentsSection ?? '')
       : '';
-  const layout = context.surface.layouts?.find(
-    (l) => l.body.mode === 'detail',
-  )?.body;
+  const layout =
+    context.surface.layouts?.find((l) => l.body.mode === 'detail')?.body ??
+    (context.data?.status === 'READY' ? context.data.addressLayout : undefined);
+  const maps =
+    context.data?.status === 'READY' ? context.data.addressMaps : undefined;
   if (context.data?.status === 'READY' && context.data.composition) {
     const data = context.data.composition;
     if (!layout)
@@ -1449,6 +1461,7 @@ function renderSections(context: SurfaceComponentContext): string {
             section,
             data.record,
             data.fields.cells,
+            maps?.[section.id],
           );
         })
         .join('') +
@@ -1477,7 +1490,7 @@ function renderSections(context: SurfaceComponentContext): string {
       slotPanel(
         context,
         record
-          ? `${data.status === 'READY' && data.receiving ? renderReceivingSection(data.receiving) : ''}${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${data.status === 'READY' && data.salesOrder ? renderSalesOrderSection(data.salesOrder) : ''}${data.status === 'READY' && data.packingDocument ? renderPackingDocument(data.packingDocument) : ''}${layout ? layout.sections.map((section) => renderLayoutDetailSection(context, section, record)).join('') : `<section class="panel data-panel" data-data-state="exact"><details class="record-section-group" open><summary><h2>Details</h2></summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(labels.get(fieldId) ?? fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${recordFieldValue(context, record, fieldId)}</dd></div>`).join('')}</dl></details></section>`}`
+          ? `${data.status === 'READY' && data.receiving ? renderReceivingSection(data.receiving) : ''}${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${data.status === 'READY' && data.salesOrder ? renderSalesOrderSection(data.salesOrder) : ''}${data.status === 'READY' && data.packingDocument ? renderPackingDocument(data.packingDocument) : ''}${layout ? layout.sections.map((section) => renderLayoutDetailSection(context, section, record, undefined, maps?.[section.id])).join('') : `<section class="panel data-panel" data-data-state="exact"><details class="record-section-group" open><summary><h2>Details</h2></summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(labels.get(fieldId) ?? fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${recordFieldValue(context, record, fieldId)}</dd></div>`).join('')}</dl></details></section>`}`
           : dataDiagnostic('QUERY_NOT_FOUND'),
         'sections-slot',
       ) + documents
@@ -2562,6 +2575,8 @@ export function renderFormControl(
   const kind = ` data-field-kind="${field.kind}"${describedBy}${extra}`;
   const html = (() => {
     switch (field.kind) {
+      case 'addressFieldType':
+        return renderAddressField(name, renderedValue, kind);
       case 'enumFieldType':
         return renderEnumControl(
           field.options,
@@ -2649,6 +2664,11 @@ function typedControlPreservesValue(
     case 'moneyFieldType':
     case 'quantityFieldType':
       return typeof value === 'string' && nativeNumberValue(value);
+    case 'addressFieldType':
+      return (
+        SavedAddressSchema.safeParse(value).success ||
+        AddressInputSchema.safeParse(value).success
+      );
     case 'textFieldType':
     case 'dateTimeFieldType':
       return oneLineInputPreservesValue(value);
@@ -3268,4 +3288,62 @@ export function renderDocumentSection(
     return `<div data-document-field="${id}"><h3>${label}</h3>${field ? `<p>Up to ${field.maxCount} files${field.required ? ' · Required for document tasks' : ''}</p>` : ''}<ul data-document-rows></ul>${form}</div>`;
   };
   return `<section class="panel data-panel"><details data-documents="${escapeHtml(path)}"><summary><h2>Files</h2></summary>${scannerLabel ? `<p>${escapeHtml(scannerLabel)}</p>` : ''}<p role="status" data-documents-status></p>${section()}${fields.map((field) => section(field)).join('')}<button type="button" data-documents-more hidden>Show more files</button></details></section>`;
+}
+
+function renderAddressField(name: string, value: unknown, attributes: string) {
+  const context = addressEditor.getStore();
+  const binding = context?.projection.bindings.find((b) =>
+    name.endsWith(b.fieldId),
+  );
+  const session = randomUUID();
+  const accounts = context?.accounts ?? [];
+  const lookup =
+    binding && accounts.length
+      ? `<label>Map provider<select name="${name}.installation"><option value="">Save text only</option>${accounts.map((a) => `<option value="${a.installationId}" data-company="${a.companyId}"${accounts.length === 1 && a.enrichment ? ' selected' : ''}>${escapeHtml(a.account)} · ${a.provider === 'fake' ? 'Demo Maps' : 'Google Maps'}</option>`).join('')}</select></label><input type="hidden" name="${name}.session" value="${session}"><input type="hidden" name="${name}.choice"><span data-address-results aria-live="polite"></span><template data-address-option><button type="button"></button></template>`
+      : '';
+  const address = SavedAddressSchema.safeParse(value);
+  const draft = AddressInputSchema.safeParse(value);
+  const current = address.success ? address.data : draft.data;
+  const component = (
+    key: string,
+    label: string,
+    text: string | undefined,
+    max: number,
+  ) =>
+    '<label>' +
+    label +
+    '<input name="' +
+    name +
+    '.' +
+    key +
+    '" maxlength="' +
+    max +
+    '" value="' +
+    escapeHtml(text ?? '') +
+    '"></label>';
+  return (
+    `<span data-address-editor data-field="${escapeHtml(binding?.fieldId ?? '')}" data-query="${escapeHtml(binding?.suggestQueryId ?? '')}" data-record="${escapeHtml(context?.recordId ?? '')}">` +
+    '<input type="text" autocomplete="street-address" maxlength="512" name="' +
+    name +
+    '"' +
+    attributes +
+    ' value="' +
+    escapeHtml(current?.text ?? '') +
+    '">' +
+    lookup +
+    '</span>' +
+    '<details><summary>Address details and pin</summary>' +
+    '<label>Street lines<textarea name="' +
+    name +
+    '.lines" maxlength="643">' +
+    escapeHtml(current?.lines?.join('\n') ?? '') +
+    '</textarea></label>' +
+    component('city', 'City', current?.city, 120) +
+    component('region', 'State or province', current?.region, 120) +
+    component('postalCode', 'Postal code', current?.postalCode, 24) +
+    component('country', 'Country code', current?.country, 2) +
+    component('latitude', 'Your pin latitude', current?.pin?.latitude, 14) +
+    component('longitude', 'Your pin longitude', current?.pin?.longitude, 14) +
+    '</details>'
+  );
 }
