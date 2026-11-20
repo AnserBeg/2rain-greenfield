@@ -15,6 +15,46 @@ jobs:
         with:
           node-version-file: .node-version
       - run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      - name: Derive connector language coverage decisions
+        run: |
+          cat > /tmp/connector-coverage.mjs <<'JS'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const root = process.cwd();
+          const imported = async (path) => {
+            const module = await import(`${root}/${path}`);
+            return module.default ?? module;
+          };
+          const { deriveLanguageCoverageLedger, observeLanguageCoverage, deriveDecisionSetDigest, deriveLanguageCoverageDecisionId, encodeLanguageCoverageObservationSnapshot } = await imported('test/helpers/language-conformance-ledger.ts');
+          const { languageCoverageApplicationPackages } = await imported('test/helpers/language-coverage-packages.ts');
+          const { normalizeApplicationPackage } = await imported('packages/canonical-model/src/index.ts');
+          const { lowerStorageTargetV1 } = await imported('packages/compiler/src/index.ts');
+          const file = 'test/fixtures/g2/language-conformance/coverage-decisions.json';
+          const old = JSON.parse(readFileSync(file, 'utf8'));
+          const ledger = deriveLanguageCoverageLedger(root);
+          const applicationPackages = languageCoverageApplicationPackages();
+          const observed = observeLanguageCoverage(ledger, {
+            applicationPackages,
+            storageTargets: applicationPackages.map((definition) => lowerStorageTargetV1(normalizeApplicationPackage(definition))),
+          });
+          const observationSnapshot = encodeLanguageCoverageObservationSnapshot(ledger, observed);
+          if (old.ledgerDigest === ledger.digest && JSON.stringify(old.observationSnapshot) === JSON.stringify(observationSnapshot)) console.log('The derived language inventory and observations are unchanged.');
+          else {
+            const decisions = old.decisions.map((entry) => {
+              const { decisionId, ...body } = entry;
+              body.ledgerDigest = ledger.digest;
+              body.obligationSetDigest = deriveDecisionSetDigest(ledger, observed, body.category);
+              body.rationale += ' CONNECT-1 admits tenant-authored Address fields and map placement. The address compiler and customization replay tests exercise them outside the first-party releases.';
+              return { ...body, decisionId: deriveLanguageCoverageDecisionId(decisionId.split('@')[0], body) };
+            });
+            writeFileSync(file, JSON.stringify({ ...old, decisions, ledgerDigest: ledger.digest, observationSnapshot }, null, 2) + '\n');
+            console.log(JSON.stringify({ previous: old.observationSnapshot.obligationCount, current: ledger.obligations.length, observed: observed.size }));
+          }
+          JS
+          node --import tsx /tmp/connector-coverage.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: connector-coverage
+          path: test/fixtures/g2/language-conformance/coverage-decisions.json
       - name: Format changed source
         run: |
           git diff --name-only --diff-filter=ACM origin/main...HEAD -- '*.ts' | xargs --no-run-if-empty corepack pnpm exec prettier --write
