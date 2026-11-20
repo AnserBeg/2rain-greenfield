@@ -198,6 +198,32 @@ export function applyOne(
   layoutReplay?: LayoutReplay,
 ): Outcome | null {
   switch (patch.kind) {
+    case 'addAddressField':
+      return addField(authored, patch, previous);
+    case 'addMapPlacement': {
+      if (
+        !isTenantId(patch.placementId) ||
+        !patch.placementId.startsWith(namespaceOf(authored) + ':placement.')
+      )
+        return refusal(
+          'CUSTOMIZE_TARGET_NOT_FOUND',
+          'Use a tenant map placement ID.',
+        );
+      const { schemaVersion, placementId, sectionId, surfaceId, fieldId } =
+        patch;
+      const placement = {
+        schemaVersion,
+        placementId,
+        sectionId,
+        surfaceId,
+        fieldId,
+      };
+      authored.mapPlacements = [
+        ...((authored.mapPlacements as Json[]) ?? []),
+        placement,
+      ];
+      return null;
+    }
     case 'addRecordType':
       return addRecordType(authored, patch);
     case 'addField':
@@ -1582,10 +1608,15 @@ function addDocumentDeclaration(
 
 function addField(
   authored: Json,
-  patch: Extract<CustomizationPatch, { kind: 'addField' }>,
+  patch: Extract<CustomizationPatch, { kind: 'addField' | 'addAddressField' }>,
   previous: readonly SingleCustomizationPatch[],
 ): Outcome | null {
-  const { entity: entityId, field } = patch;
+  const { entity: entityId } = patch;
+  const address = patch.kind === 'addAddressField' ? patch : null;
+  const field: CustomField =
+    patch.kind === 'addField'
+      ? patch.field
+      : { type: 'text', label: patch.label, required: patch.required };
   const legacy = 'legacy' in patch;
   const entity = list(authored, 'entities').find(
     (candidate) => candidate.entityId === entityId,
@@ -1603,7 +1634,28 @@ function addField(
     ? `${entityLocal}_${slug(field.label)}`
     : `${TENANT_LOCAL_PREFIX}${entityLocal}_${slug(field.label)}`;
   const namespace = namespaceOf(authored);
-  const fieldId = `${namespace}:field.${fieldLocal}`;
+  const fieldId = address?.fieldId ?? `${namespace}:field.${fieldLocal}`;
+  if (
+    address &&
+    (!fieldId.startsWith(namespace + ':field.custom_') ||
+      list(authored, 'fields').some((f) => f.fieldId === fieldId))
+  )
+    return refusal(
+      'CUSTOMIZE_DUPLICATE_LABEL',
+      'Choose a unique tenant Address field ID.',
+    );
+  if (
+    address &&
+    list(authored, 'relations').some(
+      (r) =>
+        r.ownership === 'parentScopedChild' &&
+        (r.sourceEntity as Json).targetId === entityId,
+    )
+  )
+    return refusal(
+      'CUSTOMIZE_TARGET_IN_TIER_B_DEPENDENCY_SET',
+      'Lines cannot have Address fields.',
+    );
   const siblings = list(authored, 'fields').filter(
     (candidate) => (candidate.entity as Json).targetId === entityId,
   );
@@ -1653,8 +1705,29 @@ function addField(
         searchable: false,
       }),
     );
+  if (address) {
+    const added = list(authored, 'fields').at(-1)!;
+    Object.assign(added, {
+      fieldId,
+      collation: 'binary',
+      searchable: false,
+      fieldType: { kind: 'addressFieldType', schemaVersion: version },
+      presence: address.required ? 'required' : 'optional',
+      defaultSemantics: address.required ? 'none' : 'nullable',
+    });
+    authored.connectorBindings = [
+      ...((authored.connectorBindings as Json[]) ?? []),
+      {
+        schemaVersion: version,
+        entityId,
+        fieldId,
+        contractVersion: 'northstar.address/v1',
+        mappingVersion: 'v1',
+      },
+    ];
+  }
   // A tenant record type's own list shows the new field as a column.
-  if (!bindExisting && isTenantId(entityId)) {
+  if (!bindExisting && (address || isTenantId(entityId))) {
     for (const surface of list(authored, 'surfaces')) {
       const declared = surface.list as Json | undefined;
       if (
@@ -1666,14 +1739,14 @@ function addField(
       }
       const columns = declared.columns as Json[];
       columns.push({
-        columnId: `${namespace}:list_column.${entityLocal}_list_${fieldLocal.slice(entityLocal.length + 1)}`,
+        columnId: `${namespace}:list_column.${entityLocal}_list_${address ? slug(field.label) : fieldLocal.slice(entityLocal.length + 1)}`,
         field: fieldId,
         label: field.label.trim(),
         orderKey:
           Math.max(0, ...columns.map((column) => Number(column.orderKey))) + 10,
         priority: columns.length,
         role: 'value',
-        sortable: true,
+        sortable: !address,
         ...(field.type === 'date' ? { format: 'date' } : {}),
       });
     }

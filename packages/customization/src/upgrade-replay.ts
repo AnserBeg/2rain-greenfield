@@ -38,6 +38,7 @@ const declarationKeys = {
   calculatedDisplayFields: 'fieldId',
   formulaRules: 'ruleId',
   workflows: 'workflowId',
+  mapPlacements: 'placementId',
 } as const;
 function declarations(def: Definition) {
   const ids = new Map<string, Member>();
@@ -219,17 +220,21 @@ function applyRefusal(
         observed: { moduleId: module.moduleId, label: module.label },
       };
   }
-  if (patch.kind === 'addField') {
+  if (patch.kind === 'addField' || patch.kind === 'addAddressField') {
+    const label = patch.kind === 'addField' ? patch.field.label : patch.label;
     const collision = (target.fields as Member[]).find(
       (f) =>
         (f.entity as Member)?.targetId === patch.entity &&
-        String(f.label).toLowerCase() === patch.field.label.toLowerCase(),
+        String(f.label).toLowerCase() === label.toLowerCase(),
     );
     if (collision)
       return {
         code: 'FIELD_COLLISION',
         subject: String(collision.fieldId),
-        expected: patch.field,
+        expected:
+          patch.kind === 'addField'
+            ? patch.field
+            : { fieldId: patch.fieldId, label },
         observed: { fieldId: collision.fieldId, label: collision.label },
       };
   }
@@ -357,6 +362,27 @@ export function replayCustomizationPatches(
           });
         if (before && !layout)
           conflicts.push(...bindings(patch, before, target));
+        if (patch.kind === 'addMapPlacement' && !conflicts.length) {
+          const surface = target.get(patch.surfaceId);
+          const layout =
+            surface &&
+            currentLayout(
+              authored as unknown as LayoutDefinition,
+              surface,
+              'detail',
+            );
+          if (
+            !layout?.body.sections.some(
+              (section) => section.id === patch.sectionId,
+            )
+          )
+            conflicts.push({
+              code: 'RETIRED_TARGET',
+              subject: patch.sectionId,
+              expected: { surface: patch.surfaceId, section: patch.sectionId },
+              observed: null,
+            });
+        }
         for (const id of created) {
           if (
             target.has(id) &&

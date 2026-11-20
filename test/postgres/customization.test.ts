@@ -1473,7 +1473,7 @@ test(
           const activate = () => newer.service.activate(prepared.upgradeId);
           const live = process.env.CI
             ? await withArchivedCustomizationRuntime(
-                'eda6d12ffc4d38ba84146b712c3bbeed1eabb729',
+                '032b87c00df3ee22184685050b9cecc01c62cc59',
                 async (run) => {
                   const read = () =>
                     archivedRuntimeRead(run, {

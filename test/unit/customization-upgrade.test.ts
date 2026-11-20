@@ -158,7 +158,32 @@ const occupied = (
   change,
   code,
 });
+const address = {
+  kind: 'addAddressField',
+  schemaVersion: 'v6',
+  entity: id('entity.item'),
+  fieldId: id('field.custom_item_site'),
+  label: 'Site',
+  required: false,
+};
+const mapSurface = id('surface.item_detail');
+const map = {
+  kind: 'addMapPlacement',
+  schemaVersion: 'v6',
+  fieldId: address.fieldId,
+  surfaceId: mapSurface,
+  placementId: id('placement.custom_site_map'),
+  sectionId:
+    mapSurface + '/detail/northstar.app:slot.item_detail_sections/details',
+};
 const cases = {
+  addAddressField: occupied(address, 'FIELD_COLLISION'),
+  addMapPlacement: {
+    source: applied(base, [address]),
+    conflict: base,
+    change: map,
+    code: 'RETIRED_TARGET',
+  },
   addRecordType: occupied(record, 'WHOLE_PACKAGE_FAILURE'),
   addField: retired(field),
   addChoice: retired({

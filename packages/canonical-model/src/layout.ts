@@ -8,7 +8,7 @@ import type {
 } from './schemas.js';
 
 export const LAYOUT_READER = 28;
-export const REPLAYED_LAYOUT_READER = 31;
+export const REPLAYED_LAYOUT_READER = 33;
 export const CUSTOMIZABLE_FIRST_PARTY_ENTITY_LOCALS = [
   'item',
   'location',
