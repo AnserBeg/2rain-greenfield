@@ -1,6 +1,6 @@
 # CALENDAR-1 · Board, calendar and resource timeline
 
-Slice 0 proposes [ADR-0085](../../decisions/ADR-0085-board-calendar-and-resource-timeline.md) for the orchestrator’s Fable read. The three executable slices follow its ruling.
+Slice 0 proposes [ADR-0086](../../decisions/ADR-0086-board-calendar-and-resource-timeline.md) for the orchestrator’s Fable read. The three executable slices follow its ruling.
 
 ## Design decisions
 
