@@ -4,10 +4,11 @@ import {
   ADDRESS_MAP_READER,
   CONNECTOR_PAYLOAD,
   type AddressProjection,
+  BOARD_READER,
   BOOKING_OPERATION_READER,
+  LAYOUT_READER,
   hasBookingOperations,
 } from '@north-star/canonical-model';
-import { LAYOUT_READER } from '@north-star/canonical-model';
 import {
   CALCULATED_DISPLAY_QUERY_READER,
   type CalculatedDisplayProjectionEntry,
@@ -1070,21 +1071,21 @@ function surfaceManifestPayload(
         (column) => column.relation,
       ),
   );
-  const surfaceFloor = original.surfaces.some(
-    (s) => 'layouts' in s && s.layouts,
-  )
-    ? LAYOUT_READER
-    : extendedEditor || declaredRelationList
-      ? 26
-      : hasMetrics(original)
-        ? 25
-        : hasSavedListLayouts(original)
-          ? 24
-          : recordFieldPresentation
-            ? 23
-            : rankedDefaultsOrChainedTasks
-              ? 22
-              : null;
+  const surfaceFloor = original.surfaces.some((s) => s.archetype === 'board')
+    ? BOARD_READER
+    : original.surfaces.some((s) => 'layouts' in s && s.layouts)
+      ? LAYOUT_READER
+      : extendedEditor || declaredRelationList
+        ? 26
+        : hasMetrics(original)
+          ? 25
+          : hasSavedListLayouts(original)
+            ? 24
+            : recordFieldPresentation
+              ? 23
+              : rankedDefaultsOrChainedTasks
+                ? 22
+                : null;
   const payloadSchemaVersion = composed
     ? COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION
     : navigation
@@ -1164,6 +1165,9 @@ function surfaceManifestPayload(
                     ),
                   },
           }),
+          ...(declared && 'board' in declared && declared.board
+            ? { board: declared.board }
+            : {}),
           ...(declared && 'layouts' in declared && declared.layouts
             ? { layouts: declared.layouts }
             : {}),
