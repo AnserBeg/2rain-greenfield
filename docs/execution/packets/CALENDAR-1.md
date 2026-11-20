@@ -42,3 +42,32 @@ The tenant fixture publishes an Opportunity board with a declared Open → Won t
 2. Approve the diff and activate it. Open **Purchase orders → Orders by stage**. Each card links to its order and shows up to three key facts. An empty stage has a heading. At 390 px, use **Select stage** to switch columns.
 3. Disable JavaScript, reload, and open the Board in two tabs. In both tabs, Tab to **Move card** on the same draft and press Enter. Select **Cancelled · Cancel order**, then **Review move**. The order should still be in Draft.
 4. In the first tab, read the named consequence and confirm. The order should appear in Cancelled. Confirm the stale review in the second tab. It should show the current permitted stage and ask for a fresh decision. The order revision should have advanced once.
+
+```record-claim
+{
+  "schemaVersion": "northstar.record-claim/v1",
+  "packet": "CALENDAR-1",
+  "base": "47594bc60c4349d9a8b76dcdefe81503119aeaf8",
+  "head": "576bb7816c218539cca8a9673138fff17f84ef67",
+  "changedPaths": [
+    "apps/web/src/board.ts", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts",
+    "apps/web/src/ledger-styles.ts", "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts",
+    "apps/web/src/workspace-entry.ts", "apps/web/test/browser/customize.composed-application.spec.ts", "apps/web/test/browser/surface-grammar.spec.ts",
+    "docs/execution/packets/CALENDAR-1.md", "docs/greenfield-north-star-erp-platform-plan.md", "packages/canonical-model/src/board.ts",
+    "packages/canonical-model/src/constants.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/schemas.ts",
+    "packages/canonical-model/src/surface-workspace.ts", "packages/compiler/src/projections.ts", "packages/customization/src/ai-draft.ts",
+    "packages/customization/src/apply.ts", "packages/customization/src/board-revision.ts", "packages/customization/src/index.ts",
+    "packages/customization/src/patch.ts", "packages/customization/src/render.ts", "packages/customization/src/targets.ts",
+    "packages/dev-tooling/src/surface-grammar-conformance/index.ts", "packages/dev-tooling/src/surface-runtime-seam.ts", "packages/postgres-provider/src/board-admission.ts",
+    "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/release-repository.ts", "packages/postgres-provider/src/request-runtime-view-service.ts",
+    "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-query-gateway.ts", "test/architecture/ux-grammar-skill.test.ts",
+    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/postgres/customization-validation.test.ts", "test/postgres/request-runtime-view.test.ts",
+    "test/unit/customization.test.ts"
+  ],
+  "symbols": [
+    {"path": "apps/web/src/board.ts", "name": "boardTask"},
+    {"path": "packages/customization/src/board-revision.ts", "name": "applyBoardRevision"},
+    {"path": "packages/postgres-provider/src/board-admission.ts", "name": "boardBindingsProblem"}
+  ]
+}
+```
