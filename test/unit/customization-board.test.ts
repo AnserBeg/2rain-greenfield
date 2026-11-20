@@ -13,6 +13,12 @@ import { VALIDATION_NODE_VERSION } from '../../packages/canonical-model/src/form
 import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import { replayCustomizationPatches } from '../../packages/customization/src/upgrade-replay.js';
+import { PROJECTION_FAMILY_IDS } from '../../packages/compiler/src/index.js';
+import {
+  boardBindingsProblem,
+  boardDeclarationProblem,
+} from '../../packages/postgres-provider/src/board-admission.js';
+import { projectionPayload } from '../compiler/helpers.js';
 
 // CALENDAR-1 Board v2 fix (ADR-0086, view revision member shape). Each test
 // names the packet proof it carries.
@@ -90,11 +96,11 @@ async function compiles(chain: unknown[]) {
     tip: customization.serializeRelease(tip),
     startAt: chain.length - 1,
   });
-  assert.equal(
-    result.status,
-    'compiled',
+  assert.ok(
+    result.status === 'compiled',
     JSON.stringify(result.status === 'compiled' ? null : result),
   );
+  return result;
 }
 function retire(offer: customization.BoardTarget, board: Revision) {
   return customization.draftBoardRevision(
@@ -142,6 +148,36 @@ function replay(source: Json, base: Json, chain: unknown[]) {
     origins: origins(source, parsed.length),
   });
 }
+/** The serving admission of a compiled step, as the loader and verifier run it. */
+function admission(result: { steps: readonly { release: unknown }[] }) {
+  const release = customization.parseSerializedRelease(
+    result.steps.at(-1)!.release as Parameters<
+      typeof customization.parseSerializedRelease
+    >[0],
+  );
+  const payload = (family: string) =>
+    projectionPayload<Json>(
+      release.compiled,
+      family as Parameters<typeof projectionPayload>[1],
+    );
+  const surface = release.compiled.bundle.releaseManifest.projections.find(
+    (p) => p.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
+  )!;
+  const manifest = payload(PROJECTION_FAMILY_IDS.surfaceManifest);
+  const floor = surface.requiredRuntimeCapability.minimumVersion;
+  const operations = payload(PROJECTION_FAMILY_IDS.operationCatalog);
+  const queries = payload(PROJECTION_FAMILY_IDS.queryCatalog);
+  const definition = JSON.parse(
+    new TextDecoder().decode(release.normalizedDefinitionBytes),
+  ) as unknown;
+  return {
+    manifest,
+    floor,
+    problem: (m: Json = manifest, f = floor) =>
+      boardBindingsProblem(m, f, operations, queries) ??
+      boardDeclarationProblem(definition, m, f),
+  };
+}
 const findings = (result: ReturnType<typeof replay>) =>
   result.status === 'replayConflict'
     ? result.findings.map((f) => [f.code, f.subject])
@@ -157,11 +193,11 @@ async function replaysClean(source: Json, base: Json, chain: unknown[]) {
     tip: customization.serializeRelease(tip),
     upgradeBaseRoot: tip.compiled.releaseRoot,
   });
-  assert.equal(
-    result.status,
-    'compiled',
+  assert.ok(
+    result.status === 'compiled',
     JSON.stringify(result.status === 'compiled' ? null : result),
   );
+  return result;
 }
 const changed = (mutate: (base: Json) => void) => {
   const base = structuredClone(authored);
@@ -454,8 +490,15 @@ test('proof: active then retired, and active then rebound, replay clean on a bas
   for (const chain of [
     [poBoard, retire(poOffer, poBoard)],
     [poBoard, rebound],
-  ])
-    await replaysClean(authored, withoutCancel, chain);
+  ]) {
+    // The serving reader admits the compiled release too: a retired Board's
+    // bindings are not checked, and the rebound Board binds nothing removed.
+    const served = admission(
+      await replaysClean(authored, withoutCancel, chain),
+    );
+    assert.equal(served.floor, BOARD_READER);
+    assert.equal(served.problem(), null);
+  }
 });
 
 test('proof: a new base operation between two chosen stages is not offered until a new revision chooses it', () => {
@@ -553,4 +596,40 @@ test('proof: normalization checks the recorded digest and each binding by ID, ne
   );
   board(dangling).lifecycle = 'retired';
   normalizeApplicationPackage(dangling);
+});
+
+test('proof: the serving reader refuses an understated surface floor, a stated floor without a Board, and a forged move', async () => {
+  const served = admission(await compiles([poBoard]));
+  assert.equal(served.floor, BOARD_READER);
+  assert.equal(served.problem(), null);
+  // Finding 6: a manifest carrying a Board under the preceding rung.
+  assert.equal(
+    served.problem(served.manifest, BOARD_READER - 1),
+    'Board bindings and the surface reader floor disagree.',
+  );
+  const boardless = structuredClone(served.manifest);
+  boardless.surfaces = (boardless.surfaces as Json[]).filter(
+    (s) => s.archetype !== 'board',
+  );
+  assert.equal(
+    served.problem(boardless, BOARD_READER),
+    'Board bindings and the surface reader floor disagree.',
+  );
+  // A self-consistent move whose operation the catalog binds differently.
+  const forged = structuredClone(served.manifest);
+  const member = (forged.surfaces as Json[]).find(
+    (s) => s.archetype === 'board',
+  )!.board as { body: BoardBody; resultDigest: string };
+  const move = member.body.grouping.moves[0]!;
+  move.toStateId = id('state.purchase_order_closed');
+  member.body.grouping.stages = [
+    ...member.body.grouping.stages.filter((s) => s.stateId !== move.toStateId),
+    { stateId: move.toStateId },
+  ];
+  move.contractDigest = moveContractDigest(move);
+  member.resultDigest = boardDigest(member.body);
+  assert.equal(
+    served.problem(forged, BOARD_READER),
+    'The Board move must bind the declared lifecycle transition.',
+  );
 });
