@@ -20,7 +20,7 @@ Run `node --import tsx --test test/postgres/release-approval.test.ts`. The staff
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "SIGNIN-1",
   "base": "17618776dd058bbb8efec032eae13a00a5d5398b",
-  "head": "928b6e99c35d60c1929690f68cacfa89501325a9",
+  "head": "d6101c8157b32a968f347409af4cfd3d8a447f25",
   "changedPaths": [
     "apps/api/src/staff-decisions.ts",
     "apps/api/src/staff-identity-http.ts",
