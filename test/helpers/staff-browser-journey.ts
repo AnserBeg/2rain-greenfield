@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { request } from 'node:https';
 import { chromium } from '@playwright/test';
-import { withStaffBrowser } from './staff-browser-fixture.js';
+import {
+  startBrowserLogin,
+  withStaffBrowser,
+} from './staff-browser-fixture.js';
 import { parseServerTiming } from '../../packages/postgres-provider/src/request-work-meter.js';
 import { passkeyChecks, signChallenge } from './staff-passkey-checks.js';
 import { secret, digest, csrf } from '../../apps/api/src/staff-protocol.js';
@@ -306,7 +309,54 @@ async function journey() {
             prior,
           );
         };
-        const memberVerifier = secret();
+        const ownerKey = (
+          await pool.query(
+            'SELECT credential_id FROM platform.staff_credentials WHERE principal_id=$1 AND revoked_at IS NULL',
+            [owner],
+          )
+        ).rows[0].credential_id as string;
+        const ownerSession = (await ctx.cookies(r.identityOrigin)).find(
+          (c) => c.name === '__Host-identity-session',
+        );
+        assert.ok(ownerSession);
+        // An owner needs the member's live business authority to recover that account.
+        await pool.query(
+          `INSERT INTO platform.current_policy_permission_grants(tenant_id,environment_id,role_id,permission_id,resource_id)
+           SELECT tenant_id,environment_id,role_id,'northstar.test:approve','northstar.test:request'
+           FROM platform.current_policy_roles WHERE tenant_id=$1 AND environment_id=$2 AND role_key='staff-member'`,
+          [r.tenantId, r.environmentId],
+        );
+        await assert.rejects(
+          sign(
+            ownerKey,
+            { action: 'recover', subject: member, reason: 'attended test' },
+            ownerSession.value,
+          ),
+          /Staff access could not be verified/,
+        );
+        assert.equal(
+          (
+            await pool.query(
+              `SELECT FROM platform.staff_invitations WHERE principal_id=$1 AND kind='recover'`,
+              [member],
+            )
+          ).rowCount,
+          0,
+        );
+        assert.equal(
+          (
+            await pool.query(
+              'SELECT FROM platform.staff_credentials WHERE principal_id=$1 AND revoked_at IS NULL',
+              [member],
+            )
+          ).rowCount,
+          1,
+        );
+        await pool.query(
+          "UPDATE platform.current_policy_permission_grants SET revoked_at=now() WHERE tenant_id=$1 AND environment_id=$2 AND permission_id='northstar.test:approve'",
+          [r.tenantId, r.environmentId],
+        );
+        const memberVerifier = await startBrowserLogin(r, ca);
         const memberLogin = await sign(memberCredential, {
           action: 'signin',
           binding: digest(memberVerifier).toString('base64url'),
@@ -364,16 +414,6 @@ async function journey() {
         await assert.rejects(identity.account(memberLogin.identity));
         await assert.rejects(identity.signout(memberHandle, false, 'erp'));
         await enroll(recovered);
-        const ownerKey = (
-          await pool.query(
-            'SELECT credential_id FROM platform.staff_credentials WHERE principal_id=$1 AND revoked_at IS NULL',
-            [owner],
-          )
-        ).rows[0].credential_id as string;
-        const ownerSession = (await ctx.cookies(r.identityOrigin)).find(
-          (c) => c.name === '__Host-identity-session',
-        );
-        assert.ok(ownerSession);
         await sign(
           ownerKey,
           { action: 'deactivate', subject: member, reason: 'attended test' },
@@ -454,6 +494,8 @@ async function journey() {
           spareAuthenticator.authenticatorId,
           identity,
           spareKey,
+          (prior) => startBrowserLogin(r, ca, prior),
+          pool,
         );
       } finally {
         await browser.close();
