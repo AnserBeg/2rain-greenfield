@@ -11,7 +11,8 @@ test('CI captures focused observability evidence from its own checkout', () => {
     /^ {2}observability:\n([\s\S]*?)(?=^ {2}[\w-]+:)/mu,
   )?.[1];
   assert.ok(job);
-  assert.doesNotMatch(job, /^ {4}needs:|uses: actions\/download-artifact/mu);
+  assert.match(job, /^ {4}needs: select$/mu);
+  assert.doesNotMatch(job, /uses: actions\/download-artifact/u);
   assert.ok(job.includes('OBSERVABILITY_EVIDENCE_DIR'));
   assert.ok(
     job.includes(
