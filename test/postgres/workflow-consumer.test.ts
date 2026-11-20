@@ -269,140 +269,6 @@ test(
           };
           const view = await gateways.loadView(automation);
           const sdk = generateWorkflowSdk(view, grants);
-          const fixtureGrants = { queries: [], operations: [] };
-          const fixtureBody = 'sdk.sleep(10);';
-          const fixtureDigest = await withTrustedRequestTransaction(
-            runtimePool,
-            operator,
-            (client) =>
-              storeWorkflowBundle(client, operator, {
-                body: fixtureBody,
-                executable: compileWorkflowBody(
-                  fixtureBody,
-                  generateWorkflowSdk(view, fixtureGrants),
-                ).executable,
-                authoredBy: operator.principalId,
-                fixtures: [
-                  {
-                    event: {
-                      type: 'goodsReceiptPosted',
-                      eventId: randomUUID(),
-                      receiptId: randomUUID(),
-                      legalEntityId: COMPANY,
-                    },
-                    effects: [
-                      {
-                        call: { kind: 'sleep', milliseconds: 10 },
-                        result: null,
-                      },
-                    ],
-                  },
-                ],
-              }),
-          );
-          const workflowPatch = (workflowId: string) => ({
-            kind: 'saveWorkflow' as const,
-            workflow: {
-              schemaVersion: 'v6' as const,
-              workflowId,
-              trigger: 'goodsReceiptPosted' as const,
-              bodyDigest: fixtureDigest,
-              grants: fixtureGrants,
-            },
-          });
-          await t.test(
-            'candidate admission refuses post-fixture replay divergence',
-            async () => {
-              const candidate = await service.draft(
-                workflowPatch('divergent-replay'),
-                'conversationalAi',
-              );
-              assert.equal(candidate.status, 'drafted');
-              if (candidate.status !== 'drafted') return;
-              const step = InMemoryWorkflowRun.prototype.step;
-              const firstPass = new WeakSet<InMemoryWorkflowRun>();
-              const divergence = t.mock.method(
-                InMemoryWorkflowRun.prototype,
-                'step',
-                async function (this: InMemoryWorkflowRun) {
-                  if (!firstPass.has(this) && this.snapshot().prefix.length > 0)
-                    return {
-                      kind: 'quarantined',
-                      cursor: 0,
-                      reason: 'changed-request',
-                    } as const;
-                  firstPass.add(this);
-                  return step.call(this);
-                },
-              );
-              try {
-                await assert.rejects(
-                  service.approve(candidate.patchId),
-                  /Workflow replay failed at cursor 0 \(quarantined\)/u,
-                  'candidate was admitted without running the recorded fixture again',
-                );
-              } finally {
-                divergence.mock.restore();
-              }
-            },
-          );
-
-          await t.test(
-            'candidate admission refuses incomplete workflow evidence',
-            async () => {
-              const candidate = await service.draft(
-                {
-                  kind: 'changeSet',
-                  patches: [
-                    workflowPatch('complete-evidence'),
-                    workflowPatch('missing-evidence'),
-                  ],
-                },
-                'conversationalAi',
-              );
-              assert.equal(candidate.status, 'drafted');
-              if (candidate.status !== 'drafted') return;
-              await pool.query(`
-              CREATE FUNCTION platform.test_skip_workflow_evidence() RETURNS trigger
-              LANGUAGE plpgsql AS $test$
-              BEGIN
-                IF NEW.workflow_id = 'missing-evidence' THEN RETURN NULL; END IF;
-                RETURN NEW;
-              END
-              $test$;
-              CREATE TRIGGER test_skip_workflow_evidence
-                BEFORE INSERT ON platform.workflow_verification_evidence
-                FOR EACH ROW EXECUTE FUNCTION platform.test_skip_workflow_evidence();
-            `);
-              try {
-                await assert.rejects(
-                  service.approve(candidate.patchId),
-                  /Workflow verification evidence is incomplete or does not match the candidate/u,
-                  'candidate was admitted with one declared workflow missing evidence',
-                );
-                const { rows } = await pool.query<{ workflow_ids: string[] }>(
-                  `SELECT array_agg(w.workflow_id ORDER BY w.workflow_id) AS workflow_ids
-                   FROM platform.tenant_releases AS r
-                   JOIN platform.release_verification_evidence AS e
-                     USING (tenant_id, environment_id, verification_evidence_id)
-                   JOIN platform.workflow_verification_evidence AS w
-                     USING (tenant_id, environment_id, verification_evidence_id)
-                  WHERE r.release_id = $1
-                  GROUP BY e.verification_evidence_id`,
-                  [candidate.releaseId],
-                );
-                assert.deepEqual(rows, [
-                  { workflow_ids: ['complete-evidence'] },
-                ]);
-              } finally {
-                await pool.query(`
-                DROP TRIGGER test_skip_workflow_evidence ON platform.workflow_verification_evidence;
-                DROP FUNCTION platform.test_skip_workflow_evidence();
-              `);
-              }
-            },
-          );
-
           const receivingReadModel =
             'northstar.app:query.receiving_receipt_lines';
           const registeredReadModel = registeredSemanticQueryFromPinnedView(
@@ -796,7 +662,11 @@ test(
                   0,
                   'replay dispatched without a human Retry decision',
                 );
-                assert.equal(await runStatus(pool, secondRun), 'SUSPENDED');
+                assert.equal(
+                  await runStatus(pool, secondRun),
+                  'SUSPENDED',
+                  'replay did not refuse a fence without a human Retry decision',
+                );
                 const { rows: refusal } = await pool.query<{ reason: string }>(
                   'SELECT reason FROM platform.workflow_runs WHERE run_id = $1',
                   [secondRun],
@@ -1728,6 +1598,149 @@ test(
               await worker().tick(scope);
               assert.equal(await runStatus(pool, stale), 'SUSPENDED');
               assert.equal(await journalCount(pool, stale, 'RESULT'), 1);
+            },
+          );
+
+          const fixtureGrants = { queries: [], operations: [] };
+          const fixtureBody = 'sdk.sleep(10);';
+          const fixtureDigest = await withTrustedRequestTransaction(
+            runtimePool,
+            operator,
+            (client) =>
+              storeWorkflowBundle(client, operator, {
+                body: fixtureBody,
+                executable: compileWorkflowBody(
+                  fixtureBody,
+                  generateWorkflowSdk(view, fixtureGrants),
+                ).executable,
+                authoredBy: operator.principalId,
+                fixtures: [
+                  {
+                    event: {
+                      type: 'goodsReceiptPosted',
+                      eventId: randomUUID(),
+                      receiptId: randomUUID(),
+                      legalEntityId: COMPANY,
+                    },
+                    effects: [
+                      {
+                        call: { kind: 'sleep', milliseconds: 10 },
+                        result: null,
+                      },
+                    ],
+                  },
+                ],
+              }),
+          );
+          const workflowPatch = (workflowId: string) => ({
+            kind: 'saveWorkflow' as const,
+            workflow: {
+              schemaVersion: 'v6' as const,
+              workflowId,
+              trigger: 'goodsReceiptPosted' as const,
+              bodyDigest: fixtureDigest,
+              grants: fixtureGrants,
+            },
+          });
+          await t.test(
+            'candidate admission refuses post-fixture replay divergence',
+            async () => {
+              const candidate = await service.draft(
+                workflowPatch('divergent-replay'),
+                'conversationalAi',
+              );
+              assert.ok(
+                candidate.status === 'drafted',
+                JSON.stringify(candidate),
+              );
+              const step = InMemoryWorkflowRun.prototype.step;
+              const firstPass = new WeakSet<InMemoryWorkflowRun>();
+              const divergence = t.mock.method(
+                InMemoryWorkflowRun.prototype,
+                'step',
+                async function (this: InMemoryWorkflowRun) {
+                  if (!firstPass.has(this) && this.snapshot().prefix.length > 0)
+                    return {
+                      kind: 'quarantined',
+                      cursor: 0,
+                      reason: 'changed-request',
+                    } as const;
+                  firstPass.add(this);
+                  return step.call(this);
+                },
+              );
+              try {
+                await assert.rejects(
+                  service.approve(candidate.patchId),
+                  /Workflow replay failed at cursor 0 \(quarantined\)/u,
+                  'candidate was admitted without running the recorded fixture again',
+                );
+              } finally {
+                divergence.mock.restore();
+              }
+            },
+          );
+
+          await t.test(
+            'candidate admission refuses incomplete workflow evidence',
+            async () => {
+              const complete = await service.draft(
+                workflowPatch('complete-evidence'),
+                'conversationalAi',
+              );
+              assert.ok(
+                complete.status === 'drafted',
+                JSON.stringify(complete),
+              );
+              await service.approve(complete.patchId);
+              await service.activate(complete.patchId);
+              const candidate = await service.draft(
+                workflowPatch('missing-evidence'),
+                'conversationalAi',
+              );
+              assert.ok(
+                candidate.status === 'drafted',
+                JSON.stringify(candidate),
+              );
+              await pool.query(`
+              CREATE FUNCTION platform.test_skip_workflow_evidence() RETURNS trigger
+              LANGUAGE plpgsql AS $test$
+              BEGIN
+                IF NEW.workflow_id = 'missing-evidence' THEN RETURN NULL; END IF;
+                RETURN NEW;
+              END
+              $test$;
+              CREATE TRIGGER test_skip_workflow_evidence
+                BEFORE INSERT ON platform.workflow_verification_evidence
+                FOR EACH ROW EXECUTE FUNCTION platform.test_skip_workflow_evidence();
+            `);
+              try {
+                await assert.rejects(
+                  service.approve(candidate.patchId),
+                  /Workflow verification evidence is incomplete or does not match the candidate/u,
+                  'candidate was admitted with one declared workflow missing evidence',
+                );
+                const { rows } = await pool.query<{ workflow_ids: string[] }>(
+                  `SELECT array_agg(w.workflow_id ORDER BY w.workflow_id) AS workflow_ids
+                   FROM platform.tenant_releases AS r
+                   JOIN platform.release_verification_evidence AS e
+                     USING (tenant_id, environment_id, verification_evidence_id)
+                   JOIN platform.workflow_verification_evidence AS w
+                     USING (tenant_id, environment_id, verification_evidence_id)
+                  WHERE r.release_id = $1
+                  GROUP BY e.verification_evidence_id`,
+                  [candidate.releaseId],
+                );
+                assert.deepEqual(rows, [
+                  { workflow_ids: ['complete-evidence'] },
+                ]);
+              } finally {
+                await pool.query(`
+                DROP TRIGGER test_skip_workflow_evidence ON platform.workflow_verification_evidence;
+                DROP FUNCTION platform.test_skip_workflow_evidence();
+              `);
+                await service.rollback();
+              }
             },
           );
 

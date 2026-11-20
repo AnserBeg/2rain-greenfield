@@ -635,7 +635,7 @@ export class PostgresWorkflowExecution {
         );
         if (
           counts[0]?.count !== journal.rowCount ||
-          counts[0]?.decisions !== journal.approvedAtFence
+          counts[0]?.decisions !== journal.decisionsAtFence
         )
           return null;
         return work(client, snapshot, pointer);
@@ -901,7 +901,7 @@ async function loadJournal(
     idempotencyKey: string | null;
   } | null;
   rowCount: number;
-  approvedAtFence: number;
+  decisionsAtFence: number;
   renewApproval: {
     cursor: number;
     call: Extract<WorkflowCall, { kind: 'requestApproval' }>;
@@ -932,13 +932,15 @@ async function loadJournal(
   const state = {
     prefix,
     rowCount: journal.rows.length,
-    approvedAtFence: journal.rows.filter(
+    decisionsAtFence: journal.rows.filter(
       (row) => row.approval_fence === run.execution_fence,
     ).length,
     renewApproval: null,
     pending: null,
     invalid: null,
   };
+  // Older decisions explain their immutable journal results. Renew an
+  // approval before an effect with the approved input that never committed.
   const superseded = new Map<
     number,
     Extract<WorkflowCall, { kind: 'requestApproval' }>

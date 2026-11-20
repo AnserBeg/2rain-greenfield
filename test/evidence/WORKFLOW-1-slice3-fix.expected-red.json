@@ -9,9 +9,7 @@
       "original": "            company === liveCompany &&\n            role === liveRole,",
       "replacement": "            company === liveCompany,",
       "test": {
-        "files": [
-          "test/postgres/workflow-consumer.test.ts"
-        ]
+        "files": ["test/postgres/workflow-consumer.test.ts"]
       },
       "kills": [
         {
@@ -28,9 +26,7 @@
       "original": "REVOKE UPDATE (execution_fence, status, reason) ON platform.workflow_runs FROM north_star_workflow_worker;",
       "replacement": "-- Control: retain the previous worker grants.",
       "test": {
-        "files": [
-          "test/postgres/workflow-consumer.test.ts"
-        ]
+        "files": ["test/postgres/workflow-consumer.test.ts"]
       },
       "kills": [
         {
@@ -47,9 +43,7 @@
       "original": "        if (!current.retry_authorized) {",
       "replacement": "        if (false) {",
       "test": {
-        "files": [
-          "test/postgres/workflow-consumer.test.ts"
-        ]
+        "files": ["test/postgres/workflow-consumer.test.ts"]
       },
       "kills": [
         {
@@ -66,9 +60,7 @@
       "original": "  if (familyId === PROJECTION_FAMILY_IDS.workflow) {\n    const requirement = manifest.requiredRuntimeCapability;\n    if (\n      !requirement ||\n      requirement.capabilityId !==\n        reference.requiredRuntimeCapability.capabilityId ||\n      requirement.minimumVersion !==\n        reference.requiredRuntimeCapability.minimumVersion\n    )\n      throw failure(\n        'WORKFLOW_PROJECTION_MISMATCH',\n        'Workflow manifest capability does not match the release reference',\n      );\n    const unsupported = unsupportedRuntimeCapability(familyId, requirement);\n    if (unsupported)\n      throw failure('UNSUPPORTED_RUNTIME_CAPABILITY', unsupported);\n  }\n",
       "replacement": "",
       "test": {
-        "files": [
-          "test/integration/workflow-admission.test.ts"
-        ]
+        "files": ["test/integration/workflow-admission.test.ts"]
       },
       "kills": [
         {
@@ -85,9 +77,7 @@
       "original": "            AND a.fence <= $4 AND j.kind = 'REQUEST'",
       "replacement": "            AND a.fence = $4 AND j.kind = 'REQUEST'",
       "test": {
-        "files": [
-          "test/postgres/workflow-consumer.test.ts"
-        ]
+        "files": ["test/postgres/workflow-consumer.test.ts"]
       },
       "kills": [
         {
@@ -104,9 +94,7 @@
       "original": "    const step = await replay.step();",
       "replacement": "    const step = { kind: 'done', cursor: 0 };",
       "test": {
-        "files": [
-          "test/postgres/workflow-consumer.test.ts"
-        ]
+        "files": ["test/postgres/workflow-consumer.test.ts"]
       },
       "kills": [
         {
@@ -123,9 +111,7 @@
       "original": "    if (evidence && binding.workflows) {",
       "replacement": "    if (false && evidence && binding.workflows) {",
       "test": {
-        "files": [
-          "test/postgres/workflow-consumer.test.ts"
-        ]
+        "files": ["test/postgres/workflow-consumer.test.ts"]
       },
       "kills": [
         {
@@ -142,9 +128,7 @@
       "original": "      impactAnalysisDerivation,\n      context.principalId,",
       "replacement": "      impactAnalysisDerivation,\n      context.requestId,",
       "test": {
-        "files": [
-          "test/postgres/releases.test.ts"
-        ]
+        "files": ["test/postgres/releases.test.ts"]
       },
       "kills": [
         {

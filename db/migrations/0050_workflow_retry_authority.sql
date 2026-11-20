@@ -145,8 +145,7 @@ DECLARE
   principal uuid := nullif(current_setting('north_star.principal_id', true), '')::uuid;
   request uuid := nullif(current_setting('north_star.request_id', true), '')::uuid;
   active platform.active_release_pointers%ROWTYPE;
-  run platform.workflow_runs%ROWTYPE;
-BEGIN
+  run platform.workflow_runs%ROWTYPE; BEGIN
   IF requested_action IS NULL OR requested_action NOT IN ('retry', 'cancel')
      OR principal IS NULL OR request IS NULL
   THEN RETURN false; END IF;
