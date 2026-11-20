@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import test from 'node:test';
 
 import type pg from 'pg';
+import { applicationWithoutLineCreateValues } from '../helpers/application-without-line-create-values.js';
 import { renderCompositionFields } from '../../apps/web/src/surface-composition.js';
 import {
   declaredListArguments,
@@ -677,43 +678,9 @@ function sandboxRequest(chain: readonly CustomizationPatch[]) {
   };
 }
 
-// Measure each customization floor with lower-floor first-party surfaces.
-let surfaceCompatibilityBase:
-  Pick<ReturnType<typeof sandboxRequest>, 'base' | 'tip'> | undefined;
 function surfaceCompatibilityRequest(chain: readonly CustomizationPatch[]) {
-  if (!surfaceCompatibilityBase) {
-    const base = structuredClone(authored);
-    for (const { documentEditor } of base.surfaces as {
-      documentEditor?: { lineCreateValues?: unknown };
-    }[]) {
-      if (documentEditor) delete documentEditor.lineCreateValues;
-    }
-    const normalized = normalizeApplicationPackage(base);
-    const normalizedDefinitionBytes = new TextEncoder().encode(
-      canonicalize(normalized),
-    );
-    const compiled = compileApplicationRelease(
-      {
-        kind: 'compilerInput',
-        dependencies: [],
-        expectedActiveRelease: null,
-        limits: { ...DEFAULT_COMPILER_LIMITS },
-        normalizedDefinitionBytes,
-        profile: {
-          ...MODULE_COMPILER_PROFILE,
-          languageVersion: normalized.languageVersion,
-          normalizationProfileVersion: normalized.normalizationProfileVersion,
-        },
-      },
-      acknowledgement,
-    );
-    assert.ok(compiled.status === 'compiled', JSON.stringify(compiled));
-    surfaceCompatibilityBase = {
-      base,
-      tip: serializeRelease({ compiled, normalizedDefinitionBytes }),
-    };
-  }
-  return { acknowledgement, ...surfaceCompatibilityBase, chain };
+  const { authored: base, release } = applicationWithoutLineCreateValues();
+  return { acknowledgement, base, chain, tip: release.application };
 }
 
 test('a change set compiles only its final definition and refuses a broken dependency order', async () => {

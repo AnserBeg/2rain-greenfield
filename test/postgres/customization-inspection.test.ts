@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../packages/canonical-model/src/surface-workspace.js';
+import { applicationWithoutLineCreateValues } from '../helpers/application-without-line-create-values.js';
 
 import {
   openCustomizeService,
@@ -35,6 +35,7 @@ test(
         const options = {
           databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
           tenantSlug: 'customize-inspection',
+          compiledApplication: applicationWithoutLineCreateValues().release,
         };
         const app = await startComposedApplication({
           ...options,
@@ -82,7 +83,7 @@ test(
           );
           assert.equal((await opened.service.status()).patches.length, 1);
           await opened.service.approve(drafted.patchId);
-          // The archived Today reader must refuse both releases once the base requires line create values.
+          // The last main before Inspection included the floor-25 Today reader.
           await withArchivedCustomizationRuntime(
             '8839f668293dc06f9d9ba4def3611697323f3760',
             async (run) => {
@@ -91,14 +92,17 @@ test(
                   databaseUrl: options.databaseUrl,
                   identity: app.runtime.identity,
                 });
-              const refusal = {
+              assert.deepEqual(await read(), {
+                outcome: 'loaded',
+                root: app.runtime.releaseRoot,
+              });
+              await opened.service.activate(drafted.patchId);
+              assert.deepEqual(await read(), {
                 outcome: 'refused',
                 code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
-                message: `runtime capability northstar.runtime:capability.surface-manifest requires version ${LINE_CREATE_VALUES_SURFACE_FLOOR} and this runtime supports 25`,
-              };
-              assert.deepEqual(await read(), refusal);
-              await opened.service.activate(drafted.patchId);
-              assert.deepEqual(await read(), refusal);
+                message:
+                  'runtime capability northstar.runtime:capability.surface-manifest requires version 26 and this runtime supports 25',
+              });
             },
           );
           const world = worldOver(app.runtime, String(connection.database));

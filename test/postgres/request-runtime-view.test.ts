@@ -784,7 +784,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
               loaded.projections.surface.requiredRuntimeCapability,
               {
                 capabilityId: 'northstar.runtime:capability.surface-manifest',
-                minimumVersion: 22,
+                minimumVersion: LINE_CREATE_VALUES_SURFACE_FLOOR,
               },
             );
             // All FIVE loaded families carry their requirement, not just the

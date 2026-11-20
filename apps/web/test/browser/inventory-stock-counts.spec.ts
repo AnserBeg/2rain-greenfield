@@ -224,6 +224,28 @@ async function command(
   await dialog
     .getByRole('button', { name: `Confirm ${label}`, exact: true })
     .click();
+  await expectTaskResult(page, label);
+  await expect(page).toHaveURL(url);
+  await expect(page.locator('body')).toHaveAttribute(
+    'data-count-journey',
+    'active',
+  );
+}
+
+/** A declared task on the count: its inputs, Review, Confirm. */
+async function runTask(page: Page, label: string, fill: () => Promise<void>) {
+  await page.getByRole('button', { name: label, exact: true }).click();
+  await fill();
+  await page
+    .getByRole('button', { name: `Review ${label}`, exact: true })
+    .click();
+  await page
+    .getByRole('button', { name: `Confirm ${label}`, exact: true })
+    .click();
+  await expectTaskResult(page, label);
+}
+
+async function expectTaskResult(page: Page, label: string) {
   await expect
     .poll(
       async () => {
@@ -245,26 +267,6 @@ async function command(
       { timeout: 30_000 },
     )
     .toContain(`${label}: done`);
-  await expect(page).toHaveURL(url);
-  await expect(page.locator('body')).toHaveAttribute(
-    'data-count-journey',
-    'active',
-  );
-}
-
-/** A declared task on the count: its inputs, Review, Confirm. */
-async function runTask(page: Page, label: string, fill: () => Promise<void>) {
-  await page.getByRole('button', { name: label, exact: true }).click();
-  await fill();
-  await page
-    .getByRole('button', { name: `Review ${label}`, exact: true })
-    .click();
-  await page
-    .getByRole('button', { name: `Confirm ${label}`, exact: true })
-    .click();
-  await expect(
-    page.locator('[data-composition-task] [data-task-result]'),
-  ).toContainText(`${label}: done`);
 }
 
 /** The counts that correct or reverse this one. */
