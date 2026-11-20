@@ -52,6 +52,8 @@ export interface GeneratedDocumentSource {
   readonly issuedIdentity: string;
   readonly inputDigest: string;
   readonly releaseRoot: string;
+  readonly brandRevision: string;
+  readonly companyBrandSource: DocumentQuerySource | null;
   readonly renderer: typeof DOCUMENT_TEMPLATE_RENDERER;
   readonly recordId: string;
   readonly queries: readonly DocumentQuerySource[];
@@ -63,14 +65,14 @@ export interface GeneratedDocumentSource {
   } | null;
 }
 
-interface SourceContext {
+export interface DocumentSourceContext {
   readonly storage: StorageTargetPayloadV1;
   readonly fields: ReadonlyMap<string, DocumentFieldAuthority>;
 }
 
 export function documentSourceQuery(
   view: RequestRuntimeView,
-  context: SourceContext,
+  context: DocumentSourceContext,
   source: Pick<
     DocumentQuerySource,
     'queryId' | 'companyId' | 'parentRelationId'
@@ -110,7 +112,7 @@ export function documentSourceQuery(
 }
 
 export function documentSourceField(
-  context: SourceContext,
+  context: DocumentSourceContext,
   query: RegisteredQueryDefinition,
   entity: StorageEntity,
   fieldId: string,
@@ -151,7 +153,7 @@ export async function readDocumentTemplateSources(
   view: RequestRuntimeView,
   target: DocumentTarget,
   template: DocumentTemplateRevision,
-  context: SourceContext,
+  context: DocumentSourceContext,
   gateway: SemanticQueryGateway,
   preview: boolean,
   signal: AbortSignal,
@@ -262,7 +264,10 @@ export async function readDocumentTemplateSources(
         template,
         template.currencyFieldId,
       );
-      blocks.push({ kind: 'text', text: safeText(block.label + ': ' + value) });
+      blocks.push({
+        kind: 'text',
+        text: safeDocumentPdfText(block.label + ': ' + value),
+      });
     } else if (block.kind === 'table') {
       const table = await read(block.queryId, block.parentRelationId, [
         ...block.columns.map(({ fieldId }) => fieldId),
@@ -270,11 +275,11 @@ export async function readDocumentTemplateSources(
       ]);
       blocks.push({
         kind: 'table',
-        title: safeText(block.label),
-        columns: block.columns.map(({ label }) => safeText(label)),
+        title: safeDocumentPdfText(block.label),
+        columns: block.columns.map(({ label }) => safeDocumentPdfText(label)),
         rows: table.rows.map((row) =>
           block.columns.map(({ fieldId }) =>
-            safeText(
+            safeDocumentPdfText(
               formatField(
                 row,
                 table.fields.get(fieldId)!,
@@ -286,22 +291,21 @@ export async function readDocumentTemplateSources(
         ),
       });
     } else {
-      blocks.push({ kind: block.kind, text: safeText(block.text) });
+      blocks.push({ kind: block.kind, text: safeDocumentPdfText(block.text) });
     }
   }
   return {
     record,
     queries: used,
     input: {
-      name: safeText(template.branding.displayName),
       identity,
       paper: template.format.pageSize,
-      ink: template.branding.ink,
-      accent: template.branding.accent,
-      logoDataUri: null,
       pageNumbers: template.pageNumbers,
       blocks,
-    } satisfies DocumentPdfInput,
+    } satisfies Omit<
+      DocumentPdfInput,
+      'name' | 'ink' | 'accent' | 'logoDataUri'
+    >,
   };
 }
 
@@ -380,10 +384,10 @@ function issueIdentity(value: unknown) {
     String(value).length > 100
   )
     throw unavailableBinding();
-  return safeText(String(value));
+  return safeDocumentPdfText(String(value));
 }
 
-function safeText(value: string) {
+export function safeDocumentPdfText(value: string) {
   const text = value.normalize('NFC').replaceAll('\u202f', '\u00a0');
   // The built-in PDFKit fonts use WinAnsi. Refuse glyphs they cannot encode.
   if (

@@ -58,12 +58,18 @@ import {
 } from '../../runtime/src/semantic-operation-gateway.js';
 import type { PostgresDocumentPublication } from './document-publication.js';
 
+import {
+  DOCUMENT_BRAND_COMPANY_ENTITY,
+  type CompanyDocumentBrand,
+  type CompanyDocumentBrandResolver,
+} from './document-company-brand.js';
 import { renderDocumentPdf } from './document-pdf.js';
 import {
   documentQueryDigest,
   documentSourceField,
   documentSourceQuery,
   readDocumentTemplateSources,
+  safeDocumentPdfText,
   unavailableBinding,
   type DocumentFieldAuthority,
   type DocumentQuerySource,
@@ -122,6 +128,7 @@ export class PostgresDocumentGateway implements DocumentGateway {
     private readonly publication: PostgresDocumentPublication,
     private readonly operations: SemanticOperationGateway,
     private readonly mediation: SemanticOperationMediationAuthority,
+    private readonly companyBrand: CompanyDocumentBrandResolver,
   ) {}
 
   get scannerLabel() {
@@ -255,6 +262,8 @@ export class PostgresDocumentGateway implements DocumentGateway {
       issuedIdentity: rendered.input.identity!,
       releaseRoot: view.release.contentHash,
       renderer: DOCUMENT_TEMPLATE_RENDERER,
+      brandRevision: rendered.brandRevision,
+      companyBrandSource: rendered.companyBrandSource,
       recordId: target.recordId,
       queries: rendered.queries,
       logo: rendered.logo,
@@ -262,6 +271,8 @@ export class PostgresDocumentGateway implements DocumentGateway {
         Buffer.from(
           canonicalize({
             revision: template,
+            brandRevision: rendered.brandRevision,
+            companyBrandSource: rendered.companyBrandSource,
             input: rendered.input,
             recordId: target.recordId,
             queries: rendered.queries,
@@ -358,41 +369,54 @@ export class PostgresDocumentGateway implements DocumentGateway {
         return record;
       },
     );
-    const inputs = await withReadSnapshot(
+    const context = { storage, fields: documentFields };
+    const { inputs, brand } = await withReadSnapshot(
       this.pool,
-      () =>
-        readDocumentTemplateSources(
+      async () => ({
+        inputs: await readDocumentTemplateSources(
           view,
           target,
           template,
-          { storage, fields: documentFields },
+          context,
           this.queryGateway,
           preview,
           signal,
         ),
+        brand: await this.companyBrand.resolve(view, target.companyId, context),
+      }),
       { retry: false },
     );
     if (inputs.record.revision !== initial.revision) throw unavailableBinding();
 
-    const logo = template.branding.logo
-      ? await this.readTemplateLogo(view, initial, template.branding.logo)
+    const logo = brand.logo
+      ? await this.readBrandLogo(view, initial, brand.logo)
       : null;
-    const input = { ...inputs.input, logoDataUri: logo?.dataUri ?? null };
+    const input = {
+      ...inputs.input,
+      name: safeDocumentPdfText(brand.displayName),
+      ink: brand.ink,
+      accent: brand.accent,
+      logoDataUri: logo?.dataUri ?? null,
+    };
     const bytes = await renderDocumentPdf(input, signal);
     await validateDocumentContent(bytes, 'application/pdf');
-    const sources = { queries: inputs.queries, logo: logo?.source ?? null };
+    const sources = {
+      queries: inputs.queries,
+      companyBrandSource: brand.companySource,
+      logo: logo?.source ?? null,
+    };
     await this.withRecord(view, target, permissions, async (client, record) => {
       checkSameRecord(initial, record);
       if (!preview) await this.authorizeAttach(client, view, record);
       await this.authorizeGenerated(client, view, record, sources, true);
     });
-    return { input, bytes, ...sources };
+    return { input, bytes, brandRevision: brand.revision, ...sources };
   }
 
-  private async readTemplateLogo(
+  private async readBrandLogo(
     view: RequestRuntimeView,
     target: GoverningRecord,
-    logo: NonNullable<DocumentTemplateRevision['branding']['logo']>,
+    logo: NonNullable<CompanyDocumentBrand['logo']>,
   ) {
     if (logo.companyId && logo.companyId !== target.scope)
       throw unavailableBinding();
@@ -444,7 +468,10 @@ export class PostgresDocumentGateway implements DocumentGateway {
     client: PoolClient,
     view: RequestRuntimeView,
     governing: GoverningRecord,
-    generated: Pick<GeneratedDocumentSource, 'queries' | 'logo'>,
+    generated: Pick<
+      GeneratedDocumentSource,
+      'queries' | 'companyBrandSource' | 'logo'
+    >,
     verifyRevision: boolean,
   ) {
     const { storage, documentFields, policy } = await this.release(
@@ -524,6 +551,20 @@ export class PostgresDocumentGateway implements DocumentGateway {
       )
         throw unavailableBinding();
       await check(source, governing.entity.entityId);
+    }
+    const company = generated.companyBrandSource;
+    if (governing.scope !== 'shared') {
+      if (
+        !company ||
+        company.companyId !== null ||
+        company.parentRelationId !== null ||
+        company.rows.length !== 1 ||
+        company.rows[0]?.recordId !== governing.scope
+      )
+        throw unavailableBinding();
+      await check(company, DOCUMENT_BRAND_COMPANY_ENTITY);
+    } else if (company) {
+      throw unavailableBinding();
     }
     if (generated.logo) {
       const { source, linkId, versionId, digest } = generated.logo;

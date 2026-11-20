@@ -179,8 +179,6 @@ export type { FormulaValidationRule } from './formula-validation-schema.js';
 export {
   DocumentTemplatePointerSchema,
   DocumentTemplateRevisionSchema,
-  documentPalettePasses,
-  type DocumentTemplateLogo,
   type DocumentTemplatePointer,
   type DocumentTemplateRevision,
 } from './document-template-schema.js';

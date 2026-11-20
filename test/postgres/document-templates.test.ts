@@ -11,6 +11,7 @@ import type { DocumentMetadata } from '../../packages/runtime/src/document-gatew
 import { worldOver, seededId } from '../agent/agent-world.js';
 import {
   archivedRuntimeRead,
+  assertArchivedTenantEnvelope,
   withArchivedCustomizationRuntime,
 } from '../helpers/archived-customization-runtime.js';
 import {
@@ -46,12 +47,6 @@ const template = (
     dateStyle: 'medium',
     numberGrouping: true,
     pageSize: 'LETTER',
-  },
-  branding: {
-    displayName: 'North Star',
-    ink: '#172431',
-    accent: '#284467',
-    logo: null,
   },
   layout: [{ kind: 'heading', text: heading }] as unknown[],
   pageNumbers: true,
@@ -116,6 +111,11 @@ test(
             tenant + '_get',
             tenant + '_name',
           );
+          const localBrand = await service.draft(
+            { ...po, branding: { displayName: 'Template-local brand' } },
+            'visualBuilder',
+          );
+          assert.notEqual(localBrand.status, 'drafted');
           const hidden = {
             ...po,
             layout: [
@@ -151,7 +151,7 @@ test(
           assert.equal(draft.status, 'drafted', JSON.stringify(draft));
           assert.match(
             draft.renderedDiff,
-            /North Star.*[\s\S]*Service work order[\s\S]*Description/u,
+            /Service work order[\s\S]*Description/u,
           );
           const world = worldOver(app.runtime, String(connection.database));
           const sheet = await world.create(tenant, { name: 'WO-17' });
@@ -230,6 +230,7 @@ test(
             await withArchivedCustomizationRuntime(
               '552b13d8837a5e44ac16d3383988c167345d0295',
               async (run) => {
+                await assertArchivedTenantEnvelope(run);
                 const read = () =>
                   archivedRuntimeRead(run, {
                     databaseUrl: options.databaseUrl,
@@ -265,6 +266,11 @@ test(
             return Buffer.from(await response.arrayBuffer());
           };
           const firstBytes = await bytes(attachment);
+          assert.match(
+            firstBytes.toString('latin1'),
+            /\(Default legal entity\)/u,
+            'issued PDF title should use the company record name',
+          );
           assert.deepEqual(await bytes(secondAttachment), firstBytes);
           assert.notDeepEqual(
             Buffer.from(await preview.arrayBuffer()),
@@ -285,6 +291,10 @@ test(
           assert.equal(
             saved.rows[0]?.generated_source.revisionId,
             po.revisionId,
+          );
+          assert.equal(
+            saved.rows[0]?.generated_source.brandRevision,
+            'platform-default',
           );
           assert.match(saved.rows[0]?.generated_source.issuedIdentity, /^PO-/u);
 
@@ -324,6 +334,25 @@ test(
           const list = await request(sheetUrl, 'list');
           assert.equal(list.status, 200);
           assert.deepEqual(await list.json(), []);
+
+          const revokeCompany = await pool.query(
+            `UPDATE platform.current_policy_permission_grants SET revoked_at = clock_timestamp()
+              WHERE tenant_id = $1 AND environment_id = $2 AND permission_id = $4
+                AND role_id IN (SELECT role_id FROM platform.current_policy_memberships
+                  WHERE tenant_id = $1 AND environment_id = $2 AND principal_id = $3)`,
+            [
+              tenantId,
+              environmentId,
+              principalId,
+              id('permission', 'legal_entity_read'),
+            ],
+          );
+          assert.ok(revokeCompany.rowCount);
+          assert.equal(
+            (await request(poUrl, 'download', purchaseArtifact)).status,
+            404,
+            'a revoked company source still returned a generated PDF',
+          );
         } finally {
           await customize.close();
           await app.close();

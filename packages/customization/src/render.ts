@@ -114,11 +114,10 @@ export function renderReleaseDiff(input: {
   for (const [templateId, revision] of afterTemplates) {
     if (beforeTemplates.get(templateId)?.revisionId === revision.revisionId)
       continue;
-    const { format, branding } = revision;
+    const { format } = revision;
     lines.push(
       `Selects revision ${revision.revisionId} of “${revision.label}” (${revision.documentKind}) on ${entityLabel(to, revision.entityId)}.`,
       `Prints on ${format.pageSize} using ${format.locale}, ${format.timeZone}, ${format.dateStyle} dates, ${format.currency} and ${format.numberGrouping ? 'grouped' : 'ungrouped'} numbers. ${revision.pageNumbers ? 'Shows page numbers.' : 'Omits page numbers.'}`,
-      `Displays “${branding.displayName}” with ink ${branding.ink} and accent ${branding.accent}.${branding.logo ? ` Uses image version ${branding.logo.versionId} on record ${branding.logo.recordId}.` : ''}`,
       `Reads issued identity ${revision.identityFieldId} through ${revision.headerQueryId}.` +
         (revision.currencyFieldId
           ? ` Checks currency using ${revision.currencyFieldId}.`

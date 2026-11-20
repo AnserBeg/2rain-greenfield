@@ -1,3 +1,4 @@
+import { LedgerDocumentBrandResolver } from './document-company-brand.js';
 import type { DocumentScanner } from './document-content.js';
 import {
   PostgresDocumentGateway,
@@ -229,6 +230,7 @@ export function composeServingGateways(
         documentPublication,
         operationGateway,
         operationMediation,
+        new LedgerDocumentBrandResolver(queryGateway),
       )
     : null;
   return {

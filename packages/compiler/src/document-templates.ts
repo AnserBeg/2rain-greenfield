@@ -3,7 +3,6 @@ import type {
   DocumentTemplatePointer,
   DocumentTemplateRevision,
 } from '../../canonical-model/src/document-template-schema.js';
-import { documentPalettePasses } from '../../canonical-model/src/document-template-schema.js';
 
 type Definition = Extract<
   VersionedNormalizedApplicationPackage,
@@ -72,12 +71,6 @@ export function compileDocumentTemplates(
     firstByTemplate.set(templateId, revision);
     // Immutable historical revisions survive retirement and remain usable as evidence.
     if (pointersById.get(templateId) !== revisionId) continue;
-    if (!documentPalettePasses(revision.branding))
-      return refusal(
-        revisionId,
-        'Branding ink and accent must each pass 4.5:1 on white in color and greyscale.',
-      );
-
     const header = sourceQuery(definition, headerQueryId, 'get');
     if (header?.sourceEntity.targetId !== entityId)
       return refusal(

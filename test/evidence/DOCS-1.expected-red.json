@@ -6,8 +6,8 @@
       "name": "documents-download-revocation",
       "claim": "A revoked byte-read grant withholds a previously issued attachment URL.",
       "file": "packages/postgres-provider/src/document-attachments.ts",
-      "original": "      [DOCUMENT_PERMISSIONS.view, DOCUMENT_PERMISSIONS.download],\n",
-      "replacement": "      [DOCUMENT_PERMISSIONS.view],\n",
+      "original": "      [DOCUMENT_PERMISSIONS.view, DOCUMENT_PERMISSIONS.download],\n      async (client, record) => {\n        const result = await client.query<StoredMetadata & { digest: string }>(\n          `SELECT ${metadataColumns}, v.digest, v.generated_source AS \"generatedSource\"\n",
+      "replacement": "      [DOCUMENT_PERMISSIONS.view],\n      async (client, record) => {\n        const result = await client.query<StoredMetadata & { digest: string }>(\n          `SELECT ${metadataColumns}, v.digest, v.generated_source AS \"generatedSource\"\n",
       "test": {
         "files": ["test/postgres/document-attachments.test.ts"],
         "namePattern": "^internal files use live record authority, scoped dedupe, bounded ingress and immutable audit$"
@@ -89,6 +89,24 @@
           "file": "test/postgres/document-templates.test.ts",
           "name": "approved template revisions publish governed PDFs, refuse hidden sources, and retire",
           "expected": "a revoked source query still returned a generated PDF"
+        }
+      ]
+    },
+    {
+      "name": "generated-pdf-company-brand-source-revocation",
+      "claim": "Company-brand source revocation withholds the previously issued PDF.",
+      "file": "packages/postgres-provider/src/document-attachments.ts",
+      "original": "      await check(company, DOCUMENT_BRAND_COMPANY_ENTITY);\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/document-templates.test.ts"],
+        "namePattern": "^approved template revisions publish governed PDFs, refuse hidden sources, and retire$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-templates.test.ts",
+          "name": "approved template revisions publish governed PDFs, refuse hidden sources, and retire",
+          "expected": "a revoked company source still returned a generated PDF"
         }
       ]
     }

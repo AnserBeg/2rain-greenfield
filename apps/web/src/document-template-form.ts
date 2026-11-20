@@ -107,17 +107,6 @@ export function documentTemplateForm(
     : '';
   const heading = current?.layout.find((block) => block.kind === 'heading');
   const text = current?.layout.find((block) => block.kind === 'text');
-  const logo = current?.branding.logo;
-  const logoLink = logo
-    ? '/documents?' +
-      new URLSearchParams({
-        surface: logo.surfaceId,
-        record: logo.recordId,
-        link: logo.linkId,
-        version: logo.versionId,
-        ...(logo.companyId ? { company: logo.companyId } : {}),
-      })
-    : '';
   const value = (value: string | undefined) => h(value ?? '');
 
   return `<h1>Document templates for ${h(target.label)}</h1>
@@ -141,10 +130,6 @@ export function documentTemplateForm(
       ${options(tableOptions, table?.currencyFieldId ? [table.queryId, table.parentRelationId, table.currencyFieldId].join('/') : undefined)}</select></label></details>`
         : ''
     }
-    <label>Display name <input name="displayName" required maxlength="80" value="${value(current?.branding.displayName)}"></label>
-    <label>Ink color <input name="ink" type="color" value="${value(current?.branding.ink)}"></label>
-    <label>Accent color <input name="accent" type="color" value="${value(current?.branding.accent)}"></label>
-    <label>Logo <input name="logo" maxlength="1000" value="${h(logoLink)}" placeholder="Paste a PNG or JPEG attachment’s preview link"></label>
     <label>Locale <select name="locale">${options(locale, current?.format.locale)}</select></label>
     <label>Time zone <input name="timeZone" required maxlength="64" value="${h(current?.format.timeZone ?? 'UTC')}"></label>
     <label>Currency <select name="currency">${plainOptions(['CAD', 'USD', 'EUR', 'GBP'], current?.format.currency)}</select></label>
@@ -225,11 +210,6 @@ export function templatePatchFromForm(
     });
   }
   const namespace = target.entityId.split(':')[0]!;
-  const logo = form.logo?.trim()
-    ? new URL(form.logo, 'https://internal.invalid')
-    : null;
-  if (logo && logo.pathname !== '/documents')
-    throw new Error('Paste a file preview link from the Files section.');
   return {
     kind: 'addDocumentTemplateRevision',
     schemaVersion: 'northstar.document-template-revision/v1',
@@ -252,20 +232,6 @@ export function templatePatchFromForm(
       dateStyle: form.dateStyle,
       numberGrouping: form.numberGrouping === 'on',
       pageSize: form.pageSize,
-    },
-    branding: {
-      displayName: form.displayName,
-      ink: form.ink,
-      accent: form.accent,
-      logo: logo
-        ? {
-            surfaceId: logo.searchParams.get('surface'),
-            recordId: logo.searchParams.get('record'),
-            companyId: logo.searchParams.get('company'),
-            linkId: logo.searchParams.get('link'),
-            versionId: logo.searchParams.get('version'),
-          }
-        : null,
     },
     layout,
     pageNumbers: form.pageNumbers === 'on',
