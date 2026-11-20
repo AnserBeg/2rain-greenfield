@@ -64,7 +64,7 @@ console.log(JSON.stringify({ request, release: result.steps[0].release }));
   assert.equal(
     canonicalize(envelope),
     canonicalize(historical),
-    'both tenant runners reproduce the entire v6 envelope with formula declarations absent',
+    'both tenant runners reproduce the entire v6 envelope with the optional declaration absent',
   );
 }
 

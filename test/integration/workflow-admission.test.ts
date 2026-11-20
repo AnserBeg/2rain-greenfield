@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
 import { canonicalize } from '../../packages/canonical-model/src/index.js';
+import { WORKFLOW_SURFACE_FLOOR } from '../../packages/canonical-model/src/workflows.js';
 import { PROJECTION_FAMILY_IDS } from '../../packages/compiler/src/index.js';
 import { executeVerificationPlan } from '../../packages/compiler/src/verification.js';
 import { releaseVerificationBinding } from '../../packages/postgres-provider/src/release-verification-service.js';
@@ -89,7 +90,58 @@ test('a workflow release pins the declarations, SDK catalog and required reader'
   const surface = draft.bundle.releaseManifest.projections.find(
     ({ familyId }) => familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
   );
-  assert.equal(surface?.requiredRuntimeCapability.minimumVersion, 28);
+  assert.equal(
+    surface?.requiredRuntimeCapability.minimumVersion,
+    WORKFLOW_SURFACE_FLOOR,
+  );
+
+  const reference = draft.bundle.releaseManifest.projections.find(
+    ({ familyId }) => familyId === PROJECTION_FAMILY_IDS.workflow,
+  );
+  const manifest = draft.bundle.artifacts.find(
+    ({ contentHash }) => contentHash === reference?.artifactRoot,
+  );
+  assert.ok(manifest);
+  const { chunks } = JSON.parse(
+    Buffer.from(manifest.canonicalBytes).toString(),
+  ) as {
+    chunks: { contentHash: string }[];
+  };
+  const changeProjection = (overrides: Record<string, unknown>) => ({
+    ...draft,
+    bundle: {
+      ...draft.bundle,
+      artifacts: draft.bundle.artifacts.map((artifact) =>
+        artifact.contentHash === chunks[0]?.contentHash
+          ? {
+              ...artifact,
+              canonicalBytes: Buffer.from(
+                canonicalize({
+                  ...JSON.parse(
+                    Buffer.from(artifact.canonicalBytes).toString(),
+                  ),
+                  workflows: [{ ...binding.workflows?.[0], ...overrides }],
+                }),
+              ),
+            }
+          : artifact,
+      ),
+    },
+  });
+  assert.throws(
+    () =>
+      releaseVerificationBinding(
+        changeProjection({ sdkDigest: 'b'.repeat(64) }),
+      ),
+    { code: 'WORKFLOW_PROJECTION_MISMATCH' },
+  );
+  assert.throws(
+    () =>
+      releaseVerificationBinding(
+        changeProjection({ trigger: 'untrustedEvent' }),
+      ),
+    /goodsReceiptPosted/u,
+  );
   assert.throws(
     () =>
       compilePartyFixture({

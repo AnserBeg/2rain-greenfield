@@ -1,19 +1,7 @@
 import { DRAFT_CUSTOMIZATION_TOOL } from '../../../../packages/customization/src/ai-draft.js';
 import { provisionLocalDemoAuthorization } from '../../../../packages/postgres-provider/src/composed-application-runtime.js';
 import { workflowAutomationPrincipal } from '../../../../packages/postgres-provider/src/workflow-admission.js';
-import {
-  OperationsAgentSession,
-  runOperationsAgent,
-  scriptedModel,
-  SpendMeter,
-} from '../../../../packages/operations-agent/src/index.js';
-import {
-  COMPANY,
-  seededId,
-  worldOver,
-} from '../../../../test/agent/agent-world.js';
-import { referenceScript } from '../../../../test/agent/reference-scripts.js';
-import { TASKS } from '../../../../test/agent/tasks.js';
+import { scriptedModel } from '../../../../packages/operations-agent/src/index.js';
 import { randomUUID } from 'node:crypto';
 
 import { expect, test } from '@playwright/test';
@@ -23,8 +11,19 @@ import {
   startComposedApplication,
   openCustomizeService,
 } from '../../../api/src/composition-root.js';
+import { WORKFLOW_SURFACE_FLOOR } from '../../../../packages/canonical-model/src/workflows.js';
 import { composedApplicationSeed } from '../../../../packages/domain/src/app/seed.js';
-import { SEMANTIC_OPERATION_REQUEST_VERSION } from '../../../../packages/runtime/src/semantic-operation-gateway.js';
+import type { ImmutableJsonValue } from '../../../../packages/runtime/src/request-runtime-view.js';
+import {
+  parsePinnedOperationCatalog,
+  SEMANTIC_OPERATION_REQUEST_VERSION,
+} from '../../../../packages/runtime/src/semantic-operation-gateway.js';
+import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../../../packages/runtime/src/semantic-query-gateway.js';
+import {
+  archivedRuntimeRead,
+  assertArchivedTenantEnvelope,
+  withArchivedCustomizationRuntime,
+} from '../../../../test/helpers/archived-customization-runtime.js';
 import {
   inspection,
   inspectionChange,
@@ -362,12 +361,21 @@ test('a drafted receipt workflow links an inspection and requests escalation aft
       const inspectionName = `${prefix}:field.${inspection}_name`;
       const inspectionState = `${prefix}:derived_state_field.machine.${inspection}`;
       const receiptLink = `${prefix}:relation.${inspection}_goods_receipt`;
-      const item = seededId('Field notebook');
+      const company = COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId;
+      const seed = composedApplicationSeed('distributor');
+      const seedId = (name: string) => {
+        const row = seed.find((record) =>
+          Object.values(record.values).includes(name),
+        );
+        if (!row) throw new Error(`Missing seed record ${name}`);
+        return row.recordId;
+      };
+      const item = seedId('Field notebook');
       const summary = 'Escalate the pending inspection';
       const start = new Date('2026-11-19T17:30:00.000Z');
       let instant = start;
       const operationInput = (receiptId: string) => ({
-        legalEntityId: COMPANY,
+        legalEntityId: company,
         recordId: receiptId,
         values: { [inspectionName]: 'Inspect incoming notebooks' },
         relations: { [receiptLink]: receiptId },
@@ -375,7 +383,7 @@ test('a drafted receipt workflow links an inspection and requests escalation aft
       const example = randomUUID();
       const readInspection = {
         recordId: example,
-        [inspectionArguments]: COMPANY,
+        [inspectionArguments]: company,
       };
       const pending = {
         recordId: example,
@@ -421,14 +429,14 @@ test('a drafted receipt workflow links an inspection and requests escalation aft
               type: 'goodsReceiptPosted',
               eventId: randomUUID(),
               receiptId: example,
-              legalEntityId: COMPANY,
+              legalEntityId: company,
             },
             effects: [
               {
                 call: {
                   kind: 'query',
                   id: movementQuery,
-                  input: { [movementArguments]: COMPANY },
+                  input: { [movementArguments]: company },
                 },
                 result: {
                   outcome: 'exact',
@@ -564,39 +572,170 @@ test('a drafted receipt workflow links an inspection and requests escalation aft
           await page
             .getByRole('button', { name: 'Approve', exact: true })
             .click();
-          await page.getByRole('button', { name: 'Activate now' }).click();
-          await expect(
-            page.locator('[data-customize-result="activated"]'),
-          ).toBeVisible({ timeout: 180_000 });
-          const world = worldOver(app.runtime, 'postgres');
-          const task = TASKS.find(({ id }) => id === 5)!;
-          const context = await task.arrange(world);
-          const session = new OperationsAgentSession({
-            runtime: app.runtime,
-            companyId: COMPANY,
-            personHeaders: { cookie: 'northstar-demo-actor=buyer' },
-            approve: () => Promise.resolve(true),
-          });
-          const posted = await runOperationsAgent({
-            meter: new SpendMeter(null, 1),
-            model: scriptedModel(referenceScript(task.id, context)),
-            request: task.request(context),
-            session,
-          });
-          expect(posted.stop, posted.answer).toBe('answered');
-          expect(
-            session.toolCalls.every((call) => !call.isError),
-            posted.answer,
-          ).toBe(true);
-          const lookup = () =>
-            pool.query<{ record_id: string }>(
-              "SELECT record_id FROM platform.trust_business_change_documents WHERE tenant_id=$1 AND action_id=$2 AND channel='WORKFLOW'",
-              [tenantId, create],
+          const activate = async () => {
+            await page.getByRole('button', { name: 'Activate now' }).click();
+            await expect(
+              page.locator('[data-customize-result="activated"]'),
+            ).toBeVisible({ timeout: 180_000 });
+          };
+          if (process.env.CI) {
+            await withArchivedCustomizationRuntime('840c1b48c9694e62fdb7e284fa5a8397a1360dfd', async (run) => {
+              await assertArchivedTenantEnvelope(run);
+              const read = () =>
+                archivedRuntimeRead(run, {
+                  databaseUrl,
+                  identity: app.runtime.identity,
+                });
+              expect((await read()).outcome).toBe('loaded');
+              await activate();
+              expect(await read()).toEqual({
+                outcome: 'refused',
+                code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
+                message: expect.stringContaining(
+                  `northstar.runtime:capability.surface-manifest requires version ${WORKFLOW_SURFACE_FLOOR}`,
+                ),
+              });
+            });
+          } else {
+            await activate();
+          }
+          const runtime = app.runtime;
+          const headers = { cookie: 'northstar-demo-actor=manager' };
+          const invoke = (local: string, input: ImmutableJsonValue) =>
+            runtime.entry.run({ headers }, async (view) => {
+              const operationId = `${prefix}:operation.${local}`;
+              const operation = parsePinnedOperationCatalog(
+                view.projections.operation.payload,
+              ).find((entry) => entry.operationId === operationId);
+              if (!operation) throw new Error(`Missing ${operationId}`);
+              const result = await runtime.operationGateway.invoke(
+                view,
+                {
+                  schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+                  idempotencyKey: randomUUID(),
+                  operationId,
+                  input,
+                  confirmationGrant:
+                    operation.confirmation === 'humanRequired'
+                      ? runtime.operationMediation.issueConfirmationGrant(
+                          view,
+                          operationId,
+                          input,
+                        )
+                      : null,
+                },
+                runtime.operationMediation.issueInvocation(view, 'UI'),
+              );
+              if (result.outcome !== 'succeeded' || !result.readBack) {
+                throw new Error(`${local} failed: ${JSON.stringify(result)}`);
+              }
+              return result.readBack;
+            });
+          const createRecord: Parameters<typeof inspectionLinkRecords>[0] = (
+            local,
+            values,
+            relations = {},
+          ) =>
+            invoke(`${local}_create`, {
+              recordId: randomUUID(),
+              legalEntityId: company,
+              values: Object.fromEntries(
+                Object.entries(values).map(([key, value]) => [
+                  `${prefix}:field.${local}_${key}`,
+                  value,
+                ]),
+              ),
+              relations: Object.fromEntries(
+                Object.entries(relations).map(([key, value]) => [
+                  `${prefix}:relation.${local}_${key}`,
+                  value,
+                ]),
+              ),
+            });
+          const transition = async (
+            local: string,
+            action: string,
+            recordId: string,
+          ) => {
+            const current = await runtime.entry.run(
+              { headers },
+              async (view) => {
+                const result = await runtime.queryGateway.invoke(view, {
+                  schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+                  queryId: `${prefix}:query.${local}_get`,
+                  arguments: {
+                    recordId,
+                    [`${prefix}:parameter.${local}_get_legal_entity_scope`]:
+                      company,
+                  },
+                });
+                const record = result.records[0];
+                if (!record) throw new Error(`Missing ${local} ${recordId}`);
+                return record;
+              },
             );
+            return invoke(`${local}_${action}`, {
+              recordId,
+              expectedRevision: current.revision,
+            });
+          };
+          const location = seedId('Calgary warehouse');
+          const order = await createRecord('purchase_order', {
+            supplier_party_id: seedId('Cascade Fastener Works'),
+            order_date: start.toISOString(),
+            currency: 'CAD',
+            receiving_location_id: location,
+          });
+          const orderLine = await createRecord(
+            'purchase_order_line',
+            {
+              line_number: '1',
+              item_id: item,
+              ordered_quantity: '8',
+              unit_price: '4',
+            },
+            { order: order.recordId },
+          );
+          await transition('purchase_order', 'release', order.recordId);
+          const receipt = await createRecord(
+            'goods_receipt',
+            {
+              state: `${prefix}:option.goods_receipt_state_draft`,
+              kind: `${prefix}:option.goods_receipt_kind_initial`,
+              effective_at: start.toISOString(),
+              location_id: location,
+              reason_code: 'RECEIVE',
+              reason_narrative: 'Received in full',
+            },
+            { order: order.recordId },
+          );
+          const receiptId = receipt.recordId;
+          await createRecord(
+            'goods_receipt_line',
+            {
+              line_number: '1',
+              item_id: item,
+              quantity: '8',
+              unit_id: 'EA',
+              cost_status: `${prefix}:option.goods_receipt_line_cost_status_known`,
+              unit_cost: '4',
+              currency: 'CAD',
+            },
+            { receipt: receiptId, order_line: orderLine.recordId },
+          );
+          await transition('goods_receipt', 'post', receiptId);
           await expect
-            .poll(async () => (await lookup()).rows.length, { timeout: 45_000 })
-            .toBe(1);
-          const receiptId = (await lookup()).rows[0]!.record_id;
+            .poll(
+              async () => {
+                const result = await pool.query<{ record_id: string }>(
+                  "SELECT record_id FROM platform.trust_business_change_documents WHERE tenant_id=$1 AND action_id=$2 AND channel='WORKFLOW'",
+                  [tenantId, create],
+                );
+                return result.rows.map((row) => row.record_id);
+              },
+              { timeout: 45_000 },
+            )
+            .toEqual([receiptId]);
           const detail = new URL(app.baseUrl);
           detail.searchParams.set(
             'surface',

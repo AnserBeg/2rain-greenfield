@@ -25,6 +25,7 @@ import {
   validateUnboundPermissionAcknowledgement,
 } from './conformance.js';
 import { compilerDiagnostic, finalizeDiagnostics } from './diagnostics.js';
+import { WorkflowGrantBindingError } from './workflows.js';
 import { compileDocuments } from './documents.js';
 import { requiredFormulaValidationOperationReader } from '../../canonical-model/src/formula-validation-reader.js';
 import { compileCalculatedDisplayFields } from './calculated-display-plan.js';
@@ -498,6 +499,7 @@ function compileApplicationInternal(
   try {
     appendWorkflowProjection(basePlans, packageRevision);
   } catch (error) {
+    if (!(error instanceof WorkflowGrantBindingError)) throw error;
     return failure(
       [
         {
@@ -505,10 +507,9 @@ function compileApplicationInternal(
             'COMPILER_TYPE_INVALID',
             'typeCheck',
             '$.workflows',
-            null,
+            error.grantId,
           ),
-          rule:
-            error instanceof Error ? error.message : 'Invalid workflow binding',
+          rule: 'Workflow grant does not resolve to a supported callable.',
         },
       ],
       maximumDiagnostics,
