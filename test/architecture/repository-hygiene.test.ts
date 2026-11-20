@@ -64,6 +64,7 @@ const suiteDefinitions = [
     excludedFiles: ['test/compiler/performance-budget.test.ts'],
     expectedFiles: [
       'test/compiler/adopted-language-shape.test.ts',
+      'test/compiler/booking-commitments.test.ts',
       'test/compiler/compiler-semantic-profile.test.ts',
       'test/compiler/determinism.test.ts',
       'test/compiler/disclosure-tier-projection.test.ts',
@@ -104,6 +105,7 @@ const suiteDefinitions = [
       'test/integration/table-behavior.test.ts',
       'test/integration/toolchain-contract.test.ts',
       'test/integration/trust-substrate.test.ts',
+      'test/integration/workflow-admission.test.ts',
       'test/integration/workflow-host.test.ts',
     ],
     script: 'test:integration',
@@ -183,6 +185,7 @@ const suiteDefinitions = [
     ],
     expectedFiles: [
       'test/postgres/agent-dev-tasks.test.ts',
+      'test/postgres/booking-commitments.test.ts',
       'test/postgres/agent-tasks.test.ts',
       'test/postgres/catalog-extras.test.ts',
       'test/postgres/catalog-runtime.test.ts',

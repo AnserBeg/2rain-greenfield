@@ -138,7 +138,9 @@ type Dispatch = {
 
 type Journal = Awaited<ReturnType<typeof loadJournal>>;
 type RunKey = Pick<Run, 'tenant_id' | 'environment_id' | 'run_id'>;
-type WorkflowBusinessClock = (client: PoolClient) => Date | Promise<Date>;
+export type WorkflowBusinessClock = (
+  client: PoolClient,
+) => Date | Promise<Date>;
 
 async function transactionTime(client: PoolClient): Promise<Date> {
   const result = await client.query<{ instant: Date }>(
@@ -992,7 +994,7 @@ function runKey(run: RunKey): [string, string, string] {
   return [run.tenant_id, run.environment_id, run.run_id];
 }
 
-export function sha256(value: string): string {
+export function sha256(value: string | Uint8Array): string {
   return createHash('sha256').update(value).digest('hex');
 }
 

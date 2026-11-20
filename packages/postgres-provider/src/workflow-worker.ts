@@ -8,6 +8,7 @@ import {
 import {
   PostgresWorkflowExecution,
   WorkflowRemedyRefused,
+  type WorkflowBusinessClock,
 } from './workflow-execution.js';
 import { PostgresWorkflowGateway } from './workflow-gateway.js';
 
@@ -20,6 +21,7 @@ export class PostgresWorkflowWorker {
   constructor(
     private readonly workerPool: Pool,
     private readonly runtimePool: Pool,
+    businessClock?: WorkflowBusinessClock,
   ) {
     this.#consumer = new PostgresWorkflowConsumer(workerPool);
     this.#gateway = new PostgresWorkflowGateway(runtimePool);
@@ -27,6 +29,8 @@ export class PostgresWorkflowWorker {
       workerPool,
       runtimePool,
       this.#gateway,
+      undefined,
+      businessClock,
     );
   }
 
@@ -140,6 +144,7 @@ export class PostgresWorkflowWorker {
 }
 
 export interface WorkflowSchedulerConfig {
+  readonly businessClock?: WorkflowBusinessClock;
   readonly workerDatabaseUrl: string;
   readonly runtimeDatabaseUrl: string;
 }
@@ -195,7 +200,11 @@ export function startWorkflowScheduler(
   });
   workerPool.on('error', reportFailure);
   runtimePool.on('error', reportFailure);
-  const worker = new PostgresWorkflowWorker(workerPool, runtimePool);
+  const worker = new PostgresWorkflowWorker(
+    workerPool,
+    runtimePool,
+    config.businessClock,
+  );
   const stop = superviseWorkflowPolls(worker, reportFailure);
   return {
     worker,
