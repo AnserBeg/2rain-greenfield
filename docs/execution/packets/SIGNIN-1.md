@@ -5,13 +5,13 @@
 [ADR-0081](../../decisions/ADR-0081-staff-sign-in-and-decision-authority.md) incorporates Fable’s eight dispositions. The pilot uses one ERP/identity origin pair and user-verified discoverable passkeys. Each scoped account maps to one immutable staff principal.
 The identity service enrolls the first owner and manages attended invitations, spare keys, deactivation and recovery. Recovery invalidates existing access and starts the 24-hour decision cool-off.
 ERP request entry derives the principal from the session. Protected writes verify it again in their own database transaction. The pilot loads the existing ERP gateways and SurfaceRuntime through a separate composition root.
-The loopback demo retains its explicit actor switch. The pilot requires the actual serving and identity logins and a database provisioned without fixture proof issuance.
+The shared serving path preserves DOCS-1 internal attachments and checks the staff CSRF token before accepting uploaded bytes. The loopback demo retains its explicit actor switch. The pilot requires the actual serving and identity logins and a database provisioned without fixture proof issuance.
 One forward migration adds the identity realm, staff accounts, credentials, enrollment, challenges, sessions, shared rate counters and authentication audit. The compiled surface language and release lineage stay at their existing floors.
 
 ## Gates and controls
 
-The PostgreSQL test observes committed writes, idle/absolute expiry, a clock regression, live role membership, concurrent bootstrap, cross-scope refusal, role privileges and append-only evidence. Removing either the idle check or the revocation check let an issued context write and failed the corresponding test. The previous main schema enrolled zero owners in the bootstrap race.
-The Chromium test exercises real passkey registration and assertion on HTTPS, one-use handoffs, distinct session audiences, request identity, CSRF, recovery, deactivation and sign-out across ERP instances. The signed-in purchase-order list refreshed activity in two transactions and 29 statements, within the three/40 budget.
+The PostgreSQL test observes committed writes, idle/absolute expiry, a clock regression, live role membership, concurrent bootstrap, cross-scope refusal, role privileges and append-only evidence. Removing either check admitted a write and failed its regression. The prior main schema enrolled zero owners in the bootstrap race.
+The Chromium test exercises real passkey registration and assertion on HTTPS, one-use handoffs, distinct session audiences, request identity, CSRF, recovery, deactivation and sign-out across ERP instances. It measures the signed-in purchase-order list against three transactions and forty statements.
 The import-boundary test loads the pilot with demo actor, seed and CLI imports refused, then proves its control against the demo root.
 
 ## Test it yourself
@@ -24,8 +24,8 @@ Slice 2 awaits the orchestrator. Both ADR-0073 findings and proof-gated signatur
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "SIGNIN-1",
-  "base": "f59afb11fda87bcde13170f8fe00795fadbf0506",
-  "head": "44c6a7e71624fd6cbddf78e5e03903db4b70e2b1",
+  "base": "181aef42fddddc3bbc9bd1d164115f7e2ed05bd4",
+  "head": "0639c66703d708cd8807830c89209840966e2401",
   "changedPaths": [
     "apps/api/package.json", "apps/api/src/composition-root.ts",
     "apps/api/src/erp-capabilities.ts", "apps/api/src/pilot-composition-root.ts",
@@ -33,7 +33,7 @@ Slice 2 awaits the orchestrator. Both ADR-0073 findings and proof-gated signatur
     "apps/api/src/staff-identity.ts", "apps/api/src/staff-main.ts",
     "apps/api/src/staff-protocol.ts", "apps/web/src/app-server.ts",
     "apps/web/src/surface-client.ts", "apps/web/src/surface-runtime.ts",
-    "apps/web/test/browser/staff-signin.spec.ts", "db/migrations/0044_staff_signin.sql",
+    "apps/web/test/browser/staff-signin.spec.ts", "db/migrations/0045_staff_signin.sql",
     "db/schema.snapshot.json", "packages/postgres-provider/src/composed-application-runtime.ts",
     "packages/postgres-provider/src/inventory-posting-service.ts", "packages/postgres-provider/src/request-context.ts",
     "packages/postgres-provider/src/serving-gateways.ts", "pnpm-lock.yaml",
