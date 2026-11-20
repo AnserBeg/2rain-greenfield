@@ -1,6 +1,6 @@
 # ADR-0081. Staff sign-in and authority for human decisions
 
-Proposed on 2026-11-19. The orchestrator's Fable read gates implementation.
+Accepted 2026-11-20 with the orchestrator’s amendments following the Fable read.
 
 An office worker signs in once to work in the ERP. When they approve a release, connect a provider
 or confirm a send, the ERP must be able to show who agreed, what they saw and whether they were
@@ -19,8 +19,21 @@ passkey. Keep staff credentials on the identity origin and contact credentials o
 origin with its own RP ID. Passwords and email codes are outside the staff sign-in methods admitted
 in v1.
 
-The identity service owns a dedicated HTTPS origin and uses its exact hostname as its relying party
-ID. Use a maintained WebAuthn verifier for registration and authentication. Bind a fresh random,
+One HTTPS staff identity origin serves every tenant in the deployment. At setup the owner fixes
+its WebAuthn relying-party ID (RP ID) to a registrable parent domain they intend to keep. Local
+development uses `localhost`. Verify the exact configured ceremony origin even under that parent.
+Changing the RP ID strands existing passkeys and requires attended re-enrollment.
+Each tenant/environment has independent staff accounts, including for a person who works in two
+scopes. Each account maps immutably to one policy `principal_id` in its scope. Enrollment, recovery
+and renaming preserve that mapping. Never join accounts by email or display name.
+
+This pilot deviates from the plan’s password/SSO choice and initial identity-provider integration.
+Keep the trusted identity adapter. Key credentials by method and provider credential identifier.
+Sessions and decision proofs carry method, assurance and authenticated-at, which consumers use to
+evaluate freshness. A future OIDC adapter can produce the same contract.
+Store the random opaque user handle, credential ID, COSE public key, signature counter,
+backup eligibility, current backup state, transports and revocation state. Request discoverable
+credentials, required user verification and attestation `none`. Use a maintained WebAuthn verifier for registration and authentication. Bind a fresh random,
 single-use, five-minute challenge to the browser transaction, ceremony and intended account where
 known. Check the ceremony type, configured origin, RP ID, credential binding, user presence and user
 verification. Verify the assertion signature with the stored public key. Resolve a discoverable
@@ -42,7 +55,9 @@ Provision the first tenant owner through an attended, audited installation step 
 atomically once an owner exists. Record a separately verified owner recovery contact at
 provisioning. Loss of the sole owner's keys requires that attended ownership check by the
 installation operator, an audit entry and the same revocation and re-enrollment. Ordinary staff
-administrators cannot recover a more privileged account.
+administrators cannot recover a more privileged account. Notify the owner through the verified
+channel at recovery and exclude the recovered principal from proof-gated decisions for 24 hours.
+Use this same cool-off after sole-owner recovery.
 
 Apply shared PostgreSQL attempt limits to challenge creation and completion, enrollment, recovery
 and link redemption. Start with five failed completions per account or invitation per 15 minutes and
@@ -72,6 +87,15 @@ everywhere, deactivation and recovery invalidate every session family and outsta
 that principal under the same account lock. Check revocation at protected writes as well. Compare
 shared UTC deadlines at the database, fail closed on clock regression and use an injected monotonic
 clock for in-process elapsed time.
+
+The ERP invokes a database session function in the request’s own transaction. It resolves the
+handle digest and live scoped membership, derives the principal and checks deadlines before work.
+Protected writes repeat validation in their transaction and serialize with revocation. Include
+read validation in the existing snapshot entry statement. Record foreground activity at most
+once per minute per session, conditionally in a writable entry or the existing response-boundary
+transaction for a read-only page. Combining these calls with existing statements adds zero
+transaction round trips. Measure the signed-in page, including activity refresh, against the
+SPEED-1 ceiling of three transactions and forty statements.
 [NIST session management](https://pages.nist.gov/800-63-4/sp800-63b/session/)
 
 Check Host against the configured allowlist before routing. At each origin, require a POST and a
@@ -97,7 +121,12 @@ transaction-local tenant, environment, principal and request ID to PostgreSQL.
 buyer or manager fixture. Keep this only in explicitly enabled, loopback-only local-demo composition
 with its own store. The pilot serves no switch route or selector, rejects that field, disregards the
 fixture cookie and refuses startup with demo identity enabled. Demo decisions carry fixture
-provenance. Existing server-asserted approvals retain their historical provenance and are ineligible
+provenance. Give the pilot its own composition root whose import graph excludes the demo actor,
+demo seeding, CLI and fabricated cookies. Test the graph and the running configuration.
+Ordinary ERP operations still trust the runtime’s transaction-local identity setting. A compromised
+runtime or worker can attribute such work to another person. The pilot owner accepts this residual
+for ordinary operations. Independently issued proofs protect the decision kinds below.
+Existing server-asserted approvals retain their historical provenance and are ineligible
 for new pilot effects.
 [Composition](../../packages/postgres-provider/src/composed-application-runtime.ts) ·
 [Switcher](../../apps/web/src/surface-runtime.ts)
@@ -117,6 +146,21 @@ actor, tenant, environment, company where applicable, action, outcome, exact tar
 and applicable fence. Require an assertion for **this decision** within five minutes. Changing the
 target, answer or fence requires a new review and gesture. The assistant may prepare a proposal and
 direct the person to review it.
+
+Each of the five decision kinds has one narrow SECURITY DEFINER read function executable by the
+identity service. Given the pending target and verified scope, it returns ordered labeled material
+terms and their versioned canonical digest. The identity service displays those terms through one
+generic confirmation page and binds the returned digest. The consuming function uses the same
+projection under lock. The proof schema supports one reviewed batch of N explicitly listed targets
+of the same kind, outcome and scope with one ordered aggregate digest, individual target IDs,
+digests and fences. Show every target before the gesture. Consume the complete batch atomically.
+
+A business operation that constitutes one of these decisions, a signature or a change of identity
+authority requires its corresponding proof or identity-service ceremony. An ordinary internal
+operation such as approving a purchase order relies on the verified session principal, current
+manager grant and the operation’s existing approval checks. Escalating it into an outward send
+requires the send proof. Workflow dispatch takes the approver from the consumed proof row and
+rechecks that person’s live authority. The run’s approver field is historical display data.
 
 | Decision | What the person confirms |
 | --- | --- |
@@ -156,11 +200,27 @@ owner, authentication or verifier functions.
 [Activation kernel](../../db/migrations/0005_release_activation_kernel.sql) ·
 [Workflow decision grant](../../db/migrations/0041_workflow_authority.sql)
 
+Slice 2 changes these grants on `platform` objects for `north_star_runtime` and any worker
+that inherits equivalent access. Preserve policy-scoped SELECT where already granted.
+
+| Existing grant to revoke | Replacement authority |
+| --- | --- |
+| INSERT on `release_approvals` (0004) | Proof-consuming release decision function. |
+| INSERT on `release_activation_swap_receipts`, `release_activation_attempt_outcomes`, `release_activation_outbox`, UPDATE on `active_release_pointers` (0005) | Activation kernel only. |
+| INSERT on `release_activation_verification_receipts`, `release_activation_reconciliation_starts`, `release_activation_reconciliation_alarms` (0005) | Independent verifier and reconciliation functions only. |
+| EXECUTE on `workflow_decide_approval(uuid,integer,bigint,text,text)` (0041) | Proof-consuming decision function. |
+| INSERT on `customization_patches` (0029) | A scoped proposal writer records session authorship. Approval is a separate release decision. |
+
+Only dev/test provisioning creates the fixture proof-issuer role. Its proofs carry fixture
+provenance. Pilot provisioning checks the database catalog and refuses a database with that role.
+The pilot accepts only independently issued pilot evidence.
+
 Close the two filed findings only when slice 2 demonstrates both boundaries with the actual runtime
 and worker roles. Until then the workflow scheduler and real email/maps providers are limited to the
 explicitly enabled local demo. Pilot provider connection and outward sends also require their own
 connector and delivery gates. Staff signatures need authenticated signing and the exact document
-challenge. Customer uploads and signatures additionally need verified contact redemption.
+challenge after slice 2. This ADR is ADR-0078’s external-identity ruling. Customer uploads and
+signatures require both DOCS-1 and verified contact redemption in slice 5.
 [Workflow](ADR-0073-workflow-isolate-and-authority.md#authority-boundaries) ·
 [Documents](ADR-0078-governed-documents-files-templates-and-signatures.md#signing-and-attribution) ·
 [Connectors](ADR-0080-connector-framework.md#who-can-connect-a-company)
@@ -181,7 +241,10 @@ In v1, authorized staff verify the contact through an established relationship a
 a contact passkey through an attended handoff. Staff invitations and contact enrollment have
 distinct audiences. A contact with no enrolled credential must finish that independent enrollment
 first. An email code to a previously verified address can be considered when email delivery exists.
-It would require its own assurance decision.
+It would require its own assurance decision. In practice, customer uploads for contacts without
+attended enrollment are blocked until email codes exist. Keep the method field open. Contact
+accounts belong to a single tenant and company within an environment. Fix the distinct contact
+RP ID and exact origin at deployment under the same permanence rule as the staff RP ID.
 
 In one transaction check the contact, purpose, stored association, live policy, expiry and
 revocation, consume the grant once, and issue a bounded contact session for the same scope, expiring
@@ -206,12 +269,18 @@ and is consumed once. Recheck the inviter's grantable scope at enrollment.
 Write the acting administrator, subject, before/after scope and reason with the mutation.
 Deactivation revokes access, increments the policy epoch through the existing grant model and
 preserves business and audit history. Recheck current grants on every use, including after a company
-switch and on an already open task.
+switch and on an already open task. Groups and support impersonation are outside v1. The tenant
+owner or an administrator with explicit grantable automation scope provisions and revokes service
+principals using the same policy and audit model. These principals have their own narrow grants
+and no human credentials, staff sessions or human decision authority.
 [Policy roles and memberships](../../db/migrations/0025_current_authorization.sql)
 
 ## Pilot persistence
 
-Both web instances use the same PostgreSQL stores. A response acknowledging a draft edit or task
+The pilot runs the ERP, isolated identity process and PostgreSQL on one machine behind HTTPS
+ingress. The independent verifier joins in slice 2 and the contact origin in slice 5. These
+depart from the plan’s single web/API process so each service can hold only its own database
+login and keys. A second web process connects to the same PostgreSQL stores. A response acknowledging a draft edit or task
 step follows its durable commit. Bind each row to tenant, environment, owner principal, authorized
 company scope, pinned release and revision. The browser holds an opaque locator. Recheck access
 before resuming and return a stale-state result when the pin or revision has moved.
@@ -221,6 +290,12 @@ before resuming and return a stale-state result when the pin or revision has mov
 | Document editor `buffers` | Versioned draft header and lines, entry/selection state, base revisions, in-progress creates, pending save steps, stable request keys and acknowledged receipts. Rebuild lookup displays through current queries. |
 | Task `sessions` | Ordered rows and inputs, prepared confirmation and its digest, release/fence, step cursor, request keys, results/receipt references and completion or recovery state. |
 | Assistant conversations and pending plans, when served | Owner/company, bounded conversation history, budget consumed, pinned proposal and its expiry, decision and execution/undo receipt references. An interrupted turn resumes from its recorded outcome or reports interruption. |
+
+Expire inactive unfinished drafts and interactive task state after one hour. Cap live drafts
+and tasks at 500 combined per scoped principal. Reject excess creation before acknowledging it.
+Keep committed business receipts and recovery keys through reconciliation even after UI expiry.
+Coalesce typing locally, commit each acknowledged edit batch or task step once, and show pending
+edits until commit. Measure these writes separately from the read-only page budget.
 
 Use a version check for edits and a bounded, fenced database claim for execution. Persist the step
 and its idempotency key before calling the gateway. After a lost response, recover the committed
@@ -237,7 +312,8 @@ The first implementation slice adds a forward migration for scoped accounts, cre
 challenges, session families and handle digests, enrollment/recovery records, shared attempt
 counters and append-only authentication audit. Use composite scope keys, forced RLS and narrowly
 granted functions for pre-authentication lookups. Only the identity service can write verified
-authentication events. Later slices add decision proofs and restrictions on existing writers,
+authentication events. From creation, revoke TRUNCATE from application roles and PUBLIC and
+install a refusing BEFORE TRUNCATE statement trigger on audit and proof tables. Later slices add decision proofs and restrictions on existing writers,
 contact grants and durable work state as they are used. A legacy decision keeps its original
 provenance. Require a new decision for pending pilot work. Allocate each migration after the highest
 on freshly fetched `origin/main` at merge, regenerate the snapshot and migration-list tests, rerun
@@ -259,10 +335,19 @@ material stays with the authenticator. Give the assistant no credential or confi
 | Administration and credential handling | Exercise enrollment, spare-key sign-in, recovery, account deactivation and a delegated admin's out-of-scope grant. Inspect audit rows, captured logs and model inputs for synthetic credential markers. Observe atomic rate limits from two instances. |
 | Restart and concurrent work | Save on A, read on B, interrupt after business commit and resume on B. Observe the acknowledged draft values, one business effect, one receipt and one cursor advance. Another principal cannot resume it. |
 
+Chromium’s virtual authenticator exercises enrollment and sign-in over the configured ERP/identity
+origin pair. Map two distinct test RP domains to loopback for the wrong-RP case and use trusted
+test HTTPS certificates. Check wrong origin, missing user verification, reused challenge,
+cross-ceremony challenge, handoff replay and cross-tenant use. Race two first-owner bootstraps
+and two last-owner changes. Refuse delegated recovery of a higher account, a new pilot effect
+based on a legacy approval, and pilot startup with demo identity enabled. Exercise TRUNCATE
+refusal as the actual application roles.
+
 ## Delivery after the design ruling
 
-1. Staff sign-in, sessions, attended bootstrap and session-bound principal at every staff entry point.
-2. Decision and approval binding, independent activation verification and the two filed-finding tests.
-3. Verified contact enrollment and scoped customer links for upload, view and sign with the Documents capability.
-4. Governed staff administration, company roles, delegation, deactivation and recovery.
-5. Durable drafts and task recovery across process restart and two serving instances.
+1. One ERP/identity origin pair, staff passkeys, sessions, session-bound principal and minimal
+   attended bootstrap, invite, enroll, deactivate and recover. Stop after integration.
+2. Decision proofs, batch binding, independent verification and revokes. Demonstrate both filed findings closed.
+3. Staff administration through delegated roles and company grants.
+4. Durable drafts and task recovery across restart and two serving instances.
+5. Contact enrollment and scoped upload, view and signing links after DOCS-1.
