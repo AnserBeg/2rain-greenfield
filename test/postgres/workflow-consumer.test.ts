@@ -1308,6 +1308,27 @@ test(
               } finally {
                 await setCompany(null);
               }
+
+              await world.invoke('custom_company_review_create', {
+                legalEntityId: COMPANY,
+                recordId: foreignRecord,
+                values: { [companyName]: 'Review with the same ID' },
+              });
+              const ambiguous = await startApproval(foreignWorkflow);
+              const ambiguousPlan = await pendingApproval(pool, ambiguous);
+              assert.equal(
+                await decideApproval(
+                  runtimePool,
+                  operator,
+                  ambiguous,
+                  ambiguousPlan.plan_digest,
+                  ambiguousPlan.fence,
+                  'APPROVED',
+                ),
+                false,
+                'a plan with an ambiguous record ID recorded a decision',
+              );
+              assert.equal(await journalCount(pool, ambiguous, 'RESULT'), 0);
             },
           );
 

@@ -1074,6 +1074,8 @@ async function loadFormulaPaths(
       continue;
     }
     const target = requiredEntity(storage, relation.targetEntityId);
+    // Previously compiled paths carry no issued company scope.
+    if (legalEntityReadScopeRequirement(target)) continue;
     const selected = new Map<string, string>();
     for (const path of pathsByRelation.get(relationId) ?? []) {
       if (

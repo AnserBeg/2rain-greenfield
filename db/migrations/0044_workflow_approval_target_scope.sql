@@ -25,9 +25,14 @@ DECLARE
      AND pg_input_is_valid(record_id_text, 'uuid')
      AND NOT (inputs ? 'legalEntityId')
   THEN
-    -- Ownership is immutable after creation. Shared targets must also exist.
+    -- The request has no company operand. Refuse missing and ambiguous IDs.
+    -- Storage only guarantees uniqueness within a company for owned records.
     RETURN QUERY EXECUTE format(
-      'SELECT %s FROM north_star_module.%I WHERE tenant_id = $1 AND environment_id = $2 AND record_id = $3',
+      'SELECT (array_agg(owner_company))[1] FROM (
+         SELECT %s AS owner_company FROM north_star_module.%I
+          WHERE tenant_id = $1 AND environment_id = $2 AND record_id = $3
+          LIMIT 2
+       ) AS matches HAVING count(*) = 1',
       CASE WHEN owned THEN 'legal_entity_id' ELSE 'NULL::uuid' END,
       target->>'physicalTableName'
     ) USING tenant, environment, record_id_text::uuid; END IF; END

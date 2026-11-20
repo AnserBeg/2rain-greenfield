@@ -86,6 +86,23 @@
           "expected": "a valid workflow create could not read its validation operand"
         }
       ]
+    },
+    {
+      "name": "workflow-approval-ambiguous-record",
+      "claim": "An approval cannot bind a record ID shared by multiple companies.",
+      "file": "db/migrations/0044_workflow_approval_target_scope.sql",
+      "original": "       ) AS matches HAVING count(*) = 1",
+      "replacement": "       ) AS matches",
+      "test": {
+        "files": ["test/postgres/workflow-consumer.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-consumer.test.ts",
+          "name": "the worklist and decision use the target record’s stored owner",
+          "expected": "a plan with an ambiguous record ID recorded a decision"
+        }
+      ]
     }
   ]
 }
