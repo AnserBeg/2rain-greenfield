@@ -100,6 +100,7 @@ function evidence(
     tables: [
       {
         schemaVersion: 'northstar.billing-rate-table/v1',
+        publishedAt: '2020-01-01T00:00:00.000Z',
         version: 't1',
         planDigest: compileRatePlan(p).digest,
         currency: 'CAD',
@@ -292,21 +293,57 @@ test('every missing Edmonton anchor minute resolves to the gap end, every repeat
   }
 });
 test('small best covers agree with exhaustive mixed-period enumeration, including longer tails and cent rounding', () => {
-  for (const daily of [1, 5, 31])
-    for (const weekly of [4, 21, 90])
-      for (let days = 1; days <= 15; days++) {
-        let best = Infinity;
-        for (let d = 0; d <= days; d++)
-          for (let w = 0; w <= Math.ceil(days / 7); w++)
-            if (d + 7 * w >= days)
-              best = Math.min(best, d * daily + w * weekly);
-        const p = plan(),
-          e = evidence(p, days, {
-            daily: String(daily),
-            weekly: String(weekly),
-          });
-        assert.equal(cents(p, e), 100 * best);
-      }
+  const jan31 = '2025-01-31T16:00:00.000Z';
+  for (const partialTime of ['wholeStarted', 'prorateShortestTail'] as const)
+    for (const daily of [1, 31])
+      for (const weekly of [4, 90])
+        for (const monthly of [15, 100]) {
+          const p = plan([
+            {
+              ...time,
+              partialTime,
+              rates: { day: 'd', week: 'w', month: 'm' },
+            },
+          ]);
+          for (const days of [0.5, 1, 4, 7, 7.25, 13.5, 15, 27.75, 28]) {
+            // Enumerate all week/month counts, then buy just the remaining days.
+            let best = Infinity;
+            for (let m = 0; m <= 1; m++)
+              for (let w = 0; w <= Math.ceil(days / 7); w++) {
+                const tail = Math.max(0, days - 28 * m - 7 * w);
+                best = Math.min(
+                  best,
+                  m * monthly +
+                    w * weekly +
+                    daily *
+                      (partialTime === 'wholeStarted' ? Math.ceil(tail) : tail),
+                );
+              }
+            assert.equal(
+              cents(
+                p,
+                evidence(
+                  p,
+                  days,
+                  { d: String(daily), w: String(weekly), m: String(monthly) },
+                  jan31,
+                ),
+              ),
+              100 * best,
+            );
+          }
+        }
+  const monthly = plan([
+    { ...time, rates: { month: 'm' }, partialTime: 'prorateShortestTail' },
+  ]);
+  assert.equal(
+    cents(monthly, evidence(monthly, 28, { m: '100' }, jan31)),
+    10000,
+  );
+  assert.equal(
+    cents(monthly, evidence(monthly, 14, { m: '100' }, jan31)),
+    5000,
+  );
   const p = plan([
     { ...time, rates: { day: 'd' }, partialTime: 'prorateShortestTail' },
   ]);
@@ -490,6 +527,7 @@ test('pinned complete tables use customer then assigned list then base and refus
   e.assignments = [
     {
       listId: 'list',
+      publishedAt: base.publishedAt,
       revision: '1',
       priority: 3,
       effectiveFrom: base.effectiveFrom,
@@ -540,4 +578,111 @@ test('pinned complete tables use customer then assigned list then base and refus
     }),
   );
   assert.throws(() => cents(p, { ...e, asOf: roll(start, 4000) }), /horizon/);
+});
+
+test('one positive hour earns a three-day minimum limited to CAD 70', () => {
+  const p = plan([
+    {
+      ...time,
+      rates: { day: 'daily' },
+      minimumDuration: { period: 'day', count: 3 },
+      cap: 'cap',
+    },
+  ]);
+  assert.equal(cents(p, evidence(p, 1 / 24, { daily: '30', cap: '70' })), 7000);
+});
+
+test('a different currency on the selected table alone refuses the quote', () => {
+  const p = plan(),
+    e = evidence(p, 1);
+  e.tables[0]!.currency = 'USD';
+  assert.throws(
+    () => quoteBillingService(p, e),
+    /Rate table plan version or currency mismatch/,
+  );
+});
+
+test('publication after opening preserves CAD 100 plus 30 even on a late first quote', () => {
+  const p = plan(),
+    e = evidence(p, 8);
+  const boundary = roll(e.anchor, 4);
+  e.tables[0]!.effectiveFrom = e.anchor;
+  const split = allocate(e, p, boundary);
+  const successor = {
+    ...e.tables[0]!,
+    version: 'backdated',
+    publishedAt: roll(e.anchor, 5),
+    values: { daily: '10', weekly: '50' },
+  };
+  e.tables.push(successor);
+  assert.equal(split.allocations[0]?.allocatedCents, '10000');
+  assert.equal(cents(p, split), 3000);
+  assert.equal(cents(p, e), 13000);
+  assert.equal(cents(p, { ...e, asOf: roll(start, 36) }), 54000);
+  // A newly published list assignment must obey the same opening fence.
+  e.tables.push({
+    ...successor,
+    publishedAt: e.tables[0]!.publishedAt,
+    version: 'list',
+    selector: { kind: 'priceList', listId: 'discount' },
+  });
+  e.assignments.push({
+    listId: 'discount',
+    revision: 'joined',
+    priority: 1,
+    effectiveFrom: e.anchor,
+    publishedAt: successor.publishedAt,
+  });
+  assert.equal(cents(p, split), 3000);
+});
+
+test('a service-end fee uses the end occurrence across invoice schedules', () => {
+  const close = {
+    id: 'end',
+    kind: 'fixed',
+    stage: 'afterCapBeforeTax',
+    taxClassification: 'untaxed',
+    base: 'enrollment',
+    amount: 'fee',
+    occurrence: { kind: 'oneOff', at: 'serviceEnd' },
+  } as const;
+  for (const schedule of [
+    { kind: 'onServiceEnd' },
+    { kind: 'calendarMonth', boundaryMinutes: 0 },
+  ] as const) {
+    const p = plan([close]);
+    p.schedule = schedule;
+    const e = evidence(p, 45, { fee: '10' }, '2025-01-01T00:00:00.000Z');
+    e.serviceEnd = e.asOf;
+    e.tables.push({
+      ...e.tables[0]!,
+      version: 'feb',
+      effectiveFrom: '2025-02-01T00:00:00.000Z',
+      values: { fee: '20' },
+    });
+    assert.equal(cents(p, e), 2000);
+  }
+});
+
+test('a 31-digit entitlement is accepted as either allocated or reserved cents', () => {
+  const p = plan([{ ...time, rates: { day: 'daily' } }]);
+  const e = evidence(p, 2, { daily: '100000000000000' });
+  e.bands[0]!.quantity = '100000000000000';
+  const split = allocate(e, p, roll(start, 1)),
+    first = 10n ** 30n;
+  assert.equal(
+    quoteBillingService(p, e).lines[0]!.entitlementCents,
+    String(2n * first),
+  );
+  assert.equal(split.allocations[0]!.allocatedCents, String(first));
+  assert.equal(
+    quoteBillingService(p, split).lines[0]!.differenceCents,
+    String(first),
+  );
+  split.allocations[0]!.reservedCents = String(first);
+  split.allocations[0]!.allocatedCents = '0';
+  assert.equal(
+    quoteBillingService(p, split).lines[0]!.differenceCents,
+    String(first),
+  );
 });

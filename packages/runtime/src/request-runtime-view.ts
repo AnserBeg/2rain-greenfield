@@ -1,4 +1,4 @@
-import { BILLING_READER } from '../../canonical-model/src/billing.js';
+import { BILLING_INTERVAL_READER } from '../../canonical-model/src/billing.js';
 import { BOOKING_OPERATION_READER } from '@north-star/canonical-model';
 import {
   assertTrustedRequestContext,
@@ -218,7 +218,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 26 adds header relations, relation List columns and shared or lifecycle-less editors.
     // 27 adds internal document attachments. 28 adds record and form layout revisions.
     // 29 adds verified workflow declarations. 30 adds billing declarations and service quotes.
-    maximumSupportedVersion: BILLING_READER,
+    // 31 binds agreed billing intervals to selected source fields.
+    maximumSupportedVersion: BILLING_INTERVAL_READER,
   },
 });
 
