@@ -27,8 +27,8 @@ In Customize, choose **Arrange a form or record page**, then the purchase order 
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "UI-COMPOSE-1",
-  "base": "2b373f4cf9c73676b448357987d3159fa9d8fcaf",
-  "head": "2d2e470fc71cdd3831b6652017453b68bbec651c",
+  "base": "60451569e92ffe9aad3fc2c67bfa326a978b1f3c",
+  "head": "502497b098155ec5247811aecc5812c2199e5f4c",
   "changedPaths": [
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/document-editor.ts",
     "apps/web/src/ledger-styles.ts", "apps/web/src/surface-composition.ts", "apps/web/src/surface-contract.ts",
