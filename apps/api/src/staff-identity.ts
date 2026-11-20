@@ -403,6 +403,22 @@ export class StaffIdentity {
     );
     check(result.rows[0]?.allowed);
   }
+  async receipt(reference: unknown, identity: string) {
+    return this.scoped(
+      async (c) =>
+        (
+          await c.query<{ receipt: unknown }>(
+            'SELECT platform.staff_read_decision_receipt($1,$2,$3,$4) AS receipt',
+            [
+              this.realm.tenantId,
+              this.realm.environmentId,
+              digest(identity),
+              field(reference, 36),
+            ],
+          )
+        ).rows[0]!.receipt,
+    );
+  }
   async choices(identity: string) {
     return this.scoped(
       async (c) =>
@@ -692,7 +708,7 @@ export class StaffIdentity {
           const choice = tx.intent.decision;
           check(choice && tx.intent.reviewed);
           const issued = await c.query<{ proof: string }>(
-            'SELECT platform.staff_issue_decision($1,$2,$3,$4,$5,$6,$7,$8) AS proof',
+            'SELECT platform.staff_issue_decision($1,$2,$3,$4,$5,$6,$7,$8,$9) AS proof',
             [
               this.realm.tenantId,
               this.realm.environmentId,
@@ -702,6 +718,7 @@ export class StaffIdentity {
               choice.kind,
               choice.targets,
               tx.intent.reviewed,
+              tx.expires_at,
             ],
           );
           return { proof: issued.rows[0]!.proof };

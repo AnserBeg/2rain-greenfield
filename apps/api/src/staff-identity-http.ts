@@ -52,6 +52,12 @@ form.addEventListener('submit',async event=>{
       status.textContent='Signed out.';return;
     }
     const fields=Object.fromEntries(new FormData(form));
+    if(action==='receipt'){
+      const receipt=await post('/receipt',{reference:fields.reference.trim()});
+      status.textContent=receipt.decidedAt?'Decision recorded '+receipt.decidedAt+
+        (receipt.attempts.length?' · Activation attempts '+receipt.attempts.join(', '):''):receipt.expired?'Confirmation expired. Review the decision again.':'Awaiting decision processing.';
+      return;
+    }
     if(action==='choices'){
       const choices=await post('/choices',{});
       if(!choices.length){status.textContent='No decisions available.';return;}
@@ -128,7 +134,7 @@ const pages: Record<string, [string, string]> = {
   ],
   '/decisions': [
     'Review a decision',
-    '<button value="choices" formnovalidate>Find pending decisions</button><label>Decision<select name="kind"><option value="release">Approve release</option><option value="customize">Approve customization</option><option value="retry">Retry workflow</option></select></label><label>Preparation IDs or suspended run IDs<textarea name="targets" required></textarea></label><label>Company ID for workflow Retry<input name="company"></label><button value="review">Review terms</button><section id="terms" aria-live="polite"></section><button value="decision" disabled>Confirm with passkey</button>',
+    '<button value="choices" formnovalidate>Find pending decisions</button><label>Decision<select name="kind"><option value="release">Approve release</option><option value="customize">Approve customization</option><option value="retry">Retry workflow</option></select></label><label>Preparation IDs or suspended run IDs<textarea name="targets" required></textarea></label><label>Company ID for workflow Retry<input name="company"></label><button value="review">Review terms</button><section id="terms" aria-live="polite"></section><button value="decision" disabled>Confirm with passkey</button><label>Decision reference<input name="reference"></label><button value="receipt" formnovalidate>Find receipt</button>',
   ],
   '/account': [
     'Manage sign-in',
@@ -256,10 +262,20 @@ export function identityHandler(
       sameOriginPost(req, r.identityOrigin);
       const flow = cookieValue(req.headers.cookie, flowCookie);
       check(flow && req.headers['x-erp-csrf'] === csrf(flow));
-      if (['/begin', '/finish', '/review', '/choices'].includes(url.pathname)) {
+      if (
+        ['/begin', '/finish', '/review', '/choices', '/receipt'].includes(
+          url.pathname,
+        )
+      ) {
         await identity.spend('source', sourceOf(req), 30);
       }
       const input = await readJson(req);
+      if (url.pathname === '/receipt') {
+        const previous = cookieValue(req.headers.cookie, idCookie);
+        check(previous);
+        json(res, await identity.receipt(input.reference, previous));
+        return;
+      }
       if (url.pathname === '/review' || url.pathname === '/choices') {
         const identityCookie = cookieValue(req.headers.cookie, idCookie);
         check(identityCookie);

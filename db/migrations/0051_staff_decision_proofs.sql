@@ -106,14 +106,8 @@ REVOKE ALL ON FUNCTION north_star_internal.staff_retry_terms(uuid,uuid,uuid,uuid
 
 -- All three readers and the consuming writer use the same projection. The ordered
 -- list includes the scope and outcome even when two environments share release bytes.
-CREATE FUNCTION north_star_internal.staff_decision_terms(t uuid,e uuid,p uuid,company uuid,kind text,ids uuid[])
-RETURNS jsonb LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
-DECLARE target uuid; item jsonb; items jsonb := '[]'; BEGIN
-  IF t IS DISTINCT FROM nullif(current_setting('north_star.tenant_id',true),'')::uuid
-    OR e IS DISTINCT FROM nullif(current_setting('north_star.environment_id',true),'')::uuid
-    OR kind IS NULL OR kind NOT IN ('release','customize','retry') OR (company IS NOT NULL) <> (kind='retry')
-    OR ids IS NULL OR cardinality(ids) NOT BETWEEN 1 AND 32 OR cardinality(ids)<>(SELECT count(DISTINCT id) FROM unnest(ids) id)
-    THEN RAISE EXCEPTION 'decision scope refused'; END IF;
+CREATE FUNCTION north_star_internal.staff_require_decision_authority(t uuid,e uuid,p uuid,company uuid)
+RETURNS void LANGUAGE plpgsql SET search_path=pg_catalog,pg_temp AS $$ BEGIN
   PERFORM pg_advisory_xact_lock_shared(hashtextextended('northstar.release-approval-authority:'||t::text,0));
   PERFORM 1 FROM platform.current_policy_epochs WHERE tenant_id=t AND environment_id=e FOR SHARE;
   IF NOT EXISTS (SELECT FROM platform.current_policy_memberships m JOIN platform.current_policy_roles role
@@ -122,7 +116,18 @@ DECLARE target uuid; item jsonb; items jsonb := '[]'; BEGIN
     OR (SELECT eligible FROM platform.release_approver_eligibility_events WHERE tenant_id=t AND principal_id=p
         ORDER BY policy_version DESC LIMIT 1) IS DISTINCT FROM true
     OR EXISTS (SELECT FROM platform.workflow_definitions WHERE tenant_id=t AND automation_principal_id=p)
-    THEN RAISE EXCEPTION 'decision authority refused'; END IF;
+    THEN RAISE EXCEPTION 'decision authority refused'; END IF; END $$;
+REVOKE ALL ON FUNCTION north_star_internal.staff_require_decision_authority(uuid,uuid,uuid,uuid) FROM PUBLIC;
+
+CREATE FUNCTION north_star_internal.staff_decision_terms(t uuid,e uuid,p uuid,company uuid,kind text,ids uuid[])
+RETURNS jsonb LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
+DECLARE target uuid; item jsonb; items jsonb := '[]'; BEGIN
+  IF t IS DISTINCT FROM nullif(current_setting('north_star.tenant_id',true),'')::uuid
+    OR e IS DISTINCT FROM nullif(current_setting('north_star.environment_id',true),'')::uuid
+    OR kind IS NULL OR kind NOT IN ('release','customize','retry') OR (company IS NOT NULL) <> (kind='retry')
+    OR ids IS NULL OR cardinality(ids) NOT BETWEEN 1 AND 32 OR cardinality(ids)<>(SELECT count(DISTINCT id) FROM unnest(ids) id)
+    THEN RAISE EXCEPTION 'decision scope refused'; END IF;
+  PERFORM north_star_internal.staff_require_decision_authority(t,e,p,company);
   PERFORM 1 FROM platform.active_release_pointers WHERE tenant_id=t AND environment_id=e FOR SHARE;
   FOREACH target IN ARRAY ids LOOP
     IF kind='retry' THEN
@@ -185,7 +190,7 @@ $$;
 REVOKE ALL ON FUNCTION platform.staff_review_retry(uuid,uuid,bytea,uuid,uuid[]) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION platform.staff_review_retry(uuid,uuid,bytea,uuid,uuid[]) TO north_star_identity;
 
-CREATE FUNCTION platform.staff_issue_decision(t uuid,e uuid,identity_key bytea,actor uuid,company uuid,kind text,ids uuid[],reviewed text)
+CREATE FUNCTION platform.staff_issue_decision(t uuid,e uuid,identity_key bytea,actor uuid,company uuid,kind text,ids uuid[],reviewed text,ceremony_deadline timestamptz)
 RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE s platform.staff_sessions; facts jsonb; binding bytea; observed timestamptz; issued uuid; BEGIN
   s := north_star_internal.staff_decision_session(t,e,identity_key);
@@ -194,13 +199,14 @@ DECLARE s platform.staff_sessions; facts jsonb; binding bytea; observed timestam
   binding := sha256(convert_to(facts::text,'UTF8'));
   IF encode(binding,'hex') IS DISTINCT FROM reviewed THEN RAISE EXCEPTION 'reviewed decision changed'; END IF;
   observed := platform.staff_observed_time();
+  IF ceremony_deadline IS NULL OR observed IS NULL OR observed>=ceremony_deadline THEN RAISE EXCEPTION 'decision ceremony expired'; END IF;
   INSERT INTO platform.staff_decision_proofs(tenant_id,environment_id,company_id,principal_id,family_id,session_generation,
     decision_kind,outcome,target_ids,terms,decision_digest,method,assurance,authenticated_at,expires_at)
     VALUES(t,e,company,actor,s.family_id,sha256(identity_key),kind,facts->>'outcome',ids,facts,binding,s.method,s.assurance,
-      observed,least(observed+interval '5 minutes',s.absolute_deadline)) RETURNING proof_id INTO issued;
+      observed,least(observed+interval '5 minutes',ceremony_deadline,s.absolute_deadline)) RETURNING proof_id INTO issued;
   RETURN issued; END $$;
-REVOKE ALL ON FUNCTION platform.staff_issue_decision(uuid,uuid,bytea,uuid,uuid,text,uuid[],text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION platform.staff_issue_decision(uuid,uuid,bytea,uuid,uuid,text,uuid[],text) TO north_star_identity;
+REVOKE ALL ON FUNCTION platform.staff_issue_decision(uuid,uuid,bytea,uuid,uuid,text,uuid[],text,timestamptz) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION platform.staff_issue_decision(uuid,uuid,bytea,uuid,uuid,text,uuid[],text,timestamptz) TO north_star_identity;
 
 CREATE FUNCTION platform.staff_consume_decision(t uuid,e uuid,company uuid,kind text,evidence uuid,request uuid)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
@@ -374,3 +380,18 @@ DECLARE s platform.staff_sessions; choice record; facts jsonb; BEGIN
   EXCEPTION WHEN raise_exception THEN NULL; END; END LOOP; END $$;
 REVOKE ALL ON FUNCTION platform.staff_review_choices(uuid,uuid,bytea) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION platform.staff_review_choices(uuid,uuid,bytea) TO north_star_identity;
+
+CREATE FUNCTION platform.staff_read_decision_receipt(t uuid,e uuid,identity_key bytea,evidence uuid)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE s platform.staff_sessions; p platform.staff_decision_proofs; d platform.staff_decision_receipts; BEGIN
+  s := north_star_internal.staff_decision_session(t,e,identity_key);
+  SELECT * INTO STRICT p FROM platform.staff_decision_proofs WHERE proof_id=evidence AND
+    (tenant_id,environment_id,principal_id)=(t,e,s.principal_id);
+  PERFORM north_star_internal.staff_require_decision_authority(t,e,s.principal_id,p.company_id);
+  SELECT * INTO d FROM platform.staff_decision_receipts WHERE proof_id=evidence;
+  RETURN jsonb_build_object('decision',p.decision_kind,'reference',p.proof_id,'company',p.company_id,'method',p.method,'assurance',p.assurance,
+    'authenticatedAt',p.authenticated_at,'decidedAt',d.decided_at,'expired',coalesce(platform.staff_observed_time()>=p.expires_at,true),'request',d.request_id,'attempts',coalesce((
+      SELECT jsonb_agg(a.activation_attempt_id ORDER BY array_position(p.target_ids,a.preparation_id))
+        FROM platform.release_approvals a WHERE (a.tenant_id,a.environment_id,a.staff_proof_id)=(t,e,evidence)),'[]'::jsonb)); END $$;
+REVOKE ALL ON FUNCTION platform.staff_read_decision_receipt(uuid,uuid,bytea,uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION platform.staff_read_decision_receipt(uuid,uuid,bytea,uuid) TO north_star_identity;

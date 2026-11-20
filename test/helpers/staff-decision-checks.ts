@@ -124,7 +124,7 @@ async function exerciseProof(
       async (c) =>
         (
           await c.query<{ id: MintedUuid }>(
-            'SELECT platform.staff_issue_decision($1,$2,$3,$4,$5,$6,$7,$8) AS id',
+            "SELECT platform.staff_issue_decision($1,$2,$3,$4,$5,$6,$7,$8,clock_timestamp()+interval '5 minutes') AS id",
             [
               f.tenantId,
               f.environmentId,
@@ -241,6 +241,12 @@ async function exerciseProof(
     code: '23505',
     constraint: 'staff_decision_receipts_pkey',
   });
+  const receipt = (await a.identity.receipt(proof, a.handle)) as {
+    attempts: string[];
+    decidedAt: string;
+  };
+  assert.deepEqual(receipt.attempts, attempts);
+  assert.ok(receipt.decidedAt);
   const audit = await admin.query(
     `SELECT p.principal_id,p.method,p.assurance,p.actor_type,p.company_id,p.decision_kind,p.terms,
       d.decided_at>=p.authenticated_at AS ordered FROM platform.staff_decision_proofs p JOIN platform.staff_decision_receipts d USING(proof_id) WHERE p.proof_id=$1`,
@@ -342,7 +348,7 @@ export async function checkReleaseDecisions(
       async (c) =>
         (
           await c.query<{ id: MintedUuid }>(
-            "SELECT platform.staff_issue_decision($1,$2,$3,$4,NULL,'customize',$5,$6) AS id",
+            "SELECT platform.staff_issue_decision($1,$2,$3,$4,NULL,'customize',$5,$6,clock_timestamp()+interval '5 minutes') AS id",
             [
               f.tenantId,
               f.environmentId,
@@ -425,6 +431,22 @@ export async function checkRetryDecision(
   await withDecisionAccount(admin, connection, f, async (account) => {
     const result = await exerciseProof(admin, account, f, 'retry', run);
     assert.deepEqual(result.attempts, []);
+    const records = await scoped(
+      account.verifier,
+      account.realm,
+      async (client) =>
+        (
+          await client.query(
+            'SELECT * FROM platform.staff_retry_decision_record($1,$2,$3)',
+            [f.tenantId, f.environmentId, result.proof],
+          )
+        ).rows,
+    );
+    assert.equal(records.length, 1);
+    assert.equal(records[0]?.run_id, run);
+    assert.equal(records[0]?.decided_by, f.principal);
+    assert.equal(records[0]?.company_id, f.company);
+    assert.ok(BigInt(records[0].fence) > BigInt(records[0].previous_fence));
     assert.equal(
       (
         await admin.query(
