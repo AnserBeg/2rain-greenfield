@@ -44,9 +44,9 @@ Run `node --import tsx --test test/postgres/booking-commitments.test.ts` with Do
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "BOOKING-1",
-  "base": "08edc207bcd5be1982c9c0bcf1723172df9cb7ad", "head": "54c429a5df65e6e2afa696735de678987789b592",
+  "base": "032b87c00df3ee22184685050b9cecc01c62cc59", "head": "048285f0d7d35c74349ca0ec7f025e8895ba91e6",
   "changedPaths": [
-    "apps/api/src/pilot-composition-root.ts", "apps/api/src/staff-main.ts", "db/migrations/0052_booking_authority.sql",
+    "apps/api/src/pilot-composition-root.ts", "apps/api/src/staff-main.ts", "db/migrations/0053_booking_authority.sql",
     "db/schema.snapshot.json", "packages/canonical-model/src/booking.ts", "packages/postgres-provider/src/booking-capability-executor.ts",
     "packages/postgres-provider/src/capability-operation-executor-factory.ts", "packages/postgres-provider/src/composed-application-runtime.ts", "packages/postgres-provider/src/release-verification-service.ts", "packages/postgres-provider/src/serving-gateways.ts",
     "packages/runtime/src/semantic-operation-gateway.ts", "test/architecture/release-persistence-boundary.test.ts", "test/architecture/tenant-completeness.manifest.json",
