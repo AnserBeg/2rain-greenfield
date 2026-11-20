@@ -18,6 +18,9 @@ on:
       expected_head:
         description: Ref SHA bound by automatic promotion
         type: string
+      pr_number:
+        description: Pull request concurrency group for automatic promotions
+        type: string
       merge_sha:
         description: Synthetic PR merge commit bound by automatic promotion
         type: string
@@ -26,9 +29,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.ref != 'refs/heads/main' && inputs.tier || 'auto' }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
-  queue: ${{ github.ref == 'refs/heads/main' && 'max' || 'single' }}
+  group: ci-${{ github.workflow }}-${{ inputs.merge_sha && format('pr-{0}', inputs.pr_number) || github.ref }}-${{ github.ref != 'refs/heads/main' && inputs.tier || 'auto' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' || inputs.merge_sha != '' }}
+  queue: ${{ github.ref == 'refs/heads/main' && inputs.merge_sha == '' && 'max' || 'single' }}
 
 env:
   CI: '1'
@@ -43,6 +46,8 @@ jobs:
     name: Select CI tier and covered tests
     runs-on: ubuntu-24.04
     outputs:
+      dispatch_ref: ${{ steps.select.outputs.ref }}
+      dispatch_head: ${{ steps.select.outputs.head }}
       tier: ${{ steps.select.outputs.tier }}
       promote: ${{ steps.select.outputs.promote }}
       files: ${{ steps.select.outputs.files }}
@@ -70,13 +75,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          PACKET_REF: ${{ github.head_ref || github.ref_name }}
-          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          PACKET_REF: ${{ needs.select.outputs.dispatch_ref }}
+          EXPECTED_HEAD: ${{ needs.select.outputs.dispatch_head }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           MERGE_SHA: ${{ github.event_name == 'pull_request' && github.sha || '' }}
         run: |
           run_id=$(gh api -X POST "repos/$GH_REPO/actions/workflows/ci.yml/dispatches" \
             -f "ref=$PACKET_REF" -f 'inputs[tier]=full' -f "inputs[expected_head]=$EXPECTED_HEAD" \
-            -f "inputs[merge_sha]=$MERGE_SHA" -F return_run_details=true --jq .workflow_run_id)
+            -f "inputs[merge_sha]=$MERGE_SHA" -f "inputs[pr_number]=$PR_NUMBER" -F return_run_details=true --jq .workflow_run_id)
           [[ "$run_id" =~ ^[0-9]+$ ]]
           echo "Full CI: https://github.com/$GH_REPO/actions/runs/$run_id" >> "$GITHUB_STEP_SUMMARY"
           while true; do
@@ -781,10 +787,6 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ inputs.merge_sha || github.sha }}
-      - name: Check required job conclusions
-        env:
-          CI_JOB_RESULTS: ${{ toJSON(needs) }}
-        run: node .github/scripts/check-ci-results.mjs
       - name: Set up pinned Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -793,6 +795,14 @@ jobs:
         run: corepack enable
       - name: Install frozen dependencies
         run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      - name: Check required job conclusions
+        env:
+          CI_JOB_RESULTS: ${{ toJSON(needs) }}
+        run: node --import tsx .github/scripts/check-ci-results.mjs
+      - name: Verify the tested commit
+        env:
+          TESTED_SHA: ${{ inputs.merge_sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$TESTED_SHA"
       - name: Begin executed-file evidence run
         run: node --import tsx test/helpers/begin-reachability-run.ts
       - name: Download executed-file evidence
