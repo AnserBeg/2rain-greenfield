@@ -1,6 +1,8 @@
 import type { AddressInstallation } from '../../../packages/runtime/src/address-gateway.js';
 import { layoutDigest } from '@north-star/canonical-model';
 import {
+  draftBoardRevision,
+  type BoardTarget,
   layoutCommand,
   arrangeableLayoutFields,
   type LayoutTarget,
@@ -58,6 +60,7 @@ interface CustomizationStatus {
   readonly patches: readonly ScreenPatch[];
 }
 interface CustomizationTargets {
+  readonly boards?: readonly BoardTarget[];
   readonly layouts?: readonly LayoutTarget[];
   readonly documentTargets?: readonly {
     readonly entityId: string;
@@ -256,6 +259,20 @@ export async function renderCustomizeScreen(
           ? page('Arrange page', layoutEditor(target) + backLink())
           : failure('Choose an available page.');
       }
+      const board = url.searchParams.get('board');
+      if (board) {
+        const target = (await loadTargets()).boards?.find(
+          (b) => b.body.listSurfaceId === board,
+        );
+        if (!target) return failure('Choose a List with a lifecycle.');
+        const id = url.searchParams.get('editBoard');
+        const previous = target.views.find((v) => v.surfaceId === id);
+        if (id && !previous) return failure('This Board is unavailable.');
+        return page(
+          previous ? 'Edit Board' : 'Add Board view',
+          boardEditor(target, previous) + backLink(),
+        );
+      }
       const arrange = url.searchParams.get('arrange');
       if (arrange)
         return page('Arrange a list', await arrangeForm(loadTargets, arrange));
@@ -286,25 +303,27 @@ export async function renderCustomizeScreen(
       case 'draft':
         return drafted(
           await service.draft(
-            submission.kind === 'addLayoutRevision'
-              ? layoutSubmission(
-                  (await loadTargets()).layouts ?? [],
-                  submission,
-                )
-              : patchFromForm(
-                  submission,
-                  submission.kind === 'addValidation'
-                    ? (await loadTargets()).validationTargets?.find(
-                        ({ entityId }) => entityId === submission.entity,
-                      )
-                    : undefined,
-                  submission.kind === 'addCalculatedDisplayField'
-                    ? (await loadTargets()).calculatedDisplayTargets?.find(
-                        ({ recordSurfaceId }) =>
-                          recordSurfaceId === submission.surface,
-                      )
-                    : undefined,
-                ),
+            submission.kind === 'addBoardViewRevision'
+              ? boardSubmission((await loadTargets()).boards ?? [], submission)
+              : submission.kind === 'addLayoutRevision'
+                ? layoutSubmission(
+                    (await loadTargets()).layouts ?? [],
+                    submission,
+                  )
+                : patchFromForm(
+                    submission,
+                    submission.kind === 'addValidation'
+                      ? (await loadTargets()).validationTargets?.find(
+                          ({ entityId }) => entityId === submission.entity,
+                        )
+                      : undefined,
+                    submission.kind === 'addCalculatedDisplayField'
+                      ? (await loadTargets()).calculatedDisplayTargets?.find(
+                          ({ recordSurfaceId }) =>
+                            recordSurfaceId === submission.surface,
+                        )
+                      : undefined,
+                  ),
             'visualBuilder',
             undefined,
             actor,
@@ -456,6 +475,9 @@ async function overview(
     '<p><a href="/?customize=address">Company address and map settings</a></p>',
     documentFieldForm(targets),
     choiceForm(targets),
+    targets.boards?.length
+      ? `<form method="get"><fieldset><legend>Add view</legend><input type="hidden" name="customize" value=""><label>Record type <select name="board">${targets.boards.map((t) => `<option value="${escapeHtml(t.body.listSurfaceId)}">${escapeHtml(t.listLabel)}</option>`).join('')}</select></label> <button>Add Board view</button></fieldset></form>`
+      : '',
     layoutPicker(targets.layouts ?? []),
     arrangePicker(targets),
     savedViewPicker(targets),
@@ -1171,6 +1193,8 @@ function describe(patch: PatchSummary): string {
       return `New line table "${label}"`;
     case 'declareLifecycle':
       return 'New states and actions';
+    case 'addBoardViewRevision':
+      return 'Board view revision';
     case 'addLayoutRevision':
       return 'Arranged form or record page';
     case 'changeSet':
@@ -1270,6 +1294,76 @@ function page(
   });
 }
 
+function boardEditor(
+  target: BoardTarget,
+  previous?: BoardTarget['views'][number],
+) {
+  const h = escapeHtml;
+  const stages = target.body.grouping.stages;
+  const order = previous?.states ?? stages.map((s) => s.stateId);
+  const existing = previous
+    ? ''
+    : target.views
+        .map((v) => {
+          const params = new URLSearchParams({
+            customize: '',
+            board: target.body.listSurfaceId,
+            editBoard: v.surfaceId,
+          });
+          return `<a href="/?${h(params.toString())}">Edit ${h(v.label)}${v.lifecycle === 'retired' ? ' (retired)' : ''}</a>`;
+        })
+        .join(' ');
+  const hidden = (name: string, value: string) =>
+    `<input type="hidden" name="${name}" value="${h(value)}">`;
+  const source =
+    hidden('action', 'draft') +
+    hidden('kind', 'addBoardViewRevision') +
+    hidden('list', target.body.listSurfaceId) +
+    hidden('source', layoutDigest(target.body)) +
+    (previous
+      ? hidden('viewId', previous.surfaceId) +
+        hidden('predecessor', previous.revisionId)
+      : '');
+  const positions = stages
+    .map((stage) => {
+      const position = order.indexOf(stage.stateId) + 1;
+      return `<label>${h(stage.label)} <input aria-label="${h(stage.label)} position" type="number" min="1" max="64" name="stage:${h(stage.stateId)}" value="${position || ''}"></label>`;
+    })
+    .join('');
+  return `<h1>${previous ? 'Edit Board' : 'Add Board view'}</h1>${existing ? '<nav aria-label="Existing Boards">' + existing + '</nav>' : ''}<form method="post">${source}<label>View name <input name="label" required maxlength="240" value="${h(previous?.label ?? target.listLabel + ' board')}"></label><fieldset><legend>Stages in display order</legend>${positions}<p>Leave a position empty to omit that stage.</p></fieldset><button name="lifecycle" value="active">Draft Board</button>${previous?.lifecycle === 'active' ? '<button name="lifecycle" value="retired">Draft retirement</button>' : ''}</form>`;
+}
+function boardSubmission(
+  targets: readonly BoardTarget[],
+  submission: CustomizeScreenSubmission,
+) {
+  const target = targets.find((t) => t.body.listSurfaceId === submission.list);
+  if (!target || layoutDigest(target.body) !== submission.source)
+    throw new Error('The collection changed. Choose the Board again.');
+  const previous = target.views.find((v) => v.surfaceId === submission.viewId);
+  if (
+    (submission.viewId && !previous) ||
+    (previous?.revisionId ?? '') !== (submission.predecessor ?? '')
+  )
+    throw new Error('This Board revision has changed. Reopen it in Customize.');
+  const positions = target.body.grouping.stages.flatMap((s) => {
+    const value = submission['stage:' + s.stateId];
+    return value ? [{ state: s.stateId, order: Number(value) }] : [];
+  });
+  if (
+    !positions.every(
+      (p) => Number.isInteger(p.order) && p.order >= 1 && p.order <= 64,
+    ) ||
+    new Set(positions.map((p) => p.order)).size !== positions.length
+  )
+    throw new Error('Give each stage its own position.');
+  return draftBoardRevision(
+    target,
+    submission.label ?? '',
+    positions.sort((a, b) => a.order - b.order).map((p) => p.state),
+    previous,
+    submission.lifecycle === 'retired' ? 'retired' : 'active',
+  );
+}
 function layoutPicker(targets: readonly LayoutTarget[]) {
   if (!targets.length) return '';
   return `<form method="get"><input type="hidden" name="customize" value=""><fieldset><legend>Arrange a form or record page</legend><label for="customize-layout-page">Page</label> <select id="customize-layout-page" name="layout">${targets.map((t) => `<option value="${escapeHtml(t.body.surfaceId + '/' + t.body.mode)}">${escapeHtml(t.label)} · ${t.body.mode}</option>`).join('')}</select> <button>Choose page</button></fieldset></form>`;

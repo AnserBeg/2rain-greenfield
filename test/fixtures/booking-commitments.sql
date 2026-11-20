@@ -1,5 +1,9 @@
 -- A released operation catalog and the two managed record types it binds.
 -- Only fixture installation runs as the migration owner. Calls use north_star_runtime.
+CREATE TABLE north_star_module.test_booking_parents (
+  tenant_id uuid NOT NULL, environment_id uuid NOT NULL, record_id uuid PRIMARY KEY, legal_entity_id uuid NOT NULL,
+  revision bigint NOT NULL DEFAULT 1, archived_at timestamptz
+);
 CREATE TABLE north_star_module.test_booking_owners (
   tenant_id uuid NOT NULL, environment_id uuid NOT NULL, record_id uuid PRIMARY KEY, legal_entity_id uuid NOT NULL,
   revision bigint NOT NULL DEFAULT 1, archived_at timestamptz
@@ -8,6 +12,8 @@ CREATE TABLE north_star_module.test_booking_resources (
   tenant_id uuid NOT NULL, environment_id uuid NOT NULL, record_id uuid PRIMARY KEY,
   revision bigint NOT NULL DEFAULT 1, archived_at timestamptz
 );
+ALTER TABLE north_star_module.test_booking_owners ADD COLUMN parent_id uuid;
+GRANT SELECT, UPDATE ON north_star_module.test_booking_owners TO north_star_module_runtime;
 CREATE TABLE public.booking_test_clock (instant timestamptz NOT NULL);
 INSERT INTO public.booking_test_clock VALUES ('2030-02-10 18:00Z');
 CREATE OR REPLACE FUNCTION north_star_internal.booking_now() RETURNS timestamptz LANGUAGE sql VOLATILE
@@ -33,9 +39,19 @@ BEGIN
   UPDATE platform.active_release_pointers SET release_id=r,fence=fence+1 WHERE tenant_id=t AND environment_id=e;
   INSERT INTO platform.current_policy_roles(tenant_id,environment_id,role_id,role_key) VALUES(t,e,role,'dispatcher');
   INSERT INTO platform.current_policy_memberships(tenant_id,environment_id,membership_id,principal_id,role_id) VALUES(t,e,gen_random_uuid(),p,role);
-  INSERT INTO platform.inventory_tenant_calendars(tenant_id,time_zone,business_day_boundary) VALUES(t,'America/Denver','00:00');
+  INSERT INTO platform.inventory_tenant_calendars(tenant_id,time_zone,business_day_boundary) VALUES(t,'America/Denver','08:00');
   INSERT INTO north_star_module.test_booking_owners(tenant_id,environment_id,record_id,legal_entity_id)
     SELECT t,e,md5('owner'||n)::uuid,md5('company'||(n%2))::uuid FROM generate_series(1,40) n;
+  INSERT INTO north_star_module.test_booking_parents
+    SELECT tenant_id,environment_id,record_id,legal_entity_id,revision,archived_at FROM north_star_module.test_booking_owners;
+  UPDATE north_star_module.test_booking_owners SET parent_id=record_id;
+  INSERT INTO platform.current_policy_roles(tenant_id,environment_id,role_id,role_key)
+    VALUES(t,e,md5('shared-reader')::uuid,'shared-reader');
+  INSERT INTO platform.current_policy_memberships(tenant_id,environment_id,membership_id,principal_id,role_id,legal_entity_id)
+    VALUES(t,e,gen_random_uuid(),md5('scoped')::uuid,role,md5('company1')::uuid),
+          (t,e,gen_random_uuid(),md5('scoped')::uuid,md5('shared-reader')::uuid,NULL);
+  INSERT INTO platform.current_policy_permission_grants(tenant_id,environment_id,role_id,permission_id,resource_id)
+    VALUES(t,e,md5('shared-reader')::uuid,'example.booking:permission.asset',target_entity);
   INSERT INTO north_star_module.test_booking_resources(tenant_id,environment_id,record_id)
     SELECT t,e,md5('resource'||n)::uuid FROM generate_series(1,20) n;
   FOREACH kind IN ARRAY ARRAY['unit','pool'] LOOP
@@ -61,7 +77,11 @@ BEGIN
     VALUES(t,e,role,'example.booking:permission.visit',owner_entity),(t,e,role,'example.booking:permission.asset',target_entity);
   FOREACH family IN ARRAY ARRAY['operation-catalog','storage-target'] LOOP
     payload := CASE WHEN family='operation-catalog' THEN jsonb_build_object('kind','operationCatalogPayload','operations',ops)
-      ELSE jsonb_build_object('kind','storageTargetPayload','relations','[]'::jsonb,'entities',jsonb_build_array(
+      ELSE jsonb_build_object('kind','storageTargetPayload','relations',jsonb_build_array(
+        jsonb_build_object('sourceEntityId', owner_entity,'targetEntityId','example.booking:entity.account',
+          'ownership','parentScopedChild','relationColumn',jsonb_build_object('physicalName','parent_id'))),
+      'entities',jsonb_build_array(
+        jsonb_build_object('entityId','example.booking:entity.account','lifecycle','active','legalEntity',jsonb_build_object('column','legal_entity_id'),'physicalTableName','test_booking_parents'),
         jsonb_build_object('entityId',owner_entity,'lifecycle','active','legalEntity',jsonb_build_object('column','legal_entity_id'),'physicalTableName','test_booking_owners'),
         jsonb_build_object('entityId',target_entity,'lifecycle','active','physicalTableName','test_booking_resources'))) END;
     chunk := encode(sha256(convert_to(payload::text,'UTF8')),'hex');

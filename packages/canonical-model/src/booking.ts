@@ -89,6 +89,16 @@ export function bookingDeclarationProblem(
       return operation.operationId;
     if (b.operation !== 'hold' && operation.confirmation !== 'humanRequired')
       return operation.operationId;
+    const permission = pkg.permissions.find(
+      (entry) => entry.permissionId === operation.permission.targetId,
+    );
+    if (
+      !permission ||
+      permission.lifecycle !== 'active' ||
+      permission.resource.targetId !== b.ownerEntity ||
+      !['update', 'transition'].includes(permission.action)
+    )
+      return operation.operationId;
     const ownerQuery = pkg.queries.find(
       (q) => q.queryId === operation.readBack.targetId,
     );
