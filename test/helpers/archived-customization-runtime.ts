@@ -13,6 +13,7 @@ import {
 import type { ArchivedRunner } from './archived-runtime-process.js';
 export {
   archivedRuntimeRead,
+  archivedServingQuery,
   archivedServingRead,
   withArchivedCustomizationRuntime,
 } from './archived-runtime-process.js';

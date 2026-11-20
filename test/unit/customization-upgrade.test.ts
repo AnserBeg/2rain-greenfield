@@ -325,6 +325,36 @@ const cases = {
   changeSet: retired({ kind: 'changeSet', patches: [field, files] }),
 } satisfies Record<customization.CustomizationPatchKind, ReplayCase>;
 
+test('an active or retired template never blocks editing its record type', async () => {
+  const retire = {
+    kind: 'retireDocumentTemplate',
+    schemaVersion: 'northstar.document-template-retire/v1',
+    templateId: template.templateId,
+    previousRevisionId: template.revisionId,
+  };
+  const arrange = {
+    kind: 'arrangeLayout',
+    surface: id('surface.custom_equipment_list'),
+    relabel: [{ field: id('field.custom_equipment_name'), label: 'Tool' }],
+  };
+  for (const state of [[template], [template, retire]])
+    for (const edit of [field, arrange]) {
+      const result = await customization.compileInSandbox({
+        acknowledgement,
+        base: extended,
+        chain: [...state, edit].map(patch),
+        tip: customization.serializeRelease(tip),
+      });
+      assert.equal(
+        result.status,
+        'compiled',
+        `${state.length === 1 ? 'active' : 'retired'} template, ${edit.kind}: ${JSON.stringify(result)}`.slice(
+          0,
+          2000,
+        ),
+      );
+    }
+});
 test('upgrade replay admission and its named cases cover the independently parsed vocabulary', () => {
   const admitted = [...customization.UPGRADE_PATCH_KINDS].sort();
   assert.deepEqual(

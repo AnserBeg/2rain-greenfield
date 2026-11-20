@@ -47,6 +47,10 @@ import {
 } from '@north-star/compiler';
 import { bindCalculatedDisplayField } from '../../canonical-model/src/calculated-display-bindings.js';
 import {
+  declaresOptionalReadModelDependency,
+  OPTIONAL_DEPENDENCY_QUERY_READER,
+} from '../../canonical-model/src/read-model-dependencies.js';
+import {
   CALCULATED_DISPLAY_QUERY_READER,
   parseCalculatedDisplayProjection,
   projectCalculatedDisplay,
@@ -883,9 +887,14 @@ function verifyFormulaProjectionReference(
       : rules.length
         ? operationFloor !== requiredFormulaValidationOperationReader(rules)
         : operationFloor >= LITERAL_VALIDATION_OPERATION_READER) ||
-    (displays.length
-      ? queryFloor !== CALCULATED_DISPLAY_QUERY_READER
-      : queryFloor >= CALCULATED_DISPLAY_QUERY_READER) ||
+    // The query floor is the highest catalog feature present.
+    (declaresOptionalReadModelDependency(
+      isRecord(normalized) ? normalized.queries : undefined,
+    )
+      ? queryFloor !== OPTIONAL_DEPENDENCY_QUERY_READER
+      : displays.length
+        ? queryFloor !== CALCULATED_DISPLAY_QUERY_READER
+        : queryFloor >= CALCULATED_DISPLAY_QUERY_READER) ||
     (declaring &&
       (reference?.instanceId !==
         `${declaring.package.namespace}:projection.formula-rule` ||

@@ -67,6 +67,10 @@ import {
 } from '@north-star/runtime/request-runtime-view';
 import type { Pool, PoolClient } from 'pg';
 import {
+  declaresOptionalReadModelDependency,
+  OPTIONAL_DEPENDENCY_QUERY_READER,
+} from '../../canonical-model/src/read-model-dependencies.js';
+import {
   CALCULATED_DISPLAY_QUERY_READER,
   parseCalculatedDisplayProjection,
 } from '../../canonical-model/src/calculated-display-projection.js';
@@ -1015,7 +1019,27 @@ function definitionFromSnapshotRows(
   const consumesRules =
     !booking && operationFloor >= LITERAL_VALIDATION_OPERATION_READER;
   const queryFloor = query.requiredRuntimeCapability?.minimumVersion ?? 0;
-  const consumesDisplays = queryFloor === CALCULATED_DISPLAY_QUERY_READER;
+  // The query floor is the HIGHEST catalog feature present. Optional
+  // read-model dependencies are read from the catalog itself; above the
+  // display rung the floor no longer says whether displays are declared, so
+  // the formula projection's own declaration does.
+  const optionalDependencies = declaresOptionalReadModelDependency(
+    isRecord(query.payload) ? query.payload.queries : undefined,
+  );
+  if (optionalDependencies !== queryFloor >= OPTIONAL_DEPENDENCY_QUERY_READER)
+    throw malformedProjection(
+      'optional read-model dependencies and the query reader floor disagree',
+    );
+  const earlyFormula =
+    queryFloor > CALCULATED_DISPLAY_QUERY_READER &&
+    declaresRuleProjection &&
+    hasRuleProjectionLink
+      ? projectionFor(REQUEST_RUNTIME_FORMULA_RULE_FAMILY)
+      : null;
+  const consumesDisplays =
+    queryFloor === CALCULATED_DISPLAY_QUERY_READER ||
+    (isRecord(earlyFormula?.payload) &&
+      Object.hasOwn(earlyFormula.payload, 'calculatedFields'));
   const consumesFormula =
     consumesRules || consumesDisplays || (booking && declaresRuleProjection);
   if (
@@ -1027,7 +1051,7 @@ function definitionFromSnapshotRows(
     );
   }
   const formulaRule = consumesFormula
-    ? projectionFor(REQUEST_RUNTIME_FORMULA_RULE_FAMILY)
+    ? (earlyFormula ?? projectionFor(REQUEST_RUNTIME_FORMULA_RULE_FAMILY))
     : null;
   if (formulaRule) {
     try {

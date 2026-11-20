@@ -11,6 +11,10 @@ import {
 } from '@north-star/canonical-model';
 import { CALCULATED_DISPLAY_QUERY_READER } from '../../canonical-model/src/calculated-display-projection.js';
 import {
+  declaresOptionalReadModelDependency,
+  OPTIONAL_DEPENDENCY_QUERY_READER,
+} from '../../canonical-model/src/read-model-dependencies.js';
+import {
   CANONICALIZATION_PROFILE_VERSION,
   LANGUAGE_VERSION,
   ADOPTED_LANGUAGE_VERSION,
@@ -1592,6 +1596,9 @@ function decorateV3ProjectionPlans(
       const hasReadModels = packageRevision.queries.some(
         (query) => 'readModel' in query && query.readModel,
       );
+      const hasOptionalDependencies = declaresOptionalReadModelDependency(
+        packageRevision.queries,
+      );
       const payload = plan.payload as {
         kind: string;
         queries: Array<Record<string, unknown>>;
@@ -1606,6 +1613,9 @@ function decorateV3ProjectionPlans(
                 minimumVersion: Math.max(
                   plan.requiredRuntimeCapability.minimumVersion,
                   hasListSums ? 3 : 2,
+                  hasOptionalDependencies
+                    ? OPTIONAL_DEPENDENCY_QUERY_READER
+                    : 0,
                 ),
               },
             }
@@ -2303,7 +2313,11 @@ function verifyCompleteness(
       : declaredRules &&
         operationFloor !==
           requiredFormulaValidationOperationReader(declaredRules)) ||
-    (declaredDisplays && queryFloor !== CALCULATED_DISPLAY_QUERY_READER) ||
+    // The query floor is the highest catalog feature present, so a display
+    // floor is exact only when no higher feature rides the same catalog.
+    (declaresOptionalReadModelDependency(packageRevision.queries)
+      ? queryFloor !== OPTIONAL_DEPENDENCY_QUERY_READER
+      : declaredDisplays && queryFloor !== CALCULATED_DISPLAY_QUERY_READER) ||
     ((declaredRules || declaredDisplays) &&
       (ruleReference?.instanceId !==
         `${packageRevision.package.namespace}:projection.formula-rule` ||

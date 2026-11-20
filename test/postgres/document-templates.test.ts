@@ -17,12 +17,12 @@ import {
   openCustomizeService,
   startComposedApplication,
 } from '../../apps/api/src/composition-root.js';
-import { DOCUMENT_TEMPLATES_SURFACE_FLOOR } from '../../packages/canonical-model/src/documents.js';
+import { OPTIONAL_DEPENDENCY_QUERY_READER } from '../../packages/canonical-model/src/read-model-dependencies.js';
 import type { DocumentMetadata } from '../../packages/runtime/src/document-gateway.js';
 import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../packages/runtime/src/semantic-query-gateway.js';
 import { worldOver, seededId } from '../agent/agent-world.js';
 import {
-  archivedRuntimeRead,
+  archivedServingQuery,
   assertArchivedTenantEnvelope,
   withArchivedCustomizationRuntime,
 } from '../helpers/archived-customization-runtime.js';
@@ -33,6 +33,8 @@ import {
 
 const id = (kind: string, name: string) => `northstar.app:${kind}.${name}`;
 const companyId = COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId;
+// The serving binary DOCS-1 integrates over. Re-pin it to main at integration.
+const PRECEDING_SERVING_BINARY = 'f1829ea9ce70a886a050e043dce23cb12267335d';
 const tenant = 'custom_service_sheet';
 const template = (
   type: string,
@@ -261,22 +263,34 @@ test(
           assert.equal((await request(sheetUrl, 'generate')).status, 404);
           await service.approve(draft.patchId);
           if (process.env.CI) {
+            // Flag-free tenant compiles stay byte-identical to the archived
+            // compiler's output.
             await withArchivedCustomizationRuntime(
               '08edc207bcd5be1982c9c0bcf1723172df9cb7ad',
+              assertArchivedTenantEnvelope,
+            );
+            // The preceding serving binary (main before DOCS-1 integrates)
+            // supports query-catalog rung 4. The first-party base declares
+            // optional read-model dependencies (rung 5), so its request path
+            // must refuse by name before it decodes the catalog.
+            await withArchivedCustomizationRuntime(
+              PRECEDING_SERVING_BINARY,
               async (run) => {
-                await assertArchivedTenantEnvelope(run);
-                const read = () =>
-                  archivedRuntimeRead(run, {
+                const served = () =>
+                  run(archivedServingQuery, {
                     databaseUrl: options.databaseUrl,
                     identity: app.runtime.identity,
+                    queryId: id('query', 'commercial_purchase_order_get'),
                   });
-                assert.equal((await read()).outcome, 'loaded');
-                await service.activate(draft.patchId);
-                assert.deepEqual(await read(), {
+                const refusal = {
                   outcome: 'refused',
+                  stage: 'load',
                   code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
-                  message: `runtime capability northstar.runtime:capability.surface-manifest requires version ${DOCUMENT_TEMPLATES_SURFACE_FLOOR} and this runtime supports 30`,
-                });
+                  message: `runtime capability northstar.runtime:capability.query-catalog requires version ${OPTIONAL_DEPENDENCY_QUERY_READER} and this runtime supports ${OPTIONAL_DEPENDENCY_QUERY_READER - 1}`,
+                };
+                assert.deepEqual(await served(), refusal);
+                await service.activate(draft.patchId);
+                assert.deepEqual(await served(), refusal);
               },
             );
           } else {

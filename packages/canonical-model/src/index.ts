@@ -1,5 +1,6 @@
 export * from './board.js';
 export * from './layout.js';
+export * from './read-model-dependencies.js';
 export {
   ADOPTED_LANGUAGE_VERSION,
   ADOPTED_NORMALIZATION_PROFILE_VERSION,
