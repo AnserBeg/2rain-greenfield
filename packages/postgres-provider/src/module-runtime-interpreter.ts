@@ -541,25 +541,38 @@ export class PostgresModuleRuntimeInterpreter
         });
       },
       undefined,
-      authorize &&
-        (async (client) => {
-          const storage = await this.#loadPinnedStorageTarget(client, request);
-          const entity = requiredEntity(
-            storage,
-            request.definition.effect.entity.targetId,
-          );
-          const owner = entity.legalEntity
-            ? await withModuleRuntimeRole(client, () =>
-                readRecordCompany(client, entity, parsedInput.recordId),
-              )
-            : null;
-          policyVersion = await withRecordCompanyPolicyClient(
-            this.pool,
-            client,
-            request.context,
-            () => authorize(owner),
-          );
-        }),
+      async (client) => {
+        if (
+          !authorize &&
+          request.definition.effect.kind === 'createRecordEffect'
+        )
+          return;
+        const storage = await this.#loadPinnedStorageTarget(client, request);
+        const entity = requiredEntity(
+          storage,
+          request.definition.effect.entity.targetId,
+        );
+        if (!authorize) {
+          if (entity.legalEntity)
+            throw failure(
+              'MODULE_RECORD_COMPANY_AUTHORIZATION_REQUIRED',
+              'mutating a company-owned record requires owner authorization',
+              entity.entityId,
+            );
+          return;
+        }
+        const owner = entity.legalEntity
+          ? await withModuleRuntimeRole(client, () =>
+              readRecordCompany(client, entity, parsedInput.recordId),
+            )
+          : null;
+        policyVersion = await withRecordCompanyPolicyClient(
+          this.pool,
+          client,
+          request.context,
+          () => authorize(owner),
+        );
+      },
     );
     return Object.freeze({
       kind: 'semanticOperationResult',
