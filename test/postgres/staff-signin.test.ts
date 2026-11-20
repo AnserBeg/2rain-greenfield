@@ -229,7 +229,7 @@ test('staff sessions derive one live scoped principal at entry and again at the 
       const relations = await pool.query<{ table_name: string }>(
         "SELECT table_name FROM information_schema.tables WHERE table_schema='platform' AND left(table_name,6)='staff_'",
       );
-      assert.equal(relations.rowCount, 9);
+      assert.equal(relations.rowCount, 11);
       for (const { table_name } of relations.rows) {
         assert.match(table_name, /^staff_[a-z_]+$/u);
         for (const role of [runtime, identity])

@@ -40,6 +40,7 @@ async function withDecisionAccount<T>(
     realm: StaffRealm;
     identity: StaffIdentity;
     handle: string;
+    erpHandle: string;
     verifier: pg.Pool;
     membership: string;
   }) => Promise<T>,
@@ -53,7 +54,8 @@ async function withDecisionAccount<T>(
   };
   const role = randomUUID(),
     membership = randomUUID(),
-    handle = secret();
+    handle = secret(),
+    erpHandle = secret();
   await admin.query(
     "INSERT INTO platform.staff_accounts(tenant_id,environment_id,principal_id,user_handle,display_name,recovery_contact,status) VALUES($1,$2,$3,$4,'Approver','attended','active')",
     [f.tenantId, f.environmentId, f.principal, randomBytes(32)],
@@ -74,7 +76,7 @@ async function withDecisionAccount<T>(
       f.environmentId,
       f.principal,
       digest(handle),
-      randomBytes(32),
+      digest(erpHandle),
       randomBytes(32),
     ],
   );
@@ -91,6 +93,7 @@ async function withDecisionAccount<T>(
       realm,
       identity: new StaffIdentity(identityPool, realm, randomBytes(32)),
       handle,
+      erpHandle,
       verifier,
       membership,
     });
@@ -326,19 +329,77 @@ export async function checkReleaseDecisions(
   await withDecisionAccount(admin, connection, f, async (a) => {
     const release = await exerciseProof(admin, a, f, 'release', prep);
     assert.equal(release.attempts.length, 1);
-    const patch = async (label: string) =>
-      admin.query(
-        `INSERT INTO platform.customization_patches(tenant_id,environment_id,patch_id,patch_version,patch_kind,payload,payload_digest,channel,authored_by,base_package_id,
-      base_package_version,base_revision_id,base_release_root,parent_revision_id,resulting_revision_id,resulting_release_id,language_version,normalization_profile_version)
-      SELECT r.tenant_id,r.environment_id,gen_random_uuid(),'northstar.customization-patch/v1','addField',$3,encode(sha256($3),'hex'),'visualBuilder',r.created_by,'example','1.0.0',
-        s.app_package_revision_id,s.content_hash,s.app_package_revision_id,r.app_package_revision_id,r.release_id,'v1','v1'
-      FROM platform.tenant_releases s JOIN platform.tenant_releases r ON r.release_id=$2 WHERE s.release_id=$1`,
-        [
-          source,
-          candidate,
-          Buffer.from(JSON.stringify({ kind: 'addField', label })),
-        ],
+    const patch = async (label: string) => {
+      const author = randomUUID();
+      await withDecisionAccount(
+        admin,
+        connection,
+        { ...f, principal: author },
+        async (maker) => {
+          const profile = (
+            await admin.query(
+              `SELECT jsonb_build_object('patch_version','northstar.customization-patch/v1','patch_kind','addField',
+          'payload',$3::bytea,'payload_digest',encode(sha256($3),'hex'),'channel','visualBuilder','authored_by',$4::uuid,
+          'base_package_id','example','base_package_version','1.0.0','base_revision_id',s.app_package_revision_id,'base_release_root',s.content_hash,
+          'parent_revision_id',s.app_package_revision_id,'resulting_revision_id',r.app_package_revision_id,'resulting_release_id',r.release_id,
+          'language_version','v1','normalization_profile_version','v1') AS proposal FROM platform.tenant_releases s
+          JOIN platform.tenant_releases r ON r.release_id=$2 WHERE s.release_id=$1`,
+              [
+                source,
+                candidate,
+                Buffer.from(JSON.stringify({ kind: 'addField', label })),
+                f.principal,
+              ],
+            )
+          ).rows[0].proposal;
+          const runtime = new pg.Pool({
+            ...connection,
+            user: 'north_star_runtime',
+          });
+          try {
+            const submit = () =>
+              scoped(
+                runtime,
+                a.realm,
+                async (c) =>
+                  (
+                    await c.query<{ id: string }>(
+                      'SELECT platform.staff_propose_customization($1,$2,$3,$4) AS id',
+                      [
+                        f.tenantId,
+                        f.environmentId,
+                        digest(maker.erpHandle),
+                        profile,
+                      ],
+                    )
+                  ).rows[0]!.id,
+              );
+            await assert.rejects(
+              submit(),
+              /customization author grant required/,
+            );
+            await admin.query(
+              `INSERT INTO platform.current_policy_permission_grants(tenant_id,environment_id,role_id,permission_id,resource_id)
+            SELECT tenant_id,environment_id,role_id,'northstar.runtime:permission.customize_author','northstar.runtime:customization.application'
+            FROM platform.current_policy_memberships WHERE membership_id=$1`,
+              [maker.membership],
+            );
+            const patchId = await submit();
+            assert.equal(
+              (
+                await admin.query(
+                  'SELECT authored_by FROM platform.customization_patches WHERE patch_id=$1',
+                  [patchId],
+                )
+              ).rows[0]?.authored_by,
+              author,
+            );
+          } finally {
+            await runtime.end();
+          }
+        },
       );
+    };
     await patch('Reference');
     const selection = { kind: 'customize', company: null, targets: [prep] };
     const review = await a.identity.review(selection, a.handle);

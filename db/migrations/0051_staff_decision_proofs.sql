@@ -332,8 +332,10 @@ DECLARE actor uuid; patch platform.customization_patches; BEGIN
   actor := platform.staff_session_principal(t,e,handle,true,false);
   IF actor IS NULL OR t IS DISTINCT FROM nullif(current_setting('north_star.tenant_id',true),'')::uuid
     OR e IS DISTINCT FROM nullif(current_setting('north_star.environment_id',true),'')::uuid
-    OR NOT platform.staff_has_role(t,e,actor,'staff-owner')
     THEN RAISE EXCEPTION 'customization proposal refused'; END IF;
+  PERFORM set_config('north_star.principal_id',actor::text,true);
+  PERFORM platform.lock_current_policy_epoch(t,e);
+  IF NOT EXISTS (SELECT FROM platform.customization_permission_roles()) THEN RAISE EXCEPTION 'customization author grant required'; END IF;
   patch := jsonb_populate_record(NULL::platform.customization_patches,proposal);
   patch.patch_id := gen_random_uuid(); patch.tenant_id := t; patch.environment_id := e;
   patch.authored_by := actor; patch.created_at := platform.staff_observed_time();
@@ -395,3 +397,24 @@ DECLARE s platform.staff_sessions; p platform.staff_decision_proofs; d platform.
         FROM platform.release_approvals a WHERE (a.tenant_id,a.environment_id,a.staff_proof_id)=(t,e,evidence)),'[]'::jsonb)); END $$;
 REVOKE ALL ON FUNCTION platform.staff_read_decision_receipt(uuid,uuid,bytea,uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION platform.staff_read_decision_receipt(uuid,uuid,bytea,uuid) TO north_star_identity;
+
+-- WORKFLOW-1 can join inside its remedy transaction. A new writer grant alone
+-- cannot resume a suspended pilot run or change its admitted execution fence.
+CREATE FUNCTION north_star_internal.staff_guard_workflow_retry() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$ BEGIN
+  IF NOT EXISTS (SELECT FROM north_star_internal.staff_store_mode WHERE mode='pilot') THEN RETURN NEW; END IF;
+  IF NOT EXISTS (
+    SELECT FROM platform.staff_decision_receipts d JOIN platform.staff_decision_proofs p USING (tenant_id,environment_id,proof_id)
+    CROSS JOIN LATERAL jsonb_array_elements(p.terms->'targets') item
+    WHERE d.xmin=pg_current_xact_id()::xid AND p.decision_kind='retry' AND d.tenant_id=OLD.tenant_id AND d.environment_id=OLD.environment_id
+      AND p.principal_id=nullif(current_setting('north_star.principal_id',true),'')::uuid
+      AND d.request_id=nullif(current_setting('north_star.request_id',true),'')::uuid
+      AND item->>'run'=OLD.run_id::text AND item->>'release'=OLD.release_id::text AND item->>'root'=OLD.release_root
+      AND item->>'previousFence'=OLD.execution_fence::text AND item->>'fence'=NEW.execution_fence::text
+      AND OLD.status='SUSPENDED' AND NEW.status='RUNNABLE' AND NEW.execution_fence>OLD.execution_fence)
+    THEN RAISE EXCEPTION 'workflow Retry requires its current staff decision'; END IF;
+  RETURN NEW; END $$;
+REVOKE ALL ON FUNCTION north_star_internal.staff_guard_workflow_retry() FROM PUBLIC;
+CREATE TRIGGER staff_workflow_retry BEFORE UPDATE OF execution_fence,status ON platform.workflow_runs
+  FOR EACH ROW WHEN (OLD.execution_fence<>NEW.execution_fence OR (OLD.status='SUSPENDED' AND NEW.status='RUNNABLE'))
+  EXECUTE FUNCTION north_star_internal.staff_guard_workflow_retry();
