@@ -45,7 +45,6 @@ test('inventory platform authority is limited to calendars and release-recorded 
         const migrated = await runMigrations(admin, migrations);
         assert.equal(
           migrated.applied.at(-1),
-          '0048_document_attachment_authority.sql',
           '0049_booking_commitments.sql',
         );
         assert.equal(migrated.verified.length, migrations.length);
