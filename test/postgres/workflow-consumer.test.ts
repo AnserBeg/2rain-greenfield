@@ -286,6 +286,23 @@ test(
             [{ workflow_id: 'receipt-review' }],
             'verification after approval cannot change the approved set',
           );
+          await t.test(
+            'Customize lists only source bound to the live approval',
+            async () => {
+              assert.deepEqual(await service.workflows(operator), [
+                {
+                  workflowId: 'receipt-review',
+                  body,
+                  grants,
+                  trigger: 'A goods receipt is posted',
+                },
+              ]);
+              assert.deepEqual(
+                await service.workflows(await trustedContext(automation)),
+                [],
+              );
+            },
+          );
           await cloneDefinition(pool, enrolled.releaseId, 'late-definition');
           assert.equal(
             (
