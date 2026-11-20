@@ -635,6 +635,52 @@ test(
             },
           );
           await t.test(
+            'PO attachments stay visible when approval requests are withheld',
+            async () => {
+              const attachmentUrl = new URL(poUrl);
+              attachmentUrl.searchParams.set('mode', 'upload');
+              attachmentUrl.searchParams.set('retryKey', randomUUID());
+              attachmentUrl.searchParams.set(
+                'fileName',
+                'approval-evidence.pdf',
+              );
+              const uploaded = await fetch(attachmentUrl, {
+                method: 'POST',
+                headers: {
+                  origin: attachmentUrl.origin,
+                  'content-type': 'application/pdf',
+                },
+                body: new Uint8Array(issuedPo.bytes),
+              });
+              assert.equal(uploaded.status, 201, await uploaded.clone().text());
+              const attachment = (await uploaded.json()) as DocumentMetadata;
+              const read = () =>
+                directRead(orderId, attachment, 'purchase_order');
+              assert.equal((await read()).rowCount, 1);
+              const permission = id(
+                'permission',
+                'purchase_order_approval_read',
+              );
+              const revoked = await revokeGrant(permission);
+              assert.ok(revoked.rowCount);
+              try {
+                const page = await fetch(record);
+                assert.equal(page.status, 200);
+                assert.match(await page.text(), /Nov 18, 2026/u);
+                assert.equal(
+                  (await read()).rowCount,
+                  1,
+                  'an optional approvals dependency hid the PO attachment',
+                );
+              } finally {
+                await restoreGrant(
+                  permission,
+                  revoked.rows.map(({ role_id }) => role_id),
+                );
+              }
+            },
+          );
+          await t.test(
             'a read-model dependency without required: false stays mandatory',
             async () => {
               const permission = id('permission', 'purchasing_settings_read');

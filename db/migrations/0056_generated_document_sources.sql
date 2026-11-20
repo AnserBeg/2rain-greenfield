@@ -462,9 +462,9 @@ DECLARE i record; v platform.document_versions; fields jsonb; BEGIN
     RAISE EXCEPTION 'Unavailable PDF receipt' USING ERRCODE = 'D0404'; END IF;
   RETURN (SELECT platform.document_metadata(v,b.content_type,b.byte_length)
     FROM platform.document_blobs b
-    WHERE (b.tenant_id,b.environment_id,b.owner_scope,b.digest) = (v.tenant_id,v.environment_id,v.owner_scope,v.digest)
-      AND EXISTS (SELECT FROM platform.document_file_policy(fields,v.field_id,v.category_id,b.content_type,b.byte_length) admitted
-        WHERE admitted IS NOT NULL AND (admitted->>'retention') IS NOT DISTINCT FROM v.retention_class)); END $$;
+    -- A generated version has no file field or category (generated_source
+    -- above is its authority), so no category policy applies here.
+    WHERE (b.tenant_id,b.environment_id,b.owner_scope,b.digest) = (v.tenant_id,v.environment_id,v.owner_scope,v.digest)); END $$;
 
 REVOKE ALL ON FUNCTION platform.read_generated_document_receipt(text,text,uuid,uuid,text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION platform.read_generated_document_receipt(text,text,uuid,uuid,text) TO north_star_runtime;

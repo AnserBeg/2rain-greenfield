@@ -218,6 +218,11 @@
         },
         {
           "file": "test/postgres/document-templates.test.ts",
+          "name": "PO attachments stay visible when approval requests are withheld",
+          "expected": "an optional approvals dependency hid the PO attachment"
+        },
+        {
+          "file": "test/postgres/document-templates.test.ts",
           "name": "a read-model dependency without required: false stays mandatory",
           "expected": "the declared optional dependency was treated as mandatory"
         }
@@ -225,10 +230,10 @@
     },
     {
       "name": "documents-absent-flag-stays-mandatory",
-      "claim": "A read-model dependency without the required flag still gates attachment reads.",
+      "claim": "A read-model dependency without the required flag still gates attachment reads; dropping the mandatory default lets the file escape.",
       "file": "db/migrations/0056_generated_document_sources.sql",
       "original": "    WHERE (reference.value->'required' = 'false'::jsonb) IS NOT TRUE",
-      "replacement": "    WHERE (reference.value->'required' = 'true'::jsonb) IS NOT TRUE",
+      "replacement": "    WHERE reference.value->'required' = 'true'::jsonb",
       "test": {
         "files": ["test/postgres/document-templates.test.ts"],
         "namePattern": "^approved template revisions publish governed PDFs, refuse hidden sources, and retire$"
