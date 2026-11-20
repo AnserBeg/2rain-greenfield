@@ -242,10 +242,29 @@ export const reachabilityProducers = [
   },
 ] as const satisfies readonly ReachabilityProducer[];
 
+const quickBrowserCommand =
+  'corepack pnpm exec bash scripts/run-suite.sh quick-browser --normalize-playwright -- playwright test --config apps/web/playwright.quick.config.ts';
+const quickBrowserProducer: ReachabilityProducer = {
+  id: 'quick-browser',
+  runner: 'playwright',
+  command: quickBrowserCommand,
+  argv: ['test', '--config', 'apps/web/playwright.quick.config.ts'],
+  ciJob: 'quality',
+  ciInvocation: quickBrowserCommand,
+  evidencePath: 'test-results/reachability/quick-browser.json',
+  rawEvidencePath: 'test-results/reachability/quick-browser.raw.json',
+  invocationEvidencePath: 'test-results/reachability/quick-browser.argv.json',
+  implementation: {
+    kind: 'helper',
+    sourcePath: 'apps/web/playwright.quick.config.ts',
+  },
+};
+
 export type ReachabilityProducerId =
   (typeof reachabilityProducers)[number]['id'];
 
 export function getReachabilityProducer(id: string): ReachabilityProducer {
+  if (id === 'quick-browser') return quickBrowserProducer;
   const producer = reachabilityProducers.find(
     (candidate) => candidate.id === id,
   );

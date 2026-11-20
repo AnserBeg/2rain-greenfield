@@ -119,6 +119,7 @@ const suiteDefinitions = [
     discoveryPattern: 'test/architecture/**/*.test.ts',
     expectedFiles: [
       'test/architecture/canonical-contracts-purity.test.ts',
+      'test/architecture/ci-tiers.test.ts',
       'test/architecture/compiler-hermeticity.test.ts',
       'test/architecture/customization-sandbox-boundary.test.ts',
       'test/architecture/dependency-boundaries.test.ts',
