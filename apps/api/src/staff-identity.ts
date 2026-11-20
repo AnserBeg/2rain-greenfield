@@ -105,7 +105,9 @@ async function invitation(
     check(
       (
         await client.query(
-          "SELECT platform.staff_has_role(tenant_id,environment_id,issuer_id,'staff-owner') AS allowed FROM platform.staff_invitations WHERE token_digest=$1",
+          `SELECT CASE WHEN kind='recover' THEN platform.staff_can_manage(tenant_id,environment_id,issuer_id,principal_id)
+             ELSE platform.staff_has_role(tenant_id,environment_id,issuer_id,'staff-owner') END AS allowed
+             FROM platform.staff_invitations WHERE token_digest=$1`,
           [key],
         )
       ).rows[0]?.allowed,
@@ -193,6 +195,7 @@ export async function bootstrapStaff(
   details: { name: string; contact: string; recover?: string; reason?: string },
 ) {
   return scoped(pool, r, async (c) => {
+    await c.query("SELECT platform.claim_staff_store_mode('pilot')");
     check(
       (
         await c.query(
@@ -209,9 +212,6 @@ export async function bootstrapStaff(
       ).rowCount,
     );
     const args = [r.tenantId, r.environmentId];
-    await c.query(
-      "SELECT pg_advisory_xact_lock(hashtext('staff-identity-deployment-v1'))",
-    );
     check(
       !(
         await c.query(
@@ -241,6 +241,14 @@ export async function bootstrapStaff(
       ).rowCount,
     );
     if (details.recover) {
+      check(
+        (
+          await c.query(
+            'SELECT FROM platform.current_policy_epochs WHERE tenant_id=$1 AND environment_id=$2 FOR UPDATE',
+            args,
+          )
+        ).rowCount,
+      );
       const owner = await c.query(
         `SELECT a.principal_id FROM platform.staff_accounts a JOIN platform.current_policy_memberships m
         USING(tenant_id,environment_id,principal_id) JOIN platform.current_policy_roles r USING(tenant_id,environment_id,role_id)
@@ -372,7 +380,7 @@ export class StaffIdentity {
     const intent: Intent = token
       ? { action: 'signin' as const }
       : intentFrom(input);
-    if (intent.action !== 'signin') {
+    if (!token && (intent.action !== 'signin' || identity)) {
       check(identity);
       await this.account(identity);
       intent.sessionDigest = digest(identity).toString('hex');
@@ -382,6 +390,15 @@ export class StaffIdentity {
         ? Buffer.from(opaque(input.binding), 'base64url')
         : null;
     return this.scoped(async (c) => {
+      if (binding)
+        check(
+          (
+            await c.query(
+              'SELECT FROM platform.staff_login_transactions WHERE binding=$1 AND consumed_at IS NULL AND expires_at>platform.staff_observed_time()',
+              [binding],
+            )
+          ).rowCount,
+        );
       const subject = token ? await invitation(c, token) : null;
       const options = subject
         ? await generateRegistrationOptions({
@@ -488,9 +505,9 @@ export class StaffIdentity {
             ])
           ).rows[0]?.current,
         );
-        await c.query(
+        const enrollment = await c.query(
           `INSERT INTO platform.staff_credentials(tenant_id,environment_id,principal_id,method,credential_id,public_key,sign_count,backup_eligible,backed_up,transports)
-          VALUES($1,$2,$3,'webauthn',$4,$5,$6,$7,$8,$9)`,
+          VALUES($1,$2,$3,'webauthn',$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING`,
           [
             this.realm.tenantId,
             this.realm.environmentId,
@@ -503,6 +520,7 @@ export class StaffIdentity {
             credential.transports ?? [],
           ],
         );
+        check(enrollment.rowCount === 1);
         await c.query(
           "UPDATE platform.staff_accounts SET status='active' WHERE principal_id=$1",
           [i.principal_id],
@@ -574,16 +592,18 @@ export class StaffIdentity {
           proof.authenticationInfo.credentialBackedUp,
         ],
       );
+      check(
+        (oldIdentity ? digest(oldIdentity).toString('hex') : undefined) ===
+          tx.intent.sessionDigest,
+      );
       if (tx.intent.action !== 'signin') {
-        check(
-          oldIdentity &&
-            digest(oldIdentity).toString('hex') === tx.intent.sessionDigest,
-        );
+        check(oldIdentity);
         check(
           (
             await c.query(
               `SELECT FROM platform.staff_sessions WHERE principal_id=$1 AND identity_digest=$2 AND revoked_at IS NULL
-          AND last_activity<=clock_timestamp() AND clock_timestamp()<LEAST(absolute_deadline,last_activity+interval '30 minutes')`,
+               AND platform.staff_observed_time() >= last_activity
+               AND platform.staff_observed_time()<LEAST(absolute_deadline,last_activity+interval '30 minutes') FOR UPDATE`,
               [actor, digest(oldIdentity)],
             )
           ).rowCount,
@@ -591,36 +611,50 @@ export class StaffIdentity {
         return this.manage(c, actor, reply.id, tx.intent);
       }
       check(tx.application_binding);
+      const login = (
+        await c.query<{ prior_application_digest: Buffer | null }>(
+          `SELECT prior_application_digest FROM platform.staff_login_transactions
+         WHERE binding=$1 AND consumed_at IS NULL AND expires_at>platform.staff_observed_time() FOR UPDATE`,
+          [tx.application_binding],
+        )
+      ).rows[0];
+      check(login);
       const identity = secret(),
         handoff = secret();
-      let previousDeadline: Date | null = null;
-      if (oldIdentity) {
-        const previous = await c.query<{
-          absolute_deadline: Date;
-          principal_id: string;
-        }>(
-          `UPDATE platform.staff_sessions SET revoked_at=clock_timestamp()
-          WHERE identity_digest=$1 AND revoked_at IS NULL AND absolute_deadline>clock_timestamp() RETURNING absolute_deadline,principal_id`,
-          [digest(oldIdentity)],
+      const handles = [
+        digest(identity),
+        digest(handoff),
+        tx.application_binding,
+      ];
+      if (oldIdentity || login.prior_application_digest) {
+        // The account is already locked. Rotate the one matching family in place.
+        // Concurrent completions recheck the original handles after the lock.
+        const rotated = await c.query(
+          `WITH instant AS MATERIALIZED (SELECT platform.staff_observed_time() AS at)
+           UPDATE platform.staff_sessions s SET identity_digest=$1,handoff_digest=$2,browser_binding=$3,
+             application_digest=NULL,authenticated_at=instant.at,last_activity=instant.at,
+             handoff_deadline=instant.at+interval '1 minute'
+           FROM instant WHERE s.principal_id=$4 AND s.revoked_at IS NULL
+             AND ($5::bytea IS NULL OR s.identity_digest=$5) AND ($6::bytea IS NULL OR s.application_digest=$6)
+             AND instant.at>=s.last_activity AND instant.at<LEAST(s.absolute_deadline,s.last_activity+interval '30 minutes')`,
+          [
+            ...handles,
+            actor,
+            oldIdentity ? digest(oldIdentity) : null,
+            login.prior_application_digest,
+          ],
         );
-        if (previous.rows[0]?.principal_id === actor)
-          previousDeadline = previous.rows[0].absolute_deadline;
+        check(rotated.rowCount === 1);
+      } else {
+        await c.query(
+          `WITH instant AS MATERIALIZED (SELECT platform.staff_observed_time() AS at)
+           INSERT INTO platform.staff_sessions(tenant_id,environment_id,principal_id,family_id,method,assurance,authenticated_at,last_activity,
+             absolute_deadline,identity_digest,handoff_digest,handoff_deadline,browser_binding)
+           SELECT $4,$5,$6,gen_random_uuid(),'webauthn','user-verified-passkey',at,at,
+             at+interval '12 hours',$1,$2,at+interval '1 minute',$3 FROM instant`,
+          [...handles, this.realm.tenantId, this.realm.environmentId, actor],
+        );
       }
-      await c.query(
-        `INSERT INTO platform.staff_sessions(tenant_id,environment_id,principal_id,family_id,method,assurance,authenticated_at,last_activity,
-        absolute_deadline,identity_digest,handoff_digest,handoff_deadline,browser_binding)
-        VALUES($1,$2,$3,gen_random_uuid(),'webauthn','user-verified-passkey',statement_timestamp(),statement_timestamp(),
-          LEAST(statement_timestamp()+interval '12 hours',$7),$4,$5,statement_timestamp()+interval '1 minute',$6)`,
-        [
-          this.realm.tenantId,
-          this.realm.environmentId,
-          actor,
-          digest(identity),
-          digest(handoff),
-          tx.application_binding,
-          previousDeadline,
-        ],
-      );
       await audit(c, this.realm, 'signin', actor, actor);
       return { identity, handoff };
     });
@@ -692,12 +726,12 @@ export class StaffIdentity {
     check(subject !== actor);
     check((await lockAccount(c, subject)).status === 'active');
     check(
-      !(
+      (
         await c.query(
-          "SELECT platform.staff_has_role($1,$2,$3,'staff-owner') AS owner",
-          [r.tenantId, r.environmentId, subject],
+          'SELECT platform.staff_can_manage($1,$2,$3,$4) AS allowed',
+          [r.tenantId, r.environmentId, actor, subject],
         )
-      ).rows[0]?.owner,
+      ).rows[0]?.allowed,
     );
     if (intent.action === 'deactivate')
       await c.query('SELECT platform.staff_disable_memberships($1,$2,$3,$4)', [
@@ -716,17 +750,18 @@ export class StaffIdentity {
     return this.scoped(async (c) => {
       const session = await c.query<{ principal_id: string }>(
         `SELECT a.principal_id FROM platform.staff_sessions s JOIN platform.staff_accounts a USING(tenant_id,environment_id,principal_id)
-        WHERE identity_digest=$1 AND platform.staff_has_role(a.tenant_id,a.environment_id,a.principal_id,NULL) AND revoked_at IS NULL AND last_activity<=clock_timestamp()
-        AND clock_timestamp()<LEAST(absolute_deadline,last_activity+interval '30 minutes')`,
+        CROSS JOIN (SELECT platform.staff_observed_time() AS observed) instant
+        WHERE identity_digest=$1 AND platform.staff_has_role(a.tenant_id,a.environment_id,a.principal_id,NULL) AND revoked_at IS NULL AND last_activity<=observed
+        AND observed<LEAST(absolute_deadline,last_activity+interval '30 minutes')`,
         [digest(identity)],
       );
       const p = session.rows[0]?.principal_id;
       check(p);
       if (foreground)
         await c.query(
-          `UPDATE platform.staff_sessions SET last_activity=statement_timestamp() WHERE identity_digest=$1
-        AND revoked_at IS NULL AND statement_timestamp()>=last_activity+interval '1 minute'
-        AND statement_timestamp()<LEAST(absolute_deadline,last_activity+interval '30 minutes')`,
+          `UPDATE platform.staff_sessions SET last_activity=observed FROM (SELECT platform.staff_observed_time() AS observed) instant
+        WHERE identity_digest=$1 AND revoked_at IS NULL AND observed>=last_activity+interval '1 minute'
+        AND observed<LEAST(absolute_deadline,last_activity+interval '30 minutes')`,
           [digest(identity)],
         );
       const owner =
@@ -762,29 +797,27 @@ export class StaffIdentity {
       );
       const subject = found.rows[0]?.principal_id;
       check(subject && (await lockAccount(c, subject)).status === 'active');
-      const prior = oldErp
-        ? (
-            await c.query<{ absolute_deadline: Date; principal_id: string }>(
-              `UPDATE platform.staff_sessions SET revoked_at=clock_timestamp()
-        WHERE application_digest=$1 AND revoked_at IS NULL AND absolute_deadline>clock_timestamp() RETURNING absolute_deadline,principal_id`,
-              [digest(oldErp)],
-            )
-          ).rows[0]
-        : null;
+      const binding = digest(verifier);
       check(
         (
           await c.query(
-            `UPDATE platform.staff_sessions SET handoff_digest=NULL,application_digest=$3,absolute_deadline=LEAST(absolute_deadline,$4) WHERE handoff_digest=$1
-        AND browser_binding=$2 AND handoff_deadline>clock_timestamp() AND authenticated_at<=clock_timestamp()
-        AND absolute_deadline>clock_timestamp() AND revoked_at IS NULL`,
-            [
-              digest(handoff),
-              digest(verifier),
-              digest(handle),
-              prior?.principal_id === subject ? prior.absolute_deadline : null,
-            ],
+            `UPDATE platform.staff_login_transactions SET consumed_at=observed
+         FROM (SELECT platform.staff_observed_time() AS observed) instant WHERE binding=$1
+          AND prior_application_digest IS NOT DISTINCT FROM $2::bytea AND consumed_at IS NULL AND expires_at>observed`,
+            [binding, oldErp ? digest(oldErp) : null],
           )
-        ).rowCount,
+        ).rowCount === 1,
+      );
+      check(
+        (
+          await c.query(
+            `UPDATE platform.staff_sessions SET handoff_digest=NULL,application_digest=$3
+         FROM (SELECT platform.staff_observed_time() AS observed) instant
+         WHERE handoff_digest=$1 AND browser_binding=$2 AND revoked_at IS NULL AND observed>=last_activity
+          AND observed<LEAST(handoff_deadline,absolute_deadline,last_activity+interval '30 minutes')`,
+            [digest(handoff), binding, digest(handle)],
+          )
+        ).rowCount === 1,
       );
       return handle;
     });
@@ -808,7 +841,7 @@ export class StaffIdentity {
         (
           await c.query(
             `SELECT FROM platform.staff_sessions WHERE ${column}=$1 AND revoked_at IS NULL
-        AND last_activity<=clock_timestamp() AND LEAST(last_activity+interval '30 minutes',absolute_deadline)>clock_timestamp()`,
+        AND platform.staff_observed_time()>=last_activity AND LEAST(last_activity+interval '30 minutes',absolute_deadline)>platform.staff_observed_time()`,
             [digest(identity)],
           )
         ).rowCount,

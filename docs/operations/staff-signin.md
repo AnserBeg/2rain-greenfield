@@ -1,6 +1,7 @@
 # Run the staff sign-in pilot
 
 Use one installed tenant/environment with a verified serving release and the current migrations.
+Use a dedicated pilot database. The first committed identity-mode claim fixes the mode for every environment in that database.
 The pilot serves the ERP and identity service as two HTTPS processes. Both can run on one host.
 Set these deployment values for the installer and both processes.
 
@@ -28,8 +29,10 @@ Use separate service accounts and restrict access to each process’s files and 
 Run `corepack pnpm --filter @north-star/api staff identity` and
 `corepack pnpm --filter @north-star/api staff erp` in separate processes. Each binds to
 loopback by default. Set `STAFF_BIND_ADDRESS` when binding directly to a pilot interface.
-Browser and ERP backchannel clients must trust the identity certificate. The attempt limit uses
-the TCP peer address. A shared ingress uses one source allowance for its connections.
+Browser and ERP backchannel clients must trust the identity certificate. For direct connections the attempt limit uses
+the TCP peer. Behind an ingress, set `STAFF_TRUSTED_INGRESS_ADDRESSES` to its comma-separated
+IP addresses and configure it to overwrite `X-Real-IP` with one verified client address on every
+request. A missing or invalid address from a listed ingress refuses the attempt.
 Keep bodies, query strings, fragments, cookies and enrollment links out of diagnostics.
 
 The owner opens the invitation, chooses **Create a passkey**, follows **Sign in to the ERP**,

@@ -30,9 +30,9 @@ test('the checked manifest classifies every current table exactly once', () => {
   const tables = enumerateTenantTablesFromSnapshot(loadSnapshot());
   const verified = verifyTenantCompleteness(manifest, tables);
 
-  assert.equal(verified.tableCount, 96);
-  assert.equal(verified.tenantScopedCount, 83);
-  assert.equal(verified.tenantIndependentCount, 7);
+  assert.equal(verified.tableCount, 98);
+  assert.equal(verified.tenantScopedCount, 84);
+  assert.equal(verified.tenantIndependentCount, 8);
   assert.equal(
     verified.classifications.find(
       ({ schema, table }) => schema === 'platform' && table === 'tenants',
@@ -344,7 +344,7 @@ test('ADR-0011 enumeration discovers unclassified tables in known and new schema
       assert.equal(
         verifyTenantCompleteness(manifest, await enumerateTenantTables(client))
           .tableCount,
-        96,
+        98,
       );
 
       await client.query(
