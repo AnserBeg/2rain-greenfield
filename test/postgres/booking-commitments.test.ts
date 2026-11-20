@@ -531,6 +531,42 @@ test('booking commitment writer', async (t) => {
         },
       );
       await t.test(
+        'overlapping agreements fit when their occupied intervals are adjacent',
+        async () => {
+          const morning = await call(
+            left,
+            'hold',
+            hold(22, 14, window('08:00', '11:00')),
+          );
+          assert.equal(
+            (await call(left, 'confirm', terms(22, morning))).state,
+            'confirmed',
+          );
+          await time('2030-02-11T18:00Z'); // 11:00 in the pinned calendar.
+          const day = await call(
+            right,
+            'hold',
+            hold(23, 14, {
+              kind: 'date',
+              start: '2030-02-11',
+              end: '2030-02-12',
+            }),
+          );
+          assert.equal(
+            day.state,
+            'hold',
+            'the two adjacent occupied intervals did not fit',
+          );
+          const read = await admin.query(
+            `SELECT a.agreed_interval && b.agreed_interval AS agreements,
+          upper(a.occupied_interval)=lower(b.occupied_interval) AS adjacent FROM platform.booking_commitments a,
+          platform.booking_commitments b WHERE a.booking_id=$1 AND b.booking_id=$2`,
+            [morning.bookingId, day.bookingId],
+          );
+          assert.deepEqual(read.rows, [{ agreements: true, adjacent: true }]);
+        },
+      );
+      await t.test(
         'expiry wins at equality after a lock wait and a backward clock cannot revive the claim',
         async () => {
           await time('2030-02-11T07:00Z');

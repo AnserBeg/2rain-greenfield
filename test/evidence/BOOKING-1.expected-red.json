@@ -60,6 +60,11 @@
           "file": "test/postgres/booking-commitments.test.ts",
           "name": "expiry wins at equality after a lock wait and a backward clock cannot revive the claim",
           "expected": "the backward-step hold ignored the diary time floor"
+        },
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "overlapping agreements fit when their occupied intervals are adjacent",
+          "expected": "the two adjacent occupied intervals did not fit"
         }
       ]
     },
