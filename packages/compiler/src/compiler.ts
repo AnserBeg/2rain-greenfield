@@ -1,3 +1,4 @@
+import { addressColumnId, addressComponents } from '@north-star/canonical-model';
 import { compileAddressBindings } from './address.js';
 import { CALCULATED_DISPLAY_QUERY_READER } from '../../canonical-model/src/calculated-display-projection.js';
 import {
@@ -410,7 +411,20 @@ function compileApplicationInternal(
   const formula = compileLiteralFormulaRules(packageRevision);
   const address = compileAddressBindings(packageRevision);
   if (address && 'message' in address) {
-    return failure([{...compilerDiagnostic('COMPILER_TYPE_INVALID','typeCheck','$.connectorBindings',address.subjectId),rule:address.message}], maximumDiagnostics);
+    return failure(
+      [
+        {
+          ...compilerDiagnostic(
+            'COMPILER_TYPE_INVALID',
+            'typeCheck',
+            '$.connectorBindings',
+            address.subjectId,
+          ),
+          rule: address.message,
+        },
+      ],
+      maximumDiagnostics,
+    );
   }
   const documents = compileDocuments(packageRevision);
   if (documents?.message) {
@@ -1475,7 +1489,9 @@ function projectionDispatchRevision(
               })),
               schemaVersion: LANGUAGE_VERSION,
             }
-          : field.fieldType.kind === 'addressFieldType' ? field.fieldType : { ...field.fieldType, schemaVersion: LANGUAGE_VERSION },
+          : field.fieldType.kind === 'addressFieldType'
+            ? field.fieldType
+            : { ...field.fieldType, schemaVersion: LANGUAGE_VERSION },
     })),
     languageVersion: LANGUAGE_VERSION,
     operations: packageRevision.operations.map((operation) => ({
@@ -2287,9 +2303,11 @@ function verifyCompleteness(
         entity.columns.map((field) => field.canonicalFieldId),
       )
     : [...collectStorageFields(emittedStorage).keys()];
-  const expectedFields = new Set(
-    packageRevision.fields.map((field) => field.fieldId),
-  );
+  const expectedFields = new Set(packageRevision.fields.flatMap(field =>
+    field.fieldType.kind === 'addressFieldType'
+      ? addressComponents.map(component => addressColumnId(field.fieldId, component))
+      : [field.fieldId]
+  ));
   if (!setsEqual(new Set(storageFieldIds), expectedFields)) {
     diagnostics.push(
       compilerDiagnostic(

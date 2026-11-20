@@ -80,7 +80,7 @@ export function compileAddressBindings(
       subjectId: unbound.fieldId,
       message: 'The Address has no connector binding.',
     };
-  const layouts=new Map<string,AddressProjection['layouts'][number]>();
+  const layouts = new Map<string, AddressProjection['layouts'][number]>();
   const ids = new Set<string>();
   for (const p of placements) {
     const binding = bindings.find((b) => b.fieldId === p.fieldId);
@@ -101,7 +101,7 @@ export function compileAddressBindings(
         message:
           'A map must name a unique placement and an existing section on the field’s Record surface.',
       };
-    layouts.set(p.surfaceId,layout);
+    layouts.set(p.surfaceId, layout);
     ids.add(p.placementId);
   }
   return {
@@ -110,7 +110,7 @@ export function compileAddressBindings(
       schemaVersion: 'northstar.connector-payload/v1',
       bindings,
       placements,
-      layouts:[...layouts.values()],
+      layouts: [...layouts.values()],
     }),
   };
 }

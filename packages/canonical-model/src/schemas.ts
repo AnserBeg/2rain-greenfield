@@ -505,7 +505,7 @@ export const FieldTypeSchema = z.discriminatedUnion('kind', [
 // Legacy package parsers remain closed. The projection lowerer shares its
 // internal field representation with v6, including the compound Address kind.
 const legacyFieldType = FieldTypeSchema.refine(
-  (t) => t.kind !== 'addressFieldType',
+  (t): boolean => t.kind !== 'addressFieldType',
   'Address requires v6.',
 );
 export type FieldType = z.infer<typeof FieldTypeSchema>;

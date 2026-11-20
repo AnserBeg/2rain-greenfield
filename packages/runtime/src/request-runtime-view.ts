@@ -1,4 +1,7 @@
-import { ADDRESS_MAP_READER, CONNECTOR_FAMILY } from '@north-star/canonical-model';
+import {
+  ADDRESS_MAP_READER,
+  CONNECTOR_FAMILY,
+} from '@north-star/canonical-model';
 import {
   assertTrustedRequestContext,
   type AuthenticatedRequestEntryAdapter,
@@ -159,7 +162,10 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     { readonly capabilityId: string; readonly maximumSupportedVersion: number }
   >
 > = Object.freeze({
-  [CONNECTOR_FAMILY]: Object.freeze({capabilityId:'northstar.runtime:capability.connector',maximumSupportedVersion:1}),
+  [CONNECTOR_FAMILY]: Object.freeze({
+    capabilityId: 'northstar.runtime:capability.connector',
+    maximumSupportedVersion: 1,
+  }),
   [WORKFLOW_PROJECTION_FAMILY]: {
     capabilityId: WORKFLOW_RUNTIME_CAPABILITY,
     maximumSupportedVersion: 1,
@@ -963,7 +969,14 @@ function constructRequestRuntimeView(
       definition.projections.operation,
       REQUEST_RUNTIME_PROJECTION_FAMILIES.operation,
     ),
-    ...(definition.projections.connector ? {connector:cloneProjection(definition.projections.connector,CONNECTOR_FAMILY)} : {}),
+    ...(definition.projections.connector
+      ? {
+          connector: cloneProjection(
+            definition.projections.connector,
+            CONNECTOR_FAMILY,
+          ),
+        }
+      : {}),
     ...(definition.projections.documents
       ? {
           documents: cloneProjection(

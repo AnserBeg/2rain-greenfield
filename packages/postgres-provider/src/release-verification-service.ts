@@ -3126,7 +3126,10 @@ function verificationFieldValue(
 ): unknown {
   switch (field.fieldKind) {
     case 'addressFieldType':
-      return { schemaVersion:'northstar.address-value/v1',text:'Verification address' };
+      return {
+        schemaVersion: 'northstar.address-value/v1',
+        text: 'Verification address',
+      };
     case 'booleanFieldType':
       return verificationBooleanFieldValue(entity, field.fieldId);
     case 'enumFieldType':

@@ -205,7 +205,12 @@ export function composeServingGateways(
     policy,
     operationMediation,
   );
-  const addresses = new PostgresAddresses(runtimePool,queryGateway,servingFor,options.localDemoIdentity===true);
+  const addresses = new PostgresAddresses(
+    runtimePool,
+    queryGateway,
+    servingFor,
+    options.localDemoIdentity === true,
+  );
   const documents = documentOptions
     ? new PostgresDocumentGateway(
         runtimePool,
