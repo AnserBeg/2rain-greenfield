@@ -11,7 +11,7 @@ Slice 2 implements document templates and PDF generation from [ADR-0078](../../d
 
 ## Decisions
 
-- Template sources are direct Q0 record reads and scoped child lists. Money uses the currency declared by its field type. Date-only values use the Record calendar day. Layout uses the built-in Latin-script PDF fonts.
+- Template sources are direct Q0 record reads and scoped child lists. Money uses the currency declared by its field type. Module reads return stored dates as civil text. Record pages and PDFs use the same calendar day. Layout uses the built-in Latin-script PDF fonts.
 - The company-brand resolver uses the company record name and the Ledger print palette without a logo. Shared records use the Ledger name. Each issued PDF saves brand revision `platform-default`.
 - Local demo issuance uses the demo scanner. SQL checks the governing Record grants, reads exact file categories and takes write limits and retention from the release. Scanner verdicts cannot publish across a policy change or release fence. Customer upload requests and signatures remain gated.
 
@@ -24,12 +24,12 @@ Slice 2 implements document templates and PDF generation from [ADR-0078](../../d
 
 ## Gates and controls
 
-Hosted CI covers PostgreSQL issuance, stored brand provenance, live source restrictions, lossless retry, the preceding reader and tenant release parity. The PDF integration test exercises the renderer’s network boundary and output limits. Expected-red controls cover query and company-brand read revocation, parser and subprocess limits, SQL pagination, the API scanner guard and the HTTP commit outcome.
+Hosted CI exercises the compiled app, SQL authority, the preceding reader and persisted file-only parity. Local proofs cover actual issuance, exact digest, elapsed COMMIT and isolated mutations. The PDF integration test exercises the renderer’s network boundary and output limits. Expected-red controls cover query and company-brand read revocation, parser and subprocess limits, SQL pagination, the API scanner guard and the HTTP commit outcome.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "DOCS-1",
-  "base": "08edc207bcd5be1982c9c0bcf1723172df9cb7ad", "head": "1398584763da5aa3cd1fb57b4189b6b461782e05",
+  "base": "08edc207bcd5be1982c9c0bcf1723172df9cb7ad", "head": "b5752bb1f0ba70a0c20f924d4daf9c58737bd621",
   "changedPaths": [
     ".github/workflows/ci.yml", ".github/workflows/evidence.yml", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts",
     "apps/web/src/document-http.ts", "apps/web/src/document-template-form.ts", "apps/web/src/surface-client.ts", "apps/web/src/surface-composition.ts",
@@ -39,13 +39,13 @@ Hosted CI covers PostgreSQL issuance, stored brand provenance, live source restr
     "packages/customization/src/patch.ts", "packages/customization/src/render.ts", "packages/customization/src/targets.ts", "packages/postgres-provider/package.json",
     "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/document-attachments.ts", "packages/postgres-provider/src/document-company-brand.ts", "packages/postgres-provider/src/document-content.ts",
     "packages/postgres-provider/src/document-pdf-worker.ts", "packages/postgres-provider/src/document-pdf.ts", "packages/postgres-provider/src/document-publication.ts", "packages/postgres-provider/src/document-template-sources.ts",
-    "packages/postgres-provider/src/request-context.ts", "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/postgres-provider/src/serving-gateways.ts", "packages/runtime/src/civil-date.ts",
-    "packages/runtime/src/document-gateway.ts", "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-operation-gateway.ts", "packages/runtime/src/semantic-query-gateway.ts",
-    "pnpm-lock.yaml", "test/architecture/release-persistence-boundary.test.ts", "test/architecture/repository-hygiene.test.ts", "test/evidence/DOCS-1.expected-red.json",
-    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/archived-customization-runtime.ts", "test/helpers/document-pdf-text.ts", "test/integration/document-http.test.ts",
-    "test/integration/document-pdf.test.ts", "test/postgres/document-attachments.test.ts", "test/postgres/document-templates.test.ts", "test/postgres/inventory-storage.test.ts",
-    "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts", "test/postgres/request-runtime-view.test.ts", "test/postgres/trust-substrate.test.ts",
-    "test/unit/customize-screen.test.ts"
+    "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/request-context.ts", "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/postgres-provider/src/serving-gateways.ts",
+    "packages/runtime/src/civil-date.ts", "packages/runtime/src/document-gateway.ts", "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-operation-gateway.ts",
+    "packages/runtime/src/semantic-query-gateway.ts", "pnpm-lock.yaml", "test/architecture/release-persistence-boundary.test.ts", "test/architecture/repository-hygiene.test.ts",
+    "test/evidence/DOCS-1.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/archived-customization-runtime.ts", "test/helpers/document-pdf-text.ts",
+    "test/integration/document-http.test.ts", "test/integration/document-pdf.test.ts", "test/postgres/document-attachments.test.ts", "test/postgres/document-templates.test.ts",
+    "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts", "test/postgres/request-runtime-view.test.ts",
+    "test/postgres/trust-substrate.test.ts", "test/unit/customize-screen.test.ts"
   ],
   "symbols": [
     {"path": "packages/compiler/src/document-templates.ts", "name": "compileDocumentTemplates"},
