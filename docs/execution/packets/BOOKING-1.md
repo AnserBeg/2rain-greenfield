@@ -26,7 +26,7 @@ Migration 0050 replayed to the checked-in snapshot. [Packet CI](https://github.c
 ## Slice 1a review fixes
 
 1. A booking command requires an active update or transition permission on its owner.
-2. A separate approval issuer attests a verified grant to the exact command. SQL consumes it once and records the approving human. Archive checks limit company visibility to current grants on the endpoint.
+2. Booking opts into single-use confirmations. A separate issuer attests the verified grant to the exact command. SQL consumes it once and records the approving human. Archive checks limit company visibility to current grants on the endpoint.
 3. Signed approvals and database grants bind the active fence. Reactivating a release requires a fresh approval.
 4. Both archive routines require READ COMMITTED. Archive rechecks allocation after locking the record.
 5. Expiry has its own receipt and outbox namespace. Each worker expiry rolls back independently on a unique conflict.
@@ -44,11 +44,11 @@ Run `node --import tsx --test test/postgres/booking-commitments.test.ts` with Do
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "BOOKING-1",
-  "base": "17618776dd058bbb8efec032eae13a00a5d5398b", "head": "ec70fe6b3656822a4c18bdffe8b5ce8145488b26",
+  "base": "08edc207bcd5be1982c9c0bcf1723172df9cb7ad", "head": "54c429a5df65e6e2afa696735de678987789b592",
   "changedPaths": [
-    "apps/api/src/pilot-composition-root.ts", "apps/api/src/staff-main.ts", "db/migrations/0051_booking_authority.sql",
+    "apps/api/src/pilot-composition-root.ts", "apps/api/src/staff-main.ts", "db/migrations/0052_booking_authority.sql",
     "db/schema.snapshot.json", "packages/canonical-model/src/booking.ts", "packages/postgres-provider/src/booking-capability-executor.ts",
-    "packages/postgres-provider/src/capability-operation-executor-factory.ts", "packages/postgres-provider/src/composed-application-runtime.ts", "packages/postgres-provider/src/serving-gateways.ts",
+    "packages/postgres-provider/src/capability-operation-executor-factory.ts", "packages/postgres-provider/src/composed-application-runtime.ts", "packages/postgres-provider/src/release-verification-service.ts", "packages/postgres-provider/src/serving-gateways.ts",
     "packages/runtime/src/semantic-operation-gateway.ts", "test/architecture/release-persistence-boundary.test.ts", "test/architecture/tenant-completeness.manifest.json",
     "test/architecture/tenant-completeness.test.ts", "test/compiler/booking-commitments.test.ts", "test/evidence/BOOKING-1.expected-red.json",
     "test/fixtures/booking-commitments.sql", "test/integration/module-runtime.test.ts", "test/postgres/booking-commitments.test.ts",
