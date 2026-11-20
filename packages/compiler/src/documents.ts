@@ -102,7 +102,7 @@ export function compileDocuments(
       )
       .map(({ entityId }) => entityId),
   );
-  const fileEntityIds = new Set(fields.map(({ entityId }) => entityId));
+  const fileEntityIds = new Set<string>(fields.map(({ entityId }) => entityId));
   for (const entityId of new Set([...fileEntityIds, ...templateEntityIds])) {
     const entity = definition.entities.find(
       (entry) => entry.entityId === entityId,
