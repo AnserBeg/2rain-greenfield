@@ -30,6 +30,7 @@ export interface SuiteEvidence {
 }
 
 export interface AggregateEvidenceOptions {
+  readonly requiredFiles?: ReadonlySet<string>;
   readonly environment?: Readonly<Record<string, string | undefined>>;
 }
 
@@ -136,11 +137,17 @@ export function aggregateEvidence(
     }
   }
 
-  const unreachable = findUnreachableTests(discovered, executed);
+  const unreachable = findUnreachableTests(
+    options.requiredFiles ?? discovered,
+    executed,
+  );
   if (unreachable.length > 0) {
     throw new Error(`Unreachable test files: ${unreachable.join(', ')}`);
   }
-  return { discoveredCount: discovered.size, executedCount: executed.size };
+  return {
+    discoveredCount: (options.requiredFiles ?? discovered).size,
+    executedCount: executed.size,
+  };
 }
 
 export function normalizeEvidencePath(
