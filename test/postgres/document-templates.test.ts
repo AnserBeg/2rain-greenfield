@@ -19,6 +19,7 @@ import {
 } from '../../apps/api/src/composition-root.js';
 import { DOCUMENT_TEMPLATES_SURFACE_FLOOR } from '../../packages/canonical-model/src/documents.js';
 import type { DocumentMetadata } from '../../packages/runtime/src/document-gateway.js';
+import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../packages/runtime/src/semantic-query-gateway.js';
 import { worldOver, seededId } from '../agent/agent-world.js';
 import {
   archivedRuntimeRead,
@@ -574,12 +575,22 @@ test(
             ),
             'PDF did not preserve the Record business day',
           );
+          const company = await app.runtime.entry.run({}, (view) =>
+            app.runtime.queryGateway.invoke(view, {
+              schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+              queryId: id('query', 'legal_entity_get'),
+              arguments: { recordId: companyId },
+            }),
+          );
+          const companyName =
+            company.records[0]?.values[id('field', 'legal_entity_name')];
+          assert.equal(typeof companyName, 'string');
           const expectedInput = {
             revision: issuedPo.revision,
             brandRevision: companyDraft.brandRevision,
             companyBrandSource: companyDraft.companyBrandSource,
             input: {
-              name: 'Default legal entity',
+              name: companyName,
               identity: companyDraft.issuedIdentity,
               paper: 'LETTER',
               pageNumbers: true,
