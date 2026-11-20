@@ -25,11 +25,34 @@ Fable’s narrow re-read accepted ADR-0082 with amendments. A1–A3 gate 1a, A4�
 | 3 | Compose or draft both bindings. Exercise activation, retirement, rollback, old readers and projected line terms. |
 | 4 | Generate a unit/pool/kit contract and a timed room appointment owned by a non-line record across companies. Exercise both through generic bindings. |
 
+## Slice 1a
+
+- The released booking operation binds its owner, resource, permissions and approval. Its Operation catalog reader floor is 5. A hold returns its booking ID, revision and deadline.
+- Unit holds from two companies contend on the same occupied interval. Adjacent claims fit. Pools combine simultaneous demand and dated capacity changes. A failed reschedule keeps the original claim.
+- PostgreSQL checks the release fence, actor, company and endpoint revision, serializes archive, and commits history, owner cursor, typed event, trust rows and receipt together. The worker expires due holds using their original authority.
+- Date-only holds and changes preserve the agreement and clamp occupation at the post-lock instant. At equality expiry wins. A backward clock cannot reopen capacity early.
+- Regression controls remove unit exclusion for holds, allow a pool deficit, move occupation to the day boundary, and let a waiting confirmation run at its deadline.
+
+Migration 0050 replayed to the checked-in snapshot. [Packet CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44729321788) · [Four restored regression controls](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44729321814).
+
 ## Test it yourself
 
-Run `scripts/check-records.sh` and expect `records: OK`. Trace these cases in ADR-0082 before the executable slices.
+Run `node --import tsx --test test/postgres/booking-commitments.test.ts` with Docker running. The test creates and removes its own PostgreSQL instance. The compiler proof is `node --import tsx --test test/compiler/booking-commitments.test.ts`.
 
-- Hold today’s date-only room slot after opening. The agreement starts at the local boundary. Capacity starts at the decision instant. Another company sees the room busy and cannot see the meeting label.
-- Six units of ten are booked 09:00–10:00 and six at 10:00–11:00. Four fit through both hours. If a hold expires while confirmation waits, the post-lock decision gives expiry priority at equality.
-- Return two of six pool units, then correct a pause from yesterday. Under the published owner-usage contract the legs show six then four, the cursor advances, and the old pause remains auditable.
-- Swap onto an occupied unit or fail the last kit slot. The transaction preserves every original claim. A scheduled room appointment completes without creating a possession leg.
+```record-claim
+{
+  "schemaVersion": "northstar.record-claim/v1", "packet": "BOOKING-1",
+  "base": "47594bc60c4349d9a8b76dcdefe81503119aeaf8", "head": "f87dc25b814129f7d654a19531878fb783e361b8",
+  "changedPaths": [
+    "apps/api/src/erp-capabilities.ts", "db/migrations/0050_booking_commitments.sql", "db/schema.snapshot.json", "package.json",
+    "packages/canonical-model/src/booking.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/schemas.ts", "packages/compiler/src/compiler.ts",
+    "packages/compiler/src/projections.ts", "packages/postgres-provider/package.json", "packages/postgres-provider/src/booking-capability-executor.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts",
+    "packages/postgres-provider/src/module-storage-materializer.ts", "packages/postgres-provider/src/release-repository.ts", "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/postgres-provider/src/workflow-worker.ts",
+    "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-operation-gateway.ts", "test/architecture/release-persistence-boundary.test.ts", "test/architecture/repository-hygiene.test.ts",
+    "test/architecture/tenant-completeness.manifest.json", "test/architecture/tenant-completeness.test.ts", "test/compiler/booking-commitments.test.ts", "test/evidence/BOOKING-1.expected-red.json",
+    "test/fixtures/booking-commitments.sql", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/reachability-producers.ts", "test/postgres/booking-commitments.test.ts",
+    "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts", "test/postgres/trust-substrate.test.ts"
+  ],
+  "symbols": [{"path":"packages/canonical-model/src/booking.ts","name":"BookingOperationBinding"},{"path":"packages/postgres-provider/src/booking-capability-executor.ts","name":"BookingCapabilityExecutor"}]
+}
+```

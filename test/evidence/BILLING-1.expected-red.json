@@ -5,7 +5,7 @@
     {
       "name": "billing-immutable-price",
       "claim": "Published rate versions cannot be changed by the serving role.",
-      "file": "db/migrations/0050_billing_rate_tables.sql",
+      "file": "db/migrations/0051_billing_rate_tables.sql",
       "original": "GRANT SELECT, INSERT ON platform.billing_rate_tables",
       "replacement": "GRANT SELECT, INSERT, UPDATE ON platform.billing_rate_tables",
       "test": {
@@ -23,7 +23,7 @@
     {
       "name": "billing-tenant-price",
       "claim": "A different tenant cannot read a published rate version.",
-      "file": "db/migrations/0050_billing_rate_tables.sql",
+      "file": "db/migrations/0051_billing_rate_tables.sql",
       "original": "CREATE POLICY billing_terms_scope ON platform.billing_rate_tables TO north_star_runtime\n  USING (\n    tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid",
       "replacement": "CREATE POLICY billing_terms_scope ON platform.billing_rate_tables TO north_star_runtime\n  USING (\n    TRUE",
       "test": {

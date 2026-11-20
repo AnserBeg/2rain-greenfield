@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./billing-terms": "./src/billing-terms.ts",
+    "./booking-capability-executor": "./src/booking-capability-executor.ts",
     "./composed-application-runtime": "./src/composed-application-runtime.ts",
     "./current-policy": "./src/current-policy.ts",
     "./customization-service": "./src/customization-service.ts",

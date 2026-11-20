@@ -1,4 +1,5 @@
 import { BillingPlansSchema } from './billing.js';
+import { BookingOperationBinding } from './booking.js';
 import { SurfaceLayoutSchema } from './layout.js';
 import { z } from 'zod';
 import { DOCUMENTS_PAYLOAD_VERSION } from './documents.js';
@@ -2669,9 +2670,11 @@ export type FieldNumbering = z.infer<typeof FieldNumberingSchema>;
 const operationLabel = LabelSchema.optional();
 const normalizedV6OperationDefinition = normalizedV3OperationDefinition.extend({
   label: operationLabel,
+  booking: BookingOperationBinding.optional(),
 });
 const authoredV6OperationDefinition = authoredV3OperationDefinition.extend({
   label: operationLabel,
+  booking: BookingOperationBinding.optional(),
 });
 // A whole settings record, or one policy field, can require the person's yes.
 const assistantConfirmation = {

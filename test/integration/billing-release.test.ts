@@ -67,7 +67,7 @@ test('a declaring release carries its plan and the previous serving reader refus
     !Object.hasOwn(projectionPayload<object>(absent, family), 'billingPlans'),
   );
   await withArchivedCustomizationRuntime(
-    '2042780bcc3889022af36493a2dcaa3a62b8cb56',
+    'f25df5af44df132045c67ba29eb9aebe1084dcc7',
     async (run) => {
       const previous = (await run(
         `

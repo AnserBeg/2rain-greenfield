@@ -1,5 +1,11 @@
 import { BILLING_READER } from '../../canonical-model/src/billing.js';
 import {
+  BOOKING_OPERATION_READER,
+  bookingCatalogTerms,
+  bookingDeclarationProblem,
+  hasBookingOperations,
+} from '@north-star/canonical-model';
+import {
   layoutDeclarationProblem,
   layoutBindingsProblem,
   declaredLayouts,
@@ -695,6 +701,28 @@ function verifyCompiledRelease(
       projectionPayloadBytes,
     );
     if (
+      reference.familyId === PROJECTION_FAMILY_IDS.operationCatalog &&
+      revision.languageVersion === 'v6'
+    ) {
+      const terms = bookingCatalogTerms(layoutDefinition);
+      const catalog = decodeCanonicalObject(
+        projectionPayloadBytes[0]!,
+        'PROJECTION_CHUNK_NOT_CANONICAL',
+      );
+      if (
+        (terms.length > 0 &&
+          bookingDeclarationProblem(
+            parseNormalizedApplicationPackageJson(revision.desiredState),
+          )) ||
+        canonicalize(terms) !== canonicalize(bookingCatalogTerms(catalog))
+      ) {
+        throw integrity(
+          'BOOKING_PROJECTION_CONTRACT_MISMATCH',
+          'booking operations disagree with the released declarations',
+        );
+      }
+    }
+    if (
       reference.familyId === PROJECTION_FAMILY_IDS.surfaceManifest &&
       revision.languageVersion === 'v6'
     ) {
@@ -831,9 +859,11 @@ function verifyFormulaProjectionReference(
   const reference = references[0];
   if (
     references.length !== Number(Boolean(declaring)) ||
-    (rules.length
-      ? operationFloor !== requiredFormulaValidationOperationReader(rules)
-      : operationFloor >= LITERAL_VALIDATION_OPERATION_READER) ||
+    (hasBookingOperations(normalized)
+      ? operationFloor !== BOOKING_OPERATION_READER
+      : rules.length
+        ? operationFloor !== requiredFormulaValidationOperationReader(rules)
+        : operationFloor >= LITERAL_VALIDATION_OPERATION_READER) ||
     (displays.length
       ? queryFloor !== CALCULATED_DISPLAY_QUERY_READER
       : queryFloor >= CALCULATED_DISPLAY_QUERY_READER) ||
