@@ -1542,7 +1542,14 @@ export function registeredSemanticQueryFromPinnedView(
   }
   assertExactKeys(
     payload,
-    ['kind', 'queries', 'schemaVersion'],
+    [
+      'kind',
+      'queries',
+      'schemaVersion',
+      ...(Object.hasOwn(payload, 'documentBindings')
+        ? ['documentBindings']
+        : []),
+    ],
     (message) => new MalformedPinnedQueryCatalogError(message),
   );
   if (

@@ -63,6 +63,7 @@ export interface ComposedApplicationServerOptions {
    */
   readonly compiledApplication?: unknown;
   readonly databaseUrl: string;
+  readonly documentDemoScanner?: true;
   readonly host?: string;
   readonly port?: number;
   readonly rollbackReleaseRoot?: string;
@@ -256,6 +257,7 @@ export async function startComposedApplication(
       runtime.entry,
       {
         applicationExtension: COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION,
+        ...(runtime.documents ? { documents: runtime.documents } : {}),
         operationGateway: runtime.operationGateway,
         operationMediation: runtime.operationMediation,
         queryGateway: runtime.queryGateway,
@@ -268,6 +270,7 @@ export async function startComposedApplication(
         readSnapshot: (work, snapshotOptions) =>
           runtime.readSnapshot(work, snapshotOptions),
         requestWork: createRequestWorkProbe(),
+        ...(runtime.documents ? { documents: runtime.documents } : {}),
         ...(assistant ? { assistant } : {}),
         ...(workflows ? { workflowApprovals: workflows.worker } : {}),
       },
@@ -369,6 +372,7 @@ export async function openComposedApplicationRuntime(
     | 'databaseUrl'
     | 'rollbackReleaseRoot'
     | 'tenantSlug'
+    | 'documentDemoScanner'
     | 'workflowScheduler'
   >,
 ): Promise<ComposedApplicationRuntime> {
@@ -398,6 +402,7 @@ export async function openComposedApplicationRuntime(
       },
     },
     databaseUrl: options.databaseUrl,
+    documents: options.documentDemoScanner ? { demo: true } : {},
     inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
     localDemoIdentity: true,
     ...(options.workflowScheduler

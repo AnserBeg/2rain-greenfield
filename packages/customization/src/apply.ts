@@ -191,6 +191,9 @@ function applyOne(
       return saveListView(authored, patch);
     case 'addMetricCard':
       return addMetricCard(authored, patch);
+    case 'addDocumentField':
+    case 'addUploadCategory':
+      return addDocumentDeclaration(authored, patch);
     case 'addCalculatedDisplayField': {
       if (
         !isTenantId(patch.field.fieldId) ||
@@ -1462,6 +1465,45 @@ function statePrecondition(fieldId: string, stateId: string): Json {
     schemaVersion: version,
     value: { kind: 'textValue', schemaVersion: version, value: stateId },
   };
+}
+
+function addDocumentDeclaration(
+  authored: Json,
+  patch: Extract<
+    SingleCustomizationPatch,
+    { kind: 'addDocumentField' | 'addUploadCategory' }
+  >,
+): Outcome | null {
+  const { kind, ...declaration } = patch;
+  const collection =
+    kind === 'addDocumentField' ? 'documentFields' : 'documentCategories';
+  const idKey = kind === 'addDocumentField' ? 'fieldId' : 'categoryId';
+  if (
+    !list(authored, 'entities').some(
+      (entity) => entity.entityId === declaration.entityId,
+    )
+  )
+    return refusal(
+      'CUSTOMIZE_TARGET_NOT_FOUND',
+      'Choose an existing record type.',
+    );
+  const id = kind === 'addDocumentField' ? patch.fieldId : patch.categoryId;
+  if (!isTenantId(id) || id.split(':')[0] !== namespaceOf(authored))
+    return refusal(
+      'CUSTOMIZE_TARGET_NOT_FOUND',
+      'Use a stable tenant ID for this declaration.',
+    );
+  const declarations = authored[collection] ? list(authored, collection) : [];
+  if (declarations.some((item) => item[idKey] === id))
+    return refusal(
+      'CUSTOMIZE_DUPLICATE_LABEL',
+      'This document declaration already exists.',
+    );
+  authored[collection] = [
+    ...declarations,
+    { ...declaration, schemaVersion: version },
+  ];
+  return null;
 }
 
 function addField(
