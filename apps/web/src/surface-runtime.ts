@@ -1845,7 +1845,7 @@ async function submitSurfaceRuntimeIntentInContext(
   if (boardOperation && selection.selected.board) {
     const url = new URL(requestUrl, 'http://surface-runtime.local');
     const body = selection.selected.board.body;
-    const stage = result.readBack.values[body.grouping.stateFieldId];
+    const stage = result.readBack.values[body.grouping.state.fieldId];
     if (
       typeof stage === 'string' &&
       body.grouping.stages.some((s) => s.stateId === stage)

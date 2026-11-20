@@ -4,6 +4,8 @@ import {
   type LayoutDefinition,
   type SurfaceLayout,
   type SurfaceBoard,
+  boardPresentation,
+  type BoardSource,
 } from '@north-star/canonical-model';
 import { arrangeableLayoutFields } from './layout-revision.js';
 import { createHash } from 'node:crypto';
@@ -143,8 +145,10 @@ export function renderReleaseDiff(input: {
       )?.revisionId === board.revisionId
     )
       continue;
+    // Labels come from the release the approver is approving.
+    const shown = boardPresentation(to as unknown as BoardSource, board.body);
     lines.push(
-      `${s.lifecycle === 'retired' ? 'Retires' : 'Publishes'} Board “${String(s.label)}” for ${entityLabel(to, board.body.entityId)}. Stages are ${board.body.grouping.stages.map((v) => v.label).join(', ')}. Available moves are ${board.body.moves.map((v) => v.label).join(', ') || 'none'}. Card facts are ${board.body.facts.map((f) => f.label).join(', ') || 'none'}.`,
+      `${s.lifecycle === 'retired' ? 'Retires' : 'Publishes'} Board “${String(s.label)}” for ${entityLabel(to, board.body.entityId)}. Stages are ${shown.stages.map((v) => v.label).join(', ')}. Available moves are ${shown.moves.map((v) => v.label).join(', ') || 'none'}. Card facts are ${shown.facts.map((f) => f.label).join(', ') || 'none'}.`,
     );
   }
   for (const field of to.documentFields ?? []) {

@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 
 import pg from 'pg';
 import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../packages/canonical-model/src/surface-workspace.js';
+import { BOARD_READER } from '../../packages/canonical-model/src/board.js';
 
 import {
   CANONICALIZATION_PROFILE_VERSION,
@@ -174,6 +175,7 @@ test('the capability comparison binds the family to its capability, then compare
     33,
     34,
     LINE_CREATE_VALUES_SURFACE_FLOOR,
+    BOARD_READER,
   ];
   for (const reader of surfaceFloors) {
     for (const floor of surfaceFloors) {
@@ -227,7 +229,7 @@ test('the capability comparison binds the family to its capability, then compare
   // capability on one side alone reds here rather than in production.
   assert.deepEqual(SUPPORTED_RUNTIME_CAPABILITIES[surface], {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
-    maximumSupportedVersion: LINE_CREATE_VALUES_SURFACE_FLOOR,
+    maximumSupportedVersion: BOARD_READER,
   });
 });
 
@@ -846,7 +848,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
               ],
               {
                 capabilityId: 'northstar.runtime:capability.surface-manifest',
-                maximumSupportedVersion: LINE_CREATE_VALUES_SURFACE_FLOOR,
+                maximumSupportedVersion: BOARD_READER,
               },
             );
           },
@@ -871,7 +873,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
               new RegExp(
-                `requires version 999 and this runtime supports ${LINE_CREATE_VALUES_SURFACE_FLOOR}`,
+                `requires version 999 and this runtime supports ${BOARD_READER}`,
               ),
             );
           },
@@ -902,7 +904,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
               new RegExp(
-                `requires version 999 and this runtime supports ${LINE_CREATE_VALUES_SURFACE_FLOOR}`,
+                `requires version 999 and this runtime supports ${BOARD_READER}`,
               ),
             );
           },

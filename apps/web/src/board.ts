@@ -5,7 +5,7 @@ import {
   timingSafeEqual,
 } from 'node:crypto';
 import { surfaceHref } from './component-registry.js';
-import type { BoardBody, SurfaceBoard } from '@north-star/canonical-model';
+import type { BoardMove, SurfaceBoard } from '@north-star/canonical-model';
 import type {
   ImmutableJsonValue,
   RequestRuntimeView,
@@ -69,11 +69,20 @@ const link = (url: URL, changes: Record<string, string | null>) => {
   }
   return '/?' + params.toString();
 };
-type Move = BoardBody['moves'][number];
+type Move = BoardMove;
+interface StageView {
+  stateId: string;
+  label: string;
+  role?: string;
+}
 interface BoardContext {
   view: RequestRuntimeView;
   surface: CompiledSurfaceDefinition;
   board: SurfaceBoard;
+  /** Chosen stages, in order, labelled from the active release. */
+  stages: StageView[];
+  moveLabel: (move: Move) => string;
+  factLabel: (fieldId: string) => string;
   owner: CompiledSurfaceDefinition;
   record: CompiledSurfaceDefinition;
   binding: CompiledSurfaceDataBinding;
@@ -104,12 +113,28 @@ export function boardContext(
   const company = binding.query.legalEntityScope
     ? url.searchParams.get(binding.query.legalEntityScope.operand.parameterId)
     : null;
+  // Labels render from the active release; a stage without one shows its ID.
+  const labels = surface.boardPresentation;
+  const stages = board.body.grouping.stages.map(({ stateId }) => {
+    const shown = labels?.stages.find((s) => s.stateId === stateId);
+    return {
+      stateId,
+      label: shown?.label ?? stateId,
+      ...(shown?.role && { role: shown.role }),
+    };
+  });
   return {
     view,
     surface,
     owner,
     record,
     board,
+    stages,
+    moveLabel: (move) =>
+      labels?.moves.find((m) => m.operationId === move.operationId)?.label ??
+      move.transitionId,
+    factLabel: (fieldId) =>
+      labels?.facts.find((f) => f.fieldId === fieldId)?.label ?? fieldId,
     binding,
     url,
     scope,
@@ -156,7 +181,7 @@ async function readRows(
   if (c.company === null && c.binding.query.legalEntityScope)
     throw new Error('Choose a company.');
   if (
-    c.owner.dataSourceQueryId !== c.board.body.listQueryId &&
+    c.owner.dataSourceQueryId !== c.board.body.listQuery.queryId &&
     (await c.gateways.queryGateway.previewEligibility(
       c.view,
       c.owner.dataSourceQueryId,
@@ -165,7 +190,7 @@ async function readRows(
   )
     throw new Error('The collection is unavailable.');
   const result = await c.gateways.queryGateway.invoke(c.view, {
-    queryId: c.board.body.listQueryId,
+    queryId: c.board.body.listQuery.queryId,
     schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
     arguments: {
       ...c.scope,
@@ -213,7 +238,7 @@ function recordMoves(
     return (
       operation &&
       operation.intent === 'command' &&
-      m.fromStateId === record.values[c.board.body.grouping.stateFieldId] &&
+      m.fromStateId === record.values[c.board.body.grouping.state.fieldId] &&
       evaluateRegisteredOperationPrecondition(
         operation.precondition,
         record.values,
@@ -224,7 +249,8 @@ function recordMoves(
 export async function boardSlots(c: BoardContext, focusRecordId?: string) {
   const { body } = c.board;
   const { url } = c;
-  const stages = body.grouping.stages;
+  const stages = c.stages;
+  const stateFieldId = body.grouping.state.fieldId;
   const perStage = Math.min(10, c.binding.query.maximumResultCount - 1);
   const maxStages = Math.min(
     6,
@@ -268,10 +294,8 @@ export async function boardSlots(c: BoardContext, focusRecordId?: string) {
   );
   const moves = await authorizedMoves(
     c,
-    body.moves.filter((m) =>
-      page.records.some(
-        (r) => r.values[body.grouping.stateFieldId] === m.fromStateId,
-      ),
+    body.grouping.moves.filter((m) =>
+      page.records.some((r) => r.values[stateFieldId] === m.fromStateId),
     ),
   );
   const canReadRecord =
@@ -284,7 +308,7 @@ export async function boardSlots(c: BoardContext, focusRecordId?: string) {
   const columns = pageStages
     .map((stage) => {
       const matches = page.records.filter(
-        (r) => r.values[body.grouping.stateFieldId] === stage.stateId,
+        (r) => r.values[stateFieldId] === stage.stateId,
       );
       const cards = matches.slice(0, perStage);
       const next = matches.length > perStage ? cards.at(-1) : null;
@@ -297,7 +321,9 @@ export async function boardSlots(c: BoardContext, focusRecordId?: string) {
         cards.length
           ? `<ul>${cards
               .map((r) => {
-                const title = String(r.values[body.titleFieldId] ?? r.recordId);
+                const title = String(
+                  r.values[body.title.fieldId] ?? r.recordId,
+                );
                 const movable = recordMoves(c, r, moves).length > 0;
                 if (movable && r.recordId === focusRecordId) focusCard = true;
                 const controls = movable
@@ -307,7 +333,7 @@ export async function boardSlots(c: BoardContext, focusRecordId?: string) {
                   .filter((f) => r.values[f.fieldId] != null)
                   .map(
                     (f) =>
-                      `<div><dt>${h(f.label)}</dt><dd>${h(String(r.displayValues?.[f.fieldId] ?? r.values[f.fieldId]))}</dd></div>`,
+                      `<div><dt>${h(c.factLabel(f.fieldId))}</dt><dd>${h(String(r.displayValues?.[f.fieldId] ?? r.values[f.fieldId]))}</dd></div>`,
                   )
                   .join('');
                 return `<li>${canReadRecord ? `<a href="${h(surfaceHref(c.record, r.recordId, false, { view: c.view, legalEntitySelection: c.company ? [c.company] : [] }))}">${h(title)}</a>` : h(title)}<span class="status-pill"${stage.role ? ` data-status-role="${h(stage.role)}"` : ''}>${h(stage.label)}</span>${facts ? `<dl>${facts}</dl>` : ''}${controls}</li>`;
@@ -345,6 +371,8 @@ export async function boardTask(
   form: SurfaceRuntimeSubmission,
 ): Promise<BoardTaskResult> {
   const { body } = c.board;
+  const stages = c.stages;
+  const stateFieldId = body.grouping.state.fieldId;
   const back = `<a href="${h(link(c.url, { cards: null }))}#board-heading">Cancel move and return to Board</a>`;
   const refuse = (message: string, statusCode = 409) => ({
     html: `<section role="alert"><h1>Move card</h1><p>${h(message)}</p>${back}</section>`,
@@ -354,7 +382,7 @@ export async function boardTask(
     revision = Number(form.expectedRevision),
     state = form.sourceState ?? '';
   if (
-    !body.grouping.stages.some((s) => s.stateId === state) ||
+    !stages.some((s) => s.stateId === state) ||
     !Number.isSafeInteger(revision) ||
     revision < 1
   )
@@ -372,17 +400,17 @@ export async function boardTask(
     return refuse('Open the move again.');
   const permissions = await authorizedMoves(
     c,
-    body.moves.filter((m) => m.fromStateId === state),
+    body.grouping.moves.filter((m) => m.fromStateId === state),
   );
   const current = (
     await readRows(
       c,
-      body.grouping.stages.map((s) => s.stateId),
+      c.stages.map((s) => s.stateId),
       { recordId },
     )
   ).records[0];
-  const currentStage = body.grouping.stages.find(
-    (s) => s.stateId === current?.values[body.grouping.stateFieldId],
+  const currentStage = stages.find(
+    (s) => s.stateId === current?.values[stateFieldId],
   );
   const changed = () =>
     refuse(
@@ -410,10 +438,10 @@ export async function boardTask(
   if (current.revision !== revision || currentStage?.stateId !== state)
     return changed();
   const moves = recordMoves(c, current, permissions);
-  const start = body.grouping.stages.find((s) => s.stateId === state)!.label;
+  const start = stages.find((s) => s.stateId === state)!.label;
   const formStart = (action: string, reqKey: string, token: string) =>
     `<form method="post" action="${h(link(c.url, {}))}">${hidden('boardAction', action)}${hidden('recordId', recordId)}${hidden('expectedRevision', revision)}${hidden('sourceState', state)}${hidden('idempotencyKey', reqKey)}${hidden('boardTicket', token)}`;
-  const title = h(String(current.values[body.titleFieldId] ?? recordId));
+  const title = h(String(current.values[body.title.fieldId] ?? recordId));
   const task = (html: string) => ({
     html: `<section class="composition-task-context" data-board-task><h1>Move card</h1><p>${title} · ${h(start)}</p>${html}${back}</section>`,
     statusCode: 200,
@@ -428,7 +456,7 @@ export async function boardTask(
         nonce,
         seal(frame, [recordId, revision, state, nonce, 'choose']),
       ) +
-        `<label>Destination and action <select name="operationId">${moves.map((m) => `<option value="${h(m.operationId)}">${h(body.grouping.stages.find((s) => s.stateId === m.toStateId)!.label)} · ${h(m.label)}</option>`).join('')}</select></label><button>Review move</button></form>`,
+        `<label>Destination and action <select name="operationId">${moves.map((m) => `<option value="${h(m.operationId)}">${h(stages.find((s) => s.stateId === m.toStateId)!.label)} · ${h(c.moveLabel(m))}</option>`).join('')}</select></label><button>Review move</button></form>`,
     );
   }
   const move = moves.find((m) => m.operationId === opId);
@@ -446,11 +474,11 @@ export async function boardTask(
           )
         : null;
     return task(
-      `<p>${h(move.label)} moves ${title} from ${h(start)} to ${h(body.grouping.stages.find((s) => s.stateId === move.toStateId)!.label)}.</p>` +
+      `<p>${h(c.moveLabel(move))} moves ${title} from ${h(start)} to ${h(stages.find((s) => s.stateId === move.toStateId)!.label)}.</p>` +
         formStart('confirm', key, seal(frame, [...intent, opId])) +
         hidden('operationId', opId) +
         (grant ? hidden('confirmationGrant', grant) : '') +
-        `<button>Confirm ${h(move.label)}</button></form>`,
+        `<button>Confirm ${h(c.moveLabel(move))}</button></form>`,
     );
   }
   return refuse('Review this move before confirming.');
@@ -464,14 +492,14 @@ export async function changedBoardCard(
   const current = (
     await readRows(
       c,
-      body.grouping.stages.map((s) => s.stateId),
+      c.stages.map((s) => s.stateId),
       { recordId: form.recordId ?? '' },
     )
   ).records[0];
   if (!current || current.revision === Number(form.expectedRevision))
     return null;
-  const stage = body.grouping.stages.find(
-    (s) => s.stateId === current.values[body.grouping.stateFieldId],
+  const stage = c.stages.find(
+    (s) => s.stateId === current.values[body.grouping.state.fieldId],
   );
   if (!stage) return null;
   return (

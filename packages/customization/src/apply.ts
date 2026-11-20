@@ -1,5 +1,10 @@
 import type { ReplayOrigin } from './upgrade-diagnostics.js';
-import { applyBoardRevision } from './board-revision.js';
+import {
+  applyBoardRevision,
+  type BoardApplyProblem,
+  type BoardCheck,
+  supersededBoardRevisions,
+} from './board-revision.js';
 import {
   applyLayoutRevision,
   currentLayout,
@@ -97,6 +102,7 @@ export function applyCustomizationPatches(
 ): CustomizationApplication {
   const authored = structuredClone(base) as Json;
   const previous: SingleCustomizationPatch[] = [];
+  const superseded = supersededBoardRevisions(patches);
   for (const [index, change] of patches.entries()) {
     const members = change.kind === 'changeSet' ? change.patches : [change];
     for (const patch of members) {
@@ -117,7 +123,17 @@ export function applyCustomizationPatches(
           };
         layoutReplay = { source: target.body, findings: [], blocked: [] };
       }
-      const outcome = applyOne(authored, patch, previous, layoutReplay);
+      const board =
+        patch.kind === 'addBoardViewRevision'
+          ? {
+              check: superseded.has(patch.revisionId)
+                ? ('identity' as const)
+                : origin?.differentBase
+                  ? ('structural' as const)
+                  : ('authoring' as const),
+            }
+          : undefined;
+      const outcome = applyOne(authored, patch, previous, layoutReplay, board);
       if (outcome) return Object.freeze({ ...outcome, patchIndex: index });
       previous.push(patch);
     }
@@ -201,6 +217,9 @@ export function applyOne(
   patch: SingleCustomizationPatch,
   previous: readonly SingleCustomizationPatch[],
   layoutReplay?: LayoutReplay,
+  board: { check: BoardCheck; problem?: BoardApplyProblem | undefined } = {
+    check: 'authoring',
+  },
 ): Outcome | null {
   switch (patch.kind) {
     case 'addAddressField':
@@ -247,12 +266,16 @@ export function applyOne(
           p.kind === 'addBoardViewRevision' &&
           p.revisionId === patch.revisionId,
       )
-        ? 'This Board revision ID has already been used.'
+        ? { message: 'This Board revision ID has already been used.', conflicts: [] }
         : applyBoardRevision(
             authored as unknown as BoardSource & { surfaces: Json[] },
             patch,
+            board.check,
           );
-      return problem ? refusal('CUSTOMIZE_BOARD_CONFLICT', problem) : null;
+      if (problem) board.problem = problem;
+      return problem
+        ? refusal('CUSTOMIZE_BOARD_CONFLICT', problem.message)
+        : null;
     }
     case 'addLayoutRevision': {
       if (
