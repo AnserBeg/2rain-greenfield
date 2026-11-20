@@ -84,6 +84,60 @@ export function currentLayout(
     body: current?.body ?? base,
   };
 }
+/** The document editor declares at least one header input. Ordinary forms bind their own fields. */
+export function arrangeableLayoutFields(
+  body: LayoutBody,
+  section: LayoutBody['sections'][number],
+) {
+  const editor =
+    body.mode !== 'detail' &&
+    body.sections.some((s) => s.fields.some((f) => f.editorInput));
+  const fields = editor
+    ? section.fields.filter((f) => f.editorInput)
+    : section.fields;
+  return [
+    ...fields.filter((f) => f.tier === 'always'),
+    ...fields.filter((f) => f.tier === 'progressive'),
+  ];
+}
+
+/** Extend each adopted layout from the newly declared field contract, preserving the owner's placements. */
+export function placeAddedLayoutField(def: LayoutDefinition, fieldId: string) {
+  for (const surface of def.surfaces) {
+    for (const layout of (surface.layouts as SurfaceLayout[] | undefined) ??
+      []) {
+      const body = layout.body;
+      const base = baseLayout(def, surface, body.mode);
+      const section = base?.sections.find((s) =>
+        s.fields.some((f) => f.id === fieldId),
+      );
+      if (!section) continue;
+      const index = section.fields.findIndex((f) => f.id === fieldId);
+      const field = section.fields[index]!;
+      const existing = body.sections
+        .flatMap((s) => s.fields)
+        .find((f) => f.id === fieldId);
+      if (existing) {
+        // Publishing screens for a historical query-only field binds its existing placement.
+        Object.assign(existing, field, { label: existing.label });
+      } else {
+        const predecessor = section.fields[index - 1];
+        const destination = body.sections.find((s) =>
+          s.fields.some((f) => f.id === predecessor?.id),
+        );
+        if (destination)
+          destination.fields.splice(
+            destination.fields.findIndex((f) => f.id === predecessor!.id) + 1,
+            0,
+            field,
+          );
+        else body.sections[0]!.fields.push(field);
+      }
+      layout.resultLayoutDigest = layoutDigest(body);
+    }
+  }
+}
+
 function locate(b: LayoutBody, id: string) {
   const section = b.sections.find((s) => s.id === id);
   const block = b.blocks.find((s) => s.id === id);
@@ -212,7 +266,25 @@ export function applyLayoutRevision(
     return 'The predecessor of this layout revision differs.';
   const body = structuredClone(target.body);
   try {
-    for (const edit of patch.edits) applyEdit(body, edit);
+    for (const edit of patch.edits) {
+      const section = body.sections.find((s) => s.id === edit.parent);
+      const field = section?.fields.find((f) => f.id === edit.id);
+      if (!section || !field) {
+        applyEdit(body, edit);
+        continue;
+      }
+      const visible = arrangeableLayoutFields(body, section);
+      if (!visible.some((f) => f.id === field.id))
+        return `${field.label.text} has no input in the document editor.`;
+      const oldPosition = visible.findIndex((f) => f.id === field.id);
+      applyEdit(body, edit);
+      if (
+        edit.kind === 'move' &&
+        edit.destination === section.id &&
+        arrangeableLayoutFields(body, section)[oldPosition]?.id === field.id
+      )
+        return 'This move leaves the field in the same place. Reorder it within its up-front or More details group.';
+    }
   } catch (error) {
     return (error as Error).message;
   }
@@ -275,11 +347,19 @@ export function layoutCommand(
     destination = command.destination;
     position = { edge: 'last' };
   } else {
-    const i = at.siblings.indexOf(member);
+    const section = b.sections.find((s) => s.id === at.parent);
+    const item = at.item;
+    const siblings =
+      section && 'tier' in item
+        ? arrangeableLayoutFields(b, section)
+            .filter((f) => f.tier === item.tier)
+            .map((f) => f.id)
+        : at.siblings;
+    const i = siblings.indexOf(member);
     if (command.action === 'up' && i > 0)
-      position = { before: at.siblings[i - 1]! };
-    else if (command.action === 'down' && i < at.siblings.length - 1)
-      position = { after: at.siblings[i + 1]! };
+      position = { before: siblings[i - 1]! };
+    else if (command.action === 'down' && i >= 0 && i < siblings.length - 1)
+      position = { after: siblings[i + 1]! };
     else throw new Error('Choose a position inside this group.');
   }
   return draftLayoutRevision(target, [

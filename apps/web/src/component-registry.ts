@@ -1306,6 +1306,26 @@ export function renderLayoutSection(
     : `<section class="panel" data-composition-fields data-layout-section="${id}"><h2>${label}</h2>${content}</section>`;
 }
 
+function renderLayoutDetailSection(
+  context: SurfaceComponentContext,
+  section: LayoutBody['sections'][number],
+  record: SemanticRecordDto,
+  cells?: Readonly<Record<string, string>>,
+): string {
+  return renderLayoutSection(
+    section,
+    (field) => {
+      // Composed reads have already formatted the bound column. Operation read-backs carry field IDs.
+      const value = cells
+        ? escapeHtml(cells[field.binding] ?? '—')
+        : recordFieldValue(context, record, field.id);
+      return `<div data-field-id="${escapeHtml(field.id)}"><dt>${escapeHtml(field.label.text)}</dt><dd>${value}</dd></div>`;
+    },
+    escapeHtml,
+    'detail',
+  );
+}
+
 function renderSections(context: SurfaceComponentContext): string {
   const documents =
     context.data?.status === 'READY'
@@ -1336,12 +1356,11 @@ function renderSections(context: SurfaceComponentContext): string {
             );
           const section = layout.sections.find((s) => s.id === id)!;
           if (data.fieldsFailed) return dataDiagnostic('QUERY_UNSUPPORTED');
-          return renderLayoutSection(
+          return renderLayoutDetailSection(
+            context,
             section,
-            (f) =>
-              `<div data-field-id="${escapeHtml(f.id)}"><dt>${escapeHtml(f.label.text)}</dt><dd>${escapeHtml(data.fields.cells[f.binding] ?? '—')}</dd></div>`,
-            escapeHtml,
-            'detail',
+            data.record,
+            data.fields.cells,
           );
         })
         .join('') +
@@ -1370,7 +1389,7 @@ function renderSections(context: SurfaceComponentContext): string {
       slotPanel(
         context,
         record
-          ? `${data.status === 'READY' && data.receiving ? renderReceivingSection(data.receiving) : ''}${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${data.status === 'READY' && data.salesOrder ? renderSalesOrderSection(data.salesOrder) : ''}${data.status === 'READY' && data.packingDocument ? renderPackingDocument(data.packingDocument) : ''}${layout ? layout.sections.map((section) => renderLayoutSection(section, (f) => `<div data-field-id="${escapeHtml(f.id)}"><dt>${escapeHtml(f.label.text)}</dt><dd>${recordFieldValue(context, record, f.binding)}</dd></div>`, escapeHtml, 'detail')).join('') : `<section class="panel data-panel" data-data-state="exact"><details class="record-section-group" open><summary><h2>Details</h2></summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(labels.get(fieldId) ?? fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${recordFieldValue(context, record, fieldId)}</dd></div>`).join('')}</dl></details></section>`}`
+          ? `${data.status === 'READY' && data.receiving ? renderReceivingSection(data.receiving) : ''}${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${data.status === 'READY' && data.salesOrder ? renderSalesOrderSection(data.salesOrder) : ''}${data.status === 'READY' && data.packingDocument ? renderPackingDocument(data.packingDocument) : ''}${layout ? layout.sections.map((section) => renderLayoutDetailSection(context, section, record)).join('') : `<section class="panel data-panel" data-data-state="exact"><details class="record-section-group" open><summary><h2>Details</h2></summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(labels.get(fieldId) ?? fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${recordFieldValue(context, record, fieldId)}</dd></div>`).join('')}</dl></details></section>`}`
           : dataDiagnostic('QUERY_NOT_FOUND'),
         'sections-slot',
       ) + documents

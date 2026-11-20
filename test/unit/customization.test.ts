@@ -31,6 +31,8 @@ import {
 import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import {
   applyCustomizationPatches,
+  draftLayoutRevision,
+  layoutCommand,
   compileCustomizationCandidate,
   customizationTargets,
   CUSTOMIZATION_PATCH_KINDS,
@@ -1895,6 +1897,154 @@ test('layout revision replays an ordered first revision, binds each member and r
     )?.requiredRuntimeCapability.minimumVersion,
     28,
   );
+});
+
+function purchaseOrderCreateLayout(source = authored) {
+  return customizationTargets(
+    normalizeApplicationPackage(source),
+  ).layouts!.find(
+    (t) =>
+      t.body.surfaceId.endsWith(':surface.purchase_order_form') &&
+      t.body.mode === 'create',
+  )!;
+}
+
+test('an undeclared document editor input cannot move to Delivery', () => {
+  const target = purchaseOrderCreateLayout();
+  const section = target.body.sections[0]!;
+  const field = section.fields.find(
+    (f) => f.label.text === 'Supplier reference',
+  )!;
+  assert.equal(field.editorInput, false);
+  const delivery = 'tenant-section/20730a1c-3a2f-4f69-b248-d1c3d1586098';
+  const revision = draftLayoutRevision(target, [
+    {
+      schemaVersion: 'v6',
+      kind: 'createSection',
+      id: delivery,
+      parent: target.body.slotId,
+      label: { schemaVersion: 'v6', text: 'Delivery' },
+      position: { edge: 'last' },
+    },
+    {
+      schemaVersion: 'v6',
+      kind: 'move',
+      id: field.id,
+      parent: section.id,
+      destination: delivery,
+      position: { edge: 'last' },
+    },
+  ]);
+  const result = applyCustomizationPatches(authored, [revision]);
+  assert.ok(
+    result.status === 'refused',
+    'Supplier reference has no document editor input',
+  );
+  assert.equal(result.code, 'CUSTOMIZE_LAYOUT_CONFLICT');
+  assert.match(result.message, /Supplier reference.*document editor/u);
+});
+
+test('a reorder that only crosses More details cannot reach approval', () => {
+  const target = purchaseOrderCreateLayout();
+  const section = target.body.sections[0]!;
+  const expected = section.fields.find(
+    (f) => f.label.text === 'Expected date',
+  )!;
+  const currency = section.fields.find((f) => f.label.text === 'Currency')!;
+  const revision = draftLayoutRevision(target, [
+    {
+      schemaVersion: 'v6',
+      kind: 'move',
+      id: expected.id,
+      parent: section.id,
+      destination: section.id,
+      position: { after: currency.id },
+    },
+  ]);
+  const result = applyCustomizationPatches(authored, [revision]);
+  assert.ok(result.status === 'refused', 'the visible order has not changed');
+  assert.equal(result.code, 'CUSTOMIZE_LAYOUT_CONFLICT');
+  assert.match(result.message, /More details/u);
+  const down = layoutCommand(target, { action: 'down', member: expected.id });
+  const moved = applyCustomizationPatches(authored, [down]);
+  assert.ok(moved.status === 'applied');
+  const more = purchaseOrderCreateLayout(
+    moved.authored,
+  ).body.sections[0]!.fields.filter((f) => f.tier === 'progressive');
+  assert.deepEqual(
+    more.slice(0, 2).map((f) => f.label.text),
+    ['Payment terms', 'Expected date'],
+  );
+});
+
+test('adding a field before or after a layout keeps its bound placement and replays', async () => {
+  const add = patch({
+    kind: 'addField',
+    entity: 'northstar.app:entity.purchase_order',
+    field: { label: 'Dock note', type: 'text' },
+    screens: 'record',
+  });
+  const added = applyCustomizationPatches(authored, [add]);
+  assert.ok(added.status === 'applied');
+  const targetWithField = purchaseOrderCreateLayout(added.authored);
+  const fields = targetWithField.body.sections[0]!.fields;
+  const i = fields.findIndex((f) => f.label.text === 'Dock note');
+  assert.ok(i > 0);
+  const predecessor = fields[i - 1]!;
+  const delivery = 'tenant-section/20730a1c-3a2f-4f69-b248-d1c3d1586098';
+  for (const addFirst of [false, true]) {
+    const target = addFirst ? targetWithField : purchaseOrderCreateLayout();
+    const section = target.body.sections[0]!;
+    const revision = draftLayoutRevision(target, [
+      {
+        schemaVersion: 'v6',
+        kind: 'createSection',
+        id: delivery,
+        parent: target.body.slotId,
+        label: { schemaVersion: 'v6', text: 'Delivery' },
+        position: { edge: 'last' },
+      },
+      {
+        schemaVersion: 'v6',
+        kind: 'move',
+        id: predecessor.id,
+        parent: section.id,
+        destination: delivery,
+        position: { edge: 'last' },
+      },
+    ]);
+    const chain = addFirst ? [add, revision] : [revision, add];
+    const result = applyCustomizationPatches(authored, chain);
+    assert.ok(result.status === 'applied');
+    const effective = purchaseOrderCreateLayout(result.authored);
+    const placed = effective.body.sections.find((s) =>
+      s.fields.some((f) => f.id === fields[i]!.id),
+    )!;
+    assert.equal(placed.id, addFirst ? section.id : delivery);
+    if (!addFirst)
+      assert.deepEqual(
+        placed.fields.map((f) => f.id),
+        [predecessor.id, fields[i]!.id],
+      );
+    assert.deepEqual(
+      placed.fields.find((f) => f.id === fields[i]!.id),
+      fields[i],
+    );
+    assert.equal(effective.predecessor, revision.revisionId);
+    const successor = layoutCommand(effective, {
+      action: 'rename',
+      member: fields[i]!.id,
+      label: 'Receiving note',
+    });
+    const compiled = await compileInSandbox({
+      ...sandboxRequest([...chain, successor]),
+      startAt: 2,
+    });
+    assert.ok(
+      compiled.status === 'compiled',
+      JSON.stringify(compiled.status === 'compiled' ? null : compiled),
+    );
+  }
 });
 
 test('detail layout moves whole protected blocks, preserves read-only bindings and refuses missing content or a false floor', async () => {

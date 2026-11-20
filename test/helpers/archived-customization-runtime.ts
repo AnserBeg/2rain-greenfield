@@ -18,10 +18,13 @@ import {
 const execute = promisify(execFile);
 type ArchivedRunner = (source: string, input: unknown) => Promise<unknown>;
 
-export async function assertArchivedTenantEnvelope(run: ArchivedRunner) {
+export async function assertArchivedTenantEnvelope(
+  run: ArchivedRunner,
+  entity = 'northstar.app:entity.item',
+) {
   const patch = parseCustomizationPatch({
     kind: 'addField',
-    entity: 'northstar.app:entity.item',
+    entity,
     field: { label: 'Inspection notes', type: 'text' },
   });
   assert.ok(patch.status === 'parsed');
@@ -64,7 +67,7 @@ console.log(JSON.stringify({ request, release: result.steps[0].release }));
   assert.equal(
     canonicalize(envelope),
     canonicalize(historical),
-    'both tenant runners reproduce the entire v6 envelope with formula declarations absent',
+    'both tenant runners reproduce the entire v6 envelope without a layout',
   );
 }
 
