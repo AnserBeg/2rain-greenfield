@@ -471,10 +471,13 @@ test('a buyer saves and reopens a purchase order with a moved Vendor, totals and
         const movedNext = page.locator(
           '.composed-record-body [data-composition-progression] .composition-progression-next',
         );
-        await expect(movedTotal).toBeVisible();
-        await expect(total).toHaveText(savedTotal);
-        await expect(movedNext).toBeVisible();
-        await expect(movedNext).toHaveText(savedNext, { useInnerText: true });
+        for (const width of [390, 1280]) {
+          await page.setViewportSize({ width, height: 840 });
+          await expect(movedTotal).toBeVisible();
+          await expect(total).toHaveText(savedTotal);
+          await expect(movedNext).toBeVisible();
+          await expect(movedNext).toHaveText(savedNext, { useInnerText: true });
+        }
         await expect(
           page.locator(
             '.composed-record-body .composition-collection:has(.composition-totals) ~ [data-composition-progression]',

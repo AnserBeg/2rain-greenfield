@@ -400,7 +400,7 @@ html:has([data-save-boundary]){scroll-padding-bottom:120px}
 
 /* ---------- composition (documents) ---------- */
 .composition-header{display:contents}
-.composed-record-body{display:grid;min-width:0;gap:var(--gap)}
+.composed-record-body{display:grid;grid-column:1/-1;grid-template-columns:minmax(0,1fr);min-width:0;gap:var(--gap)}
 .composed-record-body>.composition-progression{order:0}
 .composition-title{grid-column:1/-1;order:-2}
 .record-breadcrumb{order:-3}
