@@ -98,7 +98,7 @@
     {
       "name": "booking-endpoint-lock-order",
       "claim": "A booking locks a child endpoint before its parent, the generic writer's order, even when the parent's entity id sorts first.",
-      "file": "db/migrations/0055_booking_lock_order.sql",
+      "file": "db/migrations/0056_booking_lock_order.sql",
       "original": "ORDER BY north_star_internal.booking_entity_height(storage,n.entity_id) DESC,n.entity_id,n.record_id",
       "replacement": "ORDER BY n.entity_id,n.record_id",
       "test": {
@@ -120,7 +120,7 @@
     {
       "name": "booking-archive-lock-unscoped",
       "claim": "Archive locks an owner's allocation diaries whatever the archiving caller can see.",
-      "file": "db/migrations/0055_booking_lock_order.sql",
+      "file": "db/migrations/0056_booking_lock_order.sql",
       "original": "AND f.resource_key=d.resource_key AND f.state IN ('hold','confirmed')))",
       "replacement": "AND EXISTS (SELECT FROM platform.current_policy_memberships m JOIN platform.current_policy_permission_grants g USING (tenant_id,environment_id,role_id) WHERE (m.tenant_id,m.environment_id,m.principal_id,g.resource_id)=(o.tenant_id,o.environment_id,nullif(current_setting('north_star.principal_id',true),'')::uuid,o.entity_id) AND (m.legal_entity_id IS NULL OR m.legal_entity_id=o.company_id)) AND f.resource_key=d.resource_key AND f.state IN ('hold','confirmed')))",
       "test": {
@@ -137,7 +137,7 @@
     {
       "name": "booking-archive-check-unscoped",
       "claim": "An active allocation refuses archive of its owner whatever the archiving caller can see.",
-      "file": "db/migrations/0055_booking_lock_order.sql",
+      "file": "db/migrations/0056_booking_lock_order.sql",
       "original": "AND ((d.entity_id,d.record_id)=(entity,record) OR (o.entity_id,o.record_id)=(entity,record))",
       "replacement": "AND ((d.entity_id,d.record_id)=(entity,record) OR ((o.entity_id,o.record_id)=(entity,record) AND EXISTS (SELECT FROM platform.current_policy_memberships m JOIN platform.current_policy_permission_grants g USING (tenant_id,environment_id,role_id) WHERE (m.tenant_id,m.environment_id,m.principal_id,g.resource_id)=(o.tenant_id,o.environment_id,nullif(current_setting('north_star.principal_id',true),'')::uuid,o.entity_id) AND (m.legal_entity_id IS NULL OR m.legal_entity_id=o.company_id))))",
       "test": {

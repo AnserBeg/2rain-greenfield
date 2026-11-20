@@ -2680,11 +2680,11 @@ async function insertReleasePreparation(
        capability_support_digest, capability_support_result, renderer_version,
        view_schema_version, rendered_diff_evidence_digest,
        transition_preparation_receipt_id, fresh_tenant_install_id,
-       fresh_tenant_lineage_ordinal
+       fresh_tenant_lineage_ordinal, reviewed_diff
      ) VALUES (
        $1,$2,$3,'northstar.release-activation-preparation/v1',$4,$5,$6,$7,$8,$9,
        $10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,
-       'SUPPORTED',$25,$26,$27,$28,$29,$30
+       'SUPPORTED',$25,$26,$27,$28,$29,$30,$31
      )`,
     [
       input.context.tenantId,
@@ -2729,6 +2729,7 @@ async function insertReleasePreparation(
       input.receiptId,
       input.freshTenantBinding?.installId ?? null,
       input.freshTenantBinding?.lineageOrdinal ?? null,
+      input.diffBinding?.renderedText ?? null,
     ],
   );
 }

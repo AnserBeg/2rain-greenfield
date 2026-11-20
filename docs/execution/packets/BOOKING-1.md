@@ -37,7 +37,7 @@ Migration 0050 replayed to the checked-in snapshot. [Packet CI](https://github.c
 
 The staff server accepts the issuer login through `STAFF_APPROVAL_DATABASE_URL`. A missing issuer connection refuses operations requiring approval.
 
-## Slice 1a follow-up (migration 0055)
+## Slice 1a follow-up (migration 0056)
 
 The targeted check of `46d5a072` closed all nine items and found four more.
 
@@ -46,7 +46,9 @@ The targeted check of `46d5a072` closed all nine items and found four more.
 3. New tests refuse a workflow hold without an attested grant and prove the archive lock is taken for a caller whose grant names another resource.
 4. ADR-0082 and the runtime authority map record that `attest_booking_approval` trusts the issuer's scope arguments, with scope enforced at consumption.
 
-Each new test was red against the `46d5a072` SQL and green with 0055. Each fix was also removed on a committed tree to confirm its test reds (`test/evidence/BOOKING-1.expected-red.json`).
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44814536083
+
+Each new test was red against the `46d5a072` SQL and green with 0056. Each fix was also removed on a committed tree to confirm its test reds (`test/evidence/BOOKING-1.expected-red.json`).
 
 ## Test it yourself
 

@@ -10,6 +10,8 @@ Slice 0 established [ADR-0080](../../decisions/ADR-0080-connector-framework.md) 
 4. CI selects the deterministic fake even when the configuration requests Google. Google static imagery remains disabled under ADR-0080. User-entered coordinates and company-owned provider coordinates have separate lifetimes.
 5. ADR-0085 replay admission for both patch kinds has a named test in `test/unit/customization.test.ts`. It replays across a compatible base change and refuses field-label and map-section conflicts. UPGRADE-2 owns the shared allowlist inventory.
 
+SIGNIN-1 slice 2b opens when the canonical pending connection and send records and their writers land. Outside the local demo, provider enablement must go through a proof-gateable function with no runtime table-write grant.
+
 ## Gates and controls
 
 - [Prerequisite CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44728026806) exercised Party posting after an ordinary custom text field and PostgreSQL coordinate bounds and precision.

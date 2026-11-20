@@ -40,6 +40,7 @@ import { spawnSync } from 'node:child_process';
 import { join, relative, resolve, sep } from 'node:path';
 
 import ts from 'typescript';
+import nonExecutablePaths from '../../scripts/non-executable-pathspec.json';
 
 /** Every way this gate can fail. One code, one assertion, one committed control. */
 export const RECORD_CLAIM_CODES = [
@@ -116,13 +117,7 @@ export interface RecordClaimInput {
  * repaired here; it is recorded in the packet record as a scope finding, and
  * changing `git-workflow` is the orchestrator's edit.
  */
-export const NON_EXECUTABLE_PATHSPEC = [
-  ':!docs',
-  ':!.agents',
-  ':!CLAUDE.md',
-  ':!AGENTS.md',
-  ':!learnings.md',
-] as const;
+export const NON_EXECUTABLE_PATHSPEC: readonly string[] = nonExecutablePaths;
 
 const FULL_SHA = /^[0-9a-f]{40}$/u;
 // GFM allows a fence up to three spaces of indentation and any run of three or
