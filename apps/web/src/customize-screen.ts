@@ -146,6 +146,16 @@ interface ActivationOutcome {
   readonly releaseRoot: string;
 }
 
+interface LiveWorkflow {
+  readonly workflowId: string;
+  readonly trigger: string;
+  readonly body: string;
+  readonly grants: {
+    readonly queries: readonly string[];
+    readonly operations: readonly string[];
+  };
+}
+
 import type { TrustedRequestContext } from '@north-star/runtime';
 
 import { SURFACE_CLIENT_SCRIPT } from './surface-client.js';
@@ -194,6 +204,7 @@ export interface CustomizeScreenService {
   ): Promise<ActivationOutcome>;
   status(): Promise<CustomizationStatus>;
   targets(actor?: TrustedRequestContext): Promise<CustomizationTargets>;
+  workflows?(actor?: TrustedRequestContext): Promise<readonly LiveWorkflow[]>;
 }
 
 const FIELD_ROWS = 6;
@@ -252,7 +263,7 @@ export async function renderCustomizeScreen(
           'Add validation',
           validationForm(await loadTargets(), validation),
         );
-      return page('Customize', await overview(service, loadTargets));
+      return page('Customize', await overview(service, loadTargets, actor));
     }
     switch (submission.action) {
       case 'draft':
@@ -353,6 +364,7 @@ export async function renderCustomizeScreen(
 async function overview(
   service: CustomizeScreenService,
   loadTargets: LoadTargets,
+  actor?: TrustedRequestContext,
 ): Promise<string> {
   const status = await service.status();
   if (status.failedActivation)
@@ -366,6 +378,7 @@ async function overview(
       ),
     ].join('');
   const targets = await loadTargets();
+  const workflows = (await service.workflows?.(actor)) ?? [];
   const latest = status.activeChain.at(-1);
   const activeUpgrade = status.upgrades.find(
     (u) =>
@@ -399,6 +412,9 @@ async function overview(
           ? '<p>The verified release is live. Its customization history is unavailable.</p>'
           : '<p>The standard application, with no customizations.</p>'
     }${status.rollbackAvailable ? button('rollback', 'Roll back the latest change', { releaseId: status.activeReleaseId, fence: String(status.activeFence) }) : ''}</section>`,
+    workflows.length
+      ? `<section data-customize-workflows><h2>Live workflows</h2>${workflows.map(renderLiveWorkflow).join('')}</section>`
+      : '',
     refusal
       ? `<section data-customize-upgrade-refusal><h2>Platform upgrade refused</h2><p>Your current release is still live.</p><p>${escapeHtml(refusal.code)} · ${escapeHtml(refusal.message)}</p>${(refusal.issues ?? []).map((issue) => `<pre>${escapeHtml(issue)}</pre>`).join('')}</section>`
       : '',
@@ -427,6 +443,27 @@ async function overview(
         `<form method="post"><fieldset><legend>Show fields up front on ${escapeHtml(form.label)}</legend><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="arrangeLayout"><input type="hidden" name="surface" value="${escapeHtml(form.surfaceId)}"><input type="hidden" name="formLayout" value="1">${form.fields.map((f) => `<label><input type="checkbox" name="front:${escapeHtml(f.fieldId)}"${f.upFront ? ' checked' : ''}> ${escapeHtml(f.label)}</label>`).join(' ')}<button>Draft form arrangement</button></fieldset></form>`,
     ),
   ].join('');
+}
+
+function renderLiveWorkflow(workflow: LiveWorkflow): string {
+  const { trigger } = workflow;
+  const { operations, queries } = workflow.grants;
+  const describe = (id: string) =>
+    id.slice(id.lastIndexOf('.') + 1).replaceAll('_', ' ');
+  const actions = [
+    ...operations.map((id) => `use the ${describe(id)} action`),
+    ...queries.map((id) => `read ${describe(id)}`),
+  ];
+  const summary = actions.length
+    ? `When ${trigger.toLowerCase()}, this workflow may ${new Intl.ListFormat('en').format(actions)}.`
+    : `This workflow starts when ${trigger.toLowerCase()}.`;
+  const grant = (label: string, ids: readonly string[]) =>
+    `<dt>${label}</dt><dd>${ids.length ? ids.map((id) => `<code>${escapeHtml(id)}</code>`).join('<br>') : 'None'}</dd>`;
+  return `<article><h3>${escapeHtml(describe(workflow.workflowId))}</h3><p>${escapeHtml(summary)}</p>
+    <dl><dt>Trigger</dt><dd>${escapeHtml(trigger)}</dd>
+    ${grant('Query grants', queries)}${grant('Operation grants', operations)}</dl>
+    <details><summary>View code</summary><pre class="workflow-plan-input"><code>${escapeHtml(workflow.body)}</code></pre></details>
+  </article>`;
 }
 
 function askForm(service: CustomizeScreenService): string {
