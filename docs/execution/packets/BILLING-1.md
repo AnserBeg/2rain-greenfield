@@ -19,25 +19,24 @@ The narrow Fable re-read accepted [ADR-0083](../../decisions/ADR-0083-period-and
 
 ## Slice 1 · quote a service
 
-- A released structure and immutable, company-scoped price versions govern period, meter and fixed charges. The explanation query reads the declared source under its own grant and the pinned release.
-- Half-up rounding happens on the cumulative exact entitlement. Prior allocated and reserved cents are deducted once. Each line identifies its occurrence, rate version, coverage and derivation.
-- Price publication, overrides and assignments use registered operations with exact revision, permission, audit, outbox and idempotent replay. Migration 0051 enables RLS and grants append access. Reader 30 gates billing declarations.
-- Controls `billing-immutable-price` and `billing-tenant-price` exercise a real update and a cross-tenant read through the serving role.
-- The docs amendment merged at `886f84f2`. Slice 2 (billing-origin drafts and human issue) is the next implementation boundary.
-
-All packet CI jobs passed at `3b0e09da`. [CI run](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44742877160).
+- The calculator rates periods, meter allowances and fees using exact fractions. The served agreed-interval binding reads one unit, customer, currency and dates from an exact company-scoped query. Booking and meter source adapters belong to slice 2.
+- Migration 0052 revokes direct runtime access to rates and assignments. Publication validates the accepted receipt, audit, released operation, current company grant and proposal in one transaction. Reads require the released quote and source grants plus company scope.
+- Rate selection uses effective and publication time at each occurrence opening. Saved explanations contain the plan, evidence and calendar required for replay. The service-end fee selects rates at the end instant.
+- Publication retries discover their recorded company before checking the proposal and repeat authorization. Allocated and reserved cents admit every entitlement within the fraction precision bound.
+- The compiler refuses notes as evidence with `BILLING_SOURCE_FIELDS_REQUIRED`. Reader 30 covers declarations and reader 31 covers typed interval bindings.
 
 ## Test it yourself
 
-Run `node --import tsx --test test/integration/billing-quote.test.ts` from the repository root. Expect twelve passing proof groups, including CAD 100 + 30, 110 + 20, 490 + 100, 100 + 140 and a CAD 30 credit. The Edmonton spring and autumn examples bill one civil day each.
+Run `node --import tsx --test test/integration/billing-quote.test.ts`. Expect 17 proofs, including CAD 100 + 30 after a backdated publication, the capped three-day minimum of CAD 70, and a CAD 100 month from Jan 31 to Feb 28.
+Run `node --import tsx --test test/postgres/billing-terms.test.ts` for direct SQL denial, company isolation, archived retries, served replay and the historical reader’s refusal.
 
 ```record-claim
 {
   "schemaVersion":"northstar.record-claim/v1",
   "packet":"BILLING-1",
-  "base":"f25df5af44df132045c67ba29eb9aebe1084dcc7",
-  "head":"a4bb586417d0e0a45572e916e414036f2b0d838d",
-  "changedPaths":["apps/api/src/erp-capabilities.ts","db/migrations/0051_billing_rate_tables.sql","db/schema.snapshot.json","packages/canonical-model/src/billing-evidence.ts","packages/canonical-model/src/billing-normalization.ts","packages/canonical-model/src/billing.ts","packages/canonical-model/src/normalize.ts","packages/canonical-model/src/schemas.ts","packages/compiler/src/billing.ts","packages/compiler/src/compiler.ts","packages/compiler/src/projections.ts","packages/domain/src/billing/calendar.ts","packages/domain/src/billing/cover.ts","packages/domain/src/billing/fraction.ts","packages/domain/src/billing/occurrences.ts","packages/domain/src/billing/quote.ts","packages/domain/src/billing/terms.ts","packages/postgres-provider/package.json","packages/postgres-provider/src/billing-quote.ts","packages/postgres-provider/src/billing-terms.ts","packages/postgres-provider/src/release-repository.ts","packages/postgres-provider/src/serving-gateways.ts","packages/runtime/src/request-runtime-view.ts","test/architecture/release-persistence-boundary.test.ts","test/architecture/repository-hygiene.test.ts","test/architecture/tenant-completeness.manifest.json","test/architecture/tenant-completeness.test.ts","test/evidence/BILLING-1.expected-red.json","test/fixtures/g2/language-conformance/coverage-decisions.json","test/integration/billing-quote.test.ts","test/integration/billing-release.test.ts","test/postgres/billing-terms.test.ts","test/postgres/inventory-storage.test.ts","test/postgres/migrations.test.ts","test/postgres/module-storage-transition.test.ts","test/postgres/request-runtime-view.test.ts","test/postgres/trust-substrate.test.ts"],
+  "base":"08edc207bcd5be1982c9c0bcf1723172df9cb7ad",
+  "head":"4a637345016752f899a8aab1706980c9a37e021c",
+  "changedPaths":["db/migrations/0052_billing_publication.sql","db/schema.snapshot.json","learnings.md","packages/canonical-model/src/billing-evidence.ts","packages/canonical-model/src/billing.ts","packages/compiler/src/billing.ts","packages/compiler/src/projections.ts","packages/domain/src/billing/quote.ts","packages/domain/src/billing/terms.ts","packages/postgres-provider/src/billing-quote.ts","packages/postgres-provider/src/billing-terms.ts","packages/postgres-provider/src/release-repository.ts","packages/postgres-provider/src/trust/postgres-trust-service.ts","packages/runtime/src/request-runtime-view.ts","packages/runtime/src/semantic-operation-gateway.ts","test/architecture/release-persistence-boundary.test.ts","test/evidence/BILLING-1.expected-red.json","test/integration/billing-quote.test.ts","test/integration/billing-release.test.ts","test/postgres/billing-terms.test.ts","test/postgres/inventory-storage.test.ts","test/postgres/migrations.test.ts","test/postgres/module-storage-transition.test.ts","test/postgres/request-runtime-view.test.ts","test/postgres/trust-substrate.test.ts"],
   "symbols":[{"path":"packages/domain/src/billing/quote.ts","name":"quoteBillingService"},{"path":"packages/postgres-provider/src/billing-quote.ts","name":"billingQuoteReadModel"},{"path":"packages/postgres-provider/src/billing-terms.ts","name":"BILLING_TERMS_FACTORY"}]
 }
 ```
