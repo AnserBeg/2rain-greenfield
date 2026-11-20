@@ -748,8 +748,13 @@ test('a drafted receipt workflow links an inspection and requests escalation aft
             .poll(
               async () => {
                 const result = await pool.query<{ record_id: string }>(
-                  "SELECT record_id FROM platform.trust_business_change_documents WHERE tenant_id=$1 AND action_id=$2 AND channel='WORKFLOW'",
-                  [tenantId, create],
+                  `SELECT change.record_id
+                     FROM platform.trust_business_change_documents AS change
+                     JOIN platform.trust_action_invocations AS invocation
+                       USING (tenant_id, environment_id, invocation_id)
+                    WHERE change.tenant_id = $1 AND change.environment_id = $2
+                      AND change.action_id = $3 AND invocation.channel = 'WORKFLOW'`,
+                  [tenantId, environmentId, create],
                 );
                 return result.rows.map((row) => row.record_id);
               },
