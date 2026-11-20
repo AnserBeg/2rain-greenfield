@@ -55,11 +55,13 @@ const postedStockBalanceFunctionName = 'nsm_posted_stock_balance_v1';
 const allowedTypes = [
   /^boolean$/,
   /^date$/,
+  /^integer$/,
   /^numeric$/,
   /^numeric\([1-9][0-9]*,[0-9]+\)$/,
   /^text$/,
   /^time\([03]\) without time zone$/,
   /^timestamp\([03]\) with time zone$/,
+  /^timestamp\([03]\) without time zone$/,
   /^uuid$/,
   /^varchar\([1-9][0-9]*\)$/,
 ];
@@ -228,6 +230,22 @@ interface AllowedMissingCatalogObjects {
 }
 
 type StorageEntityTarget = StorageTargetPayloadV1['entities'][number];
+type StorageDateTimeCaptureCheck = NonNullable<
+  StorageEntityTarget['dateTimeCaptureChecks']
+>[number];
+
+/**
+ * ADR-0087 A4. Deploy policy, outside every authored revision and release
+ * byte: the most rows an existing table may hold for a dateTime field's window
+ * index to be built by the locking path in the approved attempt. A
+ * conservative proxy for the 2,000 ms writer-blocking trigger
+ * (docs/operations/runtime-slos.md); above it the field waits for the online
+ * index family. A deployment may lower it, never raise it.
+ */
+export const DATE_TIME_WINDOW_ROW_CEILING = 10_000;
+export interface ModuleStorageDeployPolicy {
+  readonly dateTimeWindowRowCeiling?: number;
+}
 
 /**
  * The sole compiled-DDL authority. The first pool must authenticate directly
@@ -240,6 +258,7 @@ export class PostgresModuleStorageMaterializer {
     private readonly materializerPool: Pool,
     private readonly moduleRuntimePool?: Pool,
     private readonly faultHooks: ModuleStorageMaterializerFaultHooks = {},
+    private readonly policy: ModuleStorageDeployPolicy = {},
   ) {}
 
   async prepare(
@@ -587,7 +606,12 @@ export class PostgresModuleStorageMaterializer {
               'STARTED',
               command.activationAttemptId,
             );
-            await applyDdlElement(client, target.target, element);
+            await applyDdlElement(
+              client,
+              target.target,
+              element,
+              this.policy.dateTimeWindowRowCeiling,
+            );
           }
           await appendApplication(
             client,
@@ -1295,6 +1319,7 @@ async function applyDdlElement(
   client: PoolClient,
   target: StorageTargetPayloadV1,
   element: StorageTransitionElement,
+  dateTimeWindowRowCeiling: number = DATE_TIME_WINDOW_ROW_CEILING,
 ): Promise<void> {
   switch (element.kind) {
     case 'createTable': {
@@ -1380,6 +1405,17 @@ async function applyDdlElement(
     }
     case 'createIndex': {
       const located = locateIndex(target, element);
+      if (
+        located.index.indexKind === 'dateTimeWindow' &&
+        element.classification.preparationValidity === 'deferredOnlineFamily'
+      ) {
+        await probeDateTimeWindowCeiling(
+          client,
+          located.entity,
+          element,
+          dateTimeWindowRowCeiling,
+        );
+      }
       const columns = indexColumnExpressions(located.entity, located.index);
       const predicate = indexPredicateSql(located.entity, located.index);
       await client.query(
@@ -1460,6 +1496,15 @@ async function applyDdlElement(
       throw failure('BACKFILL_REQUIRES_DML_ROLE', element.elementId);
     case 'addNotValidConstraint':
       {
+        const capture = locateDateTimeCaptureCheck(target, element);
+        if (capture) {
+          await ensureDateTimeCaptureCheck(
+            client,
+            capture.entity,
+            capture.check,
+          );
+          return;
+        }
         const located = locateCheckConstraint(target, element);
         await ensureEnumCheckConstraint(client, located.entity, located.check);
       }
@@ -1578,6 +1623,9 @@ async function createManagedTable(
   }
   for (const check of entity.checkConstraints ?? []) {
     await ensureEnumCheckConstraint(client, entity, check);
+  }
+  for (const check of entity.dateTimeCaptureChecks ?? []) {
+    await ensureDateTimeCaptureCheck(client, entity, check);
   }
   for (const unique of entity.uniqueKeys) {
     const columns = uniqueKeyColumnExpressions(entity, unique);
@@ -2792,6 +2840,114 @@ async function provisionDefaultLegalEntity(
   );
 }
 
+/**
+ * ADR-0087: the whole capture for the declared zone source, or every column
+ * null; finite values; and civil time minus offset equal to the instant in
+ * UTC, independent of the session zone and of any tz database. Rendered in
+ * PostgreSQL's own deparsed form so the catalog verifier compares it exactly.
+ */
+function dateTimeCaptureExpression(check: StorageDateTimeCaptureCheck): string {
+  const c = check.columns;
+  const all = [
+    c.instant,
+    c.civil,
+    c.offsetSeconds,
+    c.zone,
+    c.tzdbVersion,
+    c.zoneSource,
+    c.companyId,
+    c.calendarId,
+    c.dayBoundary,
+  ].map(quoted);
+  const company = check.zoneSource === 'companyBusinessCalendar';
+  const present = [
+    ...all.slice(0, 6).map((column) => `${column} IS NOT NULL`),
+    ...all
+      .slice(6)
+      .map((column) => `${column} IS ${company ? 'NOT ' : ''}NULL`),
+  ];
+  const [instant, civil, offset, , , source] = all;
+  return [
+    all.map((column) => `${column} IS NULL`).join(' AND '),
+    [
+      ...present,
+      `${source}::text = ${sqlTextLiteral(check.zoneSource)}::text`,
+      `isfinite(${instant})`,
+      `isfinite(${civil})`,
+      `${offset} >= '-64800'::integer`,
+      `${offset} <= 64800`,
+      `(${civil} - make_interval(secs => ${offset}::double precision)) = (${instant} AT TIME ZONE 'UTC'::text)`,
+    ].join(' AND '),
+  ].join(' OR ');
+}
+
+function dateTimeCaptureColumns(check: StorageDateTimeCaptureCheck): string[] {
+  return Object.values(check.columns).toSorted();
+}
+
+async function ensureDateTimeCaptureCheck(
+  client: PoolClient,
+  entity: StorageEntityTarget,
+  check: StorageDateTimeCaptureCheck,
+): Promise<void> {
+  const exists = await client.query<{ present: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1
+         FROM pg_constraint AS constraint_record
+         JOIN pg_class AS relation_record
+           ON relation_record.oid = constraint_record.conrelid
+         JOIN pg_namespace AS namespace_record
+           ON namespace_record.oid = relation_record.relnamespace
+        WHERE namespace_record.nspname = 'north_star_module'
+          AND relation_record.relname = $1
+          AND constraint_record.conname = $2
+     ) AS present`,
+    [entity.physicalTableName, check.physicalName],
+  );
+  if (exists.rows[0]?.present) return;
+  await client.query(
+    `ALTER TABLE north_star_module.${quoted(entity.physicalTableName)}
+       ADD CONSTRAINT ${quoted(check.physicalName)}
+       CHECK (${dateTimeCaptureExpression(check)}) NOT VALID`,
+  );
+}
+
+/**
+ * ADR-0087 A4: before the locking build, count the physical table -- every
+ * tenant's rows, through the definer probe -- to the ceiling plus one row,
+ * under the SHARE lock the build itself takes, and refuse by name above it.
+ */
+async function probeDateTimeWindowCeiling(
+  client: PoolClient,
+  entity: StorageEntityTarget,
+  element: StorageTransitionElement,
+  ceiling: number,
+): Promise<void> {
+  if (
+    !Number.isInteger(ceiling) ||
+    ceiling < 0 ||
+    ceiling > DATE_TIME_WINDOW_ROW_CEILING
+  ) {
+    throw failure(
+      'DATE_TIME_WINDOW_CEILING_INVALID',
+      `the dateTime window row ceiling must be an integer from 0 to ${String(DATE_TIME_WINDOW_ROW_CEILING)}`,
+    );
+  }
+  await client.query(
+    `LOCK TABLE north_star_module.${quoted(entity.physicalTableName)} IN SHARE MODE`,
+  );
+  const probe = await client.query<{ exceeds: boolean }>(
+    'SELECT north_star_internal.module_table_exceeds($1, $2) AS exceeds',
+    [entity.physicalTableName, ceiling],
+  );
+  if (probe.rows[0]?.exceeds !== false) {
+    throw failure(
+      'DATE_TIME_WINDOW_CEILING_EXCEEDED',
+      `record type ${entity.entityId} holds more than ${String(ceiling)} rows, so date-time field ${element.fieldId ?? element.subjectId} cannot build its window index in this attempt; it waits for the online index family`,
+    );
+  }
+}
+
 function enumCheckExpression(
   entity: StorageEntityTarget,
   check: StorageEntityTarget['checkConstraints'][number],
@@ -3118,8 +3274,22 @@ async function verifyCatalogOnClient(
     expectedRelations,
     effectivePendingConstraintNames,
   );
+  // A multi-column dateTime capture check lists its columns by attribute
+  // number, which depends on the order they were added; it is compared as a
+  // set. Every other constraint keeps its exact, ordered comparison.
+  const captureCheckNames = new Set(
+    [...expectedTables.values()].flatMap((entity) =>
+      (entity.dateTimeCaptureChecks ?? []).map(
+        (check) => `${entity.physicalTableName}.${check.physicalName}`,
+      ),
+    ),
+  );
   const actualConstraints = constraints.rows.map((constraint) => ({
-    columns: constraint.columns,
+    columns:
+      constraint.type === 'c' &&
+      captureCheckNames.has(`${constraint.table_name}.${constraint.name}`)
+        ? constraint.columns.toSorted()
+        : constraint.columns,
     deferred: constraint.deferred,
     deferrable: constraint.deferrable,
     definition:
@@ -4295,6 +4465,25 @@ function buildExpectedConstraints(
     });
   }
   for (const entity of tables.values()) {
+    for (const check of entity.dateTimeCaptureChecks ?? []) {
+      result.push({
+        columns: dateTimeCaptureColumns(check),
+        deferred: false,
+        deferrable: false,
+        definition: normalizeSqlExpressionRequired(
+          dateTimeCaptureExpression(check),
+        ),
+        deleteAction: ' ',
+        name: check.physicalName,
+        referencedColumns: null,
+        referencedSchema: null,
+        referencedTable: null,
+        tableName: entity.physicalTableName,
+        type: 'c',
+        updateAction: ' ',
+        validated: false,
+      });
+    }
     for (const check of entity.checkConstraints ?? []) {
       result.push({
         columns: [
@@ -5236,6 +5425,7 @@ function mergeCompatibleEntity(
       abiFunctionChecks: _abiFunctionChecks,
       columns: _columns,
       checkConstraints: _checkConstraints,
+      dateTimeCaptureChecks: _dateTimeCaptureChecks,
       consumerWriterRoots: _consumerWriterRoots,
       derivedStateFields: _derivedStateFields,
       foldedColumns: _foldedColumns,
@@ -5246,6 +5436,7 @@ function mergeCompatibleEntity(
     void _abiFunctionChecks;
     void _columns;
     void _checkConstraints;
+    void _dateTimeCaptureChecks;
     void _consumerWriterRoots;
     void _derivedStateFields;
     void _foldedColumns;
@@ -5503,6 +5694,15 @@ function mergeCompatibleEntity(
       (value) => value.physicalName,
     ),
     checkConstraints: mergeCheckConstraints(),
+    ...(prior.dateTimeCaptureChecks || next.dateTimeCaptureChecks
+      ? {
+          dateTimeCaptureChecks: mergeNamed(
+            prior.dateTimeCaptureChecks ?? [],
+            next.dateTimeCaptureChecks ?? [],
+            (value) => value.physicalName,
+          ),
+        }
+      : {}),
     columns: mergeColumns(),
     derivedStateFields: mergeNamed(
       prior.derivedStateFields,
@@ -6127,6 +6327,19 @@ function locateIndex(
     if (index) return { entity, index };
   }
   throw failure('ELEMENT_TARGET_MISSING', element.elementId);
+}
+
+function locateDateTimeCaptureCheck(
+  target: StorageTargetPayloadV1,
+  element: StorageTransitionElement,
+) {
+  for (const entity of target.entities) {
+    const check = (entity.dateTimeCaptureChecks ?? []).find(
+      (candidate) => candidate.physicalName === element.physicalObjectName,
+    );
+    if (check) return { check, entity };
+  }
+  return null;
 }
 
 function locateCheckConstraint(
