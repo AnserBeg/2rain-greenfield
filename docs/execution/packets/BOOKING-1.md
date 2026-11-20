@@ -1,6 +1,8 @@
 # BOOKING-1 — book a resource over time
 
-Fable approved [ADR-0082](../../decisions/ADR-0082-booking-over-time.md) with changes and rejected the original consumer contract. This docs-only amendment publishes the billing and event contracts. Slice 1a awaits the orchestrator’s narrow re-read.
+Fable approved [ADR-0082](../../decisions/ADR-0082-booking-over-time.md) with changes and rejected the original consumer contract. This docs-only amendment publishes the billing and event contracts.
+
+Fable’s narrow re-read accepted ADR-0082 with amendments. A1–A3 gate 1a, A4–A7 and A9–A10 gate 1b, A8 gates slice 2 and CALENDAR-1, and A9–A10 gate BILLING-1 slice 2.
 
 ## Design decisions
 
