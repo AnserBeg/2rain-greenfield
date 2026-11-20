@@ -1,4 +1,4 @@
-import { baseLayout, layoutProblem, LAYOUT_READER } from './layout.js';
+import { baseLayout, layoutProblem } from './layout.js';
 import type { VersionedNormalizedApplicationPackage } from './schemas.js';
 import { CanonicalModelError, diagnostic } from './diagnostics.js';
 import {
@@ -6,7 +6,7 @@ import {
   searchChildProblem,
 } from './picker-eligibility.js';
 
-export const LINE_CREATE_VALUES_SURFACE_FLOOR = LAYOUT_READER + 1;
+export const LINE_CREATE_VALUES_SURFACE_FLOOR = 30;
 
 /** Typed declarations also prove their cross-entity and contextual references. */
 export function validateSurfaceWorkspaces(
