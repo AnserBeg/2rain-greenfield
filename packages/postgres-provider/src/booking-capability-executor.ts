@@ -129,6 +129,47 @@ class BookingCapabilityExecutor implements RegisteredCapabilityOperationExecutor
     const input = request.input;
     const args = request.input.arguments;
     const actor = await this.service.actorIssuer.issue(request.context);
+    const command = {
+      ...args,
+      recordId: input.recordId,
+      expectedOwnerRevision: input.expectedRevision,
+      expectedRevision: args.bookingRevision ?? args.capacityRevision ?? 0,
+    };
+    let verifiedGrantId: string | undefined;
+    if (
+      request.definition.confirmation === 'humanRequired' ||
+      request.channel === 'WORKFLOW'
+    ) {
+      verifiedGrantId = this.service.verifyConfirmation?.(
+        request.view,
+        request.definition,
+        request.input,
+        request.confirmationGrant ?? null,
+      );
+      const human =
+        actor.actor.approvingHumanId ??
+        (actor.actor.executionPrincipal.kind === 'HUMAN'
+          ? actor.actor.executionPrincipal.principalId
+          : null);
+      if (!this.service.approvalPool || !verifiedGrantId || !human)
+        return refused('booking.approvalRequired');
+      await this.service.approvalPool.query(
+        'SELECT platform.attest_booking_approval($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
+        [
+          verifiedGrantId,
+          request.context.tenantId,
+          request.context.environmentId,
+          request.context.principalId,
+          human,
+          request.view.release.releaseId,
+          request.view.pointer.fence,
+          request.definition.operationId,
+          request.idempotencyKey,
+          command,
+          request.channel,
+        ],
+      );
+    }
     const result = await withTrustedRequestTransaction(
       this.service.pool,
       request.context,
@@ -151,15 +192,10 @@ class BookingCapabilityExecutor implements RegisteredCapabilityOperationExecutor
           request.view.pointer.fence,
           request.definition.operationId,
           request.idempotencyKey,
-          {
-            ...args,
-            recordId: input.recordId,
-            expectedOwnerRevision: input.expectedRevision,
-            expectedRevision:
-              args.bookingRevision ?? args.capacityRevision ?? 0,
-          },
+          command,
           {
             ...actor.actor,
+            approvalGrantId: verifiedGrantId,
             requestId: actor.requestId,
             channel: request.channel,
             policyVersion: request.policyVersion,
@@ -218,6 +254,7 @@ class BookingCapabilityExecutor implements RegisteredCapabilityOperationExecutor
 export const BOOKING_CAPABILITY_EXECUTOR_FACTORY: PostgresCapabilityOperationExecutorFactory =
   {
     capabilityId: BOOKING_CAPABILITY,
+    singleUseConfirmation: true,
     verificationRefusal: {
       code: 'SEMANTIC_OPERATION_INPUT_INVALID',
       reason: 'booking.endpointUnavailable',

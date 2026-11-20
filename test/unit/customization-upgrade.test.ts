@@ -176,7 +176,29 @@ const map = {
   sectionId:
     mapSurface + '/detail/northstar.app:slot.item_detail_sections/details',
 };
+const withEquipmentLifecycle = applied(extended, [
+  {
+    kind: 'declareLifecycle',
+    entity: equipment,
+    initial: 'Pending',
+    states: [{ label: 'Pending' }, { label: 'Passed' }],
+    transitions: [{ from: 'Pending', to: 'Passed', label: 'Pass' }],
+  },
+]);
+const equipmentBoard = customization
+  .customizationTargets(normalizeApplicationPackage(withEquipmentLifecycle))
+  .boards!.find((target) => target.body.entityId === equipment)!;
 const cases = {
+  addBoardViewRevision: {
+    source: withEquipmentLifecycle,
+    conflict: extended,
+    change: customization.draftBoardRevision(
+      equipmentBoard,
+      'Equipment inspections',
+      equipmentBoard.body.grouping.stages.map((stage) => stage.stateId),
+    ),
+    code: 'RETIRED_TARGET',
+  },
   addAddressField: occupied(address, 'FIELD_COLLISION'),
   addMapPlacement: {
     source: applied(base, [address]),

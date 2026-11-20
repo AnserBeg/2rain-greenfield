@@ -1,6 +1,6 @@
-import { BOOKING_OPERATION_READER } from '@north-star/canonical-model';
 import {
   REPLAYED_LAYOUT_READER,
+  BOOKING_OPERATION_READER,
   CONNECTOR_FAMILY,
 } from '@north-star/canonical-model';
 import {
@@ -226,7 +226,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 26 adds header relations, relation List columns and shared or lifecycle-less editors.
     // 27 adds internal document attachments. 28 adds record and form layout revisions.
     // 29 adds workflows, 30 billing, 31 Address fields and 32 map placements.
-    // 33 reads the versioned placement rule on replayed layouts.
+    // 33 adds Board lifecycle views and form-based moves.
+    // 34 reads the versioned placement rule on replayed layouts.
     maximumSupportedVersion: REPLAYED_LAYOUT_READER,
   },
 });

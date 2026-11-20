@@ -39,6 +39,7 @@ const declarationKeys = {
   formulaRules: 'ruleId',
   workflows: 'workflowId',
   mapPlacements: 'placementId',
+  stateMachines: 'machineId',
 } as const;
 function declarations(def: Definition) {
   const ids = new Map<string, Member>();
@@ -49,6 +50,7 @@ function declarations(def: Definition) {
       const fieldType = member.fieldType as Member | undefined;
       for (const [rows, idKey] of [
         [list?.views, 'viewId'],
+        [member.states, 'stateId'],
         [list?.columns, 'columnId'],
         [fieldType?.options, 'optionId'],
         [(member.launcher as Member | undefined)?.metrics, 'metricId'],

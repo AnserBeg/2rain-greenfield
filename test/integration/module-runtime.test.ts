@@ -1,3 +1,5 @@
+import { capabilityMediationAuthority } from '../../packages/postgres-provider/src/capability-operation-executor-factory.js';
+import { BOOKING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/booking-capability-executor.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
@@ -400,6 +402,42 @@ test('empty catalogs execute zero predicate-kernel inputs explicitly', async () 
   );
 });
 
+test('a capability requesting single-use approval receives fresh signed grants for identical terms', async () => {
+  const id = FIXTURE_IDS.namespace + ':capability.scheduled_time';
+  const operationId = FIXTURE_IDS.namespace + ':operation.master_archive';
+  const view = await issuedView(
+    compileFixture(),
+    new AllowPolicy(),
+    (projections) => ({
+      ...projections,
+      operation: mutateCatalog(projections.operation, 'operations', (entry) =>
+        entry.operationId !== operationId
+          ? entry
+          : {
+              ...entry,
+              tier: 'o1',
+              effect: {
+                kind: 'registeredCapabilityEffect',
+                schemaVersion: 'v1',
+                capability: {
+                  kind: 'capabilityReference',
+                  schemaVersion: 'v1',
+                  targetId: id,
+                },
+              },
+            },
+      ),
+    }),
+  );
+  const mediation = capabilityMediationAuthority([
+    { ...BOOKING_CAPABILITY_EXECUTOR_FACTORY, capabilityId: id },
+  ]);
+  const input = { recordId: randomUUID(), expectedRevision: 1 };
+  const first = mediation.issueConfirmationGrant(view, operationId, input);
+  const second = mediation.issueConfirmationGrant(view, operationId, input);
+  assert.notEqual(first, second);
+});
+
 test('human-required operations refuse every channel without a matching server grant and stale grants fail', async () => {
   const compiled = compileFixture();
   const policy = new AllowPolicy();
@@ -452,6 +490,11 @@ test('human-required operations refuse every channel without a matching server g
   assert.equal(executor.operationCalls.length, 0);
 
   const grant = mediation.issueConfirmationGrant(view, operationId, input);
+  assert.equal(
+    mediation.issueConfirmationGrant(view, operationId, input),
+    grant,
+    'rendering the same ordinary command preserves its confirmation grant',
+  );
   await assert.rejects(
     gateway.invoke(
       view,
@@ -467,6 +510,23 @@ test('human-required operations refuse every channel without a matching server g
     SemanticOperationConfirmationStaleError,
   );
   assert.equal(executor.nonAcceptedCalls.length, channels.length + 1);
+
+  const reactivated = await issuedView(compiled, policy, undefined, 3);
+  await assert.rejects(
+    gateway.invoke(
+      reactivated,
+      {
+        confirmationGrant: grant,
+        idempotencyKey: randomUUID(),
+        input,
+        operationId,
+        schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+      },
+      mediation.issueInvocation(reactivated, 'UI'),
+    ),
+    SemanticOperationConfirmationStaleError,
+    'reactivation of the same release requires fresh approval',
+  );
 
   const [grantPayload, grantSignature] = grant.split('.');
   assert.ok(grantPayload && grantSignature);
@@ -485,7 +545,7 @@ test('human-required operations refuse every channel without a matching server g
     ),
     SemanticOperationConfirmationGrantError,
   );
-  assert.equal(executor.nonAcceptedCalls.length, channels.length + 2);
+  assert.equal(executor.nonAcceptedCalls.length, channels.length + 3);
 
   const accepted = await gateway.invoke(
     view,
@@ -768,6 +828,7 @@ async function issuedView(
   transform: (
     value: LoadedRequestRuntimeDefinition['projections'],
   ) => LoadedRequestRuntimeDefinition['projections'] = (value) => value,
+  fence = 1,
 ): Promise<RequestRuntimeView> {
   const identity: AuthenticatedIdentity = {
     environmentId,
@@ -778,7 +839,7 @@ async function issuedView(
     async load(): Promise<LoadedRequestRuntimeDefinition> {
       return {
         environmentId,
-        pointer: { fence: 1, pointerId },
+        pointer: { fence, pointerId },
         projections: transform(runtimeProjections(compiled)),
         release: { contentHash: compiled.releaseRoot, releaseId },
         tenantId,
