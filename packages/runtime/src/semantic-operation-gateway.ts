@@ -1268,6 +1268,7 @@ function parseOperationCatalogPayload(
       'kind',
       'operations',
       'schemaVersion',
+      ...(Object.hasOwn(payload, 'addressBindings') ? ['addressBindings'] : []),
       ...(Object.hasOwn(payload, 'documentBindings')
         ? ['documentBindings']
         : []),

@@ -56,6 +56,7 @@ const suiteDefinitions = [
       'test/unit/surface-assets.test.ts',
       'test/unit/web-surface-hex-literal-ratchet.test.ts',
       'test/unit/workspace-contract.test.ts',
+      'test/unit/address-connector.test.ts',
     ],
     script: 'test:unit',
   },
@@ -226,6 +227,7 @@ const suiteDefinitions = [
       'test/postgres/tenant-isolation.test.ts',
       'test/postgres/trust-substrate.test.ts',
       'test/postgres/workflow-consumer.test.ts',
+      'test/postgres/address-connector.test.ts',
     ],
     scripts: [
       'test:postgres:1',
