@@ -103,6 +103,38 @@ import {
   type WorkflowApprovalsData,
 } from './workflow-approvals.js';
 
+/** Session transport for the forms emitted by the existing ERP renderer. */
+export function withStaffSession(
+  page: SurfaceRuntimeResponse,
+  staff: { csrf: string; identityOrigin: string },
+): SurfaceRuntimeResponse {
+  const token = escapeHtml(staff.csrf);
+  const account =
+    '<a href="' +
+    escapeHtml(staff.identityOrigin) +
+    '/account">Manage sign-in</a><form method="post" action="/auth/signout"><button>Sign out</button><button name="everywhere" value="true">Sign out everywhere</button></form>';
+  if (page.statusCode === 401)
+    return {
+      ...page,
+      html: page.html.replace(
+        '</main>',
+        '<a href="/auth/signin">Sign in with a passkey</a></main>',
+      ),
+    };
+  const html = page.html
+    .replace(
+      '<div class="shell-account__menu">',
+      '<div class="shell-account__menu">' + account,
+    )
+    .replace('</head>', '<meta name="erp-csrf" content="' + token + '"></head>')
+    .replace(
+      /<form\b[^>]*\bmethod="post"[^>]*>/giu,
+      (form) =>
+        form + '<input type="hidden" name="_csrf" value="' + token + '">',
+    );
+  return { ...page, html };
+}
+
 /** Fixture-only shell furniture, never installed by the production composition. */
 export function withLocalDemoIdentity(
   response: SurfaceRuntimeResponse,

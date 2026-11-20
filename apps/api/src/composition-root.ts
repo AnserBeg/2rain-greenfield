@@ -1,3 +1,5 @@
+import { CAPABILITY_EXECUTOR_FACTORIES } from './erp-capabilities.js';
+import { localDemoActor } from '../../../packages/runtime/src/local-demo-actor.js';
 import {
   canonicalAuthoredProjection,
   parseNormalizedApplicationPackageJson,
@@ -13,12 +15,6 @@ import {
   type InventoryScopeProvisioning,
 } from '@north-star/postgres-provider/composed-application-runtime';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '@north-star/postgres-provider/inventory-provider-error-mappings';
-import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/inventory-posting-capability-executor';
-import { FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/fulfillment-capability-executor';
-import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/receiving-capability-executor';
-import { RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/receivables-capability-executor';
-import { PAYABLES_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/payables-capability-executor';
-import { PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY } from '@north-star/postgres-provider/purchase-order-approval-executor';
 import {
   AGENT_KEY_FILE_VARIABLE,
   anthropicModel,
@@ -135,15 +131,6 @@ export const COMPOSED_APPLICATION_INVENTORY_SCOPE = Object.freeze({
   transferApprovalThreshold: null,
   transferReasonRequirement: 'codeOnly',
 } as const satisfies InventoryScopeProvisioning);
-
-const CAPABILITY_EXECUTOR_FACTORIES = Object.freeze([
-  INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
-  RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
-  FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY,
-  RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY,
-  PAYABLES_CAPABILITY_EXECUTOR_FACTORY,
-  PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY,
-]);
 
 /** Thin transport root: provider assembly owns persistence and runtime wiring. */
 export async function startComposedApplication(
@@ -267,6 +254,7 @@ export async function startComposedApplication(
       {
         readSnapshot: (work, snapshotOptions) =>
           runtime.readSnapshot(work, snapshotOptions),
+        selectedDemoActor: localDemoActor,
         requestWork: createRequestWorkProbe(),
         ...(assistant ? { assistant } : {}),
         ...(workflows ? { workflowApprovals: workflows.worker } : {}),
