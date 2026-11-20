@@ -29,6 +29,9 @@ Status: executable, merged on CI green. Critical paths touched: `db/migrations/0
 - Company source uses the tenant business calendar (calendar ID = tenant ID, as Booking) and the record's stored company; a company-sourced field on a shared record type refuses entry (no working company reaches the write) — named gap.
 - A required field added to an existing type is refused by the storage planner (`COMPILER_BACKFILL_INADMISSIBLE`), so no appointment is invented.
 - The viewer-zone switch follows slice 1 (packet allows it).
+- Reader rung 37 and migration 0058 were assigned at merge (35, 36 and 0055–0057 landed first).
+- The in-app drafter's keys for the member are generated from its schema; module-building eval cases wait for AI-BUILD-1.
+- Upgrade replay is proven by the named compatible-and-conflicting case in `customization-upgrade.test.ts`; a PostgreSQL upgrade that reopens and writes a value is owed with slice 2.
 - PDF text not proven: no document generator is on `main` (DOCS-1 slice 2 is unmerged). The no-viewer formatter is proven in UTC processes and at the list/export reader; templates must bind it when they land.
 
 **Test it yourself (slice 1, under ten minutes).** `corepack pnpm dev`, sign in as manager, open **Customize**.
