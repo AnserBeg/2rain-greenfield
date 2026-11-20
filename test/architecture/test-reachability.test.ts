@@ -284,6 +284,26 @@ test('comparison canary reports exactly an unreachable synthetic test', () => {
   assert.deepEqual(unreachable, ['test/orphan-demo/orphan.test.ts']);
 });
 
+test('quick reachability requires every selected file while allowing the named omissions', () => {
+  withFixtureRepository((root, producer, evidence) => {
+    const requiredFiles = new Set(['test/example.test.ts']);
+    const skipped = 'test/unrelated.test.ts';
+    writeFileSync(resolve(root, skipped), 'export {};\n');
+    writeEvidence(root, producer, evidence);
+    assert.equal(
+      aggregateEvidence(root, [producer], { environment: {}, requiredFiles })
+        .discoveredCount,
+      1,
+    );
+    requiredFiles.add(skipped);
+    assert.throws(
+      () =>
+        aggregateEvidence(root, [producer], { environment: {}, requiredFiles }),
+      /Unreachable test files: test\/unrelated.test.ts/u,
+    );
+  });
+});
+
 test('aggregator fails closed on incomplete or invalid evidence', () => {
   withFixtureRepository((root, producer, evidence) => {
     assert.throws(
@@ -410,7 +430,7 @@ test('declared unfiltered producers are wired to CI and their evidence paths', (
         readFileSync('test/helpers/prepare-reachability-evidence.ts', 'utf8'),
         /ensureReachabilityRun\(\{ repositoryRoot \}\)/u,
       );
-      assert.doesNotMatch(job, /^ {4}needs:/mu);
+      assert.match(job, /^ {4}needs: select$/mu);
     } else {
       assert.match(job, /test\/helpers\/begin-reachability-run\.ts/u);
     }
@@ -627,7 +647,10 @@ test('CI aggregates only after every evidence-producing job succeeds', () => {
   assert.match(job, /actions\/download-artifact@[0-9a-f]{40}/u);
   assert.doesNotMatch(job, /if:\s*always\(\)/u);
   assert.match(job, /CI_JOB_RESULTS: \$\{\{ toJSON\(needs\) \}\}/u);
-  assert.match(job, /run: node \.github\/scripts\/check-ci-results\.mjs/u);
+  assert.match(
+    job,
+    /run: node --import tsx \.github\/scripts\/check-ci-results\.mjs/u,
+  );
   assert.match(job, /^ {6}- security$/mu);
   for (const [jobName, result, replay, accepted] of [
     ['postgres', 'success', 'success', true],
@@ -640,6 +663,14 @@ test('CI aggregates only after every evidence-producing job succeeds', () => {
     ['postgres-composed', 'success', 'failure', false],
   ] as const) {
     const jobs = {
+      ...Object.fromEntries(
+        reachabilityProducers.map((p) => [p.ciJob, { result: 'success' }]),
+      ),
+      select: {
+        result: 'success',
+        outputs: { tier: 'full', promote: 'false' },
+      },
+      promote: { result: 'skipped' },
       quality: { result: 'success' },
       security: { result: 'success' },
       postgres: { result: 'success' },
@@ -648,7 +679,7 @@ test('CI aggregates only after every evidence-producing job succeeds', () => {
     jobs[jobName].result = result;
     const run = spawnSync(
       process.execPath,
-      ['.github/scripts/check-ci-results.mjs'],
+      ['--import', 'tsx', '.github/scripts/check-ci-results.mjs'],
       {
         env: { ...process.env, CI_JOB_RESULTS: JSON.stringify(jobs) },
       },
