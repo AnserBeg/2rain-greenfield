@@ -1,19 +1,19 @@
 # DOCS-1 — governed files and generated PDFs
 
-Slice 2 implements document templates and PDF generation from [ADR-0078](../../decisions/ADR-0078-governed-documents-files-templates-and-signatures.md). Slice 1a attached internal files to first-party and tenant records. Fable closed the design read before implementation. Migration 0051 is Critical and the branch is held for the independent read.
+Slice 2 implements document templates and PDF generation from [ADR-0078](../../decisions/ADR-0078-governed-documents-files-templates-and-signatures.md). Slice 1a attached internal files to first-party and tenant records. Fable closed the design read before implementation. The Critical candidate uses migration 0052 and Surface reader 31 after Billing. Recheck both at integration. The branch waits for the targeted follow-up.
 
 ## Claims
 
 1. Customize approves the exact template revision and selects it by a release pointer. Retirement ends issuance and preserves retained PDFs.
-2. Each render uses declared header fields and bounded parent-scoped line queries. Scoped database functions resolve the live governing record and check query authority. Publication checks stored revisions. List and byte reads enforce the saved source restrictions.
+2. Each render uses declared header fields and bounded parent-scoped line queries. Scoped database functions resolve the live governing record and check query authority. Publication locks the parent and compares the full live child set and revisions. List and byte reads enforce the saved source restrictions.
 3. PDFKit runs inside QuickJS with no host I/O. Its fixed metadata and pinned revision formats produce identical bytes for identical inputs.
-4. Generation applies the document content gate and publishes the version, source evidence and audit together. The same retry key and input return the same version. The HTTP timer waits for a publication commit already in flight.
+4. Generation applies the document content gate and publishes the version, source evidence and audit together. A committed retry returns the stored version after reauthorizing its source, even after template retirement. The HTTP timer waits for a publication commit already in flight.
 
 ## Decisions
 
-- Template sources are direct Q0 record reads and scoped child lists. All selected fields are required and money also needs the selected currency field. Layout uses the built-in Latin-script PDF fonts.
+- Template sources are direct Q0 record reads and scoped child lists. Money uses the currency declared by its field type. Date-only values use the Record calendar day. Layout uses the built-in Latin-script PDF fonts.
 - The company-brand resolver uses the company record name and the Ledger print palette without a logo. Shared records use the Ledger name. Each issued PDF saves brand revision `platform-default`.
-- Local demo issuance uses the demo scanner. The SQL entry points use the compiled Record binding when present and authorize its active Q0 query. Record scope and revision come from stored data. The scanner role can attest only while the governing record exists. Customer upload requests and signatures remain gated.
+- Local demo issuance uses the demo scanner. SQL checks the governing Record grants, reads exact file categories and takes write limits and retention from the release. Scanner verdicts cannot publish across a policy change or release fence. Customer upload requests and signatures remain gated.
 
 ## Test it yourself
 
