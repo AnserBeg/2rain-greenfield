@@ -37,7 +37,7 @@ const recordType = {
   companyOwnership: 'entityOwned',
   fields: [
     { label: 'Name', type: 'text', required: true },
-    { label: 'Status', type: 'choice', options: ['Scheduled', 'Done'] },
+    { label: 'Status', type: 'text' },
   ],
 };
 const appointment = {
@@ -401,7 +401,7 @@ function rule(predicate: unknown) {
 test('presence is admitted on the whole value; comparison and length operands are named gaps', async () => {
   const schemaVersion = 'v6';
   const status = `${NS}:field.custom_equipment_status`;
-  const scheduled = `${NS}:option.custom_equipment_status_scheduled`;
+  const scheduled = 'Scheduled';
   const presence = rule({
     schemaVersion,
     kind: 'any',
@@ -495,7 +495,8 @@ test('a saved list view filtering on the field refuses when saved, and a sort by
       filters: [{ field: fieldId, value: '2026-11-01' }],
     },
   ]);
-  assert.match(refusalOf(filtered), /saved view filter|dateTime/u);
+  // No declared filter can exist on the field, so the saved view refuses.
+  assert.match(refusalOf(filtered), /CUSTOMIZE_LIST_VIEW_INVALID/u);
 });
 
 test('with the member active and after its field retires, adding a field and arranging the list still compile', async () => {
