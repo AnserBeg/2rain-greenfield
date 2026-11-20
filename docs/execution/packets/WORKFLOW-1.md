@@ -41,7 +41,7 @@
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "WORKFLOW-1",
   "base": "17618776dd058bbb8efec032eae13a00a5d5398b",
-  "head": "255d76a8d9d2c89c127788955523f93cb824c088",
+  "head": "05c3bafbb7f18420fb01721bf503d7613f0653b5",
   "changedPaths": [
     "db/migrations/0051_workflow_retry_authority.sql", "db/schema.snapshot.json",
     "learnings.md", "packages/postgres-provider/src/current-policy.ts",
