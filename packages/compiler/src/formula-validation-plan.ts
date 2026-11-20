@@ -14,6 +14,7 @@ import {
   type ValidationRelatedValues,
   type ValidationWitness,
 } from './formula-validation-witness.js';
+import { resolveLegalEntityFamily } from './conformance.js';
 import { hashCanonical } from './hash.js';
 
 export const FORMULA_RULE_PAYLOAD_VERSION =
@@ -72,6 +73,24 @@ export function compileLiteralFormulaRules(
             ? result.message
             : 'A validation rule ID must be unique.',
       };
+    }
+    for (const path of result.binding.paths ?? []) {
+      const target = revision.entities.find(
+        (entity) => entity.entityId === path.targetEntityId,
+      )!;
+      const family = resolveLegalEntityFamily(
+        revision.package.packageId,
+        target,
+      );
+      if (
+        family.status === 'classified' &&
+        family.classification === 'entityOwned'
+      )
+        return {
+          status: 'refused',
+          subjectId: rule.ruleId,
+          message: 'This related field requires a company-scoped read.',
+        };
     }
     const permissionIds = new Set<string>();
     for (const id of rule.boundOperationIds) {
