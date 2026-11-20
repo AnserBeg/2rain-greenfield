@@ -1,46 +1,43 @@
 # SIGNIN-1 — staff sign-in and authority for human decisions
 
-## Claims and decisions
+[ADR-0081](../../decisions/ADR-0081-staff-sign-in-and-decision-authority.md) fixes the pilot origins, user-verified passkeys, session limits and attended recovery. Slice 1 landed at `60451569`. The orchestrator requested eight corrections after its independent read.
 
-[ADR-0081](../../decisions/ADR-0081-staff-sign-in-and-decision-authority.md) incorporates Fable’s eight dispositions. The pilot uses one ERP/identity origin pair and user-verified discoverable passkeys. Each scoped account maps to one immutable staff principal.
-The identity service enrolls the first owner and manages attended invitations, spare keys, deactivation and recovery. Recovery invalidates existing access and starts the 24-hour decision cool-off.
-ERP request entry derives the principal from the session. Protected writes verify it again in their own database transaction. The pilot loads the existing ERP gateways and SurfaceRuntime through a separate composition root.
-The shared serving path preserves DOCS-1 internal attachments and checks the staff CSRF token before accepting uploaded bytes. The loopback demo retains its explicit actor switch. The pilot requires the actual serving and identity logins and a database provisioned without fixture proof issuance.
-One forward migration adds the identity realm, staff accounts, credentials, enrollment, challenges, sessions, shared rate counters and authentication audit. The compiled surface language and release lineage stay at their existing floors.
+The original slice binds ERP reads and protected writes to the session and supports enrollment, recovery, revocation and sign-out across instances. The [initial slice record](https://github.com/AnserBeg/2rain-greenfield/blob/60451569/docs/execution/packets/SIGNIN-1.md) preserves its gates.
 
-## Gates and controls
+## Slice 1 corrections
 
-The PostgreSQL test observes committed writes, idle/absolute expiry, a clock regression, live role membership, concurrent bootstrap, cross-scope refusal, role privileges and append-only evidence. Removing either check admitted a write and failed its regression. The prior main schema enrolled zero owners in the bootstrap race.
-The Chromium test exercises real passkey registration and assertion on HTTPS, one-use handoffs, distinct session audiences, request identity, CSRF, recovery, deactivation and sign-out across ERP instances. It measures the signed-in purchase-order list against three transactions and forty statements.
-The import-boundary test loads the pilot with demo actor, seed and CLI imports refused, then proves its control against the demo root.
+| Finding | Decision and observed control |
+| --- | --- |
+| Store mode | Installation and demo bootstrap claim the same durable database mode. Concurrent first claims admit one mode, and another environment cannot change it. |
+| Reauthentication | A passkey assertion rotates the existing family under lock. Two completions have one winner, the family ID and original deadline agree to the microsecond, and the previous handles are refused. |
+| ERP verifier | ERP sign-in persists a five-minute transaction with the prior ERP handle digest. Two handoffs sharing its verifier yield one redemption, and a failed exchange leaves the transaction available. |
+| Clock rollback | Session checks share a database time watermark that survives transaction rollback. Injected database time crosses each deadline and moves back. Both idle and absolute expiry hold. Application reads run with a read-only transaction. |
+| Recovery | The issuer must cover the target’s live permissions, resources, companies and release authority. Policy locks cover revocation and replacement, and enrollment checks the issuer again. A refused recovery keeps the credential active and issues zero invitations. |
+| Source limits | A configured ingress supplies one verified client address. Other connections use their socket peer. The HTTP test observes distinct source allowances. |
+| Grants | Database column privileges permit credential counter, backup state and revocation changes and account lifecycle updates. The test enumerates the identity login’s actual writable columns. |
+| Enrollment logging | An enrollment conflict returns a generic refusal. The database log test observes a duplicate constraint error while the credential identifier and key bytes stay absent. |
 
-## Test it yourself
+## Gates and test it yourself
 
-With Docker and the project’s Chromium installed, run `node scripts/run-with-test-lock.mjs exclusive -- node --import tsx test/helpers/staff-browser-journey.ts`. Expect exit zero. The journey uses temporary loopback listeners and an isolated database.
-Run `node --import tsx --test test/postgres/staff-signin.test.ts` for the database guarantees. See the [operator guide](../../operations/staff-signin.md) to run the two services.
-Slice 2 awaits the orchestrator. Both ADR-0073 findings and proof-gated signatures, connections, sends, customer links and workflow decisions retain their gates.
+The PostgreSQL regressions and the Chromium passkey rotation check are red on `60451569`. Packet CI [run 44696495008](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44696495008) passed.
+Run `node --import tsx --test test/postgres/staff-signin.test.ts` and `node --import tsx test/helpers/staff-browser-journey.ts`. Both use temporary databases. Expect passing database checks and a signed-in purchase-order list within three transactions and forty statements.
+The [operator guide](../../operations/staff-signin.md) describes ingress configuration. Slice 2 awaits the orchestrator’s narrow read.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "SIGNIN-1",
-  "base": "181aef42fddddc3bbc9bd1d164115f7e2ed05bd4",
-  "head": "0639c66703d708cd8807830c89209840966e2401",
+  "base": "b64cd6aa2e829eac1b0a4610cfcd5f56a8b67d34",
+  "head": "1e5842bc017850b09024d61947b62410d3718822",
   "changedPaths": [
-    "apps/api/package.json", "apps/api/src/composition-root.ts",
-    "apps/api/src/erp-capabilities.ts", "apps/api/src/pilot-composition-root.ts",
-    "apps/api/src/staff-erp-transport.ts", "apps/api/src/staff-identity-http.ts",
-    "apps/api/src/staff-identity.ts", "apps/api/src/staff-main.ts",
-    "apps/api/src/staff-protocol.ts", "apps/web/src/app-server.ts",
-    "apps/web/src/surface-client.ts", "apps/web/src/surface-runtime.ts",
-    "apps/web/test/browser/staff-signin.spec.ts", "db/migrations/0045_staff_signin.sql",
-    "db/schema.snapshot.json", "packages/postgres-provider/src/composed-application-runtime.ts",
-    "packages/postgres-provider/src/inventory-posting-service.ts", "packages/postgres-provider/src/request-context.ts",
-    "packages/postgres-provider/src/serving-gateways.ts", "pnpm-lock.yaml",
-    "test/architecture/pilot-identity-boundary.test.ts", "test/architecture/release-persistence-boundary.test.ts",
-    "test/architecture/repository-hygiene.test.ts", "test/architecture/tenant-completeness.manifest.json",
-    "test/architecture/tenant-completeness.test.ts", "test/evidence/SIGNIN-1.expected-red.json",
-    "test/evidence/auth.expected-red.json", "test/helpers/staff-browser-fixture.ts",
+    "apps/api/src/pilot-composition-root.ts", "apps/api/src/staff-erp-transport.ts",
+    "apps/api/src/staff-identity-http.ts", "apps/api/src/staff-identity.ts",
+    "apps/api/src/staff-main.ts", "db/migrations/0047_staff_session_integrity.sql",
+    "db/schema.snapshot.json", "docs/operations/staff-signin.md",
+    "packages/dev-tooling/src/tenant-completeness.ts", "packages/postgres-provider/src/composed-application-runtime.ts",
+    "packages/postgres-provider/src/request-context.ts", "test/architecture/release-persistence-boundary.test.ts",
+    "test/architecture/tenant-completeness.manifest.json", "test/architecture/tenant-completeness.test.ts",
+    "test/evidence/SIGNIN-1.expected-red.json", "test/helpers/staff-browser-fixture.ts",
     "test/helpers/staff-browser-journey.ts", "test/helpers/staff-passkey-checks.ts",
     "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts",
     "test/postgres/module-storage-transition.test.ts", "test/postgres/staff-signin.test.ts",
@@ -48,7 +45,7 @@ Slice 2 awaits the orchestrator. Both ADR-0073 findings and proof-gated signatur
   ],
   "symbols": [
     {"path":"apps/api/src/staff-identity.ts","name":"StaffIdentity"},
-    {"path":"apps/api/src/pilot-composition-root.ts","name":"createPilotApplication"},
+    {"path":"apps/api/src/staff-identity-http.ts","name":"identityHandler"},
     {"path":"packages/postgres-provider/src/request-context.ts","name":"staffRequestEntry"}
   ]
 }

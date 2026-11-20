@@ -1,3 +1,4 @@
+import { isIP, SocketAddress } from 'node:net';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type {
   AuthenticationResponseJSON,
@@ -5,6 +6,7 @@ import type {
 } from '@simplewebauthn/server';
 import type { StaffIdentity } from './staff-identity.js';
 import {
+  StaffAccessRefused,
   check,
   cookie,
   cookieValue,
@@ -84,7 +86,22 @@ const pages: Record<string, [string, string]> = {
   ],
 };
 
-export function identityHandler(identity: StaffIdentity) {
+function canonicalAddress(address: unknown) {
+  check(typeof address === 'string' && !address.includes('%'));
+  const version = isIP(address);
+  check(version);
+  if (version === 4) return address;
+  const canonical = new SocketAddress({ address, family: 'ipv6' }).address;
+  return canonical.startsWith('::ffff:') && isIP(canonical.slice(7)) === 4
+    ? canonical.slice(7)
+    : canonical;
+}
+
+export function identityHandler(
+  identity: StaffIdentity,
+  trustedIngress: readonly string[] = [],
+) {
+  const ingress = new Set(trustedIngress.map(canonicalAddress));
   const r = identity.realm;
   validateRealm(r);
   return async (req: IncomingMessage, res: ServerResponse) => {
@@ -135,7 +152,17 @@ export function identityHandler(identity: StaffIdentity) {
               .join('');
         }
         const flow = secret();
-        res.setHeader('set-cookie', cookie(flowCookie, flow, 300));
+        const cookies = [cookie(flowCookie, flow, 300)];
+        const previous = cookieValue(req.headers.cookie, idCookie);
+        if (url.pathname === '/' && previous) {
+          try {
+            await identity.account(previous);
+          } catch (error) {
+            if (!(error instanceof StaffAccessRefused)) throw error;
+            cookies.push(cookie(idCookie, '', 0));
+          }
+        }
+        res.setHeader('set-cookie', cookies);
         res.setHeader('content-type', 'text/html; charset=utf-8');
         res.end(
           '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="csrf" content="' +
@@ -183,11 +210,11 @@ export function identityHandler(identity: StaffIdentity) {
       const flow = cookieValue(req.headers.cookie, flowCookie);
       check(flow && req.headers['x-erp-csrf'] === csrf(flow));
       if (url.pathname === '/begin' || url.pathname === '/finish') {
-        await identity.spend(
-          'source',
-          req.socket.remoteAddress ?? 'unknown',
-          30,
-        );
+        const peer = canonicalAddress(req.socket.remoteAddress);
+        const source = ingress.has(peer)
+          ? canonicalAddress(req.headers['x-real-ip'])
+          : peer;
+        await identity.spend('source', source, 30);
       }
       const input = await readJson(req);
       if (url.pathname === '/begin') {
