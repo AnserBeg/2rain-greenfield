@@ -346,9 +346,6 @@ test('a drafted receipt workflow links an inspection and requests escalation aft
         port: 0,
         seedProfile: 'demo',
       } as const;
-      const seeded = await startComposedApplication(options);
-      await seeded.close();
-      const opened = await openCustomizeService(options);
       const workflowId = 'inspect-incoming-notebooks';
       const prefix = 'northstar.app';
       const movementQuery = `${prefix}:query.inventory_movement_list`;
@@ -485,74 +482,75 @@ test('a drafted receipt workflow links an inspection and requests escalation aft
           },
         ],
       };
+      const app = await startComposedApplication({
+        ...options,
+        draftingProvider: () =>
+          Promise.resolve(
+            scriptedModel([
+              () => ({
+                toolCalls: [
+                  { name: DRAFT_CUSTOMIZATION_TOOL, input: modelDraft },
+                ],
+              }),
+            ]),
+          ),
+        workflowScheduler: {
+          workerDatabaseUrl: databaseUrl.replace(
+            'postgres@',
+            'north_star_workflow_worker@',
+          ),
+          runtimeDatabaseUrl: databaseUrl.replace(
+            'postgres@',
+            'north_star_runtime@',
+          ),
+          businessClock: () => instant,
+        },
+      });
       try {
-        const recordDraft = await opened.service.draft(
-          inspectionChange,
-          'declarativeEditor',
-        );
-        if (recordDraft.status !== 'drafted')
-          throw new Error(JSON.stringify(recordDraft));
-        const approved = await opened.service.approve(recordDraft.patchId);
-        await opened.service.activate(recordDraft.patchId);
-        const { tenantId, environmentId } = seeded.runtime.identity;
-        const approver = await pool.query<{ approving_human_id: string }>(
-          'SELECT approving_human_id FROM platform.release_approvals WHERE tenant_id=$1 AND environment_id=$2 AND activation_attempt_id=$3',
-          [tenantId, environmentId, approved.activationAttemptId],
-        );
-        const bindings = [
-          {
-            action: 'read',
-            permissionId: `${prefix}:permission.inventory_movement_read`,
-            resourceId: `${prefix}:entity.inventory_movement`,
-          },
-          ...['create', 'read', 'transition'].map((action) => ({
-            action,
-            permissionId: `${prefix}:permission.${inspection}_${action === 'transition' ? 'action_quarantine' : action}`,
-            resourceId: `${prefix}:entity.${inspection}`,
-          })),
-        ];
-        for (const [principalId, role] of [
-          [
-            workflowAutomationPrincipal(tenantId, environmentId, workflowId),
-            'inspection-workflow',
-          ],
-          [
-            approver.rows[0]!.approving_human_id,
-            'inspection-workflow-approver',
-          ],
-        ] as const) {
-          await provisionLocalDemoAuthorization(
-            pool,
-            { tenantId, environmentId, principalId },
-            bindings,
-            role,
-          );
-        }
-        const app = await startComposedApplication({
-          ...options,
-          draftingProvider: () =>
-            Promise.resolve(
-              scriptedModel([
-                () => ({
-                  toolCalls: [
-                    { name: DRAFT_CUSTOMIZATION_TOOL, input: modelDraft },
-                  ],
-                }),
-              ]),
-            ),
-          workflowScheduler: {
-            workerDatabaseUrl: databaseUrl.replace(
-              'postgres@',
-              'north_star_workflow_worker@',
-            ),
-            runtimeDatabaseUrl: databaseUrl.replace(
-              'postgres@',
-              'north_star_runtime@',
-            ),
-            businessClock: () => instant,
-          },
-        });
+        const opened = await openCustomizeService(options);
         try {
+          const recordDraft = await opened.service.draft(
+            inspectionChange,
+            'declarativeEditor',
+          );
+          if (recordDraft.status !== 'drafted')
+            throw new Error(JSON.stringify(recordDraft));
+          const approved = await opened.service.approve(recordDraft.patchId);
+          await opened.service.activate(recordDraft.patchId);
+          const { tenantId, environmentId } = app.runtime.identity;
+          const approver = await pool.query<{ approving_human_id: string }>(
+            'SELECT approving_human_id FROM platform.release_approvals WHERE tenant_id=$1 AND environment_id=$2 AND activation_attempt_id=$3',
+            [tenantId, environmentId, approved.activationAttemptId],
+          );
+          const bindings = [
+            {
+              action: 'read',
+              permissionId: `${prefix}:permission.inventory_movement_read`,
+              resourceId: `${prefix}:entity.inventory_movement`,
+            },
+            ...['create', 'read', 'transition'].map((action) => ({
+              action,
+              permissionId: `${prefix}:permission.${inspection}_${action === 'transition' ? 'action_quarantine' : action}`,
+              resourceId: `${prefix}:entity.${inspection}`,
+            })),
+          ];
+          for (const [principalId, role] of [
+            [
+              workflowAutomationPrincipal(tenantId, environmentId, workflowId),
+              'inspection-workflow',
+            ],
+            [
+              approver.rows[0]!.approving_human_id,
+              'inspection-workflow-approver',
+            ],
+          ] as const) {
+            await provisionLocalDemoAuthorization(
+              pool,
+              { tenantId, environmentId, principalId },
+              bindings,
+              role,
+            );
+          }
           await page.goto(`${app.baseUrl}/?customize`);
           await page
             .getByRole('combobox', { name: 'Acting as' })
@@ -814,10 +812,10 @@ test('a drafted receipt workflow links an inspection and requests escalation aft
           );
           expect(history.rowCount).toBe(1);
         } finally {
-          await app.close();
+          await opened.close();
         }
       } finally {
-        await opened.close();
+        await app.close();
       }
     },
     LINEAGE_INSTALL_VOLUME,

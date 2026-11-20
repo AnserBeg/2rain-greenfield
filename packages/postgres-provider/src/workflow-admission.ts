@@ -179,6 +179,8 @@ export async function persistWorkflowDefinitions(
         JSON.stringify(binding.grants),
       ],
     );
+    // Only the verifier's connection can read the authoritative digest.
+    await client.query('SET LOCAL ROLE NONE');
     const { rows } = await client.query<{ digest: string }>(
       `SELECT platform.workflow_definition_digest(d) AS digest
         FROM platform.workflow_definitions AS d
