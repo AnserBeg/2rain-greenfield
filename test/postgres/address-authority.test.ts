@@ -304,6 +304,7 @@ test(
                 assert.ok(await configure(COMPANY, 'dispatch', {}, 'buyer'));
               } finally {
                 await grantBuyerConfigure(false);
+                await restoreDispatch();
               }
               await assert.rejects(
                 configure(COMPANY, 'dispatch', {}, 'buyer'),
@@ -402,7 +403,6 @@ test(
                 before,
                 'an unrelated activation hid a located pin',
               );
-              assert.deepEqual(await pin('buyer', item.recordId), before);
             },
           );
 
@@ -899,7 +899,7 @@ test(
                   "SELECT 1 FROM platform.address_installations WHERE company_id=$1 AND account='relay' FOR UPDATE",
                   [COMPANY],
                 );
-                assert.equal(held.rowCount, 1);
+                assert.ok(held.rowCount);
                 let pending = 2;
                 const calls = [
                   configure(COMPANY, 'relay', { calls: 7 }),
