@@ -162,7 +162,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4, 5, 6, 7]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -192,6 +192,18 @@ jobs:
       - name: Run PostgreSQL shard 3
         if: matrix.shard == 3
         run: corepack pnpm test:postgres:3
+      - name: Run PostgreSQL shard 4
+        if: matrix.shard == 4
+        run: corepack pnpm test:postgres:4
+      - name: Run PostgreSQL shard 5
+        if: matrix.shard == 5
+        run: corepack pnpm test:postgres:5
+      - name: Run PostgreSQL shard 6
+        if: matrix.shard == 6
+        run: corepack pnpm test:postgres:6
+      - name: Run PostgreSQL shard 7
+        if: matrix.shard == 7
+        run: corepack pnpm test:postgres:7
       - name: Run non-C locale determinism probe
         if: matrix.shard == 1
         run: corepack pnpm test:locale
@@ -282,12 +294,39 @@ jobs:
       - name: Begin executed-file evidence run
         run: node --import tsx test/helpers/begin-reachability-run.ts
       - name: Run inventory PostgreSQL tests
-        run: corepack pnpm test:postgres:inventory
+        run: corepack pnpm test:postgres:inventory:balances
       - name: Retain inventory PostgreSQL executed-file evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: reachability-postgres-inventory-${{ github.sha }}
           path: test-results/reachability/postgres-inventory.json
+          if-no-files-found: error
+          retention-days: 7
+
+  postgres-inventory-posting:
+    name: PostgreSQL inventory posting
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install frozen dependencies
+        run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      - name: Begin executed-file evidence run
+        run: node --import tsx test/helpers/begin-reachability-run.ts
+      - name: Run inventory PostgreSQL tests
+        run: corepack pnpm test:postgres:inventory:posting
+      - name: Retain inventory PostgreSQL executed-file evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: reachability-postgres-inventory-posting-${{ github.sha }}
+          path: test-results/reachability/postgres-inventory-posting.json
           if-no-files-found: error
           retention-days: 7
 
@@ -458,6 +497,35 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  browser-rules:
+    name: Customization rules browser runner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install frozen dependencies
+        run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      - name: Begin executed-file evidence run
+        run: node --import tsx test/helpers/begin-reachability-run.ts
+      - name: Install Chromium
+        uses: ./.github/actions/install-chromium
+      - name: Run customization rules browser tests
+        run: corepack pnpm test:browser:rules
+      - name: Retain customization rules browser executed-file evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: reachability-browser-rules-${{ github.sha }}
+          path: test-results/reachability/browser-rules.json
+          if-no-files-found: error
+          retention-days: 7
+
   security:
     name: Dependency and secret scans (${{ matrix.history }})
     strategy:
@@ -495,9 +563,6 @@ jobs:
 
   observability:
     name: Observability evidence
-    needs:
-      - browser
-      - postgres
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -548,11 +613,13 @@ jobs:
       - postgres-commercial
       - postgres-sales
       - postgres-inventory
+      - postgres-inventory-posting
       - browser
       - browser-operations
       - browser-inventory
       - browser-composed
       - browser-customization
+      - browser-rules
       - observability
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -581,3 +648,5 @@ jobs:
           merge-multiple: true
       - name: Compare executed files with repository discovery
         run: corepack pnpm check:reachability
+      - name: Summarize test file timings
+        run: node --import tsx .github/scripts/report-ci-timings.mjs
