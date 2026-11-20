@@ -2477,6 +2477,8 @@ function patchDisplayLabel(patch: CustomizationPatch): string | null {
     case 'addRecordType':
     case 'addLink':
     case 'addLineTable':
+    case 'addDocumentField':
+    case 'addUploadCategory':
     case 'saveListView':
     case 'addMetricCard':
       return patch.label;

@@ -89,6 +89,7 @@ const suiteDefinitions = [
     expectedFiles: [
       'test/integration/catalog-runtime.test.ts',
       'test/integration/disclosure-tier-round-trip.test.ts',
+      'test/integration/document-http.test.ts',
       'test/integration/field-kind-round-trip.test.ts',
       'test/integration/location-runtime.test.ts',
       'test/integration/module-runtime.test.ts',
@@ -194,6 +195,7 @@ const suiteDefinitions = [
       'test/postgres/customization-world.test.ts',
       'test/postgres/customization.test.ts',
       'test/postgres/declared-list.test.ts',
+      'test/postgres/document-attachments.test.ts',
       'test/postgres/document-numbering.test.ts',
       'test/postgres/location-runtime.test.ts',
       'test/postgres/locations.test.ts',

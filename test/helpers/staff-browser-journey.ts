@@ -155,6 +155,10 @@ async function journey() {
           Promise.all(
             [
               fetch('/?principal_id=unchosen'),
+              fetch('/documents?mode=upload', {
+                method: 'POST',
+                body: 'without a session synchronizer',
+              }),
               fetch('/', { headers: { 'x-principal-id': 'unchosen' } }),
               fetch('/', {
                 method: 'POST',

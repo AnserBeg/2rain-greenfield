@@ -1,6 +1,14 @@
+import type { DocumentScanner } from './document-content.js';
+import {
+  PostgresDocumentGateway,
+  documentPermissionBindings,
+} from './document-attachments.js';
+import { PostgresDocumentPublication } from './document-publication.js';
 import type pg from 'pg';
 import { parseNormalizedApplicationPackageJson } from '@north-star/canonical-model';
 import {
+  SUPPORTED_STORAGE_TARGET_PAYLOAD_VERSIONS,
+  type StorageTargetPayloadV1,
   PROJECTION_FAMILY_IDS,
   type CompileSuccess,
 } from '@north-star/compiler';
@@ -64,6 +72,7 @@ export function composeServingGateways(
     readonly capabilityOperationExecutorFactories?: readonly PostgresCapabilityOperationExecutorFactory[];
     readonly monotonicMilliseconds?: () => number;
   },
+  documentOptions?: { scanner?: DocumentScanner | undefined },
 ) {
   const actorIssuer = humanActorIssuer();
   const interpreter: PostgresModuleRuntimeInterpreter =
@@ -79,6 +88,7 @@ export function composeServingGateways(
       },
     );
   const operationMediation = new SemanticOperationMediationAuthority();
+  const documentPublication = new PostgresDocumentPublication();
   const denialRecorder = new PostgresSemanticQueryDenialRecorder(
     runtimePool,
     actorIssuer,
@@ -108,9 +118,9 @@ export function composeServingGateways(
   const policyFor = (release: ServingRelease) =>
     new PostgresCurrentPolicyGateway(
       runtimePool,
-      currentPolicyBindingsFromPermissions(
-        parseNormalizedApplicationPackageJson(release.normalizedDefinitionBytes)
-          .permissions,
+      releasePolicyBindings(
+        release.normalizedDefinitionBytes,
+        documentOptions !== undefined,
       ),
       parsePinnedOperationCatalog(
         release.projection(PROJECTION_FAMILY_IDS.operationCatalog).payload,
@@ -154,10 +164,26 @@ export function composeServingGateways(
         interpreter,
         operationMediation,
         undefined,
-        capabilityExecutors,
+        documentOptions
+          ? [...capabilityExecutors, documentPublication]
+          : capabilityExecutors,
       ),
       policy,
       queryGateway,
+      storage: (() => {
+        if (!documentOptions) return null;
+        const payload = release.projection(
+          PROJECTION_FAMILY_IDS.storageTarget,
+        ).payload;
+        return typeof payload === 'object' &&
+          payload !== null &&
+          'schemaVersion' in payload &&
+          SUPPORTED_STORAGE_TARGET_PAYLOAD_VERSIONS.some(
+            (version) => version === payload.schemaVersion,
+          )
+          ? (payload as unknown as StorageTargetPayloadV1)
+          : null;
+      })(),
     });
   };
   const servingFor = releaseServingRoute(
@@ -174,7 +200,24 @@ export function composeServingGateways(
     policy,
     operationMediation,
   );
-  return { policy, operationGateway, queryGateway, operationMediation };
+  const documents = documentOptions
+    ? new PostgresDocumentGateway(
+        runtimePool,
+        queryGateway,
+        servingFor,
+        documentOptions.scanner,
+        documentPublication,
+        operationGateway,
+        operationMediation,
+      )
+    : null;
+  return {
+    policy,
+    operationGateway,
+    queryGateway,
+    operationMediation,
+    documents,
+  };
 }
 /** One release as the serving runtime needs it, from the lineage or the database. */
 export interface ServingRelease {
@@ -185,6 +228,7 @@ export interface ServingRelease {
 }
 
 interface ReleaseServing {
+  readonly storage: StorageTargetPayloadV1 | null;
   readonly operationGateway: SemanticOperationGateway;
   readonly policy: PostgresCurrentPolicyGateway;
   readonly queryGateway: SemanticQueryGateway;
@@ -506,4 +550,15 @@ export async function readVerifiedServing(
         }
       : null;
   });
+}
+
+export function releasePolicyBindings(
+  definitionBytes: Uint8Array,
+  documents: boolean,
+) {
+  const definition = parseNormalizedApplicationPackageJson(definitionBytes);
+  return [
+    ...currentPolicyBindingsFromPermissions(definition.permissions),
+    ...(documents ? documentPermissionBindings(definition.entities) : []),
+  ];
 }

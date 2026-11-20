@@ -20,6 +20,8 @@ import {
   type AssistantMount,
 } from './assistant-panel.js';
 import { staticAsset, type StaticAsset } from './surface-assets.js';
+import type { DocumentGateway } from '../../../packages/runtime/src/document-gateway.js';
+import { mountDocumentHttp } from './document-http.js';
 
 import {
   renderCustomizeScreen,
@@ -79,6 +81,7 @@ export interface SurfaceRuntimeServerOptions {
   ) => Promise<{ csrf: string; identityOrigin: string } | null>;
   /** The assistant panel (AGENT-3, local demo only); absent, no panel. */
   readonly assistant?: AssistantMount;
+  readonly documents?: DocumentGateway;
   readonly workflowApprovals?: WorkflowApprovalsService;
 }
 
@@ -94,6 +97,8 @@ export function createSurfaceRuntimeServer(
   customize?: () => Promise<CustomizeScreenService>,
   options: SurfaceRuntimeServerOptions = {},
 ): Server {
+  const documents =
+    options.documents && mountDocumentHttp(entry, options.documents);
   return createServer((request, response) => {
     htmlEncodings.set(response, acceptedEncoding(request));
     const handle = async () => {
@@ -107,7 +112,14 @@ export function createSurfaceRuntimeServer(
               key,
             );
           if ([...url.searchParams.keys()].some(forbidden)) throw new Error();
-          if (request.method === 'POST') {
+          if (
+            request.method === 'POST' &&
+            documents &&
+            url.pathname === '/documents'
+          ) {
+            if (request.headers['x-erp-csrf'] !== transport.csrf)
+              throw new Error();
+          } else if (request.method === 'POST') {
             if (
               !(request.headers['content-type'] ?? '').startsWith(
                 'application/x-www-form-urlencoded',
@@ -141,6 +153,7 @@ export function createSurfaceRuntimeServer(
         customize,
         options.readSnapshot,
         gateways ? options.assistant : undefined,
+        documents,
         options.workflowApprovals,
         options.selectedDemoActor,
       );
@@ -164,6 +177,7 @@ async function handleRequest(
   customize?: () => Promise<CustomizeScreenService>,
   readSnapshot?: SurfaceRuntimeServerOptions['readSnapshot'],
   assistant?: AssistantMount,
+  documents?: ReturnType<typeof mountDocumentHttp>,
   workflowApprovals?: WorkflowApprovalsService,
   selectedDemoActor?: (cookie: string | undefined) => 'buyer' | 'manager',
 ): Promise<void> {
@@ -191,6 +205,10 @@ async function handleRequest(
   }
 
   const url = new URL(request.url ?? '/', 'http://surface-runtime.local');
+  if (documents && url.pathname === '/documents') {
+    await documents(request, response, url, sameOriginRequest(request));
+    return;
+  }
   const asset =
     request.method === 'GET' ? staticAsset(url.pathname) : undefined;
   if (asset) {

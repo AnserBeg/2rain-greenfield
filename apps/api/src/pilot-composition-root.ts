@@ -57,18 +57,24 @@ export async function createPilotApplication(options: {
     const pointer = await readVerifiedServing(pool, service);
     check(pointer);
     const serving = await loadServingRelease(pool, service, pointer.releaseId);
-    const { queryGateway, operationGateway, operationMediation, policy } =
-      composeServingGateways(
-        pool,
-        evidence,
-        service,
-        serving,
-        new ObservabilityMetrics(),
-        {
-          capabilityOperationExecutorFactories: CAPABILITY_EXECUTOR_FACTORIES,
-          providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
-        },
-      );
+    const {
+      queryGateway,
+      operationGateway,
+      operationMediation,
+      policy,
+      documents,
+    } = composeServingGateways(
+      pool,
+      evidence,
+      service,
+      serving,
+      new ObservabilityMetrics(),
+      {
+        capabilityOperationExecutorFactories: CAPABILITY_EXECUTOR_FACTORIES,
+        providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
+      },
+      {},
+    );
     const entry = new AuthenticatedRequestRuntimeEntryAdapter(
       staffRequestEntry(pool, (request) => {
         const handle = cookieValue(request.headers?.cookie, sessionCookie);
@@ -95,11 +101,13 @@ export async function createPilotApplication(options: {
         queryGateway,
         operationGateway,
         operationMediation,
+        ...(documents ? { documents } : {}),
         applicationExtension: COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION,
       },
       null,
       undefined,
       {
+        ...(documents ? { documents } : {}),
         staffTransport: erpTransport(r, options.identityCa),
         readSnapshot: (work, opts) => withReadSnapshot(pool, work, opts),
         requestWork: createRequestWorkProbe(),

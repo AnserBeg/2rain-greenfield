@@ -1,5 +1,11 @@
+import type { DocumentGateway } from '../../runtime/src/document-gateway.js';
+import {
+  DEMO_DOCUMENT_SCANNER,
+  type DocumentScanner,
+} from './document-content.js';
 import {
   composeServingGateways,
+  releasePolicyBindings,
   loadServingRelease,
   projectionBinding,
   requiredProjection,
@@ -95,7 +101,6 @@ import {
 } from './request-context.js';
 import {
   CURRENT_POLICY_RUNTIME_BINDINGS,
-  currentPolicyBindingsFromPermissions,
   type CurrentPolicyPermissionBinding,
 } from './current-policy.js';
 import { localDemoActor } from '../../runtime/src/local-demo-actor.js';
@@ -134,6 +139,10 @@ export type ComposedApplicationRuntimeOptions = (
   readonly authenticateRequest?: AuthenticateRequest;
   readonly capabilityOperationExecutorFactories?: readonly PostgresCapabilityOperationExecutorFactory[];
   readonly databaseUrl: string;
+  readonly documents?: {
+    readonly scanner?: DocumentScanner;
+    readonly demo?: true;
+  };
   readonly environmentSlug?: string;
   readonly inventoryScopeProvisioning?: InventoryScopeProvisioning;
   readonly metrics?: ObservabilityMetrics;
@@ -190,6 +199,7 @@ export interface ComposedApplicationRuntime {
   readonly customizationUpgrade: UpgradePreparation | null;
   readonly activeReleaseId: MintedUuid;
   readonly entry: AuthenticatedRequestRuntimeEntryAdapter;
+  readonly documents: DocumentGateway | null;
   readonly freshTenantInstallEvidence: FreshTenantInstallEvidence | null;
   readonly identity: AuthenticatedIdentity;
   readonly identityMode: 'FAIL_CLOSED' | 'LOCAL_DEMO' | 'VERIFIED_EXTERNAL';
@@ -403,15 +413,27 @@ export async function createComposedApplicationRuntime(
       }
     }
 
-    const { operationGateway, operationMediation, queryGateway, policy } =
-      composeServingGateways(
-        runtimePool,
-        evidencePool,
-        runtimeContext,
-        serving,
-        metrics,
-        options,
-      );
+    const scanner =
+      options.documents?.scanner?.mode === 'real'
+        ? options.documents.scanner
+        : options.documents?.demo && options.localDemoIdentity
+          ? DEMO_DOCUMENT_SCANNER
+          : undefined;
+    const {
+      operationGateway,
+      operationMediation,
+      queryGateway,
+      policy,
+      documents,
+    } = composeServingGateways(
+      runtimePool,
+      evidencePool,
+      runtimeContext,
+      serving,
+      metrics,
+      options,
+      options.documents ? { scanner } : undefined,
+    );
     const entry = new AuthenticatedRequestRuntimeEntryAdapter(
       new AuthenticatedRequestEntryAdapter(
         options.localDemoIdentity
@@ -442,6 +464,7 @@ export async function createComposedApplicationRuntime(
         await Promise.all(pools.map((pool) => pool.end()));
       },
       entry,
+      documents,
       freshTenantInstallEvidence,
       identity: identities.runtime,
       localDemoActors: options.localDemoIdentity
@@ -1023,10 +1046,7 @@ export async function provisionLocalDemoReleaseAuthorization(
   normalizedDefinitionBytes: Uint8Array,
 ): Promise<void> {
   const bindings = [
-    ...currentPolicyBindingsFromPermissions(
-      parseNormalizedApplicationPackageJson(normalizedDefinitionBytes)
-        .permissions,
-    ),
+    ...releasePolicyBindings(normalizedDefinitionBytes, true),
     {
       action: 'author',
       permissionId: 'northstar.runtime:permission.customize_author',

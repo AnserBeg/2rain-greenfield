@@ -625,6 +625,107 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
     event.preventDefault();
     say('<p class="draft-note">Wait for the field to finish updating, then try again.</p>');
   });
+})();
+(() => {
+  for (const panel of document.querySelectorAll('[data-documents]')) {
+    const status = panel.querySelector('[data-documents-status]');
+    const requestURL = (mode) => {
+      const url = new URL(panel.dataset.documents, window.location.origin);
+      url.searchParams.set('mode', mode);
+      return url;
+    };
+    const refresh = async () => {
+      const response = await fetch(requestURL('list'), { cache: 'no-store' });
+      if (!response.ok) throw new Error('Files are unavailable for this record.');
+      const records = await response.json();
+      for (const field of panel.querySelectorAll('[data-document-field]')) {
+        const list = field.querySelector('[data-document-rows]');
+        list.replaceChildren();
+        const files = records.filter((record) => (record.fieldId || '') === field.dataset.documentField);
+        for (const file of files) {
+          const item = document.createElement('li');
+          item.textContent = file.fileName + ' ';
+          for (const mode of ['preview', 'download']) {
+            const url = requestURL(mode);
+            url.searchParams.set('link', file.linkId);
+            url.searchParams.set('version', file.versionId);
+            const link = document.createElement('a');
+            link.href = url.href;
+            link.textContent = mode === 'preview' ? 'Preview' : 'Download';
+            link.setAttribute('aria-label', link.textContent + ' ' + file.fileName);
+            if (mode === 'preview') {
+              link.target = '_blank';
+              link.rel = 'noopener';
+            }
+            item.append(link, ' ');
+          }
+          list.append(item);
+        }
+        if (!files.length) {
+          const item = document.createElement('li');
+          item.textContent = 'No files yet';
+          list.append(item);
+        }
+      }
+    };
+    const showError = (error) => { status.textContent = error.message || 'Files are unavailable.'; };
+    panel.addEventListener('toggle', () => {
+      if (panel.open) void refresh().catch(showError);
+    });
+    for (const form of panel.querySelectorAll('[data-document-upload]')) {
+      let retryKey = null;
+      const input = form.elements.namedItem('file');
+      const photo = form.elements.namedItem('photo');
+      const category = form.elements.namedItem('category');
+      const camera = form.querySelector('[data-document-camera]');
+      const canCapture = 'capture' in photo && window.matchMedia('(pointer: coarse)').matches;
+      const refreshCamera = () => {
+        camera.hidden = !canCapture || (category && category.selectedOptions[0]?.dataset.image !== 'true');
+        if (camera.hidden) photo.value = '';
+      };
+      refreshCamera();
+      form.addEventListener('change', (event) => {
+        retryKey = null;
+        if (event.target === photo) input.value = '';
+        if (event.target === input) photo.value = '';
+        refreshCamera();
+      });
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const file = input.files[0] || photo.files[0];
+        if (!file) {
+          status.textContent = 'Choose a file to attach.';
+          return;
+        }
+        const url = requestURL('upload');
+        retryKey ??= window.crypto.randomUUID();
+        url.searchParams.set('retryKey', retryKey);
+        url.searchParams.set('fileName', file.name);
+        if (form.dataset.field) url.searchParams.set('field', form.dataset.field);
+        if (category?.value) url.searchParams.set('category', category.value);
+        const button = form.querySelector('button');
+        button.disabled = true;
+        status.textContent = '';
+        try {
+          const csrf = document.querySelector('meta[name=erp-csrf]')?.content;
+          const response = await fetch(url, { method: 'POST', headers: csrf ? { 'x-erp-csrf': csrf } : {}, body: file });
+          if (!response.ok) {
+            const refusal = await response.json();
+            throw new Error(refusal.message);
+          }
+          form.reset();
+          refreshCamera();
+          retryKey = null;
+          await refresh();
+          status.textContent = 'File attached.';
+        } catch (error) {
+          showError(error);
+        } finally {
+          button.disabled = false;
+        }
+      });
+    }
+  }
 })();`;
 
 export const SURFACE_CLIENT_CSP_HASH = `sha256-${createHash('sha256').update(SURFACE_CLIENT_SCRIPT).digest('base64')}`;

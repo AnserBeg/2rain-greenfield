@@ -29,6 +29,7 @@ interface SurfaceManifestPayload {
 }
 
 const impactByFamily: Record<ProjectionFamilyId, ReleaseImpactCode> = {
+  [PROJECTION_FAMILY_IDS.documents]: 'operation-contract-changed',
   [PROJECTION_FAMILY_IDS.agentDiscovery]: 'agent-discovery-changed',
   [PROJECTION_FAMILY_IDS.formulaRule]: 'operation-contract-changed',
   [PROJECTION_FAMILY_IDS.operationCatalog]: 'operation-contract-changed',

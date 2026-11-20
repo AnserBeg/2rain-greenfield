@@ -57,6 +57,7 @@ import {
   FORM_EMPTY_INTENT_PREFIX,
   recordWorkspaceOwners,
   renderRegisteredSurfaceComponent,
+  renderDocumentSection,
   surfaceSupportsRuntimeIntent,
   type SurfaceDataRenderState,
   type SurfaceFormReferenceChoices,
@@ -68,6 +69,7 @@ import {
 import { DESIGN_TOKENS } from './design-tokens.js';
 import { LEDGER_STYLES } from './ledger-styles.js';
 import { SURFACE_CLIENT_SCRIPT } from './surface-client.js';
+import type { DocumentGateway } from '../../../packages/runtime/src/document-gateway.js';
 import { FONT_STYLESHEET_HREF, registerStaticAsset } from './surface-assets.js';
 import { escapeHtml, shortIdentity } from './html.js';
 import {
@@ -186,6 +188,7 @@ export interface SurfaceRuntimeResponse {
 
 export interface SurfaceRuntimeGateways {
   readonly applicationExtension?: SurfaceRuntimeApplicationExtension;
+  readonly documents?: DocumentGateway;
   /**
    * The request clock, read once per request: a List's "before today" views,
    * their counts and its overdue dates all use the same instant, as do a
@@ -666,6 +669,28 @@ export async function renderSurfaceRuntimeWithData(
           surfaces: selection.surfaces,
           view,
         });
+      }
+      if (
+        data.status === 'READY' &&
+        selection.selected.surfaceRole === 'record' &&
+        gateways.documents &&
+        data.records[0] &&
+        !data.records[0].archived
+      ) {
+        const record = data.records[0];
+        data = {
+          ...data,
+          documentsSection: renderDocumentSection(
+            view,
+            {
+              surfaceId: selection.selected.surfaceId,
+              entityId: record.entityId,
+              recordId: record.recordId,
+              companyId: legalEntitySelection[0] ?? null,
+            },
+            gateways.documents.scannerLabel,
+          ),
+        };
       }
     }
   } catch (error) {
@@ -1631,7 +1656,9 @@ function renderSelectedSurface(
     return { statusCode, html: surfaceContent(body) + queues };
   }
   const enhanceTaskDialog =
-    /<[a-z]+\s[^>]*\bdata-(?:reference-control|editor-create)\b/u.test(body) ||
+    /<[a-z]+\s[^>]*\bdata-(?:reference-control|editor-create|documents)\b/u.test(
+      body,
+    ) ||
     (data.status === 'READY' && nativeTask);
 
   // The launcher page already read its tiles' counts; the sidebar's queues
