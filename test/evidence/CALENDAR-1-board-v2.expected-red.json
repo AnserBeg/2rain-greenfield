@@ -1,0 +1,247 @@
+{
+  "version": 1,
+  "packet": "CALENDAR-1-board-v2",
+  "entries": [
+    {
+      "name": "board-v2-normalization-rederives-facts",
+      "claim": "A Board with zero facts survives a later added field: normalization never re-derives the facts from the List (review finding 1a/1b, active and retired).",
+      "file": "packages/canonical-model/src/surface-workspace.ts",
+      "original": "      const self = boardSelfProblem(board);\n",
+      "replacement": "      const derivedFacts = ((model.surfaces.find((s) => s.surfaceId === body.listSurfaceId) as unknown as { list?: { columns: { role: string; field: string }[] } } | undefined)?.list?.columns ?? []).filter((c) => c.role === 'value' && c.field.includes(':field.')).slice(0, 3);\n      const self = boardSelfProblem(board) ?? (body.facts.length < derivedFacts.length ? 'Board facts no longer match the List derivation.' : null);\n",
+      "test": {
+        "files": ["test/unit/customization-board.test.ts"],
+        "namePattern": "zero facts"
+      },
+      "kills": [
+        {
+          "file": "test/unit/customization-board.test.ts",
+          "name": "proof: from a Board with zero facts, and again after retiring it, adding a field still compiles",
+          "expected": "CANON_SCHEMA_INVALID"
+        }
+      ]
+    },
+    {
+      "name": "board-v2-fact-contract-needs-list-column",
+      "claim": "A chosen fact's contract is the list query's selection, not List column presence, so hiding its column or the title column still compiles (review finding 1c).",
+      "file": "packages/canonical-model/src/board.ts",
+      "original": "    const selected = new Set(selectedFieldIds(listQuery));\n",
+      "replacement": "    const selected = new Set(((list?.list as { columns: { field: string }[] } | undefined)?.columns ?? []).map((c) => c.field));\n",
+      "test": {
+        "files": ["test/unit/customization-board.test.ts"],
+        "namePattern": "chosen facts"
+      },
+      "kills": [
+        {
+          "file": "test/unit/customization-board.test.ts",
+          "name": "proof: from a Board with chosen facts, and again after retiring it, relabelling, hiding and reordering a fact column, hiding the title column and narrowing its operation still compile",
+          "expected": "CANON_SCHEMA_INVALID"
+        }
+      ]
+    },
+    {
+      "name": "board-v2-retired-board-validated",
+      "claim": "A retired Board is not validated on normalization: its removed binding does not block the package.",
+      "file": "packages/canonical-model/src/surface-workspace.ts",
+      "original": "      if (surface.lifecycle !== 'retired') {\n",
+      "replacement": "      if (surface.lifecycle !== 'retired' || surface.lifecycle === 'retired') {\n",
+      "test": {
+        "files": ["test/unit/customization-board.test.ts"],
+        "namePattern": "normalization checks"
+      },
+      "kills": [
+        {
+          "file": "test/unit/customization-board.test.ts",
+          "name": "proof: normalization checks the recorded digest and each binding by ID, never re-deriving, and skips a retired Board",
+          "expected": "Board binding northstar\\.app:operation\\.custom_gone is absent or retired"
+        }
+      ]
+    },
+    {
+      "name": "board-v2-normalization-self-digest-omitted",
+      "claim": "Normalization refuses a Board whose body no longer hashes to its recorded digest.",
+      "file": "packages/canonical-model/src/surface-workspace.ts",
+      "original": "      if (self) fail(surface.surfaceId, self);\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/unit/customization-board.test.ts"],
+        "namePattern": "normalization checks"
+      },
+      "kills": [
+        {
+          "file": "test/unit/customization-board.test.ts",
+          "name": "proof: normalization checks the recorded digest and each binding by ID, never re-deriving, and skips a retired Board",
+          "expected": "Missing expected exception"
+        }
+      ]
+    },
+    {
+      "name": "board-v2-superseded-revision-bound",
+      "claim": "On replay only the last revision of each Board surface checks bindings, so a retired or rebound Board replays on a base that removed what the first revision bound.",
+      "file": "packages/customization/src/upgrade-replay.ts",
+      "original": "                check: (superseded.has(patch.revisionId)\n",
+      "replacement": "                check: (superseded.has(patch.revisionId) && false\n",
+      "test": {
+        "files": ["test/unit/customization-board.test.ts"],
+        "namePattern": "rebound"
+      },
+      "kills": [
+        {
+          "file": "test/unit/customization-board.test.ts",
+          "name": "proof: active then retired, and active then rebound, replay clean on a base that removed an operation only the first revision bound",
+          "expected": "RETIRED_TARGET"
+        }
+      ]
+    },
+    {
+      "name": "board-v2-conflict-unattributed",
+      "claim": "A Board binding conflict on another base is reported with its typed code and the affected ID, never WHOLE_PACKAGE_FAILURE.",
+      "file": "packages/customization/src/upgrade-replay.ts",
+      "original": "            if (board?.problem?.conflicts.length)\n",
+      "replacement": "            if (board?.problem?.conflicts.length && false)\n",
+      "test": {
+        "files": ["test/unit/customization-board.test.ts"],
+        "namePattern": "yields its exact typed conflict"
+      },
+      "kills": [
+        {
+          "file": "test/unit/customization-board.test.ts",
+          "name": "proof: a base change to a bound operation yields its exact typed conflict naming its ID",
+          "expected": "WHOLE_PACKAGE_FAILURE"
+        },
+        {
+          "file": "test/unit/customization-board.test.ts",
+          "name": "proof: a base change to a bound tier o0 to o1 yields its exact typed conflict naming its ID",
+          "expected": "WHOLE_PACKAGE_FAILURE"
+        },
+        {
+          "file": "test/unit/customization-board.test.ts",
+          "name": "proof: a base change to a bound retargeted edge yields its exact typed conflict naming its ID",
+          "expected": "WHOLE_PACKAGE_FAILURE"
+        }
+      ]
+    },
+    {
+      "name": "board-v2-apply-self-digest-omitted",
+      "claim": "On the authoring base a Board patch whose body was changed after its digest was taken is refused for its digest.",
+      "file": "packages/customization/src/board-revision.ts",
+      "original": "  if (self) return refuse(self);\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/unit/customization-board.test.ts"],
+        "namePattern": "authoring base a patch"
+      },
+      "kills": [
+        {
+          "file": "test/unit/customization-board.test.ts",
+          "name": "proof: on the authoring base a patch whose digest does not match its recorded IDs and contracts is refused",
+          "expected": "did not match the regular expression"
+        }
+      ]
+    },
+    {
+      "name": "board-v2-apply-exact-digest-omitted",
+      "claim": "On the authoring base a self-consistent Board patch whose choices this base never offered is refused by the exact digest.",
+      "file": "packages/customization/src/board-revision.ts",
+      "original": "      if (boardDigest(expected) !== resultDigest)\n",
+      "replacement": "      if (boardDigest(expected) !== resultDigest && false)\n",
+      "test": {
+        "files": ["test/unit/customization-board.test.ts"],
+        "namePattern": "authoring base a patch"
+      },
+      "kills": [
+        {
+          "file": "test/unit/customization-board.test.ts",
+          "name": "proof: on the authoring base a patch whose digest does not match its recorded IDs and contracts is refused",
+          "expected": "\"status\":\"applied\""
+        }
+      ]
+    },
+    {
+      "name": "board-v2-serving-floor-understated",
+      "claim": "The serving reader refuses a manifest that carries a Board under the Board v2 rung (review finding 6).",
+      "file": "packages/postgres-provider/src/board-admission.ts",
+      "original": "    (declarations.length && floor < BOARD_READER) ||\n",
+      "replacement": "    false ||\n",
+      "test": {
+        "files": ["test/unit/customization-board.test.ts"],
+        "namePattern": "serving reader refuses"
+      },
+      "kills": [
+        {
+          "file": "test/unit/customization-board.test.ts",
+          "name": "proof: the serving reader refuses an understated surface floor, a stated floor without a Board, and a forged move",
+          "expected": "Board declarations and the surface manifest disagree"
+        }
+      ]
+    },
+    {
+      "name": "board-v2-serving-retired-checked",
+      "claim": "The serving reader does not check a retired Board's bindings, so a release that retired a Board whose operation the base removed is admitted.",
+      "file": "packages/postgres-provider/src/board-admission.ts",
+      "original": "    if (surface.lifecycle === 'retired') continue;\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/unit/customization-board.test.ts"],
+        "namePattern": "rebound"
+      },
+      "kills": [
+        {
+          "file": "test/unit/customization-board.test.ts",
+          "name": "proof: active then retired, and active then rebound, replay clean on a base that removed an operation only the first revision bound",
+          "expected": "The Board move must bind the declared lifecycle transition"
+        }
+      ]
+    },
+    {
+      "name": "board-v2-company-read-unscoped",
+      "claim": "A company-scoped Board read returns only the chosen company's cards; the company predicate is the only thing that hides the other company's card.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "  const predicates = archivePredicate(entity, false);\n  appendLegalEntityReadScopePredicate(entity, readScope, values, predicates);\n  appendQueryFilterPredicates(\n    entity,\n    request.filterPlans,\n    values,\n    predicates,\n    undefined,\n    request.parameterValues,\n  );\n  const scopePredicates",
+      "replacement": "  const predicates = archivePredicate(entity, false);\n  appendQueryFilterPredicates(\n    entity,\n    request.filterPlans,\n    values,\n    predicates,\n    undefined,\n    request.parameterValues,\n  );\n  const scopePredicates",
+      "test": {
+        "files": ["test/postgres/board-policy.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/board-policy.test.ts",
+          "name": "a company-scoped read and move",
+          "expected": "did not match the regular expression|match the regular expression"
+        }
+      ]
+    },
+    {
+      "name": "board-v2-forged-confirm-admitted",
+      "claim": "A Board confirmation without this server's ticket for the exact reviewed intent is refused with 403.",
+      "file": "apps/web/src/board.ts",
+      "original": "  if (form.boardAction === 'confirm' && !valid(opId))\n    return refuse('Open the move again.', 403);\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/board-policy.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/board-policy.test.ts",
+          "name": "a company-scoped read and move",
+          "expected": "403"
+        }
+      ]
+    },
+    {
+      "name": "board-v2-ungranted-move-offered",
+      "claim": "A person without the transition grant sees no Move card, even when an automation principal holds it.",
+      "file": "apps/web/src/board.ts",
+      "original": "  return moves.filter((_, i) => allowed[i]);\n",
+      "replacement": "  return moves.filter((_, i) => allowed[i] || true);\n",
+      "test": {
+        "files": ["test/postgres/board-policy.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/board-policy.test.ts",
+          "name": "a move granted only to an automation principal is never offered to a person",
+          "expected": "Move card: Alpha two"
+        }
+      ]
+    }
+  ]
+}
