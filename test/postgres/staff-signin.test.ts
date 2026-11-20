@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { createServer, request } from 'node:http';
+import { erpTransport } from '../../apps/api/src/staff-erp-transport.js';
 import { identityHandler } from '../../apps/api/src/staff-identity-http.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -390,6 +391,148 @@ test('staff sign-in integrity under the pilot database roles', async (suite) => 
           },
         );
         await suite.test(
+          'ERP landing reads and bounded login creation',
+          async () => {
+            const handler = erpTransport(realm, runtime, randomBytes(32), [
+              '127.0.0.1',
+            ]);
+            const server = createServer((req, res) => {
+              void handler(req, res).catch(() => {
+                res.writeHead(403).end();
+              });
+            });
+            try {
+              await new Promise<void>((resolve) =>
+                server.listen(0, '127.0.0.1', resolve),
+              );
+              const addr = server.address();
+              assert.ok(addr && typeof addr === 'object');
+              const send = (
+                path: string,
+                method: string,
+                headers: Record<string, string> = {},
+                body = '',
+              ) =>
+                new Promise<{
+                  status: number | undefined;
+                  cookie?: string;
+                  html: string;
+                }>((resolve, reject) => {
+                  const req = request(
+                    {
+                      hostname: '127.0.0.1',
+                      port: addr.port,
+                      path,
+                      method,
+                      headers: {
+                        host: new URL(realm.erpOrigin).host,
+                        ...headers,
+                      },
+                    },
+                    (res) => {
+                      let html = '';
+                      res.setEncoding('utf8').on('data', (chunk: string) => {
+                        html += chunk;
+                      });
+                      res.on('end', () =>
+                        resolve({
+                          status: res.statusCode,
+                          cookie:
+                            res.headers['set-cookie']?.[0]?.split(';')[0] ?? '',
+                          html,
+                        }),
+                      );
+                    },
+                  );
+                  req.on('error', reject);
+                  req.end(body);
+                });
+              const count = async () =>
+                (
+                  await pool.query(
+                    'SELECT FROM platform.staff_login_transactions',
+                  )
+                ).rowCount;
+              let landing = await send('/', 'GET');
+              for (const path of ['/auth/signin', '/', '/auth/signin'])
+                landing = await send(path, 'GET');
+              assert.equal(
+                await count(),
+                0,
+                'landing GET created a login transaction',
+              );
+              assert.equal(landing.status, 200);
+              const token = landing.html.match(
+                /name="_csrf" value="([\w-]+)"/u,
+              )?.[1];
+              assert.ok(landing.cookie && token);
+              const headers = {
+                origin: realm.erpOrigin,
+                cookie: landing.cookie,
+                'content-type': 'application/x-www-form-urlencoded',
+                'x-real-ip': '192.0.2.10',
+              };
+              const form = new URLSearchParams({ _csrf: token }).toString();
+              assert.equal(
+                (
+                  await send(
+                    '/auth/signin',
+                    'POST',
+                    { ...headers, origin: realm.identityOrigin },
+                    form,
+                  )
+                ).status,
+                403,
+              );
+              assert.equal(
+                (await send('/auth/signin', 'POST', headers, '')).status,
+                403,
+              );
+              assert.equal(await count(), 0);
+              const start = (source = '192.0.2.10') =>
+                send(
+                  '/auth/signin',
+                  'POST',
+                  { ...headers, 'x-real-ip': source },
+                  form,
+                );
+              const oldBindings: Buffer[] = [];
+              for (let i = 0; i < 2; i++) {
+                const started = await start();
+                assert.equal(started.status, 303);
+                const verifier = started.cookie?.match(
+                  /^__Host-erp-login=([\w-]+)$/u,
+                )?.[1];
+                assert.ok(verifier);
+                oldBindings.push(digest(verifier));
+              }
+              await pool.query(
+                'UPDATE platform.staff_login_transactions SET expires_at=now() WHERE binding=$1',
+                [oldBindings[0]],
+              );
+              await pool.query(
+                'UPDATE platform.staff_login_transactions SET consumed_at=now() WHERE binding=$1',
+                [oldBindings[1]],
+              );
+              assert.equal((await start()).status, 303);
+              assert.equal(
+                await count(),
+                1,
+                'expired and consumed login transactions must be purged',
+              );
+              for (let i = 3; i < 30; i++)
+                assert.equal((await start()).status, 303);
+              assert.equal((await start()).status, 403);
+              assert.equal((await start('192.0.2.11')).status, 303);
+              assert.equal(await count(), 29);
+            } finally {
+              await new Promise<void>((resolve) =>
+                server.close(() => resolve()),
+              );
+            }
+          },
+        );
+        await suite.test(
           'only a current ERP login transaction can be consumed alongside its handoff',
           async () => {
             const verifier = secret(),
@@ -402,10 +545,44 @@ test('staff sign-in integrity under the pilot database roles', async (suite) => 
               'a handoff alone cannot start an ERP session',
             );
             await runtime.query(
-              'SELECT platform.staff_start_login($1,$2,$3,NULL)',
-              [t, e, binding],
+              'SELECT platform.staff_start_login($1,$2,$3,NULL,$4)',
+              [t, e, binding, randomBytes(32)],
             );
-            await assert.rejects(service.redeem(secret(), verifier));
+            // A sequence in this temporary database witnesses the update even if its
+            // transaction rolls back. An early lookup refusal cannot satisfy this proof.
+            await pool.query(`CREATE SEQUENCE public.verifier_consumptions MINVALUE 0 START 0;
+              CREATE FUNCTION public.observe_consumption() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER AS $$
+              BEGIN PERFORM nextval('public.verifier_consumptions'); RETURN NEW; END $$;
+              CREATE TRIGGER witness_consumption AFTER UPDATE OF consumed_at ON platform.staff_login_transactions
+              FOR EACH ROW EXECUTE FUNCTION public.observe_consumption()`);
+            const expiredHandoff = await addSession(binding);
+            await pool.query(
+              'UPDATE platform.staff_sessions SET handoff_deadline=now() WHERE handoff_digest=$1',
+              [digest(expiredHandoff.handoff)],
+            );
+            await assert.rejects(
+              service.redeem(expiredHandoff.handoff, verifier),
+              /Staff access could not be verified/,
+            );
+            assert.equal(
+              (
+                await pool.query(
+                  'SELECT is_called FROM public.verifier_consumptions',
+                )
+              ).rows[0].is_called,
+              true,
+              'handoff refusal must follow verifier consumption',
+            );
+            assert.equal(
+              (
+                await pool.query(
+                  'SELECT consumed_at FROM platform.staff_login_transactions WHERE binding=$1',
+                  [binding],
+                )
+              ).rows[0].consumed_at,
+              null,
+              'handoff refusal must roll back verifier consumption',
+            );
             const outcomes = await Promise.allSettled(
               [first, second].map((row) =>
                 service.redeem(row.handoff, verifier),
@@ -415,10 +592,27 @@ test('staff sign-in integrity under the pilot database roles', async (suite) => 
               outcomes.filter((row) => row.status === 'fulfilled').length,
               1,
             );
+            const prior = await addSession(randomBytes(32));
+            const other = await addSession(randomBytes(32));
+            const returning = secret();
+            const exchange = await addSession(digest(returning));
+            const { rows } = await runtime.query(
+              'SELECT platform.staff_start_login($1,$2,$3,$4,$5) AS kept',
+              [t, e, digest(returning), digest(prior.erp), randomBytes(32)],
+            );
+            assert.equal(rows[0].kept, true);
+            await assert.rejects(
+              service.redeem(exchange.handoff, returning, other.erp),
+              /Staff access could not be verified/,
+              'a different live ERP handle must be refused',
+            );
+            assert.ok(
+              await service.redeem(exchange.handoff, returning, prior.erp),
+            );
             const expired = secret();
             await runtime.query(
-              'SELECT platform.staff_start_login($1,$2,$3,NULL)',
-              [t, e, digest(expired)],
+              'SELECT platform.staff_start_login($1,$2,$3,NULL,$4)',
+              [t, e, digest(expired), randomBytes(32)],
             );
             const pending = await addSession(digest(expired));
             await pool.query(

@@ -1,4 +1,3 @@
-import { isIP, SocketAddress } from 'node:net';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type {
   AuthenticationResponseJSON,
@@ -7,6 +6,7 @@ import type {
 import type { StaffIdentity } from './staff-identity.js';
 import {
   StaffAccessRefused,
+  clientAddress,
   check,
   cookie,
   cookieValue,
@@ -86,22 +86,11 @@ const pages: Record<string, [string, string]> = {
   ],
 };
 
-function canonicalAddress(address: unknown) {
-  check(typeof address === 'string' && !address.includes('%'));
-  const version = isIP(address);
-  check(version);
-  if (version === 4) return address;
-  const canonical = new SocketAddress({ address, family: 'ipv6' }).address;
-  return canonical.startsWith('::ffff:') && isIP(canonical.slice(7)) === 4
-    ? canonical.slice(7)
-    : canonical;
-}
-
 export function identityHandler(
   identity: StaffIdentity,
   trustedIngress: readonly string[] = [],
 ) {
-  const ingress = new Set(trustedIngress.map(canonicalAddress));
+  const sourceOf = clientAddress(trustedIngress);
   const r = identity.realm;
   validateRealm(r);
   return async (req: IncomingMessage, res: ServerResponse) => {
@@ -210,11 +199,7 @@ export function identityHandler(
       const flow = cookieValue(req.headers.cookie, flowCookie);
       check(flow && req.headers['x-erp-csrf'] === csrf(flow));
       if (url.pathname === '/begin' || url.pathname === '/finish') {
-        const peer = canonicalAddress(req.socket.remoteAddress);
-        const source = ingress.has(peer)
-          ? canonicalAddress(req.headers['x-real-ip'])
-          : peer;
-        await identity.spend('source', source, 30);
+        await identity.spend('source', sourceOf(req), 30);
       }
       const input = await readJson(req);
       if (url.pathname === '/begin') {

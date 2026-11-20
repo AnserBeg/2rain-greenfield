@@ -35,6 +35,8 @@ export async function createPilotApplication(options: {
   realm: StaffRealm;
   runtimeDatabaseUrl: string;
   identityCa?: Buffer;
+  rateKey: Buffer;
+  trustedIngress?: readonly string[];
   localDemoIdentity?: boolean;
 }) {
   check(!options.localDemoIdentity);
@@ -108,7 +110,13 @@ export async function createPilotApplication(options: {
       undefined,
       {
         ...(documents ? { documents } : {}),
-        staffTransport: erpTransport(r, pool, options.identityCa),
+        staffTransport: erpTransport(
+          r,
+          pool,
+          options.rateKey,
+          options.trustedIngress,
+          options.identityCa,
+        ),
         readSnapshot: (work, opts) => withReadSnapshot(pool, work, opts),
         requestWork: createRequestWorkProbe(),
       },
