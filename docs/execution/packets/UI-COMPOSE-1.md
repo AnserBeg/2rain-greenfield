@@ -34,7 +34,7 @@ Declaring releases require reader 33, after Address fields at 31 and Maps at 32.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "UI-COMPOSE-1",
   "base": "032b87c00df3ee22184685050b9cecc01c62cc59",
-  "head": "71dfd832a86bd66478c22a0515a932e2f3f59b08",
+  "head": "bd393e51e6aa974447bbe5a4eee3d622d80572ab",
   "changedPaths": [
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/surface-composition.ts",
     "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts", "packages/canonical-model/src/popup-actions.ts",
