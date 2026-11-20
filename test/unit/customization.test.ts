@@ -1450,10 +1450,7 @@ test('upgrade diagnostics name the missing tenant target and the new first-party
   assert.equal(first.status, 'rejected');
   assert.ok(first.status === 'rejected');
   assert.equal(first.code, 'RETIRED_TARGET');
-  assert.match(
-    JSON.stringify(first.diagnostics),
-    /RETIRED_TARGET.*item_list/u,
-  );
+  assert.match(JSON.stringify(first.diagnostics), /RETIRED_TARGET.*item_list/u);
 });
 
 test('an upgrade compiles field, layout and metric intent as one transition from the prior live tenant release', async () => {

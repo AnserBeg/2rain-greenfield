@@ -19,6 +19,6 @@ jobs:
           node-version-file: .node-version
       - run: corepack pnpm install --frozen-lockfile --reporter=append-only
       - if: matrix.suite == 'unit'
-        run: node --import tsx --test test/unit/customization-upgrade.test.ts
+        run: node --import tsx --test --test-name-pattern='upgrade diagnostics name|a whole-package upgrade rejection' test/unit/customization.test.ts
       - if: matrix.suite == 'postgres'
-        run: node --import tsx --test --test-name-pattern='a tenant with Equipment|a record-type upgrade stages' test/postgres/customization.test.ts
+        run: node --import tsx --test --test-name-pattern='a platform label upgrade' test/postgres/customization.test.ts
