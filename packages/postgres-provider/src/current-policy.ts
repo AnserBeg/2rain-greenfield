@@ -559,7 +559,9 @@ type ScopeResult =
   | { readonly legalEntityIds: readonly string[]; readonly status: 'valid' }
   | { readonly legalEntityIds: readonly []; readonly status: 'invalid' };
 
-function extractLegalEntityScope(input: ImmutableJsonValue): ScopeResult {
+export function extractLegalEntityScope(
+  input: ImmutableJsonValue,
+): ScopeResult {
   const candidates: string[] = [];
   let invalid = false;
   const visit = (value: ImmutableJsonValue, key: string | null): void => {
