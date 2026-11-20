@@ -1,12 +1,11 @@
 import { DRAFT_CUSTOMIZATION_TOOL } from '../../../../packages/customization/src/ai-draft.js';
-import { serializeRelease } from '../../../../packages/customization/src/index.js';
-import {
-  parseCompiledApplication,
-  provisionLocalDemoAuthorization,
-} from '../../../../packages/postgres-provider/src/composed-application-runtime.js';
+import { provisionLocalDemoAuthorization } from '../../../../packages/postgres-provider/src/composed-application-runtime.js';
 import { workflowAutomationPrincipal } from '../../../../packages/postgres-provider/src/workflow-admission.js';
 import { scriptedModel } from '../../../../packages/operations-agent/src/index.js';
+import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 import { expect, test } from '@playwright/test';
 
@@ -14,7 +13,6 @@ import {
   COMPOSED_APPLICATION_INVENTORY_SCOPE,
   startComposedApplication,
   openCustomizeService,
-  readCompiledApplication,
 } from '../../../api/src/composition-root.js';
 import { WORKFLOW_SURFACE_FLOOR } from '../../../../packages/canonical-model/src/workflows.js';
 import { composedApplicationSeed } from '../../../../packages/domain/src/app/seed.js';
@@ -345,27 +343,26 @@ test('a drafted receipt workflow links an inspection and requests escalation aft
     async ({ connection, pool }) => {
       const databaseUrl = `postgresql://postgres@${String(connection.host)}:${String(connection.port)}/postgres`;
       const tenantSlug = 'inspection-workflow-browser';
-      const { applications, bootstrap } = parseCompiledApplication(
-        await readCompiledApplication(),
+      // Compile with the current permissions and omit the count editor's floor.
+      // Run the existing compiler fixture through tsx, as the Node suites do.
+      const { stdout } = await promisify(execFile)(
+        process.execPath,
+        [
+          '--import',
+          'tsx',
+          '-e',
+          `const { applicationWithoutLineCreateValues } = require('./test/helpers/application-without-line-create-values.ts');
+process.stdout.write(JSON.stringify(applicationWithoutLineCreateValues().release));`,
+        ],
+        {
+          cwd: fileURLToPath(new URL('../../../../', import.meta.url)),
+          maxBuffer: 16 * 1024 * 1024,
+        },
       );
-      // Keep the archived reader's refusal attributable to the workflow.
-      const predecessor = applications.findLast(({ compiled }) =>
-        compiled.bundle.releaseManifest.projections.some(
-          ({ familyId, requiredRuntimeCapability }) =>
-            familyId ===
-              'northstar.compiler:projection-family.surface-manifest' &&
-            requiredRuntimeCapability.minimumVersion < WORKFLOW_SURFACE_FLOOR,
-        ),
-      );
-      if (!predecessor) throw new Error('Missing the pre-workflow release');
       const options = {
         databaseUrl,
         tenantSlug,
-        compiledApplication: {
-          schemaVersion: 'northstar.web:compiled-application-release/v1',
-          application: serializeRelease(predecessor),
-          bootstrap: serializeRelease(bootstrap),
-        },
+        compiledApplication: JSON.parse(stdout) as unknown,
         port: 0,
         seedProfile: 'demo',
       } as const;
