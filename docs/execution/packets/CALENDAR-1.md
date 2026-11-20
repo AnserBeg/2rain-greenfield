@@ -27,13 +27,13 @@ The amendment merged at `2915711e`. The next completed main run containing it pa
 
 ## Slice 1a · Board form
 
-The candidate uses Surface reader 30 above Workflow reader 29. It adds no migration.
+Board uses Surface reader 31 above Billing reader 30. It adds no migration.
 
 The tenant fixture publishes an Opportunity board with a declared Open → Won transition. The first-party fixture publishes a Purchase order board with its existing Cancel order operation. Both use version 1 lifecycle-state grouping and cap each card at three key facts.
 
 - At 390 px with JavaScript disabled, opening and reviewing the Move Task left the operation gateway count at zero. Confirm invoked the named operation once. [Chromium journey](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44727489193/job/136258484946)
 - A second tab confirmed the stale review. It showed Won, refused the change, and left the stored revision at its single increment. [Two-tab regression](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44727489193/job/136258484946)
-- The archived rung-29 binary served the tenant before activation and returned `UNSUPPORTED_RUNTIME_CAPABILITY` after activation. The rung-30 binary served the same Board. [Serving-reader regression](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44727489193/job/136258485420)
+- In the pre-Billing run, the archived rung-29 binary served the tenant before activation and returned `UNSUPPORTED_RUNTIME_CAPABILITY` after activation. The rung-30 binary served the same Board. [Serving-reader regression](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44727489193/job/136258485420)
 - The archived and current compilers produced byte-identical release envelopes for the same Board-free tenant patch. The checked-in application release also reproduced. [Release comparison](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44727489193/job/136258485420) · [Application release](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44727489193/job/136258485421)
 
 **Try it yourself.** Run `corepack pnpm dev` and open the demo tenant with a draft purchase order. The browser regression also creates a tenant Opportunity with Open and Won stages and uses the same controls at 390 px.

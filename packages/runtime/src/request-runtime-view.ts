@@ -219,8 +219,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 25 adds Today metric cards.
     // 26 adds header relations, relation List columns and shared or lifecycle-less editors.
     // 27 adds internal document attachments. 28 adds record and form layout revisions.
-    // 29 adds verified workflow declarations.
-    // 30 adds Board lifecycle views and form-based moves.
+    // 29 adds verified workflow declarations. 30 adds billing declarations and service quotes.
+    // 31 adds Board lifecycle views and form-based moves.
     maximumSupportedVersion: BOARD_READER,
   },
 });
