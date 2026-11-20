@@ -531,7 +531,7 @@ test('proof: a new base operation between two chosen stages is not offered until
   assert.ok(result.status === 'applied', JSON.stringify(result));
   const board = normalizeApplicationPackage(result.authored).surfaces.find(
     (s) => s.surfaceId === poBoard.surfaceId,
-  ) as { board: { body: BoardBody } };
+  ) as unknown as { board: { body: BoardBody } };
   assert.deepEqual(
     board.board.body.grouping.moves.map((m) => m.operationId),
     [cancel],

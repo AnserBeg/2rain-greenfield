@@ -310,16 +310,19 @@ export function boardBodyFor(
     grouping: {
       ...offer.frame.grouping,
       stages: stateIds.map((stateId) => ({ stateId })),
-      moves: moves.map((m) => {
-        const { label: _label, ...move } = m!;
-        return move;
-      }),
+      moves: moves.map((m) => ({
+        operationId: m!.operationId,
+        effectKind: m!.effectKind,
+        transitionId: m!.transitionId,
+        fromStateId: m!.fromStateId,
+        toStateId: m!.toStateId,
+        tier: m!.tier,
+        contractDigest: m!.contractDigest,
+      })),
     },
     facts: factFieldIds.map((fid) => {
-      const { label: _label, ...fact } = offer.facts.find(
-        (f) => f.fieldId === fid,
-      )!;
-      return fact;
+      const fact = offer.facts.find((f) => f.fieldId === fid)!;
+      return { fieldId: fact.fieldId, fieldType: fact.fieldType };
     }),
   });
 }
