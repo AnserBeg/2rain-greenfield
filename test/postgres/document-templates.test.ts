@@ -228,7 +228,7 @@ test(
           await service.approve(draft.patchId);
           if (process.env.CI) {
             await withArchivedCustomizationRuntime(
-              '60451569e92ffe9aad3fc2c67bfa326a978b1f3c',
+              '552b13d8837a5e44ac16d3383988c167345d0295',
               async (run) => {
                 const read = () =>
                   archivedRuntimeRead(run, {
@@ -240,7 +240,7 @@ test(
                 assert.deepEqual(await read(), {
                   outcome: 'refused',
                   code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
-                  message: `runtime capability northstar.runtime:capability.surface-manifest requires version ${DOCUMENT_TEMPLATES_SURFACE_FLOOR} and this runtime supports 27`,
+                  message: `runtime capability northstar.runtime:capability.surface-manifest requires version ${DOCUMENT_TEMPLATES_SURFACE_FLOOR} and this runtime supports 28`,
                 });
               },
             );

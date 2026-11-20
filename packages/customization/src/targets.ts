@@ -2,9 +2,13 @@ import type {
   DocumentTemplatePointer,
   DocumentTemplateRevision,
 } from '../../canonical-model/src/document-template-schema.js';
+import { currentLayout, type LayoutTarget } from './layout-revision.js';
 import { displayTypeForField } from '../../canonical-model/src/calculated-display-bindings.js';
 import type { CalculatedDisplayTarget } from './calculated-display-draft.js';
-import { isNarrowableOperationId } from '@north-star/canonical-model';
+import {
+  isNarrowableOperationId,
+  type LayoutDefinition,
+} from '@north-star/canonical-model';
 import { formulaFieldType } from '../../canonical-model/src/formula-validation-bindings.js';
 import { resolveValidationPath } from '../../canonical-model/src/formula-validation-path.js';
 import { VALIDATION_NODE_VERSION } from '../../canonical-model/src/formula-validation.js';
@@ -47,6 +51,7 @@ export interface DocumentTemplateTarget {
 
 export interface CustomizationTargets {
   readonly documentTemplateTargets?: readonly DocumentTemplateTarget[];
+  readonly layouts?: readonly LayoutTarget[];
   readonly documentTargets?: readonly {
     readonly entityId: string;
     readonly label: string;
@@ -130,8 +135,7 @@ type Json = Record<string, unknown>;
 export function customizationTargets(definition: {
   readonly documentTemplatePointers?: readonly DocumentTemplatePointer[];
   readonly documentTemplateRevisions?: readonly DocumentTemplateRevision[];
-  readonly calculatedDisplayFields?:
-    readonly { displaySinks: readonly { surfaceId: string }[] }[] | undefined;
+  readonly calculatedDisplayFields?: LayoutDefinition['calculatedDisplayFields'];
   readonly entities: readonly Json[];
   readonly fields: readonly Json[];
   readonly languageVersion?: string;
@@ -476,7 +480,7 @@ export function customizationTargets(definition: {
     ]),
   );
   const forms = definition.surfaces
-    .filter((surface) => surface.surfaceRole === 'form')
+    .filter((surface) => surface.surfaceRole === 'form' && !surface.layouts)
     .map((surface) => {
       const fields = ((surface.documentEditor as Json | undefined)
         ?.headerFields ??
@@ -673,6 +677,12 @@ export function customizationTargets(definition: {
         }))
         .sort((left, right) => left.label.localeCompare(right.label)),
     }),
+    layouts: definition.surfaces.flatMap((s) =>
+      (['create', 'edit', 'detail'] as const).flatMap((mode) => {
+        const target = currentLayout(definition, s, mode);
+        return target ? [target] : [];
+      }),
+    ),
     choiceFields,
     forms,
     linkTargets,

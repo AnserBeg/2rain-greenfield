@@ -208,6 +208,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 24 adds tenant-authored saved List layouts.
     // 25 adds Today metric cards.
     // 26 adds header relations, relation List columns and shared or lifecycle-less editors.
+    // 27 adds internal document attachments. 28 adds record and form layout revisions.
+    // 29 adds document templates and governed PDF generation.
     maximumSupportedVersion: DOCUMENT_TEMPLATES_SURFACE_FLOOR,
   },
 });
