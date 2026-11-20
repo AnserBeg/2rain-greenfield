@@ -612,3 +612,102 @@ for (const target of ['purchase_order', 'party'] as const) {
     );
   });
 }
+
+test('a buyer creates a section and moves the bound vendor picker into it', async ({
+  page,
+}) => {
+  test.setTimeout(360_000);
+  page.setDefaultTimeout(30_000);
+  await withEphemeralPostgres(
+    'customize-layout-browser',
+    async ({ connection }) => {
+      const app = await startComposedApplication({
+        databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
+        tenantSlug: 'customize-layout-browser',
+        seedProfile: 'distributor',
+        port: 0,
+      });
+      try {
+        const customize = app.baseUrl + '/?customize';
+        const arrange = async () => {
+          await page.goto(customize);
+          const chooser = page.getByRole('group', {
+            name: 'Arrange a form or record page',
+          });
+          await chooser
+            .getByLabel('Page', { exact: true })
+            .selectOption('northstar.app:surface.purchase_order_form/create');
+          await chooser.getByRole('button', { name: 'Choose page' }).click();
+        };
+        const activate = async () => {
+          await expect(page.locator('[data-customize-result]')).toHaveAttribute(
+            'data-customize-result',
+            'drafted',
+          );
+          await page
+            .getByRole('button', { name: 'Approve', exact: true })
+            .click({ timeout: 180_000 });
+          await page
+            .getByRole('button', { name: 'Activate now' })
+            .click({ timeout: 180_000 });
+          await expect(
+            page.locator('[data-customize-result="activated"]'),
+          ).toBeVisible();
+        };
+        await arrange();
+        await page.getByLabel('Section name').fill('Delivery');
+        await page.getByRole('button', { name: 'Draft new section' }).click();
+        await activate();
+        await arrange();
+        const vendor = page.getByRole('group', { name: 'Vendor', exact: true });
+        await vendor
+          .getByLabel('Destination')
+          .selectOption({ label: 'Delivery' });
+        await vendor.getByRole('button', { name: 'Move field' }).click();
+        await expect(page.locator('[data-customize-diff]')).toContainText(
+          'Delivery (Vendor)',
+        );
+        await activate();
+        await page.goto(
+          app.baseUrl + '/?surface=northstar.app%3Asurface.purchase_order_list',
+        );
+        await page
+          .getByRole('link', { name: 'New', exact: true })
+          .first()
+          .click();
+        for (const width of [1280, 390]) {
+          await page.setViewportSize({ width, height: 840 });
+          const group = page.getByRole('group', {
+            name: 'Delivery',
+            exact: true,
+          });
+          const picker = group.getByRole('combobox', {
+            name: 'Vendor',
+            exact: true,
+          });
+          await expect(picker).toBeVisible();
+          await expect(
+            page.getByRole('combobox', { name: 'Vendor', exact: true }),
+          ).toHaveCount(1);
+        }
+        const picker = page.getByRole('combobox', {
+          name: 'Vendor',
+          exact: true,
+        });
+        await picker.fill('Cascade');
+        await page
+          .getByRole('option')
+          .filter({ hasText: 'Cascade Fastener Works' })
+          .first()
+          .click();
+        await expect(picker).toHaveAttribute(
+          'data-selected-label',
+          'Cascade Fastener Works',
+        );
+      } finally {
+        await app.close();
+      }
+    },
+    LINEAGE_INSTALL_VOLUME,
+  );
+});

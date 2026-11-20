@@ -1509,9 +1509,15 @@ export function renderCompositionChildren(
   data: CompositionData,
   surface?: CompiledSurfaceDefinition,
   view?: RequestRuntimeView,
+  region: 'all' | 'rail' | 'body' = 'all',
 ): string {
   const rail: string[] = [];
   const children = data.children
+    .filter(
+      (child) =>
+        region === 'all' ||
+        (region === 'rail') === !!child.definition.presentation?.rail,
+    )
     .map((child) => {
       if (child.definition.presentation && surface && view) {
         // The declared rail's datasets stack in one column beside the sheet

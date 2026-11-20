@@ -1,3 +1,4 @@
+import type { LayoutBody } from '@north-star/canonical-model';
 import { DocumentsProjectionSchema } from '../../../packages/canonical-model/src/schemas.js';
 import {
   renderCompositionAlerts,
@@ -327,6 +328,13 @@ const surfaceSlotRegistry: Readonly<Record<string, SurfaceSlotRegistration>> =
                 context.data.composition,
                 context.surface,
                 context.view,
+                context.surface.layouts?.some(
+                  (l) =>
+                    l.body.mode === 'detail' &&
+                    l.body.blocks.some((b) => b.kind === 'children'),
+                )
+                  ? 'rail'
+                  : 'all',
               )
           : '',
     },
@@ -880,6 +888,39 @@ function renderBreadcrumb(context: SurfaceComponentContext): string {
   );
 }
 
+function composedProgression(
+  context: SurfaceComponentContext,
+  composition: Parameters<typeof renderCompositionProgression>[1],
+) {
+  const record = composition.record;
+  // The progression's next operation is a command this page offers now,
+  // rendered as the command bar renders it, under its own name.
+  const operationControl = (operationId: string, prefix: string) => {
+    const operation = (context.operations ?? []).find(
+      (candidate) =>
+        candidate.operationId === operationId &&
+        candidate.intent === 'command' &&
+        evaluateRegisteredOperationPrecondition(
+          candidate.precondition,
+          record.values,
+        ).outcome === 'holds',
+    );
+    return operation
+      ? renderCapabilityCommand(context, record, operation, {
+          name: `${prefix}: ${operation.label}`,
+        })
+      : null;
+  };
+  return renderCompositionProgression(
+    context.surface,
+    composition,
+    context.view,
+    operationControl,
+    // Nothing else is started while a Task is open.
+    !(context.data?.status === 'READY' && context.data.compositionTask),
+  );
+}
+
 function renderTitleStatus(context: SurfaceComponentContext): string {
   if (
     context.data?.status === 'READY' &&
@@ -887,42 +928,19 @@ function renderTitleStatus(context: SurfaceComponentContext): string {
     context.surface.composition?.presentation
   ) {
     const composition = context.data.composition;
-    const record = composition.record;
-    // The progression's next operation is a command this page offers now,
-    // rendered as the command bar renders it, under its own name.
-    const operationControl = (operationId: string, prefix: string) => {
-      const operation = (context.operations ?? []).find(
-        (candidate) =>
-          candidate.operationId === operationId &&
-          candidate.intent === 'command' &&
-          evaluateRegisteredOperationPrecondition(
-            candidate.precondition,
-            record.values,
-          ).outcome === 'holds',
-      );
-      return operation
-        ? renderCapabilityCommand(context, record, operation, {
-            name: `${prefix}: ${operation.label}`,
-          })
-        : null;
-    };
+    const progression = composedProgression(context, composition);
     return slotPanel(
       context,
       renderCompositionHeader(
         context.surface,
         composition,
-        compositionStatusRole(context, record),
+        compositionStatusRole(context, composition.record),
       ) +
         feedbackHtml(context.feedback) +
         renderCompositionAlerts(context.surface, composition) +
-        renderCompositionProgression(
-          context.surface,
-          composition,
-          context.view,
-          operationControl,
-          // Nothing else is started while a Task is open.
-          !context.data.compositionTask,
-        ),
+        (context.surface.layouts?.some((l) => l.body.mode === 'detail')
+          ? ''
+          : progression),
       'title-status-slot',
     );
   }
@@ -1252,12 +1270,85 @@ function renderKeyFacts(context: SurfaceComponentContext): string {
   );
 }
 
+/** Each caller supplies HTML from its original bound control or governed read. */
+export function renderLayoutSection(
+  section: LayoutBody['sections'][number],
+  fieldHtml: (
+    field: LayoutBody['sections'][number]['fields'][number],
+  ) => string | undefined,
+  escape: (value: string) => string,
+  mode: 'form' | 'detail',
+): string {
+  const wrap = (html: string) =>
+    mode === 'form'
+      ? `<div class="form-fields">${html}</div>`
+      : `<dl class="record-fields">${html}</dl>`;
+  const shown: string[] = [],
+    more: string[] = [],
+    names: string[] = [];
+  for (const field of section.fields) {
+    const html = fieldHtml(field);
+    if (!html) continue;
+    if (field.tier === 'progressive') {
+      more.push(html);
+      names.push(escape(field.label.text));
+    } else shown.push(html);
+  }
+  const content =
+    wrap(shown.join('')) +
+    (more.length
+      ? `<details class="draft-more"${more.some((s) => s.includes('aria-invalid="true"')) ? ' open' : ''}><summary>More details <span class="draft-more__names">${names.join(', ')}</span></summary>${wrap(more.join(''))}</details>`
+      : '');
+  const id = escape(section.id),
+    label = escape(section.label.text);
+  return mode === 'form'
+    ? `<fieldset class="form-field--wide" data-layout-section="${id}"><legend>${label}</legend>${content}</fieldset>`
+    : `<section class="panel" data-composition-fields data-layout-section="${id}"><h2>${label}</h2>${content}</section>`;
+}
+
 function renderSections(context: SurfaceComponentContext): string {
-  if (context.data?.status === 'READY' && context.data.composition)
+  const documents =
+    context.data?.status === 'READY'
+      ? (context.data.documentsSection ?? '')
+      : '';
+  const layout = context.surface.layouts?.find(
+    (l) => l.body.mode === 'detail',
+  )?.body;
+  if (context.data?.status === 'READY' && context.data.composition) {
+    const data = context.data.composition;
+    if (!layout)
+      return renderCompositionFields(context.surface, data) + documents;
+    const progress = layout.blocks.some((b) => b.kind === 'progression')
+      ? composedProgression(context, data)
+      : '';
     return (
-      renderCompositionFields(context.surface, context.data.composition) +
-      (context.data.documentsSection ?? '')
+      '<div class="composed-record-body">' +
+      layout.order
+        .map((id) => {
+          const block = layout.blocks.find((b) => b.id === id);
+          if (block?.kind === 'progression') return progress;
+          if (block?.kind === 'children')
+            return renderCompositionChildren(
+              data,
+              context.surface,
+              context.view,
+              'body',
+            );
+          const section = layout.sections.find((s) => s.id === id)!;
+          if (data.fieldsFailed) return dataDiagnostic('QUERY_UNSUPPORTED');
+          return renderLayoutSection(
+            section,
+            (f) =>
+              `<div data-field-id="${escapeHtml(f.id)}"><dt>${escapeHtml(f.label.text)}</dt><dd>${escapeHtml(data.fields.cells[f.binding] ?? '—')}</dd></div>`,
+            escapeHtml,
+            'detail',
+          );
+        })
+        .join('') +
+      '</div>' +
+      documents
     );
+  }
   const data = context.data ?? { status: 'UNBOUND' as const };
   if (data.status === 'UNBOUND') {
     return slotPanel(context, '', 'sections-slot');
@@ -1279,10 +1370,10 @@ function renderSections(context: SurfaceComponentContext): string {
       slotPanel(
         context,
         record
-          ? `${data.status === 'READY' && data.receiving ? renderReceivingSection(data.receiving) : ''}${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${data.status === 'READY' && data.salesOrder ? renderSalesOrderSection(data.salesOrder) : ''}${data.status === 'READY' && data.packingDocument ? renderPackingDocument(data.packingDocument) : ''}<section class="panel data-panel" data-data-state="exact"><details class="record-section-group" open><summary><h2>Details</h2></summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(labels.get(fieldId) ?? fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${recordFieldValue(context, record, fieldId)}</dd></div>`).join('')}</dl></details></section>`
+          ? `${data.status === 'READY' && data.receiving ? renderReceivingSection(data.receiving) : ''}${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${data.status === 'READY' && data.salesOrder ? renderSalesOrderSection(data.salesOrder) : ''}${data.status === 'READY' && data.packingDocument ? renderPackingDocument(data.packingDocument) : ''}${layout ? layout.sections.map((section) => renderLayoutSection(section, (f) => `<div data-field-id="${escapeHtml(f.id)}"><dt>${escapeHtml(f.label.text)}</dt><dd>${recordFieldValue(context, record, f.binding)}</dd></div>`, escapeHtml, 'detail')).join('') : `<section class="panel data-panel" data-data-state="exact"><details class="record-section-group" open><summary><h2>Details</h2></summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(labels.get(fieldId) ?? fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${recordFieldValue(context, record, fieldId)}</dd></div>`).join('')}</dl></details></section>`}`
           : dataDiagnostic('QUERY_NOT_FOUND'),
         'sections-slot',
-      ) + (data.status === 'READY' ? (data.documentsSection ?? '') : '')
+      ) + documents
     );
   }
   const admission = resolveFormAdmission(context, record);
@@ -1309,7 +1400,7 @@ function renderSections(context: SurfaceComponentContext): string {
     : feedbackHtml(context.feedback);
   return slotPanel(
     context,
-    `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div>${relationContent.freeze}<form id="surface-record-form" method="post" action="${escapeHtml(surfaceHref(context.surface, undefined, false, context))}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${relationContent.controls}${renderFormFields(context, operation, record)}</div></form></section>`,
+    `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div>${relationContent.freeze}<form id="surface-record-form" method="post" action="${escapeHtml(surfaceHref(context.surface, undefined, false, context))}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${context.surface.layouts?.some((l) => l.body.mode === (record ? 'edit' : 'create')) ? '' : relationContent.controls}${renderFormFields(context, operation, record)}</div></form></section>`,
     'sections-slot',
   );
 }
@@ -1449,8 +1540,10 @@ function renderRelationContent(
 function renderRelationPicker(
   context: SurfaceComponentContext,
   picker: SurfaceRelationPicker,
+  overrideLabel?: string,
 ): string {
-  const label = fieldLabel(picker.relationId, surfaceEntityId(context));
+  const label =
+    overrideLabel ?? fieldLabel(picker.relationId, surfaceEntityId(context));
   const proposed =
     context.feedback && 'validation' in context.feedback
       ? context.feedback.validation.proposedRelations?.[picker.relationId]
@@ -2101,6 +2194,29 @@ function renderFormFields(
   const invalid = new Set(validation?.fieldIds ?? []);
   const more: string[] = [];
   const moreLabels: string[] = [];
+  const layout = surface.layouts?.find(
+    (l) => l.body.mode === (record ? 'edit' : 'create'),
+  )?.body;
+  const labels = new Map(
+    layout?.sections.flatMap((s) =>
+      s.fields.map((f) => [f.id, f.label.text] as const),
+    ),
+  );
+  const bound = new Map(
+    layout && !record && context.relationPickers?.status === 'ready'
+      ? context.relationPickers.pickers.map(
+          (picker) =>
+            [
+              picker.relationId,
+              renderRelationPicker(
+                context,
+                picker,
+                labels.get(picker.relationId),
+              ),
+            ] as const,
+        )
+      : [],
+  );
   const first = formFieldIds(surface)
     .filter(
       (fieldId) =>
@@ -2109,7 +2225,9 @@ function renderFormFields(
     .map((fieldId, index) => {
       const declared = presentation.get(fieldId);
       const label =
-        declared?.label ?? fieldLabel(fieldId, surfaceEntityId(context));
+        labels.get(fieldId) ??
+        declared?.label ??
+        fieldLabel(fieldId, surfaceEntityId(context));
       const value =
         validation && Object.hasOwn(validation.proposedValues, fieldId)
           ? validation.proposedValues[fieldId]
@@ -2157,12 +2275,22 @@ function renderFormFields(
         ? renderUnavailableStoredValue(fieldId, index, inputField, value)
         : '';
       const html = `<div class="form-field"><label><span>${escapeHtml(label)}</span>${control.html}</label>${unavailableValue}${emptyIntent}</div>`;
+      if (layout) {
+        bound.set(fieldId, html);
+        return '';
+      }
       if (declared?.disclosure !== 'more') return html;
       more.push(html);
       moreLabels.push(escapeHtml(label));
       return '';
     })
     .join('');
+  if (layout)
+    return layout.sections
+      .map((s) =>
+        renderLayoutSection(s, (f) => bound.get(f.id), escapeHtml, 'form'),
+      )
+      .join('');
   const showMore = [...invalid].some(
     (fieldId) => presentation.get(fieldId)?.disclosure === 'more',
   );
