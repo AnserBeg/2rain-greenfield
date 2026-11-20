@@ -1534,12 +1534,12 @@ function applyDocumentTemplate(
     return null;
   }
 
-  const { kind: _kind, previousRevisionId: _previous, ...revision } = patch;
+  const { templateId, revisionId } = patch;
   if (
-    ![revision.templateId, revision.revisionId].every(
+    ![templateId, revisionId].every(
       (id) => isTenantId(id) && id.split(':')[0] === namespaceOf(authored),
     ) ||
-    revisions.some(({ revisionId }) => revisionId === revision.revisionId)
+    revisions.some((revision) => revision.revisionId === revisionId)
   ) {
     return refusal(
       'CUSTOMIZE_TARGET_NOT_FOUND',
@@ -1548,14 +1548,27 @@ function applyDocumentTemplate(
   }
   authored.documentTemplateRevisions = [
     ...revisions,
-    { ...revision, schemaVersion: version },
-  ];
-  authored.documentTemplatePointers = [
-    ...pointers.filter(({ templateId }) => templateId !== revision.templateId),
     {
       schemaVersion: version,
-      templateId: revision.templateId,
-      activeRevisionId: revision.revisionId,
+      templateId,
+      revisionId,
+      entityId: patch.entityId,
+      label: patch.label,
+      documentKind: patch.documentKind,
+      headerQueryId: patch.headerQueryId,
+      identityFieldId: patch.identityFieldId,
+      currencyFieldId: patch.currencyFieldId,
+      format: patch.format,
+      layout: patch.layout,
+      pageNumbers: patch.pageNumbers,
+    },
+  ];
+  authored.documentTemplatePointers = [
+    ...pointers.filter((pointer) => pointer.templateId !== templateId),
+    {
+      schemaVersion: version,
+      templateId,
+      activeRevisionId: revisionId,
     },
   ];
   return null;
