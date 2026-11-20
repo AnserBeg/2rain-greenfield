@@ -371,10 +371,24 @@ export function lowerBaseProjectionPayloads(
       plan(PROJECTION_FAMILY_IDS.documents, namespace, packageScope, documents),
     );
   }
-  if(verificationPackageRevision.languageVersion==='v6' && verificationPackageRevision.billingPlans){
-    const surface=plans.find(p=>p.familyId===PROJECTION_FAMILY_IDS.surfaceManifest)!;
-    surface.payload={...(surface.payload as object),billingPlans:verificationPackageRevision.billingPlans};
-    surface.requiredRuntimeCapability={...surface.requiredRuntimeCapability,minimumVersion:Math.max(BILLING_READER,surface.requiredRuntimeCapability.minimumVersion)};
+  if (
+    verificationPackageRevision.languageVersion === 'v6' &&
+    verificationPackageRevision.billingPlans
+  ) {
+    const surface = plans.find(
+      (p) => p.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
+    )!;
+    surface.payload = {
+      ...(surface.payload as object),
+      billingPlans: verificationPackageRevision.billingPlans,
+    };
+    surface.requiredRuntimeCapability = {
+      ...surface.requiredRuntimeCapability,
+      minimumVersion: Math.max(
+        BILLING_READER,
+        surface.requiredRuntimeCapability.minimumVersion,
+      ),
+    };
   }
   return plans;
 }

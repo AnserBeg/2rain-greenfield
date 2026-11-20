@@ -406,8 +406,22 @@ function compileApplicationInternal(
   }
 
   const formula = compileLiteralFormulaRules(packageRevision);
-  const billingProblem=billingBindingProblem(packageRevision);
-  if(billingProblem)return failure([{...compilerDiagnostic('COMPILER_TYPE_INVALID','typeCheck','$.billingPlans',null),rule:billingProblem}],maximumDiagnostics);
+  const billingProblem = billingBindingProblem(packageRevision);
+  if (billingProblem)
+    return failure(
+      [
+        {
+          ...compilerDiagnostic(
+            'COMPILER_TYPE_INVALID',
+            'typeCheck',
+            '$.billingPlans',
+            null,
+          ),
+          rule: billingProblem,
+        },
+      ],
+      maximumDiagnostics,
+    );
   const documents = compileDocuments(packageRevision);
   if (documents?.message) {
     return failure(

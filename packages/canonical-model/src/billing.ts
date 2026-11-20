@@ -4,9 +4,6 @@ export const BILLING_CALCULATION_VERSION = 'northstar.billing-calculation/v1';
 export const BILLING_READER = 29;
 export const BILLING_QUOTE_CAPABILITY = 'northstar.billing:capability.quote';
 export const BILLING_TERMS_CAPABILITY = 'northstar.billing:capability.terms';
-export const BILLING_TERMS_PERMISSION =
-  'northstar.billing:permission.publish_terms';
-export const BILLING_QUOTE_PERMISSION = 'northstar.billing:permission.quote';
 export const billingPeriods = [
   'hour',
   'day',
@@ -99,7 +96,7 @@ const component = z.discriminatedUnion('kind', [
 ]);
 export const BillingPlanSchema = z
   .strictObject({
-    schemaVersion: z.literal('northstar.billing-plan/v1'),
+    schemaVersion: z.literal('v6'),
     id,
     version: id,
     currency,
@@ -233,6 +230,6 @@ export const BillingListAssignmentSchema = z
     effectiveEnd: z.iso.datetime({ precision: 3 }).optional(),
   })
   .refine(
-    (a) => !a.effectiveEnd || a.effectiveEnd >= a.effectiveFrom,
+    (a) => !a.effectiveEnd || a.effectiveEnd > a.effectiveFrom,
     'Invalid list assignment interval',
   );

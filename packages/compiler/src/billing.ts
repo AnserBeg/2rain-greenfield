@@ -35,6 +35,7 @@ export function billingBindingProblem(
         !q.readModel &&
         q.lifecycle === 'active' &&
         field?.entity.targetId === q.sourceEntity.targetId &&
+        field.fieldType.kind === 'textFieldType' &&
         q.selections.some((s) => s.field.targetId === fieldId)
       );
     };
