@@ -13,18 +13,20 @@ Slice 2a adds reviewed staff decisions. [Slice 1 and its gates](https://github.c
 
 ## Gates and test it yourself
 
+The four database controls temporarily remove single use, decision digest, scope and current authority in a disposable database. [Focused evidence run](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44750672343)
+
 Run `node --import tsx --test test/postgres/release-approval.test.ts`. The staff subtest checks release and Customize decisions, refuses activation after membership loss, then observes a verified swap. The Retry case runs in `test/postgres/workflow-consumer.test.ts`. [Staff pilot instructions](../../operations/staff-signin.md#approvals-and-activation)
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "SIGNIN-1",
-  "base": "17618776dd058bbb8efec032eae13a00a5d5398b",
-  "head": "7eb35bbb55dd0d0326cad639cebd81176cc731e4",
+  "base": "eda6d12ffc4d38ba84146b712c3bbeed1eabb729",
+  "head": "e529f389352f176570c2dac1c08b70a013f29ac2",
   "changedPaths": [
     "apps/api/src/staff-decisions.ts", "apps/api/src/staff-identity-http.ts",
     "apps/api/src/staff-identity.ts", "apps/api/src/staff-main.ts",
-    "apps/api/src/staff-protocol.ts", "db/migrations/0051_staff_decision_proofs.sql",
+    "apps/api/src/staff-protocol.ts", "db/migrations/0052_staff_decision_proofs.sql",
     "db/schema.snapshot.json", "docs/execution/ledger.md",
     "docs/execution/packets/CONNECT-1.md", "docs/execution/packets/SIGNIN-1.md",
     "docs/execution/review-log.md", "docs/operations/staff-signin.md",

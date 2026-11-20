@@ -300,4 +300,4 @@ one line per round; the gate only requires that the SHA on `main` appears.
 | `f87dc25b814129f7d654a19531878fb783e361b8` | BOOKING-1 (slice 1a) | integration | merged — unread | 2026-11-20 | PostgreSQL commitment writer, GiST unit exclusion, locked pool check and transactional evidence. |
 | `624fb2b7354d9599453bf8262bddd331408949c9` | UPGRADE-2 (slice 1 design) | integration | merged — no Critical path | 2026-11-20 | A19–A24, docs-only under the owner’s no-rerun rule. |
 | `3b0e09daed5c57054d5039814a6c0eac8d0642ba` | BILLING-1 (slice 1) | integration | merged — unread | 2026-11-20 | Published rate tables, tenant RLS and append-only serving grants. [Packet CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44742877160). |
-| `7eb35bbb55dd0d0326cad639cebd81176cc731e4` | SIGNIN-1 (slice 2a) | integration | merged — unread | 2026-11-20 | Decision proof consumption and the independent activation verifier. |
+| `e529f389352f176570c2dac1c08b70a013f29ac2` | SIGNIN-1 (slice 2a) | integration | merged — unread | 2026-11-20 | Decision proof consumption and the independent activation verifier. |
