@@ -163,6 +163,16 @@ export function billingQuoteReadModel(
             ...base.values,
             [target]: JSON.stringify({
               algorithm: quote.algorithm,
+              plan: { id: p.id, version: p.version, digest: quote.planDigest },
+              source: {
+                queryId: source.queryId,
+                recordId: row.recordId,
+                revision: row.revision,
+                sourceRevision: evidence.sourceRevision,
+                cursor: evidence.cursor,
+                basis: evidence.basis,
+              },
+              release: evidence.release,
               lines: quote.lines,
               terms: quote.terms,
               calendar: quote.calendar,

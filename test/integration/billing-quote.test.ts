@@ -150,6 +150,25 @@ test('service-anniversary windows price 36 days as CAD 490 + 100', () => {
   const first = roll(e.anchor, 31);
   assert.equal(cents(p, { ...e, asOf: first }), 49000);
   assert.equal(cents(p, allocate(e, p, first)), 10000);
+  for (let split = 1; split < 36; split++) {
+    const boundary = roll(e.anchor, split);
+    const allocated = allocate(e, p, boundary);
+    const prior = allocated.allocations[0]!;
+    assert.equal(Number(prior.allocatedCents) + cents(p, allocated), 59000);
+    assert.equal(
+      cents(p, {
+        ...allocated,
+        allocations: [
+          {
+            ...prior,
+            reservedCents: prior.allocatedCents,
+            allocatedCents: '0',
+          },
+        ],
+      }),
+      cents(p, allocated),
+    );
+  }
 });
 test('twenty active days cap at CAD 240 with CAD 100 then CAD 140 allocated', () => {
   const p = plan([{ ...time, cap: 'cap' }], 'fourWeek'),

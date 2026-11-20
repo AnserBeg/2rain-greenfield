@@ -100,6 +100,8 @@ interface Line {
   servicePeriodEnd: string;
   currency: string;
   taxClassification: string;
+  exactEntitlement: string;
+  rounding: 'halfUp';
   entitlementCents: string;
   allocatedCents: string;
   reservedCents: string;
@@ -215,6 +217,8 @@ function calculate(
       servicePeriodEnd: iso(end),
       currency: plan.currency,
       taxClassification: c.taxClassification,
+      exactEntitlement: earned.toString(),
+      rounding: 'halfUp',
       entitlementCents: String(cents),
       allocatedCents: allocated,
       reservedCents: reserved,
@@ -306,7 +310,7 @@ function calculate(
           period.start,
           period.end,
           decimal(t.values[c.amount]!),
-          [{ rateVersion: t.version, at: fee.at }],
+          [{ rateVersion: t.version, at: fee.at, rate: t.values[c.amount] }],
         );
         continue;
       }
@@ -334,6 +338,7 @@ function calculate(
           [
             {
               rateVersion: t.version,
+              rate: t.values[c.amount],
               eligibleMs: ms,
               basisMs: o.fullEnd - o.fullStart,
               fraction: fraction.toString(),

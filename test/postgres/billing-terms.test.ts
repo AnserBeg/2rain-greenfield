@@ -202,6 +202,12 @@ test('governed terms and scoped source facts produce a quote through the install
             requested_date: end,
             currency: 'CAD',
             notes: JSON.stringify(notes),
+            ship_to_name: 'Service desk',
+            ship_to_street: '100 Industrial Way',
+            ship_to_city: 'Calgary',
+            ship_to_region: 'AB',
+            ship_to_postal_code: 'T2P 0A1',
+            ship_to_country: 'Canada',
           },
           {},
           true,
@@ -222,16 +228,61 @@ test('governed terms and scoped source facts produce a quote through the install
           expectedRevision: proposal.revision,
         },
         key = randomUUID();
-      await f.measure('deny','billing_publish_terms');
-      await assert.rejects(() => f.invoke('billing_publish',revision,key));
-      assert.equal((await f.pool.query('SELECT count(*)::int AS n FROM platform.billing_rate_tables')).rows[0].n,0);
-      await f.measure('allow','billing_publish_terms');
+      await f.measure('deny', 'billing_publish_terms');
+      await assert.rejects(() => f.invoke('billing_publish', revision, key));
+      assert.equal(
+        (
+          await f.pool.query(
+            'SELECT count(*)::int AS n FROM platform.billing_rate_tables',
+          )
+        ).rows[0].n,
+        0,
+      );
+      await f.measure('allow', 'billing_publish_terms');
       const published = await f.invoke('billing_publish', revision, key);
       assert.equal(published.outcome, 'succeeded');
       assert.equal(
         (await f.invoke('billing_publish', revision, key)).trust?.invocationId,
         published.trust?.invocationId,
       );
+      const db = await f.pool.connect();
+      try {
+        await db.query('BEGIN');
+        await db.query('SET LOCAL ROLE north_star_runtime');
+        await db.query(
+          "SELECT set_config('north_star.tenant_id',$1,true),set_config('north_star.environment_id',$2,true),set_config('north_star.principal_id',$3,true)",
+          [ids.tenantId, ids.environmentId, randomUUID()],
+        );
+        const count = async () =>
+          (
+            await db.query<{ n: number }>(
+              'SELECT count(*)::int AS n FROM platform.billing_rate_tables',
+            )
+          ).rows[0]!.n;
+        assert.equal(await count(), 1);
+        await db.query("SELECT set_config('north_star.tenant_id',$1,true)", [
+          randomUUID(),
+        ]);
+        assert.equal(
+          await count(),
+          0,
+          'another tenant read the published price',
+        );
+        await db.query("SELECT set_config('north_star.tenant_id',$1,true)", [
+          ids.tenantId,
+        ]);
+        await assert.rejects(
+          () =>
+            db.query(
+              "UPDATE platform.billing_rate_tables SET version_id='edited'",
+            ),
+          { code: '42501' },
+          'the serving role rewrote a published price',
+        );
+      } finally {
+        await db.query('ROLLBACK');
+        db.release();
+      }
       const serviceId = randomUUID();
       const facts = {
         ...ids,
