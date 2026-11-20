@@ -79,7 +79,7 @@ RETURNS jsonb LANGUAGE sql STABLE SET search_path = pg_catalog, pg_temp AS $$
   SELECT jsonb_build_object('run',r.run_id,'instance',i.instance_id,'occurrence',i.event_id,'workflow',r.workflow_id,
     'release',r.release_id,'root',r.release_root,'pointer',p.pointer_id,'originalFence',r.initial_fence::text,
     'previousFence',r.execution_fence::text,'fence',p.fence::text,'company',i.legal_entity_id,
-    'body',d.body_digest,'executable',d.executable_digest,'sdk',d.sdk_digest,'host',d.host_version,'engine',d.engine_build,
+    'body',d.body_digest,'executable',d.executable_digest,'sdk',d.sdk_digest,'sdkVersion',d.sdk_version,'host',d.host_version,'engine',d.engine_build,
     'definition',platform.workflow_definition_digest(d),'journal',(
       SELECT coalesce(jsonb_agg(jsonb_build_array(j.cursor,j.kind,j.journal_id,encode(sha256(j.canonical_bytes),'hex'))
         ORDER BY j.cursor,j.kind,j.journal_id),'[]'::jsonb) FROM platform.workflow_journal j
@@ -213,7 +213,7 @@ GRANT EXECUTE ON FUNCTION platform.staff_issue_decision(uuid,uuid,bytea,uuid,uui
 
 CREATE FUNCTION platform.staff_consume_decision(t uuid,e uuid,company uuid,kind text,evidence uuid,request uuid)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
-DECLARE proof platform.staff_decision_proofs; s platform.staff_sessions; identity_key bytea; facts jsonb; observed timestamptz; BEGIN
+DECLARE proof platform.staff_decision_proofs; s platform.staff_sessions; identity_key bytea; facts jsonb; observed timestamptz; target jsonb; journal_count integer; BEGIN
   SELECT * INTO STRICT proof FROM platform.staff_decision_proofs WHERE proof_id=evidence;
   IF (proof.tenant_id,proof.environment_id,proof.company_id,proof.decision_kind) IS DISTINCT FROM (t,e,company,kind)
     THEN RAISE EXCEPTION 'decision proof scope changed'; END IF;
@@ -221,12 +221,19 @@ DECLARE proof platform.staff_decision_proofs; s platform.staff_sessions; identit
   s := north_star_internal.staff_decision_session(t,e,identity_key);
   IF s.principal_id IS DISTINCT FROM proof.principal_id OR sha256(s.identity_digest) IS DISTINCT FROM proof.session_generation
     THEN RAISE EXCEPTION 'decision session changed'; END IF;
-  facts := north_star_internal.staff_decision_terms(t,e,proof.principal_id,proof.company_id,proof.decision_kind,proof.target_ids);
   observed := platform.staff_observed_time();
   IF observed IS NULL OR observed<proof.authenticated_at OR observed>=proof.expires_at THEN RAISE EXCEPTION 'decision proof expired'; END IF;
-  IF sha256(convert_to(facts::text,'UTF8')) IS DISTINCT FROM proof.decision_digest THEN RAISE EXCEPTION 'reviewed decision changed'; END IF;
-  -- The primary key serializes even concurrent consumers. Rollback releases the proof.
+  -- Claim the proof before reading its pending target. Every subsequent refusal rolls this row back.
   INSERT INTO platform.staff_decision_receipts VALUES(t,e,evidence,request,observed);
+  facts := north_star_internal.staff_decision_terms(t,e,proof.principal_id,proof.company_id,proof.decision_kind,proof.target_ids);
+  IF sha256(convert_to(facts::text,'UTF8')) IS DISTINCT FROM proof.decision_digest THEN RAISE EXCEPTION 'reviewed decision changed'; END IF;
+  IF kind='retry' THEN
+    PERFORM set_config('north_star.principal_id',proof.principal_id::text,true);
+    FOR target IN SELECT value FROM jsonb_array_elements(facts->'targets') LOOP
+      SELECT count(*)::integer INTO journal_count FROM jsonb_array_elements(target->'journal') AS entry(value)
+        WHERE entry.value->>1 IN ('REQUEST','RESULT');
+      IF NOT platform.workflow_apply_remedy((target->>'run')::uuid,(target->>'previousFence')::bigint,
+        (target->>'fence')::bigint,'retry',journal_count) THEN RAISE EXCEPTION 'reviewed workflow Retry is unavailable'; END IF; END LOOP; END IF;
   RETURN facts; END $$;
 REVOKE ALL ON FUNCTION platform.staff_consume_decision(uuid,uuid,uuid,text,uuid,uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION platform.staff_consume_decision(uuid,uuid,uuid,text,uuid,uuid) TO north_star_activation_verifier;
@@ -247,7 +254,6 @@ LANGUAGE plpgsql SET search_path=pg_catalog,pg_temp AS $$ DECLARE
     platform.release_activation_history,platform.release_activation_swap_receipts,platform.release_activation_attempt_outcomes,
     platform.release_activation_outbox,platform.release_activation_verification_receipts,platform.release_activation_reconciliation_starts,
     platform.release_activation_reconciliation_alarms,platform.customization_patches FROM north_star_runtime;
-  REVOKE UPDATE (execution_fence,status,reason) ON platform.workflow_runs FROM north_star_workflow_worker;
   REVOKE UPDATE ON platform.active_release_pointers FROM north_star_runtime;
   REVOKE EXECUTE ON FUNCTION platform.workflow_decide_approval(uuid,integer,bigint,text,text) FROM north_star_runtime;
   GRANT INSERT ON platform.release_approvals,platform.release_activation_attempts,platform.release_activation_phase_receipts,
@@ -372,16 +378,35 @@ DECLARE actor uuid; patch platform.customization_patches; BEGIN
 REVOKE ALL ON FUNCTION platform.staff_propose_customization(uuid,uuid,bytea,jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION platform.staff_propose_customization(uuid,uuid,bytea,jsonb) TO north_star_runtime;
 
--- Immutable per-run evidence for the Retry writer. Scope is checked at read.
+-- Link the canonical Retry decision and its human evidence before the run advances.
+ALTER TABLE platform.workflow_retry_decisions ADD COLUMN staff_proof_id uuid REFERENCES platform.staff_decision_proofs;
+CREATE UNIQUE INDEX staff_retry_target ON platform.workflow_retry_decisions(staff_proof_id,run_id) WHERE staff_proof_id IS NOT NULL;
+CREATE FUNCTION north_star_internal.staff_bind_retry_decision() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,pg_temp AS $$ DECLARE proof uuid; observed timestamptz; BEGIN
+  SELECT p.proof_id,d.decided_at INTO proof,observed
+    FROM platform.staff_decision_receipts d JOIN platform.staff_decision_proofs p USING(tenant_id,environment_id,proof_id)
+    CROSS JOIN LATERAL jsonb_array_elements(p.terms->'targets') item
+    WHERE d.xmin=pg_current_xact_id()::xid AND (d.tenant_id,d.environment_id,d.request_id,p.principal_id,p.decision_kind)=
+      (NEW.tenant_id,NEW.environment_id,NEW.request_id,NEW.decided_by,'retry')
+      AND (item->>'run',item->>'previousFence',item->>'fence')=(NEW.run_id::text,NEW.previous_fence::text,NEW.fence::text);
+  IF FOUND THEN NEW.decided_at:=observed;
+  ELSIF EXISTS (SELECT FROM north_star_internal.staff_store_mode WHERE mode='pilot') THEN
+    RAISE EXCEPTION 'workflow Retry requires its current staff decision'; END IF;
+  NEW.staff_proof_id:=proof; RETURN NEW; END $$;
+REVOKE ALL ON FUNCTION north_star_internal.staff_bind_retry_decision() FROM PUBLIC;
+CREATE TRIGGER staff_bind_retry_decision BEFORE INSERT ON platform.workflow_retry_decisions
+  FOR EACH ROW EXECUTE FUNCTION north_star_internal.staff_bind_retry_decision();
+
 CREATE FUNCTION platform.staff_retry_decision_record(t uuid,e uuid,requested uuid)
 RETURNS TABLE (run_id uuid,fence bigint,previous_fence bigint,company_id uuid,decided_by uuid,request_id uuid,
   decided_at timestamptz,proof_id uuid,decision_digest bytea,target_digest text,method text,assurance text,authenticated_at timestamptz)
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
-  SELECT (item->>'run')::uuid,(item->>'fence')::bigint,(item->>'previousFence')::bigint,p.company_id,p.principal_id,
-    d.request_id,d.decided_at,p.proof_id,p.decision_digest,item->>'targetDigest',p.method,p.assurance,p.authenticated_at
+  SELECT retry.run_id,retry.fence,retry.previous_fence,p.company_id,retry.decided_by,
+    retry.request_id,retry.decided_at,p.proof_id,p.decision_digest,item->>'targetDigest',p.method,p.assurance,p.authenticated_at
   FROM platform.staff_decision_receipts d JOIN platform.staff_decision_proofs p USING(tenant_id,environment_id,proof_id)
+  JOIN platform.workflow_retry_decisions retry ON retry.staff_proof_id=p.proof_id
   CROSS JOIN LATERAL jsonb_array_elements(p.terms->'targets') item
-  WHERE (p.tenant_id,p.environment_id,p.proof_id,p.decision_kind)=(t,e,requested,'retry')
+  WHERE item->>'run'=retry.run_id::text AND (p.tenant_id,p.environment_id,p.proof_id,p.decision_kind)=(t,e,requested,'retry')
     AND t=nullif(current_setting('north_star.tenant_id',true),'')::uuid AND e=nullif(current_setting('north_star.environment_id',true),'')::uuid
 $$;
 REVOKE ALL ON FUNCTION platform.staff_retry_decision_record(uuid,uuid,uuid) FROM PUBLIC;
@@ -426,8 +451,7 @@ DECLARE s platform.staff_sessions; p platform.staff_decision_proofs; d platform.
 REVOKE ALL ON FUNCTION platform.staff_read_decision_receipt(uuid,uuid,bytea,uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION platform.staff_read_decision_receipt(uuid,uuid,bytea,uuid) TO north_star_identity;
 
--- WORKFLOW-1 can join inside its remedy transaction. A new writer grant alone
--- cannot resume a suspended pilot run or change its admitted execution fence.
+-- A pilot run advances only with the Retry proof consumed in this transaction.
 CREATE FUNCTION north_star_internal.staff_guard_workflow_retry() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$ BEGIN
   IF NOT EXISTS (SELECT FROM north_star_internal.staff_store_mode WHERE mode='pilot') THEN RETURN NEW; END IF;

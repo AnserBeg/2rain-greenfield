@@ -12,6 +12,12 @@ import {
 } from '@north-star/canonical-model';
 import {
   compileInSandbox,
+  UPGRADE_CODES_V1,
+  unadmittedMembers,
+  type UpgradeFinding,
+  type ReplayDiagnostics,
+  type ReplayOrigin,
+  type UpgradeCode,
   CUSTOMIZATION_PATCH_VERSION,
   parseCustomizationPatch,
   parseSerializedRelease,
@@ -101,19 +107,8 @@ export const AUTHORING_CHANNELS = [
 ] as const;
 export type AuthoringChannel = (typeof AUTHORING_CHANNELS)[number];
 
-const UPGRADE_PATCH_KINDS: ReadonlySet<string> = new Set([
-  'addValidation',
-  'addCalculatedDisplayField',
-  'addField',
-  'arrangeLayout',
-  'saveListView',
-  'addMetricCard',
-  'narrowPermission',
-  'unNarrowPermission',
-  'saveWorkflow',
-]);
-
 export type CustomizationRefusalCode =
+  | UpgradeCode
   | 'CUSTOMIZE_TARGET_NOT_FOUND'
   | 'CUSTOMIZE_NOT_STARTED'
   | 'CUSTOMIZE_BASE_STALE'
@@ -135,6 +130,7 @@ export class CustomizationServiceRefusal extends Error {
   constructor(
     readonly code: CustomizationRefusalCode,
     message: string,
+    readonly replayDiagnostics?: ReplayDiagnostics,
   ) {
     super(message);
   }
@@ -210,6 +206,8 @@ export type DraftOutcome =
   | {
       readonly code?: string;
       readonly issues?: readonly string[];
+      readonly replayDiagnostics?: ReplayDiagnostics;
+      readonly report?: UpgradeReport;
       readonly message: string;
       readonly missingCapability?: string;
       readonly status: 'invalid' | 'refused' | 'rejected' | 'unsupported';
@@ -242,6 +240,18 @@ export interface UpgradeRecord {
   readonly patchIds: readonly MintedUuid[];
 }
 
+export interface UpgradeReport extends ReplayDiagnostics {
+  version: 'northstar.upgrade-report/v1';
+  tenantId: string;
+  environmentId: string;
+  upgradeId: string;
+  sourceReleaseId: string;
+  sourceFence: string;
+  targetPackageId: string;
+  targetVersion: string;
+  targetRoot: string;
+  approvalMode: 'Manual';
+}
 export type UpgradePreparation =
   | { readonly status: 'current' }
   | {
@@ -249,6 +259,7 @@ export type UpgradePreparation =
       readonly upgradeId: MintedUuid;
       readonly renderedDiff: string;
       readonly releaseRoot: string;
+      readonly report?: UpgradeReport;
     }
   | Exclude<DraftOutcome, { status: 'drafted' }>;
 
@@ -367,7 +378,20 @@ export class PostgresCustomizationService {
             'CUSTOMIZE_NOT_STARTED',
             'there is no live release',
           );
-        const sourceReleaseId = pointer.releaseId;
+        const serving = await readVerifiedServing(
+          this.connection.runtimePool,
+          context,
+        );
+        if (
+          !serving ||
+          serving.releaseId !== pointer.releaseId ||
+          serving.fence !== pointer.fence
+        )
+          throw new CustomizationServiceRefusal(
+            'CUSTOMIZE_ACTIVATION_UNVERIFIED',
+            'The current swap requires verification or recovery.',
+          );
+        const sourceReleaseId = serving.releaseId;
         let result: UpgradePreparation;
         try {
           await this.#repair(admin, context);
@@ -381,13 +405,34 @@ export class PostgresCustomizationService {
             error instanceof PersistedReleaseConflict;
           result = {
             status: 'refused',
-            code: known ? error.code : 'CUSTOMIZE_UPGRADE_FAILED',
+            code:
+              known && Object.hasOwn(UPGRADE_CODES_V1, error.code)
+                ? error.code
+                : 'WHOLE_PACKAGE_FAILURE',
+            ...(error instanceof CustomizationServiceRefusal &&
+              error.replayDiagnostics && {
+                replayDiagnostics: error.replayDiagnostics,
+              }),
             message: known
               ? error.message
               : 'The platform upgrade could not be prepared.',
           };
         }
         const baseReleaseRoot = this.#tip.compiled.releaseRoot;
+        const target = parseNormalizedApplicationPackageJson(
+          this.#tip.normalizedDefinitionBytes,
+        ).package;
+        const reportIdentity = {
+          version: 'northstar.upgrade-report/v1' as const,
+          tenantId: context.tenantId,
+          environmentId: context.environmentId,
+          sourceReleaseId,
+          sourceFence: String(pointer.fence),
+          targetPackageId: target.packageId,
+          targetVersion: target.version,
+          targetRoot: baseReleaseRoot,
+          approvalMode: 'Manual' as const,
+        };
         if (result.status === 'current' || result.status === 'drafted') {
           await withTrustedRequestTransaction(
             this.connection.runtimePool,
@@ -403,11 +448,67 @@ export class PostgresCustomizationService {
                 ],
               ),
           );
-          return result;
+          return result.status === 'drafted'
+            ? {
+                ...result,
+                report: {
+                  ...reportIdentity,
+                  upgradeId: result.upgradeId,
+                  findings: [],
+                  blocked: [],
+                },
+              }
+            : result;
         }
+        const code =
+          result.code && Object.hasOwn(UPGRADE_CODES_V1, result.code)
+            ? (result.code as UpgradeCode)
+            : 'WHOLE_PACKAGE_FAILURE';
+        const { replayDiagnostics, ...outcome } = result;
+        const report: UpgradeReport = {
+          ...reportIdentity,
+          upgradeId: createHash('sha256')
+            .update(canonicalize(reportIdentity))
+            .digest('hex'),
+          ...(replayDiagnostics ?? {
+            findings: [
+              {
+                code,
+                subject: target.packageId,
+                expected: baseReleaseRoot,
+                observed: result.message,
+              },
+            ],
+            blocked: [],
+          }),
+        };
+        const protectedTerms = await this.#restrictedUpgradeTerms(
+          context,
+          sourceReleaseId,
+        );
+        const restricted = (value: unknown) =>
+          protectedTerms === null ||
+          protectedTerms.some((term) => JSON.stringify(value).includes(term));
+        report.findings = report.findings.map((finding) =>
+          restricted(finding)
+            ? {
+                ...finding,
+                subject: 'Restricted field',
+                expected: 'Restricted',
+                observed: 'Restricted',
+              }
+            : finding,
+        );
         const diagnostic: UpgradeRefusal = {
-          ...result,
-          code: result.code ?? 'CUSTOMIZE_UPGRADE_FAILED',
+          ...outcome,
+          ...(restricted(outcome.message) && {
+            message: UPGRADE_CODES_V1[code],
+          }),
+          code,
+          report,
+          issues: [...report.findings, ...report.blocked].map((issue) =>
+            JSON.stringify(issue),
+          ),
           sourceReleaseId,
           baseReleaseRoot,
         };
@@ -418,6 +519,35 @@ export class PostgresCustomizationService {
         );
       },
     );
+  }
+
+  /** A reader that cannot interpret one side can still return a scoped, redacted refusal. */
+  async #restrictedUpgradeTerms(
+    context: TrustedRequestContext,
+    sourceReleaseId: MintedUuid,
+  ): Promise<string[] | null> {
+    try {
+      const source = await this.#identity(context, sourceReleaseId);
+      const old = parseNormalizedApplicationPackageJson(
+        await this.#desiredState(context, source.revisionId),
+      );
+      const next = parseNormalizedApplicationPackageJson(
+        this.#tip.normalizedDefinitionBytes,
+      );
+      return [
+        ...new Set(
+          [...old.fields, ...next.fields]
+            .filter(
+              (f) =>
+                f.classification !== 'public' &&
+                f.classification !== 'internal',
+            )
+            .flatMap((f) => [f.fieldId, f.label]),
+        ),
+      ];
+    } catch {
+      return null;
+    }
   }
 
   async #prepareReplay(
@@ -433,16 +563,8 @@ export class PostgresCustomizationService {
       return { status: 'current' as const };
     if (!baseReleaseId || !active.chain.length)
       throw new CustomizationServiceRefusal(
-        'CUSTOMIZE_BASE_MOVED',
+        'WHOLE_PACKAGE_FAILURE',
         'The platform upgrade has no recorded base or patch chain.',
-      );
-    const unsupported = active.chain.find(
-      (record) => !UPGRADE_PATCH_KINDS.has(record.kind),
-    );
-    if (unsupported)
-      throw new CustomizationServiceRefusal(
-        'CUSTOMIZE_BASE_MOVED',
-        `The platform upgrade cannot replay ${unsupported.kind} (change ${unsupported.patchId}).`,
       );
     this.#assertAuthoredBase();
     const sourceBase = parseNormalizedApplicationPackageJson(
@@ -459,35 +581,33 @@ export class PostgresCustomizationService {
         targetBase.normalizationProfileVersion
     ) {
       throw new CustomizationServiceRefusal(
-        'CUSTOMIZE_BASE_MOVED',
+        'WHOLE_PACKAGE_FAILURE',
         'the upgrade changes the package or language identity',
       );
     }
+    const patches = await this.#readPatches(context, active.chain, true);
     const source = (await this.#reproduce(context, active)).candidate;
     const sourceDefinition = parseNormalizedApplicationPackageJson(
       source.normalizedDefinitionBytes,
     );
-    const retiredRule = retypedFormulaRule(
-      sourceDefinition,
-      targetBase,
-      sourceBase,
-    );
-    if (retiredRule)
-      throw new CustomizationServiceRefusal(
-        'CUSTOMIZE_BASE_MOVED',
-        `The upgrade retires or retypes a target of validation rule ${retiredRule}.`,
-      );
-    assertCalculatedDisplayCompatibility(
-      sourceDefinition,
-      targetBase,
-      sourceBase,
+    const activeRoles = await admin.query<{ role_key: string }>(
+      'SELECT role_key FROM platform.current_policy_roles WHERE tenant_id=$1 AND environment_id=$2 AND revoked_at IS NULL',
+      [context.tenantId, context.environmentId],
     );
     const replay = await this.#compile(
-      await this.#readPatches(context, active.chain),
+      patches,
       this.#tip,
       source,
       0,
       true,
+      undefined,
+      await this.#origins(
+        context,
+        active.chain,
+        this.#tip.compiled.releaseRoot,
+        true,
+      ),
+      activeRoles.rows.map((r) => r.role_key),
     );
     if (replay.status !== 'compiled') return replay;
     const step = replay.steps[0]!;
@@ -495,14 +615,23 @@ export class PostgresCustomizationService {
     const candidateDefinition = parseNormalizedApplicationPackageJson(
       candidate.normalizedDefinitionBytes,
     );
-    const retypedRule = retypedFormulaRule(
+    const inheritedRule = retypedFormulaRule(
       sourceDefinition,
-      candidateDefinition,
+      targetBase,
+      sourceBase,
     );
+    assertCalculatedDisplayCompatibility(
+      sourceDefinition,
+      targetBase,
+      sourceBase,
+    );
+    const retypedRule =
+      inheritedRule ??
+      retypedFormulaRule(sourceDefinition, candidateDefinition);
     assertCalculatedDisplayCompatibility(sourceDefinition, candidateDefinition);
     if (retypedRule)
       throw new CustomizationServiceRefusal(
-        'CUSTOMIZE_BASE_MOVED',
+        'INCOMPATIBLE_TYPE',
         `The upgrade retires or retypes a target of validation rule ${retypedRule}.`,
       );
     await this.#assertActiveRestrictionRoles(
@@ -548,6 +677,21 @@ export class PostgresCustomizationService {
         candidateReleaseId: identity.releaseId,
         candidateRevisionId: identity.revisionId,
         patchIds: active.chain.map((record) => record.patchId),
+        ...('surfaces' in candidateDefinition && {
+          layoutEvidence: candidateDefinition.surfaces.flatMap((surface) =>
+            'layouts' in surface && surface.layouts
+              ? surface.layouts
+                  .filter((layout) => layout.placementRuleVersion)
+                  .map((layout) => ({
+                    surfaceId: surface.surfaceId,
+                    mode: layout.body.mode,
+                    revisionId: layout.revisionId,
+                    placementRuleVersion: layout.placementRuleVersion,
+                    resultLayoutDigest: layout.resultLayoutDigest,
+                  }))
+              : [],
+          ),
+        }),
       }),
     );
     await withTrustedRequestTransaction(
@@ -764,8 +908,8 @@ export class PostgresCustomizationService {
     );
   }
 
-  async status(): Promise<CustomizationStatus> {
-    const context = await this.#context();
+  async status(actor?: TrustedRequestContext): Promise<CustomizationStatus> {
+    const context = await this.#context(actor);
     const pointer = await this.#livePointer(context);
     const swap = await this.#currentSwap(context);
     const recovery = swap?.failed
@@ -787,21 +931,25 @@ export class PostgresCustomizationService {
         throw error;
       },
     );
-    const refusal = await withTrustedRequestTransaction(
-      this.connection.runtimePool,
-      context,
-      (client) =>
-        client.query<{ diagnostic: UpgradeRefusal }>(
-          `SELECT diagnostic FROM platform.customization_upgrade_refusals
+    const disclose =
+      !actor || (await this.#permissionRoles(context)).length > 0;
+    const refusal = disclose
+      ? await withTrustedRequestTransaction(
+          this.connection.runtimePool,
+          context,
+          (client) =>
+            client.query<{ diagnostic: UpgradeRefusal }>(
+              `SELECT diagnostic FROM platform.customization_upgrade_refusals
         WHERE tenant_id=$1 AND environment_id=$2 AND source_release_id=$3 AND base_root=$4 AND NOT resolved`,
-          [
-            context.tenantId,
-            context.environmentId,
-            pointer.releaseId,
-            this.#tip.compiled.releaseRoot,
-          ],
-        ),
-    );
+              [
+                context.tenantId,
+                context.environmentId,
+                pointer.releaseId,
+                this.#tip.compiled.releaseRoot,
+              ],
+            ),
+        )
+      : { rows: [] };
     const observed = await this.#state(
       context,
       pointer.releaseId,
@@ -827,13 +975,15 @@ export class PostgresCustomizationService {
         upgrades: [],
         activeReleaseId: pointer.releaseId,
         activeReleaseRoot: await this.#root(context, pointer.releaseId),
-        upgradeRefusal: refusal.rows[0]?.diagnostic ?? {
-          status: 'refused',
-          code: observed.code,
-          message: observed.message,
-          sourceReleaseId: pointer.releaseId,
-          baseReleaseRoot: this.#tip.compiled.releaseRoot,
-        },
+        upgradeRefusal: !disclose
+          ? null
+          : (refusal.rows[0]?.diagnostic ?? {
+              status: 'refused',
+              code: observed.code,
+              message: observed.message,
+              sourceReleaseId: pointer.releaseId,
+              baseReleaseRoot: this.#tip.compiled.releaseRoot,
+            }),
       };
     const active = { ...observed, pointer };
     const approved = await withTrustedRequestTransaction(
@@ -896,17 +1046,18 @@ export class PostgresCustomizationService {
       ...recovery,
       activeFence: pointer.fence,
       rollbackAvailable,
-      upgradeRefusal:
-        refusal.rows[0]?.diagnostic ??
-        (ambiguous.rows[0]
-          ? {
-              status: 'refused' as const,
-              code: 'CUSTOMIZE_APPROVAL_RECONCILIATION_REQUIRED',
-              message: `The original action for approval ${ambiguous.rows[0].approval_id} must be reconciled.`,
-              sourceReleaseId: pointer.releaseId,
-              baseReleaseRoot: this.#tip.compiled.releaseRoot,
-            }
-          : null),
+      upgradeRefusal: !disclose
+        ? null
+        : (refusal.rows[0]?.diagnostic ??
+          (ambiguous.rows[0]
+            ? {
+                status: 'refused' as const,
+                code: 'CUSTOMIZE_APPROVAL_RECONCILIATION_REQUIRED',
+                message: `The original action for approval ${ambiguous.rows[0].approval_id} must be reconciled.`,
+                sourceReleaseId: pointer.releaseId,
+                baseReleaseRoot: this.#tip.compiled.releaseRoot,
+              }
+            : null)),
       upgrades: Object.freeze(
         (await this.#upgrades(context)).map((upgrade) => ({
           ...upgrade,
@@ -1260,6 +1411,14 @@ export class PostgresCustomizationService {
       await this.#loadRelease(context, active.baseReleaseId),
       reproduced.candidate,
       active.chain.length,
+      false,
+      undefined,
+      await this.#origins(
+        context,
+        active.chain,
+        this.#tip.compiled.releaseRoot,
+        false,
+      ),
     );
     if (compiled.status !== 'compiled') return compiled;
     const { steps } = compiled;
@@ -1928,6 +2087,12 @@ export class PostgresCustomizationService {
         0,
         true,
         [upgrade.compilerAcknowledgement],
+        await this.#origins(
+          context,
+          source.chain,
+          base.compiled.releaseRoot,
+          true,
+        ),
       );
       if (replay.status !== 'compiled') {
         throw new CustomizationServiceRefusal(
@@ -1957,6 +2122,7 @@ export class PostgresCustomizationService {
       offset,
       false,
       chain.slice(offset).map((record) => record.compilerAcknowledgement),
+      await this.#origins(context, chain, base.compiled.releaseRoot, false),
     );
     if (compiled.status !== 'compiled') {
       throw new CustomizationServiceRefusal(
@@ -2157,6 +2323,35 @@ export class PostgresCustomizationService {
     );
   }
 
+  async #origins(
+    context: TrustedRequestContext,
+    chain: readonly PatchRecord[],
+    targetRoot: string,
+    upgrade: boolean,
+  ): Promise<ReplayOrigin[]> {
+    const origins: ReplayOrigin[] = [];
+    for (const [index, row] of chain.entries()) {
+      const differentBase = row.baseReleaseRoot !== targetRoot;
+      const needsParent =
+        (upgrade &&
+          chain[index - 1]?.resultingRevisionId !== row.parentRevisionId) ||
+        (differentBase && row.kind === 'addLayoutRevision');
+      const parent = needsParent
+        ? (canonicalAuthoredProjection(
+            parseNormalizedApplicationPackageJson(
+              await this.#desiredState(context, row.parentRevisionId),
+            ),
+          ) as unknown as Record<string, unknown>)
+        : undefined;
+      origins.push({
+        patchId: row.patchId,
+        differentBase,
+        ...(parent && { parent }),
+      });
+    }
+    return origins;
+  }
+
   async #compile(
     chain: readonly CustomizationPatch[],
     base: ParsedRelease = this.#tip,
@@ -2164,6 +2359,8 @@ export class PostgresCustomizationService {
     startAt = 0,
     upgrade = false,
     pins?: readonly (AcknowledgementInput | null | undefined)[],
+    origins?: readonly ReplayOrigin[],
+    activeRoleKeys?: readonly string[],
   ): Promise<
     | { readonly status: 'compiled'; readonly steps: readonly SandboxStep[] }
     | Exclude<DraftOutcome, { status: 'drafted' }>
@@ -2177,6 +2374,7 @@ export class PostgresCustomizationService {
     const response = await compileInSandbox(
       {
         acknowledgement: this.options.acknowledgement,
+        ...(activeRoleKeys && { activeRoleKeys }),
         ...(pins
           ? { stepAcknowledgements: pins as readonly AcknowledgementInput[] }
           : {}),
@@ -2189,6 +2387,7 @@ export class PostgresCustomizationService {
                 ),
               ) as unknown as Record<string, unknown>),
         chain,
+        ...(origins && { origins }),
         tip: serializeRelease(parent),
         startAt,
         ...(upgrade ? { upgradeBaseRoot: base.compiled.releaseRoot } : {}),
@@ -2198,6 +2397,9 @@ export class PostgresCustomizationService {
     if (response.status === 'compiled') return response;
     return Object.freeze({
       ...(response.code ? { code: response.code } : {}),
+      ...(response.replayDiagnostics && {
+        replayDiagnostics: response.replayDiagnostics,
+      }),
       ...(response.missingCapability
         ? { missingCapability: response.missingCapability }
         : {}),
@@ -2399,6 +2601,7 @@ export class PostgresCustomizationService {
   async #readPatches(
     context: TrustedRequestContext,
     records: readonly PatchRecord[],
+    upgrade = false,
   ): Promise<CustomizationPatch[]> {
     if (!records.length) return [];
     return withTrustedRequestTransaction(
@@ -2419,33 +2622,68 @@ export class PostgresCustomizationService {
         const bytes = new Map(
           result.rows.map((row) => [row.patch_id, row.payload]),
         );
-        const chain = records.map((record) => {
-          const payload = bytes.get(record.patchId);
-          if (
-            payload &&
-            createHash('sha256').update(payload).digest('hex') ===
-              record.payloadDigest
-          ) {
-            try {
-              const parsed = parseCustomizationPatch(
-                JSON.parse(payload.toString('utf8')),
-              );
-              if (
-                parsed.status === 'parsed' &&
-                parsed.patch.kind === record.kind
-              )
-                return parsed.patch.kind === 'addField' && !parsed.patch.screens
-                  ? { ...parsed.patch, legacy: true as const }
-                  : parsed.patch;
-            } catch (error) {
-              if (!(error instanceof SyntaxError)) throw error;
+        const missingKinds: UpgradeFinding[] = [];
+        const chain = records.flatMap(
+          (record, patchIndex): CustomizationPatch[] => {
+            const payload = bytes.get(record.patchId);
+            if (
+              payload &&
+              createHash('sha256').update(payload).digest('hex') ===
+                record.payloadDigest
+            ) {
+              try {
+                const raw: unknown = JSON.parse(payload.toString('utf8'));
+                if (
+                  upgrade &&
+                  raw &&
+                  typeof raw === 'object' &&
+                  'kind' in raw &&
+                  raw.kind === record.kind
+                ) {
+                  const missing = unadmittedMembers(raw);
+                  if (missing.length) {
+                    missingKinds.push(
+                      ...missing.map(({ kind, memberIndex }) => ({
+                        code: 'KIND_NOT_ADMITTED' as const,
+                        subject: kind,
+                        expected: 'admitted',
+                        observed: null,
+                        patchIndex,
+                        patchId: record.patchId,
+                        patchKind: kind,
+                        memberIndex,
+                        editIndex: 0,
+                      })),
+                    );
+                    return [];
+                  }
+                }
+                const parsed = parseCustomizationPatch(raw);
+                if (
+                  parsed.status === 'parsed' &&
+                  parsed.patch.kind === record.kind
+                )
+                  return [
+                    parsed.patch.kind === 'addField' && !parsed.patch.screens
+                      ? { ...parsed.patch, legacy: true as const }
+                      : parsed.patch,
+                  ];
+              } catch (error) {
+                if (!(error instanceof SyntaxError)) throw error;
+              }
             }
-          }
+            throw new CustomizationServiceRefusal(
+              'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
+              `patch ${record.patchId} (${record.kind}) cannot be read with its recorded kind and digest`,
+            );
+          },
+        );
+        if (missingKinds.length)
           throw new CustomizationServiceRefusal(
-            'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
-            `patch ${record.patchId} (${record.kind}) cannot be read with its recorded kind and digest`,
+            'KIND_NOT_ADMITTED',
+            UPGRADE_CODES_V1.KIND_NOT_ADMITTED,
+            { findings: missingKinds, blocked: [] },
           );
-        });
         for (const patch of chain) {
           if (patch.kind === 'saveWorkflow')
             await readWorkflowBundle(
@@ -2539,7 +2777,7 @@ function assertCalculatedDisplayCompatibility(
   const retyped = retypedCalculatedDisplayField(...comparison);
   if (retyped)
     throw new CustomizationServiceRefusal(
-      'CUSTOMIZE_BASE_MOVED',
+      'INCOMPATIBLE_TYPE',
       `The upgrade retires or retypes a target of calculated display field ${retyped}.`,
     );
 }

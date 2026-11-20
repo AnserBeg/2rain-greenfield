@@ -810,3 +810,15 @@ How to apply: Use an independent occurrence for each authorization probe. Observ
 Date: 2026-11-20
 Why: The receipt and the exact pending operation can refer to records owned by different companies.
 How to apply: Resolve the operation and storage mapping from the pinned release, then check live grants against the existing record’s stored owner or the governed create operand. Require a global grant for shared targets, and use the same scope for listing and deciding. [WORKFLOW-1](docs/execution/packets/WORKFLOW-1.md)
+
+## Bind workflow authority to its granting role
+
+Date: 2026-11-20
+Why: A workflow could use a role its approver acquired after activation because the watermark recorded only permission, resource and company.
+How to apply: Match the role, permission, resource and company of each live grant against the activation snapshot, then apply the pinned role exclusions.
+
+## Read Retry permission from a human decision record
+
+Date: 2026-11-20
+Why: A worker could resume a suspended run by updating its fence and status.
+How to apply: Require a scoped human decision for a fence advance and its replay. Keep the decision record outside worker-writable journal data.

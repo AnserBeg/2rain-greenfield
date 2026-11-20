@@ -7,6 +7,11 @@ import {
 import { PostgresReleaseApprovalService } from '@north-star/postgres-provider/release-approval-service';
 import { PostgresReleaseActivationService } from '@north-star/postgres-provider/release-activation-service';
 import { withActivationVerifierTransaction } from '@north-star/postgres-provider/request-context';
+import {
+  WORKFLOW_ENGINE_BUILD,
+  WORKFLOW_HOST_VERSION,
+  WORKFLOW_SDK_VERSION,
+} from '../../../packages/postgres-provider/src/workflow-execution.js';
 import { AuthenticatedRequestEntryAdapter } from '../../../packages/runtime/src/request-context.js';
 import {
   assertPilotDatabase,
@@ -20,6 +25,17 @@ interface ReleaseDecision {
   preparation: MintedUuid;
   upgrade: MintedUuid | null;
 }
+type ReviewedDecision =
+  | {
+      kind: 'release' | 'customize';
+      principal: string;
+      targets: ReleaseDecision[];
+    }
+  | {
+      kind: 'retry';
+      principal: string;
+      targets: { engine: string; host: string; sdkVersion: string }[];
+    };
 interface PendingDecision {
   proof_id: MintedUuid;
   decision_kind: 'release' | 'customize' | 'retry';
@@ -46,7 +62,7 @@ export async function applyStaffDecision(
   );
   return withActivationVerifierTransaction(pool, system, async (client) => {
     const { rows } = await client.query<{
-      facts: { principal: string; targets: ReleaseDecision[] };
+      facts: ReviewedDecision;
     }>('SELECT platform.staff_consume_decision($1,$2,$3,$4,$5,$6) AS facts', [
       realm.tenantId,
       realm.environmentId,
@@ -56,9 +72,18 @@ export async function applyStaffDecision(
       system.requestId,
     ]);
     const facts = rows[0]!.facts;
-    // Until the same-pin writer joins, the receipt records the human decision.
-    // No scheduler or run transition is enabled by recording it.
-    if (pending.decision_kind === 'retry') return [];
+    if (facts.kind === 'retry') {
+      // An unavailable replay runtime rolls back the decision, journal and run together.
+      check(
+        facts.targets.every(
+          (target) =>
+            target.engine === WORKFLOW_ENGINE_BUILD &&
+            target.host === WORKFLOW_HOST_VERSION &&
+            target.sdkVersion === WORKFLOW_SDK_VERSION,
+        ),
+      );
+      return [];
+    }
     const actor = await contextFor(realm, facts.principal);
     await client.query("SELECT set_config('north_star.principal_id',$1,true)", [
       actor.principalId,

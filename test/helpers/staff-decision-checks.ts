@@ -221,8 +221,8 @@ async function exerciseProof(
   }
   const eligibility = (live: boolean) =>
     admin.query(
-      'SELECT platform.set_release_approver_eligibility($1,$2,$3,$4,$5)',
-      [f.tenantId, f.principal, live, randomUUID(), randomUUID()],
+      'UPDATE platform.current_policy_memberships SET revoked_at=CASE WHEN $2 THEN NULL ELSE now() END WHERE membership_id=$1',
+      [a.membership, live],
     );
   await eligibility(false);
   try {
@@ -490,6 +490,39 @@ export async function checkRetryDecision(
   run: string,
 ) {
   await withDecisionAccount(admin, connection, f, async (account) => {
+    const direct = await admin.connect();
+    try {
+      await direct.query('BEGIN');
+      // Use the real pilot grants for this check, then return the shared demo fixture to its original mode.
+      await direct.query('TRUNCATE north_star_internal.staff_store_mode');
+      await direct.query("SELECT platform.claim_staff_store_mode('pilot')");
+      const {
+        rows: [pin],
+      } = await direct.query(
+        `SELECT r.execution_fence AS previous, p.fence,
+                (SELECT count(*)::int FROM platform.workflow_journal j
+                 WHERE j.run_id=r.run_id AND j.kind IN ('REQUEST','RESULT')) AS count
+           FROM platform.workflow_runs r JOIN platform.active_release_pointers p USING (tenant_id,environment_id,pointer_id)
+          WHERE r.run_id=$1`,
+        [run],
+      );
+      await direct.query('SET LOCAL ROLE north_star_runtime');
+      await direct.query(
+        `SELECT set_config('north_star.tenant_id',$1,true),set_config('north_star.environment_id',$2,true),
+                set_config('north_star.principal_id',$3,true),set_config('north_star.request_id',$4,true)`,
+        [f.tenantId, f.environmentId, f.principal, randomUUID()],
+      );
+      await assert.rejects(
+        direct.query(
+          "SELECT platform.workflow_apply_remedy($1,$2,$3,'retry',$4)",
+          [run, pin.previous, pin.fence, pin.count],
+        ),
+        /workflow Retry requires its current staff decision/,
+      );
+    } finally {
+      await direct.query('ROLLBACK');
+      direct.release();
+    }
     const result = await exerciseProof(admin, account, f, 'retry', run);
     assert.deepEqual(result.attempts, []);
     const records = await scoped(
@@ -507,15 +540,19 @@ export async function checkRetryDecision(
     assert.equal(records[0]?.run_id, run);
     assert.equal(records[0]?.decided_by, f.principal);
     assert.equal(records[0]?.company_id, f.company);
+    assert.equal(records[0]?.proof_id, result.proof);
     assert.ok(BigInt(records[0].fence) > BigInt(records[0].previous_fence));
-    assert.equal(
-      (
-        await admin.query(
-          'SELECT status FROM platform.workflow_runs WHERE run_id=$1',
-          [run],
-        )
-      ).rows[0]?.status,
-      'SUSPENDED',
+    const state = await admin.query(
+      `SELECT r.status, r.execution_fence = d.fence AS restored,
+              d.staff_proof_id = receipt.proof_id AND d.decided_by = $2 AND
+              d.request_id = receipt.request_id AND d.decided_at = receipt.decided_at AS bound
+         FROM platform.workflow_runs r JOIN platform.workflow_retry_decisions d USING (tenant_id,environment_id,run_id)
+         JOIN platform.staff_decision_receipts receipt ON receipt.proof_id=d.staff_proof_id
+        WHERE r.run_id=$1 AND receipt.proof_id=$3`,
+      [run, f.principal, result.proof],
     );
+    assert.deepEqual(state.rows, [
+      { status: 'RUNNABLE', restored: true, bound: true },
+    ]);
   });
 }
