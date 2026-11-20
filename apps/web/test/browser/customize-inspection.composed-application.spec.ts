@@ -1,5 +1,9 @@
 import { DRAFT_CUSTOMIZATION_TOOL } from '../../../../packages/customization/src/ai-draft.js';
-import { provisionLocalDemoAuthorization } from '../../../../packages/postgres-provider/src/composed-application-runtime.js';
+import { serializeRelease } from '../../../../packages/customization/src/index.js';
+import {
+  parseCompiledApplication,
+  provisionLocalDemoAuthorization,
+} from '../../../../packages/postgres-provider/src/composed-application-runtime.js';
 import { workflowAutomationPrincipal } from '../../../../packages/postgres-provider/src/workflow-admission.js';
 import { scriptedModel } from '../../../../packages/operations-agent/src/index.js';
 import { randomUUID } from 'node:crypto';
@@ -10,6 +14,7 @@ import {
   COMPOSED_APPLICATION_INVENTORY_SCOPE,
   startComposedApplication,
   openCustomizeService,
+  readCompiledApplication,
 } from '../../../api/src/composition-root.js';
 import { WORKFLOW_SURFACE_FLOOR } from '../../../../packages/canonical-model/src/workflows.js';
 import { composedApplicationSeed } from '../../../../packages/domain/src/app/seed.js';
@@ -19,7 +24,6 @@ import {
   SEMANTIC_OPERATION_REQUEST_VERSION,
 } from '../../../../packages/runtime/src/semantic-operation-gateway.js';
 import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../../../packages/runtime/src/semantic-query-gateway.js';
-import { applicationWithoutLineCreateValues } from '../../../../test/helpers/application-without-line-create-values.js';
 import {
   archivedRuntimeRead,
   withArchivedCustomizationRuntime,
@@ -341,11 +345,27 @@ test('a drafted receipt workflow links an inspection and requests escalation aft
     async ({ connection, pool }) => {
       const databaseUrl = `postgresql://postgres@${String(connection.host)}:${String(connection.port)}/postgres`;
       const tenantSlug = 'inspection-workflow-browser';
+      const { applications, bootstrap } = parseCompiledApplication(
+        await readCompiledApplication(),
+      );
+      // Keep the archived reader's refusal attributable to the workflow.
+      const predecessor = applications.findLast(({ compiled }) =>
+        compiled.bundle.releaseManifest.projections.some(
+          ({ familyId, requiredRuntimeCapability }) =>
+            familyId ===
+              'northstar.compiler:projection-family.surface-manifest' &&
+            requiredRuntimeCapability.minimumVersion < WORKFLOW_SURFACE_FLOOR,
+        ),
+      );
+      if (!predecessor) throw new Error('Missing the pre-workflow release');
       const options = {
         databaseUrl,
         tenantSlug,
-        // Keep the archived reader's refusal attributable to the workflow.
-        compiledApplication: applicationWithoutLineCreateValues().release,
+        compiledApplication: {
+          schemaVersion: 'northstar.web:compiled-application-release/v1',
+          application: serializeRelease(predecessor),
+          bootstrap: serializeRelease(bootstrap),
+        },
         port: 0,
         seedProfile: 'demo',
       } as const;
