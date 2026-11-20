@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        check: [snapshot, postgres, browser, baseline, rollback, prior, resource, approver, executor, issuer]
+        check: [record]
     env:
       CONTROL: ${{ matrix.check }}
     steps:
@@ -21,14 +21,4 @@ jobs:
         with:
           node-version-file: .node-version
       - run: corepack pnpm install --frozen-lockfile --reporter=append-only
-      - if: contains(fromJSON('["browser","resource","approver","executor","issuer"]'), matrix.check)
-        uses: ./.github/actions/install-chromium
-      - if: matrix.check == 'snapshot'
-        run: node --import tsx test/helpers/regenerate-schema-snapshot.ts
-      - if: matrix.check == 'snapshot'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: signin-schema
-          path: db/schema.snapshot.json
-      - if: matrix.check != 'snapshot'
-        run: python3 .github/signin-r2-proof.py
+      - run: scripts/check-records.sh
