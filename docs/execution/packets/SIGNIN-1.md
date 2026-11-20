@@ -1,7 +1,7 @@
 # SIGNIN-1 — staff sign-in and authority for human decisions
 
-Slice 0 proposes [ADR-0081](../../decisions/ADR-0081-staff-sign-in-and-decision-authority.md).
-This checkpoint changes documentation only. Implementation awaits the orchestrator's Fable read.
+Slice 0 established [ADR-0081](../../decisions/ADR-0081-staff-sign-in-and-decision-authority.md).
+Fable approved with changes. The 2026-11-20 amendment adopts all eight dispositions.
 
 ## Design decisions
 
@@ -16,12 +16,12 @@ This checkpoint changes documentation only. Implementation awaits the orchestrat
 
 ## Slices and gates
 
-0. Design proposal. Run the record check, integrate the proposal and stop for the Fable ruling.
-1. Staff sign-in, session rotation and trusted request entry.
+0. Design and Fable amendment. Docs only.
+1. Staff sign-in, session rotation, trusted request entry and minimal attended account lifecycle.
 2. Human decisions and independently verified activation receipts.
-3. Scoped customer links and verified contact access.
-4. Staff invitations, roles, companies, delegation, recovery and deactivation.
-5. Restart and two-instance recovery of drafts and tasks.
+3. Governed user administration and delegated roles.
+4. Restart and two-instance recovery of drafts and tasks.
+5. Scoped customer links after DOCS-1.
 
 ## Test it yourself
 
