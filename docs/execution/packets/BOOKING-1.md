@@ -19,7 +19,7 @@ Fable accepted amended [ADR-0082](../../decisions/ADR-0082-booking-over-time.md)
 - Unit holds from two companies contend on the same occupied interval. Adjacent claims fit. Pools combine simultaneous demand and dated capacity changes. A failed reschedule keeps the original claim.
 - PostgreSQL checks the release fence, actor, company and endpoint revision, serializes archive, and commits history, owner cursor, typed event, trust rows and receipt together. The worker expires due holds using their original authority.
 - Date-only holds and changes preserve the agreement and clamp occupation at the post-lock instant. At equality expiry wins. A backward clock cannot reopen capacity early.
-- Regression controls remove unit exclusion for holds, allow a pool deficit, move occupation to the day boundary, and let a waiting confirmation run at its deadline.
+- The fix controls check approval consumption, the release fence, both lock paths, expiry isolation, occupied bounds, company scope, event cursors and the pre-booking envelope.
 
 Migration 0050 replayed to the checked-in snapshot. [Packet CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44729321788) · [Four restored regression controls](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44729321814).
 
@@ -44,7 +44,7 @@ Run `node --import tsx --test test/postgres/booking-commitments.test.ts` with Do
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "BOOKING-1",
-  "base": "17618776dd058bbb8efec032eae13a00a5d5398b", "head": "78735418fdb9ef9648b78b30e2af92babf054800",
+  "base": "17618776dd058bbb8efec032eae13a00a5d5398b", "head": "ec70fe6b3656822a4c18bdffe8b5ce8145488b26",
   "changedPaths": [
     "apps/api/src/pilot-composition-root.ts", "apps/api/src/staff-main.ts", "db/migrations/0051_booking_authority.sql",
     "db/schema.snapshot.json", "packages/canonical-model/src/booking.ts", "packages/postgres-provider/src/booking-capability-executor.ts",
