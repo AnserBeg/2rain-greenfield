@@ -575,3 +575,16 @@ test('serving admission refuses disagreeing bindings, a missing catalog binding 
     /floor without/u,
   );
 });
+
+test('the in-app drafter can emit addDateTimeField with keys generated from the member schema', () => {
+  const schema = customization.draftingToolInputSchema() as {
+    properties: Record<string, { enum?: string[] }>;
+  };
+  assert.ok(schema.properties.kind?.enum?.includes('addDateTimeField'));
+  for (const key of ['schemaVersion', 'target', 'fieldId', 'zoneSource'])
+    assert.ok(key in schema.properties, key);
+  assert.deepEqual(
+    Object.keys(customization.DATE_TIME_DRAFTER_PROPERTIES).sort(),
+    ['fieldId', 'schemaVersion', 'target', 'zoneSource'],
+  );
+});

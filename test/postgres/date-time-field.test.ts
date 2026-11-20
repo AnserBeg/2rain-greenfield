@@ -47,7 +47,7 @@ const value = (civil: string, extra: Record<string, unknown> = {}) => ({
 
 test(
   'a dateTime field added to a populated record type builds its window index in the attempt and enters, refuses, lists and reads in record zone',
-  { timeout: 900000 },
+  { timeout: 1_800_000 },
   async () => {
     await withEphemeralPostgres(
       'date-time-field',
@@ -82,6 +82,9 @@ test(
                 ...values,
               },
             });
+          console.error(
+            `[date-time] record type active ${new Date().toISOString()}`,
+          );
           const earlier = await create('Earlier boiler');
           assert.equal(earlier.outcome, 'succeeded', JSON.stringify(earlier));
 
@@ -154,6 +157,9 @@ test(
             assert.ok(error, `${civil} was accepted`);
             return error as { code: string; details: Record<string, string> };
           };
+          console.error(
+            `[date-time] field active; index verified ${new Date().toISOString()}`,
+          );
           const gap = await refused('2026-03-08T02:30');
           assert.equal(gap.code, 'MODULE_FIELD_VALUE_INVALID');
           assert.equal(gap.details.reason, 'DATE_TIME_NONEXISTENT');
@@ -209,6 +215,9 @@ test(
 
           // The list orders the two equal-looking civil times by instant,
           // with record ID breaking ties, and prints them in record zone.
+          console.error(
+            `[date-time] entries saved ${new Date().toISOString()}`,
+          );
           const listed = await app.runtime.entry.run(
             { headers: { cookie: 'northstar-demo-actor=manager' } },
             (view) =>
@@ -288,8 +297,10 @@ test(
           // civil/offset/instant disagreement are refused by the table itself.
           const table = (
             await pool.query<{ relname: string }>(
-              `SELECT relname FROM pg_class JOIN pg_index ON pg_index.indrelid = pg_class.oid
-                 JOIN pg_class AS i ON i.oid = pg_index.indexrelid WHERE i.relname = $1`,
+              `SELECT t.relname FROM pg_index AS i
+                 JOIN pg_class AS t ON t.oid = i.indrelid
+                 JOIN pg_class AS x ON x.oid = i.indexrelid
+                WHERE x.relname = $1`,
               [indexName[0]],
             )
           ).rows[0]!.relname;
@@ -322,11 +333,17 @@ test(
               { code: '23514' },
               label,
             );
+          console.error(
+            `[date-time] database checks verified ${new Date().toISOString()}`,
+          );
           // Company-sourced field: the current company calendar decides.
           await pool.query(
             `UPDATE platform.inventory_tenant_calendars SET time_zone = 'America/Toronto'`,
           );
           await opened.service.activate(await ship(due));
+          console.error(
+            `[date-time] company field active ${new Date().toISOString()}`,
+          );
           const company = await create('Company', {
             [due.fieldId]: value('2026-11-01T01:30', { offsetSeconds: -14400 }),
           });

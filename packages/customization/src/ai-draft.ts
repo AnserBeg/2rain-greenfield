@@ -1,4 +1,5 @@
 import { draftBoardRevision } from './board-revision.js';
+import { z } from 'zod';
 import { layoutCommand } from './layout-revision.js';
 import { WorkflowDraftSchema, type WorkflowDraft } from './workflow-draft.js';
 import {
@@ -10,6 +11,7 @@ import {
   CUSTOMIZATION_CHANGE_MEMBER_KINDS,
   CUSTOMIZATION_PATCH_KINDS,
   MAX_CUSTOMIZATION_CHANGE_PATCHES,
+  AddDateTimeFieldSchema,
   parseCustomizationPatch,
   unsupported,
 } from './patch.js';
@@ -78,6 +80,9 @@ export interface DraftingModel {
 }
 
 export const DRAFT_CUSTOMIZATION_TOOL = 'draft_customization' as const;
+export function draftingToolInputSchema(): Readonly<Record<string, unknown>> {
+  return TOOL.inputSchema;
+}
 
 export type DraftedRequest =
   | { readonly patch: CustomizationPatch; readonly status: 'parsed' }
@@ -177,10 +182,30 @@ const singlePatchSchema = {
   required: ['kind'],
 } as const;
 
+// ADR-0087: the drafter's keys for addDateTimeField are generated from the
+// member's own schema, so the drafter and the parser cannot drift apart.
+const {
+  kind: _dateTimeKind,
+  label: _dateTimeLabel,
+  required: _dateTimeRequired,
+  ...dateTimeMemberProperties
+} = (
+  z.toJSONSchema(AddDateTimeFieldSchema) as {
+    properties: Record<string, unknown>;
+  }
+).properties;
+void _dateTimeKind;
+void _dateTimeLabel;
+void _dateTimeRequired;
+export const DATE_TIME_DRAFTER_PROPERTIES = Object.freeze(
+  dateTimeMemberProperties,
+);
+
 const toolSchema = {
   ...singlePatchSchema,
   properties: {
     ...singlePatchSchema.properties,
+    ...dateTimeMemberProperties,
     kind: {
       type: 'string',
       enum: [...CUSTOMIZATION_PATCH_KINDS, 'unsupported'],

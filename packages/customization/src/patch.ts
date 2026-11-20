@@ -195,7 +195,7 @@ const saveListView = z.strictObject({
 
 // ADR-0087: a versioned add-only member with a discriminated target that a
 // later schema version may widen. Its logical type is `dateTime`.
-const addDateTimeField = z.strictObject({
+export const AddDateTimeFieldSchema = z.strictObject({
   kind: z.literal('addDateTimeField'),
   schemaVersion: z.literal(DATE_TIME_PATCH_VERSION),
   target: z.discriminatedUnion('kind', [
@@ -211,7 +211,7 @@ const addDateTimeField = z.strictObject({
 });
 
 const ChangeMemberSchema = z.discriminatedUnion('kind', [
-  addDateTimeField,
+  AddDateTimeFieldSchema,
   z.strictObject({
     kind: z.literal('addAddressField'),
     schemaVersion: z.literal('v6'),
