@@ -8,8 +8,11 @@ Slice 2a adds reviewed staff decisions. [Slice 1 and its gates](https://github.c
 - Customize uses the same release approval, with the exact patch payloads, bases and reviewed diff in the proof. A fresh passkey confirmation binds the principal, assurance, authentication time and decision time.
 - Retry records the company, suspended run, occurrence, definition, journal and original and restored fences. WORKFLOW-1’s canonical remedy writer records the proof, restores the run fence and appends the control journal entry in the consumption transaction. The worker reconciles committed effects before further dispatch. Pilot scheduling stays closed.
 - Release and Customize cover every company on the environment pointer and require an unscoped membership. Retry takes the company from the event and checks the operator’s live membership. A reviewed batch binds each named target and its ordered aggregate.
-- Slice 2b stays closed pending CONNECT-1’s canonical connection and outward-send records and their writers. Only a database explicitly claimed for the local demo grants direct address installation writes. Pilot enablement awaits a proof-consuming function.
 - This slice uses a forward database migration and the existing surface reader. The orchestrator owns the independent post-merge read.
+
+## Slice 2b — provider enablement and outward sends
+
+Slice 2b stays closed pending CONNECT-1’s canonical connection and outward-send records and their writers. Only a database explicitly claimed for the local demo grants direct address installation writes. Pilot enablement awaits a proof-consuming function. Outward-send confirmation must consume its proof in CONNECT-1’s writer. [ADR-0088](../../decisions/ADR-0088-governed-communications-and-reminders.md)
 
 ## Gates and test it yourself
 
