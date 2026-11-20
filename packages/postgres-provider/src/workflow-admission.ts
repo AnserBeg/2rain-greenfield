@@ -100,8 +100,13 @@ export async function persistWorkflowDefinitions(
         tenant_id, environment_id, release_id, workflow_id, event_type,
         body_digest, executable, executable_digest, sdk_digest, engine_build,
         host_version, sdk_version, automation_principal_id, authored_by, grants
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-      ON CONFLICT DO NOTHING`,
+      ) SELECT $1::uuid, $2::uuid, $3::uuid, $4::text, $5::text, $6::text,
+               $7::bytea, $8::text, $9::text, $10::text, $11::text, $12::text,
+               $13::uuid, $14::uuid, $15::jsonb
+        WHERE NOT EXISTS (
+          SELECT 1 FROM platform.workflow_definitions
+           WHERE (tenant_id, environment_id, release_id, workflow_id) = ($1, $2, $3, $4)
+        )`,
       [
         ...scope,
         binding.workflowId,

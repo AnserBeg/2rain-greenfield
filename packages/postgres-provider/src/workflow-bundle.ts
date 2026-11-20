@@ -21,10 +21,18 @@ export async function storeWorkflowBundle(
   if (bytes.length > MAXIMUM_WORKFLOW_SOURCE_BYTES)
     throw new Error('Workflow source and fixtures exceed the bundle limit');
   const digest = sha256(bytes);
+  const scope = [context.tenantId, context.environmentId, digest] as const;
+  // PostgreSQL rejects ON CONFLICT on tables with immutable UPDATE rules.
+  await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+    `workflow-bundle:${scope.join(':')}`,
+  ]);
   await client.query(
     `INSERT INTO platform.workflow_body_blobs (tenant_id, environment_id, body_digest, bundle)
-      VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
-    [context.tenantId, context.environmentId, digest, bytes],
+      SELECT $1::uuid, $2::uuid, $3::text, $4::bytea WHERE NOT EXISTS (
+        SELECT 1 FROM platform.workflow_body_blobs
+         WHERE (tenant_id, environment_id, body_digest) = ($1, $2, $3)
+      )`,
+    [...scope, bytes],
   );
   return digest;
 }

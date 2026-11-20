@@ -554,6 +554,11 @@ test('a drafted receipt workflow links an inspection and requests escalation aft
         });
         try {
           await page.goto(`${app.baseUrl}/?customize`);
+          await page
+            .getByRole('combobox', { name: 'Acting as' })
+            .selectOption('manager');
+          await page.getByRole('button', { name: 'Switch person' }).click();
+          await page.goto(`${app.baseUrl}/?customize`);
           const ask = page.locator('[data-customize-form="ask"]');
           await ask
             .locator('textarea')
@@ -561,6 +566,14 @@ test('a drafted receipt workflow links an inspection and requests escalation aft
               'When Field notebooks arrive, create a linked inspection and ask to escalate if it is pending after two days.',
             );
           await ask.getByRole('button', { name: 'Draft it' }).click();
+          const draftResult = page.locator(
+            '[data-customize-result="drafted"], [data-customize-result="refused"]',
+          );
+          await expect(draftResult).toBeVisible({ timeout: 180_000 });
+          expect(
+            await draftResult.getAttribute('data-customize-result'),
+            await draftResult.innerText(),
+          ).toBe('drafted');
           await expect(page.locator('[data-customize-diff]')).toContainText(
             workflowId,
             { timeout: 180_000 },
