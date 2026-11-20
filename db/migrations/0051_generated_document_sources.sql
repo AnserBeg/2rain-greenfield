@@ -207,7 +207,15 @@ REVOKE ALL ON FUNCTION platform.document_storage(uuid,uuid),
 CREATE OR REPLACE FUNCTION platform.document_fields(scope text, entity text, action text, active_release uuid DEFAULT NULL)
 RETURNS jsonb LANGUAGE sql STABLE SET search_path = pg_catalog, pg_temp AS $$
   WITH definition AS MATERIALIZED (
-    SELECT convert_from(revision.desired_state, 'UTF8')::jsonb AS app
+    SELECT convert_from(revision.desired_state, 'UTF8')::jsonb AS app,
+      (SELECT convert_from(blob.canonical_bytes, 'UTF8')::jsonb->'bindings'
+       FROM platform.tenant_release_projection_links projection
+       JOIN platform.tenant_release_chunk_links chunk USING (tenant_id, environment_id, release_id, projection_instance_id)
+       JOIN platform.release_artifact_blobs blob ON blob.content_hash = chunk.chunk_hash
+         AND blob.artifact_kind = 'projectionChunk'
+       WHERE (projection.tenant_id, projection.environment_id, projection.release_id) =
+         (ptr.tenant_id, ptr.environment_id, ptr.release_id)
+         AND projection.projection_family_id = 'northstar.compiler:projection-family.documents') AS bindings
     FROM platform.document_identity() i
     JOIN platform.active_release_pointers ptr USING (tenant_id, environment_id)
     JOIN platform.tenant_releases r USING (tenant_id, environment_id, release_id)
@@ -217,10 +225,18 @@ RETURNS jsonb LANGUAGE sql STABLE SET search_path = pg_catalog, pg_temp AS $$
   )
   SELECT coalesce((SELECT jsonb_agg(f) FROM jsonb_array_elements(app->'documentFields') f
                    WHERE f->>'entityId' = entity), '[]'::jsonb)
-  FROM definition CROSS JOIN LATERAL (
+  -- A compiled binding can select a Record read model. Its query governs
+  -- permissions, and the stored record still supplies scope and revision.
+  FROM definition LEFT JOIN LATERAL (
+    SELECT b->>'queryId' AS query_id
+    FROM jsonb_array_elements(bindings) b WHERE b->>'entityId' = entity
+  ) binding ON true
+  CROSS JOIN LATERAL (
     SELECT q FROM jsonb_array_elements(app->'queries') q
     WHERE q #>> '{sourceEntity,targetId}' = entity AND q->>'queryType' = 'get'
-      AND q->>'tier' = 'q0' AND q->>'lifecycle' = 'active' AND q->>'readModel' IS NULL
+      AND q->>'tier' = 'q0' AND q->>'lifecycle' = 'active'
+      AND CASE WHEN binding.query_id IS NULL THEN q->>'readModel' IS NULL
+               ELSE q->>'queryId' = binding.query_id END
       AND EXISTS (SELECT FROM jsonb_array_elements(app->'surfaces') s WHERE s->>'surfaceRole' = 'record'
         AND s->>'lifecycle' = 'active' AND s #>> '{dataSource,targetId}' = q->>'queryId')
     ORDER BY q->>'queryId' COLLATE "C" LIMIT 1

@@ -13,7 +13,7 @@ Slice 2 implements document templates and PDF generation from [ADR-0078](../../d
 
 - Template sources are direct Q0 record reads and scoped child lists. All selected fields are required and money also needs the selected currency field. Layout uses the built-in Latin-script PDF fonts.
 - The company-brand resolver uses the company record name and the Ledger print palette without a logo. Shared records use the Ledger name. Each issued PDF saves brand revision `platform-default`.
-- Local demo issuance uses the demo scanner. The SQL entry points require an active, direct Q0 governing query with an unconditional filter. The scanner role can attest only while the governing record exists. Customer upload requests and signatures remain gated.
+- Local demo issuance uses the demo scanner. The SQL entry points use the compiled Record binding when present and authorize its active Q0 query. Record scope and revision come from stored data. The scanner role can attest only while the governing record exists. Customer upload requests and signatures remain gated.
 
 ## Test it yourself
 
@@ -29,7 +29,7 @@ Hosted CI covers PostgreSQL issuance, stored brand provenance, live source restr
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "DOCS-1",
-  "base": "f25df5af44df132045c67ba29eb9aebe1084dcc7", "head": "dddc97f42323a8bd0378d05288c8d3216dd65cd3",
+  "base": "f25df5af44df132045c67ba29eb9aebe1084dcc7", "head": "470ef0bd8f83f2a4977fc2f43e6d9c316874a155",
   "changedPaths": [
     ".github/workflows/evidence.yml", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts",
     "apps/web/src/document-http.ts", "apps/web/src/document-template-form.ts", "apps/web/src/surface-client.ts",
