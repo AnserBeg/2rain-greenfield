@@ -1,7 +1,7 @@
 # ADR-0082. Book a resource over time
 
 Amended 2026-11-20 after Fable approved the design with changes and rejected the original
-consumer contract. The orchestrator’s re-read of the amended sections gates slice 1a.
+consumer contract. Fable’s narrow re-read accepted the design with amendments A1–A10, incorporated below.
 
 A dispatcher assigning a truck, a receptionist reserving a room and a planner reserving 12 units
 from a pool need the same promise. Once a booking commits, another caller cannot claim the same
@@ -81,6 +81,7 @@ A future series can add a group kind under a new protocol version.
 Store the **agreed interval** and **occupied interval** separately. The agreement is what the
 owner requested. Occupation is the finite planned claim on capacity. Both use **[start, end)**,
 so a booking ending at 11:00 leaves 11:00 available. Initially they coincide for a future hold.
+Agreed intervals of different bookings on one unit may overlap. Only occupied intervals are exclusive.
 An early return releases remaining occupation and preserves the agreement. Store the entered
 civil dates or times, IANA zone, offsets, calendar identity and boundary settings with the
 resolved instants. Resolve each date-only boundary independently, including the exclusive end.
@@ -89,6 +90,9 @@ Refuse a missing calendar, nonexistent civil time, unresolved boundary or empty 
 
 A date-only hold starting **today** keeps the agreed local day boundary and occupies capacity
 from the writer’s decision instant through the agreed end. Refuse an already elapsed end.
+Evaluate “today” as the entered civil date in the booking’s own calendar at the post-lock
+decision instant. A hold that waits past local midnight refuses. Change interval moving a
+date-only start onto today, or re-resolving one already past, clamps occupation the same way.
 Other new holds require a future start or an explicit “start now”. Cap the hold deadline at
 the occupied end. An existing booking keeps its resolved instants through calendar changes.
 
@@ -104,21 +108,28 @@ The owner binding declares one of two fulfilment modes and each booking pins it 
   mechanism as expiry. Completion states that the scheduled time elapsed. It creates no
   evidence of attendance or possession. An authorized No-show records absence and releases
   remaining occupation. A tracked confirmation still unstarted at its end becomes `noShow`
-  under the end condition accepted at confirmation. For both modes, system work matches the
+  under the end condition accepted at confirmation. A late Start reopens that tracked booking
+  under the normal locks and capacity check. Refuse with the stable diagnostic
+  `booking.capacityTaken` if its capacity was taken meanwhile. For both modes, system work matches the
   current revision, mode and due end. A rescheduled booking cannot close on its old timer.
 
 Start, Return, partial return, Swap, Pause and Resume accept an optional effective instant.
 Default to the locked decision instant. Require finite effective time at or before recorded
-time and within the pinned `maxBackdateDays` in the owner’s business calendar (default one
-calendar day, selectable from zero to 31). A reason is required for backdating. Check the
+time. The owner slot declaration carries `maxBackdateDays` (default one, selectable from zero
+to 31) and each booking pins it. Count civil days in the owner’s calendar. N admits effective
+instants from the start of the civil day N days before the recorded day. Zero means the same civil day. A reason is required for backdating. Check the
 resulting timeline, unit assignments and quantities for consistency, including other recorded
-use of that resource. Refuse an impossible overlap. Live capacity changes at the recorded
+use of that resource. For an effective time before this booking’s own occupied start, also
+check other bookings’ historical occupied intervals on the resource, including completed
+scheduled appointments without a leg. Refuse an impossible overlap. Live capacity changes at the recorded
 decision, visible on commit. A return reported Tuesday as effective Monday never makes Monday’s
 capacity available retroactively.
 
 Correct-actuals appends a reasoned revision of a named leg, pause or attendance outcome,
 including after closure. It identifies the superseded revision and the changed effective
-boundaries, applies the same backdating and timeline checks and preserves the original
+boundaries. Require steward-level permission, a reason and a separately configured correction
+age independent of `maxBackdateDays`, with no 31-day ceiling. Apply the timeline and overlap
+checks and preserve the original
 evidence and receipt. Correcting historical evidence grants no capacity and changes no live
 assignment. A change to current possession requires the corresponding operational transition.
 Record existing booking admits an already confirmed or in-use service at onboarding. A steward
@@ -156,7 +167,7 @@ writes to the executed row verifiers. Check the trust documents and receipt sepa
 | Record existing booking | Admit a documented existing agreement or possession through the onboarding writer. | `needsYes`. Bind the source, historical evidence and occupied remainder to the review. |
 | Assign-unit (reserved) | Select an eligible member for a class claim while preserving booking identity and total demand. | `needsYes` when admitted. It commits a named member. |
 
-Returned, completed, no-show and cancelled bookings are closed to new allocations. Expiry is a system cancellation with reason
+Returned, completed, no-show and cancelled bookings are closed to new allocations except for the late Start recovery above. Expiry is a system cancellation with reason
 **hold expired**, effective at the stored deadline. At equality expiry wins. Cancel or expiry
 cannot undo a subsequent confirmation. Independent retries use the original request key.
 
@@ -196,7 +207,7 @@ may still be out at 10:05. Its finite planned interval cannot protect the next p
    Retire due holds with their own history and receipt before admitting new claims. A bounded
    sweeper uses the same transition and stable expiry key under the original hold’s authority.
    A caller triggering cleanup sees only its own outcome. Use a monotonic source for elapsed
-   waits. Readers apply the same time-floor and deadline rule even when the sweeper is late.
+   waits. Availability readers apply the same time-floor and deadline rule even when the sweeper is late.
    [PostgreSQL clocks](https://www.postgresql.org/docs/16/functions-datetime.html#FUNCTIONS-DATETIME-CURRENT)
 3. Use an **unpartitioned** current allocation table so one GiST exclusion constraint covers
    every unit claim. With a non-null, globally unique registry key, enforce
@@ -247,7 +258,7 @@ and scope. It reports a snapshot. Only an admitted hold or confirmation promises
 | Next available slot | One resource, earliest start, positive duration, quantity and search horizon. Return the earliest contiguous fit or “none within this horizon”. Distinguish elapsed duration from a count of business-calendar days. |
 | Free units of a type | Declared unit type and window. Return only authorized units free throughout, in stable record-key order with a bounded page and continuation. |
 | Pool remaining capacity | Pool and window. Return the minimum remaining quantity across the window in its unit, plus the segments and their remaining quantities. An overdue shortfall yields zero available with a conflict indication. |
-| Bookings in a window for a resource set | Bounded resource keys and [start, end). Return intersecting commitments and overdue busy spans in stable resource/time/key order for a calendar or dispatch timeline. Supply booking IDs, owner links, status and labels only as permitted. For hidden commitments return coalesced anonymous busy spans. |
+| `booking.resourceWindow/v1` | Bounded resource keys and [start, end). Select busy by occupied-or-overdue span. For hidden commitments return coalesced anonymous busy spans. Select permitted bars by agreed-or-occupied intersection. In stable resource/time/key order return booking ID, current revision, state, fulfilment mode, separate agreed and occupied intervals, quantity and permitted owner links and labels. |
 | Group availability | Bounded slots with eligible resources, quantities and one window. Return whether the entire group fits together, including combined demand on a repeated pool and distinct assignments for simultaneous unit slots. A bounded search that cannot decide returns a limit. |
 | Count free by type | Unit type and window. Count authorized distinct units free for the entire window, across all matching pages. An incomplete scan returns a limit instead of a partial count. |
 
@@ -269,10 +280,12 @@ booking). The contract also works for a standalone appointment. Require owner-de
 complete service-evidence permission. Read one consistent snapshot, including closed and
 corrected bookings. Return its as-of instant and owner cursor. At that cursor the following
 fields are reconstructible, including when the change concerns an already billed period.
+Report persisted state only. A due expiry, scheduled completion or timed no-show appears
+when its transition commits and advances the cursor. The same cursor always names the same evidence.
 
 | Projection field | Meaning |
 | --- | --- |
-| Bookings | Stable booking/service and slot IDs, group ID/kind, state, fulfilment mode, requested target, agreed interval with its calendar, separate occupied interval, and agreed exact quantity/unit. Include dated revisions of agreed terms and quantities. A swap preserves the service ID. |
+| Bookings | Stable booking/service and slot IDs, group ID/kind, state, fulfilment mode, requested target, agreed interval with its calendar, separate occupied interval, and agreed exact quantity/unit. Include dated revisions of agreed terms and quantities. A swap preserves the service ID. Only occupied intervals are exclusive on a unit. No consumer may infer exclusivity from agreed intervals. |
 | Actual-use legs | Leg ID and revision, booking ID, target, effective start and optional end, exact quantity and unit, recorded time and superseded revision. A partial return splits the legs so each quantity applies to a known interval. A scheduled completion has no possession leg. |
 | Unit-assignment legs | Stable leg ID and revision, booking ID, assigned unit key and effective bounds. A swap ends one assignment and starts the next at the same instant. |
 | Pauses | First-class, booking-scoped rows with pause ID, revision, booking ID, effective start and nullable end, typed neutral reason (v1 `operatorRequested` or `serviceInterrupted`), effective-at and recorded-at instants. Resume closes the open pause. Correct-actuals supersedes or voids an identified pause revision with an audit reason. Preserve each previous version. |
@@ -285,10 +298,14 @@ and superseded or voided IDs. Paginate changes without advancing beyond the last
 Advance the durable owner cursor under the owner lock **in the transaction** for every change to
 its bookings or child evidence. A group transaction advances each affected owner once, listing
 all its changes. A rolled-back writer cannot publish a cursor. A late correction therefore appears
-after the consumer’s checkpoint even when both effective dates precede it. A billing write can
-lock and compare the returned owner cursor before consuming the snapshot. A mismatch needs a
+after the consumer’s checkpoint even when both effective dates precede it. The published dependency set includes the pack routine `booking.ownerCursorFence/v1`.
+Through the generated facade it locks the listed owners in stable owner order, returns their
+current cursors and holds the locks to commit. Billing compares each cursor before consuming its snapshot. A mismatch needs a
 fresh read. Booking gives pauses, quantities and intervals no money meaning. BILLING-1 owns the
 choice of basis, rates, accrual and financial corrections. [BILLING-1 source contract](ADR-0083-period-and-usage-billing.md#which-service-is-billable)
+
+Every `/v1` contract here is closed. Fields, states, pause reasons, group kinds and target
+kinds are fixed. Any addition requires a new version. Serve v1 while any active tenant release pins it.
 
 **Outbox v1.** Use the trust outbox envelope and its linked immutable domain event. One accepted
 booking operation emits `eventType = booking.changed`, `eventSchemaVersion = booking.changed/v1`.
@@ -320,7 +337,7 @@ can own the same slot without a line. Two add-only patch members record those ch
 | Member | Versioned declaration |
 | --- | --- |
 | `addBookableResourceRevision` | Stable declaration ID, entity ID, resource kind, quantity unit/scale where applicable and typed configuration. |
-| `addBookingSlotRevision` | Stable binding and allocation slot IDs, typed owner, fulfilment mode, allowed target alternatives, picker queries, O2 actions and their typed arguments. Each alternative pins a target declaration and contract revision in `booking.slotTarget/v1`. Its alternatives are unit type (select a unit), pool (select a pool and quantity), or class (defer member selection until assigned). |
+| `addBookingSlotRevision` | Stable binding and allocation slot IDs, typed owner, fulfilment mode, `maxBackdateDays`, allowed target alternatives, picker queries, O2 actions and their typed arguments. Each alternative pins a target declaration and contract revision in `booking.slotTarget/v1`. Its alternatives are unit type (select a unit), pool (select a pool and quantity), or class (defer member selection until assigned). |
 
 **Both** members carry their own `schemaVersion`, stable revision ID, predecessor (null only
 on creation) and status (`active` or `retired`). Append revisions against the current head.
@@ -375,7 +392,7 @@ cannot acquire a second diary or silently lose an in-use booking.
 
 - **1a — Hold and change a commitment.** Ship the unit/pool registry, dated capacity, fact,
   history, writer, receipts and committed event cursors for hold, confirm, cancel, expiry
-  and Change interval. Race independent PostgreSQL sessions at a barrier on the same shared
+  and Change interval. Emit `booking.changed/v1` exactly as published from owner cursor zero. Race independent PostgreSQL sessions at a barrier on the same shared
   unit across companies, the last pool quantity, capacity decrease versus hold, and reschedule
   versus a competing hold. Test adjacent ranges, forbidden range bounds, non-READ-COMMITTED
   refusal, a forged owner, a lost reply and confirmation that waited past expiry. Inspect
@@ -383,7 +400,7 @@ cannot acquire a second diary or silently lose an in-use booking.
   the test harness for expiry equality and backward steps.
 - **1b — Fulfil and account for use.** Ship start, full and partial return, Change quantity,
   swap, pause/resume, groups, scheduled completion, no-show, onboarding and Correct-actuals.
-  Deliver the owner-usage projection with its outbox contract. Race overdue and second starts,
+  Deliver the owner-usage projection and cursor fence over the event shape shipped in 1a. Race overdue and second starts,
   opposing swaps, archive versus hold and return versus reschedule. Fail the last group member
   and verify all original revisions. Check late and early returns, historical overlap refusal,
   corrected pauses after billing has checkpointed, and one grouped transaction advancing two
