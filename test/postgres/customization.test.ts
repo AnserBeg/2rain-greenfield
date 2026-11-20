@@ -10,6 +10,8 @@ import test from 'node:test';
 
 import type pg from 'pg';
 
+import { applicationWithoutLineCreateValues } from '../helpers/application-without-line-create-values.js';
+
 import { readActiveRelease } from '../../packages/postgres-provider/src/active-release-root.js';
 import {
   openComposedApplicationRuntime,
@@ -738,8 +740,9 @@ function platformLabelVariant(
   previous: unknown = compiledApplication,
   addPermission = false,
   optionalField = false,
+  baseAuthored = firstPartyAuthored,
 ) {
-  let authored = structuredClone(firstPartyAuthored) as Record<string, unknown>;
+  let authored = structuredClone(baseAuthored) as Record<string, unknown>;
   if (optionalField) {
     const changed = applyCustomizationPatches(authored, [
       {
@@ -1354,9 +1357,11 @@ test(
     await withEphemeralPostgres(
       'upgrade-layout-survival',
       async ({ connection, pool }) => {
+        const compatibility = applicationWithoutLineCreateValues();
         const options = {
           databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
           tenantSlug: 'upgrade-layout',
+          compiledApplication: compatibility.release,
         };
         const old = await openComposedApplicationRuntime(options);
         const service = await openCustomizeService(options);
@@ -1371,9 +1376,10 @@ test(
           'Stock identifier',
           false,
           undefined,
-          compiledApplication,
+          compatibility.release,
           false,
           true,
+          compatibility.authored,
         );
         const target = () =>
           service.service

@@ -66,3 +66,17 @@ export const referenceTargets = new Map<string, string>(
     ),
   ),
 );
+
+/** An edit is reversible only when the owning record is visible in this state. */
+export const parentEditApprovals = new Map([
+  [
+    'northstar.app:entity.stock_count_line',
+    {
+      relationId: 'northstar.app:relation.stock_count_line_session',
+      queryId: 'northstar.app:query.stock_count_get',
+      stateFieldId: 'northstar.app:field.stock_count_state',
+      reversibleStateId: 'northstar.app:option.stock_count_state_draft',
+      reason: 'Editing a count outside draft needs your OK.',
+    },
+  ],
+]);

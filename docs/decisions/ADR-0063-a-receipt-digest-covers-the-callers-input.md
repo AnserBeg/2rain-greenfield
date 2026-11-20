@@ -306,3 +306,11 @@ the check was moved, not because the sentence was softened.**
 
 The shipped artifact is also pinned deterministically: a test reds the matrix
 when the head release's fact differs from the provider's version.
+
+## Implementation update — STOCK-COUNTS-2
+
+The count's Post operation is the first application caller of `postStockCount`.
+The version-4 preimage is frozen. On keyed replay and when persisting a receipt
+for a natural replay under a new key, its authorization evidence comes from the
+recorded accepted invocation. Live authorization still governs each request.
+The version-4 preimage and existing receipts stay as written.
