@@ -22,9 +22,8 @@ async function journey() {
         page.setDefaultTimeout(15000);
         const devtools = await ctx.newCDPSession(page);
         await devtools.send('WebAuthn.enable');
-        const { authenticatorId } = await devtools.send(
-          'WebAuthn.addVirtualAuthenticator',
-          {
+        const addKey = () =>
+          devtools.send('WebAuthn.addVirtualAuthenticator', {
             options: {
               protocol: 'ctap2',
               transport: 'internal',
@@ -33,11 +32,19 @@ async function journey() {
               isUserVerified: true,
               automaticPresenceSimulation: true,
             },
-          },
-        );
+          });
+        const { authenticatorId } = await addKey();
         const enroll = async (token: string) => {
           await page.goto(r.identityOrigin + '/enroll#invite=' + token);
+          const finish = page.waitForResponse(
+            (res) => res.url() === r.identityOrigin + '/finish',
+          );
           await page.getByRole('button', { name: 'Create a passkey' }).click();
+          assert.equal(
+            (await finish).status(),
+            200,
+            'the registration did not commit',
+          );
           await page
             .getByRole('link', { name: 'Sign in to the ERP' })
             .waitFor();
@@ -237,6 +244,13 @@ async function journey() {
           timing && timing.transactions <= 3 && timing.statements <= 40,
           JSON.stringify(timing),
         );
+        process.stdout.write(
+          'Signed-in purchase-order list used ' +
+            timing.transactions +
+            ' transactions and ' +
+            timing.statements +
+            ' statements.\n',
+        );
         await page.goto(r.identityOrigin + '/staff');
         await page
           .getByLabel('Staff name', { exact: true })
@@ -376,6 +390,34 @@ async function journey() {
           ownerSession.value,
         );
         assert.ok('invite' in spare && spare.invite);
+        // A key created on the second loopback RP cannot enroll this invitation.
+        await page.goto('https://login.other.test/');
+        const otherFlow = secret();
+        const creation = await identity.begin(otherFlow, {
+          invite: spare.invite,
+        });
+        assert.ok('rp' in creation);
+        const otherRegistration = await page.evaluate(async (json) => {
+          const options = PublicKeyCredential.parseCreationOptionsFromJSON(
+            JSON.parse(json),
+          );
+          options.rp.id = 'other.test';
+          const key = (await navigator.credentials.create({
+            publicKey: options,
+          })) as PublicKeyCredential;
+          return key.toJSON();
+        }, JSON.stringify(creation));
+        await assert.rejects(
+          identity.finish(
+            otherFlow,
+            otherRegistration as Parameters<typeof identity.finish>[1],
+          ),
+          /origin/i,
+        );
+        await devtools.send('WebAuthn.removeVirtualAuthenticator', {
+          authenticatorId,
+        });
+        const spareAuthenticator = await addKey();
         await enroll(spare.invite);
         const spareKey = (
           await pool.query(
@@ -405,7 +447,7 @@ async function journey() {
         await passkeyChecks(
           page,
           devtools,
-          authenticatorId,
+          spareAuthenticator.authenticatorId,
           identity,
           spareKey,
         );
@@ -418,17 +460,25 @@ async function journey() {
 void journey().catch((error: unknown) => {
   const message =
     error instanceof Error ? error.message : 'Staff journey failed';
+  const frame =
+    error instanceof Error
+      ? error.stack?.match(
+          /staff-(?:browser-journey|passkey-checks)\.ts:\d+:\d+/u,
+        )?.[0]
+      : undefined;
   process.stderr.write(
-    message
-      .replace(/https?:\/\/[^\s"]+/gu, (value) => {
-        try {
-          const u = new URL(value);
-          return u.origin + u.pathname;
-        } catch {
-          return '[url]';
-        }
-      })
-      .replace(/[\w-]{40,}/gu, '[redacted]') + '\n',
+    (frame ? frame + ' ' : '') +
+      message
+        .replace(/https?:\/\/[^\s"]+/gu, (value) => {
+          try {
+            const u = new URL(value);
+            return u.origin + u.pathname;
+          } catch {
+            return '[url]';
+          }
+        })
+        .replace(/[\w-]{40,}/gu, '[redacted]') +
+      '\n',
   );
   process.exitCode = 1;
 });

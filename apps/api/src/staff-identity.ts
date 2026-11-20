@@ -390,6 +390,12 @@ export class StaffIdentity {
             userName: subject.display_name,
             userID: new Uint8Array(subject.user_handle),
             attestationType: 'none',
+            excludeCredentials: (
+              await c.query<{ credential_id: string }>(
+                "SELECT credential_id FROM platform.staff_credentials WHERE principal_id=$1 AND method='webauthn' AND revoked_at IS NULL",
+                [subject.principal_id],
+              )
+            ).rows.map((row) => ({ id: row.credential_id })),
             authenticatorSelection: {
               residentKey: 'required',
               userVerification: 'required',

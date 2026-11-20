@@ -23,8 +23,15 @@ const flowCookie = '__Host-identity-flow',
 const script = `
 const form=document.querySelector('form');
 const status=document.querySelector('[role=status]');
-const fragment=new URLSearchParams(location.hash.slice(1));
-history.replaceState(null,'',location.pathname);
+let fragment=new URLSearchParams();
+const takeFragment=()=>{
+  if(!location.hash)return;
+  fragment=new URLSearchParams(location.hash.slice(1));
+  history.replaceState(null,'',location.pathname);
+  status.replaceChildren();
+};
+takeFragment();
+window.addEventListener('hashchange',takeFragment);
 const post=async(path,body)=>{
   const res=await fetch(path,{method:'POST',credentials:'same-origin',redirect:'error',
     headers:{'content-type':'application/json','x-erp-csrf':document.querySelector('meta[name=csrf]').content},body:JSON.stringify(body)});
@@ -33,6 +40,7 @@ const post=async(path,body)=>{
 };
 form.addEventListener('submit',async event=>{
   event.preventDefault();
+  takeFragment();status.replaceChildren();
   const button=event.submitter;button.disabled=true;
   try {
     const action=button.value;

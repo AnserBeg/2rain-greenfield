@@ -74,6 +74,30 @@ test('staff sessions derive one live scoped principal at entry and again at the 
       identity = new pg.Pool({ ...connection, user: 'north_star_identity' });
     try {
       await assertPilotDatabase(runtime, 'north_star_runtime', realm);
+      const lastOwnerChanges = await Promise.allSettled(
+        [0, 1].map(() =>
+          identity.query(
+            'SELECT platform.staff_disable_memberships($1,$2,$3,$4)',
+            [t, e, p, p],
+          ),
+        ),
+      );
+      assert.ok(
+        lastOwnerChanges.every(
+          (result) =>
+            result.status === 'rejected' &&
+            /deactivation refused/u.test(String(result.reason)),
+        ),
+      );
+      assert.equal(
+        (
+          await pool.query(
+            'SELECT FROM platform.current_policy_memberships WHERE principal_id=$1 AND revoked_at IS NULL',
+            [p],
+          )
+        ).rowCount,
+        1,
+      );
       const session = (scope = e, token = handle) =>
         staffRequestEntry(runtime, () => ({
           tenantId: t,
@@ -100,11 +124,16 @@ test('staff sessions derive one live scoped principal at entry and again at the 
         withTrustedRequestTransaction(runtime, context, (c) =>
           c.query(
             `INSERT INTO platform.tenant_fixture_records(tenant_id,environment_id,id,label)
-        VALUES($1,$2,gen_random_uuid(),'scoped')`,
+        VALUES($1,$2,gen_random_uuid(),current_setting('north_star.principal_id'))`,
             [t, e],
           ),
         );
       await write();
+      assert.equal(
+        (await pool.query('SELECT label FROM platform.tenant_fixture_records'))
+          .rows[0].label,
+        p,
+      );
       // Shared clock boundaries are established in the database, without sleeps.
       await pool.query(
         "UPDATE platform.staff_sessions SET authenticated_at=now()-interval '1 hour',last_activity=now()-interval '30 minutes',absolute_deadline=now()+interval '11 hours'-interval '1 second'",
@@ -174,10 +203,18 @@ test('staff sessions derive one live scoped principal at entry and again at the 
         runtime.query('SELECT * FROM platform.staff_credentials'),
         /permission denied/,
       );
-      await assert.rejects(
-        identity.query('TRUNCATE platform.staff_authentication_audit'),
-        /permission denied/,
+      const relations = await pool.query<{ table_name: string }>(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema='platform' AND left(table_name,6)='staff_'",
       );
+      assert.equal(relations.rowCount, 8);
+      for (const { table_name } of relations.rows) {
+        assert.match(table_name, /^staff_[a-z_]+$/u);
+        for (const role of [runtime, identity])
+          await assert.rejects(
+            role.query('TRUNCATE platform.' + table_name),
+            /permission denied/,
+          );
+      }
       await assert.rejects(
         pool.query('TRUNCATE platform.staff_authentication_audit'),
         /append-only/,

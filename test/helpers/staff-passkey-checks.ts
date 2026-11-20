@@ -15,18 +15,13 @@ export async function signChallenge(
 ) {
   const reply = await page.evaluate(
     async ({ challenge, key, rpId, uv }) => {
-      const bytes = (value: string) =>
-        Uint8Array.from(
-          atob(value.replace(/-/g, '+').replace(/_/g, '/')),
-          (c) => c.charCodeAt(0),
-        );
       const c = (await navigator.credentials.get({
-        publicKey: {
-          challenge: bytes(challenge),
+        publicKey: PublicKeyCredential.parseRequestOptionsFromJSON({
+          challenge,
           rpId,
           userVerification: uv,
-          allowCredentials: [{ type: 'public-key', id: bytes(key) }],
-        },
+          allowCredentials: [{ type: 'public-key', id: key }],
+        }),
         signal: AbortSignal.timeout(5000),
       })) as PublicKeyCredential;
       return c.toJSON();

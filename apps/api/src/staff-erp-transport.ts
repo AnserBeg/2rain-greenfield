@@ -102,7 +102,10 @@ export function erpTransport(r: StaffRealm, ca?: Buffer) {
       json(res, { done: true });
       return null;
     }
-    if (req.method === 'GET' && (!handle || url.pathname === '/auth/signin')) {
+    if (
+      req.method === 'GET' &&
+      (url.pathname === '/auth/signin' || (!handle && url.pathname === '/'))
+    ) {
       const verifier = secret();
       res.setHeader('set-cookie', cookie(loginCookie, verifier, 300));
       res.writeHead(303, {
