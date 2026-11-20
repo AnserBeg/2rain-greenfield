@@ -55,12 +55,14 @@ test('booking commitment writer', async (t) => {
   await withEphemeralPostgres('booking-commitments', async ({ pool }) => {
     const admin = await pool.connect(),
       left = await pool.connect(),
-      right = await pool.connect();
+      right = await pool.connect(),
+      issuer = await pool.connect();
     try {
       await runMigrations(admin, await loadMigrations('db/migrations'));
       await admin.query(
         await readFile('test/fixtures/booking-commitments.sql', 'utf8'),
       );
+      await issuer.query('SET ROLE north_star_approval_issuer');
       const policy =
         'northstar.current-policy/' +
         String(
@@ -85,21 +87,60 @@ test('booking commitment writer', async (t) => {
           [tenant, environment, principal, requestId],
         );
       }
+      let activeFence = 1;
+      const grant = async (
+        id: string,
+        action: string,
+        key: string,
+        input: object,
+        who = principal,
+        fence = activeFence,
+      ) => {
+        await issuer.query(
+          'SELECT platform.attest_booking_approval($1,$2,$3,$4,$4,$5,$6,$7,$8,$9,$10)',
+          [
+            id,
+            tenant,
+            environment,
+            who,
+            release,
+            fence,
+            action,
+            key,
+            input,
+            'UI',
+          ],
+        );
+      };
       const call = async (
         client: PoolClient,
         verb: string,
         args: object,
         key: string = randomUUID(),
         kind = 'unit',
+        who = principal,
+        approval: string | null | undefined = undefined,
       ): Promise<Result> => {
+        const action =
+          'example.booking:operation.' + verb.toLowerCase() + '_' + kind;
+        let grantId = approval;
+        if (verb !== 'hold' && approval === undefined) {
+          grantId = randomUUID();
+          await grant(grantId, action, key, args, who);
+        }
         const { rows } = await client.query<{ result: Result }>(
-          'SELECT platform.booking_apply($1,1,$2,$3,$4,$5) AS result',
+          'SELECT platform.booking_apply($1,$6,$2,$3,$4,$5) AS result',
           [
             release,
-            'example.booking:operation.' + verb.toLowerCase() + '_' + kind,
+            action,
             key,
             args,
-            actor,
+            {
+              ...actor,
+              executionPrincipal: { kind: 'HUMAN', principalId: who },
+              approvalGrantId: grantId,
+            },
+            activeFence,
           ],
         );
         return rows[0]!.result;
@@ -129,13 +170,13 @@ test('booking commitment writer', async (t) => {
         (await left.query('SELECT pg_backend_pid() AS pid')).rows[0]!.pid,
       );
       // Observe the wait in PostgreSQL before releasing the winning transaction.
-      const waitForRight = async () => {
+      const waitForRight = async (blocker = leftPid) => {
         const deadline = performance.now() + 30000;
         while (performance.now() < deadline) {
           const row = (
             await admin.query(
               'SELECT $1 = ANY(pg_blocking_pids($2)) AS blocked',
-              [leftPid, rightPid],
+              [blocker, rightPid],
             )
           ).rows[0];
           if (row?.blocked === true) return;
@@ -395,8 +436,8 @@ test('booking commitment writer', async (t) => {
           await admin.query('SET ROLE north_star_module_runtime');
           try {
             await admin.query(
-              "SELECT set_config('north_star.tenant_id',$1,false),set_config('north_star.environment_id',$2,false)",
-              [tenant, environment],
+              "SELECT set_config('north_star.tenant_id',$1,false),set_config('north_star.environment_id',$2,false),set_config('north_star.principal_id',$3,false)",
+              [tenant, environment, principal],
             );
             await assert.rejects(
               admin.query(
@@ -408,10 +449,66 @@ test('booking commitment writer', async (t) => {
           } finally {
             await admin.query('RESET ROLE');
           }
-          await assert.rejects(
-            call(right, 'confirm', { ...terms(19, held) }),
-            /booking.endpointUnavailable/u,
+          const scoped = fixtureId('scoped');
+          await right.query(
+            "SELECT set_config('north_star.principal_id',$1,false)",
+            [scoped],
           );
+          try {
+            const own = await call(
+              right,
+              'hold',
+              hold(31, 18, window('09:00', '10:00')),
+              randomUUID(),
+              'unit',
+              scoped,
+            );
+            assert.equal(
+              (
+                await call(
+                  right,
+                  'confirm',
+                  terms(31, own),
+                  randomUUID(),
+                  'unit',
+                  scoped,
+                )
+              ).state,
+              'confirmed',
+            );
+            await assert.rejects(
+              call(
+                right,
+                'confirm',
+                terms(18, held),
+                randomUUID(),
+                'unit',
+                scoped,
+              ),
+              /booking.endpointUnavailable/u,
+            );
+            await right.query('SET ROLE north_star_module_runtime');
+            try {
+              await right.query(
+                'SELECT north_star_internal.require_record_archivable($1,$2)',
+                ['example.booking:entity.visit', owner(18)],
+              );
+              await assert.rejects(
+                right.query(
+                  'SELECT north_star_internal.require_record_archivable($1,$2)',
+                  ['example.booking:entity.visit', owner(31)],
+                ),
+                /booking.activeAllocation/u,
+              );
+            } finally {
+              await right.query('SET ROLE north_star_runtime');
+            }
+          } finally {
+            await right.query(
+              "SELECT set_config('north_star.principal_id',$1,false)",
+              [principal],
+            );
+          }
           assert.equal(
             (await call(left, 'cancel', terms(18, held))).state,
             'cancelled',
@@ -469,6 +566,192 @@ test('booking commitment writer', async (t) => {
         },
       );
       await t.test(
+        'SQL accepts only an attested approval bound to this decision',
+        async () => {
+          const privileges = await right.query(`SELECT
+          has_function_privilege(current_user,'platform.attest_booking_approval(uuid,uuid,uuid,uuid,uuid,uuid,bigint,text,uuid,jsonb,text)','EXECUTE') AS issue,
+          has_table_privilege(current_user,'platform.booking_approval_grants','INSERT') AS insert`);
+          assert.deepEqual(privileges.rows, [{ issue: false, insert: false }]);
+          const held = await call(
+            left,
+            'hold',
+            hold(24, 15, window('10:00', '11:00')),
+          );
+          const args = terms(24, held),
+            id = randomUUID(),
+            key = randomUUID(),
+            action = 'example.booking:operation.confirm_unit';
+          await assert.rejects(
+            call(right, 'confirm', args, key, 'unit', principal, null),
+            /booking.approvalRequired/u,
+          );
+          await grant(id, action, key, args);
+          const confirmed = await call(
+            right,
+            'confirm',
+            args,
+            key,
+            'unit',
+            principal,
+            id,
+          );
+          assert.equal(confirmed.state, 'confirmed');
+          assert.deepEqual(
+            await call(right, 'confirm', args, key, 'unit', principal, id),
+            confirmed,
+          );
+          const otherKey = randomUUID();
+          await grant(id, action, otherKey, args);
+          await assert.rejects(
+            call(right, 'confirm', args, otherKey, 'unit', principal, id),
+            /booking.approvalRequired/u,
+          );
+          assert.deepEqual(
+            (
+              await admin.query(
+                'SELECT consumed, human_id FROM platform.booking_approval_grants WHERE grant_id=$1',
+                [id],
+              )
+            ).rows,
+            [{ consumed: true, human_id: principal }],
+          );
+        },
+      );
+      await t.test(
+        'first hold and archive agree after the row lock; an old archive snapshot refuses',
+        async () => {
+          const endpoint = ['example.booking:entity.visit', owner(25)];
+          await right.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
+          try {
+            await right.query('SELECT txid_current_snapshot()');
+            await left.query('BEGIN');
+            assert.equal(
+              (await call(left, 'hold', hold(25, 16, window('10:00', '11:00'))))
+                .state,
+              'hold',
+            );
+            await assert.rejects(
+              right.query(
+                'SELECT platform.lock_record_allocations($1,$2)',
+                endpoint,
+              ),
+              /booking.requiresReadCommitted/u,
+            );
+          } finally {
+            await right.query('ROLLBACK');
+            await left.query('ROLLBACK');
+          }
+          await right.query('BEGIN');
+          try {
+            await right.query(
+              'SELECT platform.lock_record_allocations($1,$2)',
+              endpoint,
+            );
+            await left.query('BEGIN');
+            assert.equal(
+              (await call(left, 'hold', hold(25, 16, window('10:00', '11:00'))))
+                .state,
+              'hold',
+            );
+            await right.query('SET LOCAL ROLE north_star_module_runtime');
+            const archive = right.query(
+              'SELECT record_id FROM north_star_module.test_booking_owners WHERE record_id=$1 FOR UPDATE',
+              [owner(25)],
+            );
+            await waitForRight();
+            await left.query('COMMIT');
+            await archive;
+            await assert.rejects(
+              right.query(
+                'SELECT north_star_internal.require_record_archivable($1,$2)',
+                endpoint,
+              ),
+              /booking.activeAllocation/u,
+            );
+          } finally {
+            await left.query('ROLLBACK');
+            await right.query('ROLLBACK');
+          }
+          await right.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
+          try {
+            await right.query('SET LOCAL ROLE north_star_module_runtime');
+            await assert.rejects(
+              right.query(
+                'SELECT north_star_internal.require_record_archivable($1,$2)',
+                endpoint,
+              ),
+              /booking.requiresReadCommitted/u,
+            );
+          } finally {
+            await right.query('ROLLBACK');
+          }
+        },
+      );
+      await t.test(
+        'a parent used by another operation is locked before its child',
+        async () => {
+          const adminPid = Number(
+            (await admin.query('SELECT pg_backend_pid() AS pid')).rows[0]!.pid,
+          );
+          await admin.query('BEGIN');
+          const row = owner(26);
+          await admin.query(
+            'SELECT FROM north_star_module.test_booking_parents WHERE record_id=$1 FOR UPDATE',
+            [row],
+          );
+          const writer = call(
+            right,
+            'hold',
+            hold(26, 17, window('10:00', '11:00')),
+          );
+          void writer.catch(() => undefined);
+          try {
+            await waitForRight(adminPid);
+            await admin.query(
+              'SELECT FROM north_star_module.test_booking_owners WHERE record_id=$1 FOR UPDATE NOWAIT',
+              [row],
+            );
+          } finally {
+            await admin.query('ROLLBACK');
+          }
+          assert.equal((await writer).state, 'hold');
+        },
+      );
+      await t.test(
+        'one owner cursor spans successful writes and a failed concurrent write on another diary',
+        async () => {
+          const [held, denied] = await race(
+            () => call(left, 'hold', hold(27, 19, window('10:00', '11:00'))),
+            () => call(right, 'hold', hold(27, 20, window('10:00', '11:00'))),
+          );
+          assert.equal(denied.refused, 'booking.slotOccupied');
+          const confirmed = await call(left, 'confirm', terms(27, held));
+          await call(left, 'cancel', terms(27, confirmed));
+          const other = await call(
+            right,
+            'hold',
+            hold(27, 20, window('10:00', '11:00')),
+          );
+          assert.equal(other.state, 'hold');
+          const chain = await admin.query(
+            `SELECT v.payload #>> '{owners,value,0,previousCursor}' AS prev,
+          v.payload #>> '{owners,value,0,cursor}' AS current,h.booking_id FROM platform.booking_history h
+          JOIN platform.booking_owner_cursors o USING(tenant_id,environment_id,owner_key)
+          JOIN platform.trust_domain_events v ON (v.tenant_id,v.environment_id,v.invocation_id)=(h.tenant_id,h.environment_id,h.receipt_id)
+          WHERE o.record_id=$1 ORDER BY h.cursor_value`,
+            [owner(27)],
+          );
+          assert.deepEqual(
+            chain.rows,
+            [held, held, held, other].map((b, i) => ({
+              prev: String(i),
+              current: String(i + 1),
+              booking_id: b.bookingId,
+            })),
+          );
+        },
+      );
+      await t.test(
         'post-lock today and Change interval retain the agreement and clamp occupation',
         async () => {
           const today = {
@@ -487,7 +770,7 @@ test('booking commitment writer', async (t) => {
             ).rows[0]!;
           assert.equal(
             (await project(early.bookingId)).agreed.toISOString(),
-            '2030-02-10T07:00:00.000Z',
+            '2030-02-10T15:00:00.000Z',
           );
           assert.equal(
             (await project(early.bookingId)).occupied.toISOString(),
@@ -512,16 +795,10 @@ test('booking commitment writer', async (t) => {
           );
           assert.equal(
             (await project(later.bookingId)).agreed.toISOString(),
-            '2030-02-10T07:00:00.000Z',
+            '2030-02-10T15:00:00.000Z',
           );
           await left.query('BEGIN');
-          await left.query('SELECT platform.booking_apply($1,1,$2,$3,$4,$5)', [
-            release,
-            'example.booking:operation.cancel_unit',
-            randomUUID(),
-            terms(13, moved),
-            actor,
-          ]);
+          await call(left, 'cancel', terms(13, moved));
           const waiting = call(right, 'hold', hold(14, 7, today));
           void waiting.catch(() => undefined);
           await waitForRight();
@@ -624,6 +901,168 @@ test('booking commitment writer', async (t) => {
         },
       );
       await t.test(
+        'before the 08:00 day boundary today occupies from the 06:00 decision',
+        async () => {
+          await time('2030-02-11T13:00Z');
+          const held = await call(
+            left,
+            'hold',
+            hold(28, 13, {
+              kind: 'date',
+              start: '2030-02-11',
+              end: '2030-02-12',
+            }),
+          );
+          assert.equal(held.state, 'hold');
+          const bounds = await admin.query(
+            'SELECT lower(agreed_interval) AS agreed,lower(occupied_interval) AS occupied FROM platform.booking_commitments WHERE booking_id=$1',
+            [held.bookingId],
+          );
+          assert.equal(
+            bounds.rows[0]!.agreed.toISOString(),
+            '2030-02-11T15:00:00.000Z',
+          );
+          assert.equal(
+            bounds.rows[0]!.occupied.toISOString(),
+            '2030-02-11T13:00:00.000Z',
+          );
+          assert.equal(
+            (await call(right, 'hold', hold(29, 13, window('06:30', '07:30'))))
+              .refused,
+            'booking.noLongerAvailable',
+          );
+        },
+      );
+      await t.test(
+        'a worker skips a foreground owner cursor and commits unrelated expiries with colliding user keys',
+        async () => {
+          await time('2030-02-11T14:00Z');
+          const held = await call(
+            left,
+            'hold',
+            hold(32, 10, window('09:00', '10:00')),
+          );
+          const expiryKey = fixtureId(
+            'booking.expire/' + held.bookingId + '/1',
+          );
+          const locked = await call(
+            left,
+            'hold',
+            hold(33, 11, window('09:00', '10:00')),
+            expiryKey,
+          );
+          assert.equal(locked.state, 'hold');
+          await time(locked.deadline);
+          await admin.query('BEGIN');
+          try {
+            await admin.query(
+              'SELECT FROM platform.booking_owner_cursors WHERE record_id=$1 FOR UPDATE',
+              [owner(33)],
+            );
+            await right.query('SET ROLE north_star_workflow_worker');
+            await right.query("SET lock_timeout='1500ms'");
+            await right.query('SELECT platform.booking_sweep_due(128)');
+            const states = await admin.query(
+              'SELECT state FROM platform.booking_commitments WHERE booking_id=$1',
+              [held.bookingId],
+            );
+            assert.equal(states.rows[0]!.state, 'cancelled');
+            assert.equal(
+              (
+                await admin.query(
+                  'SELECT state FROM platform.booking_commitments WHERE booking_id=$1',
+                  [locked.bookingId],
+                )
+              ).rows[0]!.state,
+              'hold',
+            );
+            assert.equal(
+              (
+                await admin.query(
+                  'SELECT FROM platform.booking_receipts WHERE request_key=$1',
+                  [expiryKey],
+                )
+              ).rowCount,
+              2,
+            );
+          } finally {
+            await admin.query('ROLLBACK');
+            await right.query('RESET lock_timeout');
+            await right.query('SET ROLE north_star_runtime');
+          }
+          await admin.query('SELECT platform.booking_sweep_due(128)');
+          assert.equal(
+            (
+              await admin.query(
+                'SELECT state FROM platform.booking_commitments WHERE booking_id=$1',
+                [locked.bookingId],
+              )
+            ).rows[0]!.state,
+            'cancelled',
+          );
+        },
+      );
+      await t.test(
+        'one conflicting receipt leaves only its own hold due',
+        async () => {
+          await time('2030-02-11T14:20Z');
+          const failed = await call(
+            left,
+            'hold',
+            hold(34, 10, window('09:00', '10:00')),
+          );
+          const due = await call(
+            right,
+            'hold',
+            hold(35, 10, window('10:00', '11:00')),
+          );
+          assert.equal(failed.state, 'hold');
+          assert.equal(due.state, 'hold');
+          await admin.query(`CREATE FUNCTION public.conflict_one_expiry() RETURNS trigger LANGUAGE plpgsql AS $$
+          BEGIN IF NEW.operation_id='expireHold' AND NEW.input->>'bookingId'=TG_ARGV[0] THEN
+            RAISE unique_violation; END IF; RETURN NEW; END $$`);
+          // Install the conflict on this one fixture booking, on the same diary as its neighbour.
+          await admin.query(`CREATE TRIGGER booking_expiry_conflict BEFORE INSERT ON platform.booking_receipts
+          FOR EACH ROW EXECUTE FUNCTION public.conflict_one_expiry('${failed.bookingId}')`);
+          try {
+            await time(due.deadline);
+            await admin.query('SELECT platform.booking_sweep_due(128)');
+            assert.deepEqual(
+              (
+                await admin.query(
+                  'SELECT state FROM platform.booking_commitments WHERE booking_id=$1',
+                  [due.bookingId],
+                )
+              ).rows,
+              [{ state: 'cancelled' }],
+            );
+            assert.deepEqual(
+              (
+                await admin.query(
+                  'SELECT state FROM platform.booking_commitments WHERE booking_id=$1',
+                  [failed.bookingId],
+                )
+              ).rows,
+              [{ state: 'hold' }],
+            );
+          } finally {
+            await admin.query(
+              'DROP TRIGGER booking_expiry_conflict ON platform.booking_receipts',
+            );
+          }
+          await admin.query('SELECT platform.booking_sweep_due(128)');
+          assert.deepEqual(
+            (
+              await admin.query(
+                'SELECT revision FROM platform.booking_commitments WHERE booking_id=$1',
+                [failed.bookingId],
+              )
+            ).rows,
+            [{ revision: 2 }],
+          );
+        },
+      );
+      await t.test(
         'the bounded worker expires a due hold once and keeps its original authority',
         async () => {
           await time('2030-02-11T08:00Z');
@@ -665,7 +1104,49 @@ test('booking commitment writer', async (t) => {
           assert.deepEqual(evidence.rows, [{ actor: 'SYSTEM', linked: true }]);
         },
       );
+      await t.test(
+        'a fresh approval is required when the same release returns at a new fence',
+        async () => {
+          await time('2030-02-11T15:00Z');
+          const held = await call(
+            left,
+            'hold',
+            hold(36, 20, window('11:00', '12:00')),
+          );
+          assert.equal(held.state, 'hold');
+          const args = terms(36, held),
+            id = randomUUID(),
+            key = randomUUID();
+          const action = 'example.booking:operation.confirm_unit';
+          await grant(id, action, key, args);
+          const alternate = randomUUID();
+          await admin.query(
+            `INSERT INTO platform.tenant_releases
+          (tenant_id,environment_id,release_id,app_package_revision_id,compiler_version,compiler_semantic_profile_version,
+           output_protocol_version,content_hash,compiler_attestation_digest,verification_evidence_id,created_by)
+          SELECT tenant_id,environment_id,$2,app_package_revision_id,compiler_version,compiler_semantic_profile_version,
+           output_protocol_version,content_hash,compiler_attestation_digest,gen_random_uuid(),created_by
+          FROM platform.tenant_releases WHERE release_id=$1`,
+            [release, alternate],
+          );
+          for (const target of [alternate, release]) {
+            const moved = await admin.query(
+              'UPDATE platform.active_release_pointers SET release_id=$3,fence=fence+1 WHERE tenant_id=$1 AND environment_id=$2 RETURNING fence',
+              [tenant, environment, target],
+            );
+            activeFence = Number(moved.rows[0]!.fence);
+          }
+          assert.equal(activeFence, 3);
+          await assert.rejects(
+            call(right, 'confirm', args, key, 'unit', principal, id),
+            /booking.approvalRequired/u,
+          );
+          const confirmed = await call(right, 'confirm', args, key);
+          assert.equal(confirmed.state, 'confirmed');
+        },
+      );
     } finally {
+      issuer.release();
       left.release();
       right.release();
       admin.release();

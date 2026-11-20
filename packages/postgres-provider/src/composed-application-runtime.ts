@@ -299,6 +299,7 @@ export async function createComposedApplicationRuntime(
   adminPool.on('error', () => undefined);
 
   let runtimePool: pg.Pool | undefined;
+  let approvalPool: pg.Pool | undefined;
   let scannerPool: pg.Pool | undefined;
   let materializerPool: pg.Pool | undefined;
   let modulePool: pg.Pool | undefined;
@@ -336,6 +337,11 @@ export async function createComposedApplicationRuntime(
     // Denial evidence is written on its own connections (SPEED-1).
     evidencePool = rolePool(options.databaseUrl, 'north_star_runtime', 2);
 
+    approvalPool = rolePool(
+      options.databaseUrl,
+      'north_star_approval_issuer',
+      2,
+    );
     const runtimeContext = await trustedContext(identities.runtime);
     const selected = await withReleaseScopeLock(
       adminPool,
@@ -441,7 +447,7 @@ export async function createComposedApplicationRuntime(
       runtimeContext,
       serving,
       metrics,
-      options,
+      { ...options, approvalPool },
       options.documents ? { scanner, scannerPool } : undefined,
     );
     const entry = new AuthenticatedRequestRuntimeEntryAdapter(
@@ -461,6 +467,7 @@ export async function createComposedApplicationRuntime(
       materializerPool,
       modulePool,
       evidencePool,
+      approvalPool,
       ...(scannerPool ? [scannerPool] : []),
       adminPool,
     ];
@@ -508,6 +515,7 @@ export async function createComposedApplicationRuntime(
         modulePool,
         evidencePool,
         scannerPool,
+        approvalPool,
         adminPool,
       ]
         .filter((pool): pool is pg.Pool => pool !== undefined)

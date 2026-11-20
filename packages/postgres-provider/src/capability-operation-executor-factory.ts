@@ -1,6 +1,9 @@
 import type { Pool } from 'pg';
 
-import type { RegisteredCapabilityOperationExecutor } from '../../runtime/src/semantic-operation-gateway.js';
+import type {
+  RegisteredCapabilityOperationExecutor,
+  SemanticOperationMediationAuthority,
+} from '../../runtime/src/semantic-operation-gateway.js';
 import type { SemanticQueryGateway } from '../../runtime/src/semantic-query-gateway.js';
 import type { TrustedActorEnvelopeIssuer } from './trust/trusted-actor-envelope.js';
 
@@ -10,6 +13,8 @@ export interface PinnedCapabilityProjection {
 }
 
 export interface PostgresCapabilityOperationExecutorContext {
+  readonly approvalPool?: Pool;
+  readonly verifyConfirmation?: SemanticOperationMediationAuthority['assertConfirmationGrant'];
   readonly actorIssuer: TrustedActorEnvelopeIssuer;
   readonly currentInstant: () => string;
   readonly pool: Pool;

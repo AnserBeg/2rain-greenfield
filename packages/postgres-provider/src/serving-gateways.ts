@@ -70,6 +70,7 @@ export function composeServingGateways(
   options: {
     readonly providerErrorMappings: readonly ModuleProviderErrorMapping[];
     readonly capabilityOperationExecutorFactories?: readonly PostgresCapabilityOperationExecutorFactory[];
+    readonly approvalPool?: pg.Pool;
     readonly monotonicMilliseconds?: () => number;
   },
   documentOptions?: {
@@ -155,6 +156,9 @@ export function composeServingGateways(
         actorIssuer,
         currentInstant: () => new Date().toISOString(),
         pool: runtimePool,
+        verifyConfirmation:
+          operationMediation.assertConfirmationGrant.bind(operationMediation),
+        ...(options.approvalPool ? { approvalPool: options.approvalPool } : {}),
         projection: release.projection,
         queryGateway: routed.queryGateway ?? queryGateway,
         releaseContentHash: release.releaseRoot,

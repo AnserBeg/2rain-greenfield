@@ -7,6 +7,7 @@ import {
   createHash,
   createHmac,
   randomBytes,
+  randomUUID,
   timingSafeEqual,
 } from 'node:crypto';
 
@@ -267,6 +268,7 @@ export interface SemanticOperationExecutionRequest {
 }
 
 export interface RegisteredCapabilityOperationExecutionRequest {
+  readonly confirmationGrant?: string;
   readonly authorization: RegisteredCapabilityOperationAuthorization;
   readonly channel: TrustedInvocationChannel;
   readonly context: TrustedRequestContext;
@@ -379,6 +381,8 @@ export function evaluateRegisteredOperationPrecondition(
 }
 
 interface ConfirmationGrantClaims {
+  readonly grantId: string;
+  readonly releaseFence: number;
   readonly environmentId: string;
   readonly expectedRevision: number | null;
   readonly inputDigest: string;
@@ -431,6 +435,8 @@ export class SemanticOperationMediationAuthority {
     }
     const binding = operationTargetBinding(input);
     const claims: ConfirmationGrantClaims = Object.freeze({
+      grantId: randomUUID(),
+      releaseFence: view.pointer.fence,
       environmentId: view.environmentId,
       expectedRevision: binding.expectedRevision,
       inputDigest: digestOperationInput(input),
@@ -465,7 +471,7 @@ export class SemanticOperationMediationAuthority {
     definition: RegisteredOperationDefinition,
     input: ImmutableJsonValue,
     token: string | null,
-  ): void {
+  ): string | undefined {
     if (definition.confirmation === 'none') {
       if (token !== null) {
         throw new SemanticOperationConfirmationGrantError(
@@ -487,6 +493,7 @@ export class SemanticOperationMediationAuthority {
       claims.tenantId !== view.tenantId ||
       claims.environmentId !== view.environmentId ||
       claims.principalId !== view.principalId ||
+      claims.releaseFence !== view.pointer.fence ||
       claims.releaseId !== view.release.releaseId ||
       claims.releaseContentHash !== view.release.contentHash ||
       claims.operationId !== definition.operationId ||
@@ -496,6 +503,7 @@ export class SemanticOperationMediationAuthority {
     ) {
       throw new SemanticOperationConfirmationStaleError(definition.operationId);
     }
+    return claims.grantId;
   }
 
   #verifiedClaims(token: string): ConfirmationGrantClaims {
@@ -1046,6 +1054,9 @@ export class SemanticOperationGateway {
             definition,
             policyVersion: operationDecision.policyVersion,
             authorization: capabilityAuthorization,
+            ...(request.confirmationGrant
+              ? { confirmationGrant: request.confirmationGrant }
+              : {}),
             policyEvaluatorVersion: SEMANTIC_OPERATION_POLICY_EVALUATOR_VERSION,
           }) as RegisteredCapabilityOperationExecutionRequest,
         );
@@ -2194,6 +2205,8 @@ function isConfirmationGrantClaims(
   const keys = [
     'environmentId',
     'expectedRevision',
+    'grantId',
+    'releaseFence',
     'inputDigest',
     'operationId',
     'principalId',
@@ -2205,6 +2218,8 @@ function isConfirmationGrantClaims(
   ].sort();
   if (Object.keys(value).sort().join('\0') !== keys.join('\0')) return false;
   return (
+    isUuid(value.grantId) &&
+    Number.isSafeInteger(value.releaseFence) &&
     isUuid(value.environmentId) &&
     (value.expectedRevision === null ||
       (Number.isSafeInteger(value.expectedRevision) &&

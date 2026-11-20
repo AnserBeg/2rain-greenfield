@@ -468,6 +468,23 @@ test('human-required operations refuse every channel without a matching server g
   );
   assert.equal(executor.nonAcceptedCalls.length, channels.length + 1);
 
+  const reactivated = await issuedView(compiled, policy, undefined, 3);
+  await assert.rejects(
+    gateway.invoke(
+      reactivated,
+      {
+        confirmationGrant: grant,
+        idempotencyKey: randomUUID(),
+        input,
+        operationId,
+        schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+      },
+      mediation.issueInvocation(reactivated, 'UI'),
+    ),
+    SemanticOperationConfirmationStaleError,
+    'reactivation of the same release requires fresh approval',
+  );
+
   const [grantPayload, grantSignature] = grant.split('.');
   assert.ok(grantPayload && grantSignature);
   const forgedGrant = `${grantPayload}.${grantSignature.startsWith('a') ? 'b' : 'a'}${grantSignature.slice(1)}`;
@@ -485,7 +502,7 @@ test('human-required operations refuse every channel without a matching server g
     ),
     SemanticOperationConfirmationGrantError,
   );
-  assert.equal(executor.nonAcceptedCalls.length, channels.length + 2);
+  assert.equal(executor.nonAcceptedCalls.length, channels.length + 3);
 
   const accepted = await gateway.invoke(
     view,
@@ -768,6 +785,7 @@ async function issuedView(
   transform: (
     value: LoadedRequestRuntimeDefinition['projections'],
   ) => LoadedRequestRuntimeDefinition['projections'] = (value) => value,
+  fence = 1,
 ): Promise<RequestRuntimeView> {
   const identity: AuthenticatedIdentity = {
     environmentId,
@@ -778,7 +796,7 @@ async function issuedView(
     async load(): Promise<LoadedRequestRuntimeDefinition> {
       return {
         environmentId,
-        pointer: { fence: 1, pointerId },
+        pointer: { fence, pointerId },
         projections: transform(runtimeProjections(compiled)),
         release: { contentHash: compiled.releaseRoot, releaseId },
         tenantId,

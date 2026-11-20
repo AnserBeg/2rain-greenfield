@@ -34,6 +34,7 @@ import { erpTransport, sessionCookie } from './staff-erp-transport.js';
 export async function createPilotApplication(options: {
   realm: StaffRealm;
   runtimeDatabaseUrl: string;
+  approvalDatabaseUrl?: string;
   identityCa?: Buffer;
   rateKey: Buffer;
   trustedIngress?: readonly string[];
@@ -48,9 +49,15 @@ export async function createPilotApplication(options: {
   const evidence = meterPoolStatements(
     new pg.Pool({ connectionString: options.runtimeDatabaseUrl, max: 2 }),
   );
-  const close = () => Promise.all([pool.end(), evidence.end()]);
+  const approvalPool = options.approvalDatabaseUrl
+    ? new pg.Pool({ connectionString: options.approvalDatabaseUrl, max: 2 })
+    : undefined;
+  const close = () =>
+    Promise.all([pool.end(), evidence.end(), approvalPool?.end()]);
   try {
     await assertPilotDatabase(pool, 'north_star_runtime', r);
+    if (approvalPool)
+      await assertPilotDatabase(approvalPool, 'north_star_approval_issuer', r);
     const service = await new AuthenticatedRequestEntryAdapter(async () => ({
       tenantId: r.tenantId,
       environmentId: r.environmentId,
@@ -72,6 +79,7 @@ export async function createPilotApplication(options: {
       serving,
       new ObservabilityMetrics(),
       {
+        ...(approvalPool ? { approvalPool } : {}),
         capabilityOperationExecutorFactories: CAPABILITY_EXECUTOR_FACTORIES,
         providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
       },
