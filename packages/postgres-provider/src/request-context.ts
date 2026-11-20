@@ -1,6 +1,10 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
-import { assertTrustedRequestContext } from '@north-star/runtime';
+import {
+  AuthenticationRequiredError,
+  AuthenticatedRequestEntryAdapter,
+  assertTrustedRequestContext,
+} from '@north-star/runtime';
 import type { Pool, PoolClient } from 'pg';
 
 import type { TrustedRequestContext } from '@north-star/runtime';
@@ -302,6 +306,19 @@ class ReadSnapshot {
       );
   }
 
+  async resolveStaffPrincipal(session: StaffRequestSession): Promise<string> {
+    return this.#exclusive(async () => {
+      if (!this.#client) {
+        this.#client = await this.pool.connect();
+        await this.#client.query(
+          'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY',
+        );
+        await assertRuntimeLoginRole(this.#client);
+      }
+      return lookupStaffPrincipal(this.#client, session);
+    });
+  }
+
   async join<T>(
     context: TrustedRequestContext,
     run: (
@@ -328,9 +345,13 @@ class ReadSnapshot {
         return runTrustedTransaction(this.pool, context, (client) =>
           run(client, null),
         );
-      if (this.#client && !sameIdentity(this.#identity, context))
+      if (
+        this.#client &&
+        this.#identity &&
+        !sameIdentity(this.#identity, context)
+      )
         await this.#end();
-      if (!this.#client) await this.#open(context);
+      if (!this.#client || !this.#identity) await this.#open(context);
       const client = this.#client!;
       try {
         return await joinedReads.run(this, () =>
@@ -422,7 +443,9 @@ class ReadSnapshot {
     try {
       await client.query('COMMIT');
       open = false;
-      await client.query('BEGIN READ ONLY');
+      await client.query(
+        staffSessions.has(identity) ? 'BEGIN' : 'BEGIN READ ONLY',
+      );
       open = true;
       await setTrustedIdentity(client, identity);
       live =
@@ -460,13 +483,16 @@ class ReadSnapshot {
   }
 
   async #open(context: TrustedRequestContext): Promise<void> {
-    const client = await this.pool.connect();
+    const started = this.#client !== null;
+    const client = this.#client ?? (await this.pool.connect());
     this.#client = client;
     this.#identity = context;
     try {
-      await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
-      await assertRuntimeLoginRole(client);
-      await setTrustedIdentity(client, context);
+      if (!started) {
+        await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+        await assertRuntimeLoginRole(client);
+      }
+      await setTrustedIdentity(client, context, 'read');
       const result = await client.query<{ policy_version: string }>(
         SNAPSHOT_POLICY_VERSION_SQL,
         [context.tenantId, context.environmentId],
@@ -599,10 +625,87 @@ async function assertRuntimeLoginRole(client: PoolClient): Promise<void> {
   }
 }
 
-async function setTrustedIdentity(
+export interface StaffRequestSession {
+  readonly tenantId: string;
+  readonly environmentId: string;
+  readonly digest: Buffer;
+  readonly foreground: boolean;
+}
+const staffSessions = new WeakMap<TrustedRequestContext, StaffRequestSession>();
+async function lookupStaffPrincipal(
+  client: Pool | PoolClient,
+  session: StaffRequestSession,
+) {
+  const row = await client.query<{ principal: string | null }>(
+    'SELECT platform.staff_session_principal($1,$2,$3,false,false) AS principal',
+    [session.tenantId, session.environmentId, session.digest],
+  );
+  if (!row.rows[0]?.principal)
+    throw new AuthenticationRequiredError('staff session required');
+  return row.rows[0].principal;
+}
+
+/** The binding is private to the issued context and never enters a view, audit or model input. */
+export function staffRequestEntry(
+  pool: Pool,
+  fromRequest: (
+    req: Parameters<AuthenticatedRequestEntryAdapter['enter']>[0],
+  ) => StaffRequestSession | null,
+): AuthenticatedRequestEntryAdapter {
+  return new (class extends AuthenticatedRequestEntryAdapter {
+    constructor() {
+      super(async () => null);
+    }
+    override async enter(
+      request: Parameters<AuthenticatedRequestEntryAdapter['enter']>[0],
+    ) {
+      const session = fromRequest(request);
+      const adapter = new AuthenticatedRequestEntryAdapter(async () => {
+        if (!session) return null;
+        const snapshot = currentReadSnapshot(pool);
+        const principalId = snapshot
+          ? await snapshot.resolveStaffPrincipal(session)
+          : await lookupStaffPrincipal(pool, session);
+        return {
+          tenantId: session.tenantId,
+          environmentId: session.environmentId,
+          principalId,
+        };
+      });
+      const context = await adapter.enter(request);
+      staffSessions.set(context, session!);
+      return context;
+    }
+  })();
+}
+
+export async function setTrustedIdentity(
   client: PoolClient,
   context: TrustedRequestContext,
+  mode: 'read' | 'write' = 'write',
 ): Promise<void> {
+  const session = staffSessions.get(context);
+  if (session) {
+    const result = await client.query(
+      `SELECT set_config('north_star.tenant_id',$1,true),
+      set_config('north_star.environment_id',$2,true),set_config('north_star.principal_id',verified::text,true),
+      set_config('north_star.request_id',$4,true)
+      FROM platform.staff_session_principal($1::text::uuid,$2::text::uuid,$5,$6,$7) AS verified
+      WHERE verified=$3::uuid`,
+      [
+        context.tenantId,
+        context.environmentId,
+        context.principalId,
+        context.requestId,
+        session.digest,
+        mode === 'write',
+        session.foreground,
+      ],
+    );
+    if (!result.rowCount)
+      throw new AuthenticationRequiredError('staff session expired');
+    return;
+  }
   // ADR-0015 keeps legal entity as explicit business scope. Only tenancy,
   // environment, and request identity are ambient database context axes.
   await client.query(

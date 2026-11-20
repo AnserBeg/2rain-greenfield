@@ -1,6 +1,6 @@
 # UPGRADE-2 — platform upgrades for customized companies
 
-Slice 0 proposes [ADR-0084](../../decisions/ADR-0084-platform-upgrades-for-customized-tenants.md) for Fable. Implementation awaits the design ruling and the CUSTOMIZE-3 and WORKFLOW-1 prerequisites. The first-customer gate includes the survival suite, deployment check and legacy fixtures.
+Slice 0 proposes [ADR-0085](../../decisions/ADR-0085-platform-upgrades-for-customized-tenants.md) for Fable. Implementation awaits the design ruling and the CUSTOMIZE-3 and WORKFLOW-1 prerequisites. The first-customer gate includes the survival suite, deployment check and legacy fixtures.
 
 ## Design decisions
 

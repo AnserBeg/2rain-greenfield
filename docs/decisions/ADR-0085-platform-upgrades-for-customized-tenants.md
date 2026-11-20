@@ -1,4 +1,4 @@
-# ADR-0084. Ship platform updates to customized companies
+# ADR-0085. Ship platform updates to customized companies
 
 **Proposed for Fable’s design read, 2026-11-20.** UPGRADE-2, design only. The owner’s ruling on the approval amendment is pending. Build follows that ruling and the landing of CUSTOMIZE-3 and WORKFLOW-1 authoring, verification and approvals. The survival and deployment gates are due before the first real customer.
 
