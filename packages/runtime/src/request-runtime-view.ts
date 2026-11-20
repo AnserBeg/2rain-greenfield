@@ -1,3 +1,4 @@
+import { BOOKING_OPERATION_READER } from '@north-star/canonical-model';
 import {
   assertTrustedRequestContext,
   type AuthenticatedRequestEntryAdapter,
@@ -176,7 +177,7 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.operation]: {
     capabilityId: 'northstar.runtime:capability.operation-catalog',
-    maximumSupportedVersion: 4,
+    maximumSupportedVersion: BOOKING_OPERATION_READER,
   },
   [REQUEST_RUNTIME_FORMULA_RULE_FAMILY]: {
     capabilityId: 'northstar.runtime:capability.formula-rule',
