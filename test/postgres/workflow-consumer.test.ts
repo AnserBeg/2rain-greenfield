@@ -38,6 +38,8 @@ import {
   WORKFLOW_SDK_VERSION,
 } from '../../packages/postgres-provider/src/workflow-execution.js';
 import { PostgresWorkflowGateway } from '../../packages/postgres-provider/src/workflow-gateway.js';
+import { storeWorkflowBundle } from '../../packages/postgres-provider/src/workflow-bundle.js';
+import { InMemoryWorkflowRun } from '../../packages/postgres-provider/src/workflow-run.js';
 import { generateWorkflowSdk } from '../../packages/postgres-provider/src/workflow-sdk.js';
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
 import { PostgresImmutableReleaseRepository } from '../../packages/postgres-provider/src/release-repository.js';
@@ -628,6 +630,58 @@ test(
               }
             },
           );
+          await t.test(
+            'only a recorded human Retry can advance the run fence',
+            async () => {
+              const { rows } = await pool.query<{
+                old_fence: string;
+                new_fence: string;
+              }>(
+                `SELECT r.execution_fence AS old_fence, p.fence AS new_fence
+                 FROM platform.workflow_runs AS r
+                 JOIN platform.active_release_pointers AS p USING (tenant_id, environment_id, pointer_id)
+                WHERE r.run_id = $1`,
+                [secondRun],
+              );
+              const { old_fence: oldFence, new_fence: newFence } = rows[0]!;
+              const advance = `UPDATE platform.workflow_runs
+                SET execution_fence = $2, status = 'RUNNABLE', reason = NULL WHERE run_id = $1`;
+              try {
+                await assert.rejects(
+                  withWorkflowTransaction(workerPool, scope, (client) =>
+                    client.query(advance, [secondRun, newFence]),
+                  ),
+                  { code: '42501' },
+                  'worker can update the run fence and status directly',
+                );
+                // Simulate a legacy row advanced before the database grant was revoked.
+                await pool.query(advance, [secondRun, newFence]);
+                await restarted.step(scope, secondRun);
+                assert.equal(
+                  await operationReceiptCount(pool, secondRun),
+                  0,
+                  'replay dispatched without a human Retry decision',
+                );
+                assert.equal(
+                  await runStatus(pool, secondRun),
+                  'SUSPENDED',
+                  'replay did not refuse a fence without a human Retry decision',
+                );
+                const { rows: refusal } = await pool.query<{ reason: string }>(
+                  'SELECT reason FROM platform.workflow_runs WHERE run_id = $1',
+                  [secondRun],
+                );
+                assert.equal(refusal[0]?.reason, 'retry-decision-missing');
+              } finally {
+                await pool.query(
+                  `UPDATE platform.workflow_runs
+                    SET execution_fence = $2, status = 'SUSPENDED', reason = 'stale-release-pin'
+                  WHERE run_id = $1`,
+                  [secondRun, oldFence],
+                );
+              }
+            },
+          );
           assert.deepEqual(
             await restarted.remedy(operator, [secondRun], 'retry'),
             [{ runId: secondRun, outcome: 'retried' }],
@@ -675,6 +729,42 @@ test(
                     originalRole,
                   );
                 }
+              }
+            },
+          );
+
+          await t.test(
+            'a role gained after activation cannot widen a workflow grant',
+            async () => {
+              const allowedRole = 'workflow-receipt-approver';
+              await service.rollback();
+              await provisionLocalDemoAuthorization(
+                pool,
+                operator,
+                bindings,
+                excludedRole,
+              );
+              await service.approve(draft.patchId);
+              await service.activate(draft.patchId);
+              await provisionLocalDemoAuthorization(
+                pool,
+                operator,
+                bindings,
+                allowedRole,
+              );
+              try {
+                const runId = await newRun();
+                await restarted.step(scope, runId);
+                assert.equal(
+                  await operationReceiptCount(pool, runId),
+                  0,
+                  'a newly allowed role widened the activation grant',
+                );
+                assert.equal(await runStatus(pool, runId), 'SUSPENDED');
+              } finally {
+                await service.rollback();
+                await service.approve(draft.patchId);
+                await service.activate(draft.patchId);
               }
             },
           );
@@ -1127,12 +1217,11 @@ test(
           );
 
           const forged = await startApproval();
-          await writeAdversarialApprovalResult(
-            workerPool,
-            scope,
-            forged,
-            true,
-            true,
+          await writeAdversarialApprovalResult(workerPool, scope, forged, true);
+          // Corrupt the run as an administrator to exercise replay's independent check.
+          await pool.query(
+            "UPDATE platform.workflow_runs SET status = 'RUNNABLE' WHERE run_id = $1",
+            [forged],
           );
           await restarted.step(scope, forged);
           assert.equal(await runStatus(pool, forged), 'QUARANTINED');
@@ -1144,7 +1233,6 @@ test(
             scope,
             declined,
             true,
-            false,
           );
           await assertApprovalBoundary(
             pool,
@@ -1163,7 +1251,6 @@ test(
             workerPool,
             scope,
             accepted,
-            false,
             false,
           );
           await assertApprovalBoundary(
@@ -1189,6 +1276,72 @@ test(
           assert.equal(await journalCount(pool, ordinary, 'RESULT'), 1);
           await restarted.step(scope, ordinary);
           assert.equal(await journalCount(pool, ordinary, 'REQUEST'), 2);
+
+          await t.test(
+            'same-pin Retry asks for fresh approval before an uncommitted effect',
+            async () => {
+              const runId = await startApproval();
+              const previous = await pendingApproval(pool, runId);
+              assert.equal(
+                await decideApproval(
+                  runtimePool,
+                  operator,
+                  runId,
+                  previous.plan_digest,
+                  previous.fence,
+                  'APPROVED',
+                ),
+                true,
+              );
+              await restarted.step(scope, runId);
+              assert.equal(await journalCount(pool, runId, 'REQUEST'), 2);
+              await service.rollback();
+              await restarted.step(scope, runId);
+              assert.equal(await runStatus(pool, runId), 'SUSPENDED');
+              await service.approve(draft.patchId);
+              await service.activate(draft.patchId);
+
+              assert.deepEqual(
+                await restarted.remedy(operator, [runId], 'retry'),
+                [{ runId, outcome: 'retried' }],
+              );
+              await restarted.step(scope, runId);
+              assert.equal(
+                await runStatus(pool, runId),
+                'WAITING',
+                'retry quarantined historical approval instead of requesting a fresh decision',
+              );
+              assert.equal(await operationReceiptCount(pool, runId), 0);
+              const fresh = await pendingApproval(pool, runId);
+              assert.notEqual(fresh.fence, previous.fence);
+              assert.notEqual(fresh.plan_digest, previous.plan_digest);
+              assert.equal(
+                await decideApproval(
+                  runtimePool,
+                  operator,
+                  runId,
+                  previous.plan_digest,
+                  previous.fence,
+                  'APPROVED',
+                ),
+                false,
+              );
+              assert.equal(
+                await decideApproval(
+                  runtimePool,
+                  operator,
+                  runId,
+                  fresh.plan_digest,
+                  fresh.fence,
+                  'APPROVED',
+                ),
+                true,
+              );
+              await restarted.step(scope, runId);
+              assert.equal(await operationReceiptCount(pool, runId), 1);
+              assert.equal(await journalCount(pool, runId, 'RESULT'), 2);
+            },
+          );
 
           await t.test(
             'a shared approval needs a global grant for the exact action',
@@ -1445,6 +1598,149 @@ test(
               await worker().tick(scope);
               assert.equal(await runStatus(pool, stale), 'SUSPENDED');
               assert.equal(await journalCount(pool, stale, 'RESULT'), 1);
+            },
+          );
+
+          const fixtureGrants = { queries: [], operations: [] };
+          const fixtureBody = 'sdk.sleep(10);';
+          const fixtureDigest = await withTrustedRequestTransaction(
+            runtimePool,
+            operator,
+            (client) =>
+              storeWorkflowBundle(client, operator, {
+                body: fixtureBody,
+                executable: compileWorkflowBody(
+                  fixtureBody,
+                  generateWorkflowSdk(view, fixtureGrants),
+                ).executable,
+                authoredBy: operator.principalId,
+                fixtures: [
+                  {
+                    event: {
+                      type: 'goodsReceiptPosted',
+                      eventId: randomUUID(),
+                      receiptId: randomUUID(),
+                      legalEntityId: COMPANY,
+                    },
+                    effects: [
+                      {
+                        call: { kind: 'sleep', milliseconds: 10 },
+                        result: null,
+                      },
+                    ],
+                  },
+                ],
+              }),
+          );
+          const workflowPatch = (workflowId: string) => ({
+            kind: 'saveWorkflow' as const,
+            workflow: {
+              schemaVersion: 'v6' as const,
+              workflowId,
+              trigger: 'goodsReceiptPosted' as const,
+              bodyDigest: fixtureDigest,
+              grants: fixtureGrants,
+            },
+          });
+          await t.test(
+            'candidate admission refuses post-fixture replay divergence',
+            async () => {
+              const candidate = await service.draft(
+                workflowPatch('divergent-replay'),
+                'conversationalAi',
+              );
+              assert.ok(
+                candidate.status === 'drafted',
+                JSON.stringify(candidate),
+              );
+              const step = InMemoryWorkflowRun.prototype.step;
+              const firstPass = new WeakSet<InMemoryWorkflowRun>();
+              const divergence = t.mock.method(
+                InMemoryWorkflowRun.prototype,
+                'step',
+                async function (this: InMemoryWorkflowRun) {
+                  if (!firstPass.has(this) && this.snapshot().prefix.length > 0)
+                    return {
+                      kind: 'quarantined',
+                      cursor: 0,
+                      reason: 'changed-request',
+                    } as const;
+                  firstPass.add(this);
+                  return step.call(this);
+                },
+              );
+              try {
+                await assert.rejects(
+                  service.approve(candidate.patchId),
+                  /Workflow replay failed at cursor 0 \(quarantined\)/u,
+                  'candidate was admitted without running the recorded fixture again',
+                );
+              } finally {
+                divergence.mock.restore();
+              }
+            },
+          );
+
+          await t.test(
+            'candidate admission refuses incomplete workflow evidence',
+            async () => {
+              const complete = await service.draft(
+                workflowPatch('complete-evidence'),
+                'conversationalAi',
+              );
+              assert.ok(
+                complete.status === 'drafted',
+                JSON.stringify(complete),
+              );
+              await service.approve(complete.patchId);
+              await service.activate(complete.patchId);
+              const candidate = await service.draft(
+                workflowPatch('missing-evidence'),
+                'conversationalAi',
+              );
+              assert.ok(
+                candidate.status === 'drafted',
+                JSON.stringify(candidate),
+              );
+              await pool.query(`
+              CREATE FUNCTION platform.test_skip_workflow_evidence() RETURNS trigger
+              LANGUAGE plpgsql AS $test$
+              BEGIN
+                IF NEW.workflow_id = 'missing-evidence' THEN RETURN NULL; END IF;
+                RETURN NEW;
+              END
+              $test$;
+              CREATE TRIGGER test_skip_workflow_evidence
+                BEFORE INSERT ON platform.workflow_verification_evidence
+                FOR EACH ROW EXECUTE FUNCTION platform.test_skip_workflow_evidence();
+            `);
+              try {
+                await assert.rejects(
+                  service.approve(candidate.patchId),
+                  /Workflow verification evidence is incomplete or does not match the candidate/u,
+                  'candidate was admitted with one declared workflow missing evidence',
+                );
+                const { rows } = await pool.query<{ workflow_ids: string[] }>(
+                  `SELECT array_agg(w.workflow_id ORDER BY w.workflow_id) AS workflow_ids
+                   FROM platform.tenant_releases AS r
+                   JOIN platform.release_verification_evidence AS e
+                     USING (tenant_id, environment_id, verification_evidence_id)
+                   JOIN platform.workflow_verification_evidence AS w
+                     USING (tenant_id, environment_id, verification_evidence_id)
+                  WHERE r.release_id = $1
+                  GROUP BY e.verification_evidence_id`,
+                  [candidate.releaseId],
+                );
+                assert.deepEqual(rows, [
+                  { workflow_ids: ['complete-evidence'] },
+                ]);
+              } finally {
+                await pool.query(`
+                DROP TRIGGER test_skip_workflow_evidence ON platform.workflow_verification_evidence;
+                DROP FUNCTION platform.test_skip_workflow_evidence();
+              `);
+                await service.rollback();
+              }
             },
           );
 
@@ -1889,7 +2185,6 @@ async function writeAdversarialApprovalResult(
   scope: { tenant_id: string; environment_id: string },
   runId: string,
   result: boolean,
-  resume: boolean,
 ) {
   await withWorkflowTransaction(workerPool, scope, async (client) => {
     await client.query(
@@ -1897,11 +2192,6 @@ async function writeAdversarialApprovalResult(
         VALUES ($1, $2, $3, 0, 'RESULT', convert_to($4, 'UTF8'))`,
       [scope.tenant_id, scope.environment_id, runId, String(result)],
     );
-    if (resume)
-      await client.query(
-        "UPDATE platform.workflow_runs SET status = 'RUNNABLE', reason = NULL WHERE run_id = $1",
-        [runId],
-      );
   });
 }
 
@@ -1960,7 +2250,8 @@ async function assertApprovalBoundary(
 
 async function pendingApproval(pool: pg.Pool, runId: string) {
   const result = await pool.query<{ fence: string; plan_digest: string }>(
-    'SELECT fence, plan_digest FROM platform.workflow_pending_approvals WHERE run_id = $1',
+    `SELECT fence, plan_digest FROM platform.workflow_pending_approvals
+      WHERE run_id = $1 AND status = 'PENDING'`,
     [runId],
   );
   assert.equal(result.rows.length, 1);

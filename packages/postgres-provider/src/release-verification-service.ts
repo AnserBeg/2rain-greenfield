@@ -55,6 +55,7 @@ import {
   REQUEST_RUNTIME_FORMULA_RULE_FAMILY,
   REQUEST_RUNTIME_PROJECTION_FAMILIES,
   issueLegalEntityReadScope,
+  unsupportedRuntimeCapability,
   type CurrentPolicyDecisionRequest,
   type CurrentPolicyGateway,
   type CurrentPolicySubject,
@@ -3107,6 +3108,23 @@ function compiledProjectionBinding(
   const manifest = decode(
     manifestArtifact.canonicalBytes,
   ) as unknown as ProjectionManifestEnvelope;
+  if (familyId === PROJECTION_FAMILY_IDS.workflow) {
+    const requirement = manifest.requiredRuntimeCapability;
+    if (
+      !requirement ||
+      requirement.capabilityId !==
+        reference.requiredRuntimeCapability.capabilityId ||
+      requirement.minimumVersion !==
+        reference.requiredRuntimeCapability.minimumVersion
+    )
+      throw failure(
+        'WORKFLOW_PROJECTION_MISMATCH',
+        'Workflow manifest capability does not match the release reference',
+      );
+    const unsupported = unsupportedRuntimeCapability(familyId, requirement);
+    if (unsupported)
+      throw failure('UNSUPPORTED_RUNTIME_CAPABILITY', unsupported);
+  }
   const chunk = compiled.bundle.artifacts.find(
     (artifact) => artifact.contentHash === manifest.chunks[0]?.contentHash,
   );
