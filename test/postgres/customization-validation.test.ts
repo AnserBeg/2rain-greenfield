@@ -466,7 +466,7 @@ test(
           assert.ok(draft.status === 'drafted', JSON.stringify(draft));
           await opened.service.approve(draft.patchId);
           await withArchivedCustomizationRuntime(
-            '238b98a6cbb88171983f395ec23179eb4d73b24e',
+            '2042780bcc3889022af36493a2dcaa3a62b8cb56',
             async (run) => {
               await assertArchivedTenantEnvelope(run);
               const read = () =>
@@ -480,7 +480,7 @@ test(
               assert.equal(refused.code, 'UNSUPPORTED_RUNTIME_CAPABILITY');
               assert.ok(
                 refused.message?.includes(
-                  'surface-manifest requires version ' + BOARD_READER,
+                  'surface-manifest requires version ' + BOARD_READER + ' and this runtime supports ' + (BOARD_READER-1),
                 ),
                 refused.message,
               );

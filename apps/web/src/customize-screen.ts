@@ -263,9 +263,11 @@ export async function renderCustomizeScreen(
         const target = (await loadTargets()).boards?.find(
           (b) => b.body.listSurfaceId === board,
         );
-        return target
-          ? page('Add Board view', boardEditor(target) + backLink())
-          : failure('Choose a List with a lifecycle.');
+        if(!target) return failure('Choose a List with a lifecycle.');
+        const id=url.searchParams.get('editBoard');
+        const previous=target.views.find(v=>v.surfaceId===id);
+        if(id && !previous) return failure('This Board is unavailable.');
+        return page(previous ? 'Edit Board' : 'Add Board view',boardEditor(target,previous)+backLink());
       }
       const arrange = url.searchParams.get('arrange');
       if (arrange)
@@ -1234,9 +1236,23 @@ function page(
   });
 }
 
-function boardEditor(target: BoardTarget) {
-  const h = escapeHtml;
-  return `<h1>Add Board view</h1><form method="post"><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="addBoardViewRevision"><input type="hidden" name="list" value="${h(target.body.listSurfaceId)}"><input type="hidden" name="source" value="${h(layoutDigest(target.body))}"><label>View name <input name="label" required maxlength="240" value="${h(target.listLabel + ' board')}"></label><fieldset><legend>Stages in display order</legend>${target.body.grouping.stages.map((s, i) => `<label>${h(s.label)} <input aria-label="${h(s.label)} position" type="number" min="1" max="64" name="stage:${h(s.stateId)}" value="${i + 1}"></label>`).join('')}<p>Leave a position empty to omit that stage.</p></fieldset><button>Draft Board</button></form>`;
+function boardEditor(target:BoardTarget,previous?:BoardTarget['views'][number]) {
+  const h=escapeHtml;
+  const stages=target.body.grouping.stages;
+  const order=previous?.states ?? stages.map(s=>s.stateId);
+  const existing=previous ? '' : target.views.map(v=>{
+    const params=new URLSearchParams({customize:'',board:target.body.listSurfaceId,editBoard:v.surfaceId});
+    return `<a href="/?${h(params.toString())}">Edit ${h(v.label)}${v.lifecycle==='retired'?' (retired)':''}</a>`;
+  }).join(' ');
+  const hidden=(name:string,value:string)=>`<input type="hidden" name="${name}" value="${h(value)}">`;
+  const source=hidden('action','draft')+hidden('kind','addBoardViewRevision')+
+    hidden('list',target.body.listSurfaceId)+hidden('source',layoutDigest(target.body))+
+    (previous ? hidden('viewId',previous.surfaceId)+hidden('predecessor',previous.revisionId) : '');
+  const positions=stages.map(stage=>{
+    const position=order.indexOf(stage.stateId)+1;
+    return `<label>${h(stage.label)} <input aria-label="${h(stage.label)} position" type="number" min="1" max="64" name="stage:${h(stage.stateId)}" value="${position||''}"></label>`;
+  }).join('');
+  return `<h1>${previous?'Edit Board':'Add Board view'}</h1>${existing?'<nav aria-label="Existing Boards">'+existing+'</nav>':''}<form method="post">${source}<label>View name <input name="label" required maxlength="240" value="${h(previous?.label??target.listLabel+' board')}"></label><fieldset><legend>Stages in display order</legend>${positions}<p>Leave a position empty to omit that stage.</p></fieldset><button name="lifecycle" value="active">Draft Board</button>${previous?.lifecycle==='active'?'<button name="lifecycle" value="retired">Draft retirement</button>':''}</form>`;
 }
 function boardSubmission(
   targets: readonly BoardTarget[],
@@ -1245,6 +1261,9 @@ function boardSubmission(
   const target = targets.find((t) => t.body.listSurfaceId === submission.list);
   if (!target || layoutDigest(target.body) !== submission.source)
     throw new Error('The collection changed. Choose the Board again.');
+  const previous=target.views.find(v=>v.surfaceId===submission.viewId);
+  if ((submission.viewId && !previous) || (previous?.revisionId??'') !== (submission.predecessor??''))
+    throw new Error('This Board revision has changed. Reopen it in Customize.');
   const positions = target.body.grouping.stages.flatMap((s) => {
     const value = submission['stage:' + s.stateId];
     return value ? [{ state: s.stateId, order: Number(value) }] : [];
@@ -1260,6 +1279,8 @@ function boardSubmission(
     target,
     submission.label ?? '',
     positions.sort((a, b) => a.order - b.order).map((p) => p.state),
+    previous,
+    submission.lifecycle==='retired'?'retired':'active',
   );
 }
 function layoutPicker(targets: readonly LayoutTarget[]) {

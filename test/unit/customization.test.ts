@@ -2390,6 +2390,17 @@ test('Board revisions bind the tenant and purchase-order machines, cap facts, an
     JSON.stringify(compiled.status === 'compiled' ? null : compiled),
   );
   const release = parseSerializedRelease(compiled.steps[0]!.release);
+  const {projectionPayload}=await import('../compiler/helpers.js');
+  const {boardDeclarationProblem,boardBindingsProblem}=await import('../../packages/postgres-provider/src/board-admission.js');
+  const manifest=projectionPayload<{surfaces:{surfaceId:string;board?:{body:{moves:{operationId:string}[]}}}[]}>(release.compiled,PROJECTION_FAMILY_IDS.surfaceManifest);
+  const operations=projectionPayload(release.compiled,PROJECTION_FAMILY_IDS.operationCatalog);
+  const queries=projectionPayload(release.compiled,PROJECTION_FAMILY_IDS.queryCatalog);
+  assert.equal(boardDeclarationProblem(after,manifest,BOARD_READER),null);
+  assert.equal(boardBindingsProblem(manifest,BOARD_READER,operations,queries),null);
+  assert.match(boardDeclarationProblem(after,manifest,BOARD_READER-1) ?? '',/Board declarations/u);
+  const forged=structuredClone(manifest);
+  forged.surfaces.find(s=>s.surfaceId===boards[0]!.surfaceId)!.board!.body.moves[0]!.operationId='northstar.app:operation.purchase_order_release';
+  assert.match(boardBindingsProblem(forged,BOARD_READER,operations,queries)??'',/Board/u);
   const surface = release.compiled.bundle.releaseManifest.projections.find(
     (p) => p.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
   )!;

@@ -9,6 +9,7 @@ import { arrangeableLayoutFields } from './layout-revision.js';
 import { createHash } from 'node:crypto';
 
 import type { CalculatedDisplayField } from '@north-star/canonical-model';
+import type { WorkflowDefinition } from '../../canonical-model/src/schemas.js';
 import type { ReleaseDiffEnvelope } from '@north-star/compiler';
 
 /**
@@ -24,6 +25,7 @@ export const RENDERED_DIFF_VERSION =
 type Json = Record<string, unknown>;
 
 export interface DiffDefinition extends LayoutDefinition {
+  readonly workflows?: readonly WorkflowDefinition[];
   readonly documentFields?: readonly {
     readonly fieldId: string;
     readonly entityId: string;
@@ -94,6 +96,43 @@ export function renderReleaseDiff(input: {
         ?.label ?? entityId,
     );
   const lines: string[] = [];
+  for (const workflow of to.workflows ?? []) {
+    const previous = from.workflows?.find(
+      ({ workflowId }) => workflowId === workflow.workflowId,
+    );
+    if (
+      previous?.bodyDigest === workflow.bodyDigest &&
+      JSON.stringify(previous.grants) === JSON.stringify(workflow.grants)
+    )
+      continue;
+    const operations = workflow.grants.operations.map((operationId) =>
+      String(
+        to.operations?.find(
+          (operation) => operation.operationId === operationId,
+        )?.label ?? operationId,
+      ),
+    );
+    const summary = [
+      `${previous ? 'Updates' : 'Adds'} workflow “${workflow.workflowId}”. A posted goods receipt starts it.`,
+      ...(operations.length
+        ? [`Operations it may request: ${operations.join(', ')}.`]
+        : []),
+      ...(workflow.grants.queries.length
+        ? [`Reads: ${workflow.grants.queries.join(', ')}.`]
+        : []),
+    ];
+    lines.push(summary.join(' '));
+  }
+  for (const workflow of from.workflows ?? []) {
+    if (
+      !to.workflows?.some(
+        ({ workflowId }) => workflowId === workflow.workflowId,
+      )
+    )
+      lines.push(
+        `Removes workflow “${workflow.workflowId}” from future receipt events.`,
+      );
+  }
   for (const s of to.surfaces) {
     const board = s.board as
       SurfaceBoard | undefined;
@@ -106,7 +145,7 @@ export function renderReleaseDiff(input: {
     )
       continue;
     lines.push(
-      `${s.lifecycle === 'retired' ? 'Retires' : 'Publishes'} Board “${String(s.label)}” for ${entityLabel(to, board.body.entityId)}. Stages: ${board.body.grouping.stages.map((v) => v.label).join(', ')}. Moves: ${board.body.moves.map((v) => v.label).join(', ') || 'none'}.`,
+      `${s.lifecycle === 'retired' ? 'Retires' : 'Publishes'} Board “${String(s.label)}” for ${entityLabel(to, board.body.entityId)}. Stages are ${board.body.grouping.stages.map((v) => v.label).join(', ')}. Available moves are ${board.body.moves.map((v) => v.label).join(', ') || 'none'}. Card facts are ${board.body.facts.map(f=>f.label).join(', ') || 'none'}.`,
     );
   }
   for (const field of to.documentFields ?? []) {

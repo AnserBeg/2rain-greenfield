@@ -1,0 +1,30 @@
+const {readFileSync,writeFileSync}=require('node:fs');
+const {resolve}=require('node:path');
+const assert=require('node:assert/strict');
+const {deriveLanguageCoverageLedger,deriveLanguageCoverageDecisionId,deriveDecisionSetDigest,deriveObligationSetDigest,
+  encodeLanguageCoverageObservationSnapshot,observeLanguageCoverage}=require(resolve('test/helpers/language-conformance-ledger.ts'));
+const {languageCoverageApplicationPackages}=require(resolve('test/helpers/language-coverage-packages.ts'));
+const {lowerStorageTargetV1}=require(resolve('packages/compiler/src/index.ts'));
+const {normalizeApplicationPackage}=require(resolve('packages/canonical-model/src/index.ts'));
+const path='test/fixtures/g2/language-conformance/coverage-decisions.json';
+const doc=JSON.parse(readFileSync(path,'utf8'));
+const ledger=deriveLanguageCoverageLedger(process.cwd());
+const applicationPackages=languageCoverageApplicationPackages();
+const storageTargets=applicationPackages.map(d=>lowerStorageTargetV1(normalizeApplicationPackage(d)));
+const observed=observeLanguageCoverage(ledger,{applicationPackages,storageTargets});
+const snapshot=encodeLanguageCoverageObservationSnapshot(ledger,observed);
+const defects=new Set(doc.acceptedButUnhonoredObligationIds);
+assert.ok([...defects].every(id=>ledger.obligations.some(o=>o.id===id)));
+assert.equal(snapshot.observedCount,doc.observationSnapshot.observedCount);
+const note=' CALENDAR-1 exercises Board declarations on tenant and Purchase Order fixtures. The first-party coverage samples omit Boards.';
+doc.decisions=doc.decisions.map(({decisionId,...body})=>{
+  const obligationSetDigest=deriveDecisionSetDigest(ledger,observed,body.category);
+  if(body.category!=='unobserved')assert.equal(obligationSetDigest,body.obligationSetDigest);
+  body={...body,ledgerDigest:ledger.digest,obligationSetDigest,acceptedButUnhonoredSetDigest:deriveObligationSetDigest(defects)};
+  if(body.category==='unobserved' && !body.rationale.includes(note))body.rationale+=note;
+  return {...body,decisionId:deriveLanguageCoverageDecisionId(decisionId.split('@')[0],body)};
+});
+doc.ledgerDigest=ledger.digest;
+doc.observationSnapshot=snapshot;
+writeFileSync(path,JSON.stringify(doc,null,2)+'\n');
+console.log('coverage',ledger.obligations.length,observed.size,ledger.digest);

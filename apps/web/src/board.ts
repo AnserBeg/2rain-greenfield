@@ -217,7 +217,7 @@ function recordMoves(
     );
   });
 }
-export async function boardSlots(c: BoardContext) {
+export async function boardSlots(c: BoardContext,focusRecordId?:string) {
   const { body } = c.board;
   const { url } = c;
   const stages = body.grouping.stages;
@@ -235,7 +235,7 @@ export async function boardSlots(c: BoardContext) {
   );
   const cursor = url.searchParams.get('cards');
   let after: string | undefined;
-  let message = '';
+  let message = url.searchParams.get('resetListOptions')==='yes' ? '<p role="status">List-only search, filters and sorting were reset for this Board.</p>' : '';
   if (cursor) {
     const anchor = unseal(bindingKey(c, 'page'), cursor);
     if (
@@ -268,6 +268,7 @@ export async function boardSlots(c: BoardContext) {
     ),
   );
   const canReadRecord = await c.gateways.queryGateway.previewEligibility(c.view,body.getQueryId,c.company) === 'eligible';
+  let focusCard=false;
   const columns = pageStages
     .map((stage) => {
       const matches = page.records.filter(
@@ -285,8 +286,10 @@ export async function boardSlots(c: BoardContext) {
           ? `<ul>${cards
               .map((r) => {
                 const title = String(r.values[body.titleFieldId] ?? r.recordId);
-                const controls = recordMoves(c, r, moves).length
-                  ? `<form method="post" action="${h(link(url, {}))}">${hidden('boardAction', 'open')}${hidden('recordId', r.recordId)}${hidden('expectedRevision', r.revision)}${hidden('sourceState', stage.stateId)}<button id="move-${h(r.recordId)}" aria-label="Move card: ${h(title)}">Move card</button></form>`
+                const movable=recordMoves(c,r,moves).length>0;
+                if(movable && r.recordId===focusRecordId)focusCard=true;
+                const controls = movable
+                  ? `<form method="post" action="${h(link(url, {}))}">${hidden('boardAction', 'open')}${hidden('recordId', r.recordId)}${hidden('expectedRevision', r.revision)}${hidden('sourceState', stage.stateId)}<button id="move-${h(r.recordId)}"${r.recordId===focusRecordId?' autofocus':''} aria-label="Move card: ${h(title)}">Move card</button></form>`
                   : '';
                 const facts = body.facts
                   .filter((f) => r.values[f.fieldId] != null)
@@ -295,7 +298,7 @@ export async function boardSlots(c: BoardContext) {
                       `<div><dt>${h(f.label)}</dt><dd>${h(String(r.displayValues?.[f.fieldId] ?? r.values[f.fieldId]))}</dd></div>`,
                   )
                   .join('');
-                return `<li>${canReadRecord ? `<a href="${h(surfaceHref(c.record,r.recordId,false,{view:c.view,legalEntitySelection:c.company ? [c.company] : []}))}">${h(title)}</a>` : h(title)}<span class="status-chip" data-status-role="${h(stage.role ?? 'neutral')}">● ${h(stage.label)}</span>${facts ? `<dl>${facts}</dl>` : ''}${controls}</li>`;
+                return `<li>${canReadRecord ? `<a href="${h(surfaceHref(c.record,r.recordId,false,{view:c.view,legalEntitySelection:c.company ? [c.company] : []}))}">${h(title)}</a>` : h(title)}<span class="status-pill"${stage.role ? ` data-status-role="${h(stage.role)}"` : ''}>${h(stage.label)}</span>${facts ? `<dl>${facts}</dl>` : ''}${controls}</li>`;
               })
               .join('')}</ul>`
           : page.partial
@@ -312,7 +315,7 @@ export async function boardSlots(c: BoardContext) {
     )
     .join(' ');
   return {
-    title: `<h1 id="board-heading" tabindex="-1">${h(c.surface.label)}</h1>`,
+    title: `<h1 id="board-heading" tabindex="-1"${focusRecordId && !focusCard?' autofocus':''}>${h(c.surface.label)}</h1>`,
     savedViews: tabs ? `<nav aria-label="Saved views">${tabs}</nav>` : '',
     stageSelector: `<nav aria-label="Select stage">${stages.map((s) => `<a href="${h(link(url, { stage: s.stateId, cards: null }))}"${s.stateId === stages[index]!.stateId ? ' aria-current="true"' : ''}>${h(s.label)}</a>`).join(' ')}</nav>`,
     columns: message + `<div class="board-columns">${columns}</div>`,
@@ -330,7 +333,7 @@ export async function boardTask(
   form: SurfaceRuntimeSubmission,
 ): Promise<BoardTaskResult> {
   const { body } = c.board;
-  const back = `<a href="${h(link(c.url, { cards: null }))}#board-heading">Back to Board</a>`;
+  const back = `<a href="${h(link(c.url, { cards: null }))}#board-heading">Cancel move and return to Board</a>`;
   const refuse = (message: string, statusCode = 409) => ({
     html: `<section role="alert"><h1>Move card</h1><p>${h(message)}</p>${back}</section>`,
     statusCode,

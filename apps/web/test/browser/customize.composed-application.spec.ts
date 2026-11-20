@@ -660,6 +660,7 @@ test('a keyboard user moves a card through its reviewed Task with JavaScript dis
         for(let n=0;n<11;n++)await createCard('Prospect '+String(n+1),randomUUID());
         const full=await measure();
         expect(full.statements).toBe(sparse.statements);
+        process.stdout.write('Board page work '+JSON.stringify({sparse,full})+'\n');
         const compactCards=page.locator('.board-column:visible li');
         await expect(compactCards).toHaveCount(10);
         await page.getByRole('link',{name:'More Open cards'}).press('Enter');

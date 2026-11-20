@@ -4,7 +4,7 @@ import { STATUS_ROLES } from './constants.js';
 import type { SurfaceComposition, SurfaceList } from './schemas.js';
 
 // Assigned against main immediately before integration.
-export const BOARD_READER = 29;
+export const BOARD_READER = 30;
 const id = z.string().min(5).max(180);
 const text = z.string().min(1).max(240);
 const field = z.strictObject({ fieldId: id, label: text });
@@ -118,6 +118,7 @@ export function boardForList(
     !query ||
     !ownerQuery ||
     !entityId ||
+    ownerQuery.lifecycle === 'retired' ||
     query.readModel ||
     query.tier !== 'q0' ||
     (query.maximumResultCount as number) < 2 ||
@@ -129,8 +130,11 @@ export function boardForList(
     canonicalizeAndHash(selectedFields(ownerQuery)).contentHash !== canonicalizeAndHash(selectedFields(query)).contentHash
   )
     return null;
+  const scope=(query.legalEntityScope as {operand:{parameterId:string}}|undefined);
+  if((query.parameters as {parameterId:string}[]|undefined)?.some(p=>p.parameterId!==scope?.operand.parameterId))
+    return null;
   const machine = def.stateMachines?.find(
-    (m) => target(m.entity) === entityId,
+    (m) => target(m.entity) === entityId && m.lifecycle !== 'retired',
   ) as unknown as Machine | undefined;
   if (!machine) return null;
   const stateFieldId = machine.machineId.replace(':', ':derived_state_field.');
@@ -141,7 +145,7 @@ export function boardForList(
       def.queries.some(
         (q) =>
           q.queryId === target(s.dataSource) &&
-          q.queryType === 'get' &&
+          q.queryType === 'get' && q.lifecycle !== 'retired' &&
           target(q.sourceEntity) === entityId,
       ),
   );
@@ -188,7 +192,7 @@ export function boardForList(
             def.queries.some(
               (q) =>
                 q.queryId === target(op.readBack) &&
-                q.queryType === 'get' &&
+                q.queryType === 'get' && q.lifecycle !== 'retired' &&
                 target(q.sourceEntity) === entityId,
             ) &&
             (op.effect as Row).kind === 'transitionStateEffect' &&
@@ -204,7 +208,7 @@ export function boardForList(
         })),
     )
     .sort((a, b) => a.operationId.localeCompare(b.operationId, 'en'));
-  return BoardBodySchema.parse({
+  const result=BoardBodySchema.safeParse({
     version: 1,
     entityId,
     listSurfaceId,
@@ -236,6 +240,7 @@ export function boardForList(
         }),
     },
   });
+  return result.success ? result.data : null;
 }
 
 export function boardWithStages(

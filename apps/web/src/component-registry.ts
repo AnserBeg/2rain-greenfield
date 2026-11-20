@@ -265,7 +265,7 @@ export function renderSurfaceDataComponent({
 }
 
 type SurfaceComponentRenderer = (context: SurfaceComponentContext) => string;
-type MutationSurfaceRole = 'form' | 'record';
+type MutationSurfaceRole = 'form' | 'record' | 'board';
 
 interface SurfaceSlotRegistration {
   readonly className: string;
@@ -298,6 +298,7 @@ const surfaceSlotRegistry: Readonly<Record<string, SurfaceSlotRegistration>> =
       renderer: renderBoardSlot,
     },
     'board:columns': {
+      mutationIntents:{board:['command']},
       className: 'board-columns-slot',
       ownsDataResolution: true,
       renderer: renderBoardSlot,
@@ -576,8 +577,10 @@ function collectionSwitcher(context: SurfaceComponentContext) {
       }
       if (state) {
         const view = list.list?.views.find((v) => v.viewId === state.viewId);
-        if (view && !view.before && !view.open && !view.supply && !view.band)
-          params.set('view', view.viewId);
+        const compatible = view && !view.before && !view.open && !view.supply && !view.band;
+        if (compatible) params.set('view',view.viewId);
+        if(s.board && (state.search || state.referenceScope || state.includeArchived || state.sortIsExplicit || (view && !compatible)))
+          params.set('resetListOptions','yes');
         for (const [key, value] of Object.entries(state.filterValues))
           params.set(key, value);
       }
@@ -597,7 +600,7 @@ function renderBoardSlot(context: SurfaceComponentContext) {
     context.slot.slot === 'title' &&
     context.feedback &&
     'record' in context.feedback
-      ? `<p role="status" tabindex="-1" autofocus data-board-result>${escapeHtml(context.feedback.label)} completed.</p>`
+      ? `<p role="status" data-board-result>${escapeHtml(context.feedback.label)} completed.</p>`
       : '';
   return slotPanel(
     context,
@@ -2133,14 +2136,10 @@ function slotRegistrationSupportsIntent(
   slot: CompiledSurfaceSlot,
   intent: SurfaceOperationIntent,
 ): boolean {
-  if (surface.surfaceRole !== 'form' && surface.surfaceRole !== 'record') {
-    return false;
-  }
-  const registration = surfaceSlotRegistry[`${surface.archetype}:${slot.slot}`];
-  return (
-    registration?.mutationIntents?.[surface.surfaceRole]?.includes(intent) ??
-    false
-  );
+  const role=surface.archetype==='board' && surface.board ? 'board' : surface.surfaceRole;
+  if (role!=='board' && role!=='form' && role!=='record') return false;
+  const registration=surfaceSlotRegistry[`${surface.archetype}:${slot.slot}`];
+  return registration?.mutationIntents?.[role]?.includes(intent) ?? false;
 }
 
 export function surfaceHref(

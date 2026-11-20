@@ -537,7 +537,7 @@ export async function renderSurfaceRuntimeWithData(
         legalEntityScopeArguments(binding, url),
         gateways,
       );
-      const slots = await boardSlots(context);
+      const slots = await boardSlots(context,feedback && 'record' in feedback ? feedback.record.recordId : undefined);
       return rendered(() =>
         renderSelectedSurface(
           view,
@@ -1502,13 +1502,7 @@ export async function submitSurfaceRuntimeIntent(
   if (
     !operation ||
     (boardOperation && boardOperation !== operation) ||
-    (!boardOperation &&
-      !surfaceSupportsRuntimeIntent(
-        view,
-        selection.selected,
-        selection.surfaces,
-        operation.intent,
-      ))
+    !surfaceSupportsRuntimeIntent(view,selection.selected,selection.surfaces,operation.intent)
   ) {
     return operationDiagnostic('OPERATION_UNSUPPORTED', 422);
   }

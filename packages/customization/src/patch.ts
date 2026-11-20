@@ -11,6 +11,7 @@ import { z } from 'zod';
 import {
   DocumentCategoryDefinitionSchema,
   DocumentFieldDefinitionSchema,
+  WorkflowDefinitionSchema,
 } from '../../canonical-model/src/schemas.js';
 
 /**
@@ -225,6 +226,10 @@ const singlePatchKinds = [
   LayoutRevisionSchema,
   ...ChangeMemberSchema.options,
   z.strictObject({
+    kind: z.literal('saveWorkflow'),
+    workflow: WorkflowDefinitionSchema,
+  }),
+  z.strictObject({
     kind: z.literal('narrowPermission'),
     target: z.strictObject({
       kind: z.literal('operation'),
@@ -311,6 +316,7 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'addUploadCategory',
   'narrowPermission',
   'unNarrowPermission',
+  'saveWorkflow',
   'changeSet',
 ] as const satisfies readonly CustomizationPatchKind[]);
 

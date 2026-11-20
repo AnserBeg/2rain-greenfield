@@ -63,3 +63,61 @@ jobs:
     - uses: ./.github/actions/install-chromium
     - run: corepack pnpm exec playwright test --config apps/web/playwright.customization.config.ts
         --grep 'keyboard user moves' --reporter=list
+  generated:
+    name: Board formatting and coverage artifact
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+    - *id001
+    - *id002
+    - *id003
+    - *id004
+    - run: node --import tsx test/helpers/calendar1-generate.diagnostic.cjs
+    - run: corepack pnpm exec prettier --write apps/web/src/board.ts apps/web/src/component-registry.ts
+        apps/web/src/customize-screen.ts apps/web/src/ledger-styles.ts apps/web/src/surface-contract.ts
+        apps/web/src/surface-runtime.ts apps/web/src/workspace-entry.ts apps/web/test/browser/customize.composed-application.spec.ts
+        apps/web/test/browser/surface-grammar.spec.ts packages/canonical-model/src/board.ts
+        packages/canonical-model/src/constants.ts packages/canonical-model/src/index.ts
+        packages/canonical-model/src/schemas.ts packages/canonical-model/src/surface-workspace.ts
+        packages/compiler/src/projections.ts packages/customization/src/ai-draft.ts
+        packages/customization/src/apply.ts packages/customization/src/board-revision.ts
+        packages/customization/src/index.ts packages/customization/src/patch.ts packages/customization/src/render.ts
+        packages/customization/src/targets.ts packages/dev-tooling/src/surface-grammar-conformance/index.ts
+        packages/dev-tooling/src/surface-runtime-seam.ts packages/postgres-provider/src/board-admission.ts
+        packages/postgres-provider/src/module-runtime-interpreter.ts packages/postgres-provider/src/release-repository.ts
+        packages/postgres-provider/src/request-runtime-view-service.ts packages/runtime/src/request-runtime-view.ts
+        packages/runtime/src/semantic-query-gateway.ts test/postgres/customization-validation.test.ts
+        test/postgres/request-runtime-view.test.ts test/unit/customization.test.ts
+        test/fixtures/g2/language-conformance/coverage-decisions.json
+    - run: git diff --binary -- apps/web/src/board.ts apps/web/src/component-registry.ts
+        apps/web/src/customize-screen.ts apps/web/src/ledger-styles.ts apps/web/src/surface-contract.ts
+        apps/web/src/surface-runtime.ts apps/web/src/workspace-entry.ts apps/web/test/browser/customize.composed-application.spec.ts
+        apps/web/test/browser/surface-grammar.spec.ts packages/canonical-model/src/board.ts
+        packages/canonical-model/src/constants.ts packages/canonical-model/src/index.ts
+        packages/canonical-model/src/schemas.ts packages/canonical-model/src/surface-workspace.ts
+        packages/compiler/src/projections.ts packages/customization/src/ai-draft.ts
+        packages/customization/src/apply.ts packages/customization/src/board-revision.ts
+        packages/customization/src/index.ts packages/customization/src/patch.ts packages/customization/src/render.ts
+        packages/customization/src/targets.ts packages/dev-tooling/src/surface-grammar-conformance/index.ts
+        packages/dev-tooling/src/surface-runtime-seam.ts packages/postgres-provider/src/board-admission.ts
+        packages/postgres-provider/src/module-runtime-interpreter.ts packages/postgres-provider/src/release-repository.ts
+        packages/postgres-provider/src/request-runtime-view-service.ts packages/runtime/src/request-runtime-view.ts
+        packages/runtime/src/semantic-query-gateway.ts test/postgres/customization-validation.test.ts
+        test/postgres/request-runtime-view.test.ts test/unit/customization.test.ts
+        test/fixtures/g2/language-conformance/coverage-decisions.json > /tmp/calendar1-generated.patch
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: calendar1-regular-generated
+        path: /tmp/calendar1-generated.patch
+        retention-days: 1
+  architecture:
+    name: Board surface architecture
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+    - *id001
+    - *id002
+    - *id003
+    - *id004
+    - run: node --import tsx --test test/architecture/surface-runtime-seam.test.ts
+        test/architecture/surface-grammar-conformance.test.ts
