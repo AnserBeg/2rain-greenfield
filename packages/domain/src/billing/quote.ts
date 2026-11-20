@@ -245,7 +245,7 @@ function calculate(
           values = t.values;
         const cover = bestCover(segments, w.monthDays, c, values, budget);
         const cap = c.cap ? decimal(values[c.cap]!) : null;
-        const floor =
+        const floor: Fraction =
           c.minimumScope === 'perEnrollment' && enrollmentFloor !== null
             ? zero
             : durationFloor(
