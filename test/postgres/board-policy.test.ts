@@ -9,6 +9,7 @@ import {
   defaultBoardChoices,
   draftBoardRevision,
 } from '../../packages/customization/src/board-revision.js';
+import { physicalNameFor } from '../../packages/compiler/src/storage.js';
 import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../packages/runtime/src/semantic-query-gateway.js';
 import { COMPANY, worldOver } from '../agent/agent-world.js';
 import {
@@ -113,12 +114,7 @@ test(
           const alpha = await deal(COMPANY, 'Alpha one');
           const beta = await deal(other, 'Beta one');
           const { tenantId, environmentId, principalId } = app.runtime.identity;
-          const tables = await pool.query<{ table_name: string }>(
-            `SELECT table_name FROM information_schema.tables
-              WHERE table_schema = 'north_star_module' AND table_name LIKE '%deal%'`,
-          );
-          const table = tables.rows[0]?.table_name;
-          assert.ok(table, JSON.stringify(tables.rows));
+          const table = physicalNameFor('table', entity);
           const url = (company: string) => {
             const value = new URL('/', app.baseUrl);
             value.searchParams.set('surface', board.surfaceId);
