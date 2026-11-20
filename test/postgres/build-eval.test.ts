@@ -97,7 +97,7 @@ function receiptWorkflow() {
       trigger: 'goodsReceiptPosted',
       grants: { operations: [createCheck], queries: [] },
     },
-    body: `sdk.operation({ id: '${createCheck}', input: { recordId: event.eventId, legalEntityId: event.legalEntityId, values: { '${NS}:field.custom_receipt_check_name': 'Receipt check' }, relations: { '${NS}:relation.custom_receipt_check_goods_receipt': event.receiptId } } });`,
+    body: `sdk.operation('${createCheck}', { recordId: event.eventId, legalEntityId: event.legalEntityId, values: { '${NS}:field.custom_receipt_check_name': 'Receipt check' }, relations: { '${NS}:relation.custom_receipt_check_goods_receipt': event.receiptId } });`,
     fixtures: [
       {
         event,
