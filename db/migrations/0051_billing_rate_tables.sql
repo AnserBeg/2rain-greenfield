@@ -55,3 +55,5 @@ CREATE POLICY billing_assignment_scope ON platform.billing_list_assignments TO n
     AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid
     AND nullif(current_setting('north_star.principal_id', true), '')::uuid IS NOT NULL
   );
+
+-- CI-3 path-selection control.
