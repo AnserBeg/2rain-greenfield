@@ -46,8 +46,7 @@ DECLARE target jsonb; relation jsonb; revision bigint; BEGIN
     SELECT value INTO relation FROM jsonb_array_elements(storage->'relations')
       WHERE value->>'relationId' = parent_relation AND value->>'sourceEntityId' = entity
         AND value->>'ownership' = 'parentScopedChild';
-    IF relation IS NULL OR parent_key IS NULL THEN RETURN NULL; END IF;
-  END IF;
+    IF relation IS NULL OR parent_key IS NULL THEN RETURN NULL; END IF; END IF;
   EXECUTE format('SELECT %I FROM north_star_module.%I
     WHERE tenant_id = $1 AND environment_id = $2 AND %I = $3 AND %I IS NULL%s%s%s',
     target #>> '{optimisticRevision,column}', target->>'physicalTableName',
@@ -57,8 +56,7 @@ DECLARE target jsonb; relation jsonb; revision bigint; BEGIN
     CASE WHEN lock_row THEN ' FOR SHARE' ELSE '' END)
     INTO STRICT revision USING t, e, record_key, scope, parent_key;
   RETURN revision;
-EXCEPTION WHEN no_data_found OR too_many_rows OR undefined_table OR undefined_column THEN RETURN NULL;
-END $$;
+EXCEPTION WHEN no_data_found OR too_many_rows OR undefined_table OR undefined_column THEN RETURN NULL; END $$;
 
 CREATE FUNCTION platform.document_app(t uuid, e uuid, release_key uuid DEFAULT NULL)
 RETURNS jsonb LANGUAGE sql STABLE SET search_path = pg_catalog, pg_temp AS $$
@@ -127,16 +125,13 @@ DECLARE i record; q jsonb; issued_query jsonb; field jsonb; stored bigint;
         AND f #>> '{fieldType,kind}' = field->>'fieldKind'
         AND EXISTS (SELECT FROM jsonb_array_elements(q->'selections') selection
           WHERE selection #>> '{field,targetId}' = field->>'fieldId'))
-    THEN RETURN false; END IF;
-  END LOOP;
+    THEN RETURN false; END IF; END LOOP;
   FOR source_row IN SELECT * FROM jsonb_array_elements(source->'rows') ORDER BY value->>'recordId' LOOP
     stored := platform.document_record_revision(i.tenant_id, i.environment_id, storage, source_entity,
       scope, (source_row->>'recordId')::uuid, parent, record_key, verify_revision);
     IF stored IS NULL OR (verify_revision AND stored IS DISTINCT FROM (source_row->>'revision')::bigint)
-    THEN RETURN false; END IF;
-  END LOOP;
-  RETURN true;
-END $$;
+    THEN RETURN false; END IF; END LOOP;
+  RETURN true; END $$;
 
 CREATE FUNCTION platform.document_generated_allowed(source jsonb, issued_release uuid, scope text,
   entity text, record_key uuid, verify_revision boolean)
@@ -177,8 +172,7 @@ DECLARE i record; app jsonb; issued_app jsonb; storage jsonb; binding jsonb; bra
   LOOP
     IF required_field IS NOT NULL
        AND (binding->'fields' @> jsonb_build_array(jsonb_build_object('fieldId',required_field))) IS DISTINCT FROM true
-    THEN RETURN false; END IF;
-  END LOOP;
+    THEN RETURN false; END IF; END LOOP;
   FOR block IN SELECT * FROM jsonb_array_elements(template->'layout') WHERE value->>'kind' = 'table' LOOP
     binding := source->'queries'->binding_index;
     IF binding->>'queryId' IS DISTINCT FROM block->>'queryId'
@@ -190,23 +184,19 @@ DECLARE i record; app jsonb; issued_app jsonb; storage jsonb; binding jsonb; bra
     LOOP
       IF required_field IS NOT NULL
         AND (binding->'fields' @> jsonb_build_array(jsonb_build_object('fieldId',required_field))) IS DISTINCT FROM true
-      THEN RETURN false; END IF;
-    END LOOP;
-    binding_index := binding_index + 1;
-  END LOOP;
+      THEN RETURN false; END IF; END LOOP;
+    binding_index := binding_index + 1; END LOOP;
   IF binding_index <> jsonb_array_length(source->'queries') THEN RETURN false; END IF;
   FOR binding IN SELECT * FROM jsonb_array_elements(source->'queries') LOOP
     IF NOT platform.document_source_allowed(app, issued_app, storage, binding, scope, entity, record_key, verify_revision)
-    THEN RETURN false; END IF;
-  END LOOP;
+    THEN RETURN false; END IF; END LOOP;
   brand := source->'companyBrandSource';
   IF scope = 'shared' THEN RETURN brand = 'null'::jsonb; END IF;
   RETURN (brand->>'queryId' = 'northstar.app:query.legal_entity_get'
     AND brand->>'parentRelationId' IS NULL
     AND brand->'fields' @> '[{"fieldId":"northstar.app:field.legal_entity_name"}]'::jsonb
     AND platform.document_source_allowed(app, issued_app, storage, brand, 'shared',
-      'northstar.app:entity.legal_entity', scope::uuid, verify_revision)) IS TRUE;
-END $$;
+      'northstar.app:entity.legal_entity', scope::uuid, verify_revision)) IS TRUE; END $$;
 
 REVOKE ALL ON FUNCTION platform.document_storage(uuid,uuid),
   platform.document_record_revision(uuid,uuid,jsonb,text,text,uuid,text,uuid,boolean),
@@ -231,8 +221,6 @@ RETURNS jsonb LANGUAGE sql STABLE SET search_path = pg_catalog, pg_temp AS $$
     SELECT q FROM jsonb_array_elements(app->'queries') q
     WHERE q #>> '{sourceEntity,targetId}' = entity AND q->>'queryType' = 'get'
       AND q->>'tier' = 'q0' AND q->>'lifecycle' = 'active' AND q->>'readModel' IS NULL
-      AND q #>> '{filter,kind}' = 'booleanPredicate' AND q #>> '{filter,value}' = 'true'
-      AND (q ? 'legalEntityScope') = (scope <> 'shared')
       AND EXISTS (SELECT FROM jsonb_array_elements(app->'surfaces') s WHERE s->>'surfaceRole' = 'record'
         AND s->>'lifecycle' = 'active' AND s #>> '{dataSource,targetId}' = q->>'queryId')
     ORDER BY q->>'queryId' COLLATE "C" LIMIT 1
@@ -240,6 +228,9 @@ RETURNS jsonb LANGUAGE sql STABLE SET search_path = pg_catalog, pg_temp AS $$
   JOIN LATERAL jsonb_array_elements(app->'permissions') perm
     ON perm->>'permissionId' = q #>> '{permission,targetId}'
   WHERE platform.document_query_boundary()
+    AND q #>> '{filter,kind}' = 'booleanPredicate' AND q #>> '{filter,value}' = 'true'
+    AND (q ? 'legalEntityScope') = (scope <> 'shared')
+    AND jsonb_array_length(coalesce(q->'parameters','[]'::jsonb)) = CASE WHEN scope = 'shared' THEN 0 ELSE 1 END
     AND perm->>'lifecycle' = 'active'
     AND platform.document_granted(scope, perm->>'permissionId', perm #>> '{resource,targetId}')
     AND (scope = 'shared' OR platform.document_granted(scope,
