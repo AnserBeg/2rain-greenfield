@@ -1,5 +1,18 @@
 # posting-kernel-admission — the cross-layer admission map for the posting kernel
 
+## Billing and Receivables transaction admission
+
+BILLING-1 design amendment, 2026-11-20. The following admission is for Billing slice 2, pending the separate [Receivables v2 ruling](../../decisions/ADR-0084-receivables-billing-origin-drafts.md). It specifies a new primitive. The inventory writer does not implement it today.
+
+| Layer | Required boundary and proof |
+| --- | --- |
+| Release and authority | Register only Billing generation/refresh → Receivables billing draft, and the corresponding Receivables cancel/void → Billing coverage release. Verify the pair of versioned contracts, their declared dependencies, live grants, actor, tenant, environment, stored company and activation fence. Supply a scoped transaction-bound operation handle. Neither owner gains the other’s table grants or authority to invoke an arbitrary operation. |
+| Locking and replay | One coordinator owns one PostgreSQL transaction and connection for the call. Both owners take the shared Receivables customer credit lock first, then scoped group, service/occurrence and invoice keys in a common canonical order before mutation. Check source cursors, request digests, current revisions and uniqueness of the live natural occurrence under lock. Each owner binds its receipt to the same invocation. Recheck authority before returning a committed replay. |
+| Commit evidence | Billing owns rated snapshots, allocations and coverage. Receivables owns draft headers, lines, tax and credit exposure. Each reads back its own exact rows, revisions and amounts. Verify the combined write set and linked audit, change, outbox and receipts before the sole commit. An inner refusal or verifier failure rolls back both owners’ effects. A void releases the live allocation and preserves its history in that same commit. |
+| Slice-2 admission tests | Inject failure after the inner line write and before the outer receipt. From a second connection observe neither invoice/line nor claim, reservation, trust or outbox effect. Race independent keys and a lost-response retry, then a void with reissue or payment. Observe exactly one authorized live effect or complete release and unchanged history. Denied inner authority, a stale cursor or mismatched company cannot commit. Keep order-origin and Payables controls. |
+
+## Original inventory admission
+
 Cut from `3b7b6dab2ddb790b33b7b641c68773c62db18e9a` (`main`) on branch
 `packet/posting-kernel-admission`, worked in the detached worktree
 `../2rain-greenfield-pka` because the shared checkout is `ENUM-WIDEN`'s.
