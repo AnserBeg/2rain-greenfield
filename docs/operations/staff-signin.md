@@ -22,8 +22,9 @@ Provide each process its own `STAFF_TLS_CERT_FILE` and `STAFF_TLS_KEY_FILE` for 
 Configure PostgreSQL client authentication separately for each service login. Give the ERP
 process only `STAFF_RUNTIME_DATABASE_URL` as `north_star_runtime`. When the identity host uses a
 private CA, set the ERP’s `STAFF_IDENTITY_CA_FILE` to the trusted CA certificate. Give the identity
-process only `STAFF_IDENTITY_DATABASE_URL` as `north_star_identity` and `STAFF_RATE_KEY_FILE`
-pointing to a protected file containing at least 32 random bytes shared by its replicas.
+process only `STAFF_IDENTITY_DATABASE_URL` as `north_star_identity`.
+For each service, set `STAFF_RATE_KEY_FILE` to a protected file of at least 32 random bytes.
+Use a stable key shared by replicas of the same service.
 Use separate service accounts and restrict access to each process’s files and database login.
 
 Run `corepack pnpm --filter @north-star/api staff identity` and
@@ -36,7 +37,7 @@ request. A missing or invalid address from a listed ingress refuses the attempt.
 Keep bodies, query strings, fragments, cookies and enrollment links out of diagnostics.
 
 The owner opens the invitation, chooses **Create a passkey**, follows **Sign in to the ERP**,
-and confirms the passkey again. **Manage sign-in** offers spare keys, lost-key revocation and
+chooses **Continue to staff sign-in**, and confirms the passkey again. **Manage sign-in** offers spare keys, lost-key revocation and
 sign-out everywhere. **Manage staff** lets the owner invite, deactivate and recover a member.
 For attended recovery, check the person and notify them and the owner via their established
 channels. Record the reason and delivery reference. The replacement keeps the same principal.

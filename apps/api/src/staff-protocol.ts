@@ -1,3 +1,4 @@
+import { isIP, SocketAddress } from 'node:net';
 import { getDomain } from 'tldts';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import type pg from 'pg';
@@ -100,6 +101,39 @@ export function cookie(name: string, value: string, maxAge: number) {
     String(maxAge)
   );
 }
+function canonicalAddress(address: unknown) {
+  check(typeof address === 'string' && !address.includes('%'));
+  const version = isIP(address);
+  check(version);
+  if (version === 4) return address;
+  const canonical = new SocketAddress({ address, family: 'ipv6' }).address;
+  return canonical.startsWith('::ffff:') && isIP(canonical.slice(7)) === 4
+    ? canonical.slice(7)
+    : canonical;
+}
+
+export function clientAddress(trustedIngress: readonly string[]) {
+  const ingress = new Set(trustedIngress.map(canonicalAddress));
+  return (req: IncomingMessage) => {
+    const peer = canonicalAddress(req.socket.remoteAddress);
+    return ingress.has(peer)
+      ? canonicalAddress(req.headers['x-real-ip'])
+      : peer;
+  };
+}
+
+export function attemptBucket(
+  key: Buffer,
+  category: string,
+  identifier: string,
+) {
+  return createHmac('sha256', key)
+    .update(category)
+    .update('\0')
+    .update(identifier)
+    .digest();
+}
+
 export function sameOriginPost(req: IncomingMessage, origin: string) {
   check(req.method === 'POST' && req.headers.host === new URL(origin).host);
   const source = req.headers.origin,
@@ -109,13 +143,17 @@ export function sameOriginPost(req: IncomingMessage, origin: string) {
       (!site || site === 'same-origin'),
   );
 }
-export function secureResponse(res: ServerResponse) {
+export function secureResponse(
+  res: ServerResponse,
+  formRedirectOrigin?: string,
+) {
   res.setHeader('cache-control', 'no-store');
   res.setHeader('referrer-policy', 'no-referrer');
   res.setHeader('x-content-type-options', 'nosniff');
   res.setHeader(
     'content-security-policy',
-    "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'" +
+      (formRedirectOrigin ? ' ' + formRedirectOrigin : ''),
   );
 }
 export async function readJson(req: IncomingMessage) {
