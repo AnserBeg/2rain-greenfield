@@ -390,7 +390,10 @@ test(
           await withArchivedCustomizationRuntime(
             '60451569e92ffe9aad3fc2c67bfa326a978b1f3c',
             async (run) => {
-              await assertArchivedTenantEnvelope(run);
+              await assertArchivedTenantEnvelope(
+                run,
+                'northstar.app:entity.purchase_order',
+              );
               const read = () =>
                 archivedRuntimeRead(run, {
                   databaseUrl: options.databaseUrl,

@@ -14,6 +14,9 @@ import {
 
 import {
   STATUS_ROLES,
+  baseLayout,
+  layoutDigest,
+  normalizeApplicationPackage,
   SurfaceCompositionSchema,
   SurfaceDocumentEditorSchema,
   SurfaceListSchema,
@@ -3640,6 +3643,57 @@ test('inventory shipment cost is declared separately from packed facts and custo
       ),
     );
   }
+});
+
+test('archive and restore read-backs keep the saved description in the composed item section', async () => {
+  const definition = normalizeApplicationPackage(
+    composedApplicationDefinition(),
+  );
+  const item = definition.surfaces.find((s) =>
+    s.surfaceId.endsWith(':surface.item_detail'),
+  )!;
+  const body = baseLayout(definition, item, 'detail')!;
+  const description = body.sections[0]!.fields.find(
+    (f) => f.label.text === 'Description',
+  )!;
+  assert.notEqual(description.binding, description.id);
+  body.sections[0]!.label.text = 'Item identification';
+  const manifest = await governedProjection<{
+    surfaces: CompiledSurfaceDefinition[];
+  }>('northstar.compiler:projection-family.surface-manifest');
+  const surface = {
+    ...manifest.payload.surfaces.find((s) => s.surfaceId === item.surfaceId)!,
+    layouts: [
+      {
+        body,
+        revisionId: 'f931d3ac-9716-49d3-a699-368054c110cb',
+        resultLayoutDigest: layoutDigest(body),
+      },
+    ],
+  };
+  const slot = surface.slots.find((s) => s.slot === 'sections')!;
+  await demoEntry().run({}, (view) => {
+    for (const archived of [true, false]) {
+      const record = {
+        archived,
+        recordId: '4642f787-4d38-4a38-bb75-bb2325d7128d',
+        entityId: 'northstar.app:entity.item',
+        revision: archived ? 2 : 3,
+        values: { [description.id]: 'Blue & green widget' },
+      };
+      const result = renderRegisteredSurfaceComponent({
+        view,
+        surface,
+        slot,
+        data: { status: 'READY', records: [record] },
+      });
+      assert.match(result.html, /Item identification/u);
+      assert.match(
+        result.html,
+        /<dt>Description<\/dt><dd>Blue &amp; green widget<\/dd>/u,
+      );
+    }
+  });
 });
 
 test('STOCK-COUNTS: a document editor writes its declared line create values on each new line, never an update or a removal', () => {

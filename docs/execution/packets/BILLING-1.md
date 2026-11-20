@@ -1,6 +1,6 @@
 # BILLING-1 — period and usage billing
 
-Fable approved the slice-0 design with changes. The 2026-11-20 docs amendment covers R1–R13. The orchestrator’s narrow re-read covers the changed sections of [ADR-0083](../../decisions/ADR-0083-period-and-usage-billing.md) and the separate [Receivables v2 proposal](../../decisions/ADR-0084-receivables-billing-origin-drafts.md) before slice 1.
+The narrow Fable re-read accepted [ADR-0083](../../decisions/ADR-0083-period-and-usage-billing.md) with amendments and required A3–A6 in [ADR-0084](../../decisions/ADR-0084-receivables-billing-origin-drafts.md). All R1–R13 were resolved. The orchestrator accepted the amendments on 2026-11-20.
 
 ## Design decisions
 
@@ -12,6 +12,10 @@ Fable approved the slice-0 design with changes. The 2026-11-20 docs amendment co
 - The customization proofs cover equipment hire, a usage-only subscription without Booking, and a service contract with a fixed fee.
 
 ## Gates
+
+- A1 gates slice 1. The calculation version pins first-valid-after-gap and earlier-offset overlap anchors.
+- A3–A6 gate slice 2. Delivered arrears count toward exposure, void reserves occurrence cents and fences dependents, and correction credits require bound confirmation.
+- A7 gates slice 3. An advanced source cursor raises due work for issued coverage even after enrollment ends.
 
 The record check passed. The packet’s original [CI run](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44670135739) passed all 18 jobs at `6fd58698`. The amendment uses that run under the orchestrator’s no-re-run ruling. No migration or reader rung is allocated.
 
