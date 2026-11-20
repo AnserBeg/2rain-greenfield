@@ -89,8 +89,8 @@ test('template money uses its declared currency and rejects a text override', ()
   const parsed = parseVersionedAuthoredApplicationPackageJson(
     readFileSync('apps/web/release/app.authored.json', 'utf8'),
   );
+  assert.ok(parsed.languageVersion === 'v6');
   const definition = normalizeApplicationPackage(parsed);
-  assert.ok(definition.languageVersion === 'v6');
   const ns = 'northstar.app:';
   const amountId = ns + 'field.purchase_order_freight_amount';
   const fields = definition.fields.map((field) =>

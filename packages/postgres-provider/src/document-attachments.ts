@@ -681,7 +681,9 @@ export class PostgresDocumentGateway implements DocumentGateway {
               return result.rows[0]!.metadata;
             },
             {
-              onCommitStart: deadline.beginPublicationCommit,
+              ...(deadline.beginPublicationCommit && {
+                onCommitStart: deadline.beginPublicationCommit,
+              }),
               lockSources: generated !== null,
             },
           ),
