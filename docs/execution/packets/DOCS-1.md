@@ -1,6 +1,6 @@
 # DOCS-1 — governed files and generated PDFs
 
-Slice 2 implements document templates and PDF generation from [ADR-0078](../../decisions/ADR-0078-governed-documents-files-templates-and-signatures.md). Slice 1a attached internal files to first-party and tenant records. Fable closed the design read before implementation. Migration 0050 is Critical and the branch is held for the independent read.
+Slice 2 implements document templates and PDF generation from [ADR-0078](../../decisions/ADR-0078-governed-documents-files-templates-and-signatures.md). Slice 1a attached internal files to first-party and tenant records. Fable closed the design read before implementation. Migration 0051 is Critical and the branch is held for the independent read.
 
 ## Claims
 

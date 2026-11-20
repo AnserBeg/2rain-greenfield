@@ -126,6 +126,7 @@ test('migrations upgrade accepted G1 and converge with the checked-in snapshot',
         '0047_staff_session_integrity.sql',
         '0048_document_attachment_authority.sql',
         '0049_staff_login_creation.sql',
+        '0050_booking_commitments.sql',
         '0051_generated_document_sources.sql',
       ]);
       assert.equal(upgraded.verified.length, migrations.length);
