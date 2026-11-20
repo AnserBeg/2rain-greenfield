@@ -1,4 +1,5 @@
-import { fixedQuickFile, quickSelection } from './quick-ci.js';
+import { fixedQuickFile } from './quick-files.js';
+import { quickSelection } from './quick-ci.js';
 import {
   aggregateEvidence,
   discoverRepositoryTests,
