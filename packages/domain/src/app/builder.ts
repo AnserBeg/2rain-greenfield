@@ -35,7 +35,10 @@ import {
   purchasingWorkspace,
   receivingWorkspaceQueries,
 } from '../purchasing/workspace.js';
-import { inventoryDocumentWorkspace } from '../inventory/workspace.js';
+import {
+  inventoryDocumentWorkspace,
+  stockCountWorkspaceQueries,
+} from '../inventory/workspace.js';
 import { itemStockWorkspace } from '../inventory/item-stock-workspace.js';
 import { locationWorkspace } from '../location/workspace.js';
 import { periodLockWorkspace } from '../inventory/period-lock-workspace.js';
@@ -254,6 +257,8 @@ const RECORD_DATA_SOURCES: Readonly<Record<string, string>> = Object.freeze({
  */
 const LIST_DATA_SOURCES: Readonly<Record<string, string>> = Object.freeze({
   purchase_order_list: 'commercial_purchase_order_list',
+  // Only adjustments and transfers: no posting companion (STOCK-COUNTS).
+  inventory_transaction_list: 'inventory_document_list',
 });
 
 /** The mounted module names, in composition order, for callers that assert on the set. */
@@ -348,6 +353,7 @@ export function composedApplicationDefinition(): Record<string, unknown> {
       APPLICATION_NAMESPACE,
       merged(definitions, 'queries') as Record<string, unknown>[],
     ),
+    ...stockCountWorkspaceQueries(APPLICATION_NAMESPACE, moduleQueries),
   ];
 
   const application = withDeclaredLists({

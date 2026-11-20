@@ -757,10 +757,11 @@ export const BILL_LIST: SettlementListSpec = Object.freeze({
 });
 
 /**
- * Stock documents (INVENTORY-PARITY): every inventory transaction, newest
- * first. Receipts, shipments and counts write companion transactions too, so
- * the tabs keep drafts and the two documents a person records -- adjustments
- * and transfers -- one click away.
+ * Stock documents (INVENTORY-PARITY): the documents a person records --
+ * adjustments and transfers -- newest first. The List reads them through a
+ * query that admits only those two types (STOCK-COUNTS, ADR-0049 condition
+ * 3): the companion transactions the posting kernel writes for receipts,
+ * shipments, returns and counts are never listed beside them.
  */
 function inventoryTransactionList(namespace: string): ListSpec {
   const field = (local: string) =>
@@ -814,6 +815,82 @@ function inventoryTransactionList(namespace: string): ListSpec {
         local: 'transfers',
         label: 'Transfers',
         filters: { [field('type')]: option('type_transfer') },
+      },
+    ],
+    filters: [],
+    export: false,
+  };
+}
+
+/**
+ * Stock counts (STOCK-COUNTS): every count, newest first, with its location
+ * named; the tabs follow a count from counting to posted.
+ */
+function stockCountList(namespace: string): ListSpec {
+  const field = (local: string) => `${namespace}:field.stock_count_${local}`;
+  const state = (local: string) =>
+    `${namespace}:option.stock_count_state_${local}`;
+  return {
+    pageSize: 50,
+    columns: [
+      {
+        local: 'number',
+        label: 'Number',
+        field: field('number'),
+        role: 'title',
+      },
+      {
+        local: 'location',
+        label: 'Location',
+        field: field('location_id'),
+        reference: {
+          query: `${namespace}:query.location_list`,
+          labelField: `${namespace}:field.location_name`,
+        },
+      },
+      { local: 'kind', label: 'Kind', field: field('kind') },
+      {
+        local: 'counted',
+        label: 'Counted',
+        field: field('counted_at'),
+        format: 'date',
+      },
+      {
+        local: 'state',
+        label: 'State',
+        field: field('state'),
+        role: 'status',
+        statusRoles: {
+          [state('draft')]: 'inProgress',
+          [state('counting')]: 'inProgress',
+          [state('reviewed')]: 'attention',
+          [state('posted')]: 'success',
+          [state('cancelled')]: 'blocked',
+        },
+      },
+    ],
+    defaultSort: [{ column: 'counted', direction: 'descending' }],
+    views: [
+      { local: 'all', label: 'All', filters: {} },
+      {
+        local: 'counting',
+        label: 'Counting',
+        filters: { [field('state')]: state('counting') },
+      },
+      {
+        local: 'reviewed',
+        label: 'Reviewed',
+        filters: { [field('state')]: state('reviewed') },
+      },
+      {
+        local: 'posted',
+        label: 'Posted',
+        filters: { [field('state')]: state('posted') },
+      },
+      {
+        local: 'cancelled',
+        label: 'Cancelled',
+        filters: { [field('state')]: state('cancelled') },
       },
     ],
     filters: [],
@@ -1826,6 +1903,7 @@ export function composedListSpecs(
     vendor_bill_list: settlementList(namespace, BILL_LIST),
     // Stock documents, recorded in the draft editor (INVENTORY-PARITY).
     inventory_transaction_list: inventoryTransactionList(namespace),
+    stock_count_list: stockCountList(namespace),
     // Stock by item and the Buying worklist (REPLENISHMENT).
     [ITEM_STOCK_LIST]: itemFigureList(namespace, ITEM_STOCK_LIST),
     [ITEM_BUYING_LIST]: itemFigureList(namespace, ITEM_BUYING_LIST),
