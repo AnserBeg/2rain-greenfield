@@ -33,7 +33,7 @@ import { withTrustedRequestTransaction } from '../../packages/postgres-provider/
 import { worldOver } from '../agent/agent-world.js';
 import {
   archivedRuntimeRead,
-  assertArchivedTenantEnvelope,
+  assertArchivedTenantEnvelopeForChange,
   withArchivedCustomizationRuntime,
 } from '../helpers/archived-customization-runtime.js';
 import {
@@ -1413,9 +1413,8 @@ test(
             await withArchivedCustomizationRuntime(
               '2042780bcc3889022af36493a2dcaa3a62b8cb56',
               async (run) => {
-                const archived = await assertArchivedTenantEnvelope(
+                const archived = await assertArchivedTenantEnvelopeForChange(
                   run,
-                  undefined,
                   fileChange,
                 );
                 const expected = archived.artifacts

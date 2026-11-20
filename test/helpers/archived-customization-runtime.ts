@@ -20,11 +20,17 @@ export {
 export async function assertArchivedTenantEnvelope(
   run: ArchivedRunner,
   entity = 'northstar.app:entity.item',
-  change: unknown = {
+): Promise<void> {
+  await assertArchivedTenantEnvelopeForChange(run, {
     kind: 'addField',
     entity,
     field: { label: 'Inspection notes', type: 'text' },
-  },
+  });
+}
+
+export async function assertArchivedTenantEnvelopeForChange(
+  run: ArchivedRunner,
+  change: unknown,
 ): Promise<SerializedRelease> {
   const patch = parseCustomizationPatch(change);
   assert.ok(patch.status === 'parsed');
