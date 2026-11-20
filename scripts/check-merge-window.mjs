@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 import console from 'node:console';
 import { criticalDiff, git } from '../.github/scripts/ci-selection.mjs';
+import nonExecutablePaths from './non-executable-pathspec.json' with { type: 'json' };
 
 const api = (path) =>
   JSON.parse(execFileSync('gh', ['api', path], { encoding: 'utf8' }));
@@ -40,6 +41,21 @@ export function exactFull(run, candidate, jobs) {
   );
 }
 
+export function docsOnly(base, candidate) {
+  return !git(
+    'diff',
+    '--no-renames',
+    '--name-only',
+    '-z',
+    base,
+    candidate,
+    '--',
+    '.',
+    ...nonExecutablePaths,
+    ':!README.md',
+  );
+}
+
 function checkWindow(packet, candidate) {
   if (!packet || !/^[a-f0-9]{40}$/u.test(candidate ?? ''))
     throw new Error(
@@ -52,12 +68,6 @@ function checkWindow(packet, candidate) {
     throw new Error(
       'Candidate must be a two-parent integration commit on current origin/main',
     );
-  const paths = git('diff', '--name-only', '-z', base, candidate)
-    .split('\0')
-    .filter(Boolean);
-  const docsOnly = paths.every(
-    (path) => path.startsWith('docs/') && path.endsWith('.md'),
-  );
   const latest = lastMainConclusion(
     workflowRuns('branch=main&event=push'),
     (run) =>
@@ -93,7 +103,12 @@ function checkWindow(packet, candidate) {
     '/home/rvham/2rain-missions/merge-window.txt',
     'utf8',
   ).trim();
-  if (!docsOnly && owner && owner !== packet && owner !== `packet/${packet}`)
+  if (
+    owner &&
+    owner !== packet &&
+    owner !== `packet/${packet}` &&
+    !docsOnly(base, candidate)
+  )
     throw new Error(`Merge window belongs to ${owner}`);
   if (
     git('ls-remote', '--exit-code', 'origin', 'refs/heads/main').split(

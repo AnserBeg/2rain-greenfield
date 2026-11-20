@@ -217,6 +217,37 @@ test('the token command refuses red main and an integration without exact full e
     writeFileSync(join(repo, 'AGENTS.md'), readFileSync('AGENTS.md'));
     git('add', 'AGENTS.md');
     git('commit', '-qm', 'main');
+    const docsBase = git('rev-parse', 'HEAD');
+    for (const path of [
+      'AGENTS.md',
+      'CLAUDE.md',
+      'learnings.md',
+      'README.md',
+      '.agents/skills/test/SKILL.md',
+      'docs/contracts/fixture.json',
+    ]) {
+      mkdirSync(join(repo, path, '..'), { recursive: true });
+      writeFileSync(
+        join(repo, path),
+        path === 'AGENTS.md'
+          ? `${readFileSync('AGENTS.md', 'utf8')}\n`
+          : 'documentation',
+      );
+    }
+    git(
+      'add',
+      'AGENTS.md',
+      'CLAUDE.md',
+      'learnings.md',
+      'README.md',
+      '.agents',
+      'docs',
+    );
+    git('commit', '-qm', 'documentation changes');
+    assert.equal(
+      probe(windowGate, `m.docsOnly('${docsBase}', 'HEAD')`, repo),
+      true,
+    );
     git('init', '--quiet', '--bare', join(dir, 'origin.git'));
     git('remote', 'add', 'origin', join(dir, 'origin.git'));
     git('push', '--quiet', 'origin', 'main');
@@ -228,6 +259,10 @@ test('the token command refuses red main and an integration without exact full e
     git('switch', '-q', 'main');
     git('merge', '--quiet', '--no-ff', 'packet/fixture', '-m', 'candidate');
     const candidate = git('rev-parse', 'HEAD');
+    assert.equal(
+      probe(windowGate, `m.docsOnly('${docsBase}', 'HEAD')`, repo),
+      false,
+    );
     writeFileSync(
       join(dir, 'gh'),
       `#!/bin/sh
@@ -284,7 +319,7 @@ test('a newly selected unit or compiler file outside the fixed argv is scheduled
 test('the promotion waits through an initial 404 and forwards the exact child conclusion', () => {
   const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
   const shell = workflow.match(
-    /- name: Follow the dispatched run\n[\s\S]*?        run: \|\n((?:          [^\n]*\n)+)/u,
+    /- name: Follow the dispatched run\n[\s\S]*? {8}run: \|\n((?: {10}[^\n]*\n)+)/u,
   )?.[1];
   assert.ok(shell);
   const dir = mkdtempSync(join(tmpdir(), 'ci-3-promotion-'));
@@ -307,18 +342,22 @@ printf 'completed\\t%s\\n' "$CHILD"
       ['invisible', 1, 12],
     ] as const) {
       writeFileSync(calls, '');
-      const child = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', shell], {
-        env: {
-          ...process.env,
-          PATH: `${dir}:${process.env.PATH}`,
-          CALLS: calls,
-          GH_REPO: 'fixture/repo',
-          RUN_ID: '42',
-          CHILD: conclusion,
+      const status: number | null = spawnSync(
+        'bash',
+        ['-e', '-o', 'pipefail', '-c', shell],
+        {
+          env: {
+            ...process.env,
+            PATH: `${dir}:${process.env.PATH}`,
+            CALLS: calls,
+            GH_REPO: 'fixture/repo',
+            RUN_ID: '42',
+            CHILD: conclusion,
+          },
+          timeout: 5000,
         },
-        timeout: 5000,
-      });
-      assert.equal(child.status, exit);
+      ).status;
+      assert.equal(status, exit);
       assert.equal(
         readFileSync(calls, 'utf8').trim().split('\n').length,
         count,
