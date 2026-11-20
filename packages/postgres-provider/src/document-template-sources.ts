@@ -20,6 +20,7 @@ import {
 } from '../../runtime/src/semantic-query-gateway.js';
 import { readCivilDate } from '../../runtime/src/civil-date.js';
 import { documentDigest } from './document-content.js';
+import { ModuleRuntimeInterpreterError } from './module-runtime-interpreter.js';
 import type { DocumentPdfInput } from './document-pdf.js';
 
 type StorageEntity = StorageTargetPayloadV1['entities'][number];
@@ -212,7 +213,7 @@ export async function readDocumentTemplateSources(
       })
       .catch((error: unknown) => {
         signal.throwIfAborted();
-        if (error instanceof Error && 'code' in error && error.code === '57014')
+        if (isDocumentSqlCancellation(error))
           throw new DocumentRequestError(408, 'The file response expired.');
         throw unavailableBinding();
       });
@@ -397,6 +398,12 @@ export function safeDocumentPdfText(value: string) {
       'This template contains text the PDF font cannot render.',
     );
   return text;
+}
+
+export function isDocumentSqlCancellation(error: unknown): boolean {
+  if (error instanceof ModuleRuntimeInterpreterError)
+    return error.providerMetadata?.sqlstate === '57014';
+  return error instanceof Error && 'code' in error && error.code === '57014';
 }
 
 export function unavailableBinding() {

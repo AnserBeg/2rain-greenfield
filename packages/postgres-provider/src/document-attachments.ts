@@ -69,6 +69,7 @@ import {
   documentQueryDigest,
   documentSourceField,
   documentSourceQuery,
+  isDocumentSqlCancellation,
   readDocumentTemplateSources,
   safeDocumentPdfText,
   unavailableBinding,
@@ -970,9 +971,9 @@ function documentDatabaseError(
   deadline: DocumentDeadline,
 ): never {
   deadline.remainingMilliseconds();
+  if (isDocumentSqlCancellation(error))
+    throw new DocumentRequestError(408, 'The file response expired.');
   if (error instanceof Error && 'code' in error) {
-    if (error.code === '57014')
-      throw new DocumentRequestError(408, 'The file response expired.');
     if (
       typeof error.code === 'string' &&
       /^D0(404|409|413|422)$/u.test(error.code)
