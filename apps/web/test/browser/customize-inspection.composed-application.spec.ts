@@ -12,10 +12,10 @@ import {
   inspection,
   inspectionFields,
   inspectionLinks,
-  inspectionLinkRecords,
   inspectionStates,
   inspectionTransitions,
 } from '../../../../test/fixtures/inspection-customization.js';
+import { inspectionLinkRecords } from '../../../../test/fixtures/inspection-link-records.js';
 import {
   LINEAGE_INSTALL_VOLUME,
   withEphemeralPostgres,

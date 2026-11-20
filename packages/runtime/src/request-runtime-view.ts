@@ -1,13 +1,11 @@
+import { LAYOUT_READER } from '@north-star/canonical-model';
 import {
   assertTrustedRequestContext,
   type AuthenticatedRequestEntryAdapter,
   type TrustedRequestContext,
   type UntrustedRequestInput,
 } from './request-context.js';
-import {
-  DOCUMENTS_PROJECTION_FAMILY,
-  DOCUMENT_FILES_SURFACE_FLOOR,
-} from '../../canonical-model/src/documents.js';
+import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents.js';
 
 export const REQUEST_RUNTIME_VIEW_VERSION =
   'northstar.request-runtime-view/v1' as const;
@@ -208,7 +206,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 24 adds tenant-authored saved List layouts.
     // 25 adds Today metric cards.
     // 26 adds header relations, relation List columns and shared or lifecycle-less editors.
-    maximumSupportedVersion: DOCUMENT_FILES_SURFACE_FLOOR,
+    // 27 adds internal document attachments. 28 adds record and form layout revisions.
+    maximumSupportedVersion: LAYOUT_READER,
   },
 });
 

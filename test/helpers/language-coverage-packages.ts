@@ -1,3 +1,8 @@
+import {
+  baseLayout,
+  type LayoutDefinition,
+  layoutDigest,
+} from '../../packages/canonical-model/src/layout.js';
 import { composedApplicationDefinition } from '../../packages/domain/src/app/builder.js';
 import { calculatedDisplayDraft } from '../../packages/customization/src/calculated-display-draft.js';
 import { platformModuleDefinition } from '../../packages/domain/src/platform/definition.js';
@@ -82,6 +87,25 @@ export function languageCoverageApplicationPackages() {
       }).rule,
     ],
   };
+  const source = application as unknown as LayoutDefinition;
+  const pageLayoutFixture = {
+    ...application,
+    surfaces: source.surfaces.map((surface) => {
+      if (surface.surfaceId !== 'northstar.app:surface.purchase_order_detail')
+        return surface;
+      const body = baseLayout(source, surface, 'detail')!;
+      return {
+        ...surface,
+        layouts: [
+          {
+            revisionId: 'c5f424f8-a0da-4836-b70e-0bb7a8da26e6',
+            resultLayoutDigest: layoutDigest(body),
+            body,
+          },
+        ],
+      };
+    }),
+  };
   const valueType = { precision: 38, scale: 18, currency: 'CAD', unit: null };
   const price = 'northstar.app:field.item_price_cad';
   const cost = 'northstar.app:field.item_standard_cost_cad';
@@ -128,6 +152,7 @@ export function languageCoverageApplicationPackages() {
     ],
   };
   return [
+    pageLayoutFixture,
     application,
     displayFixture,
     platformModuleDefinition(),
