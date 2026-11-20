@@ -1,6 +1,6 @@
 # CALENDAR-1 Board v2 fix — Boards record choices, not derivations
 
-Status — built on `packet/CALENDAR-1-board-v2` from main `5d315668` (docs E1–E20). Surface reader rung 36, taken at merge above draft line create values (35). No migration. Governs: [ADR-0086 view revision member shape](../../decisions/ADR-0086-board-calendar-and-resource-timeline.md), [Board v2 fix proofs](CALENDAR-1.md#board-v2-fix).
+Status — built on `packet/CALENDAR-1-board-v2` from main `5d315668` (docs E1–E20), synchronized with main `fff2166f`. Surface reader rung 36, taken at merge above draft line create values (35). No migration. Governs: [ADR-0086 view revision member shape](../../decisions/ADR-0086-board-calendar-and-resource-timeline.md), [Board v2 fix proofs](CALENDAR-1.md#board-v2-fix).
 
 CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44824314810
 
@@ -39,8 +39,8 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44824314
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CALENDAR-1-board-v2",
-  "base": "5d315668741e4f0cd4e71fc284e731beac1ff940",
-  "head": "864fabec27ead932aad0637bf145a3a16dd2d2f4",
+  "base": "fff2166fa326f871c11a34d4da623707878e7636",
+  "head": "359643c05037ec1a4f2e338895b03d832c8f1a8b",
   "changedPaths": [
     "apps/web/src/board.ts", "apps/web/src/customize-screen.ts", "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts",
     "package.json", "packages/canonical-model/src/board.ts", "packages/canonical-model/src/surface-workspace.ts",
