@@ -1,5 +1,7 @@
 import { BILLING_READER } from '../../canonical-model/src/billing.js';
 import {
+  DATE_TIME_FIELD_READER,
+  type DateTimeBinding,
   ADDRESS_FIELD_READER,
   ADDRESS_MAP_READER,
   CONNECTOR_PAYLOAD,
@@ -208,6 +210,7 @@ export function lowerBaseProjectionPayloads(
     { payload: unknown }
   >['payload'],
   address?: AddressProjection,
+  dateTimeBindings?: readonly DateTimeBinding[],
 ): ProjectionPayloadPlan[] {
   const namespace = packageRevision.package.namespace;
   const packageScope: LogicalScope = {
@@ -427,6 +430,31 @@ export function lowerBaseProjectionPayloads(
     plans.push(
       plan(PROJECTION_FAMILY_IDS.connector, namespace, packageScope, address),
     );
+  }
+  // ADR-0087: each consumer carries the same bindings and the surface reader
+  // floor rises to the dateTime rung. Omission emits nothing.
+  if (dateTimeBindings?.length) {
+    const consumers = [
+      PROJECTION_FAMILY_IDS.queryCatalog,
+      PROJECTION_FAMILY_IDS.operationCatalog,
+      PROJECTION_FAMILY_IDS.surfaceManifest,
+    ] as string[];
+    for (const projection of plans.filter((p) =>
+      consumers.includes(p.familyId),
+    )) {
+      projection.payload = {
+        ...(projection.payload as object),
+        dateTimeBindings,
+      };
+      if (projection.familyId === PROJECTION_FAMILY_IDS.surfaceManifest)
+        projection.requiredRuntimeCapability = {
+          ...projection.requiredRuntimeCapability,
+          minimumVersion: Math.max(
+            projection.requiredRuntimeCapability.minimumVersion,
+            DATE_TIME_FIELD_READER,
+          ),
+        };
+    }
   }
   if (
     verificationPackageRevision.languageVersion === 'v6' &&

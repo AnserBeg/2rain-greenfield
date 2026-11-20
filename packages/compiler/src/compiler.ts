@@ -1,8 +1,11 @@
 import {
+  DATE_TIME_COMPONENTS,
+  dateTimeComponentId,
   addressColumnId,
   addressComponents,
 } from '@north-star/canonical-model';
 import { compileAddressBindings } from './address.js';
+import { compileDateTimeFields } from './date-time.js';
 import {
   BOOKING_OPERATION_READER,
   bookingDeclarationProblem,
@@ -437,6 +440,23 @@ function compileApplicationInternal(
       maximumDiagnostics,
     );
   }
+  const dateTime = compileDateTimeFields(packageRevision);
+  if (dateTime && 'message' in dateTime) {
+    return failure(
+      [
+        {
+          ...compilerDiagnostic(
+            'COMPILER_TYPE_INVALID',
+            'typeCheck',
+            dateTime.path,
+            dateTime.subjectId,
+          ),
+          rule: dateTime.message,
+        },
+      ],
+      maximumDiagnostics,
+    );
+  }
   const billingProblem = billingBindingProblem(packageRevision);
   if (billingProblem)
     return failure(
@@ -540,6 +560,7 @@ function compileApplicationInternal(
       displays.fields,
       documents?.payload,
       address?.payload,
+      dateTime?.payload,
     ),
     packageRevision,
   );
@@ -2351,13 +2372,26 @@ function verifyCompleteness(
         entity.columns.map((field) => field.canonicalFieldId),
       )
     : [...collectStorageFields(emittedStorage).keys()];
+  const dateTimeFieldIds = new Set(
+    (packageRevision.languageVersion === 'v6'
+      ? (packageRevision.dateTimeFields ?? [])
+      : []
+    ).map((declaration) => declaration.fieldId),
+  );
   const expectedFields = new Set(
     packageRevision.fields.flatMap((field) =>
       field.fieldType.kind === 'addressFieldType'
         ? addressComponents.map((component) =>
             addressColumnId(field.fieldId, component),
           )
-        : [field.fieldId],
+        : dateTimeFieldIds.has(field.fieldId)
+          ? [
+              field.fieldId,
+              ...DATE_TIME_COMPONENTS.map((component) =>
+                dateTimeComponentId(field.fieldId, component),
+              ),
+            ]
+          : [field.fieldId],
     ),
   );
   if (!setsEqual(new Set(storageFieldIds), expectedFields)) {

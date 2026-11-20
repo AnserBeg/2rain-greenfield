@@ -2,6 +2,10 @@ import { createHash } from 'node:crypto';
 
 import {
   CanonicalIdSchema,
+  DATE_TIME_COMPONENTS,
+  dateTimeComponentId,
+  type DateTimeComponent,
+  type DateTimeFieldDeclaration,
   ADDRESS_COMPONENTS,
   addressComponents,
   addressColumnId,
@@ -375,6 +379,8 @@ export interface StorageEntityTarget {
   ];
   columns: StorageColumnTarget[];
   checkConstraints: StorageCheckConstraintTarget[];
+  /** ADR-0087; emitted only when the entity holds a dateTime field. */
+  dateTimeCaptureChecks?: StorageDateTimeCaptureCheckTarget[];
   consumerWriterRoots: {
     readerQueryIds: string[];
     writerOperationIds: string[];
@@ -506,10 +512,26 @@ export interface StorageCheckConstraintTarget {
   validated: false;
 }
 
+/**
+ * ADR-0087: one multi-column check per logical `dateTime` field -- the whole
+ * capture present for its declared zone source or every column null, finite
+ * values, and civil time minus offset equal to the instant in UTC. Added NOT
+ * VALID, so earlier rows and old writers satisfy it by leaving all null.
+ */
+export interface StorageDateTimeCaptureCheckTarget {
+  canonicalFieldId: string;
+  checkKind: 'dateTimeCapture';
+  columns: Record<'instant' | DateTimeComponent, string>;
+  physicalName: string;
+  validated: false;
+  zoneSource: DateTimeFieldDeclaration['zoneSource']['kind'];
+}
+
 export interface StorageIndexTarget {
   columnNames: string[];
   indexKind:
     | 'caseInsensitiveUnique'
+    | 'dateTimeWindow'
     | 'foldedAccess'
     | 'legalEntityDefaultUnique'
     | 'periodLockScopeUnique'
@@ -639,6 +661,7 @@ export function lowerStorageTargetV1(
     packageRevision.stateMachines,
     (machine) => machine.entity.targetId,
   );
+  const dateTimeDeclarations = dateTimeDeclarationsOf(packageRevision);
 
   const entities = packageRevision.entities.map(
     (entity): StorageEntityTarget => {
@@ -707,8 +730,10 @@ export function lowerStorageTargetV1(
         ]),
       );
       const columns = (fieldsByEntity.get(entity.entityId) ?? [])
-        .flatMap(storageFields)
+        .flatMap((field) => storageFieldsWith(field, dateTimeDeclarations))
         .map((field) => {
+          const component = dateTimeComponentSpecs.get(field);
+          if (component) return lowerDateTimeComponent(field, component, mappings);
           const previousColumn = previousColumns.get(field.fieldId);
           const deferRequiredTightening =
             field.presence === 'required' &&
@@ -779,6 +804,7 @@ export function lowerStorageTargetV1(
           'constraint',
           `${field.fieldId}/enum-domain`,
         );
+
         const constraint = {
           canonicalFieldId: field.fieldId,
           checkKind: 'enumDomain' as const,
@@ -797,6 +823,31 @@ export function lowerStorageTargetV1(
         );
         return [constraint];
       });
+      const dateTimeCaptureChecks = (fieldsByEntity.get(entity.entityId) ?? [])
+        .flatMap((field): StorageDateTimeCaptureCheckTarget[] => {
+          const declaration = dateTimeDeclarations.get(field.fieldId);
+          if (!declaration) return [];
+          const capture: StorageDateTimeCaptureCheckTarget = {
+            canonicalFieldId: field.fieldId,
+            checkKind: 'dateTimeCapture',
+            columns: dateTimeColumnNames(field.fieldId, columns),
+            physicalName: physicalNameFor(
+              'constraint',
+              `${field.fieldId}/date-time-capture`,
+            ),
+            validated: false,
+            zoneSource: declaration.zoneSource.kind,
+          };
+          addMapping(
+            mappings,
+            'constraint',
+            `${field.fieldId}#date-time-capture`,
+            capture.physicalName,
+            capture,
+          );
+          return [capture];
+        })
+        .sort((left, right) => compare(left.physicalName, right.physicalName));
       // From v5 the machine's state field is an ordinary column, lowered by
       // the `columns` map above like any other enumeration field, and this
       // parallel construct is retired. Emitting both registers two
@@ -962,6 +1013,34 @@ export function lowerStorageTargetV1(
             periodLockRule,
           )
         : undefined;
+      // ADR-0087: the field's own window index -- scope, instant, record ID.
+      for (const field of fieldsByEntity.get(entity.entityId) ?? []) {
+        if (!dateTimeDeclarations.has(field.fieldId)) continue;
+        const instant = columns.find(
+          (column) => column.canonicalFieldId === field.fieldId,
+        )!;
+        const index: StorageIndexTarget = {
+          columnNames: [
+            ...businessKeyScopeColumns,
+            instant.physicalName,
+            'record_id',
+          ],
+          indexKind: 'dateTimeWindow',
+          physicalName: physicalNameFor(
+            'index',
+            `${field.fieldId}/date-time-window`,
+          ),
+          predicate: null,
+        };
+        indexes.push(index);
+        addMapping(
+          mappings,
+          'index',
+          `${field.fieldId}#date-time-window`,
+          index.physicalName,
+          index,
+        );
+      }
       if (factStorage) {
         indexes.push({
           columnNames: factStorage.stockHorizonIndex.columns,
@@ -1004,6 +1083,7 @@ export function lowerStorageTargetV1(
         ...(legalEntityMaster ? { legalEntityMaster } : {}),
         checkConstraints,
         columns,
+        ...(dateTimeCaptureChecks.length ? { dateTimeCaptureChecks } : {}),
         consumerWriterRoots: {
           readerQueryIds: (queriesByEntity.get(entity.entityId) ?? [])
             .map((query) => query.queryId)
@@ -1738,9 +1818,10 @@ export function buildStorageTransitionEnvelope(
   candidate: StorageTargetPayloadV1,
   binding: TransitionBinding,
 ): StorageTransitionEnvelope | { diagnostic: CompilerDiagnostic } {
+  const dateTimeDeclarations = dateTimeDeclarationsOf(packageRevision);
   const sourceFields = new Map<string, Field>(
     packageRevision.fields
-      .flatMap(storageFields)
+      .flatMap((field) => storageFieldsWith(field, dateTimeDeclarations))
       .map((field) => [field.fieldId, field]),
   );
   const previousEntities = new Map(
@@ -2064,6 +2145,56 @@ export function buildStorageTransitionEnvelope(
           [addedColumnElementIds.get(check.canonicalFieldId)].filter(
             (dependency): dependency is string => dependency !== undefined,
           ),
+          'existing',
+        ),
+      );
+    }
+    // ADR-0087 A4: a dateTime field added to an existing record type builds
+    // its window index in the approved attempt (deferredOnlineFamily) after
+    // every capture column, and its capture check is added NOT VALID after
+    // the index, so a ceiling refusal leaves only inert columns behind.
+    const oldCaptureChecks = new Set(
+      (oldEntity.dateTimeCaptureChecks ?? []).map((check) => check.physicalName),
+    );
+    for (const check of entity.dateTimeCaptureChecks ?? []) {
+      if (oldCaptureChecks.has(check.physicalName)) continue;
+      const columnIds = [
+        check.canonicalFieldId,
+        ...DATE_TIME_COMPONENTS.map((component) =>
+          dateTimeComponentId(check.canonicalFieldId, component),
+        ),
+      ];
+      const columnElements = columnIds
+        .map((id) => addedColumnElementIds.get(id))
+        .filter((id): id is string => id !== undefined);
+      if (columnElements.length !== columnIds.length)
+        return failureDiagnostic(
+          'COMPILER_STORAGE_TRANSITION_UNSUPPORTED',
+          '$.dateTimeFields',
+          check.canonicalFieldId,
+        );
+      const window = entity.indexes.find(
+        (index) =>
+          index.indexKind === 'dateTimeWindow' &&
+          index.columnNames.includes(check.columns.instant),
+      );
+      if (!window) throw new Error('validated dateTime window index is missing');
+      const createWindow = element(
+        'createIndex',
+        entity.entityId,
+        check.canonicalFieldId,
+        window.physicalName,
+        columnElements,
+        'existing',
+      );
+      elements.push(
+        createWindow,
+        element(
+          'addNotValidConstraint',
+          entity.entityId,
+          check.canonicalFieldId,
+          check.physicalName,
+          [...columnElements, createWindow.elementId],
           'existing',
         ),
       );
@@ -2717,6 +2848,159 @@ function isUnicodeFoldableField(field: Field): boolean {
     field.fieldType.kind === 'textFieldType' ||
     field.fieldType.kind === 'enumFieldType'
   );
+}
+
+interface DateTimeComponentSpec {
+  readonly component: DateTimeComponent;
+  readonly logicalFieldId: string;
+  readonly postgresqlType: string;
+  readonly contract: Pick<ModuleFieldContract, 'bounds' | 'fieldKind' | 'temporal'>;
+}
+// Synthesized component fields carry their physical contract here, so they
+// flow through the same planner paths as ordinary optional columns.
+const dateTimeComponentSpecs = new WeakMap<Field, DateTimeComponentSpec>();
+const NO_BOUNDS = { maximumLength: null, precision: null, scale: null };
+const NO_TEMPORAL = { precision: null, timezoneSemantics: null };
+const DATE_TIME_COMPONENT_CONTRACTS: Record<
+  DateTimeComponent,
+  Omit<DateTimeComponentSpec, 'component' | 'logicalFieldId'>
+> = {
+  civil: {
+    postgresqlType: 'timestamp(3) without time zone',
+    contract: {
+      bounds: NO_BOUNDS,
+      fieldKind: 'dateTimeFieldType',
+      temporal: { precision: 'millisecond', timezoneSemantics: 'localWallTime' },
+    },
+  },
+  offsetSeconds: {
+    postgresqlType: 'integer',
+    contract: { bounds: NO_BOUNDS, fieldKind: 'integerFieldType', temporal: NO_TEMPORAL },
+  },
+  zone: text(64),
+  tzdbVersion: text(16),
+  zoneSource: text(32),
+  companyId: text(36),
+  calendarId: text(64),
+  dayBoundary: {
+    postgresqlType: 'time(3) without time zone',
+    contract: {
+      bounds: NO_BOUNDS,
+      fieldKind: 'timeFieldType',
+      temporal: { precision: 'millisecond', timezoneSemantics: 'localWallTime' },
+    },
+  },
+};
+function text(
+  maximumLength: number,
+): Omit<DateTimeComponentSpec, 'component' | 'logicalFieldId'> {
+  return {
+    postgresqlType: `varchar(${maximumLength})`,
+    contract: {
+      bounds: { maximumLength, precision: null, scale: null },
+      fieldKind: 'textFieldType',
+      temporal: NO_TEMPORAL,
+    },
+  };
+}
+
+function dateTimeDeclarationsOf(
+  packageRevision: NormalizedApplicationPackage,
+): ReadonlyMap<string, DateTimeFieldDeclaration> {
+  const declarations =
+    (packageRevision as { dateTimeFields?: DateTimeFieldDeclaration[] })
+      .dateTimeFields ?? [];
+  return new Map(declarations.map((d) => [d.fieldId, d]));
+}
+
+/** Storage fields for one field, including a logical dateTime's capture. */
+function storageFieldsWith(
+  field: Field,
+  dateTimeDeclarations: ReadonlyMap<string, DateTimeFieldDeclaration>,
+): Field[] {
+  if (!dateTimeDeclarations.has(field.fieldId)) return storageFields(field);
+  return [
+    field,
+    ...DATE_TIME_COMPONENTS.map((component) => {
+      const synthesized: Field = {
+        ...field,
+        fieldId: CanonicalIdSchema.parse(
+          dateTimeComponentId(field.fieldId, component),
+        ),
+        presence: 'optional',
+        defaultSemantics: 'nullable',
+        searchable: false,
+        businessKey: undefined,
+        storageEvolution: undefined,
+      } as Field;
+      dateTimeComponentSpecs.set(synthesized, {
+        component,
+        logicalFieldId: field.fieldId,
+        ...DATE_TIME_COMPONENT_CONTRACTS[component],
+      });
+      return synthesized;
+    }),
+  ];
+}
+
+function lowerDateTimeComponent(
+  field: Field,
+  spec: DateTimeComponentSpec,
+  mappings: PhysicalMappingRecord[],
+): StorageColumnTarget {
+  const physicalName = physicalNameFor('column', field.fieldId);
+  const value: StorageColumnTarget = {
+    canonicalFieldId: field.fieldId,
+    coexistenceImpact: 'requiresReadFallback',
+    collation: 'binary',
+    defaultSemantics: 'nullable',
+    defaultValue: null,
+    fieldContract: {
+      ...spec.contract,
+      enumOptionIds: [],
+      fieldId: field.fieldId,
+      normalization: 'none',
+      required: false,
+      schemaVersion: MODULE_FIELD_CONTRACT_VERSION,
+      writable: true,
+    },
+    nullable: true,
+    physicalName,
+    postgresqlType: spec.postgresqlType,
+    requiredAfterTightening: false,
+    searchMapping: 'none',
+    shapeFingerprint: hashCanonical(
+      `${HASH_DOMAINS.projectionSemantic}/storage-column`,
+      {
+        dateTimeComponent: spec.component,
+        logicalFieldId: spec.logicalFieldId,
+        nullable: true,
+        postgresqlType: spec.postgresqlType,
+      },
+    ).digest,
+  };
+  addMapping(mappings, 'column', field.fieldId, physicalName, value);
+  return value;
+}
+
+function dateTimeColumnNames(
+  fieldId: string,
+  columns: readonly StorageColumnTarget[],
+): StorageDateTimeCaptureCheckTarget['columns'] {
+  const physical = (id: string) => {
+    const column = columns.find((c) => c.canonicalFieldId === id);
+    if (!column) throw new Error(`dateTime storage is incomplete for ${fieldId}`);
+    return column.physicalName;
+  };
+  return {
+    instant: physical(fieldId),
+    ...(Object.fromEntries(
+      DATE_TIME_COMPONENTS.map((component) => [
+        component,
+        physical(dateTimeComponentId(fieldId, component)),
+      ]),
+    ) as Record<DateTimeComponent, string>),
+  };
 }
 
 function storageFields(field: Field): Field[] {
