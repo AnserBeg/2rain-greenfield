@@ -1,24 +1,19 @@
 # WORKFLOW-1 — goods receipt workflows
 
-Latest integrated checkpoint corrects dispatch, approval and validation-read authority. Workflow authoring and verifier admission remain pending.
-
 ## Claims
 
-1. Verified definition bindings and receipt source authority are release- and fence-pinned. The worker consumes the existing receipt outbox.
-2. Approval decisions bind the exact release, operation inputs, receipt company, occurrence and fence. The approver needs the live action grant for the target’s owner. Shared targets require a global grant. Ambiguous record IDs are refused.
-3. Sleep persists a UTC deadline and an exactly-once journaled wake. Stale waiting runs suspend. Approvals shows exact inputs and supports per-run retry or cancel results.
-4. Customize shows the approved live definition and read-only source to workspace authors and release approvers.
-5. Workflow dispatch applies the pinned role restrictions to both principals and uses their live intersection with activation grants for validation reads.
+1. A posted receipt starts a release- and fence-pinned workflow as a scoped automation principal. The journal and outbox make effect retry and timer wake idempotent.
+2. Dispatch applies current narrowed policy and activation authority. Approval requires the exact action and its stored owner scope. Shared targets require a global grant and ambiguous record IDs are refused.
+3. Customize Ask drafts workflow source and replay fixtures as a normal patch. The release verifier binds the body, trigger, grants and SDK to the pinned release. Approval and activation use the normal release path.
+4. A receipt for Field notebooks creates an Inspection linked to the receipt. Two days later a pending Inspection produces a human approval request. Rollback retains the audit trail.
 
 ## Decisions
 
 - QuickJS Emscripten 0.32.0 won on the fixed host-owned WASM memory cap. Both candidates passed isolation, dispatch and limit probes. [ADR-0073](../../decisions/ADR-0073-workflow-isolate-and-authority.md)
-- Require exact human confirmation for Tier B calls, dependency intersections and incomplete proofs. The owning capability alone writes Tier B facts.
-- Actionless historical plans remain auditable and ineligible. Active approval uses source trust records and the pinned action catalog.
-- The scheduler and worklist are opt-in for the local demo. Its Manager is enrolled as a potential approver and still needs each operation grant.
-- Keep the receipt company in the immutable plan for source attribution. Show the resolved action scope in Approvals.
-- Company-owned validation paths without issued scope are refused by the integrated CRITFIX-G guard.
-- The next surface-reader rung is assigned at integration. Workflow drafting and activation, the full author-to-Inspection browser journey, and wait-for-event remain open. Documents, communication/email and connectors are later N2 work.
+- Tier B calls and incomplete dependency proofs require exact human confirmation. The owning capability writes Tier B facts.
+- The workflow requires surface reader 29. Releases with no workflow keep their previous bytes. [ADR-0074](../../decisions/ADR-0074-formula-rule-and-workflow-projection-admission.md)
+- The demo scheduler and Approvals are opt-in. SIGNIN-1 owns the staff approval proof.
+- Wait-for-event, broader document workflows, communication/email and connectors remain open.
 
 ## Gates
 
@@ -29,43 +24,45 @@ Latest integrated checkpoint corrects dispatch, approval and validation-read aut
 - Workflow display at `f8393f9a`. Gates passed on [CI 44653100303](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44653100303).
 
 - Authority findings at `cfba4a6c` passed [CI 44678755860](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44678755860). Defect controls are in [five restored-behavior controls 44669839289](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44669839289) and [shared-scope control 44678755737](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44678755737). Migration `0046_workflow_approval_target_scope.sql`.
+- Verifier and authoring at `35c0de4a` passed [CI 44711875228](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44711875228).
 
 ## Controls
 
-- `workflow-dispatch-role-narrowing`, `workflow-approval-stored-owner` and `workflow-validation-read-authority` each restore the pre-fix behavior and fail the corresponding PostgreSQL regression.
-- The controls also refuse company-only grants on shared actions, missing exact action grants and ambiguous target IDs.
+- The dispatch narrowing, stored-owner and validation-read regressions each fail with the old behavior restored.
+- A real pre-admission reader refuses the required surface floor. The archived tenant runner reproduces the whole workflow-free envelope. Altered SDK and trigger projections are refused.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "WORKFLOW-1",
-  "base": "60451569e92ffe9aad3fc2c67bfa326a978b1f3c",
-  "head": "cfba4a6c1dfe090de6d97fba480278a5f7cd83c1",
+  "base": "238b98a6cbb88171983f395ec23179eb4d73b24e",
+  "head": "35c0de4a3b8bcbd0cebee3f70beab792f21e4f6c",
   "changedPaths": [
-    "apps/web/src/surface-runtime.ts",
-    "apps/web/src/workflow-approvals.ts",
-    "apps/web/test/browser/message-catalog.spec.ts",
-    "db/migrations/0046_workflow_approval_target_scope.sql",
-    "db/schema.snapshot.json",
-    "packages/postgres-provider/src/current-policy.ts",
-    "packages/postgres-provider/src/workflow-gateway.ts",
-    "packages/postgres-provider/src/workflow-worker.ts",
-    "test/architecture/release-persistence-boundary.test.ts",
-    "test/evidence/WORKFLOW-1.expected-red.json",
-    "test/postgres/inventory-storage.test.ts",
-    "test/postgres/migrations.test.ts",
-    "test/postgres/module-storage-transition.test.ts",
-    "test/postgres/trust-substrate.test.ts",
-    "test/postgres/workflow-consumer.test.ts"
+    ".github/workflows/ci.yml", "apps/web/test/browser/customize-inspection.composed-application.spec.ts",
+    "packages/canonical-model/src/normalize.ts", "packages/canonical-model/src/schemas.ts",
+    "packages/canonical-model/src/workflows.ts", "packages/compiler/src/compiler.ts",
+    "packages/compiler/src/index.ts", "packages/compiler/src/projections.ts",
+    "packages/compiler/src/workflows.ts", "packages/customization/src/ai-draft.ts",
+    "packages/customization/src/apply.ts", "packages/customization/src/patch.ts",
+    "packages/customization/src/render.ts", "packages/customization/src/targets.ts",
+    "packages/customization/src/workflow-draft.ts", "packages/postgres-provider/src/composed-application-runtime.ts",
+    "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/release-verification-service.ts",
+    "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/postgres-provider/src/workflow-admission.ts",
+    "packages/postgres-provider/src/workflow-bundle.ts", "packages/postgres-provider/src/workflow-execution.ts",
+    "packages/postgres-provider/src/workflow-verification.ts", "packages/postgres-provider/src/workflow-worker.ts",
+    "packages/runtime/src/request-runtime-view.ts", "test/architecture/repository-hygiene.test.ts",
+    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/archived-customization-runtime.ts",
+    "test/helpers/archived-runtime-process.ts", "test/helpers/language-coverage-packages.ts",
+    "test/integration/workflow-admission.test.ts", "test/postgres/request-runtime-view.test.ts"
   ],
   "symbols": [
     {
-      "path": "packages/postgres-provider/src/workflow-gateway.ts",
-      "name": "PostgresWorkflowGateway"
+      "path": "packages/postgres-provider/src/release-verification-service.ts",
+      "name": "releaseVerificationBinding"
     },
     {
-      "path": "packages/postgres-provider/src/workflow-worker.ts",
-      "name": "PostgresWorkflowWorker"
+      "path": "packages/postgres-provider/src/workflow-admission.ts",
+      "name": "verifyWorkflowDefinitions"
     }
   ]
 }
@@ -73,5 +70,5 @@ Latest integrated checkpoint corrects dispatch, approval and validation-read aut
 
 ## Test it yourself
 
-- Open PostgreSQL shard 3 in the CI run above and find the workflow receipt journey. Check the results for pinned role restrictions, target ownership, shared grants and validation reads.
-- Open **Approvals** in the local demo. Check the target company or **Tenant-wide** and the exact operation inputs before deciding. Open **Customize → Live workflows → View code** to inspect the trigger, grants and read-only source.
+- Open the Customization rules browser runner in [CI 44711875228](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44711875228). Find **a drafted receipt workflow links an inspection and requests escalation after two days**. It drafts and activates the change, posts a receipt, opens its link from the pending Inspection and advances the clock to the approval request.
+- In the opt-in local demo, open **Customize → Live workflows → View code** to check the trigger, grants and source. Open **Approvals** to inspect the exact operation inputs and target company.

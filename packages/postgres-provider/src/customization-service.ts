@@ -74,6 +74,14 @@ import {
   ReleaseReverseTransitionRefusal,
 } from './release-reverse-transition-policy.js';
 import { withTrustedRequestTransaction } from './request-context.js';
+import { parsePinnedOperationCatalog } from '../../runtime/src/semantic-operation-gateway.js';
+import { PostgresWorkflowGateway } from './workflow-gateway.js';
+import { generateWorkflowSdk } from './workflow-sdk.js';
+import {
+  readWorkflowBundle,
+  storeWorkflowBundle,
+  verifyWorkflowBundle,
+} from './workflow-bundle.js';
 
 /**
  * Tenant customization over the composed application (CUSTOMIZE packet). A
@@ -102,6 +110,7 @@ const UPGRADE_PATCH_KINDS: ReadonlySet<string> = new Set([
   'addMetricCard',
   'narrowPermission',
   'unNarrowPermission',
+  'saveWorkflow',
 ]);
 
 export type CustomizationRefusalCode =
@@ -952,11 +961,79 @@ export class PostgresCustomizationService {
         status: 'refused' as const,
       });
     }
-    const drafted = await draftPatchFromRequest(
-      model,
-      request,
-      await this.targets(actor),
-    );
+    const context = await this.#context(actor);
+    const view = await new PostgresWorkflowGateway(
+      this.connection.runtimePool,
+    ).loadView(context);
+    const operations = parsePinnedOperationCatalog(
+      view.projections.operation.payload,
+    )
+      .flatMap((op) =>
+        op.lifecycle === 'active' &&
+        op.tier === 'o0' &&
+        op.inputContract &&
+        /:operation\.custom_/u.test(op.operationId)
+          ? [op.operationId]
+          : [],
+      )
+      .slice(0, 64);
+    const queryCatalog = view.projections.query.payload as unknown as {
+      queries: readonly {
+        queryId: string;
+        lifecycle: string;
+        legalEntityScope?: unknown;
+        readModel?: unknown;
+      }[];
+    };
+    const queries = queryCatalog.queries
+      .filter(
+        (query) =>
+          query.lifecycle === 'active' &&
+          query.legalEntityScope &&
+          !query.readModel,
+      )
+      .map(({ queryId }) => queryId);
+    const targets = await this.targets(actor);
+    const drafted = await draftPatchFromRequest(model, request, {
+      ...targets,
+      ...(operations.length
+        ? {
+            workflowSdk: generateWorkflowSdk(view, { queries, operations })
+              .declarations,
+          }
+        : {}),
+    });
+    if (drafted.status === 'workflowDraft') {
+      signal?.throwIfAborted();
+      const { workflow, body, fixtures } = drafted.draft;
+      const bundle = { body, fixtures, authoredBy: context.principalId };
+      let digest: string;
+      try {
+        const { executable } = await verifyWorkflowBundle(
+          view,
+          workflow.grants,
+          bundle,
+        );
+        digest = await withTrustedRequestTransaction(
+          this.connection.runtimePool,
+          context,
+          (client) =>
+            storeWorkflowBundle(client, context, { ...bundle, executable }),
+        );
+      } catch (error) {
+        return {
+          status: 'invalid',
+          message: 'The workflow draft did not pass verification.',
+          issues: [error instanceof Error ? error.message : String(error)],
+        };
+      }
+      return this.draft(
+        { kind: 'saveWorkflow', workflow: { ...workflow, bodyDigest: digest } },
+        'conversationalAi',
+        signal,
+        actor,
+      );
+    }
     if (drafted.status === 'parsed') {
       signal?.throwIfAborted();
       return this.draft(drafted.patch, 'conversationalAi', signal, actor);
@@ -1137,6 +1214,22 @@ export class PostgresCustomizationService {
     const context = await this.#context(actor);
     const active = await this.#active(context);
     const change = parsed.patch;
+    if (change.kind === 'saveWorkflow') {
+      try {
+        await withTrustedRequestTransaction(
+          this.connection.runtimePool,
+          context,
+          (client) =>
+            readWorkflowBundle(client, context, change.workflow.bodyDigest),
+        );
+      } catch (error) {
+        return {
+          status: 'invalid',
+          message: 'The workflow body could not be loaded.',
+          issues: [error instanceof Error ? error.message : String(error)],
+        };
+      }
+    }
     if (
       change.kind === 'narrowPermission' ||
       change.kind === 'unNarrowPermission'
@@ -1373,6 +1466,7 @@ export class PostgresCustomizationService {
           candidate,
           this.options.providerErrorMappings ?? [],
           this.options.capabilityOperationExecutorFactories ?? [],
+          this.connection.adminPool,
         );
       const binding = releaseDiffBinding(parent, candidate);
       const approver = await trustedContext(
@@ -2325,7 +2419,7 @@ export class PostgresCustomizationService {
         const bytes = new Map(
           result.rows.map((row) => [row.patch_id, row.payload]),
         );
-        return records.map((record) => {
+        const chain = records.map((record) => {
           const payload = bytes.get(record.patchId);
           if (
             payload &&
@@ -2352,6 +2446,15 @@ export class PostgresCustomizationService {
             `patch ${record.patchId} (${record.kind}) cannot be read with its recorded kind and digest`,
           );
         });
+        for (const patch of chain) {
+          if (patch.kind === 'saveWorkflow')
+            await readWorkflowBundle(
+              client,
+              context,
+              patch.workflow.bodyDigest,
+            );
+        }
+        return chain;
       },
     );
   }
@@ -2476,6 +2579,8 @@ function patchDisplayLabel(patch: CustomizationPatch): string | null {
       return patch.field.label;
     case 'addValidation':
       return patch.rule.message;
+    case 'saveWorkflow':
+      return patch.workflow.workflowId;
     case 'addRecordType':
     case 'addLink':
     case 'addLineTable':

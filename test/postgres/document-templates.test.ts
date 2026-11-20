@@ -64,6 +64,9 @@ test(
           tenantSlug: 'document-templates',
           port: 0,
         };
+        await pool.query(
+          "ALTER DATABASE postgres SET north_star.isolated_document_demo = 'on'",
+        );
         const app = await startComposedApplication({
           ...options,
           documentDemoScanner: true,
@@ -221,7 +224,7 @@ test(
           await service.approve(draft.patchId);
           if (process.env.CI) {
             await withArchivedCustomizationRuntime(
-              '552b13d8837a5e44ac16d3383988c167345d0295',
+              '2042780bcc3889022af36493a2dcaa3a62b8cb56',
               async (run) => {
                 await assertArchivedTenantEnvelope(run);
                 const read = () =>
@@ -234,7 +237,7 @@ test(
                 assert.deepEqual(await read(), {
                   outcome: 'refused',
                   code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
-                  message: `runtime capability northstar.runtime:capability.surface-manifest requires version ${DOCUMENT_TEMPLATES_SURFACE_FLOOR} and this runtime supports 28`,
+                  message: `runtime capability northstar.runtime:capability.surface-manifest requires version ${DOCUMENT_TEMPLATES_SURFACE_FLOOR} and this runtime supports 29`,
                 });
               },
             );
@@ -280,6 +283,14 @@ test(
           const saved = await pool.query(
             'SELECT generated_source FROM platform.document_versions WHERE version_id = $1',
             [purchaseArtifact.versionId],
+          );
+          assert.equal(
+            saved.rows[0]?.generated_source.templateId,
+            po.templateId,
+          );
+          assert.match(
+            saved.rows[0]?.generated_source.inputDigest,
+            /^[0-9a-f]{64}$/u,
           );
           assert.equal(
             saved.rows[0]?.generated_source.revisionId,

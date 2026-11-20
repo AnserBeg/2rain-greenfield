@@ -25,6 +25,12 @@ import {
   DOCUMENTS_PAYLOAD_VERSION,
 } from '../../canonical-model/src/documents.js';
 import type { compileDocuments } from './documents.js';
+import {
+  WORKFLOW_PAYLOAD_VERSION,
+  WORKFLOW_RUNTIME_CAPABILITY,
+  WORKFLOW_SURFACE_FLOOR,
+} from '../../canonical-model/src/workflows.js';
+import { workflowSdkBindingDigest } from './workflows.js';
 
 import {
   FORMULA_RULE_PAYLOAD_VERSION,
@@ -90,12 +96,12 @@ export function verificationAssertionEntityId(
 
 type LoweredProjectionFamily = Exclude<
   ProjectionFamilyId,
-  | typeof PROJECTION_FAMILY_IDS.storageTransition
-  | typeof PROJECTION_FAMILY_IDS.workflow
+  typeof PROJECTION_FAMILY_IDS.storageTransition
 >;
 
 const payloadSchemaVersions: Record<LoweredProjectionFamily, string> = {
   [PROJECTION_FAMILY_IDS.documents]: DOCUMENTS_PAYLOAD_VERSION,
+  [PROJECTION_FAMILY_IDS.workflow]: WORKFLOW_PAYLOAD_VERSION,
   [PROJECTION_FAMILY_IDS.agentDiscovery]:
     'northstar.agent-discovery-payload/v0-provisional',
   [PROJECTION_FAMILY_IDS.formulaRule]: FORMULA_RULE_PAYLOAD_VERSION,
@@ -121,6 +127,10 @@ const runtimeCapabilities: Record<
   LoweredProjectionFamily,
   RuntimeCapabilityRequirement
 > = {
+  [PROJECTION_FAMILY_IDS.workflow]: {
+    capabilityId: WORKFLOW_RUNTIME_CAPABILITY,
+    minimumVersion: 1,
+  },
   [PROJECTION_FAMILY_IDS.documents]: {
     capabilityId: 'northstar.runtime:capability.documents',
     minimumVersion: 1,
@@ -377,6 +387,48 @@ export function lowerBaseProjectionPayloads(
     );
   }
   return plans;
+}
+
+export function appendWorkflowProjection(
+  plans: ProjectionPayloadPlan[],
+  revision: VersionedNormalizedApplicationPackage,
+): void {
+  if (revision.languageVersion !== 'v6' || !revision.workflows) return;
+  const operations = plans.find(
+    ({ familyId }) => familyId === PROJECTION_FAMILY_IDS.operationCatalog,
+  )!.payload;
+  const queries = plans.find(
+    ({ familyId }) => familyId === PROJECTION_FAMILY_IDS.queryCatalog,
+  )!.payload;
+  const surface = plans.find(
+    ({ familyId }) => familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
+  )!;
+  surface.requiredRuntimeCapability = {
+    ...surface.requiredRuntimeCapability,
+    minimumVersion: Math.max(
+      surface.requiredRuntimeCapability.minimumVersion,
+      WORKFLOW_SURFACE_FLOOR,
+    ),
+  };
+  plans.push(
+    plan(
+      PROJECTION_FAMILY_IDS.workflow,
+      revision.package.namespace,
+      { kind: 'packageScope', scopeId: revision.package.packageId },
+      {
+        kind: 'workflowPayload',
+        schemaVersion: WORKFLOW_PAYLOAD_VERSION,
+        workflows: revision.workflows.map((workflow) => ({
+          ...workflow,
+          sdkDigest: workflowSdkBindingDigest(
+            workflow.grants,
+            operations,
+            queries,
+          ),
+        })),
+      },
+    ),
+  );
 }
 
 /**

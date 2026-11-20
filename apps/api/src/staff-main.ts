@@ -67,12 +67,18 @@ async function main() {
   const origin = new URL(
     mode === 'erp' ? realm.erpOrigin : realm.identityOrigin,
   );
+  const rateKey = await readFile(setting('STAFF_RATE_KEY_FILE'));
+  const trustedIngress = process.env.STAFF_TRUSTED_INGRESS_ADDRESSES?.split(
+    ',',
+  ).map((address) => address.trim());
   let server, close: () => Promise<unknown>;
   if (mode === 'erp') {
     const { createPilotApplication } =
       await import('./pilot-composition-root.js');
     const app = await createPilotApplication({
       realm,
+      rateKey,
+      ...(trustedIngress ? { trustedIngress } : {}),
       runtimeDatabaseUrl: setting('STAFF_RUNTIME_DATABASE_URL'),
       ...(process.env.STAFF_IDENTITY_CA_FILE
         ? { identityCa: await readFile(process.env.STAFF_IDENTITY_CA_FILE) }
@@ -92,20 +98,8 @@ async function main() {
       await assertPilotDatabase(pool, 'north_star_identity', realm);
       const { identityHandler } = await import('./staff-identity-http.js');
       const { StaffIdentity } = await import('./staff-identity.js');
-      const identity = new StaffIdentity(
-        pool,
-        realm,
-        await readFile(setting('STAFF_RATE_KEY_FILE')),
-      );
-      server = createServer(
-        tls,
-        identityHandler(
-          identity,
-          process.env.STAFF_TRUSTED_INGRESS_ADDRESSES?.split(',').map(
-            (address) => address.trim(),
-          ),
-        ),
-      );
+      const identity = new StaffIdentity(pool, realm, rateKey);
+      server = createServer(tls, identityHandler(identity, trustedIngress));
       close = () => pool.end();
     } catch (error) {
       await pool.end();

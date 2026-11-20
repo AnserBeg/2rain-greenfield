@@ -58,6 +58,7 @@ export interface CustomizationTargets {
   }[];
   readonly calculatedDisplayTargets?: readonly CalculatedDisplayTarget[];
   readonly validationTargets?: readonly LiteralValidationTarget[];
+  readonly workflowSdk?: string;
   readonly linkTargets?: readonly {
     readonly entityId: string;
     readonly label: string;
