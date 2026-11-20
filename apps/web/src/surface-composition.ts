@@ -2539,6 +2539,40 @@ export async function submitCompositionAction(
   const popup = surface.popupActions?.find(
     (p) => p.revision.actionId === current.action.actionId,
   );
+  // Re-read the actual record before advancing an open pop-up. The invocation
+  // still carries the revision seen on open and checks it inside the write.
+  if (popup && submission.taskToken && !current.confirmed) {
+    const fresh = await query(
+      view,
+      gateways,
+      surface.dataSourceQueryId,
+      current.data.scope,
+      recordArguments(view, surface, current.data.record.recordId),
+    );
+    const record = fresh.records[0];
+    if (
+      fresh.outcome !== 'exact' ||
+      !record ||
+      record.recordId !== current.data.record.recordId ||
+      record.revision !== current.data.record.revision ||
+      !(
+        await availablePopups(
+          view,
+          [popup],
+          record,
+          current.data.scope,
+          gateways.operationGateway,
+        )
+      ).length
+    ) {
+      sessions.delete(token!);
+      return renderTask(
+        compositionMessage('COMPOSITION_TASK_UNAVAILABLE', 'alert'),
+        null,
+        422,
+      );
+    }
+  }
   const boundSources =
     popup?.task?.steps[0]?.bindings.filter(
       (b) =>

@@ -7,6 +7,7 @@ import {
 } from './layout.js';
 import type {
   CanonicalId,
+  CompiledPopupSchema,
   SurfaceComposition,
   SurfaceForm,
   SurfaceDocumentEditor,
@@ -307,7 +308,12 @@ export function popupOptions(
       });
     }
   }
-  return options;
+  return options.map((o) => ({
+    ...o,
+    existing: o.existing.filter(
+      (r) => r.target.contractVersion === o.target.contractVersion,
+    ),
+  }));
 }
 
 export function resolvePopup(
@@ -461,4 +467,4 @@ export function compiledPopups(def: LayoutDefinition, surface: Row) {
       : {}),
   }));
 }
-export type CompiledPopup = ReturnType<typeof compiledPopups>[number];
+export type CompiledPopup = z.infer<typeof CompiledPopupSchema>;

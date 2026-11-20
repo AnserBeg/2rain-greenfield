@@ -1,8 +1,8 @@
-import { randomUUID } from 'node:crypto';
-import type {
-  PopupRevision,
-  PopupOption,
-} from '../../../packages/canonical-model/src/popup-actions.js';
+import {
+  popupCommand,
+  popupOptionId,
+} from '../../../packages/customization/src/popup-revision.js';
+import type { PopupOption } from '../../../packages/canonical-model/src/popup-actions.js';
 import { layoutDigest } from '@north-star/canonical-model';
 import {
   layoutCommand,
@@ -1337,13 +1337,6 @@ function layoutSubmission(
   });
 }
 
-function popupKey(o: PopupOption) {
-  return [
-    o.surface,
-    o.target.kind === 'update' ? o.target.operationId : o.target.taskId,
-  ].join('/');
-}
-
 function popupPicker(options: readonly PopupOption[]) {
   if (!options.length) return '';
   const edit = options.flatMap((o) =>
@@ -1355,10 +1348,10 @@ function popupPicker(options: readonly PopupOption[]) {
       )
       .map(
         (r) =>
-          `<li><a href="/?customize&amp;popup=${encodeURIComponent(popupKey(o))}&amp;button=${encodeURIComponent(r.actionId)}">Edit ${escapeHtml(r.label.text)} on ${escapeHtml(o.page)}</a></li>`,
+          `<li><a href="/?customize&amp;popup=${encodeURIComponent(popupOptionId(o))}&amp;button=${encodeURIComponent(r.actionId)}">Edit ${escapeHtml(r.label.text)} on ${escapeHtml(o.page)}</a></li>`,
       ),
   );
-  return `<form method="get"><fieldset><legend>Add a record button</legend><input type="hidden" name="customize" value=""><label>Page and action <select name="popup">${options.map((o) => `<option value="${escapeHtml(popupKey(o))}">${escapeHtml(o.page)} — ${escapeHtml(o.label)}</option>`).join('')}</select></label><button>Choose fields</button></fieldset></form>${edit.length ? `<ul>${edit.join('')}</ul>` : ''}`;
+  return `<form method="get"><fieldset><legend>Add a record button</legend><input type="hidden" name="customize" value=""><label>Page and action <select name="popup">${options.map((o) => `<option value="${escapeHtml(popupOptionId(o))}">${escapeHtml(o.page)} — ${escapeHtml(o.label)}</option>`).join('')}</select></label><button>Choose fields</button></fieldset></form>${edit.length ? `<ul>${edit.join('')}</ul>` : ''}`;
 }
 
 function popupEditor(
@@ -1366,7 +1359,7 @@ function popupEditor(
   key: string,
   actionId: string | null,
 ) {
-  const o = options.find((v) => popupKey(v) === key);
+  const o = options.find((v) => popupOptionId(v) === key);
   const prior = o?.existing.find(
     (r) => r.actionId === actionId && r.status === 'active',
   );
@@ -1407,68 +1400,28 @@ function popupSubmission(
 ) {
   const o = options.find(
     (o) =>
-      popupKey(o) === form.popup && form.contract === o.target.contractVersion,
+      popupOptionId(o) === form.popup &&
+      form.contract === o.target.contractVersion,
   );
   if (!o)
     throw new Error('The action contract changed. Reopen the button editor.');
-  const prior = o.existing.find((r) => r.actionId === form.button);
-  if ((form.button && !prior) || (prior?.revisionId ?? '') !== form.predecessor)
-    throw new Error('The button has changed. Reopen the button editor.');
-  const schemaVersion = 'v6' as const;
-  const revisionId = randomUUID();
-  if (prior && form.retire === 'yes')
-    return {
-      ...prior,
-      kind: 'addPopupActionRevision',
-      revisionId,
-      predecessor: prior.revisionId,
-      status: 'retired',
-    };
-  const inputs: PopupRevision['inputs'] = [];
-  for (const f of o.fields) {
-    const key = form['source:' + f.id];
-    if (!key) continue;
-    const from = o.sources.find((s) => s.id === key);
-    const source: PopupRevision['inputs'][number]['source'] =
-      key === 'entry'
-        ? { kind: 'userEntry', schemaVersion }
-        : key === 'constant'
-          ? {
-              kind: 'constant',
-              type: 'text',
-              value: form['constant:' + f.id] ?? '',
-              schemaVersion,
-            }
-          : from
-            ? {
-                kind: 'recordField',
-                schemaVersion,
-                fieldId: from.id,
-                contractVersion: from.contractVersion,
-              }
-            : (() => {
-                throw new Error('Choose an available source.');
-              })();
-    inputs.push({
-      schemaVersion,
-      binding: f.id,
-      contractVersion: f.contractVersion,
-      source,
-    });
-  }
-  return {
-    kind: 'addPopupActionRevision',
-    schemaVersion,
-    actionId:
-      prior?.actionId ??
-      o.surface.split(':')[0] + ':action.custom_' + randomUUID(),
-    revisionId,
-    predecessor: prior?.revisionId ?? null,
-    status: 'active',
-    surface: o.surface,
-    slot: o.slot,
-    label: { schemaVersion, text: form.label },
-    target: o.target,
+  const inputs = o.fields.flatMap(({ id }) => {
+    const source = form['source:' + id];
+    if (!source) return [];
+    if (source === 'entry') return [{ binding: id, source }];
+    return [
+      source === 'constant'
+        ? { binding: id, source, value: form['constant:' + id] ?? '' }
+        : { binding: id, source: 'record', fieldId: source },
+    ];
+  });
+  return popupCommand(options, {
+    option: form.popup,
+    label: form.label,
+    contract: form.contract,
+    actionId: form.button,
+    predecessor: form.predecessor,
+    retire: form.retire === 'yes',
     inputs,
-  };
+  });
 }

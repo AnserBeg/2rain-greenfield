@@ -2310,10 +2310,13 @@ test('addPopupActionRevision replay accepts a compatible base move and refuses a
   const targets = customizationTargets(
     model as unknown as Parameters<typeof customizationTargets>[0],
   );
-  const option = targets.popupActions!.find(
+  const option = targets.popupActions?.find(
     (o) => o.target.kind === 'operation' && o.label === 'Place order',
-  )!;
-  assert.ok(option);
+  );
+  assert.ok(
+    option,
+    'The purchase-order Record declares an eligible Place order Task',
+  );
   const revision = patch({
     kind: 'addPopupActionRevision',
     schemaVersion: 'v6',
@@ -2355,6 +2358,51 @@ test('addPopupActionRevision replay accepts a compatible base move and refuses a
   };
   const button = manifest.surfaces.find((s) => s.surfaceId === option.surface)!
     .popupActions![0]!;
+  const { popupDeclarationProblem, popupBindingsProblem } =
+    await import('../../packages/postgres-provider/src/popup-admission.js');
+  const operationCatalog = projectionPayload(
+    release.compiled,
+    PROJECTION_FAMILY_IDS.operationCatalog,
+  );
+  const queryCatalog = projectionPayload(
+    release.compiled,
+    PROJECTION_FAMILY_IDS.queryCatalog,
+  );
+  assert.equal(
+    popupBindingsProblem(
+      manifest,
+      POPUP_READER,
+      operationCatalog,
+      queryCatalog,
+    ),
+    null,
+  );
+  assert.match(
+    popupBindingsProblem(
+      manifest,
+      POPUP_READER - 1,
+      operationCatalog,
+      queryCatalog,
+    ) ?? '',
+    /floor/,
+  );
+  assert.match(
+    popupBindingsProblem(
+      manifest,
+      POPUP_READER,
+      { operations: [] },
+      queryCatalog,
+    ) ?? '',
+    /bound operation/,
+  );
+  assert.match(
+    popupDeclarationProblem(
+      JSON.parse(new TextDecoder().decode(release.normalizedDefinitionBytes)),
+      { surfaces: [] },
+      POPUP_READER,
+    ) ?? '',
+    /floor/,
+  );
   assert.deepEqual(button.task?.conditions, option.task?.conditions);
   assert.deepEqual(button.task?.steps, option.task?.steps);
   assert.equal(button.task?.description, option.task?.description);

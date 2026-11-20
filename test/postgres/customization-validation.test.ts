@@ -446,7 +446,11 @@ test(
           databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
           tenantSlug: 'customize-popup',
         };
-        const app = await startComposedApplication({ ...options, port: 0 });
+        const app = await startComposedApplication({
+          ...options,
+          purchaseOrdersRequireApproval: true,
+          port: 0,
+        });
         const opened = await openCustomizeService(options);
         try {
           const surface = 'northstar.app:surface.item_detail',
@@ -530,6 +534,21 @@ test(
                 )
               ).rows[0].count,
             );
+          const assistant = new OperationsAgentSession({
+            runtime: app.runtime,
+            companyId: COMPANY,
+            personHeaders: { cookie: 'northstar-demo-actor=buyer' },
+            approve: () => Promise.resolve(false),
+          });
+          const assistantContext = () =>
+            assistant.turnContext({
+              surfaceId: surface,
+              recordId: record.recordId,
+            });
+          assert.ok(
+            (await assistantContext()).includes(revision.actionId),
+            'the assistant resolves this record button from its release',
+          );
           const start = await receiptCount();
           const button = { compositionAction: revision.actionId };
           const page = await (await fetch(actualUrl)).text();
@@ -564,11 +583,138 @@ test(
             taskStage: 'apply',
             [field]: 'Stale value',
           });
+          assert.match(old, /Task unavailable/u);
           assert.doesNotMatch(old, /Edit item note: done/u);
           assert.equal(await receiptCount(), start + 1);
           const after = await (await fetch(actualUrl)).text();
           assert.match(after, /Dock three/u);
           assert.doesNotMatch(after, /Stale value/u);
+          const { popupCommand, popupOptionId } =
+            await import('../../packages/customization/src/popup-revision.js');
+          const place = (await opened.service.targets()).popupActions!.find(
+            (o) =>
+              o.target.operationId.endsWith(
+                ':operation.purchase_order_release',
+              ),
+          )!;
+          const send = popupCommand([place], {
+            option: popupOptionId(place),
+            label: 'Send to vendor',
+            inputs: [
+              {
+                binding: place.fields[0]!.id,
+                source: 'constant',
+                value: 'Dock <3>',
+              },
+            ],
+          });
+          const approved = await opened.service.draft(send, 'visualBuilder');
+          assert.ok(approved.status === 'drafted', JSON.stringify(approved));
+          await opened.service.approve(approved.patchId);
+          await opened.service.activate(approved.patchId);
+          const world = worldOver(app.runtime, String(connection.database));
+          const supplier = app.seededRecords.find((r) =>
+            r.operationId.endsWith(':operation.party_create'),
+          )!.recordId;
+          await world.invoke('party_role_create', {
+            recordId: randomUUID(),
+            values: {
+              'northstar.app:field.party_role_kind':
+                'northstar.app:option.supplier',
+              'northstar.app:field.party_role_status':
+                'northstar.app:option.active',
+            },
+            relations: { 'northstar.app:relation.party_role_party': supplier },
+          });
+          const order = await world.create('purchase_order', {
+            supplier_party_id: supplier,
+            order_date: new Date().toISOString(),
+            currency: 'CAD',
+          });
+          await world.create(
+            'purchase_order_line',
+            {
+              line_number: '1',
+              item_id: record.recordId,
+              ordered_quantity: '1',
+              unit_price: '5',
+            },
+            { order: order.recordId },
+          );
+          const po = new URL('/', app.baseUrl);
+          po.searchParams.set('surface', place.surface);
+          po.searchParams.set('record', order.recordId);
+          po.searchParams.set(
+            'northstar.app:parameter.commercial_purchase_order_get_legal_entity_scope',
+            COMPANY,
+          );
+          const poUrl = new URL((await fetch(po)).url);
+          const launch = { compositionAction: send.actionId };
+          assert.doesNotMatch(
+            await post(poUrl, launch),
+            /name="taskToken"/u,
+            'a configured independent approval blocks the custom Place action',
+          );
+          // The approver explicitly releases this order through the original approval operations.
+          const current = await world.read('purchase_order', order.recordId);
+          await world.invoke(
+            'purchase_order_submit',
+            { recordId: order.recordId, expectedRevision: current.revision },
+            { actor: 'buyer' },
+          );
+          const request = (
+            await world.list('northstar.app:query.purchase_order_approval_list')
+          )[0]!;
+          await world.invoke(
+            'purchase_order_approval_approve',
+            {
+              recordId: request.recordId,
+              expectedRevision: request.revision,
+              arguments: { reason: 'Approved for delivery' },
+            },
+            { actor: 'manager' },
+          );
+          const openedTask = await post(poUrl, launch);
+          const taskToken = /name="taskToken" value="([^"]+)"/u.exec(
+            openedTask,
+          )?.[1];
+          assert.ok(taskToken, openedTask.slice(-900));
+          const task = { ...launch, taskToken };
+          assert.doesNotMatch(
+            await post(poUrl, { ...task, taskStage: 'apply' }),
+            /Send to vendor: done/u,
+          );
+          const review = async () => {
+            const html = await post(poUrl, { ...task, taskStage: 'prepare' });
+            assert.match(html, /Fixed value/u);
+            assert.match(html, /Dock &lt;3&gt;/u);
+            const id = /name="preparedId" value="([^"]+)"/u.exec(html)?.[1];
+            assert.ok(id);
+            return id;
+          };
+          const oldPreparation = await review();
+          await post(poUrl, { ...task, taskStage: 'edit' });
+          assert.doesNotMatch(
+            await post(poUrl, {
+              ...task,
+              taskStage: 'confirm',
+              preparedId: oldPreparation,
+            }),
+            /Send to vendor: done/u,
+          );
+          const completed = await post(poUrl, {
+            ...task,
+            taskStage: 'confirm',
+            preparedId: await review(),
+          });
+          assert.match(completed, /Send to vendor: done/u);
+          const placed = await world.read('purchase_order', order.recordId);
+          assert.equal(
+            placed.values[
+              'northstar.app:derived_state_field.machine.purchase_order_lifecycle'
+            ],
+            'northstar.app:state.purchase_order_released',
+          );
           const restrict = await opened.service.draft(
             {
               kind: 'narrowPermission',
@@ -598,6 +744,10 @@ test(
             !(await (await fetch(actualUrl)).text()).includes(
               'value="' + revision.actionId + '"',
             ),
+          );
+          assert.ok(
+            !(await assistantContext()).includes(revision.actionId),
+            'the assistant also withholds the restricted button',
           );
           assert.doesNotMatch(
             await post(actualUrl, button),

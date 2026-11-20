@@ -47,6 +47,7 @@ import {
   registeredSemanticQueryFromPinnedView,
   SEMANTIC_QUERY_REQUEST_VERSION,
   type SemanticQueryResultEnvelope,
+  type SemanticRecordDto,
 } from '../../../packages/runtime/src/semantic-query-gateway.js';
 import type { SemanticQueryGateway } from '../../../packages/runtime/src/semantic-query-gateway.js';
 import {
@@ -660,24 +661,16 @@ export async function renderSurfaceRuntimeWithData(
         data.records[0] &&
         selection.selected.popupActions
       ) {
-        const offered = await availablePopups(
-          view,
-          selection.selected.popupActions,
-          data.records[0],
-          compositionScope,
-          gateways.operationGateway,
-        );
-        const buttons = offered
-          .map(
-            (p) =>
-              `<form method="post" action="${escapeHtml(url.pathname + url.search)}"><input type="hidden" name="compositionAction" value="${escapeHtml(p.revision.actionId)}"><button class="secondary-action">${escapeHtml(p.revision.label.text)}</button></form>`,
-          )
-          .join('');
         data = {
           ...data,
-          popupButtons: buttons
-            ? `<details class="action-overflow"><summary>Custom actions</summary>${buttons}</details>`
-            : '',
+          popupButtons: await recordPopupButtons(
+            view,
+            selection.selected,
+            data.records[0],
+            url.pathname + url.search,
+            compositionScope,
+            gateways.operationGateway,
+          ),
         };
       }
       if (
@@ -1325,7 +1318,7 @@ export async function submitSurfaceRuntimeIntent(
     // The step's page is rendered after the step's reads and writes, with
     // the sidebar's queue counts read last (SPEED-1): after a Confirm they
     // count what it committed.
-    const renderStep = (
+    const renderStep = async (
       html: string,
       data: Parameters<Parameters<typeof submitCompositionAction>[5]>[1],
       statusCode: number,
@@ -1341,7 +1334,18 @@ export async function submitSurfaceRuntimeIntent(
               status: 'READY',
               records: [data.record],
               ...(selection.selected.composition ? { composition: data } : {}),
-              ...(fragment && outcome?.inline ? {} : { compositionTask: html }),
+              ...(fragment && outcome?.inline
+                ? {
+                    popupButtons: await recordPopupButtons(
+                      view,
+                      selection.selected,
+                      data.record,
+                      data.url,
+                      data.scope,
+                      gateways.operationGateway,
+                    ),
+                  }
+                : { compositionTask: html }),
             },
             null,
             offeredOperations,
@@ -1633,6 +1637,33 @@ export async function submitSurfaceRuntimeIntent(
   );
 }
 
+async function recordPopupButtons(
+  view: RuntimeViewContract.RequestRuntimeView,
+  surface: CompiledSurfaceDefinition,
+  record: SemanticRecordDto,
+  url: string,
+  scope: string | null,
+  gateway: SemanticOperationGateway,
+) {
+  if (!surface.popupActions) return '';
+  const offered = await availablePopups(
+    view,
+    surface.popupActions,
+    record,
+    scope,
+    gateway,
+  );
+  const buttons = offered
+    .map(
+      ({ revision }) =>
+        `<form method="post" action="${escapeHtml(url)}"><input type="hidden" name="compositionAction" value="${escapeHtml(revision.actionId)}"><button class="secondary-action">${escapeHtml(revision.label.text)}</button></form>`,
+    )
+    .join('');
+  return buttons
+    ? `<details class="action-overflow"><summary>Custom actions</summary><div class="action-overflow__menu">${buttons}</div></details>`
+    : '';
+}
+
 function renderSelectedSurface(
   view: RuntimeViewContract.RequestRuntimeView,
   { navigation, selected, surfaces }: SelectedSurface,
@@ -1682,7 +1713,7 @@ function renderSelectedSurface(
   const nativeTask =
     selected.composition?.presentation?.task?.mode === 'nativeDialog' ||
     !!selected.popupActions;
-  const body = `${nativeTask ? recordTaskRegion(fragment?.outcome ?? (data.status === 'READY' && !selected.slots.some((s) => s.slot === 'childTables') ? (data.compositionTask ?? '') : '')) : ''}${pageHeading}
+  const body = `${nativeTask ? recordTaskRegion(fragment?.outcome ?? (data.status === 'READY' && (!selected.composition || !selected.slots.some((s) => s.slot === 'childTables')) ? (data.compositionTask ?? '') : '')) : ''}${pageHeading}
     <div class="surface-grid" data-surface-archetype="${escapeHtml(selected.archetype)}">
       ${renderedSlots.map((result) => result.html).join('')}
     </div>`;
