@@ -24672,7 +24672,7 @@
       "relation": "inventory_projection_discrepancies",
       "name": "inventory_projection_discrepancies_scope",
       "permissive": true,
-      "roles": ["north_star_module_materializer","north_star_module_runtime"],
+      "roles": ["north_star_module_materializer", "north_star_module_runtime"],
       "command": "r",
       "using_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid",
       "check_expression": null
