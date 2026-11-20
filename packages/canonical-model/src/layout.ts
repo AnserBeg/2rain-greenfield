@@ -7,7 +7,7 @@ import type {
   SurfaceForm,
 } from './schemas.js';
 
-export const LAYOUT_READER = 27;
+export const LAYOUT_READER = 28;
 export const CUSTOMIZABLE_FIRST_PARTY_ENTITY_LOCALS = [
   'item',
   'location',

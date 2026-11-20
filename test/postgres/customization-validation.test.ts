@@ -167,24 +167,54 @@ test(
         const app = await startComposedApplication({ ...options, port: 0 });
         const opened = await openCustomizeService(options);
         try {
-          const target = (await opened.service.targets()).layouts?.find(
+          const document = await opened.service.draft(
+            {
+              kind: 'addDocumentField',
+              schemaVersion: 'northstar.document-field/v1',
+              entityId: 'northstar.app:entity.item',
+              fieldId: 'northstar.app:field.custom_item_evidence',
+              label: 'Evidence',
+              type: 'files',
+              maxCount: 1,
+              required: false,
+              allowedCategoryIds: [],
+            },
+            'visualBuilder',
+          );
+          assert.ok(document.status === 'drafted', JSON.stringify(document));
+          await opened.service.approve(document.patchId);
+          await opened.service.activate(document.patchId);
+          const { layouts } = await opened.service.targets();
+          const form = layouts?.find(
             (t) =>
-              t.body.surfaceId.endsWith('item_form') &&
+              t.body.surfaceId === 'northstar.app:surface.item_form' &&
               t.body.mode === 'create',
           );
-          assert.ok(target);
+          const detail = layouts?.find(
+            (t) =>
+              t.body.surfaceId === 'northstar.app:surface.item_detail' &&
+              t.body.mode === 'detail',
+          );
+          assert.ok(form && detail);
           const { layoutCommand } =
             await import('../../packages/customization/src/layout-revision.js');
-          const revision = layoutCommand(target, {
-            action: 'rename',
-            member: target.body.sections[0]!.id,
-            label: 'Item identification',
-          });
-          const draft = await opened.service.draft(revision, 'visualBuilder');
+          const draft = await opened.service.draft(
+            {
+              kind: 'changeSet',
+              patches: [form, detail].map((target) =>
+                layoutCommand(target, {
+                  action: 'rename',
+                  member: target.body.sections[0]!.id,
+                  label: 'Item identification',
+                }),
+              ),
+            },
+            'visualBuilder',
+          );
           assert.ok(draft.status === 'drafted', JSON.stringify(draft));
           await opened.service.approve(draft.patchId);
           await withArchivedCustomizationRuntime(
-            '014fea1641953e41e49ccb642b3faf27c094a1a8',
+            '181aef42fddddc3bbc9bd1d164115f7e2ed05bd4',
             async (run) => {
               await assertArchivedTenantEnvelope(run);
               const read = () =>
@@ -198,7 +228,7 @@ test(
               assert.equal(refused.code, 'UNSUPPORTED_RUNTIME_CAPABILITY');
               assert.match(
                 refused.message ?? '',
-                /surface-manifest requires version 27 and this runtime supports 26/u,
+                /surface-manifest requires version 28 and this runtime supports 27/u,
               );
               const form = await fetch(
                 app.baseUrl + '/?surface=northstar.app%3Asurface.item_form',
@@ -207,6 +237,22 @@ test(
               assert.match(
                 await form.text(),
                 /<legend>Item identification<\/legend>/u,
+              );
+              const item = app.seededRecords.find(
+                (row) =>
+                  row.operationId === 'northstar.app:operation.item_create',
+              );
+              assert.ok(item);
+              const url = new URL('/', app.baseUrl);
+              url.searchParams.set('surface', detail.body.surfaceId);
+              url.searchParams.set('record', item.recordId);
+              const page = await fetch(url);
+              assert.equal(page.status, 200);
+              const html = await page.text();
+              assert.match(html, /<h2>Item identification<\/h2>/u);
+              assert.match(
+                html,
+                /data-document-field="northstar.app:field.custom_item_evidence"/u,
               );
             },
           );

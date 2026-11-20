@@ -1893,7 +1893,7 @@ test('layout revision replays an ordered first revision, binds each member and r
     release.compiled.bundle.releaseManifest.projections.find(
       (p) => p.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
     )?.requiredRuntimeCapability.minimumVersion,
-    27,
+    28,
   );
 });
 
@@ -1949,18 +1949,18 @@ test('detail layout moves whole protected blocks, preserves read-only bindings a
     surfaces: [{ ...surface, dataSourceQueryId: 'detail-query' }],
   };
   const queries = { queries: [{ queryId: 'detail-query' }] };
-  assert.equal(layoutDeclarationProblem(applied.authored, manifest, 27), null);
-  assert.equal(layoutBindingsProblem(manifest, 27, {}, queries), null);
-  assert.ok(layoutDeclarationProblem(applied.authored, manifest, 26));
-  assert.ok(layoutDeclarationProblem(authored, manifest, 27));
-  assert.ok(layoutDeclarationProblem(applied.authored, { surfaces: [] }, 27));
-  assert.ok(layoutBindingsProblem(manifest, 26, {}, queries));
-  assert.ok(layoutBindingsProblem(manifest, 27, {}, { queries: [] }));
+  assert.equal(layoutDeclarationProblem(applied.authored, manifest, 28), null);
+  assert.equal(layoutBindingsProblem(manifest, 28, {}, queries), null);
+  assert.ok(layoutDeclarationProblem(applied.authored, manifest, 27));
+  assert.ok(layoutDeclarationProblem(authored, manifest, 28));
+  assert.ok(layoutDeclarationProblem(applied.authored, { surfaces: [] }, 28));
+  assert.ok(layoutBindingsProblem(manifest, 27, {}, queries));
+  assert.ok(layoutBindingsProblem(manifest, 28, {}, { queries: [] }));
   const unbound = {
     surfaces: [{ ...manifest.surfaces[0], composition: { fields: [] } }],
   };
   assert.match(
-    layoutBindingsProblem(unbound, 27, {}, queries) ?? '',
+    layoutBindingsProblem(unbound, 28, {}, queries) ?? '',
     /bound read/u,
   );
   const altered = structuredClone(layout);
@@ -2015,7 +2015,7 @@ test('tenant inspection edit sections share the extended header bindings and the
     ).compiled.bundle.releaseManifest.projections.find(
       (p) => p.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
     )!.requiredRuntimeCapability.minimumVersion;
-  assert.deepEqual([floor(0), floor(1)], [26, 27]);
+  assert.deepEqual([floor(0), floor(1)], [26, 28]);
 });
 
 test('composed detail keeps calculated display values readable and outside edit and create inputs', async () => {
@@ -2067,7 +2067,7 @@ test('composed detail keeps calculated display values readable and outside edit 
   assert.equal(
     mixedRefs.find((r) => r.familyId === PROJECTION_FAMILY_IDS.surfaceManifest)
       ?.requiredRuntimeCapability.minimumVersion,
-    27,
+    28,
   );
   assert.equal(
     mixedRefs.find((r) => r.familyId === PROJECTION_FAMILY_IDS.queryCatalog)
@@ -2088,4 +2088,67 @@ test('composed detail keeps calculated display values readable and outside edit 
       (c) => c.columnId === placed?.binding && c.field === patch.field.fieldId,
     ),
   );
+});
+
+test('record layout retains the file catalog and raises the Surface floor above attachments', async () => {
+  const file = patch({
+    kind: 'addDocumentField',
+    schemaVersion: 'northstar.document-field/v1',
+    entityId: 'northstar.app:entity.item',
+    fieldId: 'northstar.app:field.custom_item_evidence',
+    label: 'Evidence',
+    type: 'files',
+    maxCount: 1,
+    required: false,
+    allowedCategoryIds: [],
+  });
+  const record = 'northstar.app:surface.item_detail';
+  const withFile = applyCustomizationPatches(authored, [file]);
+  assert.ok(withFile.status === 'applied');
+  const target = customizationTargets(
+    normalizeApplicationPackage(withFile.authored),
+  ).layouts?.find(
+    (t) => t.body.surfaceId === record && t.body.mode === 'detail',
+  );
+  assert.ok(target);
+  const { layoutCommand } =
+    await import('../../packages/customization/src/layout-revision.js');
+  const layout = layoutCommand(target, {
+    action: 'rename',
+    member: target.body.sections[0]!.id,
+    label: 'Item identification',
+  });
+  const result = await compileInSandbox(sandboxRequest([file, layout]));
+  assert.ok(
+    result.status === 'compiled',
+    JSON.stringify(result.status === 'compiled' ? null : result),
+  );
+  const { projectionPayload } = await import('../compiler/helpers.js');
+  for (const [index, expected] of [27, 28].entries()) {
+    const compiled: ReturnType<typeof parseSerializedRelease>['compiled'] =
+      parseSerializedRelease(result.steps[index]!.release).compiled;
+    const reference = compiled.bundle.releaseManifest.projections.find(
+      (p) => p.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
+    )!;
+    assert.equal(reference.requiredRuntimeCapability.minimumVersion, expected);
+    const manifest = projectionPayload<{
+      surfaces: CompiledSurfaceDefinition[];
+      documentBindings: unknown;
+    }>(compiled, PROJECTION_FAMILY_IDS.surfaceManifest);
+    const files = projectionPayload<{
+      fields: { fieldId: string }[];
+      bindings: unknown;
+    }>(compiled, PROJECTION_FAMILY_IDS.documents);
+    assert.ok(
+      files.fields.some(
+        (f) => f.fieldId === 'northstar.app:field.custom_item_evidence',
+      ),
+    );
+    assert.deepEqual(manifest.documentBindings, files.bindings);
+    assert.equal(
+      manifest.surfaces.find((s) => s.surfaceId === record)?.layouts?.[0]?.body
+        .sections[0]?.label.text,
+      index === 1 ? 'Item identification' : undefined,
+    );
+  }
 });

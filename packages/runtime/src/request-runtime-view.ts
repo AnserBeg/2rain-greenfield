@@ -5,6 +5,7 @@ import {
   type TrustedRequestContext,
   type UntrustedRequestInput,
 } from './request-context.js';
+import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents.js';
 
 export const REQUEST_RUNTIME_VIEW_VERSION =
   'northstar.request-runtime-view/v1' as const;
@@ -35,7 +36,8 @@ export const REQUEST_RUNTIME_FORMULA_RULE_FAMILY =
 
 export type RequestRuntimeProjectionFamily =
   | (typeof REQUEST_RUNTIME_PROJECTION_FAMILIES)[keyof typeof REQUEST_RUNTIME_PROJECTION_FAMILIES]
-  | typeof REQUEST_RUNTIME_FORMULA_RULE_FAMILY;
+  | typeof REQUEST_RUNTIME_FORMULA_RULE_FAMILY
+  | typeof DOCUMENTS_PROJECTION_FAMILY;
 
 export type ImmutableJsonValue =
   | boolean
@@ -151,6 +153,10 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     { readonly capabilityId: string; readonly maximumSupportedVersion: number }
   >
 > = Object.freeze({
+  [DOCUMENTS_PROJECTION_FAMILY]: Object.freeze({
+    capabilityId: 'northstar.runtime:capability.documents',
+    maximumSupportedVersion: 1,
+  }),
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.agent]: {
     capabilityId: 'northstar.runtime:capability.agent-discovery',
     maximumSupportedVersion: 4,
@@ -200,6 +206,7 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 24 adds tenant-authored saved List layouts.
     // 25 adds Today metric cards.
     // 26 adds header relations, relation List columns and shared or lifecycle-less editors.
+    // 27 adds internal document attachments. 28 adds record and form layout revisions.
     maximumSupportedVersion: LAYOUT_READER,
   },
 });
@@ -276,6 +283,7 @@ export interface LoadedRequestRuntimeDefinition {
     readonly formulaRule?: RuntimeProjection<
       typeof REQUEST_RUNTIME_FORMULA_RULE_FAMILY
     >;
+    readonly documents?: RuntimeProjection<typeof DOCUMENTS_PROJECTION_FAMILY>;
     readonly operation: RuntimeProjection<
       typeof REQUEST_RUNTIME_PROJECTION_FAMILIES.operation
     >;
@@ -942,6 +950,14 @@ function constructRequestRuntimeView(
       definition.projections.operation,
       REQUEST_RUNTIME_PROJECTION_FAMILIES.operation,
     ),
+    ...(definition.projections.documents
+      ? {
+          documents: cloneProjection(
+            definition.projections.documents,
+            DOCUMENTS_PROJECTION_FAMILY,
+          ),
+        }
+      : {}),
     query: cloneProjection(
       definition.projections.query,
       REQUEST_RUNTIME_PROJECTION_FAMILIES.query,

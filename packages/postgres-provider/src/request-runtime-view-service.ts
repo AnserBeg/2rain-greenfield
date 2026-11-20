@@ -4,6 +4,12 @@ import { createHash } from 'node:crypto';
 
 import { canonicalize } from '@north-star/canonical-model';
 import {
+  DOCUMENT_FILES_SURFACE_FLOOR,
+  DOCUMENTS_PAYLOAD_VERSION,
+  DOCUMENTS_PROJECTION_FAMILY,
+} from '../../canonical-model/src/documents.js';
+import { DocumentsProjectionSchema } from '../../canonical-model/src/schemas.js';
+import {
   CHUNK_DESCRIPTOR_VERSION,
   CHUNKING_SCHEME_VERSION,
   HASH_DOMAINS,
@@ -186,6 +192,10 @@ const sha256Pattern = /^[0-9a-f]{64}$/;
 const maximumFillAttempts = 4;
 
 const supportedProjectionSchemas = Object.freeze({
+  [DOCUMENTS_PROJECTION_FAMILY]: Object.freeze({
+    payloadKind: 'documentsPayload',
+    payloadSchemaVersions: Object.freeze([DOCUMENTS_PAYLOAD_VERSION]),
+  }),
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.agent]: Object.freeze({
     payloadKind: 'agentDiscoveryPayload',
     payloadSchemaVersions: Object.freeze([
@@ -834,6 +844,50 @@ function definitionFromSnapshotRows(
     REQUEST_RUNTIME_PROJECTION_FAMILIES.operation,
   );
   const query = projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.query);
+  const agent = projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.agent);
+  const surface = projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.surface);
+  const referencesDocuments = references.some(
+    (entry) =>
+      isRecord(entry) && entry.familyId === DOCUMENTS_PROJECTION_FAMILY,
+  );
+  const linksDocuments = projectionLinks.some(
+    ({ familyId }) => familyId === DOCUMENTS_PROJECTION_FAMILY,
+  );
+  const catalogs = [agent, operation, query, surface];
+  const consumesDocuments = catalogs.some(
+    ({ payload }) =>
+      isRecord(payload) && Object.hasOwn(payload, 'documentBindings'),
+  );
+  if (
+    referencesDocuments !== consumesDocuments ||
+    linksDocuments !== consumesDocuments
+  ) {
+    throw malformedProjection(
+      'documents projection and required catalog bindings disagree',
+    );
+  }
+  const documents = consumesDocuments
+    ? projectionFor(DOCUMENTS_PROJECTION_FAMILY)
+    : null;
+  if (documents) {
+    const parsed = DocumentsProjectionSchema.safeParse(documents.payload);
+    if (
+      !parsed.success ||
+      (surface.requiredRuntimeCapability?.minimumVersion ?? 0) <
+        DOCUMENT_FILES_SURFACE_FLOOR ||
+      !catalogs.every(
+        ({ payload }) =>
+          isRecord(payload) &&
+          Object.hasOwn(payload, 'documentBindings') &&
+          canonicalize(payload.documentBindings) ===
+            canonicalize(parsed.data.bindings),
+      )
+    ) {
+      throw malformedProjection(
+        'documents projection has invalid catalog bindings or reader floor',
+      );
+    }
+  }
   const declaresRuleProjection = references.some(
     (entry) =>
       isRecord(entry) && entry.familyId === REQUEST_RUNTIME_FORMULA_RULE_FAMILY,
@@ -880,7 +934,6 @@ function definitionFromSnapshotRows(
       throw malformedProjection('formula/rule projection has invalid bindings');
     }
   }
-  const surface = projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.surface);
   const problem = layoutBindingsProblem(
     surface.payload,
     surface.requiredRuntimeCapability?.minimumVersion ?? 0,
@@ -892,9 +945,10 @@ function definitionFromSnapshotRows(
     environmentId: context.environmentId,
     pointer: Object.freeze({ fence, pointerId: first.pointer_id }),
     projections: Object.freeze({
-      agent: projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.agent),
+      agent,
       catalog: projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.catalog),
       ...(formulaRule ? { formulaRule } : {}),
+      ...(documents ? { documents } : {}),
       operation,
       query,
       surface,
