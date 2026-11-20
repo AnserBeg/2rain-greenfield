@@ -83,7 +83,10 @@ function compileChain(
         message: UPGRADE_CODES_V1[code],
         status: 'rejected',
         replayDiagnostics: { findings, blocked },
-        diagnostics: findings,
+        diagnostics: findings.map((finding) => ({
+          ...finding,
+          firstPartyBase: request.upgradeBaseRoot,
+        })),
       };
     }
     if (request.upgradeBaseRoot && result.status === 'rejected') {
@@ -124,7 +127,10 @@ function compileChain(
         status: 'rejected',
         code: findings[0]!.code,
         message: result.message,
-        diagnostics: findings,
+        diagnostics: findings.map((finding) => ({
+          ...finding,
+          firstPartyBase: request.upgradeBaseRoot,
+        })),
         replayDiagnostics: { findings, blocked: [] },
       };
     }

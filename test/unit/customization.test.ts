@@ -2413,13 +2413,22 @@ test('addAddressField and addMapPlacement replay on a compatible base and identi
     data.mapPlacements.map((p) => p.sectionId),
     [compatible.sectionId],
   );
-  for (const base of [
-    variant('Delivery site', false),
-    variant('Stock number', true),
-  ]) {
+  for (const [base, code, subject] of [
+    [
+      variant('Delivery site', false),
+      'FIELD_COLLISION',
+      'northstar.app:field.item_sku',
+    ],
+    [variant('Stock number', true), 'RETIRED_TARGET', compatible.sectionId],
+  ] as const) {
     const rejected = await replay(base);
     assert.ok(rejected.status === 'rejected', JSON.stringify(rejected));
-    assert.equal(rejected.code, 'CUSTOMIZE_UPGRADE_CONFLICT');
-    assert.match(JSON.stringify(rejected.diagnostics), new RegExp(base.root));
+    assert.equal(rejected.code, code);
+    assert.equal(rejected.replayDiagnostics?.findings[0]?.subject, subject);
+    assert.partialDeepStrictEqual(rejected.diagnostics?.[0], {
+      firstPartyBase: base.root,
+      code,
+      subject,
+    });
   }
 });
