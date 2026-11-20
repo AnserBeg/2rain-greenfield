@@ -29,7 +29,7 @@ Hosted CI covers PostgreSQL issuance, stored brand provenance, live source restr
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "DOCS-1",
-  "base": "f25df5af44df132045c67ba29eb9aebe1084dcc7", "head": "d647ac887a6f81a1b7619ec29b4d8233f3cb2d96",
+  "base": "f25df5af44df132045c67ba29eb9aebe1084dcc7", "head": "3f4811494f8bf21d7cbac699bcd12056acc30c08",
   "changedPaths": [
     ".github/workflows/evidence.yml", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts",
     "apps/web/src/document-http.ts", "apps/web/src/document-template-form.ts", "apps/web/src/surface-client.ts",
@@ -39,15 +39,15 @@ Hosted CI covers PostgreSQL issuance, stored brand provenance, live source restr
     "packages/compiler/src/documents.ts", "packages/compiler/src/projections.ts", "packages/customization/src/apply.ts",
     "packages/customization/src/patch.ts", "packages/customization/src/render.ts", "packages/customization/src/targets.ts",
     "packages/postgres-provider/package.json", "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/document-attachments.ts",
-    "packages/postgres-provider/src/document-company-brand.ts", "packages/postgres-provider/src/document-pdf-worker.ts", "packages/postgres-provider/src/document-pdf.ts",
-    "packages/postgres-provider/src/document-publication.ts", "packages/postgres-provider/src/document-template-sources.ts", "packages/postgres-provider/src/request-context.ts",
-    "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/postgres-provider/src/serving-gateways.ts", "packages/runtime/src/document-gateway.ts",
-    "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-operation-gateway.ts", "packages/runtime/src/semantic-query-gateway.ts",
-    "pnpm-lock.yaml", "test/architecture/release-persistence-boundary.test.ts", "test/architecture/repository-hygiene.test.ts",
-    "test/evidence/DOCS-1.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/integration/document-http.test.ts",
-    "test/integration/document-pdf.test.ts", "test/postgres/document-attachments.test.ts", "test/postgres/document-templates.test.ts",
-    "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts",
-    "test/postgres/request-runtime-view.test.ts", "test/postgres/trust-substrate.test.ts"
+    "packages/postgres-provider/src/document-company-brand.ts", "packages/postgres-provider/src/document-content.ts", "packages/postgres-provider/src/document-pdf-worker.ts",
+    "packages/postgres-provider/src/document-pdf.ts", "packages/postgres-provider/src/document-publication.ts", "packages/postgres-provider/src/document-template-sources.ts",
+    "packages/postgres-provider/src/request-context.ts", "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/postgres-provider/src/serving-gateways.ts",
+    "packages/runtime/src/document-gateway.ts", "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-operation-gateway.ts",
+    "packages/runtime/src/semantic-query-gateway.ts", "pnpm-lock.yaml", "test/architecture/release-persistence-boundary.test.ts",
+    "test/architecture/repository-hygiene.test.ts", "test/evidence/DOCS-1.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json",
+    "test/integration/document-http.test.ts", "test/integration/document-pdf.test.ts", "test/postgres/document-attachments.test.ts",
+    "test/postgres/document-templates.test.ts", "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts",
+    "test/postgres/module-storage-transition.test.ts", "test/postgres/request-runtime-view.test.ts", "test/postgres/trust-substrate.test.ts"
   ],
   "symbols": [
     {"path": "packages/compiler/src/document-templates.ts", "name": "compileDocumentTemplates"},
