@@ -946,7 +946,7 @@ export function resolvePinnedLegalEntityFamily(
 }
 
 type OwnershipEntity = NormalizedApplicationPackage['entities'][number] & {
-  companyOwnership?: LegalEntityFamilyClassification;
+  companyOwnership?: LegalEntityFamilyClassification | undefined;
 };
 
 function isTenantRecordFamily(entityId: string): boolean {
