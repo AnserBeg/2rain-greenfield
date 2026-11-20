@@ -1,3 +1,4 @@
+import { boardContext, boardSlots, boardTask, changedBoardCard } from './board.js';
 import {
   compositionRelationTargets,
   loadSurfaceComposition,
@@ -497,6 +498,16 @@ export async function renderSurfaceRuntimeWithData(
         workspaceContext,
       ),
     );
+  }
+  if (selection.selected.board) {
+    try {
+      const context = boardContext(view,selection.selected,selection.surfaces,binding,url,legalEntityScopeArguments(binding,url),gateways);
+      const slots = await boardSlots(context);
+      return rendered(() => renderSelectedSurface(view,selection,{status:'READY',records:[],boardSlots:slots},
+        feedback,offeredOperations,200,legalEntitySelection,workspaceContext));
+    } catch (error) {
+      return renderApplicationDiagnostic(422,{code:queryMessageCode(error)});
+    }
   }
   if (binding.query.queryType === 'aggregate') {
     const scopeParameterId =
@@ -1407,15 +1418,23 @@ export async function submitSurfaceRuntimeIntent(
       });
     }
   }
+  let boardOperation: CompiledSurfaceDataBinding['operations'][number] | null = null;
+  if (selection.selected.board) {
+    const url = new URL(requestUrl,'http://surface-runtime.local');
+    try {
+      const context = boardContext(view,selection.selected,selection.surfaces,binding,url,legalEntityScopeArguments(binding,url),gateways);
+      const task = await boardTask(context,submission);
+      if ('html' in task) return {statusCode:task.statusCode,html:shellDocument(view,selection.surfaces,selection.navigation,selection.selected,task.html)};
+      boardOperation = task.operation;
+    } catch (error) { return renderApplicationDiagnostic(422,{code:queryMessageCode(error)}); }
+  }
   const operation = boundOperation(binding, submission.operationId);
   if (
     !operation ||
-    !surfaceSupportsRuntimeIntent(
-      view,
-      selection.selected,
-      selection.surfaces,
-      operation.intent,
-    )
+    (boardOperation && boardOperation !== operation) ||
+    (!boardOperation && !surfaceSupportsRuntimeIntent(
+      view, selection.selected, selection.surfaces, operation.intent
+    ))
   ) {
     return operationDiagnostic('OPERATION_UNSUPPORTED', 422);
   }
@@ -1512,6 +1531,12 @@ export async function submitSurfaceRuntimeIntent(
       }
     }
     const ref = operationMessageRef(error);
+    if (boardOperation && ref.code !== 'OPERATION_PERMISSION_DENIED') {
+      const url = new URL(requestUrl,'http://surface-runtime.local');
+      const context=boardContext(view,selection.selected,selection.surfaces,binding,url,legalEntityScopeArguments(binding,url),gateways);
+      const html=await changedBoardCard(context,submission).catch(()=>null);
+      if (html) return {statusCode:409,html:shellDocument(view,selection.surfaces,selection.navigation,selection.selected,html)};
+    }
     return renderApplicationDiagnostic(
       ref.code === 'OPERATION_PERMISSION_DENIED' ? 403 : 422,
       ref,
@@ -1555,7 +1580,7 @@ export async function submitSurfaceRuntimeIntent(
     'http://surface-runtime.local',
   ).searchParams.get('record');
   if (
-    gateways.applicationExtension?.refreshAfterOperation({
+    boardOperation || gateways.applicationExtension?.refreshAfterOperation({
       binding,
       intent,
       surface: selection.selected,
@@ -1622,7 +1647,7 @@ function renderSelectedSurface(
     }),
   );
   const pageHeading =
-    selected.archetype === 'list' || selected.archetype === 'record'
+    selected.archetype === 'board' || selected.archetype === 'list' || selected.archetype === 'record'
       ? ''
       : `<header class="surface-heading">
       <div>

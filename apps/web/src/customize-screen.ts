@@ -1,5 +1,7 @@
 import { layoutDigest } from '@north-star/canonical-model';
 import {
+  draftBoardRevision,
+  type BoardTarget,
   layoutCommand,
   type LayoutTarget,
   recordTypeEntityId,
@@ -56,6 +58,7 @@ interface CustomizationStatus {
   readonly patches: readonly ScreenPatch[];
 }
 interface CustomizationTargets {
+  readonly boards?: readonly BoardTarget[];
   readonly layouts?: readonly LayoutTarget[];
   readonly documentTargets?: readonly {
     readonly entityId: string;
@@ -254,6 +257,15 @@ export async function renderCustomizeScreen(
           ? page('Arrange page', layoutEditor(target) + backLink())
           : failure('Choose an available page.');
       }
+      const board = url.searchParams.get('board');
+      if (board) {
+        const target = (await loadTargets()).boards?.find(
+          (b) => b.body.listSurfaceId === board,
+        );
+        return target
+          ? page('Add Board view', boardEditor(target) + backLink())
+          : failure('Choose a List with a lifecycle.');
+      }
       const arrange = url.searchParams.get('arrange');
       if (arrange)
         return page('Arrange a list', await arrangeForm(loadTargets, arrange));
@@ -284,25 +296,27 @@ export async function renderCustomizeScreen(
       case 'draft':
         return drafted(
           await service.draft(
-            submission.kind === 'addLayoutRevision'
-              ? layoutSubmission(
-                  (await loadTargets()).layouts ?? [],
-                  submission,
-                )
-              : patchFromForm(
-                  submission,
-                  submission.kind === 'addValidation'
-                    ? (await loadTargets()).validationTargets?.find(
-                        ({ entityId }) => entityId === submission.entity,
-                      )
-                    : undefined,
-                  submission.kind === 'addCalculatedDisplayField'
-                    ? (await loadTargets()).calculatedDisplayTargets?.find(
-                        ({ recordSurfaceId }) =>
-                          recordSurfaceId === submission.surface,
-                      )
-                    : undefined,
-                ),
+            submission.kind === 'addBoardViewRevision'
+              ? boardSubmission((await loadTargets()).boards ?? [], submission)
+              : submission.kind === 'addLayoutRevision'
+                ? layoutSubmission(
+                    (await loadTargets()).layouts ?? [],
+                    submission,
+                  )
+                : patchFromForm(
+                    submission,
+                    submission.kind === 'addValidation'
+                      ? (await loadTargets()).validationTargets?.find(
+                          ({ entityId }) => entityId === submission.entity,
+                        )
+                      : undefined,
+                    submission.kind === 'addCalculatedDisplayField'
+                      ? (await loadTargets()).calculatedDisplayTargets?.find(
+                          ({ recordSurfaceId }) =>
+                            recordSurfaceId === submission.surface,
+                        )
+                      : undefined,
+                  ),
             'visualBuilder',
             undefined,
             actor,
@@ -452,6 +466,9 @@ async function overview(
     fieldForm(targets),
     documentFieldForm(targets),
     choiceForm(targets),
+    targets.boards?.length
+      ? `<form method="get"><fieldset><legend>Add view</legend><input type="hidden" name="customize" value=""><label>Record type <select name="board">${targets.boards.map((t) => `<option value="${escapeHtml(t.body.listSurfaceId)}">${escapeHtml(t.listLabel)}</option>`).join('')}</select></label> <button>Add Board view</button></fieldset></form>`
+      : '',
     layoutPicker(targets.layouts ?? []),
     arrangePicker(targets),
     savedViewPicker(targets),
@@ -1115,6 +1132,8 @@ function describe(patch: PatchSummary): string {
       return `New line table "${label}"`;
     case 'declareLifecycle':
       return 'New states and actions';
+    case 'addBoardViewRevision':
+      return 'Board view revision';
     case 'addLayoutRevision':
       return 'Arranged form or record page';
     case 'changeSet':
@@ -1214,6 +1233,34 @@ function page(
   });
 }
 
+function boardEditor(target: BoardTarget) {
+  const h = escapeHtml;
+  return `<h1>Add Board view</h1><form method="post"><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="addBoardViewRevision"><input type="hidden" name="list" value="${h(target.body.listSurfaceId)}"><input type="hidden" name="source" value="${h(layoutDigest(target.body))}"><label>View name <input name="label" required maxlength="240" value="${h(target.listLabel + ' board')}"></label><fieldset><legend>Stages in display order</legend>${target.body.grouping.stages.map((s, i) => `<label>${h(s.label)} <input aria-label="${h(s.label)} position" type="number" min="1" max="64" name="stage:${h(s.stateId)}" value="${i + 1}"></label>`).join('')}<p>Leave a position empty to omit that stage.</p></fieldset><button>Draft Board</button></form>`;
+}
+function boardSubmission(
+  targets: readonly BoardTarget[],
+  submission: CustomizeScreenSubmission,
+) {
+  const target = targets.find((t) => t.body.listSurfaceId === submission.list);
+  if (!target || layoutDigest(target.body) !== submission.source)
+    throw new Error('The collection changed. Choose the Board again.');
+  const positions = target.body.grouping.stages.flatMap((s) => {
+    const value = submission['stage:' + s.stateId];
+    return value ? [{ state: s.stateId, order: Number(value) }] : [];
+  });
+  if (
+    !positions.every(
+      (p) => Number.isInteger(p.order) && p.order >= 1 && p.order <= 64,
+    ) ||
+    new Set(positions.map((p) => p.order)).size !== positions.length
+  )
+    throw new Error('Give each stage its own position.');
+  return draftBoardRevision(
+    target,
+    submission.label ?? '',
+    positions.sort((a, b) => a.order - b.order).map((p) => p.state),
+  );
+}
 function layoutPicker(targets: readonly LayoutTarget[]) {
   if (!targets.length) return '';
   return `<form method="get"><input type="hidden" name="customize" value=""><fieldset><legend>Arrange a form or record page</legend><label for="customize-layout-page">Page</label> <select id="customize-layout-page" name="layout">${targets.map((t) => `<option value="${escapeHtml(t.body.surfaceId + '/' + t.body.mode)}">${escapeHtml(t.label)} · ${t.body.mode}</option>`).join('')}</select> <button>Choose page</button></fieldset></form>`;

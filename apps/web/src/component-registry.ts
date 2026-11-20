@@ -181,6 +181,7 @@ export type SurfaceDataRenderState =
     }
   | {
       readonly records: readonly SemanticRecordDto[];
+      readonly boardSlots?: Readonly<Record<string, string>>;
       readonly documentEditorSlots?: Readonly<Record<string, string>>;
       readonly documentsSection?: string;
       readonly receiving?: ReceivingSection;
@@ -283,6 +284,23 @@ const componentRegistry: Readonly<Record<string, SurfaceComponentRenderer>> =
 
 const surfaceSlotRegistry: Readonly<Record<string, SurfaceSlotRegistration>> =
   Object.freeze({
+    'board:title': {
+      className: 'surface-title-slot',
+      renderer: renderBoardSlot,
+    },
+    'board:savedViews': {
+      className: 'saved-views-slot',
+      renderer: renderBoardSlot,
+    },
+    'board:stageSelector': {
+      className: 'board-selector-slot',
+      renderer: renderBoardSlot,
+    },
+    'board:columns': {
+      className: 'board-columns-slot',
+      ownsDataResolution: true,
+      renderer: renderBoardSlot,
+    },
     'list:bulkActions': {
       className: 'bulk-actions-slot',
       renderer: renderBulkActions,
@@ -532,13 +550,66 @@ function surfaceSlotClassName(
   return surfaceSlotRegistry[`${surface.archetype}:${slot.slot}`]?.className;
 }
 
+function collectionSwitcher(context: SurfaceComponentContext) {
+  const owner =
+    context.surface.board?.body.listSurfaceId ?? context.surface.surfaceId;
+  const boards = (context.surfaces ?? []).filter(
+    (s) => s.lifecycle === 'active' && s.board?.body.listSurfaceId === owner,
+  );
+  const list = context.surfaces?.find((s) => s.surfaceId === owner);
+  if (!boards.length || !list) return '';
+  const state =
+    context.data?.status === 'READY'
+      ? context.data.declaredList?.state
+      : undefined;
+  return `<nav class="collection-views" aria-label="Collection views">${[
+    list,
+    ...boards,
+  ]
+    .map((s) => {
+      let href = surfaceHref(s, undefined, false, context);
+      if (state) {
+        const params = new URL(href, 'http://surface-runtime.local')
+          .searchParams;
+        const view = list.list?.views.find((v) => v.viewId === state.viewId);
+        if (view && !view.before && !view.open && !view.supply && !view.band)
+          params.set('view', view.viewId);
+        for (const [key, value] of Object.entries(state.filterValues))
+          params.set(key, value);
+        href = '/?' + params.toString();
+      }
+      return `<a href="${escapeHtml(href)}"${context.surface.surfaceId === s.surfaceId ? ' aria-current="page"' : ''}>${escapeHtml(s === list ? 'List' : s.label)}</a>`;
+    })
+    .join(' ')}</nav>`;
+}
+function renderBoardSlot(context: SurfaceComponentContext) {
+  const content =
+    context.data?.status === 'READY'
+      ? (context.data.boardSlots?.[context.slot.slot] ?? '')
+      : '';
+  const link =
+    context.slot.slot === 'savedViews' ? collectionSwitcher(context) : '';
+  const receipt =
+    context.slot.slot === 'title' &&
+    context.feedback &&
+    'record' in context.feedback
+      ? `<p role="status" data-board-result>${escapeHtml(context.feedback.label)} completed.</p>`
+      : '';
+  return slotPanel(
+    context,
+    link + content + receipt,
+    surfaceSlotRegistry['board:' + context.slot.slot]?.className ?? '',
+  );
+}
 function renderListTitle(context: SurfaceComponentContext): string {
   const form = relatedSurface(context, 'form');
   const archiveToggle = renderArchiveToggle(context);
-  return slotPanel(
-    context,
-    `<header class="surface-heading surface-heading--slot"><div><h1>${escapeHtml(entityLabel(context.surface))}</h1></div><div class="surface-heading__actions">${declaredStatusRoles(context.surface)}${archiveToggle}${form ? `<a class="primary-action" href="${escapeHtml(surfaceHref(form, undefined, false, context))}">New</a>` : ''}</div></header>`,
-    'surface-title-slot',
+  return (
+    slotPanel(
+      context,
+      `<header class="surface-heading surface-heading--slot"><div><h1>${escapeHtml(entityLabel(context.surface))}</h1></div><div class="surface-heading__actions">${declaredStatusRoles(context.surface)}${archiveToggle}${form ? `<a class="primary-action" href="${escapeHtml(surfaceHref(form, undefined, false, context))}">New</a>` : ''}</div></header>`,
+      'surface-title-slot',
+    ) + collectionSwitcher(context)
   );
 }
 

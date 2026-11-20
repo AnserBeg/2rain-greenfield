@@ -1,3 +1,4 @@
+export * from './board.js';
 export * from './layout.js';
 export {
   ADOPTED_LANGUAGE_VERSION,

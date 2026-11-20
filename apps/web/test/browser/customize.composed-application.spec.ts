@@ -2,7 +2,8 @@ import { performance } from 'node:perf_hooks';
 
 import { expect, test } from '@playwright/test';
 
-import { startComposedApplication } from '../../../api/src/composition-root.js';
+import {worldOver} from '../../../../test/agent/agent-world.js';
+import { openCustomizeService, startComposedApplication } from '../../../api/src/composition-root.js';
 import {
   LINEAGE_INSTALL_VOLUME,
   withEphemeralPostgres,
@@ -433,4 +434,63 @@ test('a buyer creates a section and moves the bound vendor picker into it', asyn
     },
     LINEAGE_INSTALL_VOLUME,
   );
+});
+
+test('a keyboard user moves a card through its reviewed Task with JavaScript disabled', async ({browser})=>{
+  test.setTimeout(600_000);
+  await withEphemeralPostgres('customize-board-browser',async({connection})=>{
+    const options={databaseUrl:`postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
+      tenantSlug:'customize-board-browser'};
+    const app=await startComposedApplication({...options,port:0});
+    const opened=await openCustomizeService(options);
+    const context=await browser.newContext({javaScriptEnabled:false,viewport:{width:390,height:844}});
+    const page=await context.newPage();
+    try {
+      const draft=await opened.service.draft({kind:'changeSet',patches:[
+        {kind:'addRecordType',label:'Opportunity',fields:[{label:'Name',type:'text',required:true}]},
+        {kind:'declareLifecycle',entity:'northstar.app:entity.custom_opportunity',initial:'Open',states:[{label:'Open'},{label:'Won',role:'success'}],
+          transitions:[{from:'Open',to:'Won',label:'Mark won'}]},
+      ]},'visualBuilder');
+      if(draft.status!=='drafted') throw new Error(JSON.stringify(draft));
+      await opened.service.approve(draft.patchId);
+      await opened.service.activate(draft.patchId);
+      const world=worldOver(app.runtime,String(connection.database));
+      const card=await world.create('custom_opportunity',{name:'Westside renewal'});
+      const before=()=>world.read('custom_opportunity',card.recordId);
+      const chooser=page.getByRole('group',{name:'Add view',exact:true});
+      await page.goto(app.baseUrl+'/?customize');
+      await chooser.getByLabel('Record type').selectOption('northstar.app:surface.custom_opportunity_list');
+      await chooser.getByRole('button',{name:'Add Board view'}).press('Enter');
+      await page.getByLabel('View name').fill('Pipeline');
+      await page.getByRole('button',{name:'Draft Board'}).press('Enter');
+      await page.getByRole('button',{name:'Approve',exact:true}).press('Enter');
+      await page.getByRole('button',{name:'Activate now'}).press('Enter');
+      await expect(page.locator('[data-customize-result="activated"]')).toBeVisible({timeout:180_000});
+      await page.goto(app.baseUrl+'/?surface=northstar.app%3Asurface.custom_opportunity_list');
+      await page.getByRole('link',{name:'Pipeline',exact:true}).press('Enter');
+      const boardUrl=page.url();
+      const other=await context.newPage();
+      await other.goto(boardUrl);
+      for(const tab of [page,other]){
+        await tab.getByRole('button',{name:'Move card: Westside renewal'}).press('Enter');
+        await expect(tab.getByRole('heading',{name:'Move card'})).toBeVisible();
+        expect((await before()).revision).toBe(card.revision);
+        await tab.getByLabel('Destination and action').selectOption({label:'Won · Mark won'});
+        await tab.getByRole('button',{name:'Review move'}).press('Enter');
+        await expect(tab.getByRole('button',{name:'Confirm Mark won'})).toBeVisible();
+        expect((await before()).revision).toBe(card.revision);
+      }
+      await page.getByRole('button',{name:'Confirm Mark won'}).press('Enter');
+      await expect(page.getByRole('status').filter({hasText:'Mark won completed'})).toBeVisible();
+      const moved=await before();
+      expect(moved.revision).toBe(card.revision+1);
+      await other.getByRole('button',{name:'Confirm Mark won'}).press('Enter');
+      await expect(other.getByRole('alert')).toContainText('This card changed');
+      await expect(other.getByRole('alert')).toContainText('Won');
+      expect((await before()).revision).toBe(moved.revision);
+      await page.getByRole('navigation',{name:'Select stage'}).getByRole('link',{name:'Won',exact:true}).press('Enter');
+      await expect(page.getByRole('link',{name:'Westside renewal',exact:true})).toBeVisible();
+      expect(await page.locator('html').evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);
+    }finally{await context.close();await opened.close();await app.close();}
+  },LINEAGE_INSTALL_VOLUME);
 });

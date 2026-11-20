@@ -12,6 +12,11 @@
  * floor on phone-width targets.
  */
 export const LEDGER_STYLES = `
+.board-columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:1rem}
+.board-column{min-width:0}.board-column ul{list-style:none;padding:0}.board-column li{display:grid;gap:.5rem;padding:.75rem;border:1px solid var(--rule);background:var(--paper);overflow-wrap:anywhere}
+.board-column dl{margin:0}.board-column dl div{display:flex;gap:.5rem}.board-column dd{margin:0}.board-column button,.board-selector-slot a,.collection-views a{min-height:44px;display:inline-flex;align-items:center;padding:0 .6rem}
+.surface-grid[data-surface-archetype="board"]{display:block}.board-column .status-chip{justify-self:start}
+@media(max-width:800px){.board-column[data-selected="false"]{display:none}.board-columns{grid-template-columns:minmax(0,1fr)}}
 *,*::before,*::after{box-sizing:border-box}
 [hidden]{display:none!important}
 html{container:ledger / inline-size;font-size:16px;-webkit-text-size-adjust:100%}

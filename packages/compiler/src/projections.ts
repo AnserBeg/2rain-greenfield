@@ -1,4 +1,4 @@
-import { LAYOUT_READER } from '@north-star/canonical-model';
+import { BOARD_READER, LAYOUT_READER } from '@north-star/canonical-model';
 import {
   CALCULATED_DISPLAY_QUERY_READER,
   type CalculatedDisplayProjectionEntry,
@@ -950,7 +950,7 @@ function surfaceManifestPayload(
         (column) => column.relation,
       ),
   );
-  const surfaceFloor = original.surfaces.some(
+  const surfaceFloor = original.surfaces.some(s => s.archetype === 'board') ? BOARD_READER : original.surfaces.some(
     (s) => 'layouts' in s && s.layouts,
   )
     ? LAYOUT_READER
@@ -1044,6 +1044,7 @@ function surfaceManifestPayload(
                     ),
                   },
           }),
+          ...(declared && 'board' in declared && declared.board ? { board: declared.board } : {}),
           ...(declared && 'layouts' in declared && declared.layouts
             ? { layouts: declared.layouts }
             : {}),

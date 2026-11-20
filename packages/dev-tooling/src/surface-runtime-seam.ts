@@ -58,6 +58,8 @@ const planSlotAnchors = Object.freeze({
   activity: 'activity rail',
   breadcrumb: 'breadcrumb',
   bulkActions: 'bulk bar',
+  stageSelector: 'stage selector',
+  columns: 'stage columns',
   childTables: 'child tables',
   commandBar: 'command bar',
   dataGrid: 'spreadsheet-grade grid',

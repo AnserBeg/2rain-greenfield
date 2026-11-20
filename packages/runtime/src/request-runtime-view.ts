@@ -1,4 +1,4 @@
-import { LAYOUT_READER } from '@north-star/canonical-model';
+import { BOARD_READER } from '@north-star/canonical-model';
 import {
   assertTrustedRequestContext,
   type AuthenticatedRequestEntryAdapter,
@@ -207,7 +207,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 25 adds Today metric cards.
     // 26 adds header relations, relation List columns and shared or lifecycle-less editors.
     // 27 adds internal document attachments. 28 adds record and form layout revisions.
-    maximumSupportedVersion: LAYOUT_READER,
+    // Board lifecycle views and form-based moves.
+    maximumSupportedVersion: BOARD_READER,
   },
 });
 

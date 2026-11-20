@@ -1,3 +1,4 @@
+import { draftBoardRevision } from './board-revision.js';
 import { layoutCommand } from './layout-revision.js';
 import {
   ADD_LINK_LATER_CAPABILITY,
@@ -222,6 +223,7 @@ const toolSchema = {
       },
       required: ['fieldId', 'check', 'message'],
     },
+    stageIds: { type: 'array', minItems: 1, maxItems: 64, items: { type: 'string' } },
     mode: { type: 'string', enum: ['create', 'edit', 'detail'] },
     layoutEdit: {
       type: 'object',
@@ -370,6 +372,9 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
       (form) =>
         `- ${form.surfaceId} — ${form.label}: ${form.fields.map((field) => `${field.fieldId} "${field.label}"`).join(', ')}`,
     ),
+    '- addBoardViewRevision {kind,surface,label,stageIds}: choose a listed collection and ordered lifecycle stages.',
+    ...(targets.boards ?? []).map(t => t.body.listSurfaceId + ' ' + t.listLabel + ' ' +
+      t.body.grouping.stages.map(stage => stage.stateId + ' ' + stage.label).join(', ')),
     '- addLayoutRevision {kind,surface,mode,layoutEdit:{action,member?,destination?,label?}}. Create a section with label. Rename a member, move a field to a destination section, or move a member up/down. Use listed IDs.',
     ...(targets.layouts ?? []).map(
       (t) =>
@@ -546,6 +551,19 @@ function readToolInput(
     input &&
     typeof input === 'object' &&
     'kind' in input &&
+    input.kind === 'addBoardViewRevision'
+  ) {
+    const req = input as Record<string, unknown>;
+    const target = targets.boards?.find(t => t.body.listSurfaceId === req.surface);
+    if (!target || typeof req.label !== 'string' || !Array.isArray(req.stageIds) ||
+        !req.stageIds.every((id): id is string => typeof id === 'string'))
+      return {status:'invalid', issues:['Choose a declared collection and its lifecycle stages.']};
+    try {
+      return {status:'parsed', patch:draftBoardRevision(target,req.label,req.stageIds)};
+    } catch (error) { return {status:'invalid',issues:[(error as Error).message]}; }
+  }
+  if (
+    input && typeof input === 'object' && 'kind' in input &&
     input.kind === 'addLayoutRevision'
   ) {
     const req = input as Record<string, unknown>;

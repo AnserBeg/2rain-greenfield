@@ -2088,6 +2088,10 @@ async function executeQueryOnClient(
       );
     }
     case 'list': {
+      if (args.boardPage !== undefined) {
+        if (list || definition.readModel || includeArchived) throw failure('MODULE_LIST_FIELD_INVALID','Invalid Board query.');
+        return readBoardPage(client, entity, request, definition, readScope, args.boardPage);
+      }
       if (list) {
         return listSharedRecords(
           client,
@@ -2936,6 +2940,70 @@ async function listRecords(
     values,
   );
   return rows.rows.map((row) => rawRecord(entity, row));
+}
+
+/** Probe a bounded PK window before grouping. Scope and policy filter the window
+ * inside PostgreSQL; only the selected, authorized DTO fields leave the provider. */
+async function readBoardPage(
+  client: PoolClient, entity: StorageEntity,
+  request: SemanticQueryExecutionRequest | SemanticAggregateQueryExecutionRequest,
+  definition: RegisteredQueryDefinition, readScope: VerifiedLegalEntityReadScope | null, input: ImmutableJsonValue,
+): Promise<SemanticQueryResultEnvelope> {
+  const window = requireRecord(input, 'Board page');
+  const manifest = requireRecord(request.view.projections.surface.payload,'surface manifest');
+  const surface = Array.isArray(manifest.surfaces) ? manifest.surfaces.map(s=>requireRecord(s,'surface')).find(s=>s.surfaceId === window.surfaceId) : undefined;
+  const binding = SurfaceBoardSchema.safeParse(surface?.board);
+  if (!binding.success || surface?.lifecycle !== 'active' || binding.data.revisionId !== window.revisionId ||
+    binding.data.body.listQueryId !== definition.queryId || binding.data.body.entityId !== entity.entityId)
+    throw failure('MODULE_LIST_FIELD_INVALID','The Board binding changed.');
+  const {body} = binding.data;
+  const stages = window.stages;
+  const perStage = Math.min(10,definition.maximumResultCount-1);
+  const maxStages = Math.min(6,Math.floor(definition.maximumResultCount/(perStage+1)));
+  if (!Array.isArray(stages) || stages.length < 1 || stages.length > (window.recordId ? body.grouping.stages.length : maxStages) ||
+    new Set(stages).size !== stages.length ||
+    stages.some(id => !body.grouping.stages.some(s=>s.stateId === id)))
+    throw failure('MODULE_LIST_FIELD_INVALID','Choose stages declared by this Board.');
+  const columnFor = (field: string) => {
+    const col = entity.columns.find(c=>c.canonicalFieldId === field);
+    if (!col || !definition.selections.some(s=>s.fieldId === field)) throw failure('MODULE_LIST_FIELD_INVALID','The Board filter needs a selected field.');
+    return quoted(col.physicalName);
+  };
+  const values: unknown[] = [];
+  const id = quoted(entity.recordIdentity.column);
+  const exact = optionalUuid(window.recordId, 'recordId');
+  const after = optionalUuid(window.after, 'after');
+  const start = exact ? id+' = '+parameter(values,exact) : after ? id+' > '+parameter(values,after) : 'TRUE';
+  const predicates = archivePredicate(entity,false);
+  appendLegalEntityReadScopePredicate(entity,readScope,values,predicates);
+  appendQueryFilterPredicates(entity,request.filterPlans,values,predicates,undefined,request.parameterValues);
+  const scopePredicates = [start,...predicates];
+  predicates.length = 0;
+  const stageColumn = columnFor(body.grouping.stateFieldId);
+  predicates.push(stageColumn+' = ANY('+parameter(values,stages)+'::text[])');
+  if (!Array.isArray(window.filters) || window.filters.length > 8) throw failure('MODULE_LIST_FIELD_INVALID','Invalid Board filters.');
+  for (const operand of window.filters) {
+    const f = requireRecord(operand,'Board filter');
+    if (typeof f.fieldId !== 'string' || typeof f.value !== 'string' || f.value.length > 240)
+      throw failure('MODULE_LIST_FIELD_INVALID','Invalid Board filter.');
+    predicates.push(columnFor(f.fieldId)+'::text = '+parameter(values,f.value));
+  }
+  // 512 scoped physical keys per request, plus one probe. Even an empty stage
+  // on an existing unindexed table has a finite amount of work.
+  const result = await client.query<QueryResultRow>(
+    `WITH candidates AS MATERIALIZED (
+      SELECT * FROM north_star_module.${quoted(entity.physicalTableName)} WHERE ${scopePredicates.join(' AND ')} ORDER BY ${id} LIMIT 513
+    ), inspected AS MATERIALIZED (SELECT * FROM candidates ORDER BY ${id} LIMIT 512),
+    ranked AS (
+      SELECT inspected.*,row_number() OVER (PARTITION BY ${stageColumn} ORDER BY ${id}) AS board_rank
+        FROM inspected WHERE ${predicates.join(' AND ')}
+    ), coverage AS (SELECT EXISTS(SELECT 1 FROM candidates OFFSET 512) AS board_partial)
+    SELECT ranked.*, coverage.board_partial FROM coverage LEFT JOIN ranked ON ranked.board_rank <= ${parameter(values,perStage+1)}
+    ORDER BY ranked.${id}`, values);
+  const records = result.rows.filter(r => r[entity.recordIdentity.column] !== null)
+    .map(r=>toDto(entity,rawRecord(entity,r),definition.selections));
+  return {...queryResult(definition.queryId,'exact',records,null),
+    boardCoverage:{ revisionId:binding.data.revisionId, scanLimitReached:result.rows[0]?.board_partial === true }};
 }
 
 interface ListRelationPlan {
