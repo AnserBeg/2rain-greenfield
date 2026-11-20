@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import {
+  PLATFORM_IDS,
+  platformModuleDefinition,
+} from '../../packages/domain/src/platform/index.js';
+import { literalValidationDraft } from '../../packages/customization/src/validation-draft.js';
 import { PARTY_IDS } from '../fixtures/g2/party/definition.js';
 import {
   invokePartyOperation,
@@ -116,3 +121,35 @@ function listArguments(sortFieldId: string): Record<string, unknown> {
     },
   };
 }
+
+test('the saved-filter adapter refuses rule-bearing mutations before writing', async () => {
+  const fieldId = PLATFORM_IDS.fieldIds.name;
+  const { rule } = literalValidationDraft(
+    {
+      entityId: PLATFORM_IDS.entityId,
+      label: 'Saved filter',
+      operationIds: [
+        PLATFORM_IDS.operationIds.create,
+        PLATFORM_IDS.operationIds.update,
+      ],
+      fields: [{ fieldId, label: 'Name', valueType: { kind: 'text' } }],
+    },
+    {
+      fieldId,
+      check: 'maximumLength',
+      limit: '20',
+      message: 'Use at most 20 characters.',
+    },
+  );
+  const observed = await observeSavedFilterAdmissionRefusal(
+    'guarded-saved-filter',
+    { ...platformModuleDefinition(), formulaRules: [rule] },
+  );
+  assert.equal(
+    observed.executionErrorCode,
+    'SAVED_FILTER_VALIDATION_UNSUPPORTED',
+    observed.executionErrorMessage,
+  );
+  assert.equal(observed.searchWitnessCount, 0);
+  assert.equal(observed.evidenceCount, 0);
+});
