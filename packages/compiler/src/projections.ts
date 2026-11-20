@@ -1,3 +1,7 @@
+import {
+  BOOKING_OPERATION_READER,
+  hasBookingOperations,
+} from '@north-star/canonical-model';
 import { LAYOUT_READER } from '@north-star/canonical-model';
 import {
   CALCULATED_DISPLAY_QUERY_READER,
@@ -244,14 +248,16 @@ export function lowerBaseProjectionPayloads(
     hasSavedListLayouts(verificationPackageRevision) ? 3 : 1,
     hasMetrics(verificationPackageRevision) ? 4 : 1,
   );
-  const operationFloor = formulaRules
-    ? requiredFormulaValidationOperationReader(
-        formulaRules.bindings.map(({ rule }) => rule),
-      )
-    : 'operationRoleNarrowings' in verificationPackageRevision &&
-        verificationPackageRevision.operationRoleNarrowings
-      ? 2
-      : 1;
+  const operationFloor = hasBookingOperations(verificationPackageRevision)
+    ? BOOKING_OPERATION_READER
+    : formulaRules
+      ? requiredFormulaValidationOperationReader(
+          formulaRules.bindings.map(({ rule }) => rule),
+        )
+      : 'operationRoleNarrowings' in verificationPackageRevision &&
+          verificationPackageRevision.operationRoleNarrowings
+        ? 2
+        : 1;
   const plans = [
     plan(
       PROJECTION_FAMILY_IDS.semanticModel,
@@ -755,6 +761,9 @@ function operationCatalogPayload(
     kind: 'operationCatalogPayload',
     operations: packageRevision.operations.map((operation) => ({
       confirmation: operation.confirmation,
+      ...('booking' in operation && operation.booking
+        ? { booking: operation.booking }
+        : {}),
       effect: resolvedEffect(operation.effect, packageRevision),
       // Declared command words (presentation only); absent, the reader derives
       // a label from the id, so every existing catalog byte is unchanged.
@@ -797,7 +806,8 @@ function operationCatalogPayload(
                 ? storageByEntity.get(operation.effect.entity.targetId)
                 : undefined,
               compilerSemanticProfileVersion,
-              argumentOperations.has(operation.operationId),
+              'booking' in operation ||
+                argumentOperations.has(operation.operationId),
             ),
             infrastructure: {
               archiveRepresentation: 'nullableArchivedAt',

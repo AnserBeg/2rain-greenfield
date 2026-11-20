@@ -646,16 +646,16 @@ test(
               const { old_fence: oldFence, new_fence: newFence } = rows[0]!;
               const advance = `UPDATE platform.workflow_runs
                 SET execution_fence = $2, status = 'RUNNABLE', reason = NULL WHERE run_id = $1`;
-              await assert.rejects(
-                withWorkflowTransaction(workerPool, scope, (client) =>
-                  client.query(advance, [secondRun, newFence]),
-                ),
-                { code: '42501' },
-                'worker can update the run fence and status directly',
-              );
-              // Simulate a legacy row advanced before the database grant was revoked.
-              await pool.query(advance, [secondRun, newFence]);
               try {
+                await assert.rejects(
+                  withWorkflowTransaction(workerPool, scope, (client) =>
+                    client.query(advance, [secondRun, newFence]),
+                  ),
+                  { code: '42501' },
+                  'worker can update the run fence and status directly',
+                );
+                // Simulate a legacy row advanced before the database grant was revoked.
+                await pool.query(advance, [secondRun, newFence]);
                 await restarted.step(scope, secondRun);
                 assert.equal(
                   await operationReceiptCount(pool, secondRun),
@@ -2250,7 +2250,8 @@ async function assertApprovalBoundary(
 
 async function pendingApproval(pool: pg.Pool, runId: string) {
   const result = await pool.query<{ fence: string; plan_digest: string }>(
-    'SELECT fence, plan_digest FROM platform.workflow_pending_approvals WHERE run_id = $1',
+    `SELECT fence, plan_digest FROM platform.workflow_pending_approvals
+      WHERE run_id = $1 AND status = 'PENDING'`,
     [runId],
   );
   assert.equal(result.rows.length, 1);
