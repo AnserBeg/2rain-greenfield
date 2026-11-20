@@ -15,6 +15,14 @@ jobs:
         with:
           node-version-file: .node-version
       - run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      - name: Format changed source
+        run: |
+          git diff --name-only --diff-filter=ACM origin/main...HEAD -- '*.ts' | xargs --no-run-if-empty corepack pnpm exec prettier --write
+          git diff -- '*.ts' > /tmp/connector-format.patch
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: connector-format
+          path: /tmp/connector-format.patch
       - name: Capture migration stream
         run: node --import tsx test/helpers/regenerate-schema-snapshot.ts
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -28,6 +36,9 @@ jobs:
         id: lint
         continue-on-error: true
       - run: node --import tsx --test test/unit/address-connector.test.ts
+      - run: node --import tsx --test --test-name-pattern='addAddressField and addMapPlacement replay' test/unit/customization.test.ts
+        id: replay
+        continue-on-error: true
       - run: node --import tsx --test test/postgres/address-connector.test.ts
       - if: always()
         run: test "${{ steps.types.outcome }}" = success && test "${{ steps.lint.outcome }}" = success
