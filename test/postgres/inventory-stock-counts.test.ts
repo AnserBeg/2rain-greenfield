@@ -561,8 +561,8 @@ test(
         'the entity list still holds it: the filter is the List’s',
       );
 
-      // A stale count: reviewed, then a movement dated before its instant is
-      // posted. Post refuses it whole and writes nothing.
+      // A movement posted after review with the same effective instant
+      // changes the reviewed ledger. Post refuses the stale count.
       const second = await count.create(VANCOUVER_WAREHOUSE);
       const secondStarted = await count.command(
         'start',
@@ -580,10 +580,10 @@ test(
       const countedAt = String((await read.stored(second.recordId))!.countedAt);
       await postAdjustment(fixture, {
         location: VANCOUVER_WAREHOUSE,
-        quantity: '-1',
-        effectiveAt: new Date(Date.parse(countedAt) - 1000).toISOString(),
-        reason: 'DAMAGED',
-        narrative: 'Damaged before the count was posted',
+        quantity: '1',
+        effectiveAt: countedAt,
+        reason: 'FOUND',
+        narrative: 'Found stock effective at the reviewed instant',
       });
       await assert.rejects(
         count.command(
