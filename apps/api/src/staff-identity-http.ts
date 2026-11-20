@@ -25,6 +25,7 @@ const flowCookie = '__Host-identity-flow',
 const script = `
 const form=document.querySelector('form');
 const status=document.querySelector('[role=status]');
+let reviewed;
 let fragment=new URLSearchParams();
 const takeFragment=()=>{
   if(!location.hash)return;
@@ -51,12 +52,61 @@ form.addEventListener('submit',async event=>{
       status.textContent='Signed out.';return;
     }
     const fields=Object.fromEntries(new FormData(form));
-    const invite=fragment.get('invite');
+    if(action==='choices'){
+      const choices=await post('/choices',{});
+      if(!choices.length){status.textContent='No decisions available.';return;}
+      for(const choice of choices){
+        const pick=document.createElement('button');pick.type='button';
+        pick.textContent=choice.kind+' · '+choice.label;
+        pick.addEventListener('click',()=>{form.elements.kind.value=choice.kind;
+          form.elements.targets.value=choice.target;form.elements.company.value=choice.company||'';
+          reviewed=undefined;document.querySelector('#terms').replaceChildren();status.replaceChildren();});
+        status.append(pick);
+      }
+      return;
+    }
+    if(action==='review'||action==='decision'){
+      const choice={kind:fields.kind,company:fields.company?.trim()||null,
+        targets:fields.targets.trim().split(/[\\s,]+/)};
+      if(action==='review'){
+        reviewed=undefined;
+        const result=await post('/review',choice);
+        const preview=document.querySelector('#terms');
+        preview.replaceChildren();
+        const terms=result.terms;
+        const paragraph=(parent,label,value)=>{
+          const title=document.createElement('dt'),detail=document.createElement('dd');
+          title.textContent=label;
+          detail.textContent=typeof value==='object'?JSON.stringify(value,null,2):String(value);
+          parent.append(title,detail);
+        };
+        const scope=document.createElement('dl');
+        paragraph(scope,'Tenant',terms.tenant);paragraph(scope,'Environment',terms.environment);
+        paragraph(scope,'Company',terms.company||'All companies');preview.append(scope);
+        for(const item of terms.targets){
+          const heading=document.createElement('h2'),facts=document.createElement('dl');
+          heading.textContent=terms.kind==='retry'?'Retry suspended workflow':terms.kind==='customize'?'Approve customization':'Approve release';
+          preview.append(heading,facts);
+          if(item.diff)paragraph(facts,'Proposed changes',item.diff);
+          for(const [key,value] of Object.entries(item)){
+            if(key!=='diff' && value!==null)paragraph(facts,key.replace(/([a-z])([A-Z])/g,'$1 $2'),value);
+          }
+        }
+        reviewed={...choice,reviewed:result.digest};
+        document.querySelector('[value=decision]').disabled=false;
+        return;
+      }
+      if(!reviewed || JSON.stringify(choice)!==JSON.stringify({kind:reviewed.kind,company:reviewed.company,targets:reviewed.targets}))
+        throw new Error('Review the selected decisions again.');
+      Object.assign(fields,reviewed);
+    }
+    const invite=action==='decision'?null:fragment.get('invite');
     const options=await post('/begin',{...fields,action,invite,binding:fragment.get('binding')});
     const credential=invite
       ? await navigator.credentials.create({publicKey:PublicKeyCredential.parseCreationOptionsFromJSON(options)})
       : await navigator.credentials.get({publicKey:PublicKeyCredential.parseRequestOptionsFromJSON(options)});
     const result=await post('/finish',{credential:credential.toJSON()});
+    if(result.proof){reviewed=undefined;status.textContent='Confirmed. Decision reference '+result.proof;return;}
     if(result.handoff){location.replace(document.body.dataset.erp+'/auth/callback#'+result.handoff);return;}
     if(result.enrolled){status.textContent='Passkey enrolled. ';const a=document.createElement('a');a.href=document.body.dataset.erp;a.textContent='Sign in to the ERP';status.append(a);return;}
     status.textContent=result.invite?'Hand this one-use enrollment link to the verified person.':'Account updated.';
@@ -66,7 +116,7 @@ form.addEventListener('submit',async event=>{
   }catch(error){status.textContent=error.message;}finally{button.disabled=false;}
 });`;
 const style =
-  'body{margin:3rem auto;padding:0 1rem;max-width:32rem;font:1rem/1.5 system-ui}label,input,button{display:block}input,button{box-sizing:border-box;min-height:44px;width:100%;margin:.4rem 0 1rem}button{font:inherit}';
+  'body{margin:3rem auto;padding:0 1rem;max-width:32rem;font:1rem/1.5 system-ui}label,input,button{display:block}input,button{box-sizing:border-box;min-height:44px;width:100%;margin:.4rem 0 1rem}button{font:inherit}dt{font-weight:600}dd{margin:0 0 .6rem;white-space:pre-wrap;overflow-wrap:anywhere}textarea,select{width:100%;font:inherit}';
 const pages: Record<string, [string, string]> = {
   '/': [
     'Staff sign-in',
@@ -76,9 +126,13 @@ const pages: Record<string, [string, string]> = {
     'Enroll your passkey',
     '<button value="enroll">Create a passkey</button>',
   ],
+  '/decisions': [
+    'Review a decision',
+    '<button value="choices" formnovalidate>Find pending decisions</button><label>Decision<select name="kind"><option value="release">Approve release</option><option value="customize">Approve customization</option><option value="retry">Retry workflow</option></select></label><label>Preparation IDs or suspended run IDs<textarea name="targets" required></textarea></label><label>Company ID for workflow Retry<input name="company"></label><button value="review">Review terms</button><section id="terms" aria-live="polite"></section><button value="decision" disabled>Confirm with passkey</button>',
+  ],
   '/account': [
     'Manage sign-in',
-    '<button value="spare">Enroll a spare passkey</button><label>Lost credential ID<input name="subject"></label><button value="revoke-key">Revoke lost passkey</button><button value="signout">Sign out</button><button value="signout-everywhere">Sign out everywhere</button><a href="/staff">Manage staff</a>',
+    '<button value="spare">Enroll a spare passkey</button><label>Lost credential ID<input name="subject"></label><button value="revoke-key">Revoke lost passkey</button><button value="signout">Sign out</button><button value="signout-everywhere">Sign out everywhere</button><a href="/staff">Manage staff</a> <a href="/decisions">Review a decision</a>',
   ],
   '/staff': [
     'Manage staff',
@@ -115,7 +169,11 @@ export function identityHandler(
           return;
         }
         let details = '';
-        if (url.pathname === '/account' || url.pathname === '/staff') {
+        if (
+          url.pathname === '/account' ||
+          url.pathname === '/staff' ||
+          url.pathname === '/decisions'
+        ) {
           const session = cookieValue(req.headers.cookie, idCookie);
           check(session);
           const account = await identity.account(
@@ -198,10 +256,21 @@ export function identityHandler(
       sameOriginPost(req, r.identityOrigin);
       const flow = cookieValue(req.headers.cookie, flowCookie);
       check(flow && req.headers['x-erp-csrf'] === csrf(flow));
-      if (url.pathname === '/begin' || url.pathname === '/finish') {
+      if (['/begin', '/finish', '/review', '/choices'].includes(url.pathname)) {
         await identity.spend('source', sourceOf(req), 30);
       }
       const input = await readJson(req);
+      if (url.pathname === '/review' || url.pathname === '/choices') {
+        const identityCookie = cookieValue(req.headers.cookie, idCookie);
+        check(identityCookie);
+        json(
+          res,
+          url.pathname === '/choices'
+            ? await identity.choices(identityCookie)
+            : await identity.review(input, identityCookie),
+        );
+        return;
+      }
       if (url.pathname === '/begin') {
         json(
           res,

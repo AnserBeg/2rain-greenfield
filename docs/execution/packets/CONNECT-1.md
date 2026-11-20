@@ -17,6 +17,8 @@ Critical paths touched by CONNECT-1 in this slice are empty.
 5. The charter named ADR-0076. Main uses it for cross-field validation, CUSTOMIZE-3 uses
    ADR-0077, DOCS-1 uses ADR-0078 and UI-COMPOSE-1 uses ADR-0079. Connectors take ADR-0080.
 
+SIGNIN-1 slice 2b opens when the canonical pending connection and send records and their writers land. Outside the local demo, provider enablement must go through a proof-gateable function with no runtime table-write grant.
+
 ## Slices and gates
 
 0. Amended ADR-0080, including the sign-in gate and measured first-party and tenant absence parity.

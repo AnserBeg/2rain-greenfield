@@ -45,4 +45,10 @@ For sole-owner recovery, the installer verifies the saved contact, supplies the 
 `STAFF_OWNER_PRINCIPAL`, `STAFF_RECOVERY_REASON` and a new invitation file, then runs
 `corepack pnpm --filter @north-star/api staff recover-owner`.
 
-This checkpoint covers staff sign-in. The five proof-gated decisions await SIGNIN-1 slice 2.
+## Approvals and activation
+
+Use **Manage sign-in → Review a decision** on the identity host. Choose **Find pending decisions** and select the change, or enter its preparation ID. A release applies to all companies in the environment. For Retry, enter the suspended run ID and its company ID. List multiple IDs to review one batch of the same kind and scope. Review the changes and fence for each target, then choose **Confirm with passkey**. The decision reference identifies the evidence and expires for use after five minutes.
+
+Give the separate activation verifier service account its own `STAFF_ACTIVATION_DATABASE_URL` for the `north_star_activation_verifier` login and the same realm settings as the identity process. Run `corepack pnpm --filter @north-star/api staff decisions` to apply pending confirmations. Each result gives the decision reference and its prebound attempt IDs. Run `corepack pnpm --filter @north-star/api staff activate <attempt-id>` to activate an approved release or resume its verification. The verifier reads the committed pointer, swap and candidate evidence before it records the outcome.
+
+The Retry receipt records the original and restored fences. Workflow scheduling outside the local demo awaits WORKFLOW-1’s same-transaction remedy integration. Provider enablement and outward-send confirmation await CONNECT-1’s canonical pending records and writers.

@@ -52,6 +52,7 @@ import {
   scriptedModel,
   SpendMeter,
 } from '../../packages/operations-agent/src/index.js';
+import { checkRetryDecision } from '../helpers/staff-decision-checks.js';
 import { COMPANY, worldOver, type AgentWorld } from '../agent/agent-world.js';
 import { referenceScript } from '../agent/reference-scripts.js';
 import { TASKS } from '../agent/tasks.js';
@@ -626,6 +627,22 @@ test(
                 resumeReplay.resolve();
                 await delayedReplay;
               }
+            },
+          );
+          await t.test(
+            'staff Retry proof binds the suspended occurrence and restored fence',
+            async () => {
+              const principal = randomUUID();
+              await pool.query(
+                'SELECT platform.set_release_approver_eligibility($1,$2,true,$3,$4)',
+                [tenantId, principal, operator.principalId, randomUUID()],
+              );
+              await checkRetryDecision(
+                pool,
+                connection,
+                { tenantId, environmentId, principal, company: COMPANY },
+                secondRun,
+              );
             },
           );
           assert.deepEqual(

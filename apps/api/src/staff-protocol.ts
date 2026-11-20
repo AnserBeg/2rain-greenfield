@@ -45,8 +45,17 @@ export async function assertPilotDatabase(
     NOT (rolsuper OR rolbypassrls OR rolinherit OR rolcreaterole OR rolcreatedb OR rolreplication)
     AND NOT EXISTS (SELECT FROM pg_roles WHERE rolname='north_star_fixture_proof_issuer')
     AND NOT EXISTS (SELECT FROM pg_roles r WHERE (r.rolsuper OR r.rolbypassrls OR r.rolcreaterole
-      OR r.rolname IN ('north_star_identity','north_star_workflow_verifier','north_star_module_materializer'))
+      OR r.rolname IN ('north_star_identity','north_star_activation_verifier','north_star_workflow_verifier','north_star_module_materializer'))
       AND r.rolname <> current_user AND pg_has_role(current_user,r.oid,'MEMBER'))
+    AND NOT EXISTS (SELECT FROM pg_roles accessible WHERE EXISTS (
+      SELECT FROM pg_roles caller WHERE caller.rolname IN ('north_star_runtime','north_star_workflow_worker')
+        AND pg_has_role(caller.oid,accessible.oid,'MEMBER'))
+      AND (accessible.rolname IN ('north_star_identity','north_star_activation_verifier','north_star_workflow_verifier')
+        OR has_any_column_privilege(accessible.oid,'platform.release_approvals','INSERT')
+        OR has_any_column_privilege(accessible.oid,'platform.release_activation_verification_receipts','INSERT')
+        OR has_any_column_privilege(accessible.oid,'platform.release_activation_swap_receipts','INSERT')
+        OR has_any_column_privilege(accessible.oid,'platform.active_release_pointers','UPDATE')
+        OR has_function_privilege(accessible.oid,'platform.workflow_decide_approval(uuid,integer,bigint,text,text)','EXECUTE')))
     AS safe FROM pg_roles WHERE rolname=current_user`,
     [role],
   );
