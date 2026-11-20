@@ -29,11 +29,11 @@ Hosted CI covers PostgreSQL issuance, stored brand provenance, live source restr
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "DOCS-1",
-  "base": "94b233007c03481398bdeb55413e69a31f81092f", "head": "262076c79176fcd68cb1baa61d6b63f7cd91a935",
+  "base": "139022660149c1c5839c7f89f9a6bd2f06477974", "head": "1f75454ff29ededcd5b08d4432c05a66186bfdd3",
   "changedPaths": [
     ".github/workflows/evidence.yml", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts",
     "apps/web/src/document-http.ts", "apps/web/src/document-template-form.ts", "apps/web/src/surface-client.ts",
-    "db/migrations/0047_generated_document_sources.sql", "db/schema.snapshot.json", "packages/canonical-model/src/document-template-schema.ts",
+    "db/migrations/0048_generated_document_sources.sql", "db/schema.snapshot.json", "packages/canonical-model/src/document-template-schema.ts",
     "packages/canonical-model/src/documents.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/normalize.ts",
     "packages/canonical-model/src/schemas.ts", "packages/compiler/src/compiler.ts", "packages/compiler/src/document-templates.ts",
     "packages/compiler/src/documents.ts", "packages/compiler/src/projections.ts", "packages/customization/src/apply.ts",
