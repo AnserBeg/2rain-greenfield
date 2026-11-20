@@ -960,8 +960,29 @@ test('booking commitment writer', async (t) => {
               [owner(33)],
             );
             await right.query('SET ROLE north_star_workflow_worker');
-            await right.query("SET lock_timeout='1500ms'");
-            await right.query('SELECT platform.booking_sweep_due(128)');
+            let finished = false;
+            const sweep = right
+              .query('SELECT platform.booking_sweep_due(128)')
+              .finally(() => {
+                finished = true;
+              });
+            void sweep.catch(() => undefined);
+            while (!finished) {
+              const wait = await admin.query(
+                'SELECT pg_backend_pid() = ANY(pg_blocking_pids($1)) AS waiting',
+                [rightPid],
+              );
+              if (wait.rows[0]!.waiting) {
+                await admin.query('ROLLBACK');
+                await sweep;
+                assert.fail(
+                  'the sweeper waited on the foreground owner cursor',
+                );
+              }
+              if (!finished)
+                await new Promise((resolve) => setTimeout(resolve, 10));
+            }
+            await sweep;
             const states = await admin.query(
               'SELECT state FROM platform.booking_commitments WHERE booking_id=$1',
               [held.bookingId],
@@ -987,7 +1008,6 @@ test('booking commitment writer', async (t) => {
             );
           } finally {
             await admin.query('ROLLBACK');
-            await right.query('RESET lock_timeout');
             await right.query('SET ROLE north_star_runtime');
           }
           await admin.query('SELECT platform.booking_sweep_due(128)');
