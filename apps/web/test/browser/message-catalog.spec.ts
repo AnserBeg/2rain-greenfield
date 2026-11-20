@@ -429,6 +429,7 @@ let methodProbeUrl: string;
 let approvalsUrl: string;
 const approvalRunId = '10000000-0000-4000-8000-000000000005';
 const approvalDigest = 'a'.repeat(64);
+const readOnlyWorkflowBody = 'sdk.sleep(172_800_000);';
 const suspendedRunIds = [
   '10000000-0000-4000-8000-000000000007',
   '10000000-0000-4000-8000-000000000008',
@@ -453,7 +454,53 @@ test.beforeAll(async () => {
       // are never reached by this fixture.
       Object.create(null) as SurfaceRuntimeGateways,
       null,
-      undefined,
+      async () => {
+        const outsideJourney = () => {
+          throw new Error('The workflow display journey is read-only');
+        };
+        return {
+          activate: outsideJourney,
+          approve: outsideJourney,
+          draft: outsideJourney,
+          recover: outsideJourney,
+          rollback: outsideJourney,
+          async status() {
+            return {
+              activeChain: [
+                {
+                  kind: 'saveWorkflow',
+                  displayLabel: 'Receipt inspection',
+                  patchId: approvalRunId,
+                },
+              ],
+              activeFence: 2,
+              activeReleaseId: approvalRunId,
+              patches: [],
+              rollbackAvailable: false,
+              upgradeRefusal: null,
+              upgrades: [],
+            };
+          },
+          async targets() {
+            return { choiceFields: [], lists: [], recordTypes: [] };
+          },
+          async workflows() {
+            return [
+              {
+                workflowId: 'receipt-inspection',
+                trigger: 'A goods receipt is posted',
+                grants: {
+                  queries: [],
+                  operations: [
+                    'northstar.app:operation.custom_receipt_review_create',
+                  ],
+                },
+                body: readOnlyWorkflowBody,
+              },
+            ];
+          },
+        };
+      },
       {
         workflowApprovals: {
           async worklist(actor) {
@@ -1061,6 +1108,27 @@ test('the Approvals worklist sends every selected suspended run', async ({
   } finally {
     showSuspended = false;
   }
+});
+
+test('Customize presents verified workflow source as read-only text', async ({
+  page,
+}) => {
+  await page.goto(`${approvalsUrl}/?customize`);
+  const workflow = page.locator('[data-customize-workflows]');
+  await expect(
+    workflow.getByText('A goods receipt is posted', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    workflow.getByText('northstar.app:operation.custom_receipt_review_create'),
+  ).toBeVisible();
+  await expect(
+    workflow.getByText(/may use the custom receipt review create action/u),
+  ).toBeVisible();
+  await workflow.getByText('View code', { exact: true }).click();
+  await expect(workflow.locator('pre code')).toHaveText(readOnlyWorkflowBody);
+  await expect(
+    workflow.locator('input, textarea, [contenteditable]'),
+  ).toHaveCount(0);
 });
 
 test('the slot renderer resolves the same catalog as the page renderer', async ({

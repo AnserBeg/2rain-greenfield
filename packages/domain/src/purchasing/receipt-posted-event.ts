@@ -2,6 +2,7 @@
 export const RECEIPT_POSTED_EVENT = Object.freeze({
   postingAction: 'northstar.purchasing:capability.receiving',
   eventType: 'northstar.purchasing:event.receipt_posted',
+  label: 'A goods receipt is posted',
   schemaVersion: 'northstar.purchasing-receipt-posted/v1',
   recordType: 'northstar.purchasing:record.goods_receipt',
 });
