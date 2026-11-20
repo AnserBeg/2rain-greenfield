@@ -1449,10 +1449,10 @@ test('upgrade diagnostics name the missing tenant target and the new first-party
   assert.deepEqual(first, second);
   assert.equal(first.status, 'rejected');
   assert.ok(first.status === 'rejected');
-  assert.equal(first.code, 'CUSTOMIZE_UPGRADE_CONFLICT');
+  assert.equal(first.code, 'RETIRED_TARGET');
   assert.match(
     JSON.stringify(first.diagnostics),
-    /firstPartyBase.*tenantPatch.*item_list.*There is no screen/u,
+    /RETIRED_TARGET.*item_list/u,
   );
 });
 
@@ -1572,12 +1572,12 @@ test('a whole-package upgrade rejection keeps the compiler subject without attri
   assert.ok(response.status === 'rejected', JSON.stringify(response));
   assert.equal('patchIndex' in response, false);
   const diagnostics = response.diagnostics as {
-    firstPartySubject?: string;
+    subject?: string;
     tenantPatch?: unknown;
     patchIndex?: number;
   }[];
   assert.ok(
-    diagnostics.some((d) => d.firstPartySubject === permissionId),
+    diagnostics.some((d) => d.subject === permissionId),
     JSON.stringify(diagnostics),
   );
   assert.ok(
