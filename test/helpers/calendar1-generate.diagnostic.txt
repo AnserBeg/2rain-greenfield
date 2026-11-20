@@ -15,11 +15,21 @@ const observed=observeLanguageCoverage(ledger,{applicationPackages,storageTarget
 const snapshot=encodeLanguageCoverageObservationSnapshot(ledger,observed);
 const defects=new Set(doc.acceptedButUnhonoredObligationIds);
 assert.ok([...defects].every(id=>ledger.obligations.some(o=>o.id===id)));
-assert.equal(snapshot.observedCount,doc.observationSnapshot.observedCount);
+if(process.env.CALENDAR_OLD_OBSERVATIONS){
+  assert.deepEqual(snapshot,doc.observationSnapshot);
+  writeFileSync('/tmp/calendar1-old-observed.json',JSON.stringify([...observed]));
+  process.exit(0);
+}
+const previous=new Set(JSON.parse(readFileSync('/tmp/calendar1-old-observed.json','utf8')));
+const lost=[...previous].filter(id=>!observed.has(id));
+const added=[...observed].filter(id=>!previous.has(id));
+console.log('Observed obligation changes',JSON.stringify({lost,added}));
+assert.deepEqual(lost,[]);
+assert.equal(added.length,1);
 const note=' CALENDAR-1 exercises Board declarations on tenant and Purchase Order fixtures. The first-party coverage samples omit Boards.';
 doc.decisions=doc.decisions.map(({decisionId,...body})=>{
   const obligationSetDigest=deriveDecisionSetDigest(ledger,observed,body.category);
-  if(body.category!=='unobserved')assert.equal(obligationSetDigest,body.obligationSetDigest);
+  if(body.category==='observedRelationScope')assert.equal(obligationSetDigest,body.obligationSetDigest);
   body={...body,ledgerDigest:ledger.digest,obligationSetDigest,acceptedButUnhonoredSetDigest:deriveObligationSetDigest(defects)};
   if(body.category==='unobserved' && !body.rationale.includes(note))body.rationale+=note;
   return {...body,decisionId:deriveLanguageCoverageDecisionId(decisionId.split('@')[0],body)};

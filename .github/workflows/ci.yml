@@ -72,7 +72,14 @@ jobs:
     - *id002
     - *id003
     - *id004
-    - run: node --import tsx test/helpers/calendar1-generate.diagnostic.cjs
+    - run: 'cp test/helpers/calendar1-generate.diagnostic.txt /tmp/calendar1-generator.cjs
+
+        git worktree add --detach /tmp/calendar1-original 2042780bcc3889022af36493a2dcaa3a62b8cb56
+
+        (cd /tmp/calendar1-original && corepack pnpm install --offline --frozen-lockfile
+        --reporter=append-only && CALENDAR_OLD_OBSERVATIONS=1 node --import tsx /tmp/calendar1-generator.cjs)
+
+        node --import tsx /tmp/calendar1-generator.cjs'
     - run: corepack pnpm exec prettier --write apps/web/src/board.ts apps/web/src/component-registry.ts
         apps/web/src/customize-screen.ts apps/web/src/ledger-styles.ts apps/web/src/surface-contract.ts
         apps/web/src/surface-runtime.ts apps/web/src/workspace-entry.ts apps/web/test/browser/customize.composed-application.spec.ts
