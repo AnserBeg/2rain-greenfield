@@ -82,6 +82,27 @@ jobs:
       - run: node --import tsx --test test/postgres/address-connector.test.ts
       - if: always()
         run: test "${{ steps.types.outcome }}" = success && test "${{ steps.lint.outcome }}" = success
+  remaining:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: packet/CONNECT-1
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+      - run: corepack enable
+      - run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      - run: node --import tsx test/helpers/begin-reachability-run.ts
+      - run: node --import tsx --test test/integration/field-kind-round-trip.test.ts
+      - if: always()
+        run: corepack pnpm test:architecture
+      - if: always()
+        run: corepack pnpm check:app-release
+      - if: always()
+        run: corepack pnpm test:contracts
   controls:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
