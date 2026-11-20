@@ -88,23 +88,10 @@ export function criticalDiff(base, tip) {
   // RLS/grant SQL can also be embedded in executable source. Search both sides
   // of changed files so a split-line statement or an edited grantee is covered.
   const sql =
-    /\b(?:grant\s+(?:all|select|insert|update|delete|truncate|references|trigger|usage|execute|create|connect|temporary|[\w"]+\s+to\b)|revoke\s+\w+|(?:create|alter|drop)\s+policy|row\s+level\s+security)\b/iu;
-  for (const path of git(
-    'diff',
-    '--no-renames',
-    '--name-only',
-    '-z',
-    base,
-    tip,
-    '--',
-    'packages',
-    'apps',
-    'db',
-    'scripts',
-    '*.sql',
-  )
-    .split('\0')
-    .filter(Boolean)) {
+    /\b(?:(?:grant|revoke)\s+\S|(?:create|alter|drop)\s+policy\b|row\s+level\s+security\b)/iu;
+  const changed = git('diff', '--no-renames', '--name-only', '-z', base, tip);
+  for (const path of changed.split('\0').filter(Boolean)) {
+    if (path.endsWith('.md')) continue;
     for (const rev of [base, tip]) {
       if (
         git('ls-tree', '-z', rev, '--', `:(literal)${path}`) &&
@@ -156,15 +143,24 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     event.inputs.expected_head !== process.env.GITHUB_SHA
   )
     throw new Error('The packet moved before the requested run started');
-  if (
-    event.inputs?.merge_sha &&
-    (!forced ||
-      !/^[0-9a-f]{40}$/u.test(event.inputs.merge_sha) ||
-      git('rev-parse', 'HEAD^2').trim() !== process.env.GITHUB_SHA)
-  )
-    throw new Error(
-      'The requested PR merge must have the dispatched head as its second parent',
-    );
+  if (event.inputs?.merge_sha) {
+    const parents = git('show', '-s', '--format=%P', 'HEAD').trim().split(' ');
+    if (
+      !forced ||
+      head !== event.inputs.merge_sha ||
+      parents.length !== 2 ||
+      !parents.includes(process.env.GITHUB_SHA) ||
+      git('rev-parse', `${head}:.github/workflows/ci.yml`).trim() !==
+        git(
+          'rev-parse',
+          `${process.env.GITHUB_SHA}:.github/workflows/ci.yml`,
+        ).trim()
+    ) {
+      throw new Error(
+        'Promoted CI must execute the workflow of the exact PR merge tree from one of its parents',
+      );
+    }
+  }
   const plan = forced
     ? { tier: 'full', reason: 'full requested' }
     : selectRange(
@@ -172,11 +168,29 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         head,
       );
   const promote = !forced && plan.tier === 'full';
+  // A lane opened before CI-3 may still have CI-2 on its head. Dispatch
+  // from the parent that supplies the workflow GitHub actually selected.
+  let dispatchRef = process.env.GITHUB_REF_NAME;
+  let dispatchHead = process.env.GITHUB_SHA;
+  if (promote && pr) {
+    const workflow = git('rev-parse', 'HEAD:.github/workflows/ci.yml').trim();
+    const parent = [pr.head, pr.base].find(
+      (candidate) =>
+        git('rev-parse', `${candidate.sha}:.github/workflows/ci.yml`).trim() ===
+        workflow,
+    );
+    if (!parent)
+      throw new Error(
+        'Both sides changed ci.yml. Merge the base into the packet to test the combined workflow.',
+      );
+    dispatchRef = parent.ref;
+    dispatchHead = parent.sha;
+  }
   const files = plan.files ?? [];
   console.log(JSON.stringify({ ...plan, head, promote }));
   appendFileSync(
     process.env.GITHUB_OUTPUT,
-    `tier=${plan.tier}\npromote=${Boolean(promote)}\nfiles=${JSON.stringify(files)}\nbrowser=${files.some((path) => browserFile.test(path))}\n`,
+    `ref=${dispatchRef}\nhead=${dispatchHead}\ntier=${plan.tier}\npromote=${Boolean(promote)}\nfiles=${JSON.stringify(files)}\nbrowser=${files.some((path) => browserFile.test(path))}\n`,
   );
   appendFileSync(
     process.env.GITHUB_STEP_SUMMARY,

@@ -74,7 +74,7 @@ continues. Mechanics: `mission-cadence`.
 
 - **Nothing waits for a review.** While pre-tenant (no `rulings/first-tenant.md`,
   ADR-0066's switch) a vertical merges on CI green; review reads `main` afterwards.
-- **Critical set.** Git pathspecs below include the posting-trigger/rebuild container and SQL files. Also Critical is RLS/grant SQL embedded in executable files.
+- **Critical set.** Git pathspecs below include the posting-trigger/rebuild container. RLS/grant SQL is also Critical, including SQL embedded in executable files.
 
 <!-- critical-pathspecs -->
 `packages/postgres-provider/src/inventory-posting-service.ts`
@@ -84,7 +84,6 @@ continues. Mechanics: `mission-cadence`.
 `packages/postgres-provider/src/release-verification-service.ts`
 `packages/platform-runtime/src/trust/**`
 `db/migrations/**`
-`*.sql`
 <!-- end-critical-pathspecs -->
 
 - **A read is owed** — one fresh-naive Codex arm the orchestrator launches over
@@ -99,8 +98,7 @@ continues. Mechanics: `mission-cadence`.
 
 ## 5. Gates
 
-- **Packet CI** runs quick on mapped changes and full on shared or unknown paths. Request final full with `gh workflow run ci.yml --ref <candidate-ref> -f tier=full`. Before pushing main run `node scripts/check-merge-window.mjs <id> <integration-SHA>`. Main queues every full run. [CI evidence and tier mapping](docs/execution/evidence-on-demand.md).
-- Run focused tests locally. CI owns the heavy suites.
+- [Tiered CI](docs/execution/evidence-on-demand.md#packet-and-main-ci) selects packet coverage and queues full on main. Before pushing main run `node scripts/check-merge-window.mjs <id> <integration-SHA>`. Run focused tests locally. CI owns the heavy suites.
 - Integration is a `--no-ff` merge of the packet into `main`; the packet tip is
   the second parent (`check-review-record.sh` reads it). Every merge records one
   review-log row: `merged — no Critical path` or `merged — unread`.
