@@ -291,3 +291,4 @@ one line per round; the gate only requires that the SHA on `main` appears.
 | `4331c2992a494457dbb050a06c808c26f03de21d` | BOOKING-1 (narrow re-read) | integration | merged — no Critical path | 2026-11-20 | Fable accepted ADR-0082 with A1–A10. |
 | `1e5842bc017850b09024d61947b62410d3718822` | SIGNIN-1 (slice 1 corrections) | integration | merged — unread | 2026-11-20 | Staff identity migration, session checks and recovery authority. [CI 44696495008](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44696495008). |
 | `b900f44b54cbb83a0d65e69d59dc701d3c618a13` | BILLING-1 (narrow re-read) | integration | merged — no Critical path | 2026-11-20 | Fable accepted ADR-0083 with amendments. A3–A6 amend ADR-0084 before slice 2. |
+| `4bfce9c3bc7f374c902444bb83bb465949939c83` | CALENDAR-1 (Fable amendments) | integration | merged — no Critical path | 2026-11-20 | Docs-only A1–A14 under the no-re-run ruling. |
