@@ -22,9 +22,9 @@
     {
       "name": "shared-record-company-pin",
       "claim": "A shared record returns only the selected company installation’s provider pin.",
-      "file": "packages/postgres-provider/src/address-geocodes.ts",
-      "original": "FROM platform.address_geocodes WHERE tenant_id=$1 AND environment_id=$2 AND company_id=$3 AND installation_id=$4 AND record_id=$5 AND field_id=$6 AND address_revision=$7 AND release_id=$8 AND fence=$9",
-      "replacement": "FROM platform.address_geocodes WHERE tenant_id=$1 AND environment_id=$2 AND $3::uuid IS NOT NULL AND $4::uuid IS NOT NULL AND record_id=$5 AND field_id=$6 AND address_revision=$7 AND release_id=$8 AND fence=$9",
+      "file": "db/migrations/0055_address_connector_authority.sql",
+      "original": "     AND g.company_id = scope_company\n     AND g.installation_id = scope_installation\n",
+      "replacement": "",
       "test": {
         "files": ["test/postgres/address-connector.test.ts"]
       },
@@ -33,6 +33,448 @@
           "file": "test/postgres/address-connector.test.ts",
           "name": "Address publication preserves the old envelope, stops the prior reader, and serves governed user text without a provider",
           "expected": "the other company received a provider pin for this shared record"
+        }
+      ]
+    },
+    {
+      "name": "address-configure-needs-permission",
+      "claim": "Enabling or configuring a provider needs the declared configure permission in a live grant.",
+      "file": "db/migrations/0055_address_connector_authority.sql",
+      "original": "      AND g.permission_id = 'northstar.runtime:permission.connector_configure'\n      AND g.resource_id = 'northstar.runtime:connector.address'\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/address-authority.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/address-authority.test.ts",
+          "name": "configuring a provider needs the declared write permission, checked live",
+          "expected": "a principal without the configure permission enabled a provider"
+        }
+      ]
+    },
+    {
+      "name": "address-installation-read-for-members",
+      "claim": "Any member of the company reads its installation; reading never needs the configure permission.",
+      "file": "db/migrations/0055_address_connector_authority.sql",
+      "original": "  IF NOT north_star_internal.address_member(scope_company) THEN RETURN; END IF;\n  RETURN QUERY",
+      "replacement": "  IF NOT north_star_internal.address_may_configure(scope_company) THEN RETURN; END IF;\n  RETURN QUERY",
+      "test": {
+        "files": ["test/postgres/address-authority.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/address-authority.test.ts",
+          "name": "a non-manager buyer locates, reads pins and gets suggestions",
+          "expected": "a non-manager job was held instead of located"
+        }
+      ]
+    },
+    {
+      "name": "address-pin-survives-activation",
+      "claim": "A pin is matched on record, field, revision and installation, never on the current release fence.",
+      "file": "db/migrations/0055_address_connector_authority.sql",
+      "original": "     AND g.address_revision = scope_revision\n",
+      "replacement": "     AND g.address_revision = scope_revision\n     AND g.fence = (SELECT p.fence FROM platform.active_release_pointers p WHERE (p.tenant_id,p.environment_id) = (g.tenant_id,g.environment_id))\n",
+      "test": {
+        "files": ["test/postgres/address-authority.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/address-authority.test.ts",
+          "name": "an unrelated activation keeps a located pin visible",
+          "expected": "an unrelated activation hid a located pin"
+        }
+      ]
+    },
+    {
+      "name": "address-membership-company-scope",
+      "claim": "A company-scoped membership reaches only its own company through every address function.",
+      "file": "db/migrations/0055_address_connector_authority.sql",
+      "original": "      AND m.revoked_at IS NULL AND r.revoked_at IS NULL\n      AND (m.legal_entity_id IS NULL OR m.legal_entity_id = scope_company))\n",
+      "replacement": "      AND m.revoked_at IS NULL AND r.revoked_at IS NULL)\n",
+      "test": {
+        "files": ["test/postgres/address-authority.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/address-authority.test.ts",
+          "name": "a company-scoped principal reaches no other company through the address functions",
+          "expected": "a company-scoped principal listed another company installation"
+        }
+      ]
+    },
+    {
+      "name": "address-pin-company-predicate",
+      "claim": "The pin read matches the caller’s company, not only the installation it names.",
+      "file": "db/migrations/0055_address_connector_authority.sql",
+      "original": "     AND g.company_id = scope_company\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/address-authority.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/address-authority.test.ts",
+          "name": "the pin read matches its own company, not only the installation named",
+          "expected": "company A read company B pin by naming its installation"
+        }
+      ]
+    },
+    {
+      "name": "address-pin-installation-predicate",
+      "claim": "Only the current installation’s enrichment supplies a pin.",
+      "file": "db/migrations/0055_address_connector_authority.sql",
+      "original": "     AND g.installation_id = scope_installation\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/address-authority.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/address-authority.test.ts",
+          "name": "the pin read matches the current installation",
+          "expected": "a replaced installation still supplied the pin"
+        }
+      ]
+    },
+    {
+      "name": "address-owned-record-predicate",
+      "claim": "An owned record’s address is read only for its stored company.",
+      "file": "packages/postgres-provider/src/address-geocodes.ts",
+      "original": "      ${company ? 'AND ' + ident(company.column) + '=$4' : ''} FOR SHARE`,",
+      "replacement": "      $${company ? 'AND $$4::uuid IS NOT NULL' : ''} FOR SHARE`,",
+      "test": {
+        "files": ["test/postgres/address-authority.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/address-authority.test.ts",
+          "name": "an owned record is read only for its stored company",
+          "expected": "the owned-record predicate let company A read company B record"
+        }
+      ]
+    },
+    {
+      "name": "address-enqueue-stored-owner",
+      "claim": "Saving an owned record queues a geocode only for its stored company.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "              (!accepted.owner || selection.companyId === accepted.owner)",
+      "replacement": "              true",
+      "test": {
+        "files": ["test/postgres/address-authority.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/address-authority.test.ts",
+          "name": "saving an owned record queues only for its stored company",
+          "expected": "a save queued a geocode for a company that does not own the record"
+        }
+      ]
+    },
+    {
+      "name": "address-sweep-batch-limit",
+      "claim": "The coordinate sweeper scrubs at most its batch per call.",
+      "file": "db/migrations/0055_address_connector_authority.sql",
+      "original": "     LIMIT greatest(least(max_rows, 1000), 0)",
+      "replacement": "     LIMIT 1000",
+      "test": {
+        "files": ["test/postgres/address-authority.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/address-authority.test.ts",
+          "name": "expired provider coordinates are scrubbed in bounded batches",
+          "expected": "the sweeper exceeded its batch"
+        }
+      ]
+    },
+    {
+      "name": "address-sweep-expiry-only",
+      "claim": "The coordinate sweeper scrubs only expired provider coordinates.",
+      "file": "db/migrations/0055_address_connector_authority.sql",
+      "original": "       AND g.expires_at <= clock_timestamp()",
+      "replacement": "       AND g.expires_at IS NOT NULL",
+      "test": {
+        "files": ["test/postgres/address-authority.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/address-authority.test.ts",
+          "name": "expired provider coordinates are scrubbed in bounded batches",
+          "expected": "the sweeper scrubbed unexpired coordinates"
+        }
+      ]
+    },
+    {
+      "name": "address-quota-call-limit",
+      "claim": "A call beyond the period call limit is refused.",
+      "file": "db/migrations/0055_address_connector_authority.sql",
+      "original": "  WHERE q.calls < installed.period_calls\n",
+      "replacement": "  WHERE true\n",
+      "test": {
+        "files": ["test/postgres/address-authority.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/address-authority.test.ts",
+          "name": "the call limit refuses once spent",
+          "expected": "a call beyond the period limit was reserved"
+        }
+      ]
+    },
+    {
+      "name": "address-quota-budget-limit",
+      "claim": "A call beyond the period budget is refused.",
+      "file": "db/migrations/0055_address_connector_authority.sql",
+      "original": "    AND q.reserved_micros + excluded.reserved_micros <= installed.period_budget_micros;",
+      "replacement": "    AND true;",
+      "test": {
+        "files": ["test/postgres/address-authority.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/address-authority.test.ts",
+          "name": "the budget refuses a call it cannot cover",
+          "expected": "a call beyond the period budget was reserved"
+        }
+      ]
+    },
+    {
+      "name": "address-quota-first-call-cost",
+      "claim": "A first call costing more than the budget is refused.",
+      "file": "db/migrations/0055_address_connector_authority.sql",
+      "original": "  IF cost > installed.period_budget_micros THEN RETURN false; END IF;\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/address-authority.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/address-authority.test.ts",
+          "name": "a budget below one call refuses the first",
+          "expected": "a first call costing more than the budget was reserved"
+        }
+      ]
+    },
+    {
+      "name": "address-installation-identity-reuse",
+      "claim": "Re-enabling a provider account reuses its installation, so its quota and key entry survive.",
+      "file": "db/migrations/0055_address_connector_authority.sql",
+      "original": "     AND i.provider = requested_provider AND i.account = requested_account\n",
+      "replacement": "     AND i.provider = requested_provider AND i.account = requested_account AND false\n",
+      "test": {
+        "files": ["test/postgres/address-authority.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/address-authority.test.ts",
+          "name": "quota follows the provider account through pause and switching",
+          "expected": "pausing and re-enabling one account minted a new installation"
+        }
+      ]
+    },
+    {
+      "name": "address-late-revision-recheck",
+      "claim": "A late geocode is refused when the address revision moved, even to the same text.",
+      "file": "packages/postgres-provider/src/address-geocodes.ts",
+      "original": "          address.revision !== job.revision ||\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/address-authority.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/address-authority.test.ts",
+          "name": "a late geocode rechecks the address revision",
+          "expected": "a late geocode was accepted for a superseded revision"
+        }
+      ]
+    },
+    {
+      "name": "address-late-installation-recheck",
+      "claim": "A late geocode is refused when the company installation changed.",
+      "file": "packages/postgres-provider/src/address-geocodes.ts",
+      "original": "          i?.installationId !== job.installationId ||\n",
+      "replacement": "          !i ||\n",
+      "test": {
+        "files": ["test/postgres/address-authority.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/address-authority.test.ts",
+          "name": "a late geocode rechecks the installation",
+          "expected": "a late geocode was accepted after the installation changed"
+        }
+      ]
+    },
+    {
+      "name": "address-late-enrichment-recheck",
+      "claim": "A late geocode is refused when enrichment was switched off.",
+      "file": "packages/postgres-provider/src/address-geocodes.ts",
+      "original": "          !i.enrichment ||\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/address-authority.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/address-authority.test.ts",
+          "name": "a late geocode rechecks enrichment",
+          "expected": "a late geocode was accepted after enrichment was switched off"
+        }
+      ]
+    },
+    {
+      "name": "address-configure-lock-order",
+      "claim": "Concurrent configure calls for one company serialize instead of deadlocking.",
+      "file": "db/migrations/0055_address_connector_authority.sql",
+      "original": "  PERFORM pg_advisory_xact_lock(hashtextextended(\n    'north_star.address_installation:' || tenant || ':' || environment || ':' || scope_company, 0));\n  SELECT i.installation_id INTO current_id FROM platform.address_installations i\n   WHERE (i.tenant_id,i.environment_id,i.company_id) = (tenant,environment,scope_company) AND i.enabled\n     FOR UPDATE;",
+      "replacement": "  SELECT i.installation_id INTO current_id FROM platform.address_installations i\n   WHERE (i.tenant_id,i.environment_id,i.company_id) = (tenant,environment,scope_company) AND i.enabled\n     FOR SHARE;",
+      "test": {
+        "files": ["test/postgres/address-authority.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/address-authority.test.ts",
+          "name": "concurrent configure calls for one company serialize",
+          "expected": "concurrent configure calls deadlocked"
+        }
+      ]
+    },
+    {
+      "name": "address-history-replaced-installation",
+      "claim": "A replaced installation is recorded as paused.",
+      "file": "db/migrations/0055_address_connector_authority.sql",
+      "original": "    INSERT INTO platform.address_installation_history(tenant_id,environment_id,company_id,installation_id,principal_id,change)\n    VALUES (tenant,environment,scope_company,current_id,principal,'paused'); END IF;",
+      "replacement": "    NULL; END IF;",
+      "test": {
+        "files": ["test/postgres/address-authority.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/address-authority.test.ts",
+          "name": "a replaced installation gets its own history row",
+          "expected": "the replaced installation has no history row"
+        }
+      ]
+    },
+    {
+      "name": "address-provider-error-scrub",
+      "claim": "A provider failure surfaces only its reason, never the request that carried the key.",
+      "file": "packages/postgres-provider/src/address-provider.ts",
+      "original": "    throw e instanceof AddressProviderError\n      ? e\n      : new AddressProviderError('unavailable');",
+      "replacement": "    throw e;",
+      "test": {
+        "files": ["test/postgres/address-authority.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/address-authority.test.ts",
+          "name": "a canary provider key never reaches errors, rows, tool results or output",
+          "expected": "a provider error carried the canary key"
+        }
+      ]
+    },
+    {
+      "name": "address-map-placement-reader-floor",
+      "claim": "A map placement raises the surface floor to 32, so a reader 31 build refuses it.",
+      "file": "packages/compiler/src/projections.ts",
+      "original": "            address.placements.length\n              ? ADDRESS_MAP_READER\n              : ADDRESS_FIELD_READER,",
+      "replacement": "            ADDRESS_FIELD_READER,",
+      "test": {
+        "files": ["test/postgres/address-connector.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/address-connector.test.ts",
+          "name": "Address publication preserves the old envelope, stops the prior reader, and serves governed user text without a provider",
+          "expected": "a reader 31 build did not refuse a map placement release by its floor"
+        }
+      ]
+    },
+    {
+      "name": "address-loader-link-declaration",
+      "claim": "The loader refuses a connector link without its declaration.",
+      "file": "packages/postgres-provider/src/request-runtime-view-service.ts",
+      "original": "  if (release.linked !== release.declared) return disagree;\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/unit/address-connector.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/address-connector.test.ts",
+          "name": "the loader refuses a connector link without its declaration",
+          "expected": "a linked but undeclared connector was served"
+        }
+      ]
+    },
+    {
+      "name": "address-loader-consumer-declaration",
+      "claim": "The loader refuses an Address consumer without a connector declaration.",
+      "file": "packages/postgres-provider/src/request-runtime-view-service.ts",
+      "original": "  if (release.declared !== bound) return disagree;\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/request-runtime-view.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/request-runtime-view.test.ts",
+          "name": "a surface bound to Address without a connector declaration refuses to load",
+          "expected": "an Address consumer without a declaration was served"
+        }
+      ]
+    },
+    {
+      "name": "address-loader-floor-without-consumer",
+      "claim": "The loader refuses an Address floor without an Address consumer.",
+      "file": "packages/postgres-provider/src/request-runtime-view-service.ts",
+      "original": "  if (!bound && [ADDRESS_FIELD_READER, ADDRESS_MAP_READER].includes(floor))\n    return disagree;\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/request-runtime-view.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/request-runtime-view.test.ts",
+          "name": "an Address map floor without an Address consumer refuses to load",
+          "expected": "an Address floor without a consumer was served"
+        }
+      ]
+    },
+    {
+      "name": "address-loader-placement-floor",
+      "claim": "The loader refuses a map placement below the map reader floor.",
+      "file": "packages/postgres-provider/src/request-runtime-view-service.ts",
+      "original": "  if (floor < required) return invalid;\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/unit/address-connector.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/address-connector.test.ts",
+          "name": "the loader refuses a map placement below the map reader floor",
+          "expected": "a map placement was served at the Address field floor"
+        }
+      ]
+    },
+    {
+      "name": "address-loader-consumer-bindings",
+      "claim": "The loader refuses a consumer that pins different Address bindings.",
+      "file": "packages/postgres-provider/src/request-runtime-view-service.ts",
+      "original": "        canonicalize(payload.addressBindings) === pinned,",
+      "replacement": "        true,",
+      "test": {
+        "files": ["test/unit/address-connector.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/address-connector.test.ts",
+          "name": "the loader refuses a consumer that pins different Address bindings",
+          "expected": "a consumer with different Address bindings was served"
         }
       ]
     }
