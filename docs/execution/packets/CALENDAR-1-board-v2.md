@@ -20,6 +20,8 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44824314
 - A retire revision records its predecessor's body unchanged and binds nothing new.
 - The builder offers every list-query-selected field of the type as a fact. The type's key facts and column priority remain the default (E11).
 - **Not expressible today:** a validation rule binds only create and update operations (`CANON_VALIDATION_BINDING_UNSUPPORTED`). The E15 validation case and finding 3's "validation refusal leaves the card in place" have no platform form. A test pins that refusal.
+- A company-scoped membership cannot list companies, so it cannot open any workspace page (Lists included; existing behaviour). The scoped Board read is proven at the query gateway; the HTTP pages use the unscoped buyer with an explicit company.
+- Drafter coverage (MIGRATION-RULE item 12) is a named exception until AI-BUILD-1 adds the fail-closed test; the drafter emits v2 with explicit IDs.
 - The automation-only proof grants the transitions to a separate policy principal and withholds them from the person. It does not deploy a workflow.
 - A stage relabel replays clean. Shipping it is refused by the storage planner's retype rule (`COMPILER_STORAGE_RETYPE_UNSUPPORTED`), which is not a Board rule. The proof therefore checks replay and normalization for that case and compiles the fact-column and operation relabels.
 - Local dev tenants that activated a v1 Board need `dev:reset` (E14).
@@ -40,7 +42,7 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44824314
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CALENDAR-1-board-v2",
   "base": "fff2166fa326f871c11a34d4da623707878e7636",
-  "head": "359643c05037ec1a4f2e338895b03d832c8f1a8b",
+  "head": "a4128fb08a92ef900caa7540f71b1228f5f34cc4",
   "changedPaths": [
     "apps/web/src/board.ts", "apps/web/src/customize-screen.ts", "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts",
     "package.json", "packages/canonical-model/src/board.ts", "packages/canonical-model/src/surface-workspace.ts",
