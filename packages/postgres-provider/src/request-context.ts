@@ -306,18 +306,6 @@ class ReadSnapshot {
       );
   }
 
-  async resolveStaffPrincipal(session: StaffRequestSession): Promise<string> {
-    return this.#exclusive(async () => {
-      if (this.#identity) await this.#end();
-      if (!this.#client) {
-        this.#client = await this.pool.connect();
-        await this.#client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
-        await assertRuntimeLoginRole(this.#client);
-      }
-      return lookupStaffPrincipal(this.#client, session);
-    });
-  }
-
   async join<T>(
     context: TrustedRequestContext,
     run: (
@@ -482,19 +470,16 @@ class ReadSnapshot {
   }
 
   async #open(context: TrustedRequestContext): Promise<void> {
-    const started = this.#client !== null;
-    const client = this.#client ?? (await this.pool.connect());
+    const client = await this.pool.connect();
     this.#client = client;
     this.#identity = context;
     try {
-      if (!started) {
-        await client.query(
-          staffSessions.has(context)
-            ? 'BEGIN ISOLATION LEVEL REPEATABLE READ'
-            : 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY',
-        );
-        await assertRuntimeLoginRole(client);
-      }
+      await client.query(
+        staffSessions.has(context)
+          ? 'BEGIN ISOLATION LEVEL REPEATABLE READ'
+          : 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY',
+      );
+      await assertRuntimeLoginRole(client);
       await setTrustedIdentity(client, context, 'read');
       // Session verification publishes a database clock observation. Seal the
       // snapshot read-only before handing this client to any application read.
@@ -671,7 +656,7 @@ export function staffRequestEntry(
         if (!session) return null;
         const snapshot = currentReadSnapshot(pool);
         const principalId = snapshot
-          ? await snapshot.resolveStaffPrincipal(session)
+          ? await snapshot.runOutside(() => lookupStaffPrincipal(pool, session))
           : await lookupStaffPrincipal(pool, session);
         return {
           tenantId: session.tenantId,

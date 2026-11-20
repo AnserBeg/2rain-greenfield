@@ -107,8 +107,10 @@ GRANT EXECUTE ON FUNCTION platform.staff_start_login(uuid,uuid,bytea,bytea) TO n
 -- A global grant covers a company grant. The policy epoch fences changes until commit.
 CREATE FUNCTION platform.staff_can_manage(t uuid,e uuid,actor uuid,subject uuid) RETURNS boolean
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$ BEGIN
-  IF actor=subject THEN RETURN false; END IF;
-  IF platform.lock_current_policy_epoch(t,e)='0' THEN RETURN false; END IF;
+  IF actor=subject OR t IS DISTINCT FROM nullif(current_setting('north_star.tenant_id',true),'')::uuid
+      OR e IS DISTINCT FROM nullif(current_setting('north_star.environment_id',true),'')::uuid THEN RETURN false; END IF;
+  PERFORM 1 FROM platform.current_policy_epochs WHERE tenant_id=t AND environment_id=e FOR UPDATE;
+  IF NOT FOUND THEN RETURN false; END IF;
   IF NOT platform.staff_has_role(t,e,actor,'staff-owner') OR EXISTS (
     SELECT FROM platform.current_policy_memberships m JOIN platform.current_policy_roles r
     USING(tenant_id,environment_id,role_id)

@@ -20,6 +20,8 @@ import {
 } from '../../apps/api/src/staff-protocol.js';
 import {
   staffRequestEntry,
+  withReadSnapshot,
+  withTrustedRequestRead,
   withTrustedRequestTransaction,
 } from '../../packages/postgres-provider/src/request-context.js';
 import {
@@ -113,6 +115,20 @@ test('staff sessions derive one live scoped principal at entry and again at the 
         }));
       const context = await session().enter({});
       assert.equal(context.principalId, p);
+      await withReadSnapshot(runtime, async () => {
+        const reader = await session().enter({});
+        await withTrustedRequestRead(runtime, reader, async (c) => {
+          await c.query('SAVEPOINT check_read_only');
+          await assert.rejects(
+            c.query(
+              'INSERT INTO platform.tenant_fixture_records(tenant_id,environment_id,id,label) VALUES($1,$2,gen_random_uuid(),$3)',
+              [t, e, 'read snapshot'],
+            ),
+            { code: '25006' },
+          );
+          await c.query('ROLLBACK TO SAVEPOINT check_read_only');
+        });
+      });
       await assert.rejects(
         session(randomUUID()).enter({}),
         /staff session required/,

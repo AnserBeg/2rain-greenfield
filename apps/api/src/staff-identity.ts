@@ -241,7 +241,14 @@ export async function bootstrapStaff(
       ).rowCount,
     );
     if (details.recover) {
-      await c.query('SELECT platform.lock_current_policy_epoch($1,$2)', args);
+      check(
+        (
+          await c.query(
+            'SELECT FROM platform.current_policy_epochs WHERE tenant_id=$1 AND environment_id=$2 FOR UPDATE',
+            args,
+          )
+        ).rowCount,
+      );
       const owner = await c.query(
         `SELECT a.principal_id FROM platform.staff_accounts a JOIN platform.current_policy_memberships m
         USING(tenant_id,environment_id,principal_id) JOIN platform.current_policy_roles r USING(tenant_id,environment_id,role_id)
