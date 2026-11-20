@@ -26,8 +26,10 @@ export const RENDERED_DIFF_VERSION =
 type Json = Record<string, unknown>;
 
 export interface DiffDefinition extends LayoutDefinition {
-  readonly documentTemplatePointers?: readonly DocumentTemplatePointer[];
-  readonly documentTemplateRevisions?: readonly DocumentTemplateRevision[];
+  readonly documentTemplatePointers?:
+    readonly DocumentTemplatePointer[] | undefined;
+  readonly documentTemplateRevisions?:
+    readonly DocumentTemplateRevision[] | undefined;
   readonly documentFields?: readonly {
     readonly fieldId: string;
     readonly entityId: string;

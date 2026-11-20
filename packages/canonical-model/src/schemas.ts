@@ -2851,6 +2851,7 @@ export const DocumentsProjectionSchema = z
           queryId: CanonicalIdSchema,
           attachPermissionId: CanonicalIdSchema,
           attachOperationId: CanonicalIdSchema,
+          generateOperationId: CanonicalIdSchema.optional(),
           surfaceIds: z.array(CanonicalIdSchema).min(1),
         }),
       )

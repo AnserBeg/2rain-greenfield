@@ -406,7 +406,7 @@ function compileApplicationInternal(
 
   const formula = compileLiteralFormulaRules(packageRevision);
   const documents = compileDocuments(packageRevision);
-  if (documents?.message) {
+  if (documents && 'message' in documents) {
     return failure(
       [
         {

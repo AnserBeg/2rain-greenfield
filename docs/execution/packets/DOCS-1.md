@@ -29,23 +29,23 @@ Hosted CI covers PostgreSQL issuance, stored brand provenance, live source restr
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "DOCS-1",
-  "base": "4ed523e803b9a0eb12c7bffe9dc4a85ce231c428", "head": "7a16cbb916f68043b12967971ac9a6ced5bc92ca",
+  "base": "4ed523e803b9a0eb12c7bffe9dc4a85ce231c428", "head": "d6dbebdc5213f767eee20a0f54f82b61c8458393",
   "changedPaths": [
     ".github/workflows/evidence.yml", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts",
     "apps/web/src/document-http.ts", "apps/web/src/document-template-form.ts", "apps/web/src/surface-client.ts",
     "db/migrations/0047_generated_document_sources.sql", "db/schema.snapshot.json", "packages/canonical-model/src/document-template-schema.ts",
     "packages/canonical-model/src/documents.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/normalize.ts",
-    "packages/canonical-model/src/schemas.ts", "packages/compiler/src/document-templates.ts", "packages/compiler/src/documents.ts",
-    "packages/compiler/src/projections.ts", "packages/customization/src/apply.ts", "packages/customization/src/patch.ts",
-    "packages/customization/src/render.ts", "packages/customization/src/targets.ts", "packages/postgres-provider/package.json",
-    "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/document-attachments.ts", "packages/postgres-provider/src/document-company-brand.ts",
-    "packages/postgres-provider/src/document-pdf-worker.ts", "packages/postgres-provider/src/document-pdf.ts", "packages/postgres-provider/src/document-publication.ts",
-    "packages/postgres-provider/src/document-template-sources.ts", "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/postgres-provider/src/serving-gateways.ts",
-    "packages/runtime/src/document-gateway.ts", "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-operation-gateway.ts",
-    "packages/runtime/src/semantic-query-gateway.ts", "pnpm-lock.yaml", "test/architecture/release-persistence-boundary.test.ts",
-    "test/evidence/DOCS-1.expected-red.json", "test/integration/document-pdf.test.ts", "test/postgres/document-templates.test.ts",
-    "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts",
-    "test/postgres/request-runtime-view.test.ts", "test/postgres/trust-substrate.test.ts"
+    "packages/canonical-model/src/schemas.ts", "packages/compiler/src/compiler.ts", "packages/compiler/src/document-templates.ts",
+    "packages/compiler/src/documents.ts", "packages/compiler/src/projections.ts", "packages/customization/src/apply.ts",
+    "packages/customization/src/patch.ts", "packages/customization/src/render.ts", "packages/customization/src/targets.ts",
+    "packages/postgres-provider/package.json", "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/document-attachments.ts",
+    "packages/postgres-provider/src/document-company-brand.ts", "packages/postgres-provider/src/document-pdf-worker.ts", "packages/postgres-provider/src/document-pdf.ts",
+    "packages/postgres-provider/src/document-publication.ts", "packages/postgres-provider/src/document-template-sources.ts", "packages/postgres-provider/src/request-runtime-view-service.ts",
+    "packages/postgres-provider/src/serving-gateways.ts", "packages/runtime/src/document-gateway.ts", "packages/runtime/src/request-runtime-view.ts",
+    "packages/runtime/src/semantic-operation-gateway.ts", "packages/runtime/src/semantic-query-gateway.ts", "pnpm-lock.yaml",
+    "test/architecture/release-persistence-boundary.test.ts", "test/evidence/DOCS-1.expected-red.json", "test/integration/document-pdf.test.ts",
+    "test/postgres/document-templates.test.ts", "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts",
+    "test/postgres/module-storage-transition.test.ts", "test/postgres/request-runtime-view.test.ts", "test/postgres/trust-substrate.test.ts"
   ],
   "symbols": [
     {"path": "packages/compiler/src/document-templates.ts", "name": "compileDocumentTemplates"},
