@@ -22,6 +22,7 @@ import { documentDigest } from './document-content.js';
 import type { DocumentPdfInput } from './document-pdf.js';
 
 type StorageEntity = StorageTargetPayloadV1['entities'][number];
+type StorageRelation = StorageTargetPayloadV1['relations'][number];
 
 export interface DocumentFieldAuthority {
   readonly classification:
@@ -78,7 +79,11 @@ export function documentSourceQuery(
     'queryId' | 'companyId' | 'parentRelationId'
   >,
   governingEntityId: string,
-) {
+): {
+  query: RegisteredQueryDefinition;
+  entity: StorageEntity;
+  relation: StorageRelation | null;
+} {
   const query = registeredQueryFromPinnedView(view, source.queryId);
   const entity = context.storage.entities.find(
     (entity) => entity.entityId === query?.sourceEntityId,
@@ -108,7 +113,7 @@ export function documentSourceQuery(
       : query.queryType !== 'get' || query.sourceEntityId !== governingEntityId)
   )
     throw unavailableBinding();
-  return { query, entity, relation };
+  return { query, entity, relation: relation ?? null };
 }
 
 export function documentSourceField(
