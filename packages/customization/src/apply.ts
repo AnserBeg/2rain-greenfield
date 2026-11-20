@@ -1,8 +1,12 @@
+import { applyBoardRevision } from './board-revision.js';
 import {
   applyLayoutRevision,
   placeAddedLayoutField,
 } from './layout-revision.js';
-import type { LayoutDefinition } from '@north-star/canonical-model';
+import type {
+  BoardSource,
+  LayoutDefinition,
+} from '@north-star/canonical-model';
 import {
   CUSTOMIZABLE_FIRST_PARTY_ENTITY_LOCALS,
   isNarrowableOperationId,
@@ -53,6 +57,7 @@ export type CustomizationRefusalCode =
   | 'CUSTOMIZE_TARGET_NOT_FOUND'
   | 'CUSTOMIZE_LIST_VIEW_INVALID'
   | 'CUSTOMIZE_FIELD_NOT_ON_LIST'
+  | 'CUSTOMIZE_BOARD_CONFLICT'
   | 'CUSTOMIZE_LAYOUT_CONFLICT';
 
 export interface CustomizationRefusal {
@@ -214,6 +219,19 @@ function applyOne(
       return addLineTable(authored, patch);
     case 'declareLifecycle':
       return declareLifecycle(authored, patch);
+    case 'addBoardViewRevision': {
+      const problem = previous.some(
+        (p) =>
+          p.kind === 'addBoardViewRevision' &&
+          p.revisionId === patch.revisionId,
+      )
+        ? 'This Board revision ID has already been used.'
+        : applyBoardRevision(
+            authored as unknown as BoardSource & { surfaces: Json[] },
+            patch,
+          );
+      return problem ? refusal('CUSTOMIZE_BOARD_CONFLICT', problem) : null;
+    }
     case 'addLayoutRevision': {
       if (
         previous.some(

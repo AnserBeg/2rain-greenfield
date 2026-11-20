@@ -6,6 +6,12 @@ import { withAddressEditor } from './address-context.js';
 import type { AddressGateway } from '../../../packages/runtime/src/address-gateway.js';
 import { addressFromForm } from './address-field.js';
 import {
+  boardContext,
+  boardSlots,
+  boardTask,
+  changedBoardCard,
+} from './board.js';
+import {
   compositionRelationTargets,
   loadSurfaceComposition,
   submitCompositionAction,
@@ -66,6 +72,7 @@ import {
   renderRegisteredSurfaceComponent,
   renderDocumentSection,
   surfaceSupportsRuntimeIntent,
+  surfaceHref,
   type SurfaceDataRenderState,
   type SurfaceFormReferenceChoices,
   type SurfaceOperationFeedback,
@@ -314,7 +321,60 @@ async function renderSurfaceRuntimeWithDataInContext(
     return render();
   };
   const selection = selectSurface(view, requestUrl);
-  if ('statusCode' in selection) return selection;
+  if ('statusCode' in selection) {
+    if (selection.statusCode !== 404) return selection;
+    const url = new URL(requestUrl, 'http://surface-runtime.local');
+    const id = url.searchParams.get('surface');
+    if (!id?.includes(':surface.custom_board_')) return selection;
+    const manifest = readCompiledSurfaceManifest(view);
+    const retired = manifest.surfaces.find(
+      (surface) => surface.surfaceId === id,
+    )?.board;
+    const ownerId =
+      retired?.body.listSurfaceId ?? url.searchParams.get('collection');
+    const owner = manifest.surfaces.find(
+      (surface) =>
+        surface.surfaceId === ownerId &&
+        surface.archetype === 'list' &&
+        surface.lifecycle === 'active',
+    );
+    let back = '';
+    if (owner) {
+      const binding = readCompiledSurfaceDataBinding(view, owner);
+      const scope = binding.query.legalEntityScope;
+      const company = scope ? url.searchParams.get('collectionCompany') : null;
+      if (
+        (await gateways.queryGateway.previewEligibility(
+          view,
+          owner.dataSourceQueryId,
+          company,
+        )) === 'eligible'
+      ) {
+        const href = surfaceHref(owner, undefined, false, {
+          view,
+          legalEntitySelection: company ? [company] : [],
+        });
+        back =
+          '<a href="' +
+          escapeHtml(href) +
+          '">Open ' +
+          escapeHtml(owner.label) +
+          '</a>';
+      }
+    }
+    return {
+      statusCode: 404,
+      html: shellDocument(
+        view,
+        manifest.surfaces.filter((s) => s.lifecycle === 'active'),
+        manifest.navigation,
+        null,
+        '<section role="alert"><h1>View not available</h1>' +
+          back +
+          '</section>',
+      ),
+    };
+  }
   let binding: CompiledSurfaceDataBinding;
   try {
     binding = readCompiledSurfaceDataBinding(view, selection.selected);
@@ -526,6 +586,44 @@ async function renderSurfaceRuntimeWithDataInContext(
         workspaceContext,
       ),
     );
+  }
+  if (selection.selected.board) {
+    try {
+      const context = boardContext(
+        view,
+        selection.selected,
+        selection.surfaces,
+        binding,
+        url,
+        legalEntityScopeArguments(binding, url),
+        gateways,
+      );
+      const slots = await boardSlots(
+        context,
+        feedback && 'record' in feedback ? feedback.record.recordId : undefined,
+      );
+      return rendered(() =>
+        renderSelectedSurface(
+          view,
+          selection,
+          {
+            status: 'READY',
+            records: [],
+            boardSlots: slots,
+            boardListState: readDeclaredListState(context.owner.list!, url),
+          },
+          feedback,
+          offeredOperations,
+          200,
+          legalEntitySelection,
+          workspaceContext,
+        ),
+      );
+    } catch (error) {
+      return renderApplicationDiagnostic(422, {
+        code: queryMessageCode(error),
+      });
+    }
   }
   if (binding.query.queryType === 'aggregate') {
     const scopeParameterId =
@@ -1537,9 +1635,43 @@ async function submitSurfaceRuntimeIntentInContext(
       });
     }
   }
+  let boardOperation: CompiledSurfaceDataBinding['operations'][number] | null =
+    null;
+  if (selection.selected.board) {
+    const url = new URL(requestUrl, 'http://surface-runtime.local');
+    try {
+      const context = boardContext(
+        view,
+        selection.selected,
+        selection.surfaces,
+        binding,
+        url,
+        legalEntityScopeArguments(binding, url),
+        gateways,
+      );
+      const task = await boardTask(context, submission);
+      if ('html' in task)
+        return {
+          statusCode: task.statusCode,
+          html: shellDocument(
+            view,
+            selection.surfaces,
+            selection.navigation,
+            selection.selected,
+            task.html,
+          ),
+        };
+      boardOperation = task.operation;
+    } catch (error) {
+      return renderApplicationDiagnostic(422, {
+        code: queryMessageCode(error),
+      });
+    }
+  }
   const operation = boundOperation(binding, submission.operationId);
   if (
     !operation ||
+    (boardOperation && boardOperation !== operation) ||
     !surfaceSupportsRuntimeIntent(
       view,
       selection.selected,
@@ -1642,6 +1774,32 @@ async function submitSurfaceRuntimeIntentInContext(
       }
     }
     const ref = operationMessageRef(error);
+    if (boardOperation && ref.code !== 'OPERATION_PERMISSION_DENIED') {
+      const url = new URL(requestUrl, 'http://surface-runtime.local');
+      const context = boardContext(
+        view,
+        selection.selected,
+        selection.surfaces,
+        binding,
+        url,
+        legalEntityScopeArguments(binding, url),
+        gateways,
+      );
+      const html = await changedBoardCard(context, submission).catch(
+        () => null,
+      );
+      if (html)
+        return {
+          statusCode: 409,
+          html: shellDocument(
+            view,
+            selection.surfaces,
+            selection.navigation,
+            selection.selected,
+            html,
+          ),
+        };
+    }
     return renderApplicationDiagnostic(
       ref.code === 'OPERATION_PERMISSION_DENIED' ? 403 : 422,
       ref,
@@ -1684,6 +1842,18 @@ async function submitSurfaceRuntimeIntentInContext(
     requestUrl,
     'http://surface-runtime.local',
   ).searchParams.get('record');
+  if (boardOperation && selection.selected.board) {
+    const url = new URL(requestUrl, 'http://surface-runtime.local');
+    const body = selection.selected.board.body;
+    const stage = result.readBack.values[body.grouping.stateFieldId];
+    if (
+      typeof stage === 'string' &&
+      body.grouping.stages.some((s) => s.stateId === stage)
+    )
+      url.searchParams.set('stage', stage);
+    url.searchParams.delete('cards');
+    return renderSurfaceRuntimeWithData(view, url.href, gateways, feedback);
+  }
   if (
     gateways.applicationExtension?.refreshAfterOperation({
       binding,
@@ -1752,7 +1922,9 @@ function renderSelectedSurface(
     }),
   );
   const pageHeading =
-    selected.archetype === 'list' || selected.archetype === 'record'
+    selected.archetype === 'board' ||
+    selected.archetype === 'list' ||
+    selected.archetype === 'record'
       ? ''
       : `<header class="surface-heading">
       <div>

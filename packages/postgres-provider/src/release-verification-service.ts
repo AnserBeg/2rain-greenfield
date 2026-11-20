@@ -70,10 +70,11 @@ import { escapeIdentifier, type Pool, type PoolClient } from 'pg';
 import {
   SEMANTIC_OPERATION_REQUEST_VERSION,
   SemanticOperationGateway,
-  SemanticOperationMediationAuthority,
+  type SemanticOperationMediationAuthority,
   type SemanticOperationExecutor,
 } from '../../runtime/src/semantic-operation-gateway.js';
 import {
+  capabilityMediationAuthority,
   createRegisteredCapabilityExecutors,
   registeredCapabilityIdsFromOperationCatalog,
   type CapabilityVerificationRefusalExpectation,
@@ -492,7 +493,9 @@ export class PostgresReleaseVerificationService {
     ) => Promise<TResult>,
   ): Promise<TResult> {
     const policy = new VerificationAllowPolicy();
-    const mediation = new SemanticOperationMediationAuthority();
+    const mediation = capabilityMediationAuthority(
+      this.capabilityOperationExecutorFactories,
+    );
     const queryGateway = new SemanticQueryGateway(policy, executorProvider);
     const capabilityExecutors = createRegisteredCapabilityExecutors(
       this.capabilityOperationExecutorFactories,
