@@ -382,7 +382,7 @@ test('declared unfiltered producers are wired to CI and their evidence paths', (
     let job = extractWorkflowJob(workflow, producer.ciJob);
     if (producer.ciJob === 'postgres') {
       const shard = producer.id.slice('postgres-'.length);
-      assert.match(job, /shard: \[1, 2, 3, 4, 5, 6\]/u);
+      assert.match(job, /shard: \[1, 2, 3, 4, 5, 6, 7\]/u);
       assert.ok(
         job.includes(
           `if: matrix.shard == ${shard}\n        run: ${producer.ciInvocation}\n`,
@@ -458,6 +458,7 @@ test('every file selected by the former general PostgreSQL glob belongs to exact
     'postgres-4',
     'postgres-5',
     'postgres-6',
+    'postgres-7',
   ].map(getReachabilityProducer);
   const files = globSync(oldGeneralGlob);
   assert.ok(files.length > 0);
