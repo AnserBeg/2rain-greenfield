@@ -21,9 +21,9 @@ Eight regression controls failed against unchanged main code at 552b13d8. [Basel
 {
   "schemaVersion":"northstar.record-claim/v1",
   "packet":"CRITFIX-H",
-  "base":"552b13d8837a5e44ac16d3383988c167345d0295",
-  "head":"84211b4694d9e597d89f64d28b7ce2d46a9e8b09",
-  "changedPaths":["apps/api/src/main.ts","apps/web/src/document-http.ts","apps/web/src/surface-client.ts","db/migrations/0046_document_attachment_authority.sql","db/schema.snapshot.json","packages/postgres-provider/src/composed-application-runtime.ts","packages/postgres-provider/src/document-attachments.ts","packages/postgres-provider/src/document-content.ts","packages/postgres-provider/src/document-pdf-worker.mjs","packages/postgres-provider/src/request-context.ts","packages/postgres-provider/src/serving-gateways.ts","packages/runtime/src/document-gateway.ts","packages/runtime/src/request-deadline.ts","test/architecture/release-persistence-boundary.test.ts","test/evidence/DOCS-1.expected-red.json","test/integration/document-http.test.ts","test/postgres/document-attachments.test.ts","test/postgres/inventory-storage.test.ts","test/postgres/migrations.test.ts","test/postgres/module-storage-transition.test.ts","test/postgres/trust-substrate.test.ts"],
+  "base":"888b0636423660d351d20eb48ebea98bab519259",
+  "head":"97350de7c337237c7748a1fa8f2e76429c479cd7",
+  "changedPaths":["apps/api/src/main.ts","apps/web/src/document-http.ts","apps/web/src/surface-client.ts","db/migrations/0046_document_attachment_authority.sql","db/schema.snapshot.json","packages/postgres-provider/package.json","packages/postgres-provider/src/composed-application-runtime.ts","packages/postgres-provider/src/document-attachments.ts","packages/postgres-provider/src/document-content.ts","packages/postgres-provider/src/document-pdf-worker.mjs","packages/postgres-provider/src/request-context.ts","packages/postgres-provider/src/serving-gateways.ts","packages/runtime/src/document-gateway.ts","packages/runtime/src/request-deadline.ts","test/architecture/release-persistence-boundary.test.ts","test/evidence/DOCS-1.expected-red.json","test/integration/document-http.test.ts","test/postgres/document-attachments.test.ts","test/postgres/inventory-storage.test.ts","test/postgres/migrations.test.ts","test/postgres/module-storage-transition.test.ts","test/postgres/trust-substrate.test.ts"],
   "symbols":[{"path":"packages/postgres-provider/src/document-attachments.ts","name":"PostgresDocumentGateway"},{"path":"apps/web/src/document-http.ts","name":"mountDocumentHttp"}]
 }
 ```
