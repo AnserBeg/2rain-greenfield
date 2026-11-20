@@ -1,5 +1,7 @@
 # CALENDAR-1 · Board, calendar and resource timeline
 
+**Owner walkthrough deferred until the Board v2 fix lands.**
+
 Slice 0 established [ADR-0086](../../decisions/ADR-0086-board-calendar-and-resource-timeline.md) with the owner’s reference survey. Fable’s verdict was ACCEPT WITH AMENDMENTS; the orchestrator accepted A1–A14. The delivery order is 1a (Board form), 1b (pointer), 2 (Calendar), 3a (generic timeline) and 3b (Booking timeline).
 
 ## Design decisions
@@ -73,3 +75,22 @@ The tenant fixture publishes an Opportunity board with a declared Open → Won t
   ]
 }
 ```
+
+## Board v2 fix
+
+Required by the [view revision member shape ruling](../../decisions/ADR-0086-board-calendar-and-resource-timeline.md) after the independent Board review (verdict REVISE). The Board member becomes v2 with its own reader rung, and v1 is removed outright. Required proofs:
+
+- With a Board active, and again after retiring it, adding a field and arranging the list on that type both still compile.
+- A label-only base change to a stage, a fact column or an operation replays clean.
+- A removed operation or field yields a typed conflict naming its ID (`RETIRED_TARGET`, `INCOMPATIBLE_TYPE` or `MOVED_MEMBER`), not `WHOLE_PACKAGE_FAILURE`.
+- UPGRADE-2's compatible-base case relabels something the Board binds.
+- Permission proofs (review finding 3):
+  - a company-scoped read and move;
+  - a cross-company negative;
+  - no Move card without the transition grant;
+  - a forged confirm returns 403;
+  - a narrowed transition disappears;
+  - a validation refusal leaves the card in place;
+  - an automation-only edge is never offered.
+- The scan-ceiling and timeout partial renders (finding 5).
+- The understated-floor serving branch (finding 6).

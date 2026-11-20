@@ -81,6 +81,22 @@ Each later binding kind added to a view member takes its own reader rung. Each e
 
 The assistant resolves the current tab, stage or resource, window, zone, filters, coverage and eligible actions from the same pinned Surface and governed queries on each request. It can explain “Why is this card here?”, show this week’s absences, or propose extending the selected booking. It states the window and any missing coverage. Availability questions use the pack query at its read instant. It sees only permitted fields and actions, including after a scope change. A requested move resolves to the underlying operation in the existing plan, confirmation, receipt and verified-state flow. An eligible reversible action keeps its existing Undo contract. Booking resizes require the exact plan’s yes. Changing tabs cannot retarget a pending decision. Unsupported actions surface as capability gaps. [PANEL-2](../execution/packets/PANEL-2.md) · [Plan §9.4](../greenfield-north-star-erp-platform-plan.md)
 
+## View revision member shape (2026-11-20 ruling)
+
+Orchestrator ruling after the independent review of the merged Board (slice 1a, main `8e3603b8`, verdict REVISE; findings 1, 2 and 4). It applies to all three view types: Board, Calendar and Resource timeline.
+
+1. **Board v2 replaces v1.** The Board patch member gets a new member version (v2) with its own reader rung, allocated at the executable merge. No stored v1 Board patch exists anywhere: the product is pre-tenant and none are checked in. The v1 parser and authoring are therefore removed outright, not kept readable. The v1 shape is withdrawn before any customer used it.
+2. **The member records the author's explicit choices by stable ID.**
+   - The chosen stage IDs, in order.
+   - For each offered move, the Semantic Operation ID plus its pinned operation version or contract digest.
+   - The chosen key-fact field IDs, at most three.
+
+   "Absent means everything derived" is not a meaning any member may have. A member never re-derives its body from the current model to decide what it chose.
+3. **The digest covers stable IDs and contracts only.** Labels for stages, facts and operations render from the active release at read time. A pure relabel is never a conflict.
+4. **Replay and normalization follow ADR-0085's layout rule A20.** Verify the exact digest on the authoring base only. On any other base, check each referenced ID structurally: present, with the same contract. A missing or changed binding is a typed conflict that names the affected stage, field or operation ID, using ADR-0085's code table (`RETIRED_TARGET`, `INCOMPATIBLE_TYPE`, `MOVED_MEMBER`). It is never `WHOLE_PACKAGE_FAILURE` with an unrelated subject. The replay allowlist and its named per-kind tests (one compatible base move, one real conflict) cover the v2 member.
+5. **Retired view revisions are not validated on normalization.** Adding a field or arranging a list on the type must compile with the view active and after it is retired.
+6. **Calendar and timeline members (slices 2, 3a, 3b) use the same shape rules from their first version.** They record explicit endpoint field IDs, granularity and convention pins, and gesture-binding operation IDs with their contracts. They never ship a derived-body digest first and migrate later.
+
 ## Implementation after Fable’s read and the orchestrator’s ruling
 
 - **1a · Board form.** Publish a board for a tenant opportunity type with `declareLifecycle` and for the existing first-party purchase order machine. Ship the archetype, grouping union, capped facts, patch member and reader rung. Enter Move card by keyboard and with script off. Exercise the gateway, stale moves, permissions, confirmation, empty/crowded stages, compact layout, rollback, byte-identical omission, reader admission and served-page budget. Record the walkthrough alongside the reference survey.
