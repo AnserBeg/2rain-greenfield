@@ -4,7 +4,7 @@ Slice 2a adds reviewed staff decisions. [Slice 1 and its gates](https://github.c
 
 ## Decisions
 
-- Release approval freezes the verified candidate, preparation, reviewed diff, source pointer and fence. The isolated activation verifier consumes the evidence and creates the prebound attempt in one transaction. The activation kernel checks current authority, performs the swap and reads back the generation.
+- Release approval freezes the verified candidate, preparation, reviewed diff, source pointer and fence. The isolated activation verifier consumes the evidence and creates the prebound attempt in one transaction. The verifier reads the kernel’s scoped release evidence. It can update only the pointer’s release ID and fence. The kernel checks current authority, performs the swap and reads back the generation.
 - Customize uses the same release approval, with the exact patch payloads, bases and reviewed diff in the proof. A fresh passkey confirmation binds the principal, assurance, authentication time and decision time.
 - Retry records the company, suspended run, occurrence, definition, journal and original and restored fences. WORKFLOW-1’s join is the transaction that writes its retry decision and resumes the run. The database requires a matching proof consumption in the same transaction. Pilot scheduling remains closed pending effect reconciliation and that join.
 - Release and Customize cover every company on the environment pointer and require an unscoped membership. Retry takes the company from the event and checks the operator’s live membership. A reviewed batch binds each named target and its ordered aggregate.
@@ -13,7 +13,7 @@ Slice 2a adds reviewed staff decisions. [Slice 1 and its gates](https://github.c
 
 ## Gates and test it yourself
 
-The four database controls temporarily remove single use, decision digest, scope and current authority in a disposable database. [Focused evidence run](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44773631113)
+The four database controls temporarily remove single use, decision digest, scope and current authority in a disposable database. [Focused evidence run](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44793117835)
 
 Run `node --import tsx --test test/postgres/release-approval.test.ts`. The staff subtest checks release and Customize decisions, refuses activation after membership loss, then observes a verified swap. The Retry case runs in `test/postgres/workflow-consumer.test.ts`. [Staff pilot instructions](../../operations/staff-signin.md#approvals-and-activation)
 
@@ -21,8 +21,8 @@ Run `node --import tsx --test test/postgres/release-approval.test.ts`. The staff
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "SIGNIN-1",
-  "base": "46d5a0729ca31686989080aab4ad8661b2d7e330",
-  "head": "873e3ad6a9a54196b2580cd7bdf4f7e3886911f7",
+  "base": "3968bffe44e89f1829536d3271b1d8fbf7de12e2",
+  "head": "285309aadfcdfcdfe70012e4fe701e84a7fdc8b2",
   "changedPaths": [
     "apps/api/src/staff-decisions.ts", "apps/api/src/staff-identity-http.ts",
     "apps/api/src/staff-identity.ts", "apps/api/src/staff-main.ts",
@@ -34,7 +34,7 @@ Run `node --import tsx --test test/postgres/release-approval.test.ts`. The staff
     "packages/postgres-provider/src/release-approval-service.ts", "packages/postgres-provider/src/request-context.ts",
     "test/architecture/release-persistence-boundary.test.ts", "test/architecture/tenant-completeness.manifest.json",
     "test/architecture/tenant-completeness.test.ts", "test/helpers/staff-decision-checks.ts",
-    "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts",
+    "test/postgres/application-grants.tsv", "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts",
     "test/postgres/module-storage-transition.test.ts", "test/postgres/release-approval.test.ts",
     "test/postgres/staff-signin.test.ts", "test/postgres/trust-substrate.test.ts",
     "test/postgres/workflow-consumer.test.ts"
