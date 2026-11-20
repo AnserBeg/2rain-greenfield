@@ -43,7 +43,6 @@ import {
   serializeRelease,
 } from '../../packages/customization/src/index.js';
 import {
-  REPLAYED_LAYOUT_READER,
   layoutDigest,
   canonicalize,
   normalizeApplicationPackage,
@@ -1481,6 +1480,8 @@ test(
                       databaseUrl: options.databaseUrl,
                       identity: boot.identity,
                     });
+                  const { REPLAYED_LAYOUT_READER } =
+                    await import('../../packages/canonical-model/src/index.js');
                   assert.equal((await read()).outcome, 'loaded');
                   const activated = await activate();
                   const refused = await read();
