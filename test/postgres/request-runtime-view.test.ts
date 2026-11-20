@@ -788,15 +788,23 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 minimumVersion: LINE_CREATE_VALUES_SURFACE_FLOOR,
               },
             );
-            const requirement = loaded.projections.surface.requiredRuntimeCapability;
+            const requirement =
+              loaded.projections.surface.requiredRuntimeCapability;
             assert.match(
-              unsupportedRuntimeCapability(PROJECTION_FAMILY_IDS.surfaceManifest, requirement, {
-                [PROJECTION_FAMILY_IDS.surfaceManifest]: {
-                  capabilityId: requirement.capabilityId,
-                  maximumSupportedVersion: LINE_CREATE_VALUES_SURFACE_FLOOR - 1,
+              unsupportedRuntimeCapability(
+                PROJECTION_FAMILY_IDS.surfaceManifest,
+                requirement,
+                {
+                  [PROJECTION_FAMILY_IDS.surfaceManifest]: {
+                    capabilityId: requirement.capabilityId,
+                    maximumSupportedVersion:
+                      LINE_CREATE_VALUES_SURFACE_FLOOR - 1,
+                  },
                 },
-              }) ?? '',
-              new RegExp(`requires version ${LINE_CREATE_VALUES_SURFACE_FLOOR} and this runtime supports ${LINE_CREATE_VALUES_SURFACE_FLOOR - 1}`),
+              ) ?? '',
+              new RegExp(
+                `requires version ${LINE_CREATE_VALUES_SURFACE_FLOOR} and this runtime supports ${LINE_CREATE_VALUES_SURFACE_FLOOR - 1}`,
+              ),
             );
             // All FIVE loaded families carry their requirement, not just the
             // surface. Added on round-2 review, which named "carry it only for

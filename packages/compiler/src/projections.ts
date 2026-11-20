@@ -959,19 +959,21 @@ function surfaceManifestPayload(
   );
   const surfaceFloor = lineCreateValues
     ? LINE_CREATE_VALUES_SURFACE_FLOOR
-    : original.surfaces.some((surface) => 'layouts' in surface && surface.layouts)
+    : original.surfaces.some(
+          (surface) => 'layouts' in surface && surface.layouts,
+        )
       ? LAYOUT_READER
-    : extendedEditor || declaredRelationList
-      ? 26
-      : hasMetrics(original)
-        ? 25
-        : hasSavedListLayouts(original)
-          ? 24
-          : recordFieldPresentation
-            ? 23
-            : rankedDefaultsOrChainedTasks
-              ? 22
-              : null;
+      : extendedEditor || declaredRelationList
+        ? 26
+        : hasMetrics(original)
+          ? 25
+          : hasSavedListLayouts(original)
+            ? 24
+            : recordFieldPresentation
+              ? 23
+              : rankedDefaultsOrChainedTasks
+                ? 22
+                : null;
   const payloadSchemaVersion = composed
     ? COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION
     : navigation
