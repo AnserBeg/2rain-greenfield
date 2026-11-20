@@ -5,6 +5,7 @@ import {
   withWorkflowVerifierTransaction,
   type WorkflowBinding,
 } from './workflow-admission.js';
+import { dateTimeCheck } from './date-time-storage.js';
 import { WorkflowProjectionSchema } from '../../canonical-model/src/schemas.js';
 import { WORKFLOW_SURFACE_FLOOR } from '../../canonical-model/src/workflows.js';
 import { workflowSdkBindingDigest } from '@north-star/compiler';
@@ -3145,6 +3146,14 @@ function verificationFieldValue(
   token: string,
   entity: StorageTargetPayloadV1['entities'][number],
 ): unknown {
+  // ADR-0087: a logical dateTime is written whole, as typed entry.
+  const dateTime = dateTimeCheck(entity, field.fieldId);
+  if (dateTime)
+    return {
+      schemaVersion: 'northstar.date-time-value/v1',
+      civil: '2026-01-01T12:34',
+      ...(dateTime.zoneSource === 'perRecordIana' ? { zone: 'Etc/UTC' } : {}),
+    };
   switch (field.fieldKind) {
     case 'addressFieldType':
       return {

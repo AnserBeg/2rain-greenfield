@@ -12,6 +12,22 @@ import {
 } from '@north-star/canonical-model';
 import { enqueueAddress } from './address-geocodes.js';
 import {
+  DateTimeEntryError,
+  dateTimeCheck,
+  dateTimeChecks,
+  dateTimeColumnExpression,
+  expandDateTimePatch,
+  isDateTimeComponent,
+  readDateTime,
+  resolveDateTimePatch,
+  type BusinessCalendarContext,
+} from './date-time-storage.js';
+import {
+  DateTimeWriteSchema,
+  canonicalZone,
+  formatRecordZone,
+} from '@north-star/canonical-model';
+import {
   AddressWriteSchema,
   SavedAddressSchema,
 } from '@north-star/canonical-model';
@@ -499,6 +515,15 @@ export class PostgresModuleRuntimeInterpreter
           currentEntity,
           parsedInput,
         );
+        // ADR-0087: the business calendar is read as the runtime login role,
+        // inside this write, only when a logical dateTime value is entered.
+        const touchesDateTime = Object.entries(parsedInput.patch).some(
+          ([fieldId, value]) =>
+            value !== null && dateTimeCheck(currentEntity, fieldId),
+        );
+        const calendar = touchesDateTime
+          ? await readBusinessCalendar(client)
+          : null;
         const accepted = await withModuleRuntimeRole(client, async () => {
           try {
             await requireActiveCreateLegalEntity(
@@ -510,13 +535,22 @@ export class PostgresModuleRuntimeInterpreter
             );
             // Assigned before the change is prepared, so the change document
             // records the number the record is created with.
-            const numbered = await assignDocumentNumbers(
+            const assigned = await assignDocumentNumbers(
               client,
               currentEntity,
               request.definition,
               parsedInput,
               this.#documentNumbers,
             );
+            const numbered = touchesDateTime
+              ? await resolveDateTimeInput(
+                  client,
+                  currentEntity,
+                  request.definition.effect.kind,
+                  assigned,
+                  calendar,
+                )
+              : rejectStrayDateTimeValues(currentEntity, assigned);
             // The host assigns a new field revision inside the idempotent write.
             // Retrying the operation returns the original revision through its receipt.
             const addressInputs = currentEntity.columns.filter(
@@ -589,7 +623,10 @@ export class PostgresModuleRuntimeInterpreter
               currentStorage,
               currentEntity,
               request,
-              expandAddressInputs(currentEntity, input),
+              expandDateTimeInputs(
+                currentEntity,
+                expandAddressInputs(currentEntity, input),
+              ),
               request.readBackDefinition.selections,
             );
             return Object.freeze({
@@ -1556,6 +1593,99 @@ async function assignDocumentNumbers(
     patch[field.fieldId] = number;
   }
   return Object.freeze({ ...input, patch: Object.freeze(patch) });
+}
+
+function expandDateTimeInputs(
+  entity: StorageEntity,
+  input: MutationInput,
+): MutationInput {
+  if (dateTimeChecks(entity).length === 0) return input;
+  return {
+    ...input,
+    patch: Object.freeze(
+      expandDateTimePatch(entity, input.patch) as Record<
+        string,
+        ImmutableJsonValue
+      >,
+    ),
+  };
+}
+
+async function readBusinessCalendar(
+  client: PoolClient,
+): Promise<BusinessCalendarContext | null> {
+  const result = await client.query<{
+    calendar_id: string;
+    time_zone: string;
+    day_boundary: string;
+  }>(
+    `SELECT tenant_id::text AS calendar_id,
+            time_zone,
+            to_char(business_day_boundary, 'HH24:MI:SS.MS') AS day_boundary
+       FROM platform.inventory_tenant_calendars
+      WHERE tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid`,
+  );
+  const row = result.rows[0];
+  const zone = row && canonicalZone(row.time_zone);
+  return row && zone
+    ? { calendarId: row.calendar_id, zone, dayBoundary: row.day_boundary }
+    : null;
+}
+
+/** A logical dateTime value is written only to a field that declares one. */
+function rejectStrayDateTimeValues(
+  entity: StorageEntity,
+  input: MutationInput,
+): MutationInput {
+  for (const [fieldId, value] of Object.entries(input.patch)) {
+    if (isRecord(value) && !dateTimeCheck(entity, fieldId) && !hasAddress(entity, fieldId))
+      throw failure(
+        'MODULE_FIELD_VALUE_INVALID',
+        'operation input field violates its compiled value contract',
+        fieldId,
+      );
+  }
+  return input;
+}
+
+async function resolveDateTimeInput(
+  client: PoolClient,
+  entity: StorageEntity,
+  effect: string,
+  input: MutationInput,
+  calendar: BusinessCalendarContext | null,
+): Promise<MutationInput> {
+  rejectStrayDateTimeValues(entity, input);
+  const update = effect === 'updateRecordEffect';
+  const prior = update
+    ? await loadRawRecord(client, entity, input.recordId, false, [], true)
+    : null;
+  // The owning company: the stored one on update, the created one on create.
+  const companyId = entity.legalEntity
+    ? update
+      ? await readRecordCompany(client, entity, input.recordId)
+      : input.systemInput && typeof input.systemInput.value === 'string'
+        ? input.systemInput.value
+        : null
+    : null;
+  try {
+    return {
+      ...input,
+      patch: Object.freeze(
+        resolveDateTimePatch(entity, input.patch, {
+          calendar,
+          companyId,
+          prior: prior?.values ?? null,
+        }) as Record<string, ImmutableJsonValue>,
+      ),
+    };
+  } catch (error) {
+    if (!(error instanceof DateTimeEntryError)) throw error;
+    throw failure('MODULE_FIELD_VALUE_INVALID', error.message, error.fieldId, {
+      ...error.details,
+      reason: error.code,
+    });
+  }
 }
 
 function expandAddressInputs(
@@ -4753,9 +4883,12 @@ async function listSharedRecords(
     sourceAlias,
   );
   const searchExpressions = [
-    ...selectedColumns.map((column) =>
-      foldedVisibleFieldExpression(entity, column, sourceAlias),
-    ),
+    // Search is a capability gap for the dateTime type (ADR-0087).
+    ...selectedColumns
+      .filter((column) => !dateTimeCheck(entity, column.canonicalFieldId))
+      .map((column) =>
+        foldedVisibleFieldExpression(entity, column, sourceAlias),
+      ),
     ...relationPlans.map((plan) =>
       foldedVisibleFieldExpression(
         plan.target,
@@ -5188,7 +5321,10 @@ function listSelectList(
     entity.optimisticRevision.column,
     entity.archive.archivedAtColumn,
     ...entity.columns.map((column) => column.physicalName),
-  ].map((column) => `${qualified(sourceAlias, column)} AS ${quoted(column)}`);
+  ].map(
+    (column) =>
+      `${dateTimeColumnExpression(entity, column, qualified(sourceAlias, column)) ?? qualified(sourceAlias, column)} AS ${quoted(column)}`,
+  );
   const displays = selectedColumns.map(
     (column, index) =>
       `${visibleFieldExpression(column, sourceAlias)} AS ${quoted(`nsm_table_display_${String(index)}`)}`,
@@ -5347,10 +5483,18 @@ function toListDto(
       : base;
   const displayValues = Object.freeze(
     Object.fromEntries([
-      ...selectedColumns.map((column, index) => [
-        column.canonicalFieldId,
-        nullableDisplayValue(row[`nsm_table_display_${String(index)}`]),
-      ]),
+      ...selectedColumns.map((column, index) => {
+        // Record-zone display, rendered from the capture: no process or
+        // session zone reaches a list cell or an export.
+        const dateTime = dateTimeCheck(entity, column.canonicalFieldId);
+        const saved = dateTime ? readDateTime(dateTime, row) : null;
+        return [
+          column.canonicalFieldId,
+          dateTime
+            ? saved && formatRecordZone(saved)
+            : nullableDisplayValue(row[`nsm_table_display_${String(index)}`]),
+        ];
+      }),
       ...figures.flatMap((figure, index) =>
         figure.label
           ? [
@@ -6182,7 +6326,12 @@ function selectSql(
   ];
   for (const column of extraColumns)
     if (!columns.includes(column)) columns.push(column);
-  return `SELECT ${columns.map(quoted).join(', ')}
+  return `SELECT ${columns
+    .map((column) => {
+      const text = dateTimeColumnExpression(entity, column, quoted(column));
+      return text ? `${text} AS ${quoted(column)}` : quoted(column);
+    })
+    .join(', ')}
             FROM north_star_module.${quoted(entity.physicalTableName)}
            WHERE ${predicates.length > 0 ? predicates.join(' AND ') : 'true'}
            ${suffix}`;
@@ -6204,15 +6353,27 @@ function rawRecord(entity: StorageEntity, row: QueryResultRow): RawRecord {
   }
   const values = Object.fromEntries(
     entity.columns
-      .filter((column) => !isAddressComponent(entity, column.canonicalFieldId))
-      .map((column) => [
-        column.canonicalFieldId,
-        hasAddress(entity, column.canonicalFieldId)
-          ? addressJson(
-              readAddress(addressColumns(entity, column.canonicalFieldId), row),
-            )
-          : immutableDatabaseValue(row[column.physicalName]),
-      ]),
+      .filter(
+        (column) =>
+          !isAddressComponent(entity, column.canonicalFieldId) &&
+          !isDateTimeComponent(entity, column.canonicalFieldId),
+      )
+      .map((column) => {
+        const dateTime = dateTimeCheck(entity, column.canonicalFieldId);
+        return [
+          column.canonicalFieldId,
+          dateTime
+            ? (readDateTime(dateTime, row) as ImmutableJsonValue)
+            : hasAddress(entity, column.canonicalFieldId)
+              ? addressJson(
+                  readAddress(
+                    addressColumns(entity, column.canonicalFieldId),
+                    row,
+                  ),
+                )
+              : immutableDatabaseValue(row[column.physicalName]),
+        ];
+      }),
   );
   return Object.freeze({
     archivedAt: (row[entity.archive.archivedAtColumn] ?? null) as
@@ -6838,13 +6999,17 @@ function validateFieldValue(
         isValidIsoTime(value, field.temporal.precision);
       break;
     case 'dateTimeFieldType':
+      // A logical ADR-0087 value is checked against its declaration inside
+      // the write; a plain instant field refuses an object there.
       valid =
-        typeof value === 'string' &&
-        isValidIsoDateTime(
-          value,
-          field.temporal.precision,
-          field.temporal.timezoneSemantics,
-        );
+        (typeof value === 'string' &&
+          isValidIsoDateTime(
+            value,
+            field.temporal.precision,
+            field.temporal.timezoneSemantics,
+          )) ||
+        (field.temporal.timezoneSemantics === 'utcInstant' &&
+          DateTimeWriteSchema.safeParse(value).success);
       break;
   }
   if (!valid) {
