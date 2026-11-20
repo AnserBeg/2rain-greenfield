@@ -32,6 +32,8 @@
     "@north-star/observability": "workspace:*",
     "@north-star/platform-runtime": "workspace:*",
     "@north-star/runtime": "workspace:*",
+    "jpeg-js": "0.4.4",
+    "pdf-lib": "1.17.1",
     "pg": "^8.22.0",
     "quickjs-emscripten": "0.32.0"
   },

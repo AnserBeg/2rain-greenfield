@@ -62,6 +62,9 @@ try {
   if (managesContainer) await ensureLocalPostgres();
   application = await startComposedApplication({
     databaseUrl,
+    ...(process.env.NORTH_STAR_DOCUMENT_DEMO_SCANNER === '1'
+      ? { documentDemoScanner: true }
+      : {}),
     ...(workflowScheduler ? { workflowScheduler } : {}),
     host: process.env.HOST ?? '127.0.0.1',
     port: Number.parseInt(process.env.PORT ?? '4174', 10),
