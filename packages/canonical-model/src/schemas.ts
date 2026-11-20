@@ -1,6 +1,7 @@
 import { SurfaceLayoutSchema } from './layout.js';
 import { z } from 'zod';
 import { DOCUMENTS_PAYLOAD_VERSION } from './documents.js';
+import { WORKFLOW_PAYLOAD_VERSION } from './workflows.js';
 
 import {
   CANONICALIZATION_PROFILE_VERSION,
@@ -2836,6 +2837,47 @@ export const DocumentsProjectionSchema = z.strictObject({
     .max(128),
 });
 
+const workflowDigest = z.string().regex(/^[a-f0-9]{64}$/u);
+const workflowGrantIds = z
+  .array(CanonicalIdSchema)
+  .max(32)
+  .refine(
+    (ids) => new Set(ids).size === ids.length,
+    'Workflow grants must be unique',
+  );
+export const WorkflowDefinitionSchema = z.strictObject({
+  schemaVersion: z.literal('v6'),
+  workflowId: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
+  trigger: z.literal('goodsReceiptPosted'),
+  bodyDigest: workflowDigest,
+  grants: z.strictObject({
+    operations: workflowGrantIds,
+    queries: workflowGrantIds,
+  }),
+});
+export type WorkflowDefinition = z.infer<typeof WorkflowDefinitionSchema>;
+
+const workflows = z
+  .array(WorkflowDefinitionSchema)
+  .min(1)
+  .max(32)
+  .refine(
+    (entries) =>
+      new Set(entries.map(({ workflowId }) => workflowId)).size ===
+      entries.length,
+    'Workflow IDs must be unique',
+  )
+  .optional();
+
+export const WorkflowProjectionSchema = z.strictObject({
+  kind: z.literal('workflowPayload'),
+  schemaVersion: z.literal(WORKFLOW_PAYLOAD_VERSION),
+  workflows: z
+    .array(WorkflowDefinitionSchema.extend({ sdkDigest: workflowDigest }))
+    .min(1)
+    .max(32),
+});
+
 const v6NormalizedShape = {
   ...v5NormalizedShape,
   entities: z.array(normalizedV6EntityDefinition),
@@ -2843,6 +2885,7 @@ const v6NormalizedShape = {
   operations: z.array(normalizedV6OperationDefinition),
   documentFields,
   documentCategories,
+  workflows,
   formulaRules,
   calculatedDisplayFields,
   operationRoleNarrowings,
@@ -2976,6 +3019,7 @@ const v6AuthoredShape = {
   operations: z.array(authoredV6OperationDefinition),
   documentFields,
   documentCategories,
+  workflows,
   formulaRules,
   calculatedDisplayFields,
   operationRoleNarrowings,
