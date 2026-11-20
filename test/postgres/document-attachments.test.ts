@@ -121,6 +121,7 @@ test(
           );
 
           await pool.query(`CREATE SEQUENCE public.observed_document_blob_writes;
+            GRANT USAGE ON SEQUENCE public.observed_document_blob_writes TO north_star_runtime;
             CREATE FUNCTION public.count_document_blob_write() RETURNS trigger LANGUAGE plpgsql AS $$
               BEGIN PERFORM nextval('public.observed_document_blob_writes'); RETURN NULL; END $$;
             CREATE TRIGGER observe_blob_write AFTER INSERT OR UPDATE ON platform.document_blobs
@@ -789,16 +790,17 @@ test(
             required: true,
             allowedCategoryIds: [],
           });
+          const equipmentDeclaration = {
+            kind: 'addRecordType',
+            label: 'Equipment',
+            companyOwnership: 'entityOwned',
+            fields: [{ type: 'text', label: 'Name', required: true }],
+          };
           const candidate = await service.draft(
             {
               kind: 'changeSet',
               patches: [
-                {
-                  kind: 'addRecordType',
-                  label: 'Equipment',
-                  companyOwnership: 'entityOwned',
-                  fields: [{ type: 'text', label: 'Name', required: true }],
-                },
+                equipmentDeclaration,
                 files(
                   'northstar.app:entity.item',
                   'northstar.app:field.custom_item_evidence',
@@ -915,13 +917,16 @@ test(
             'a field ID activated on another entity keeps rolled-back files hidden',
             async () => {
               const reused = await service.draft(
-                files(
-                  'northstar.app:entity.party',
-                  'northstar.app:field.custom_item_evidence',
-                ),
+                {
+                  kind: 'changeSet',
+                  patches: [
+                    equipmentDeclaration,
+                    files(entityId, 'northstar.app:field.custom_item_evidence'),
+                  ],
+                },
                 'visualBuilder',
               );
-              assert.equal(reused.status, 'drafted');
+              assert.equal(reused.status, 'drafted', JSON.stringify(reused));
               await service.approve(reused.patchId);
               await service.activate(reused.patchId);
               assert.deepEqual(

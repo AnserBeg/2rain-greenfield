@@ -7,6 +7,15 @@ REVOKE ALL ON platform.document_versions, platform.document_blobs,
   platform.document_attachment_audit, platform.document_upload_staging FROM north_star_runtime;
 REVOKE EXECUTE ON FUNCTION platform.retire_document_upload_staging(uuid) FROM north_star_runtime;
 
+-- Preserve the physical charge for any blob that 0044 admitted without a version.
+-- Its reserve stays fixed when these bytes are subsequently published, so every
+-- new version consumes exactly its length regardless of the digest it matches.
+ALTER TABLE platform.document_blobs ADD COLUMN unversioned_reserve boolean NOT NULL DEFAULT true;
+UPDATE platform.document_blobs b SET unversioned_reserve = false WHERE EXISTS (
+  SELECT FROM platform.document_versions v WHERE (v.tenant_id,v.environment_id,v.owner_scope,v.digest)
+    = (b.tenant_id,b.environment_id,b.owner_scope,b.digest)
+);
+
 ALTER TABLE platform.document_upload_staging
   ADD COLUMN scan_clean boolean,
   ADD COLUMN scan_digest text,
@@ -180,13 +189,12 @@ RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg
   IF s.retired_at IS NOT NULL OR s.expires_at <= clock_timestamp() OR s.scan_clean IS DISTINCT FROM true
     OR (s.scan_digest,s.scan_policy) IS DISTINCT FROM (hash,policy) THEN
     RAISE EXCEPTION 'This staged upload has no current clean verdict.' USING ERRCODE = 'D0409'; END IF;
-  IF greatest(
-    (SELECT coalesce(sum(b.byte_length),0) FROM platform.document_versions v
-     JOIN platform.document_blobs b USING (tenant_id,environment_id,owner_scope,digest)
-     WHERE (v.tenant_id,v.environment_id) = (i.tenant_id,i.environment_id)),
-    (SELECT coalesce(sum(b.byte_length),0) FROM platform.document_blobs b
-     WHERE (b.tenant_id,b.environment_id) = (i.tenant_id,i.environment_id))
-  ) + s.byte_length > 104857600 THEN
+  IF (SELECT coalesce(sum(b.byte_length),0) FROM platform.document_versions v
+      JOIN platform.document_blobs b USING (tenant_id,environment_id,owner_scope,digest)
+      WHERE (v.tenant_id,v.environment_id) = (i.tenant_id,i.environment_id))
+    + (SELECT coalesce(sum(b.byte_length),0) FROM platform.document_blobs b
+      WHERE (b.tenant_id,b.environment_id) = (i.tenant_id,i.environment_id) AND b.unversioned_reserve)
+    + s.byte_length > 104857600 THEN
     RAISE EXCEPTION 'The stored file quota is full.' USING ERRCODE = 'D0413'; END IF;
   IF s.field_id IS NOT NULL THEN
     SELECT (f->>'maxCount')::integer INTO STRICT field_limit FROM jsonb_array_elements(fields) f WHERE f->>'fieldId' = s.field_id;
@@ -195,8 +203,8 @@ RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg
         = (i.tenant_id,i.environment_id,s.owner_scope,s.entity_id,s.record_id,s.field_id)) THEN
       RAISE EXCEPTION 'This file field or category is full.' USING ERRCODE = 'D0409'; END IF; END IF;
   -- Both paths write the complete admitted payload. The unique key retains one logical blob.
-  INSERT INTO platform.document_blobs (tenant_id,environment_id,owner_scope,digest,content_type,bytes)
-    VALUES (i.tenant_id,i.environment_id,s.owner_scope,hash,s.content_type,s.bytes)
+  INSERT INTO platform.document_blobs (tenant_id,environment_id,owner_scope,digest,content_type,bytes,unversioned_reserve)
+    VALUES (i.tenant_id,i.environment_id,s.owner_scope,hash,s.content_type,s.bytes,false)
     ON CONFLICT (tenant_id,environment_id,owner_scope,digest) DO UPDATE SET bytes = excluded.bytes;
   INSERT INTO platform.document_versions (tenant_id,environment_id,link_id,version_id,upload_id,owner_scope,
     digest,entity_id,record_id,record_revision,field_id,category_id,retention_class,file_name,actor_id,release_id,scan_policy_version)

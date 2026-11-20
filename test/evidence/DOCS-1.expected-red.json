@@ -60,8 +60,8 @@
       "name": "documents-stored-quota",
       "claim": "Publication refuses even a duplicate when the stored-byte quota is full.",
       "file": "db/migrations/0046_document_attachment_authority.sql",
-      "original": "  ) + s.byte_length > 104857600 THEN",
-      "replacement": "  ) + s.byte_length > 2147483647 THEN",
+      "original": "    + s.byte_length > 104857600 THEN",
+      "replacement": "    + s.byte_length > 2147483647 THEN",
       "test": {
         "files": ["test/postgres/document-attachments.test.ts"],
         "namePattern": "^internal files use live record authority, scoped dedupe, bounded ingress and immutable audit$"
