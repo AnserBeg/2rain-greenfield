@@ -12,6 +12,8 @@
 
 The existing CALENDAR-1 two-date path and Booking’s governed interval have their own source contracts. Calendar and timeline bindings ship in CALENDAR-1. The field slices use the normal draft, diff, verification, approval, activation and compatible pointer rollback.
 
+**Slice 0 gates.** The record check passed. All 24 hosted jobs passed at `9b4a2735` before synchronization with main. [Packet CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44746473972)
+
 ## Test it yourself
 
 **Now, on the design (under five minutes).** Open the linked ADR beside this table. Use its entry, display and window rules to check these examples. After the relevant slice ships, repeat them on tenant record types in Customize using the ordinary create form and Record.

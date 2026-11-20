@@ -1,3 +1,4 @@
+import { BillingPlansSchema } from './billing.js';
 import { BookingOperationBinding } from './booking.js';
 import { SurfaceLayoutSchema } from './layout.js';
 import { z } from 'zod';
@@ -2886,6 +2887,7 @@ const v6NormalizedShape = {
   entities: z.array(normalizedV6EntityDefinition),
   fields: z.array(normalizedV6FieldDefinition),
   operations: z.array(normalizedV6OperationDefinition),
+  billingPlans: BillingPlansSchema.optional(),
   documentFields,
   documentCategories,
   workflows,
@@ -3020,6 +3022,7 @@ const v6AuthoredShape = {
   entities: z.array(authoredV6EntityDefinition),
   fields: z.array(authoredV6FieldDefinition),
   operations: z.array(authoredV6OperationDefinition),
+  billingPlans: BillingPlansSchema.optional(),
   documentFields,
   documentCategories,
   workflows,
