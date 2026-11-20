@@ -651,7 +651,7 @@ export function staffRequestEntry(
   fromRequest: (
     req: Parameters<AuthenticatedRequestEntryAdapter['enter']>[0],
   ) => StaffRequestSession | null,
-) {
+): AuthenticatedRequestEntryAdapter {
   return new (class extends AuthenticatedRequestEntryAdapter {
     constructor() {
       super(async () => null);
