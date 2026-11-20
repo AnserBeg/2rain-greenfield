@@ -5,7 +5,6 @@ import {
   type UntrustedRequestInput,
 } from './request-context.js';
 import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents.js';
-
 import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../canonical-model/src/surface-workspace.js';
 
 export const REQUEST_RUNTIME_VIEW_VERSION =
@@ -207,7 +206,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 24 adds tenant-authored saved List layouts.
     // 25 adds Today metric cards.
     // 26 adds header relations, relation List columns and shared or lifecycle-less editors.
-    // 27 adds document files. The next rung adds draft line create values.
+    // 27 adds internal document attachments. 28 adds record and form layout revisions.
+    // 29 adds draft line create values.
     maximumSupportedVersion: LINE_CREATE_VALUES_SURFACE_FLOOR,
   },
 });

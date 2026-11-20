@@ -19,6 +19,7 @@ import {
   CanonicalModelError,
   normalizeApplicationPackage,
   type SurfaceList,
+  type SurfaceLayout,
 } from '../../packages/canonical-model/src/index.js';
 import {
   compileApplicationRelease,
@@ -1676,4 +1677,491 @@ test('a field-only chain reproduces with historical bindings and upgrades onto a
     reproduced.steps[0]!.release.releaseRoot,
     upgraded.steps[0]!.release.releaseRoot,
   );
+});
+
+test('layout inventory derives stable slots on existing first-party and tenant releases', () => {
+  const original = canonicalize(authored);
+  const base = normalizeApplicationPackage(authored);
+  assert.equal(
+    canonicalize(base),
+    new TextDecoder().decode(tip.normalizedDefinitionBytes),
+  );
+  const layouts = customizationTargets(base).layouts;
+  assert.ok(layouts?.length);
+  const order = layouts.filter((t) =>
+    t.body.surfaceId.endsWith('purchase_order_form'),
+  );
+  assert.deepEqual(
+    order.map((t) => t.body.mode),
+    ['create', 'edit'],
+  );
+  assert.ok(
+    order.every((t) =>
+      t.body.sections[0]!.fields.some(
+        (f) =>
+          f.id.endsWith('supplier_party_id') &&
+          f.required &&
+          f.tier === 'always',
+      ),
+    ),
+  );
+  assert.ok(
+    !layouts.some(
+      (t) =>
+        t.body.surfaceId.includes('_line_form') ||
+        t.body.surfaceId.includes('goods_receipt'),
+    ),
+  );
+  const renamed = structuredClone(authored);
+  const surface = (renamed.surfaces as Record<string, unknown>[]).find(
+    (s) => s.surfaceId === order[0]!.body.surfaceId,
+  )!;
+  surface.label = 'Buy';
+  const renamedLayouts = customizationTargets(
+    normalizeApplicationPackage(renamed),
+  ).layouts!;
+  assert.deepEqual(
+    renamedLayouts.find(
+      (t) => t.body.surfaceId === surface.surfaceId && t.body.mode === 'create',
+    )!.body,
+    order[0]!.body,
+  );
+  const tenant = applyCustomizationPatches(authored, [equipment]);
+  assert.equal(tenant.status, 'applied');
+  if (tenant.status !== 'applied') return;
+  const definition = normalizeApplicationPackage(tenant.authored);
+  const tenantLayouts = customizationTargets(definition).layouts!.filter((t) =>
+    t.body.surfaceId.includes('custom_equipment'),
+  );
+  assert.deepEqual(tenantLayouts.map((t) => t.body.mode).sort(), [
+    'create',
+    'detail',
+    'edit',
+  ]);
+  assert.ok(definition.surfaces.every((s) => !('layouts' in s)));
+  assert.equal(canonicalize(authored), original);
+});
+
+test('layout revision replays an ordered first revision, binds each member and refuses a second layout writer', async () => {
+  const mod = await import('../../packages/customization/src/index.js');
+  const entity = 'northstar.app:entity.purchase_order';
+  const surface = 'northstar.app:surface.purchase_order_form';
+  const custom = 'northstar.app:field.custom_purchase_order_delivery_note';
+  const add = patch({
+    kind: 'addField',
+    entity,
+    field: { label: 'Delivery note', type: 'text' },
+    screens: 'record',
+  });
+  const initial = applyCustomizationPatches(authored, [add]);
+  assert.equal(initial.status, 'applied');
+  if (initial.status !== 'applied') return;
+  const addedId =
+    (initial.authored.fields as { fieldId: string; label: string }[]).find(
+      (f) => f.label === 'Delivery note',
+    )?.fieldId ?? custom;
+  const legacy = patch({ kind: 'arrangeLayout', surface, upFront: [addedId] });
+  const prior = applyCustomizationPatches(authored, [add, legacy]);
+  assert.equal(prior.status, 'applied');
+  if (prior.status !== 'applied') return;
+  const target = customizationTargets(
+    normalizeApplicationPackage(prior.authored),
+  ).layouts?.find(
+    (t) => t.body.surfaceId === surface && t.body.mode === 'create',
+  );
+  assert.ok(target);
+  const base = target.body.sections[0]!;
+  assert.equal(base.fields.find((f) => f.id === addedId)?.tier, 'always');
+  const supplier = base.fields.find((f) =>
+    f.id.endsWith('_supplier_party_id'),
+  )!;
+  const section = 'tenant-section/3c02d328-d170-471c-923d-9606f802a5f9';
+  const revision = mod.draftLayoutRevision(target, [
+    {
+      schemaVersion: 'v6',
+      kind: 'createSection',
+      id: section,
+      parent: target.body.slotId,
+      label: { schemaVersion: 'v6', text: 'Delivery' },
+      position: { edge: 'first' },
+    },
+    {
+      schemaVersion: 'v6',
+      kind: 'move',
+      id: supplier.id,
+      parent: base.id,
+      destination: section,
+      position: { edge: 'last' },
+    },
+    {
+      schemaVersion: 'v6',
+      kind: 'move',
+      id: addedId,
+      parent: base.id,
+      destination: section,
+      position: { before: supplier.id },
+    },
+    {
+      schemaVersion: 'v6',
+      kind: 'rename',
+      id: section,
+      parent: target.body.slotId,
+      label: { schemaVersion: 'v6', text: 'Shipping' },
+    },
+    {
+      schemaVersion: 'v6',
+      kind: 'rename',
+      id: addedId,
+      parent: section,
+      label: { schemaVersion: 'v6', text: 'Instructions' },
+    },
+  ]);
+  assert.equal(parseCustomizationPatch(revision).status, 'parsed');
+  assert.equal(
+    parseCustomizationPatch({
+      ...revision,
+      edits: [{ ...revision.edits[0], schemaVersion: 'v5' }],
+    }).status,
+    'invalid',
+  );
+  const chain = [add, legacy, revision];
+  const applied = applyCustomizationPatches(authored, chain);
+  assert.equal(
+    applied.status,
+    'applied',
+    JSON.stringify(applied.status === 'applied' ? null : applied),
+  );
+  if (applied.status !== 'applied') return;
+  const effective = customizationTargets(
+    normalizeApplicationPackage(applied.authored),
+  ).layouts!.find(
+    (t) => t.body.surfaceId === surface && t.body.mode === 'create',
+  )!;
+  assert.deepEqual(
+    effective.body.sections[0]?.fields.map((f) => f.id),
+    [addedId, supplier.id],
+  );
+  assert.equal(
+    effective.body.sections[0]?.fields[1]?.binding,
+    supplier.binding,
+  );
+  assert.equal(effective.body.sections[0]?.label.text, 'Shipping');
+  assert.equal(effective.body.sections[0]?.id, section);
+  assert.equal(
+    applyCustomizationPatches(authored, [...chain, legacy]).status,
+    'refused',
+  );
+  assert.equal(
+    applyCustomizationPatches(authored, [...chain, revision]).status,
+    'refused',
+  );
+  assert.equal(
+    applyCustomizationPatches(authored, [
+      add,
+      legacy,
+      { ...revision, resultLayoutDigest: 'a'.repeat(64) },
+    ]).status,
+    'refused',
+  );
+  assert.equal(
+    applyCustomizationPatches(authored, [
+      add,
+      legacy,
+      {
+        ...revision,
+        edits: [{ ...revision.edits[0]!, expected: 'a'.repeat(64) }],
+      },
+    ]).status,
+    'refused',
+  );
+  const next = mod.layoutCommand(effective, {
+    action: 'down',
+    member: section,
+  });
+  assert.equal(next.predecessor, revision.revisionId);
+  const compiled = await compileInSandbox({
+    ...sandboxRequest(chain),
+    startAt: 2,
+  });
+  assert.ok(
+    compiled.status === 'compiled',
+    JSON.stringify(compiled.status === 'compiled' ? null : compiled),
+  );
+  assert.match(
+    compiled.steps[0]!.rendered.text,
+    /Previously [^\n]+\bVendor\b/u,
+  );
+  assert.match(compiled.steps[0]!.rendered.text, /Shipping \(Instructions, /u);
+  const replay = await compileInSandbox({
+    ...sandboxRequest(chain),
+    startAt: 2,
+  });
+  assert.ok(replay.status === 'compiled');
+  assert.equal(
+    canonicalize(replay.steps[0]!.release),
+    canonicalize(compiled.steps[0]!.release),
+  );
+  const release = parseSerializedRelease(compiled.steps[0]!.release);
+  assert.equal(
+    release.compiled.bundle.releaseManifest.projections.find(
+      (p) => p.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
+    )?.requiredRuntimeCapability.minimumVersion,
+    28,
+  );
+});
+
+test('detail layout moves whole protected blocks, preserves read-only bindings and refuses missing content or a false floor', async () => {
+  const def = normalizeApplicationPackage(authored);
+  const target = customizationTargets(def).layouts?.find((t) =>
+    t.body.surfaceId.endsWith('purchase_order_detail'),
+  );
+  assert.ok(target);
+  const { draftLayoutRevision } =
+    await import('../../packages/customization/src/layout-revision.js');
+  const { layoutDigest, layoutProblem } =
+    await import('../../packages/canonical-model/src/layout.js');
+  const { layoutBindingsProblem, layoutDeclarationProblem } =
+    await import('../../packages/postgres-provider/src/layout-admission.js');
+  const detail = target.body.sections[0]!,
+    end = target.body.blocks.find((b) => b.kind === 'progression')!;
+  const children = target.body.blocks.find((b) => b.kind === 'children')!;
+  const revision = draftLayoutRevision(target, [
+    {
+      schemaVersion: 'v6',
+      kind: 'move',
+      id: end.id,
+      parent: target.body.slotId,
+      destination: target.body.slotId,
+      position: { after: detail.id },
+    },
+  ]);
+  const applied = applyCustomizationPatches(authored, [revision]);
+  assert.ok(applied.status === 'applied');
+  const source = applied.authored.surfaces as (Record<string, unknown> & {
+    layouts?: SurfaceLayout[];
+  })[];
+  const surface = source.find((s) => s.surfaceId === revision.surface)!;
+  const layout = surface.layouts![0]!;
+  assert.deepEqual(layout.body.order, [children.id, detail.id, end.id]);
+  assert.equal(layoutProblem(layout, target.body), null);
+  const corrupt = structuredClone(layout);
+  corrupt.body.order.splice(0, 1);
+  corrupt.resultLayoutDigest = layoutDigest(corrupt.body);
+  assert.match(layoutProblem(corrupt, target.body) ?? '', /protected block/u);
+  const duplicate = structuredClone(layout);
+  duplicate.body.sections[0]!.fields.push(
+    duplicate.body.sections[0]!.fields[0]!,
+  );
+  duplicate.resultLayoutDigest = layoutDigest(duplicate.body);
+  assert.match(layoutProblem(duplicate, target.body) ?? '', /one placement/u);
+  const missing = structuredClone(layout);
+  missing.body.sections[0]!.fields.shift();
+  missing.resultLayoutDigest = layoutDigest(missing.body);
+  assert.match(layoutProblem(missing, target.body) ?? '', /bound field/u);
+  const manifest = {
+    surfaces: [{ ...surface, dataSourceQueryId: 'detail-query' }],
+  };
+  const queries = { queries: [{ queryId: 'detail-query' }] };
+  assert.equal(layoutDeclarationProblem(applied.authored, manifest, 28), null);
+  assert.equal(layoutBindingsProblem(manifest, 28, {}, queries), null);
+  assert.ok(layoutDeclarationProblem(applied.authored, manifest, 27));
+  assert.ok(layoutDeclarationProblem(authored, manifest, 28));
+  assert.ok(layoutDeclarationProblem(applied.authored, { surfaces: [] }, 28));
+  assert.ok(layoutBindingsProblem(manifest, 27, {}, queries));
+  assert.ok(layoutBindingsProblem(manifest, 28, {}, { queries: [] }));
+  const unbound = {
+    surfaces: [{ ...manifest.surfaces[0], composition: { fields: [] } }],
+  };
+  assert.match(
+    layoutBindingsProblem(unbound, 28, {}, queries) ?? '',
+    /bound read/u,
+  );
+  const altered = structuredClone(layout);
+  altered.body.sections[0]!.fields[0]!.binding = 'other-column';
+  altered.resultLayoutDigest = layoutDigest(altered.body);
+  assert.match(layoutProblem(altered, target.body) ?? '', /bound field/u);
+});
+
+test('tenant inspection edit sections share the extended header bindings and the higher reader floor', async () => {
+  const { inspectionChange } =
+    await import('../fixtures/inspection-customization.js');
+  const change = patch(inspectionChange);
+  const applied = applyCustomizationPatches(authored, [change]);
+  assert.ok(applied.status === 'applied');
+  const targets = customizationTargets(
+    normalizeApplicationPackage(applied.authored),
+  ).layouts;
+  const edit = targets?.find(
+    (t) =>
+      t.body.surfaceId.endsWith('custom_goods_receipt_inspection_form') &&
+      t.body.mode === 'edit',
+  );
+  assert.ok(edit);
+  const create = targets!.find(
+    (t) => t.body.surfaceId === edit.body.surfaceId && t.body.mode === 'create',
+  )!;
+  assert.ok(
+    create.body.sections[0]!.fields.some(
+      (f) => f.bindingType.startsWith('relation:') && f.editorInput,
+    ),
+  );
+  assert.ok(
+    !edit.body.sections[0]!.fields.some((f) =>
+      f.bindingType.startsWith('relation:'),
+    ),
+  );
+  const { layoutCommand } =
+    await import('../../packages/customization/src/layout-revision.js');
+  const revision = layoutCommand(edit, {
+    action: 'rename',
+    member: edit.body.sections[0]!.id,
+    label: 'Inspection details',
+  });
+  const result = await compileInSandbox(sandboxRequest([change, revision]));
+  assert.ok(
+    result.status === 'compiled',
+    JSON.stringify(result.status === 'compiled' ? null : result),
+  );
+  const floor = (i: number) =>
+    parseSerializedRelease(
+      result.steps[i]!.release,
+    ).compiled.bundle.releaseManifest.projections.find(
+      (p) => p.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
+    )!.requiredRuntimeCapability.minimumVersion;
+  assert.deepEqual([floor(0), floor(1)], [26, 28]);
+});
+
+test('composed detail keeps calculated display values readable and outside edit and create inputs', async () => {
+  const record = 'northstar.app:surface.item_detail';
+  const { calculatedDisplayDraft, layoutCommand } =
+    await import('../../packages/customization/src/index.js');
+  const { projectionPayload } = await import('../compiler/helpers.js');
+  const target = customizationTargets(
+    normalizeApplicationPackage(authored),
+  ).calculatedDisplayTargets?.find((t) => t.recordSurfaceId === record);
+  assert.ok(target);
+  const patch = calculatedDisplayDraft(target, {
+    label: 'Margin CAD',
+    operator: 'subtract',
+    leftFieldId: 'northstar.app:field.item_price_cad',
+    rightFieldId: 'northstar.app:field.item_standard_cost_cad',
+    listSurfaceId: 'northstar.app:surface.item_list',
+  });
+  const applied = applyCustomizationPatches(authored, [patch]);
+  assert.ok(applied.status === 'applied');
+  const normalized = normalizeApplicationPackage(applied.authored);
+  const layouts = customizationTargets(normalized).layouts!;
+  const detail = layouts.find(({ body }) => body.surfaceId === record)!;
+  const section = detail.body.sections.find((s) =>
+    s.fields.some((f) => f.id === patch.field.fieldId),
+  )!;
+  assert.ok(section, 'the calculated value has a stable detail placement');
+  assert.ok(
+    layouts
+      .filter((l) => l.body.mode !== 'detail')
+      .every((l) =>
+        l.body.sections.every((s) =>
+          s.fields.every((f) => f.id !== patch.field.fieldId),
+        ),
+      ),
+  );
+  const relabel = layoutCommand(detail, {
+    action: 'rename',
+    member: patch.field.fieldId,
+    label: 'Margin shown',
+  });
+  const result = await compileInSandbox(sandboxRequest([patch, relabel]));
+  assert.ok(
+    result.status === 'compiled',
+    JSON.stringify(result.status === 'compiled' ? null : result),
+  );
+  const mixed = parseSerializedRelease(result.steps[1]!.release).compiled;
+  const mixedRefs = mixed.bundle.releaseManifest.projections;
+  assert.equal(
+    mixedRefs.find((r) => r.familyId === PROJECTION_FAMILY_IDS.surfaceManifest)
+      ?.requiredRuntimeCapability.minimumVersion,
+    28,
+  );
+  assert.equal(
+    mixedRefs.find((r) => r.familyId === PROJECTION_FAMILY_IDS.queryCatalog)
+      ?.requiredRuntimeCapability.minimumVersion,
+    4,
+  );
+  const mixedPage = projectionPayload<{
+    surfaces: CompiledSurfaceDefinition[];
+  }>(mixed, PROJECTION_FAMILY_IDS.surfaceManifest).surfaces.find(
+    (s) => s.surfaceId === record,
+  )!;
+  const placed = mixedPage.layouts?.[0]?.body.sections
+    .flatMap((s) => s.fields)
+    .find((f) => f.id === patch.field.fieldId);
+  assert.equal(placed?.label.text, 'Margin shown');
+  assert.ok(
+    mixedPage.composition?.fields.some(
+      (c) => c.columnId === placed?.binding && c.field === patch.field.fieldId,
+    ),
+  );
+});
+
+test('record layout retains the file catalog and raises the Surface floor above attachments', async () => {
+  const file = patch({
+    kind: 'addDocumentField',
+    schemaVersion: 'northstar.document-field/v1',
+    entityId: 'northstar.app:entity.item',
+    fieldId: 'northstar.app:field.custom_item_evidence',
+    label: 'Evidence',
+    type: 'files',
+    maxCount: 1,
+    required: false,
+    allowedCategoryIds: [],
+  });
+  const record = 'northstar.app:surface.item_detail';
+  const withFile = applyCustomizationPatches(authored, [file]);
+  assert.ok(withFile.status === 'applied');
+  const target = customizationTargets(
+    normalizeApplicationPackage(withFile.authored),
+  ).layouts?.find(
+    (t) => t.body.surfaceId === record && t.body.mode === 'detail',
+  );
+  assert.ok(target);
+  const { layoutCommand } =
+    await import('../../packages/customization/src/layout-revision.js');
+  const layout = layoutCommand(target, {
+    action: 'rename',
+    member: target.body.sections[0]!.id,
+    label: 'Item identification',
+  });
+  const result = await compileInSandbox(sandboxRequest([file, layout]));
+  assert.ok(
+    result.status === 'compiled',
+    JSON.stringify(result.status === 'compiled' ? null : result),
+  );
+  const { projectionPayload } = await import('../compiler/helpers.js');
+  for (const [index, expected] of [27, 28].entries()) {
+    const compiled: ReturnType<typeof parseSerializedRelease>['compiled'] =
+      parseSerializedRelease(result.steps[index]!.release).compiled;
+    const reference = compiled.bundle.releaseManifest.projections.find(
+      (p) => p.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
+    )!;
+    assert.equal(reference.requiredRuntimeCapability.minimumVersion, expected);
+    const manifest = projectionPayload<{
+      surfaces: CompiledSurfaceDefinition[];
+      documentBindings: unknown;
+    }>(compiled, PROJECTION_FAMILY_IDS.surfaceManifest);
+    const files = projectionPayload<{
+      fields: { fieldId: string }[];
+      bindings: unknown;
+    }>(compiled, PROJECTION_FAMILY_IDS.documents);
+    assert.ok(
+      files.fields.some(
+        (f) => f.fieldId === 'northstar.app:field.custom_item_evidence',
+      ),
+    );
+    assert.deepEqual(manifest.documentBindings, files.bindings);
+    assert.equal(
+      manifest.surfaces.find((s) => s.surfaceId === record)?.layouts?.[0]?.body
+        .sections[0]?.label.text,
+      index === 1 ? 'Item identification' : undefined,
+    );
+  }
 });

@@ -1,3 +1,4 @@
+import { LAYOUT_READER } from '@north-star/canonical-model';
 import {
   CALCULATED_DISPLAY_QUERY_READER,
   type CalculatedDisplayProjectionEntry,
@@ -958,6 +959,8 @@ function surfaceManifestPayload(
   );
   const surfaceFloor = lineCreateValues
     ? LINE_CREATE_VALUES_SURFACE_FLOOR
+    : original.surfaces.some((surface) => 'layouts' in surface && surface.layouts)
+      ? LAYOUT_READER
     : extendedEditor || declaredRelationList
       ? 26
       : hasMetrics(original)
@@ -1048,6 +1051,9 @@ function surfaceManifestPayload(
                     ),
                   },
           }),
+          ...(declared && 'layouts' in declared && declared.layouts
+            ? { layouts: declared.layouts }
+            : {}),
           ...(declared && 'form' in declared && declared.form
             ? { form: declared.form }
             : {}),

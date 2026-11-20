@@ -1,4 +1,4 @@
-import { DOCUMENT_FILES_SURFACE_FLOOR } from './documents.js';
+import { baseLayout, layoutProblem, LAYOUT_READER } from './layout.js';
 import type { VersionedNormalizedApplicationPackage } from './schemas.js';
 import { CanonicalModelError, diagnostic } from './diagnostics.js';
 import {
@@ -7,7 +7,7 @@ import {
 } from './picker-eligibility.js';
 
 export const LINE_CREATE_VALUES_SURFACE_FLOOR =
-  DOCUMENT_FILES_SURFACE_FLOOR + 1;
+  LAYOUT_READER + 1;
 
 /** Typed declarations also prove their cross-entity and contextual references. */
 export function validateSurfaceWorkspaces(
@@ -34,6 +34,17 @@ export function validateSurfaceWorkspaces(
     ]);
   };
   for (const surface of model.surfaces) {
+    if ('layouts' in surface && surface.layouts) {
+      const modes = new Set<string>();
+      for (const layout of surface.layouts) {
+        const mode = layout.body.mode;
+        if (modes.has(mode) || layout.body.surfaceId !== surface.surfaceId)
+          fail(surface.surfaceId, 'Layout mode or owner differs.');
+        modes.add(mode);
+        const problem = layoutProblem(layout, baseLayout(model, surface, mode));
+        if (problem) fail(surface.surfaceId, problem);
+      }
+    }
     if ('workspace' in surface && surface.workspace) {
       const workspace = surface.workspace;
       // A launcher Task is a destination of its own -- the warehouse view --

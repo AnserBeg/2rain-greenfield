@@ -59,7 +59,10 @@ function compileFixture() {
       normalized.package.packageId,
     ),
   );
-  assert.ok(compiled.status === 'compiled', JSON.stringify(compiled));
+  assert.ok(
+    compiled.status === 'compiled',
+    JSON.stringify(compiled.status === 'compiled' ? [] : compiled.diagnostics),
+  );
   return {
     authored,
     release: {

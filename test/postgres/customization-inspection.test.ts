@@ -12,8 +12,8 @@ import { COMPANY, worldOver, seededId } from '../agent/agent-world.js';
 import {
   inspection,
   inspectionChange,
-  inspectionLinkRecords,
 } from '../fixtures/inspection-customization.js';
+import { inspectionLinkRecords } from '../fixtures/inspection-link-records.js';
 import {
   archivedServingRead,
   withArchivedCustomizationRuntime,

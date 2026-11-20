@@ -339,3 +339,97 @@ for (const action of ['create', 'update'] as const)
       datedPartyDefinition(),
     );
   });
+
+test(
+  'layout revisions admit the current reader, reproduce tenant bytes and refuse the preceding serving reader',
+  { timeout: 600_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'customize-layout-reader',
+      async ({ connection }) => {
+        const options = {
+          databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
+          tenantSlug: 'customize-layout-reader',
+        };
+        const app = await startComposedApplication({ ...options, port: 0 });
+        const opened = await openCustomizeService(options);
+        try {
+          const document = await opened.service.draft(
+            {
+              kind: 'addDocumentField',
+              schemaVersion: 'northstar.document-field/v1',
+              entityId: 'northstar.app:entity.item',
+              fieldId: 'northstar.app:field.custom_item_evidence',
+              label: 'Evidence',
+              type: 'files',
+              maxCount: 1,
+              required: false,
+              allowedCategoryIds: [],
+            },
+            'visualBuilder',
+          );
+          assert.ok(document.status === 'drafted', JSON.stringify(document));
+          await opened.service.approve(document.patchId);
+          await opened.service.activate(document.patchId);
+          const { layoutCommand } =
+            await import('../../packages/customization/src/layout-revision.js');
+          const surfaceId = 'northstar.app:surface.item_detail';
+          const target = (await opened.service.targets()).layouts?.find(
+            (t) => t.body.surfaceId === surfaceId && t.body.mode === 'detail',
+          );
+          assert.ok(target);
+          const layout = layoutCommand(target, {
+            action: 'rename',
+            member: target.body.sections[0]!.id,
+            label: 'Item identification',
+          });
+          const draft = await opened.service.draft(layout, 'visualBuilder');
+          assert.ok(draft.status === 'drafted', JSON.stringify(draft));
+          await opened.service.approve(draft.patchId);
+          await withArchivedCustomizationRuntime(
+            '60451569e92ffe9aad3fc2c67bfa326a978b1f3c',
+            async (run) => {
+              await assertArchivedTenantEnvelope(run);
+              const read = () =>
+                archivedRuntimeRead(run, {
+                  databaseUrl: options.databaseUrl,
+                  identity: app.runtime.identity,
+                });
+              assert.equal((await read()).outcome, 'loaded');
+              await opened.service.activate(draft.patchId);
+              const refused = await read();
+              assert.equal(refused.code, 'UNSUPPORTED_RUNTIME_CAPABILITY');
+              assert.match(
+                refused.message ?? '',
+                /surface-manifest requires version 28 and this runtime supports 27/u,
+              );
+              const item = app.seededRecords.find(
+                (row) =>
+                  row.operationId === 'northstar.app:operation.item_create',
+              );
+              assert.ok(item);
+              const url = new URL('/', app.baseUrl);
+              url.searchParams.set(
+                'surface',
+                'northstar.app:surface.item_detail',
+              );
+              url.searchParams.set('record', item.recordId);
+              const page = await fetch(url);
+              assert.equal(page.status, 200);
+              const html = await page.text();
+              assert.match(html, /<h2>Item identification<\/h2>/u);
+              assert.match(
+                html,
+                /data-document-field="northstar.app:field.custom_item_evidence"/u,
+              );
+            },
+          );
+        } finally {
+          await opened.close();
+          await app.close();
+        }
+      },
+      LINEAGE_INSTALL_VOLUME,
+    );
+  },
+);
