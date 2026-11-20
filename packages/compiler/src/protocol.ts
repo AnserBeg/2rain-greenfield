@@ -151,6 +151,7 @@ export const HASH_DOMAINS = Object.freeze({
 
 export const PROJECTION_FAMILY_IDS = Object.freeze({
   agentDiscovery: 'northstar.compiler:projection-family.agent-discovery',
+  documents: 'northstar.compiler:projection-family.documents',
   formulaRule: 'northstar.compiler:projection-family.formula-rule',
   operationCatalog: 'northstar.compiler:projection-family.operation-catalog',
   policyReferences: 'northstar.compiler:projection-family.policy-references',

@@ -1,3 +1,4 @@
+import { DocumentsProjectionSchema } from '../../../packages/canonical-model/src/schemas.js';
 import {
   renderCompositionAlerts,
   renderCompositionFields,
@@ -180,6 +181,7 @@ export type SurfaceDataRenderState =
   | {
       readonly records: readonly SemanticRecordDto[];
       readonly documentEditorSlots?: Readonly<Record<string, string>>;
+      readonly documentsSection?: string;
       readonly receiving?: ReceivingSection;
       readonly receivingNavigation?: ReceivingNavigation;
       readonly composition?: CompositionData;
@@ -1252,7 +1254,10 @@ function renderKeyFacts(context: SurfaceComponentContext): string {
 
 function renderSections(context: SurfaceComponentContext): string {
   if (context.data?.status === 'READY' && context.data.composition)
-    return renderCompositionFields(context.surface, context.data.composition);
+    return (
+      renderCompositionFields(context.surface, context.data.composition) +
+      (context.data.documentsSection ?? '')
+    );
   const data = context.data ?? { status: 'UNBOUND' as const };
   if (data.status === 'UNBOUND') {
     return slotPanel(context, '', 'sections-slot');
@@ -1270,12 +1275,14 @@ function renderSections(context: SurfaceComponentContext): string {
         'form',
       )?.form?.fields?.map((field) => [String(field.fieldId), field.label]),
     );
-    return slotPanel(
-      context,
-      record
-        ? `${data.status === 'READY' && data.receiving ? renderReceivingSection(data.receiving) : ''}${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${data.status === 'READY' && data.salesOrder ? renderSalesOrderSection(data.salesOrder) : ''}${data.status === 'READY' && data.packingDocument ? renderPackingDocument(data.packingDocument) : ''}<section class="panel data-panel" data-data-state="exact"><details class="record-section-group" open><summary><h2>Details</h2></summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(labels.get(fieldId) ?? fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${recordFieldValue(context, record, fieldId)}</dd></div>`).join('')}</dl></details></section>`
-        : dataDiagnostic('QUERY_NOT_FOUND'),
-      'sections-slot',
+    return (
+      slotPanel(
+        context,
+        record
+          ? `${data.status === 'READY' && data.receiving ? renderReceivingSection(data.receiving) : ''}${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${data.status === 'READY' && data.salesOrder ? renderSalesOrderSection(data.salesOrder) : ''}${data.status === 'READY' && data.packingDocument ? renderPackingDocument(data.packingDocument) : ''}<section class="panel data-panel" data-data-state="exact"><details class="record-section-group" open><summary><h2>Details</h2></summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(labels.get(fieldId) ?? fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${recordFieldValue(context, record, fieldId)}</dd></div>`).join('')}</dl></details></section>`
+          : dataDiagnostic('QUERY_NOT_FOUND'),
+        'sections-slot',
+      ) + (data.status === 'READY' ? (data.documentsSection ?? '') : '')
     );
   }
   const admission = resolveFormAdmission(context, record);
@@ -2985,4 +2992,46 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
     input.supplyWithheld,
   );
   return `<section class="panel data-panel" data-data-state="exact" data-list-result="${escapeHtml(coverage.schemaVersion)}" data-declared-list="true"${anchor}><div class="panel__heading"><div><h2>${escapeHtml(input.recordLabel)}</h2></div><div class="list-summary"><span class="list-count" data-list-total="${String(coverage.totalCount)}">${escapeHtml(count)}</span>${range ? `<span class="muted">${escapeHtml(range)}</span>` : ''}${exportControl}</div></div>${withheld}${controls}${empty}${input.records.length > 0 ? `<div class="data-table-wrap" data-list-rendering="responsive-single"${list.compact ? ` data-compact="${escapeHtml(list.compact)}"` : ''}><table><thead><tr>${input.selectionCell ? '<th scope="col">Select</th>' : ''}${header}${rowActions ? '<th scope="col">Actions</th>' : ''}</tr></thead><tbody>${body}</tbody></table></div>` : ''}${paging}</section>`;
+}
+
+export function renderDocumentSection(
+  view: RuntimeViewContract.RequestRuntimeView,
+  target: {
+    surfaceId: string;
+    recordId: string;
+    companyId: string | null;
+    entityId: string;
+  },
+  scannerLabel: string | null,
+): string {
+  const projection = view.projections.documents;
+  const declaration = projection
+    ? DocumentsProjectionSchema.parse(projection.payload)
+    : null;
+  const fields =
+    declaration?.fields.filter((field) => field.entityId === target.entityId) ??
+    [];
+  const path =
+    '/documents?' +
+    new URLSearchParams({
+      surface: target.surfaceId,
+      record: target.recordId,
+      ...(target.companyId ? { company: target.companyId } : {}),
+    });
+  const section = (field?: (typeof fields)[number]) => {
+    const categories =
+      declaration?.categories.filter(
+        (category) => category.fieldId === field?.fieldId,
+      ) ?? [];
+    const label = escapeHtml(field?.label ?? 'Attachments');
+    const id = escapeHtml(field?.fieldId ?? '');
+    const categoryControl = categories.length
+      ? `<label>Category <select name="category" required><option value="">Choose a category</option>${categories.map((category) => `<option value="${escapeHtml(category.categoryId)}" data-image="${category.contentTypes.some((type) => type.startsWith('image/'))}">${escapeHtml(category.label)}</option>`).join('')}</select></label>`
+      : '';
+    const form = scannerLabel
+      ? `<form data-document-upload data-field="${id}">${categoryControl}<label>Choose file <input type="file" name="file" accept="application/pdf,image/jpeg,image/png"></label><label data-document-camera hidden>Take photo <input type="file" name="photo" accept="image/jpeg,image/png" capture="environment"></label><button type="submit">Attach</button></form>`
+      : '';
+    return `<div data-document-field="${id}"><h3>${label}</h3>${field ? `<p>Up to ${field.maxCount} files${field.required ? ' · Required for document tasks' : ''}</p>` : ''}<ul data-document-rows></ul>${form}</div>`;
+  };
+  return `<section class="panel data-panel"><details data-documents="${escapeHtml(path)}"><summary><h2>Files</h2></summary>${scannerLabel ? `<p>${escapeHtml(scannerLabel)}</p>` : ''}<p role="status" data-documents-status></p>${section()}${fields.map((field) => section(field)).join('')}</details></section>`;
 }

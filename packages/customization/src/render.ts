@@ -16,6 +16,18 @@ export const RENDERED_DIFF_VERSION =
 type Json = Record<string, unknown>;
 
 export interface DiffDefinition {
+  readonly documentFields?: readonly {
+    readonly fieldId: string;
+    readonly entityId: string;
+    readonly label: string;
+    readonly maxCount: number;
+    readonly required: boolean;
+    readonly allowedCategoryIds: readonly string[];
+  }[];
+  readonly documentCategories?: readonly {
+    readonly categoryId: string;
+    readonly label: string;
+  }[];
   readonly entities: readonly Json[];
   readonly fields: readonly Json[];
   readonly operations?: readonly Json[];
@@ -74,6 +86,24 @@ export function renderReleaseDiff(input: {
         ?.label ?? entityId,
     );
   const lines: string[] = [];
+  for (const field of to.documentFields ?? []) {
+    if (from.documentFields?.some(({ fieldId }) => fieldId === field.fieldId))
+      continue;
+    const names = field.allowedCategoryIds.map(
+      (id) =>
+        to.documentCategories?.find(({ categoryId }) => categoryId === id)
+          ?.label ?? id,
+    );
+    lines.push(
+      `Adds the files field “${field.label}” to ${entityLabel(to, field.entityId)}. Maximum ${field.maxCount}. ${field.required ? 'Required to complete a document task.' : 'Optional.'} ${names.length ? `Categories ${names.join(', ')}.` : 'Accepts uncategorized files.'}`,
+    );
+  }
+  for (const field of from.documentFields ?? []) {
+    if (!to.documentFields?.some(({ fieldId }) => fieldId === field.fieldId))
+      lines.push(
+        `Removes the files field “${field.label}” from ${entityLabel(from, field.entityId)}. Its files stay in retention.`,
+      );
+  }
   const operandLabel = (
     operand: CalculatedDisplayField['expression']['left'],
   ) =>

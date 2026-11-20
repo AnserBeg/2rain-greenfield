@@ -68,7 +68,13 @@ labelled local demo. The connector worker defaults to off. CI and all other envi
 bind only network-free fakes. The runtime can currently assert another principal. Its ability
 to fabricate connection authority or a confirmation is filed under [sign-in item 1](../execution/current-plan-archive.md#filed-during-the-freeze).
 
-In that demo an authorized administrator chooses a registered provider in company settings, binds the
+SIGNIN-1 slice 2 must prove the decision and verification boundaries before the pilot can
+make real email or maps calls. Connecting an account and confirming an outward send in
+the pilot each consume a proof for the exact reviewed terms. Connector consent, installation,
+delivery and document gates still apply.
+[Staff decision authority](ADR-0081-staff-sign-in-and-decision-authority.md#human-decisions-and-activation-evidence)
+
+In the demo an authorized administrator chooses a registered provider in company settings, binds the
 required credential slots, checks the account identity and enables the approved operations.
 Display the company, provider account, allowed purposes, status and last check. Enabling,
 rotating, pausing and revoking are audited. The host derives tenant and environment from
