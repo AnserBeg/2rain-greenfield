@@ -397,9 +397,18 @@ test(
             return Buffer.from(await response.arrayBuffer());
           };
           const firstBytes = await bytes(attachment);
-          assert.match(
-            firstBytes.toString('latin1'),
-            /\(Default legal entity\)/u,
+          const company = await app.runtime.entry.run({}, (view) =>
+            app.runtime.queryGateway.invoke(view, {
+              schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+              queryId: id('query', 'legal_entity_get'),
+              arguments: { recordId: companyId },
+            }),
+          );
+          const companyName =
+            company.records[0]?.values[id('field', 'legal_entity_name')];
+          assert.equal(typeof companyName, 'string');
+          assert.ok(
+            firstBytes.toString('latin1').includes(`(${companyName})`),
             'issued PDF title should use the company record name',
           );
           assert.match(
@@ -656,16 +665,6 @@ test(
               }
             },
           );
-          const company = await app.runtime.entry.run({}, (view) =>
-            app.runtime.queryGateway.invoke(view, {
-              schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
-              queryId: id('query', 'legal_entity_get'),
-              arguments: { recordId: companyId },
-            }),
-          );
-          const companyName =
-            company.records[0]?.values[id('field', 'legal_entity_name')];
-          assert.equal(typeof companyName, 'string');
           const expectedInput = {
             revision: issuedPo.revision,
             brandRevision: companyDraft.brandRevision,
