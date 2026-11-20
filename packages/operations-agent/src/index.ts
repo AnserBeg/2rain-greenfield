@@ -51,6 +51,9 @@ export {
 } from './keys.js';
 export {
   anthropicModel,
+  assistantRoute,
+  SONNET_MODEL,
+  SONNET_PRICES,
   DEFAULT_ANTHROPIC_MODEL,
   type AnthropicModelOptions,
 } from './anthropic-model.js';
