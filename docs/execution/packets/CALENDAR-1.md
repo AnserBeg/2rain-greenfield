@@ -1,14 +1,16 @@
 # CALENDAR-1 · Board, calendar and resource timeline
 
-Slice 0 proposes [ADR-0086](../../decisions/ADR-0086-board-calendar-and-resource-timeline.md) for the orchestrator’s Fable read. The three executable slices follow its ruling.
+Slice 0 established [ADR-0086](../../decisions/ADR-0086-board-calendar-and-resource-timeline.md) with the owner’s reference survey. Fable’s verdict was ACCEPT WITH AMENDMENTS; the orchestrator accepted A1–A14. The delivery order is 1a (Board form), 1b (pointer), 2 (Calendar), 3a (generic timeline) and 3b (Booking timeline).
 
 ## Design decisions
 
 - The customer adds a view to a record type in Customize. Each archetype has fixed anatomy, a compact presentation and a bounded Semantic Query.
 - A board drop enters a Task for the record’s declared transition. A calendar reads a date or interval. The timeline can change either eligible edge through Booking’s Change interval operation. Extend and Shorten each require explicit confirmation.
 - The proposal extends ADR-0036 with one pointer gesture over server-rendered targets. The ordinary form supports the same choices using a keyboard, touch or JavaScript-disabled browser.
-- UI-COMPOSE-1 supplies Record, Task and brand contracts. Timeline uses BOOKING-1 slice 1’s interval writer and slice 2’s resource-window query with separate availability and detail permissions.
+- Slice 1a uses the existing INTERACT-1 Task. It has no dependency on UI-COMPOSE-1 pop-ups. ADR-0082’s amendment re-read returned ACCEPT WITH AMENDMENTS. BOOKING-1 is applying A8, the `booking.resourceWindow/v1` contract. Slice 3b waits for BOOKING-1 slices 1a, 2 and 3. The Booking calendar separately requires its owner-collection window query.
 - Each executable capability takes its reader rung at merge. This design allocates no rung or migration.
+
+Tenant date-time/interval field authoring is queued separately with its own patch member and rung. Plan §8.6 item-4 evidence pairs the reference survey with the executable slice 1a walkthrough; that walkthrough is due with 1a.
 
 ## Gates
 

@@ -16,10 +16,13 @@ export {
   withArchivedCustomizationRuntime,
 } from './archived-runtime-process.js';
 
-export async function assertArchivedTenantEnvelope(run: ArchivedRunner) {
+export async function assertArchivedTenantEnvelope(
+  run: ArchivedRunner,
+  entity = 'northstar.app:entity.item',
+) {
   const patch = parseCustomizationPatch({
     kind: 'addField',
-    entity: 'northstar.app:entity.item',
+    entity,
     field: { label: 'Inspection notes', type: 'text' },
   });
   assert.ok(patch.status === 'parsed');
@@ -62,6 +65,6 @@ console.log(JSON.stringify({ request, release: result.steps[0].release }));
   assert.equal(
     canonicalize(envelope),
     canonicalize(historical),
-    'both tenant runners reproduce the entire v6 envelope with the optional declaration absent',
+    'both tenant runners reproduce the entire v6 envelope',
   );
 }
