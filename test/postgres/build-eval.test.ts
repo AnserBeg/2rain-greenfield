@@ -256,7 +256,9 @@ test(
 
       const summary = summarize(results);
       assert.equal(summary.ran, 6);
-      assert.equal(summary.falseRefusals, 1);
+      // M01's scripted refusal, and the parser's refusal of H01's grouped
+      // permission change: both refuse a request the platform can draft.
+      assert.equal(summary.falseRefusals, 2);
       assert.equal(summary.injected, 1);
     });
   },

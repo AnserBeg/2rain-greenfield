@@ -528,13 +528,47 @@ export async function scoreModule(
       )
         miss(`${label}: "${wanted.names[0]!}" absent on the record`);
 
+    // Lines first: a parent in a terminal state may refuse new lines, so the
+    // line is added while the record is in its initial state.
+    // One line under the record, listed under its parent.
+    const lineLocal = `${local}_lines`;
+    const lines = createOp(after, lineLocal);
+    if (spec.lines && !lines) miss(`${label}: no line table`);
+    if (lines?.inputContract && (spec.lines || !createOp(before, lineLocal))) {
+      const parent = `${NS}:relation.${lineLocal}_parent`;
+      for (const wanted of spec.lines?.fields ?? [])
+        if (
+          !lines.inputContract.fields.some(
+            (f) =>
+              nameMatches(
+                wanted.names,
+                localOf(f.fieldId).slice(lineLocal.length + 1),
+              ) && fieldKinds[wanted.type].includes(f.fieldKind),
+          )
+        )
+          miss(`${label}: line field "${wanted.names[0]!}" missing`);
+      try {
+        const line = await createRecord(world, after, lineLocal, {
+          [parent]: recordId,
+        });
+        const listed = await listRecords(world, lineLocal, {
+          relationId: parent,
+          recordId,
+        });
+        if (!listed.some((row) => row.recordId === line.recordId))
+          throw new Error('line not listed under its parent');
+      } catch (error) {
+        broke(`${label}: line not created: ${errorText(error)}`);
+      }
+    }
+
     // Lifecycle: the expected path, or (mechanically) any declared step.
     const moves = transitions(after, local);
     if (spec.lifecycle && !moves.length) miss(`${label}: no lifecycle`);
     if (moves.length) {
       const stateField = moves[0]!.effect.stateFieldId;
       let state = String(record.values[stateField] ?? '');
-      let revision = record.revision;
+      let revision = (await readRecord(world, local, recordId)).revision;
       const path = spec.lifecycle ?? [];
       if (
         path.length &&
@@ -576,38 +610,6 @@ export async function scoreModule(
           );
           break;
         }
-      }
-    }
-
-    // Lines: one line under the record, listed under its parent.
-    const lineLocal = `${local}_lines`;
-    const lines = createOp(after, lineLocal);
-    if (spec.lines && !lines) miss(`${label}: no line table`);
-    if (lines?.inputContract && (spec.lines || !createOp(before, lineLocal))) {
-      const parent = `${NS}:relation.${lineLocal}_parent`;
-      for (const wanted of spec.lines?.fields ?? [])
-        if (
-          !lines.inputContract.fields.some(
-            (f) =>
-              nameMatches(
-                wanted.names,
-                localOf(f.fieldId).slice(lineLocal.length + 1),
-              ) && fieldKinds[wanted.type].includes(f.fieldKind),
-          )
-        )
-          miss(`${label}: line field "${wanted.names[0]!}" missing`);
-      try {
-        const line = await createRecord(world, after, lineLocal, {
-          [parent]: recordId,
-        });
-        const listed = await listRecords(world, lineLocal, {
-          relationId: parent,
-          recordId,
-        });
-        if (!listed.some((row) => row.recordId === line.recordId))
-          throw new Error('line not listed under its parent');
-      } catch (error) {
-        broke(`${label}: line not created: ${errorText(error)}`);
       }
     }
 
