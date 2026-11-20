@@ -125,7 +125,9 @@ try {
                   'Activation verification failed. Run customize recover to retry or customize recover --revert to restore the previous release.',
                 ]
               : []),
-            ...(status.upgradeRefusal.issues ?? []),
+            ...(status.upgradeRefusal.report
+              ? [JSON.stringify(status.upgradeRefusal.report)]
+              : (status.upgradeRefusal.issues ?? [])),
           ]
         : []),
       status.historyUnavailable
