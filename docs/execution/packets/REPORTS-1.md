@@ -36,4 +36,6 @@
 
 Use the existing List and Home grammar. A group has typed keys, currency and measures. A report's stable ID survives renaming. The proposed 91+ label puts day 90 in one band. The ADR assigns limits for review and leaves scalar reader and migration numbers to executable merges. No runtime proof is claimed at this checkpoint.
 
+Open question for the design read: may a report's missing index on an existing table use the same ceiling-bounded locking build (ADR-0087 A4, PR-6c path) through the report's compiled storage transition, rather than refusing until an online-build transition exists?
+
 The local record check passed. All 24 jobs passed at `385e2f77`. The docs-only synchronization took ADR-0089 after COMMS-1 landed. [Packet CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44768627224)
