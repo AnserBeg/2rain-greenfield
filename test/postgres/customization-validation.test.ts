@@ -369,35 +369,26 @@ test(
           assert.ok(document.status === 'drafted', JSON.stringify(document));
           await opened.service.approve(document.patchId);
           await opened.service.activate(document.patchId);
-          const { layouts } = await opened.service.targets();
-          const form = layouts?.find(
-            (t) =>
-              t.body.surfaceId === 'northstar.app:surface.item_form' &&
-              t.body.mode === 'create',
-          );
-          const detail = layouts?.find(
-            (t) =>
-              t.body.surfaceId === 'northstar.app:surface.item_detail' &&
-              t.body.mode === 'detail',
-          );
-          assert.ok(form && detail);
           const { layoutCommand } =
             await import('../../packages/customization/src/layout-revision.js');
-          const draft = await opened.service.draft(
-            {
-              kind: 'changeSet',
-              patches: [form, detail].map((target) =>
-                layoutCommand(target, {
-                  action: 'rename',
-                  member: target.body.sections[0]!.id,
-                  label: 'Item identification',
-                }),
-              ),
-            },
-            'visualBuilder',
-          );
-          assert.ok(draft.status === 'drafted', JSON.stringify(draft));
-          await opened.service.approve(draft.patchId);
+          const rename = async (
+            surfaceId: string,
+            mode: 'create' | 'detail',
+          ) => {
+            const target = (await opened.service.targets()).layouts?.find(
+              (t) => t.body.surfaceId === surfaceId && t.body.mode === mode,
+            );
+            assert.ok(target);
+            const revision = layoutCommand(target, {
+              action: 'rename',
+              member: target.body.sections[0]!.id,
+              label: 'Item identification',
+            });
+            const draft = await opened.service.draft(revision, 'visualBuilder');
+            assert.ok(draft.status === 'drafted', JSON.stringify(draft));
+            await opened.service.approve(draft.patchId);
+            await opened.service.activate(draft.patchId);
+          };
           await withArchivedCustomizationRuntime(
             '840c1b48c9694e62fdb7e284fa5a8397a1360dfd',
             async (run) => {
@@ -408,20 +399,12 @@ test(
                   identity: app.runtime.identity,
                 });
               assert.equal((await read()).outcome, 'loaded');
-              await opened.service.activate(draft.patchId);
+              await rename('northstar.app:surface.item_detail', 'detail');
               const refused = await read();
               assert.equal(refused.code, 'UNSUPPORTED_RUNTIME_CAPABILITY');
               assert.match(
                 refused.message ?? '',
                 /surface-manifest requires version 28 and this runtime supports 27/u,
-              );
-              const form = await fetch(
-                app.baseUrl + '/?surface=northstar.app%3Asurface.item_form',
-              );
-              assert.equal(form.status, 200);
-              assert.match(
-                await form.text(),
-                /<legend>Item identification<\/legend>/u,
               );
               const item = app.seededRecords.find(
                 (row) =>
@@ -429,7 +412,10 @@ test(
               );
               assert.ok(item);
               const url = new URL('/', app.baseUrl);
-              url.searchParams.set('surface', detail.body.surfaceId);
+              url.searchParams.set(
+                'surface',
+                'northstar.app:surface.item_detail',
+              );
               url.searchParams.set('record', item.recordId);
               const page = await fetch(url);
               assert.equal(page.status, 200);
@@ -438,6 +424,15 @@ test(
               assert.match(
                 html,
                 /data-document-field="northstar.app:field.custom_item_evidence"/u,
+              );
+              await rename('northstar.app:surface.item_form', 'create');
+              const form = await fetch(
+                app.baseUrl + '/?surface=northstar.app%3Asurface.item_form',
+              );
+              assert.equal(form.status, 200);
+              assert.match(
+                await form.text(),
+                /<legend>Item identification<\/legend>/u,
               );
             },
           );
