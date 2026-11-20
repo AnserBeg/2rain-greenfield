@@ -7,7 +7,7 @@
       "claim": "A company-scoped approver cannot decide a shared plan.",
       "file": "db/migrations/0045_workflow_approval_target_scope.sql",
       "original": "          AND (membership.legal_entity_id IS NULL OR membership.legal_entity_id = target_scope.company_id)\n",
-      "replacement": "",
+      "replacement": "          AND (target_scope.company_id IS NULL OR membership.legal_entity_id IS NULL OR membership.legal_entity_id = target_scope.company_id)\n",
       "test": {
         "files": ["test/postgres/workflow-consumer.test.ts"]
       },
