@@ -1,6 +1,8 @@
 # CI-2 — Duration-balanced CI
 
-The final gate requires every job to succeed and every producer to supply unfiltered executed-file evidence for the same run and attempt.
+CI-3 retains this matrix as the full tier. [Tier selection, reachability and final dispatch](../evidence-on-demand.md#packet-and-main-ci).
+
+The full gate requires every job to succeed and every producer to supply unfiltered executed-file evidence for the same run and attempt.
 
 ## Shard assignments
 
