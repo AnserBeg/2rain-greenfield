@@ -2386,7 +2386,7 @@ test('addAddressField and addMapPlacement replay on a compatible base and identi
     );
     return requirement.minimumVersion;
   });
-  assert.deepEqual(floors, [30, 31]);
+  assert.deepEqual(floors, [31, 32]);
   const source = original.steps.at(-1)!.release;
   const replay = (next: typeof compatible) =>
     compileInSandbox({

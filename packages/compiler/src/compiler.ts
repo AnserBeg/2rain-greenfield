@@ -37,6 +37,7 @@ import {
   validateUnboundPermissionAcknowledgement,
 } from './conformance.js';
 import { compilerDiagnostic, finalizeDiagnostics } from './diagnostics.js';
+import { billingBindingProblem } from './billing.js';
 import { WorkflowGrantBindingError } from './workflows.js';
 import { compileDocuments } from './documents.js';
 import { requiredFormulaValidationOperationReader } from '../../canonical-model/src/formula-validation-reader.js';
@@ -436,6 +437,22 @@ function compileApplicationInternal(
       maximumDiagnostics,
     );
   }
+  const billingProblem = billingBindingProblem(packageRevision);
+  if (billingProblem)
+    return failure(
+      [
+        {
+          ...compilerDiagnostic(
+            'COMPILER_TYPE_INVALID',
+            'typeCheck',
+            '$.billingPlans',
+            null,
+          ),
+          rule: billingProblem,
+        },
+      ],
+      maximumDiagnostics,
+    );
   const documents = compileDocuments(packageRevision);
   if (documents?.message) {
     return failure(

@@ -28,7 +28,7 @@ import {
   withEphemeralPostgres,
 } from '../helpers/postgres.js';
 
-const previousReader = '2042780b';
+const previousReader = 'eda6d12f';
 const address = {
   kind: 'addAddressField',
   schemaVersion: 'v6',
