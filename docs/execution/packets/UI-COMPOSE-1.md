@@ -13,13 +13,13 @@ The orchestrator accepted ADR-0079 with Fable’s amendments on 2026-11-19.
 ## Slices
 
 - [Design with Fable’s amendments](../../decisions/ADR-0079-form-and-record-composition.md).
-- 1a derives slot and field inventories from the active package and stores a layout only when the owner adopts a revision. No database migration.
+- 1a derives slot and field inventories from the active package and stores a layout only when the owner adopts a revision. Layouts require Surface reader 28, above the attachment reader at 27. No database migration.
 - 1b adds disclosure, upgrade refusals and assistant discovery.
 - Shell branding and pop-up actions can land in either order. Document branding follows DOCS-1 templates.
 
 ## Gates and test it yourself
 
-Five focused tests fail on the preceding main and pass on slice 1a. They exercise persistent inventory, the before-and-after approval view, ordered replay, protected blocks, a generated Inspection with both reader requirements, and a calculated value whose read binding survives rearrangement. The PostgreSQL journey runs the preceding serving reader and compares complete tenant compiler envelopes. The browser journey uses the Vendor picker in its new section at desktop and compact widths.
+Six focused tests fail on the preceding main and pass on slice 1a. They exercise persistent inventory, the before-and-after approval view, ordered replay, protected blocks, a generated Inspection with both reader requirements, a calculated value whose read binding survives rearrangement, and the Files section on a composed record. The PostgreSQL journey loads attachments with reader 27, checks its refusal after a layout activates, and compares complete tenant compiler envelopes. The browser journey uses the Vendor picker in its new section at desktop and compact widths.
 
 In Customize, choose **Arrange a form or record page**, then the purchase order create form. Draft a section named **Delivery**, approve it and activate. Open the same arrangement and move **Vendor** into **Delivery**. Approve and activate. Open **Purchase orders → New**. Under **Delivery**, type a vendor name and select a result. Roll back the latest change to restore the vendor’s previous placement.
 
@@ -27,8 +27,8 @@ In Customize, choose **Arrange a form or record page**, then the purchase order 
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "UI-COMPOSE-1",
-  "base": "014fea1641953e41e49ccb642b3faf27c094a1a8",
-  "head": "525e47404bd2898b6691df3f08b12bfe05d9025c",
+  "base": "181aef42fddddc3bbc9bd1d164115f7e2ed05bd4",
+  "head": "8ad360aac51346ce18e72553946db50a4e766045",
   "changedPaths": [
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/document-editor.ts",
     "apps/web/src/ledger-styles.ts", "apps/web/src/surface-composition.ts", "apps/web/src/surface-contract.ts",
