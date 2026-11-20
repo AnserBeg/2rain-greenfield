@@ -540,14 +540,14 @@ test(
               WHERE n.nspname = 'north_star_module' AND c.relkind = 'r'
                 AND EXISTS (SELECT 1 FROM pg_attribute AS a
                              WHERE a.attrelid = c.oid AND a.attnum > 0
-                               AND format_type(a.atttypid, a.atttypmod) = 'varchar(240)')
+                               AND format_type(a.atttypid, a.atttypmod) = 'character varying(240)')
               ORDER BY c.oid DESC LIMIT 1`,
           );
           const table = `north_star_module.${tableRow.rows[0]!.table}`;
           const nameColumn = (
             await pool.query<{ attname: string }>(
               `SELECT attname FROM pg_attribute WHERE attrelid = $1::regclass
-                 AND format_type(atttypid, atttypmod) = 'varchar(240)'`,
+                 AND format_type(atttypid, atttypmod) = 'character varying(240)'`,
               [table],
             )
           ).rows[0]!.attname;
