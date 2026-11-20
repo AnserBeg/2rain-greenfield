@@ -228,10 +228,17 @@ DECLARE proof platform.staff_decision_proofs; s platform.staff_sessions; identit
 REVOKE ALL ON FUNCTION platform.staff_consume_decision(uuid,uuid,uuid,text,uuid,uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION platform.staff_consume_decision(uuid,uuid,uuid,text,uuid,uuid) TO north_star_activation_verifier;
 
--- Choosing pilot mode removes the legacy provisioning writers in this database.
--- This also applies to an existing pilot upgrading from slice 1.
-CREATE FUNCTION north_star_internal.staff_restrict_pilot_writers() RETURNS void
+-- Direct connector setup is available only after the installer claims demo mode.
+-- A pilot also gives release approval and activation to the independent verifier.
+CREATE FUNCTION north_star_internal.staff_configure_store_writers(store_mode text) RETURNS void
 LANGUAGE plpgsql SET search_path=pg_catalog,pg_temp AS $$ BEGIN
+  IF store_mode = 'demo' THEN
+    GRANT INSERT ON platform.address_installations,platform.address_installation_history TO north_star_runtime;
+    GRANT UPDATE (enabled,enrichment,period_calls,period_budget_micros) ON platform.address_installations TO north_star_runtime;
+    RETURN; END IF;
+  REVOKE INSERT ON platform.address_installations,platform.address_installation_history FROM north_star_runtime;
+  REVOKE UPDATE (enabled,enrichment,period_calls,period_budget_micros) ON platform.address_installations FROM north_star_runtime;
+  IF store_mode IS DISTINCT FROM 'pilot' THEN RETURN; END IF;
   REVOKE INSERT ON platform.release_approvals,platform.release_activation_attempts,platform.release_activation_phase_receipts,
     platform.release_activation_history,platform.release_activation_swap_receipts,platform.release_activation_attempt_outcomes,
     platform.release_activation_outbox,platform.release_activation_verification_receipts,platform.release_activation_reconciliation_starts,
@@ -244,16 +251,14 @@ LANGUAGE plpgsql SET search_path=pg_catalog,pg_temp AS $$ BEGIN
     platform.release_activation_outbox,platform.release_activation_verification_receipts,platform.release_activation_reconciliation_starts,
     platform.release_activation_reconciliation_alarms TO north_star_activation_verifier;
   GRANT UPDATE ON platform.active_release_pointers TO north_star_activation_verifier; END $$;
-REVOKE ALL ON FUNCTION north_star_internal.staff_restrict_pilot_writers() FROM PUBLIC;
-CREATE FUNCTION north_star_internal.staff_pilot_writers_trigger() RETURNS trigger LANGUAGE plpgsql
+REVOKE ALL ON FUNCTION north_star_internal.staff_configure_store_writers(text) FROM PUBLIC;
+CREATE FUNCTION north_star_internal.staff_store_writers_trigger() RETURNS trigger LANGUAGE plpgsql
 SET search_path=pg_catalog,pg_temp AS $$ BEGIN
-  PERFORM north_star_internal.staff_restrict_pilot_writers(); RETURN NEW; END $$;
-REVOKE ALL ON FUNCTION north_star_internal.staff_pilot_writers_trigger() FROM PUBLIC;
-CREATE TRIGGER staff_pilot_writers AFTER INSERT ON north_star_internal.staff_store_mode
-  FOR EACH ROW WHEN (NEW.mode='pilot') EXECUTE FUNCTION north_star_internal.staff_pilot_writers_trigger();
-DO $$ BEGIN
-  IF EXISTS (SELECT FROM north_star_internal.staff_store_mode WHERE mode='pilot') THEN
-    PERFORM north_star_internal.staff_restrict_pilot_writers(); END IF; END $$;
+  PERFORM north_star_internal.staff_configure_store_writers(NEW.mode); RETURN NEW; END $$;
+REVOKE ALL ON FUNCTION north_star_internal.staff_store_writers_trigger() FROM PUBLIC;
+CREATE TRIGGER staff_store_writers AFTER INSERT ON north_star_internal.staff_store_mode
+  FOR EACH ROW EXECUTE FUNCTION north_star_internal.staff_store_writers_trigger();
+SELECT north_star_internal.staff_configure_store_writers((SELECT mode FROM north_star_internal.staff_store_mode));
 
 ALTER TABLE platform.release_approvals ADD COLUMN staff_proof_id uuid REFERENCES platform.staff_decision_proofs;
 CREATE UNIQUE INDEX staff_approval_per_target ON platform.release_approvals(staff_proof_id,preparation_id) WHERE staff_proof_id IS NOT NULL;

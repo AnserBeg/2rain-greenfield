@@ -274,6 +274,19 @@ test('staff sign-in integrity under the pilot database roles', async (suite) => 
       } finally {
         setup.release();
       }
+      const checkConnectorWrites = async (allowed: boolean) => {
+        const grants = await pool.query(
+          `SELECT has_table_privilege('north_star_runtime','platform.address_installations','INSERT') AS install,
+                  has_column_privilege('north_star_runtime','platform.address_installations','enabled','UPDATE') AS enable,
+                  has_table_privilege('north_star_runtime','platform.address_installation_history','INSERT') AS record`,
+        );
+        assert.deepEqual(grants.rows[0], {
+          install: allowed,
+          enable: allowed,
+          record: allowed,
+        });
+      };
+      await checkConnectorWrites(false);
       const t = randomUUID(),
         e = randomUUID();
       const realm: StaffRealm = {
@@ -293,6 +306,7 @@ test('staff sign-in integrity under the pilot database roles', async (suite) => 
       );
       const owner = { name: 'Owner', contact: 'attended' };
       await bootstrapStaff(pool, realm, owner);
+      await checkConnectorWrites(false);
       const p = (
         await pool.query<{ principal_id: string }>(
           "UPDATE platform.staff_accounts SET status='active' RETURNING principal_id",
@@ -377,6 +391,7 @@ test('staff sign-in integrity under the pilot database roles', async (suite) => 
             );
             await pool.query('TRUNCATE north_star_internal.staff_store_mode');
             await claim('demo');
+            await checkConnectorWrites(true);
             const other = randomUUID();
             await pool.query(
               'INSERT INTO platform.environments(tenant_id,id,slug) VALUES($1,$2,$2::uuid::text)',
@@ -388,6 +403,7 @@ test('staff sign-in integrity under the pilot database roles', async (suite) => 
             );
             await pool.query('TRUNCATE north_star_internal.staff_store_mode');
             await claim('pilot');
+            await checkConnectorWrites(false);
           },
         );
         await suite.test(
