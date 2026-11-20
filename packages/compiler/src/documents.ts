@@ -20,7 +20,7 @@ export function compileDocuments(
     return null;
 
   const calculatedFields = definition.calculatedDisplayFields ?? [];
-  const ids = new Set(
+  const ids = new Set<string>(
     [...definition.fields, ...calculatedFields].map(({ fieldId }) => fieldId),
   );
   const labels = new Set([
@@ -121,8 +121,9 @@ export function compileDocuments(
         ),
     );
     const query =
-      recordQueries.find((entry) => !entry.readModel) ??
-      (templateEntityIds.has(entityId) ? recordQueries[0] : undefined);
+      recordQueries.find(
+        (entry) => !('readModel' in entry) || !entry.readModel,
+      ) ?? (templateEntityIds.has(entityId) ? recordQueries[0] : undefined);
     if (!entity || entity.lifecycle !== 'active' || !query) {
       if (!activeTemplateEntities.has(entityId) && !fileEntityIds.has(entityId))
         continue;
