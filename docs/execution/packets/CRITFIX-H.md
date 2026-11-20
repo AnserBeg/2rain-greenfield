@@ -16,7 +16,7 @@ Critical migration and grants. The packet is open pending the item 8 completion 
 Run `node --import tsx --test test/integration/document-http.test.ts` and `node --import tsx --test test/postgres/document-attachments.test.ts` with Docker available.
 ## Gates
 
-Eight regression controls failed against unchanged main code at 552b13d8. [Baseline run](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44685966955). Packet CI and integration are pending.
+Eight regression controls failed against unchanged main code at 552b13d8. [Baseline run](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44685966955). [Packet CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44692069750) covers the combined migrations. Integration awaits the item 8 ruling.
 ```record-claim
 {
   "schemaVersion":"northstar.record-claim/v1",
