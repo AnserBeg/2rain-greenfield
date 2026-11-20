@@ -5,7 +5,7 @@
     {
       "name": "documents-download-revocation",
       "claim": "A revoked byte-read grant withholds a previously issued attachment URL.",
-      "file": "db/migrations/0050_generated_document_sources.sql",
+      "file": "db/migrations/0051_generated_document_sources.sql",
       "original": "    AND platform.document_granted(scope, 'northstar.documents:permission.' || action, 'northstar.documents:resource.attachments')",
       "replacement": "    AND (action = 'download' OR platform.document_granted(scope, 'northstar.documents:permission.' || action, 'northstar.documents:resource.attachments'))",
       "test": {
@@ -23,7 +23,7 @@
     {
       "name": "documents-publication-audit",
       "claim": "Every published version is accounted for by a committed attachment audit row.",
-      "file": "db/migrations/0050_generated_document_sources.sql",
+      "file": "db/migrations/0051_generated_document_sources.sql",
       "original": "  INSERT INTO platform.document_attachment_audit (tenant_id,environment_id,link_id,operation_id)\n    VALUES (i.tenant_id,i.environment_id,published.link_id,replace(s.entity_id, ':entity.',\n      CASE WHEN s.generated_source IS NULL THEN ':operation.document_attach_' ELSE ':operation.document_generate_' END));\n",
       "replacement": "",
       "test": {
@@ -41,7 +41,7 @@
     {
       "name": "documents-stored-quota",
       "claim": "Publication refuses even a duplicate when the stored-byte quota is full.",
-      "file": "db/migrations/0050_generated_document_sources.sql",
+      "file": "db/migrations/0051_generated_document_sources.sql",
       "original": "    + s.byte_length > 104857600 THEN",
       "replacement": "    + s.byte_length > 2147483647 THEN",
       "test": {
@@ -59,7 +59,7 @@
     {
       "name": "generated-pdf-source-revocation",
       "claim": "When a reader loses a bound source, its issued PDF cannot be downloaded.",
-      "file": "db/migrations/0050_generated_document_sources.sql",
+      "file": "db/migrations/0051_generated_document_sources.sql",
       "original": "    AND platform.document_generated_allowed(v.generated_source,v.release_id,scope,entity,record_key,false) AND (v.owner_scope,v.entity_id,v.record_id,v.link_id,v.version_id) = (scope,entity,record_key,link,version)",
       "replacement": "    AND (v.owner_scope,v.entity_id,v.record_id,v.link_id,v.version_id) = (scope,entity,record_key,link,version)",
       "test": {
@@ -77,7 +77,7 @@
     {
       "name": "generated-pdf-company-brand-source-revocation",
       "claim": "Company-brand source revocation withholds the previously issued PDF.",
-      "file": "db/migrations/0050_generated_document_sources.sql",
+      "file": "db/migrations/0051_generated_document_sources.sql",
       "original": "    AND platform.document_source_allowed(app, issued_app, storage, brand, 'shared',\n      'northstar.app:entity.legal_entity', scope::uuid, verify_revision)",
       "replacement": "",
       "test": {
@@ -131,7 +131,7 @@
     {
       "name": "documents-sql-page-size",
       "claim": "Node buffers at most the requested attachment page and one lookahead row.",
-      "file": "db/migrations/0050_generated_document_sources.sql",
+      "file": "db/migrations/0051_generated_document_sources.sql",
       "original": " LIMIT greatest(1, least(page_size, 100))",
       "replacement": "",
       "test": {
