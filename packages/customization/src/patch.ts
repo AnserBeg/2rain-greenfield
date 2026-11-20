@@ -1,4 +1,5 @@
 import { PopupRevisionSchema } from '../../canonical-model/src/popup-actions.js';
+import { BoardViewRevisionSchema } from './board-revision.js';
 import { LayoutRevisionSchema } from './layout-revision.js';
 import {
   CalculatedDisplayFieldDefinitionSchema,
@@ -208,6 +209,7 @@ const ChangeMemberSchema = z.discriminatedUnion('kind', [
     fieldId: canonicalId,
     sectionId: z.string().min(1).max(512),
   }),
+  BoardViewRevisionSchema,
   addRecordType,
   addField,
   addChoice,
@@ -326,6 +328,7 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'arrangeLayout',
   'addLayoutRevision',
   'addPopupActionRevision',
+  'addBoardViewRevision',
   'saveListView',
   'addValidation',
   'addCalculatedDisplayField',

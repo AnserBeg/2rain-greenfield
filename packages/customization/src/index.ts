@@ -1,3 +1,4 @@
+export * from './board-revision.js';
 export * from './layout-revision.js';
 export * from './apply.js';
 export * from './candidate.js';

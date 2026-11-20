@@ -4,6 +4,11 @@ import {
   popupBindingsProblem,
 } from './popup-admission.js';
 import {
+  boardBindingsProblem,
+  boardDeclarationProblem,
+  hasBoardDeclaration,
+} from './board-admission.js';
+import {
   BOOKING_OPERATION_READER,
   bookingCatalogTerms,
   bookingDeclarationProblem,
@@ -591,6 +596,7 @@ function verifyCompiledRelease(
       layoutDefinition.surfaces.some(
         (s) => isRecord(s) && Object.hasOwn(s, 'popupActions'),
       )) ||
+    hasBoardDeclaration(layoutDefinition) ||
     declaredLayouts(isRecord(layoutDefinition) ? layoutDefinition.surfaces : [])
       .length > 0;
   const surfaceReference = manifest.projections.find(
@@ -759,11 +765,17 @@ function verifyCompiledRelease(
           'BILLING_PLAN_MISMATCH',
           'The billing plan or reader floor disagrees with the release.',
         );
-      const problem = layoutDeclarationProblem(
-        layoutDefinition,
-        payload,
-        reference.requiredRuntimeCapability.minimumVersion,
-      );
+      const problem =
+        boardDeclarationProblem(
+          layoutDefinition,
+          payload,
+          reference.requiredRuntimeCapability.minimumVersion,
+        ) ??
+        layoutDeclarationProblem(
+          layoutDefinition,
+          payload,
+          reference.requiredRuntimeCapability.minimumVersion,
+        );
       if (problem)
         throw integrity('LAYOUT_PROJECTION_CONTRACT_MISMATCH', problem);
     }
@@ -820,12 +832,19 @@ function verifyCompiledRelease(
     );
     if (popupProblem)
       throw integrity('POPUP_PROJECTION_CONTRACT_MISMATCH', popupProblem);
-    const problem = layoutBindingsProblem(
-      payload(PROJECTION_FAMILY_IDS.surfaceManifest),
-      surfaceReference!.requiredRuntimeCapability.minimumVersion,
-      payload(PROJECTION_FAMILY_IDS.operationCatalog),
-      payload(PROJECTION_FAMILY_IDS.queryCatalog),
-    );
+    const problem =
+      boardBindingsProblem(
+        payload(PROJECTION_FAMILY_IDS.surfaceManifest),
+        surfaceReference!.requiredRuntimeCapability.minimumVersion,
+        payload(PROJECTION_FAMILY_IDS.operationCatalog),
+        payload(PROJECTION_FAMILY_IDS.queryCatalog),
+      ) ??
+      layoutBindingsProblem(
+        payload(PROJECTION_FAMILY_IDS.surfaceManifest),
+        surfaceReference!.requiredRuntimeCapability.minimumVersion,
+        payload(PROJECTION_FAMILY_IDS.operationCatalog),
+        payload(PROJECTION_FAMILY_IDS.queryCatalog),
+      );
     if (problem)
       throw integrity('LAYOUT_PROJECTION_CONTRACT_MISMATCH', problem);
   }

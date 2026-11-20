@@ -179,7 +179,8 @@ export async function resolveWorkspaceEntry(
     mayDefault:
       shared ||
       surface.launcher !== undefined ||
-      (surface.surfaceRole === 'list' && !url.searchParams.has('record')),
+      ((surface.surfaceRole === 'list' || surface.archetype === 'board') &&
+        !url.searchParams.has('record')),
   });
   if (explicit.length) {
     // Explicit context is validated against current active authorized membership.

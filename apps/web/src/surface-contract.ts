@@ -6,6 +6,8 @@ import {
 } from '../../../packages/canonical-model/src/layout.js';
 import { recordCatalogParse } from '../../../packages/runtime/src/catalog-parse-count.js';
 import {
+  SurfaceBoardSchema,
+  type SurfaceBoard,
   canonicalize,
   SurfaceCompositionSchema,
   type SurfaceComposition,
@@ -53,7 +55,14 @@ export {
 type SurfaceManifestPayloadVersion =
   (typeof SUPPORTED_SURFACE_MANIFEST_PAYLOAD_VERSIONS)[number];
 
-const archetypes = ['builder', 'home', 'list', 'record', 'task'] as const;
+const archetypes = [
+  'board',
+  'builder',
+  'home',
+  'list',
+  'record',
+  'task',
+] as const;
 const lifecycleValues = ['active', 'retired'] as const;
 const statusRoles = ['attention', 'blocked', 'inProgress', 'success'] as const;
 const disclosureTiers = ['always', 'onDemand', 'progressive'] as const;
@@ -79,6 +88,7 @@ export const COMPILED_FIELD_KINDS = Object.freeze([
   'timeFieldType',
 ] as const);
 const slotsByArchetype = Object.freeze({
+  board: Object.freeze(['title', 'savedViews', 'stageSelector', 'columns']),
   builder: Object.freeze([
     'modeSwitch',
     'selection',
@@ -303,6 +313,7 @@ export function formFieldIds(
 
 export interface CompiledSurfaceDefinition {
   readonly popupActions?: readonly CompiledPopup[];
+  readonly board?: SurfaceBoard;
   readonly layouts?: readonly SurfaceLayout[];
   readonly list?: SurfaceList;
   /**
@@ -799,6 +810,8 @@ function surfaceAcceptsQuery(
   surface: CompiledSurfaceDefinition,
   queryType: RegisteredSemanticQueryDefinition['queryType'],
 ): boolean {
+  if (surface.archetype === 'board')
+    return !!surface.board && queryType === 'list';
   return surface.archetype === 'task' && surface.surfaceRole === null
     ? queryType === 'aggregate'
     : surface.surfaceRole === 'list'
@@ -1125,6 +1138,9 @@ function parseSurface(
   const fields = parseSurfaceFields(value, index);
 
   return Object.freeze({
+    ...(archetype === 'board'
+      ? { board: SurfaceBoardSchema.parse(value.board) }
+      : {}),
     ...(value.composition === undefined
       ? {}
       : { composition: SurfaceCompositionSchema.parse(value.composition) }),

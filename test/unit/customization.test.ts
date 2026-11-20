@@ -2569,3 +2569,148 @@ test('addAddressField and addMapPlacement replay on a compatible base and identi
     assert.match(JSON.stringify(rejected.diagnostics), new RegExp(base.root));
   }
 });
+
+test('Board revisions bind the tenant and purchase-order machines, cap facts, and preserve a boardless release', async () => {
+  const { draftBoardRevision } =
+    await import('../../packages/customization/src/board-revision.js');
+  const { BOARD_READER } =
+    await import('../../packages/canonical-model/src/board.js');
+  const tenant = patch({
+    kind: 'changeSet',
+    patches: [
+      {
+        kind: 'addRecordType',
+        label: 'Opportunity',
+        fields: [
+          { label: 'Name', type: 'text', required: true },
+          { label: 'Contact', type: 'text' },
+          { label: 'Channel', type: 'text' },
+          { label: 'Reference', type: 'text' },
+          { label: 'Territory', type: 'text' },
+        ],
+      },
+      {
+        kind: 'declareLifecycle',
+        entity: 'northstar.app:entity.custom_opportunity',
+        initial: 'Open',
+        states: [{ label: 'Open' }, { label: 'Won', role: 'success' }],
+        transitions: [{ from: 'Open', to: 'Won', label: 'Mark won' }],
+      },
+    ],
+  });
+  const before = applyCustomizationPatches(authored, [tenant]);
+  assert.ok(before.status === 'applied');
+  const def = normalizeApplicationPackage(before.authored);
+  const targets = customizationTargets(def).boards ?? [];
+  const po = targets.find(
+    (t) => t.body.listSurfaceId === 'northstar.app:surface.purchase_order_list',
+  );
+  const opportunity = targets.find(
+    (t) => t.body.entityId === 'northstar.app:entity.custom_opportunity',
+  );
+  assert.ok(
+    po && opportunity,
+    'both first-party and tenant record types offer Board',
+  );
+  assert.deepEqual(
+    po.body.moves.map((m) => m.operationId),
+    ['northstar.app:operation.purchase_order_draft_cancel'],
+  );
+  assert.deepEqual(
+    opportunity.body.moves.map((m) => m.label),
+    ['Mark won'],
+  );
+  for (const t of [po, opportunity]) {
+    assert.equal(t.body.grouping.version, 1);
+    assert.equal(t.body.grouping.kind, 'lifecycleState');
+    assert.ok(t.body.facts.length <= 3);
+  }
+  const boards = [po, opportunity].map((t) =>
+    draftBoardRevision(
+      t,
+      t.listLabel + ' board',
+      t.body.grouping.stages.map((s) => s.stateId),
+    ),
+  );
+  const built = applyCustomizationPatches(authored, [tenant, ...boards]);
+  assert.ok(
+    built.status === 'applied',
+    JSON.stringify(built.status === 'applied' ? null : built),
+  );
+  const after = normalizeApplicationPackage(built.authored);
+  for (const list of [po, opportunity]) {
+    assert.equal(
+      canonicalize(
+        after.surfaces.find((s) => s.surfaceId === list.body.listSurfaceId),
+      ),
+      canonicalize(
+        def.surfaces.find((s) => s.surfaceId === list.body.listSurfaceId),
+      ),
+    );
+  }
+  const compiled = await compileInSandbox({
+    ...sandboxRequest([tenant, ...boards]),
+    startAt: 2,
+  });
+  assert.ok(
+    compiled.status === 'compiled',
+    JSON.stringify(compiled.status === 'compiled' ? null : compiled),
+  );
+  const release = parseSerializedRelease(compiled.steps[0]!.release);
+  const { projectionPayload } = await import('../compiler/helpers.js');
+  const { boardDeclarationProblem, boardBindingsProblem } =
+    await import('../../packages/postgres-provider/src/board-admission.js');
+  const manifest = projectionPayload<{
+    surfaces: {
+      surfaceId: string;
+      board?: { body: { moves: { operationId: string }[] } };
+    }[];
+  }>(release.compiled, PROJECTION_FAMILY_IDS.surfaceManifest);
+  const operations = projectionPayload(
+    release.compiled,
+    PROJECTION_FAMILY_IDS.operationCatalog,
+  );
+  const queries = projectionPayload(
+    release.compiled,
+    PROJECTION_FAMILY_IDS.queryCatalog,
+  );
+  assert.equal(boardDeclarationProblem(after, manifest, BOARD_READER), null);
+  assert.equal(
+    boardBindingsProblem(manifest, BOARD_READER, operations, queries),
+    null,
+  );
+  assert.match(
+    boardDeclarationProblem(after, manifest, BOARD_READER - 1) ?? '',
+    /Board declarations/u,
+  );
+  const forged = structuredClone(manifest);
+  forged.surfaces.find(
+    (s) => s.surfaceId === boards[0]!.surfaceId,
+  )!.board!.body.moves[0]!.operationId =
+    'northstar.app:operation.purchase_order_release';
+  assert.match(
+    boardBindingsProblem(forged, BOARD_READER, operations, queries) ?? '',
+    /Board/u,
+  );
+  const surface = release.compiled.bundle.releaseManifest.projections.find(
+    (p) => p.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
+  )!;
+  assert.equal(surface.requiredRuntimeCapability.minimumVersion, BOARD_READER);
+  assert.match(
+    unsupportedRuntimeCapability(
+      surface.familyId,
+      surface.requiredRuntimeCapability,
+      {
+        [surface.familyId]: {
+          capabilityId: surface.requiredRuntimeCapability.capabilityId,
+          maximumSupportedVersion: BOARD_READER - 1,
+        },
+      },
+    ) ?? '',
+    /requires version/u,
+  );
+  assert.equal(
+    canonicalize(normalizeApplicationPackage(authored)),
+    new TextDecoder().decode(tip.normalizedDefinitionBytes),
+  );
+});

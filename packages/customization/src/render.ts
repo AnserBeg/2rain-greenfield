@@ -4,6 +4,7 @@ import {
   type LayoutBody,
   type LayoutDefinition,
   type SurfaceLayout,
+  type SurfaceBoard,
 } from '@north-star/canonical-model';
 import { arrangeableLayoutFields } from './layout-revision.js';
 import { createHash } from 'node:crypto';
@@ -132,6 +133,20 @@ export function renderReleaseDiff(input: {
       lines.push(
         `Removes workflow “${workflow.workflowId}” from future receipt events.`,
       );
+  }
+  for (const s of to.surfaces) {
+    const board = s.board as SurfaceBoard | undefined;
+    if (
+      !board ||
+      (
+        from.surfaces.find((old) => old.surfaceId === s.surfaceId)
+          ?.board as typeof board
+      )?.revisionId === board.revisionId
+    )
+      continue;
+    lines.push(
+      `${s.lifecycle === 'retired' ? 'Retires' : 'Publishes'} Board “${String(s.label)}” for ${entityLabel(to, board.body.entityId)}. Stages are ${board.body.grouping.stages.map((v) => v.label).join(', ')}. Available moves are ${board.body.moves.map((v) => v.label).join(', ') || 'none'}. Card facts are ${board.body.facts.map((f) => f.label).join(', ') || 'none'}.`,
+    );
   }
   for (const field of to.documentFields ?? []) {
     if (from.documentFields?.some(({ fieldId }) => fieldId === field.fieldId))

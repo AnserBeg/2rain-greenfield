@@ -440,7 +440,7 @@ test(
   { timeout: 600_000 },
   async () => {
     await withArchivedCustomizationRuntime(
-      '032b87c00df3ee22184685050b9cecc01c62cc59',
+      '8e3603b8e734a14ed350f2f2f7f64d1e2b034eb7',
       async (run) => {
         await assertArchivedTenantEnvelope(run);
         await withEphemeralPostgres(
@@ -512,7 +512,7 @@ test(
               assert.equal(refusal.code, 'UNSUPPORTED_RUNTIME_CAPABILITY');
               assert.match(
                 refusal.message ?? '',
-                /surface-manifest requires version 33 and this runtime supports 32/u,
+                /surface-manifest requires version 34 and this runtime supports 33/u,
               );
               const option = (
                 await opened.service.targets()
@@ -790,6 +790,81 @@ test(
           LINEAGE_INSTALL_VOLUME,
         );
       },
+    );
+  },
+);
+
+test(
+  'a preceding serving reader admits the same tenant until Board activation',
+  { timeout: 600_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'customize-board-reader',
+      async ({ connection }) => {
+        const options = {
+          databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
+          tenantSlug: 'customize-board-reader',
+        };
+        const app = await startComposedApplication({ ...options, port: 0 });
+        const opened = await openCustomizeService(options);
+        try {
+          const { draftBoardRevision } =
+            await import('../../packages/customization/src/board-revision.js');
+          const { BOARD_READER } =
+            await import('../../packages/canonical-model/src/board.js');
+          const target = (await opened.service.targets()).boards?.find(
+            (t) => t.body.entityId === 'northstar.app:entity.purchase_order',
+          );
+          assert.ok(target);
+          const revision = draftBoardRevision(
+            target,
+            'Purchase order board',
+            target.body.grouping.stages.map((s) => s.stateId),
+          );
+          const draft = await opened.service.draft(revision, 'visualBuilder');
+          assert.ok(draft.status === 'drafted', JSON.stringify(draft));
+          await opened.service.approve(draft.patchId);
+          await withArchivedCustomizationRuntime(
+            '032b87c00df3ee22184685050b9cecc01c62cc59',
+            async (run) => {
+              await assertArchivedTenantEnvelope(run);
+              const read = () =>
+                archivedRuntimeRead(run, {
+                  databaseUrl: options.databaseUrl,
+                  identity: app.runtime.identity,
+                });
+              assert.equal((await read()).outcome, 'loaded');
+              await opened.service.activate(draft.patchId);
+              const refused = await read();
+              assert.equal(refused.code, 'UNSUPPORTED_RUNTIME_CAPABILITY');
+              assert.ok(
+                refused.message?.includes(
+                  'surface-manifest requires version ' +
+                    BOARD_READER +
+                    ' and this runtime supports ' +
+                    (BOARD_READER - 1),
+                ),
+                refused.message,
+              );
+              const url = new URL('/', app.baseUrl);
+              url.searchParams.set('surface', revision.surfaceId);
+              const response = await fetch(url);
+              const html = await response.text();
+              assert.equal(
+                response.status,
+                200,
+                html.match(/data-diagnostic-code="[^"]+"/u)?.[0] ??
+                  html.replace(/<[^>]+>/gu, ' ').slice(-900),
+              );
+              assert.match(html, /<h1[^>]*>Purchase order board<\/h1>/u);
+            },
+          );
+        } finally {
+          await opened.close();
+          await app.close();
+        }
+      },
+      LINEAGE_INSTALL_VOLUME,
     );
   },
 );
