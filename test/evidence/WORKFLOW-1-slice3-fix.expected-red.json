@@ -129,7 +129,8 @@
       "original": "      impactAnalysisDerivation,\n      context.principalId,",
       "replacement": "      impactAnalysisDerivation,\n      context.requestId,",
       "test": {
-        "files": ["test/postgres/releases.test.ts"]
+        "files": ["test/postgres/releases.test.ts"],
+        "namePattern": "^durable verification evidence round-trips both partitions and refuses a corrupted derivation$"
       },
       "kills": [
         {
