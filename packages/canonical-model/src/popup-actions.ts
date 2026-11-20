@@ -13,7 +13,7 @@ import type {
   SurfaceDocumentEditor,
 } from './schemas.js';
 
-export const POPUP_READER = 35;
+export const POPUP_READER = 36;
 const version = z.literal('v6');
 const id = z
   .string()

@@ -64,7 +64,10 @@ import {
 } from './business-words.js';
 import { operationRisk, type OperationRisk, type RiskClass } from './risk.js';
 import { capabilityChildren } from '../../domain/src/app/capability-children.js';
-import { referenceTargets } from '../../domain/src/app/record-references.js';
+import {
+  parentEditApprovals,
+  referenceTargets,
+} from '../../domain/src/app/record-references.js';
 import { PO_APPROVAL_CAPABILITY_ID } from '../../domain/src/purchasing/approvals.js';
 import { effectiveApprovalArguments } from '../../domain/src/purchasing/approval-arguments.js';
 import { asData, type OperationsAgentToolId } from './tools.js';
@@ -1924,10 +1927,7 @@ export class OperationsAgentSession {
         check: 'lookup required',
         refused: `${where}: the target record ${target} did not come from a lookup for ${localName(entity)}.`,
       };
-    const countRelation =
-      prefix === 'stock_count_line'
-        ? `${entity.split(':')[0]}:relation.stock_count_line_session`
-        : null;
+    const parentEditApproval = parentEditApprovals.get(entity);
     const record = await readRecord(
       this.#options.runtime,
       view,
@@ -1936,30 +1936,33 @@ export class OperationsAgentSession {
       target,
       this.#options.companyId,
       false,
-      countRelation ?? undefined,
+      parentEditApproval?.relationId,
     );
     if (!record)
       throw new ToolInputError(
         `${where}: no ${localName(entity)} ${target} is visible to the person`,
       );
     this.#identities.set(`${entity}/${target}`, 'exact');
-    let needsCountApproval = false;
-    if (countRelation) {
-      const parent = record.relationLabels?.[countRelation]?.recordId;
+    let parentApprovalReason: string | undefined;
+    if (parentEditApproval) {
+      const parent =
+        record.relationLabels?.[parentEditApproval.relationId]?.recordId;
       const parentState = parent
         ? await readRecord(
             this.#options.runtime,
             view,
             catalog,
-            `${entity.split(':')[0]}:query.stock_count_get`,
+            parentEditApproval.queryId,
             parent,
             this.#options.companyId,
           )
         : null;
-      needsCountApproval =
-        parentState?.values[
-          `${entity.split(':')[0]}:field.stock_count_state`
-        ] !== `${entity.split(':')[0]}:option.stock_count_state_draft`;
+      if (
+        parentState?.values[parentEditApproval.stateFieldId] !==
+        parentEditApproval.reversibleStateId
+      ) {
+        parentApprovalReason = parentEditApproval.reason;
+      }
     }
     const evaluation = evaluateRegisteredOperationPrecondition(
       operation.precondition,
@@ -1972,10 +1975,10 @@ export class OperationsAgentSession {
         ...(effectKind(operation) === 'registeredCapabilityEffect'
           ? { children: await this.#children(view, catalog, operation, target) }
           : {}),
-        risk: needsCountApproval
+        risk: parentApprovalReason
           ? {
               riskClass: 'needsYes',
-              reason: 'Editing a count outside draft needs your OK.',
+              reason: parentApprovalReason,
             }
           : writeRisk(
               catalog,

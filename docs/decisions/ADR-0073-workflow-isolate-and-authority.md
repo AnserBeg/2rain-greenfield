@@ -78,6 +78,8 @@ operation or current policy requirement. Tier B facts can be produced only by
 the owning capability's whole Semantic Operation. Before N5, every
 confirmation-class call waits for explicit human approval of the exact plan.
 
+[ADR-0088 R1](ADR-0088-governed-communications-and-reminders.md#amendments-from-the-2026-11-20-fable-read) rules that communication prepare and notify take only stable IDs, accept no body-computed content and write only an inert draft or inbox row, so they are not confirmation-class. The send proof is the exact-values decision.
+
 ## Package content and authoring
 
 Use a typed `saveWorkflow` patch under CUSTOMIZE-4's bounded identifier check.

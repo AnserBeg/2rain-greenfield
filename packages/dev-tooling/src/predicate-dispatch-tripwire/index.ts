@@ -91,6 +91,14 @@ const recognizedDispatches: Readonly<Record<string, readonly PredicateKind[]>> =
       'anyPredicate',
       'notPredicate',
     ]),
+    // STOCK-COUNTS: the stock-count terminal-guard pin reads the guard's
+    // shape -- posted refused alone, or as one all-of arm of state refusals --
+    // and compares canonical roots; it evaluates nothing.
+    'packages/compiler/src/conformance.ts': signature([
+      'notPredicate',
+      'fieldComparisonPredicate',
+      'allPredicate',
+    ]),
     'packages/compiler/src/predicate-lowering.ts': signature([
       'booleanPredicate',
       'fieldComparisonPredicate',
@@ -124,11 +132,20 @@ const recognizedDispatches: Readonly<Record<string, readonly PredicateKind[]>> =
       'allPredicate',
       'notPredicate',
     ]),
+    // STOCK-COUNTS: the count guard's all(not(...)) arms, the stock documents
+    // List's any(type) filter, the commands' any(state) preconditions and
+    // Return to counting's all(state, not(reversal)) -- constructed, never
+    // evaluated.
     'packages/domain/src/inventory/definition.ts': signature([
       'notPredicate',
       'fieldComparisonPredicate',
+      'allPredicate',
       'fieldComparisonPredicate',
       'allPredicate',
+      'anyPredicate',
+      'notPredicate',
+      'allPredicate',
+      'anyPredicate',
     ]),
     'packages/postgres-provider/src/module-runtime-interpreter.ts': signature([
       'booleanPredicate',

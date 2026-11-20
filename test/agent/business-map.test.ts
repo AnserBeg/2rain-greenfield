@@ -791,12 +791,11 @@ test('X5: a status or state change, a settings update, and a create its maker ca
   assert.equal(
     await classOf(
       {
-        operationId: 'stock_count_update',
+        operationId: 'stock_count_review',
         target: PARTY,
-        patch: { state: 'reviewed', reason_code: 'review edit' },
       },
       {
-        [`${NS}:field.stock_count_state`]: `${NS}:option.stock_count_state_reviewed`,
+        [`${NS}:field.stock_count_state`]: `${NS}:option.stock_count_state_counting`,
       },
     ),
     'needsYes',
@@ -810,16 +809,16 @@ test('X5: a status or state change, a settings update, and a create its maker ca
     }),
     'needsYes',
   );
-  // Sending a reviewed count back to draft.
+  // Returning a reviewed count to counting through its governed action.
   assert.equal(
     await classOf(
       {
-        operationId: 'stock_count_update',
+        operationId: 'stock_count_reopen',
         target: PARTY,
-        patch: { state: 'draft' },
       },
       {
         [`${NS}:field.stock_count_state`]: `${NS}:option.stock_count_state_reviewed`,
+        [`${NS}:field.stock_count_kind`]: `${NS}:option.stock_count_kind_cycle`,
       },
     ),
     'needsYes',
