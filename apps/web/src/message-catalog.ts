@@ -545,6 +545,47 @@ export const SURFACE_MESSAGE_CATALOG = Object.freeze({
     sentence: 'Untrusted context rejected',
     subject: null,
   },
+  WORKFLOW_APPROVALS_EMPTY: {
+    consequence: 'advisory',
+    detail: 'Plans you can decide appear here with their exact inputs.',
+    nextAction: 'Open Customize to review live workflows.',
+    placements: ['page'],
+    sentence: 'No pending plans',
+    subject: null,
+  },
+  WORKFLOW_SUSPENDED_EMPTY: {
+    consequence: 'advisory',
+    detail: 'Suspended workflows you can retry or cancel appear here.',
+    nextAction: 'Check this list again after a release change.',
+    placements: ['page'],
+    sentence: 'No suspended runs',
+    subject: null,
+  },
+  WORKFLOW_APPROVAL_DECIDED: {
+    consequence: 'advisory',
+    detail: 'The workflow can resume with your decision.',
+    nextAction: 'Review any remaining pending plans.',
+    placements: ['page'],
+    sentence: 'Decision recorded',
+    subject: null,
+  },
+  WORKFLOW_APPROVAL_REFUSED: {
+    consequence: 'blocking',
+    detail:
+      'The plan may have changed or your current grants may no longer allow this decision.',
+    nextAction: 'Review the pending plans again.',
+    placements: ['page'],
+    sentence: 'Decision refused',
+    subject: null,
+  },
+  WORKFLOW_REMEDY_REFUSED: {
+    consequence: 'blocking',
+    detail: 'The selection or your current grants prevent this action.',
+    nextAction: 'Review the suspended runs again.',
+    placements: ['page'],
+    sentence: 'Run action refused',
+    subject: null,
+  },
 } as const satisfies Readonly<Record<string, SurfaceMessage>>);
 
 /**
