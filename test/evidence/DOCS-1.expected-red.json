@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "packet": "DOCS-1",
+  "entries": [
+    {
+      "name": "documents-download-revocation",
+      "claim": "A revoked byte-read grant withholds a previously issued attachment URL.",
+      "file": "packages/postgres-provider/src/document-attachments.ts",
+      "original": "      [DOCUMENT_PERMISSIONS.view, DOCUMENT_PERMISSIONS.download],\n",
+      "replacement": "      [DOCUMENT_PERMISSIONS.view],\n",
+      "test": {
+        "files": ["test/postgres/document-attachments.test.ts"],
+        "namePattern": "^internal files use live record authority, scoped dedupe, bounded ingress and immutable audit$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-attachments.test.ts",
+          "name": "internal files use live record authority, scoped dedupe, bounded ingress and immutable audit",
+          "expected": "a revoked download grant still returned bytes"
+        }
+      ]
+    },
+    {
+      "name": "documents-ownership-dedupe",
+      "claim": "Identical bytes in shared and company ownership consume distinct blobs.",
+      "file": "packages/postgres-provider/src/document-attachments.ts",
+      "original": "      const scope = row.company_id ?? 'shared';\n",
+      "replacement": "      const scope = 'shared';\n",
+      "test": {
+        "files": ["test/postgres/document-attachments.test.ts"],
+        "namePattern": "^internal files use live record authority, scoped dedupe, bounded ingress and immutable audit$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-attachments.test.ts",
+          "name": "internal files use live record authority, scoped dedupe, bounded ingress and immutable audit",
+          "expected": "identical bytes were pooled across ownership scopes"
+        }
+      ]
+    },
+    {
+      "name": "documents-publication-audit",
+      "claim": "Every published version is accounted for by a committed attachment audit row.",
+      "file": "packages/postgres-provider/src/document-attachments.ts",
+      "original": "            await client.query(\n              `INSERT INTO platform.document_attachment_audit (tenant_id, environment_id, link_id, operation_id)\n         VALUES ($1,$2,$3,$4)`,\n              [\n                view.tenantId,\n                view.environmentId,\n                linkId,\n                documentAttachOperation(record.entity.entityId),\n              ],\n            );\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/document-attachments.test.ts"],
+        "namePattern": "^internal files use live record authority, scoped dedupe, bounded ingress and immutable audit$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-attachments.test.ts",
+          "name": "internal files use live record authority, scoped dedupe, bounded ingress and immutable audit",
+          "expected": "published attachments missed their audit rows"
+        }
+      ]
+    },
+    {
+      "name": "documents-stored-quota",
+      "claim": "Publication refuses even a duplicate when the stored-byte quota is full.",
+      "file": "packages/postgres-provider/src/document-attachments.ts",
+      "original": "              DOCUMENT_TENANT_MAX_BYTES\n",
+      "replacement": "              Number.MAX_SAFE_INTEGER\n",
+      "test": {
+        "files": ["test/postgres/document-attachments.test.ts"],
+        "namePattern": "^internal files use live record authority, scoped dedupe, bounded ingress and immutable audit$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-attachments.test.ts",
+          "name": "internal files use live record authority, scoped dedupe, bounded ingress and immutable audit",
+          "expected": "the stored-byte quota allowed publication"
+        }
+      ]
+    }
+  ]
+}

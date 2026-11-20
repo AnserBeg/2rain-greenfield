@@ -21,6 +21,8 @@ import {
 } from './assistant-panel.js';
 import { staticAsset, type StaticAsset } from './surface-assets.js';
 import { localDemoActor } from '../../../packages/runtime/src/local-demo-actor.js';
+import type { DocumentGateway } from '../../../packages/runtime/src/document-gateway.js';
+import { mountDocumentHttp } from './document-http.js';
 
 import {
   renderCustomizeScreen,
@@ -72,6 +74,7 @@ export interface SurfaceRuntimeServerOptions {
   readonly requestWork?: RequestWorkProbe;
   /** The assistant panel (AGENT-3, local demo only); absent, no panel. */
   readonly assistant?: AssistantMount;
+  readonly documents?: DocumentGateway;
   readonly workflowApprovals?: WorkflowApprovalsService;
 }
 
@@ -87,6 +90,8 @@ export function createSurfaceRuntimeServer(
   customize?: () => Promise<CustomizeScreenService>,
   options: SurfaceRuntimeServerOptions = {},
 ): Server {
+  const documents =
+    options.documents && mountDocumentHttp(entry, options.documents);
   return createServer((request, response) => {
     htmlEncodings.set(response, acceptedEncoding(request));
     const handle = () =>
@@ -99,6 +104,7 @@ export function createSurfaceRuntimeServer(
         customize,
         options.readSnapshot,
         gateways ? options.assistant : undefined,
+        documents,
         options.workflowApprovals,
       );
     const probe = options.requestWork;
@@ -120,6 +126,7 @@ async function handleRequest(
   customize?: () => Promise<CustomizeScreenService>,
   readSnapshot?: SurfaceRuntimeServerOptions['readSnapshot'],
   assistant?: AssistantMount,
+  documents?: ReturnType<typeof mountDocumentHttp>,
   workflowApprovals?: WorkflowApprovalsService,
 ): Promise<void> {
   response.setHeader('cache-control', 'no-store');
@@ -146,6 +153,10 @@ async function handleRequest(
   }
 
   const url = new URL(request.url ?? '/', 'http://surface-runtime.local');
+  if (documents && url.pathname === '/documents') {
+    await documents(request, response, url, sameOriginRequest(request));
+    return;
+  }
   const asset =
     request.method === 'GET' ? staticAsset(url.pathname) : undefined;
   if (asset) {

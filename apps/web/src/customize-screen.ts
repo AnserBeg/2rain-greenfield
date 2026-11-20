@@ -1,4 +1,5 @@
 import { recordTypeEntityId } from '@north-star/customization';
+import { slug } from '../../../packages/customization/src/apply.js';
 
 /*
  * The shapes this screen reads from the customization service, declared here:
@@ -50,6 +51,10 @@ interface CustomizationStatus {
   readonly patches: readonly ScreenPatch[];
 }
 interface CustomizationTargets {
+  readonly documentTargets?: readonly {
+    readonly entityId: string;
+    readonly label: string;
+  }[];
   readonly calculatedDisplayTargets?: readonly CalculatedDisplayTarget[];
   readonly validationTargets?: readonly LiteralValidationTarget[];
   readonly linkTargets?: readonly {
@@ -425,6 +430,7 @@ async function overview(
     recordTypeForm(targets),
     extendRecordTypeForm(targets),
     fieldForm(targets),
+    documentFieldForm(targets),
     choiceForm(targets),
     arrangePicker(targets),
     savedViewPicker(targets),
@@ -522,6 +528,17 @@ function fieldForm(targets: CustomizationTargets): string {
     )
     .join('');
   return `<form method="post" data-customize-form="addField"><fieldset><legend>A new field</legend><label>On <select name="entity" required>${options}</select></label> <label>Field name <input name="field_1_label" required></label> <label>Type ${typeSelect('field_1_type', 'Field type', false)}</label> <label>Choices <input name="field_1_options" placeholder="for a choice: Yes, No"></label> <label><input type="checkbox" name="field_1_required"> Required (record types added here only)</label><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="addField"><p><button type="submit">Draft this field</button></p></fieldset></form>`;
+}
+
+function documentFieldForm(targets: CustomizationTargets): string {
+  if (!targets.documentTargets?.length) return '';
+  const options = targets.documentTargets
+    .map(
+      ({ entityId, label }) =>
+        `<option value="${escapeHtml(entityId)}">${escapeHtml(label)}</option>`,
+    )
+    .join('');
+  return `<form method="post" data-customize-form="addDocumentField"><fieldset><legend>A new files field</legend><label>On <select name="entity" required>${options}</select></label><label>Field name <input name="label" required maxlength="80"></label><label>Maximum files <input name="maxCount" type="number" min="1" max="20" value="1" required></label><label>Internal categories, separated by commas <input name="categories" maxlength="320"></label><label><input name="required" type="checkbox"> Required to complete a document task</label><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="addDocumentField"><p><button>Draft files field</button></p></fieldset></form>`;
 }
 
 function choiceForm(targets: CustomizationTargets): string {
@@ -798,6 +815,47 @@ export function patchFromForm(
     };
   };
   switch (form.kind) {
+    case 'addDocumentField': {
+      const entityId = String(form.entity ?? '');
+      const [namespace, entity] = entityId.split(':entity.');
+      if (!namespace || !entity) throw new Error('Choose a record type.');
+      const label = (form.label ?? '').trim();
+      const maxCount = Number(form.maxCount);
+      const fieldId = `${namespace}:field.custom_${entity}_${slug(label)}`;
+      const categories = (form.categories ?? '')
+        .split(',')
+        .map((name) => name.trim())
+        .filter(Boolean)
+        .map((name) => ({
+          kind: 'addUploadCategory',
+          schemaVersion: 'northstar.document-category/v1',
+          categoryId: `${namespace}:category.custom_${entity}_${slug(label)}_${slug(name)}`,
+          fieldId,
+          entityId,
+          label: name,
+          maxCount,
+          required: false,
+          visibility: 'internal',
+          retentionClass: 'northstar.documents:retention.manual',
+          documentExpiryDate: null,
+          maxBytes: 20 * 1024 * 1024,
+          contentTypes: ['application/pdf', 'image/jpeg', 'image/png'],
+        }));
+      const field = {
+        kind: 'addDocumentField',
+        schemaVersion: 'northstar.document-field/v1',
+        type: 'files',
+        fieldId,
+        entityId,
+        label,
+        required: form.required === 'on',
+        maxCount,
+        allowedCategoryIds: categories.map(({ categoryId }) => categoryId),
+      };
+      return categories.length
+        ? { kind: 'changeSet', patches: [field, ...categories] }
+        : field;
+    }
     case 'addCalculatedDisplayField':
       if (!calculatedTarget)
         throw new Error('Choose a record page for the calculation.');
@@ -1026,6 +1084,8 @@ function describe(patch: PatchSummary): string {
       return `New record type "${label}"`;
     case 'addField':
       return `New field "${label}"`;
+    case 'addDocumentField':
+      return `New files field "${label}"`;
     case 'addChoice':
       return `New choice "${label}"`;
     case 'addLink':
