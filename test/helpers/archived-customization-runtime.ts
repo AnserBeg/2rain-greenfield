@@ -19,6 +19,14 @@ export {
 export async function assertArchivedTenantEnvelope(
   run: ArchivedRunner,
   entity = 'northstar.app:entity.item',
+): Promise<void> {
+  await archivedTenantEnvelope(run, entity);
+}
+
+/** The archived runner's envelope, after asserting the current one equals it. */
+export async function archivedTenantEnvelope(
+  run: ArchivedRunner,
+  entity = 'northstar.app:entity.item',
 ) {
   const patch = parseCustomizationPatch({
     kind: 'addField',
@@ -67,4 +75,8 @@ console.log(JSON.stringify({ request, release: result.steps[0].release }));
     canonicalize(historical),
     'both tenant runners reproduce the entire v6 envelope',
   );
+  return historical as {
+    readonly releaseRoot: string;
+    readonly normalizedDefinitionBytesBase64: string;
+  };
 }

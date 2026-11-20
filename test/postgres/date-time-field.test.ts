@@ -6,9 +6,15 @@ import {
   startComposedApplication,
 } from '../../apps/api/src/composition-root.js';
 import {
+  DATE_TIME_FIELD_READER,
   SavedDateTimeSchema,
   formatRecordZone,
 } from '../../packages/canonical-model/src/index.js';
+import {
+  archivedRuntimeRead,
+  archivedTenantEnvelope,
+  withArchivedCustomizationRuntime,
+} from '../helpers/archived-customization-runtime.js';
 import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../packages/runtime/src/semantic-query-gateway.js';
 import { SHARED_LIST_QUERY_VERSION } from '../../packages/runtime/src/list-behavior/index.js';
 import { COMPANY, NS, worldOver } from '../agent/agent-world.js';
@@ -339,6 +345,239 @@ test(
             company.readBack!.recordId,
           );
           assert.deepEqual(reread.values[due.fieldId], capture);
+        } finally {
+          await opened.close();
+          await app.close();
+        }
+      },
+      LINEAGE_INSTALL_VOLUME,
+    );
+  },
+);
+
+// The preceding production tree: re-pinned to main's tip at merge time.
+const previousReader = 'b0db1ce3';
+
+test(
+  'releases without the field keep their persisted bytes, the prior parser refuses the member and the prior loader refuses a declaring release',
+  { timeout: 1_200_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'date-time-reader',
+      async ({ connection, pool }) => {
+        const databaseUrl = `postgresql://${connection.user}@${connection.host}:${connection.port}/${connection.database}`;
+        const options = { databaseUrl, tenantSlug: 'date-time-reader' };
+        const app = await startComposedApplication({ ...options, port: 0 });
+        const opened = await openCustomizeService(options);
+        try {
+          // The persisted release row for a field-free customization is the
+          // byte-identical release the preceding compiler produces.
+          const plain = await opened.service.draft(
+            {
+              kind: 'addField',
+              entity: `${NS}:entity.item`,
+              field: { label: 'Inspection notes', type: 'text' },
+            },
+            'visualBuilder',
+          );
+          assert.ok(plain.status === 'drafted', JSON.stringify(plain));
+          const persisted = (
+            await pool.query<{ content_hash: string; desired_state: Buffer }>(
+              `SELECT release.content_hash, revision.desired_state
+                 FROM platform.tenant_releases AS release
+                 JOIN platform.app_package_revisions AS revision
+                   ON revision.revision_id = release.app_package_revision_id
+                WHERE release.release_id = $1`,
+              [plain.releaseId],
+            )
+          ).rows[0]!;
+          await withArchivedCustomizationRuntime(previousReader, async (run) => {
+            const historical = await archivedTenantEnvelope(run);
+            assert.equal(persisted.content_hash, historical.releaseRoot);
+            assert.equal(
+              persisted.desired_state.toString('base64'),
+              historical.normalizedDefinitionBytesBase64,
+            );
+            const parse = (await run(
+              `import {readFileSync} from 'node:fs';import {parseCustomizationPatch} from './packages/customization/src/patch.ts';console.log(JSON.stringify(parseCustomizationPatch(JSON.parse(readFileSync(process.argv[2],'utf8')))));`,
+              { kind: 'changeSet', patches: [
+                { kind: 'addRecordType', label: 'Visits', fields: [{ label: 'Name', type: 'text' }] },
+                { ...appointment, target: { kind: 'tenantRecordType', recordTypeId: `${NS}:entity.custom_visits` } },
+              ] },
+            )) as { status: string; missingCapability?: string };
+            assert.equal(parse.status, 'unsupported');
+            assert.equal(parse.missingCapability, 'addDateTimeField');
+            const read = () =>
+              archivedRuntimeRead(run, {
+                databaseUrl,
+                identity: app.runtime.identity,
+              });
+            assert.equal((await read()).outcome, 'loaded');
+            const record = await opened.service.draft(
+              {
+                kind: 'addRecordType',
+                label: 'Equipment',
+                companyOwnership: 'entityOwned',
+                fields: [{ label: 'Name', type: 'text', required: true }],
+              },
+              'visualBuilder',
+            );
+            assert.ok(record.status === 'drafted');
+            await opened.service.approve(record.patchId);
+            await opened.service.activate(record.patchId);
+            assert.equal((await read()).outcome, 'loaded');
+            const field = await opened.service.draft(appointment, 'visualBuilder');
+            assert.ok(field.status === 'drafted', JSON.stringify(field));
+            await opened.service.approve(field.patchId);
+            await opened.service.activate(field.patchId);
+            const refusal = await read();
+            assert.equal(refusal.code, 'UNSUPPORTED_RUNTIME_CAPABILITY');
+            assert.match(
+              refusal.message ?? '',
+              new RegExp(
+                `surface-manifest requires version ${String(DATE_TIME_FIELD_READER)}`,
+              ),
+            );
+          });
+        } finally {
+          await opened.close();
+          await app.close();
+        }
+      },
+      LINEAGE_INSTALL_VOLUME,
+    );
+  },
+);
+
+test(
+  'one row over the window-index ceiling refuses the attempt by name while the source release keeps serving, and the build at the ceiling is measured',
+  { timeout: 1_200_000 },
+  async (t) => {
+    await withEphemeralPostgres(
+      'date-time-ceiling',
+      async ({ connection, pool }) => {
+        const databaseUrl = `postgresql://${connection.user}@${connection.host}:${connection.port}/${connection.database}`;
+        const options = { databaseUrl, tenantSlug: 'date-time-ceiling' };
+        const app = await startComposedApplication({ ...options, port: 0 });
+        const opened = await openCustomizeService(options);
+        const world = worldOver(app.runtime, String(connection.database));
+        try {
+          const record = await opened.service.draft(
+            {
+              kind: 'addRecordType',
+              label: 'Equipment',
+              companyOwnership: 'entityOwned',
+              fields: [{ label: 'Name', type: 'text', required: true }],
+            },
+            'visualBuilder',
+          );
+          assert.ok(record.status === 'drafted');
+          await opened.service.approve(record.patchId);
+          await opened.service.activate(record.patchId);
+          const seeded = await world.invoke('custom_equipment_create', {
+            recordId: randomUUID(),
+            legalEntityId: COMPANY,
+            relations: {},
+            values: { [`${NS}:field.custom_equipment_name`]: 'Seed' },
+          });
+          assert.equal(seeded.outcome, 'succeeded');
+          const tableRow = await pool.query<{ table: string }>(
+            `SELECT c.relname AS table FROM pg_class AS c
+               JOIN pg_namespace AS n ON n.oid = c.relnamespace
+              WHERE n.nspname = 'north_star_module' AND c.relkind = 'r'
+                AND EXISTS (SELECT 1 FROM pg_attribute AS a
+                             WHERE a.attrelid = c.oid AND a.attnum > 0
+                               AND format_type(a.atttypid, a.atttypmod) = 'varchar(240)')
+              ORDER BY c.oid DESC LIMIT 1`,
+          );
+          const table = `north_star_module.${tableRow.rows[0]!.table}`;
+          const nameColumn = (
+            await pool.query<{ attname: string }>(
+              `SELECT attname FROM pg_attribute WHERE attrelid = $1::regclass
+                 AND format_type(atttypid, atttypmod) = 'varchar(240)'`,
+              [table],
+            )
+          ).rows[0]!.attname;
+          const fill = async (count: number, tenant: 'own' | 'other') => {
+            const client = await pool.connect();
+            try {
+              // Another tenant's rows in the pooled table count toward the
+              // ceiling; they are written with constraint triggers off.
+              if (tenant === 'other')
+                await client.query("SET session_replication_role = 'replica'");
+              await client.query(
+                `INSERT INTO ${table} (tenant_id, environment_id, legal_entity_id, record_id, revision, ${nameColumn})
+                 SELECT ${tenant === 'other' ? 'gen_random_uuid()' : 'seed.tenant_id'},
+                        seed.environment_id, seed.legal_entity_id, gen_random_uuid(), 1, 'Bulk ' || g
+                   FROM (SELECT * FROM ${table} WHERE record_id = $1) AS seed,
+                        generate_series(1, $2::integer) AS g`,
+                [seeded.readBack!.recordId, count],
+              );
+            } finally {
+              await client.query("SET session_replication_role = 'origin'");
+              client.release();
+            }
+          };
+          // 9,000 rows this tenant can see plus 1,001 another tenant's: the
+          // tenant-scoped view is under the ceiling, the physical table over it.
+          await fill(8_999, 'own');
+          await fill(1_001, 'other');
+          const count = async () =>
+            Number(
+              (await pool.query<{ n: string }>(`SELECT count(*) AS n FROM ${table}`))
+                .rows[0]!.n,
+            );
+          assert.equal(await count(), 10_001);
+          const sourceRoot = (await opened.service.status()).activeReleaseRoot;
+          const field = await opened.service.draft(appointment, 'visualBuilder');
+          assert.ok(field.status === 'drafted', JSON.stringify(field));
+          await opened.service.approve(field.patchId);
+          await assert.rejects(opened.service.activate(field.patchId), (error) => {
+            assert.equal((error as { code?: string }).code, 'DATE_TIME_WINDOW_CEILING_EXCEEDED');
+            assert.match(String((error as Error).message), /custom_equipment holds more than 10000 rows/u);
+            assert.match(String((error as Error).message), /custom_equipment_service_at/u);
+            return true;
+          });
+          // The verified source keeps serving: it reads and writes as before.
+          assert.equal((await opened.service.status()).activeReleaseRoot, sourceRoot);
+          const read = await world.read('custom_equipment', seeded.readBack!.recordId);
+          assert.equal(read.values[appointment.fieldId], undefined);
+          const updated = await world.invoke('custom_equipment_update', {
+            recordId: seeded.readBack!.recordId,
+            expectedRevision: read.revision,
+            patch: { [`${NS}:field.custom_equipment_name`]: 'Still serving' },
+          });
+          assert.equal(updated.outcome, 'succeeded');
+          // At exactly the ceiling the attempt resumes and builds the index.
+          // A concurrent writer measures how long the build blocks writes.
+          await pool.query(
+            `DELETE FROM ${table} WHERE record_id IN (SELECT record_id FROM ${table} WHERE ${nameColumn} LIKE 'Bulk %' LIMIT 1)`,
+          );
+          assert.equal(await count(), 10_000);
+          const writer = await pool.connect();
+          let writing = true;
+          let longest = 0;
+          const loop = (async () => {
+            while (writing) {
+              const started = performance.now();
+              await writer.query(
+                `UPDATE ${table} SET revision = revision WHERE record_id = $1`,
+                [seeded.readBack!.recordId],
+              );
+              longest = Math.max(longest, performance.now() - started);
+            }
+          })();
+          const activated = performance.now();
+          await opened.service.activate(field.patchId);
+          const activation = performance.now() - activated;
+          writing = false;
+          await loop;
+          writer.release();
+          t.diagnostic(
+            `writer blocking at the 10,000-row ceiling: longest write ${longest.toFixed(1)} ms during a ${activation.toFixed(0)} ms activation`,
+          );
+          assert.ok(longest < 2_000, `writer blocked ${longest} ms`);
+          assert.notEqual((await opened.service.status()).activeReleaseRoot, sourceRoot);
         } finally {
           await opened.close();
           await app.close();

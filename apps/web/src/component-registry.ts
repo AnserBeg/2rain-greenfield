@@ -1,4 +1,5 @@
 import { addressEditor } from './address-context.js';
+import { dateTimeBindings, renderDateTimeEntry } from './date-time-field.js';
 import {
   AddressInputSchema,
   SavedAddressSchema,
@@ -2366,8 +2367,22 @@ function renderFormFields(
           ? canonicalStoredDecimal(value)
           : value;
       const choices = context.formReferences?.[fieldId];
-      const control =
-        choices?.status === 'ready'
+      const dateTime = dateTimeBindings(
+        context.view.projections.surface.payload,
+      ).get(fieldId);
+      const control = dateTime
+        ? {
+            html: renderDateTimeEntry(
+              dateTime,
+              `value:${escapeHtml(fieldId)}`,
+              value,
+              invalid.has(fieldId)
+                ? ` aria-invalid="true" aria-describedby="${validationMessageId}"`
+                : '',
+            ),
+            storedValueUnavailable: false,
+          }
+        : choices?.status === 'ready'
           ? renderFormReferenceControl(choices.options, fieldId, value)
           : renderFormControl(
               field,

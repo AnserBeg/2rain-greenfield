@@ -2871,7 +2871,7 @@ function dateTimeCaptureExpression(check: StorageDateTimeCaptureCheck): string {
     all.map((column) => `${column} IS NULL`).join(' AND '),
     [
       ...present,
-      `${source}::text = ${sqlTextLiteral(check.zoneSource)}::text`,
+      `${source}::text = ${sqlTextLiteral(check.zoneSource)}`,
       `isfinite(${instant})`,
       `isfinite(${civil})`,
       `${offset} >= '-64800'::integer`,
