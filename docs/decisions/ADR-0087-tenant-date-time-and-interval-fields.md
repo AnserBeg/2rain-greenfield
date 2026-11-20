@@ -56,6 +56,7 @@ Presence is admitted for both logical types on a whole value. For example, a Sch
 | List column, sort, filter and saved view | Display both types. Sort `dateTime` by stored instant with stable record ID breaking ties. Refuse interval sorting and filters on either type. Apply the same rules to `saveListView` columns, sorts and string-valued filters when saved and when loaded. |
 | Metric card, workflow condition, search | Refuse bindings to either type for metrics, conditions and search terms. |
 | Document template/PDF, export, API, notification and assistant | Admit authorized typed query fields for display with the no-viewer rule. Use the template’s admitted output positions. Form, API and assistant entry use the whole-value contract. |
+| Reminder anchor (ADR-0088) | Admit a Date, DateTime or interval end field. Take the zone and day boundary from the field's capture, including perRecordIana. Resolve derived boundaries by ADR-0083 A1 and pin boundary-rule and tzdb versions. For a date-only inclusive interval "end" is the last entered date. Refuse only a missing zone or working-day calendar. |
 | Import | Refuse mapping an import column to either type in v1. |
 
 Each refusal identifies the logical type, field and requested consumer or operand position. Test each admitted path and each refusal through its normal entry point, including forged declarations at compilation. [CUSTOMIZE-5 proofs](../execution/packets/CUSTOMIZE-5.md#release-and-upgrade-proofs-for-each-executable-slice)
