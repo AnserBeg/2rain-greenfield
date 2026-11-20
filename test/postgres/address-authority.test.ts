@@ -953,7 +953,12 @@ test(
           await t.test(
             'a replaced installation gets its own history row',
             async () => {
-              const since = new Date();
+              // The database clock orders history rows, not this process's.
+              const since = (
+                await pool.query<{ at: string }>(
+                  'SELECT clock_timestamp()::text AS at',
+                )
+              ).rows[0]!.at;
               try {
                 const audit = await configure(COMPANY, 'audit');
                 assert.ok(audit && audit !== dispatch);
@@ -961,7 +966,7 @@ test(
                   installation_id: string;
                   change: string;
                 }>(
-                  'SELECT installation_id, change FROM platform.address_installation_history WHERE company_id=$1 AND recorded_at>=$2 ORDER BY recorded_at, change',
+                  'SELECT installation_id, change FROM platform.address_installation_history WHERE company_id=$1 AND recorded_at>=$2::timestamptz ORDER BY recorded_at, change',
                   [COMPANY, since],
                 );
                 assert.deepEqual(
