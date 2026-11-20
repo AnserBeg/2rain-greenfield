@@ -481,7 +481,12 @@ export const BUILD_CASES: readonly BuildCase[] = [
     id: 'F06',
     split: 'dev',
     category: 'follow-up',
-    base: [serviceJobBase, serviceJobLifecycleBase],
+    base: [
+      {
+        kind: 'changeSet',
+        patches: [serviceJobBase, serviceJobLifecycleBase],
+      },
+    ],
     request: 'Add a board of service jobs by status.',
     expect: {
       outcome: 'board',

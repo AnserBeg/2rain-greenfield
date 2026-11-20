@@ -263,7 +263,6 @@ function valueFor(
     case 'dateFieldType':
       return '2026-11-20';
     case 'integerFieldType':
-      return 7;
     case 'exactDecimalFieldType':
     case 'moneyFieldType':
     case 'quantityFieldType':

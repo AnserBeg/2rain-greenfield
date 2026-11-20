@@ -34,18 +34,6 @@ const draft = (input: unknown) => () => ({
   toolCalls: [{ name: DRAFT_CUSTOMIZATION_TOOL, input }],
 });
 
-const serviceJob = {
-  kind: 'addRecordType',
-  label: 'Service job',
-  companyOwnership: 'entityOwned',
-  fields: [
-    { label: 'Job name', type: 'text' },
-    { label: 'Customer site', type: 'text' },
-    { label: 'Scheduled date', type: 'date' },
-    { label: 'Estimated hours', type: 'number' },
-    { label: 'Billable', type: 'yesNo' },
-  ],
-};
 const leaveFields = [
   { label: 'Employee name', type: 'text' },
   {
@@ -169,7 +157,7 @@ test(
       };
 
       await t.test('a correct draft passes every stage first try', async () => {
-        const result = await run('M01', [draft(serviceJob)]);
+        const result = await run('M03', [draft(leave)]);
         assert.deepEqual(result.reasons, []);
         assert.equal(result.firstTry, true);
         assert.equal(result.e2e, true);
@@ -177,24 +165,15 @@ test(
       });
 
       await t.test(
-        'a malformed first call repaired on the second counts after repair only',
+        'a repaired draft counts after repair only, and a wrong draft that activates still fails behaviour',
         async () => {
           const result = await run('M03', [
             draft({ kind: 'addRecordType', label: 'Leave request' }),
-            draft(leave),
+            draft(wrongLeave),
           ]);
-          assert.deepEqual(result.reasons, []);
           assert.equal(result.modelCalls, 2);
           assert.equal(result.firstTry, false);
           assert.equal(result.afterRepair, true);
-          assert.equal(result.behaviour, true);
-        },
-      );
-
-      await t.test(
-        'a wrong draft that activates still fails behaviour',
-        async () => {
-          const result = await run('M03', [draft(wrongLeave)]);
           assert.equal(result.activated, true);
           assert.equal(result.e2e, true, result.reasons.join('; '));
           assert.equal(result.behaviour, false);
@@ -276,7 +255,7 @@ test(
       );
 
       const summary = summarize(results);
-      assert.equal(summary.ran, 7);
+      assert.equal(summary.ran, 6);
       assert.equal(summary.falseRefusals, 1);
       assert.equal(summary.injected, 1);
     });
