@@ -297,3 +297,37 @@ export function expandDateTimePatch(
   }
   return expanded;
 }
+
+/**
+ * The compiled bindings and the storage target name the same logical fields
+ * with the same zone sources, in both directions, or the write refuses.
+ */
+export function dateTimeStorageDisagreement(
+  bindingsPayload: unknown,
+  storage: StorageTargetPayloadV1,
+): string | null {
+  const bindings =
+    bindingsPayload && typeof bindingsPayload === 'object'
+      ? (bindingsPayload as { dateTimeBindings?: unknown }).dateTimeBindings
+      : undefined;
+  const bound = new Map(
+    (Array.isArray(bindings) ? bindings : []).map((binding) => {
+      const b = binding as {
+        fieldId: string;
+        entityId: string;
+        zoneSource: { kind: string };
+      };
+      return [b.fieldId, `${b.entityId}|${b.zoneSource.kind}`] as const;
+    }),
+  );
+  for (const entity of storage.entities)
+    for (const check of dateTimeChecks(entity)) {
+      const expected = bound.get(check.canonicalFieldId);
+      // A retired field keeps its storage and leaves the bindings.
+      if (expected === undefined) continue;
+      if (expected !== `${entity.entityId}|${check.zoneSource}`)
+        return check.canonicalFieldId;
+      bound.delete(check.canonicalFieldId);
+    }
+  return bound.size > 0 ? [...bound.keys()][0]! : null;
+}

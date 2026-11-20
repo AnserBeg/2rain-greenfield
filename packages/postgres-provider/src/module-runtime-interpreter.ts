@@ -16,6 +16,7 @@ import {
   dateTimeCheck,
   dateTimeChecks,
   dateTimeColumnExpression,
+  dateTimeStorageDisagreement,
   expandDateTimePatch,
   isDateTimeComponent,
   readDateTime,
@@ -515,6 +516,16 @@ export class PostgresModuleRuntimeInterpreter
           currentEntity,
           parsedInput,
         );
+        const disagreement = dateTimeStorageDisagreement(
+          request.view.projections.operation.payload,
+          currentStorage,
+        );
+        if (disagreement)
+          throw failure(
+            'MODULE_STORAGE_TARGET_MALFORMED',
+            'dateTime bindings and storage disagree',
+            disagreement,
+          );
         // ADR-0087: the business calendar is read as the runtime login role,
         // inside this write, only when a logical dateTime value is entered.
         const touchesDateTime = Object.entries(parsedInput.patch).some(

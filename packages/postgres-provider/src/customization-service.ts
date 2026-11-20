@@ -2317,9 +2317,14 @@ export class PostgresCustomizationService {
   }
 
   #materializer(): PostgresModuleStorageMaterializer {
+    // ADR-0087 A4: the window-index row ceiling is deploy policy. A
+    // deployment may lower it; the materializer refuses a higher value.
+    const ceiling = process.env.NORTH_STAR_DATE_TIME_WINDOW_ROW_CEILING;
     return new PostgresModuleStorageMaterializer(
       this.connection.materializerPool,
       this.connection.modulePool,
+      {},
+      ceiling === undefined ? {} : { dateTimeWindowRowCeiling: Number(ceiling) },
     );
   }
 
