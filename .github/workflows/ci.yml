@@ -7,7 +7,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        fixture: [release-approval, workflow-consumer]
+        fixture: [release-approval, workflow-consumer, staff-signin]
     runs-on: ubuntu-24.04
     timeout-minutes: 24
     steps:
@@ -19,7 +19,22 @@ jobs:
           node-version-file: .node-version
       - name: Install frozen dependencies
         run: corepack pnpm install --frozen-lockfile --reporter=append-only
-      - name: Exercise the committed regression and its four expected reds
+      - name: Check the default connector grant regression
+        if: matrix.fixture == 'staff-signin'
+        run: |
+          set -euo pipefail
+          migration=$(ls db/migrations/*_staff_decision_proofs.sql)
+          test "$(grep -c 'REVOKE INSERT ON platform.address_installations,platform.address_installation_history FROM north_star_runtime;' "$migration")" -eq 1
+          sed -i '/REVOKE INSERT ON platform.address_installations,platform.address_installation_history FROM north_star_runtime;/d' "$migration"
+          if node --import tsx --test --test-name-pattern='staff sign-in integrity' test/postgres/staff-signin.test.ts > "$RUNNER_TEMP/connector-control.log" 2>&1; then
+            echo 'The regression stayed green without the connector grant restriction.'
+            exit 1
+          fi
+          grep -F 'install: true' "$RUNNER_TEMP/connector-control.log"
+          grep -F 'install: false' "$RUNNER_TEMP/connector-control.log"
+          git restore -- "$migration"
+          echo 'EXPECTED RED for connector installation grants on an unclaimed store'
+      - name: Exercise the committed regressions
         env:
           FIXTURE: ${{ matrix.fixture }}
         run: node --import tsx --test "test/postgres/$FIXTURE.test.ts"
