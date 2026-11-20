@@ -872,7 +872,8 @@ test(
           assert.equal(
             retiredReplay.status,
             201,
-            await retiredReplay.clone().text(),
+            'retired template retry lost its committed receipt: ' +
+              (await retiredReplay.clone().text()),
           );
           assert.deepEqual(await retiredReplay.json(), purchaseArtifact);
           assert.equal(
@@ -966,6 +967,7 @@ test(
                 (await directRead(orderId, purchaseArtifact, 'purchase_order'))
                   .rowCount,
                 0,
+                'a file escaped the full Record permission set',
               );
             },
           );
