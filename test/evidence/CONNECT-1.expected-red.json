@@ -22,7 +22,7 @@
     {
       "name": "shared-record-company-pin",
       "claim": "A shared record returns only the selected company installation’s provider pin.",
-      "file": "db/migrations/0056_address_connector_authority.sql",
+      "file": "db/migrations/0057_address_connector_authority.sql",
       "original": "     AND g.company_id = scope_company\n     AND g.installation_id = scope_installation\n",
       "replacement": "",
       "test": {
@@ -39,7 +39,7 @@
     {
       "name": "address-configure-needs-permission",
       "claim": "Enabling or configuring a provider needs the declared configure permission in a live grant.",
-      "file": "db/migrations/0056_address_connector_authority.sql",
+      "file": "db/migrations/0057_address_connector_authority.sql",
       "original": "      AND g.permission_id = 'northstar.runtime:permission.connector_configure'\n      AND g.resource_id = 'northstar.runtime:connector.address'\n",
       "replacement": "",
       "test": {
@@ -56,7 +56,7 @@
     {
       "name": "address-configure-demo-store",
       "claim": "Until SIGNIN-1 slice 2b, a provider is enabled only in a store claimed for the local demo.",
-      "file": "db/migrations/0056_address_connector_authority.sql",
+      "file": "db/migrations/0057_address_connector_authority.sql",
       "original": "  IF NOT EXISTS (SELECT FROM north_star_internal.staff_store_mode WHERE mode = 'demo') THEN\n    RAISE EXCEPTION 'address.configureNeedsDecisionProof' USING ERRCODE = '42501'; END IF;\n",
       "replacement": "",
       "test": {
@@ -73,7 +73,7 @@
     {
       "name": "address-installation-read-for-members",
       "claim": "Any member of the company reads its installation; reading never needs the configure permission.",
-      "file": "db/migrations/0056_address_connector_authority.sql",
+      "file": "db/migrations/0057_address_connector_authority.sql",
       "original": "  IF NOT north_star_internal.address_member(scope_company) THEN RETURN; END IF;\n  RETURN QUERY",
       "replacement": "  IF NOT north_star_internal.address_may_configure(scope_company) THEN RETURN; END IF;\n  RETURN QUERY",
       "test": {
@@ -90,7 +90,7 @@
     {
       "name": "address-pin-survives-activation",
       "claim": "A pin is matched on record, field, revision and installation, never on the current release fence.",
-      "file": "db/migrations/0056_address_connector_authority.sql",
+      "file": "db/migrations/0057_address_connector_authority.sql",
       "original": "     AND g.address_revision = scope_revision\n",
       "replacement": "     AND g.address_revision = scope_revision\n     AND g.fence = (SELECT p.fence FROM platform.active_release_pointers p WHERE (p.tenant_id,p.environment_id) = (g.tenant_id,g.environment_id))\n",
       "test": {
@@ -107,7 +107,7 @@
     {
       "name": "address-membership-company-scope",
       "claim": "A company-scoped membership reaches only its own company through every address function.",
-      "file": "db/migrations/0056_address_connector_authority.sql",
+      "file": "db/migrations/0057_address_connector_authority.sql",
       "original": "      AND m.revoked_at IS NULL AND r.revoked_at IS NULL\n      AND (m.legal_entity_id IS NULL OR m.legal_entity_id = scope_company))\n",
       "replacement": "      AND m.revoked_at IS NULL AND r.revoked_at IS NULL)\n",
       "test": {
@@ -124,7 +124,7 @@
     {
       "name": "address-pin-company-predicate",
       "claim": "The pin read matches the caller’s company, not only the installation it names.",
-      "file": "db/migrations/0056_address_connector_authority.sql",
+      "file": "db/migrations/0057_address_connector_authority.sql",
       "original": "     AND g.company_id = scope_company\n",
       "replacement": "",
       "test": {
@@ -141,7 +141,7 @@
     {
       "name": "address-pin-installation-predicate",
       "claim": "Only the current installation’s enrichment supplies a pin.",
-      "file": "db/migrations/0056_address_connector_authority.sql",
+      "file": "db/migrations/0057_address_connector_authority.sql",
       "original": "     AND g.installation_id = scope_installation\n",
       "replacement": "",
       "test": {
@@ -192,7 +192,7 @@
     {
       "name": "address-sweep-batch-limit",
       "claim": "The coordinate sweeper scrubs at most its batch per call.",
-      "file": "db/migrations/0056_address_connector_authority.sql",
+      "file": "db/migrations/0057_address_connector_authority.sql",
       "original": "     LIMIT greatest(least(max_rows, 1000), 0)",
       "replacement": "     LIMIT 1000",
       "test": {
@@ -209,7 +209,7 @@
     {
       "name": "address-sweep-expiry-only",
       "claim": "The coordinate sweeper scrubs only expired provider coordinates.",
-      "file": "db/migrations/0056_address_connector_authority.sql",
+      "file": "db/migrations/0057_address_connector_authority.sql",
       "original": "       AND g.expires_at <= clock_timestamp()",
       "replacement": "       AND g.expires_at IS NOT NULL",
       "test": {
@@ -226,7 +226,7 @@
     {
       "name": "address-quota-call-limit",
       "claim": "A call beyond the period call limit is refused.",
-      "file": "db/migrations/0056_address_connector_authority.sql",
+      "file": "db/migrations/0057_address_connector_authority.sql",
       "original": "  WHERE q.calls < installed.period_calls\n",
       "replacement": "  WHERE true\n",
       "test": {
@@ -243,7 +243,7 @@
     {
       "name": "address-quota-budget-limit",
       "claim": "A call beyond the period budget is refused.",
-      "file": "db/migrations/0056_address_connector_authority.sql",
+      "file": "db/migrations/0057_address_connector_authority.sql",
       "original": "    AND q.reserved_micros + excluded.reserved_micros <= installed.period_budget_micros;",
       "replacement": "    AND true;",
       "test": {
@@ -260,7 +260,7 @@
     {
       "name": "address-quota-first-call-cost",
       "claim": "A first call costing more than the budget is refused.",
-      "file": "db/migrations/0056_address_connector_authority.sql",
+      "file": "db/migrations/0057_address_connector_authority.sql",
       "original": "  IF cost > installed.period_budget_micros THEN RETURN false; END IF;\n",
       "replacement": "",
       "test": {
@@ -277,7 +277,7 @@
     {
       "name": "address-installation-identity-reuse",
       "claim": "Re-enabling a provider account reuses its installation, so its quota and key entry survive.",
-      "file": "db/migrations/0056_address_connector_authority.sql",
+      "file": "db/migrations/0057_address_connector_authority.sql",
       "original": "     AND i.provider = requested_provider AND i.account = requested_account\n",
       "replacement": "     AND i.provider = requested_provider AND i.account = requested_account AND false\n",
       "test": {
@@ -345,7 +345,7 @@
     {
       "name": "address-configure-lock-order",
       "claim": "Concurrent configure calls for one company serialize instead of deadlocking.",
-      "file": "db/migrations/0056_address_connector_authority.sql",
+      "file": "db/migrations/0057_address_connector_authority.sql",
       "original": "  PERFORM pg_advisory_xact_lock(hashtextextended(\n    'north_star.address_installation:' || tenant || ':' || environment || ':' || scope_company, 0));\n  SELECT i.installation_id INTO current_id FROM platform.address_installations i\n   WHERE (i.tenant_id,i.environment_id,i.company_id) = (tenant,environment,scope_company) AND i.enabled\n     FOR UPDATE;",
       "replacement": "  SELECT i.installation_id INTO current_id FROM platform.address_installations i\n   WHERE (i.tenant_id,i.environment_id,i.company_id) = (tenant,environment,scope_company) AND i.enabled\n     FOR SHARE;",
       "test": {
@@ -362,7 +362,7 @@
     {
       "name": "address-history-replaced-installation",
       "claim": "A replaced installation is recorded as paused.",
-      "file": "db/migrations/0056_address_connector_authority.sql",
+      "file": "db/migrations/0057_address_connector_authority.sql",
       "original": "    INSERT INTO platform.address_installation_history(tenant_id,environment_id,company_id,installation_id,principal_id,change)\n    VALUES (tenant,environment,scope_company,current_id,principal,'paused'); END IF;",
       "replacement": "    NULL; END IF;",
       "test": {
