@@ -14,6 +14,7 @@
 import { createHash } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
+import { escapeHtml } from './html.js';
 import { registerStaticAsset } from './surface-assets.js';
 
 /** The transport seam the app server mounts: `/?assistant=...` requests. */
@@ -584,7 +585,7 @@ const PANEL_MARKUP = `<aside id="assistant-panel" class="assistant-panel" data-a
  */
 export function withAssistantPanel<
   T extends { statusCode: number; html: string; download?: unknown },
->(result: T): T {
+>(result: T, workflowApprovalsHref?: string): T {
   if (
     (result.statusCode !== 200 &&
       !(
@@ -612,8 +613,14 @@ export function withAssistantPanel<
         .replace(SHELL_ACCOUNT, `${TOGGLE('inline')}${SHELL_ACCOUNT}`)
     : result.html;
   const index = html.lastIndexOf('</body>');
+  const panel = workflowApprovalsHref
+    ? PANEL_MARKUP.replace(
+        '<h2>Assistant</h2>',
+        `<h2>Assistant</h2><a href="${escapeHtml(workflowApprovalsHref)}">Workflow approvals</a>`,
+      )
+    : PANEL_MARKUP;
   return {
     ...result,
-    html: `${html.slice(0, index)}${inShell && html.includes('<div class="ledger-viewport">') ? '</div>' : ''}<link rel="stylesheet" href="${ASSISTANT_PANEL_STYLESHEET_HREF}">${inShell ? '' : TOGGLE('floating')}${PANEL_MARKUP}<script data-assistant-script>${ASSISTANT_PANEL_SCRIPT}</script>${html.slice(index)}`,
+    html: `${html.slice(0, index)}${inShell && html.includes('<div class="ledger-viewport">') ? '</div>' : ''}<link rel="stylesheet" href="${ASSISTANT_PANEL_STYLESHEET_HREF}">${inShell ? '' : TOGGLE('floating')}${panel}<script data-assistant-script>${ASSISTANT_PANEL_SCRIPT}</script>${html.slice(index)}`,
   };
 }

@@ -31,7 +31,10 @@ import {
   type SurfaceMessageRef,
 } from '../../src/message-catalog.js';
 import { readCompiledSurfaceManifest } from '../../src/surface-contract.js';
-import { renderApplicationDiagnostic } from '../../src/surface-runtime.js';
+import {
+  renderApplicationDiagnostic,
+  type SurfaceRuntimeGateways,
+} from '../../src/surface-runtime.js';
 import { compiledFixturePath, demoEntry } from '../helpers.js';
 import { closeServer } from './close-server.js';
 
@@ -423,6 +426,15 @@ async function censusServerUrl(): Promise<string> {
 let shellUrl: string;
 let censusUrl: string;
 let methodProbeUrl: string;
+let approvalsUrl: string;
+const approvalRunId = '10000000-0000-4000-8000-000000000005';
+const approvalDigest = 'a'.repeat(64);
+const suspendedRunIds = [
+  '10000000-0000-4000-8000-000000000007',
+  '10000000-0000-4000-8000-000000000008',
+];
+let showSuspended = false;
+let showApprovals = true;
 const realPathUrls = new Map<string, string>();
 let catalogFixture: ReturnType<typeof spawn>;
 let catalogFixtureExit: Promise<unknown[]>;
@@ -434,6 +446,62 @@ let requestCatalogMeasurement: (
 test.beforeAll(async () => {
   test.setTimeout(120_000);
   shellUrl = await listen(createSurfaceRuntimeServer(demoEntry()));
+  approvalsUrl = await listen(
+    createSurfaceRuntimeServer(
+      demoEntry(),
+      // Workflow approvals use their own guarded service. The surface gateways
+      // are never reached by this fixture.
+      Object.create(null) as SurfaceRuntimeGateways,
+      null,
+      undefined,
+      {
+        workflowApprovals: {
+          async worklist(actor) {
+            expect(actor.tenantId).toBeTruthy();
+            return {
+              approvals: showApprovals
+                ? [
+                    {
+                      runId: approvalRunId,
+                      cursor: 1,
+                      fence: '2',
+                      digest: approvalDigest,
+                      companyId: '10000000-0000-4000-8000-000000000006',
+                      operationId:
+                        'northstar.app:operation.custom_receipt_review_escalate',
+                      summary: 'Escalate inspection',
+                      input: { recordId: approvalRunId, expectedRevision: 3 },
+                    },
+                  ]
+                : [],
+              suspended: showSuspended
+                ? suspendedRunIds.map((runId) => ({
+                    runId,
+                    workflowId: 'receipt-review',
+                    reason: 'stale-release-pin',
+                  }))
+                : [],
+            };
+          },
+          async decide(_actor, selection) {
+            return (
+              selection.digest === approvalDigest &&
+              selection.fence === '2' &&
+              selection.cursor === 1 &&
+              selection.runId === approvalRunId
+            );
+          },
+          async remedy(_actor, runIds, action) {
+            expect(runIds).toEqual(suspendedRunIds);
+            return runIds.map((runId) => ({
+              runId,
+              outcome: action === 'retry' ? 'retried' : 'cancelled',
+            }));
+          },
+        },
+      },
+    ),
+  );
   censusUrl = await censusServerUrl();
   methodProbeUrl = await listen(
     createServer((_request, response) => {
@@ -690,6 +758,40 @@ const REAL_PATH_DRIVERS: Readonly<
   },
   WORKSPACE_COMPANY_UNAVAILABLE: (page) =>
     page.goto(realPathUrls.get('WORKSPACE_COMPANY_UNAVAILABLE')!),
+  WORKFLOW_SUSPENDED_EMPTY: (page) => page.goto(`${approvalsUrl}/?approvals`),
+  WORKFLOW_APPROVALS_EMPTY: async (page) => {
+    showApprovals = false;
+    try {
+      await page.goto(`${approvalsUrl}/?approvals`);
+    } finally {
+      showApprovals = true;
+    }
+  },
+  WORKFLOW_REMEDY_REFUSED: async (page) => {
+    showSuspended = true;
+    try {
+      await page.goto(`${approvalsUrl}/?approvals`);
+      await page.getByRole('button', { name: 'Retry selected' }).click();
+    } finally {
+      showSuspended = false;
+    }
+  },
+  WORKFLOW_APPROVAL_DECIDED: async (page) => {
+    await page.goto(`${approvalsUrl}/?approvals`);
+    const plan = page.locator('[data-workflow-approval]');
+    await expect(plan.getByText('Escalate inspection')).toBeVisible();
+    await expect(plan.locator('pre')).toContainText('"expectedRevision": 3');
+    await plan.getByRole('button', { name: 'Approve' }).click();
+  },
+  WORKFLOW_APPROVAL_REFUSED: async (page) => {
+    await page.goto(`${approvalsUrl}/?approvals`);
+    await page
+      .locator('input[name=digest]')
+      .evaluate((input: HTMLInputElement) => {
+        input.value = 'b'.repeat(64);
+      });
+    await page.getByRole('button', { name: 'Decline' }).click();
+  },
 };
 
 /**
@@ -942,6 +1044,23 @@ test('every registered code renders the sentence the catalog registers', async (
     );
   }
   expect(violations).toEqual([]);
+});
+
+test('the Approvals worklist sends every selected suspended run', async ({
+  page,
+}) => {
+  showSuspended = true;
+  try {
+    await page.goto(`${approvalsUrl}/?approvals`);
+    for (const checkbox of await page.getByRole('checkbox').all())
+      await checkbox.check();
+    await page.getByRole('button', { name: 'Cancel selected' }).click();
+    const results = page.getByRole('status').filter({ hasText: 'Run results' });
+    for (const id of suspendedRunIds)
+      await expect(results).toContainText(`${id} · cancelled`);
+  } finally {
+    showSuspended = false;
+  }
 });
 
 test('the slot renderer resolves the same catalog as the page renderer', async ({
