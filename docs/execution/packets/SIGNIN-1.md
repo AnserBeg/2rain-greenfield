@@ -8,12 +8,12 @@ Slice 2a adds reviewed staff decisions. [Slice 1 and its gates](https://github.c
 - Customize uses the same release approval, with the exact patch payloads, bases and reviewed diff in the proof. A fresh passkey confirmation binds the principal, assurance, authentication time and decision time.
 - Retry records the company, suspended run, occurrence, definition, journal and original and restored fences. WORKFLOW-1’s join is the transaction that writes its retry decision and resumes the run. The database requires a matching proof consumption in the same transaction. Pilot scheduling remains closed pending effect reconciliation and that join.
 - Release and Customize cover every company on the environment pointer and require an unscoped membership. Retry takes the company from the event and checks the operator’s live membership. A reviewed batch binds each named target and its ordered aggregate.
-- Slice 2b stays closed pending CONNECT-1’s canonical connection and outward-send records and their writers. Pilot enablement requires a proof-consuming function. Real provider calls remain limited to the local demo.
+- Slice 2b stays closed pending CONNECT-1’s canonical connection and outward-send records and their writers. Only a database explicitly claimed for the local demo grants direct address installation writes. Pilot enablement awaits a proof-consuming function.
 - This slice uses a forward database migration and the existing surface reader. The orchestrator owns the independent post-merge read.
 
 ## Gates and test it yourself
 
-The four database controls temporarily remove single use, decision digest, scope and current authority in a disposable database. [Focused evidence run](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44750672343)
+The four database controls temporarily remove single use, decision digest, scope and current authority in a disposable database. [Focused evidence run](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44773631113)
 
 Run `node --import tsx --test test/postgres/release-approval.test.ts`. The staff subtest checks release and Customize decisions, refuses activation after membership loss, then observes a verified swap. The Retry case runs in `test/postgres/workflow-consumer.test.ts`. [Staff pilot instructions](../../operations/staff-signin.md#approvals-and-activation)
 
@@ -21,15 +21,15 @@ Run `node --import tsx --test test/postgres/release-approval.test.ts`. The staff
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "SIGNIN-1",
-  "base": "eda6d12ffc4d38ba84146b712c3bbeed1eabb729",
-  "head": "e529f389352f176570c2dac1c08b70a013f29ac2",
+  "base": "032b87c00df3ee22184685050b9cecc01c62cc59",
+  "head": "c7c7a998ec9a71cee55ec3483cc297d6a321071e",
   "changedPaths": [
     "apps/api/src/staff-decisions.ts", "apps/api/src/staff-identity-http.ts",
     "apps/api/src/staff-identity.ts", "apps/api/src/staff-main.ts",
-    "apps/api/src/staff-protocol.ts", "db/migrations/0052_staff_decision_proofs.sql",
-    "db/schema.snapshot.json", "docs/execution/ledger.md",
+    "apps/api/src/staff-protocol.ts", "db/migrations/0053_staff_decision_proofs.sql",
+    "db/schema.snapshot.json",
     "docs/execution/packets/CONNECT-1.md", "docs/execution/packets/SIGNIN-1.md",
-    "docs/execution/review-log.md", "docs/operations/staff-signin.md",
+    "docs/operations/staff-signin.md",
     "packages/postgres-provider/src/composed-application-runtime.ts", "packages/postgres-provider/src/release-activation-service.ts",
     "packages/postgres-provider/src/release-approval-service.ts", "packages/postgres-provider/src/request-context.ts",
     "test/architecture/release-persistence-boundary.test.ts", "test/architecture/tenant-completeness.manifest.json",
