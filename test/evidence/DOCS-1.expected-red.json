@@ -9,9 +9,7 @@
       "original": "      [DOCUMENT_PERMISSIONS.view, DOCUMENT_PERMISSIONS.download],\n",
       "replacement": "      [DOCUMENT_PERMISSIONS.view],\n",
       "test": {
-        "files": [
-          "test/postgres/document-attachments.test.ts"
-        ],
+        "files": ["test/postgres/document-attachments.test.ts"],
         "namePattern": "^internal files use live record authority, scoped dedupe, bounded ingress and immutable audit$"
       },
       "kills": [
@@ -29,9 +27,7 @@
       "original": "      const scope = row.company_id ?? 'shared';\n",
       "replacement": "      const scope = 'shared';\n",
       "test": {
-        "files": [
-          "test/postgres/document-attachments.test.ts"
-        ],
+        "files": ["test/postgres/document-attachments.test.ts"],
         "namePattern": "^internal files use live record authority, scoped dedupe, bounded ingress and immutable audit$"
       },
       "kills": [
@@ -49,9 +45,7 @@
       "original": "            await client.query(\n              `INSERT INTO platform.document_attachment_audit (tenant_id, environment_id, link_id, operation_id)\n         VALUES ($1,$2,$3,$4)`,\n              [\n                view.tenantId,\n                view.environmentId,\n                linkId,\n                documentAttachOperation(record.entity.entityId),\n              ],\n            );\n",
       "replacement": "",
       "test": {
-        "files": [
-          "test/postgres/document-attachments.test.ts"
-        ],
+        "files": ["test/postgres/document-attachments.test.ts"],
         "namePattern": "^internal files use live record authority, scoped dedupe, bounded ingress and immutable audit$"
       },
       "kills": [
@@ -69,9 +63,7 @@
       "original": "              DOCUMENT_TENANT_MAX_BYTES\n",
       "replacement": "              Number.MAX_SAFE_INTEGER\n",
       "test": {
-        "files": [
-          "test/postgres/document-attachments.test.ts"
-        ],
+        "files": ["test/postgres/document-attachments.test.ts"],
         "namePattern": "^internal files use live record authority, scoped dedupe, bounded ingress and immutable audit$"
       },
       "kills": [
