@@ -228,7 +228,7 @@ test('governed terms and scoped source facts produce a quote through the install
           expectedRevision: proposal.revision,
         },
         key = randomUUID();
-      await f.measure('deny', 'billing_publish_terms');
+      await f.measure('deny', undefined, undefined, 'billing_publish_terms');
       await assert.rejects(() => f.invoke('billing_publish', revision, key));
       assert.equal(
         (
@@ -238,7 +238,7 @@ test('governed terms and scoped source facts produce a quote through the install
         ).rows[0].n,
         0,
       );
-      await f.measure('allow', 'billing_publish_terms');
+      await f.measure('allow', undefined, undefined, 'billing_publish_terms');
       const published = await f.invoke('billing_publish', revision, key);
       assert.equal(published.outcome, 'succeeded');
       assert.equal(

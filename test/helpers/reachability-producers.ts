@@ -153,7 +153,6 @@ export const reachabilityProducers = [
     ],
   ),
   nodeProducer('postgres-sales', 'postgres-sales', 'test:postgres:sales', [
-    'test/postgres/billing-terms.test.ts',
     'test/postgres/counter-sale.test.ts',
     'test/postgres/customer-credit.test.ts',
     'test/postgres/fulfillment.test.ts',
