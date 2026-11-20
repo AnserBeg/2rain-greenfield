@@ -40,10 +40,10 @@
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "WORKFLOW-1",
-  "base": "17618776dd058bbb8efec032eae13a00a5d5398b",
-  "head": "92b980b32f37fcab9c6e4751ebfa323d7a1ce41c",
+  "base": "08edc207bcd5be1982c9c0bcf1723172df9cb7ad",
+  "head": "5375450fa9fc24cf255a3b5a763facb0ed99c7b4",
   "changedPaths": [
-    "db/migrations/0051_workflow_retry_authority.sql", "db/schema.snapshot.json",
+    "db/migrations/0052_workflow_retry_authority.sql", "db/schema.snapshot.json",
     "learnings.md", "packages/postgres-provider/src/current-policy.ts",
     "packages/postgres-provider/src/release-verification-service.ts", "packages/postgres-provider/src/workflow-execution.ts",
     "packages/postgres-provider/src/workflow-gateway.ts", "test/architecture/release-persistence-boundary.test.ts",
