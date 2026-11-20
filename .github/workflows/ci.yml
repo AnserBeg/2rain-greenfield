@@ -1,15 +1,33 @@
-name: CONNECT-1 Party prerequisites
+name: CONNECT-1 focused diagnostics
 on: workflow_dispatch
 permissions:
   contents: read
 jobs:
-  posting:
+  address:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: packet/CONNECT-1
+          fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version-file: .node-version
       - run: corepack pnpm install --frozen-lockfile --reporter=append-only
-      - run: node --import tsx --test --test-concurrency=1 --test-name-pattern='the unchanged kernel admits a posting' test/postgres/inventory-posting.test.ts
+      - name: Capture migration stream
+        run: node --import tsx test/helpers/regenerate-schema-snapshot.ts
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: connector-snapshot
+          path: db/schema.snapshot.json
+      - run: corepack pnpm typecheck
+        id: types
+        continue-on-error: true
+      - run: corepack pnpm lint
+        id: lint
+        continue-on-error: true
+      - run: node --import tsx --test test/unit/address-connector.test.ts
+      - run: node --import tsx --test test/postgres/address-connector.test.ts
+      - if: always()
+        run: test "${{ steps.types.outcome }}" = success && test "${{ steps.lint.outcome }}" = success
