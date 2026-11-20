@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { retypedCalculatedDisplayField } from '../../canonical-model/src/calculated-display-bindings.js';
 import { retypedFormulaRule } from '../../canonical-model/src/formula-validation-bindings.js';
 
+import { RECEIPT_POSTED_EVENT } from '../../domain/src/purchasing/receipt-posted-event.js';
 import {
   canonicalAuthoredProjection,
   canonicalize,
@@ -971,6 +972,70 @@ export class PostgresCustomizationService {
       message: 'the model did not produce a well-formed change',
       status: 'invalid' as const,
     });
+  }
+
+  async workflows(actor?: TrustedRequestContext) {
+    const context = await this.#context(actor);
+    const pointer = await this.#livePointer(context);
+    const workflows = await withTrustedRequestTransaction(
+      this.connection.runtimePool,
+      context,
+      async (client) =>
+        (
+          await client.query<{
+            workflowId: string;
+            eventType: string;
+            body: string;
+            grants: {
+              queries: readonly string[];
+              operations: readonly string[];
+            };
+          }>(
+            `SELECT d.workflow_id AS "workflowId", d.event_type AS "eventType",
+                  convert_from(b.bundle, 'UTF8')::jsonb->>'body' AS body, d.grants
+             FROM platform.release_activation_verification_receipts AS v
+             JOIN platform.release_activation_swap_receipts AS s
+               USING (tenant_id, environment_id, activation_attempt_id)
+             JOIN platform.release_approvals AS a
+               ON (a.tenant_id, a.environment_id, a.approval_id) =
+                  (s.tenant_id, s.environment_id, s.approval_id)
+             JOIN platform.workflow_definitions AS d
+               ON (d.tenant_id, d.environment_id, d.release_id) =
+                  (v.tenant_id, v.environment_id, v.activated_release_id)
+              AND a.workflow_definition_bindings ? d.workflow_id
+             JOIN platform.workflow_body_blobs AS b
+               ON (b.tenant_id, b.environment_id, b.body_digest) =
+                  (d.tenant_id, d.environment_id, d.body_digest)
+            WHERE v.tenant_id = $1 AND v.environment_id = $2 AND v.activated_release_id = $3
+              AND v.pointer_id = $4 AND v.fence = $5 AND v.status = 'SWAPPED_VERIFIED'
+              AND (
+                EXISTS (SELECT 1 FROM platform.customization_permission_roles())
+                OR COALESCE((
+                  SELECT eligible FROM platform.release_approver_eligibility_events
+                   WHERE tenant_id = $1 AND principal_id = $6
+                   ORDER BY policy_version DESC LIMIT 1
+                ), false)
+              )
+              AND jsonb_typeof(convert_from(b.bundle, 'UTF8')::jsonb->'body') = 'string'
+            ORDER BY d.workflow_id`,
+            [
+              context.tenantId,
+              context.environmentId,
+              pointer.releaseId,
+              pointer.pointerId,
+              pointer.fence,
+              context.principalId,
+            ],
+          )
+        ).rows,
+    );
+    return workflows.map(({ eventType, ...workflow }) => ({
+      ...workflow,
+      trigger:
+        eventType === RECEIPT_POSTED_EVENT.eventType
+          ? RECEIPT_POSTED_EVENT.label
+          : eventType,
+    }));
   }
 
   /** What a change may target on the live release (plan §10.6 rules). */
