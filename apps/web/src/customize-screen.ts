@@ -596,7 +596,19 @@ function addressForms(targets: CustomizationTargets) {
         `<form method="post"><fieldset><legend>Map on ${escapeHtml(l.label)}</legend><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="addMapPlacement"><input type="hidden" name="surface" value="${escapeHtml(l.body.surfaceId)}"><label>Address<select name="fieldId">${fields.map((f) => `<option value="${escapeHtml(f.id)}">${escapeHtml(f.label.text)}</option>`).join('')}</select></label><label>Record section<select name="sectionId">${l.body.sections.map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.label.text)}</option>`).join('')}</select></label><button>Draft map placement</button></fieldset></form>`,
       ];
     });
+  // ADR-0087: a date-time field on a tenant record type, with its zone source.
+  const tenantTypes = targets.recordTypes
+    .filter((e) => e.entityId.includes(':entity.custom_'))
+    .map(
+      (e) =>
+        `<option value="${escapeHtml(e.entityId)}">${escapeHtml(e.label)}</option>`,
+    )
+    .join('');
+  const dateTimeForm = tenantTypes
+    ? `<form method="post" data-customize-form="addDateTimeField"><fieldset><legend>New date and time field</legend><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="addDateTimeField"><label>Record type<select required name="entity">${tenantTypes}</select></label><label>Field name<input name="label" required maxlength="80"></label><label>Time zone<select name="zoneSource"><option value="perRecordIana">Chosen on each record</option><option value="companyBusinessCalendar">Company business calendar</option></select></label><label><input type="checkbox" name="required"> Required</label><button>Draft date and time field</button></fieldset></form>`
+    : '';
   return (
+    dateTimeForm +
     `<form method="post"><fieldset><legend>New address field</legend><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="addAddressField"><label>Record type<select required name="entity">${entities}</select></label><label>Field name<input name="label" required maxlength="80"></label><label><input type="checkbox" name="required"> Required</label><button>Draft address field</button></fieldset></form>` +
     mapForms.join('')
   );
@@ -887,6 +899,26 @@ export function patchFromForm(
     };
   };
   switch (form.kind) {
+    case 'addDateTimeField': {
+      const entity = String(form.entity ?? '');
+      const [ns, local] = entity.split(':entity.');
+      const label = String(form.label ?? '').trim();
+      return {
+        kind: 'addDateTimeField',
+        schemaVersion: 'northstar.date-time-field/v1',
+        target: { kind: 'tenantRecordType', recordTypeId: entity },
+        fieldId: `${ns}:field.${local}_${slug(label)}`,
+        label,
+        required: form.required === 'on',
+        zoneSource: {
+          kind:
+            form.zoneSource === 'companyBusinessCalendar'
+              ? 'companyBusinessCalendar'
+              : 'perRecordIana',
+          version: 'v1',
+        },
+      };
+    }
     case 'addAddressField': {
       const entity = String(form.entity ?? '');
       const [ns, local] = entity.split(':entity.');
@@ -1182,6 +1214,8 @@ function describe(patch: PatchSummary): string {
       return `New field "${label}"`;
     case 'addAddressField':
       return 'New address field ' + label;
+    case 'addDateTimeField':
+      return `New date and time field "${label}"`;
     case 'addMapPlacement':
       return 'Map placement on Record';
     case 'addDocumentField':
