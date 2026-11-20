@@ -1,6 +1,7 @@
 # Run the staff sign-in pilot
 
 Use one installed tenant/environment with a verified serving release and the current migrations.
+Use a dedicated pilot database. The first committed identity-mode claim fixes the mode for every environment in that database.
 The pilot serves the ERP and identity service as two HTTPS processes. Both can run on one host.
 Set these deployment values for the installer and both processes.
 

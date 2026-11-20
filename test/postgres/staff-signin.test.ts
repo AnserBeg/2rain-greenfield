@@ -322,6 +322,30 @@ test('staff sign-in integrity under the pilot database roles', async (suite) => 
         await suite.test(
           'bootstrap records one database-wide mode before either service can provision',
           async () => {
+            const { createComposedApplicationRuntime } =
+              await import('../../packages/postgres-provider/src/composed-application-runtime.js');
+            const installer = await pool.connect();
+            try {
+              await installer.query('BEGIN');
+              await installer.query(
+                "SELECT pg_advisory_xact_lock(hashtext('staff-identity-deployment-v1'))",
+              );
+              const demo = createComposedApplicationRuntime({
+                databaseUrl: `postgresql://postgres@127.0.0.1:${connection.port}/postgres?options=-c%20lock_timeout%3D250ms`,
+                localDemoIdentity: true,
+                migrationsDirectory: 'db/migrations',
+                providerErrorMappings: [],
+                tenantSlug: 'mode-check',
+                compiledApplication: {},
+              });
+              await assert.rejects(demo, {
+                code: '55P03',
+                where: /claim_staff_store_mode/u,
+              });
+            } finally {
+              await installer.query('ROLLBACK');
+              installer.release();
+            }
             const claim = (mode: string) =>
               pool.query('SELECT platform.claim_staff_store_mode($1)', [mode]);
             const outcomes = await Promise.allSettled([

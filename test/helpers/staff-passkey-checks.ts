@@ -112,7 +112,8 @@ export async function passkeyChecks(
   const rotation = await login(handle);
   const prior = accepted.identity;
   const left = await start(rotation, prior),
-    right = await start(rotation, prior);
+    right = await start(rotation, prior),
+    late = await start(rotation, prior);
   const assertions = [
     await assertion(left.challenge),
     await assertion(right.challenge),
@@ -134,6 +135,12 @@ export async function passkeyChecks(
     await family(replacement.identity),
     original,
     'rotation preserves the family and exact first deadline',
+  );
+  // This outstanding ceremony gets a fresh assertion counter after the winner.
+  // Its sole obsolete input is the superseded identity handle.
+  await assert.rejects(
+    issuer.finish(late.flow, await assertion(late.challenge), prior),
+    /Staff access could not be verified/u,
   );
   const rotated = await issuer.redeem(replacement.handoff, rotation, handle);
   assert.ok(handle !== rotated);
