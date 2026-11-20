@@ -124,6 +124,11 @@ export class PostgresCurrentPolicyGateway implements CurrentPolicyGateway {
     private readonly pool: Pool,
     bindings: readonly CurrentPolicyPermissionBinding[],
     operations: readonly RegisteredOperationDefinition[] = [],
+    private readonly grantCeiling?: (
+      binding: CurrentPolicyPermissionBinding,
+      roleId: string,
+      companyId: string | null,
+    ) => boolean,
   ) {
     const byId = new Map<string, CurrentPolicyPermissionBinding>();
     for (const binding of [...CURRENT_POLICY_RUNTIME_BINDINGS, ...bindings]) {
@@ -288,6 +293,12 @@ export class PostgresCurrentPolicyGateway implements CurrentPolicyGateway {
         .filter(
           (row) =>
             row.grant_role_id !== null &&
+            (!this.grantCeiling ||
+              this.grantCeiling(
+                binding,
+                row.grant_role_id,
+                row.legal_entity_id,
+              )) &&
             (!excluded ||
               (row.role_key !== null && !excluded.includes(row.role_key))),
         )
