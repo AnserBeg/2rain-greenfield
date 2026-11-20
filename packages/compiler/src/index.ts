@@ -130,3 +130,4 @@ export {
   type StorageTargetPayloadV1,
 } from './storage.js';
 export { workflowTierBDependencies } from './workflow-dependencies.js';
+export { workflowSdkBindingDigest } from './workflows.js';
