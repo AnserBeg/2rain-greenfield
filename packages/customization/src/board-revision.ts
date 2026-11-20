@@ -341,15 +341,16 @@ export interface BoardView {
 }
 export interface BoardTarget extends BoardOffer {
   views: BoardView[];
+  /** The List no longer passes the authoring gates: its Boards can only retire. */
+  retireOnly?: true;
 }
 export function boardTargets(def: BoardSource): BoardTarget[] {
   return def.surfaces.flatMap((list) => {
     if (!list.list) return [];
-    const offer = boardOffer(def, String(list.surfaceId));
-    if (!offer) return [];
+    const listSurfaceId = String(list.surfaceId);
     const views = def.surfaces.flatMap((surface) => {
       const board = surface.board as SurfaceBoard | undefined;
-      return board?.body.listSurfaceId === offer.frame.listSurfaceId
+      return board?.body.listSurfaceId === listSurfaceId
         ? [
             {
               surfaceId: String(surface.surfaceId),
@@ -361,7 +362,42 @@ export function boardTargets(def: BoardSource): BoardTarget[] {
           ]
         : [];
     });
-    return [{ ...offer, views }];
+    const offer = boardOffer(def, listSurfaceId);
+    if (offer) return [{ ...offer, views }];
+    // Keep a way out: an existing Board on a List that no longer qualifies can
+    // still be retired, which checks identity and predecessor only.
+    const body = views.find((v) => v.lifecycle === 'active')?.body;
+    if (!body) return [];
+    const { grouping } = body;
+    return [
+      {
+        listLabel: String(list.label),
+        frame: {
+          version: body.version,
+          entityId: body.entityId,
+          listSurfaceId: body.listSurfaceId,
+          listQuery: body.listQuery,
+          recordSurfaceId: body.recordSurfaceId,
+          getQueryId: body.getQueryId,
+          title: body.title,
+          grouping: {
+            kind: grouping.kind,
+            version: grouping.version,
+            machineId: grouping.machineId,
+            state: grouping.state,
+          },
+        },
+        stages: grouping.stages.map((s) => ({
+          stateId: s.stateId,
+          label: s.stateId,
+        })),
+        moves: [],
+        facts: [],
+        defaultFacts: [],
+        views,
+        retireOnly: true as const,
+      },
+    ];
   });
 }
 /** The builder's default offer: the stages, every move between them, default facts. */

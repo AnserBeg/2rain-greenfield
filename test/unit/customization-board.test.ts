@@ -246,17 +246,33 @@ test('Board v2 records explicit choices by stable ID, with the version literal 2
     /"label":"(?!Purchase order board)/u,
   );
   assert.equal(poBoard.resultDigest, boardDigest(poBoard.body));
-  // Reader: a v1-shaped patch is refused by the parser on its missing version.
-  const v1 = structuredClone(poBoard) as Json;
-  delete v1.version;
+  // Reader: a v1-shaped patch (the withdrawn shape) is refused by the parser.
+  const v1 = {
+    kind: 'addBoardViewRevision',
+    schemaVersion: 'v6',
+    surfaceId: poBoard.surfaceId,
+    listSurfaceId: poList,
+    label: 'Purchase order board',
+    lifecycle: 'active',
+    revisionId: poBoard.revisionId,
+    predecessor: null,
+    grouping: {
+      kind: 'lifecycleState',
+      version: 1,
+      machineId: id('machine.purchase_order_lifecycle'),
+      states: poBoard.body.grouping.stages.map((s) => s.stateId),
+    },
+    resultDigest: poBoard.resultDigest,
+  };
   assert.equal(
     customization.CustomizationPatchSchema.safeParse(v1).success,
     false,
   );
-  assert.equal(
-    customization.CustomizationPatchSchema.safeParse({ ...poBoard, version: 1 })
-      .success,
-    false,
+  const issues =
+    customization.BoardViewRevisionSchema.safeParse(v1).error!.issues;
+  assert.ok(
+    issues.some((i) => i.path.join('.') === 'version'),
+    JSON.stringify(issues),
   );
   assert.equal(BOARD_READER, 36);
 });
@@ -632,4 +648,41 @@ test('proof: the serving reader refuses an understated surface floor, a stated f
     served.problem(forged, BOARD_READER),
     'The Board move must bind the declared lifecycle transition.',
   );
+});
+
+test('a Board on a List that no longer qualifies can still be retired', () => {
+  const built = applied(authored, [poBoard]);
+  // A second Record surface for purchase orders that names no owner makes the
+  // authoring gates refuse the List; the recorded Board stays valid.
+  const record = structuredClone(
+    rows(built, 'surfaces').find(
+      (s) => s.surfaceId === poBoard.body.recordSurfaceId,
+    )!,
+  );
+  const twin = id('surface.purchase_order_detail_twin');
+  record.surfaceId = twin;
+  delete record.workspace;
+  for (const slot of record.slots as Json[])
+    slot.slotId = String(slot.slotId) + '_twin';
+  rows(built, 'surfaces').push(record);
+  const owner = rows(built, 'surfaces').find(
+    (s) => s.surfaceId === poBoard.body.recordSurfaceId,
+  )!;
+  delete owner.workspace;
+  const def = normalizeApplicationPackage(built);
+  const found = customization
+    .customizationTargets(def)
+    .boards!.find((t) => t.frame.listSurfaceId === poList)!;
+  assert.equal(found.retireOnly, true);
+  const retired = customization.draftBoardRevision(
+    found,
+    'Purchase order board',
+    customization.choicesOf(poBoard.body),
+    found.views[0],
+    'retired',
+  );
+  const result = customization.applyCustomizationPatches(built, [
+    patch(retired),
+  ]);
+  assert.equal(result.status, 'applied', JSON.stringify(result));
 });

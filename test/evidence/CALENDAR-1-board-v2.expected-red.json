@@ -226,6 +226,11 @@
           "file": "test/postgres/board-policy.test.ts",
           "name": "a company-scoped read and move",
           "expected": "did not match the regular expression|match the regular expression"
+        },
+        {
+          "file": "test/postgres/board-policy.test.ts",
+          "name": "a company-scoped Board offers only granted live moves in its company, refuses a forged confirm and never renders a partial read as empty",
+          "expected": "subtest failed"
         }
       ]
     },
@@ -243,6 +248,11 @@
           "file": "test/postgres/board-policy.test.ts",
           "name": "a company-scoped read and move",
           "expected": "403"
+        },
+        {
+          "file": "test/postgres/board-policy.test.ts",
+          "name": "a company-scoped Board offers only granted live moves in its company, refuses a forged confirm and never renders a partial read as empty",
+          "expected": "subtest failed"
         }
       ]
     },
@@ -260,6 +270,11 @@
           "file": "test/postgres/board-policy.test.ts",
           "name": "a move granted only to an automation principal is never offered to a person",
           "expected": "Move card: Alpha two"
+        },
+        {
+          "file": "test/postgres/board-policy.test.ts",
+          "name": "a company-scoped Board offers only granted live moves in its company, refuses a forged confirm and never renders a partial read as empty",
+          "expected": "subtest failed"
         }
       ]
     }

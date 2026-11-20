@@ -182,8 +182,17 @@ export function boardBindingConflicts(
   const query = (qid: string) => def.queries.find((q) => q.queryId === qid);
   const list = surface(body.listSurfaceId);
   if (!active(list)) retired(body.listSurfaceId, list ? 'retired' : null);
-  else if (list.archetype !== 'list')
-    changed(body.listSurfaceId, 'list', list.archetype);
+  else if (
+    list.archetype !== 'list' ||
+    (target(list.dataSource) !== body.listQuery.queryId &&
+      (list.workspace as { entry?: { authorizationQueryId?: string } })?.entry
+        ?.authorizationQueryId !== body.listQuery.queryId)
+  )
+    changed(
+      body.listSurfaceId,
+      { archetype: 'list', readsQueryId: body.listQuery.queryId },
+      { archetype: list.archetype, readsQueryId: target(list.dataSource) },
+    );
   const boundFields = [body.title, body.grouping.state, ...body.facts];
   const listQuery = query(body.listQuery.queryId);
   if (!active(listQuery))
