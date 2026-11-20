@@ -308,11 +308,10 @@ class ReadSnapshot {
 
   async resolveStaffPrincipal(session: StaffRequestSession): Promise<string> {
     return this.#exclusive(async () => {
+      if (this.#identity) await this.#end();
       if (!this.#client) {
         this.#client = await this.pool.connect();
-        await this.#client.query(
-          'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY',
-        );
+        await this.#client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
         await assertRuntimeLoginRole(this.#client);
       }
       return lookupStaffPrincipal(this.#client, session);
@@ -489,10 +488,18 @@ class ReadSnapshot {
     this.#identity = context;
     try {
       if (!started) {
-        await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+        await client.query(
+          staffSessions.has(context)
+            ? 'BEGIN ISOLATION LEVEL REPEATABLE READ'
+            : 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY',
+        );
         await assertRuntimeLoginRole(client);
       }
       await setTrustedIdentity(client, context, 'read');
+      // Session verification publishes a database clock observation. Seal the
+      // snapshot read-only before handing this client to any application read.
+      if (staffSessions.has(context))
+        await client.query('SET TRANSACTION READ ONLY');
       const result = await client.query<{ policy_version: string }>(
         SNAPSHOT_POLICY_VERSION_SQL,
         [context.tenantId, context.environmentId],

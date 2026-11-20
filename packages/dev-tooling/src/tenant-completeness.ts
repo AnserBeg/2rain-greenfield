@@ -41,6 +41,7 @@ const tenantIndependentV1TableAuthorities: ReadonlyMap<
   ],
   ['north_star_internal.module_storage_elements', 'shared-immutable-catalog'],
   ['north_star_internal.schema_migrations', 'migration-history'],
+  ['north_star_internal.staff_store_mode', 'kernel-integrity-witness'],
   ['platform.immutable_release_write_guard', 'kernel-integrity-witness'],
   ['platform.release_activation_write_guard', 'kernel-integrity-witness'],
   ['platform.release_artifact_blobs', 'shared-immutable-content'],

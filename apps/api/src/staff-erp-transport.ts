@@ -1,3 +1,4 @@
+import type { Pool } from 'pg';
 import { request as httpsRequest } from 'node:https';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
@@ -57,7 +58,7 @@ async function backchannel(
   });
   return JSON.parse(result) as Record<string, unknown>;
 }
-export function erpTransport(r: StaffRealm, ca?: Buffer) {
+export function erpTransport(r: StaffRealm, pool: Pool, ca?: Buffer) {
   validateRealm(r);
   return async (req: IncomingMessage, res: ServerResponse) => {
     secureResponse(res);
@@ -107,12 +108,17 @@ export function erpTransport(r: StaffRealm, ca?: Buffer) {
       (url.pathname === '/auth/signin' || (!handle && url.pathname === '/'))
     ) {
       const verifier = secret();
-      res.setHeader('set-cookie', cookie(loginCookie, verifier, 300));
+      const binding = digest(verifier);
+      const { rows } = await pool.query<{ keep: boolean }>(
+        'SELECT platform.staff_start_login($1,$2,$3,$4) AS keep',
+        [r.tenantId, r.environmentId, binding, handle ? digest(handle) : null],
+      );
+      const cookies = [cookie(loginCookie, verifier, 300)];
+      if (handle && !rows[0]?.keep) cookies.push(cookie(sessionCookie, '', 0));
+      res.setHeader('set-cookie', cookies);
       res.writeHead(303, {
         location:
-          r.identityOrigin +
-          '/#binding=' +
-          digest(verifier).toString('base64url'),
+          r.identityOrigin + '/#binding=' + binding.toString('base64url'),
       });
       res.end();
       return null;

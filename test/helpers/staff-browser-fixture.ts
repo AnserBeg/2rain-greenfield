@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { createServer, type Server } from 'node:https';
+import { createServer, request, type Server } from 'node:https';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -40,6 +40,41 @@ async function listen(server: Server) {
     throw new Error('Expected loopback listener');
   return addr.port;
 }
+/** Start an ordinary ERP login without navigating the authenticator's page. */
+export function startBrowserLogin(
+  realm: StaffRealm,
+  ca: Buffer,
+  prior?: string,
+) {
+  const erp = new URL(realm.erpOrigin);
+  return new Promise<string>((resolve, reject) => {
+    const req = request(
+      {
+        hostname: '127.0.0.1',
+        port: erp.port,
+        servername: erp.hostname,
+        ca,
+        path: '/auth/signin',
+        headers: {
+          host: erp.host,
+          ...(prior ? { cookie: '__Host-erp-session=' + prior } : {}),
+        },
+      },
+      (res) => {
+        res.resume();
+        const cookie = res.headers['set-cookie']?.find((header) =>
+          header.startsWith('__Host-erp-login='),
+        );
+        const verifier = cookie?.match(/^__Host-erp-login=([\w-]{43});/u)?.[1];
+        if (res.statusCode === 303 && verifier) resolve(verifier);
+        else reject(new Error('ERP login transaction did not start'));
+      },
+    );
+    req.on('error', reject);
+    req.end();
+  });
+}
+
 export interface BrowserStaffFixture {
   realm: StaffRealm;
   pool: pg.Pool;
