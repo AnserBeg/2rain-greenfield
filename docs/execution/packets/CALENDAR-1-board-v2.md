@@ -2,6 +2,8 @@
 
 Status — built on `packet/CALENDAR-1-board-v2` from main `5d315668` (docs E1–E20). Surface reader rung 36, taken at merge above draft line create values (35). No migration. Governs: [ADR-0086 view revision member shape](../../decisions/ADR-0086-board-calendar-and-resource-timeline.md), [Board v2 fix proofs](CALENDAR-1.md#board-v2-fix).
 
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44824314810
+
 ## Claims
 
 1. The Board patch member and compiled body carry version literal 2. They record the chosen stage IDs, each offered move's operation ID with its contract digest (operation, effect kind, transition, from and to state, tier), up to three fact field IDs with field-type kinds, and every other binding once (List, list query tier and company scope, Record and get query, title and state fields). The v1 parser and builder are removed.
