@@ -10,8 +10,8 @@ One forward migration adds the identity realm, staff accounts, credentials, enro
 
 ## Gates and controls
 
-The PostgreSQL test observes committed writes, idle/absolute expiry, a clock regression, live role membership, concurrent bootstrap, cross-scope refusal, role privileges and append-only evidence. Two named controls remove the idle and revocation checks individually.
-The Chromium test exercises real passkey registration and assertion on HTTPS, one-use handoffs, distinct session audiences, request identity, CSRF, recovery, deactivation and sign-out across ERP instances. It measures the signed-in purchase-order list against three transactions and forty statements.
+The PostgreSQL test observes committed writes, idle/absolute expiry, a clock regression, live role membership, concurrent bootstrap, cross-scope refusal, role privileges and append-only evidence. Removing either the idle check or the revocation check let an issued context write and failed the corresponding test. The previous main schema enrolled zero owners in the bootstrap race.
+The Chromium test exercises real passkey registration and assertion on HTTPS, one-use handoffs, distinct session audiences, request identity, CSRF, recovery, deactivation and sign-out across ERP instances. The signed-in purchase-order list refreshed activity in two transactions and 29 statements, within the three/40 budget.
 The import-boundary test loads the pilot with demo actor, seed and CLI imports refused, then proves its control against the demo root.
 
 ## Test it yourself
@@ -25,7 +25,7 @@ Slice 2 awaits the orchestrator. Both ADR-0073 findings and proof-gated signatur
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "SIGNIN-1",
   "base": "f59afb11fda87bcde13170f8fe00795fadbf0506",
-  "head": "705b986bc397bcffbf2d3ec5237832eb315e8904",
+  "head": "44c6a7e71624fd6cbddf78e5e03903db4b70e2b1",
   "changedPaths": [
     "apps/api/package.json", "apps/api/src/composition-root.ts",
     "apps/api/src/erp-capabilities.ts", "apps/api/src/pilot-composition-root.ts",
