@@ -11,7 +11,7 @@ interface ApprovalSelection {
 }
 
 export interface ApprovalPlan extends ApprovalSelection {
-  readonly companyId: string;
+  readonly companyId: string | null;
   readonly operationId: string;
   readonly summary: string;
   readonly input: unknown;

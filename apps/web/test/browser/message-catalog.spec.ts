@@ -513,7 +513,7 @@ test.beforeAll(async () => {
                       cursor: 1,
                       fence: '2',
                       digest: approvalDigest,
-                      companyId: '10000000-0000-4000-8000-000000000006',
+                      companyId: null,
                       operationId:
                         'northstar.app:operation.custom_receipt_review_escalate',
                       summary: 'Escalate inspection',
@@ -827,6 +827,7 @@ const REAL_PATH_DRIVERS: Readonly<
     await page.goto(`${approvalsUrl}/?approvals`);
     const plan = page.locator('[data-workflow-approval]');
     await expect(plan.getByText('Escalate inspection')).toBeVisible();
+    await expect(plan.getByText('Tenant-wide', { exact: true })).toBeVisible();
     await expect(plan.locator('pre')).toContainText('"expectedRevision": 3');
     await plan.getByRole('button', { name: 'Approve' }).click();
   },
