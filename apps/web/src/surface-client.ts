@@ -627,6 +627,53 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
   });
 })();
 (() => {
+  for (const editor of document.querySelectorAll('[data-address-editor]')) {
+    const input = editor.querySelector('input[type=text]');
+    const installation = editor.querySelector('select');
+    const option = editor.querySelector('template[data-address-option]')?.content.firstElementChild;
+    if (!input || !installation || !option) continue;
+    const results = editor.querySelector('[data-address-results]');
+    const choice = editor.querySelector('input[name$=".choice"]');
+    const session = editor.querySelector('input[name$=".session"]').value;
+    let generation = 0;
+    let timer;
+    const update = () => {
+      const current = ++generation;
+      const text = input.value;
+      clearTimeout(timer);
+      results.replaceChildren();
+      choice.value = '';
+      if (text.trim().length < 3 || !installation.value) return;
+      timer = setTimeout(async () => {
+        try {
+          const body = new URLSearchParams({
+            fieldId: editor.dataset.field, queryId: editor.dataset.query,
+            recordId: editor.dataset.record, installationId: installation.value, text, session,
+          });
+          const csrf = input.closest('form')?.querySelector('input[name="csrf"]')?.value;
+          if (csrf) body.set('csrf', csrf);
+          const response = await fetch('/address/suggest', { method: 'POST', body });
+          if (!response.ok) throw new Error();
+          const offered = await response.json();
+          if (current !== generation) return;
+          results.textContent = offered.attribution;
+          for (const row of offered.suggestions) {
+            const button = option.cloneNode(true);
+            button.textContent = row.label;
+            button.onclick = () => {
+              choice.value = row.handle;
+              results.textContent = row.label + ' · ' + offered.attribution;
+            };
+            results.append(button);
+          }
+        } catch {
+          if (current === generation) results.textContent = 'Suggestions unavailable. You can save the typed address.';
+        }
+      }, 350);
+    };
+    input.addEventListener('input', update);
+    installation.addEventListener('change', update);
+  }
   for (const panel of document.querySelectorAll('[data-documents]')) {
     const status = panel.querySelector('[data-documents-status]');
     const requestURL = (mode) => {
