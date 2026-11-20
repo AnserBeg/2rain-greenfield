@@ -675,6 +675,7 @@ test(
           assert.equal((await fetch(listUrl(itemUrl))).status, 404);
 
           const manager = { cookie: 'northstar-demo-actor=manager' };
+          const beforeQuota = (await counts())!;
           await pool.query(
             `INSERT INTO platform.document_blobs (tenant_id, environment_id, owner_scope, digest, content_type, bytes)
          SELECT $1, $2, 'shared', encode(sha256(bytes), 'hex'), 'image/png', bytes
@@ -731,9 +732,9 @@ test(
             'refusals leave attachment counts unchanged',
             async () => {
               assert.deepEqual(await counts(), {
-                blobs: 7,
-                versions: 8,
-                audit: 3,
+                blobs: beforeQuota.blobs + 5,
+                versions: beforeQuota.versions + 5,
+                audit: beforeQuota.audit,
               });
             },
           );
