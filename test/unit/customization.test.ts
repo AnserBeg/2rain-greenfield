@@ -1880,7 +1880,7 @@ test('layout revision replays an ordered first revision, binds each member and r
   });
   assert.equal(next.predecessor, revision.revisionId);
   const compiled = await compileInSandbox({
-    ...sandboxRequest(chain),
+    ...surfaceCompatibilityRequest(chain),
     startAt: 2,
   });
   assert.ok(
@@ -1893,7 +1893,7 @@ test('layout revision replays an ordered first revision, binds each member and r
   );
   assert.match(compiled.steps[0]!.rendered.text, /Shipping \(Instructions, /u);
   const replay = await compileInSandbox({
-    ...sandboxRequest(chain),
+    ...surfaceCompatibilityRequest(chain),
     startAt: 2,
   });
   assert.ok(replay.status === 'compiled');
@@ -2017,7 +2017,9 @@ test('tenant inspection edit sections share the extended header bindings and the
     member: edit.body.sections[0]!.id,
     label: 'Inspection details',
   });
-  const result = await compileInSandbox(sandboxRequest([change, revision]));
+  const result = await compileInSandbox(
+    surfaceCompatibilityRequest([change, revision]),
+  );
   assert.ok(
     result.status === 'compiled',
     JSON.stringify(result.status === 'compiled' ? null : result),
@@ -2070,7 +2072,9 @@ test('composed detail keeps calculated display values readable and outside edit 
     member: patch.field.fieldId,
     label: 'Margin shown',
   });
-  const result = await compileInSandbox(sandboxRequest([patch, relabel]));
+  const result = await compileInSandbox(
+    surfaceCompatibilityRequest([patch, relabel]),
+  );
   assert.ok(
     result.status === 'compiled',
     JSON.stringify(result.status === 'compiled' ? null : result),
@@ -2131,7 +2135,9 @@ test('record layout retains the file catalog and raises the Surface floor above 
     member: target.body.sections[0]!.id,
     label: 'Item identification',
   });
-  const result = await compileInSandbox(sandboxRequest([file, layout]));
+  const result = await compileInSandbox(
+    surfaceCompatibilityRequest([file, layout]),
+  );
   assert.ok(
     result.status === 'compiled',
     JSON.stringify(result.status === 'compiled' ? null : result),

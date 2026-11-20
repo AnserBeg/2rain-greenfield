@@ -159,7 +159,16 @@ test('the capability comparison binds the family to its capability, then compare
     null,
   );
 
-  const surfaceFloors = [22, 23, 24, 25, 26, 27, 28];
+  const surfaceFloors = [
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    LINE_CREATE_VALUES_SURFACE_FLOOR,
+  ];
   for (const reader of surfaceFloors) {
     for (const floor of surfaceFloors) {
       const refusal = unsupportedRuntimeCapability(
