@@ -196,8 +196,7 @@ DECLARE
      WHERE tenant_id = tenant AND environment_id = environment AND run_id = requested_run;
   ELSE
     UPDATE platform.workflow_runs SET status = 'CANCELLED', reason = 'operator-cancelled'
-     WHERE tenant_id = tenant AND environment_id = environment AND run_id = requested_run;
-  END IF;
+     WHERE tenant_id = tenant AND environment_id = environment AND run_id = requested_run; END IF;
   INSERT INTO platform.workflow_journal (tenant_id, environment_id, run_id, cursor, kind, canonical_bytes)
   VALUES (tenant, environment, requested_run, 0, 'CONTROL', convert_to(format(
     '{"fence":"%s","operator":"%s","reason":"%s"}',
@@ -205,8 +204,7 @@ DECLARE
     principal,
     CASE WHEN requested_action = 'retry' THEN 'same-pin-retry' ELSE 'operator-cancelled' END
   ), 'UTF8'));
-  RETURN true;
-END
+  RETURN true; END
 $$;
 REVOKE ALL ON FUNCTION platform.workflow_apply_remedy(uuid, bigint, bigint, text, integer) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION platform.workflow_apply_remedy(uuid, bigint, bigint, text, integer)

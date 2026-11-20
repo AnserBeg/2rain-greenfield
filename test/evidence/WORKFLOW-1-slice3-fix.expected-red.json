@@ -58,9 +58,10 @@
       "claim": "Admission refuses a workflow capability version above the serving runtime.",
       "file": "packages/postgres-provider/src/release-verification-service.ts",
       "original": "  if (familyId === PROJECTION_FAMILY_IDS.workflow) {\n    const requirement = manifest.requiredRuntimeCapability;\n    if (\n      !requirement ||\n      requirement.capabilityId !==\n        reference.requiredRuntimeCapability.capabilityId ||\n      requirement.minimumVersion !==\n        reference.requiredRuntimeCapability.minimumVersion\n    )\n      throw failure(\n        'WORKFLOW_PROJECTION_MISMATCH',\n        'Workflow manifest capability does not match the release reference',\n      );\n    const unsupported = unsupportedRuntimeCapability(familyId, requirement);\n    if (unsupported)\n      throw failure('UNSUPPORTED_RUNTIME_CAPABILITY', unsupported);\n  }\n",
-      "replacement": "",
+      "replacement": "  // Control: admit the unsupported workflow requirement.\n",
       "test": {
-        "files": ["test/integration/workflow-admission.test.ts"]
+        "files": ["test/integration/workflow-admission.test.ts"],
+        "namePattern": "a workflow release pins the declarations, SDK catalog and required reader"
       },
       "kills": [
         {
