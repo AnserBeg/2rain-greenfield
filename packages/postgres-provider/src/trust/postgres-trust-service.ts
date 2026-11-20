@@ -55,6 +55,7 @@ export type IdempotentBusinessMutation<TMutationResult> = (
 ) => Promise<{
   readonly command: AcceptedMutationCommand;
   readonly mutationResult: TMutationResult;
+  readonly afterReceipt?: BusinessMutation<void>;
 }>;
 
 export class TrustEvidenceError extends Error {
@@ -229,6 +230,7 @@ export class PostgresTrustService {
         attempted.mutationResult,
       );
       await insertIdempotencyReceipt(client, context, binding, receipt);
+      await attempted.afterReceipt?.(client);
       return receipt;
     });
   }
