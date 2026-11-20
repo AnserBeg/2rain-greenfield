@@ -1,8 +1,8 @@
 # CI-3 — tiered packet and main CI
 
-Status: independent read REVISE at `e07f0fc9` (B1 red-main deadlock, N1 serialized main, N2 decision records). All three are fixed and the GitHub controls are complete. The full run on the integration commit is pending; the `CI tier: full` line moves to it in a docs-only change after merge, because the record cannot name a run of the commit that contains it.
+Status: merged at `2e9942b8` after the independent read's REVISE at `e07f0fc9` (B1 red-main deadlock, N1 serialized main, N2 decision records); all three are fixed and the GitHub controls are complete. The full run below tested integration `4afa17dd`, which differs from the merged commit only by main's docs-only WORKFLOW-2 commits `fdffb89d` and `1f6c5ee7`.
 
-CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44777281191
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44817252075
 
 ## Claims
 
