@@ -110,12 +110,32 @@
         },
         {
           "file": "test/unit/customization-board.test.ts",
-          "name": "proof: a base change to a bound tier o0 to o1 yields its exact typed conflict naming its ID",
+          "name": "proof: a base change to a bound field yields its exact typed conflict naming its ID",
+          "expected": "WHOLE_PACKAGE_FAILURE"
+        },
+        {
+          "file": "test/unit/customization-board.test.ts",
+          "name": "proof: a base change to a bound stage yields its exact typed conflict naming its ID",
+          "expected": "WHOLE_PACKAGE_FAILURE"
+        },
+        {
+          "file": "test/unit/customization-board.test.ts",
+          "name": "proof: a base change to a bound transition yields its exact typed conflict naming its ID",
           "expected": "WHOLE_PACKAGE_FAILURE"
         },
         {
           "file": "test/unit/customization-board.test.ts",
           "name": "proof: a base change to a bound retargeted edge yields its exact typed conflict naming its ID",
+          "expected": "WHOLE_PACKAGE_FAILURE"
+        },
+        {
+          "file": "test/unit/customization-board.test.ts",
+          "name": "proof: a base change to a bound field type yields its exact typed conflict naming its ID",
+          "expected": "WHOLE_PACKAGE_FAILURE"
+        },
+        {
+          "file": "test/unit/customization-board.test.ts",
+          "name": "proof: a base change to a bound tier o0 to o1 yields its exact typed conflict naming its ID",
           "expected": "WHOLE_PACKAGE_FAILURE"
         }
       ]
