@@ -278,11 +278,13 @@ test(
             },
           });
           assert.equal(otherEntity.outcome, 'succeeded');
-          const dispatch = (await configure(COMPANY, 'dispatch'))!;
+          let dispatch = (await configure(COMPANY, 'dispatch'))!;
           const otherDispatch = (await configure(OTHER, 'other-dispatch'))!;
           assert.ok(dispatch && otherDispatch && dispatch !== otherDispatch);
+          // Re-enabling the same account keeps its identity (D4); its own
+          // subtest asserts that, so the others only follow the current one.
           const restoreDispatch = async () => {
-            assert.equal(await configure(COMPANY, 'dispatch'), dispatch);
+            dispatch = (await configure(COMPANY, 'dispatch'))!;
           };
 
           await t.test(
@@ -297,10 +299,7 @@ test(
               );
               await grantBuyerConfigure(true);
               try {
-                assert.equal(
-                  await configure(COMPANY, 'dispatch', {}, 'buyer'),
-                  dispatch,
-                );
+                assert.ok(await configure(COMPANY, 'dispatch', {}, 'buyer'));
               } finally {
                 await grantBuyerConfigure(false);
               }
@@ -540,10 +539,6 @@ test(
               } finally {
                 await restoreDispatch();
               }
-              assert.equal(
-                (await pin('manager', item.recordId)).status,
-                'ready',
-              );
             },
           );
 
@@ -753,6 +748,7 @@ test(
                 const kept = await configure(COMPANY, 'quota-keep', {
                   calls: 5,
                 });
+                const pinned = await located('Kept pin', COMPANY, kept!);
                 await suggest(COMPANY, item.recordId);
                 await suggest(COMPANY, item.recordId);
                 assert.equal(
@@ -771,6 +767,11 @@ test(
                   kept,
                 );
                 await suggest(COMPANY, item.recordId);
+                assert.equal(
+                  (await pin('manager', pinned.recordId)).status,
+                  'ready',
+                  'a returning account lost its located pins',
+                );
                 const usage = await sql<{
                   installation_id: string;
                   calls: number;
@@ -852,9 +853,8 @@ test(
             lateReply(
               'Enrichment off',
               async () => {
-                assert.equal(
+                assert.ok(
                   await configure(COMPANY, 'dispatch', { enrichment: false }),
-                  dispatch,
                 );
               },
               'a late geocode was accepted after enrichment was switched off',
@@ -874,12 +874,17 @@ test(
                   [COMPANY],
                 );
                 assert.equal(held.rowCount, 1);
+                let pending = 2;
                 const calls = [
                   configure(COMPANY, 'relay', { calls: 7 }),
                   configure(COMPANY, 'relay', { calls: 8 }),
-                ];
+                ].map((call) =>
+                  call.finally(() => {
+                    pending -= 1;
+                  }),
+                );
                 const deadline = Date.now() + 20000;
-                for (;;) {
+                while (pending > 0) {
                   const waiting = await pool.query<{ n: number }>(
                     "SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND pid<>$1",
                     [
