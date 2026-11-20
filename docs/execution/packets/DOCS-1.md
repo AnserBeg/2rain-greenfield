@@ -30,7 +30,7 @@ PostgreSQL tests cover byte reads, grants, company refusal, audit, quota, count,
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "DOCS-1",
-  "base": "014fea1641953e41e49ccb642b3faf27c094a1a8", "head": "a21e0e7356cb263216af018e52e3a4cecac5ddf7",
+  "base": "cfbe24f0ea74b71b62924125c060137f12d467d6", "head": "38a9137f7880c1d8bc97abde98c7a229eaa33036",
   "changedPaths": [
     "apps/api/src/composition-root.ts", "apps/api/src/main.ts", "apps/web/src/app-server.ts",
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/document-http.ts",
