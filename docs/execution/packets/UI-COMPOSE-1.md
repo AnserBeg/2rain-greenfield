@@ -14,38 +14,45 @@ The orchestrator accepted ADR-0079 with Fable’s amendments on 2026-11-19.
 
 - [Design with Fable’s amendments](../../decisions/ADR-0079-form-and-record-composition.md).
 - 1a derives slot and field inventories from the active package and stores a layout only when the owner adopts a revision. Layouts require Surface reader 28, above the attachment reader at 27. No database migration.
-- 1b adds disclosure, upgrade refusals and assistant discovery.
+- Slice 1b entry condition with UPGRADE-2: any chain with a layout still refuses a platform base change with `CUSTOMIZE_BASE_MOVED`. Prove moved, retired and changed bindings before admitting upgrade replay. Disclosure and assistant discovery also belong to 1b.
 - Shell branding and pop-up actions can land in either order. Document branding follows DOCS-1 templates.
 
 ## Gates and test it yourself
 
-Six focused tests fail on the preceding main and pass on slice 1a. They exercise persistent inventory, the before-and-after approval view, ordered replay, protected blocks, a generated Inspection with both reader requirements, a calculated value whose read binding survives rearrangement, and the Files section on a composed record. The PostgreSQL journey loads attachments with reader 27, checks its refusal after a layout activates, and compares complete tenant compiler envelopes. The browser journey uses the Vendor picker in its new section at desktop and compact widths.
+Slice 1a compared complete layout-free compiler envelopes and exercised the reader floor, protected blocks, calculated display values and Files. The four fix-round regressions failed on `552b13d8`. [Fix CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44703111463)
 
-In Customize, choose **Arrange a form or record page**, then the purchase order create form. Draft a section named **Delivery**, approve it and activate. Open the same arrangement and move **Vendor** into **Delivery**. Approve and activate. Open **Purchase orders → New**. Under **Delivery**, type a vendor name and select a result. Roll back the latest change to restore the vendor’s previous placement.
+- Archive and restore render the saved item description from the operation’s field ID. The contract test checks the escaped value in the renamed section on both read-backs.
+- Supplier reference has no purchase-order editor input. The compiler refuses its move with `CUSTOMIZE_LAYOUT_CONFLICT`. Customize offers moves for the editor’s bound inputs.
+- Dock note compiles before or after a layout, retains its binding and accepts a further revision. On an active layout it follows the current placement of its base-order predecessor. The archived tenant runner checks layout-free purchase-order field additions byte for byte.
+- Moving Expected date past Currency alone is refused. Move down places Expected date after Payment terms under More details, matching the approval order.
+- The browser saves a purchase order through the Vendor picker in Delivery, moves Tables and totals above Progress, then reopens the saved order and checks the supplier, total and next action. The [first browser run](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44699236478/job/136163306228) found a zero-width total at 390 px. The composed body now spans the sheet, and the test checks both widths.
+
+**Try it yourself.** In Customize, arrange the purchase-order create form. Create **Delivery**, move **Vendor** there, and approve and activate each change. Add an optional text field. Under **Purchase orders → New**, select a vendor, enter the date and one line, then save the draft. Reopen the order and check the vendor.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "UI-COMPOSE-1",
-  "base": "60451569e92ffe9aad3fc2c67bfa326a978b1f3c",
-  "head": "502497b098155ec5247811aecc5812c2199e5f4c",
+  "base": "b64cd6aa2e829eac1b0a4610cfcd5f56a8b67d34",
+  "head": "f0af2074f56b1c8e7d6b32e611920785e91f32f1",
   "changedPaths": [
-    "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/document-editor.ts",
-    "apps/web/src/ledger-styles.ts", "apps/web/src/surface-composition.ts", "apps/web/src/surface-contract.ts",
-    "apps/web/test/browser/customize-inspection.composed-application.spec.ts", "apps/web/test/browser/customize.composed-application.spec.ts", "packages/canonical-model/src/index.ts",
-    "packages/canonical-model/src/layout.ts", "packages/canonical-model/src/schemas.ts", "packages/canonical-model/src/surface-workspace.ts",
-    "packages/compiler/src/projections.ts", "packages/customization/src/ai-draft.ts", "packages/customization/src/apply.ts",
-    "packages/customization/src/index.ts", "packages/customization/src/layout-revision.ts", "packages/customization/src/patch.ts",
-    "packages/customization/src/render.ts", "packages/customization/src/targets.ts", "packages/postgres-provider/src/customization-service.ts",
-    "packages/postgres-provider/src/layout-admission.ts", "packages/postgres-provider/src/release-repository.ts", "packages/postgres-provider/src/request-runtime-view-service.ts",
-    "packages/runtime/src/request-runtime-view.ts", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/fixtures/inspection-customization.ts",
-    "test/fixtures/inspection-link-records.ts", "test/helpers/language-coverage-packages.ts", "test/postgres/customization-inspection.test.ts",
-    "test/postgres/customization-validation.test.ts", "test/postgres/request-runtime-view.test.ts", "test/unit/customization.test.ts"
+    "apps/web/src/component-registry.ts",
+    "apps/web/src/customize-screen.ts",
+    "apps/web/src/ledger-styles.ts",
+    "apps/web/test/browser/customize.composed-application.spec.ts",
+    "apps/web/test/surface-runtime-contract.test.ts",
+    "docs/decisions/ADR-0079-form-and-record-composition.md",
+    "packages/customization/src/apply.ts",
+    "packages/customization/src/layout-revision.ts",
+    "packages/customization/src/render.ts",
+    "test/helpers/archived-customization-runtime.ts",
+    "test/postgres/customization-validation.test.ts",
+    "test/unit/customization.test.ts"
   ],
   "symbols": [
-    {"path":"packages/canonical-model/src/layout.ts","name":"baseLayout"},
-    {"path":"packages/customization/src/layout-revision.ts","name":"applyLayoutRevision"},
-    {"path":"packages/postgres-provider/src/layout-admission.ts","name":"layoutBindingsProblem"}
+    {"path": "apps/web/src/component-registry.ts", "name": "renderLayoutDetailSection"},
+    {"path": "packages/customization/src/layout-revision.ts", "name": "placeAddedLayoutField"},
+    {"path": "packages/customization/src/layout-revision.ts", "name": "arrangeableLayoutFields"}
   ]
 }
 ```
