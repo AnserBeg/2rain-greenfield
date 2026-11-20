@@ -48,7 +48,8 @@ const workflowPath = '.github/workflows/ci.yml';
 const rootScriptCiAllowlist = {
   'check:boundaries':
     'transitively enforced by test/architecture/dependency-boundaries.test.ts',
-  'test:postgres': 'developer aggregate for the three CI PostgreSQL shards',
+  'test:postgres': 'developer aggregate for the general CI PostgreSQL shards',
+  'test:postgres:inventory': 'developer aggregate for both inventory shards',
   test: 'developer aggregate for running the CI test commands locally',
 } as const;
 const nodeSelectionArguments =
@@ -381,7 +382,7 @@ test('declared unfiltered producers are wired to CI and their evidence paths', (
     let job = extractWorkflowJob(workflow, producer.ciJob);
     if (producer.ciJob === 'postgres') {
       const shard = producer.id.slice('postgres-'.length);
-      assert.match(job, /shard: \[1, 2, 3\]/u);
+      assert.match(job, /shard: \[1, 2, 3, 4, 5, 6\]/u);
       assert.ok(
         job.includes(
           `if: matrix.shard == ${shard}\n        run: ${producer.ciInvocation}\n`,
@@ -450,9 +451,14 @@ test('declared unfiltered producers are wired to CI and their evidence paths', (
 test('every file selected by the former general PostgreSQL glob belongs to exactly one shard', () => {
   const oldGeneralGlob =
     'test/postgres/**/!(commercial-totals|composed-application|counter-sale|customer-credit|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|period-lock-commands|price-lists|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|replenishment|stock-serializer).test.ts';
-  const shards = ['postgres-1', 'postgres-2', 'postgres-3'].map(
-    getReachabilityProducer,
-  );
+  const shards = [
+    'postgres-1',
+    'postgres-2',
+    'postgres-3',
+    'postgres-4',
+    'postgres-5',
+    'postgres-6',
+  ].map(getReachabilityProducer);
   const files = globSync(oldGeneralGlob);
   assert.ok(files.length > 0);
   // These paths share basenames with root files assigned to shards 1 and 2.
@@ -570,14 +576,16 @@ test('the Playwright producers run every browser spec in exactly one job and rep
     spec.endsWith('composed-application.spec.ts'),
   );
   assert.ok(composed.length > 0, 'no composed-application journey was found');
+  const customizationJobs = new Map([
+    ['customize.composed-application.spec.ts', 'browser-customization'],
+    ['customize-formulas.composed-application.spec.ts', 'browser-rules'],
+    ['customize-inspection.composed-application.spec.ts', 'browser-rules'],
+    ['customize-rules.composed-application.spec.ts', 'browser-rules'],
+  ]);
   for (const spec of composed) {
     assert.deepEqual(
       selectedBy.get(spec),
-      [
-        basename(spec) === 'customize.composed-application.spec.ts'
-          ? 'browser-customization'
-          : 'browser-composed',
-      ],
+      [customizationJobs.get(basename(spec)) ?? 'browser-composed'],
       `${relative(process.cwd(), spec)} would not run in its declared composed browser job`,
     );
   }
@@ -871,6 +879,8 @@ function projectSelectsSpec(
 }
 
 function patternMatchesSpec(pattern: unknown, spec: string): boolean {
+  if (Array.isArray(pattern))
+    return pattern.some((item) => patternMatchesSpec(item, spec));
   assert.ok(
     pattern instanceof RegExp,
     `unmodelled Playwright file pattern: ${String(pattern)}`,

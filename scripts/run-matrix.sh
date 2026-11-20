@@ -205,16 +205,21 @@ echo "PERFORMANCE_GATE_PASS_SHA=$SHA" | tee -a "$LOG"
   corepack pnpm test:postgres:1 &&
   corepack pnpm test:postgres:2 &&
   corepack pnpm test:postgres:3 &&
+  corepack pnpm test:postgres:4 &&
+  corepack pnpm test:postgres:5 &&
+  corepack pnpm test:postgres:6 &&
   corepack pnpm test:postgres:composed &&
   corepack pnpm test:postgres:commercial &&
   corepack pnpm test:postgres:sales &&
-  corepack pnpm test:postgres:inventory &&
+  corepack pnpm test:postgres:inventory:balances &&
+  corepack pnpm test:postgres:inventory:posting &&
   corepack pnpm test:locale &&
   corepack pnpm test:browser &&
   corepack pnpm test:browser:operations &&
   corepack pnpm test:browser:inventory &&
   corepack pnpm test:browser:composed &&
-  corepack pnpm test:browser:customization
+  corepack pnpm test:browser:customization &&
+  corepack pnpm test:browser:rules
 } 2>&1 | tee -a "$LOG"
 RC="${PIPESTATUS[0]}"
 if [ "$RC" -ne 0 ]; then
