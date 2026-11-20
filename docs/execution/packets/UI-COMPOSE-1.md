@@ -25,7 +25,7 @@ The pop-up regression uses a running server and HTML form posts. Opening two ite
 The purchase-order button inherits the approval gate. Its review shows the fixed supplier reference. Editing invalidates the previous confirmation and the current confirmation invokes Place order.
 Restricting Item update removes the offer from the record and the assistant, blocks a new binding and refuses a submitted action ID. A historical binary loads the original release and refuses the declaring release. The tenant compiler reproduces the complete envelope without the declaration.
 The named addPopupActionRevision replay in customization.test.ts accepts a field label change on the new base and refuses a changed target Task contract. Admission also checks the operation binding and the advertised Surface floor.
-Reader 35 serves the Stock Counts release and refuses pop-ups at 36. The tenant Cabinet test reviews a record-sourced value and checks the exact gateway update. The UPGRADE-2 allowlist fixture replays a compatible base and identifies a retired tenant target.
+Reader 36 serves the original release and refuses declared pop-ups at 37. The tenant Cabinet test reviews a record-sourced value and checks the exact gateway update. The UPGRADE-2 allowlist fixture replays a compatible base and identifies a retired tenant target.
 
 **Try it yourself.** In Customize, choose **Add a record button**, select the item update, name it **Edit item note** and set Description to **Ask the person**. Draft, approve and activate it. Open an item, choose **Custom actions → Edit item note**, change the description and save. Refresh the item to see the saved text. The same steps work with JavaScript disabled.
 
@@ -33,8 +33,8 @@ Reader 35 serves the Stock Counts release and refuses pop-ups at 36. The tenant 
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "UI-COMPOSE-1",
-  "base": "b8a91a6f94c3c1ad6aa505fe81adee39412f6777",
-  "head": "292d3726c2c188007ed2b92af11d26ad862538be",
+  "base": "67e4efce31eb663f12d6f161aa91c0ce1220dffc",
+  "head": "85cd33443b5c9751469a1c01d88c215281d3a1a4",
   "changedPaths": [
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/surface-composition.ts",
     "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts", "packages/canonical-model/src/popup-actions.ts",
