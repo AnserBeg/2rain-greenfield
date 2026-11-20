@@ -236,7 +236,8 @@ async function validatePdf(bytes: Buffer, signal?: AbortSignal): Promise<void> {
       '--jitless',
       '--max-old-space-size=96',
       fileURLToPath(
-        import.meta.resolve('@north-star/postgres-provider/document-pdf-worker'),
+        import.meta
+          .resolve('@north-star/postgres-provider/document-pdf-worker'),
       ),
     ],
     { stdio: ['pipe', 'ignore', 'ignore'], env: {} },
