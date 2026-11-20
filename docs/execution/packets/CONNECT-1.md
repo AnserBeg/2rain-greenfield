@@ -21,7 +21,7 @@ SIGNIN-1 slice 2b opens when the canonical pending connection and send records a
 
 ## Slice 1 fix round (2026-11-20 review of `032b87c0`, verdict REVISE)
 
-Migration `0057_address_connector_authority.sql` revokes every runtime grant on the four address tables; scoped SECURITY DEFINER functions take tenant, environment and principal from the trusted context and check company membership live.
+Migration `0058_address_connector_authority.sql` revokes every runtime grant on the four address tables; scoped SECURITY DEFINER functions take tenant, environment and principal from the trusted context and check company membership live.
 - **Join point:** `platform.address_configure` is the single entry point that enables, reconfigures, switches or pauses a provider. It requires `northstar.runtime:permission.connector_configure` on `northstar.runtime:connector.address`, live and in a membership covering the company (the local demo grants it to the manager), and refuses unless the store is claimed for the local demo; no store mode grants a direct table write any more. SIGNIN-1 slice 2b adds its passkey decision proof there, outside the local demo.
 - Any member reads its company's installation, so a buyer locates, sees pins and gets suggestions. A pin matches record, field, revision and installation, never the current release fence; a retired field has no binding.
 - One installation per company and provider account: pausing, re-enabling and switching back keep its quota and key-file identity. Configure takes the company's advisory lock, then its rows `FOR UPDATE`; a replaced installation is recorded `paused`.

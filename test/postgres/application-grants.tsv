@@ -79,10 +79,6 @@ north_star_runtime	platform.active_release_pointers	SELECT	*	Resolve or advance 
 north_star_runtime	platform.active_release_pointers	UPDATE	*	Resolve or advance the active release for the scoped environment.
 north_star_runtime	platform.app_package_revisions	INSERT	*	Persist and reload the package revision used to build a release.
 north_star_runtime	platform.app_package_revisions	SELECT	*	Persist and reload the package revision used to build a release.
-north_star_runtime	platform.billing_list_assignments	INSERT	*	open debt: BILLING-1
-north_star_runtime	platform.billing_list_assignments	SELECT	*	open debt: BILLING-1
-north_star_runtime	platform.billing_rate_tables	INSERT	*	open debt: BILLING-1
-north_star_runtime	platform.billing_rate_tables	SELECT	*	open debt: BILLING-1
 north_star_runtime	platform.current_policy_epochs	SELECT	*	Resolve current permission grants and their revocation epoch.
 north_star_runtime	platform.current_policy_memberships	SELECT	*	Resolve current permission grants and their revocation epoch.
 north_star_runtime	platform.current_policy_permission_grants	SELECT	*	Resolve current permission grants and their revocation epoch.

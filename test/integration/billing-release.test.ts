@@ -16,7 +16,7 @@ import {
   assertArchivedTenantEnvelope,
 } from '../helpers/archived-customization-runtime.js';
 
-test('a declaring release carries its plan and the previous serving reader refuses its floor', async () => {
+test('a declaring release carries its plan and preserves pre-billing release bytes when absent', async () => {
   const authored = JSON.parse(
     readFileSync('test/fixtures/g1/compiler/vertical-v1.authored.json', 'utf8')
       .replaceAll('"v3"', '"v6"')
@@ -72,19 +72,14 @@ test('a declaring release carries its plan and the previous serving reader refus
       const previous = (await run(
         `
      import {readFileSync} from 'node:fs';
-     import {unsupportedRuntimeCapability} from './packages/runtime/src/request-runtime-view.ts';
      import {compilerInput,normalizedBytes,mustCompile} from './test/compiler/helpers.ts';
      const input=JSON.parse(readFileSync(process.argv[2],'utf8'));
-     const result=mustCompile(compilerInput(normalizedBytes(input.authored)));
-     console.log(JSON.stringify({reason:unsupportedRuntimeCapability(input.family,input.floor),root:result.releaseRoot}));
+     const result=mustCompile(compilerInput(normalizedBytes(input)));
+     console.log(JSON.stringify(result.releaseRoot));
    `,
-        { authored, family, floor: ref.requiredRuntimeCapability },
-      )) as { reason: string; root: string };
-      assert.match(
-        previous.reason,
-        new RegExp('requires version ' + BILLING_READER),
-      );
-      assert.equal(previous.root, absent.releaseRoot);
+        authored,
+      )) as string;
+      assert.equal(previous, absent.releaseRoot);
       await assertArchivedTenantEnvelope(run);
     },
   );

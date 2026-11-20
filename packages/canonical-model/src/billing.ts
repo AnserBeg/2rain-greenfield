@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export const BILLING_CALCULATION_VERSION = 'northstar.billing-calculation/v1';
 export const BILLING_READER = 30;
+export const BILLING_INTERVAL_READER = 36;
 export const BILLING_QUOTE_CAPABILITY = 'northstar.billing:capability.quote';
 export const BILLING_TERMS_CAPABILITY = 'northstar.billing:capability.terms';
 export const billingPeriods = [
@@ -103,7 +104,17 @@ export const BillingPlanSchema = z
       .strictObject({
         quoteQueryId: id,
         evidenceQueryId: id,
-        evidenceFieldId: id,
+        // Historical declarations parse so the compiler can explain their refusal.
+        evidenceFieldId: id.optional(),
+        agreedInterval: z
+          .strictObject({
+            customerFieldId: id,
+            currencyFieldId: id,
+            startFieldId: id,
+            endFieldId: id,
+            zone: z.string().min(1).max(100),
+          })
+          .optional(),
         publishOperationId: id,
         overrideOperationId: id,
         assignmentOperationId: id,
