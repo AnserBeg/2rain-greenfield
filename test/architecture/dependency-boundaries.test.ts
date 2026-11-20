@@ -182,6 +182,44 @@ test('plain gateway, inventory, and hard-delete violations fail', () => {
   }
 });
 
+test('only the login retention statement and its snapshot can collect browser transactions', () => {
+  const retention =
+    'DELETE FROM platform.staff_login_transactions WHERE binding IN (SELECT binding FROM platform.staff_login_transactions WHERE expires_at <= now());';
+  const business = 'DELETE FROM platform.staff_authentication_audit;';
+  const approved = [
+    'db/migrations/0001_staff_login_creation.sql',
+    'db/schema.snapshot.json',
+  ];
+  const app = 'apps/api/src/login.ts';
+  const root = createArchitectureFixture({
+    'package.json': packageManifest('fixture'),
+    ...Object.fromEntries(
+      approved.map((path) => [
+        path,
+        [
+          retention,
+          business,
+          'DELETE FROM platform.staff_login_transactions;',
+        ].join('\n'),
+      ]),
+    ),
+    [app]: 'export const sql = ' + JSON.stringify(retention),
+  });
+  try {
+    const deletes = checkArchitecture(root).violations.filter(
+      (v) => v.ruleId === 'AUTH006_HARD_DELETE',
+    );
+    for (const path of approved)
+      assert.deepEqual(
+        deletes.filter((v) => v.file === path).map((v) => v.line),
+        [2, 3],
+      );
+    assert.equal(deletes.filter((v) => v.file === app).length, 1);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
 test('inventory append ownership follows the consolidated domain module path', () => {
   const root = createArchitectureFixture({
     'package.json': packageManifest('fixture'),

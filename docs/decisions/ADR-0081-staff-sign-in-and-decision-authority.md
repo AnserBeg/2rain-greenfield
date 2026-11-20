@@ -88,6 +88,16 @@ that principal under the same account lock. Check revocation at protected writes
 shared UTC deadlines at the database, fail closed on clock regression and use an injected monotonic
 clock for in-process elapsed time.
 
+The pilot accepts one residual for session expiry. It needs both a database crash and a backwards host clock.
+The database sequence preserves the latest observed time across transaction rollback. If PostgreSQL
+crashes before a refused transaction's observation reaches durable storage, and the host clock
+returns to a time inside the session's validity window, the session can be accepted again.
+A session check runs inside the caller's snapshot or protected write. That transaction can have
+uncommitted business work and cannot commit solely to persist a refusal. A separate durable
+observation would require coordinating an independent writer across the ERP and identity checks.
+The pilot keeps the in-transaction check and accepts this combined failure.
+[PostgreSQL sequence durability](https://www.postgresql.org/docs/current/functions-sequence.html)
+
 The ERP invokes a database session function in the request’s own transaction. It resolves the
 handle digest and live scoped membership, derives the principal and checks deadlines before work.
 Protected writes repeat validation in their transaction and serialize with revocation. Include
