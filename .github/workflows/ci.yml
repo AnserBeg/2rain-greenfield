@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        check: [snapshot]
+        check: [snapshot, postgres, browser, baseline, rollback, prior, resource, approver, executor, issuer]
     env:
       CONTROL: ${{ matrix.check }}
     steps:
