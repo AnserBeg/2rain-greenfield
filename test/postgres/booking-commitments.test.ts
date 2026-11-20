@@ -748,7 +748,7 @@ test('booking commitment writer', async (t) => {
               [row],
             );
             writer = call(right, 'hold', {
-              ...hold(37, 2, window('10:00', '11:00')),
+              ...hold(37, 21, window('10:00', '11:00')),
               expectedOwnerRevision: 2,
             });
             void writer.catch(() => undefined);
@@ -777,17 +777,17 @@ test('booking commitment writer', async (t) => {
           const held = await call(
             left,
             'hold',
-            hold(38, 3, window('10:00', '11:00')),
+            hold(38, 22, window('10:00', '11:00')),
           );
           const diary = (
             await admin.query(
               'SELECT resource_key FROM platform.booking_resources WHERE (entity_id,record_id)=($1,$2)',
-              ['example.booking:entity.asset', resource(3)],
+              ['example.booking:entity.asset', resource(22)],
             )
           ).rows[0]!.resource_key;
           const endpoints = [
             ['example.booking:entity.visit', owner(38)],
-            ['example.booking:entity.asset', resource(3)],
+            ['example.booking:entity.asset', resource(22)],
           ];
           await right.query(
             "SELECT set_config('north_star.principal_id',$1,false)",
@@ -840,7 +840,7 @@ test('booking commitment writer', async (t) => {
       await t.test(
         'a workflow hold needs an attested human decision',
         async () => {
-          const args = hold(39, 2, window('12:00', '13:00')),
+          const args = hold(39, 23, window('12:00', '13:00')),
             key = randomUUID(),
             id = randomUUID();
           await assert.rejects(

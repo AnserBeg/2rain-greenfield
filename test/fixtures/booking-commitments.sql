@@ -60,7 +60,7 @@ BEGIN
   INSERT INTO platform.current_policy_permission_grants(tenant_id,environment_id,role_id,permission_id,resource_id)
     VALUES(t,e,md5('visit-archiver')::uuid,'example.booking:permission.archive_visit','example.booking:entity.account');
   INSERT INTO north_star_module.test_booking_resources(tenant_id,environment_id,record_id)
-    SELECT t,e,md5('resource'||n)::uuid FROM generate_series(1,20) n;
+    SELECT t,e,md5('resource'||n)::uuid FROM generate_series(1,24) n;
   FOREACH kind IN ARRAY ARRAY['unit','pool'] LOOP
     FOREACH verb IN ARRAY ARRAY['hold','confirm','changeInterval','cancel','setCapacity'] LOOP
       IF verb='setCapacity' AND kind='unit' THEN CONTINUE; END IF;
