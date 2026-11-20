@@ -97,7 +97,15 @@ async function main() {
         realm,
         await readFile(setting('STAFF_RATE_KEY_FILE')),
       );
-      server = createServer(tls, identityHandler(identity));
+      server = createServer(
+        tls,
+        identityHandler(
+          identity,
+          process.env.STAFF_TRUSTED_INGRESS_ADDRESSES?.split(',').map(
+            (address) => address.trim(),
+          ),
+        ),
+      );
       close = () => pool.end();
     } catch (error) {
       await pool.end();

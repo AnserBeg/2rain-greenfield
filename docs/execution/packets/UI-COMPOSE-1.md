@@ -19,13 +19,13 @@ The orchestrator accepted ADR-0079 with Fable’s amendments on 2026-11-19.
 
 ## Gates and test it yourself
 
-Slice 1a compared complete layout-free compiler envelopes and exercised the reader floor, protected blocks, calculated display values and Files. The four fix-round regressions failed on `552b13d8`. [Fix CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44699236478)
+Slice 1a compared complete layout-free compiler envelopes and exercised the reader floor, protected blocks, calculated display values and Files. The four fix-round regressions failed on `552b13d8`. [Fix CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44703111463)
 
 - Archive and restore render the saved item description from the operation’s field ID. The contract test checks the escaped value in the renamed section on both read-backs.
 - Supplier reference has no purchase-order editor input. The compiler refuses its move with `CUSTOMIZE_LAYOUT_CONFLICT`. Customize offers moves for the editor’s bound inputs.
 - Dock note compiles before or after a layout, retains its binding and accepts a further revision. On an active layout it follows the current placement of its base-order predecessor. The archived tenant runner checks layout-free purchase-order field additions byte for byte.
 - Moving Expected date past Currency alone is refused. Move down places Expected date after Payment terms under More details, matching the approval order.
-- The browser saves a purchase order through the Vendor picker in Delivery, moves Tables and totals above Progress, then reopens the saved order and checks the supplier, total and next action.
+- The browser saves a purchase order through the Vendor picker in Delivery, moves Tables and totals above Progress, then reopens the saved order and checks the supplier, total and next action. The [first browser run](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44699236478/job/136163306228) found a zero-width total at 390 px. The composed body now spans the sheet, and the test checks both widths.
 
 **Try it yourself.** In Customize, arrange the purchase-order create form. Create **Delivery**, move **Vendor** there, and approve and activate each change. Add an optional text field. Under **Purchase orders → New**, select a vendor, enter the date and one line, then save the draft. Reopen the order and check the vendor.
 
@@ -33,11 +33,12 @@ Slice 1a compared complete layout-free compiler envelopes and exercised the read
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "UI-COMPOSE-1",
-  "base": "94b233007c03481398bdeb55413e69a31f81092f",
-  "head": "6e15fa6c346ef3531149afbccc645a838e04a4d9",
+  "base": "b64cd6aa2e829eac1b0a4610cfcd5f56a8b67d34",
+  "head": "f0af2074f56b1c8e7d6b32e611920785e91f32f1",
   "changedPaths": [
     "apps/web/src/component-registry.ts",
     "apps/web/src/customize-screen.ts",
+    "apps/web/src/ledger-styles.ts",
     "apps/web/test/browser/customize.composed-application.spec.ts",
     "apps/web/test/surface-runtime-contract.test.ts",
     "docs/decisions/ADR-0079-form-and-record-composition.md",
