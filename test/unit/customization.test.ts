@@ -2457,7 +2457,7 @@ test('addAddressField and addMapPlacement replay on a compatible base and identi
 });
 
 test('Board revisions bind the tenant and purchase-order machines, cap facts, and preserve a boardless release', async () => {
-  const { draftBoardRevision } =
+  const { defaultBoardChoices, draftBoardRevision } =
     await import('../../packages/customization/src/board-revision.js');
   const { BOARD_READER } =
     await import('../../packages/canonical-model/src/board.js');
@@ -2489,34 +2489,31 @@ test('Board revisions bind the tenant and purchase-order machines, cap facts, an
   const def = normalizeApplicationPackage(before.authored);
   const targets = customizationTargets(def).boards ?? [];
   const po = targets.find(
-    (t) => t.body.listSurfaceId === 'northstar.app:surface.purchase_order_list',
+    (t) =>
+      t.frame.listSurfaceId === 'northstar.app:surface.purchase_order_list',
   );
   const opportunity = targets.find(
-    (t) => t.body.entityId === 'northstar.app:entity.custom_opportunity',
+    (t) => t.frame.entityId === 'northstar.app:entity.custom_opportunity',
   );
   assert.ok(
     po && opportunity,
     'both first-party and tenant record types offer Board',
   );
   assert.deepEqual(
-    po.body.moves.map((m) => m.operationId),
+    po.moves.map((m) => m.operationId),
     ['northstar.app:operation.purchase_order_draft_cancel'],
   );
   assert.deepEqual(
-    opportunity.body.moves.map((m) => m.label),
+    opportunity.moves.map((m) => m.label),
     ['Mark won'],
   );
   for (const t of [po, opportunity]) {
-    assert.equal(t.body.grouping.version, 1);
-    assert.equal(t.body.grouping.kind, 'lifecycleState');
-    assert.ok(t.body.facts.length <= 3);
+    assert.equal(t.frame.grouping.version, 2);
+    assert.equal(t.frame.grouping.kind, 'lifecycleState');
+    assert.ok(t.defaultFacts.length <= 3);
   }
   const boards = [po, opportunity].map((t) =>
-    draftBoardRevision(
-      t,
-      t.listLabel + ' board',
-      t.body.grouping.stages.map((s) => s.stateId),
-    ),
+    draftBoardRevision(t, t.listLabel + ' board', defaultBoardChoices(t)),
   );
   const built = applyCustomizationPatches(authored, [tenant, ...boards]);
   assert.ok(
@@ -2527,10 +2524,10 @@ test('Board revisions bind the tenant and purchase-order machines, cap facts, an
   for (const list of [po, opportunity]) {
     assert.equal(
       canonicalize(
-        after.surfaces.find((s) => s.surfaceId === list.body.listSurfaceId),
+        after.surfaces.find((s) => s.surfaceId === list.frame.listSurfaceId),
       ),
       canonicalize(
-        def.surfaces.find((s) => s.surfaceId === list.body.listSurfaceId),
+        def.surfaces.find((s) => s.surfaceId === list.frame.listSurfaceId),
       ),
     );
   }
@@ -2549,7 +2546,7 @@ test('Board revisions bind the tenant and purchase-order machines, cap facts, an
   const manifest = projectionPayload<{
     surfaces: {
       surfaceId: string;
-      board?: { body: { moves: { operationId: string }[] } };
+      board?: { body: { grouping: { moves: { operationId: string }[] } } };
     }[];
   }>(release.compiled, PROJECTION_FAMILY_IDS.surfaceManifest);
   const operations = projectionPayload(
@@ -2572,7 +2569,7 @@ test('Board revisions bind the tenant and purchase-order machines, cap facts, an
   const forged = structuredClone(manifest);
   forged.surfaces.find(
     (s) => s.surfaceId === boards[0]!.surfaceId,
-  )!.board!.body.moves[0]!.operationId =
+  )!.board!.body.grouping.moves[0]!.operationId =
     'northstar.app:operation.purchase_order_release';
   assert.match(
     boardBindingsProblem(forged, BOARD_READER, operations, queries) ?? '',

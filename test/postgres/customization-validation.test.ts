@@ -453,18 +453,18 @@ test(
         const app = await startComposedApplication({ ...options, port: 0 });
         const opened = await openCustomizeService(options);
         try {
-          const { draftBoardRevision } =
+          const { defaultBoardChoices, draftBoardRevision } =
             await import('../../packages/customization/src/board-revision.js');
           const { BOARD_READER } =
             await import('../../packages/canonical-model/src/board.js');
           const target = (await opened.service.targets()).boards?.find(
-            (t) => t.body.entityId === 'northstar.app:entity.purchase_order',
+            (t) => t.frame.entityId === 'northstar.app:entity.purchase_order',
           );
           assert.ok(target);
           const revision = draftBoardRevision(
             target,
             'Purchase order board',
-            target.body.grouping.stages.map((s) => s.stateId),
+            defaultBoardChoices(target),
           );
           const draft = await opened.service.draft(revision, 'visualBuilder');
           assert.ok(draft.status === 'drafted', JSON.stringify(draft));

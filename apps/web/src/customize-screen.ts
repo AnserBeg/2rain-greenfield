@@ -1364,7 +1364,11 @@ function boardEditor(
     .join('');
   const facts = target.facts
     .map((f) =>
-      check('fact:' + f.fieldId, f.label, chosen.factFieldIds.includes(f.fieldId)),
+      check(
+        'fact:' + f.fieldId,
+        f.label,
+        chosen.factFieldIds.includes(f.fieldId),
+      ),
     )
     .join('');
   return `<h1>${previous ? 'Edit Board' : 'Add Board view'}</h1>${existing ? '<nav aria-label="Existing Boards">' + existing + '</nav>' : ''}<form method="post">${source}<label>View name <input name="label" required maxlength="240" value="${h(previous?.label ?? target.listLabel + ' board')}"></label><fieldset><legend>Stages in display order</legend>${positions}<p>Leave a position empty to omit that stage.</p></fieldset><fieldset><legend>Moves people can make</legend>${moves || '<p>This lifecycle has no move a Board can offer.</p>'}<p>A move is offered only between chosen stages.</p></fieldset><fieldset><legend>Card facts (up to three)</legend>${facts || '<p>No other field is available.</p>'}</fieldset><button name="lifecycle" value="active">Draft Board</button>${previous?.lifecycle === 'active' ? '<button name="lifecycle" value="retired">Draft retirement</button>' : ''}</form>`;
@@ -1373,9 +1377,7 @@ function boardSubmission(
   targets: readonly BoardTarget[],
   submission: CustomizeScreenSubmission,
 ) {
-  const target = targets.find(
-    (t) => t.frame.listSurfaceId === submission.list,
-  );
+  const target = targets.find((t) => t.frame.listSurfaceId === submission.list);
   if (!target || boardOfferDigest(target) !== submission.source)
     throw new Error('The collection changed. Choose the Board again.');
   const previous = target.views.find((v) => v.surfaceId === submission.viewId);

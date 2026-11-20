@@ -187,7 +187,7 @@ const withEquipmentLifecycle = applied(extended, [
 ]);
 const equipmentBoard = customization
   .customizationTargets(normalizeApplicationPackage(withEquipmentLifecycle))
-  .boards!.find((target) => target.body.entityId === equipment)!;
+  .boards!.find((target) => target.frame.entityId === equipment)!;
 const cases = {
   addBoardViewRevision: {
     source: withEquipmentLifecycle,
@@ -195,7 +195,7 @@ const cases = {
     change: customization.draftBoardRevision(
       equipmentBoard,
       'Equipment inspections',
-      equipmentBoard.body.grouping.stages.map((stage) => stage.stateId),
+      customization.defaultBoardChoices(equipmentBoard),
     ),
     code: 'RETIRED_TARGET',
   },

@@ -266,7 +266,10 @@ export function applyOne(
           p.kind === 'addBoardViewRevision' &&
           p.revisionId === patch.revisionId,
       )
-        ? { message: 'This Board revision ID has already been used.', conflicts: [] }
+        ? {
+            message: 'This Board revision ID has already been used.',
+            conflicts: [],
+          }
         : applyBoardRevision(
             authored as unknown as BoardSource & { surfaces: Json[] },
             patch,

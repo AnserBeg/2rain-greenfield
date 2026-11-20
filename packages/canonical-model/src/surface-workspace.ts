@@ -58,7 +58,10 @@ export function validateSurfaceWorkspaces(
         surface.workspace?.membership !== 'contextual' ||
         surface.workspace.ownerSurfaceId !== body.listSurfaceId
       )
-        fail(surface.surfaceId, 'The Board owner, slots or read binding differ.');
+        fail(
+          surface.surfaceId,
+          'The Board owner, slots or read binding differ.',
+        );
       if (surface.lifecycle !== 'retired') {
         const conflict = boardBindingConflicts(model, body)[0];
         if (conflict)

@@ -87,8 +87,7 @@ export function boardOffer(
   const sourceId = ownerQuery?.readModel
     ? (
         owner.workspace as
-          | { entry?: { authorizationQueryId?: string } }
-          | undefined
+          { entry?: { authorizationQueryId?: string } } | undefined
       )?.entry?.authorizationQueryId
     : ownerQuery?.queryId;
   const query = def.queries.find(
@@ -111,8 +110,7 @@ export function boardOffer(
   )
     return null;
   const scope = query.legalEntityScope as
-    | { operand: { parameterId: string } }
-    | undefined;
+    { operand: { parameterId: string } } | undefined;
   if (
     (query.parameters as { parameterId: string }[] | undefined)?.some(
       (p) => p.parameterId !== scope?.operand.parameterId,
@@ -242,7 +240,9 @@ export function boardOffer(
       label?: string;
       orderKey: number;
     }[]),
-  ].sort((a, b) => a.orderKey - b.orderKey || byCodeUnits(a.stateId, b.stateId));
+  ].sort(
+    (a, b) => a.orderKey - b.orderKey || byCodeUnits(a.stateId, b.stateId),
+  );
   return {
     listLabel: String(owner.label),
     frame: {
@@ -436,7 +436,12 @@ export function applyBoardRevision(
     message: string,
     conflicts: BoardBindingConflict[] = [],
   ): BoardApplyProblem => ({ message, conflicts });
-  const self = boardSelfProblem({ revisionId, predecessor, body, resultDigest });
+  const self = boardSelfProblem({
+    revisionId,
+    predecessor,
+    body,
+    resultDigest,
+  });
   if (self) return refuse(self);
   if (
     !surfaceId.startsWith(namespace + ':surface.custom_board_') ||
@@ -511,8 +516,7 @@ export function applyBoardRevision(
 /** ADR-0086 item 5: binding checks apply to the last revision of each Board. */
 export function supersededBoardRevisions(
   chain: readonly (
-    | { kind: string; patches?: readonly unknown[] }
-    | Record<string, unknown>
+    { kind: string; patches?: readonly unknown[] } | Record<string, unknown>
   )[],
 ): Set<string> {
   const last = new Map<string, string>();

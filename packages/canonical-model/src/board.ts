@@ -208,8 +208,7 @@ export function boardBindingConflicts(
       changed(body.listQuery.queryId, expected, observed);
   }
   const record = surface(body.recordSurfaceId);
-  if (!active(record))
-    retired(body.recordSurfaceId, record ? 'retired' : null);
+  if (!active(record)) retired(body.recordSurfaceId, record ? 'retired' : null);
   else if (
     record.surfaceRole !== 'record' ||
     target(record.dataSource) !== body.getQueryId
