@@ -10,7 +10,7 @@ Slice 0 established [ADR-0086](../../decisions/ADR-0086-board-calendar-and-resou
 - Slice 1a uses the existing INTERACT-1 Task. It has no dependency on UI-COMPOSE-1 pop-ups. ADR-0082’s amendment re-read returned ACCEPT WITH AMENDMENTS. BOOKING-1 is applying A8, the `booking.resourceWindow/v1` contract. Slice 3b waits for BOOKING-1 slices 1a, 2 and 3. The Booking calendar separately requires its owner-collection window query.
 - Each executable capability takes its reader rung at merge. This design allocates no rung or migration.
 
-Tenant date-time/interval field authoring is queued separately with its own patch member and rung. The owner’s reference survey and the slice 1a walkthrough below address plan §8.6 item 4.
+Tenant date-time/interval field authoring is queued separately with its own patch member and rung. **Usability evidence for slice 1a (plan §8.6 item 4) is PENDING** the owner’s hands-on walkthrough or explicit waiver. The steps below are the lane’s test instructions.
 
 ## Gates
 
