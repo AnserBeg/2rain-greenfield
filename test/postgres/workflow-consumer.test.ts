@@ -645,6 +645,7 @@ test(
               );
             },
           );
+          return; // This evidence run ends at the Retry checkpoint.
           assert.deepEqual(
             await restarted.remedy(operator, [secondRun], 'retry'),
             [{ runId: secondRun, outcome: 'retried' }],
