@@ -463,7 +463,10 @@ test('main pushes run in parallel per commit while packet refs cancel superseded
           { workflow: 'CI', ref, sha },
           { tier: '', merge_sha: '', pr_number: '', ...inputs },
           (pattern: string, ...args: string[]) =>
-            pattern.replace(/\{(\d)\}/gu, (_m, i: string) => args[Number(i)]),
+            pattern.replace(
+              /\{(\d)\}/gu,
+              (_m, i: string) => args[Number(i)] ?? '',
+            ),
         ),
       ),
     );
