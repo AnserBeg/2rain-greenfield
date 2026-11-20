@@ -1,3 +1,7 @@
+import {
+  BOOKING_OPERATION_READER,
+  hasBookingOperations,
+} from '@north-star/canonical-model';
 import { layoutBindingsProblem } from './layout-admission.js';
 import { servingPointersSql } from './verified-release-generation.js';
 import { createHash } from 'node:crypto';
@@ -957,10 +961,17 @@ function definitionFromSnapshotRows(
   );
   const operationFloor =
     operation.requiredRuntimeCapability?.minimumVersion ?? 0;
-  const consumesRules = operationFloor >= LITERAL_VALIDATION_OPERATION_READER;
+  const booking = hasBookingOperations(operation.payload);
+  if (booking !== (operationFloor === BOOKING_OPERATION_READER))
+    throw malformedProjection(
+      'booking operations and the mandatory reader floor disagree',
+    );
+  const consumesRules =
+    !booking && operationFloor >= LITERAL_VALIDATION_OPERATION_READER;
   const queryFloor = query.requiredRuntimeCapability?.minimumVersion ?? 0;
   const consumesDisplays = queryFloor === CALCULATED_DISPLAY_QUERY_READER;
-  const consumesFormula = consumesRules || consumesDisplays;
+  const consumesFormula =
+    consumesRules || consumesDisplays || (booking && declaresRuleProjection);
   if (
     declaresRuleProjection !== consumesFormula ||
     hasRuleProjectionLink !== consumesFormula
@@ -978,7 +989,7 @@ function definitionFromSnapshotRows(
         ({ rule }) => rule,
       );
       if (
-        Boolean(rules.length) !== consumesRules ||
+        (!booking && Boolean(rules.length) !== consumesRules) ||
         (consumesRules &&
           operationFloor !== requiredFormulaValidationOperationReader(rules))
       )

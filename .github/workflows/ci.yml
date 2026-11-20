@@ -23,3 +23,4 @@ jobs:
           path: test/fixtures/g2/language-conformance/coverage-decisions.json
           if-no-files-found: error
       - run: env -u CI node --import tsx --test --test-concurrency=1 test/postgres/document-attachments.test.ts test/postgres/document-templates.test.ts
+      - run: node --import tsx --test test/integration/document-http.test.ts

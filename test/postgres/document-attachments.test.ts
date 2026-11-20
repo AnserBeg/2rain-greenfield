@@ -5,7 +5,6 @@ import { createHash, randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { Client } from 'pg';
 import { mountDocumentHttp } from '../../apps/web/src/document-http.js';
 import {
   COMPOSED_APPLICATION_INVENTORY_SCOPE,
@@ -857,40 +856,49 @@ test(
               );
               const baseUrl =
                 'http://127.0.0.1:' + (server.address() as AddressInfo).port;
-              const committing = Promise.withResolvers<void>();
-              const finish = Promise.withResolvers<void>();
-              const publishers = new WeakSet<Client>();
-              const query = Client.prototype.query;
-              t.mock.method(
-                Client.prototype,
-                'query',
-                function (this: Client, ...args: unknown[]) {
-                  const text = args[0];
-                  if (
-                    typeof text === 'string' &&
-                    text.startsWith('SELECT platform.publish_document_upload(')
-                  )
-                    publishers.add(this);
-                  const result = Reflect.apply(query, this, args);
-                  if (text === 'COMMIT' && publishers.delete(this)) {
-                    committing.resolve();
-                    return Promise.resolve(result).then(async (receipt) => {
-                      await finish.promise;
-                      return receipt;
-                    });
-                  }
-                  return result;
-                },
-              );
-              t.mock.timers.enable({ apis: ['setTimeout'] });
-              const response = upload(
-                documentUrl(baseUrl, itemSurface, recordId),
-                pixel,
-                { headers: manager },
-              );
+              const locker = await pool.connect();
+              let held = false;
               try {
+                await pool.query(`CREATE FUNCTION public.pause_document_test_commit() RETURNS trigger
+                  LANGUAGE plpgsql AS $$
+                  BEGIN PERFORM pg_advisory_xact_lock(84217); RETURN NEW; END $$;
+                  CREATE CONSTRAINT TRIGGER pause_document_test_commit
+                    AFTER INSERT ON platform.document_versions DEFERRABLE INITIALLY DEFERRED
+                    FOR EACH ROW WHEN (NEW.file_name = 'commit-evidence.png')
+                    EXECUTE FUNCTION public.pause_document_test_commit()`);
+                const {
+                  rows: [backend],
+                } = await locker.query<{ pid: number }>(
+                  'SELECT pg_backend_pid() AS pid',
+                );
+                await locker.query('BEGIN');
+                held = true;
+                await locker.query('SELECT pg_advisory_xact_lock(84217)');
+                t.mock.timers.enable({ apis: ['setTimeout'] });
+                const response = upload(
+                  documentUrl(baseUrl, itemSurface, recordId),
+                  pixel,
+                  { headers: manager, fileName: 'commit-evidence.png' },
+                );
+                async function waitForCommit() {
+                  const until = performance.now() + 10_000;
+                  while (
+                    !(
+                      await pool.query(
+                        "SELECT FROM pg_stat_activity WHERE query = 'COMMIT' AND $1 = ANY(pg_blocking_pids(pid))",
+                        [backend!.pid],
+                      )
+                    ).rowCount
+                  ) {
+                    assert.ok(
+                      performance.now() < until,
+                      'publication COMMIT did not reach the deferred trigger',
+                    );
+                    await new Promise<void>((resolve) => setImmediate(resolve));
+                  }
+                }
                 await Promise.race([
-                  committing.promise,
+                  waitForCommit(),
                   response.then(async (early) => {
                     assert.fail(
                       'response before COMMIT: ' +
@@ -901,7 +909,8 @@ test(
                   }),
                 ]);
                 t.mock.timers.tick(DOCUMENT_RESPONSE_MILLISECONDS);
-                finish.resolve();
+                await locker.query('ROLLBACK');
+                held = false;
                 const issued = await response;
                 assert.equal(issued.status, 201, await issued.clone().text());
                 const result = (await issued.json()) as DocumentMetadata;
@@ -913,9 +922,9 @@ test(
                   { version_id: result.versionId },
                 ]);
               } finally {
-                finish.resolve();
                 t.mock.timers.reset();
-                t.mock.restoreAll();
+                if (held) await locker.query('ROLLBACK');
+                locker.release();
                 server.closeAllConnections();
                 await new Promise<void>((done) => server.close(() => done()));
               }
