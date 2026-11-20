@@ -185,8 +185,8 @@ const suiteDefinitions = [
     ],
     expectedFiles: [
       'test/postgres/agent-dev-tasks.test.ts',
-      'test/postgres/booking-commitments.test.ts',
       'test/postgres/agent-tasks.test.ts',
+      'test/postgres/booking-commitments.test.ts',
       'test/postgres/catalog-extras.test.ts',
       'test/postgres/catalog-runtime.test.ts',
       'test/postgres/current-policy.test.ts',
