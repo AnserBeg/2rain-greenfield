@@ -1,3 +1,7 @@
+import {FieldTypeSchema} from '../../packages/canonical-model/src/schemas.js';
+import {postgresqlTypeFor} from '../../packages/compiler/src/storage.js';
+import { applyCustomizationPatches, compileInSandbox, serializeRelease, parseSerializedRelease } from '../../packages/customization/src/index.js';
+import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import { activateInventoryFixture } from '../helpers/verified-fixture-release.js';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
@@ -3839,21 +3843,32 @@ async function compiledFixture(): Promise<PostingFixture> {
 }
 
 async function buildFixture(): Promise<PostingFixture> {
-  const inventoryDefinition = await loadInventoryDefinition();
-  const emptyDefinition = emptyDefinitionFrom(inventoryDefinition);
+  const baseDefinition = await loadInventoryDefinition();
+  const emptyDefinition = emptyDefinitionFrom(baseDefinition);
   const empty = mustCompile(moduleInput(emptyDefinition));
-  const inventory = mustCompile(
-    moduleInput(inventoryDefinition, expectedActiveReleaseFrom(empty)),
-  );
+  const base = mustCompile(moduleInput(baseDefinition, expectedActiveReleaseFrom(empty)));
+  const patch = {kind: 'addField', entity: 'northstar.app:entity.party', field: {label:'Dispatch note', type:'text'}} as const;
+  const applied = applyCustomizationPatches(baseDefinition, [patch]);
+  assert.equal(applied.status, 'applied');
+  const inventoryDefinition = applied.authored;
+  const response = await compileInSandbox({
+    acknowledgement: readUnboundPermissionAcknowledgementFor('apps/web/release/app.authored.json','northstar.app:package.application'),
+    base: baseDefinition, chain: [patch], tip: serializeRelease({compiled:base,normalizedDefinitionBytes:definitionBytes(baseDefinition)})
+  });
+  assert.equal(response.status, 'compiled', response.status === 'compiled' ? '' : JSON.stringify(response));
+  const {compiled:inventory} = parseSerializedRelease(response.steps[0].release);
   const storage = projectionPayload<StorageTargetPayloadV1>(
     inventory,
     PROJECTION_FAMILY_IDS.storageTarget,
   );
+  const party = storage.payload.entities.find(e=>e.entityId === patch.entity);
+  assert.ok(party?.columns.some(c=>c.canonicalFieldId === 'northstar.app:field.custom_party_dispatch_note' && c.postgresqlType.startsWith('varchar(')), JSON.stringify(party?.columns.map(c=>[c.canonicalFieldId,c.postgresqlType])));
+  console.log('Party Dispatch note compiled as text in', storage.payload.schemaVersion);
   return {
     empty,
     emptyDefinition,
     inventory,
-    inventoryDefinition,
+    inventoryDefinition, base, baseDefinition,
     storage: storage.payload,
     storageContentHash: storage.contentHash,
   };
@@ -3886,10 +3901,11 @@ async function withPostingDatabase(
       const context = await trustedContext();
       const releases = await persistSequence(runtimePool, context, [
         [fixture.empty, fixture.emptyDefinition],
+        [fixture.base, fixture.baseDefinition],
         [fixture.inventory, fixture.inventoryDefinition],
       ]);
       const sourceReleaseId = releases[0]!;
-      const targetReleaseId = releases[1]!;
+      const targetReleaseId = releases[2]!;
       await activateInventoryFixture(
         database.pool,
         runtimePool,
@@ -3902,6 +3918,9 @@ async function withPostingDatabase(
         materializerPool,
         moduleRuntimePool,
       );
+      const preparedBase = await materializer.prepare({context, expiresAt:'2099-01-01T00:00:00.000Z', generationId: randomUUID(), initiatedBy: principalId, preparationId: randomUUID(), targetReleaseId:releases[1]!});
+      assert.equal(preparedBase.schemaState,'APPLIED');
+      await activateInventoryFixture(database.pool, runtimePool, context, releases[1]!, fixture.base);
       const prepared = await materializer.prepare({
         context,
         expiresAt: '2099-01-01T00:00:00.000Z',
@@ -5142,6 +5161,14 @@ test('posting kernel admission: the unchanged kernel admits a posting whose ever
     );
     assert.equal(await movementCountBySource(database, posting.sourceId), 1);
     assert.equal(await receiptCountByKey(database, posting.idempotencyKey), 1);
+    console.log('Posted one movement with one receipt under the active customized release', database.registration.releaseContentHash);
+    const type = postgresqlTypeFor(FieldTypeSchema.parse({kind:'exactDecimalFieldType', schemaVersion:'v6', representation:'canonicalString', precision:10, scale:7}));
+    assert.equal(type,'numeric(10,7)');
+    const values = ['-180.0000000','180.0000000','-90.0000000','90.0000000','-123.4567891','0.0000001'];
+    const result = await database.adminPool.query(`SELECT (value::${type})::text AS value FROM unnest($1::text[]) WITH ORDINALITY AS coords(value,position) ORDER BY position`,[values]);
+    assert.deepEqual(result.rows.map(r=>r.value),values);
+    console.log(type, 'round-tripped both coordinate limits and seven decimal places');
+
   });
 });
 
@@ -7118,13 +7145,14 @@ async function persistSequence(
 ): Promise<MintedUuid[]> {
   const repository = new PostgresImmutableReleaseRepository(runtimePool);
   const releases: MintedUuid[] = [];
+  let priorRevisionId = null;
   for (const [compiled, definition] of entries) {
     const revisionId = randomUUID() as MintedUuid;
     const releaseId = randomUUID() as MintedUuid;
     const desiredState = definitionBytes(definition);
     await repository.storeAppPackageRevision(
       context,
-      revisionCommand(context, revisionId, desiredState),
+      {...revisionCommand(context, revisionId, desiredState), provenance: definition.package.provenance, parentRevisionId: definition.package.provenance === 'tenantAuthored' ? priorRevisionId : null},
     );
     const staged = await repository.stageTenantReleaseCandidate(context, {
       appPackageRevisionId: revisionId,
@@ -7153,6 +7181,7 @@ async function persistSequence(
         ),
       );
     }
+    priorRevisionId = revisionId;
     releases.push(releaseId);
   }
   return releases;
