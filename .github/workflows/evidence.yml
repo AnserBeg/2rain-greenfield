@@ -84,7 +84,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: ${{ (matrix.control == 'validation-refusal-does-not-veto' || matrix.control == 'validation-related-row-read-ignored') && '0' || '1' }}
+          fetch-depth: ${{ (matrix.control == 'validation-refusal-does-not-veto' || matrix.control == 'validation-related-row-read-ignored' || startsWith(matrix.control, 'generated-pdf-')) && '0' || '1' }}
           persist-credentials: false
       - name: Set up pinned Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
