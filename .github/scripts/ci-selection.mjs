@@ -141,7 +141,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const pr = event.pull_request;
   const head = git('rev-parse', 'HEAD').trim();
   const forced =
-    process.env.GITHUB_REF === 'refs/heads/main' ||
+    process.env.GITHUB_REF === 'refs/heads/ci-3-controls/parallel-main' ||
     event.inputs?.tier === 'full' ||
     (pr && pr.head.repo.full_name !== process.env.GITHUB_REPOSITORY);
   if (

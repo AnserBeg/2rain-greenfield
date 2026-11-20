@@ -1,13 +1,13 @@
 name: CI
 # GitHub assigns run-name before a diff can be read. An automatic promotion
 # dispatches a named full run and propagates its exact result to the request.
-run-name: CI ${{ (github.ref == 'refs/heads/main' || inputs.tier == 'full' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository)) && 'full' || 'quick' }} · ${{ inputs.merge_sha || github.sha }}
+run-name: CI ${{ (github.ref == 'refs/heads/ci-3-controls/parallel-main' || inputs.tier == 'full' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository)) && 'full' || 'quick' }} · ${{ inputs.merge_sha || github.sha }}
 
 on:
   pull_request:
   push:
     branches:
-      - main
+      - ci-3-controls/parallel-main
   workflow_dispatch:
     inputs:
       tier:
@@ -31,8 +31,8 @@ permissions:
 # Main runs one group per commit: every push runs full in parallel and none is
 # cancelled or held behind an earlier push. Packet refs cancel superseded runs.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ inputs.merge_sha && format('pr-{0}', inputs.pr_number) || github.ref }}-${{ github.ref == 'refs/heads/main' && !inputs.merge_sha && format('sha-{0}', github.sha) || github.ref != 'refs/heads/main' && inputs.tier || 'auto' }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' || inputs.merge_sha != '' }}
+  group: ci-${{ github.workflow }}-${{ inputs.merge_sha && format('pr-{0}', inputs.pr_number) || github.ref }}-${{ github.ref == 'refs/heads/ci-3-controls/parallel-main' && !inputs.merge_sha && format('sha-{0}', github.sha) || github.ref != 'refs/heads/ci-3-controls/parallel-main' && inputs.tier || 'auto' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/ci-3-controls/parallel-main' || inputs.merge_sha != '' }}
 
 env:
   CI: '1'

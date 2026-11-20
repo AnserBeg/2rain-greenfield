@@ -474,10 +474,10 @@ test('main pushes run in parallel per commit while packet refs cancel superseded
     group: evaluate(keys.group, ref, sha, inputs),
     cancel: evaluate(keys['cancel-in-progress'], ref, sha, inputs),
   });
-  const main = 'refs/heads/main';
+  const main = 'refs/heads/ci-3-controls/parallel-main';
   const pr = 'refs/pull/7/merge';
   assert.deepEqual(policy(main, 'a'), {
-    group: 'ci-CI-refs/heads/main-sha-a',
+    group: 'ci-CI-refs/heads/ci-3-controls/parallel-main-sha-a',
     cancel: 'false',
   });
   assert.notEqual(policy(main, 'a').group, policy(main, 'b').group);
