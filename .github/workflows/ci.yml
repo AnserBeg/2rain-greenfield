@@ -82,3 +82,20 @@ jobs:
       - run: node --import tsx --test test/postgres/address-connector.test.ts
       - if: always()
         run: test "${{ steps.types.outcome }}" = success && test "${{ steps.lint.outcome }}" = success
+  controls:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        control: [late-address-response, shared-record-company-pin]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: packet/CONNECT-1
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+      - run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      - run: bash scripts/check-expected-red.sh --run "${{ matrix.control }}"
