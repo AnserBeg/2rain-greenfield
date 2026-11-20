@@ -3,24 +3,35 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+env:
+  CI: '1'
 jobs:
-  docs-1-pdf:
-    name: DOCS-1 inspect PDF admission
+  isolate:
+    name: DOCS-1 expected red - ${{ matrix.control }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        control:
+          - generated-pdf-source-revocation
+          - generated-pdf-company-brand-source-revocation
+          - documents-parse-time-pdf-bound
+          - documents-pdf-process-limits
+          - documents-sql-page-size
+          - documents-api-demo-scanner-guard
+          - documents-http-commit-outcome
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: bf243213400bd8d9062c151ca689cf67a38dfa2c
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version-file: .node-version
+      - run: corepack enable
       - run: corepack pnpm install --frozen-lockfile --reporter=append-only
-      - name: Inspect the validator refusal from fixture PDFs
-        run: |
-          sed -i 's/^} catch {/} catch (error) { console.error(error);/' packages/postgres-provider/src/document-pdf-worker.mjs
-          sed -i "s/stdio: \['pipe', 'ignore', 'ignore'\]/stdio: ['pipe', 'ignore', 'inherit']/" packages/postgres-provider/src/document-content.ts
-          node --import tsx --test test/integration/document-pdf.test.ts test/integration/document-http.test.ts
-      - name: Verify COMMIT and generated PDF paths
-        if: always()
-        run: env -u CI node --import tsx --test --test-concurrency=1 --test-name-pattern='^(staged attachment verdicts and deadlines govern publication|approved template revisions publish governed PDFs, refuse hidden sources, and retire)$' test/postgres/document-attachments.test.ts test/postgres/document-templates.test.ts
+      - env:
+          CONTROL: ${{ matrix.control }}
+        run: bash scripts/check-expected-red.sh --run "$CONTROL"

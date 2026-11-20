@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { decode } from 'jpeg-js';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { crc32, inflateSync } from 'node:zlib';
 import {
   DOCUMENT_BLOB_MAX_BYTES,
@@ -36,6 +36,7 @@ export function documentDigest(bytes: Buffer): string {
 
 const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const imagePixels = 16 * 1024 * 1024;
+const resolvePackage = createRequire(import.meta.url).resolve;
 
 export async function validateDocumentContent(
   bytes: Buffer,
@@ -235,10 +236,7 @@ async function validatePdf(bytes: Buffer, signal?: AbortSignal): Promise<void> {
       process.execPath,
       '--jitless',
       '--max-old-space-size=96',
-      fileURLToPath(
-        import.meta
-          .resolve('@north-star/postgres-provider/document-pdf-worker'),
-      ),
+      resolvePackage('@north-star/postgres-provider/document-pdf-worker'),
     ],
     { stdio: ['pipe', 'ignore', 'ignore'], env: {} },
   );

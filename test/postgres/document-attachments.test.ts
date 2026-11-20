@@ -897,17 +897,15 @@ test(
                     await new Promise<void>((resolve) => setImmediate(resolve));
                   }
                 }
-                await Promise.race([
-                  waitForCommit(),
-                  response.then(async (early) => {
-                    assert.fail(
-                      'response before COMMIT: ' +
-                        early.status +
-                        ' ' +
-                        (await early.text()),
-                    );
-                  }),
+                const early = await Promise.race([
+                  waitForCommit().then(() => undefined),
+                  response,
                 ]);
+                assert.equal(
+                  early,
+                  undefined,
+                  'response before COMMIT: ' + (early?.status ?? ''),
+                );
                 t.mock.timers.tick(DOCUMENT_RESPONSE_MILLISECONDS);
                 await locker.query('ROLLBACK');
                 held = false;
