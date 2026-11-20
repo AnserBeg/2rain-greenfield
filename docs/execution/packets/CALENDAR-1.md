@@ -47,8 +47,8 @@ The tenant fixture publishes an Opportunity board with a declared Open → Won t
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CALENDAR-1",
-  "base": "47594bc60c4349d9a8b76dcdefe81503119aeaf8",
-  "head": "576bb7816c218539cca8a9673138fff17f84ef67",
+  "base": "f25df5af44df132045c67ba29eb9aebe1084dcc7",
+  "head": "e2c734d9ba9b56c9c936fc3f62a2f3dcfdcf8f2b",
   "changedPaths": [
     "apps/web/src/board.ts", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts",
     "apps/web/src/ledger-styles.ts", "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts",
