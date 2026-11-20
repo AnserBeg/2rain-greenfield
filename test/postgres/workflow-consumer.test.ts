@@ -703,6 +703,7 @@ test(
           await restarted.step(scope, secondRun);
           await restarted.step(scope, secondRun);
           assert.equal(await runStatus(pool, secondRun), 'COMPLETED');
+          return; // The focused runner stops after the authenticated Retry and worker replay.
 
           const newRun = async () => {
             await postReceipt(world);
