@@ -959,9 +959,8 @@ test(
           );
           const cover = await request(headerUrl, 'generate');
           assert.equal(cover.status, 201, await cover.clone().text());
-          const coverFile = await stored(
-            (await cover.json()) as DocumentMetadata,
-          );
+          const coverMetadata = (await cover.json()) as DocumentMetadata;
+          const coverFile = await stored(coverMetadata);
 
           await live({
             kind: 'retireDocumentTemplate',
@@ -1000,7 +999,7 @@ test(
           );
           const list = await request(sheetUrl, 'list');
           assert.equal(list.status, 200);
-          assert.deepEqual(await list.json(), []);
+          assert.deepEqual(await list.json(), [coverMetadata]);
 
           await t.test(
             'staging replay checks the stored source after a source grant is revoked',
