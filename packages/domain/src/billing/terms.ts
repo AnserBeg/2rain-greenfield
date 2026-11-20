@@ -119,3 +119,5 @@ export function selectTable(
     );
   return best[0]!;
 }
+
+// CI-3 control exercises the mapped billing tests.
