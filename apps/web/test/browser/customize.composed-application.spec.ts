@@ -336,10 +336,10 @@ for (const target of ['purchase_order', 'party'] as const) {
   });
 }
 
-test('a buyer creates a section and moves the bound vendor picker into it', async ({
+test('a buyer saves and reopens a purchase order with a moved Vendor, totals and next step', async ({
   page,
 }) => {
-  test.setTimeout(360_000);
+  test.setTimeout(600_000);
   page.setDefaultTimeout(30_000);
   await withEphemeralPostgres(
     'customize-layout-browser',
@@ -352,14 +352,14 @@ test('a buyer creates a section and moves the bound vendor picker into it', asyn
       });
       try {
         const customize = app.baseUrl + '/?customize';
-        const arrange = async () => {
+        const arrange = async (target = 'purchase_order_form/create') => {
           await page.goto(customize);
           const chooser = page.getByRole('group', {
             name: 'Arrange a form or record page',
           });
           await chooser
             .getByLabel('Page', { exact: true })
-            .selectOption('northstar.app:surface.purchase_order_form/create');
+            .selectOption('northstar.app:surface.' + target);
           await chooser.getByRole('button', { name: 'Choose page' }).click();
         };
         const activate = async () => {
@@ -427,6 +427,59 @@ test('a buyer creates a section and moves the bound vendor picker into it', asyn
           'data-selected-label',
           'Cascade Fastener Works',
         );
+        const product = page.getByRole('combobox', {
+          name: 'Line 1 product',
+          exact: true,
+        });
+        await product.fill('OFF-100');
+        await page
+          .getByRole('option')
+          .filter({ hasText: 'Field notebook' })
+          .click();
+        await expect(product).toHaveAttribute(
+          'data-selected-label',
+          'Field notebook',
+        );
+        await page.getByLabel('Order date *').fill('2026-11-18');
+        await page.getByLabel('Line 1 quantity', { exact: true }).fill('2');
+        await page.getByLabel('Line 1 unit cost', { exact: true }).fill('12.5');
+        await page
+          .getByRole('button', { name: 'Save draft', exact: true })
+          .click();
+        await expect(page).toHaveURL(/purchase_order_detail/u);
+        const saved = page.url();
+        const total = page.locator('.composition-totals > div:last-child dd');
+        await expect(total).toHaveText(/\d/u);
+        const savedTotal = await total.innerText();
+        const next = page.locator('.composition-progression-next');
+        await expect(next).toBeVisible();
+        const savedNext = await next.innerText();
+
+        await arrange('purchase_order_detail/detail');
+        await page
+          .getByRole('group', { name: 'Tables and totals', exact: true })
+          .getByRole('button', { name: 'Move up' })
+          .click();
+        await activate();
+        await page.goto(saved);
+        await expect(page.locator('.composition-subtitle')).toContainText(
+          'Cascade Fastener Works',
+        );
+        const movedTotal = page.locator(
+          '.composed-record-body .composition-collection .composition-totals',
+        );
+        const movedNext = page.locator(
+          '.composed-record-body [data-composition-progression] .composition-progression-next',
+        );
+        await expect(movedTotal).toBeVisible();
+        await expect(total).toHaveText(savedTotal);
+        await expect(movedNext).toBeVisible();
+        await expect(movedNext).toHaveText(savedNext, { useInnerText: true });
+        await expect(
+          page.locator(
+            '.composed-record-body .composition-collection:has(.composition-totals) ~ [data-composition-progression]',
+          ),
+        ).toHaveCount(1);
       } finally {
         await app.close();
       }
