@@ -26,7 +26,6 @@ export interface CompanyDocumentBrand {
   readonly ink: string;
   readonly accent: string;
   readonly companySource: DocumentQuerySource | null;
-
 }
 
 export interface CompanyDocumentBrandResolver {
