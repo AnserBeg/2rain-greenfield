@@ -60,7 +60,7 @@
       "name": "generated-pdf-source-revocation",
       "claim": "When a reader loses a bound source, its issued PDF cannot be downloaded.",
       "file": "db/migrations/0050_generated_document_sources.sql",
-      "original": "    AND platform.document_generated_allowed(v.generated_source,v.release_id,scope,entity,record_key,false)\n    AND (v.owner_scope,v.entity_id,v.record_id,v.link_id,v.version_id) = (scope,entity,record_key,link,version)",
+      "original": "    AND platform.document_generated_allowed(v.generated_source,v.release_id,scope,entity,record_key,false) AND (v.owner_scope,v.entity_id,v.record_id,v.link_id,v.version_id) = (scope,entity,record_key,link,version)",
       "replacement": "    AND (v.owner_scope,v.entity_id,v.record_id,v.link_id,v.version_id) = (scope,entity,record_key,link,version)",
       "test": {
         "files": ["test/postgres/document-templates.test.ts"],
