@@ -1,0 +1,158 @@
+{
+  "version": 1,
+  "packet": "WORKFLOW-1-slice3-fix",
+  "entries": [
+    {
+      "name": "workflow-activation-role-ceiling",
+      "claim": "A newly allowed role cannot supply an activation grant.",
+      "file": "packages/postgres-provider/src/workflow-gateway.ts",
+      "original": "            company === liveCompany &&\n            role === liveRole,",
+      "replacement": "            company === liveCompany,",
+      "test": {
+        "files": [
+          "test/postgres/workflow-consumer.test.ts"
+        ]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-consumer.test.ts",
+          "name": "a role gained after activation cannot widen a workflow grant",
+          "expected": "a newly allowed role widened the activation grant"
+        }
+      ]
+    },
+    {
+      "name": "workflow-worker-direct-resume",
+      "claim": "The worker cannot advance the fence and status directly.",
+      "file": "db/migrations/0049_workflow_retry_authority.sql",
+      "original": "REVOKE UPDATE (execution_fence, status, reason) ON platform.workflow_runs FROM north_star_workflow_worker;",
+      "replacement": "-- Control: retain the previous worker grants.",
+      "test": {
+        "files": [
+          "test/postgres/workflow-consumer.test.ts"
+        ]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-consumer.test.ts",
+          "name": "only a recorded human Retry can advance the run fence",
+          "expected": "worker can update the run fence and status directly"
+        }
+      ]
+    },
+    {
+      "name": "workflow-replay-requires-retry",
+      "claim": "A run advanced before the grant revoke cannot enter replay without a recorded decision.",
+      "file": "packages/postgres-provider/src/workflow-execution.ts",
+      "original": "        if (!current.retry_authorized) {",
+      "replacement": "        if (false) {",
+      "test": {
+        "files": [
+          "test/postgres/workflow-consumer.test.ts"
+        ]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-consumer.test.ts",
+          "name": "only a recorded human Retry can advance the run fence",
+          "expected": "replay did not refuse a fence without a human Retry decision"
+        }
+      ]
+    },
+    {
+      "name": "workflow-unsupported-capability-admission",
+      "claim": "Admission refuses a workflow capability version above the serving runtime.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "  if (familyId === PROJECTION_FAMILY_IDS.workflow) {\n    const requirement = manifest.requiredRuntimeCapability;\n    if (\n      !requirement ||\n      requirement.capabilityId !==\n        reference.requiredRuntimeCapability.capabilityId ||\n      requirement.minimumVersion !==\n        reference.requiredRuntimeCapability.minimumVersion\n    )\n      throw failure(\n        'WORKFLOW_PROJECTION_MISMATCH',\n        'Workflow manifest capability does not match the release reference',\n      );\n    const unsupported = unsupportedRuntimeCapability(familyId, requirement);\n    if (unsupported)\n      throw failure('UNSUPPORTED_RUNTIME_CAPABILITY', unsupported);\n  }\n",
+      "replacement": "",
+      "test": {
+        "files": [
+          "test/integration/workflow-admission.test.ts"
+        ]
+      },
+      "kills": [
+        {
+          "file": "test/integration/workflow-admission.test.ts",
+          "name": "a workflow release pins the declarations, SDK catalog and required reader",
+          "expected": "Missing expected exception"
+        }
+      ]
+    },
+    {
+      "name": "workflow-retry-approval-history",
+      "claim": "An older approval can be replayed and subsequently requires a new plan before an uncommitted effect.",
+      "file": "packages/postgres-provider/src/workflow-execution.ts",
+      "original": "            AND a.fence <= $4 AND j.kind = 'REQUEST'",
+      "replacement": "            AND a.fence = $4 AND j.kind = 'REQUEST'",
+      "test": {
+        "files": [
+          "test/postgres/workflow-consumer.test.ts"
+        ]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-consumer.test.ts",
+          "name": "same-pin Retry asks for fresh approval before an uncommitted effect",
+          "expected": "retry quarantined historical approval instead of requesting a fresh decision"
+        }
+      ]
+    },
+    {
+      "name": "workflow-candidate-replay-divergence",
+      "claim": "A candidate that diverges on replay cannot be approved.",
+      "file": "packages/postgres-provider/src/workflow-run.ts",
+      "original": "    const step = await replay.step();",
+      "replacement": "    const step = { kind: 'done', cursor: 0 };",
+      "test": {
+        "files": [
+          "test/postgres/workflow-consumer.test.ts"
+        ]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-consumer.test.ts",
+          "name": "candidate admission refuses post-fixture replay divergence",
+          "expected": "candidate was admitted without running the recorded fixture again"
+        }
+      ]
+    },
+    {
+      "name": "workflow-candidate-evidence-completeness",
+      "claim": "A candidate with general evidence still needs evidence for each declared workflow.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "    if (evidence && binding.workflows) {",
+      "replacement": "    if (false && evidence && binding.workflows) {",
+      "test": {
+        "files": [
+          "test/postgres/workflow-consumer.test.ts"
+        ]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-consumer.test.ts",
+          "name": "candidate admission refuses incomplete workflow evidence",
+          "expected": "candidate was admitted with one declared workflow missing evidence"
+        }
+      ]
+    },
+    {
+      "name": "workflow-free-persisted-evidence",
+      "claim": "The workflow-free verification row preserves the full v1 bytes, including the author.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "      impactAnalysisDerivation,\n      context.principalId,",
+      "replacement": "      impactAnalysisDerivation,\n      context.requestId,",
+      "test": {
+        "files": [
+          "test/postgres/releases.test.ts"
+        ]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/releases.test.ts",
+          "name": "full execution still writes and reads back as untouched v1 evidence",
+          "expected": "persisted workflow-free verification evidence bytes changed"
+        }
+      ]
+    }
+  ]
+}

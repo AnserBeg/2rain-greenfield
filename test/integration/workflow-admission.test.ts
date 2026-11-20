@@ -124,6 +124,45 @@ test('a workflow release pins the declarations, SDK catalog and required reader'
   ) as {
     chunks: { contentHash: string }[];
   };
+  assert.ok(reference);
+  const requiresV2 = {
+    ...reference.requiredRuntimeCapability,
+    minimumVersion: 2,
+  };
+  assert.throws(
+    () =>
+      releaseVerificationBinding({
+        ...draft,
+        bundle: {
+          ...draft.bundle,
+          releaseManifest: {
+            ...draft.bundle.releaseManifest,
+            projections: draft.bundle.releaseManifest.projections.map(
+              (projection) =>
+                projection === reference
+                  ? { ...projection, requiredRuntimeCapability: requiresV2 }
+                  : projection,
+            ),
+          },
+          artifacts: draft.bundle.artifacts.map((artifact) =>
+            artifact === manifest
+              ? {
+                  ...artifact,
+                  canonicalBytes: Buffer.from(
+                    canonicalize({
+                      ...JSON.parse(
+                        Buffer.from(manifest.canonicalBytes).toString(),
+                      ),
+                      requiredRuntimeCapability: requiresV2,
+                    }),
+                  ),
+                }
+              : artifact,
+          ),
+        },
+      }),
+    { code: 'UNSUPPORTED_RUNTIME_CAPABILITY' },
+  );
   const changeProjection = (overrides: Record<string, unknown>) => ({
     ...draft,
     bundle: {

@@ -14,7 +14,7 @@ import {
   type ImmutableJsonValue,
   type RequestRuntimeView,
 } from '@north-star/runtime/request-runtime-view';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 
 import {
   MalformedSemanticOperationRequestError,
@@ -80,7 +80,7 @@ export class PostgresWorkflowGateway implements WorkflowGateway {
 
   async withRemedyAuthority<T>(
     operator: TrustedRequestContext,
-    work: () => Promise<T>,
+    work: (client: PoolClient) => Promise<T>,
   ): Promise<T> {
     return withTrustedRequestTransaction(
       this.pool,
@@ -98,7 +98,7 @@ export class PostgresWorkflowGateway implements WorkflowGateway {
         );
         if (!rows[0]?.eligible)
           throw new WorkflowRemedyRefused('Workflow remedy permission refused');
-        return work();
+        return work(client);
       },
     );
   }
@@ -136,6 +136,19 @@ export class PostgresWorkflowGateway implements WorkflowGateway {
       bindings,
       operations,
     );
+    const activationPolicy = new PostgresCurrentPolicyGateway(
+      this.pool,
+      bindings,
+      operations,
+      (binding, liveRole, liveCompany) =>
+        run.approver_grants.some(
+          ([permission, resource, company, role]) =>
+            permission === binding.permissionId &&
+            resource === binding.resourceId &&
+            company === liveCompany &&
+            role === liveRole,
+        ),
+    );
     const byPermission = new Map(
       [...CURRENT_POLICY_RUNTIME_BINDINGS, ...bindings].map(
         (binding) => [binding.permissionId, binding] as const,
@@ -152,24 +165,16 @@ export class PostgresWorkflowGateway implements WorkflowGateway {
             ? null
             : request.decisionInput,
         );
-        const company = scope.legalEntityIds[0] ?? null;
-        const inSnapshot =
-          binding &&
-          scope.status === 'valid' &&
-          scope.legalEntityIds.every((id) => id === run.legal_entity_id) &&
-          run.approver_grants.some(
-            ([permission, resource, scopeId]) =>
-              permission === binding.permissionId &&
-              resource === binding.resourceId &&
-              (binding.scopeMode === 'membershipOnly' ||
-                scopeId === null ||
-                scopeId === company),
-          );
         const actorDecision = await current.authorize(request);
-        if (!inSnapshot || actorDecision.decision !== 'ALLOW')
+        if (
+          !binding ||
+          scope.status !== 'valid' ||
+          !scope.legalEntityIds.every((id) => id === run.legal_entity_id) ||
+          actorDecision.decision !== 'ALLOW'
+        )
           return { ...actorDecision, decision: 'DENY' };
         const human = await authorizeCurrentPolicy(
-          current,
+          activationPolicy,
           approver,
           request.permissionId,
           request.decisionInput,

@@ -40,8 +40,8 @@
       "name": "workflow-revoked-automation-grant",
       "claim": "A workflow write leaves no semantic operation receipt after the automation actor loses its current grant.",
       "file": "packages/postgres-provider/src/workflow-gateway.ts",
-      "original": "        if (!inSnapshot || actorDecision.decision !== 'ALLOW')\n",
-      "replacement": "        if (!inSnapshot || (call.kind === 'query' && actorDecision.decision !== 'ALLOW'))\n",
+      "original": "          actorDecision.decision !== 'ALLOW'\n",
+      "replacement": "          (call.kind === 'query' && actorDecision.decision !== 'ALLOW')\n",
       "test": {
         "files": ["test/postgres/workflow-consumer.test.ts"]
       },
