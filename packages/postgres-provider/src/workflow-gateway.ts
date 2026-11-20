@@ -47,6 +47,7 @@ import {
   sha256,
   WorkflowPermanentEffectFailure,
   WorkflowEffectRefusal,
+  WorkflowRemedyRefused,
   type WorkflowGateway,
   type WorkflowRunPin,
 } from './workflow-execution.js';
@@ -95,7 +96,7 @@ export class PostgresWorkflowGateway implements WorkflowGateway {
           [operator.tenantId, operator.principalId],
         );
         if (!rows[0]?.eligible)
-          throw new Error('Workflow remedy permission refused');
+          throw new WorkflowRemedyRefused('Workflow remedy permission refused');
         return work();
       },
     );
