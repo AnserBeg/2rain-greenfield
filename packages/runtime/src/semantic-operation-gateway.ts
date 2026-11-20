@@ -284,6 +284,7 @@ export interface RegisteredCapabilityOperationExecutionRequest {
 }
 
 export interface RegisteredCapabilityOperationAuthorizationRequest {
+  readonly idempotencyKey: string;
   readonly context: TrustedRequestContext;
   readonly definition: RegisteredCapabilityOperationDefinition;
   readonly input: ImmutableJsonValue;
@@ -945,6 +946,7 @@ export class SemanticOperationGateway {
             context: trustedContextForRequestRuntimeView(view),
             definition,
             input: request.input,
+            idempotencyKey: request.idempotencyKey,
             inputDigest,
             readBackDefinition,
             view,

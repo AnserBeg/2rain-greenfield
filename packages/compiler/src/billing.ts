@@ -25,24 +25,50 @@ export function billingBindingProblem(
       b.assignmentOperationId,
     ];
     const model = outer && 'readModel' in outer ? outer.readModel : null;
-    const entityFor = (queryId: string, fieldId: string) => {
-      const q = def.queries.find((q) => q.queryId === queryId);
-      const field = def.fields.find((f) => f.fieldId === fieldId);
-      return (
-        !!q &&
-        q.queryType === 'get' &&
-        q.legalEntityScope?.cardinality === 'exactlyOne' &&
-        !q.readModel &&
-        q.lifecycle === 'active' &&
-        field?.entity.targetId === q.sourceEntity.targetId &&
-        field.fieldType.kind === 'textFieldType' &&
-        q.selections.some((s) => s.field.targetId === fieldId)
-      );
-    };
+    const selectedField = (q: typeof source, fieldId: string) =>
+      q?.queryType === 'get' &&
+      q.legalEntityScope?.cardinality === 'exactlyOne' &&
+      !q.readModel &&
+      q.lifecycle === 'active' &&
+      q.selections.some((s) => s.field.targetId === fieldId)
+        ? def.fields.find(
+            (f) =>
+              f.fieldId === fieldId &&
+              f.entity.targetId === q.sourceEntity.targetId,
+          )
+        : undefined;
+    const interval = b.agreedInterval;
+    const sourcePrefix = source?.sourceEntity.targetId.replace(
+      ':entity.',
+      ':field.',
+    );
+    if (
+      b.evidenceFieldId ||
+      !interval ||
+      interval.customerFieldId !== sourcePrefix + '_customer_party_id' ||
+      interval.currencyFieldId !== sourcePrefix + '_currency' ||
+      selectedField(source, interval.customerFieldId)?.fieldType.kind !==
+        'textFieldType' ||
+      selectedField(source, interval.currencyFieldId)?.fieldType.kind !==
+        'textFieldType' ||
+      outer?.queryType !== 'get' ||
+      !outer.selections.some(
+        (s) => s.field.targetId === interval.customerFieldId,
+      ) ||
+      !outer.selections.some(
+        (s) => s.field.targetId === interval.currencyFieldId,
+      ) ||
+      interval.startFieldId === interval.endFieldId ||
+      selectedField(source, interval.startFieldId)?.fieldType.kind !==
+        'dateTimeFieldType' ||
+      selectedField(source, interval.endFieldId)?.fieldType.kind !==
+        'dateTimeFieldType' ||
+      p.components.some((c) => c.kind === 'meter')
+    )
+      return 'BILLING_SOURCE_FIELDS_REQUIRED';
     if (
       owners.has(b.quoteQueryId) ||
       publishers.has(b.publishOperationId) ||
-      outer?.queryType !== 'get' ||
       outer.lifecycle !== 'active' ||
       outer.legalEntityScope?.cardinality !== 'exactlyOne' ||
       outer.permission.targetId !==
@@ -53,8 +79,8 @@ export function billingBindingProblem(
       Object.keys(model.queries).length !== 1 ||
       Object.keys(model.resultFields).length !== 1 ||
       outer.sourceEntity.targetId !== source?.sourceEntity.targetId ||
-      !entityFor(b.evidenceQueryId, b.evidenceFieldId) ||
-      !entityFor(b.termsQueryId, b.termsFieldId) ||
+      selectedField(terms, b.termsFieldId)?.fieldType.kind !==
+        'textFieldType' ||
       new Set(writes).size !== 3 ||
       writes.some((id) => {
         const op = def.operations.find((o) => o.operationId === id);

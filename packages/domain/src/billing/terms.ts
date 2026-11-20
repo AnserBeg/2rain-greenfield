@@ -44,14 +44,38 @@ export function publishRateTable(plan: BillingPlan, input: unknown) {
   return { table: t, digest: digest(t) };
 }
 export interface ListAssignment {
+  publishedAt: string;
   listId: string;
   priority: number;
   effectiveFrom: string;
   effectiveEnd?: string | undefined;
   revision: string;
 }
+// Effective time orders a selector's versions. Publication time fences what
+// was knowable at opening and orders corrections with the same effective time.
+function headsAt<T extends { effectiveFrom: string; publishedAt: string }>(
+  rows: readonly T[],
+  keyFor: (row: T) => string,
+  opening: number,
+) {
+  const heads = new Map<string, T[]>();
+  for (const row of rows) {
+    const effective = instant(row.effectiveFrom),
+      published = instant(row.publishedAt);
+    if (effective > opening || published > opening) continue;
+    const key = keyFor(row),
+      head = heads.get(key);
+    const order = head
+      ? effective - instant(head[0]!.effectiveFrom) ||
+        published - instant(head[0]!.publishedAt)
+      : 1;
+    if (order > 0) heads.set(key, [row]);
+    else if (order === 0) head!.push(row);
+  }
+  return heads;
+}
 export function selectTable(
-  tables: readonly BillingRateTable[],
+  tables: readonly (BillingRateTable & { publishedAt: string })[],
   customer: string,
   assignments: readonly ListAssignment[],
   opening: number,
@@ -59,29 +83,13 @@ export function selectTable(
   let best: {
     rank: number;
     priority: number;
-    table: BillingRateTable;
+    table: BillingRateTable & { publishedAt: string };
     assignment: ListAssignment | null;
   }[] = [];
   // A successor ends only the series with the identical selector. An ended
   // successor never revives an older override.
-  const assignmentHeads = new Map<string, ListAssignment[]>();
-  for (const a of assignments) {
-    const at = instant(a.effectiveFrom);
-    if (at > opening) continue;
-    const list = assignmentHeads.get(a.listId);
-    if (!list || at > instant(list[0]!.effectiveFrom))
-      assignmentHeads.set(a.listId, [a]);
-    else if (at === instant(list[0]!.effectiveFrom)) list.push(a);
-  }
-  const series = new Map<string, BillingRateTable[]>();
-  for (const table of tables) {
-    const at = instant(table.effectiveFrom);
-    if (at > opening) continue;
-    const key = digest(table.selector),
-      head = series.get(key);
-    if (!head || at > instant(head[0]!.effectiveFrom)) series.set(key, [table]);
-    else if (at === instant(head[0]!.effectiveFrom)) head.push(table);
-  }
+  const assignmentHeads = headsAt(assignments, (a) => a.listId, opening);
+  const series = headsAt(tables, (t) => digest(t.selector), opening);
   for (const t of [...series.values()].flat()) {
     if (t.effectiveEnd && instant(t.effectiveEnd) <= opening) continue;
     const s = t.selector;
