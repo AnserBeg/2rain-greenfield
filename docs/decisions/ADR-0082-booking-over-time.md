@@ -1,4 +1,4 @@
-# ADR-0081. Book a resource over time
+# ADR-0082. Book a resource over time
 
 Proposed on 2026-11-20 for the orchestrator’s Fable read. The four build slices require its ruling.
 

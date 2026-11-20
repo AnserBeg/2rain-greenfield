@@ -1,6 +1,6 @@
 # BOOKING-1 — book a resource over time
 
-Slice 0 proposes [ADR-0081](../../decisions/ADR-0081-booking-over-time.md).
+Slice 0 proposes [ADR-0082](../../decisions/ADR-0082-booking-over-time.md).
 The orchestrator’s Fable ruling gates implementation. This slice changes documentation only.
 
 ## Design decisions
@@ -23,7 +23,7 @@ The orchestrator’s Fable ruling gates implementation. This slice changes docum
 
 ## Test it yourself
 
-Run `scripts/check-records.sh` from the repository root and expect `records: OK`. For the design read, open ADR-0081 and trace these cases.
+Run `scripts/check-records.sh` from the repository root and expect `records: OK`. For the design read, open ADR-0082 and trace these cases.
 
 - Companies A and B each try to hold the same shared room at 10:00. Only one hold can commit. The other company can see that the room is busy without learning who booked it.
 - Six units of a ten-unit pool are booked 09:00–10:00, and six are booked 10:00–11:00. A request for four fits across both hours. A fifth unit would exceed capacity.
