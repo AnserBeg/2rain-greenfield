@@ -1,3 +1,4 @@
+import { WorkflowDraftSchema, type WorkflowDraft } from './workflow-draft.js';
 import {
   ADD_LINK_LATER_CAPABILITY,
   addLinkLaterRefusal,
@@ -78,6 +79,7 @@ export const DRAFT_CUSTOMIZATION_TOOL = 'draft_customization' as const;
 
 export type DraftedRequest =
   | { readonly patch: CustomizationPatch; readonly status: 'parsed' }
+  | { readonly draft: WorkflowDraft; readonly status: 'workflowDraft' }
   | UnsupportedCustomization
   | { readonly issues: readonly string[]; readonly status: 'invalid' };
 
@@ -241,6 +243,9 @@ const toolSchema = {
       minItems: 2,
       maxItems: MAX_CUSTOMIZATION_CHANGE_PATCHES,
     },
+    workflow: { type: 'object' },
+    body: { type: 'string' },
+    fixtures: { type: 'array', items: { type: 'object' } },
     missingCapability: { type: 'string' },
   },
 } as const;
@@ -389,7 +394,11 @@ export async function draftPatchFromRequest(
   if (text === '') {
     return { issues: ['the request is empty'], status: 'invalid' };
   }
-  const system = draftingSystemPrompt(targets);
+  const system =
+    draftingSystemPrompt(targets) +
+    (targets.workflowSdk
+      ? `\nFor a receipt workflow use saveWorkflow with workflow {schemaVersion:"v6", workflowId, trigger:"goodsReceiptPosted", grants:{operations,queries}}, a TypeScript body and fixtures. Each fixture has an event {type:"goodsReceiptPosted", eventId, receiptId, legalEntityId} and effects in execution order {call, result}. Use the exact canonical IDs in these SDK declarations and declare only the calls the body makes. Sleep uses milliseconds and yields null. requestApproval yields a boolean. Never call operations or read live records to test a draft.\n${targets.workflowSdk}`
+      : '');
   const conversation: DraftingConversationEntry[] = [{ role: 'user', text }];
   let issues: readonly string[] = ['the model proposed no change'];
   for (let turn = 0; turn < maximumTurns; turn += 1) {
@@ -443,6 +452,27 @@ function readToolInput(
   input: unknown,
   targets: CustomizationTargets,
 ): DraftedRequest {
+  if (
+    input &&
+    typeof input === 'object' &&
+    'kind' in input &&
+    input.kind === 'saveWorkflow'
+  ) {
+    if (!targets.workflowSdk)
+      return unsupported(
+        'workflow',
+        'No callable workflow targets are available.',
+      );
+    const parsed = WorkflowDraftSchema.safeParse(input);
+    return parsed.success
+      ? { status: 'workflowDraft', draft: parsed.data }
+      : {
+          status: 'invalid',
+          issues: parsed.error.issues.map(
+            ({ path, message }) => `${path.join('.')}: ${message}`,
+          ),
+        };
+  }
   if (
     typeof input === 'object' &&
     input !== null &&

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import type { CalculatedDisplayField } from '@north-star/canonical-model';
+import type { WorkflowDefinition } from '../../canonical-model/src/schemas.js';
 import type { ReleaseDiffEnvelope } from '@north-star/compiler';
 
 /**
@@ -16,6 +17,7 @@ export const RENDERED_DIFF_VERSION =
 type Json = Record<string, unknown>;
 
 export interface DiffDefinition {
+  readonly workflows?: readonly WorkflowDefinition[];
   readonly documentFields?: readonly {
     readonly fieldId: string;
     readonly entityId: string;
@@ -86,6 +88,43 @@ export function renderReleaseDiff(input: {
         ?.label ?? entityId,
     );
   const lines: string[] = [];
+  for (const workflow of to.workflows ?? []) {
+    const previous = from.workflows?.find(
+      ({ workflowId }) => workflowId === workflow.workflowId,
+    );
+    if (
+      previous?.bodyDigest === workflow.bodyDigest &&
+      JSON.stringify(previous.grants) === JSON.stringify(workflow.grants)
+    )
+      continue;
+    const operations = workflow.grants.operations.map((operationId) =>
+      String(
+        to.operations?.find(
+          (operation) => operation.operationId === operationId,
+        )?.label ?? operationId,
+      ),
+    );
+    const summary = [
+      `${previous ? 'Updates' : 'Adds'} workflow “${workflow.workflowId}”. A posted goods receipt starts it.`,
+      ...(operations.length
+        ? [`Operations it may request: ${operations.join(', ')}.`]
+        : []),
+      ...(workflow.grants.queries.length
+        ? [`Reads: ${workflow.grants.queries.join(', ')}.`]
+        : []),
+    ];
+    lines.push(summary.join(' '));
+  }
+  for (const workflow of from.workflows ?? []) {
+    if (
+      !to.workflows?.some(
+        ({ workflowId }) => workflowId === workflow.workflowId,
+      )
+    )
+      lines.push(
+        `Removes workflow “${workflow.workflowId}” from future receipt events.`,
+      );
+  }
   for (const field of to.documentFields ?? []) {
     if (from.documentFields?.some(({ fieldId }) => fieldId === field.fieldId))
       continue;

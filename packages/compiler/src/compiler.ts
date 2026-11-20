@@ -41,6 +41,7 @@ import {
 } from './hash.js';
 import {
   legalEntityScopeCatalogEntry,
+  appendWorkflowProjection,
   lowerBaseProjectionPayloads,
   queryParameterCatalogEntries,
   requiredProjectionFamily,
@@ -494,6 +495,25 @@ function compileApplicationInternal(
     ),
     packageRevision,
   );
+  try {
+    appendWorkflowProjection(basePlans, packageRevision);
+  } catch (error) {
+    return failure(
+      [
+        {
+          ...compilerDiagnostic(
+            'COMPILER_TYPE_INVALID',
+            'typeCheck',
+            '$.workflows',
+            null,
+          ),
+          rule:
+            error instanceof Error ? error.message : 'Invalid workflow binding',
+        },
+      ],
+      maximumDiagnostics,
+    );
+  }
   if (conformanceMode === 'current') {
     const resolveStorageDiagnostics = validateResolveStorageConformance(
       packageRevision,

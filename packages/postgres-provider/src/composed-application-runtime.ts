@@ -2296,6 +2296,7 @@ export async function ensureReleaseAdmitted(
   release: ParsedRelease,
   providerErrorMappings: readonly ModuleProviderErrorMapping[],
   capabilityOperationExecutorFactories: readonly PostgresCapabilityOperationExecutorFactory[],
+  workflowVerifierPool?: pg.Pool,
 ): Promise<void> {
   const repository = new PostgresImmutableReleaseRepository(pool);
   if (await repository.getTenantRelease(context, identity.releaseId)) return;
@@ -2303,6 +2304,7 @@ export async function ensureReleaseAdmitted(
     pool,
     providerErrorMappings,
     capabilityOperationExecutorFactories,
+    workflowVerifierPool,
   ).executeSemanticCandidateAndPersist(context, {
     compiledRelease: release.compiled,
     evidenceId: identity.evidenceId,
