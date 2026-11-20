@@ -1,3 +1,4 @@
+import { PostgresAddresses } from './address-geocodes.js';
 import { BILLING_QUOTE_CAPABILITY } from '../../canonical-model/src/billing.js';
 import { billingQuoteReadModel } from './billing-quote.js';
 import type { DocumentScanner } from './document-content.js';
@@ -74,6 +75,7 @@ export function composeServingGateways(
   options: {
     readonly providerErrorMappings: readonly ModuleProviderErrorMapping[];
     readonly capabilityOperationExecutorFactories?: readonly PostgresCapabilityOperationExecutorFactory[];
+    readonly localDemoIdentity?: true;
     readonly monotonicMilliseconds?: () => number;
   },
   documentOptions?: {
@@ -209,6 +211,12 @@ export function composeServingGateways(
     policy,
     operationMediation,
   );
+  const addresses = new PostgresAddresses(
+    runtimePool,
+    queryGateway,
+    servingFor,
+    options.localDemoIdentity === true,
+  );
   const documents = documentOptions
     ? new PostgresDocumentGateway(
         runtimePool,
@@ -226,6 +234,7 @@ export function composeServingGateways(
     operationGateway,
     queryGateway,
     operationMediation,
+    addresses,
     documents,
   };
 }

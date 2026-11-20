@@ -18,7 +18,7 @@ type Revision = Extract<
 >;
 type Field = Revision['fields'][number];
 export type FormulaValidationFieldType =
-  | { readonly kind: 'text' | 'boolean' | 'integer' | 'date' }
+  | { readonly kind: 'text' | 'boolean' | 'integer' | 'date' | 'address' }
   | {
       readonly kind: 'decimal';
       readonly precision: number;
@@ -162,6 +162,8 @@ export function formulaFieldType(
 ): FormulaValidationFieldType | null {
   const type = field.fieldType;
   switch (type.kind) {
+    case 'addressFieldType':
+      return { kind: 'address' };
     case 'textFieldType':
       return { kind: 'text' };
     case 'booleanFieldType':
@@ -282,7 +284,7 @@ export function bindLiteralValidation(
         return null;
       case 'comparison': {
         const left = fieldType(predicate.left);
-        if (!left)
+        if (!left || left.kind === 'address')
           return 'Compare a supported field on this record with a typed value.';
         if (
           predicate.operator !== 'equal' &&

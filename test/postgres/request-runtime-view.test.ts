@@ -169,6 +169,8 @@ test('the capability comparison binds the family to its capability, then compare
     28,
     29,
     30,
+    31,
+    32,
     LINE_CREATE_VALUES_SURFACE_FLOOR,
   ];
   for (const reader of surfaceFloors) {

@@ -2321,3 +2321,131 @@ test('record layout retains the file catalog and raises the Surface floor above 
     );
   }
 });
+
+test('addAddressField and addMapPlacement replay on a compatible base and identify each conflicting change', async () => {
+  const entity = 'northstar.app:entity.item';
+  const surfaceId = 'northstar.app:surface.item_detail';
+  const fieldId = 'northstar.app:field.custom_item_delivery_site';
+  const compatibility = applicationWithoutLineCreateValues();
+  const compatibilityTip = parseSerializedRelease(
+    compatibility.release.application,
+  ).compiled;
+  const add = patch({
+    kind: 'addAddressField',
+    schemaVersion: 'v6',
+    entity,
+    fieldId,
+    label: 'Delivery site',
+    required: false,
+  });
+  const variant = (label: string, moveSection: boolean) => {
+    const base = structuredClone(compatibility.authored);
+    const sku = (base.fields as { fieldId: string; label: string }[]).find(
+      (f) => f.fieldId === 'northstar.app:field.item_sku',
+    )!;
+    sku.label = label;
+    const surface = (
+      base.surfaces as {
+        surfaceId: string;
+        slots: { slot: string; slotId: string }[];
+      }[]
+    ).find((s) => s.surfaceId === surfaceId)!;
+    const section = surface.slots.find((s) => s.slot === 'sections')!;
+    if (moveSection)
+      section.slotId = 'northstar.app:slot.item_detail_delivery_sections';
+    const normalized = normalizeApplicationPackage(base);
+    const result = compileApplicationRelease(
+      {
+        kind: 'compilerInput',
+        dependencies: [],
+        limits: { ...DEFAULT_COMPILER_LIMITS },
+        expectedActiveRelease: expectedActiveReleaseFrom(compatibilityTip),
+        normalizedDefinitionBytes: new TextEncoder().encode(
+          canonicalize(normalized),
+        ),
+        profile: {
+          ...MODULE_COMPILER_PROFILE,
+          languageVersion: normalized.languageVersion,
+          normalizationProfileVersion: normalized.normalizationProfileVersion,
+        },
+      },
+      acknowledgement,
+    );
+    assert.ok(result.status === 'compiled', JSON.stringify(result.diagnostics));
+    return {
+      base,
+      root: result.releaseRoot,
+      sectionId: [surfaceId, 'detail', section.slotId, 'details'].join('/'),
+    };
+  };
+  const compatible = variant('Stock number', false);
+  const map = patch({
+    kind: 'addMapPlacement',
+    schemaVersion: 'v6',
+    placementId: 'northstar.app:placement.custom_delivery_map',
+    surfaceId,
+    sectionId: compatible.sectionId,
+    fieldId,
+  });
+  const chain = [add, map];
+  const original = await compileInSandbox(surfaceCompatibilityRequest(chain));
+  assert.ok(original.status === 'compiled', JSON.stringify(original));
+  const family = PROJECTION_FAMILY_IDS.surfaceManifest;
+  const floors = original.steps.map(({ release }) => {
+    const manifest =
+      parseSerializedRelease(release).compiled.bundle.releaseManifest;
+    const requirement = manifest.projections.find(
+      (p) => p.familyId === family,
+    )!.requiredRuntimeCapability;
+    assert.equal(unsupportedRuntimeCapability(family, requirement), null);
+    assert.match(
+      unsupportedRuntimeCapability(family, requirement, {
+        [family]: {
+          capabilityId: requirement.capabilityId,
+          maximumSupportedVersion: requirement.minimumVersion - 1,
+        },
+      }) ?? '',
+      /requires version/u,
+    );
+    return requirement.minimumVersion;
+  });
+  assert.deepEqual(floors, [31, 32]);
+  const source = original.steps.at(-1)!.release;
+  const replay = (next: typeof compatible) =>
+    compileInSandbox({
+      acknowledgement,
+      base: next.base,
+      chain,
+      tip: source,
+      upgradeBaseRoot: next.root,
+    });
+  const moved = await replay(compatible);
+  assert.ok(moved.status === 'compiled', JSON.stringify(moved));
+  assert.equal(moved.steps[0]?.diff.fromManifestRoot, source.releaseRoot);
+  const data = JSON.parse(
+    Buffer.from(
+      moved.steps[0]!.release.normalizedDefinitionBytesBase64,
+      'base64',
+    ).toString(),
+  ) as {
+    connectorBindings: { fieldId: string }[];
+    mapPlacements: { sectionId: string }[];
+  };
+  assert.deepEqual(
+    data.connectorBindings.map((b) => b.fieldId),
+    [fieldId],
+  );
+  assert.deepEqual(
+    data.mapPlacements.map((p) => p.sectionId),
+    [compatible.sectionId],
+  );
+  for (const base of [
+    variant('Delivery site', false),
+    variant('Stock number', true),
+  ]) {
+    const rejected = await replay(base);
+    assert.ok(rejected.status === 'rejected', JSON.stringify(rejected));
+    assert.equal(rejected.code, 'CUSTOMIZE_UPGRADE_CONFLICT');
+    assert.match(JSON.stringify(rejected.diagnostics), new RegExp(base.root));
+  }
+});
