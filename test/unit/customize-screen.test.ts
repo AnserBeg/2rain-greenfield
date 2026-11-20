@@ -123,6 +123,42 @@ test('the Customize screen offers the four kinds and the live state', async () =
   assert.doesNotMatch(response.html, /<script/u);
 });
 
+test('Customize shows bound workflow source and grants read-only', async () => {
+  const response = await renderCustomizeScreen(
+    {
+      ...fakeService([]),
+      async workflows() {
+        return [
+          {
+            workflowId: 'inspection-review',
+            trigger: 'A goods receipt is posted',
+            grants: {
+              queries: ['northstar.app:query.receipt_items'],
+              operations: ['northstar.app:operation.inspection_create'],
+            },
+            body: 'sdk.sleep(2); // <script>',
+          },
+        ];
+      },
+    },
+    'http://local/?customize',
+    null,
+  );
+  const section = response.html.match(
+    /<section data-customize-workflows>.*?<\/section>/su,
+  )?.[0];
+  assert.ok(section);
+  assert.match(section, /A goods receipt is posted/u);
+  assert.match(
+    section,
+    /may use the inspection create action and read receipt items/u,
+  );
+  assert.match(section, /northstar\.app:operation\.inspection_create/u);
+  assert.match(section, /northstar\.app:query\.receipt_items/u);
+  assert.match(section, /<code>sdk\.sleep\(2\); \/\/ &lt;script&gt;<\/code>/u);
+  assert.doesNotMatch(section, /<(?:textarea|input|button|script)\b/u);
+});
+
 test('a described record type drafts as one typed patch and shows its plain diff with Approve', async () => {
   const calls: string[] = [];
   const response = await renderCustomizeScreen(
