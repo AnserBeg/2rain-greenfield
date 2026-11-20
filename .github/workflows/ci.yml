@@ -46,12 +46,17 @@ jobs:
           assert.ok([...defectIds].every((id) => known.has(id)));
           const templateObligations = ledger.obligations.filter(({ id }) => id.includes('documentTemplate'));
           assert.ok(templateObligations.length > 0);
-          console.log({ before: oldSnapshot.observedCount, after: observed.size, templateObligations: templateObligations.map(({id}) => ({id, observed: observed.has(id)})) });
-          assert.ok(templateObligations.every(({ id }) => !observed.has(id)));
-          assert.equal(observed.size, oldSnapshot.observedCount);
+          const observedTemplates = templateObligations.filter(({ id }) => observed.has(id)).map(({ id }) => id);
+          assert.deepEqual(observedTemplates, [
+            'authoredLanguage:$.documentTemplatePointers.$presence="absent"',
+            'authoredLanguage:$.documentTemplateRevisions.$presence="absent"',
+          ]);
+          assert.equal(observed.size, oldSnapshot.observedCount + observedTemplates.length);
+          const priorLedger = { ...ledger, obligations: ledger.obligations.filter(({ id }) => !id.includes('documentTemplate')) };
+          assert.equal(priorLedger.obligations.length, oldSnapshot.obligationCount);
           document.decisions = document.decisions.map(({ decisionId, ...body }) => {
             const obligationSetDigest = deriveDecisionSetDigest(ledger, observed, body.category);
-            if (body.category !== 'unobserved') assert.equal(obligationSetDigest, body.obligationSetDigest);
+            assert.equal(deriveDecisionSetDigest(priorLedger, observed, body.category), body.obligationSetDigest);
             const updated = {
               ...body,
               ledgerDigest: ledger.digest,
@@ -59,7 +64,9 @@ jobs:
               acceptedButUnhonoredSetDigest: deriveObligationSetDigest(defectIds),
               rationale: body.category === 'unobserved'
                 ? body.rationale + ' DOCS-1 adds optional v6 document-template declarations. The first-party coverage fixtures leave them absent. The PostgreSQL issuance test exercises templates in customized releases.'
-                : body.rationale,
+                : body.category === 'observedOutsideRelationScope'
+                  ? body.rationale + ' The DOCS-1 first-party fixtures observe both optional template declarations absent.'
+                  : body.rationale,
             };
             return { ...updated, decisionId: deriveLanguageCoverageDecisionId(decisionId.split('@')[0], updated) };
           });
