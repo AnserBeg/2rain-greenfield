@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "packet": "CUSTOMIZE-5",
+  "entries": [
+    {
+      "name": "date-time-consumer-admitted-by-surface",
+      "claim": "A list filter on a logical dateTime field refuses by logical type and field name.",
+      "file": "packages/canonical-model/src/date-time-field.ts",
+      "original": "if (ADMITTED.has(path) || path.startsWith('surfaces.layouts.')) return;",
+      "replacement": "if (ADMITTED.has(path) || path.startsWith('surfaces.')) return;",
+      "test": {
+        "files": ["test/unit/date-time-field.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/date-time-field.test.ts",
+          "name": "a forged list filter on a dateTime field refuses by logical type",
+          "expected": "AssertionError"
+        }
+      ]
+    },
+    {
+      "name": "date-time-comparison-admitted",
+      "claim": "A comparison operand on a logical dateTime field is a named capability gap; only presence is admitted.",
+      "file": "packages/canonical-model/src/date-time-field.ts",
+      "original": "          owner?.kind === 'required' &&",
+      "replacement": "          owner?.kind !== undefined &&",
+      "test": {
+        "files": ["test/unit/date-time-field.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/date-time-field.test.ts",
+          "name": "presence is admitted on the whole value; comparison and length operands are named gaps",
+          "expected": "comparison operand"
+        }
+      ]
+    },
+    {
+      "name": "date-time-floor-not-raised",
+      "claim": "A release declaring a dateTime field requires the dateTime surface reader rung.",
+      "file": "packages/compiler/src/projections.ts",
+      "original": "            projection.requiredRuntimeCapability.minimumVersion,\n            DATE_TIME_FIELD_READER,",
+      "replacement": "            projection.requiredRuntimeCapability.minimumVersion,\n            0,",
+      "test": {
+        "files": ["test/unit/date-time-field.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/date-time-field.test.ts",
+          "name": "the declaration binds one logical field on the same three catalogs at the dateTime reader floor",
+          "expected": "Expected values to be strictly equal"
+        }
+      ]
+    },
+    {
+      "name": "date-time-serving-floor-unchecked",
+      "claim": "Serving refuses a dateTime binding under an understated surface floor.",
+      "file": "packages/postgres-provider/src/date-time-admission.ts",
+      "original": "  if (surfaceFloor < DATE_TIME_FIELD_READER)",
+      "replacement": "  if (surfaceFloor < 0)",
+      "test": {
+        "files": ["test/unit/date-time-field.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/date-time-field.test.ts",
+          "name": "serving admission refuses disagreeing bindings, a missing catalog binding and an understated floor",
+          "expected": "The input did not match the regular expression"
+        }
+      ]
+    },
+    {
+      "name": "date-time-capture-partial",
+      "claim": "The table itself refuses a partial dateTime capture.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "    ...all.slice(0, 6).map((column) => `${column} IS NOT NULL`),",
+      "replacement": "    ...all.slice(0, 1).map((column) => `${column} IS NOT NULL`),",
+      "test": {
+        "files": ["test/postgres/date-time-field.test.ts"],
+        "namePattern": "populated record type"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/date-time-field.test.ts",
+          "name": "a dateTime field added to a populated record type builds its window index in the attempt and enters, refuses, lists and reads in record zone",
+          "expected": "partial capture"
+        }
+      ]
+    },
+    {
+      "name": "date-time-ceiling-unprobed",
+      "claim": "One row over the window-index ceiling refuses the attempt by name.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "  if (probe.rows[0]?.exceeds !== false) {",
+      "replacement": "  if (probe.rows[0]?.exceeds === 'never') {",
+      "test": {
+        "files": ["test/postgres/date-time-field.test.ts"],
+        "namePattern": "window-index ceiling"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/date-time-field.test.ts",
+          "name": "one row over the window-index ceiling refuses the attempt by name while the source release keeps serving, and the build at the ceiling is measured",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    }
+  ]
+}
