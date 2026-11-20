@@ -1,3 +1,4 @@
+import { PopupRevisionSchema } from './popup-actions.js';
 import { AddressBindingSchema, MapPlacementSchema } from './address.js';
 import { BillingPlansSchema } from './billing.js';
 import { SurfaceBoardSchema } from './board.js';
@@ -1220,6 +1221,10 @@ export const SurfaceCompositionSchema = z.strictObject({
   children: z.array(compositionDataset).max(12),
   actions: z.array(compositionAction).max(24),
 });
+export const CompiledPopupSchema = z.strictObject({
+  revision: PopupRevisionSchema,
+  task: SurfaceCompositionSchema.shape.actions.element.optional(),
+});
 export type SurfaceComposition = z.infer<typeof SurfaceCompositionSchema>;
 /** Optional v6 workspace declarations; absence preserves historical bytes. */
 export const SurfaceWorkspaceSchema = z.strictObject({
@@ -2209,6 +2214,7 @@ export const SurfaceLauncherSchema = z.strictObject({
 });
 export type SurfaceLauncher = z.infer<typeof SurfaceLauncherSchema>;
 const normalizedV6SurfaceDefinition = normalizedSurfaceDefinition.extend({
+  popupActions: z.array(PopupRevisionSchema).min(1).optional(),
   board: SurfaceBoardSchema.optional(),
   layouts: z.array(SurfaceLayoutSchema).min(1).max(2).optional(),
   composition: SurfaceCompositionSchema.optional(),

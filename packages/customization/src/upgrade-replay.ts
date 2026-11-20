@@ -1,3 +1,7 @@
+import {
+  boundPopupOption,
+  popupOptions,
+} from '../../canonical-model/src/popup-actions.js';
 import { compileLiteralFormulaRules } from '../../compiler/src/formula-validation-plan.js';
 import { retypedCalculatedDisplayField } from '../../canonical-model/src/calculated-display-bindings.js';
 import { retypedFormulaRule } from '../../canonical-model/src/formula-validation-bindings.js';
@@ -210,6 +214,24 @@ function applyRefusal(
       expected: patch.surface,
       observed: null,
     };
+  if (patch.kind === 'addPopupActionRevision') {
+    const model = normalizeApplicationPackage(
+      target,
+    ) as unknown as LayoutDefinition;
+    const surface = model.surfaces.find((s) => s.surfaceId === patch.surface);
+    const option =
+      surface && boundPopupOption(popupOptions(model, surface), patch);
+    if (
+      !option ||
+      option.target.contractVersion !== patch.target.contractVersion
+    )
+      return {
+        code: option ? 'INCOMPATIBLE_TYPE' : 'RETIRED_TARGET',
+        subject: patch.target.operationId,
+        expected: patch.target.contractVersion,
+        observed: option?.target.contractVersion ?? null,
+      };
+  }
   if (patch.kind === 'addRecordType') {
     const module = (target.modules as Member[]).find(
       (m) => String(m.label).toLowerCase() === patch.label.toLowerCase(),
@@ -242,7 +264,11 @@ function applyRefusal(
   }
   const subject =
     [...referencedIds(patch)][0] ??
-    ('label' in patch ? patch.label : patch.kind);
+    (patch.kind === 'addPopupActionRevision'
+      ? patch.actionId
+      : 'label' in patch
+        ? patch.label
+        : patch.kind);
   return {
     code: 'WHOLE_PACKAGE_FAILURE',
     subject,

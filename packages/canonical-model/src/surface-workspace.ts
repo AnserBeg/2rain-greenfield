@@ -1,3 +1,4 @@
+import { compiledPopups } from './popup-actions.js';
 import { boardDigest, boardForList, boardWithStages } from './board.js';
 import { SURFACE_SLOTS } from './constants.js';
 import { baseLayout, layoutProblem } from './layout.js';
@@ -35,6 +36,13 @@ export function validateSurfaceWorkspaces(
     ]);
   };
   for (const surface of model.surfaces) {
+    if ('popupActions' in surface && surface.popupActions) {
+      try {
+        compiledPopups(model, surface);
+      } catch (error) {
+        fail(surface.surfaceId, String(error));
+      }
+    }
     const board = 'board' in surface ? surface.board : undefined;
     if (surface.archetype === 'board' || board) {
       if (!board || surface.archetype !== 'board')
