@@ -439,3 +439,7 @@ test('module parity uses within-task spread and requires three timed attempts on
     false,
   );
 });
+
+test('CI-3 deliberately broken skipped-suite control', () => {
+  assert.fail('CI-3 planted agent regression');
+});
