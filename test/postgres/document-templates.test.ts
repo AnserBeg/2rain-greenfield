@@ -294,6 +294,7 @@ test(
                   env: {
                     ...process.env,
                     PORT: '0',
+                    TZ: 'Pacific/Auckland',
                     DATABASE_URL: options.databaseUrl,
                     NORTH_STAR_TENANT_SLUG: options.tenantSlug,
                     NORTH_STAR_DOCUMENT_DEMO_SCANNER: '0',
@@ -354,10 +355,23 @@ test(
                   rendered.headers.get('content-type'),
                   'application/pdf',
                 );
-                assert.match(
-                  documentPdfText(Buffer.from(await rendered.arrayBuffer())),
-                  /Replace filter/u,
+                const pdf = documentPdfText(
+                  Buffer.from(await rendered.arrayBuffer()),
                 );
+                assert.match(pdf, /Replace filter/u);
+                assert.match(pdf, /Service date: Nov 18, 2026/u);
+                const recordUrl = new URL('/', baseUrl);
+                recordUrl.searchParams.set(
+                  'surface',
+                  id('surface', tenant + '_detail'),
+                );
+                recordUrl.searchParams.set('record', sheet.recordId);
+                recordUrl.searchParams.set(
+                  id('parameter', tenant + '_get_legal_entity_scope'),
+                  companyId,
+                );
+                const recordPage = await fetch(recordUrl);
+                assert.ok((await recordPage.text()).includes('Nov 18, 2026'));
               } finally {
                 child.kill('SIGTERM');
                 await closed;
