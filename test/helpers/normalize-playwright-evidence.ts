@@ -28,6 +28,7 @@ const rawReport = JSON.parse(
   readFileSync(resolve(producer.rawEvidencePath), 'utf8'),
 ) as JSONReport;
 const counts = new Map<string, number>();
+const durations = new Map<string, number>();
 
 for (const suite of rawReport.suites)
   collectSuiteResults(suite, rawReport, counts);
@@ -41,7 +42,11 @@ const evidence: SuiteEvidence = {
   suiteSucceeded:
     rawReport.errors.length === 0 && rawReport.stats.unexpected === 0,
   files: [...counts]
-    .map(([path, realResultCount]) => ({ path, realResultCount }))
+    .map(([path, realResultCount]) => ({
+      path,
+      realResultCount,
+      durationMs: durations.get(path) ?? 0,
+    }))
     .sort((left, right) => left.path.localeCompare(right.path)),
 };
 
@@ -79,15 +84,19 @@ function collectSuiteResults(
 ): void {
   for (const spec of suite.specs) {
     let realResultCount = 0;
+    let durationMs = 0;
     for (const test of spec.tests) {
       if (test.status === 'skipped' || test.expectedStatus === 'skipped')
         continue;
-      realResultCount += test.results.filter(
-        (result) => result.status && result.status !== 'skipped',
-      ).length;
+      for (const result of test.results) {
+        if (!result.status || result.status === 'skipped') continue;
+        realResultCount += 1;
+        durationMs += result.duration;
+      }
     }
     if (realResultCount > 0) {
       const path = resolve(report.config.rootDir, spec.file);
+      durations.set(path, (durations.get(path) ?? 0) + durationMs);
       counts.set(path, (counts.get(path) ?? 0) + realResultCount);
     }
   }

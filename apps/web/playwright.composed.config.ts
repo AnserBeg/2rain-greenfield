@@ -4,6 +4,7 @@ import {
   browserSuiteConfig,
   composedApplicationSpecs,
   customizationBrowserSpecs,
+  customizationRulesSpecs,
 } from './playwright.shared.js';
 
 // The composed application's journeys, in a CI job of their own beside the
@@ -16,7 +17,7 @@ export default defineConfig({
     {
       name: 'composed-application',
       testMatch: composedApplicationSpecs,
-      testIgnore: customizationBrowserSpecs,
+      testIgnore: [customizationBrowserSpecs, customizationRulesSpecs],
     },
   ],
 });
