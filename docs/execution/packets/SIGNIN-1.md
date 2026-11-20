@@ -21,12 +21,12 @@ Run `node --import tsx --test test/postgres/release-approval.test.ts`. The staff
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "SIGNIN-1",
-  "base": "032b87c00df3ee22184685050b9cecc01c62cc59",
-  "head": "c7c7a998ec9a71cee55ec3483cc297d6a321071e",
+  "base": "46d5a0729ca31686989080aab4ad8661b2d7e330",
+  "head": "873e3ad6a9a54196b2580cd7bdf4f7e3886911f7",
   "changedPaths": [
     "apps/api/src/staff-decisions.ts", "apps/api/src/staff-identity-http.ts",
     "apps/api/src/staff-identity.ts", "apps/api/src/staff-main.ts",
-    "apps/api/src/staff-protocol.ts", "db/migrations/0053_staff_decision_proofs.sql",
+    "apps/api/src/staff-protocol.ts", "db/migrations/0054_staff_decision_proofs.sql",
     "db/schema.snapshot.json",
     "docs/execution/packets/CONNECT-1.md", "docs/execution/packets/SIGNIN-1.md",
     "docs/operations/staff-signin.md",
