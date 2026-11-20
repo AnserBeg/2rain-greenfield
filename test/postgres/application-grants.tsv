@@ -77,6 +77,17 @@ north_star_runtime	north_star_internal.module_storage_catalog_receipts	SELECT	*	
 north_star_runtime	north_star_internal.module_storage_generations	SELECT	*	Track storage transitions and resolve their materialization evidence.
 north_star_runtime	platform.active_release_pointers	SELECT	*	Resolve or advance the active release for the scoped environment.
 north_star_runtime	platform.active_release_pointers	UPDATE	*	Resolve or advance the active release for the scoped environment.
+north_star_runtime	platform.address_geocodes	INSERT	*	open debt: CONNECT-1
+north_star_runtime	platform.address_geocodes	SELECT	*	open debt: CONNECT-1
+north_star_runtime	platform.address_geocodes	UPDATE	attempts,available_at,claim_id,expires_at,latitude,longitude,"precision",reason,state	open debt: CONNECT-1
+north_star_runtime	platform.address_installation_history	INSERT	*	open debt: CONNECT-1
+north_star_runtime	platform.address_installation_history	SELECT	*	open debt: CONNECT-1
+north_star_runtime	platform.address_installations	INSERT	*	open debt: CONNECT-1
+north_star_runtime	platform.address_installations	SELECT	*	open debt: CONNECT-1
+north_star_runtime	platform.address_installations	UPDATE	enabled,enrichment,period_budget_micros,period_calls	open debt: CONNECT-1
+north_star_runtime	platform.address_quota	INSERT	*	open debt: CONNECT-1
+north_star_runtime	platform.address_quota	SELECT	*	open debt: CONNECT-1
+north_star_runtime	platform.address_quota	UPDATE	calls,reserved_micros	open debt: CONNECT-1
 north_star_runtime	platform.app_package_revisions	INSERT	*	Persist and reload the package revision used to build a release.
 north_star_runtime	platform.app_package_revisions	SELECT	*	Persist and reload the package revision used to build a release.
 north_star_runtime	platform.billing_list_assignments	INSERT	*	open debt: BILLING-1
