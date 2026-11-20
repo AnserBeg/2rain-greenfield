@@ -210,7 +210,8 @@ async function handleRequest(
   if (
     gateways?.addresses &&
     demoActors &&
-    url.pathname === '/address/settings'
+    url.pathname === '/' &&
+    url.searchParams.get('customize') === 'address'
   ) {
     try {
       if (request.method === 'POST' && !sameOriginRequest(request))

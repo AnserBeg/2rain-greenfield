@@ -1,3 +1,4 @@
+import type { AddressInstallation } from '../../../packages/runtime/src/address-gateway.js';
 import { layoutDigest } from '@north-star/canonical-model';
 import {
   layoutCommand,
@@ -452,7 +453,7 @@ async function overview(
     extendRecordTypeForm(targets),
     fieldForm(targets),
     addressForms(targets),
-    '<p><a href="/address/settings">Company address and map settings</a></p>',
+    '<p><a href="/?customize=address">Company address and map settings</a></p>',
     documentFieldForm(targets),
     choiceForm(targets),
     layoutPicker(targets.layouts ?? []),
@@ -1365,4 +1366,33 @@ function layoutSubmission(
     destination: form.destination,
     label: form.label,
   });
+}
+
+export function renderCompanyAddressSettings(
+  companies: readonly { id: string; label: string }[],
+  accounts: readonly AddressInstallation[],
+) {
+  const options = companies.map(
+    ({ id, label }) =>
+      `<option value="${escapeHtml(id)}">${escapeHtml(label)}</option>`,
+  );
+  const active = accounts
+    .map(
+      (i) =>
+        `<li>${escapeHtml(i.account)} · ${i.provider === 'fake' ? 'Demo Maps' : 'Google Maps'} · ${i.enrichment ? 'Geocoding enabled' : 'Suggestions only'}</li>`,
+    )
+    .join('');
+  return page(
+    'Address and Maps',
+    '<a href="/?customize">Customize</a><h1>Address and Maps</h1><p>Local demo company settings</p>' +
+      (active ? '<ul>' + active + '</ul>' : '<p>No enabled accounts.</p>') +
+      '<form method="post"><label>Company<select name="companyId" required>' +
+      options.join('') +
+      '</select></label>' +
+      '<label>Provider<select name="provider"><option value="fake">Demo Maps</option><option value="google">Google Maps (supported non-EEA demo)</option></select></label>' +
+      '<label>Provider account reference<input name="account" required pattern="[A-Za-z0-9_.-]+" maxlength="120" value="demo"></label>' +
+      '<label>Monthly lookup limit<input name="calls" type="number" min="1" max="10000" value="100" required></label>' +
+      '<label>Monthly spend limit (USD)<input name="budget" type="number" min="0" max="1000" step="0.01" value="0" required></label>' +
+      '<label><input name="enrichment" type="checkbox" checked> Locate saved addresses</label><button name="action" value="enable">Enable for this company</button><button name="action" value="pause">Pause</button></form>',
+  ).html;
 }

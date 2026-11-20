@@ -1,4 +1,4 @@
-import { renderAddressField } from './address-field.js';
+import { addressEditor } from './address-context.js';
 import {
   AddressInputSchema,
   SavedAddressSchema,
@@ -3201,4 +3201,62 @@ export function renderDocumentSection(
     return `<div data-document-field="${id}"><h3>${label}</h3>${field ? `<p>Up to ${field.maxCount} files${field.required ? ' · Required for document tasks' : ''}</p>` : ''}<ul data-document-rows></ul>${form}</div>`;
   };
   return `<section class="panel data-panel"><details data-documents="${escapeHtml(path)}"><summary><h2>Files</h2></summary>${scannerLabel ? `<p>${escapeHtml(scannerLabel)}</p>` : ''}<p role="status" data-documents-status></p>${section()}${fields.map((field) => section(field)).join('')}<button type="button" data-documents-more hidden>Show more files</button></details></section>`;
+}
+
+function renderAddressField(name: string, value: unknown, attributes: string) {
+  const context = addressEditor.getStore();
+  const binding = context?.projection.bindings.find((b) =>
+    name.endsWith(b.fieldId),
+  );
+  const session = randomUUID();
+  const accounts = context?.accounts ?? [];
+  const lookup =
+    binding && accounts.length
+      ? `<label>Map provider<select name="${name}.installation"><option value="">Save text only</option>${accounts.map((a) => `<option value="${a.installationId}" data-company="${a.companyId}"${accounts.length === 1 && a.enrichment ? ' selected' : ''}>${escapeHtml(a.account)} · ${a.provider === 'fake' ? 'Demo Maps' : 'Google Maps'}</option>`).join('')}</select></label><input type="hidden" name="${name}.session" value="${session}"><input type="hidden" name="${name}.choice"><span data-address-results aria-live="polite"></span><template data-address-option><button type="button"></button></template>`
+      : '';
+  const address = SavedAddressSchema.safeParse(value);
+  const draft = AddressInputSchema.safeParse(value);
+  const current = address.success ? address.data : draft.data;
+  const component = (
+    key: string,
+    label: string,
+    text: string | undefined,
+    max: number,
+  ) =>
+    '<label>' +
+    label +
+    '<input name="' +
+    name +
+    '.' +
+    key +
+    '" maxlength="' +
+    max +
+    '" value="' +
+    escapeHtml(text ?? '') +
+    '"></label>';
+  return (
+    `<span data-address-editor data-field="${escapeHtml(binding?.fieldId ?? '')}" data-query="${escapeHtml(binding?.suggestQueryId ?? '')}" data-record="${escapeHtml(context?.recordId ?? '')}">` +
+    '<input type="text" autocomplete="street-address" maxlength="512" name="' +
+    name +
+    '"' +
+    attributes +
+    ' value="' +
+    escapeHtml(current?.text ?? '') +
+    '">' +
+    lookup +
+    '</span>' +
+    '<details><summary>Address details and pin</summary>' +
+    '<label>Street lines<textarea name="' +
+    name +
+    '.lines" maxlength="643">' +
+    escapeHtml(current?.lines?.join('\n') ?? '') +
+    '</textarea></label>' +
+    component('city', 'City', current?.city, 120) +
+    component('region', 'State or province', current?.region, 120) +
+    component('postalCode', 'Postal code', current?.postalCode, 24) +
+    component('country', 'Country code', current?.country, 2) +
+    component('latitude', 'Your pin latitude', current?.pin?.latitude, 14) +
+    component('longitude', 'Your pin longitude', current?.pin?.longitude, 14) +
+    '</details>'
+  );
 }

@@ -3,12 +3,8 @@ import type { AddressGateway } from '../../../packages/runtime/src/address-gatew
 import type { SemanticQueryGateway } from '../../../packages/runtime/src/semantic-query-gateway.js';
 import { workspaceList } from './workspace-entry.js';
 
-const escape = (v: string) =>
-  v
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;');
+import { renderCompanyAddressSettings } from './customize-screen.js';
+
 export async function addressSettings(
   view: RequestRuntimeView,
   addresses: AddressGateway,
@@ -55,28 +51,14 @@ export async function addressSettings(
     });
   }
   const accounts = await addresses.installations(view);
-  const options = companies.map((c) => {
+  const choices = companies.map((c) => {
     const label = Object.entries(c.values).find(
       ([field, value]) => field.endsWith('name') && typeof value === 'string',
     )?.[1];
-    return `<option value="${escape(c.recordId)}">${escape(typeof label === 'string' ? label : c.recordId)}</option>`;
+    return {
+      id: c.recordId,
+      label: typeof label === 'string' ? label : c.recordId,
+    };
   });
-  const active = accounts
-    .map(
-      (i) =>
-        `<li>${escape(i.account)} · ${i.provider === 'fake' ? 'Demo Maps' : 'Google Maps'} · ${i.enrichment ? 'Geocoding enabled' : 'Suggestions only'}</li>`,
-    )
-    .join('');
-  return (
-    '<!doctype html><html lang="en"><meta charset="utf-8"><title>Address and Maps</title><main><a href="/?customize">Customize</a><h1>Address and Maps</h1><p>Local demo company settings</p>' +
-    (active ? '<ul>' + active + '</ul>' : '<p>No enabled accounts.</p>') +
-    '<form method="post"><label>Company<select name="companyId" required>' +
-    options.join('') +
-    '</select></label>' +
-    '<label>Provider<select name="provider"><option value="fake">Demo Maps</option><option value="google">Google Maps (supported non-EEA demo)</option></select></label>' +
-    '<label>Provider account reference<input name="account" required pattern="[A-Za-z0-9_.-]+" maxlength="120" value="demo"></label>' +
-    '<label>Monthly lookup limit<input name="calls" type="number" min="1" max="10000" value="100" required></label>' +
-    '<label>Monthly spend limit (USD)<input name="budget" type="number" min="0" max="1000" step="0.01" value="0" required></label>' +
-    '<label><input name="enrichment" type="checkbox" checked> Locate saved addresses</label><button name="action" value="enable">Enable for this company</button><button name="action" value="pause">Pause</button></form></main></html>'
-  );
+  return renderCompanyAddressSettings(choices, accounts);
 }

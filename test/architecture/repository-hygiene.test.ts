@@ -22,6 +22,7 @@ const suiteDefinitions = [
   {
     discoveryPattern: 'test/unit/**/*.test.ts',
     expectedFiles: [
+      'test/unit/address-connector.test.ts',
       'test/unit/calculated-display.test.ts',
       'test/unit/canonical-model/diagnostic-ordering.test.ts',
       'test/unit/canonical-model/disclosure-tier.test.ts',
@@ -56,7 +57,6 @@ const suiteDefinitions = [
       'test/unit/surface-assets.test.ts',
       'test/unit/web-surface-hex-literal-ratchet.test.ts',
       'test/unit/workspace-contract.test.ts',
-      'test/unit/address-connector.test.ts',
     ],
     script: 'test:unit',
   },
@@ -185,6 +185,7 @@ const suiteDefinitions = [
       'test/postgres/stock-serializer.test.ts',
     ],
     expectedFiles: [
+      'test/postgres/address-connector.test.ts',
       'test/postgres/agent-dev-tasks.test.ts',
       'test/postgres/agent-tasks.test.ts',
       'test/postgres/booking-commitments.test.ts',
@@ -227,7 +228,6 @@ const suiteDefinitions = [
       'test/postgres/tenant-isolation.test.ts',
       'test/postgres/trust-substrate.test.ts',
       'test/postgres/workflow-consumer.test.ts',
-      'test/postgres/address-connector.test.ts',
     ],
     scripts: [
       'test:postgres:1',
