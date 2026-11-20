@@ -38,6 +38,7 @@ import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/po
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
 import { PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/purchase-order-approval-executor.js';
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receiving-capability-executor.js';
+import { PostgresModuleRuntimeInterpreter } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
 import { serializeRelease } from '../../packages/customization/src/index.js';
 import {
@@ -873,7 +874,7 @@ test(
 test(
   'company-owned tenant record mutations follow the stored owner',
   { timeout: 600_000 },
-  async () => {
+  async (t) => {
     await withEphemeralPostgres(
       'custom-company',
       async ({ connection, pool }) => {
@@ -945,6 +946,11 @@ test(
           assert.ok((await setBuyerCompany(COMPANY)).rowCount);
           const foreignInput = { recordId: foreign, expectedRevision: 1 };
           const denied = { name: 'SemanticOperationPolicyDeniedError' };
+          const scopedExecution = t.mock.method(
+            PostgresModuleRuntimeInterpreter.prototype,
+            'executeWithRecordCompany',
+            { times: 1 },
+          );
           await assert.rejects(
             world.invoke(
               `${type}_update`,
@@ -955,6 +961,17 @@ test(
               buyer,
             ),
             denied,
+          );
+          await t.test(
+            'plain executor requires stored-owner authorization',
+            async () => {
+              // Use the exact request the gateway just declined for this buyer.
+              const call = scopedExecution.mock.calls[0]!;
+              assert.ok(call.this instanceof PostgresModuleRuntimeInterpreter);
+              await assert.rejects(call.this.execute(call.arguments[0]), {
+                code: 'MODULE_RECORD_COMPANY_AUTHORIZATION_REQUIRED',
+              });
+            },
           );
           for (const effect of ['action_pass', 'archive', 'restore']) {
             await assert.rejects(
