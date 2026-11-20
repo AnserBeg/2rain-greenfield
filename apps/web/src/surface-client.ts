@@ -75,9 +75,10 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
   const sendTask = async (form, fields) => {
     const body = new URLSearchParams();
     for (const [name, value] of fields) if (typeof value === 'string') body.append(name, value);
+    const csrf = document.querySelector('meta[name=erp-csrf]')?.content;
     const response = await fetch(form.action, {
       method: 'POST', credentials: 'same-origin', redirect: 'error',
-      headers: { 'x-rain-fragment': 'task' }, body,
+      headers: { 'x-rain-fragment': 'task', ...(csrf ? { 'x-erp-csrf': csrf } : {}) }, body,
     });
     if (response.headers.get('x-rain-fragment') !== 'fragment') throw new Error('Task response unavailable');
     const refresh = response.headers.get('x-rain-fragment-refresh');
@@ -288,7 +289,8 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
   const lineSources = () => Object.fromEntries([...document.querySelectorAll('[data-line-source]')].map((control) => [control.name, control.value]));
   const post = async (body, signal) => {
     try {
-      const response = await fetch(endpoint, { method: 'POST', credentials: 'same-origin', redirect: 'error', signal, headers: { 'x-rain-fragment': '1', 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(body) });
+      const csrf = document.querySelector('meta[name=erp-csrf]')?.content;
+      const response = await fetch(endpoint, { method: 'POST', credentials: 'same-origin', redirect: 'error', signal, headers: { ...(csrf ? { 'x-erp-csrf': csrf } : {}), 'x-rain-fragment': '1', 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(body) });
       if (response.headers.get('x-rain-fragment-fallback') === 'page' || response.headers.get('x-rain-fragment') !== 'fragment') throw fallbackError();
       return { status: response.status, html: await response.text() };
     } catch (error) {
@@ -705,7 +707,8 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
         button.disabled = true;
         status.textContent = '';
         try {
-          const response = await fetch(url, { method: 'POST', body: file });
+          const csrf = document.querySelector('meta[name=erp-csrf]')?.content;
+          const response = await fetch(url, { method: 'POST', headers: csrf ? { 'x-erp-csrf': csrf } : {}, body: file });
           if (!response.ok) {
             const refusal = await response.json();
             throw new Error(refusal.message);
