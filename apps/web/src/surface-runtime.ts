@@ -99,6 +99,11 @@ import {
   type SurfaceOperationIntent,
 } from './surface-contract.js';
 import { NAVIGATION_ICONS, declaredIcon, svgIcon } from './navigation-icons.js';
+import {
+  WORKFLOW_APPROVALS_HREF,
+  type ApprovalPlan,
+  type WorkflowApprovalsData,
+} from './workflow-approvals.js';
 
 /** Fixture-only shell furniture, never installed by the production composition. */
 export function withLocalDemoIdentity(
@@ -106,6 +111,7 @@ export function withLocalDemoIdentity(
   actors:
     readonly { key: 'buyer' | 'manager'; label: string }[] | null | undefined,
   selected: 'buyer' | 'manager',
+  worklistHref?: string,
 ): SurfaceRuntimeResponse {
   if (!actors) return response;
   const bar = `<aside class="demo-identity" aria-label="Local demo identity"><form method="post"><label>Acting as <select name="localDemoActAs" aria-label="Acting as">${actors.map((actor) => `<option value="${actor.key}"${actor.key === selected ? ' selected' : ''}>${escapeHtml(actor.label)}</option>`).join('')}</select></label><button type="submit">Switch person</button><span>Local demo</span></form></aside>`;
@@ -113,6 +119,9 @@ export function withLocalDemoIdentity(
   // names the person and their role (LOOK-1 round 3); a page without the
   // shell keeps it at the top of the body.
   const menu = '<div class="shell-account__menu">';
+  const worklist = worklistHref
+    ? `<a href="${escapeHtml(worklistHref)}">Approvals</a>`
+    : '';
   const who = '<span class="side-foot__who"><strong>Signed in</strong></span>';
   const person = actors.find((actor) => actor.key === selected)?.label;
   if (!response.html.includes(menu))
@@ -123,7 +132,7 @@ export function withLocalDemoIdentity(
   return {
     ...response,
     html: response.html
-      .replace(menu, `${menu}${bar}`)
+      .replace(menu, `${menu}${bar}${worklist}`)
       .replace(
         who,
         person
@@ -2545,6 +2554,96 @@ export function renderApplicationDiagnostic(
   });
 }
 
+export function renderWorkflowApprovals(
+  view: RuntimeViewContract.RequestRuntimeView,
+  { worklist, message, results }: WorkflowApprovalsData,
+): SurfaceRuntimeResponse {
+  assertRequestRuntimeView(view);
+  const plans = worklist.approvals.map(renderApprovalPlan).join('');
+  const runs = worklist.suspended
+    .map(
+      ({ runId, workflowId, reason }) =>
+        `<li><label><input name="run-${escapeHtml(runId)}" type="checkbox"> ${escapeHtml(workflowId)} · <code>${escapeHtml(runId)}</code></label> <span>${escapeHtml(reason)}</span></li>`,
+    )
+    .join('');
+  const notice = message
+    ? `<section class="panel" role="status" ${messageAttributes(message)}>${messageBody(message, '', 'h2')}</section>`
+    : '';
+  const outcome = results
+    ? `<section class="panel" role="status"><h2>Run results</h2><ul>${results
+        .map(
+          ({ runId, outcome }) =>
+            `<li><code>${escapeHtml(runId)}</code> · ${escapeHtml(outcome)}</li>`,
+        )
+        .join('')}</ul></section>`
+    : '';
+  const content = `<h1>Approvals</h1><div data-workflow-approvals>${notice}${outcome}
+    <section class="panel"><h2>Pending plans</h2>
+      ${plans || workflowWorklistEmpty('WORKFLOW_APPROVALS_EMPTY')}
+    </section>
+    <section class="panel"><h2>Suspended runs</h2>
+      ${
+        runs
+          ? `<form action="${WORKFLOW_APPROVALS_HREF}" method="post">
+        <ul>${runs}</ul>
+        <button name="action" value="retry">Retry selected</button>
+        <button name="action" value="cancel">Cancel selected</button>
+      </form>`
+          : workflowWorklistEmpty('WORKFLOW_SUSPENDED_EMPTY')
+      }
+    </section></div>
+  `;
+  const selection = selectSurface(view, '/');
+  if ('statusCode' in selection) return selection;
+  return {
+    html: shellDocument(
+      view,
+      selection.surfaces,
+      selection.navigation,
+      null,
+      content,
+      null,
+      false,
+      null,
+      'Approvals',
+    ),
+    statusCode: 200,
+  };
+}
+
+function renderApprovalPlan(plan: ApprovalPlan): string {
+  const identity = {
+    runId: plan.runId,
+    cursor: String(plan.cursor),
+    fence: plan.fence,
+    digest: plan.digest,
+  };
+  return `<article class="panel" data-workflow-approval>
+    <h3>${escapeHtml(plan.summary)}</h3>
+    <dl><dt>Company</dt><dd><code>${escapeHtml(plan.companyId)}</code></dd>
+        <dt>Operation</dt><dd><code>${escapeHtml(plan.operationId)}</code></dd></dl>
+    <h4>Exact inputs</h4>
+    <pre class="workflow-plan-input"><code>${escapeHtml(JSON.stringify(plan.input, null, 2))}</code></pre>
+    <form action="${WORKFLOW_APPROVALS_HREF}" method="post">
+      ${Object.entries(identity)
+        .map(
+          ([key, value]) =>
+            `<input type="hidden" name="${key}" value="${escapeHtml(value)}">`,
+        )
+        .join('')}
+      <button name="action" value="approve">Approve</button>
+      <button name="action" value="decline">Decline</button>
+    </form>
+  </article>`;
+}
+
+function workflowWorklistEmpty(
+  code: 'WORKFLOW_APPROVALS_EMPTY' | 'WORKFLOW_SUSPENDED_EMPTY',
+): string {
+  const ref = { code };
+  return `<div ${messageAttributes(ref)}>${messageBody(ref, '', 'h2')}</div>`;
+}
+
 /**
  * SPEED-1 (fix read 3): a task's Confirm or retry stopped by a policy change
  * after some of its steps may have committed. Nothing of the record is shown
@@ -2604,8 +2703,9 @@ function shellDocument(
   workspaceContext: WorkspaceContextBar | null = null,
   enhanceTaskDialog = false,
   queueCounts: ReadonlyMap<string, number | null> | null = null,
+  worklistTitle?: string,
 ): string {
-  const title = selected?.label ?? 'Release diagnostic';
+  const title = worklistTitle ?? selected?.label ?? 'Release diagnostic';
   const navigation = navigationEntries(surfaces, compiledNavigation);
   const activeDestination = currentNavigationDestination(
     view,
@@ -2639,7 +2739,7 @@ function shellDocument(
       </aside>
       <div class="workspace">
         <header class="topbar">
-          <strong class="topbar__context">${escapeHtml(activeDestination ?? selected?.label ?? 'Workspace')}</strong>
+          <strong class="topbar__context">${escapeHtml(worklistTitle ?? activeDestination ?? selected?.label ?? 'Workspace')}</strong>
           ${launcher ? renderShellSearch(view, launcher, workspaceContext) : ''}
           <details class="shell-account"><summary aria-label="Account and diagnostics"><span class="principal__avatar" aria-hidden="true">${escapeHtml(initials('Signed in'))}</span></summary><div class="shell-account__menu">
           <div class="principal" aria-label="Signed-in principal">Signed in</div>

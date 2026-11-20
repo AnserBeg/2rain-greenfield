@@ -171,6 +171,7 @@ export type ComposedApplicationRuntimeOptions = (
   readonly metrics?: ObservabilityMetrics;
   /** Explicit local-only fixture identity and full-release grant provisioning. */
   readonly localDemoIdentity?: true;
+  readonly localDemoWorkflowApprovals?: true;
   /**
    * The elapsed-time source the composed read ingress is timed from. It exists
    * so a test can drive a composition across a real ladder boundary without
@@ -365,6 +366,12 @@ export async function createComposedApplicationRuntime(
         identities,
         serving.normalizedDefinitionBytes,
       );
+      if (options.localDemoWorkflowApprovals)
+        await ensureReleaseApprover(
+          adminPool,
+          identities.manager,
+          identities.authorityOperatorId,
+        );
     }
     let customizationUpgrade: UpgradePreparation | null = selected.diagnostic;
     if (selected.prepareReplay) {
@@ -2006,29 +2013,37 @@ async function provisionInventoryScopeOnClient(
   );
 }
 
-async function ensureAuthority(
-  pool: pg.PoolClient,
-  identities: ScopeIdentities,
+async function ensureReleaseApprover(
+  pool: AdminQueryable,
+  identity: AuthenticatedIdentity,
+  authorityOperatorId: string,
 ): Promise<void> {
-  const tenantId = identities.runtime.tenantId;
+  const { tenantId, principalId } = identity;
   const approver = await pool.query<{ eligible: boolean }>(
     `SELECT eligible
        FROM platform.release_approver_eligibility_events
       WHERE tenant_id = $1 AND principal_id = $2
       ORDER BY policy_version DESC LIMIT 1`,
-    [tenantId, identities.approver.principalId],
+    [tenantId, principalId],
   );
   if (approver.rows[0]?.eligible !== true) {
     await pool.query(
       'SELECT platform.set_release_approver_eligibility($1,$2,true,$3,$4)',
-      [
-        tenantId,
-        identities.approver.principalId,
-        identities.authorityOperatorId,
-        randomUUID(),
-      ],
+      [tenantId, principalId, authorityOperatorId, randomUUID()],
     );
   }
+}
+
+async function ensureAuthority(
+  pool: pg.PoolClient,
+  identities: ScopeIdentities,
+): Promise<void> {
+  const tenantId = identities.runtime.tenantId;
+  await ensureReleaseApprover(
+    pool,
+    identities.approver,
+    identities.authorityOperatorId,
+  );
   for (const principalId of [
     identities.runtime.principalId,
     SYSTEM_EXECUTION_PRINCIPAL.principalId,
