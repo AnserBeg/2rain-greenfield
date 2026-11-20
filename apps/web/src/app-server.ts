@@ -20,7 +20,6 @@ import {
   type AssistantMount,
 } from './assistant-panel.js';
 import { staticAsset, type StaticAsset } from './surface-assets.js';
-import { localDemoActor } from '../../../packages/runtime/src/local-demo-actor.js';
 import type { DocumentGateway } from '../../../packages/runtime/src/document-gateway.js';
 import { mountDocumentHttp } from './document-http.js';
 
@@ -40,6 +39,7 @@ import {
   renderSurfaceRuntime,
   renderWorkflowApprovals,
   withLocalDemoIdentity,
+  withStaffSession,
   renderSurfaceRuntimeWithData,
   submitSurfaceRuntimeFragment,
   submitSurfaceRuntimeIntent,
@@ -72,6 +72,13 @@ export interface SurfaceRuntimeServerOptions {
     options?: { readonly retry?: boolean },
   ) => Promise<T>;
   readonly requestWork?: RequestWorkProbe;
+  readonly selectedDemoActor?: (
+    cookie: string | undefined,
+  ) => 'buyer' | 'manager';
+  readonly staffTransport?: (
+    request: IncomingMessage,
+    response: ServerResponse,
+  ) => Promise<{ csrf: string; identityOrigin: string } | null>;
   /** The assistant panel (AGENT-3, local demo only); absent, no panel. */
   readonly assistant?: AssistantMount;
   readonly documents?: DocumentGateway;
@@ -94,8 +101,50 @@ export function createSurfaceRuntimeServer(
     options.documents && mountDocumentHttp(entry, options.documents);
   return createServer((request, response) => {
     htmlEncodings.set(response, acceptedEncoding(request));
-    const handle = () =>
-      handleRequest(
+    const handle = async () => {
+      if (options.staffTransport) {
+        try {
+          const transport = await options.staffTransport(request, response);
+          if (!transport) return;
+          const url = new URL(request.url ?? '/', 'https://staff.invalid');
+          const forbidden = (key: string) =>
+            /^(?:localDemoActAs|principal[_-]?id|tenant[_-]?id|environment[_-]?id)$/iu.test(
+              key,
+            );
+          if ([...url.searchParams.keys()].some(forbidden)) throw new Error();
+          if (
+            request.method === 'POST' &&
+            documents &&
+            url.pathname === '/documents'
+          ) {
+            if (request.headers['x-erp-csrf'] !== transport.csrf)
+              throw new Error();
+          } else if (request.method === 'POST') {
+            if (
+              !(request.headers['content-type'] ?? '').startsWith(
+                'application/x-www-form-urlencoded',
+              )
+            )
+              throw new Error();
+            const form = await readFormSubmission(request);
+            if (
+              (request.headers['x-erp-csrf'] ?? form._csrf) !==
+                transport.csrf ||
+              Object.keys(form).some(forbidden)
+            )
+              throw new Error();
+            const clean = { ...form };
+            delete clean._csrf;
+            staffForms.set(request, clean);
+          }
+          staffResponses.set(response, transport);
+        } catch {
+          response.statusCode = 403;
+          response.end();
+          return;
+        }
+      }
+      return handleRequest(
         entry,
         gateways,
         request,
@@ -106,7 +155,9 @@ export function createSurfaceRuntimeServer(
         gateways ? options.assistant : undefined,
         documents,
         options.workflowApprovals,
+        options.selectedDemoActor,
       );
+    };
     const probe = options.requestWork;
     void (probe
       ? probe.measure((serverTiming) => {
@@ -128,6 +179,7 @@ async function handleRequest(
   assistant?: AssistantMount,
   documents?: ReturnType<typeof mountDocumentHttp>,
   workflowApprovals?: WorkflowApprovalsService,
+  selectedDemoActor?: (cookie: string | undefined) => 'buyer' | 'manager',
 ): Promise<void> {
   response.setHeader('cache-control', 'no-store');
   response.setHeader(
@@ -296,7 +348,7 @@ async function handleRequest(
       const page = withLocalDemoIdentity(
         result,
         demoActors,
-        localDemoActor(request.headers.cookie),
+        (demoActors && selectedDemoActor?.(request.headers.cookie)) || 'buyer',
         WORKFLOW_APPROVALS_HREF,
       );
       writeHtml(
@@ -329,7 +381,7 @@ async function handleRequest(
       const customizePage = withLocalDemoIdentity(
         result,
         demoActors,
-        localDemoActor(request.headers.cookie),
+        (demoActors && selectedDemoActor?.(request.headers.cookie)) || 'buyer',
       );
       // The assistant links here ("Review it on the Customize screen"); the
       // panel comes along (end review X15).
@@ -404,7 +456,7 @@ async function handleRequest(
     const page = withLocalDemoIdentity(
       result,
       demoActors,
-      localDemoActor(request.headers.cookie),
+      (demoActors && selectedDemoActor?.(request.headers.cookie)) || 'buyer',
       workflowApprovals && WORKFLOW_APPROVALS_HREF,
     );
     writeHtml(
@@ -506,9 +558,20 @@ function sameOriginRequest(request: IncomingMessage): boolean {
   }
 }
 
+const staffForms = new WeakMap<
+  IncomingMessage,
+  Readonly<Record<string, string>>
+>();
+const staffResponses = new WeakMap<
+  ServerResponse,
+  { csrf: string; identityOrigin: string }
+>();
+
 async function readFormSubmission(
   request: IncomingMessage,
 ): Promise<Readonly<Record<string, string>>> {
+  const prepared = staffForms.get(request);
+  if (prepared) return prepared;
   if (
     !String(request.headers['content-type'] ?? '').startsWith(
       'application/x-www-form-urlencoded',
@@ -576,6 +639,8 @@ function writeHtml(
   response: ServerResponse,
   result: SurfaceRuntimeResponse,
 ): void {
+  const staff = staffResponses.get(response);
+  if (staff) result = withStaffSession(result, staff);
   response.statusCode = result.statusCode;
   const serverTiming = serverTimings.get(response);
   if (serverTiming) response.setHeader('server-timing', serverTiming());

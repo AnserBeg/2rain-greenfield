@@ -7,11 +7,15 @@
     "dev": "node --import tsx src/main.ts",
     "dev:reset": "node --import tsx src/dev-container-cli.ts reset",
     "dev:stop": "node --import tsx src/dev-container-cli.ts stop",
-    "agent": "node --import tsx src/agent-cli.ts"
+    "agent": "node --import tsx src/agent-cli.ts",
+    "staff": "node --import tsx src/staff-main.ts"
   },
   "dependencies": {
     "@north-star/operations-agent": "workspace:*",
     "@north-star/postgres-provider": "workspace:*",
-    "@north-star/web": "workspace:*"
+    "@north-star/web": "workspace:*",
+    "@simplewebauthn/server": "14.1.0",
+    "pg": "^8.22.0",
+    "tldts": "7.5.4"
   }
 }
