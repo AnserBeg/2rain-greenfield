@@ -22,6 +22,7 @@ import { PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY } from '@north-star/postgres-p
 import {
   AGENT_KEY_FILE_VARIABLE,
   anthropicModel,
+  assistantRoute,
   DEFAULT_ANTHROPIC_MODEL,
   loadModelKey,
   type ModelAdapter,
@@ -324,25 +325,28 @@ export async function startComposedApplication(
 }
 
 /** The panel's default model: the key file, read once on first use. */
-function keyFileAssistantModel(): () => Promise<
-  ModelAdapter | { unavailable: string }
-> {
-  let model: Promise<ModelAdapter | { unavailable: string }> | undefined;
-  return () =>
-    (model ??= loadModelKey('anthropic').then(
-      (key) =>
-        anthropicModel({
-          key,
-          modelId:
-            process.env.NORTH_STAR_AGENT_MODEL ?? DEFAULT_ANTHROPIC_MODEL,
-        }),
-      () => {
-        model = undefined;
-        return {
-          unavailable: `The assistant has no model key. Start the app with ${AGENT_KEY_FILE_VARIABLE} naming the key file, then ask again.`,
-        };
-      },
-    ));
+function keyFileAssistantModel() {
+  let key: ReturnType<typeof loadModelKey> | undefined;
+  const models = new Map<string, ModelAdapter>();
+  return async (request: string) => {
+    const route = assistantRoute(request, process.env.NORTH_STAR_AGENT_MODEL);
+    const id = `${route.modelId}/${route.effort}`;
+    const cached = models.get(id);
+    if (cached) return cached;
+    try {
+      const model = anthropicModel({
+        key: await (key ??= loadModelKey('anthropic')),
+        ...route,
+      });
+      models.set(id, model);
+      return model;
+    } catch {
+      key = undefined;
+      return {
+        unavailable: `The assistant has no model key. Start the app with ${AGENT_KEY_FILE_VARIABLE} naming the key file, then ask again.`,
+      };
+    }
+  };
 }
 
 /** The release this checkout compiled, as `pnpm dev` would install it. */

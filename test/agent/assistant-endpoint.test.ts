@@ -818,7 +818,7 @@ test('X15: the suggested customize command quotes the request as one shell word;
   // rendering and quoting are the same modules the installed command uses.
   const request = "Add a field named Buyer's Notes";
   const modules = {
-    '@north-star/operations-agent': `export const agentPreamble=()=>({}), anthropicModel=()=>({}), DEFAULT_ANTHROPIC_MODEL='scripted', loadModelKey=()=>null, OperationsAgentSession=class {}, SpendMeter=class {}, runOperationsAgent=()=>({handoff:true,usage:{},stop:'answered'});`,
+    '@north-star/operations-agent': `export const agentPreamble=()=>({}), anthropicModel=()=>({}), assistantRoute=()=>({modelId:'scripted'}), loadModelKey=()=>null, OperationsAgentSession=class {}, SpendMeter=class {}, runOperationsAgent=()=>({handoff:true,usage:{},stop:'answered'});`,
     './agent-release-guard.js':
       "export const checkTerminalRelease=()=>({kind:'match'}), compiledReleaseRoot=()=>'';",
     './composition-root.js':
