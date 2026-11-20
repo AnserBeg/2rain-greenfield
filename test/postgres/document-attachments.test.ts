@@ -1288,13 +1288,14 @@ function upload(
     fieldId?: string;
     categoryId?: string;
     contentType?: string;
+    fileName?: string;
     headers?: Record<string, string>;
   } = {},
 ): Promise<Response> {
   const url = new URL(target);
   url.searchParams.set('mode', 'upload');
   url.searchParams.set('retryKey', options.retryKey ?? randomUUID());
-  url.searchParams.set('fileName', 'evidence.png');
+  url.searchParams.set('fileName', options.fileName ?? 'evidence.png');
   if (options.fieldId) url.searchParams.set('field', options.fieldId);
   if (options.categoryId) url.searchParams.set('category', options.categoryId);
   return fetch(url, {
