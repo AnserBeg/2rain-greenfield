@@ -2643,10 +2643,21 @@ const v5NormalizedShape = {
   languageVersion: v5NodeVersion,
 } as const;
 
+/**
+ * A query a read model reads through. Absent `required` means the read model
+ * cannot answer without it, so every existing declaration stays mandatory.
+ * `required: false` declares that the provider still answers, with the
+ * dependent results left empty, when the reader may not run that query.
+ * `true` is never spelled, so a mandatory dependency keeps exactly one
+ * encoding. Optional v6 key (ADR-0047 §7).
+ */
+export const QueryReadModelDependencySchema = compositionReference(
+  'queryReference',
+).extend({ required: z.literal(false).optional() });
 export const QueryReadModelSchema = z.strictObject({
   capability: compositionReference('capabilityReference'),
   binding: CanonicalIdSchema,
-  queries: z.record(z.string().min(1), compositionReference('queryReference')),
+  queries: z.record(z.string().min(1), QueryReadModelDependencySchema),
   resultFields: z.record(z.string().min(1), CanonicalIdSchema),
 });
 export type QueryReadModel = z.infer<typeof QueryReadModelSchema>;

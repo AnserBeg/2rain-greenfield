@@ -360,14 +360,22 @@ export function declareApprovalReadModels(
         ...model,
         queries: {
           ...model.queries,
-          settings: ref(
-            'queryReference',
-            `${namespace}:query.purchasing_settings_list`,
-          ),
-          approvals: ref(
-            'queryReference',
-            `${namespace}:query.purchase_order_approval_list`,
-          ),
+          // The order still reads when either approval read is withheld: the
+          // provider leaves the approval figures empty instead.
+          settings: {
+            ...ref(
+              'queryReference',
+              `${namespace}:query.purchasing_settings_list`,
+            ),
+            required: false,
+          },
+          approvals: {
+            ...ref(
+              'queryReference',
+              `${namespace}:query.purchase_order_approval_list`,
+            ),
+            required: false,
+          },
         },
         resultFields: {
           ...model.resultFields,

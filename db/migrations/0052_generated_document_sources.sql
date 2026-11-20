@@ -98,9 +98,9 @@ RETURNS boolean LANGUAGE sql STABLE SET search_path = pg_catalog, pg_temp AS $$
       SELECT value AS q FROM jsonb_array_elements(app->'queries')
       WHERE value->>'queryId' = reference.value->>'targetId'
     ) dependency ON true
-    -- The commercial PO provider allows either approval dependency to be withheld.
-    WHERE (required.q #>> '{readModel,binding}' = 'northstar.sales:read_model.commercial_purchase_order'
-      AND reference.key IN ('settings', 'approvals')) IS NOT TRUE
+    -- A dependency is mandatory unless its compiled declaration says exactly
+    -- required: false; a missing or any other value fails closed.
+    WHERE (reference.value->'required' = 'false'::jsonb) IS NOT TRUE
   )
   SELECT NOT EXISTS (
     SELECT FROM required

@@ -631,6 +631,57 @@ test(
             },
           );
           await t.test(
+            'a read-model dependency without required: false stays mandatory',
+            async () => {
+              const permission = id('permission', 'purchasing_settings_read');
+              const revoked = await revokeGrant(permission);
+              assert.ok(revoked.rowCount);
+              try {
+                const granted = (variant: 'declared' | 'absent' | 'text') =>
+                  direct(async (client) => {
+                    const result = await client.query<{ granted: boolean }>(
+                      `WITH app AS (
+                         SELECT platform.document_app($1::uuid,$2::uuid) AS app
+                       ), governing AS (
+                         SELECT q FROM app, jsonb_array_elements(app->'queries') q
+                         WHERE q->>'queryId' = $3
+                       )
+                       SELECT platform.document_record_query_granted(app,
+                         CASE $4 WHEN 'declared' THEN q
+                           WHEN 'absent' THEN q #- '{readModel,queries,settings,required}'
+                           ELSE jsonb_set(q, '{readModel,queries,settings,required}', '"false"') END,
+                         $5) AS granted
+                       FROM app, governing`,
+                      [
+                        tenantId,
+                        environmentId,
+                        id('query', 'commercial_purchase_order_get'),
+                        variant,
+                        companyId,
+                      ],
+                    );
+                    assert.equal(result.rowCount, 1);
+                    return result.rows[0]!.granted;
+                  }, null);
+                // The compiled PO declaration reads with settings withheld.
+                assert.equal(await granted('declared'), true);
+                // The same dependency with no flag is mandatory again.
+                assert.equal(
+                  await granted('absent'),
+                  false,
+                  'a dependency without the flag was treated as optional',
+                );
+                // Only the JSON boolean false declares optionality.
+                assert.equal(await granted('text'), false);
+              } finally {
+                await restoreGrant(
+                  permission,
+                  revoked.rows.map(({ role_id }) => role_id),
+                );
+              }
+            },
+          );
+          await t.test(
             'an issuer without download authority receives the same receipt on retry',
             async () => {
               const permission = 'northstar.documents:permission.download';
