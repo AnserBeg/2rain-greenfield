@@ -17,6 +17,7 @@ carries the detail. No packet is chartered from this table without a user ruling
 
 | packet | date | finding (one sentence) | record |
 |---|---|---|---|
+| AGENT-SPEED-1 | 2026-11-19 | Atomic creation with lines needs CUSTOMIZE-4 Option A. Recipes depend on WORKFLOW-1 bodies. Habit shortcuts need a durable run record. | [Packet](packets/AGENT-SPEED-1.md) |
 | WORKFLOW-1 | 2026-11-19 | **FILED, sign-in packet item 1.** The runtime principal assertion can name an eligible human and persist a workflow approval decision. | [ADR-0073 authority boundaries](../decisions/ADR-0073-workflow-isolate-and-authority.md#authority-boundaries) |
 | WORKFLOW-1 | 2026-11-19 | **FILED, sign-in packet item 1.** Runtime release-approval and verification writes can assert an eligible human's approval or verification of a matching activation. | [ADR-0073 authority boundaries](../decisions/ADR-0073-workflow-isolate-and-authority.md#authority-boundaries) |
 | WORKFLOW-1 | 2026-11-19 | A worker-written query replay result can select an unintended branch. Every unattended write still requires verified Tier A proof for its operation and input contract, plus current grants. | [Packet](packets/WORKFLOW-1-threat-model-fix.md) |
