@@ -1,3 +1,7 @@
+import {
+  popupOptions,
+  type PopupOption,
+} from '../../canonical-model/src/popup-actions.js';
 import { boardTargets, type BoardTarget } from './board-revision.js';
 import { currentLayout, type LayoutTarget } from './layout-revision.js';
 import { displayTypeForField } from '../../canonical-model/src/calculated-display-bindings.js';
@@ -25,6 +29,7 @@ import type { LiteralValidationTarget } from './validation-draft.js';
  * again when it is applied.
  */
 export interface CustomizationTargets {
+  readonly popupActions?: readonly PopupOption[];
   readonly boards?: readonly BoardTarget[];
   readonly layouts?: readonly LayoutTarget[];
   readonly documentTargets?: readonly {
@@ -560,6 +565,9 @@ export function customizationTargets(definition: {
         }))
         .sort((left, right) => left.label.localeCompare(right.label)),
     }),
+    popupActions: definition.surfaces.flatMap((s) =>
+      popupOptions(definition, s),
+    ),
     boards: boardTargets(definition),
     layouts: definition.surfaces.flatMap((s) =>
       (['create', 'edit', 'detail'] as const).flatMap((mode) => {
