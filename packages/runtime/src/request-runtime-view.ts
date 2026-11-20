@@ -227,7 +227,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 27 adds internal document attachments. 28 adds record and form layout revisions.
     // 29 adds workflows, 30 billing, 31 Address fields and 32 map placements.
     // 33 adds Board lifecycle views and form-based moves.
-    // 34 adds custom buttons that open a record Task.
+    // 34 reads the versioned placement rule on replayed layouts.
+    // 35 adds custom buttons that open a record Task.
     maximumSupportedVersion: POPUP_READER,
   },
 });

@@ -13,7 +13,7 @@ import type {
   SurfaceDocumentEditor,
 } from './schemas.js';
 
-export const POPUP_READER = 34;
+export const POPUP_READER = 35;
 const version = z.literal('v6');
 const id = z
   .string()
@@ -316,12 +316,12 @@ export function popupOptions(
   }));
 }
 
-export function resolvePopup(
-  options: PopupOption[],
+export function boundPopupOption(
+  options: readonly PopupOption[],
   revision: PopupRevision,
-): Task {
+) {
   const target = revision.target;
-  const option = options.find(
+  return options.find(
     (o) =>
       o.surface === revision.surface &&
       o.slot === revision.slot &&
@@ -329,6 +329,13 @@ export function resolvePopup(
       o.target.operationId === target.operationId &&
       (target.kind !== 'operation' || o.task?.actionId === target.taskId),
   );
+}
+export function resolvePopup(
+  options: PopupOption[],
+  revision: PopupRevision,
+): Task {
+  const target = revision.target;
+  const option = boundPopupOption(options, revision);
   if (!option)
     throw new Error(
       'The record, action position or target operation is unavailable.',

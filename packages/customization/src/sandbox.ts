@@ -1,3 +1,4 @@
+import type { ReplayDiagnostics, ReplayOrigin } from './upgrade-diagnostics.js';
 import { fork, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -36,6 +37,8 @@ export interface SandboxRequest {
   readonly stepAcknowledgements?: readonly AcknowledgementInput[];
   /** Replay the entire chain once against tip, the previously live release. */
   readonly upgradeBaseRoot?: string;
+  readonly origins?: readonly ReplayOrigin[];
+  readonly activeRoleKeys?: readonly string[];
 }
 
 export interface SandboxStep {
@@ -52,6 +55,7 @@ export type SandboxResponse =
     }
   | {
       readonly code?: string;
+      readonly replayDiagnostics?: ReplayDiagnostics;
       readonly diagnostics?: readonly unknown[];
       readonly message: string;
       readonly missingCapability?: string;
