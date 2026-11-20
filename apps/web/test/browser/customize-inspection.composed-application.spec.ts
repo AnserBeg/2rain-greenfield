@@ -344,7 +344,7 @@ test('a drafted receipt workflow links an inspection and requests escalation aft
         databaseUrl,
         tenantSlug,
         port: 0,
-        seedProfile: 'distributor',
+        seedProfile: 'demo',
       } as const;
       const seeded = await startComposedApplication(options);
       await seeded.close();
@@ -361,7 +361,7 @@ test('a drafted receipt workflow links an inspection and requests escalation aft
       const inspectionState = `${prefix}:derived_state_field.machine.${inspection}`;
       const receiptLink = `${prefix}:relation.${inspection}_goods_receipt`;
       const company = COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId;
-      const seed = composedApplicationSeed('distributor');
+      const seed = composedApplicationSeed('demo');
       const seedId = (name: string) => {
         const row = seed.find((record) =>
           Object.values(record.values).includes(name),
@@ -584,11 +584,19 @@ test('a drafted receipt workflow links an inspection and requests escalation aft
           await page
             .getByRole('button', { name: 'Approve', exact: true })
             .click();
+          await expect(page.getByRole('main')).toContainText(
+            'Approved — not live yet',
+          );
           const activate = async () => {
             await page.getByRole('button', { name: 'Activate now' }).click();
-            await expect(
-              page.locator('[data-customize-result="activated"]'),
-            ).toBeVisible({ timeout: 180_000 });
+            const result = page.locator(
+              '[data-customize-result="activated"], [data-customize-result="refused"]',
+            );
+            await expect(result).toBeVisible({ timeout: 180_000 });
+            expect(
+              await result.getAttribute('data-customize-result'),
+              await result.innerText(),
+            ).toBe('activated');
           };
           if (process.env.CI) {
             await withArchivedCustomizationRuntime(
@@ -695,7 +703,7 @@ test('a drafted receipt workflow links an inspection and requests escalation aft
           };
           const location = seedId('Calgary warehouse');
           const order = await createRecord('purchase_order', {
-            supplier_party_id: seedId('Cascade Fastener Works'),
+            supplier_party_id: seedId('Summit Industrial'),
             order_date: start.toISOString(),
             currency: 'CAD',
             receiving_location_id: location,
