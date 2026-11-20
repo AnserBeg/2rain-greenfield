@@ -26,16 +26,27 @@ Migration 0050 replayed to the checked-in snapshot. [Packet CI](https://github.c
 ## Slice 1a review fixes
 
 1. A booking command requires an active update or transition permission on its owner.
-2. Booking opts into single-use confirmations. A separate issuer attests the verified grant to the exact command. SQL consumes it once and records the approving human. Archive checks limit company visibility to current grants on the endpoint.
+2. Booking opts into single-use confirmations. A separate issuer attests the verified grant to the exact command. SQL consumes it once and records the approving human. (Superseded by the follow-up below: the archive guard no longer depends on visibility.)
 3. Signed approvals and database grants bind the active fence. Reactivating a release requires a fresh approval.
 4. Both archive routines require READ COMMITTED. Archive rechecks allocation after locking the record.
 5. Expiry has its own receipt and outbox namespace. Each worker expiry rolls back independently on a unique conflict.
-6. After locking the diary, foreground writers lock both endpoints and all ancestors in order, then owner cursors in order. Workers skip locked diaries and busy owner cursors.
+6. After locking the diary, foreground writers lock both endpoints and all ancestors in one order (descendants first since the follow-up below), then owner cursors in order. Workers skip locked diaries and busy owner cursors.
 7. With an 08:00 day boundary, a date-only hold entered at 06:00 retains the 08:00 agreement and occupies from 06:00.
 8. Company authority is exercised against the correct owner. Committed event cursors remain contiguous across a competing diary write that fails.
 9. Both tenant runners compare the complete v6 release envelope to the pre-booking compiler at `47594bc6`.
 
 The staff server accepts the issuer login through `STAFF_APPROVAL_DATABASE_URL`. A missing issuer connection refuses operations requiring approval.
+
+## Slice 1a follow-up (migration 0055)
+
+The targeted check of `46d5a072` closed all nine items and found four more.
+
+1. Endpoint locks now run descendants before ancestors (longest ownership path to a root, descending), then by entity and record. That is the generic writer's child-then-parent order, so a booking no longer deadlocks against an ordinary update or archive of its child.
+2. An active allocation refuses archive of either endpoint whatever the caller can see. This deliberately reverses the visibility filter added for review item 2. The archive caller is already authorized for the record, and neither routine returns allocation detail.
+3. New tests refuse a workflow hold without an attested grant and prove the archive lock is taken for a caller whose grant names another resource.
+4. ADR-0082 and the runtime authority map record that `attest_booking_approval` trusts the issuer's scope arguments, with scope enforced at consumption.
+
+Each new test was red against the `46d5a072` SQL and green with 0055. Each fix was also removed on a committed tree to confirm its test reds (`test/evidence/BOOKING-1.expected-red.json`).
 
 ## Test it yourself
 

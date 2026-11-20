@@ -94,6 +94,84 @@
           "expected": "confirmation won at the expiry deadline"
         }
       ]
+    },
+    {
+      "name": "booking-endpoint-lock-order",
+      "claim": "A booking locks a child endpoint before its parent, the generic writer's order, even when the parent's entity id sorts first.",
+      "file": "db/migrations/0055_booking_lock_order.sql",
+      "original": "ORDER BY north_star_internal.booking_entity_height(storage,n.entity_id) DESC,n.entity_id,n.record_id",
+      "replacement": "ORDER BY n.entity_id,n.record_id",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "endpoints lock descendants before ancestors, whatever their entity ids",
+          "expected": "could not obtain lock on row in relation \"test_booking_parents\""
+        },
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "a booking and an ordinary child update share one lock order",
+          "expected": "deadlock detected"
+        }
+      ]
+    },
+    {
+      "name": "booking-archive-lock-unscoped",
+      "claim": "Archive locks an owner's allocation diaries whatever the archiving caller can see.",
+      "file": "db/migrations/0055_booking_lock_order.sql",
+      "original": "AND f.resource_key=d.resource_key AND f.state IN ('hold','confirmed')))",
+      "replacement": "AND EXISTS (SELECT FROM platform.current_policy_memberships m JOIN platform.current_policy_permission_grants g USING (tenant_id,environment_id,role_id) WHERE (m.tenant_id,m.environment_id,m.principal_id,g.resource_id)=(o.tenant_id,o.environment_id,nullif(current_setting('north_star.principal_id',true),'')::uuid,o.entity_id) AND (m.legal_entity_id IS NULL OR m.legal_entity_id=o.company_id)) AND f.resource_key=d.resource_key AND f.state IN ('hold','confirmed')))",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "an active allocation refuses archive whatever grant authorized it",
+          "expected": "Missing expected rejection."
+        }
+      ]
+    },
+    {
+      "name": "booking-archive-check-unscoped",
+      "claim": "An active allocation refuses archive of its owner whatever the archiving caller can see.",
+      "file": "db/migrations/0055_booking_lock_order.sql",
+      "original": "AND ((d.entity_id,d.record_id)=(entity,record) OR (o.entity_id,o.record_id)=(entity,record))",
+      "replacement": "AND ((d.entity_id,d.record_id)=(entity,record) OR ((o.entity_id,o.record_id)=(entity,record) AND EXISTS (SELECT FROM platform.current_policy_memberships m JOIN platform.current_policy_permission_grants g USING (tenant_id,environment_id,role_id) WHERE (m.tenant_id,m.environment_id,m.principal_id,g.resource_id)=(o.tenant_id,o.environment_id,nullif(current_setting('north_star.principal_id',true),'')::uuid,o.entity_id) AND (m.legal_entity_id IS NULL OR m.legal_entity_id=o.company_id))))",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "archive and another company cannot change an active allocation",
+          "expected": "Missing expected rejection."
+        },
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "an active allocation refuses archive whatever grant authorized it",
+          "expected": "Missing expected rejection."
+        }
+      ]
+    },
+    {
+      "name": "booking-workflow-hold-grant",
+      "claim": "A WORKFLOW-channel hold refuses without an attested human decision.",
+      "file": "db/migrations/0053_booking_authority.sql",
+      "original": "IF op->>'confirmation'='humanRequired' OR actor->>'channel'='WORKFLOW' THEN",
+      "replacement": "IF op->>'confirmation'='humanRequired' THEN",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "a workflow hold needs an attested human decision",
+          "expected": "Missing expected rejection."
+        }
+      ]
     }
   ]
 }
