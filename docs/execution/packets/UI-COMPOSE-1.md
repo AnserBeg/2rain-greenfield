@@ -25,7 +25,7 @@ The pop-up regression uses a running server and HTML form posts. Opening two ite
 The purchase-order button inherits the approval gate. Its review shows the fixed supplier reference. Editing invalidates the previous confirmation and the current confirmation invokes Place order.
 Restricting Item update removes the offer from the record and the assistant, blocks a new binding and refuses a submitted action ID. A historical binary loads the original release and refuses the declaring release. The tenant compiler reproduces the complete envelope without the declaration.
 The named addPopupActionRevision replay in customization.test.ts accepts a field label change on the new base and refuses a changed target Task contract. Admission also checks the operation binding and the advertised Surface floor.
-The compiler assigns reader 31 to declaring releases after BILLING-1 at 30. The tenant Cabinet test opens a page without a base Task, reviews a record-sourced value and checks the exact update received by the gateway.
+Declaring releases require reader 33, after Address fields at 31 and Maps at 32. The tenant Cabinet test opens a page without a base Task, reviews a record-sourced value and checks the exact update received by the gateway.
 
 **Try it yourself.** In Customize, choose **Add a record button**, select the item update, name it **Edit item note** and set Description to **Ask the person**. Draft, approve and activate it. Open an item, choose **Custom actions → Edit item note**, change the description and save. Refresh the item to see the saved text. The same steps work with JavaScript disabled.
 
@@ -33,8 +33,8 @@ The compiler assigns reader 31 to declaring releases after BILLING-1 at 30. The 
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "UI-COMPOSE-1",
-  "base": "eda6d12ffc4d38ba84146b712c3bbeed1eabb729",
-  "head": "aabce2055980ac011a043bc79ee2407e4a1ea8b8",
+  "base": "032b87c00df3ee22184685050b9cecc01c62cc59",
+  "head": "71dfd832a86bd66478c22a0515a932e2f3f59b08",
   "changedPaths": [
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/surface-composition.ts",
     "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts", "packages/canonical-model/src/popup-actions.ts",
