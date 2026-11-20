@@ -58,6 +58,7 @@ export class ReleaseActivationError extends Error {
 }
 
 export interface ReleaseActivationServiceOptions {
+  readonly transaction?: typeof withTrustedRequestTransaction;
   readonly reconciliationClock?: ReleaseActivationReconciliationClock;
   readonly reconciliationMaxAgeMilliseconds?: number;
 }
@@ -194,6 +195,7 @@ const systemMonotonicClock = createSystemMonotonicClock();
  * from canonical PostgreSQL records under the attempt/authority locks.
  */
 export class PostgresReleaseActivationService {
+  readonly #transaction: typeof withTrustedRequestTransaction;
   readonly #reconciliationClock:
     ReleaseActivationReconciliationClock | undefined;
   readonly #reconciliationMaxAgeMilliseconds: number;
@@ -202,6 +204,7 @@ export class PostgresReleaseActivationService {
     private readonly pool: Pool,
     options: ReleaseActivationServiceOptions = {},
   ) {
+    this.#transaction = options.transaction ?? withTrustedRequestTransaction;
     const maxAge =
       options.reconciliationMaxAgeMilliseconds ??
       RECONCILIATION_MAX_AGE_MILLISECONDS;
@@ -255,7 +258,7 @@ export class PostgresReleaseActivationService {
     assertAttemptIdentity(command.activationAttemptId);
     try {
       await this.#recordDurableReconciliationAge(context, command, true);
-      const inspected = await withTrustedRequestTransaction(
+      const inspected = await this.#transaction(
         this.pool,
         context,
         async (client) =>
@@ -284,7 +287,7 @@ export class PostgresReleaseActivationService {
     assertAttemptIdentity(command.activationAttemptId);
     try {
       await this.#recordDurableReconciliationAge(context, command, false);
-      const cancelled = await withTrustedRequestTransaction(
+      const cancelled = await this.#transaction(
         this.pool,
         context,
         async (client) => {
@@ -345,7 +348,7 @@ export class PostgresReleaseActivationService {
     assertAttemptIdentity(command.activationAttemptId);
     try {
       await this.#recordDurableReconciliationAge(context, command, true);
-      const verified = await withTrustedRequestTransaction(
+      const verified = await this.#transaction(
         this.pool,
         context,
         async (client) => {
@@ -512,7 +515,7 @@ export class PostgresReleaseActivationService {
   ): Promise<ReleaseActivationReconciliationInspection> {
     assertTrustedRequestContext(context);
     assertAttemptIdentity(command.activationAttemptId);
-    return withTrustedRequestTransaction(this.pool, context, async (client) => {
+    return this.#transaction(this.pool, context, async (client) => {
       const clock = await sampleReconciliationClock(
         client,
         this.#reconciliationClock,
@@ -532,7 +535,7 @@ export class PostgresReleaseActivationService {
   ): Promise<ReleaseActivationInvalidationEvent | null> {
     assertTrustedRequestContext(context);
     assertAttemptIdentity(outboxId);
-    return withTrustedRequestTransaction(this.pool, context, async (client) => {
+    return this.#transaction(this.pool, context, async (client) => {
       const result = await client.query<{
         activation_attempt_id: MintedUuid;
         deduplication_key: string;
@@ -588,7 +591,7 @@ export class PostgresReleaseActivationService {
     context: TrustedRequestContext,
     command: ActivateReleaseCommand,
   ): Promise<SwapTransactionResult> {
-    return withTrustedRequestTransaction(this.pool, context, async (client) => {
+    return this.#transaction(this.pool, context, async (client) => {
       const record = await loadAttemptRecord(
         client,
         context,
@@ -633,6 +636,7 @@ export class PostgresReleaseActivationService {
         client,
         context.tenantId,
         record.approving_human_id,
+        context.environmentId,
       );
       if (!approverEligible) {
         return {
@@ -961,7 +965,7 @@ export class PostgresReleaseActivationService {
     command: ActivateReleaseCommand,
     createIfMissing: boolean,
   ): Promise<DurableReconciliationAge> {
-    return withTrustedRequestTransaction(this.pool, context, async (client) => {
+    return this.#transaction(this.pool, context, async (client) => {
       const locked = await client.query<{
         activation_attempt_id: MintedUuid;
       }>(
@@ -1731,7 +1735,9 @@ async function loadAttemptRecord(
        ) AS ready ON true
       WHERE attempt.tenant_id = $1
         AND attempt.environment_id = $2
-        AND attempt.activation_attempt_id = $3`,
+        AND attempt.activation_attempt_id = $3
+        AND (session_user <> 'north_star_activation_verifier' OR
+          platform.staff_activation_approved(attempt.tenant_id,attempt.environment_id,attempt.approval_id))`,
     [
       context.tenantId,
       context.environmentId,
@@ -1789,14 +1795,16 @@ async function loadCurrentApproverEligibility(
   client: PoolClient,
   tenantId: string,
   principalId: string,
+  environmentId: string,
 ): Promise<boolean> {
   const result = await client.query<{ eligible: boolean }>(
-    `SELECT eligible
+    `SELECT eligible AND (session_user <> 'north_star_activation_verifier' OR
+            platform.staff_activation_member($1,$3,$2)) AS eligible
        FROM platform.release_approver_eligibility_events
       WHERE tenant_id = $1 AND principal_id = $2
       ORDER BY policy_version DESC
       LIMIT 1`,
-    [tenantId, principalId],
+    [tenantId, principalId, environmentId],
   );
   return result.rows[0]?.eligible === true;
 }

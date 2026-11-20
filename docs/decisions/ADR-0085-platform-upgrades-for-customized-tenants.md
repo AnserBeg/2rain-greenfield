@@ -50,7 +50,7 @@ This closed table is a public contract once shipped. Pin its exact codes and mea
 
 | Stable code | Outcome and identifying evidence |
 | --- | --- |
-| `RETIRED_TARGET` | Conflict. Name the referenced field, operand, anchor, operation, role or trigger ID absent on the destination. |
+| `RETIRED_TARGET` | Conflict. Name the referenced field, operand, anchor, operation, role, trigger, stage, transition, query or surface ID absent on the destination. |
 | `MOVED_MEMBER` | Conflict. Name the member, expected parent/anchor and destination placement. |
 | `INCOMPATIBLE_TYPE` | Conflict. Show expected and observed types of the bound subject. |
 | `INCOMPATIBLE_SCOPE` | Conflict. Show the subject's expected and observed scope. |
