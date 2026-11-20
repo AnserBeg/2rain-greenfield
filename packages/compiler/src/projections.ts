@@ -1,4 +1,7 @@
-import { BILLING_READER } from '../../canonical-model/src/billing.js';
+import {
+  BILLING_READER,
+  BILLING_INTERVAL_READER,
+} from '../../canonical-model/src/billing.js';
 import {
   POPUP_READER,
   compiledPopups,
@@ -447,7 +450,11 @@ export function lowerBaseProjectionPayloads(
     surface.requiredRuntimeCapability = {
       ...surface.requiredRuntimeCapability,
       minimumVersion: Math.max(
-        BILLING_READER,
+        verificationPackageRevision.billingPlans.some(
+          (p) => p.bindings?.agreedInterval,
+        )
+          ? BILLING_INTERVAL_READER
+          : BILLING_READER,
         surface.requiredRuntimeCapability.minimumVersion,
       ),
     };

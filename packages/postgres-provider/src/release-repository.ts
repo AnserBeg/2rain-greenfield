@@ -1,4 +1,7 @@
-import { BILLING_READER } from '../../canonical-model/src/billing.js';
+import {
+  BILLING_READER,
+  BILLING_INTERVAL_READER,
+} from '../../canonical-model/src/billing.js';
 import {
   popupDeclarationProblem,
   popupBindingsProblem,
@@ -605,6 +608,13 @@ function verifyCompiledRelease(
   const billingPlans = isRecord(layoutDefinition)
     ? layoutDefinition.billingPlans
     : undefined;
+  const billingFloor =
+    Array.isArray(billingPlans) &&
+    billingPlans.some(
+      (p) => isRecord(p) && isRecord(p.bindings) && p.bindings.agreedInterval,
+    )
+      ? BILLING_INTERVAL_READER
+      : BILLING_READER;
   if (billingPlans && !surfaceReference)
     throw integrity(
       'BILLING_PLAN_MISMATCH',
@@ -756,10 +766,11 @@ function verifyCompiledRelease(
         canonicalize(payload.billingPlans ?? null) !==
           canonicalize(billingPlans ?? null) ||
         (billingPlans &&
-          reference.requiredRuntimeCapability.minimumVersion <
-            BILLING_READER) ||
+          reference.requiredRuntimeCapability.minimumVersion < billingFloor) ||
         (!billingPlans &&
-          reference.requiredRuntimeCapability.minimumVersion === BILLING_READER)
+          [BILLING_READER, BILLING_INTERVAL_READER].includes(
+            reference.requiredRuntimeCapability.minimumVersion,
+          ))
       )
         throw integrity(
           'BILLING_PLAN_MISMATCH',

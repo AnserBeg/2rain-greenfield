@@ -229,7 +229,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 33 adds Board lifecycle views and form-based moves.
     // 34 reads the versioned placement rule on replayed layouts.
     // 35 adds draft line create values.
-    // 36 adds custom buttons that open a record Task.
+    // 36 binds agreed billing intervals to selected source fields.
+    // 37 adds custom buttons that open a record Task.
     maximumSupportedVersion: POPUP_READER,
   },
 });
