@@ -11,6 +11,23 @@ import {
   partyDefinitionBytes,
 } from '../fixtures/g2/party/compiler.js';
 
+import {
+  assertArchivedTenantEnvelope,
+  withArchivedCustomizationRuntime,
+} from '../helpers/archived-customization-runtime.js';
+
+test(
+  'the tenant runner preserves the full v6 envelope when the workflow declaration is absent',
+  {
+    skip: !process.env.CI,
+  },
+  () =>
+    withArchivedCustomizationRuntime(
+      '840c1b48c9694e62fdb7e284fa5a8397a1360dfd',
+      assertArchivedTenantEnvelope,
+    ),
+);
+
 const hash = (bytes: string | Uint8Array) =>
   createHash('sha256').update(bytes).digest('hex');
 

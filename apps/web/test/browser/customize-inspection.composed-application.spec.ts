@@ -21,9 +21,8 @@ import {
 import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../../../packages/runtime/src/semantic-query-gateway.js';
 import {
   archivedRuntimeRead,
-  assertArchivedTenantEnvelope,
   withArchivedCustomizationRuntime,
-} from '../../../../test/helpers/archived-customization-runtime.js';
+} from '../../../../test/helpers/archived-runtime-process.js';
 import {
   inspection,
   inspectionChange,
@@ -579,23 +578,26 @@ test('a drafted receipt workflow links an inspection and requests escalation aft
             ).toBeVisible({ timeout: 180_000 });
           };
           if (process.env.CI) {
-            await withArchivedCustomizationRuntime('840c1b48c9694e62fdb7e284fa5a8397a1360dfd', async (run) => {
-              await assertArchivedTenantEnvelope(run);
-              const read = () =>
-                archivedRuntimeRead(run, {
-                  databaseUrl,
-                  identity: app.runtime.identity,
+            await withArchivedCustomizationRuntime(
+              '840c1b48c9694e62fdb7e284fa5a8397a1360dfd',
+              async (run) => {
+                await assertArchivedTenantEnvelope(run);
+                const read = () =>
+                  archivedRuntimeRead(run, {
+                    databaseUrl,
+                    identity: app.runtime.identity,
+                  });
+                expect((await read()).outcome).toBe('loaded');
+                await activate();
+                expect(await read()).toEqual({
+                  outcome: 'refused',
+                  code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
+                  message: expect.stringContaining(
+                    `northstar.runtime:capability.surface-manifest requires version ${WORKFLOW_SURFACE_FLOOR}`,
+                  ),
                 });
-              expect((await read()).outcome).toBe('loaded');
-              await activate();
-              expect(await read()).toEqual({
-                outcome: 'refused',
-                code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
-                message: expect.stringContaining(
-                  `northstar.runtime:capability.surface-manifest requires version ${WORKFLOW_SURFACE_FLOOR}`,
-                ),
-              });
-            });
+              },
+            );
           } else {
             await activate();
           }
