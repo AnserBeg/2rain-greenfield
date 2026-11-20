@@ -35,7 +35,7 @@ Run `node --import tsx --test test/postgres/billing-terms.test.ts` for direct SQ
   "schemaVersion":"northstar.record-claim/v1",
   "packet":"BILLING-1",
   "base":"08edc207bcd5be1982c9c0bcf1723172df9cb7ad",
-  "head":"4a637345016752f899a8aab1706980c9a37e021c",
+  "head":"628d9d5ea49e23431d7672a3f87b1d3388fde75e",
   "changedPaths":["db/migrations/0052_billing_publication.sql","db/schema.snapshot.json","learnings.md","packages/canonical-model/src/billing-evidence.ts","packages/canonical-model/src/billing.ts","packages/compiler/src/billing.ts","packages/compiler/src/projections.ts","packages/domain/src/billing/quote.ts","packages/domain/src/billing/terms.ts","packages/postgres-provider/src/billing-quote.ts","packages/postgres-provider/src/billing-terms.ts","packages/postgres-provider/src/release-repository.ts","packages/postgres-provider/src/trust/postgres-trust-service.ts","packages/runtime/src/request-runtime-view.ts","packages/runtime/src/semantic-operation-gateway.ts","test/architecture/release-persistence-boundary.test.ts","test/evidence/BILLING-1.expected-red.json","test/integration/billing-quote.test.ts","test/integration/billing-release.test.ts","test/postgres/billing-terms.test.ts","test/postgres/inventory-storage.test.ts","test/postgres/migrations.test.ts","test/postgres/module-storage-transition.test.ts","test/postgres/request-runtime-view.test.ts","test/postgres/trust-substrate.test.ts"],
   "symbols":[{"path":"packages/domain/src/billing/quote.ts","name":"quoteBillingService"},{"path":"packages/postgres-provider/src/billing-quote.ts","name":"billingQuoteReadModel"},{"path":"packages/postgres-provider/src/billing-terms.ts","name":"BILLING_TERMS_FACTORY"}]
 }
