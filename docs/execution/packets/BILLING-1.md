@@ -21,7 +21,7 @@ The narrow Fable re-read accepted [ADR-0083](../../decisions/ADR-0083-period-and
 
 - A released structure and immutable, company-scoped price versions govern period, meter and fixed charges. The explanation query reads the declared source under its own grant and the pinned release.
 - Half-up rounding happens on the cumulative exact entitlement. Prior allocated and reserved cents are deducted once. Each line identifies its occurrence, rate version, coverage and derivation.
-- Price publication, overrides and assignments use registered operations with exact revision, permission, audit, outbox and idempotent replay. Migration 0049 enables RLS and grants append access. Reader 29 gates billing declarations.
+- Price publication, overrides and assignments use registered operations with exact revision, permission, audit, outbox and idempotent replay. Migration 0049 enables RLS and grants append access. Reader 30 gates billing declarations.
 - Controls `billing-immutable-price` and `billing-tenant-price` exercise a real update and a cross-tenant read through the serving role.
 - The docs amendment merged at `886f84f2`. Slice 2 (billing-origin drafts and human issue) is the next implementation boundary.
 
@@ -33,8 +33,8 @@ Run `node --import tsx --test test/integration/billing-quote.test.ts` from the r
 {
   "schemaVersion":"northstar.record-claim/v1",
   "packet":"BILLING-1",
-  "base":"238b98a6cbb88171983f395ec23179eb4d73b24e",
-  "head":"751138b89b695cbccd531fc253c988790d6a8e79",
+  "base":"2042780bcc3889022af36493a2dcaa3a62b8cb56",
+  "head":"f02b1f88862b7b386b00db9c659f179a35734bd8",
   "changedPaths":["apps/api/src/erp-capabilities.ts","db/migrations/0049_billing_rate_tables.sql","db/schema.snapshot.json","packages/canonical-model/src/billing-evidence.ts","packages/canonical-model/src/billing.ts","packages/canonical-model/src/normalize.ts","packages/canonical-model/src/schemas.ts","packages/compiler/src/billing.ts","packages/compiler/src/compiler.ts","packages/compiler/src/projections.ts","packages/domain/src/billing/calendar.ts","packages/domain/src/billing/cover.ts","packages/domain/src/billing/fraction.ts","packages/domain/src/billing/occurrences.ts","packages/domain/src/billing/quote.ts","packages/domain/src/billing/terms.ts","packages/postgres-provider/package.json","packages/postgres-provider/src/billing-quote.ts","packages/postgres-provider/src/billing-terms.ts","packages/postgres-provider/src/release-repository.ts","packages/postgres-provider/src/serving-gateways.ts","packages/runtime/src/request-runtime-view.ts","test/architecture/release-persistence-boundary.test.ts","test/evidence/BILLING-1.expected-red.json","test/fixtures/g2/language-conformance/coverage-decisions.json","test/integration/billing-quote.test.ts","test/integration/billing-release.test.ts","test/postgres/billing-terms.test.ts","test/postgres/inventory-storage.test.ts","test/postgres/migrations.test.ts","test/postgres/module-storage-transition.test.ts","test/postgres/request-runtime-view.test.ts","test/postgres/trust-substrate.test.ts"],
   "symbols":[{"path":"packages/domain/src/billing/quote.ts","name":"quoteBillingService"},{"path":"packages/postgres-provider/src/billing-quote.ts","name":"billingQuoteReadModel"},{"path":"packages/postgres-provider/src/billing-terms.ts","name":"BILLING_TERMS_FACTORY"}]
 }
