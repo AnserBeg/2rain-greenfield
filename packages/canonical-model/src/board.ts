@@ -1,3 +1,4 @@
+import { compareCodeUnits } from './diagnostics.js';
 import { z } from 'zod';
 import { canonicalizeAndHash } from './canonicalize.js';
 import { STATUS_ROLES } from './constants.js';
@@ -217,7 +218,7 @@ export function boardForList(
           label: String(op.label ?? t.label ?? t.transitionId),
         })),
     )
-    .sort((a, b) => a.operationId.localeCompare(b.operationId, 'en'));
+    .sort((a, b) => compareCodeUnits(a.operationId, b.operationId));
   const result = BoardBodySchema.safeParse({
     version: 1,
     entityId,
@@ -236,7 +237,7 @@ export function boardForList(
       stages: [...machine.states]
         .sort(
           (a, b) =>
-            a.orderKey - b.orderKey || a.stateId.localeCompare(b.stateId, 'en'),
+            a.orderKey - b.orderKey || compareCodeUnits(a.stateId, b.stateId),
         )
         .map((state) => {
           const role = status.statusRoles?.find(
