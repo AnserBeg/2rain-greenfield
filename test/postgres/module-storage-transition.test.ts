@@ -189,7 +189,8 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
           '0041_workflow_authority.sql',
           '0042_customization_patch_kind_identifier.sql',
           '0043_workflow_approval_scope.sql',
-          '0044_workflow_approval_target_scope.sql',
+          '0044_document_attachments.sql',
+          '0045_workflow_approval_target_scope.sql',
         ]);
         assert.equal(migrationResult.verified.length, allMigrations.length);
         await seedScope(admin);

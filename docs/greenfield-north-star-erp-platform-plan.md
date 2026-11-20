@@ -3705,7 +3705,7 @@ scaffolding.
 | N1-06 | N1    | Customized-tenant upgrade proof (section 12.14), repeated each stage   | N1-04        | customized revision recompiles on a new package version with no hand merge; conflicts are diagnostics; rollback; workflow body included from N2 |
 | N2-00 | N2    | Sandbox host, release-generated SDK and journal (section 12.5)         | N1           | isolation/resource-limit/grant tests; run-twice replay; release-pinned resume |
 | N2-01 | N2    | Versioned workflow definition/instance/task/timer/compensation kernel  | N2-00        | workflow recovery, upgrade, concurrency, cancellation tests             |
-| N2-02 | N2    | Documents, files, templates, signatures, and retention                 | N2-01        | security/content/version/retention/recovery evidence                    |
+| N2-02 | N2    | Documents, files, templates, signatures, and retention                 | Slice 1a (internal attachments and file fields) has no N2-01 dependency because it uses no workflow, timer, or approval. Workflow-triggered template generation depends on N2-01. Customer upload requests require the external-identity ruling. Signatures require sign-in. | security/content/version/retention/recovery evidence |
 | N2-03 | N2    | Communication thread/message/participant/consent/channel model         | N2-01,N2-02  | permission, retention, inbound/outbound correlation tests               |
 | N2-04 | N2    | Email provider binding through connector/outbox contract               | N2-03        | retry, duplicate, bounce, replay, secret and recovery tests             |
 | N2-05 | N2    | Generated approval-and-communication case proof                        | N2-01..N2-04 | no-branch proof and provider-failure journey                            |

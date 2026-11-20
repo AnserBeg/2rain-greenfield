@@ -20,6 +20,10 @@ import type { LiteralValidationTarget } from './validation-draft.js';
  * again when it is applied.
  */
 export interface CustomizationTargets {
+  readonly documentTargets?: readonly {
+    readonly entityId: string;
+    readonly label: string;
+  }[];
   readonly calculatedDisplayTargets?: readonly CalculatedDisplayTarget[];
   readonly validationTargets?: readonly LiteralValidationTarget[];
   readonly linkTargets?: readonly {
@@ -125,6 +129,36 @@ export function customizationTargets(definition: {
       entityId: String(entity.entityId),
       label: String(entity.label),
       tenantAuthored: isTenantId(String(entity.entityId)),
+    }))
+    .sort((left, right) => left.label.localeCompare(right.label));
+  const recordQueryIds = new Set(
+    definition.surfaces
+      .filter(
+        (surface) =>
+          surface.surfaceRole === 'record' && surface.lifecycle === 'active',
+      )
+      .map((surface) => (surface.dataSource as Json)?.targetId),
+  );
+  const documentEntityIds = new Set(
+    definition.queries
+      .filter(
+        (query) =>
+          query.queryType === 'get' &&
+          query.tier === 'q0' &&
+          query.lifecycle === 'active' &&
+          !query.readModel &&
+          recordQueryIds.has(query.queryId),
+      )
+      .map((query) => (query.sourceEntity as Json)?.targetId),
+  );
+  const documentTargets = definition.entities
+    .filter(
+      (entity) =>
+        entity.lifecycle === 'active' && documentEntityIds.has(entity.entityId),
+    )
+    .map((entity) => ({
+      entityId: String(entity.entityId),
+      label: String(entity.label),
     }))
     .sort((left, right) => left.label.localeCompare(right.label));
   const validationTargets =
@@ -524,6 +558,7 @@ export function customizationTargets(definition: {
     linkTargets,
     lists,
     recordTypes,
+    ...(documentTargets.length > 0 ? { documentTargets } : {}),
     ...(metricLists.length ? { metricLists } : {}),
   });
 }

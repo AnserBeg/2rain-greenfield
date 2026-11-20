@@ -1000,9 +1000,7 @@ async function requireFormulaValidation(
     ? (pinnedBusinessDate ??
       (
         await client.query<{ business_date: string }>(
-          `SELECT to_char((transaction_timestamp() AT TIME ZONE time_zone) - business_day_boundary::interval, 'YYYY-MM-DD') AS business_date
-           FROM platform.inventory_tenant_calendars
-          WHERE tenant_id = $1`,
+          `SELECT to_char(north_star_internal.inventory_business_period($1, transaction_timestamp()), 'YYYY-MM-DD') AS business_date`,
           [request.context.tenantId],
         )
       ).rows[0]?.business_date ??

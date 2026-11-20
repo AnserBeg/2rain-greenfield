@@ -65,7 +65,7 @@ test('migrations upgrade accepted G1 and converge with the checked-in snapshot',
     const migrations = await loadMigrations(checkedInMigrations);
     assert.equal(
       migrations.at(-1)?.name,
-      '0044_workflow_approval_target_scope.sql',
+      '0045_workflow_approval_target_scope.sql',
     );
     const admin = await pool.connect();
     try {
@@ -120,7 +120,8 @@ test('migrations upgrade accepted G1 and converge with the checked-in snapshot',
         '0041_workflow_authority.sql',
         '0042_customization_patch_kind_identifier.sql',
         '0043_workflow_approval_scope.sql',
-        '0044_workflow_approval_target_scope.sql',
+        '0044_document_attachments.sql',
+        '0045_workflow_approval_target_scope.sql',
       ]);
       assert.equal(upgraded.verified.length, migrations.length);
       await assertSchemaMatchesSnapshot(admin, checkedInSnapshot);

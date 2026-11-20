@@ -341,7 +341,7 @@ async function issuedView(
   return entry.run({ headers: { authorization: token } }, (view) => view);
 }
 
-function humanActorIssuer(): TrustedActorEnvelopeIssuer {
+export function humanActorIssuer(): TrustedActorEnvelopeIssuer {
   return new TrustedActorEnvelopeIssuer({
     async resolve(context) {
       return {

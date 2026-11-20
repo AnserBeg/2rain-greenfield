@@ -72,6 +72,7 @@ import {
   ReleaseVerificationIntegrityError,
   releaseVerificationBinding,
   verificationReadBackArguments,
+  verificationScenarioDeriver,
   verificationEvidenceIdForCandidate,
 } from '../../packages/postgres-provider/src/release-verification-service.js';
 import {
@@ -89,6 +90,9 @@ import {
   fixtureBytes,
   normalizedBytes,
 } from '../compiler/helpers.js';
+import { datedPartyDefinition } from '../fixtures/g2/party/validation.js';
+import { compilePartyFixture } from '../fixtures/g2/party/compiler.js';
+import type { FormulaRulePayload } from '../../packages/compiler/src/formula-validation-plan.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 
 const checkedInMigrations = resolve('db/migrations');
@@ -2756,3 +2760,71 @@ async function seedTenants(client: pg.PoolClient): Promise<void> {
 function minted(value: string): MintedUuid {
   return value as MintedUuid;
 }
+
+test('verification requires the projected operation example and a matching refusal for each rule', () => {
+  const { compiled } = compilePartyFixture(datedPartyDefinition());
+  for (const omission of ['operation', 'refusal', 'message'] as const) {
+    const damaged = rewriteProjectionPayload(
+      compiled,
+      PROJECTION_FAMILY_IDS.verificationPlan,
+      (plan) => {
+        const scenarios = plan.scenarios as Array<{
+          kind: string;
+          formulaWitnesses?: FormulaRulePayload['witnesses'][number];
+        }>;
+        const index = scenarios.findIndex(
+          (s) => s.kind === 'formulaValidation',
+        );
+        assert.ok(index >= 0);
+        if (omission === 'operation') scenarios.splice(index, 1);
+        else {
+          const proof = scenarios[index]!.formulaWitnesses!;
+          scenarios[index]!.formulaWitnesses = {
+            ...proof,
+            violating:
+              omission === 'refusal'
+                ? []
+                : proof.violating.map((w) => ({
+                    ...w,
+                    message: 'Different refusal',
+                  })),
+          };
+        }
+      },
+    );
+    assert.throws(
+      () => releaseVerificationBinding(damaged),
+      { code: 'VERIFICATION_FORMULA_RULE_MISMATCH' },
+      omission,
+    );
+  }
+});
+
+test('an unconstructible sibling create cannot derive formula evidence', async () => {
+  const { compiled } = compilePartyFixture(datedPartyDefinition());
+  const binding = releaseVerificationBinding(compiled);
+  const formula = binding.plan.scenarios.find(
+    (s) => s.kind === 'formulaValidation',
+  )!;
+  const finding = {
+    code: 'VERIFICATION_OPERATION_INPUT_UNCONSTRUCTABLE' as const,
+    entityId: formula.entityId,
+    message: 'Required column has no input',
+    operationId: 'fixture:operation.sibling',
+    requiredStorageColumn: 'required_value',
+  };
+  const derive = verificationScenarioDeriver(compiled, {
+    ...binding,
+    findings: [finding],
+  });
+  assert.ok(derive);
+  assert.equal(await derive(formula), null);
+  const plan = { ...binding.plan, scenarios: [formula] };
+  const stale = await executeVerificationPlan(
+    plan,
+    partitionVerificationCommand(),
+    () => assert.fail('fixture is derived'),
+    () => finding,
+  );
+  assert.equal(validateExecutedVerificationPlan(plan, stale).status, 'failed');
+});
