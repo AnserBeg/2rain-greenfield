@@ -110,9 +110,10 @@ export const reachabilityProducers = [
   ]),
   nodeProducer('postgres-2', 'postgres', 'test:postgres:2', [
     'test/postgres/customization.test.ts',
+    'test/postgres/declared-list.test.ts',
   ]),
   nodeProducer('postgres-3', 'postgres', 'test:postgres:3', [
-    'test/postgres/{!(agent-dev-tasks|commercial-totals|composed-application|counter-sale|customer-credit|customization|customization-display|customization-formulas|customization-governed-reads|customization-inspection|customization-live|customization-validation|customization-world|document-attachments|document-numbering|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|locations|module-storage-transition|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|period-lock-commands|price-lists|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|replenishment|stock-serializer|workflow-consumer),*/**/*}.test.ts',
+    'test/postgres/{!(agent-dev-tasks|commercial-totals|composed-application|counter-sale|customer-credit|customization|customization-display|customization-formulas|customization-governed-reads|customization-inspection|customization-live|customization-validation|customization-world|declared-list|document-attachments|document-numbering|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|locations|module-storage-transition|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|period-lock-commands|price-lists|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|replenishment|stock-serializer|workflow-consumer),*/**/*}.test.ts',
   ]),
   nodeProducer('postgres-4', 'postgres', 'test:postgres:4', [
     'test/postgres/customization-live.test.ts',
