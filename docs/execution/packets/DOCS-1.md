@@ -29,7 +29,7 @@ Hosted CI covers PostgreSQL issuance, stored brand provenance, live source restr
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "DOCS-1",
-  "base": "4ed523e803b9a0eb12c7bffe9dc4a85ce231c428", "head": "e17ec0012acb029913a013673ff1a600a501e95c",
+  "base": "4ed523e803b9a0eb12c7bffe9dc4a85ce231c428", "head": "7a16cbb916f68043b12967971ac9a6ced5bc92ca",
   "changedPaths": [
     ".github/workflows/evidence.yml", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts",
     "apps/web/src/document-http.ts", "apps/web/src/document-template-form.ts", "apps/web/src/surface-client.ts",

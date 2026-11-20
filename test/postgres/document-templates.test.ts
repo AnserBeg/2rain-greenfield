@@ -157,24 +157,17 @@ test(
           const sheet = await world.create(tenant, { name: 'WO-17' });
           await world.create(
             tenant + '_lines',
-            { line_number: 1, description: 'Replace filter' },
+            { line_number: '1', description: 'Replace filter' },
             { parent: sheet.recordId },
           );
-          const orderId = randomUUID();
-          const created = await world.invoke('purchase_order_create', {
-            recordId: orderId,
-            legalEntityId: companyId,
-            relations: {},
-            values: {
-              [id('field', 'purchase_order_supplier_party_id')]: seededId(
-                'Cascade Fastener Works',
-              ),
-              [id('field', 'purchase_order_order_date')]:
-                '2026-11-18T00:00:00.000Z',
-              [id('field', 'purchase_order_currency')]: 'CAD',
-            },
+          const purchaseOrder = await world.create('purchase_order', {
+            supplier_party_id: seededId('Cascade Fastener Works'),
+            order_date: '2026-11-18T00:00:00.000Z',
+            expected_date: null,
+            currency: 'CAD',
+            notes: null,
           });
-          assert.equal(created.outcome, 'succeeded');
+          const orderId = purchaseOrder.recordId;
           const endpoint = (
             type: string,
             recordId: string,

@@ -18,7 +18,10 @@ jobs:
           node-version-file: .node-version
       - run: corepack enable
       - run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      - name: Typecheck
+        run: corepack pnpm typecheck
       - name: Document renderer
+        if: always()
         run: node --import tsx --test test/integration/document-pdf.test.ts
       - name: Template issuance
         if: always()

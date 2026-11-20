@@ -2,7 +2,7 @@ import type { StorageTargetPayloadV1 } from '@north-star/compiler';
 import { canonicalize } from '@north-star/canonical-model';
 import {
   DOCUMENT_TEMPLATE_MAX_ROWS,
-  DOCUMENT_TEMPLATE_RENDERER,
+  type DOCUMENT_TEMPLATE_RENDERER,
 } from '../../canonical-model/src/documents.js';
 import type { DocumentTemplateRevision } from '../../canonical-model/src/document-template-schema.js';
 import {
