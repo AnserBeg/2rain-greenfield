@@ -126,8 +126,8 @@
       "name": "workflow-free-persisted-evidence",
       "claim": "The workflow-free verification row preserves the full v1 bytes, including the author.",
       "file": "packages/postgres-provider/src/release-verification-service.ts",
-      "original": "      impactAnalysisDerivation,\n      context.principalId,",
-      "replacement": "      impactAnalysisDerivation,\n      context.requestId,",
+      "original": "       impact_analysis_derivation, created_by\n     ) VALUES (\n       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,\n       $17,'[]'::jsonb,$18::jsonb,$19\n     )",
+      "replacement": "       impact_analysis_derivation, created_by, created_at\n     ) VALUES (\n       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,\n       $17,'[]'::jsonb,$18::jsonb,$19,'2026-01-01T00:00:01Z'::timestamptz\n     )",
       "test": {
         "files": ["test/postgres/releases.test.ts"],
         "namePattern": "^durable verification evidence round-trips both partitions and refuses a corrupted derivation$"
