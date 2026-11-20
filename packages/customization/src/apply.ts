@@ -230,6 +230,17 @@ function applyOne(
     case 'addDocumentTemplateRevision':
     case 'retireDocumentTemplate':
       return applyDocumentTemplate(authored, patch);
+    case 'saveWorkflow': {
+      const workflows =
+        authored.workflows === undefined ? [] : list(authored, 'workflows');
+      authored.workflows = [
+        ...workflows.filter(
+          ({ workflowId }) => workflowId !== patch.workflow.workflowId,
+        ),
+        patch.workflow,
+      ];
+      return null;
+    }
     case 'addDocumentField':
     case 'addUploadCategory':
       return addDocumentDeclaration(authored, patch);

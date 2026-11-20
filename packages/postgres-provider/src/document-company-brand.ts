@@ -26,13 +26,7 @@ export interface CompanyDocumentBrand {
   readonly ink: string;
   readonly accent: string;
   readonly companySource: DocumentQuerySource | null;
-  readonly logo: {
-    readonly surfaceId: string;
-    readonly recordId: string;
-    readonly companyId: string | null;
-    readonly linkId: string;
-    readonly versionId: string;
-  } | null;
+
 }
 
 export interface CompanyDocumentBrandResolver {
@@ -54,7 +48,6 @@ export class LedgerDocumentBrandResolver implements CompanyDocumentBrandResolver
     const defaults = {
       ...ledgerPrintPalette,
       revision: 'platform-default',
-      logo: null,
     };
     if (!companyId)
       return { ...defaults, displayName: 'Ledger', companySource: null };

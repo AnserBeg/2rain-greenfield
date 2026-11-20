@@ -58,12 +58,7 @@ export interface GeneratedDocumentSource {
   readonly renderer: typeof DOCUMENT_TEMPLATE_RENDERER;
   readonly recordId: string;
   readonly queries: readonly DocumentQuerySource[];
-  readonly logo: {
-    readonly source: DocumentQuerySource;
-    readonly linkId: string;
-    readonly versionId: string;
-    readonly digest: string;
-  } | null;
+  readonly logo: null;
 }
 
 export interface DocumentSourceContext {

@@ -12,6 +12,7 @@ import type {
   DocumentTemplatePointer,
   DocumentTemplateRevision,
 } from '../../canonical-model/src/document-template-schema.js';
+import type { WorkflowDefinition } from '../../canonical-model/src/schemas.js';
 import type { ReleaseDiffEnvelope } from '@north-star/compiler';
 
 /**
@@ -31,6 +32,7 @@ export interface DiffDefinition extends LayoutDefinition {
     readonly DocumentTemplatePointer[] | undefined;
   readonly documentTemplateRevisions?:
     readonly DocumentTemplateRevision[] | undefined;
+  readonly workflows?: readonly WorkflowDefinition[];
   readonly documentFields?: readonly {
     readonly fieldId: string;
     readonly entityId: string;
@@ -147,6 +149,43 @@ export function renderReleaseDiff(input: {
     if (!afterTemplates.has(templateId))
       lines.push(
         `Retires “${revision.label}” from PDF generation. Issued PDFs stay in retention.`,
+      );
+  }
+  for (const workflow of to.workflows ?? []) {
+    const previous = from.workflows?.find(
+      ({ workflowId }) => workflowId === workflow.workflowId,
+    );
+    if (
+      previous?.bodyDigest === workflow.bodyDigest &&
+      JSON.stringify(previous.grants) === JSON.stringify(workflow.grants)
+    )
+      continue;
+    const operations = workflow.grants.operations.map((operationId) =>
+      String(
+        to.operations?.find(
+          (operation) => operation.operationId === operationId,
+        )?.label ?? operationId,
+      ),
+    );
+    const summary = [
+      `${previous ? 'Updates' : 'Adds'} workflow “${workflow.workflowId}”. A posted goods receipt starts it.`,
+      ...(operations.length
+        ? [`Operations it may request: ${operations.join(', ')}.`]
+        : []),
+      ...(workflow.grants.queries.length
+        ? [`Reads: ${workflow.grants.queries.join(', ')}.`]
+        : []),
+    ];
+    lines.push(summary.join(' '));
+  }
+  for (const workflow of from.workflows ?? []) {
+    if (
+      !to.workflows?.some(
+        ({ workflowId }) => workflowId === workflow.workflowId,
+      )
+    )
+      lines.push(
+        `Removes workflow “${workflow.workflowId}” from future receipt events.`,
       );
   }
   for (const field of to.documentFields ?? []) {

@@ -15,8 +15,23 @@ import { parsePinnedOperationCatalog } from '../../runtime/src/semantic-operatio
 import { sha256 } from './workflow-execution.js';
 import type { WorkflowGrants } from './workflow-sdk.js';
 
+type WorkflowVerificationRelease = {
+  readonly artifacts: readonly Pick<
+    PersistedTenantRelease['artifacts'][number],
+    'artifactKind' | 'canonicalBytes' | 'contentHash' | 'domainTag'
+  >[];
+  readonly release: Pick<
+    PersistedTenantRelease['release'],
+    | 'contentHash'
+    | 'tenantId'
+    | 'environmentId'
+    | 'releaseId'
+    | 'verificationEvidenceId'
+  >;
+};
+
 function pinnedProjection(
-  release: PersistedTenantRelease,
+  release: WorkflowVerificationRelease,
   family: ProjectionFamilyId,
 ): unknown {
   function read<T>(hash: string | undefined, kind: string): T {
@@ -57,7 +72,7 @@ function pinnedProjection(
 }
 
 export function compileWorkflowUnattendedOperations(
-  release: PersistedTenantRelease,
+  release: WorkflowVerificationRelease,
   grants: WorkflowGrants,
 ) {
   if (!grants.operations.length) return {};
@@ -111,7 +126,7 @@ export function compileWorkflowUnattendedOperations(
 /** Called on the verifier connection after verification of the exact definition. */
 export async function recordVerifiedWorkflow(
   client: PoolClient,
-  release: PersistedTenantRelease,
+  release: WorkflowVerificationRelease,
   definition: {
     readonly id: string;
     readonly digest: string;

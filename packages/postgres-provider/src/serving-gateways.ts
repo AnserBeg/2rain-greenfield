@@ -74,7 +74,10 @@ export function composeServingGateways(
     readonly capabilityOperationExecutorFactories?: readonly PostgresCapabilityOperationExecutorFactory[];
     readonly monotonicMilliseconds?: () => number;
   },
-  documentOptions?: { scanner?: DocumentScanner | undefined },
+  documentOptions?: {
+    scanner?: DocumentScanner | undefined;
+    scannerPool?: pg.Pool | undefined;
+  },
 ) {
   const actorIssuer = humanActorIssuer();
   const interpreter: PostgresModuleRuntimeInterpreter =
@@ -227,6 +230,7 @@ export function composeServingGateways(
         queryGateway,
         servingFor,
         documentOptions.scanner,
+        documentOptions.scannerPool,
         documentPublication,
         operationGateway,
         operationMediation,

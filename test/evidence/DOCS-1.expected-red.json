@@ -5,47 +5,33 @@
     {
       "name": "documents-download-revocation",
       "claim": "A revoked byte-read grant withholds a previously issued attachment URL.",
-      "file": "packages/postgres-provider/src/document-attachments.ts",
-      "original": "      [DOCUMENT_PERMISSIONS.view, DOCUMENT_PERMISSIONS.download],\n      async (client, record) => {\n        const result = await client.query<StoredMetadata & { digest: string }>(\n          `SELECT ${metadataColumns}, v.digest, v.generated_source AS \"generatedSource\"\n",
-      "replacement": "      [DOCUMENT_PERMISSIONS.view],\n      async (client, record) => {\n        const result = await client.query<StoredMetadata & { digest: string }>(\n          `SELECT ${metadataColumns}, v.digest, v.generated_source AS \"generatedSource\"\n",
+      "file": "db/migrations/0049_generated_document_sources.sql",
+      "original": "    AND platform.document_granted(scope, 'northstar.documents:permission.' || action, 'northstar.documents:resource.attachments')",
+      "replacement": "    AND (action = 'download' OR platform.document_granted(scope, 'northstar.documents:permission.' || action, 'northstar.documents:resource.attachments'))",
       "test": {
-        "files": ["test/postgres/document-attachments.test.ts"],
+        "files": [
+          "test/postgres/document-attachments.test.ts"
+        ],
         "namePattern": "^internal files use live record authority, scoped dedupe, bounded ingress and immutable audit$"
       },
       "kills": [
         {
           "file": "test/postgres/document-attachments.test.ts",
           "name": "internal files use live record authority, scoped dedupe, bounded ingress and immutable audit",
-          "expected": "a revoked download grant still returned bytes"
-        }
-      ]
-    },
-    {
-      "name": "documents-ownership-dedupe",
-      "claim": "Identical bytes in shared and company ownership consume distinct blobs.",
-      "file": "packages/postgres-provider/src/document-attachments.ts",
-      "original": "      const scope = row.company_id ?? 'shared';\n",
-      "replacement": "      const scope = 'shared';\n",
-      "test": {
-        "files": ["test/postgres/document-attachments.test.ts"],
-        "namePattern": "^internal files use live record authority, scoped dedupe, bounded ingress and immutable audit$"
-      },
-      "kills": [
-        {
-          "file": "test/postgres/document-attachments.test.ts",
-          "name": "internal files use live record authority, scoped dedupe, bounded ingress and immutable audit",
-          "expected": "identical bytes were pooled across ownership scopes"
+          "expected": "the database returned bytes after download revocation"
         }
       ]
     },
     {
       "name": "documents-publication-audit",
       "claim": "Every published version is accounted for by a committed attachment audit row.",
-      "file": "packages/postgres-provider/src/document-attachments.ts",
-      "original": "            await client.query(\n              `INSERT INTO platform.document_attachment_audit (tenant_id, environment_id, link_id, operation_id)\n         VALUES ($1,$2,$3,$4)`,\n              [\n                view.tenantId,\n                view.environmentId,\n                linkId,\n                generated\n                  ? documentGenerateOperation(record.entity.entityId)\n                  : documentAttachOperation(record.entity.entityId),\n              ],\n            );\n",
+      "file": "db/migrations/0049_generated_document_sources.sql",
+      "original": "  INSERT INTO platform.document_attachment_audit (tenant_id,environment_id,link_id,operation_id)\n    VALUES (i.tenant_id,i.environment_id,published.link_id,replace(s.entity_id, ':entity.',\n      CASE WHEN s.generated_source IS NULL THEN ':operation.document_attach_' ELSE ':operation.document_generate_' END));\n",
       "replacement": "",
       "test": {
-        "files": ["test/postgres/document-attachments.test.ts"],
+        "files": [
+          "test/postgres/document-attachments.test.ts"
+        ],
         "namePattern": "^internal files use live record authority, scoped dedupe, bounded ingress and immutable audit$"
       },
       "kills": [
@@ -59,11 +45,13 @@
     {
       "name": "documents-stored-quota",
       "claim": "Publication refuses even a duplicate when the stored-byte quota is full.",
-      "file": "packages/postgres-provider/src/document-attachments.ts",
-      "original": "              DOCUMENT_TENANT_MAX_BYTES\n",
-      "replacement": "              Number.MAX_SAFE_INTEGER\n",
+      "file": "db/migrations/0049_generated_document_sources.sql",
+      "original": "    + s.byte_length > 104857600 THEN",
+      "replacement": "    + s.byte_length > 2147483647 THEN",
       "test": {
-        "files": ["test/postgres/document-attachments.test.ts"],
+        "files": [
+          "test/postgres/document-attachments.test.ts"
+        ],
         "namePattern": "^internal files use live record authority, scoped dedupe, bounded ingress and immutable audit$"
       },
       "kills": [
@@ -77,11 +65,13 @@
     {
       "name": "generated-pdf-source-revocation",
       "claim": "When a reader loses a bound source, its issued PDF cannot be downloaded.",
-      "file": "packages/postgres-provider/src/document-attachments.ts",
-      "original": "        if (generatedSource)\n          await this.authorizeGenerated(\n            client,\n            view,\n            record,\n            generatedSource,\n            false,\n          );\n",
-      "replacement": "",
+      "file": "db/migrations/0049_generated_document_sources.sql",
+      "original": "    AND platform.document_generated_allowed(v.generated_source,v.release_id,scope,entity,record_key,false)\n    AND (v.owner_scope,v.entity_id,v.record_id,v.link_id,v.version_id) = (scope,entity,record_key,link,version)",
+      "replacement": "    AND (v.owner_scope,v.entity_id,v.record_id,v.link_id,v.version_id) = (scope,entity,record_key,link,version)",
       "test": {
-        "files": ["test/postgres/document-templates.test.ts"],
+        "files": [
+          "test/postgres/document-templates.test.ts"
+        ],
         "namePattern": "^approved template revisions publish governed PDFs, refuse hidden sources, and retire$"
       },
       "kills": [
@@ -95,11 +85,13 @@
     {
       "name": "generated-pdf-company-brand-source-revocation",
       "claim": "Company-brand source revocation withholds the previously issued PDF.",
-      "file": "packages/postgres-provider/src/document-attachments.ts",
-      "original": "      await check(company, DOCUMENT_BRAND_COMPANY_ENTITY);\n",
+      "file": "db/migrations/0049_generated_document_sources.sql",
+      "original": "    AND platform.document_source_allowed(app, issued_app, storage, brand, 'shared',\n      'northstar.app:entity.legal_entity', scope::uuid, verify_revision)",
       "replacement": "",
       "test": {
-        "files": ["test/postgres/document-templates.test.ts"],
+        "files": [
+          "test/postgres/document-templates.test.ts"
+        ],
         "namePattern": "^approved template revisions publish governed PDFs, refuse hidden sources, and retire$"
       },
       "kills": [
@@ -107,6 +99,106 @@
           "file": "test/postgres/document-templates.test.ts",
           "name": "approved template revisions publish governed PDFs, refuse hidden sources, and retire",
           "expected": "a revoked company source still returned a generated PDF"
+        }
+      ]
+    },
+    {
+      "name": "documents-parse-time-pdf-bound",
+      "claim": "A shallow PDF page tree cannot bypass the parser nesting bound.",
+      "file": "packages/postgres-provider/src/document-pdf-worker.mjs",
+      "original": "    if (++this.depth > 64 || ++this.nodes > 200000)\n      throw new Error('PDF structural limit');",
+      "replacement": "    this.depth++;\n    this.nodes++;",
+      "test": {
+        "files": [
+          "test/integration/document-http.test.ts"
+        ],
+        "namePattern": "^classic PDFs are accepted up to the parser page-tree depth limit$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/document-http.test.ts",
+          "name": "classic PDFs are accepted up to the parser page-tree depth limit",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    },
+    {
+      "name": "documents-pdf-process-limits",
+      "claim": "The PDF validator process inherits operating-system resource limits.",
+      "file": "packages/postgres-provider/src/document-content.ts",
+      "original": "      '--as=1073741824',\n      '--cpu=4',\n      '--core=0',\n",
+      "replacement": "",
+      "test": {
+        "files": [
+          "test/integration/document-http.test.ts"
+        ],
+        "namePattern": "^classic PDFs are accepted up to the parser page-tree depth limit$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/document-http.test.ts",
+          "name": "classic PDFs are accepted up to the parser page-tree depth limit",
+          "expected": "the PDF subprocess inherits the OS resource limits"
+        }
+      ]
+    },
+    {
+      "name": "documents-sql-page-size",
+      "claim": "Node buffers at most the requested attachment page and one lookahead row.",
+      "file": "db/migrations/0049_generated_document_sources.sql",
+      "original": " LIMIT greatest(1, least(page_size, 100))",
+      "replacement": "",
+      "test": {
+        "files": [
+          "test/postgres/document-attachments.test.ts"
+        ],
+        "namePattern": "^internal files use live record authority, scoped dedupe, bounded ingress and immutable audit$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-attachments.test.ts",
+          "name": "internal files use live record authority, scoped dedupe, bounded ingress and immutable audit",
+          "expected": "pg buffered more rows than the SQL page"
+        }
+      ]
+    },
+    {
+      "name": "documents-api-demo-scanner-guard",
+      "claim": "The API refuses demo scanning when an external database URL is supplied.",
+      "file": "apps/api/src/main.ts",
+      "original": "  if (demoScanner && !managesContainer)\n    throw new Error('The demo scanner requires a managed local demo database.');\n",
+      "replacement": "",
+      "test": {
+        "files": [
+          "test/integration/document-http.test.ts"
+        ],
+        "namePattern": "^the API entry point refuses the demo scanner with an external database URL$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/document-http.test.ts",
+          "name": "the API entry point refuses the demo scanner with an external database URL",
+          "expected": "The demo scanner requires a managed local demo database"
+        }
+      ]
+    },
+    {
+      "name": "documents-http-commit-outcome",
+      "claim": "An HTTP timer waits for publication when COMMIT is in flight.",
+      "file": "apps/web/src/document-http.ts",
+      "original": "      if (publicationCommitting) return;\n",
+      "replacement": "",
+      "test": {
+        "files": [
+          "test/postgres/document-attachments.test.ts"
+        ],
+        "namePattern": "^staged attachment verdicts and deadlines govern publication$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-attachments.test.ts",
+          "name": "staged attachment verdicts and deadlines govern publication",
+          "expected": "the HTTP deadline awaits a publication COMMIT already in flight"
         }
       ]
     }
