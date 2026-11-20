@@ -66,7 +66,8 @@ export type SavedFilterDiagnosticCode =
   | 'SAVED_FILTER_NOT_VISIBLE'
   | 'SAVED_FILTER_QUERY_INADMISSIBLE'
   | 'SAVED_FILTER_QUERY_STALE'
-  | 'SAVED_FILTER_RELEASE_MISMATCH';
+  | 'SAVED_FILTER_RELEASE_MISMATCH'
+  | 'SAVED_FILTER_VALIDATION_UNSUPPORTED';
 
 export class SavedFilterContractError extends Error {
   override readonly name = 'SavedFilterContractError';
