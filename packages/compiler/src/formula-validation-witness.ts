@@ -29,6 +29,26 @@ export interface ValidationWitness extends SynthesizedInput {
   readonly invocation: ValidationInvocation;
 }
 
+// The projection stores typed values. Lower each fixture separately to operation
+// inputs, preserving explicit nulls and exact decimal and integer strings.
+function formulaFixtureOverrides(witness: ValidationWitness) {
+  const inputValues = (values: Values) =>
+    Object.fromEntries(
+      Object.entries(values).map(([id, scalar]) => [id, scalar?.value ?? null]),
+    );
+  return {
+    invocation: witness.invocation,
+    values: inputValues(witness.values),
+    previousValues: inputValues(witness.previousValues ?? {}),
+    relatedValues: Object.fromEntries(
+      Object.entries(witness.relatedValues ?? {}).map(([id, row]) => [
+        id,
+        row && inputValues(row),
+      ]),
+    ),
+  };
+}
+
 interface ViolatingWitness extends ValidationWitness {
   readonly ruleId: string;
   readonly refusalCode: 'MODULE_VALIDATION_REFUSED';
@@ -42,6 +62,20 @@ export type JointValidationWitnesses =
       readonly violating: readonly ViolatingWitness[];
     }
   | { readonly status: 'unproved'; readonly ruleIds: readonly string[] };
+
+export function lowerFormulaVerificationFixtures(
+  proof: Extract<JointValidationWitnesses, { status: 'proved' }>,
+) {
+  return {
+    satisfying: formulaFixtureOverrides(proof.satisfying),
+    violating: proof.violating.map((example) => ({
+      ...formulaFixtureOverrides(example),
+      ruleId: example.ruleId,
+      message: example.message,
+      refusalCode: example.refusalCode,
+    })),
+  };
+}
 
 function readWitnessOperand(
   witness: ValidationWitness,

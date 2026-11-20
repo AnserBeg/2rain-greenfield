@@ -37,9 +37,8 @@ import {
 } from '@north-star/runtime';
 import type { RequestRuntimeView as IssuedRequestRuntimeView } from '@north-star/runtime/request-runtime-view';
 import type { FormulaRulePayload } from '../../compiler/src/formula-validation-plan.js';
-import type { ValidationWitness } from '../../compiler/src/formula-validation-witness.js';
+import { lowerFormulaVerificationFixtures } from '../../compiler/src/formula-validation-witness.js';
 import { parseFormulaValidationBindings } from '../../canonical-model/src/formula-validation-projection.js';
-import { observeValidationRefusals } from '../../runtime/src/formula-validation.js';
 import {
   AuthenticatedRequestRuntimeEntryAdapter,
   CURRENT_POLICY_DECISION_VERSION,
@@ -55,7 +54,7 @@ import {
   type RequestRuntimeProjectionFamily,
   type RuntimeProjection,
 } from '@north-star/runtime/request-runtime-view';
-import type { Pool, PoolClient } from 'pg';
+import { escapeIdentifier, type Pool, type PoolClient } from 'pg';
 
 import {
   SEMANTIC_OPERATION_REQUEST_VERSION,
@@ -86,6 +85,7 @@ import {
   ModuleRuntimeInterpreterError,
   PostgresModuleRuntimeInterpreter,
   verificationSentinelNumber,
+  withModuleRuntimeRole,
 } from './module-runtime-interpreter.js';
 import { withTrustedRequestTransaction } from './request-context.js';
 import { TrustedActorEnvelopeIssuer } from './trust/trusted-actor-envelope.js';
@@ -494,6 +494,8 @@ export class PostgresReleaseVerificationService {
         command.compiledRelease,
         binding.plan,
         binding.findings,
+        this.pool,
+        context,
         operationGateway,
         mediation,
         queryGateway,
@@ -733,6 +735,7 @@ export function releaseVerificationBinding(
       'verification-plan payload is malformed',
     );
   }
+  assertFormulaScenarioCoverage(compiledRelease, plan);
   return Object.freeze({
     artifactClosureDigest: digestCanonical(
       'northstar.release-artifact-closure/v1',
@@ -902,6 +905,7 @@ export function verificationScenarioDeriver(
   const derive = (
     scenario: VerificationScenario,
   ): VerificationDerivationReason | null => {
+    if (scenario.kind === 'formulaValidation') return null;
     const finding = unconstructableByEntity.get(scenario.entityId);
     if (finding) {
       return Object.freeze({
@@ -1255,19 +1259,90 @@ class VerificationAllowPolicy implements CurrentPolicyGateway {
 }
 
 type FormulaWitnesses = FormulaRulePayload['witnesses'][number];
+type FormulaFixtures = ReturnType<typeof lowerFormulaVerificationFixtures>;
 
-function formulaValues(values: ValidationWitness['values']) {
-  return Object.fromEntries(
-    Object.entries(values).map(([fieldId, scalar]) => [
-      fieldId,
-      scalar?.value ?? null,
-    ]),
+function assertFormulaScenarioCoverage(
+  compiled: CompileSuccess,
+  plan: VerificationPlanPayloadV1,
+) {
+  const payload = compiled.bundle.releaseManifest.projections.some(
+    (ref) => ref.familyId === PROJECTION_FAMILY_IDS.formulaRule,
+  )
+    ? compiledProjectionPayload<FormulaRulePayload>(
+        compiled,
+        PROJECTION_FAMILY_IDS.formulaRule,
+      )
+    : undefined;
+  const scenarios = plan.scenarios.filter(
+    (scenario) => scenario.kind === 'formulaValidation',
   );
+  const bindings = payload ? parseFormulaValidationBindings(payload) : [];
+  const proofs = payload?.witnesses ?? [];
+  if (!scenarios.length && !bindings.length && !proofs.length) return;
+  const operations = compiledProjectionPayload<{
+    operations: VerificationOperationContract[];
+  }>(compiled, PROJECTION_FAMILY_IDS.operationCatalog).operations;
+  const invalid = (subject: string) =>
+    failure(
+      'VERIFICATION_FORMULA_RULE_MISMATCH',
+      `Verification requires the compiled satisfying example and every bound rule's refusal for ${subject}.`,
+    );
+  const expected = new Set(
+    bindings.flatMap(({ rule }) => rule.boundOperationIds),
+  );
+  if (expected.size !== scenarios.length || expected.size !== proofs.length)
+    throw invalid('the bound operations');
+  for (const scenario of scenarios) {
+    const operationId = scenario.subjectId;
+    const proof = proofs.find(
+      ({ satisfying }) => satisfying.invocation.operationId === operationId,
+    );
+    const operation = operations.find(
+      (entry) => entry.operationId === operationId,
+    );
+    if (
+      !expected.delete(operationId) ||
+      !proof ||
+      proof.status !== 'proved' ||
+      !operation ||
+      (operation.effect.kind !== 'createRecordEffect' &&
+        operation.effect.kind !== 'updateRecordEffect') ||
+      operation.effect.entity.targetId !== scenario.entityId ||
+      scenario.probePolarity !== 'positiveAndNegative' ||
+      scenario.provider !== 'realPostgresql' ||
+      !scenario.formulaWitnesses ||
+      canonicalize(proof) !== canonicalize(scenario.formulaWitnesses)
+    )
+      throw invalid(operationId);
+    const invocation = proof.satisfying.invocation;
+    const rules = bindings.filter(({ rule }) =>
+      rule.boundOperationIds.includes(operationId),
+    );
+    if (
+      invocation.kind !==
+        (operation.effect.kind === 'createRecordEffect'
+          ? 'create'
+          : 'update') ||
+      invocation.businessDate !== payload?.verificationBusinessDate ||
+      proof.violating.length !== rules.length ||
+      !rules.every(
+        ({ rule }) =>
+          rule.targetId === scenario.entityId &&
+          proof.violating.some(
+            (example) =>
+              example.ruleId === rule.ruleId &&
+              example.message === rule.message &&
+              example.refusalCode === 'MODULE_VALIDATION_REFUSED' &&
+              canonicalize(example.invocation) === canonicalize(invocation),
+          ),
+      )
+    )
+      throw invalid(operationId);
+  }
 }
 
 class SemanticVerificationExecutor {
-  readonly #formulaCreateDefaults = new Map<string, ValidationWitness>();
-  readonly #formulaBindings: ReturnType<typeof parseFormulaValidationBindings>;
+  readonly #formulaFixtures = new Map<string, FormulaFixtures>();
   readonly #arrangedLegalEntityIds = new Set<string>();
   readonly #createdRecords: VerificationRecord[] = [];
   readonly #excludedFieldsByEntity = new Map<string, Set<string>>();
@@ -1284,6 +1359,8 @@ class SemanticVerificationExecutor {
     compiled: CompileSuccess,
     plan: VerificationPlanPayloadV1,
     private readonly constructibilityFindings: readonly VerificationConstructibilityFinding[],
+    private readonly pool: Pool,
+    private readonly context: TrustedRequestContext,
     private readonly operationGateway: SemanticOperationGateway,
     private readonly mediation: SemanticOperationMediationAuthority,
     private readonly queryGateway: SemanticQueryGateway,
@@ -1309,9 +1386,6 @@ class SemanticVerificationExecutor {
     );
     this.#relations = storage.relations;
     this.#storageEntities = storage.entities;
-    this.#formulaBindings = view.projections.formulaRule
-      ? parseFormulaValidationBindings(view.projections.formulaRule.payload)
-      : [];
     // The immutable application lineage includes releases compiled before any
     // query elected ADR-0031's v4 operand. Once a release elects the contract,
     // storage becomes the independent authority for the complete required set:
@@ -1334,12 +1408,12 @@ class SemanticVerificationExecutor {
     );
     for (const scenario of plan.scenarios) {
       if (scenario.kind === 'formulaValidation') {
-        const { satisfying } = scenario.formulaWitnesses as FormulaWitnesses;
-        if (satisfying.invocation.kind === 'create')
-          this.#formulaCreateDefaults.set(
-            satisfying.invocation.operationId,
-            satisfying,
-          );
+        this.#formulaFixtures.set(
+          scenario.subjectId,
+          lowerFormulaVerificationFixtures(
+            scenario.formulaWitnesses as FormulaWitnesses,
+          ),
+        );
         continue;
       }
       if (scenario.kind !== 'searchableExclusion') continue;
@@ -1595,19 +1669,20 @@ class SemanticVerificationExecutor {
   }
 
   async #formulaValidation(scenario: VerificationScenario, token: string) {
-    const { satisfying, violating } =
-      scenario.formulaWitnesses as FormulaWitnesses;
+    const { satisfying, violating } = this.#formulaFixtures.get(
+      scenario.subjectId,
+    )!;
     const operation = this.#requiredOperation(
       satisfying.invocation.operationId,
     );
     const entityId = scenario.entityId;
     const arrangeRelations = async (
-      witness: ValidationWitness,
+      fixture: FormulaFixtures['satisfying'],
       fixtureToken: string,
     ) => {
       const references: Record<string, string> = {};
       for (const [relationId, values] of Object.entries(
-        witness.relatedValues ?? {},
+        fixture.relatedValues,
       )) {
         if (!values) continue;
         const relation = this.#relations.find(
@@ -1623,22 +1698,22 @@ class SemanticVerificationExecutor {
         const record = await this.#create(
           relation.targetEntityId,
           arrangementPathToken(fixtureToken, relationId),
-          formulaValues(values),
+          values,
         );
         references[relationId] = record.recordId;
       }
       return references;
     };
     const prepare = async (
-      witness: ValidationWitness,
+      fixture: FormulaFixtures['satisfying'],
       fixtureToken: string,
     ) => {
-      const relations = await arrangeRelations(witness, fixtureToken);
-      if (witness.invocation.kind === 'create')
+      const relations = await arrangeRelations(fixture, fixtureToken);
+      if (fixture.invocation.kind === 'create')
         return this.#createInput(
           entityId,
           fixtureToken,
-          formulaValues(witness.values),
+          fixture.values,
           relations,
           [],
           operation,
@@ -1646,13 +1721,13 @@ class SemanticVerificationExecutor {
       const prior = await this.#create(
         entityId,
         fixtureToken,
-        formulaValues(witness.previousValues ?? {}),
+        fixture.previousValues,
         relations,
       );
       return {
         recordId: prior.recordId,
         expectedRevision: 1,
-        patch: formulaValues(witness.values),
+        patch: fixture.values,
       };
     };
     const positiveProbe =
@@ -1660,7 +1735,7 @@ class SemanticVerificationExecutor {
         ? await this.#create(
             entityId,
             `${token}-accept`,
-            formulaValues(satisfying.values),
+            satisfying.values,
             await arrangeRelations(satisfying, `${token}-accept`),
             [],
             operation,
@@ -1672,6 +1747,12 @@ class SemanticVerificationExecutor {
     const negativeProbe = [];
     for (const [index, example] of violating.entries()) {
       const input = await prepare(example, `${token}-refuse-${index}`);
+      const before = await this.#formulaRow(entityId, input.recordId);
+      if ((before === null) !== (example.invocation.kind === 'create'))
+        throw failure(
+          'VERIFICATION_FORMULA_FIXTURE_MISSING',
+          'The formula probe target does not have its required initial state.',
+        );
       const refused = await this.#captureRejection(
         this.#invokeOperation(operation, input),
         [example.refusalCode],
@@ -1682,9 +1763,37 @@ class SemanticVerificationExecutor {
           'VERIFICATION_FORMULA_RULE_MISMATCH',
           `Verification refused a different rule for ${operation.operationId}.`,
         );
+      const after = await this.#formulaRow(entityId, input.recordId);
+      if (after !== before) {
+        if (before === null)
+          this.#createdRecords.push(
+            this.#arrangedRecord(entityId, operation, input),
+          );
+        throw failure(
+          'VERIFICATION_FORMULA_TARGET_CHANGED',
+          `The refused ${operation.operationId} changed its target.`,
+        );
+      }
       negativeProbe.push(refused);
     }
     return { positiveProbe, negativeProbe };
+  }
+
+  // A projected get may omit fields or hide archived rows. Compare the complete
+  // stored image, including revision, in PostgreSQL's lossless text form.
+  #formulaRow(entityId: string, recordId: unknown): Promise<string | null> {
+    const entity = this.#requiredStorageEntity(entityId);
+    return withTrustedRequestTransaction(this.pool, this.context, (client) =>
+      withModuleRuntimeRole(client, async () => {
+        const result = await client.query<{ image: string }>(
+          `SELECT to_jsonb(target)::text AS image
+             FROM north_star_module.${escapeIdentifier(entity.physicalTableName)} AS target
+            WHERE tenant_id = $1 AND environment_id = $2 AND ${escapeIdentifier(entity.recordIdentity.column)} = $3`,
+          [this.context.tenantId, this.context.environmentId, recordId],
+        );
+        return result.rows[0]?.image ?? null;
+      }),
+    );
   }
 
   async #resolverAuthority(scenario: VerificationScenario, token: string) {
@@ -1744,7 +1853,9 @@ class SemanticVerificationExecutor {
       const target = await this.#create(
         optionalFieldRelation.targetEntityId,
         arrangementPathToken(token, optionalFieldRelation.relationId),
-        {},
+        this.#formulaFixtures.get(
+          this.#createOperation(scenario.entityId).operationId,
+        )?.satisfying.relatedValues[optionalFieldRelation.relationId] ?? {},
         {},
         [scenario.entityId],
       );
@@ -2027,7 +2138,14 @@ class SemanticVerificationExecutor {
         'archive restriction scenario does not name a compiled restrict relation',
       );
     }
-    const parent = await this.#create(relation.targetEntityId, `${token}-p`);
+    const childCreate = this.#createOperation(relation.sourceEntityId);
+    const parentFields = this.#formulaFixtures.get(childCreate.operationId)
+      ?.satisfying.relatedValues[relation.relationId];
+    const parent = await this.#create(
+      relation.targetEntityId,
+      `${token}-p`,
+      parentFields ?? {},
+    );
     const child = await this.#create(
       relation.sourceEntityId,
       `${token}-c`,
@@ -2067,26 +2185,8 @@ class SemanticVerificationExecutor {
       arrangementPath,
       operation,
     );
-    const systemInput = operation.inputContract.systemInput;
-    const legalEntityId = systemInput ? input[systemInput.argumentKey] : null;
-    if (legalEntityId !== null && typeof legalEntityId !== 'string') {
-      throw failure(
-        'VERIFICATION_SYSTEM_INPUT_VALUE_INVALID',
-        'verification arranged a record with an invalid system input value',
-      );
-    }
+    const arranged = this.#arrangedRecord(entityId, operation, input);
     const created = await this.#invokeOperation(operation, input);
-    // Registered for archiving the moment it exists: whatever fails below,
-    // `archiveProbeRecords` still archives it.
-    const arranged: VerificationRecord = Object.freeze({
-      entityId,
-      legalEntityId,
-      recordId: String(input.recordId),
-      relations: input.relations as Readonly<Record<string, string>>,
-      values: Object.freeze({
-        ...(input.values as Readonly<Record<string, unknown>>),
-      }),
-    });
     const registered = this.#createdRecords.push(arranged) - 1;
     const assignedFields = operation.inputContract.assignedFields ?? [];
     if (assignedFields.length === 0) return arranged;
@@ -2108,6 +2208,30 @@ class SemanticVerificationExecutor {
     });
     this.#createdRecords[registered] = record;
     return record;
+  }
+
+  #arrangedRecord(
+    entityId: string,
+    operation: VerificationOperationContract,
+    input: Record<string, unknown>,
+  ): VerificationRecord {
+    const systemInput = operation.inputContract.systemInput;
+    const legalEntityId = systemInput ? input[systemInput.argumentKey] : null;
+    if (legalEntityId !== null && typeof legalEntityId !== 'string') {
+      throw failure(
+        'VERIFICATION_SYSTEM_INPUT_VALUE_INVALID',
+        'verification arranged a record with an invalid system input value',
+      );
+    }
+    return Object.freeze({
+      entityId,
+      legalEntityId,
+      recordId: String(input.recordId),
+      relations: input.relations as Readonly<Record<string, string>>,
+      values: Object.freeze({
+        ...(input.values as Readonly<Record<string, unknown>>),
+      }),
+    });
   }
 
   /**
@@ -2215,17 +2339,33 @@ class SemanticVerificationExecutor {
       );
     }
     const nextArrangementPath = [...arrangementPath, entityId];
-    const witness = this.#formulaCreateDefaults.get(operation.operationId);
+    const defaultFixture = this.#formulaFixtures.get(
+      operation.operationId,
+    )?.satisfying;
+    const inputOverrides = {
+      ...defaultFixture?.values,
+      ...overrides,
+    };
+    const writable = operation.inputContract.fields.filter(
+      (field) => field.writable,
+    );
+    if (
+      Object.keys(inputOverrides).some(
+        (id) => !writable.some((field) => field.fieldId === id),
+      )
+    )
+      throw failure(
+        'VERIFICATION_FORMULA_FIXTURE_UNWRITABLE',
+        `A fixture override cannot be supplied to ${operation.operationId}.`,
+      );
     const storageEntity = this.#requiredStorageEntity(entityId);
     const values = Object.fromEntries(
-      operation.inputContract.fields
-        .filter((field) => field.writable)
-        .map((field) => [
-          field.fieldId,
-          Object.hasOwn(overrides, field.fieldId)
-            ? overrides[field.fieldId]
-            : verificationFieldValue(field, token, storageEntity),
-        ]),
+      writable.map((field) => [
+        field.fieldId,
+        Object.hasOwn(inputOverrides, field.fieldId)
+          ? inputOverrides[field.fieldId]
+          : verificationFieldValue(field, token, storageEntity),
+      ]),
     );
     const fieldOriginRelations = this.#relations.filter(
       (relation) =>
@@ -2262,7 +2402,7 @@ class SemanticVerificationExecutor {
       const target = await this.#create(
         relation.targetEntityId,
         arrangementPathToken(token, relation.relationId),
-        {},
+        defaultFixture?.relatedValues[relation.relationId] ?? {},
         {},
         nextArrangementPath,
       );
@@ -2283,51 +2423,11 @@ class SemanticVerificationExecutor {
       const target = await this.#create(
         relation.targetEntityId,
         arrangementPathToken(token, relationInput.relationId),
-        {},
+        defaultFixture?.relatedValues[relationInput.relationId] ?? {},
         {},
         nextArrangementPath,
       );
       relations[relationInput.relationId] = target.recordId;
-    }
-    if (witness) {
-      const pathValues = Object.fromEntries(
-        this.#formulaBindings
-          .filter(({ rule }) =>
-            rule.boundOperationIds.includes(operation.operationId),
-          )
-          .flatMap(({ paths }) => paths ?? [])
-          .flatMap<readonly [string, VerificationRecord['values'] | null]>(
-            ({ relationId, targetEntityId }) => {
-              const target = relations[relationId];
-              if (!target) return [[relationId, null]];
-              const record = this.#createdRecords.find(
-                ({ entityId, recordId }) =>
-                  entityId === targetEntityId && recordId === target,
-              );
-              return record ? [[relationId, record.values]] : [];
-            },
-          ),
-      );
-      if (
-        observeValidationRefusals(this.#formulaBindings, {
-          operationId: operation.operationId,
-          businessDate: witness.invocation.businessDate,
-          values,
-          pathValues,
-        }).length
-      ) {
-        // Preserve a probe's own values when they satisfy the guards with its
-        // arranged relations. Explicit formula example values take precedence.
-        for (const [fieldId, value] of Object.entries(
-          formulaValues(witness.values),
-        )) {
-          if (
-            Object.hasOwn(values, fieldId) &&
-            !Object.hasOwn(overrides, fieldId)
-          )
-            values[fieldId] = value;
-        }
-      }
     }
     const systemInput = operation.inputContract.systemInput;
     const systemArguments = systemInput

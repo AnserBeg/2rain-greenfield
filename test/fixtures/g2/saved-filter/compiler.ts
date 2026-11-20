@@ -24,8 +24,9 @@ export interface CompiledPlatformFixture {
   readonly definition: Record<string, unknown>;
 }
 
-export function compilePlatformFixture(): CompiledPlatformFixture {
-  const definition = platformModuleDefinition();
+export function compilePlatformFixture(
+  definition = platformModuleDefinition(),
+): CompiledPlatformFixture {
   const compiled = mustCompile(platformCompilerInput(definition));
   return { compiled, definition };
 }
