@@ -337,7 +337,11 @@ test('booking commitment writer', async (t) => {
                 interval: window('09:00', '11:00'),
               }),
           );
-          assert.equal(conflict.refused, 'booking.noLongerAvailable');
+          assert.equal(
+            conflict.refused,
+            'booking.noLongerAvailable',
+            'the reschedule displaced a competing unit hold',
+          );
           const kept = (
             await admin.query(
               'SELECT revision,upper(occupied_interval) AS ending FROM platform.booking_commitments WHERE booking_id=$1',
@@ -529,6 +533,7 @@ test('booking commitment writer', async (t) => {
       await t.test(
         'expiry wins at equality after a lock wait and a backward clock cannot revive the claim',
         async () => {
+          await time('2030-02-11T07:00Z');
           const held = await call(
             left,
             'hold',
@@ -575,12 +580,23 @@ test('booking commitment writer', async (t) => {
               [again.bookingId],
             )
           ).rows[0]!;
-          assert.equal(+stored.start_at, Date.parse(held.deadline));
+          assert.equal(
+            +stored.start_at,
+            Date.parse(held.deadline),
+            'the backward-step hold ignored the diary time floor',
+          );
         },
       );
       await t.test(
         'the bounded worker expires a due hold once and keeps its original authority',
         async () => {
+          await time('2030-02-11T08:00Z');
+          const holdForWorker = await call(
+            left,
+            'hold',
+            hold(21, 12, window('09:00', '10:00')),
+          );
+          assert.equal(holdForWorker.state, 'hold');
           await time('2030-02-11T08:30Z');
           await admin.query('SET ROLE north_star_workflow_worker');
           try {
@@ -608,7 +624,7 @@ test('booking commitment writer', async (t) => {
           JOIN platform.trust_action_invocations i ON i.invocation_id=h.receipt_id
           JOIN platform.booking_owner_cursors o ON o.owner_key=h.owner_key
           WHERE h.operation='expireHold' AND o.record_id=$1`,
-            [owner(17)],
+            [owner(21)],
           );
           assert.deepEqual(evidence.rows, [{ actor: 'SYSTEM', linked: true }]);
         },
