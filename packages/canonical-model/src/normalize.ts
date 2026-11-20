@@ -1,3 +1,4 @@
+import { normalizeBillingPlan } from './billing-normalization.js';
 import {
   validateSurfaceCompositions,
   normalizeSurfaceComposition,
@@ -205,6 +206,23 @@ export function normalizeApplicationPackage(
       : undefined;
 
   const normalizedCandidate = {
+    ...(authored.languageVersion === 'v6' &&
+      authored.billingPlans && {
+        billingPlans: authored.billingPlans
+          .map(normalizeBillingPlan)
+          .map((p) => ({
+            ...p,
+            components: [...p.components].sort((a, b) =>
+              compareCodeUnits(a.id, b.id),
+            ),
+            slots: [...p.slots].sort((a, b) => compareCodeUnits(a.id, b.id)),
+          }))
+          .sort(
+            (a, b) =>
+              compareCodeUnits(a.id, b.id) ||
+              compareCodeUnits(a.version, b.version),
+          ),
+      }),
     ...(authored.languageVersion === 'v6' &&
       authored.workflows && {
         workflows: authored.workflows

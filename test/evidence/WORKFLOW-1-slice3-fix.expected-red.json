@@ -22,7 +22,7 @@
     {
       "name": "workflow-worker-direct-resume",
       "claim": "The worker cannot advance the fence and status directly.",
-      "file": "db/migrations/0051_workflow_retry_authority.sql",
+      "file": "db/migrations/0052_workflow_retry_authority.sql",
       "original": "REVOKE UPDATE (execution_fence, status, reason) ON platform.workflow_runs FROM north_star_workflow_worker;",
       "replacement": "-- Control: retain the previous worker grants.",
       "test": {
