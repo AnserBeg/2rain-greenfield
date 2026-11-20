@@ -284,7 +284,7 @@ test(
           await t.test(
             'the compiled application serves real template PDFs through the production launcher',
             {
-              skip: !process.env.CI && !existsSync('dist/apps/api/src/main.js'),
+              skip: !existsSync('dist/apps/api/src/main.js'),
             },
             async () => {
               const child = spawn(
@@ -297,6 +297,8 @@ test(
                     DATABASE_URL: options.databaseUrl,
                     NORTH_STAR_TENANT_SLUG: options.tenantSlug,
                     NORTH_STAR_DOCUMENT_DEMO_SCANNER: '0',
+                    NORTH_STAR_DEV_DATABASE_CONTAINER:
+                      'dev-composed-app-postgres-docs-1-production-test',
                   },
                   stdio: ['ignore', 'pipe', 'pipe'],
                 },
@@ -896,10 +898,39 @@ test(
             'staging replay checks the stored source after a source grant is revoked',
             async () => {
               const original = await stored(attachment);
+              const active = (
+                await pool.query<{ release_id: string; content_hash: string }>(
+                  `
+                SELECT ptr.release_id,r.content_hash FROM platform.active_release_pointers ptr
+                JOIN platform.tenant_releases r USING (tenant_id,environment_id,release_id)
+                WHERE (ptr.tenant_id,ptr.environment_id)=($1,$2)`,
+                  [tenantId, environmentId],
+                )
+              ).rows[0]!;
               const replacement = {
                 ...coverFile.generated_source,
+                releaseRoot: active.content_hash,
                 inputDigest: original.generated_source.inputDigest,
               };
+              const forged = await direct(
+                (client) =>
+                  client.query<{ allowed: boolean }>(
+                    'SELECT platform.document_generated_allowed($1,$2,$3,$4,$5,true) AS allowed',
+                    [
+                      replacement,
+                      active.release_id,
+                      companyId,
+                      id('entity', tenant),
+                      sheet.recordId,
+                    ],
+                  ),
+                null,
+              );
+              assert.equal(
+                forged.rows[0]?.allowed,
+                true,
+                'the retry description must pass its own source check',
+              );
               assert.equal(
                 (await directRead(sheet.recordId, attachment)).rowCount,
                 0,

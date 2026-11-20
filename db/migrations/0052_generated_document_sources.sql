@@ -268,14 +268,14 @@ CREATE OR REPLACE FUNCTION platform.document_fields(scope text, entity text, act
 RETURNS jsonb LANGUAGE sql STABLE SET search_path = pg_catalog, pg_temp AS $$
   WITH definition AS MATERIALIZED (
     SELECT convert_from(revision.desired_state, 'UTF8')::jsonb AS app,
-      (SELECT convert_from(blob.canonical_bytes, 'UTF8')::jsonb->'bindings'
+      (SELECT convert_from(blob.canonical_bytes, 'UTF8')::jsonb
        FROM platform.tenant_release_projection_links projection
        JOIN platform.tenant_release_chunk_links chunk USING (tenant_id, environment_id, release_id, projection_instance_id)
        JOIN platform.release_artifact_blobs blob ON blob.content_hash = chunk.chunk_hash
          AND blob.artifact_kind = 'projectionChunk'
        WHERE (projection.tenant_id, projection.environment_id, projection.release_id) =
          (ptr.tenant_id, ptr.environment_id, ptr.release_id)
-         AND projection.projection_family_id = 'northstar.compiler:projection-family.documents') AS bindings
+         AND projection.projection_family_id = 'northstar.compiler:projection-family.documents') AS documents
     FROM platform.document_identity() i
     JOIN platform.active_release_pointers ptr USING (tenant_id, environment_id)
     JOIN platform.tenant_releases r USING (tenant_id, environment_id, release_id)
@@ -284,15 +284,15 @@ RETURNS jsonb LANGUAGE sql STABLE SET search_path = pg_catalog, pg_temp AS $$
     WHERE active_release IS NULL OR ptr.release_id = active_release
   )
   SELECT jsonb_build_object(
-    'fields', coalesce((SELECT jsonb_agg(f) FROM jsonb_array_elements(app->'documentFields') f
+    'fields', coalesce((SELECT jsonb_agg(f) FROM jsonb_array_elements(documents->'fields') f
                         WHERE f->>'entityId' = entity), '[]'::jsonb),
-    'categories', coalesce((SELECT jsonb_agg(c) FROM jsonb_array_elements(app->'documentCategories') c
+    'categories', coalesce((SELECT jsonb_agg(c) FROM jsonb_array_elements(documents->'categories') c
                             WHERE c->>'entityId' = entity), '[]'::jsonb))
   -- A compiled binding can select a Record read model. Its query governs
   -- permissions, and the stored record still supplies scope and revision.
   FROM definition LEFT JOIN LATERAL (
     SELECT b->>'queryId' AS query_id
-    FROM jsonb_array_elements(bindings) b WHERE b->>'entityId' = entity
+    FROM jsonb_array_elements(documents->'bindings') b WHERE b->>'entityId' = entity
   ) binding ON true
   CROSS JOIN LATERAL (
     SELECT q FROM jsonb_array_elements(app->'queries') q
@@ -485,6 +485,8 @@ RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_
       AND clean IS NOT NULL AND scan_clean IS DISTINCT FROM false AND retired_at IS NULL;
   IF NOT FOUND THEN RAISE EXCEPTION 'Unavailable stage' USING ERRCODE = 'D0409'; END IF; END $$;
 
+-- Keep the serving function's existing arguments for file-only readers.
+-- Category limits and retention come from the verified Documents projection.
 CREATE OR REPLACE FUNCTION platform.publish_document_upload(upload uuid, hash text, policy text, active_release uuid,
   revision bigint, category_limit integer, retention text)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$ DECLARE
