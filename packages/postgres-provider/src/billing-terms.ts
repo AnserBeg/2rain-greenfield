@@ -75,6 +75,7 @@ function termsExecutor(
       scopeColumn: identifier(entity.legalEntity.column),
     };
   };
+  const replays = new WeakSet<object>();
   return {
     capabilityId: BILLING_TERMS_CAPABILITY,
     async prepareAuthorization(r) {
@@ -97,20 +98,38 @@ function termsExecutor(
         q.queryId,
         q.sourceEntityId,
       );
-      const result = await withTrustedRequestTransaction(
+      const scope = await withTrustedRequestTransaction(
         ctx.pool,
         r.context,
-        (client) =>
-          withModuleRuntimeRole(client, () =>
+        async (client) => {
+          const receipt = await client.query<{ company: string }>(
+            `
+          SELECT i.metadata->'companyId'->>'value' AS company FROM platform.semantic_operation_receipts r
+          JOIN platform.trust_action_invocations i USING(tenant_id,environment_id,invocation_id)
+          WHERE (r.tenant_id,r.environment_id,r.action_id,r.idempotency_key,r.principal_id,r.input_digest)=($1,$2,$3,$4,$5,$6)`,
+            [
+              r.context.tenantId,
+              r.context.environmentId,
+              r.definition.operationId,
+              r.idempotencyKey,
+              r.context.principalId,
+              r.inputDigest,
+            ],
+          );
+          if (receipt.rows[0])
+            return { company: receipt.rows[0].company, replay: true };
+          const result = await withModuleRuntimeRole(client, () =>
             client.query<{ company: string }>(
               `SELECT ${scopeColumn} AS company FROM ${fulfillmentTable(entity)} WHERE tenant_id=$1 AND environment_id=$2 AND record_id=$3 AND archived_at IS NULL`,
               [r.context.tenantId, r.context.environmentId, i.recordId],
             ),
-          ),
+          );
+          return { company: result.rows[0]?.company, replay: false };
+        },
       );
-      const company = result.rows[0]?.company;
+      const company = scope.company;
       if (!company) throw refuse();
-      return {
+      const authorization = {
         decisionInput: { legalEntityId: company },
         legalEntityReadScopeIds: [company],
         readBackArguments: {
@@ -118,6 +137,8 @@ function termsExecutor(
           [q.legalEntityScope.operand.parameterId]: company,
         },
       };
+      if (scope.replay) replays.add(authorization);
+      return authorization;
     },
     async execute(r) {
       const { plan, b, entity, scopeColumn } = bind(
@@ -137,19 +158,13 @@ function termsExecutor(
       )
         throw refuse();
       const recordId = i.recordId;
-      const read = await ctx.queryGateway.invoke(r.view, {
-        schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
-        queryId: b.termsQueryId,
-        arguments: r.authorization.readBackArguments,
-      });
-      const proposal = read.records[0];
-      if (
-        read.outcome !== 'exact' ||
-        read.records.length !== 1 ||
-        proposal?.recordId !== recordId ||
-        proposal.archived
-      )
-        throw refuse();
+      const read = replays.has(r.authorization)
+        ? null
+        : await ctx.queryGateway.invoke(r.view, {
+            schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+            queryId: b.termsQueryId,
+            arguments: r.authorization.readBackArguments,
+          });
       const trust = await new PostgresTrustService(
         ctx.pool,
       ).executeIdempotentAcceptedMutation(
@@ -163,11 +178,20 @@ function termsExecutor(
           releaseId: r.view.release.releaseId,
         },
         async (client) => {
-          if (proposal.revision !== i.expectedRevision) throw refuse();
+          const proposal = read?.records[0];
+          if (
+            read?.outcome !== 'exact' ||
+            read.records.length !== 1 ||
+            proposal?.recordId !== recordId ||
+            proposal.archived ||
+            proposal.revision !== i.expectedRevision
+          )
+            throw refuse();
           const text = proposal.values[b.termsFieldId];
           if (typeof text !== 'string' || Buffer.byteLength(text) > 131072)
             throw refuse();
-          const planDigest = compileRatePlan(plan).digest;
+          const compiled = compileRatePlan(plan);
+          const planDigest = compiled.digest;
           const input: unknown = JSON.parse(text);
           const scope = [r.context.tenantId, r.context.environmentId];
           const pointer = await client.query(
@@ -187,81 +211,34 @@ function termsExecutor(
             ),
           );
           if (locked.rowCount !== 1) throw refuse();
-          let stored, digest: string, body: unknown;
-          if (r.definition.operationId === b.assignmentOperationId) {
-            const a = BillingListAssignmentSchema.parse(input);
-            digest = contentDigest(a);
-            body = a;
-            const key = [
-              ...scope,
-              company,
-              planDigest,
-              a.customerId,
-              a.listId,
-              a.revision,
-            ];
-            await client.query(
-              `INSERT INTO platform.billing_list_assignments
-           (tenant_id,environment_id,company_id,plan_digest,customer_id,list_id,revision_id,effective_from,content_digest,body,release_id,actor_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-              [
-                ...key,
-                a.effectiveFrom,
-                digest,
-                JSON.stringify(a),
-                r.view.release.releaseId,
-                r.context.principalId,
-              ],
-            );
-            stored = await client.query<{ body: unknown; digest: string }>(
-              'SELECT body,content_digest AS digest FROM platform.billing_list_assignments WHERE tenant_id=$1 AND environment_id=$2 AND company_id=$3 AND plan_digest=$4 AND customer_id=$5 AND list_id=$6 AND revision_id=$7',
-              key,
-            );
-          } else {
-            const published = publishRateTable(
-                compileRatePlan(plan).plan,
-                input,
-              ),
-              table = published.table;
-            if (
-              (r.definition.operationId === b.publishOperationId) !==
-              (table.selector.kind === 'base')
-            )
-              throw refuse();
-            digest = published.digest;
-            body = table;
-            const key = [...scope, company, table.planDigest, table.version];
-            await client.query(
-              `INSERT INTO platform.billing_rate_tables
-          (tenant_id,environment_id,company_id,plan_digest,version_id,selector,effective_from,content_digest,body,release_id,actor_id)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-              [
-                ...key,
-                JSON.stringify(table.selector),
-                table.effectiveFrom,
-                digest,
-                JSON.stringify(table),
-                r.view.release.releaseId,
-                r.context.principalId,
-              ],
-            );
-            stored = await client.query<{ body: unknown; digest: string }>(
-              'SELECT body,content_digest AS digest FROM platform.billing_rate_tables WHERE tenant_id=$1 AND environment_id=$2 AND company_id=$3 AND plan_digest=$4 AND version_id=$5',
-              key,
-            );
-          }
+          const body =
+            r.definition.operationId === b.assignmentOperationId
+              ? BillingListAssignmentSchema.parse(input)
+              : publishRateTable(compiled.plan, input).table;
           if (
-            stored.rows.length !== 1 ||
-            stored.rows[0]!.digest !== digest ||
-            canonicalize(stored.rows[0]!.body) !== canonicalize(body)
+            'selector' in body &&
+            (r.definition.operationId === b.publishOperationId) !==
+              (body.selector.kind === 'base')
           )
             throw refuse();
+          const digest = contentDigest(body);
           const metadata = {
             tableDigest: { classification: 'INTERNAL' as const, value: digest },
             companyId: { classification: 'INTERNAL' as const, value: company },
           };
           return {
-            mutationResult: { recordId },
+            mutationResult: { recordId, planDigest },
+            afterReceipt: async (transaction) => {
+              await transaction.query(
+                'SELECT platform.billing_publish($1,$2,$3,$4)',
+                [
+                  r.definition.operationId,
+                  r.idempotencyKey,
+                  canonicalize(body),
+                  canonicalize(compiled.plan),
+                ],
+              );
+            },
             command: {
               actionId: r.definition.operationId,
               causationId: null,

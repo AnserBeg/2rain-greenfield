@@ -3,6 +3,8 @@ import { BillingRateTableSchema } from './billing.js';
 const id = z.string().min(1).max(160);
 const time = z.iso.datetime({ precision: 3 });
 const value = z.string().regex(/^(0|[1-9]\d{0,17})(\.\d{1,9})?$/u);
+// A 128-digit fraction numerator can produce at most 130 digits in cents.
+const cents = z.string().regex(/^(0|[1-9]\d{0,129})$/u);
 const revision = { id, revision: id };
 const interval = z.strictObject({
   ...revision,
@@ -54,6 +56,7 @@ export const BillingQuoteEvidenceSchema = z.strictObject({
   assignments: z
     .array(
       z.strictObject({
+        publishedAt: time,
         listId: id,
         priority: z.int(),
         effectiveFrom: time,
@@ -62,14 +65,17 @@ export const BillingQuoteEvidenceSchema = z.strictObject({
       }),
     )
     .max(128),
-  tables: z.array(BillingRateTableSchema).min(1).max(256),
+  tables: z
+    .array(BillingRateTableSchema.extend({ publishedAt: time }))
+    .min(1)
+    .max(256),
   allocations: z
     .array(
       z.strictObject({
         componentId: id,
         occurrence: id.max(512),
-        allocatedCents: z.string().regex(/^(0|[1-9]\d{0,29})$/u),
-        reservedCents: z.string().regex(/^(0|[1-9]\d{0,29})$/u),
+        allocatedCents: cents,
+        reservedCents: cents,
       }),
     )
     .max(4096),

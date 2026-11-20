@@ -810,3 +810,9 @@ How to apply: Use an independent occurrence for each authorization probe. Observ
 Date: 2026-11-20
 Why: The receipt and the exact pending operation can refer to records owned by different companies.
 How to apply: Resolve the operation and storage mapping from the pinned release, then check live grants against the existing record’s stored owner or the governed create operand. Require a global grant for shared targets, and use the same scope for listing and deciding. [WORKFLOW-1](docs/execution/packets/WORKFLOW-1.md)
+
+## Fence effective-dated prices by publication time
+
+Date: 2026-11-20
+Why: A backdated successor reduced an eight-day entitlement below the amount already allocated after four days.
+How to apply: At each occurrence opening, select among the terms and assignments published by then. Save the inputs served to the caller and replay them after publishing a successor. [BILLING-1](docs/execution/packets/BILLING-1.md)

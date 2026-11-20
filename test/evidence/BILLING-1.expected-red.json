@@ -3,38 +3,38 @@
   "packet": "BILLING-1",
   "entries": [
     {
-      "name": "billing-immutable-price",
-      "claim": "Published rate versions cannot be changed by the serving role.",
-      "file": "db/migrations/0051_billing_rate_tables.sql",
-      "original": "GRANT SELECT, INSERT ON platform.billing_rate_tables",
-      "replacement": "GRANT SELECT, INSERT, UPDATE ON platform.billing_rate_tables",
+      "name": "billing-direct-privileges",
+      "claim": "The serving role has no direct rate or assignment table grant.",
+      "file": "db/migrations/0054_billing_publication.sql",
+      "original": "REVOKE ALL ON platform.billing_rate_tables, platform.billing_list_assignments FROM north_star_runtime;",
+      "replacement": "REVOKE ALL ON platform.billing_list_assignments FROM north_star_runtime;",
       "test": {
         "files": ["test/postgres/billing-terms.test.ts"],
-        "namePattern": "^governed terms and scoped source facts produce a quote through the installed semantic gateways$"
+        "namePattern": "^the serving role has no direct billing table privileges$"
       },
       "kills": [
         {
           "file": "test/postgres/billing-terms.test.ts",
-          "name": "governed terms and scoped source facts produce a quote through the installed semantic gateways",
-          "expected": "the serving role rewrote a published price"
+          "name": "the serving role has no direct billing table privileges",
+          "expected": "direct billing privilege on billing_rate_tables"
         }
       ]
     },
     {
-      "name": "billing-tenant-price",
-      "claim": "A different tenant cannot read a published rate version.",
-      "file": "db/migrations/0051_billing_rate_tables.sql",
-      "original": "CREATE POLICY billing_terms_scope ON platform.billing_rate_tables TO north_star_runtime\n  USING (\n    tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid",
-      "replacement": "CREATE POLICY billing_terms_scope ON platform.billing_rate_tables TO north_star_runtime\n  USING (\n    TRUE",
+      "name": "billing-window-publication",
+      "claim": "A backdated publication cannot change an open pricing window.",
+      "file": "packages/domain/src/billing/terms.ts",
+      "original": "effective > opening || published > opening",
+      "replacement": "effective > opening",
       "test": {
-        "files": ["test/postgres/billing-terms.test.ts"],
-        "namePattern": "^governed terms and scoped source facts produce a quote through the installed semantic gateways$"
+        "files": ["test/integration/billing-quote.test.ts"],
+        "namePattern": "^publication after opening preserves CAD 100 plus 30 even on a late first quote$"
       },
       "kills": [
         {
-          "file": "test/postgres/billing-terms.test.ts",
-          "name": "governed terms and scoped source facts produce a quote through the installed semantic gateways",
-          "expected": "another tenant read the published price"
+          "file": "test/integration/billing-quote.test.ts",
+          "name": "publication after opening preserves CAD 100 plus 30 even on a late first quote",
+          "expected": "-4000 !== 3000"
         }
       ]
     }
