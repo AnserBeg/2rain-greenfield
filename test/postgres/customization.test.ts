@@ -26,15 +26,26 @@ import {
   trustedContext,
   type ComposedApplicationRuntime,
 } from '../../packages/postgres-provider/src/composed-application-runtime.js';
+import {
+  withArchivedCustomizationRuntime,
+  archivedRuntimeRead,
+} from '../helpers/archived-runtime-process.js';
 import { upgradeLogFields } from '../../packages/postgres-provider/src/customization-service.js';
 import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/inventory-posting-capability-executor.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
 import { PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/purchase-order-approval-executor.js';
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receiving-capability-executor.js';
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
-import { applyCustomizationPatches,customizationTargets,draftLayoutRevision,serializeRelease } from '../../packages/customization/src/index.js';
 import {
-  layoutDigest,canonicalize,
+  applyCustomizationPatches,
+  customizationTargets,
+  draftLayoutRevision,
+  serializeRelease,
+} from '../../packages/customization/src/index.js';
+import {
+  REPLAYED_LAYOUT_READER,
+  layoutDigest,
+  canonicalize,
   normalizeApplicationPackage,
 } from '../../packages/canonical-model/src/index.js';
 import {
@@ -161,8 +172,11 @@ test(
           assert.equal(diagnostic?.status, 'rejected');
           assert.ok(diagnostic && diagnostic.status === 'rejected');
           assert.equal(diagnostic.code, 'FIELD_COLLISION');
-          assert.match(JSON.stringify(diagnostic.issues),/northstar.app:field.item_sku/u);
-          assert.match(JSON.stringify(diagnostic.issues),/Shelf code/u);
+          assert.match(
+            JSON.stringify(diagnostic.issues),
+            /northstar.app:field.item_sku/u,
+          );
+          assert.match(JSON.stringify(diagnostic.issues), /Shelf code/u);
           assert.deepEqual(
             upgradeLogFields(diagnostic),
             {
@@ -726,15 +740,19 @@ function platformLabelVariant(
   addPermission = false,
   optionalField = false,
 ) {
-  let authored = structuredClone(firstPartyAuthored) as Record<
-    string,
-    unknown
-  >;
+  let authored = structuredClone(firstPartyAuthored) as Record<string, unknown>;
   if (optionalField) {
-    const changed=applyCustomizationPatches(authored,[{kind:'addField',entity:'northstar.app:entity.purchase_order',screens:'record',field:{type:'text',label:'Dock note'}}]);
-    assert.equal(changed.status,'applied');
-    const party=authored.package;
-    authored={...changed.authored,package:party};
+    const changed = applyCustomizationPatches(authored, [
+      {
+        kind: 'addField',
+        entity: 'northstar.app:entity.purchase_order',
+        screens: 'record',
+        field: { type: 'text', label: 'Dock note' },
+      },
+    ]);
+    assert.equal(changed.status, 'applied');
+    const party = authored.package;
+    authored = { ...changed.authored, package: party };
   }
   const fields = authored.fields as { fieldId: string; label: string }[];
   fields.find(
@@ -896,10 +914,7 @@ async function assertUpgradePersistence(
           'SELECT diagnostic FROM platform.customization_upgrade_refusals',
         ),
     );
-    assert.equal(
-      refusals.rows[0]?.diagnostic.code,
-      'FIELD_COLLISION',
-    );
+    assert.equal(refusals.rows[0]?.diagnostic.code, 'FIELD_COLLISION');
     for (const identity of [foreign.runtime, otherEnvironment.runtime]) {
       await withTrustedRequestTransaction(
         runtimePool,
@@ -1167,11 +1182,11 @@ test(
             );
             const status = await opened.service.status();
             if (kind === 'addRecordType') {
-              assert.equal(boot.customizationUpgrade?.status,'drafted');
-              assert.equal(status.upgradeRefusal,null);
+              assert.equal(boot.customizationUpgrade?.status, 'drafted');
+              assert.equal(status.upgradeRefusal, null);
             } else {
-              assert.equal(boot.customizationUpgrade?.status,'refused');
-              assert.equal(status.upgradeRefusal?.code,'KIND_NOT_ADMITTED');
+              assert.equal(boot.customizationUpgrade?.status, 'refused');
+              assert.equal(status.upgradeRefusal?.code, 'KIND_NOT_ADMITTED');
             }
             assert.equal(status.activeChain[0]?.kind, kind);
             if (kind === 'futurePatchKind') {
@@ -1192,10 +1207,7 @@ test(
                   },
                 },
               );
-              assert.match(
-                cli,
-                /Platform upgrade refused: KIND_NOT_ADMITTED/u,
-              );
+              assert.match(cli, /Platform upgrade refused: KIND_NOT_ADMITTED/u);
               assert.match(cli, /futurePatchKind/u);
               await assert.rejects(
                 opened.service.rollback(base),
@@ -1322,70 +1334,212 @@ async function assertCycleRejected(
   }
 }
 
-test('a tenant with Equipment and a purchase-order layout takes a platform upgrade without changing its patch rows', {timeout:900_000}, async()=>{
-  await withEphemeralPostgres('upgrade-layout-survival',async({connection,pool})=>{
-    const options={databaseUrl:`postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,tenantSlug:'upgrade-layout'};
-    const old=await openComposedApplicationRuntime(options);
-    const service=await openCustomizeService(options);
-    const patches=()=>pool.query<{row:unknown}>(`SELECT to_jsonb(p) AS row FROM platform.customization_patches p WHERE tenant_id=$1 AND environment_id=$2 ORDER BY created_at,patch_id`,[old.identity.tenantId,old.identity.environmentId]).then(r=>r.rows);
-    const successor=platformLabelVariant('Stock identifier',false,undefined,compiledApplication,false,true);
-    const target=()=>service.service.targets().then(t=>t.layouts!.find(l=>l.body.surfaceId.endsWith(':surface.purchase_order_form') && l.body.mode==='create')!);
-    const save=async(change:unknown)=>{
-      const draft=await service.service.draft(change,'declarativeEditor');
-      assert.ok(draft.status==='drafted',JSON.stringify(draft));
-      await service.service.approve(draft.patchId);
-      return service.service.activate(draft.patchId);
-    };
-    const delivery='tenant-section/2ea905ad-e361-41fa-bb3f-13571d071b94';
-    let source:string;
-    let before:Awaited<ReturnType<typeof patches>>;
-    let chain:string[];
-    const recordId=randomUUID();
-    let parentId:string;
-    try {
-      await save(equipment);
-      assert.equal((await createEquipment(old,recordId)).outcome,'succeeded');
-      const sourceLayout=await target();
-      const newLayout=customizationTargets(normalizeApplicationPackage(successor.authored)).layouts!.find(l=>l.body.surfaceId===sourceLayout.body.surfaceId && l.body.mode==='create')!;
-      const baseSection=newLayout.body.sections.find(s=>s.fields.some(f=>f.label.text==='Dock note'))!;
-      const index=baseSection.fields.findIndex(f=>f.label.text==='Dock note');
-      assert.ok(index>0);
-      parentId=baseSection.fields[index-1]!.id;
-      const originalSection=sourceLayout.body.sections.find(s=>s.fields.some(f=>f.id===parentId))!;
-      source=(await save(draftLayoutRevision(sourceLayout,[
-        {kind:'createSection',schemaVersion:'v6',id:delivery,parent:sourceLayout.body.slotId,position:{edge:'last'},label:{schemaVersion:'v6',text:'Delivery'}},
-        {kind:'move',schemaVersion:'v6',id:parentId,parent:originalSection.id,destination:delivery,position:{edge:'last'}},
-      ]))).releaseId;
-      before=await patches();
-      chain=(await service.service.status()).activeChain.map(p=>p.patchId);
-    } finally {await service.close();await old.close();}
-    const next={...options,compiledApplication:successor.envelope};
-    const boot=await openComposedApplicationRuntime(next);
-    const newer=await openCustomizeService(next);
-    try {
-      const prepared=boot.customizationUpgrade;
-      assert.ok(prepared?.status==='drafted',JSON.stringify(prepared));
-      assert.equal(boot.activeReleaseId,source);
-      assert.ok(prepared.report);
-      assert.equal(prepared.report.approvalMode,'Manual');
-      assert.deepEqual(prepared.report.findings,[]);
-      await assert.rejects(newer.service.activate(prepared.upgradeId),{code:'CUSTOMIZE_NOT_APPROVED'});
-      await newer.service.approve(prepared.upgradeId);
-      const live=await newer.service.activate(prepared.upgradeId);
-      const status=await newer.service.status();
-      assert.equal(status.activeReleaseId,live.releaseId);
-      assert.deepEqual(status.activeChain.map(p=>p.patchId),chain);
-      assert.deepEqual(await patches(),before);
-      const layout=(await newer.service.targets()).layouts!.find(l=>l.body.surfaceId.endsWith(':surface.purchase_order_form') && l.body.mode==='create')!;
-      const section=layout.body.sections.find(s=>s.id===delivery)!;
-      assert.deepEqual(section.fields.map(f=>f.id),[parentId,'northstar.app:field.custom_purchase_order_dock_note']);
-      const evidence=await pool.query<{payload:Buffer}>(`SELECT payload FROM platform.customization_upgrades WHERE upgrade_id=$1 AND candidate_release_id=$2 AND source_release_id=$3`,[prepared.upgradeId,live.releaseId,source]);
-      const binding=JSON.parse(evidence.rows[0]!.payload.toString('utf8'));
-      assert.deepEqual(binding.patchIds,chain);
-      assert.ok(binding.layoutEvidence.some((l:{placementRuleVersion:number;resultLayoutDigest:string})=>l.placementRuleVersion===1 && l.resultLayoutDigest===layoutDigest(layout.body)));
-      assert.deepEqual((await listEquipment(boot)).records.map(r=>r.recordId),[recordId]);
-      assert.equal((await newer.service.rollback(live.releaseId,String(status.activeFence))).releaseId,source);
-      assert.deepEqual(await patches(),before);
-    } finally {await newer.close();await boot.close();}
-  },LINEAGE_INSTALL_VOLUME);
-});
+test(
+  'a tenant with Equipment and a purchase-order layout takes a platform upgrade without changing its patch rows',
+  { timeout: 900_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'upgrade-layout-survival',
+      async ({ connection, pool }) => {
+        const options = {
+          databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
+          tenantSlug: 'upgrade-layout',
+        };
+        const old = await openComposedApplicationRuntime(options);
+        const service = await openCustomizeService(options);
+        const patches = () =>
+          pool
+            .query<{ row: unknown }>(
+              `SELECT to_jsonb(p) AS row FROM platform.customization_patches p WHERE tenant_id=$1 AND environment_id=$2 ORDER BY created_at,patch_id`,
+              [old.identity.tenantId, old.identity.environmentId],
+            )
+            .then((r) => r.rows);
+        const successor = platformLabelVariant(
+          'Stock identifier',
+          false,
+          undefined,
+          compiledApplication,
+          false,
+          true,
+        );
+        const target = () =>
+          service.service
+            .targets()
+            .then((t) =>
+              t.layouts!.find(
+                (l) =>
+                  l.body.surfaceId.endsWith(':surface.purchase_order_form') &&
+                  l.body.mode === 'create',
+              )!,
+            );
+        const save = async (change: unknown) => {
+          const draft = await service.service.draft(
+            change,
+            'declarativeEditor',
+          );
+          assert.ok(draft.status === 'drafted', JSON.stringify(draft));
+          await service.service.approve(draft.patchId);
+          return service.service.activate(draft.patchId);
+        };
+        const delivery = 'tenant-section/2ea905ad-e361-41fa-bb3f-13571d071b94';
+        let source: string;
+        let before: Awaited<ReturnType<typeof patches>>;
+        let chain: string[];
+        const recordId = randomUUID();
+        let parentId: string;
+        try {
+          await save(equipment);
+          assert.equal(
+            (await createEquipment(old, recordId)).outcome,
+            'succeeded',
+          );
+          const sourceLayout = await target();
+          const newLayout = customizationTargets(
+            normalizeApplicationPackage(successor.authored),
+          ).layouts!.find(
+            (l) =>
+              l.body.surfaceId === sourceLayout.body.surfaceId &&
+              l.body.mode === 'create',
+          )!;
+          const baseSection = newLayout.body.sections.find((s) =>
+            s.fields.some((f) => f.label.text === 'Dock note'),
+          )!;
+          const index = baseSection.fields.findIndex(
+            (f) => f.label.text === 'Dock note',
+          );
+          assert.ok(index > 0);
+          parentId = baseSection.fields[index - 1]!.id;
+          const originalSection = sourceLayout.body.sections.find((s) =>
+            s.fields.some((f) => f.id === parentId),
+          )!;
+          source = (
+            await save(
+              draftLayoutRevision(sourceLayout, [
+                {
+                  kind: 'createSection',
+                  schemaVersion: 'v6',
+                  id: delivery,
+                  parent: sourceLayout.body.slotId,
+                  position: { edge: 'last' },
+                  label: { schemaVersion: 'v6', text: 'Delivery' },
+                },
+                {
+                  kind: 'move',
+                  schemaVersion: 'v6',
+                  id: parentId,
+                  parent: originalSection.id,
+                  destination: delivery,
+                  position: { edge: 'last' },
+                },
+              ]),
+            )
+          ).releaseId;
+          before = await patches();
+          chain = (await service.service.status()).activeChain.map(
+            (p) => p.patchId,
+          );
+        } finally {
+          await service.close();
+          await old.close();
+        }
+        const next = { ...options, compiledApplication: successor.envelope };
+        const boot = await openComposedApplicationRuntime(next);
+        const newer = await openCustomizeService(next);
+        try {
+          const prepared = boot.customizationUpgrade;
+          assert.ok(prepared?.status === 'drafted', JSON.stringify(prepared));
+          assert.equal(boot.activeReleaseId, source);
+          assert.ok(prepared.report);
+          assert.equal(prepared.report.approvalMode, 'Manual');
+          assert.deepEqual(prepared.report.findings, []);
+          await assert.rejects(newer.service.activate(prepared.upgradeId), {
+            code: 'CUSTOMIZE_NOT_APPROVED',
+          });
+          await newer.service.approve(prepared.upgradeId);
+          const activate = () => newer.service.activate(prepared.upgradeId);
+          const live = process.env.CI
+            ? await withArchivedCustomizationRuntime(
+                '17618776dd058bbb8efec032eae13a00a5d5398b',
+                async (run) => {
+                  const read = () =>
+                    archivedRuntimeRead(run, {
+                      databaseUrl: options.databaseUrl,
+                      identity: boot.identity,
+                    });
+                  assert.equal((await read()).outcome, 'loaded');
+                  const activated = await activate();
+                  const refused = await read();
+                  assert.equal(
+                    refused.code,
+                    'UNSUPPORTED_RUNTIME_CAPABILITY',
+                    JSON.stringify(refused),
+                  );
+                  assert.match(
+                    refused.message ?? '',
+                    new RegExp(
+                      `surface-manifest requires version ${REPLAYED_LAYOUT_READER}`,
+                      'u',
+                    ),
+                  );
+                  return activated;
+                },
+              )
+            : await activate();
+          const status = await newer.service.status();
+          assert.equal(status.activeReleaseId, live.releaseId);
+          assert.deepEqual(
+            status.activeChain.map((p) => p.patchId),
+            chain,
+          );
+          assert.deepEqual(await patches(), before);
+          const layout = (await newer.service.targets()).layouts!.find(
+            (l) =>
+              l.body.surfaceId.endsWith(':surface.purchase_order_form') &&
+              l.body.mode === 'create',
+          )!;
+          const section = layout.body.sections.find((s) => s.id === delivery)!;
+          assert.deepEqual(
+            section.fields.map((f) => f.id),
+            [parentId, 'northstar.app:field.custom_purchase_order_dock_note'],
+          );
+          const evidence = await pool.query<{ payload: Buffer }>(
+            `SELECT payload FROM platform.customization_upgrades WHERE upgrade_id=$1 AND candidate_release_id=$2 AND source_release_id=$3`,
+            [prepared.upgradeId, live.releaseId, source],
+          );
+          const binding = JSON.parse(
+            evidence.rows[0]!.payload.toString('utf8'),
+          );
+          assert.deepEqual(binding.patchIds, chain);
+          assert.ok(
+            binding.layoutEvidence.some(
+              (l: {
+                placementRuleVersion: number;
+                resultLayoutDigest: string;
+              }) =>
+                l.placementRuleVersion === 1 &&
+                l.resultLayoutDigest === layoutDigest(layout.body),
+            ),
+          );
+          assert.deepEqual(
+            (await listEquipment(boot)).records.map((r) => r.recordId),
+            [recordId],
+          );
+          assert.equal(
+            (
+              await newer.service.rollback(
+                live.releaseId,
+                String(status.activeFence),
+              )
+            ).releaseId,
+            source,
+          );
+          assert.deepEqual(await patches(), before);
+        } finally {
+          await newer.close();
+          await boot.close();
+        }
+      },
+      LINEAGE_INSTALL_VOLUME,
+    );
+  },
+);

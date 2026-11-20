@@ -13,8 +13,8 @@ import {
 import {
   compileInSandbox,
   UPGRADE_CODES_V1,
-  UPGRADE_PATCH_KINDS,
-  unadmittedKind,
+  unadmittedMembers,
+  type UpgradeFinding,
   type ReplayDiagnostics,
   type ReplayOrigin,
   type UpgradeCode,
@@ -130,6 +130,7 @@ export class CustomizationServiceRefusal extends Error {
   constructor(
     readonly code: CustomizationRefusalCode,
     message: string,
+    readonly replayDiagnostics?: ReplayDiagnostics,
   ) {
     super(message);
   }
@@ -376,9 +377,19 @@ export class PostgresCustomizationService {
             'CUSTOMIZE_NOT_STARTED',
             'there is no live release',
           );
-        const serving=await readVerifiedServing(this.connection.runtimePool,context);
-        if (!serving || serving.releaseId!==pointer.releaseId || serving.fence!==pointer.fence)
-          throw new CustomizationServiceRefusal('CUSTOMIZE_ACTIVATION_UNVERIFIED','The current swap requires verification or recovery.');
+        const serving = await readVerifiedServing(
+          this.connection.runtimePool,
+          context,
+        );
+        if (
+          !serving ||
+          serving.releaseId !== pointer.releaseId ||
+          serving.fence !== pointer.fence
+        )
+          throw new CustomizationServiceRefusal(
+            'CUSTOMIZE_ACTIVATION_UNVERIFIED',
+            'The current swap requires verification or recovery.',
+          );
         const sourceReleaseId = serving.releaseId;
         let result: UpgradePreparation;
         try {
@@ -397,6 +408,10 @@ export class PostgresCustomizationService {
               known && Object.hasOwn(UPGRADE_CODES_V1, error.code)
                 ? error.code
                 : 'WHOLE_PACKAGE_FAILURE',
+            ...(error instanceof CustomizationServiceRefusal &&
+              error.replayDiagnostics && {
+                replayDiagnostics: error.replayDiagnostics,
+              }),
             message: known
               ? error.message
               : 'The platform upgrade could not be prepared.',
@@ -465,8 +480,43 @@ export class PostgresCustomizationService {
             blocked: [],
           }),
         };
+        const sourceIdentity = await this.#identity(context, sourceReleaseId);
+        const sourceDefinition = parseNormalizedApplicationPackageJson(
+          await this.#desiredState(context, sourceIdentity.revisionId),
+        );
+        const targetDefinition = parseNormalizedApplicationPackageJson(
+          this.#tip.normalizedDefinitionBytes,
+        );
+        const restrictedFields = [
+          ...sourceDefinition.fields,
+          ...targetDefinition.fields,
+        ].filter(
+          (field) =>
+            field.classification !== 'public' &&
+            field.classification !== 'internal',
+        );
+        const protectedTerms = new Set(
+          restrictedFields.flatMap((field) => [field.fieldId, field.label]),
+        );
+        const restricted = (value: unknown) => {
+          const data = JSON.stringify(value);
+          return [...protectedTerms].some((term) => data.includes(term));
+        };
+        report.findings = report.findings.map((finding) =>
+          restricted(finding)
+            ? {
+                ...finding,
+                subject: 'Restricted field',
+                expected: 'Restricted',
+                observed: 'Restricted',
+              }
+            : finding,
+        );
         const diagnostic: UpgradeRefusal = {
           ...outcome,
+          ...(restricted(outcome.message) && {
+            message: UPGRADE_CODES_V1[code],
+          }),
           code,
           report,
           issues: [...report.findings, ...report.blocked].map((issue) =>
@@ -500,28 +550,6 @@ export class PostgresCustomizationService {
         'WHOLE_PACKAGE_FAILURE',
         'The platform upgrade has no recorded base or patch chain.',
       );
-    const unsupported = active.chain.find(
-      (record) => !UPGRADE_PATCH_KINDS.has(record.kind),
-    );
-    if (unsupported) {
-      const finding = {
-        code: 'KIND_NOT_ADMITTED' as const,
-        subject: unsupported.kind,
-        expected: 'admitted',
-        observed: null,
-        patchId: unsupported.patchId,
-        patchKind: unsupported.kind,
-        patchIndex: active.chain.indexOf(unsupported),
-        memberIndex: 0,
-        editIndex: 0,
-      };
-      return {
-        status: 'refused',
-        code: finding.code,
-        message: `The platform upgrade cannot replay ${unsupported.kind}.`,
-        replayDiagnostics: { findings: [finding], blocked: [] },
-      };
-    }
     this.#assertAuthoredBase();
     const sourceBase = parseNormalizedApplicationPackageJson(
       (await this.#loadRelease(context, active.baseReleaseId))
@@ -541,10 +569,14 @@ export class PostgresCustomizationService {
         'the upgrade changes the package or language identity',
       );
     }
-    const patches=await this.#readPatches(context,active.chain,true);
+    const patches = await this.#readPatches(context, active.chain, true);
     const source = (await this.#reproduce(context, active)).candidate;
     const sourceDefinition = parseNormalizedApplicationPackageJson(
       source.normalizedDefinitionBytes,
+    );
+    const activeRoles = await admin.query<{ role_key: string }>(
+      'SELECT role_key FROM platform.current_policy_roles WHERE tenant_id=$1 AND environment_id=$2 AND revoked_at IS NULL',
+      [context.tenantId, context.environmentId],
     );
     const replay = await this.#compile(
       patches,
@@ -559,6 +591,7 @@ export class PostgresCustomizationService {
         this.#tip.compiled.releaseRoot,
         true,
       ),
+      activeRoles.rows.map((r) => r.role_key),
     );
     if (replay.status !== 'compiled') return replay;
     const step = replay.steps[0]!;
@@ -859,8 +892,8 @@ export class PostgresCustomizationService {
     );
   }
 
-  async status(): Promise<CustomizationStatus> {
-    const context = await this.#context();
+  async status(actor?: TrustedRequestContext): Promise<CustomizationStatus> {
+    const context = await this.#context(actor);
     const pointer = await this.#livePointer(context);
     const swap = await this.#currentSwap(context);
     const recovery = swap?.failed
@@ -882,21 +915,25 @@ export class PostgresCustomizationService {
         throw error;
       },
     );
-    const refusal = await withTrustedRequestTransaction(
-      this.connection.runtimePool,
-      context,
-      (client) =>
-        client.query<{ diagnostic: UpgradeRefusal }>(
-          `SELECT diagnostic FROM platform.customization_upgrade_refusals
+    const disclose =
+      !actor || (await this.#permissionRoles(context)).length > 0;
+    const refusal = disclose
+      ? await withTrustedRequestTransaction(
+          this.connection.runtimePool,
+          context,
+          (client) =>
+            client.query<{ diagnostic: UpgradeRefusal }>(
+              `SELECT diagnostic FROM platform.customization_upgrade_refusals
         WHERE tenant_id=$1 AND environment_id=$2 AND source_release_id=$3 AND base_root=$4 AND NOT resolved`,
-          [
-            context.tenantId,
-            context.environmentId,
-            pointer.releaseId,
-            this.#tip.compiled.releaseRoot,
-          ],
-        ),
-    );
+              [
+                context.tenantId,
+                context.environmentId,
+                pointer.releaseId,
+                this.#tip.compiled.releaseRoot,
+              ],
+            ),
+        )
+      : { rows: [] };
     const observed = await this.#state(
       context,
       pointer.releaseId,
@@ -922,13 +959,15 @@ export class PostgresCustomizationService {
         upgrades: [],
         activeReleaseId: pointer.releaseId,
         activeReleaseRoot: await this.#root(context, pointer.releaseId),
-        upgradeRefusal: refusal.rows[0]?.diagnostic ?? {
-          status: 'refused',
-          code: observed.code,
-          message: observed.message,
-          sourceReleaseId: pointer.releaseId,
-          baseReleaseRoot: this.#tip.compiled.releaseRoot,
-        },
+        upgradeRefusal: !disclose
+          ? null
+          : (refusal.rows[0]?.diagnostic ?? {
+              status: 'refused',
+              code: observed.code,
+              message: observed.message,
+              sourceReleaseId: pointer.releaseId,
+              baseReleaseRoot: this.#tip.compiled.releaseRoot,
+            }),
       };
     const active = { ...observed, pointer };
     const approved = await withTrustedRequestTransaction(
@@ -991,17 +1030,18 @@ export class PostgresCustomizationService {
       ...recovery,
       activeFence: pointer.fence,
       rollbackAvailable,
-      upgradeRefusal:
-        refusal.rows[0]?.diagnostic ??
-        (ambiguous.rows[0]
-          ? {
-              status: 'refused' as const,
-              code: 'CUSTOMIZE_APPROVAL_RECONCILIATION_REQUIRED',
-              message: `The original action for approval ${ambiguous.rows[0].approval_id} must be reconciled.`,
-              sourceReleaseId: pointer.releaseId,
-              baseReleaseRoot: this.#tip.compiled.releaseRoot,
-            }
-          : null),
+      upgradeRefusal: !disclose
+        ? null
+        : (refusal.rows[0]?.diagnostic ??
+          (ambiguous.rows[0]
+            ? {
+                status: 'refused' as const,
+                code: 'CUSTOMIZE_APPROVAL_RECONCILIATION_REQUIRED',
+                message: `The original action for approval ${ambiguous.rows[0].approval_id} must be reconciled.`,
+                sourceReleaseId: pointer.releaseId,
+                baseReleaseRoot: this.#tip.compiled.releaseRoot,
+              }
+            : null)),
       upgrades: Object.freeze(
         (await this.#upgrades(context)).map((upgrade) => ({
           ...upgrade,
@@ -2304,6 +2344,7 @@ export class PostgresCustomizationService {
     upgrade = false,
     pins?: readonly (AcknowledgementInput | null | undefined)[],
     origins?: readonly ReplayOrigin[],
+    activeRoleKeys?: readonly string[],
   ): Promise<
     | { readonly status: 'compiled'; readonly steps: readonly SandboxStep[] }
     | Exclude<DraftOutcome, { status: 'drafted' }>
@@ -2317,6 +2358,7 @@ export class PostgresCustomizationService {
     const response = await compileInSandbox(
       {
         acknowledgement: this.options.acknowledgement,
+        ...(activeRoleKeys && { activeRoleKeys }),
         ...(pins
           ? { stepAcknowledgements: pins as readonly AcknowledgementInput[] }
           : {}),
@@ -2564,38 +2606,68 @@ export class PostgresCustomizationService {
         const bytes = new Map(
           result.rows.map((row) => [row.patch_id, row.payload]),
         );
-        const chain = records.map((record) => {
-          const payload = bytes.get(record.patchId);
-          if (
-            payload &&
-            createHash('sha256').update(payload).digest('hex') ===
-              record.payloadDigest
-          ) {
-            try {
-              const raw: unknown = JSON.parse(payload.toString('utf8'));
-              const missing = upgrade && unadmittedKind(raw);
-              if (missing)
-                throw new CustomizationServiceRefusal(
-                  'KIND_NOT_ADMITTED',
-                  `The platform upgrade cannot replay ${missing} (change ${record.patchId}).`,
-                );
-              const parsed = parseCustomizationPatch(raw);
-              if (
-                parsed.status === 'parsed' &&
-                parsed.patch.kind === record.kind
-              )
-                return parsed.patch.kind === 'addField' && !parsed.patch.screens
-                  ? { ...parsed.patch, legacy: true as const }
-                  : parsed.patch;
-            } catch (error) {
-              if (!(error instanceof SyntaxError)) throw error;
+        const missingKinds: UpgradeFinding[] = [];
+        const chain = records.flatMap(
+          (record, patchIndex): CustomizationPatch[] => {
+            const payload = bytes.get(record.patchId);
+            if (
+              payload &&
+              createHash('sha256').update(payload).digest('hex') ===
+                record.payloadDigest
+            ) {
+              try {
+                const raw: unknown = JSON.parse(payload.toString('utf8'));
+                if (
+                  upgrade &&
+                  raw &&
+                  typeof raw === 'object' &&
+                  'kind' in raw &&
+                  raw.kind === record.kind
+                ) {
+                  const missing = unadmittedMembers(raw);
+                  if (missing.length) {
+                    missingKinds.push(
+                      ...missing.map(({ kind, memberIndex }) => ({
+                        code: 'KIND_NOT_ADMITTED' as const,
+                        subject: kind,
+                        expected: 'admitted',
+                        observed: null,
+                        patchIndex,
+                        patchId: record.patchId,
+                        patchKind: kind,
+                        memberIndex,
+                        editIndex: 0,
+                      })),
+                    );
+                    return [];
+                  }
+                }
+                const parsed = parseCustomizationPatch(raw);
+                if (
+                  parsed.status === 'parsed' &&
+                  parsed.patch.kind === record.kind
+                )
+                  return [
+                    parsed.patch.kind === 'addField' && !parsed.patch.screens
+                      ? { ...parsed.patch, legacy: true as const }
+                      : parsed.patch,
+                  ];
+              } catch (error) {
+                if (!(error instanceof SyntaxError)) throw error;
+              }
             }
-          }
+            throw new CustomizationServiceRefusal(
+              'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
+              `patch ${record.patchId} (${record.kind}) cannot be read with its recorded kind and digest`,
+            );
+          },
+        );
+        if (missingKinds.length)
           throw new CustomizationServiceRefusal(
-            'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
-            `patch ${record.patchId} (${record.kind}) cannot be read with its recorded kind and digest`,
+            'KIND_NOT_ADMITTED',
+            UPGRADE_CODES_V1.KIND_NOT_ADMITTED,
+            { findings: missingKinds, blocked: [] },
           );
-        });
         for (const patch of chain) {
           if (patch.kind === 'saveWorkflow')
             await readWorkflowBundle(

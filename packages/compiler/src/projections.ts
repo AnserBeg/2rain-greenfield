@@ -5,6 +5,7 @@ import {
 import {
   LAYOUT_READER,
   REPLAYED_LAYOUT_READER,
+  type SurfaceLayout,
 } from '@north-star/canonical-model';
 import {
   CALCULATED_DISPLAY_QUERY_READER,
@@ -1018,7 +1019,9 @@ function surfaceManifestPayload(
   const replayedLayout = original.surfaces.some(
     (s) =>
       'layouts' in s &&
-      s.layouts?.some((layout) => layout.placementRuleVersion === 1),
+      (s.layouts as SurfaceLayout[] | undefined)?.some(
+        (layout) => layout.placementRuleVersion === 1,
+      ),
   );
   const surfaceFloor = replayedLayout
     ? REPLAYED_LAYOUT_READER

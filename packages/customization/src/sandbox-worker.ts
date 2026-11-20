@@ -72,6 +72,7 @@ function compileChain(
       ...(request.historical ? { historical: true } : {}),
       ...(request.origins && { origins: request.origins }),
       upgradeReplay: !!request.upgradeBaseRoot,
+      ...(request.activeRoleKeys && { activeRoleKeys: request.activeRoleKeys }),
       sandbox,
     });
     if (result.status === 'replayConflict') {

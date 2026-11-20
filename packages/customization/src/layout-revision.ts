@@ -256,6 +256,9 @@ function structuralConflict(
   const ids = new Set(
     [edit.id, destination, anchor].filter((id): id is string => !!id),
   );
+  const section =
+    edit.kind === 'move' && sourceBody.sections.find((s) => s.id === edit.id);
+  if (section) for (const field of section.fields) ids.add(field.id);
   for (const id of ids) {
     if (id === body.slotId) continue;
     const before = locate(sourceBody, id);

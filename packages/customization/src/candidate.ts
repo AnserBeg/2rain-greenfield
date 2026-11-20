@@ -73,6 +73,7 @@ export function compileCustomizationCandidate(input: {
   readonly acknowledgement: AcknowledgementInput;
   readonly upgradeReplay?: boolean;
   readonly origins?: readonly ReplayOrigin[];
+  readonly activeRoleKeys?: readonly string[];
   readonly historical?: boolean;
   readonly base: Readonly<Record<string, unknown>>;
   readonly chain: readonly CustomizationPatch[];
@@ -90,7 +91,12 @@ export function compileCustomizationCandidate(input: {
     if (refusal) return { ...refusal, patchIndex: input.chain.length - 1 };
   }
   const applied = input.upgradeReplay
-    ? replayCustomizationPatches(input.base, input.chain, input.origins)
+    ? replayCustomizationPatches(
+        input.base,
+        input.chain,
+        input.origins,
+        input.activeRoleKeys,
+      )
     : applyCustomizationPatches(input.base, input.chain, input.origins);
   if (applied.status !== 'applied') return applied;
   let normalizedDefinitionBytes: Uint8Array;

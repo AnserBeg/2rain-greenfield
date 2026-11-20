@@ -47,6 +47,7 @@ interface CustomizationStatus {
   readonly upgradeRefusal: {
     readonly code: string;
     readonly message: string;
+    readonly report?: { readonly upgradeId: string };
     readonly issues?: readonly string[];
   } | null;
   readonly upgrades: readonly {
@@ -209,7 +210,7 @@ export interface CustomizeScreenService {
     expectedReleaseId: string,
     expectedFence: string,
   ): Promise<ActivationOutcome>;
-  status(): Promise<CustomizationStatus>;
+  status(actor?: TrustedRequestContext): Promise<CustomizationStatus>;
   targets(actor?: TrustedRequestContext): Promise<CustomizationTargets>;
   workflows?(actor?: TrustedRequestContext): Promise<readonly LiveWorkflow[]>;
 }
@@ -387,7 +388,7 @@ async function overview(
   loadTargets: LoadTargets,
   actor?: TrustedRequestContext,
 ): Promise<string> {
-  const status = await service.status();
+  const status = await service.status(actor);
   if (status.failedActivation)
     return [
       '<h1>Activation verification failed</h1><p>The previous verified release is still live. Inventory posting can resume once recovery succeeds.</p>',
@@ -437,7 +438,7 @@ async function overview(
       ? `<section data-customize-workflows><h2>Live workflows</h2>${workflows.map(renderLiveWorkflow).join('')}</section>`
       : '',
     refusal
-      ? `<section data-customize-upgrade-refusal><h2>Platform upgrade refused</h2><p>Your current release is still live.</p><p>${escapeHtml(refusal.code)} · ${escapeHtml(refusal.message)}</p>${(refusal.issues ?? []).map((issue) => `<pre>${escapeHtml(issue)}</pre>`).join('')}</section>`
+      ? `<section data-customize-upgrade-refusal><h2>Platform upgrade refused</h2><p>Your current release is still live.</p><p>${escapeHtml(refusal.code)} · ${escapeHtml(refusal.message)}</p>${refusal.report ? `<details><summary>Upgrade conflict report</summary><pre>${escapeHtml(JSON.stringify(refusal.report, null, 2))}</pre></details>` : (refusal.issues ?? []).map((issue) => `<pre>${escapeHtml(issue)}</pre>`).join('')}</section>`
       : '',
     `<section data-customize-changes><h2>Changes</h2>${
       rows

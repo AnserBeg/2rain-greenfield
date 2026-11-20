@@ -38,6 +38,7 @@ export interface SandboxRequest {
   /** Replay the entire chain once against tip, the previously live release. */
   readonly upgradeBaseRoot?: string;
   readonly origins?: readonly ReplayOrigin[];
+  readonly activeRoleKeys?: readonly string[];
 }
 
 export interface SandboxStep {

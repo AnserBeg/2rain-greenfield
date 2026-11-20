@@ -69,20 +69,26 @@ export interface ReplayOrigin {
   /** The verified authoring parent at a discontinuity in the original chain. */
   parent?: Record<string, unknown>;
 }
-export function unadmittedKind(change: unknown): string | undefined {
-  if (!change || typeof change !== 'object' || !('kind' in change)) return;
-  const kind = change.kind;
-  if (typeof kind !== 'string') return;
-  if (!UPGRADE_PATCH_KINDS.has(kind)) return kind;
+export function unadmittedMembers(
+  change: unknown,
+  memberIndex = 0,
+): { kind: string; memberIndex: number }[] {
   if (
-    kind === 'changeSet' &&
+    !change ||
+    typeof change !== 'object' ||
+    !('kind' in change) ||
+    typeof change.kind !== 'string'
+  )
+    return [];
+  if (!UPGRADE_PATCH_KINDS.has(change.kind))
+    return [{ kind: change.kind, memberIndex }];
+  if (
+    change.kind === 'changeSet' &&
     'patches' in change &&
     Array.isArray(change.patches)
-  ) {
-    for (const member of change.patches) {
-      const missing = unadmittedKind(member);
-      if (missing) return missing;
-    }
-  }
-  return;
+  )
+    return change.patches.flatMap((member, index) =>
+      unadmittedMembers(member, index),
+    );
+  return [];
 }

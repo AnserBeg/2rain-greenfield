@@ -1,9 +1,10 @@
 import { compileLiteralFormulaRules } from '../../compiler/src/formula-validation-plan.js';
 import { retypedCalculatedDisplayField } from '../../canonical-model/src/calculated-display-bindings.js';
 import { retypedFormulaRule } from '../../canonical-model/src/formula-validation-bindings.js';
-import { normalizeApplicationPackage } from '@north-star/canonical-model';
 import {
   canonicalize,
+  normalizeApplicationPackage,
+  type VersionedNormalizedApplicationPackage,
   type LayoutDefinition,
 } from '@north-star/canonical-model';
 import {
@@ -41,8 +42,21 @@ const declarationKeys = {
 function declarations(def: Definition) {
   const ids = new Map<string, Member>();
   for (const [table, key] of Object.entries(declarationKeys)) {
-    for (const member of (def[table] as Member[] | undefined) ?? [])
+    for (const member of (def[table] as Member[] | undefined) ?? []) {
       ids.set(String(member[key]), member);
+      const list = member.list as Member | undefined;
+      const fieldType = member.fieldType as Member | undefined;
+      for (const [rows, idKey] of [
+        [list?.views, 'viewId'],
+        [list?.columns, 'columnId'],
+        [fieldType?.options, 'optionId'],
+        [member.metrics, 'metricId'],
+      ] as const) {
+        if (Array.isArray(rows))
+          for (const row of rows as Member[])
+            if (typeof row[idKey] === 'string') ids.set(row[idKey], row);
+      }
+    }
   }
   return ids;
 }
@@ -97,30 +111,87 @@ function bindings(
   return conflicts;
 }
 function formulaConflicts(
-  patch:SingleCustomizationPatch, original:Definition, trial:Definition, base:Definition,
+  patch: SingleCustomizationPatch,
+  original: Definition,
+  trial: Definition,
+  base: Definition,
 ): ReplayConflict[] {
-  if (patch.kind!=='addValidation' && patch.kind!=='addCalculatedDisplayField') return [];
-  const before=normalizeApplicationPackage(original);
-  const after=normalizeApplicationPackage(trial);
-  if(before.languageVersion!=='v6' || after.languageVersion!=='v6') return [];
-  if(patch.kind==='addCalculatedDisplayField') {
-    if(retypedCalculatedDisplayField({...before,calculatedDisplayFields:[patch.field]},after))
-      return [{code:'INCOMPATIBLE_TYPE',subject:patch.field.fieldId,expected:patch.field.expression,observed:'The destination binds a different operand contract.'}];
+  if (
+    patch.kind !== 'addValidation' &&
+    patch.kind !== 'addCalculatedDisplayField'
+  )
+    return [];
+  const before = normalizeApplicationPackage(
+    original,
+  ) as VersionedNormalizedApplicationPackage;
+  const after = normalizeApplicationPackage(
+    trial,
+  ) as VersionedNormalizedApplicationPackage;
+  if (before.languageVersion !== 'v6' || after.languageVersion !== 'v6')
+    return [];
+  if (patch.kind === 'addCalculatedDisplayField') {
+    if (
+      retypedCalculatedDisplayField(
+        { ...before, calculatedDisplayFields: [patch.field] },
+        after,
+      )
+    )
+      return [
+        {
+          code: 'INCOMPATIBLE_TYPE',
+          subject: patch.field.fieldId,
+          expected: patch.field.expression,
+          observed: 'The destination binds a different operand contract.',
+        },
+      ];
     return [];
   }
-  if(retypedFormulaRule({...before,formulaRules:[patch.rule]},after))
-    return [{code:'INCOMPATIBLE_TYPE',subject:patch.rule.ruleId,expected:patch.rule.fieldAnchors,observed:'The destination binds a different validation operand or action.'}];
-  const proof=compileLiteralFormulaRules(after);
-  if(proof.status!=='refused' || !proof.message.includes('satisfying and violating')) return [];
-  const constraints=(base.formulaRules as typeof after.formulaRules) ?? [];
-  const blockers=constraints.filter(rule=>{
-    if(rule.targetId!==patch.rule.targetId) return false;
-    const pair=compileLiteralFormulaRules({...after,formulaRules:[rule,patch.rule]});
-    const alone=compileLiteralFormulaRules({...after,formulaRules:[patch.rule]});
-    return pair.status==='refused' && alone.status==='compiled';
-  }).map(rule=>rule.ruleId);
-  return [{code:'UNSATISFIABLE_RULE',subject:patch.rule.ruleId,expected:{ruleId:patch.rule.ruleId,witness:'satisfying and independently violating inputs'},
-    observed:{constraints:blockers,subject:proof.subjectId,reason:proof.message}}];
+  if (retypedFormulaRule({ ...before, formulaRules: [patch.rule] }, after))
+    return [
+      {
+        code: 'INCOMPATIBLE_TYPE',
+        subject: patch.rule.ruleId,
+        expected: patch.rule.fieldAnchors,
+        observed:
+          'The destination binds a different validation operand or action.',
+      },
+    ];
+  const proof = compileLiteralFormulaRules(after);
+  if (
+    proof.status !== 'refused' ||
+    !proof.message.includes('satisfying and violating')
+  )
+    return [];
+  const constraints = (base.formulaRules as typeof after.formulaRules) ?? [];
+  const blockers = constraints
+    .filter((rule) => {
+      if (rule.targetId !== patch.rule.targetId) return false;
+      const pair = compileLiteralFormulaRules({
+        ...after,
+        formulaRules: [rule, patch.rule],
+      });
+      const alone = compileLiteralFormulaRules({
+        ...after,
+        formulaRules: [patch.rule],
+      });
+      return pair.status === 'refused' && alone.status === 'compiled';
+    })
+    .map((rule) => rule.ruleId);
+  return [
+    {
+      code: 'UNSATISFIABLE_RULE',
+      subject: patch.rule.ruleId,
+      expected: {
+        ruleId: patch.rule.ruleId,
+        witness: 'satisfying and independently violating inputs',
+      },
+      observed: {
+        constraints: blockers,
+        subject: proof.subjectId,
+        reason: proof.message,
+      },
+    },
+  ];
 }
 
 function applyRefusal(
@@ -129,11 +200,24 @@ function applyRefusal(
   reason: string,
 ): ReplayConflict {
   const ids = declarations(target);
-  if (patch.kind==='arrangeLayout' && !ids.has(patch.surface))
-    return {code:'RETIRED_TARGET',subject:patch.surface,expected:patch.surface,observed:null};
-  if (patch.kind==='addRecordType') {
-    const module=(target.modules as Member[]).find(m=>String(m.label).toLowerCase()===patch.label.toLowerCase());
-    if(module) return {code:'WHOLE_PACKAGE_FAILURE',subject:String(module.moduleId),expected:{kind:patch.kind,label:patch.label},observed:{moduleId:module.moduleId,label:module.label}};
+  if (patch.kind === 'arrangeLayout' && !ids.has(patch.surface))
+    return {
+      code: 'RETIRED_TARGET',
+      subject: patch.surface,
+      expected: patch.surface,
+      observed: null,
+    };
+  if (patch.kind === 'addRecordType') {
+    const module = (target.modules as Member[]).find(
+      (m) => String(m.label).toLowerCase() === patch.label.toLowerCase(),
+    );
+    if (module)
+      return {
+        code: 'WHOLE_PACKAGE_FAILURE',
+        subject: String(module.moduleId),
+        expected: { kind: patch.kind, label: patch.label },
+        observed: { moduleId: module.moduleId, label: module.label },
+      };
   }
   if (patch.kind === 'addField') {
     const collision = (target.fields as Member[]).find(
@@ -179,6 +263,7 @@ export function replayCustomizationPatches(
   base: Definition,
   chain: readonly CustomizationPatch[],
   origins: readonly ReplayOrigin[] = [],
+  activeRoleKeys?: readonly string[],
 ): AppliedCustomization | ReplayFailure {
   let authored = structuredClone(base);
   let original: Definition | undefined;
@@ -247,10 +332,35 @@ export function replayCustomizationPatches(
         });
       else {
         const target = declarations(authored);
+        if (
+          patch.kind === 'narrowPermission' &&
+          activeRoleKeys &&
+          !activeRoleKeys.includes(patch.roleKey) &&
+          !chain
+            .slice(patchIndex + 1)
+            .some(
+              (p) =>
+                p.kind === 'unNarrowPermission' &&
+                p.roleKey === patch.roleKey &&
+                p.target.id === patch.target.id,
+            )
+        )
+          conflicts.push({
+            code: 'RETIRED_TARGET',
+            subject: patch.roleKey,
+            expected: { roleKey: patch.roleKey, active: true },
+            observed: null,
+          });
         if (before && !layout)
           conflicts.push(...bindings(patch, before, target));
         for (const id of created) {
-          if (target.has(id))
+          if (
+            target.has(id) &&
+            !(
+              patch.kind === 'addRecordType' &&
+              id.endsWith(':module.custom_record-types')
+            )
+          )
             conflicts.push({
               code: id.includes(':field.')
                 ? 'FIELD_COLLISION'
@@ -276,9 +386,10 @@ export function replayCustomizationPatches(
             } else
               conflicts.push(applyRefusal(patch, authored, outcome.message));
           } else {
-            if(original) conflicts.push(...formulaConflicts(patch,original,trial,base));
-            if(!conflicts.length) {
-              authored=trial;
+            if (original)
+              conflicts.push(...formulaConflicts(patch, original, trial, base));
+            if (!conflicts.length) {
+              authored = trial;
               applied.push(patch);
             }
           }
