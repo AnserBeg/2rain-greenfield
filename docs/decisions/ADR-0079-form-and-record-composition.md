@@ -184,7 +184,9 @@ to **Shipping**, the ID still resolves but the expected parent fails. Return a t
 refusal distinguishing a moved member, retired target or changed contract, with the
 affected IDs and expected and observed locations when permitted. Never match by label,
 skip an edit or silently move a new field out of view. Unrelated compatible additions
-keep their declared placement. A new optional field under a hidden or collapsed section
+keep their declared placement.
+When Customize adds a field to an active layout, place it after its base-order predecessor in that field’s current section, or at the end of the first section if it has no predecessor.
+A new optional field under a hidden or collapsed section
 stays there and is listed in Customize. A new required field there returns a typed
 conflict, as does any new protected input under concealment. Show the conflict in Customize and leave the verified
 source release active until the owner reviews a fresh draft. Admit each kind to upgrade

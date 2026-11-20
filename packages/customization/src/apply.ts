@@ -1,4 +1,7 @@
-import { applyLayoutRevision } from './layout-revision.js';
+import {
+  applyLayoutRevision,
+  placeAddedLayoutField,
+} from './layout-revision.js';
 import type { LayoutDefinition } from '@north-star/canonical-model';
 import {
   CUSTOMIZABLE_FIRST_PARTY_ENTITY_LOCALS,
@@ -251,6 +254,10 @@ function applyOne(
         );
       }
       authored.calculatedDisplayFields = [...fields, patch.field];
+      placeAddedLayoutField(
+        authored as unknown as LayoutDefinition,
+        patch.field.fieldId,
+      );
       return null;
     }
     case 'addValidation': {
@@ -1808,6 +1815,7 @@ function addField(
       selectionId: `${namespace}:selection.${fieldLocal}_${plain ? String(query.queryType) : localOf(String(query.queryId))}`,
     });
   }
+  placeAddedLayoutField(authored as unknown as LayoutDefinition, fieldId);
   return null;
 }
 
