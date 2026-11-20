@@ -1,3 +1,4 @@
+import { BILLING_READER } from '../../canonical-model/src/billing.js';
 import {
   popupDeclarationProblem,
   popupBindingsProblem,
@@ -595,6 +596,14 @@ function verifyCompiledRelease(
   const surfaceReference = manifest.projections.find(
     (ref) => ref.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
   );
+  const billingPlans = isRecord(layoutDefinition)
+    ? layoutDefinition.billingPlans
+    : undefined;
+  if (billingPlans && !surfaceReference)
+    throw integrity(
+      'BILLING_PLAN_MISMATCH',
+      'Billing plans require a pinned surface manifest.',
+    );
   if (needsLayout && !surfaceReference)
     throw integrity(
       'LAYOUT_PROJECTION_CONTRACT_MISMATCH',
@@ -737,6 +746,19 @@ function verifyCompiledRelease(
       );
       if (popupProblem)
         throw integrity('POPUP_PROJECTION_CONTRACT_MISMATCH', popupProblem);
+      if (
+        canonicalize(payload.billingPlans ?? null) !==
+          canonicalize(billingPlans ?? null) ||
+        (billingPlans &&
+          reference.requiredRuntimeCapability.minimumVersion <
+            BILLING_READER) ||
+        (!billingPlans &&
+          reference.requiredRuntimeCapability.minimumVersion === BILLING_READER)
+      )
+        throw integrity(
+          'BILLING_PLAN_MISMATCH',
+          'The billing plan or reader floor disagrees with the release.',
+        );
       const problem = layoutDeclarationProblem(
         layoutDefinition,
         payload,
