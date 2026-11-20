@@ -108,7 +108,7 @@ export async function createPilotApplication(options: {
       undefined,
       {
         ...(documents ? { documents } : {}),
-        staffTransport: erpTransport(r, options.identityCa),
+        staffTransport: erpTransport(r, pool, options.identityCa),
         readSnapshot: (work, opts) => withReadSnapshot(pool, work, opts),
         requestWork: createRequestWorkProbe(),
       },

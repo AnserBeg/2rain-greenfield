@@ -5,7 +5,7 @@
     {
       "name": "documents-download-revocation",
       "claim": "A revoked byte-read grant withholds a previously issued attachment URL.",
-      "file": "db/migrations/0047_document_attachment_authority.sql",
+      "file": "db/migrations/0048_document_attachment_authority.sql",
       "original": "    AND platform.document_granted(scope, 'northstar.documents:permission.' || action, 'northstar.documents:resource.attachments')",
       "replacement": "    AND (action = 'download' OR platform.document_granted(scope, 'northstar.documents:permission.' || action, 'northstar.documents:resource.attachments'))",
       "test": {
@@ -41,7 +41,7 @@
     {
       "name": "documents-publication-audit",
       "claim": "Every published version is accounted for by a committed attachment audit row.",
-      "file": "db/migrations/0047_document_attachment_authority.sql",
+      "file": "db/migrations/0048_document_attachment_authority.sql",
       "original": "  INSERT INTO platform.document_attachment_audit (tenant_id,environment_id,link_id,operation_id)\n    VALUES (i.tenant_id,i.environment_id,published.link_id,replace(s.entity_id, ':entity.', ':operation.document_attach_'));\n",
       "replacement": "",
       "test": {
@@ -59,7 +59,7 @@
     {
       "name": "documents-stored-quota",
       "claim": "Publication refuses even a duplicate when the stored-byte quota is full.",
-      "file": "db/migrations/0047_document_attachment_authority.sql",
+      "file": "db/migrations/0048_document_attachment_authority.sql",
       "original": "    + s.byte_length > 104857600 THEN",
       "replacement": "    + s.byte_length > 2147483647 THEN",
       "test": {
