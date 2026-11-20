@@ -63,12 +63,10 @@ try {
   if (demoScanner && !managesContainer)
     throw new Error('The demo scanner requires a managed local demo database.');
   if (managesContainer) await ensureLocalPostgres();
-  const demoCluster = demoScanner ? await isolatedDemoCluster() : undefined;
+  if (demoScanner) await markIsolatedDemoDatabase();
   application = await startComposedApplication({
     databaseUrl,
-    ...(demoCluster
-      ? { documentDemoScanner: { systemIdentifier: demoCluster } }
-      : {}),
+    ...(demoScanner ? { documentDemoScanner: true } : {}),
     ...(workflowScheduler ? { workflowScheduler } : {}),
     host: process.env.HOST ?? '127.0.0.1',
     port: Number.parseInt(process.env.PORT ?? '4174', 10),
@@ -233,8 +231,8 @@ async function stopContainer(): Promise<void> {
   }
 }
 
-/** Match the actual database connection to the separately inspected local dev container. */
-async function isolatedDemoCluster(): Promise<string> {
+/** Only the inspected dev container can provision the database-owner marker. */
+async function markIsolatedDemoDatabase(): Promise<void> {
   const inspect = await execFileAsync(
     'docker',
     ['container', 'inspect', container.name],
@@ -262,23 +260,20 @@ async function isolatedDemoCluster(): Promise<string> {
     throw new Error(
       'The demo scanner requires the isolated local demo container.',
     );
-  const result = await execFileAsync(
-    'docker',
-    [
-      'exec',
-      container.name,
-      'psql',
-      '-XAt',
-      '-U',
-      'postgres',
-      '-d',
-      'postgres',
-      '-c',
-      'SELECT system_identifier FROM pg_control_system()',
-    ],
-    { encoding: 'utf8' },
-  );
-  return result.stdout.trim();
+  await docker([
+    'exec',
+    container.name,
+    'psql',
+    '-X',
+    '-v',
+    'ON_ERROR_STOP=1',
+    '-U',
+    'postgres',
+    '-d',
+    'postgres',
+    '-c',
+    "ALTER DATABASE postgres SET north_star.isolated_document_demo = 'on'",
+  ]);
 }
 
 async function docker(arguments_: readonly string[]): Promise<void> {

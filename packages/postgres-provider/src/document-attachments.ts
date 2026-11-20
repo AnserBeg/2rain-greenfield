@@ -13,6 +13,7 @@ import {
   type DocumentGateway,
   type DocumentDeadline,
   DOCUMENT_PAGE_SIZE,
+  documentDeadline,
   type DocumentMetadata,
   type DocumentTarget,
   type DocumentUpload,
@@ -106,8 +107,11 @@ export class PostgresDocumentGateway implements DocumentGateway {
   async list(
     view: RequestRuntimeView,
     target: DocumentTarget,
-    page: { after: string | null; limit: number },
-    deadline: DocumentDeadline,
+    page: { after: string | null; limit: number } = {
+      after: null,
+      limit: DOCUMENT_PAGE_SIZE,
+    },
+    deadline = documentDeadline(),
   ): Promise<readonly DocumentMetadata[]> {
     if (
       (page.after !== null && !uuid.test(page.after)) ||
@@ -143,7 +147,7 @@ export class PostgresDocumentGateway implements DocumentGateway {
     linkId: string,
     versionId: string,
     deliver: (metadata: DocumentMetadata, bytes: Buffer) => void,
-    deadline: DocumentDeadline,
+    deadline = documentDeadline(),
   ): Promise<void> {
     if (!uuid.test(linkId) || !uuid.test(versionId)) throw notFound();
     await this.withRecord(
@@ -175,7 +179,8 @@ export class PostgresDocumentGateway implements DocumentGateway {
     target: DocumentTarget,
     upload: DocumentUpload,
     receive: (maximumBytes: number) => Promise<Buffer>,
-    deadline: DocumentDeadline,
+    signal: AbortSignal,
+    deadline = documentDeadline(signal),
   ): Promise<DocumentMetadata> {
     if (!this.scanner || !this.scannerPool)
       throw new DocumentRequestError(

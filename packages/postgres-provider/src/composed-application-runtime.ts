@@ -141,7 +141,7 @@ export type ComposedApplicationRuntimeOptions = (
   readonly databaseUrl: string;
   readonly documents?: {
     readonly scanner?: DocumentScanner;
-    readonly demo?: { readonly systemIdentifier: string };
+    readonly demo?: true;
   };
   readonly environmentSlug?: string;
   readonly inventoryScopeProvisioning?: InventoryScopeProvisioning;
@@ -304,22 +304,19 @@ export async function createComposedApplicationRuntime(
   let modulePool: pg.Pool | undefined;
   let evidencePool: pg.Pool | undefined;
   try {
-    if (options.documents?.demo) {
-      const expected = options.documents.demo.systemIdentifier;
-      if (
-        !options.localDemoIdentity ||
-        !expected ||
+    if (
+      options.documents?.demo &&
+      (!options.localDemoIdentity ||
         !(
-          await adminPool.query(
-            "SELECT FROM pg_control_system() WHERE system_identifier::text = $1 AND current_database() = 'postgres'",
-            [expected],
-          )
-        ).rowCount
-      )
-        throw new TypeError(
-          'The demo scanner requires a verified isolated demo database.',
-        );
-    }
+          await adminPool.query(`SELECT FROM pg_catalog.pg_db_role_setting s
+        JOIN pg_catalog.pg_database d ON d.oid = s.setdatabase
+        WHERE d.datname = current_database() AND s.setrole = 0
+          AND 'north_star.isolated_document_demo=on' = ANY(s.setconfig)`)
+        ).rowCount)
+    )
+      throw new TypeError(
+        'The demo scanner requires a verified isolated demo database.',
+      );
     await migrate(adminPool, options.migrationsDirectory);
     if (
       options.localDemoIdentity &&

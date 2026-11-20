@@ -78,10 +78,10 @@ RETURNS jsonb LANGUAGE sql STABLE SET search_path = pg_catalog, pg_temp AS $$
     AND (action <> 'upload' OR platform.document_granted(scope, replace(entity, ':entity.', ':permission.document_attach_'), entity))
 $$;
 
-CREATE FUNCTION platform.document_metadata(v platform.document_versions, b platform.document_blobs)
+CREATE FUNCTION platform.document_metadata(v platform.document_versions, mime text, size_bytes integer)
 RETURNS jsonb LANGUAGE sql IMMUTABLE SET search_path = pg_catalog, pg_temp AS $$
   SELECT jsonb_build_object('linkId', v.link_id, 'versionId', v.version_id, 'fieldId', v.field_id,
-    'categoryId', v.category_id, 'fileName', v.file_name, 'contentType', b.content_type, 'byteLength', b.byte_length)
+    'categoryId', v.category_id, 'fileName', v.file_name, 'contentType', mime, 'byteLength', size_bytes)
 $$;
 
 CREATE INDEX document_versions_page ON platform.document_versions
@@ -90,7 +90,7 @@ CREATE INDEX document_versions_page ON platform.document_versions
 CREATE FUNCTION platform.list_document_versions(scope text, entity text, record_key uuid, after_link uuid, page_size integer)
 RETURNS TABLE(metadata jsonb) LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
   WITH allowed AS MATERIALIZED (SELECT platform.document_fields(scope, entity, 'view') AS fields)
-  SELECT platform.document_metadata(v,b) FROM allowed, platform.document_identity() i
+  SELECT platform.document_metadata(v,b.content_type,b.byte_length) FROM allowed, platform.document_identity() i
   JOIN platform.document_versions v USING (tenant_id, environment_id)
   JOIN platform.document_blobs b USING (tenant_id, environment_id, owner_scope, digest)
   WHERE fields IS NOT NULL AND (v.owner_scope,v.entity_id,v.record_id) = (scope,entity,record_key)
@@ -102,7 +102,7 @@ $$;
 CREATE FUNCTION platform.read_document_version(scope text, entity text, record_key uuid, link uuid, version uuid)
 RETURNS TABLE(metadata jsonb, bytes bytea) LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
   WITH allowed AS MATERIALIZED (SELECT platform.document_fields(scope, entity, 'download') AS fields)
-  SELECT platform.document_metadata(v,b), b.bytes FROM allowed, platform.document_identity() i
+  SELECT platform.document_metadata(v,b.content_type,b.byte_length), b.bytes FROM allowed, platform.document_identity() i
   JOIN platform.document_versions v USING (tenant_id, environment_id)
   JOIN platform.document_blobs b USING (tenant_id, environment_id, owner_scope, digest)
   WHERE fields IS NOT NULL AND (v.owner_scope,v.entity_id,v.record_id,v.link_id,v.version_id) = (scope,entity,record_key,link,version)
@@ -125,7 +125,7 @@ RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg
     IF (s.principal_id,s.owner_scope,s.entity_id,s.record_id,s.field_id,s.category_id,s.file_name,s.digest,s.content_type)
        IS DISTINCT FROM (i.principal_id,scope,entity,record_key,field,category,filename,hash,mime) THEN
       RAISE EXCEPTION 'This upload ID already has different input.' USING ERRCODE = 'D0409'; END IF;
-    SELECT platform.document_metadata(v,b) INTO receipt FROM platform.document_versions v
+    SELECT platform.document_metadata(v,b.content_type,b.byte_length) INTO receipt FROM platform.document_versions v
       JOIN platform.document_blobs b USING (tenant_id,environment_id,owner_scope,digest)
       WHERE (v.tenant_id,v.environment_id,v.upload_id) = (i.tenant_id,i.environment_id,upload);
     IF FOUND THEN RETURN receipt; END IF;
@@ -165,7 +165,7 @@ CREATE FUNCTION platform.publish_document_upload(upload uuid, hash text, policy 
   revision bigint, category_limit integer, retention text)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$ DECLARE
   i record; s platform.document_upload_staging; fields jsonb; field_limit integer; receipt jsonb;
-  published platform.document_versions; blob platform.document_blobs; BEGIN
+  published platform.document_versions; BEGIN
   SELECT * INTO i FROM platform.document_identity();
   PERFORM pg_advisory_xact_lock(hashtextextended('documents:' || i.tenant_id || ':' || i.environment_id, 0));
   SELECT * INTO STRICT s FROM platform.document_upload_staging
@@ -173,7 +173,7 @@ RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg
   fields := platform.document_fields(s.owner_scope, s.entity_id, 'upload', active_release);
   IF fields IS NULL OR (s.field_id IS NOT NULL AND NOT fields @> jsonb_build_array(jsonb_build_object('fieldId',s.field_id))) THEN
     RAISE EXCEPTION 'Unavailable file field' USING ERRCODE = 'D0404'; END IF;
-  SELECT platform.document_metadata(v,b) INTO receipt FROM platform.document_versions v
+  SELECT platform.document_metadata(v,b.content_type,b.byte_length) INTO receipt FROM platform.document_versions v
     JOIN platform.document_blobs b USING (tenant_id,environment_id,owner_scope,digest)
     WHERE (v.tenant_id,v.environment_id,v.upload_id) = (i.tenant_id,i.environment_id,upload);
   IF FOUND THEN RETURN receipt; END IF;
@@ -197,8 +197,7 @@ RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg
   -- Both paths write the complete admitted payload. The unique key retains one logical blob.
   INSERT INTO platform.document_blobs (tenant_id,environment_id,owner_scope,digest,content_type,bytes)
     VALUES (i.tenant_id,i.environment_id,s.owner_scope,hash,s.content_type,s.bytes)
-    ON CONFLICT (tenant_id,environment_id,owner_scope,digest) DO UPDATE SET bytes = excluded.bytes
-    RETURNING * INTO blob;
+    ON CONFLICT (tenant_id,environment_id,owner_scope,digest) DO UPDATE SET bytes = excluded.bytes;
   INSERT INTO platform.document_versions (tenant_id,environment_id,link_id,version_id,upload_id,owner_scope,
     digest,entity_id,record_id,record_revision,field_id,category_id,retention_class,file_name,actor_id,release_id,scan_policy_version)
     VALUES (i.tenant_id,i.environment_id,gen_random_uuid(),gen_random_uuid(),upload,s.owner_scope,
@@ -207,11 +206,11 @@ RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg
   INSERT INTO platform.document_attachment_audit (tenant_id,environment_id,link_id,operation_id)
     VALUES (i.tenant_id,i.environment_id,published.link_id,replace(s.entity_id, ':entity.', ':operation.document_attach_'));
   PERFORM platform.retire_document_upload_staging(upload);
-  RETURN platform.document_metadata(published,blob); END $$;
+  RETURN platform.document_metadata(published,s.content_type,s.byte_length); END $$;
 
 REVOKE ALL ON FUNCTION platform.reject_document_mutation(), platform.document_identity(),
   platform.document_granted(text,text,text), platform.document_fields(text,text,text,uuid),
-  platform.document_metadata(platform.document_versions,platform.document_blobs),
+  platform.document_metadata(platform.document_versions,text,integer),
   platform.list_document_versions(text,text,uuid,uuid,integer), platform.read_document_version(text,text,uuid,uuid,uuid),
   platform.stage_document_upload(text,text,uuid,uuid,text,text,text,text,bytea),
   platform.lock_document_scan(uuid,uuid,uuid,uuid,text,text), platform.record_document_scan(uuid,uuid,uuid,uuid,text,text,boolean),

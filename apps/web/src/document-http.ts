@@ -1,8 +1,10 @@
+import { requestDeadline } from '../../../packages/runtime/src/request-deadline.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { AuthenticatedRequestRuntimeEntryAdapter } from '@north-star/runtime/request-runtime-view';
 import {
   DocumentRequestError,
   DOCUMENT_PAGE_SIZE,
+  documentDeadline,
   type DocumentGateway,
 } from '../../../packages/runtime/src/document-gateway.js';
 import { DOCUMENT_RESPONSE_MILLISECONDS } from '../../../packages/canonical-model/src/documents.js';
@@ -47,7 +49,7 @@ export function mountDocumentHttp(
     if (upload) writes++;
     if (byteRead) reads++;
     const controller = new AbortController();
-    const expires = performance.now() + DOCUMENT_RESPONSE_MILLISECONDS;
+    const deadline = documentDeadline(controller.signal);
     let settle: () => void;
     const responseDone = new Promise<void>((resolve) => {
       settle = resolve;
@@ -67,14 +69,7 @@ export function mountDocumentHttp(
       if (response.headersSent) response.destroy();
       else documentError(response, 408, 'The file response expired.');
     }, DOCUMENT_RESPONSE_MILLISECONDS);
-    const remainingMilliseconds = () => {
-      controller.signal.throwIfAborted();
-      const remaining = expires - performance.now();
-      if (remaining <= 0)
-        throw new DocumentRequestError(408, 'The file response expired.');
-      return Math.ceil(remaining);
-    };
-    const deadline = { signal: controller.signal, remainingMilliseconds };
+    const { remainingMilliseconds } = deadline;
 
     try {
       const target = {
@@ -82,95 +77,101 @@ export function mountDocumentHttp(
         recordId: url.searchParams.get('record') ?? '',
         companyId: url.searchParams.get('company'),
       };
-      await entry.run({ headers: request.headers }, async (view) => {
-        remainingMilliseconds();
-        if (upload) {
-          const metadata = await gateway.upload(
-            view,
-            target,
-            {
-              retryKey: url.searchParams.get('retryKey') ?? '',
-              fieldId: url.searchParams.get('field'),
-              categoryId: url.searchParams.get('category'),
-              fileName: url.searchParams.get('fileName') ?? '',
-              contentType:
-                request.headers['content-type'] ?? 'application/octet-stream',
-            },
-            async (maximumBytes) => {
-              const length = request.headers['content-length'];
-              if (length && Number(length) > maximumBytes)
-                throw new DocumentRequestError(
-                  413,
-                  'The file exceeds this upload limit.',
-                );
-              const chunks: Buffer[] = [];
-              let size = 0;
-              for await (const chunk of request.iterator({
-                destroyOnReturn: false,
-              })) {
-                remainingMilliseconds();
-                const bytes = Buffer.isBuffer(chunk)
-                  ? chunk
-                  : Buffer.from(chunk);
-                size += bytes.length;
-                if (size > maximumBytes)
+      await requestDeadline.run(remainingMilliseconds, () =>
+        entry.run({ headers: request.headers }, async (view) => {
+          remainingMilliseconds();
+          if (upload) {
+            const metadata = await gateway.upload(
+              view,
+              target,
+              {
+                retryKey: url.searchParams.get('retryKey') ?? '',
+                fieldId: url.searchParams.get('field'),
+                categoryId: url.searchParams.get('category'),
+                fileName: url.searchParams.get('fileName') ?? '',
+                contentType:
+                  request.headers['content-type'] ?? 'application/octet-stream',
+              },
+              async (maximumBytes) => {
+                const length = request.headers['content-length'];
+                if (length && Number(length) > maximumBytes)
                   throw new DocumentRequestError(
                     413,
                     'The file exceeds this upload limit.',
                   );
-                chunks.push(bytes);
-              }
-              return Buffer.concat(chunks, size);
+                const chunks: Buffer[] = [];
+                let size = 0;
+                for await (const chunk of request.iterator({
+                  destroyOnReturn: false,
+                })) {
+                  remainingMilliseconds();
+                  const bytes = Buffer.isBuffer(chunk)
+                    ? chunk
+                    : Buffer.from(chunk);
+                  size += bytes.length;
+                  if (size > maximumBytes)
+                    throw new DocumentRequestError(
+                      413,
+                      'The file exceeds this upload limit.',
+                    );
+                  chunks.push(bytes);
+                }
+                return Buffer.concat(chunks, size);
+              },
+              controller.signal,
+              deadline,
+            );
+            remainingMilliseconds();
+            return json(response, 201, metadata);
+          }
+          if (list) {
+            const after = url.searchParams.get('after');
+            const limit = Number(
+              url.searchParams.get('limit') ?? DOCUMENT_PAGE_SIZE,
+            );
+            if (
+              !Number.isInteger(limit) ||
+              limit < 1 ||
+              limit > DOCUMENT_PAGE_SIZE
+            )
+              throw new DocumentRequestError(400, 'Invalid file page size.');
+            const rows = await gateway.list(
+              view,
+              target,
+              { after, limit: limit + 1 },
+              deadline,
+            );
+            if (rows.length > limit)
+              response.setHeader(
+                'x-next-document-link',
+                rows[limit - 1]!.linkId,
+              );
+            remainingMilliseconds();
+            return json(response, 200, rows.slice(0, limit));
+          }
+          await gateway.read(
+            view,
+            target,
+            url.searchParams.get('link') ?? '',
+            url.searchParams.get('version') ?? '',
+            (metadata, bytes) => {
+              remainingMilliseconds();
+              const filename = encodeURIComponent(metadata.fileName).replaceAll(
+                "'",
+                '%27',
+              );
+              response.setHeader('content-type', metadata.contentType);
+              response.setHeader('content-length', metadata.byteLength);
+              response.setHeader(
+                'content-disposition',
+                `${mode === 'preview' ? 'inline' : 'attachment'}; filename*=UTF-8''${filename}`,
+              );
+              response.end(bytes);
             },
             deadline,
           );
-          remainingMilliseconds();
-          return json(response, 201, metadata);
-        }
-        if (list) {
-          const after = url.searchParams.get('after');
-          const limit = Number(
-            url.searchParams.get('limit') ?? DOCUMENT_PAGE_SIZE,
-          );
-          if (
-            !Number.isInteger(limit) ||
-            limit < 1 ||
-            limit > DOCUMENT_PAGE_SIZE
-          )
-            throw new DocumentRequestError(400, 'Invalid file page size.');
-          const rows = await gateway.list(
-            view,
-            target,
-            { after, limit: limit + 1 },
-            deadline,
-          );
-          if (rows.length > limit)
-            response.setHeader('x-next-document-link', rows[limit - 1]!.linkId);
-          remainingMilliseconds();
-          return json(response, 200, rows.slice(0, limit));
-        }
-        await gateway.read(
-          view,
-          target,
-          url.searchParams.get('link') ?? '',
-          url.searchParams.get('version') ?? '',
-          (metadata, bytes) => {
-            remainingMilliseconds();
-            const filename = encodeURIComponent(metadata.fileName).replaceAll(
-              "'",
-              '%27',
-            );
-            response.setHeader('content-type', metadata.contentType);
-            response.setHeader('content-length', metadata.byteLength);
-            response.setHeader(
-              'content-disposition',
-              `${mode === 'preview' ? 'inline' : 'attachment'}; filename*=UTF-8''${filename}`,
-            );
-            response.end(bytes);
-          },
-          deadline,
-        );
-      });
+        }),
+      );
     } catch (error) {
       if (!response.headersSent) {
         const refusal =

@@ -70,6 +70,7 @@ export async function validateDocumentContent(
       throw new Error('content type mismatch');
     return detected;
   } catch {
+    signal?.throwIfAborted();
     throw new DocumentRequestError(
       415,
       'Choose a valid PDF, JPEG or PNG file.',
@@ -241,13 +242,16 @@ async function validatePdf(bytes: Buffer, signal?: AbortSignal): Promise<void> {
   const stop = () => {
     worker.kill('SIGKILL');
   };
+  const expires = performance.now() + 5000;
   const timer = setTimeout(stop, 5000);
   signal?.addEventListener('abort', stop, { once: true });
   try {
     await new Promise<void>((resolve, reject) => {
       worker.once('error', reject);
       worker.once('close', (code) =>
-        code === 0 ? resolve() : reject(new Error('PDF worker refused input')),
+        code === 0 && performance.now() < expires
+          ? resolve()
+          : reject(new Error('PDF worker refused input')),
       );
       // An early refusal closes the pipe; the worker exit supplies the verdict.
       worker.stdin.on('error', () => undefined);

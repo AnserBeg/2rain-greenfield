@@ -1,3 +1,5 @@
+import { Buffer } from 'node:buffer';
+import process from 'node:process';
 import { PDFCatalog, PDFParser, PDFPageLeaf, PDFPageTree } from 'pdf-lib';
 
 const disallowedPdfNames = new Set([
@@ -87,6 +89,14 @@ class BoundedPdfParser extends PDFParser {
   depth = 0;
   objects = 0;
   nodes = 0;
+  pages = 0;
+
+  parseDict() {
+    const value = super.parseDict();
+    if (value instanceof PDFPageLeaf && ++this.pages > 1000)
+      throw new Error('PDF page count');
+    return value;
+  }
 
   parseIndirectObject() {
     if (++this.objects > 10000) throw new Error('PDF object count');

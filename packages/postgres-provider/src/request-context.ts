@@ -1,3 +1,4 @@
+import { requestDeadline } from '../../runtime/src/request-deadline.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 import {
@@ -103,7 +104,7 @@ async function runTrustedTransaction<T>(
   pool: Pool,
   context: TrustedRequestContext,
   run: (client: PoolClient) => Promise<T>,
-  remainingMilliseconds?: () => number,
+  remainingMilliseconds = requestDeadline.getStore(),
 ): Promise<T> {
   const client = await pool.connect();
   let hasPrimaryError = false;
