@@ -95,6 +95,7 @@ test('booking commitment writer', async (t) => {
         input: object,
         who = principal,
         fence = activeFence,
+        channel = 'UI',
       ) => {
         await issuer.query(
           'SELECT platform.attest_booking_approval($1,$2,$3,$4,$4,$5,$6,$7,$8,$9,$10)',
@@ -108,7 +109,7 @@ test('booking commitment writer', async (t) => {
             action,
             key,
             input,
-            'UI',
+            channel,
           ],
         );
       };
@@ -120,13 +121,14 @@ test('booking commitment writer', async (t) => {
         kind = 'unit',
         who = principal,
         approval: string | null | undefined = undefined,
+        channel = 'UI',
       ): Promise<Result> => {
         const action =
           'example.booking:operation.' + verb.toLowerCase() + '_' + kind;
         let grantId = approval;
         if (verb !== 'hold' && approval === undefined) {
           grantId = randomUUID();
-          await grant(grantId, action, key, args, who);
+          await grant(grantId, action, key, args, who, activeFence, channel);
         }
         const { rows } = await client.query<{ result: Result }>(
           'SELECT platform.booking_apply($1,$6,$2,$3,$4,$5) AS result',
@@ -137,6 +139,7 @@ test('booking commitment writer', async (t) => {
             args,
             {
               ...actor,
+              channel,
               executionPrincipal: { kind: 'HUMAN', principalId: who },
               approvalGrantId: grantId,
             },
@@ -489,9 +492,14 @@ test('booking commitment writer', async (t) => {
             );
             await right.query('SET ROLE north_star_module_runtime');
             try {
-              await right.query(
-                'SELECT north_star_internal.require_record_archivable($1,$2)',
-                ['example.booking:entity.visit', owner(18)],
+              // The archive guard is integrity, not disclosure: it refuses
+              // whatever the caller can see (ADR-0082 archive rule).
+              await assert.rejects(
+                right.query(
+                  'SELECT north_star_internal.require_record_archivable($1,$2)',
+                  ['example.booking:entity.visit', owner(18)],
+                ),
+                /booking.activeAllocation/u,
               );
               await assert.rejects(
                 right.query(
@@ -688,15 +696,16 @@ test('booking commitment writer', async (t) => {
         },
       );
       await t.test(
-        'a parent used by another operation is locked before its child',
+        'endpoints lock descendants before ancestors, whatever their entity ids',
         async () => {
           const adminPid = Number(
             (await admin.query('SELECT pg_backend_pid() AS pid')).rows[0]!.pid,
           );
           await admin.query('BEGIN');
           const row = owner(26);
+          // entity.account (the parent) sorts before entity.visit (the child).
           await admin.query(
-            'SELECT FROM north_star_module.test_booking_parents WHERE record_id=$1 FOR UPDATE',
+            'SELECT FROM north_star_module.test_booking_owners WHERE record_id=$1 FOR UPDATE',
             [row],
           );
           const writer = call(
@@ -708,13 +717,169 @@ test('booking commitment writer', async (t) => {
           try {
             await waitForRight(adminPid);
             await admin.query(
-              'SELECT FROM north_star_module.test_booking_owners WHERE record_id=$1 FOR UPDATE NOWAIT',
+              'SELECT FROM north_star_module.test_booking_parents WHERE record_id=$1 FOR UPDATE NOWAIT',
               [row],
             );
           } finally {
             await admin.query('ROLLBACK');
           }
           assert.equal((await writer).state, 'hold');
+        },
+      );
+      await t.test(
+        'a booking and an ordinary child update share one lock order',
+        async () => {
+          const adminPid = Number(
+            (await admin.query('SELECT pg_backend_pid() AS pid')).rows[0]!.pid,
+          );
+          const row = owner(37);
+          // The generic module writer: the child's ownership row, the child
+          // itself, then its parent FOR SHARE (readRecordCompany, loadRawRecord,
+          // requireRelationTarget). The parent's entity id sorts first.
+          await admin.query('BEGIN');
+          let writer: Promise<Result> | undefined;
+          try {
+            await admin.query(
+              'SELECT FROM north_star_module.test_booking_owners WHERE record_id=$1 FOR NO KEY UPDATE',
+              [row],
+            );
+            await admin.query(
+              'SELECT FROM north_star_module.test_booking_owners WHERE record_id=$1 FOR UPDATE',
+              [row],
+            );
+            writer = call(right, 'hold', {
+              ...hold(37, 2, window('10:00', '11:00')),
+              expectedOwnerRevision: 2,
+            });
+            void writer.catch(() => undefined);
+            await waitForRight(adminPid);
+            await admin.query(
+              'SELECT FROM north_star_module.test_booking_parents WHERE record_id=$1 FOR SHARE',
+              [row],
+            );
+            await admin.query(
+              'UPDATE north_star_module.test_booking_owners SET revision=revision+1 WHERE record_id=$1',
+              [row],
+            );
+            await admin.query('COMMIT');
+          } catch (error) {
+            await admin.query('ROLLBACK');
+            throw error;
+          }
+          assert.equal((await writer).state, 'hold');
+        },
+      );
+      await t.test(
+        'an active allocation refuses archive whatever grant authorized it',
+        async () => {
+          // The archiver's only grant names entity.account, not the visit.
+          const archiver = fixtureId('archiver');
+          const held = await call(
+            left,
+            'hold',
+            hold(38, 3, window('10:00', '11:00')),
+          );
+          const diary = (
+            await admin.query(
+              'SELECT resource_key FROM platform.booking_resources WHERE (entity_id,record_id)=($1,$2)',
+              ['example.booking:entity.asset', resource(3)],
+            )
+          ).rows[0]!.resource_key;
+          const endpoints = [
+            ['example.booking:entity.visit', owner(38)],
+            ['example.booking:entity.asset', resource(3)],
+          ];
+          await right.query(
+            "SELECT set_config('north_star.principal_id',$1,false)",
+            [archiver],
+          );
+          try {
+            for (const endpoint of endpoints) {
+              await right.query('BEGIN');
+              try {
+                await right.query(
+                  'SELECT platform.lock_record_allocations($1,$2)',
+                  endpoint,
+                );
+                await assert.rejects(
+                  admin.query(
+                    'SELECT FROM platform.booking_resources WHERE resource_key=$1 FOR UPDATE NOWAIT',
+                    [diary],
+                  ),
+                  { code: '55P03' },
+                );
+              } finally {
+                await right.query('ROLLBACK');
+              }
+            }
+            await right.query('SET ROLE north_star_module_runtime');
+            try {
+              for (const endpoint of endpoints)
+                await assert.rejects(
+                  right.query(
+                    'SELECT north_star_internal.require_record_archivable($1,$2)',
+                    endpoint,
+                  ),
+                  /booking.activeAllocation/u,
+                );
+            } finally {
+              await right.query('SET ROLE north_star_runtime');
+            }
+          } finally {
+            await right.query(
+              "SELECT set_config('north_star.principal_id',$1,false)",
+              [principal],
+            );
+          }
+          assert.equal(
+            (await call(left, 'cancel', terms(38, held))).state,
+            'cancelled',
+          );
+        },
+      );
+      await t.test(
+        'a workflow hold needs an attested human decision',
+        async () => {
+          const args = hold(39, 2, window('12:00', '13:00')),
+            key = randomUUID(),
+            id = randomUUID();
+          await assert.rejects(
+            call(
+              left,
+              'hold',
+              args,
+              key,
+              'unit',
+              principal,
+              undefined,
+              'WORKFLOW',
+            ),
+            /booking.approvalRequired/u,
+          );
+          await grant(
+            id,
+            'example.booking:operation.hold_unit',
+            key,
+            args,
+            principal,
+            activeFence,
+            'WORKFLOW',
+          );
+          assert.equal(
+            (
+              await call(
+                left,
+                'hold',
+                args,
+                key,
+                'unit',
+                principal,
+                id,
+                'WORKFLOW',
+              )
+            ).state,
+            'hold',
+          );
         },
       );
       await t.test(

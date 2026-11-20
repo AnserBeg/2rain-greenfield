@@ -52,6 +52,13 @@ BEGIN
           (t,e,gen_random_uuid(),md5('scoped')::uuid,md5('shared-reader')::uuid,NULL);
   INSERT INTO platform.current_policy_permission_grants(tenant_id,environment_id,role_id,permission_id,resource_id)
     VALUES(t,e,md5('shared-reader')::uuid,'example.booking:permission.asset',target_entity);
+  -- An archiver of company0 visits whose only grant names a different resource.
+  INSERT INTO platform.current_policy_roles(tenant_id,environment_id,role_id,role_key)
+    VALUES(t,e,md5('visit-archiver')::uuid,'visit-archiver');
+  INSERT INTO platform.current_policy_memberships(tenant_id,environment_id,membership_id,principal_id,role_id,legal_entity_id)
+    VALUES(t,e,gen_random_uuid(),md5('archiver')::uuid,md5('visit-archiver')::uuid,md5('company0')::uuid);
+  INSERT INTO platform.current_policy_permission_grants(tenant_id,environment_id,role_id,permission_id,resource_id)
+    VALUES(t,e,md5('visit-archiver')::uuid,'example.booking:permission.archive_visit','example.booking:entity.account');
   INSERT INTO north_star_module.test_booking_resources(tenant_id,environment_id,record_id)
     SELECT t,e,md5('resource'||n)::uuid FROM generate_series(1,20) n;
   FOREACH kind IN ARRAY ARRAY['unit','pool'] LOOP
