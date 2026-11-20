@@ -1,20 +1,32 @@
 import type { TrustedRequestContext } from '@north-star/runtime';
 import pg, { type Pool } from 'pg';
-import { PostgresWorkflowConsumer } from './workflow-consumer.js';
-import { PostgresWorkflowExecution } from './workflow-execution.js';
+import { withTrustedRequestTransaction } from './request-context.js';
+import {
+  PostgresWorkflowConsumer,
+  withWorkflowTransaction,
+} from './workflow-consumer.js';
+import {
+  PostgresWorkflowExecution,
+  WorkflowRemedyRefused,
+} from './workflow-execution.js';
 import { PostgresWorkflowGateway } from './workflow-gateway.js';
 
 /** One scheduler pass. Separate pools keep enumeration off the request role. */
 export class PostgresWorkflowWorker {
   readonly #consumer: PostgresWorkflowConsumer;
   readonly #execution: PostgresWorkflowExecution;
+  readonly #gateway: PostgresWorkflowGateway;
 
-  constructor(workerPool: Pool, runtimePool: Pool) {
+  constructor(
+    private readonly workerPool: Pool,
+    private readonly runtimePool: Pool,
+  ) {
     this.#consumer = new PostgresWorkflowConsumer(workerPool);
+    this.#gateway = new PostgresWorkflowGateway(runtimePool);
     this.#execution = new PostgresWorkflowExecution(
       workerPool,
       runtimePool,
-      new PostgresWorkflowGateway(runtimePool),
+      this.#gateway,
     );
   }
 
@@ -38,6 +50,87 @@ export class PostgresWorkflowWorker {
     action: 'retry' | 'cancel',
   ) {
     return this.#execution.remedy(operator, runIds, action);
+  }
+
+  async worklist(operator: TrustedRequestContext) {
+    const approvals = await withTrustedRequestTransaction(
+      this.runtimePool,
+      operator,
+      async (client) =>
+        (
+          await client.query<{
+            runId: string;
+            cursor: number;
+            fence: string;
+            digest: string;
+            companyId: string;
+            summary: string;
+            operationId: string;
+            input: unknown;
+          }>(
+            `SELECT run_id AS "runId", cursor, fence::text, plan_digest AS digest,
+                  plan.value->>'companyId' AS "companyId",
+                  plan.value #>> '{request,summary}' AS summary,
+                  plan.value #>> '{request,operationId}' AS "operationId",
+                  plan.value #> '{request,input}' AS input
+             FROM platform.workflow_approval_worklist() AS approval
+            CROSS JOIN LATERAL (SELECT convert_from(approval.plan, 'UTF8')::jsonb AS value) AS plan`,
+          )
+        ).rows,
+    );
+    const suspended = await this.#gateway
+      .withRemedyAuthority(operator, () =>
+        withWorkflowTransaction(
+          this.workerPool,
+          {
+            tenant_id: operator.tenantId,
+            environment_id: operator.environmentId,
+          },
+          async (client) =>
+            (
+              await client.query<{
+                runId: string;
+                workflowId: string;
+                reason: string;
+              }>(
+                `SELECT run_id AS "runId", workflow_id AS "workflowId", reason
+             FROM platform.workflow_runs
+            WHERE tenant_id = $1 AND environment_id = $2 AND status = 'SUSPENDED'
+            ORDER BY created_at, run_id LIMIT 100`,
+                [operator.tenantId, operator.environmentId],
+              )
+            ).rows,
+        ),
+      )
+      .catch((error: unknown) => {
+        if (error instanceof WorkflowRemedyRefused) return [];
+        throw error;
+      });
+    return { approvals, suspended };
+  }
+
+  decide(
+    operator: TrustedRequestContext,
+    selection: { runId: string; cursor: number; fence: string; digest: string },
+    decision: 'APPROVED' | 'DECLINED',
+  ) {
+    return withTrustedRequestTransaction(
+      this.runtimePool,
+      operator,
+      async (client) =>
+        (
+          await client.query<{ decided: boolean }>(
+            'SELECT platform.workflow_decide_approval($1, $2, $3, $4, $5) AS decided',
+            [
+              selection.runId,
+              selection.cursor,
+              selection.fence,
+              selection.digest,
+              decision,
+            ],
+          )
+        ).rows[0]!.decided,
+    );
   }
 }
 
@@ -82,7 +175,7 @@ function validateRoleUrl(
 export function startWorkflowScheduler(
   config: WorkflowSchedulerConfig,
   reportFailure: () => void,
-): () => Promise<void> {
+) {
   validateRoleUrl(config.workerDatabaseUrl, 'north_star_workflow_worker');
   validateRoleUrl(config.runtimeDatabaseUrl, 'north_star_runtime');
   const workerPool = new pg.Pool({
@@ -97,13 +190,14 @@ export function startWorkflowScheduler(
   });
   workerPool.on('error', reportFailure);
   runtimePool.on('error', reportFailure);
-  const stop = superviseWorkflowPolls(
-    new PostgresWorkflowWorker(workerPool, runtimePool),
-    reportFailure,
-  );
-  return async () => {
-    await stop();
-    await Promise.all([workerPool.end(), runtimePool.end()]);
+  const worker = new PostgresWorkflowWorker(workerPool, runtimePool);
+  const stop = superviseWorkflowPolls(worker, reportFailure);
+  return {
+    worker,
+    async close() {
+      await stop();
+      await Promise.all([workerPool.end(), runtimePool.end()]);
+    },
   };
 }
 

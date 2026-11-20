@@ -174,7 +174,7 @@ export async function startComposedApplication(
   let seededRecords: readonly ComposedApplicationSeedReceipt[];
   let server: Server | undefined;
   let assistant: AssistantEndpoint | undefined;
-  let stopWorkflowScheduler: (() => Promise<void>) | undefined;
+  let workflows: ReturnType<typeof startWorkflowScheduler> | undefined;
   // The Host values the assistant answers to, known once the server listens;
   // nothing is accepted before then (end review X10).
   let authorities: readonly string[] = [];
@@ -247,6 +247,11 @@ export async function startComposedApplication(
             },
           })
         : undefined;
+    if (options.workflowScheduler && runtime.identityMode === 'LOCAL_DEMO') {
+      workflows = startWorkflowScheduler(options.workflowScheduler, () => {
+        process.stderr.write('WORKFLOW_SCHEDULER_POLL_FAILED\n');
+      });
+    }
     server = createSurfaceRuntimeServer(
       runtime.entry,
       {
@@ -264,6 +269,7 @@ export async function startComposedApplication(
           runtime.readSnapshot(work, snapshotOptions),
         requestWork: createRequestWorkProbe(),
         ...(assistant ? { assistant } : {}),
+        ...(workflows ? { workflowApprovals: workflows.worker } : {}),
       },
     );
     const listener = server;
@@ -274,17 +280,10 @@ export async function startComposedApplication(
         resolve();
       });
     });
-    if (options.workflowScheduler) {
-      stopWorkflowScheduler = startWorkflowScheduler(
-        options.workflowScheduler,
-        () => {
-          process.stderr.write('WORKFLOW_SCHEDULER_POLL_FAILED\n');
-        },
-      );
-    }
   } catch (error) {
     server?.close();
     assistant?.close();
+    await workflows?.close();
     await closeCustomization();
     await runtime.close();
     throw error;
@@ -296,7 +295,7 @@ export async function startComposedApplication(
         resolve();
       });
     });
-    await stopWorkflowScheduler?.();
+    await workflows?.close();
     await closeCustomization();
     await runtime.close();
     throw new Error('composed application server has no TCP address');
@@ -309,10 +308,10 @@ export async function startComposedApplication(
       if (closed) return;
       closed = true;
       assistant?.close();
-      await stopWorkflowScheduler?.();
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
       });
+      await workflows?.close();
       await closeCustomization();
       await runtime.close();
     },
@@ -366,7 +365,11 @@ export async function readCompiledApplication(): Promise<unknown> {
 export async function openComposedApplicationRuntime(
   options: Pick<
     ComposedApplicationServerOptions,
-    'compiledApplication' | 'databaseUrl' | 'rollbackReleaseRoot' | 'tenantSlug'
+    | 'compiledApplication'
+    | 'databaseUrl'
+    | 'rollbackReleaseRoot'
+    | 'tenantSlug'
+    | 'workflowScheduler'
   >,
 ): Promise<ComposedApplicationRuntime> {
   let compiledApplication: unknown;
@@ -397,6 +400,9 @@ export async function openComposedApplicationRuntime(
     databaseUrl: options.databaseUrl,
     inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
     localDemoIdentity: true,
+    ...(options.workflowScheduler
+      ? { localDemoWorkflowApprovals: true as const }
+      : {}),
     migrationsDirectory: new URL('../../../db/migrations/', import.meta.url)
       .pathname,
     providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
