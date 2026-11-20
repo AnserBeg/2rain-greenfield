@@ -578,11 +578,13 @@ test(
           );
           record.searchParams.set('record', orderId);
           record.searchParams.set(
-            id('parameter', 'purchase_order_get_legal_entity_scope'),
+            id('parameter', 'commercial_purchase_order_get_legal_entity_scope'),
             companyId,
           );
+          const recordPage = await fetch(record);
+          assert.equal(recordPage.status, 200);
           assert.ok(
-            (await (await fetch(record)).text()).includes(expectedDate),
+            (await recordPage.text()).includes(expectedDate),
             'Record did not display the expected business day',
           );
           assert.ok(
