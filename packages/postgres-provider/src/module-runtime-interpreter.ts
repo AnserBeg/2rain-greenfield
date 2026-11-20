@@ -1,3 +1,20 @@
+import {
+  addressColumns,
+  addressScalars,
+  hasAddress,
+  isAddressComponent,
+  readAddress,
+} from './address-storage.js';
+import {
+  addressColumnId,
+  addressComponents,
+  addressJson,
+} from '@north-star/canonical-model';
+import { enqueueAddress } from './address-geocodes.js';
+import {
+  AddressWriteSchema,
+  SavedAddressSchema,
+} from '@north-star/canonical-model';
 import { createHash, randomUUID } from 'node:crypto';
 
 import {
@@ -480,7 +497,7 @@ export class PostgresModuleRuntimeInterpreter
           currentEntity,
           parsedInput,
         );
-        return withModuleRuntimeRole(client, async () => {
+        const accepted = await withModuleRuntimeRole(client, async () => {
           try {
             await requireActiveCreateLegalEntity(
               client,
@@ -491,13 +508,64 @@ export class PostgresModuleRuntimeInterpreter
             );
             // Assigned before the change is prepared, so the change document
             // records the number the record is created with.
-            const input = await assignDocumentNumbers(
+            const numbered = await assignDocumentNumbers(
               client,
               currentEntity,
               request.definition,
               parsedInput,
               this.#documentNumbers,
             );
+            // The host assigns a new field revision inside the idempotent write.
+            // Retrying the operation returns the original revision through its receipt.
+            const addressInputs = currentEntity.columns.filter(
+              (c) =>
+                numbered.patch[c.canonicalFieldId] != null &&
+                hasAddress(currentEntity, c.canonicalFieldId),
+            );
+            const prior =
+              addressInputs.length &&
+              request.definition.effect.kind === 'updateRecordEffect'
+                ? await loadRawRecord(
+                    client,
+                    currentEntity,
+                    numbered.recordId,
+                    false,
+                    [],
+                    true,
+                  )
+                : null;
+            const requests = addressInputs.map((c) => {
+              const { locateFor, ...value } = AddressWriteSchema.parse(
+                numbered.patch[c.canonicalFieldId],
+              );
+              const old = SavedAddressSchema.safeParse(
+                prior?.values[c.canonicalFieldId],
+              ).data;
+              if (old) {
+                const { revision, ...existing } = old;
+                if (canonicalize(existing) === canonicalize(value))
+                  return {
+                    fieldId: c.canonicalFieldId,
+                    value: { ...value, revision },
+                  };
+              }
+              return {
+                fieldId: c.canonicalFieldId,
+                locateFor,
+                value: { ...value, revision: randomUUID() },
+              };
+            });
+            const input = requests.length
+              ? {
+                  ...numbered,
+                  patch: {
+                    ...numbered.patch,
+                    ...Object.fromEntries(
+                      requests.map((r) => [r.fieldId, addressJson(r.value)]),
+                    ),
+                  },
+                }
+              : numbered;
             const preparation = await prepareMutation(
               client,
               request,
@@ -519,10 +587,20 @@ export class PostgresModuleRuntimeInterpreter
               currentStorage,
               currentEntity,
               request,
-              input,
+              expandAddressInputs(currentEntity, input),
               request.readBackDefinition.selections,
             );
             return Object.freeze({
+              addresses: requests.filter((r) => !r.value.pin),
+              owner:
+                requests.length && currentEntity.legalEntity
+                  ? await readRecordCompany(
+                      client,
+                      currentEntity,
+                      input.recordId,
+                    )
+                  : null,
+              outboxId: ids.outboxId,
               command: acceptedCommand(
                 { ...request, policyVersion },
                 preparation,
@@ -539,6 +617,34 @@ export class PostgresModuleRuntimeInterpreter
             );
           }
         });
+        if (
+          request.channel === 'UI' &&
+          this.#documentNumbers !== 'verificationSentinel'
+        ) {
+          for (const address of accepted.addresses) {
+            const selection = address.locateFor;
+            if (
+              selection &&
+              (!accepted.owner || selection.companyId === accepted.owner)
+            )
+              await enqueueAddress(
+                client,
+                request.view,
+                selection.companyId,
+                currentEntity.entityId,
+                parsedInput.recordId,
+                address.fieldId,
+                address.value.revision,
+                accepted.outboxId,
+                selection.installationId,
+                addressScalars(address.value).sourceDigest!,
+              );
+          }
+        }
+        return {
+          command: accepted.command,
+          mutationResult: accepted.mutationResult,
+        };
       },
       request.definition.effect.kind === 'archiveRecordEffect'
         ? async (client) => {
@@ -1448,6 +1554,22 @@ async function assignDocumentNumbers(
     patch[field.fieldId] = number;
   }
   return Object.freeze({ ...input, patch: Object.freeze(patch) });
+}
+
+function expandAddressInputs(
+  entity: StorageEntity,
+  input: MutationInput,
+): MutationInput {
+  const patch = { ...input.patch };
+  for (const [id, value] of Object.entries(input.patch)) {
+    if (!hasAddress(entity, id)) continue;
+    const parts = addressScalars(
+      value === null ? null : SavedAddressSchema.parse(value),
+    );
+    for (const component of addressComponents)
+      patch[addressColumnId(id, component)] = parts[component];
+  }
+  return { ...input, patch };
 }
 
 async function insertRecord(
@@ -5089,6 +5211,21 @@ function foldedVisibleFieldExpression(
   column: StorageEntity['columns'][number],
   tableAlias: string,
 ): string {
+  if (hasAddress(entity, column.canonicalFieldId)) {
+    const parts = addressColumns(entity, column.canonicalFieldId);
+    const text = [
+      parts.text,
+      parts.line1,
+      parts.line2,
+      parts.line3,
+      parts.line4,
+      parts.city,
+      parts.region,
+      parts.postalCode,
+      parts.country,
+    ];
+    return `north_star_module.${unicodeCaseFoldFunctionName}(concat_ws(' ', ${text.map((name) => qualified(tableAlias, name)).join(', ')}))`;
+  }
   if (
     column.fieldContract.fieldKind === 'textFieldType' &&
     (entity.foldedColumns ?? []).some(
@@ -5878,10 +6015,16 @@ function rawRecord(entity: StorageEntity, row: QueryResultRow): RawRecord {
     throw failure('MODULE_RECORD_MALFORMED', 'record revision is invalid');
   }
   const values = Object.fromEntries(
-    entity.columns.map((column) => [
-      column.canonicalFieldId,
-      immutableDatabaseValue(row[column.physicalName]),
-    ]),
+    entity.columns
+      .filter((column) => !isAddressComponent(entity, column.canonicalFieldId))
+      .map((column) => [
+        column.canonicalFieldId,
+        hasAddress(entity, column.canonicalFieldId)
+          ? addressJson(
+              readAddress(addressColumns(entity, column.canonicalFieldId), row),
+            )
+          : immutableDatabaseValue(row[column.physicalName]),
+      ]),
   );
   return Object.freeze({
     archivedAt: (row[entity.archive.archivedAtColumn] ?? null) as
@@ -6472,6 +6615,9 @@ function validateFieldValue(
   }
   let valid = false;
   switch (field.fieldKind) {
+    case 'addressFieldType':
+      valid = AddressWriteSchema.safeParse(value).success;
+      break;
     case 'booleanFieldType':
       valid = typeof value === 'boolean';
       break;
@@ -6937,6 +7083,10 @@ function databaseValue(value: ImmutableJsonValue): unknown {
 }
 
 function immutableDatabaseValue(value: unknown): ImmutableJsonValue {
+  if (isRecord(value)) {
+    const address = SavedAddressSchema.safeParse(value);
+    if (address.success) return addressJson(address.data);
+  }
   if (
     value === null ||
     typeof value === 'boolean' ||

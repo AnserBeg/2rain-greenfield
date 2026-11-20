@@ -1,4 +1,5 @@
 import { PopupRevisionSchema } from './popup-actions.js';
+import { AddressBindingSchema, MapPlacementSchema } from './address.js';
 import { BillingPlansSchema } from './billing.js';
 import { BookingOperationBinding } from './booking.js';
 import { SurfaceLayoutSchema } from './layout.js';
@@ -485,7 +486,7 @@ const enumFieldType = z.strictObject({
   schemaVersion: nodeVersion,
 });
 
-export const FieldTypeSchema = z.discriminatedUnion('kind', [
+const ScalarFieldTypeSchema = z.discriminatedUnion('kind', [
   textFieldType,
   booleanFieldType,
   integerFieldType,
@@ -497,6 +498,19 @@ export const FieldTypeSchema = z.discriminatedUnion('kind', [
   quantityFieldType,
   enumFieldType,
 ]);
+export const FieldTypeSchema = z.discriminatedUnion('kind', [
+  ...ScalarFieldTypeSchema.options,
+  z.strictObject({
+    kind: z.literal('addressFieldType'),
+    schemaVersion: z.literal('v6'),
+  }),
+]);
+// Legacy package parsers remain closed. The projection lowerer shares its
+// internal field representation with v6, including the compound Address kind.
+const legacyFieldType = FieldTypeSchema.refine(
+  (t): boolean => t.kind !== 'addressFieldType',
+  'Address requires v6.',
+);
 export type FieldType = z.infer<typeof FieldTypeSchema>;
 
 const normalizedPackageDefinition = z.strictObject({
@@ -598,7 +612,7 @@ const normalizedFieldDefinition = z.strictObject({
   defaultValue: CanonicalScalarSchema.optional(),
   entity: CanonicalReferenceSchema,
   fieldId: CanonicalIdSchema,
-  fieldType: FieldTypeSchema,
+  fieldType: legacyFieldType,
   kind: z.literal('fieldDefinition'),
   label: LabelSchema,
   lifecycle: z.enum(['active', 'retired']),
@@ -2246,7 +2260,7 @@ const authoredQueryParameterDefinition = z.strictObject({
 });
 const normalizedQueryParameterDefinition =
   authoredQueryParameterDefinition.extend({
-    parameterType: FieldTypeSchema,
+    parameterType: ScalarFieldTypeSchema,
   });
 const authoredQueryAggregateSelection = z.strictObject({
   field: CanonicalReferenceSchema,
@@ -2355,7 +2369,7 @@ const legalEntityReferenceParameterType = z.strictObject({
 const normalizedV4QueryParameterDefinition =
   authoredQueryParameterDefinition.extend({
     parameterType: z.union([
-      FieldTypeSchema,
+      ScalarFieldTypeSchema,
       legalEntityReferenceParameterType,
     ]),
   });
@@ -2687,10 +2701,12 @@ const assistantConfirmation = {
   requiresAssistantConfirmation: z.literal(true).optional(),
 };
 const normalizedV6FieldDefinition = normalizedV3FieldDefinition.extend({
+  fieldType: FieldTypeSchema,
   ...assistantConfirmation,
   numbering: FieldNumberingSchema.optional(),
 });
 const authoredV6FieldDefinition = authoredV3FieldDefinition.extend({
+  fieldType: FieldTypeSchema,
   ...assistantConfirmation,
   numbering: FieldNumberingSchema.optional(),
 });
@@ -2893,6 +2909,8 @@ const v6NormalizedShape = {
   entities: z.array(normalizedV6EntityDefinition),
   fields: z.array(normalizedV6FieldDefinition),
   operations: z.array(normalizedV6OperationDefinition),
+  connectorBindings: z.array(AddressBindingSchema).min(1).max(128).optional(),
+  mapPlacements: z.array(MapPlacementSchema).min(1).max(128).optional(),
   billingPlans: BillingPlansSchema.optional(),
   documentFields,
   documentCategories,
@@ -3028,6 +3046,8 @@ const v6AuthoredShape = {
   entities: z.array(authoredV6EntityDefinition),
   fields: z.array(authoredV6FieldDefinition),
   operations: z.array(authoredV6OperationDefinition),
+  connectorBindings: z.array(AddressBindingSchema).min(1).max(128).optional(),
+  mapPlacements: z.array(MapPlacementSchema).min(1).max(128).optional(),
   billingPlans: BillingPlansSchema.optional(),
   documentFields,
   documentCategories,

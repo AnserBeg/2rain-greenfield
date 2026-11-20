@@ -440,7 +440,7 @@ test(
   { timeout: 600_000 },
   async () => {
     await withArchivedCustomizationRuntime(
-      'eda6d12ffc4d38ba84146b712c3bbeed1eabb729',
+      '032b87c00df3ee22184685050b9cecc01c62cc59',
       async (run) => {
         await assertArchivedTenantEnvelope(run);
         await withEphemeralPostgres(
@@ -512,7 +512,7 @@ test(
               assert.equal(refusal.code, 'UNSUPPORTED_RUNTIME_CAPABILITY');
               assert.match(
                 refusal.message ?? '',
-                /surface-manifest requires version 31 and this runtime supports 30/u,
+                /surface-manifest requires version 33 and this runtime supports 32/u,
               );
               const option = (
                 await opened.service.targets()
