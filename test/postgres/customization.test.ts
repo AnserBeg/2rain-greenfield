@@ -1209,6 +1209,20 @@ test(
               );
               assert.match(cli, /Platform upgrade refused: KIND_NOT_ADMITTED/u);
               assert.match(cli, /futurePatchKind/u);
+              const report = status.upgradeRefusal?.report;
+              assert.ok(report);
+              assert.deepEqual(
+                JSON.parse(
+                  cli.split('\n').find((line) => line.startsWith('{'))!,
+                ),
+                report,
+              );
+              assert.equal(report.sourceReleaseId, source);
+              assert.equal(report.sourceFence, String(status.activeFence));
+              assert.deepEqual(
+                report.findings.map((f) => [f.patchId, f.code, f.subject]),
+                [[patchId, 'KIND_NOT_ADMITTED', kind]],
+              );
               await assert.rejects(
                 opened.service.rollback(base),
                 /live release changed/iu,
@@ -1450,6 +1464,7 @@ test(
           assert.ok(prepared?.status === 'drafted', JSON.stringify(prepared));
           assert.equal(boot.activeReleaseId, source);
           assert.ok(prepared.report);
+          assert.deepEqual(await patches(), before);
           assert.equal(prepared.report.approvalMode, 'Manual');
           assert.deepEqual(prepared.report.findings, []);
           await assert.rejects(newer.service.activate(prepared.upgradeId), {

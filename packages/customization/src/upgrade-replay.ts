@@ -163,16 +163,16 @@ function formulaConflicts(
   )
     return [];
   const constraints = (base.formulaRules as typeof after.formulaRules) ?? [];
+  const alone = compileLiteralFormulaRules({
+    ...after,
+    formulaRules: [patch.rule],
+  });
   const blockers = constraints
     .filter((rule) => {
       if (rule.targetId !== patch.rule.targetId) return false;
       const pair = compileLiteralFormulaRules({
         ...after,
         formulaRules: [rule, patch.rule],
-      });
-      const alone = compileLiteralFormulaRules({
-        ...after,
-        formulaRules: [patch.rule],
       });
       return pair.status === 'refused' && alone.status === 'compiled';
     })
@@ -317,7 +317,11 @@ export function replayCustomizationPatches(
         before && original
           ? [...declarations(original).keys()].filter((id) => !before.has(id))
           : [];
-      const refs = referencedIds(patch);
+      if (layout) layout.externalFailures = failedIds;
+      const refs =
+        layout && patch.kind === 'addLayoutRevision'
+          ? [patch.surface]
+          : referencedIds(patch);
       const blockedBy =
         (layoutKey && failedLayouts.get(layoutKey)) ||
         [...refs].map((id) => failedIds.get(id)).find((v) => !!v);
@@ -366,21 +370,24 @@ export function replayCustomizationPatches(
                 ? 'FIELD_COLLISION'
                 : 'WHOLE_PACKAGE_FAILURE',
               subject: id,
-              expected: null,
-              observed: id,
+              expected: declarations(original!).get(id),
+              observed: target.get(id),
             });
         }
         if (!conflicts.length) {
           const trial = structuredClone(authored);
           const outcome = applyOne(trial, patch, applied, layout);
           if (outcome) {
-            if (layout?.findings.length) {
+            if (layout && (layout.findings.length || layout.blocked.length)) {
               conflicts.push(...layout.findings);
               report.blocked.push(
                 ...layout.blocked.map((b) => ({
                   ...at,
                   editIndex: b.editIndex,
-                  blockedBy: { ...at, editIndex: b.blockedBy },
+                  blockedBy:
+                    typeof b.blockedBy === 'number'
+                      ? { ...at, editIndex: b.blockedBy }
+                      : b.blockedBy,
                 })),
               );
             } else
@@ -395,18 +402,39 @@ export function replayCustomizationPatches(
           }
         }
       }
-      if (conflicts.length || blockedBy) {
-        const cause = blockedBy || {
-          ...at,
-          ...(layout?.findings[0] && {
-            editIndex: layout.findings[0].editIndex,
-          }),
-        };
+      if (conflicts.length || blockedBy || layout?.blocked.length) {
+        const blockedOrigin = layout?.blocked[0]?.blockedBy;
+        const cause =
+          blockedBy ||
+          (typeof blockedOrigin === 'object' && !layout?.findings.length
+            ? blockedOrigin
+            : {
+                ...at,
+                editIndex:
+                  layout?.findings[0]?.editIndex ??
+                  (typeof blockedOrigin === 'number' ? blockedOrigin : 0),
+              });
         for (const id of created) failedIds.set(id, cause);
         if (layoutKey) failedLayouts.set(layoutKey, cause);
-        if (patch.kind === 'addLayoutRevision')
-          for (const edit of patch.edits)
-            if (edit.kind !== 'rename') failedIds.set(edit.id, cause);
+        if (patch.kind === 'addLayoutRevision') {
+          for (const [editIndex, edit] of patch.edits.entries()) {
+            if (edit.kind === 'rename') continue;
+            const from = layout?.blocked.find(
+              (b) => b.editIndex === editIndex,
+            )?.blockedBy;
+            if (from !== undefined)
+              failedIds.set(
+                edit.id,
+                typeof from === 'number' ? { ...at, editIndex: from } : from,
+              );
+            else if (
+              !layout ||
+              blockedBy ||
+              layout.findings.some((f) => f.editIndex === editIndex)
+            )
+              failedIds.set(edit.id, blockedBy || { ...at, editIndex });
+          }
+        }
         report.findings.push(...conflicts.map((c) => ({ ...at, ...c })));
       }
     }

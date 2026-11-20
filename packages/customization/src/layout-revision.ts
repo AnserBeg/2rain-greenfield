@@ -1,4 +1,4 @@
-import type { ReplayConflict } from './upgrade-diagnostics.js';
+import type { EditLocation, ReplayConflict } from './upgrade-diagnostics.js';
 import { randomUUID } from 'node:crypto';
 import {
   baseLayout,
@@ -238,7 +238,8 @@ export type LayoutReplayFinding = ReplayConflict & { editIndex: number };
 export interface LayoutReplay {
   source: LayoutBody;
   findings: LayoutReplayFinding[];
-  blocked: { editIndex: number; blockedBy: number }[];
+  externalFailures?: ReadonlyMap<string, EditLocation>;
+  blocked: { editIndex: number; blockedBy: number | EditLocation }[];
 }
 
 function structuralConflict(
@@ -373,7 +374,9 @@ export function applyLayoutRevision(
       section.fields = section.fields.filter((f) => !setAside.has(f.id));
     }
   }
-  const failed = new Map<string, number>();
+  const failed = new Map<string, number | EditLocation>(
+    replay?.externalFailures,
+  );
   try {
     for (const [editIndex, edit] of patch.edits.entries()) {
       if (original && replay) {
@@ -420,7 +423,7 @@ export function applyLayoutRevision(
   } catch (error) {
     return (error as Error).message;
   }
-  if (replay?.findings.length)
+  if (replay && (replay.findings.length || replay.blocked.length))
     return 'The layout conflicts with the destination.';
   for (const section of base.sections) {
     for (const [index, field] of section.fields.entries())

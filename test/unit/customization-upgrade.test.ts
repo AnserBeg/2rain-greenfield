@@ -248,6 +248,14 @@ test('upgrade replay admission and its named cases cover the independently parse
     admitted,
     [...customization.CUSTOMIZATION_PATCH_KINDS].sort(),
   );
+  const [single, changeSet] = customization.CustomizationPatchSchema.options;
+  assert.deepEqual(
+    [
+      ...single.options.map((member) => member.shape.kind.value),
+      changeSet.shape.kind.value,
+    ].sort(),
+    admitted,
+  );
   assert.deepEqual(Object.keys(cases).sort(), admitted);
   assert.deepEqual(
     customization.unadmittedMembers({
@@ -469,5 +477,52 @@ test('a failed validation witness identifies the tenant rule and the conflicting
   assert.deepEqual(
     (finding.observed as { constraints: string[] }).constraints,
     [stricter.rule.ruleId],
+  );
+});
+
+test('an unrelated layout edit is still checked when its sibling refers to a failed field creation', () => {
+  const added = {
+    ...field,
+    entity: id('entity.sales_order'),
+    field: { type: 'text', label: 'Loading bay' },
+  };
+  const source = applied(base, [added]);
+  const target = applied(salesDefinition('moved'), [added]);
+  const page = customization
+    .customizationTargets(normalizeApplicationPackage(source))
+    .layouts!.find(
+      (l) =>
+        l.body.surfaceId === salesPage.body.surfaceId &&
+        l.body.mode === 'detail',
+    )!;
+  const edits = [id('field.custom_sales_order_loading_bay'), city].map(
+    (member) => {
+      const parent = page.body.sections.find((s) =>
+        s.fields.some((f) => f.id === member),
+      )!;
+      return {
+        kind: 'rename' as const,
+        schemaVersion: 'v6' as const,
+        id: member,
+        parent: parent.id,
+        label: { schemaVersion: 'v6' as const, text: 'Destination' },
+      };
+    },
+  );
+  const result = inspectReplay(target, [
+    added,
+    customization.draftLayoutRevision(page, edits),
+  ]);
+  assert.equal(result.status, 'replayConflict');
+  assert.deepEqual(
+    result.findings.map((f) => [f.patchId, f.editIndex, f.code]),
+    [
+      ['1', 0, 'FIELD_COLLISION'],
+      ['2', 1, 'MOVED_MEMBER'],
+    ],
+  );
+  assert.deepEqual(
+    result.blocked.map((b) => [b.patchId, b.editIndex, b.blockedBy.patchId]),
+    [['2', 0, '1']],
   );
 });

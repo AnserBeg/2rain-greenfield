@@ -247,6 +247,7 @@ export interface UpgradeReport extends ReplayDiagnostics {
   upgradeId: string;
   sourceReleaseId: string;
   sourceFence: string;
+  targetPackageId: string;
   targetVersion: string;
   targetRoot: string;
   approvalMode: 'Manual';
@@ -427,6 +428,7 @@ export class PostgresCustomizationService {
           environmentId: context.environmentId,
           sourceReleaseId,
           sourceFence: String(pointer.fence),
+          targetPackageId: target.packageId,
           targetVersion: target.version,
           targetRoot: baseReleaseRoot,
           approvalMode: 'Manual' as const,
@@ -480,28 +482,13 @@ export class PostgresCustomizationService {
             blocked: [],
           }),
         };
-        const sourceIdentity = await this.#identity(context, sourceReleaseId);
-        const sourceDefinition = parseNormalizedApplicationPackageJson(
-          await this.#desiredState(context, sourceIdentity.revisionId),
+        const protectedTerms = await this.#restrictedUpgradeTerms(
+          context,
+          sourceReleaseId,
         );
-        const targetDefinition = parseNormalizedApplicationPackageJson(
-          this.#tip.normalizedDefinitionBytes,
-        );
-        const restrictedFields = [
-          ...sourceDefinition.fields,
-          ...targetDefinition.fields,
-        ].filter(
-          (field) =>
-            field.classification !== 'public' &&
-            field.classification !== 'internal',
-        );
-        const protectedTerms = new Set(
-          restrictedFields.flatMap((field) => [field.fieldId, field.label]),
-        );
-        const restricted = (value: unknown) => {
-          const data = JSON.stringify(value);
-          return [...protectedTerms].some((term) => data.includes(term));
-        };
+        const restricted = (value: unknown) =>
+          protectedTerms === null ||
+          protectedTerms.some((term) => JSON.stringify(value).includes(term));
         report.findings = report.findings.map((finding) =>
           restricted(finding)
             ? {
@@ -532,6 +519,35 @@ export class PostgresCustomizationService {
         );
       },
     );
+  }
+
+  /** A reader that cannot interpret one side can still return a scoped, redacted refusal. */
+  async #restrictedUpgradeTerms(
+    context: TrustedRequestContext,
+    sourceReleaseId: MintedUuid,
+  ): Promise<string[] | null> {
+    try {
+      const source = await this.#identity(context, sourceReleaseId);
+      const old = parseNormalizedApplicationPackageJson(
+        await this.#desiredState(context, source.revisionId),
+      );
+      const next = parseNormalizedApplicationPackageJson(
+        this.#tip.normalizedDefinitionBytes,
+      );
+      return [
+        ...new Set(
+          [...old.fields, ...next.fields]
+            .filter(
+              (f) =>
+                f.classification !== 'public' &&
+                f.classification !== 'internal',
+            )
+            .flatMap((f) => [f.fieldId, f.label]),
+        ),
+      ];
+    } catch {
+      return null;
+    }
   }
 
   async #prepareReplay(
