@@ -28,10 +28,10 @@ import {
   inspectionChange,
   inspectionFields,
   inspectionLinks,
-  inspectionLinkRecords,
   inspectionStates,
   inspectionTransitions,
 } from '../../../../test/fixtures/inspection-customization.js';
+import { inspectionLinkRecords } from '../../../../test/fixtures/inspection-link-records.js';
 import {
   LINEAGE_INSTALL_VOLUME,
   withEphemeralPostgres,
@@ -598,7 +598,7 @@ test('a drafted receipt workflow links an inspection and requests escalation aft
           };
           if (process.env.CI) {
             await withArchivedCustomizationRuntime(
-              '840c1b48c9694e62fdb7e284fa5a8397a1360dfd',
+              '552b13d8837a5e44ac16d3383988c167345d0295',
               async (run) => {
                 const read = () =>
                   archivedRuntimeRead(run, {
@@ -761,13 +761,18 @@ test('a drafted receipt workflow links an inspection and requests escalation aft
               { timeout: 45_000 },
             )
             .toEqual([receiptId]);
-          const detail = new URL(app.baseUrl);
-          detail.searchParams.set(
-            'surface',
-            `${prefix}:surface.${inspection}_detail`,
+          await page
+            .getByRole('link', {
+              name: 'Open Goods Receipt Inspection',
+              exact: true,
+            })
+            .click();
+          await page
+            .getByRole('link', { name: /Open .*Inspect incoming notebooks/u })
+            .click();
+          await expect(page).toHaveURL(
+            (url) => url.searchParams.get('record') === receiptId,
           );
-          detail.searchParams.set('record', receiptId);
-          await page.goto(detail.toString());
           await expect(page.locator('.composition-business-status')).toHaveText(
             'Pending',
           );

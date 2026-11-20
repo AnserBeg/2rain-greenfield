@@ -1,3 +1,9 @@
+import {
+  baseLayout,
+  type LayoutBody,
+  type LayoutDefinition,
+  type SurfaceLayout,
+} from '@north-star/canonical-model';
 import { createHash } from 'node:crypto';
 
 import type { CalculatedDisplayField } from '@north-star/canonical-model';
@@ -16,7 +22,7 @@ export const RENDERED_DIFF_VERSION =
 
 type Json = Record<string, unknown>;
 
-export interface DiffDefinition {
+export interface DiffDefinition extends LayoutDefinition {
   readonly workflows?: readonly WorkflowDefinition[];
   readonly documentFields?: readonly {
     readonly fieldId: string;
@@ -354,6 +360,39 @@ export function renderReleaseDiff(input: {
     if (!before || !after) continue;
     const beforeMetrics = ((before.launcher as Json | undefined)?.metrics ??
       []) as Json[];
+    const oldLayouts = (before.layouts ?? []) as SurfaceLayout[];
+    const newLayouts = (after.layouts ?? []) as SurfaceLayout[];
+    const describeBody = (body: LayoutBody) =>
+      body.order
+        .map((id) => {
+          const section = body.sections.find((s) => s.id === id);
+          if (!section) return body.blocks.find((b) => b.id === id)!.label.text;
+          const fields = section.fields.map((f) => f.label.text);
+          return fields.length
+            ? section.label.text + ' (' + fields.join(', ') + ')'
+            : section.label.text;
+        })
+        .join(' → ');
+    const modes = new Set(
+      [...oldLayouts, ...newLayouts].map((l) => l.body.mode),
+    );
+    let layoutChanged = false;
+    for (const mode of modes) {
+      const previous = oldLayouts.find((l) => l.body.mode === mode);
+      const next = newLayouts.find((l) => l.body.mode === mode);
+      if (previous?.revisionId === next?.revisionId) continue;
+      const oldBody = previous?.body ?? baseLayout(from, before, mode);
+      const newBody = next?.body ?? baseLayout(to, after, mode);
+      if (!oldBody || !newBody)
+        throw new Error('Cannot describe the original and revised layout.');
+      lines.push(
+        String(after.label) + ' · ' + mode + ' layout',
+        'Previously ' + describeBody(oldBody),
+        'Now ' + describeBody(newBody),
+      );
+      layoutChanged = true;
+    }
+    if (layoutChanged) continue;
     const addedMetrics = (
       ((after.launcher as Json | undefined)?.metrics ?? []) as Json[]
     ).filter(

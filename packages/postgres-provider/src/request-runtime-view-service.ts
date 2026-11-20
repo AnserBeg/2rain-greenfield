@@ -1,3 +1,4 @@
+import { layoutBindingsProblem } from './layout-admission.js';
 import { servingPointersSql } from './verified-release-generation.js';
 import { createHash } from 'node:crypto';
 
@@ -983,6 +984,13 @@ function definitionFromSnapshotRows(
       throw malformedProjection('formula/rule projection has invalid bindings');
     }
   }
+  const problem = layoutBindingsProblem(
+    surface.payload,
+    surface.requiredRuntimeCapability?.minimumVersion ?? 0,
+    operation.payload,
+    query.payload,
+  );
+  if (problem) throw malformedProjection(problem);
   return Object.freeze({
     environmentId: context.environmentId,
     pointer: Object.freeze({ fence, pointerId: first.pointer_id }),

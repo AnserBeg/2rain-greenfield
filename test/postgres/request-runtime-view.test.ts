@@ -158,8 +158,9 @@ test('the capability comparison binds the family to its capability, then compare
     null,
   );
 
-  for (const reader of [22, 23, 24, 25, 26, 27]) {
-    for (const floor of [22, 23, 24, 25, 26, 27]) {
+  const surfaceFloors = [22, 23, 24, 25, 26, 27, 28];
+  for (const reader of surfaceFloors) {
+    for (const floor of surfaceFloors) {
       const refusal = unsupportedRuntimeCapability(
         surface,
         { ...requirement, minimumVersion: floor },

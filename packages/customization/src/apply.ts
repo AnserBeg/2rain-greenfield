@@ -1,4 +1,9 @@
-import { isNarrowableOperationId } from '@north-star/canonical-model';
+import { applyLayoutRevision } from './layout-revision.js';
+import type { LayoutDefinition } from '@north-star/canonical-model';
+import {
+  CUSTOMIZABLE_FIRST_PARTY_ENTITY_LOCALS,
+  isNarrowableOperationId,
+} from '@north-star/canonical-model';
 import type {
   CustomField,
   CustomizationPatch,
@@ -34,13 +39,7 @@ export const TENANT_LOCAL_PREFIX = 'custom_' as const;
  * capability without a published set writes -- is treated as inside a Tier B
  * dependency set, and a patch targeting it is refused.
  */
-export const CUSTOMIZABLE_FIRST_PARTY_ENTITY_LOCALS = Object.freeze([
-  'item',
-  'location',
-  'party',
-  'purchase_order',
-  'sales_order',
-] as const);
+export { CUSTOMIZABLE_FIRST_PARTY_ENTITY_LOCALS } from '@north-star/canonical-model';
 
 export type CustomizationRefusalCode =
   | 'CUSTOMIZE_CHOICE_PLATFORM_OWNED'
@@ -50,7 +49,8 @@ export type CustomizationRefusalCode =
   | 'CUSTOMIZE_TARGET_NOT_CHOICE'
   | 'CUSTOMIZE_TARGET_NOT_FOUND'
   | 'CUSTOMIZE_LIST_VIEW_INVALID'
-  | 'CUSTOMIZE_FIELD_NOT_ON_LIST';
+  | 'CUSTOMIZE_FIELD_NOT_ON_LIST'
+  | 'CUSTOMIZE_LAYOUT_CONFLICT';
 
 export interface CustomizationRefusal {
   readonly code: CustomizationRefusalCode;
@@ -185,6 +185,39 @@ function applyOne(
       return addLineTable(authored, patch);
     case 'declareLifecycle':
       return declareLifecycle(authored, patch);
+    case 'addLayoutRevision': {
+      if (
+        previous.some(
+          (p) =>
+            p.kind === 'addLayoutRevision' && p.revisionId === patch.revisionId,
+        )
+      )
+        return refusal(
+          'CUSTOMIZE_LAYOUT_CONFLICT',
+          'This revision ID has already been used.',
+        );
+      const createdIds = new Set(
+        patch.edits.filter((e) => e.kind === 'createSection').map((e) => e.id),
+      );
+      if (
+        previous.some(
+          (p) =>
+            p.kind === 'addLayoutRevision' &&
+            p.edits.some(
+              (e) => e.kind === 'createSection' && createdIds.has(e.id),
+            ),
+        )
+      )
+        return refusal(
+          'CUSTOMIZE_LAYOUT_CONFLICT',
+          'A section already owns that ID.',
+        );
+      const problem = applyLayoutRevision(
+        authored as unknown as LayoutDefinition,
+        patch,
+      );
+      return problem ? refusal('CUSTOMIZE_LAYOUT_CONFLICT', problem) : null;
+    }
     case 'arrangeLayout':
       return arrangeLayout(authored, patch);
     case 'saveListView':
@@ -1816,6 +1849,20 @@ function arrangeLayout(
     return refusal(
       'CUSTOMIZE_TARGET_NOT_FOUND',
       `There is no screen ${patch.surface} to arrange.`,
+    );
+  }
+  if (
+    surface.layouts ||
+    list(authored, 'surfaces').some(
+      (s) =>
+        s.layouts &&
+        (surface.documentEditor as Json | undefined)?.headerFormSurfaceId ===
+          s.surfaceId,
+    )
+  ) {
+    return refusal(
+      'CUSTOMIZE_LAYOUT_CONFLICT',
+      'This surface now uses layout revisions.',
     );
   }
   if (patch.upFront) {

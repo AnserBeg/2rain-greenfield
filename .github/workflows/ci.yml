@@ -68,6 +68,15 @@ jobs:
         run: corepack pnpm install --frozen-lockfile --reporter=append-only
       - name: Begin executed-file evidence run
         run: node --import tsx test/helpers/begin-reachability-run.ts
+      - name: Regenerate merged workflow coverage decisions
+        run: node --import tsx scripts/workflow-admission-coverage.cjs
+      - name: Retain merged workflow coverage decisions
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: workflow-admission-derived-coverage
+          path: test/fixtures/g2/language-conformance/coverage-decisions.json
+          if-no-files-found: error
+          retention-days: 1
       - name: Check formatting
         run: corepack pnpm format
       - name: Lint

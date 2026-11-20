@@ -1,4 +1,4 @@
-export const WORKFLOW_SURFACE_FLOOR = 28;
+export const WORKFLOW_SURFACE_FLOOR = 29;
 export const WORKFLOW_PAYLOAD_VERSION = 'northstar.workflow-payload/v1';
 export const WORKFLOW_PROJECTION_FAMILY =
   'northstar.compiler:projection-family.workflow';

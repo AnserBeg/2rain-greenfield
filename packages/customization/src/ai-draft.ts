@@ -1,3 +1,4 @@
+import { layoutCommand } from './layout-revision.js';
 import { WorkflowDraftSchema, type WorkflowDraft } from './workflow-draft.js';
 import {
   ADD_LINK_LATER_CAPABILITY,
@@ -223,6 +224,21 @@ const toolSchema = {
       },
       required: ['fieldId', 'check', 'message'],
     },
+    mode: { type: 'string', enum: ['create', 'edit', 'detail'] },
+    layoutEdit: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['create', 'move', 'rename', 'up', 'down'],
+        },
+        member: { type: 'string' },
+        label: { type: 'string' },
+        destination: { type: 'string' },
+      },
+      required: ['action'],
+    },
     roleKey: { type: 'string' },
     target: {
       anyOf: [
@@ -358,6 +374,26 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
     ...(targets.forms ?? []).map(
       (form) =>
         `- ${form.surfaceId} — ${form.label}: ${form.fields.map((field) => `${field.fieldId} "${field.label}"`).join(', ')}`,
+    ),
+    '- addLayoutRevision {kind,surface,mode,layoutEdit:{action,member?,destination?,label?}}. Create a section with label. Rename a member, move a field to a destination section, or move a member up/down. Use listed IDs.',
+    ...(targets.layouts ?? []).map(
+      (t) =>
+        t.body.surfaceId +
+        ' ' +
+        t.body.mode +
+        ' ' +
+        t.body.sections
+          .map(
+            (s) =>
+              s.id +
+              ' ' +
+              s.label.text +
+              ' [' +
+              s.fields.map((f) => f.id + ' ' + f.label.text).join(', ') +
+              ']',
+          )
+          .concat(t.body.blocks.map((b) => b.id + ' ' + b.label.text))
+          .join('; '),
     ),
     'Lists you can arrange:',
     ...targets.lists.map(
@@ -534,6 +570,33 @@ function readToolInput(
             : 'The validation selection is invalid.',
         ],
       };
+    }
+  }
+  if (
+    input &&
+    typeof input === 'object' &&
+    'kind' in input &&
+    input.kind === 'addLayoutRevision'
+  ) {
+    const req = input as Record<string, unknown>;
+    const target = targets.layouts?.find(
+      (t) => t.body.surfaceId === req.surface && t.body.mode === req.mode,
+    );
+    if (!target || !req.layoutEdit || typeof req.layoutEdit !== 'object')
+      return {
+        status: 'invalid',
+        issues: ['Choose a declared layout and edit.'],
+      };
+    try {
+      return {
+        status: 'parsed',
+        patch: layoutCommand(
+          target,
+          req.layoutEdit as Parameters<typeof layoutCommand>[1],
+        ),
+      };
+    } catch (error) {
+      return { status: 'invalid', issues: [(error as Error).message] };
     }
   }
   if (

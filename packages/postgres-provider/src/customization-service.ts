@@ -1125,14 +1125,16 @@ export class PostgresCustomizationService {
       await this.#desiredState(context, active.revisionId),
     ) as unknown as Parameters<typeof customizationTargets>[0];
     const roles = await this.#permissionRoles(context);
+    const targets = customizationTargets(definition);
     if (!roles.length)
-      return customizationTargets({
-        ...definition,
-        operations: [],
-        operationRoleNarrowings: [],
-      });
+      return {
+        ...targets,
+        permissionActions: [],
+        permissionRestrictions: [],
+        validationTargets: [],
+      };
     return {
-      ...customizationTargets(definition),
+      ...targets,
       permissionRoleKeys: roles.map(({ role_key }) => role_key),
       permissionRoleLabels: Object.fromEntries(
         roles.map(({ role_key, label }) => [role_key, label]),
