@@ -304,18 +304,8 @@ export async function createComposedApplicationRuntime(
   let evidencePool: pg.Pool | undefined;
   try {
     await migrate(adminPool, options.migrationsDirectory);
-    if (
-      options.localDemoIdentity &&
-      (
-        await adminPool.query(
-          'SELECT FROM platform.staff_relying_parties LIMIT 1',
-        )
-      ).rowCount
-    ) {
-      throw new TypeError(
-        'local demo identity requires a dedicated demo database',
-      );
-    }
+    if (options.localDemoIdentity)
+      await adminPool.query("SELECT platform.claim_staff_store_mode('demo')");
     const identities = await ensureScope(
       adminPool,
       options.tenantSlug,
