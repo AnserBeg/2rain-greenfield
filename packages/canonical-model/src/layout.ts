@@ -8,6 +8,7 @@ import type {
 } from './schemas.js';
 
 export const LAYOUT_READER = 28;
+export const REPLAYED_LAYOUT_READER = 34;
 export const CUSTOMIZABLE_FIRST_PARTY_ENTITY_LOCALS = [
   'item',
   'location',
@@ -56,6 +57,7 @@ export const LayoutBodySchema = z.strictObject({
   order: z.array(id).min(1).max(42),
 });
 export const SurfaceLayoutSchema = z.strictObject({
+  placementRuleVersion: z.literal(1).optional(),
   revisionId: z.uuid(),
   resultLayoutDigest: z.string().regex(/^[a-f0-9]{64}$/u),
   body: LayoutBodySchema,

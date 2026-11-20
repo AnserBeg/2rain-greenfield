@@ -15,6 +15,11 @@
 - The demo scheduler and Approvals are opt-in. SIGNIN-1 owns the staff approval proof.
 - Wait-for-event, broader document workflows, communication/email and connectors remain open.
 
+- Slice 3 fixes require the activation grant's role ID and a recorded human Retry for a later fence. Legacy watermarks retain their audit data and need a fresh activation to authorize new runs.
+- An approval on an earlier fence explains its journal result. An uncommitted effect requires a new decision on the current fence.
+
+- The application grant allowlist permits the worker to read Retry decisions and update the polling cursor.
+
 ## Gates
 
 - Slices 1 and 2 passed [CI 44456002463](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44456002463) and [CI 44477729782](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44477729782).
@@ -26,44 +31,39 @@
 - Authority findings at `cfba4a6c` passed [CI 44678755860](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44678755860). Defect controls are in [five restored-behavior controls 44669839289](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44669839289) and [shared-scope control 44678755737](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44678755737). Migration `0046_workflow_approval_target_scope.sql`.
 - Verifier and authoring at `35c0de4a` passed [CI 44711875228](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44711875228).
 
+- The final slice 3 fixes passed [CI 44792656748](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44792656748) on `095ec177`. Seven slice 3 controls passed at `3d6d97b0`. The author mutation reached the RLS guard. The isolated timestamp control reached the byte comparison. [Workflow controls 44741920199](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44741920199) [Persisted row control](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44749052360/job/136333660148) and [retained write-authority control 44775680283](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44775680283).
+- The integration tip `12f66dd7` includes upstream changes on separate paths and uses the same workflow migration and schema snapshot.
+
 ## Controls
 
 - The dispatch narrowing, stored-owner and validation-read regressions each fail with the old behavior restored.
 - A real pre-admission reader refuses the required surface floor. The archived tenant runner reproduces the whole workflow-free envelope. Altered SDK and trigger projections are refused.
 
+- Slice 3 controls restore each reviewed failure and check an actual candidate, operation receipt, Retry decision or evidence row. See [control manifest](../../../test/evidence/WORKFLOW-1-slice3-fix.expected-red.json).
+
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "WORKFLOW-1",
-  "base": "238b98a6cbb88171983f395ec23179eb4d73b24e",
-  "head": "35c0de4a3b8bcbd0cebee3f70beab792f21e4f6c",
+  "base": "3968bffe44e89f1829536d3271b1d8fbf7de12e2",
+  "head": "3ca7118b9ef6291a0b16dca98e2e5dafd2f703f1",
   "changedPaths": [
-    ".github/workflows/ci.yml", "apps/web/test/browser/customize-inspection.composed-application.spec.ts",
-    "packages/canonical-model/src/normalize.ts", "packages/canonical-model/src/schemas.ts",
-    "packages/canonical-model/src/workflows.ts", "packages/compiler/src/compiler.ts",
-    "packages/compiler/src/index.ts", "packages/compiler/src/projections.ts",
-    "packages/compiler/src/workflows.ts", "packages/customization/src/ai-draft.ts",
-    "packages/customization/src/apply.ts", "packages/customization/src/patch.ts",
-    "packages/customization/src/render.ts", "packages/customization/src/targets.ts",
-    "packages/customization/src/workflow-draft.ts", "packages/postgres-provider/src/composed-application-runtime.ts",
-    "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/release-verification-service.ts",
-    "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/postgres-provider/src/workflow-admission.ts",
-    "packages/postgres-provider/src/workflow-bundle.ts", "packages/postgres-provider/src/workflow-execution.ts",
-    "packages/postgres-provider/src/workflow-verification.ts", "packages/postgres-provider/src/workflow-worker.ts",
-    "packages/runtime/src/request-runtime-view.ts", "test/architecture/repository-hygiene.test.ts",
-    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/archived-customization-runtime.ts",
-    "test/helpers/archived-runtime-process.ts", "test/helpers/language-coverage-packages.ts",
-    "test/integration/workflow-admission.test.ts", "test/postgres/request-runtime-view.test.ts"
+    "db/migrations/0054_workflow_retry_authority.sql", "db/schema.snapshot.json",
+    "learnings.md", "packages/postgres-provider/src/current-policy.ts",
+    "packages/postgres-provider/src/release-verification-service.ts", "packages/postgres-provider/src/workflow-execution.ts",
+    "packages/postgres-provider/src/workflow-gateway.ts", "test/architecture/release-persistence-boundary.test.ts",
+    "test/architecture/tenant-completeness.manifest.json", "test/architecture/tenant-completeness.test.ts",
+    "test/evidence/WORKFLOW-1-slice3-fix.expected-red.json", "test/evidence/WORKFLOW-1-threat-model-fix.expected-red.json",
+    "test/evidence/WORKFLOW-1.expected-red.json", "test/integration/workflow-admission.test.ts",
+    "test/postgres/application-grants.tsv", "test/postgres/inventory-storage.test.ts",
+    "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts",
+    "test/postgres/releases.test.ts", "test/postgres/trust-substrate.test.ts",
+    "test/postgres/workflow-consumer.test.ts"
   ],
   "symbols": [
-    {
-      "path": "packages/postgres-provider/src/release-verification-service.ts",
-      "name": "releaseVerificationBinding"
-    },
-    {
-      "path": "packages/postgres-provider/src/workflow-admission.ts",
-      "name": "verifyWorkflowDefinitions"
-    }
+    {"path": "packages/postgres-provider/src/current-policy.ts", "name": "PostgresCurrentPolicyGateway"},
+    {"path": "packages/postgres-provider/src/release-verification-service.ts", "name": "compiledProjectionBinding"},
+    {"path": "packages/postgres-provider/src/workflow-execution.ts", "name": "loadJournal"}
   ]
 }
 ```
@@ -72,3 +72,4 @@
 
 - Open the Customization rules browser runner in [CI 44711875228](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44711875228). Find **a drafted receipt workflow links an inspection and requests escalation after two days**. It drafts and activates the change, posts a receipt, opens its link from the pending Inspection and advances the clock to the approval request.
 - In the opt-in local demo, open **Customize → Live workflows → View code** to check the trigger, grants and source. Open **Approvals** to inspect the exact operation inputs and target company.
+- In CI for the slice 3 fix, open the PostgreSQL shard for **only a recorded human Retry can advance the run fence** and **same-pin Retry asks for fresh approval before an uncommitted effect**. The first requires human Retry, and the second shows a fresh plan with zero receipts until approval.

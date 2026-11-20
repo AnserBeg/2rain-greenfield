@@ -1,0 +1,202 @@
+role	schema.table	privilege	columns (* = whole table)	reason
+north_star_fulfillment_projection_writer	north_star_internal.inventory_projection_discrepancies	SELECT	*	Inherited from the module runtime for companion inventory posting.
+north_star_fulfillment_projection_writer	north_star_internal.module_storage_backfill_checkpoints	INSERT	*	Inherited from the module runtime for companion inventory posting.
+north_star_fulfillment_projection_writer	north_star_internal.module_storage_backfill_checkpoints	SELECT	*	Inherited from the module runtime for companion inventory posting.
+north_star_fulfillment_projection_writer	north_star_internal.module_storage_backfill_checkpoints	UPDATE	*	Inherited from the module runtime for companion inventory posting.
+north_star_fulfillment_projection_writer	north_star_internal.semantic_aggregate_anchor_discrepancies	INSERT	*	Inherited from the module runtime for companion inventory posting.
+north_star_fulfillment_projection_writer	north_star_internal.semantic_aggregate_anchor_discrepancies	SELECT	*	Inherited from the module runtime for companion inventory posting.
+north_star_fulfillment_projection_writer	north_star_internal.semantic_aggregate_anchors	INSERT	*	Inherited from the module runtime for companion inventory posting.
+north_star_fulfillment_projection_writer	north_star_internal.semantic_aggregate_anchors	SELECT	*	Inherited from the module runtime for companion inventory posting.
+north_star_fulfillment_projection_writer	north_star_internal.semantic_aggregate_generations	SELECT	*	Inherited from the module runtime for companion inventory posting.
+north_star_identity	platform.staff_accounts	INSERT	*	Maintain staff authentication state and audit evidence on the identity connection.
+north_star_identity	platform.staff_accounts	SELECT	*	Maintain staff authentication state and audit evidence on the identity connection.
+north_star_identity	platform.staff_accounts	UPDATE	decisions_after,status	Maintain staff authentication state and audit evidence on the identity connection.
+north_star_identity	platform.staff_attempts	INSERT	*	Maintain staff authentication state and audit evidence on the identity connection.
+north_star_identity	platform.staff_attempts	SELECT	*	Maintain staff authentication state and audit evidence on the identity connection.
+north_star_identity	platform.staff_attempts	UPDATE	*	Maintain staff authentication state and audit evidence on the identity connection.
+north_star_identity	platform.staff_authentication_audit	INSERT	*	Maintain staff authentication state and audit evidence on the identity connection.
+north_star_identity	platform.staff_authentication_audit	SELECT	*	Maintain staff authentication state and audit evidence on the identity connection.
+north_star_identity	platform.staff_ceremonies	INSERT	*	Maintain staff authentication state and audit evidence on the identity connection.
+north_star_identity	platform.staff_ceremonies	SELECT	*	Maintain staff authentication state and audit evidence on the identity connection.
+north_star_identity	platform.staff_ceremonies	UPDATE	*	Maintain staff authentication state and audit evidence on the identity connection.
+north_star_identity	platform.staff_credentials	INSERT	*	Maintain staff authentication state and audit evidence on the identity connection.
+north_star_identity	platform.staff_credentials	SELECT	*	Maintain staff authentication state and audit evidence on the identity connection.
+north_star_identity	platform.staff_credentials	UPDATE	backed_up,revoked_at,sign_count	Maintain staff authentication state and audit evidence on the identity connection.
+north_star_identity	platform.staff_invitations	INSERT	*	Maintain staff authentication state and audit evidence on the identity connection.
+north_star_identity	platform.staff_invitations	SELECT	*	Maintain staff authentication state and audit evidence on the identity connection.
+north_star_identity	platform.staff_invitations	UPDATE	*	Maintain staff authentication state and audit evidence on the identity connection.
+north_star_identity	platform.staff_login_transactions	SELECT	*	Maintain staff authentication state and audit evidence on the identity connection.
+north_star_identity	platform.staff_login_transactions	UPDATE	consumed_at	Maintain staff authentication state and audit evidence on the identity connection.
+north_star_identity	platform.staff_sessions	INSERT	*	Maintain staff authentication state and audit evidence on the identity connection.
+north_star_identity	platform.staff_sessions	SELECT	*	Maintain staff authentication state and audit evidence on the identity connection.
+north_star_identity	platform.staff_sessions	UPDATE	*	Maintain staff authentication state and audit evidence on the identity connection.
+north_star_module_materializer	north_star_internal.inventory_projection_discrepancies	INSERT	*	Record or inspect discrepancies during inventory reconciliation.
+north_star_module_materializer	north_star_internal.inventory_projection_discrepancies	SELECT	*	Record or inspect discrepancies during inventory reconciliation.
+north_star_module_materializer	north_star_internal.module_storage_attempt_claims	INSERT	*	Track storage transitions and resolve their materialization evidence.
+north_star_module_materializer	north_star_internal.module_storage_attempt_claims	SELECT	*	Track storage transitions and resolve their materialization evidence.
+north_star_module_materializer	north_star_internal.module_storage_attempt_claims	UPDATE	*	Track storage transitions and resolve their materialization evidence.
+north_star_module_materializer	north_star_internal.module_storage_backfill_checkpoints	INSERT	*	Track storage transitions and resolve their materialization evidence.
+north_star_module_materializer	north_star_internal.module_storage_backfill_checkpoints	SELECT	*	Track storage transitions and resolve their materialization evidence.
+north_star_module_materializer	north_star_internal.module_storage_backfill_checkpoints	UPDATE	*	Track storage transitions and resolve their materialization evidence.
+north_star_module_materializer	north_star_internal.module_storage_catalog_receipts	INSERT	*	Track storage transitions and resolve their materialization evidence.
+north_star_module_materializer	north_star_internal.module_storage_catalog_receipts	SELECT	*	Track storage transitions and resolve their materialization evidence.
+north_star_module_materializer	north_star_internal.module_storage_element_applications	INSERT	*	Track storage transitions and resolve their materialization evidence.
+north_star_module_materializer	north_star_internal.module_storage_element_applications	SELECT	*	Track storage transitions and resolve their materialization evidence.
+north_star_module_materializer	north_star_internal.module_storage_elements	INSERT	*	Track storage transitions and resolve their materialization evidence.
+north_star_module_materializer	north_star_internal.module_storage_elements	SELECT	*	Track storage transitions and resolve their materialization evidence.
+north_star_module_materializer	north_star_internal.module_storage_generations	INSERT	*	Track storage transitions and resolve their materialization evidence.
+north_star_module_materializer	north_star_internal.module_storage_generations	SELECT	*	Track storage transitions and resolve their materialization evidence.
+north_star_module_materializer	north_star_internal.module_storage_generations	UPDATE	*	Track storage transitions and resolve their materialization evidence.
+north_star_module_materializer	north_star_internal.module_storage_reference_counts	INSERT	*	Track storage transitions and resolve their materialization evidence.
+north_star_module_materializer	north_star_internal.module_storage_reference_counts	SELECT	*	Track storage transitions and resolve their materialization evidence.
+north_star_module_materializer	north_star_internal.module_storage_reference_counts	UPDATE	*	Track storage transitions and resolve their materialization evidence.
+north_star_module_materializer	north_star_internal.module_storage_root_membership	INSERT	*	Track storage transitions and resolve their materialization evidence.
+north_star_module_materializer	north_star_internal.module_storage_root_membership	SELECT	*	Track storage transitions and resolve their materialization evidence.
+north_star_module_materializer	north_star_internal.module_storage_tightening_debt	INSERT	*	Track storage transitions and resolve their materialization evidence.
+north_star_module_materializer	north_star_internal.module_storage_tightening_debt	SELECT	*	Track storage transitions and resolve their materialization evidence.
+north_star_module_materializer	north_star_internal.module_storage_tightening_debt	UPDATE	*	Track storage transitions and resolve their materialization evidence.
+north_star_module_runtime	north_star_internal.inventory_projection_discrepancies	SELECT	*	Record or inspect discrepancies during inventory reconciliation.
+north_star_module_runtime	north_star_internal.module_storage_backfill_checkpoints	INSERT	*	Track storage transitions and resolve their materialization evidence.
+north_star_module_runtime	north_star_internal.module_storage_backfill_checkpoints	SELECT	*	Track storage transitions and resolve their materialization evidence.
+north_star_module_runtime	north_star_internal.module_storage_backfill_checkpoints	UPDATE	*	Track storage transitions and resolve their materialization evidence.
+north_star_module_runtime	north_star_internal.semantic_aggregate_anchor_discrepancies	INSERT	*	Maintain or reconcile the aggregate anchors used by scoped reads.
+north_star_module_runtime	north_star_internal.semantic_aggregate_anchor_discrepancies	SELECT	*	Maintain or reconcile the aggregate anchors used by scoped reads.
+north_star_module_runtime	north_star_internal.semantic_aggregate_anchors	INSERT	*	Maintain or reconcile the aggregate anchors used by scoped reads.
+north_star_module_runtime	north_star_internal.semantic_aggregate_anchors	SELECT	*	Maintain or reconcile the aggregate anchors used by scoped reads.
+north_star_module_runtime	north_star_internal.semantic_aggregate_generations	SELECT	*	Maintain or reconcile the aggregate anchors used by scoped reads.
+north_star_receipt_projection_writer	north_star_internal.inventory_projection_discrepancies	SELECT	*	Inherited from the module runtime for companion inventory posting.
+north_star_receipt_projection_writer	north_star_internal.module_storage_backfill_checkpoints	INSERT	*	Inherited from the module runtime for companion inventory posting.
+north_star_receipt_projection_writer	north_star_internal.module_storage_backfill_checkpoints	SELECT	*	Inherited from the module runtime for companion inventory posting.
+north_star_receipt_projection_writer	north_star_internal.module_storage_backfill_checkpoints	UPDATE	*	Inherited from the module runtime for companion inventory posting.
+north_star_receipt_projection_writer	north_star_internal.semantic_aggregate_anchor_discrepancies	INSERT	*	Inherited from the module runtime for companion inventory posting.
+north_star_receipt_projection_writer	north_star_internal.semantic_aggregate_anchor_discrepancies	SELECT	*	Inherited from the module runtime for companion inventory posting.
+north_star_receipt_projection_writer	north_star_internal.semantic_aggregate_anchors	INSERT	*	Inherited from the module runtime for companion inventory posting.
+north_star_receipt_projection_writer	north_star_internal.semantic_aggregate_anchors	SELECT	*	Inherited from the module runtime for companion inventory posting.
+north_star_receipt_projection_writer	north_star_internal.semantic_aggregate_generations	SELECT	*	Inherited from the module runtime for companion inventory posting.
+north_star_runtime	north_star_internal.module_storage_catalog_receipts	SELECT	*	Track storage transitions and resolve their materialization evidence.
+north_star_runtime	north_star_internal.module_storage_generations	SELECT	*	Track storage transitions and resolve their materialization evidence.
+north_star_runtime	platform.active_release_pointers	SELECT	*	Resolve or advance the active release for the scoped environment.
+north_star_runtime	platform.active_release_pointers	UPDATE	*	Resolve or advance the active release for the scoped environment.
+north_star_runtime	platform.address_geocodes	INSERT	*	open debt: CONNECT-1
+north_star_runtime	platform.address_geocodes	SELECT	*	open debt: CONNECT-1
+north_star_runtime	platform.address_geocodes	UPDATE	attempts,available_at,claim_id,expires_at,latitude,longitude,"precision",reason,state	open debt: CONNECT-1
+north_star_runtime	platform.address_installation_history	INSERT	*	open debt: CONNECT-1
+north_star_runtime	platform.address_installation_history	SELECT	*	open debt: CONNECT-1
+north_star_runtime	platform.address_installations	INSERT	*	open debt: CONNECT-1
+north_star_runtime	platform.address_installations	SELECT	*	open debt: CONNECT-1
+north_star_runtime	platform.address_installations	UPDATE	enabled,enrichment,period_budget_micros,period_calls	open debt: CONNECT-1
+north_star_runtime	platform.address_quota	INSERT	*	open debt: CONNECT-1
+north_star_runtime	platform.address_quota	SELECT	*	open debt: CONNECT-1
+north_star_runtime	platform.address_quota	UPDATE	calls,reserved_micros	open debt: CONNECT-1
+north_star_runtime	platform.app_package_revisions	INSERT	*	Persist and reload the package revision used to build a release.
+north_star_runtime	platform.app_package_revisions	SELECT	*	Persist and reload the package revision used to build a release.
+north_star_runtime	platform.billing_list_assignments	INSERT	*	open debt: BILLING-1
+north_star_runtime	platform.billing_list_assignments	SELECT	*	open debt: BILLING-1
+north_star_runtime	platform.billing_rate_tables	INSERT	*	open debt: BILLING-1
+north_star_runtime	platform.billing_rate_tables	SELECT	*	open debt: BILLING-1
+north_star_runtime	platform.current_policy_epochs	SELECT	*	Resolve current permission grants and their revocation epoch.
+north_star_runtime	platform.current_policy_memberships	SELECT	*	Resolve current permission grants and their revocation epoch.
+north_star_runtime	platform.current_policy_permission_grants	SELECT	*	Resolve current permission grants and their revocation epoch.
+north_star_runtime	platform.current_policy_roles	SELECT	*	Resolve current permission grants and their revocation epoch.
+north_star_runtime	platform.customization_patches	INSERT	*	Persist and reload authored changes for compilation.
+north_star_runtime	platform.customization_patches	SELECT	*	Persist and reload authored changes for compilation.
+north_star_runtime	platform.customization_upgrade_refusals	INSERT	*	Track diagnostics and resolution of refused upgrades.
+north_star_runtime	platform.customization_upgrade_refusals	SELECT	*	Track diagnostics and resolution of refused upgrades.
+north_star_runtime	platform.customization_upgrade_refusals	UPDATE	diagnostic,recorded_at,resolved	Track diagnostics and resolution of refused upgrades.
+north_star_runtime	platform.customization_upgrades	INSERT	*	Persist and reload proposed upgrades for activation.
+north_star_runtime	platform.customization_upgrades	SELECT	*	Persist and reload proposed upgrades for activation.
+north_star_runtime	platform.fresh_tenant_install_evidence	SELECT	*	Verify the installation lineage and intermediate admissions.
+north_star_runtime	platform.fresh_tenant_intermediate_release_admissions	INSERT	*	Verify the installation lineage and intermediate admissions.
+north_star_runtime	platform.fresh_tenant_intermediate_release_admissions	SELECT	*	Verify the installation lineage and intermediate admissions.
+north_star_runtime	platform.inventory_posting_configurations	SELECT	*	Load the scoped posting policy for stock commands.
+north_star_runtime	platform.inventory_tenant_calendars	SELECT	*	Resolve the business date used for inventory posting.
+north_star_runtime	platform.release_activation_attempt_outcomes	INSERT	*	Run and recover the fenced release activation protocol.
+north_star_runtime	platform.release_activation_attempt_outcomes	SELECT	*	Run and recover the fenced release activation protocol.
+north_star_runtime	platform.release_activation_attempts	INSERT	*	Run and recover the fenced release activation protocol.
+north_star_runtime	platform.release_activation_attempts	SELECT	*	Run and recover the fenced release activation protocol.
+north_star_runtime	platform.release_activation_authority_epochs	SELECT	*	Run and recover the fenced release activation protocol.
+north_star_runtime	platform.release_activation_control_events	SELECT	*	Run and recover the fenced release activation protocol.
+north_star_runtime	platform.release_activation_history	INSERT	*	Run and recover the fenced release activation protocol.
+north_star_runtime	platform.release_activation_history	SELECT	*	Run and recover the fenced release activation protocol.
+north_star_runtime	platform.release_activation_outbox	INSERT	*	Run and recover the fenced release activation protocol.
+north_star_runtime	platform.release_activation_outbox	SELECT	*	Run and recover the fenced release activation protocol.
+north_star_runtime	platform.release_activation_phase_receipts	INSERT	*	Run and recover the fenced release activation protocol.
+north_star_runtime	platform.release_activation_phase_receipts	SELECT	*	Run and recover the fenced release activation protocol.
+north_star_runtime	platform.release_activation_preparations	INSERT	*	Run and recover the fenced release activation protocol.
+north_star_runtime	platform.release_activation_preparations	SELECT	*	Run and recover the fenced release activation protocol.
+north_star_runtime	platform.release_activation_reconciliation_alarms	INSERT	*	Run and recover the fenced release activation protocol.
+north_star_runtime	platform.release_activation_reconciliation_alarms	SELECT	*	Run and recover the fenced release activation protocol.
+north_star_runtime	platform.release_activation_reconciliation_starts	INSERT	*	Run and recover the fenced release activation protocol.
+north_star_runtime	platform.release_activation_reconciliation_starts	SELECT	*	Run and recover the fenced release activation protocol.
+north_star_runtime	platform.release_activation_swap_receipts	INSERT	*	Run and recover the fenced release activation protocol.
+north_star_runtime	platform.release_activation_swap_receipts	SELECT	*	Run and recover the fenced release activation protocol.
+north_star_runtime	platform.release_activation_verification_receipts	INSERT	*	Run and recover the fenced release activation protocol.
+north_star_runtime	platform.release_activation_verification_receipts	SELECT	*	Run and recover the fenced release activation protocol.
+north_star_runtime	platform.release_approvals	INSERT	*	Evaluate and record approval for a release decision.
+north_star_runtime	platform.release_approvals	SELECT	*	Evaluate and record approval for a release decision.
+north_star_runtime	platform.release_approver_eligibility_events	SELECT	*	Evaluate and record approval for a release decision.
+north_star_runtime	platform.release_executor_authority_events	SELECT	*	Resolve the executor authority for the release decision.
+north_star_runtime	platform.release_verification_evidence	INSERT	*	Store and reload evidence for release verification.
+north_star_runtime	platform.release_verification_evidence	SELECT	*	Store and reload evidence for release verification.
+north_star_runtime	platform.release_verification_results	INSERT	*	Store and reload evidence for release verification.
+north_star_runtime	platform.release_verification_results	SELECT	*	Store and reload evidence for release verification.
+north_star_runtime	platform.saved_master_filters	INSERT	*	Persist and retrieve the user’s scoped list filters.
+north_star_runtime	platform.saved_master_filters	SELECT	*	Persist and retrieve the user’s scoped list filters.
+north_star_runtime	platform.saved_master_filters	UPDATE	*	Persist and retrieve the user’s scoped list filters.
+north_star_runtime	platform.semantic_operation_receipts	INSERT	*	Record and retrieve replay evidence for semantic operations.
+north_star_runtime	platform.semantic_operation_receipts	SELECT	*	Record and retrieve replay evidence for semantic operations.
+north_star_runtime	platform.tenant_fixture_records	INSERT	*	Store and reload records for the tenant isolation fixture.
+north_star_runtime	platform.tenant_fixture_records	SELECT	*	Store and reload records for the tenant isolation fixture.
+north_star_runtime	platform.tenant_release_admissions	INSERT	*	Install the tenant release and resolve its admitted artifacts.
+north_star_runtime	platform.tenant_release_admissions	SELECT	*	Install the tenant release and resolve its admitted artifacts.
+north_star_runtime	platform.tenant_release_artifact_links	INSERT	*	Install the tenant release and resolve its admitted artifacts.
+north_star_runtime	platform.tenant_release_artifact_links	SELECT	*	Install the tenant release and resolve its admitted artifacts.
+north_star_runtime	platform.tenant_release_chunk_links	INSERT	*	Install the tenant release and resolve its admitted artifacts.
+north_star_runtime	platform.tenant_release_chunk_links	SELECT	*	Install the tenant release and resolve its admitted artifacts.
+north_star_runtime	platform.tenant_release_projection_links	INSERT	*	Install the tenant release and resolve its admitted artifacts.
+north_star_runtime	platform.tenant_release_projection_links	SELECT	*	Install the tenant release and resolve its admitted artifacts.
+north_star_runtime	platform.tenant_releases	INSERT	*	Install the tenant release and resolve its admitted artifacts.
+north_star_runtime	platform.tenant_releases	SELECT	*	Install the tenant release and resolve its admitted artifacts.
+north_star_runtime	platform.transition_preparation_receipts	INSERT	*	Record and reload release transition preparation evidence.
+north_star_runtime	platform.transition_preparation_receipts	SELECT	*	Record and reload release transition preparation evidence.
+north_star_runtime	platform.trust_action_invocations	INSERT	*	Write or read transactional trust evidence for semantic operations.
+north_star_runtime	platform.trust_action_invocations	SELECT	*	Write or read transactional trust evidence for semantic operations.
+north_star_runtime	platform.trust_business_change_documents	INSERT	*	Write or read transactional trust evidence for semantic operations.
+north_star_runtime	platform.trust_business_change_documents	SELECT	*	Write or read transactional trust evidence for semantic operations.
+north_star_runtime	platform.trust_domain_events	INSERT	*	Write or read transactional trust evidence for semantic operations.
+north_star_runtime	platform.trust_domain_events	SELECT	*	Write or read transactional trust evidence for semantic operations.
+north_star_runtime	platform.trust_outbox	INSERT	*	Write or read transactional trust evidence for semantic operations.
+north_star_runtime	platform.trust_outbox	SELECT	*	Write or read transactional trust evidence for semantic operations.
+north_star_runtime	platform.workflow_body_blobs	INSERT	*	Publish and retrieve versioned workflow bodies.
+north_star_runtime	platform.workflow_body_blobs	SELECT	*	Publish and retrieve versioned workflow bodies.
+north_star_runtime	platform.workflow_definitions	INSERT	*	Publish or resolve workflow definitions for the release.
+north_star_runtime	platform.workflow_definitions	SELECT	*	Publish or resolve workflow definitions for the release.
+north_star_workflow_verifier	platform.workflow_verification_evidence	INSERT	*	Record release-bound workflow evidence on the verifier connection.
+north_star_workflow_worker	platform.trust_action_invocations	SELECT	action_id,environment_id,invocation_id,outcome,policy_inputs,tenant_id	Consume committed trust evidence as workflow event input.
+north_star_workflow_worker	platform.trust_business_change_documents	SELECT	action_id,change_document_id,domain_event_id,environment_id,execution_principal_id,invocation_id,outbox_id,record_id,record_type,release_content_hash,release_id,tenant_id	Consume committed trust evidence as workflow event input.
+north_star_workflow_worker	platform.trust_domain_events	SELECT	action_id,change_document_id,domain_event_id,environment_id,event_schema_version,event_type,invocation_id,outbox_id,payload,release_content_hash,release_id,tenant_id	Consume committed trust evidence as workflow event input.
+north_star_workflow_worker	platform.trust_outbox	SELECT	action_id,change_document_id,domain_event_id,environment_id,event_schema_version,event_type,invocation_id,outbox_id,release_content_hash,release_id,tenant_id	Consume committed trust evidence as workflow event input.
+north_star_workflow_worker	platform.workflow_activation_watermarks	SELECT	*	Advance and recover durable workflow executions on the worker connection.
+north_star_workflow_worker	platform.workflow_definitions	SELECT	*	Publish or resolve workflow definitions for the release.
+north_star_workflow_worker	platform.workflow_effect_outbox	INSERT	*	Advance and recover durable workflow executions on the worker connection.
+north_star_workflow_worker	platform.workflow_effect_outbox	SELECT	*	Advance and recover durable workflow executions on the worker connection.
+north_star_workflow_worker	platform.workflow_event_occurrences	INSERT	*	Advance and recover durable workflow executions on the worker connection.
+north_star_workflow_worker	platform.workflow_event_occurrences	SELECT	*	Advance and recover durable workflow executions on the worker connection.
+north_star_workflow_worker	platform.workflow_event_sources	SELECT	*	Advance and recover durable workflow executions on the worker connection.
+north_star_workflow_worker	platform.workflow_event_waits	INSERT	*	Advance and recover durable workflow executions on the worker connection.
+north_star_workflow_worker	platform.workflow_event_waits	SELECT	*	Advance and recover durable workflow executions on the worker connection.
+north_star_workflow_worker	platform.workflow_instances	INSERT	*	Advance and recover durable workflow executions on the worker connection.
+north_star_workflow_worker	platform.workflow_instances	SELECT	*	Advance and recover durable workflow executions on the worker connection.
+north_star_workflow_worker	platform.workflow_journal	INSERT	*	Advance and recover durable workflow executions on the worker connection.
+north_star_workflow_worker	platform.workflow_journal	SELECT	*	Advance and recover durable workflow executions on the worker connection.
+north_star_workflow_worker	platform.workflow_pending_approvals	INSERT	cursor,environment_id,fence,plan,plan_digest,run_id,tenant_id	Advance and recover durable workflow executions on the worker connection.
+north_star_workflow_worker	platform.workflow_pending_approvals	SELECT	*	Advance and recover durable workflow executions on the worker connection.
+north_star_workflow_worker	platform.workflow_receipt_scan_positions	INSERT	*	Advance and recover durable workflow executions on the worker connection.
+north_star_workflow_worker	platform.workflow_receipt_scan_positions	SELECT	*	Advance and recover durable workflow executions on the worker connection.
+north_star_workflow_worker	platform.workflow_receipt_scan_positions	UPDATE	fence,next_outbox_id,pointer_id	Advance and recover durable workflow executions on the worker connection.
+north_star_workflow_worker	platform.workflow_retry_decisions	SELECT	*	Validate a recorded human Retry before replay or effect dispatch.
+north_star_workflow_worker	platform.workflow_runs	INSERT	*	Advance and recover durable workflow executions on the worker connection.
+north_star_workflow_worker	platform.workflow_runs	SELECT	*	Advance and recover durable workflow executions on the worker connection.
+north_star_workflow_worker	platform.workflow_runs	UPDATE	poll_order	Advance the worker polling cursor.
+north_star_workflow_worker	platform.workflow_timers	INSERT	*	Advance and recover durable workflow executions on the worker connection.
+north_star_workflow_worker	platform.workflow_timers	SELECT	*	Advance and recover durable workflow executions on the worker connection.

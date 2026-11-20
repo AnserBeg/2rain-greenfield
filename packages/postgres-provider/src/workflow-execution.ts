@@ -71,11 +71,13 @@ export interface WorkflowRunPin extends WorkflowScope, ReceiptScope {
     permission: string,
     resource: string,
     company: string | null,
+    role: string,
   ][];
 }
 
 interface Run extends Omit<WorkflowRunPin, keyof ReceiptScope> {
   readonly receipt_scope: ReceiptScope | null;
+  readonly retry_authorized: boolean;
   readonly workflow_id: string;
   readonly status:
     | 'RUNNABLE'
@@ -100,6 +102,7 @@ interface JournalRow {
   readonly canonical_bytes: Buffer;
   readonly idempotency_key: string | null;
   readonly approval_status: 'APPROVED' | 'DECLINED' | null;
+  readonly approval_fence: string | null;
 }
 
 export interface WorkflowGateway {
@@ -111,7 +114,7 @@ export interface WorkflowGateway {
   ): Promise<ImmutableJsonValue>;
   withRemedyAuthority<T>(
     operator: TrustedRequestContext,
-    work: () => Promise<T>,
+    work: (client: PoolClient) => Promise<T>,
   ): Promise<T>;
 }
 
@@ -226,9 +229,7 @@ export class PostgresWorkflowExecution {
             ORDER BY timer.due_at, r.run_id, timer.cursor
             LIMIT 16 FOR UPDATE OF r SKIP LOCKED
          )
-         UPDATE platform.workflow_runs AS r SET status = 'RUNNABLE'
-           FROM ready
-          WHERE r.tenant_id = $1 AND r.environment_id = $2 AND r.run_id = ready.run_id`,
+         SELECT platform.workflow_set_worker_status(ready.run_id, $5, 'RUNNABLE', NULL) FROM ready`,
         [
           ...scopeKey,
           pointer.pointer_id,
@@ -247,9 +248,10 @@ export class PostgresWorkflowExecution {
     if (!snapshot || snapshot.run.status !== 'RUNNABLE') return;
     const { run, journal } = snapshot;
     const scopedRun = run.receipt_scope && { ...run, ...run.receipt_scope };
-    const pending = pendingDispatch(run, journal);
+    const pending = run.retry_authorized ? pendingDispatch(run, journal) : null;
     const recovered = pending && (await this.#readReceipt(pending));
     const decision =
+      !run.retry_authorized ||
       journal.invalid ||
       recovered ||
       !scopedRun ||
@@ -260,6 +262,15 @@ export class PostgresWorkflowExecution {
       run,
       journal,
       async (client, current, pointer) => {
+        if (!current.retry_authorized) {
+          await setStatus(
+            client,
+            current,
+            'SUSPENDED',
+            'retry-decision-missing',
+          );
+          return null;
+        }
         if (journal.invalid) {
           await setStatus(client, current, 'QUARANTINED', journal.invalid);
           return null;
@@ -285,6 +296,18 @@ export class PostgresWorkflowExecution {
         if (!decision) return null;
         if (decision.kind === 'SUSPENDED' || decision.kind === 'QUARANTINED') {
           await setStatus(client, current, decision.kind, decision.reason);
+          return null;
+        }
+        if (decision.kind !== 'quarantined' && journal.renewApproval) {
+          const { cursor, call } = journal.renewApproval;
+          await stageApproval(
+            client,
+            current,
+            scopedRun.legal_entity_id,
+            cursor,
+            call,
+            true,
+          );
           return null;
         }
         if (decision.kind === 'done') {
@@ -337,47 +360,14 @@ export class PostgresWorkflowExecution {
           return null;
         }
         if (call.kind === 'requestApproval') {
-          if (
-            !('operationId' in call) ||
-            (typeof call.input === 'object' &&
-              call.input !== null &&
-              'legalEntityId' in call.input &&
-              call.input.legalEntityId !== scopedRun.legal_entity_id)
-          ) {
-            await setStatus(
-              client,
-              current,
-              'SUSPENDED',
-              'approval-action-or-company-refused',
-            );
-            return null;
-          }
-          const plan = canonicalize({
-            request: call,
-            companyId: scopedRun.legal_entity_id,
+          await stageApproval(
+            client,
+            current,
+            scopedRun.legal_entity_id,
             cursor,
-            fence: current.execution_fence,
-            pointerId: current.pointer_id,
-            releaseId: current.release_id,
-            releaseRoot: current.release_root,
-            runId: current.run_id,
-          });
-          if (!journal.pending)
-            await insertJournal(client, current, cursor, 'REQUEST', call);
-          await client.query(
-            `INSERT INTO platform.workflow_pending_approvals
-               (tenant_id, environment_id, run_id, cursor, fence, plan, plan_digest)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
-             ON CONFLICT (tenant_id, environment_id, run_id, cursor, fence) DO NOTHING`,
-            [
-              ...runKey(current),
-              cursor,
-              current.execution_fence,
-              Buffer.from(plan),
-              sha256(plan),
-            ],
+            call,
+            !!journal.pending,
           );
-          await setStatus(client, current, 'WAITING', null);
           return null;
         }
         if (!isEffect(call)) {
@@ -493,7 +483,7 @@ export class PostgresWorkflowExecution {
       const recovered = pending && (await this.#readReceipt(pending));
       // Hold current operator authority through each committed transition.
       const outcome = await this.gateway
-        .withRemedyAuthority(operator, async () => {
+        .withRemedyAuthority(operator, async (authority) => {
           if (!snapshot) return 'ineligible' as const;
           const applied = await this.#withCurrent(
             snapshot.run,
@@ -538,32 +528,31 @@ export class PostgresWorkflowExecution {
                 );
                 return 'ineligible' as const;
               }
-              if (action === 'cancel') {
-                await setStatus(
-                  client,
-                  run,
-                  'CANCELLED',
-                  'operator-cancelled',
-                  operator.principalId,
-                );
-                return 'cancelled' as const;
-              }
-              await client.query(
-                `UPDATE platform.workflow_runs SET status = 'RUNNABLE', reason = NULL, execution_fence = $4
-            WHERE tenant_id = $1 AND environment_id = $2 AND run_id = $3`,
-                [...runKey(run), pointer!.fence],
-              );
-              await recordControl(
-                client,
-                run,
-                'same-pin-retry',
-                operator.principalId,
-                pointer!.fence,
-              );
-              return 'retried' as const;
+              return {
+                fence: pointer?.fence ?? null,
+                journalCount:
+                  snapshot.journal.rowCount +
+                  (pending && recovered && !parked ? 1 : 0),
+              };
             },
           );
-          return applied ?? 'ineligible';
+          if (!applied || applied === 'ineligible')
+            return 'ineligible' as const;
+          const { rows } = await authority.query<{ applied: boolean }>(
+            'SELECT platform.workflow_apply_remedy($1, $2, $3, $4, $5) AS applied',
+            [
+              runId,
+              snapshot.run.execution_fence,
+              applied.fence,
+              action,
+              applied.journalCount,
+            ],
+          );
+          return rows[0]?.applied
+            ? action === 'retry'
+              ? ('retried' as const)
+              : ('cancelled' as const)
+            : ('ineligible' as const);
         })
         .catch(async (error: unknown) => {
           if (!(error instanceof WorkflowRemedyRefused)) throw error;
@@ -630,12 +619,25 @@ export class PostgresWorkflowExecution {
         )
           return null;
         // Requests and results are immutable and appended at contiguous cursors.
-        const { rows: counts } = await client.query<{ count: number }>(
-          `SELECT count(*)::int AS count FROM platform.workflow_journal
-          WHERE tenant_id = $1 AND environment_id = $2 AND run_id = $3 AND kind IN ('REQUEST', 'RESULT')`,
-          runKey(snapshot),
+        const { rows: counts } = await client.query<{
+          count: number;
+          decisions: number;
+        }>(
+          `SELECT
+            (SELECT count(*)::int FROM platform.workflow_journal
+              WHERE tenant_id = $1 AND environment_id = $2 AND run_id = $3
+                AND kind IN ('REQUEST', 'RESULT')) AS count,
+            (SELECT count(*)::int FROM platform.workflow_pending_approvals
+              WHERE tenant_id = $1 AND environment_id = $2 AND run_id = $3
+                AND fence = $4 AND decision_request_id IS NOT NULL
+                AND status IN ('APPROVED', 'DECLINED')) AS decisions`,
+          [...runKey(snapshot), snapshot.execution_fence],
         );
-        if (counts[0]?.count !== journal.rowCount) return null;
+        if (
+          counts[0]?.count !== journal.rowCount ||
+          counts[0]?.decisions !== journal.decisionsAtFence
+        )
+          return null;
         return work(client, snapshot, pointer);
       },
     );
@@ -742,6 +744,57 @@ export class PostgresWorkflowExecution {
   }
 }
 
+async function stageApproval(
+  client: PoolClient,
+  current: Run,
+  companyId: string,
+  cursor: number,
+  call: Extract<WorkflowCall, { kind: 'requestApproval' }>,
+  alreadyRecorded: boolean,
+): Promise<void> {
+  if (
+    !('operationId' in call) ||
+    (typeof call.input === 'object' &&
+      call.input !== null &&
+      'legalEntityId' in call.input &&
+      call.input.legalEntityId !== companyId)
+  ) {
+    await setStatus(
+      client,
+      current,
+      'SUSPENDED',
+      'approval-action-or-company-refused',
+    );
+    return;
+  }
+  const plan = canonicalize({
+    request: call,
+    companyId: companyId,
+    cursor,
+    fence: current.execution_fence,
+    pointerId: current.pointer_id,
+    releaseId: current.release_id,
+    releaseRoot: current.release_root,
+    runId: current.run_id,
+  });
+  if (!alreadyRecorded)
+    await insertJournal(client, current, cursor, 'REQUEST', call);
+  await client.query(
+    `INSERT INTO platform.workflow_pending_approvals
+       (tenant_id, environment_id, run_id, cursor, fence, plan, plan_digest)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (tenant_id, environment_id, run_id, cursor, fence) DO NOTHING`,
+    [
+      ...runKey(current),
+      cursor,
+      current.execution_fence,
+      Buffer.from(plan),
+      sha256(plan),
+    ],
+  );
+  await setStatus(client, current, 'WAITING', null);
+}
+
 async function persistEffectResult(
   client: PoolClient,
   run: Run,
@@ -781,6 +834,7 @@ async function loadRun(
       await client.query<Run>(
         `SELECT r.*, d.executable, d.sdk_digest, d.grants, d.engine_build, d.host_version, d.sdk_version,
              d.automation_principal_id,
+             (r.execution_fence = r.initial_fence OR retry.fence IS NOT NULL) AS retry_authorized,
              CASE WHEN change.record_id IS NOT NULL THEN jsonb_build_object(
                'legal_entity_id', event.payload #>> '{legalEntityId,value}',
                'receipt_id', change.record_id,
@@ -796,6 +850,9 @@ async function loadRun(
         FROM platform.workflow_runs AS r
         JOIN platform.workflow_instances AS i USING (tenant_id, environment_id, instance_id, workflow_id)
         JOIN platform.workflow_definitions AS d USING (tenant_id, environment_id, release_id, workflow_id)
+        LEFT JOIN platform.workflow_retry_decisions AS retry
+          ON (retry.tenant_id, retry.environment_id, retry.run_id, retry.fence) =
+             (r.tenant_id, r.environment_id, r.run_id, r.execution_fence)
         LEFT JOIN platform.trust_domain_events AS event
           ON (event.tenant_id, event.environment_id, event.domain_event_id, event.outbox_id) =
              (r.tenant_id, r.environment_id, i.event_id, i.outbox_id)
@@ -844,20 +901,29 @@ async function loadJournal(
     idempotencyKey: string | null;
   } | null;
   rowCount: number;
+  decisionsAtFence: number;
+  renewApproval: {
+    cursor: number;
+    call: Extract<WorkflowCall, { kind: 'requestApproval' }>;
+  } | null;
   invalid: string | null;
 }> {
   const journal = await client.query<JournalRow>(
-    `SELECT j.cursor, j.kind, j.canonical_bytes, e.idempotency_key, a.status AS approval_status
+    `SELECT j.cursor, j.kind, j.canonical_bytes, e.idempotency_key, a.status AS approval_status, a.fence AS approval_fence
        FROM platform.workflow_journal AS j
        LEFT JOIN platform.workflow_effect_outbox AS e
          ON e.tenant_id = j.tenant_id AND e.environment_id = j.environment_id
         AND e.run_id = j.run_id AND e.cursor = j.cursor AND e.request_journal_id = j.journal_id
-       LEFT JOIN platform.workflow_pending_approvals AS a
-         ON (a.tenant_id, a.environment_id, a.run_id, a.cursor) =
-            (j.tenant_id, j.environment_id, j.run_id, j.cursor)
-        AND a.fence = $4 AND j.kind = 'REQUEST'
-        AND convert_from(a.plan, 'UTF8')::jsonb->'request' = convert_from(j.canonical_bytes, 'UTF8')::jsonb
-        AND a.decision_request_id IS NOT NULL AND a.status IN ('APPROVED', 'DECLINED')
+       LEFT JOIN LATERAL (
+         SELECT a.status, a.fence
+           FROM platform.workflow_pending_approvals AS a
+          WHERE (a.tenant_id, a.environment_id, a.run_id, a.cursor) =
+                (j.tenant_id, j.environment_id, j.run_id, j.cursor)
+            AND a.fence <= $4 AND j.kind = 'REQUEST'
+            AND convert_from(a.plan, 'UTF8')::jsonb->'request' = convert_from(j.canonical_bytes, 'UTF8')::jsonb
+            AND a.decision_request_id IS NOT NULL AND a.status IN ('APPROVED', 'DECLINED')
+          ORDER BY a.fence DESC LIMIT 1
+       ) AS a ON true
       WHERE j.tenant_id = $1 AND j.environment_id = $2 AND j.run_id = $3 AND j.kind <> 'CONTROL'
       ORDER BY j.cursor, j.kind`,
     [...runKey(run), run.execution_fence],
@@ -866,8 +932,22 @@ async function loadJournal(
   const state = {
     prefix,
     rowCount: journal.rows.length,
+    decisionsAtFence: journal.rows.filter(
+      (row) => row.approval_fence === run.execution_fence,
+    ).length,
+    renewApproval: null,
     pending: null,
     invalid: null,
+  };
+  // Older decisions explain their immutable journal results. Renew an
+  // approval before an effect with the approved input that never committed.
+  const superseded = new Map<
+    number,
+    Extract<WorkflowCall, { kind: 'requestApproval' }>
+  >();
+  const renewApproval = () => {
+    const next = superseded.entries().next().value;
+    return next ? { cursor: next[0], call: next[1] } : null;
   };
   for (let index = 0; index < journal.rows.length; index += 2) {
     const request = journal.rows[index]!;
@@ -897,6 +977,7 @@ async function loadJournal(
     if (!result)
       return {
         ...state,
+        renewApproval: renewApproval(),
         pending: {
           cursor: request.cursor,
           call,
@@ -906,8 +987,25 @@ async function loadJournal(
     if (result.kind !== 'RESULT' || result.cursor !== request.cursor)
       return { ...state, invalid: 'unpaired-journal-result' };
     // The journal can report an outcome but cannot grant human approval.
-    if (call.kind === 'requestApproval' && !request.approval_status)
-      return { ...state, invalid: 'approval-result-without-decision' };
+    if (call.kind === 'requestApproval') {
+      if (!request.approval_status)
+        return { ...state, invalid: 'approval-result-without-decision' };
+      if (
+        request.approval_status === 'APPROVED' &&
+        request.approval_fence !== run.execution_fence
+      )
+        superseded.set(request.cursor, call);
+    }
+    if (call.kind === 'operation') {
+      for (const [cursor, approval] of superseded) {
+        if (
+          'operationId' in approval &&
+          approval.operationId === call.id &&
+          canonicalize(approval.input) === canonicalize(call.input)
+        )
+          superseded.delete(cursor);
+      }
+    }
     prefix.push({
       request: bytes,
       result:
@@ -916,7 +1014,7 @@ async function loadJournal(
           : result.canonical_bytes.toString(),
     });
   }
-  return state;
+  return { ...state, renewApproval: renewApproval() };
 }
 
 function pendingDispatch(run: Run, journal: Journal): Dispatch | null {
@@ -954,14 +1052,14 @@ async function setStatus(
   run: RunKey & Pick<Run, 'execution_fence'>,
   status: Run['status'],
   reason: string | null,
-  operator: string | null = null,
 ): Promise<void> {
-  await client.query(
-    `UPDATE platform.workflow_runs SET status = $4, reason = $5
-      WHERE tenant_id = $1 AND environment_id = $2 AND run_id = $3`,
-    [...runKey(run), status, reason],
+  const { rows } = await client.query<{ applied: boolean }>(
+    'SELECT platform.workflow_set_worker_status($1, $2, $3, $4) AS applied',
+    [run.run_id, run.execution_fence, status, reason],
   );
-  await recordControl(client, run, reason ?? status, operator);
+  if (!rows[0]?.applied)
+    throw new Error('Workflow worker status transition refused');
+  await recordControl(client, run, reason ?? status, null);
 }
 
 async function recordControl(
@@ -969,9 +1067,12 @@ async function recordControl(
   run: RunKey & Pick<Run, 'execution_fence'>,
   reason: string,
   operator: string | null,
-  fence = run.execution_fence,
 ): Promise<void> {
-  await insertJournal(client, run, 0, 'CONTROL', { fence, operator, reason });
+  await insertJournal(client, run, 0, 'CONTROL', {
+    fence: run.execution_fence,
+    operator,
+    reason,
+  });
 }
 
 function matchesPin(run: Run, pointer: WorkflowPointer | null): boolean {
