@@ -2,7 +2,7 @@
 
 **Design checkpoint, 2026-11-20.** Slice 0 merged at `0850ef0b`. Fable 5.2 independently read [ADR-0085](../../decisions/ADR-0085-platform-upgrades-for-customized-tenants.md) at `94b23300` and returned **ACCEPT WITH AMENDMENTS**. The full read is in `/home/rvham/2rain-missions/adr85-read.fable.result.txt`. B1 found an undefined workflow authority ceiling and stranded runs. B2 found a fleet-wide binary, a tip-only draft guard and a wave that one held member could stall.
 
-The amended design is in force except for the policy rows, each **proposed, awaiting the owner's ruling**. The proposal changes ADR-0006's sole-human-authority line, ADR-0081 and plan §10.1. Manual governs all activations today. The next gate is a narrow Fable re-read before code. Build also depends on CUSTOMIZE-3 and WORKFLOW-1. The survival, deploy and legacy-fixture gates precede the first customer.
+The amended design is in force except for the policy rows, each **proposed, awaiting the owner's ruling**. The proposal changes ADR-0006's sole-human-authority line, ADR-0081 and plan §10.1. Manual governs all activations today. Fable’s narrow re-read closed B1 and B2 and accepted the design with amendments A19–A24. Slice 1 can start independently of CUSTOMIZE-3 and WORKFLOW-1. The survival, deploy and legacy-fixture gates precede the first customer.
 
 ## Amendments and the slices they gate
 
@@ -16,7 +16,7 @@ The amended design is in force except for the policy rows, each **proposed, awai
 | A6 | 6 | **Recheck and fall back** returns to Manual on all five triggers and requires fresh opt-in proof. |
 | A7 | 6 | **Issue an approval** takes only the upgrade ID and requires isolated evidence, classification and provisioning-root authentication. |
 | A8 | 6 | **Notify and roll back** records and notifies each policy activation and requires Manual rollback and re-upgrade. |
-| A9 | 4 (limited waves), 6 (proposed principal) | **Authorize a platform rollout operator** binds proofs to start/pause/resume/exclude and limits the interim path to local demo or pilot owner CLI. |
+| A9 | 4 (limited waves), 6 (proposed principal) | **Authorize a platform rollout operator** binds proofs to start/pause/resume/exclude under the proposed principal. Rollout waves confines the interim path to local demo or pilot owner CLI regardless of the ruling. |
 | A10 | 1 | **Slice 1 replay admission** closes the present eight-kind allowlist gap, checks the entire vocabulary and classifies missing admission as a platform defect. |
 | A11 | 1 | **Diagnostic codes v1** retires the catch-all and pins the closed code table by test. |
 | A12 | 1 | **Diagnostic codes v1** requires all independent conflicts, dependent edits and rule-specific witness failures in one attempt. |
