@@ -1,4 +1,17 @@
 import {
+  AddressProjectionSchema,
+  SavedAddressSchema,
+} from '@north-star/canonical-model';
+import { withAddressEditor } from './address-context.js';
+import type { AddressGateway } from '../../../packages/runtime/src/address-gateway.js';
+import { addressFromForm } from './address-field.js';
+import {
+  boardContext,
+  boardSlots,
+  boardTask,
+  changedBoardCard,
+} from './board.js';
+import {
   compositionRelationTargets,
   loadSurfaceComposition,
   submitCompositionAction,
@@ -59,6 +72,7 @@ import {
   renderRegisteredSurfaceComponent,
   renderDocumentSection,
   surfaceSupportsRuntimeIntent,
+  surfaceHref,
   type SurfaceDataRenderState,
   type SurfaceFormReferenceChoices,
   type SurfaceOperationFeedback,
@@ -188,6 +202,7 @@ export interface SurfaceRuntimeResponse {
 
 export interface SurfaceRuntimeGateways {
   readonly applicationExtension?: SurfaceRuntimeApplicationExtension;
+  readonly addresses?: AddressGateway;
   readonly documents?: DocumentGateway;
   /**
    * The request clock, read once per request: a List's "before today" views,
@@ -277,6 +292,27 @@ export async function renderSurfaceRuntimeWithData(
    */
   reads: { readonly finishReads: () => Promise<void> } | null = null,
 ): Promise<SurfaceRuntimeResponse> {
+  return withAddressEditor(view, requestUrl, gateways.addresses, () =>
+    renderSurfaceRuntimeWithDataInContext(
+      view,
+      requestUrl,
+      gateways,
+      feedback,
+      reads,
+    ),
+  );
+}
+async function renderSurfaceRuntimeWithDataInContext(
+  view: RuntimeViewContract.RequestRuntimeView,
+  requestUrl: string,
+  gateways: SurfaceRuntimeGateways,
+  feedback: SurfaceOperationFeedback | null = null,
+  /**
+   * SPEED-1: the page's read snapshot. Its reads are finished before the
+   * page is rendered, so the snapshot is never held across rendering.
+   */
+  reads: { readonly finishReads: () => Promise<void> } | null = null,
+): Promise<SurfaceRuntimeResponse> {
   assertRequestRuntimeView(view);
   const rendered = async (
     render: () => SurfaceRuntimeResponse,
@@ -285,7 +321,60 @@ export async function renderSurfaceRuntimeWithData(
     return render();
   };
   const selection = selectSurface(view, requestUrl);
-  if ('statusCode' in selection) return selection;
+  if ('statusCode' in selection) {
+    if (selection.statusCode !== 404) return selection;
+    const url = new URL(requestUrl, 'http://surface-runtime.local');
+    const id = url.searchParams.get('surface');
+    if (!id?.includes(':surface.custom_board_')) return selection;
+    const manifest = readCompiledSurfaceManifest(view);
+    const retired = manifest.surfaces.find(
+      (surface) => surface.surfaceId === id,
+    )?.board;
+    const ownerId =
+      retired?.body.listSurfaceId ?? url.searchParams.get('collection');
+    const owner = manifest.surfaces.find(
+      (surface) =>
+        surface.surfaceId === ownerId &&
+        surface.archetype === 'list' &&
+        surface.lifecycle === 'active',
+    );
+    let back = '';
+    if (owner) {
+      const binding = readCompiledSurfaceDataBinding(view, owner);
+      const scope = binding.query.legalEntityScope;
+      const company = scope ? url.searchParams.get('collectionCompany') : null;
+      if (
+        (await gateways.queryGateway.previewEligibility(
+          view,
+          owner.dataSourceQueryId,
+          company,
+        )) === 'eligible'
+      ) {
+        const href = surfaceHref(owner, undefined, false, {
+          view,
+          legalEntitySelection: company ? [company] : [],
+        });
+        back =
+          '<a href="' +
+          escapeHtml(href) +
+          '">Open ' +
+          escapeHtml(owner.label) +
+          '</a>';
+      }
+    }
+    return {
+      statusCode: 404,
+      html: shellDocument(
+        view,
+        manifest.surfaces.filter((s) => s.lifecycle === 'active'),
+        manifest.navigation,
+        null,
+        '<section role="alert"><h1>View not available</h1>' +
+          back +
+          '</section>',
+      ),
+    };
+  }
   let binding: CompiledSurfaceDataBinding;
   try {
     binding = readCompiledSurfaceDataBinding(view, selection.selected);
@@ -498,6 +587,44 @@ export async function renderSurfaceRuntimeWithData(
       ),
     );
   }
+  if (selection.selected.board) {
+    try {
+      const context = boardContext(
+        view,
+        selection.selected,
+        selection.surfaces,
+        binding,
+        url,
+        legalEntityScopeArguments(binding, url),
+        gateways,
+      );
+      const slots = await boardSlots(
+        context,
+        feedback && 'record' in feedback ? feedback.record.recordId : undefined,
+      );
+      return rendered(() =>
+        renderSelectedSurface(
+          view,
+          selection,
+          {
+            status: 'READY',
+            records: [],
+            boardSlots: slots,
+            boardListState: readDeclaredListState(context.owner.list!, url),
+          },
+          feedback,
+          offeredOperations,
+          200,
+          legalEntitySelection,
+          workspaceContext,
+        ),
+      );
+    } catch (error) {
+      return renderApplicationDiagnostic(422, {
+        code: queryMessageCode(error),
+      });
+    }
+  }
   if (binding.query.queryType === 'aggregate') {
     const scopeParameterId =
       binding.query.legalEntityScope?.operand.parameterId;
@@ -669,6 +796,70 @@ export async function renderSurfaceRuntimeWithData(
           surfaces: selection.surfaces,
           view,
         });
+      }
+      if (
+        data.status === 'READY' &&
+        data.records[0] &&
+        selection.selected.surfaceRole === 'record' &&
+        view.projections.connector &&
+        gateways.addresses
+      ) {
+        const definition = AddressProjectionSchema.parse(
+          view.projections.connector.payload,
+        );
+        const record = data.records[0],
+          company =
+            workspaceContext?.selectedRecordId ?? legalEntitySelection[0];
+        const maps: Record<string, string> = {};
+        const layout = definition.layouts.find(
+          (l) => l.surfaceId === selection.selected.surfaceId,
+        );
+        for (const p of definition.placements.filter(
+          (p) => p.surfaceId === selection.selected.surfaceId,
+        )) {
+          const binding = definition.bindings.find(
+            (b) => b.fieldId === p.fieldId,
+          )!;
+          const value = SavedAddressSchema.safeParse(
+            record.values[p.fieldId],
+          ).data;
+          if (!value) continue;
+          const pin = value.pin
+            ? {
+                status: 'ready' as const,
+                pin: value.pin,
+                attribution: 'User pin',
+                image: null,
+              }
+            : company
+              ? await gateways.addresses
+                  .pin(
+                    view,
+                    {
+                      fieldId: p.fieldId,
+                      recordId: record.recordId,
+                      companyId: company,
+                    },
+                    binding.mapQueryId,
+                  )
+                  .catch(() => ({ status: 'unavailable' as const }))
+              : { status: 'unavailable' as const };
+          const message =
+            pin.status === 'ready'
+              ? `${pin.pin.latitude}, ${pin.pin.longitude} · ${pin.attribution}`
+              : pin.status === 'locating'
+                ? 'Address saved · locating'
+                : 'Address saved · map unavailable';
+          const img =
+            pin.status === 'ready' && pin.image
+              ? `<img width="240" height="120" alt="${escapeHtml(message)}" src="data:image/svg+xml;base64,${Buffer.from(pin.image).toString('base64')}">`
+              : '';
+          maps[p.sectionId] =
+            (maps[p.sectionId] ?? '') +
+            `<figure>${img}<figcaption>${escapeHtml(value.text)} · ${escapeHtml(message)}</figcaption></figure>`;
+        }
+        if (layout)
+          data = { ...data, addressLayout: layout, addressMaps: maps };
       }
       if (
         data.status === 'READY' &&
@@ -1136,6 +1327,11 @@ async function exportDeclaredList(
               : JSON.stringify(value);
         },
         state.viewId,
+        new Set(
+          AddressProjectionSchema.safeParse(
+            view.projections.connector?.payload,
+          ).data?.bindings.map((b) => b.fieldId),
+        ),
       ),
       contentType: 'text/csv; charset=utf-8' as const,
       fileName: exportFileName(surface.label, now),
@@ -1162,6 +1358,21 @@ export interface SurfaceRuntimeFragmentResponse extends SurfaceRuntimeResponse {
  * the script then performs the ordinary submit, which answers it as a page.
  */
 export async function submitSurfaceRuntimeFragment(
+  view: RuntimeViewContract.RequestRuntimeView,
+  requestUrl: string,
+  submission: SurfaceRuntimeSubmission,
+  gateways: SurfaceRuntimeGateways,
+): Promise<SurfaceRuntimeFragmentResponse> {
+  return withAddressEditor(view, requestUrl, gateways.addresses, () =>
+    submitSurfaceRuntimeFragmentInContext(
+      view,
+      requestUrl,
+      submission,
+      gateways,
+    ),
+  );
+}
+async function submitSurfaceRuntimeFragmentInContext(
   view: RuntimeViewContract.RequestRuntimeView,
   requestUrl: string,
   submission: SurfaceRuntimeSubmission,
@@ -1227,6 +1438,23 @@ export async function submitSurfaceRuntimeFragment(
  * the server's sort order to the control the user actually pressed.
  */
 export async function submitSurfaceRuntimeIntent(
+  view: RuntimeViewContract.RequestRuntimeView,
+  requestUrl: string,
+  submission: SurfaceRuntimeSubmission,
+  gateways: SurfaceRuntimeGateways,
+  transport: 'page' | 'task-fragment' = 'page',
+): Promise<SurfaceRuntimeResponse> {
+  return withAddressEditor(view, requestUrl, gateways.addresses, () =>
+    submitSurfaceRuntimeIntentInContext(
+      view,
+      requestUrl,
+      submission,
+      gateways,
+      transport,
+    ),
+  );
+}
+async function submitSurfaceRuntimeIntentInContext(
   view: RuntimeViewContract.RequestRuntimeView,
   requestUrl: string,
   submission: SurfaceRuntimeSubmission,
@@ -1407,9 +1635,43 @@ export async function submitSurfaceRuntimeIntent(
       });
     }
   }
+  let boardOperation: CompiledSurfaceDataBinding['operations'][number] | null =
+    null;
+  if (selection.selected.board) {
+    const url = new URL(requestUrl, 'http://surface-runtime.local');
+    try {
+      const context = boardContext(
+        view,
+        selection.selected,
+        selection.surfaces,
+        binding,
+        url,
+        legalEntityScopeArguments(binding, url),
+        gateways,
+      );
+      const task = await boardTask(context, submission);
+      if ('html' in task)
+        return {
+          statusCode: task.statusCode,
+          html: shellDocument(
+            view,
+            selection.surfaces,
+            selection.navigation,
+            selection.selected,
+            task.html,
+          ),
+        };
+      boardOperation = task.operation;
+    } catch (error) {
+      return renderApplicationDiagnostic(422, {
+        code: queryMessageCode(error),
+      });
+    }
+  }
   const operation = boundOperation(binding, submission.operationId);
   if (
     !operation ||
+    (boardOperation && boardOperation !== operation) ||
     !surfaceSupportsRuntimeIntent(
       view,
       selection.selected,
@@ -1512,6 +1774,32 @@ export async function submitSurfaceRuntimeIntent(
       }
     }
     const ref = operationMessageRef(error);
+    if (boardOperation && ref.code !== 'OPERATION_PERMISSION_DENIED') {
+      const url = new URL(requestUrl, 'http://surface-runtime.local');
+      const context = boardContext(
+        view,
+        selection.selected,
+        selection.surfaces,
+        binding,
+        url,
+        legalEntityScopeArguments(binding, url),
+        gateways,
+      );
+      const html = await changedBoardCard(context, submission).catch(
+        () => null,
+      );
+      if (html)
+        return {
+          statusCode: 409,
+          html: shellDocument(
+            view,
+            selection.surfaces,
+            selection.navigation,
+            selection.selected,
+            html,
+          ),
+        };
+    }
     return renderApplicationDiagnostic(
       ref.code === 'OPERATION_PERMISSION_DENIED' ? 403 : 422,
       ref,
@@ -1554,6 +1842,18 @@ export async function submitSurfaceRuntimeIntent(
     requestUrl,
     'http://surface-runtime.local',
   ).searchParams.get('record');
+  if (boardOperation && selection.selected.board) {
+    const url = new URL(requestUrl, 'http://surface-runtime.local');
+    const body = selection.selected.board.body;
+    const stage = result.readBack.values[body.grouping.stateFieldId];
+    if (
+      typeof stage === 'string' &&
+      body.grouping.stages.some((s) => s.stateId === stage)
+    )
+      url.searchParams.set('stage', stage);
+    url.searchParams.delete('cards');
+    return renderSurfaceRuntimeWithData(view, url.href, gateways, feedback);
+  }
   if (
     gateways.applicationExtension?.refreshAfterOperation({
       binding,
@@ -1622,7 +1922,9 @@ function renderSelectedSurface(
     }),
   );
   const pageHeading =
-    selected.archetype === 'list' || selected.archetype === 'record'
+    selected.archetype === 'board' ||
+    selected.archetype === 'list' ||
+    selected.archetype === 'record'
       ? ''
       : `<header class="surface-heading">
       <div>
@@ -1656,7 +1958,7 @@ function renderSelectedSurface(
     return { statusCode, html: surfaceContent(body) + queues };
   }
   const enhanceTaskDialog =
-    /<[a-z]+\s[^>]*\bdata-(?:reference-control|editor-create|documents)\b/u.test(
+    /<[a-z]+\s[^>]*\bdata-(?:reference-control|editor-create|documents|address-editor)\b/u.test(
       body,
     ) ||
     (data.status === 'READY' && nativeTask);
@@ -2347,6 +2649,17 @@ function fieldInput(
       submission[`${FORM_EMPTY_INTENT_PREFIX}${fieldId}`],
     );
     if (mutation.kind === 'nothing') continue;
+    if (field?.kind === 'addressFieldType' && mutation.kind === 'set') {
+      try {
+        entries.push([
+          fieldId,
+          addressFromForm('value:' + fieldId, submission),
+        ]);
+      } catch {
+        invalidFormSubmission();
+      }
+      continue;
+    }
     entries.push([fieldId, mutation.kind === 'clear' ? null : mutation.value]);
   }
   return Object.freeze(Object.fromEntries(entries));

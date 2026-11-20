@@ -1,3 +1,4 @@
+import { PostgresAddresses } from './address-geocodes.js';
 import { BILLING_QUOTE_CAPABILITY } from '../../canonical-model/src/billing.js';
 import { billingQuoteReadModel } from './billing-quote.js';
 import { LedgerDocumentBrandResolver } from './document-company-brand.js';
@@ -23,13 +24,14 @@ import type { TrustedRequestContext } from '@north-star/runtime';
 import {
   SemanticOperationGateway,
   parsePinnedOperationCatalog,
-  SemanticOperationMediationAuthority,
+  type SemanticOperationMediationAuthority,
 } from '../../runtime/src/semantic-operation-gateway.js';
 import {
   SemanticQueryGateway,
   type RegisteredQueryLatencyInstrumentation,
 } from '../../runtime/src/semantic-query-gateway.js';
 import {
+  capabilityMediationAuthority,
   createRegisteredCapabilityExecutors,
   registeredCapabilityIdsFromOperationCatalog,
   type PinnedCapabilityProjection,
@@ -61,6 +63,8 @@ import { FULFILLMENT_CAPABILITY_ID } from './fulfillment.js';
 import { COMMERCIAL_CAPABILITY_ID } from '../../domain/src/sales/definition.js';
 import { fulfillmentReadModel } from './fulfillment-read-model.js';
 import { receivingReadModel } from './receiving-read-model.js';
+import { inventoryCountReadModel } from './inventory-count-read-model.js';
+import { INVENTORY_POSTING_CAPABILITY_ID } from './inventory-posting-service.js';
 import { RECEIVING_CAPABILITY_ID } from './goods-receipt.js';
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -74,6 +78,8 @@ export function composeServingGateways(
   options: {
     readonly providerErrorMappings: readonly ModuleProviderErrorMapping[];
     readonly capabilityOperationExecutorFactories?: readonly PostgresCapabilityOperationExecutorFactory[];
+    readonly approvalPool?: pg.Pool;
+    readonly localDemoIdentity?: true;
     readonly monotonicMilliseconds?: () => number;
   },
   documentOptions?: {
@@ -94,7 +100,9 @@ export function composeServingGateways(
           (await servingFor(releaseId)).policy,
       },
     );
-  const operationMediation = new SemanticOperationMediationAuthority();
+  const operationMediation = capabilityMediationAuthority(
+    options.capabilityOperationExecutorFactories ?? [],
+  );
   const documentPublication = new PostgresDocumentPublication();
   const denialRecorder = new PostgresSemanticQueryDenialRecorder(
     runtimePool,
@@ -116,6 +124,7 @@ export function composeServingGateways(
     [VALUATION_CAPABILITY_ID]: inventoryValuationReadModel,
     // A receipt's lines with what each can still reverse (ORDER-PARITY).
     [RECEIVING_CAPABILITY_ID]: receivingReadModel,
+    [INVENTORY_POSTING_CAPABILITY_ID]: inventoryCountReadModel,
   };
   // Release-scoped state -- the policy bindings of a release's permissions
   // and the capability executors pinned to its id, root and projections --
@@ -160,6 +169,9 @@ export function composeServingGateways(
         actorIssuer,
         currentInstant: () => new Date().toISOString(),
         pool: runtimePool,
+        verifyConfirmation:
+          operationMediation.assertConfirmationGrant.bind(operationMediation),
+        ...(options.approvalPool ? { approvalPool: options.approvalPool } : {}),
         projection: release.projection,
         queryGateway: routed.queryGateway ?? queryGateway,
         releaseContentHash: release.releaseRoot,
@@ -230,6 +242,12 @@ export function composeServingGateways(
     policy,
     operationMediation,
   );
+  const addresses = new PostgresAddresses(
+    runtimePool,
+    queryGateway,
+    servingFor,
+    options.localDemoIdentity === true,
+  );
   const documents = documentOptions
     ? new PostgresDocumentGateway(
         runtimePool,
@@ -248,6 +266,7 @@ export function composeServingGateways(
     operationGateway,
     queryGateway,
     operationMediation,
+    addresses,
     documents,
   };
 }

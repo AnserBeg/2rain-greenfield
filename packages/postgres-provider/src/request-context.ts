@@ -70,6 +70,23 @@ export async function withTrustedRequestTransaction<T>(
   );
 }
 
+/** Only the separately provisioned verifier process has this login. */
+export async function withActivationVerifierTransaction<T>(
+  pool: Pool,
+  context: TrustedRequestContext,
+  run: (client: PoolClient) => Promise<T>,
+): Promise<T> {
+  assertTrustedRequestContext(context);
+  return runTrustedTransaction(
+    pool,
+    context,
+    run,
+    undefined,
+    undefined,
+    'north_star_activation_verifier',
+  );
+}
+
 export async function setTransactionDeadline(
   client: PoolClient,
   remainingMilliseconds: () => number,
@@ -119,6 +136,7 @@ async function runTrustedTransaction<T>(
   run: (client: PoolClient) => Promise<T>,
   remainingMilliseconds = requestDeadline.getStore(),
   onCommitStart?: () => void,
+  role = 'north_star_runtime',
 ): Promise<T> {
   const client = await pool.connect();
   let hasPrimaryError = false;
@@ -131,7 +149,7 @@ async function runTrustedTransaction<T>(
     transactionOpen = true;
     if (remainingMilliseconds)
       await setTransactionDeadline(client, remainingMilliseconds);
-    await assertRuntimeLoginRole(client);
+    await assertRuntimeLoginRole(client, role);
     await setTrustedIdentity(client, context);
     result = await run(client);
     remainingMilliseconds?.();
@@ -685,7 +703,10 @@ function sameIdentity(
   );
 }
 
-async function assertRuntimeLoginRole(client: PoolClient): Promise<void> {
+async function assertRuntimeLoginRole(
+  client: PoolClient,
+  expectedRole = 'north_star_runtime',
+): Promise<void> {
   const role = await client.query<{
     bypass_rls: boolean;
     can_login: boolean;
@@ -711,8 +732,8 @@ async function assertRuntimeLoginRole(client: PoolClient): Promise<void> {
     `);
   const runtimeRole = role.rows[0];
   if (
-    runtimeRole?.role !== 'north_star_runtime' ||
-    runtimeRole.session_role !== 'north_star_runtime' ||
+    runtimeRole?.role !== expectedRole ||
+    runtimeRole.session_role !== expectedRole ||
     runtimeRole.bypass_rls ||
     !runtimeRole.can_login ||
     runtimeRole.create_database ||

@@ -1,5 +1,8 @@
+import type { AddressInstallation } from '../../../packages/runtime/src/address-gateway.js';
 import { layoutDigest } from '@north-star/canonical-model';
 import {
+  draftBoardRevision,
+  type BoardTarget,
   layoutCommand,
   arrangeableLayoutFields,
   type LayoutTarget,
@@ -53,6 +56,7 @@ interface CustomizationStatus {
   readonly upgradeRefusal: {
     readonly code: string;
     readonly message: string;
+    readonly report?: { readonly upgradeId: string };
     readonly issues?: readonly string[];
   } | null;
   readonly upgrades: readonly {
@@ -64,6 +68,7 @@ interface CustomizationStatus {
 }
 interface CustomizationTargets {
   readonly documentTemplateTargets?: readonly DocumentTemplateTarget[];
+  readonly boards?: readonly BoardTarget[];
   readonly layouts?: readonly LayoutTarget[];
   readonly documentTargets?: readonly {
     readonly entityId: string;
@@ -216,7 +221,7 @@ export interface CustomizeScreenService {
     expectedReleaseId: string,
     expectedFence: string,
   ): Promise<ActivationOutcome>;
-  status(): Promise<CustomizationStatus>;
+  status(actor?: TrustedRequestContext): Promise<CustomizationStatus>;
   targets(actor?: TrustedRequestContext): Promise<CustomizationTargets>;
   workflows?(actor?: TrustedRequestContext): Promise<readonly LiveWorkflow[]>;
 }
@@ -272,6 +277,20 @@ export async function renderCustomizeScreen(
           ? page('Arrange page', layoutEditor(target) + backLink())
           : failure('Choose an available page.');
       }
+      const board = url.searchParams.get('board');
+      if (board) {
+        const target = (await loadTargets()).boards?.find(
+          (b) => b.body.listSurfaceId === board,
+        );
+        if (!target) return failure('Choose a List with a lifecycle.');
+        const id = url.searchParams.get('editBoard');
+        const previous = target.views.find((v) => v.surfaceId === id);
+        if (id && !previous) return failure('This Board is unavailable.');
+        return page(
+          previous ? 'Edit Board' : 'Add Board view',
+          boardEditor(target, previous) + backLink(),
+        );
+      }
       const arrange = url.searchParams.get('arrange');
       if (arrange)
         return page('Arrange a list', await arrangeForm(loadTargets, arrange));
@@ -309,25 +328,30 @@ export async function renderCustomizeScreen(
                     ({ entityId }) => entityId === submission.entity,
                   ),
                 )
-              : submission.kind === 'addLayoutRevision'
-                ? layoutSubmission(
-                    (await loadTargets()).layouts ?? [],
+              : submission.kind === 'addBoardViewRevision'
+                ? boardSubmission(
+                    (await loadTargets()).boards ?? [],
                     submission,
                   )
-                : patchFromForm(
-                    submission,
-                    submission.kind === 'addValidation'
-                      ? (await loadTargets()).validationTargets?.find(
-                          ({ entityId }) => entityId === submission.entity,
-                        )
-                      : undefined,
-                    submission.kind === 'addCalculatedDisplayField'
-                      ? (await loadTargets()).calculatedDisplayTargets?.find(
-                          ({ recordSurfaceId }) =>
-                            recordSurfaceId === submission.surface,
-                        )
-                      : undefined,
-                  ),
+                : submission.kind === 'addLayoutRevision'
+                  ? layoutSubmission(
+                      (await loadTargets()).layouts ?? [],
+                      submission,
+                    )
+                  : patchFromForm(
+                      submission,
+                      submission.kind === 'addValidation'
+                        ? (await loadTargets()).validationTargets?.find(
+                            ({ entityId }) => entityId === submission.entity,
+                          )
+                        : undefined,
+                      submission.kind === 'addCalculatedDisplayField'
+                        ? (await loadTargets()).calculatedDisplayTargets?.find(
+                            ({ recordSurfaceId }) =>
+                              recordSurfaceId === submission.surface,
+                          )
+                        : undefined,
+                    ),
             'visualBuilder',
             undefined,
             actor,
@@ -411,7 +435,7 @@ async function overview(
   loadTargets: LoadTargets,
   actor?: TrustedRequestContext,
 ): Promise<string> {
-  const status = await service.status();
+  const status = await service.status(actor);
   if (status.failedActivation)
     return [
       '<h1>Activation verification failed</h1><p>The previous verified release is still live. Inventory posting can resume once recovery succeeds.</p>',
@@ -461,7 +485,7 @@ async function overview(
       ? `<section data-customize-workflows><h2>Live workflows</h2>${workflows.map(renderLiveWorkflow).join('')}</section>`
       : '',
     refusal
-      ? `<section data-customize-upgrade-refusal><h2>Platform upgrade refused</h2><p>Your current release is still live.</p><p>${escapeHtml(refusal.code)} · ${escapeHtml(refusal.message)}</p>${(refusal.issues ?? []).map((issue) => `<pre>${escapeHtml(issue)}</pre>`).join('')}</section>`
+      ? `<section data-customize-upgrade-refusal><h2>Platform upgrade refused</h2><p>Your current release is still live.</p><p>${escapeHtml(refusal.code)} · ${escapeHtml(refusal.message)}</p>${refusal.report ? `<details><summary>Upgrade conflict report</summary><pre>${escapeHtml(JSON.stringify(refusal.report, null, 2))}</pre></details>` : (refusal.issues ?? []).map((issue) => `<pre>${escapeHtml(issue)}</pre>`).join('')}</section>`
       : '',
     `<section data-customize-changes><h2>Changes</h2>${
       rows
@@ -475,9 +499,14 @@ async function overview(
     recordTypeForm(targets),
     extendRecordTypeForm(targets),
     fieldForm(targets),
+    addressForms(targets),
+    '<p><a href="/?customize=address">Company address and map settings</a></p>',
     documentFieldForm(targets),
     documentTemplateSelector(targets.documentTemplateTargets ?? []),
     choiceForm(targets),
+    targets.boards?.length
+      ? `<form method="get"><fieldset><legend>Add view</legend><input type="hidden" name="customize" value=""><label>Record type <select name="board">${targets.boards.map((t) => `<option value="${escapeHtml(t.body.listSurfaceId)}">${escapeHtml(t.listLabel)}</option>`).join('')}</select></label> <button>Add Board view</button></fieldset></form>`
+      : '',
     layoutPicker(targets.layouts ?? []),
     arrangePicker(targets),
     savedViewPicker(targets),
@@ -575,6 +604,30 @@ function fieldForm(targets: CustomizationTargets): string {
     )
     .join('');
   return `<form method="post" data-customize-form="addField"><fieldset><legend>A new field</legend><label>On <select name="entity" required>${options}</select></label> <label>Field name <input name="field_1_label" required></label> <label>Type ${typeSelect('field_1_type', 'Field type', false)}</label> <label>Choices <input name="field_1_options" placeholder="for a choice: Yes, No"></label> <label><input type="checkbox" name="field_1_required"> Required (record types added here only)</label><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="addField"><p><button type="submit">Draft this field</button></p></fieldset></form>`;
+}
+
+function addressForms(targets: CustomizationTargets) {
+  const entities = targets.recordTypes
+    .map(
+      (e) =>
+        `<option value="${escapeHtml(e.entityId)}">${escapeHtml(e.label)}</option>`,
+    )
+    .join('');
+  const mapForms = (targets.layouts ?? [])
+    .filter((l) => l.body.mode === 'detail')
+    .flatMap((l) => {
+      const fields = l.body.sections
+        .flatMap((s) => s.fields)
+        .filter((f) => f.bindingType === 'query:addressFieldType');
+      if (!fields.length) return [];
+      return [
+        `<form method="post"><fieldset><legend>Map on ${escapeHtml(l.label)}</legend><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="addMapPlacement"><input type="hidden" name="surface" value="${escapeHtml(l.body.surfaceId)}"><label>Address<select name="fieldId">${fields.map((f) => `<option value="${escapeHtml(f.id)}">${escapeHtml(f.label.text)}</option>`).join('')}</select></label><label>Record section<select name="sectionId">${l.body.sections.map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.label.text)}</option>`).join('')}</select></label><button>Draft map placement</button></fieldset></form>`,
+      ];
+    });
+  return (
+    `<form method="post"><fieldset><legend>New address field</legend><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="addAddressField"><label>Record type<select required name="entity">${entities}</select></label><label>Field name<input name="label" required maxlength="80"></label><label><input type="checkbox" name="required"> Required</label><button>Draft address field</button></fieldset></form>` +
+    mapForms.join('')
+  );
 }
 
 function documentFieldForm(targets: CustomizationTargets): string {
@@ -869,6 +922,30 @@ export function patchFromForm(
         templateId: form.templateId,
         previousRevisionId: form.previousRevisionId,
       };
+    case 'addAddressField': {
+      const entity = String(form.entity ?? '');
+      const [ns, local] = entity.split(':entity.');
+      const label = String(form.label ?? '').trim();
+      return {
+        kind: 'addAddressField',
+        schemaVersion: 'v6',
+        entity,
+        fieldId: ns + ':field.custom_' + local + '_' + slug(label),
+        label,
+        required: form.required === 'on',
+      };
+    }
+    case 'addMapPlacement': {
+      const fieldId = String(form.fieldId ?? '');
+      return {
+        kind: 'addMapPlacement',
+        schemaVersion: 'v6',
+        placementId: fieldId.replace(':field.', ':placement.') + '_map',
+        surfaceId: form.surface,
+        sectionId: form.sectionId,
+        fieldId,
+      };
+    }
     case 'addDocumentField': {
       const entityId = String(form.entity ?? '');
       const [namespace, entity] = entityId.split(':entity.');
@@ -1138,6 +1215,10 @@ function describe(patch: PatchSummary): string {
       return `New record type "${label}"`;
     case 'addField':
       return `New field "${label}"`;
+    case 'addAddressField':
+      return 'New address field ' + label;
+    case 'addMapPlacement':
+      return 'Map placement on Record';
     case 'addDocumentField':
       return `New files field "${label}"`;
     case 'addDocumentTemplateRevision':
@@ -1152,6 +1233,8 @@ function describe(patch: PatchSummary): string {
       return `New line table "${label}"`;
     case 'declareLifecycle':
       return 'New states and actions';
+    case 'addBoardViewRevision':
+      return 'Board view revision';
     case 'addLayoutRevision':
       return 'Arranged form or record page';
     case 'changeSet':
@@ -1251,6 +1334,76 @@ function page(
   });
 }
 
+function boardEditor(
+  target: BoardTarget,
+  previous?: BoardTarget['views'][number],
+) {
+  const h = escapeHtml;
+  const stages = target.body.grouping.stages;
+  const order = previous?.states ?? stages.map((s) => s.stateId);
+  const existing = previous
+    ? ''
+    : target.views
+        .map((v) => {
+          const params = new URLSearchParams({
+            customize: '',
+            board: target.body.listSurfaceId,
+            editBoard: v.surfaceId,
+          });
+          return `<a href="/?${h(params.toString())}">Edit ${h(v.label)}${v.lifecycle === 'retired' ? ' (retired)' : ''}</a>`;
+        })
+        .join(' ');
+  const hidden = (name: string, value: string) =>
+    `<input type="hidden" name="${name}" value="${h(value)}">`;
+  const source =
+    hidden('action', 'draft') +
+    hidden('kind', 'addBoardViewRevision') +
+    hidden('list', target.body.listSurfaceId) +
+    hidden('source', layoutDigest(target.body)) +
+    (previous
+      ? hidden('viewId', previous.surfaceId) +
+        hidden('predecessor', previous.revisionId)
+      : '');
+  const positions = stages
+    .map((stage) => {
+      const position = order.indexOf(stage.stateId) + 1;
+      return `<label>${h(stage.label)} <input aria-label="${h(stage.label)} position" type="number" min="1" max="64" name="stage:${h(stage.stateId)}" value="${position || ''}"></label>`;
+    })
+    .join('');
+  return `<h1>${previous ? 'Edit Board' : 'Add Board view'}</h1>${existing ? '<nav aria-label="Existing Boards">' + existing + '</nav>' : ''}<form method="post">${source}<label>View name <input name="label" required maxlength="240" value="${h(previous?.label ?? target.listLabel + ' board')}"></label><fieldset><legend>Stages in display order</legend>${positions}<p>Leave a position empty to omit that stage.</p></fieldset><button name="lifecycle" value="active">Draft Board</button>${previous?.lifecycle === 'active' ? '<button name="lifecycle" value="retired">Draft retirement</button>' : ''}</form>`;
+}
+function boardSubmission(
+  targets: readonly BoardTarget[],
+  submission: CustomizeScreenSubmission,
+) {
+  const target = targets.find((t) => t.body.listSurfaceId === submission.list);
+  if (!target || layoutDigest(target.body) !== submission.source)
+    throw new Error('The collection changed. Choose the Board again.');
+  const previous = target.views.find((v) => v.surfaceId === submission.viewId);
+  if (
+    (submission.viewId && !previous) ||
+    (previous?.revisionId ?? '') !== (submission.predecessor ?? '')
+  )
+    throw new Error('This Board revision has changed. Reopen it in Customize.');
+  const positions = target.body.grouping.stages.flatMap((s) => {
+    const value = submission['stage:' + s.stateId];
+    return value ? [{ state: s.stateId, order: Number(value) }] : [];
+  });
+  if (
+    !positions.every(
+      (p) => Number.isInteger(p.order) && p.order >= 1 && p.order <= 64,
+    ) ||
+    new Set(positions.map((p) => p.order)).size !== positions.length
+  )
+    throw new Error('Give each stage its own position.');
+  return draftBoardRevision(
+    target,
+    submission.label ?? '',
+    positions.sort((a, b) => a.order - b.order).map((p) => p.state),
+    previous,
+    submission.lifecycle === 'retired' ? 'retired' : 'active',
+  );
+}
 function layoutPicker(targets: readonly LayoutTarget[]) {
   if (!targets.length) return '';
   return `<form method="get"><input type="hidden" name="customize" value=""><fieldset><legend>Arrange a form or record page</legend><label for="customize-layout-page">Page</label> <select id="customize-layout-page" name="layout">${targets.map((t) => `<option value="${escapeHtml(t.body.surfaceId + '/' + t.body.mode)}">${escapeHtml(t.label)} · ${t.body.mode}</option>`).join('')}</select> <button>Choose page</button></fieldset></form>`;
@@ -1507,4 +1660,33 @@ function options(
         `<option value="${escapeHtml(value)}"${value === selected ? ' selected' : ''}>${escapeHtml(label)}</option>`,
     )
     .join('');
+}
+
+export function renderCompanyAddressSettings(
+  companies: readonly { id: string; label: string }[],
+  accounts: readonly AddressInstallation[],
+) {
+  const options = companies.map(
+    ({ id, label }) =>
+      `<option value="${escapeHtml(id)}">${escapeHtml(label)}</option>`,
+  );
+  const active = accounts
+    .map(
+      (i) =>
+        `<li>${escapeHtml(i.account)} · ${i.provider === 'fake' ? 'Demo Maps' : 'Google Maps'} · ${i.enrichment ? 'Geocoding enabled' : 'Suggestions only'}</li>`,
+    )
+    .join('');
+  return page(
+    'Address and Maps',
+    '<a href="/?customize">Customize</a><h1>Address and Maps</h1><p>Local demo company settings</p>' +
+      (active ? '<ul>' + active + '</ul>' : '<p>No enabled accounts.</p>') +
+      '<form method="post"><label>Company<select name="companyId" required>' +
+      options.join('') +
+      '</select></label>' +
+      '<label>Provider<select name="provider"><option value="fake">Demo Maps</option><option value="google">Google Maps (supported non-EEA demo)</option></select></label>' +
+      '<label>Provider account reference<input name="account" required pattern="[A-Za-z0-9_.-]+" maxlength="120" value="demo"></label>' +
+      '<label>Monthly lookup limit<input name="calls" type="number" min="1" max="10000" value="100" required></label>' +
+      '<label>Monthly spend limit (USD)<input name="budget" type="number" min="0" max="1000" step="0.01" value="0" required></label>' +
+      '<label><input name="enrichment" type="checkbox" checked> Locate saved addresses</label><button name="action" value="enable">Enable for this company</button><button name="action" value="pause">Pause</button></form>',
+  ).html;
 }

@@ -1,3 +1,4 @@
+export * from './board.js';
 export * from './layout.js';
 export {
   ADOPTED_LANGUAGE_VERSION,
@@ -176,6 +177,7 @@ export const platformContract = Object.freeze({
 export { CalculatedDisplayFieldDefinitionSchema } from './schemas.js';
 export type { CalculatedDisplayField } from './calculated-display-schema.js';
 export type { FormulaValidationRule } from './formula-validation-schema.js';
+export * from './address.js';
 
 export * from './booking.js';
 export {

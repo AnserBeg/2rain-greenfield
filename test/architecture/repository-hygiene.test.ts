@@ -22,6 +22,7 @@ const suiteDefinitions = [
   {
     discoveryPattern: 'test/unit/**/*.test.ts',
     expectedFiles: [
+      'test/unit/address-connector.test.ts',
       'test/unit/calculated-display.test.ts',
       'test/unit/canonical-model/diagnostic-ordering.test.ts',
       'test/unit/canonical-model/disclosure-tier.test.ts',
@@ -36,6 +37,7 @@ const suiteDefinitions = [
       'test/unit/catalog-extras.test.ts',
       'test/unit/commercial-amounts.test.ts',
       'test/unit/customization-ai-draft.test.ts',
+      'test/unit/customization-upgrade.test.ts',
       'test/unit/customization.test.ts',
       'test/unit/customize-screen.test.ts',
       'test/unit/dev-environment.test.ts',
@@ -117,6 +119,7 @@ const suiteDefinitions = [
     discoveryPattern: 'test/architecture/**/*.test.ts',
     expectedFiles: [
       'test/architecture/canonical-contracts-purity.test.ts',
+      'test/architecture/ci-tiers.test.ts',
       'test/architecture/compiler-hermeticity.test.ts',
       'test/architecture/customization-sandbox-boundary.test.ts',
       'test/architecture/dependency-boundaries.test.ts',
@@ -178,6 +181,7 @@ const suiteDefinitions = [
       'test/postgres/inventory-posting.test.ts',
       'test/postgres/inventory-reconciliation.test.ts',
       'test/postgres/inventory-stock-count.test.ts',
+      'test/postgres/inventory-stock-counts.test.ts',
       'test/postgres/inventory-storage.test.ts',
       'test/postgres/inventory-terminal-state.test.ts',
       'test/postgres/inventory-valuation.test.ts',
@@ -187,8 +191,10 @@ const suiteDefinitions = [
       'test/postgres/stock-serializer.test.ts',
     ],
     expectedFiles: [
+      'test/postgres/address-connector.test.ts',
       'test/postgres/agent-dev-tasks.test.ts',
       'test/postgres/agent-tasks.test.ts',
+      'test/postgres/application-grants.test.ts',
       'test/postgres/billing-terms.test.ts',
       'test/postgres/booking-commitments.test.ts',
       'test/postgres/catalog-extras.test.ts',
@@ -281,7 +287,7 @@ const suiteDefinitions = [
   },
   {
     discoveryPattern:
-      'test/postgres/**/@(inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|period-lock-commands|replenishment|stock-serializer).test.ts',
+      'test/postgres/**/@(inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-stock-counts|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|period-lock-commands|replenishment|stock-serializer).test.ts',
     expectedFiles: [
       'test/postgres/inventory-backdate-policy.test.ts',
       'test/postgres/inventory-backup-restore.test.ts',
@@ -291,6 +297,7 @@ const suiteDefinitions = [
       'test/postgres/inventory-posting.test.ts',
       'test/postgres/inventory-reconciliation.test.ts',
       'test/postgres/inventory-stock-count.test.ts',
+      'test/postgres/inventory-stock-counts.test.ts',
       'test/postgres/inventory-storage.test.ts',
       'test/postgres/inventory-terminal-state.test.ts',
       'test/postgres/inventory-valuation.test.ts',

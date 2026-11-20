@@ -1007,27 +1007,84 @@ test('durable verification evidence round-trips both partitions and refuses a co
                 releaseId: bootstrapReleaseId,
                 tenantId: contextA.tenantId,
               });
-            await verification.executeSemanticCandidateAndPersist(contextA, {
-              compiledRelease: bootstrap,
-              evidenceId: bootstrapStaged.verificationEvidenceId,
-              releaseId: bootstrapReleaseId,
-            });
-            assert.deepEqual(
-              await evidenceHeader(
-                pool,
-                bootstrapStaged.verificationEvidenceId,
-              ),
-              {
-                closed_document: null,
-                derived_count: null,
-                evidence_version: 'northstar.verification-result-set/v1',
-                execution_scope: 'FULL',
-                impact_analysis_version: null,
-                result_count: 0,
-                skipped_scenario_ids: [],
-              },
-              'the production writer still emits FULL scope and no derivation document for v1',
-            );
+            // Use a fixed database default so the comparison includes every row column.
+            const createdAt = '2026-01-01T00:00:00+00:00';
+            await pool.query(`
+              ALTER TABLE platform.release_verification_evidence
+                ALTER COLUMN created_at SET DEFAULT '2026-01-01T00:00:00Z'::timestamptz
+            `);
+            try {
+              const evidenceId = bootstrapStaged.verificationEvidenceId;
+              const observed =
+                await verification.executeSemanticCandidateAndPersist(
+                  contextA,
+                  {
+                    compiledRelease: bootstrap,
+                    evidenceId,
+                    releaseId: bootstrapReleaseId,
+                  },
+                );
+              const binding = releaseVerificationBinding(bootstrap);
+              assert.equal(binding.workflows, undefined);
+              const baseline = await executeVerificationPlan(
+                binding.plan,
+                {
+                  artifactClosureDigest: binding.artifactClosureDigest,
+                  providerRunId: observed.providerRunId,
+                  releaseRoot: binding.releaseRoot,
+                  verificationPlanArtifactRoot:
+                    binding.verificationPlanArtifactRoot,
+                  verificationPlanSemanticDigest:
+                    binding.verificationPlanSemanticDigest,
+                },
+                () => {
+                  throw new Error('The historical bootstrap plan is empty');
+                },
+              );
+              const { rows } = await pool.query<{ bytes: string }>(
+                `SELECT to_jsonb(e)::text AS bytes
+                   FROM platform.release_verification_evidence AS e
+                  WHERE (tenant_id, environment_id, verification_evidence_id) = ($1, $2, $3)`,
+                [contextA.tenantId, contextA.environmentId, evidenceId],
+              );
+              assert.equal(rows.length, 1);
+              // The persisted v1 column layout and fixed inputs are those of
+              // the workflow-free writer at 840c1b48.
+              assert.equal(
+                canonicalize(JSON.parse(rows[0]!.bytes)),
+                canonicalize({
+                  tenant_id: contextA.tenantId,
+                  environment_id: contextA.environmentId,
+                  verification_evidence_id: evidenceId,
+                  evidence_version: 'northstar.verification-result-set/v1',
+                  release_root: baseline.releaseRoot,
+                  artifact_closure_digest: baseline.artifactClosureDigest,
+                  verification_plan_artifact_root:
+                    baseline.verificationPlanArtifactRoot,
+                  verification_plan_semantic_digest:
+                    baseline.verificationPlanSemanticDigest,
+                  verification_plan_digest: baseline.verificationPlanDigest,
+                  result_set_digest: baseline.resultSetDigest,
+                  result_count: 0,
+                  provider: 'realPostgresql',
+                  provider_run_id: baseline.providerRunId,
+                  executed_tenant_id: contextA.tenantId,
+                  executed_environment_id: contextA.environmentId,
+                  executed_evidence_id: evidenceId,
+                  execution_scope: 'FULL',
+                  skipped_scenario_ids: [],
+                  impact_analysis_derivation: null,
+                  created_by: contextA.principalId,
+                  created_at: createdAt,
+                }),
+                'persisted workflow-free verification evidence bytes changed',
+              );
+            } finally {
+              await pool.query(`
+                ALTER TABLE platform.release_verification_evidence
+                  ALTER COLUMN created_at SET DEFAULT transaction_timestamp()
+              `);
+            }
           },
         );
 

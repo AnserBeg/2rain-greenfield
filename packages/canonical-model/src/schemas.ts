@@ -1,4 +1,6 @@
+import { AddressBindingSchema, MapPlacementSchema } from './address.js';
 import { BillingPlansSchema } from './billing.js';
+import { SurfaceBoardSchema } from './board.js';
 import { BookingOperationBinding } from './booking.js';
 import { SurfaceLayoutSchema } from './layout.js';
 import { z } from 'zod';
@@ -488,7 +490,7 @@ const enumFieldType = z.strictObject({
   schemaVersion: nodeVersion,
 });
 
-export const FieldTypeSchema = z.discriminatedUnion('kind', [
+const ScalarFieldTypeSchema = z.discriminatedUnion('kind', [
   textFieldType,
   booleanFieldType,
   integerFieldType,
@@ -500,6 +502,19 @@ export const FieldTypeSchema = z.discriminatedUnion('kind', [
   quantityFieldType,
   enumFieldType,
 ]);
+export const FieldTypeSchema = z.discriminatedUnion('kind', [
+  ...ScalarFieldTypeSchema.options,
+  z.strictObject({
+    kind: z.literal('addressFieldType'),
+    schemaVersion: z.literal('v6'),
+  }),
+]);
+// Legacy package parsers remain closed. The projection lowerer shares its
+// internal field representation with v6, including the compound Address kind.
+const legacyFieldType = FieldTypeSchema.refine(
+  (t): boolean => t.kind !== 'addressFieldType',
+  'Address requires v6.',
+);
 export type FieldType = z.infer<typeof FieldTypeSchema>;
 
 const normalizedPackageDefinition = z.strictObject({
@@ -601,7 +616,7 @@ const normalizedFieldDefinition = z.strictObject({
   defaultValue: CanonicalScalarSchema.optional(),
   entity: CanonicalReferenceSchema,
   fieldId: CanonicalIdSchema,
-  fieldType: FieldTypeSchema,
+  fieldType: legacyFieldType,
   kind: z.literal('fieldDefinition'),
   label: LabelSchema,
   lifecycle: z.enum(['active', 'retired']),
@@ -1603,6 +1618,25 @@ export const SurfaceDocumentEditorSchema = z.strictObject({
     .min(1)
     .max(8)
     .optional(),
+  /**
+   * Literal values every new line's first create also writes, in line fields
+   * the editor does not offer: figures the server sets later, such as a stock
+   * count line's expected, counted and variance, which its review replaces.
+   * An update never sends them. Optional v6 key (ADR-0047 §7).
+   */
+  lineCreateValues: z
+    .array(
+      z.strictObject({
+        fieldId: CanonicalIdSchema,
+        value: z.strictObject({
+          source: z.literal('literal'),
+          value: z.string().min(1).max(200),
+        }),
+      }),
+    )
+    .min(1)
+    .max(8)
+    .optional(),
 });
 export type SurfaceDocumentEditor = z.infer<typeof SurfaceDocumentEditorSchema>;
 export type SurfaceEditorField = SurfaceDocumentEditor['headerFields'][number];
@@ -2179,6 +2213,7 @@ export const SurfaceLauncherSchema = z.strictObject({
 });
 export type SurfaceLauncher = z.infer<typeof SurfaceLauncherSchema>;
 const normalizedV6SurfaceDefinition = normalizedSurfaceDefinition.extend({
+  board: SurfaceBoardSchema.optional(),
   layouts: z.array(SurfaceLayoutSchema).min(1).max(2).optional(),
   composition: SurfaceCompositionSchema.optional(),
   workspace: SurfaceWorkspaceSchema.optional(),
@@ -2244,7 +2279,7 @@ const authoredQueryParameterDefinition = z.strictObject({
 });
 const normalizedQueryParameterDefinition =
   authoredQueryParameterDefinition.extend({
-    parameterType: FieldTypeSchema,
+    parameterType: ScalarFieldTypeSchema,
   });
 const authoredQueryAggregateSelection = z.strictObject({
   field: CanonicalReferenceSchema,
@@ -2353,7 +2388,7 @@ const legalEntityReferenceParameterType = z.strictObject({
 const normalizedV4QueryParameterDefinition =
   authoredQueryParameterDefinition.extend({
     parameterType: z.union([
-      FieldTypeSchema,
+      ScalarFieldTypeSchema,
       legalEntityReferenceParameterType,
     ]),
   });
@@ -2696,10 +2731,12 @@ const assistantConfirmation = {
   requiresAssistantConfirmation: z.literal(true).optional(),
 };
 const normalizedV6FieldDefinition = normalizedV3FieldDefinition.extend({
+  fieldType: FieldTypeSchema,
   ...assistantConfirmation,
   numbering: FieldNumberingSchema.optional(),
 });
 const authoredV6FieldDefinition = authoredV3FieldDefinition.extend({
+  fieldType: FieldTypeSchema,
   ...assistantConfirmation,
   numbering: FieldNumberingSchema.optional(),
 });
@@ -2924,6 +2961,8 @@ const v6NormalizedShape = {
   entities: z.array(normalizedV6EntityDefinition),
   fields: z.array(normalizedV6FieldDefinition),
   operations: z.array(normalizedV6OperationDefinition),
+  connectorBindings: z.array(AddressBindingSchema).min(1).max(128).optional(),
+  mapPlacements: z.array(MapPlacementSchema).min(1).max(128).optional(),
   billingPlans: BillingPlansSchema.optional(),
   documentFields,
   documentCategories,
@@ -3061,6 +3100,8 @@ const v6AuthoredShape = {
   entities: z.array(authoredV6EntityDefinition),
   fields: z.array(authoredV6FieldDefinition),
   operations: z.array(authoredV6OperationDefinition),
+  connectorBindings: z.array(AddressBindingSchema).min(1).max(128).optional(),
+  mapPlacements: z.array(MapPlacementSchema).min(1).max(128).optional(),
   billingPlans: BillingPlansSchema.optional(),
   documentFields,
   documentCategories,

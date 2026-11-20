@@ -38,4 +38,7 @@ if [ ! -d node_modules/tsx ]; then
   exit 2
 fi
 
+if [[ ${1:-} != --self-test ]]; then
+  node scripts/check-record-ci-tier.mjs || exit 1
+fi
 exec node --import tsx test/architecture/record-claim-fidelity.ts "$@"

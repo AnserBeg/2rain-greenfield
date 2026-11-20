@@ -55,6 +55,7 @@ import {
   REQUEST_RUNTIME_FORMULA_RULE_FAMILY,
   REQUEST_RUNTIME_PROJECTION_FAMILIES,
   issueLegalEntityReadScope,
+  unsupportedRuntimeCapability,
   type CurrentPolicyDecisionRequest,
   type CurrentPolicyGateway,
   type CurrentPolicySubject,
@@ -69,10 +70,11 @@ import { escapeIdentifier, type Pool, type PoolClient } from 'pg';
 import {
   SEMANTIC_OPERATION_REQUEST_VERSION,
   SemanticOperationGateway,
-  SemanticOperationMediationAuthority,
+  type SemanticOperationMediationAuthority,
   type SemanticOperationExecutor,
 } from '../../runtime/src/semantic-operation-gateway.js';
 import {
+  capabilityMediationAuthority,
   createRegisteredCapabilityExecutors,
   registeredCapabilityIdsFromOperationCatalog,
   type CapabilityVerificationRefusalExpectation,
@@ -491,7 +493,9 @@ export class PostgresReleaseVerificationService {
     ) => Promise<TResult>,
   ): Promise<TResult> {
     const policy = new VerificationAllowPolicy();
-    const mediation = new SemanticOperationMediationAuthority();
+    const mediation = capabilityMediationAuthority(
+      this.capabilityOperationExecutorFactories,
+    );
     const queryGateway = new SemanticQueryGateway(policy, executorProvider);
     const capabilityExecutors = createRegisteredCapabilityExecutors(
       this.capabilityOperationExecutorFactories,
@@ -3104,6 +3108,23 @@ function compiledProjectionBinding(
   const manifest = decode(
     manifestArtifact.canonicalBytes,
   ) as unknown as ProjectionManifestEnvelope;
+  if (familyId === PROJECTION_FAMILY_IDS.workflow) {
+    const requirement = manifest.requiredRuntimeCapability;
+    if (
+      !requirement ||
+      requirement.capabilityId !==
+        reference.requiredRuntimeCapability.capabilityId ||
+      requirement.minimumVersion !==
+        reference.requiredRuntimeCapability.minimumVersion
+    )
+      throw failure(
+        'WORKFLOW_PROJECTION_MISMATCH',
+        'Workflow manifest capability does not match the release reference',
+      );
+    const unsupported = unsupportedRuntimeCapability(familyId, requirement);
+    if (unsupported)
+      throw failure('UNSUPPORTED_RUNTIME_CAPABILITY', unsupported);
+  }
   const chunk = compiled.bundle.artifacts.find(
     (artifact) => artifact.contentHash === manifest.chunks[0]?.contentHash,
   );
@@ -3125,6 +3146,11 @@ function verificationFieldValue(
   entity: StorageTargetPayloadV1['entities'][number],
 ): unknown {
   switch (field.fieldKind) {
+    case 'addressFieldType':
+      return {
+        schemaVersion: 'northstar.address-value/v1',
+        text: 'Verification address',
+      };
     case 'booleanFieldType':
       return verificationBooleanFieldValue(entity, field.fieldId);
     case 'enumFieldType':

@@ -1,4 +1,10 @@
+import { boardBindingsProblem } from './board-admission.js';
 import {
+  ADDRESS_FIELD_READER,
+  ADDRESS_MAP_READER,
+  AddressProjectionSchema,
+  CONNECTOR_FAMILY,
+  CONNECTOR_PAYLOAD,
   BOOKING_OPERATION_READER,
   hasBookingOperations,
 } from '@north-star/canonical-model';
@@ -206,6 +212,10 @@ const sha256Pattern = /^[0-9a-f]{64}$/;
 const maximumFillAttempts = 4;
 
 const supportedProjectionSchemas = Object.freeze({
+  [CONNECTOR_FAMILY]: Object.freeze({
+    payloadKind: 'connectorPayload',
+    payloadSchemaVersions: Object.freeze([CONNECTOR_PAYLOAD]),
+  }),
   [WORKFLOW_PROJECTION_FAMILY]: Object.freeze({
     payloadKind: 'workflowPayload',
     payloadSchemaVersions: Object.freeze([WORKFLOW_PAYLOAD_VERSION]),
@@ -864,6 +874,42 @@ function definitionFromSnapshotRows(
   const query = projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.query);
   const agent = projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.agent);
   const surface = projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.surface);
+  const consumers = [operation, query, surface];
+  const linked = projectionLinks.some((p) => p.familyId === CONNECTOR_FAMILY);
+  const declared = references.some(
+    (p) => isRecord(p) && p.familyId === CONNECTOR_FAMILY,
+  );
+  const bound = consumers.some(
+    (p) => isRecord(p.payload) && Object.hasOwn(p.payload, 'addressBindings'),
+  );
+  const floor = surface.requiredRuntimeCapability?.minimumVersion ?? 0;
+  if (
+    linked !== declared ||
+    declared !== bound ||
+    (!bound && [ADDRESS_FIELD_READER, ADDRESS_MAP_READER].includes(floor))
+  )
+    throw malformedProjection('Address declarations and consumers disagree.');
+  const connector = declared ? projectionFor(CONNECTOR_FAMILY) : null;
+  if (connector) {
+    const parsed = AddressProjectionSchema.safeParse(connector.payload);
+    if (
+      !parsed.success ||
+      floor <
+        (parsed.data.placements.length
+          ? ADDRESS_MAP_READER
+          : ADDRESS_FIELD_READER) ||
+      !consumers.every(
+        (p) =>
+          isRecord(p.payload) &&
+          Object.hasOwn(p.payload, 'addressBindings') &&
+          canonicalize(p.payload.addressBindings) ===
+            canonicalize(parsed.data.bindings),
+      )
+    )
+      throw malformedProjection(
+        'Address bindings or surface floor are invalid.',
+      );
+  }
   const referencesDocuments = references.some(
     (entry) =>
       isRecord(entry) && entry.familyId === DOCUMENTS_PROJECTION_FAMILY,
@@ -1005,12 +1051,19 @@ function definitionFromSnapshotRows(
       throw malformedProjection('formula/rule projection has invalid bindings');
     }
   }
-  const problem = layoutBindingsProblem(
-    surface.payload,
-    surface.requiredRuntimeCapability?.minimumVersion ?? 0,
-    operation.payload,
-    query.payload,
-  );
+  const problem =
+    boardBindingsProblem(
+      surface.payload,
+      surface.requiredRuntimeCapability?.minimumVersion ?? 0,
+      operation.payload,
+      query.payload,
+    ) ??
+    layoutBindingsProblem(
+      surface.payload,
+      surface.requiredRuntimeCapability?.minimumVersion ?? 0,
+      operation.payload,
+      query.payload,
+    );
   if (problem) throw malformedProjection(problem);
   return Object.freeze({
     environmentId: context.environmentId,
@@ -1019,6 +1072,7 @@ function definitionFromSnapshotRows(
       agent,
       catalog: projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.catalog),
       ...(formulaRule ? { formulaRule } : {}),
+      ...(connector ? { connector } : {}),
       ...(documents ? { documents } : {}),
       operation,
       query,

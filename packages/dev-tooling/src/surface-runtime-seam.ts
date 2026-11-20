@@ -34,6 +34,7 @@ const paths = Object.freeze({
   appServer: 'apps/web/src/app-server.ts',
   canonicalConstants: 'packages/canonical-model/src/constants.ts',
   componentRegistry: 'apps/web/src/component-registry.ts',
+  board: 'apps/web/src/board.ts',
   controlSemantics: 'apps/web/src/control-semantics.ts',
   documentEditor: 'apps/web/src/document-editor.ts',
   editorControls: 'apps/web/src/editor-controls.ts',
@@ -58,6 +59,8 @@ const planSlotAnchors = Object.freeze({
   activity: 'activity rail',
   breadcrumb: 'breadcrumb',
   bulkActions: 'bulk bar',
+  stageSelector: 'stage selector',
+  columns: 'stage columns',
   childTables: 'child tables',
   commandBar: 'command bar',
   dataGrid: 'spreadsheet-grade grid',
@@ -621,6 +624,7 @@ function scanForBypass(
     // registry: compositions, and a launcher Task's tiles and scan box.
     paths.surfaceComposition,
     paths.surfaceLauncher,
+    paths.board,
     paths.componentRegistry,
     paths.documentEditor,
     // The editor's own typed controls, consumed only by the generic editor.
@@ -646,6 +650,7 @@ function scanForBypass(
     paths.controlSemantics,
     paths.surfaceComposition,
     paths.surfaceLauncher,
+    paths.board,
     paths.componentRegistry,
     paths.documentEditor,
     paths.editorControls,
@@ -656,6 +661,7 @@ function scanForBypass(
     // The generic editor imports only SurfaceRuntime's gateway/submission
     // types; SurfaceRuntime remains its sole production caller.
     paths.documentEditor,
+    paths.board,
   ]);
   const structuralMarkup =
     /<\s*(?:html|body|head|header|footer|main|nav|aside|section|article|form|fieldset|legend|input|select|textarea|button|table|h[1-6])(?:\s|>)|createElement\(\s*['"](?:html|body|head|header|footer|main|nav|aside|section|article|form|fieldset|legend|input|select|textarea|button|table|h[1-6])['"]|(?:jsx|jsxs|jsxDEV)\(\s*['"](?:html|body|head|header|footer|main|nav|aside|section|article|form|fieldset|legend|input|select|textarea|button|table|h[1-6])['"]|data-surface-archetype\s*=|data-component\s*=/i;
@@ -694,6 +700,16 @@ function scanForBypass(
         repoPath,
         'SURF001_RUNTIME_BYPASS',
         'only SurfaceRuntime and its closed registry may delegate to the launcher interpreter',
+      );
+    if (
+      repoPath !== paths.surfaceRuntime &&
+      /from ['"][^'"]*\/board\.js['"]/u.test(source)
+    )
+      add(
+        violations,
+        repoPath,
+        'SURF001_RUNTIME_BYPASS',
+        'only SurfaceRuntime may delegate to the Board interpreter',
       );
     // The editor's controls are part of the generic editor delegate, not a
     // second surface authority: nothing but that editor may render them.

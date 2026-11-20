@@ -7,6 +7,8 @@ This map assigns every concern in the two constitutional ADR tranches to one
 named authority and one owning decision. It refines, but cannot override, the
 program authority in `docs/greenfield-north-star-erp-platform-plan.md`.
 
+PostgreSQL CI checks effective application table and column privileges against the [reviewed grant allowlist](../../test/postgres/application-grants.tsv).
+
 ## One-owner map
 
 | Concern | Sole named authority | Owning decision | Consumers that are not authorities |

@@ -1,3 +1,4 @@
+import { BoardViewRevisionSchema } from './board-revision.js';
 import { LayoutRevisionSchema } from './layout-revision.js';
 import {
   CalculatedDisplayFieldDefinitionSchema,
@@ -192,6 +193,23 @@ const saveListView = z.strictObject({
 });
 
 const ChangeMemberSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('addAddressField'),
+    schemaVersion: z.literal('v6'),
+    entity: canonicalId,
+    fieldId: canonicalId,
+    label,
+    required: z.boolean(),
+  }),
+  z.strictObject({
+    kind: z.literal('addMapPlacement'),
+    schemaVersion: z.literal('v6'),
+    placementId: canonicalId,
+    surfaceId: canonicalId,
+    fieldId: canonicalId,
+    sectionId: z.string().min(1).max(512),
+  }),
+  BoardViewRevisionSchema,
   addRecordType,
   addField,
   addChoice,
@@ -309,6 +327,8 @@ export type CustomizationPatch =
   SingleCustomizationPatch | z.infer<typeof changeSet>;
 export type CustomizationPatchKind = CustomizationPatch['kind'];
 export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
+  'addAddressField',
+  'addMapPlacement',
   'addRecordType',
   'addField',
   'addChoice',
@@ -317,6 +337,7 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'declareLifecycle',
   'arrangeLayout',
   'addLayoutRevision',
+  'addBoardViewRevision',
   'saveListView',
   'addValidation',
   'addCalculatedDisplayField',

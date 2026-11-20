@@ -8,6 +8,7 @@ import test from 'node:test';
 import { promisify } from 'node:util';
 
 import pg from 'pg';
+import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../packages/canonical-model/src/surface-workspace.js';
 
 import {
   CANONICALIZATION_PROFILE_VERSION,
@@ -159,7 +160,23 @@ test('the capability comparison binds the family to its capability, then compare
     null,
   );
 
-  const surfaceFloors = [22, 23, 24, 25, 26, 27, 28];
+  const surfaceFloors = [
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    33,
+    34,
+    LINE_CREATE_VALUES_SURFACE_FLOOR,
+    DOCUMENT_TEMPLATES_SURFACE_FLOOR,
+  ];
   for (const reader of surfaceFloors) {
     for (const floor of surfaceFloors) {
       const refusal = unsupportedRuntimeCapability(
@@ -785,8 +802,26 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
               loaded.projections.surface.requiredRuntimeCapability,
               {
                 capabilityId: 'northstar.runtime:capability.surface-manifest',
-                minimumVersion: 22,
+                minimumVersion: LINE_CREATE_VALUES_SURFACE_FLOOR,
               },
+            );
+            const requirement =
+              loaded.projections.surface.requiredRuntimeCapability;
+            assert.match(
+              unsupportedRuntimeCapability(
+                PROJECTION_FAMILY_IDS.surfaceManifest,
+                requirement,
+                {
+                  [PROJECTION_FAMILY_IDS.surfaceManifest]: {
+                    capabilityId: requirement.capabilityId,
+                    maximumSupportedVersion:
+                      LINE_CREATE_VALUES_SURFACE_FLOOR - 1,
+                  },
+                },
+              ) ?? '',
+              new RegExp(
+                `requires version ${LINE_CREATE_VALUES_SURFACE_FLOOR} and this runtime supports ${LINE_CREATE_VALUES_SURFACE_FLOOR - 1}`,
+              ),
             );
             // All FIVE loaded families carry their requirement, not just the
             // surface. Added on round-2 review, which named "carry it only for

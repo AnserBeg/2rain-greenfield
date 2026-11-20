@@ -5,7 +5,7 @@
     {
       "name": "documents-download-revocation",
       "claim": "A revoked byte-read grant withholds a previously issued attachment URL.",
-      "file": "db/migrations/0052_generated_document_sources.sql",
+      "file": "db/migrations/0056_generated_document_sources.sql",
       "original": "    AND platform.document_granted(scope, 'northstar.documents:permission.' || action, 'northstar.documents:resource.attachments')",
       "replacement": "    AND (action = 'download' OR platform.document_granted(scope, 'northstar.documents:permission.' || action, 'northstar.documents:resource.attachments'))",
       "test": {
@@ -23,7 +23,7 @@
     {
       "name": "documents-publication-audit",
       "claim": "Every published version is accounted for by a committed attachment audit row.",
-      "file": "db/migrations/0052_generated_document_sources.sql",
+      "file": "db/migrations/0056_generated_document_sources.sql",
       "original": "  INSERT INTO platform.document_attachment_audit (tenant_id,environment_id,link_id,operation_id)\n    VALUES (i.tenant_id,i.environment_id,published.link_id,replace(s.entity_id, ':entity.',\n      CASE WHEN s.generated_source IS NULL THEN ':operation.document_attach_' ELSE ':operation.document_generate_' END));\n",
       "replacement": "",
       "test": {
@@ -41,7 +41,7 @@
     {
       "name": "documents-stored-quota",
       "claim": "Publication refuses even a duplicate when the stored-byte quota is full.",
-      "file": "db/migrations/0052_generated_document_sources.sql",
+      "file": "db/migrations/0056_generated_document_sources.sql",
       "original": "    + s.byte_length > 104857600 THEN",
       "replacement": "    + s.byte_length > 2147483647 THEN",
       "test": {
@@ -59,7 +59,7 @@
     {
       "name": "generated-pdf-source-revocation",
       "claim": "When a reader loses a bound source, its issued PDF cannot be downloaded.",
-      "file": "db/migrations/0052_generated_document_sources.sql",
+      "file": "db/migrations/0056_generated_document_sources.sql",
       "original": "    AND platform.document_generated_allowed(v.generated_source,v.release_id,scope,entity,record_key,false) AND (v.owner_scope,v.entity_id,v.record_id,v.link_id,v.version_id) = (scope,entity,record_key,link,version)",
       "replacement": "    AND (v.owner_scope,v.entity_id,v.record_id,v.link_id,v.version_id) = (scope,entity,record_key,link,version)",
       "test": {
@@ -77,7 +77,7 @@
     {
       "name": "generated-pdf-company-brand-source-revocation",
       "claim": "Company-brand source revocation withholds the previously issued PDF.",
-      "file": "db/migrations/0052_generated_document_sources.sql",
+      "file": "db/migrations/0056_generated_document_sources.sql",
       "original": "    AND platform.document_source_allowed(app, issued_app, storage, brand, 'shared',\n      'northstar.app:entity.legal_entity', scope::uuid, verify_revision)",
       "replacement": "",
       "test": {
@@ -131,7 +131,7 @@
     {
       "name": "documents-sql-page-size",
       "claim": "Node buffers at most the requested attachment page and one lookahead row.",
-      "file": "db/migrations/0052_generated_document_sources.sql",
+      "file": "db/migrations/0056_generated_document_sources.sql",
       "original": " LIMIT greatest(1, least(page_size, 100))",
       "replacement": "",
       "test": {
@@ -185,7 +185,7 @@
     {
       "name": "generated-pdf-record-query-grants",
       "claim": "The governing Record read grants include its declared child-query authority.",
-      "file": "db/migrations/0052_generated_document_sources.sql",
+      "file": "db/migrations/0056_generated_document_sources.sql",
       "original": "    AND platform.document_record_query_granted(app, q, scope)",
       "replacement": "    AND platform.document_record_query_granted(app, q - 'readModel', scope)",
       "test": {
@@ -203,7 +203,7 @@
     {
       "name": "documents-optional-dependency-flag",
       "claim": "A read-model dependency the compiled release declares required: false does not gate attachment reads.",
-      "file": "db/migrations/0052_generated_document_sources.sql",
+      "file": "db/migrations/0056_generated_document_sources.sql",
       "original": "    WHERE (reference.value->'required' = 'false'::jsonb) IS NOT TRUE",
       "replacement": "    WHERE true",
       "test": {
@@ -226,7 +226,7 @@
     {
       "name": "documents-absent-flag-stays-mandatory",
       "claim": "A read-model dependency without the required flag still gates attachment reads.",
-      "file": "db/migrations/0052_generated_document_sources.sql",
+      "file": "db/migrations/0056_generated_document_sources.sql",
       "original": "    WHERE (reference.value->'required' = 'false'::jsonb) IS NOT TRUE",
       "replacement": "    WHERE (reference.value->'required' = 'true'::jsonb) IS NOT TRUE",
       "test": {
@@ -249,7 +249,7 @@
     {
       "name": "generated-pdf-child-set-completeness",
       "claim": "Publication verifies the live child set even when the render captured no rows.",
-      "file": "db/migrations/0052_generated_document_sources.sql",
+      "file": "db/migrations/0056_generated_document_sources.sql",
       "original": "  IF verify_revision AND relation IS NOT NULL THEN",
       "replacement": "  IF false THEN",
       "test": {
@@ -267,7 +267,7 @@
     {
       "name": "generated-pdf-retained-field-classification",
       "claim": "A selected same-record confidential field is denied by SQL.",
-      "file": "db/migrations/0052_generated_document_sources.sql",
+      "file": "db/migrations/0056_generated_document_sources.sql",
       "original": "        AND f->>'classification' IN ('public','internal')\n",
       "replacement": "",
       "test": {
@@ -285,7 +285,7 @@
     {
       "name": "generated-pdf-staging-stored-source",
       "claim": "Replay authorizes the stored source and withholds metadata when it is revoked.",
-      "file": "db/migrations/0052_generated_document_sources.sql",
+      "file": "db/migrations/0056_generated_document_sources.sql",
       "original": "        AND platform.document_generated_allowed(v.generated_source,v.release_id,scope,entity,record_key,false)\n",
       "replacement": "",
       "test": {
@@ -357,7 +357,7 @@
     {
       "name": "documents-company-gateway-memberships",
       "claim": "A company employee uses the query and operation gateway grants through company membership.",
-      "file": "db/migrations/0052_generated_document_sources.sql",
+      "file": "db/migrations/0056_generated_document_sources.sql",
       "original": "      AND g.permission_id = permission AND g.resource_id = resource",
       "replacement": "      AND m.legal_entity_id IS NULL AND g.permission_id = permission AND g.resource_id = resource",
       "test": {
@@ -375,7 +375,7 @@
     {
       "name": "documents-rejected-scan-cannot-publish",
       "claim": "Matching policy and digest still require a clean verdict.",
-      "file": "db/migrations/0052_generated_document_sources.sql",
+      "file": "db/migrations/0056_generated_document_sources.sql",
       "original": " OR s.scan_clean IS DISTINCT FROM true",
       "replacement": "",
       "test": {
@@ -393,7 +393,7 @@
     {
       "name": "documents-stage-authority-revocation",
       "claim": "A staged clean verdict cannot survive revocation and regrant of uploader authority.",
-      "file": "db/migrations/0052_generated_document_sources.sql",
+      "file": "db/migrations/0056_generated_document_sources.sql",
       "original": "  IF file_policy IS NULL OR\n     (s.authority_fence,s.authority_policy_version) IS DISTINCT FROM (fence_now,policy_now) THEN",
       "replacement": "  IF file_policy IS NULL THEN",
       "test": {
@@ -519,7 +519,7 @@
     {
       "name": "generated-pdf-file-category-list",
       "claim": "Attachment listing keeps the exact issued category restriction.",
-      "file": "db/migrations/0052_generated_document_sources.sql",
+      "file": "db/migrations/0056_generated_document_sources.sql",
       "original": "    AND EXISTS (SELECT FROM platform.document_file_policy(fields,v.field_id,v.category_id,\n        b.content_type,b.byte_length) policy\n      WHERE policy IS NOT NULL AND (policy->>'retention') IS NOT DISTINCT FROM v.retention_class)\n    AND (after_link",
       "replacement": "    AND (v.field_id IS NULL OR fields->'fields' @> jsonb_build_array(jsonb_build_object('fieldId',v.field_id)))\n    AND (after_link",
       "test": {
@@ -537,7 +537,7 @@
     {
       "name": "generated-pdf-file-category-read",
       "claim": "Attachment downloads keep the exact issued category restriction.",
-      "file": "db/migrations/0052_generated_document_sources.sql",
+      "file": "db/migrations/0056_generated_document_sources.sql",
       "original": "    AND EXISTS (SELECT FROM platform.document_file_policy(fields,v.field_id,v.category_id,\n        b.content_type,b.byte_length) policy\n      WHERE policy IS NOT NULL AND (policy->>'retention') IS NOT DISTINCT FROM v.retention_class)\n$$;",
       "replacement": "    AND (v.field_id IS NULL OR fields->'fields' @> jsonb_build_array(jsonb_build_object('fieldId',v.field_id)))\n$$;",
       "test": {
@@ -555,7 +555,7 @@
     {
       "name": "generated-pdf-file-category-count",
       "claim": "Publication uses the verified category count instead of the supplied limit.",
-      "file": "db/migrations/0052_generated_document_sources.sql",
+      "file": "db/migrations/0056_generated_document_sources.sql",
       "original": "(file_policy->>'categoryLimit')::integer",
       "replacement": "category_limit",
       "test": {
@@ -573,7 +573,7 @@
     {
       "name": "generated-pdf-file-category-retention",
       "claim": "Publication uses the verified retention class even when a caller supplies another.",
-      "file": "db/migrations/0052_generated_document_sources.sql",
+      "file": "db/migrations/0056_generated_document_sources.sql",
       "original": "s.category_id,file_policy->>'retention',s.file_name",
       "replacement": "s.category_id,retention,s.file_name",
       "test": {

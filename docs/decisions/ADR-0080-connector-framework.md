@@ -166,7 +166,9 @@ transition. Record verified duplicates without repeating a business change.
 
 ## What a business owner publishes
 
-In Customize, add an Address field to a first-party or tenant-authored record. The closed,
+Charter scope (2026-11-20): “any record type” means any ADR-0079-eligible record type. Protected-record annotations await a separate design ruling.
+
+In Customize, add an Address field to an eligible first-party or tenant-authored record. The closed,
 versioned `addAddressField` patch binds a stable field ID to a record type. Independently,
 `addMapPlacement` binds a stable placement ID, Address field, Record surface and section ID.
 Preview, approve and activate the pinned diff through the existing compare-and-swap flow.
@@ -175,9 +177,11 @@ spend limits and timeouts, bounded by the host contract. None of these are patch
 
 `addDocumentEmailAction` binds a stable action ID to the Record command bar. It carries
 ordered `to` and `cc` source lists. A source is a closed union of an authorized email field
-on the record, a declared relation and target email field, or an address supplied by the
-person at confirmation. Bind zero or more document selectors, an optional template reference
-and an explicit attach or link mode. Every payload, binding, source and reference carries a
+on the record or a declared relation and target email field. No address is ever supplied by
+the person at confirmation (ADR-0088, 2026-11-20 amendment). Bind zero or more document
+selectors, a required approved email template reference, the source query, purpose and
+channel (a versioned discriminated union, initially email) and an explicit attach or link
+mode. Every payload, binding, source and reference carries a
 schemaVersion. Resolve exact recipients, versions and link access before confirmation.
 Reject duplicate IDs, unresolved consumers, incompatible types and disallowed disclosures.
 
@@ -226,6 +230,8 @@ and the input revision. Accept only finite latitude in [−90, 90] and longitude
 The read gives a user pin precedence. A change to the address or manual pin advances the
 revision. A late geocode must match the exact record, revision, release and installation.
 A selected suggestion or copied geocode cannot be relabelled as user content to evade expiry.
+
+**2026-11-20 storage amendment.** One stable Address field ID owns scalar columns for typed text, components, revision, source digest, status and an optional user pin in `numeric(11,8)`. A record write replaces them atomically. Provider pins and delivery status belong to the matching company installation and source revision.
 
 A null or omitted value is absent. Require nonblank typed text in any present value.
 A required Address therefore needs text alone, including during an outage. Adding a required
@@ -288,7 +294,7 @@ and operator replay. Check that an unknown outcome beyond the provider window st
 and a revoked document or consent yields zero new sends. Release the document action when
 DOCS-1 supplies a governed immutable version/read contract and N2-03 supplies at minimum
 the linked thread, participants, exact message revision, verified company sender, per-recipient
-consent, delivery state and inbound correlation. Slice 2 waits for both.
+consent, delivery state and inbound correlation. ADR-0088 assigns the canonical message revision to CONNECT-1, so slice 2 does not wait on N2-03 for it. The email action patch member is CONNECT-1 slice 2's first deliverable. Slice 2 is jointly gated on DOCS-1 version handles and on [SIGNIN-1 slice 2b](../execution/packets/SIGNIN-1.md#slice-2b-provider-enablement-and-outward-sends) (provider enablement and outward sends, waiting for CONNECT-1's canonical pending records).
 
 ## Later connectors
 

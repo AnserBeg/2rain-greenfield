@@ -1,7 +1,7 @@
 {
   "schemaVersion": "northstar.tenant-completeness-manifest/v1",
   "tenantIndependentDefinition": "A table is tenant-independent only when its rows represent a database-wide kernel mechanism or immutable content deliberately shared across tenants; business records are never tenant-independent, and absence of a tenant column is not evidence.",
-  "expectedTableCount": 100,
+  "expectedTableCount": 108,
   "tables": [
     {
       "schema": "north_star_internal",
@@ -498,6 +498,12 @@
     },
     {
       "schema": "platform",
+      "table": "workflow_retry_decisions",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
       "table": "workflow_runs",
       "classification": "tenant-scoped",
       "tenantColumn": "tenant_id"
@@ -511,6 +517,18 @@
     {
       "schema": "platform",
       "table": "workflow_verification_evidence",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "staff_decision_proofs",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "staff_decision_receipts",
       "classification": "tenant-scoped",
       "tenantColumn": "tenant_id"
     },
@@ -608,6 +626,36 @@
     {
       "schema": "platform",
       "table": "booking_resources",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "address_geocodes",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "address_installation_history",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "address_installations",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "address_quota",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "booking_approval_grants",
       "classification": "tenant-scoped",
       "tenantColumn": "tenant_id"
     }

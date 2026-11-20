@@ -1,3 +1,5 @@
+import { boardDigest, boardForList, boardWithStages } from './board.js';
+import { SURFACE_SLOTS } from './constants.js';
 import { baseLayout, layoutProblem } from './layout.js';
 import type { VersionedNormalizedApplicationPackage } from './schemas.js';
 import { CanonicalModelError, diagnostic } from './diagnostics.js';
@@ -5,6 +7,8 @@ import {
   pickerEligibilityProblem,
   searchChildProblem,
 } from './picker-eligibility.js';
+
+export const LINE_CREATE_VALUES_SURFACE_FLOOR = 35;
 
 /** Typed declarations also prove their cross-entity and contextual references. */
 export function validateSurfaceWorkspaces(
@@ -31,6 +35,41 @@ export function validateSurfaceWorkspaces(
     ]);
   };
   for (const surface of model.surfaces) {
+    const board = 'board' in surface ? surface.board : undefined;
+    if (surface.archetype === 'board' || board) {
+      if (!board || surface.archetype !== 'board')
+        return fail(
+          surface.surfaceId,
+          'A v6 Board must declare its view binding.',
+        );
+      const { body } = board;
+      const source = boardForList(model, body.listSurfaceId);
+      const expected =
+        source &&
+        boardWithStages(
+          source,
+          body.grouping.stages.map((s) => s.stateId),
+        );
+      const slots = [...surface.slots]
+        .sort((a, b) => a.orderKey - b.orderKey)
+        .map((s) => s.slot);
+      if (
+        !expected ||
+        boardDigest(expected) !== board.resultDigest ||
+        boardDigest(body) !== board.resultDigest ||
+        body.listQueryId !== surface.dataSource.targetId ||
+        board.predecessor === board.revisionId ||
+        surface.surfaceRole !== undefined ||
+        slots.join() !== SURFACE_SLOTS.board.join() ||
+        !('workspace' in surface) ||
+        surface.workspace?.membership !== 'contextual' ||
+        surface.workspace.ownerSurfaceId !== body.listSurfaceId
+      )
+        fail(
+          surface.surfaceId,
+          'Board stages, moves, owner, slots or authorized read bindings have changed.',
+        );
+    }
     if ('layouts' in surface && surface.layouts) {
       const modes = new Set<string>();
       for (const layout of surface.layouts) {
@@ -994,6 +1033,44 @@ export function validateSurfaceWorkspaces(
         fail(
           surface.surfaceId,
           'a create value is a header field no editor field offers, holding a value it admits',
+        );
+    }
+    // What every new line's first create also writes: line fields the editor
+    // does not offer, each once, with a literal the field admits -- text that
+    // fits, an option of its enumeration, or a canonical decimal.
+    const lineEntity = lineQuery!.sourceEntity.targetId;
+    const lineCreateValues = editor.lineCreateValues ?? [];
+    const createsLine = model.operations.some(
+      (operation) =>
+        operation.effect.kind === 'createRecordEffect' &&
+        'entity' in operation.effect &&
+        operation.effect.entity.targetId === lineEntity,
+    );
+    if (
+      new Set(lineCreateValues.map((value) => value.fieldId)).size !==
+      lineCreateValues.length
+    )
+      fail(surface.surfaceId, 'a line create value names each field once');
+    for (const entry of lineCreateValues) {
+      const type = fields.get(entry.fieldId)?.fieldType;
+      const value = entry.value.value;
+      const admissible =
+        type?.kind === 'textFieldType'
+          ? [...value].length <= type.maximumLength
+          : type?.kind === 'enumFieldType'
+            ? type.options.some((option) => option.optionId === value)
+            : type?.kind === 'exactDecimalFieldType' &&
+              /^(?:0|-?[1-9][0-9]*)(?:\.[0-9]*[1-9])?$/u.test(value);
+      if (
+        !createsLine ||
+        fields.get(entry.fieldId)?.entity.targetId !== lineEntity ||
+        entry.fieldId === editor.lineNumberFieldId ||
+        offered.has(String(entry.fieldId)) ||
+        !admissible
+      )
+        fail(
+          surface.surfaceId,
+          'a line create value is a line field no editor field offers, holding a literal it admits',
         );
     }
   }

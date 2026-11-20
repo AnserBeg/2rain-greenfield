@@ -1,9 +1,16 @@
 import { BILLING_READER } from '../../canonical-model/src/billing.js';
 import {
+  ADDRESS_FIELD_READER,
+  ADDRESS_MAP_READER,
+  CONNECTOR_PAYLOAD,
+  type AddressProjection,
+  BOARD_READER,
   BOOKING_OPERATION_READER,
+  LAYOUT_READER,
+  REPLAYED_LAYOUT_READER,
+  type SurfaceLayout,
   hasBookingOperations,
 } from '@north-star/canonical-model';
-import { LAYOUT_READER } from '@north-star/canonical-model';
 import {
   CALCULATED_DISPLAY_QUERY_READER,
   type CalculatedDisplayProjectionEntry,
@@ -29,6 +36,7 @@ import {
   DOCUMENT_TEMPLATES_SURFACE_FLOOR,
   DOCUMENTS_PAYLOAD_VERSION,
 } from '../../canonical-model/src/documents.js';
+import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../canonical-model/src/surface-workspace.js';
 import type { compileDocuments } from './documents.js';
 import {
   WORKFLOW_PAYLOAD_VERSION,
@@ -105,6 +113,7 @@ type LoweredProjectionFamily = Exclude<
 >;
 
 const payloadSchemaVersions: Record<LoweredProjectionFamily, string> = {
+  [PROJECTION_FAMILY_IDS.connector]: CONNECTOR_PAYLOAD,
   [PROJECTION_FAMILY_IDS.documents]: DOCUMENTS_PAYLOAD_VERSION,
   [PROJECTION_FAMILY_IDS.workflow]: WORKFLOW_PAYLOAD_VERSION,
   [PROJECTION_FAMILY_IDS.agentDiscovery]:
@@ -132,6 +141,10 @@ const runtimeCapabilities: Record<
   LoweredProjectionFamily,
   RuntimeCapabilityRequirement
 > = {
+  [PROJECTION_FAMILY_IDS.connector]: {
+    capabilityId: 'northstar.runtime:capability.connector',
+    minimumVersion: 1,
+  },
   [PROJECTION_FAMILY_IDS.workflow]: {
     capabilityId: WORKFLOW_RUNTIME_CAPABILITY,
     minimumVersion: 1,
@@ -196,6 +209,7 @@ export function lowerBaseProjectionPayloads(
     NonNullable<ReturnType<typeof compileDocuments>>,
     { payload: unknown }
   >['payload'],
+  address?: AddressProjection,
 ): ProjectionPayloadPlan[] {
   const namespace = packageRevision.package.namespace;
   const packageScope: LogicalScope = {
@@ -391,6 +405,34 @@ export function lowerBaseProjectionPayloads(
     }
     plans.push(
       plan(PROJECTION_FAMILY_IDS.documents, namespace, packageScope, documents),
+    );
+  }
+  if (address) {
+    const consumers = [
+      PROJECTION_FAMILY_IDS.queryCatalog,
+      PROJECTION_FAMILY_IDS.operationCatalog,
+      PROJECTION_FAMILY_IDS.surfaceManifest,
+    ] as string[];
+    for (const projection of plans.filter((p) =>
+      consumers.includes(p.familyId),
+    )) {
+      projection.payload = {
+        ...(projection.payload as object),
+        addressBindings: address.bindings,
+      };
+      if (projection.familyId === PROJECTION_FAMILY_IDS.surfaceManifest)
+        projection.requiredRuntimeCapability = {
+          ...projection.requiredRuntimeCapability,
+          minimumVersion: Math.max(
+            projection.requiredRuntimeCapability.minimumVersion,
+            address.placements.length
+              ? ADDRESS_MAP_READER
+              : ADDRESS_FIELD_READER,
+          ),
+        };
+    }
+    plans.push(
+      plan(PROJECTION_FAMILY_IDS.connector, namespace, packageScope, address),
     );
   }
   if (
@@ -1038,21 +1080,38 @@ function surfaceManifestPayload(
         (column) => column.relation,
       ),
   );
-  const surfaceFloor = original.surfaces.some(
-    (s) => 'layouts' in s && s.layouts,
-  )
-    ? LAYOUT_READER
-    : extendedEditor || declaredRelationList
-      ? 26
-      : hasMetrics(original)
-        ? 25
-        : hasSavedListLayouts(original)
-          ? 24
-          : recordFieldPresentation
-            ? 23
-            : rankedDefaultsOrChainedTasks
-              ? 22
-              : null;
+  const lineCreateValues = original.surfaces.some(
+    (surface) =>
+      'documentEditor' in surface &&
+      (surface.documentEditor as SurfaceDocumentEditor | undefined)
+        ?.lineCreateValues !== undefined,
+  );
+  const replayedLayout = original.surfaces.some(
+    (s) =>
+      'layouts' in s &&
+      (s.layouts as SurfaceLayout[] | undefined)?.some(
+        (layout) => layout.placementRuleVersion === 1,
+      ),
+  );
+  const surfaceFloor = lineCreateValues
+    ? LINE_CREATE_VALUES_SURFACE_FLOOR
+    : replayedLayout
+      ? REPLAYED_LAYOUT_READER
+      : original.surfaces.some((s) => s.archetype === 'board')
+        ? BOARD_READER
+        : original.surfaces.some((s) => 'layouts' in s && s.layouts)
+          ? LAYOUT_READER
+          : extendedEditor || declaredRelationList
+            ? 26
+            : hasMetrics(original)
+              ? 25
+              : hasSavedListLayouts(original)
+                ? 24
+                : recordFieldPresentation
+                  ? 23
+                  : rankedDefaultsOrChainedTasks
+                    ? 22
+                    : null;
   const payloadSchemaVersion = composed
     ? COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION
     : navigation
@@ -1132,6 +1191,9 @@ function surfaceManifestPayload(
                     ),
                   },
           }),
+          ...(declared && 'board' in declared && declared.board
+            ? { board: declared.board }
+            : {}),
           ...(declared && 'layouts' in declared && declared.layouts
             ? { layouts: declared.layouts }
             : {}),

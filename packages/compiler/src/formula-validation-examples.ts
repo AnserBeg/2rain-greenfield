@@ -86,6 +86,8 @@ function syntheticScalars(
   businessDate: string,
 ): readonly ValidationScalar[] {
   switch (type.kind) {
+    case 'address':
+      return [{ kind: 'text', value: '1 Main Street' }];
     case 'boolean':
       return [true, false].map((value) => ({ kind: 'boolean', value }));
     case 'date': {

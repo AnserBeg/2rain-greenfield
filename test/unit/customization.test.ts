@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import test from 'node:test';
 
 import type pg from 'pg';
+import { applicationWithoutLineCreateValues } from '../helpers/application-without-line-create-values.js';
 import { renderCompositionFields } from '../../apps/web/src/surface-composition.js';
 import {
   declaredListArguments,
@@ -513,7 +514,7 @@ test('tenant line tables use the document editor with or without company scope a
     label: 'Review source',
   };
   const accepted = await compileInSandbox(
-    sandboxRequest([change([header, lifecycle, lines])]),
+    surfaceCompatibilityRequest([change([header, lifecycle, lines])]),
   );
   assert.equal(
     accepted.status,
@@ -588,7 +589,9 @@ test('tenant line tables use the document editor with or without company scope a
     ],
     [header, ...links, lines, lifecycle],
   ]) {
-    const extended = await compileInSandbox(sandboxRequest([change(members)]));
+    const extended = await compileInSandbox(
+      surfaceCompatibilityRequest([change(members)]),
+    );
     assert.equal(
       extended.status,
       'compiled',
@@ -616,7 +619,10 @@ test('tenant line tables use the document editor with or without company scope a
     assert.equal(unsupportedRuntimeCapability(family, requirement), null);
   }
   const visual = await compileInSandbox(
-    sandboxRequest([patch(header), change([...links, lines, lifecycle])]),
+    surfaceCompatibilityRequest([
+      patch(header),
+      change([...links, lines, lifecycle]),
+    ]),
   );
   assert.deepEqual(visual, {
     message:
@@ -673,6 +679,11 @@ function sandboxRequest(chain: readonly CustomizationPatch[]) {
     chain,
     tip: serializeRelease(tip),
   };
+}
+
+function surfaceCompatibilityRequest(chain: readonly CustomizationPatch[]) {
+  const { authored: base, release } = applicationWithoutLineCreateValues();
+  return { acknowledgement, base, chain, tip: release.application };
 }
 
 test('a change set compiles only its final definition and refuses a broken dependency order', async () => {
@@ -1157,7 +1168,9 @@ test('Today compiles only declared numeric measures of a direct List', async () 
     label: 'Catalog prices in CAD',
     sumField: 'northstar.app:field.item_price_cad',
   };
-  const compiled = await compileInSandbox(sandboxRequest([patch(card)]));
+  const compiled = await compileInSandbox(
+    surfaceCompatibilityRequest([patch(card)]),
+  );
   assert.equal(compiled.status, 'compiled', JSON.stringify(compiled));
   assert.match(compiled.steps[0]!.rendered.text, /sums Price \(CAD\) in/u);
   const { projections } = parseSerializedRelease(compiled.steps[0]!.release)
@@ -1213,7 +1226,7 @@ test('a saved Location view compiles its own columns, sort and declared filter',
     ],
   };
   const saved = patch(baseView);
-  const compiled = await compileInSandbox(sandboxRequest([saved]));
+  const compiled = await compileInSandbox(surfaceCompatibilityRequest([saved]));
   assert.equal(compiled.status, 'compiled', JSON.stringify(compiled));
   const { projections } = parseSerializedRelease(compiled.steps[0]!.release)
     .compiled.bundle.releaseManifest;
@@ -1330,7 +1343,7 @@ test('a saved Location view compiles its own columns, sort and declared filter',
   );
 
   const refused = await compileInSandbox(
-    sandboxRequest([
+    surfaceCompatibilityRequest([
       patch({
         ...baseView,
         filters: [
@@ -1449,11 +1462,8 @@ test('upgrade diagnostics name the missing tenant target and the new first-party
   assert.deepEqual(first, second);
   assert.equal(first.status, 'rejected');
   assert.ok(first.status === 'rejected');
-  assert.equal(first.code, 'CUSTOMIZE_UPGRADE_CONFLICT');
-  assert.match(
-    JSON.stringify(first.diagnostics),
-    /firstPartyBase.*tenantPatch.*item_list.*There is no screen/u,
-  );
+  assert.equal(first.code, 'RETIRED_TARGET');
+  assert.match(JSON.stringify(first.diagnostics), /RETIRED_TARGET.*item_list/u);
 });
 
 test('an upgrade compiles field, layout and metric intent as one transition from the prior live tenant release', async () => {
@@ -1572,12 +1582,12 @@ test('a whole-package upgrade rejection keeps the compiler subject without attri
   assert.ok(response.status === 'rejected', JSON.stringify(response));
   assert.equal('patchIndex' in response, false);
   const diagnostics = response.diagnostics as {
-    firstPartySubject?: string;
+    subject?: string;
     tenantPatch?: unknown;
     patchIndex?: number;
   }[];
   assert.ok(
-    diagnostics.some((d) => d.firstPartySubject === permissionId),
+    diagnostics.some((d) => d.subject === permissionId),
     JSON.stringify(diagnostics),
   );
   assert.ok(
@@ -1869,7 +1879,7 @@ test('layout revision replays an ordered first revision, binds each member and r
   });
   assert.equal(next.predecessor, revision.revisionId);
   const compiled = await compileInSandbox({
-    ...sandboxRequest(chain),
+    ...surfaceCompatibilityRequest(chain),
     startAt: 2,
   });
   assert.ok(
@@ -1882,7 +1892,7 @@ test('layout revision replays an ordered first revision, binds each member and r
   );
   assert.match(compiled.steps[0]!.rendered.text, /Shipping \(Instructions, /u);
   const replay = await compileInSandbox({
-    ...sandboxRequest(chain),
+    ...surfaceCompatibilityRequest(chain),
     startAt: 2,
   });
   assert.ok(replay.status === 'compiled');
@@ -2154,7 +2164,9 @@ test('tenant inspection edit sections share the extended header bindings and the
     member: edit.body.sections[0]!.id,
     label: 'Inspection details',
   });
-  const result = await compileInSandbox(sandboxRequest([change, revision]));
+  const result = await compileInSandbox(
+    surfaceCompatibilityRequest([change, revision]),
+  );
   assert.ok(
     result.status === 'compiled',
     JSON.stringify(result.status === 'compiled' ? null : result),
@@ -2207,7 +2219,9 @@ test('composed detail keeps calculated display values readable and outside edit 
     member: patch.field.fieldId,
     label: 'Margin shown',
   });
-  const result = await compileInSandbox(sandboxRequest([patch, relabel]));
+  const result = await compileInSandbox(
+    surfaceCompatibilityRequest([patch, relabel]),
+  );
   assert.ok(
     result.status === 'compiled',
     JSON.stringify(result.status === 'compiled' ? null : result),
@@ -2268,7 +2282,9 @@ test('record layout retains the file catalog and raises the Surface floor above 
     member: target.body.sections[0]!.id,
     label: 'Item identification',
   });
-  const result = await compileInSandbox(sandboxRequest([file, layout]));
+  const result = await compileInSandbox(
+    surfaceCompatibilityRequest([file, layout]),
+  );
   assert.ok(
     result.status === 'compiled',
     JSON.stringify(result.status === 'compiled' ? null : result),
@@ -2301,4 +2317,286 @@ test('record layout retains the file catalog and raises the Surface floor above 
       index === 1 ? 'Item identification' : undefined,
     );
   }
+});
+
+test('addAddressField and addMapPlacement replay on a compatible base and identify each conflicting change', async () => {
+  const entity = 'northstar.app:entity.item';
+  const surfaceId = 'northstar.app:surface.item_detail';
+  const fieldId = 'northstar.app:field.custom_item_delivery_site';
+  const compatibility = applicationWithoutLineCreateValues();
+  const compatibilityTip = parseSerializedRelease(
+    compatibility.release.application,
+  ).compiled;
+  const add = patch({
+    kind: 'addAddressField',
+    schemaVersion: 'v6',
+    entity,
+    fieldId,
+    label: 'Delivery site',
+    required: false,
+  });
+  const variant = (label: string, moveSection: boolean) => {
+    const base = structuredClone(compatibility.authored);
+    const sku = (base.fields as { fieldId: string; label: string }[]).find(
+      (f) => f.fieldId === 'northstar.app:field.item_sku',
+    )!;
+    sku.label = label;
+    const surface = (
+      base.surfaces as {
+        surfaceId: string;
+        slots: { slot: string; slotId: string }[];
+      }[]
+    ).find((s) => s.surfaceId === surfaceId)!;
+    const section = surface.slots.find((s) => s.slot === 'sections')!;
+    if (moveSection)
+      section.slotId = 'northstar.app:slot.item_detail_delivery_sections';
+    const normalized = normalizeApplicationPackage(base);
+    const result = compileApplicationRelease(
+      {
+        kind: 'compilerInput',
+        dependencies: [],
+        limits: { ...DEFAULT_COMPILER_LIMITS },
+        expectedActiveRelease: expectedActiveReleaseFrom(compatibilityTip),
+        normalizedDefinitionBytes: new TextEncoder().encode(
+          canonicalize(normalized),
+        ),
+        profile: {
+          ...MODULE_COMPILER_PROFILE,
+          languageVersion: normalized.languageVersion,
+          normalizationProfileVersion: normalized.normalizationProfileVersion,
+        },
+      },
+      acknowledgement,
+    );
+    assert.ok(result.status === 'compiled', JSON.stringify(result.diagnostics));
+    return {
+      base,
+      root: result.releaseRoot,
+      sectionId: [surfaceId, 'detail', section.slotId, 'details'].join('/'),
+    };
+  };
+  const compatible = variant('Stock number', false);
+  const map = patch({
+    kind: 'addMapPlacement',
+    schemaVersion: 'v6',
+    placementId: 'northstar.app:placement.custom_delivery_map',
+    surfaceId,
+    sectionId: compatible.sectionId,
+    fieldId,
+  });
+  const chain = [add, map];
+  const original = await compileInSandbox(surfaceCompatibilityRequest(chain));
+  assert.ok(original.status === 'compiled', JSON.stringify(original));
+  const family = PROJECTION_FAMILY_IDS.surfaceManifest;
+  const floors = original.steps.map(({ release }) => {
+    const manifest =
+      parseSerializedRelease(release).compiled.bundle.releaseManifest;
+    const requirement = manifest.projections.find(
+      (p) => p.familyId === family,
+    )!.requiredRuntimeCapability;
+    assert.equal(unsupportedRuntimeCapability(family, requirement), null);
+    assert.match(
+      unsupportedRuntimeCapability(family, requirement, {
+        [family]: {
+          capabilityId: requirement.capabilityId,
+          maximumSupportedVersion: requirement.minimumVersion - 1,
+        },
+      }) ?? '',
+      /requires version/u,
+    );
+    return requirement.minimumVersion;
+  });
+  assert.deepEqual(floors, [31, 32]);
+  const source = original.steps.at(-1)!.release;
+  const replay = (next: typeof compatible) =>
+    compileInSandbox({
+      acknowledgement,
+      base: next.base,
+      chain,
+      tip: source,
+      upgradeBaseRoot: next.root,
+    });
+  const moved = await replay(compatible);
+  assert.ok(moved.status === 'compiled', JSON.stringify(moved));
+  assert.equal(moved.steps[0]?.diff.fromManifestRoot, source.releaseRoot);
+  const data = JSON.parse(
+    Buffer.from(
+      moved.steps[0]!.release.normalizedDefinitionBytesBase64,
+      'base64',
+    ).toString(),
+  ) as {
+    connectorBindings: { fieldId: string }[];
+    mapPlacements: { sectionId: string }[];
+  };
+  assert.deepEqual(
+    data.connectorBindings.map((b) => b.fieldId),
+    [fieldId],
+  );
+  assert.deepEqual(
+    data.mapPlacements.map((p) => p.sectionId),
+    [compatible.sectionId],
+  );
+  for (const [base, code, subject] of [
+    [
+      variant('Delivery site', false),
+      'FIELD_COLLISION',
+      'northstar.app:field.item_sku',
+    ],
+    [variant('Stock number', true), 'RETIRED_TARGET', compatible.sectionId],
+  ] as const) {
+    const rejected = await replay(base);
+    assert.ok(rejected.status === 'rejected', JSON.stringify(rejected));
+    assert.equal(rejected.code, code);
+    assert.equal(rejected.replayDiagnostics?.findings[0]?.subject, subject);
+    assert.partialDeepStrictEqual(rejected.diagnostics?.[0], {
+      firstPartyBase: base.root,
+      code,
+      subject,
+    });
+  }
+});
+
+test('Board revisions bind the tenant and purchase-order machines, cap facts, and preserve a boardless release', async () => {
+  const { draftBoardRevision } =
+    await import('../../packages/customization/src/board-revision.js');
+  const { BOARD_READER } =
+    await import('../../packages/canonical-model/src/board.js');
+  const tenant = patch({
+    kind: 'changeSet',
+    patches: [
+      {
+        kind: 'addRecordType',
+        label: 'Opportunity',
+        fields: [
+          { label: 'Name', type: 'text', required: true },
+          { label: 'Contact', type: 'text' },
+          { label: 'Channel', type: 'text' },
+          { label: 'Reference', type: 'text' },
+          { label: 'Territory', type: 'text' },
+        ],
+      },
+      {
+        kind: 'declareLifecycle',
+        entity: 'northstar.app:entity.custom_opportunity',
+        initial: 'Open',
+        states: [{ label: 'Open' }, { label: 'Won', role: 'success' }],
+        transitions: [{ from: 'Open', to: 'Won', label: 'Mark won' }],
+      },
+    ],
+  });
+  const before = applyCustomizationPatches(authored, [tenant]);
+  assert.ok(before.status === 'applied');
+  const def = normalizeApplicationPackage(before.authored);
+  const targets = customizationTargets(def).boards ?? [];
+  const po = targets.find(
+    (t) => t.body.listSurfaceId === 'northstar.app:surface.purchase_order_list',
+  );
+  const opportunity = targets.find(
+    (t) => t.body.entityId === 'northstar.app:entity.custom_opportunity',
+  );
+  assert.ok(
+    po && opportunity,
+    'both first-party and tenant record types offer Board',
+  );
+  assert.deepEqual(
+    po.body.moves.map((m) => m.operationId),
+    ['northstar.app:operation.purchase_order_draft_cancel'],
+  );
+  assert.deepEqual(
+    opportunity.body.moves.map((m) => m.label),
+    ['Mark won'],
+  );
+  for (const t of [po, opportunity]) {
+    assert.equal(t.body.grouping.version, 1);
+    assert.equal(t.body.grouping.kind, 'lifecycleState');
+    assert.ok(t.body.facts.length <= 3);
+  }
+  const boards = [po, opportunity].map((t) =>
+    draftBoardRevision(
+      t,
+      t.listLabel + ' board',
+      t.body.grouping.stages.map((s) => s.stateId),
+    ),
+  );
+  const built = applyCustomizationPatches(authored, [tenant, ...boards]);
+  assert.ok(
+    built.status === 'applied',
+    JSON.stringify(built.status === 'applied' ? null : built),
+  );
+  const after = normalizeApplicationPackage(built.authored);
+  for (const list of [po, opportunity]) {
+    assert.equal(
+      canonicalize(
+        after.surfaces.find((s) => s.surfaceId === list.body.listSurfaceId),
+      ),
+      canonicalize(
+        def.surfaces.find((s) => s.surfaceId === list.body.listSurfaceId),
+      ),
+    );
+  }
+  const compiled = await compileInSandbox({
+    ...surfaceCompatibilityRequest([tenant, ...boards]),
+    startAt: 2,
+  });
+  assert.ok(
+    compiled.status === 'compiled',
+    JSON.stringify(compiled.status === 'compiled' ? null : compiled),
+  );
+  const release = parseSerializedRelease(compiled.steps[0]!.release);
+  const { projectionPayload } = await import('../compiler/helpers.js');
+  const { boardDeclarationProblem, boardBindingsProblem } =
+    await import('../../packages/postgres-provider/src/board-admission.js');
+  const manifest = projectionPayload<{
+    surfaces: {
+      surfaceId: string;
+      board?: { body: { moves: { operationId: string }[] } };
+    }[];
+  }>(release.compiled, PROJECTION_FAMILY_IDS.surfaceManifest);
+  const operations = projectionPayload(
+    release.compiled,
+    PROJECTION_FAMILY_IDS.operationCatalog,
+  );
+  const queries = projectionPayload(
+    release.compiled,
+    PROJECTION_FAMILY_IDS.queryCatalog,
+  );
+  assert.equal(boardDeclarationProblem(after, manifest, BOARD_READER), null);
+  assert.equal(
+    boardBindingsProblem(manifest, BOARD_READER, operations, queries),
+    null,
+  );
+  assert.match(
+    boardDeclarationProblem(after, manifest, BOARD_READER - 1) ?? '',
+    /Board declarations/u,
+  );
+  const forged = structuredClone(manifest);
+  forged.surfaces.find(
+    (s) => s.surfaceId === boards[0]!.surfaceId,
+  )!.board!.body.moves[0]!.operationId =
+    'northstar.app:operation.purchase_order_release';
+  assert.match(
+    boardBindingsProblem(forged, BOARD_READER, operations, queries) ?? '',
+    /Board/u,
+  );
+  const surface = release.compiled.bundle.releaseManifest.projections.find(
+    (p) => p.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
+  )!;
+  assert.equal(surface.requiredRuntimeCapability.minimumVersion, BOARD_READER);
+  assert.match(
+    unsupportedRuntimeCapability(
+      surface.familyId,
+      surface.requiredRuntimeCapability,
+      {
+        [surface.familyId]: {
+          capabilityId: surface.requiredRuntimeCapability.capabilityId,
+          maximumSupportedVersion: BOARD_READER - 1,
+        },
+      },
+    ) ?? '',
+    /requires version/u,
+  );
+  assert.equal(
+    canonicalize(normalizeApplicationPackage(authored)),
+    new TextDecoder().decode(tip.normalizedDefinitionBytes),
+  );
 });

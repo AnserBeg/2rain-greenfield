@@ -103,6 +103,10 @@ export interface SemanticQueryResultEnvelope {
   readonly queryId: string;
   readonly records: readonly SemanticRecordDto[];
   readonly schemaVersion: typeof SEMANTIC_QUERY_RESULT_VERSION;
+  readonly boardCoverage?: {
+    readonly revisionId: string;
+    readonly scanLimitReached: boolean;
+  };
   readonly listCoverage?: SharedListCoverage;
   readonly unsupportedReason: string | null;
 }
@@ -1546,6 +1550,7 @@ export function registeredSemanticQueryFromPinnedView(
       'kind',
       'queries',
       'schemaVersion',
+      ...(Object.hasOwn(payload, 'addressBindings') ? ['addressBindings'] : []),
       ...(Object.hasOwn(payload, 'documentBindings')
         ? ['documentBindings']
         : []),

@@ -39,7 +39,8 @@
     "pdf-lib": "1.17.1",
     "pdfkit": "0.17.2",
     "pg": "^8.22.0",
-    "quickjs-emscripten": "0.32.0"
+    "quickjs-emscripten": "0.32.0",
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@types/pg": "^8.20.0",

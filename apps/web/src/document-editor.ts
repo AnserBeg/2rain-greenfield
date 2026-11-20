@@ -1,3 +1,4 @@
+import { addressFromForm } from './address-field.js';
 import { renderLayoutSection } from './component-registry.js';
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
@@ -3203,6 +3204,17 @@ function capture(
     // A decimal is kept in canonical spelling when it is one; anything else is
     // kept exactly as typed so the operator sees it, and save refuses it.
     const kind = inputs.get(field.fieldId)?.kind ?? '';
+    if (kind === 'addressFieldType' && value !== '') {
+      try {
+        row.values[field.fieldId] = addressFromForm(
+          inputName(row, field.fieldId),
+          submission,
+        );
+      } catch {
+        refused.push(field.label);
+      }
+      continue;
+    }
     if (kind === 'booleanFieldType' && value !== '') {
       if (value === 'true' || value === 'false')
         row.values[field.fieldId] = value === 'true';
@@ -3271,11 +3283,12 @@ function snapshot(
   return values;
 }
 /**
- * The declared create values a row's save also writes: only the header's
- * first create, never an update, a removal or a line. A literal is sent as
- * declared; the record id is the header row's own, the id its create sends;
- * the instant is the save's and the principal the saving person's. The save
- * plan freezes them with the step, so a retry resends the same values.
+ * The declared create values a row's save also writes: the header's first
+ * create its create values, a line's first create its line create values;
+ * never an update or a removal. A literal is sent as declared; the record id
+ * is the header row's own, the id its create sends; the instant is the
+ * save's and the principal the saving person's. The save plan freezes them
+ * with the step, so a retry resends the same values.
  */
 export function createValuesFor(
   definition: SurfaceDocumentEditor,
@@ -3287,7 +3300,16 @@ export function createValuesFor(
   header: boolean,
   save: { readonly instant: string; readonly principalId: string },
 ): Readonly<Record<string, string>> {
-  if (!header || row.record || row.removed) return {};
+  if (row.record || row.removed) return {};
+  // A new line writes its declared literals (STOCK-COUNTS): figures the server
+  // sets later, never values the person types.
+  if (!header)
+    return Object.fromEntries(
+      (definition.lineCreateValues ?? []).map((entry) => [
+        entry.fieldId,
+        entry.value.value,
+      ]),
+    );
   return Object.fromEntries(
     (definition.createValues ?? []).map((entry) => [
       entry.fieldId,

@@ -67,3 +67,37 @@ git add test/postgres/fresh-tenant-full-replay-schema.snapshot.json
 ```
 
 Then commit it with the change that needed it, as the pull request's author.
+
+## Packet and main CI
+
+A packet pull request or a non-main dispatch starts with quick selection. The
+selector reads the entire packet diff against the event base (the merge base
+with origin/main for dispatch). Renames include both paths. Its allowlist
+covers Markdown under docs, README.md, learnings.md, recognized test files
+and the exact source entries in the [coverage map](../../.github/scripts/ci-selection.mjs).
+A decision record edit also selects the integration test that reads decision records.
+Each source entry lists its directly covering tests. Unmapped paths, deletions,
+shared infrastructure and the exclusive compiler performance test select full.
+Fork pull requests run full under the read-only token.
+
+Quick runs quality, both security scans, architecture, unit, compiler and the
+changed or mapped tests. Its reachability summary names every omitted producer.
+Full checks all jobs, unfiltered invocations and executed files in one attempt.
+A rerun of failed jobs alone cannot combine evidence from different attempts.
+
+GitHub assigns the run title before it reads the diff. A quick request that
+selects full dispatches a run named **CI full** and waits for its conclusion.
+Follow the full link in the promotion job summary. A promoted pull request tests
+the original synthetic merge. The dispatcher uses the parent carrying that exact
+workflow version and the child verifies the parent SHA. Cite the run that executed the tests. New packet records carry a
+standalone line such as `CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/12345`.
+
+For the final full run, push the proposed integration commit to a candidate ref
+and run `gh workflow run ci.yml --ref <candidate-ref> -f tier=full`. Before
+pushing that commit to main, run `node scripts/check-merge-window.mjs <packet> <40-character-integration-SHA>`.
+The gate reads main CI and the lane token, checks the first parent against
+origin/main, and requires successful full reachability on that exact SHA for a
+Critical change, including migrations. While the latest completed main run is
+red or cancelled, every candidate needs that exact full green, so a fix or
+revert can still land. Every main push runs full in its own concurrency group:
+main runs proceed in parallel and none is cancelled or held behind another.

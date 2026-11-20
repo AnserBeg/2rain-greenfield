@@ -2,7 +2,10 @@ import { DRAFT_CUSTOMIZATION_TOOL } from '../../../../packages/customization/src
 import { provisionLocalDemoAuthorization } from '../../../../packages/postgres-provider/src/composed-application-runtime.js';
 import { workflowAutomationPrincipal } from '../../../../packages/postgres-provider/src/workflow-admission.js';
 import { scriptedModel } from '../../../../packages/operations-agent/src/index.js';
+import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 import { expect, test } from '@playwright/test';
 
@@ -340,9 +343,26 @@ test('a drafted receipt workflow links an inspection and requests escalation aft
     async ({ connection, pool }) => {
       const databaseUrl = `postgresql://postgres@${String(connection.host)}:${String(connection.port)}/postgres`;
       const tenantSlug = 'inspection-workflow-browser';
+      // Compile with the current permissions and omit the count editor's floor.
+      // Run the existing compiler fixture through tsx, as the Node suites do.
+      const { stdout } = await promisify(execFile)(
+        process.execPath,
+        [
+          '--import',
+          'tsx',
+          '-e',
+          `const { applicationWithoutLineCreateValues } = require('./test/helpers/application-without-line-create-values.ts');
+process.stdout.write(JSON.stringify(applicationWithoutLineCreateValues().release));`,
+        ],
+        {
+          cwd: fileURLToPath(new URL('../../../../', import.meta.url)),
+          maxBuffer: 16 * 1024 * 1024,
+        },
+      );
       const options = {
         databaseUrl,
         tenantSlug,
+        compiledApplication: JSON.parse(stdout) as unknown,
         port: 0,
         seedProfile: 'demo',
       } as const;

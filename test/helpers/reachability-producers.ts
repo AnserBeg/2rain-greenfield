@@ -41,6 +41,7 @@ export const reachabilityProducers = [
     'test/unit/catalog-extras.test.ts',
     'test/unit/commercial-amounts.test.ts',
     'test/unit/customization-ai-draft.test.ts',
+    'test/unit/customization-upgrade.test.ts',
     'test/unit/customization.test.ts',
     'test/unit/customize-screen.test.ts',
     'test/unit/dev-environment.test.ts',
@@ -61,6 +62,7 @@ export const reachabilityProducers = [
     'test/unit/surface-assets.test.ts',
     'test/unit/web-surface-hex-literal-ratchet.test.ts',
     'test/unit/workspace-contract.test.ts',
+    'test/unit/address-connector.test.ts',
   ]),
   nodeProducer('compiler', 'quality', 'test:compiler', [
     'test/compiler/adopted-language-shape.test.ts',
@@ -107,12 +109,13 @@ export const reachabilityProducers = [
     'test/postgres/customization-formulas.test.ts',
     'test/postgres/document-numbering.test.ts',
     'test/postgres/workflow-consumer.test.ts',
+    'test/postgres/address-connector.test.ts',
   ]),
   nodeProducer('postgres-2', 'postgres', 'test:postgres:2', [
     'test/postgres/customization.test.ts',
   ]),
   nodeProducer('postgres-3', 'postgres', 'test:postgres:3', [
-    'test/postgres/{!(agent-dev-tasks|commercial-totals|composed-application|counter-sale|customer-credit|customization|customization-display|customization-formulas|customization-governed-reads|customization-inspection|customization-live|customization-validation|customization-world|declared-list|document-attachments|document-numbering|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|locations|module-storage-transition|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|period-lock-commands|price-lists|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|replenishment|stock-serializer|workflow-consumer),*/**/*}.test.ts',
+    'test/postgres/{!(address-connector|agent-dev-tasks|commercial-totals|composed-application|counter-sale|customer-credit|customization|customization-display|customization-formulas|customization-governed-reads|customization-inspection|customization-live|customization-validation|customization-world|declared-list|document-attachments|document-numbering|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-stock-counts|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|locations|module-storage-transition|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|period-lock-commands|price-lists|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|replenishment|stock-serializer|workflow-consumer),*/**/*}.test.ts',
   ]),
   nodeProducer('postgres-4', 'postgres', 'test:postgres:4', [
     'test/postgres/customization-inspection.test.ts',
@@ -176,6 +179,7 @@ export const reachabilityProducers = [
       'test/postgres/inventory-onhand.test.ts',
       'test/postgres/inventory-reconciliation.test.ts',
       'test/postgres/inventory-stock-count.test.ts',
+      'test/postgres/inventory-stock-counts.test.ts',
       'test/postgres/inventory-storage.test.ts',
       'test/postgres/inventory-terminal-state.test.ts',
       'test/postgres/inventory-valuation.test.ts',
@@ -237,10 +241,29 @@ export const reachabilityProducers = [
   },
 ] as const satisfies readonly ReachabilityProducer[];
 
+const quickBrowserCommand =
+  'corepack pnpm exec bash scripts/run-suite.sh quick-browser --normalize-playwright -- playwright test --config apps/web/playwright.quick.config.ts';
+const quickBrowserProducer: ReachabilityProducer = {
+  id: 'quick-browser',
+  runner: 'playwright',
+  command: quickBrowserCommand,
+  argv: ['test', '--config', 'apps/web/playwright.quick.config.ts'],
+  ciJob: 'quality',
+  ciInvocation: quickBrowserCommand,
+  evidencePath: 'test-results/reachability/quick-browser.json',
+  rawEvidencePath: 'test-results/reachability/quick-browser.raw.json',
+  invocationEvidencePath: 'test-results/reachability/quick-browser.argv.json',
+  implementation: {
+    kind: 'helper',
+    sourcePath: 'apps/web/playwright.quick.config.ts',
+  },
+};
+
 export type ReachabilityProducerId =
   (typeof reachabilityProducers)[number]['id'];
 
 export function getReachabilityProducer(id: string): ReachabilityProducer {
+  if (id === 'quick-browser') return quickBrowserProducer;
   const producer = reachabilityProducers.find(
     (candidate) => candidate.id === id,
   );
