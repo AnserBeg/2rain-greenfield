@@ -2,6 +2,7 @@ import {
   assertWorkflowEvidence,
   persistWorkflowDefinitions,
   verifyWorkflowDefinitions,
+  withWorkflowVerifierTransaction,
   type WorkflowBinding,
 } from './workflow-admission.js';
 import { WorkflowProjectionSchema } from '../../canonical-model/src/schemas.js';
@@ -351,35 +352,35 @@ export class PostgresReleaseVerificationService {
       );
     }
 
-    await withTrustedRequestTransaction(
-      workflowPool ?? this.pool,
-      context,
-      async (client) => {
-        const candidate = await client.query<{ content_hash: string }>(
-          `SELECT content_hash
-           FROM platform.tenant_releases
-          WHERE tenant_id = $1
-            AND environment_id = $2
-            AND release_id = $3
-            AND verification_evidence_id = $4`,
-          [
-            context.tenantId,
-            context.environmentId,
-            command.releaseId,
-            command.evidenceId,
-          ],
+    const persist = async (client: PoolClient) => {
+      if (workflowPool) await client.query('SET LOCAL ROLE north_star_runtime');
+      const candidate = await client.query<{ content_hash: string }>(
+        `SELECT content_hash
+         FROM platform.tenant_releases
+        WHERE tenant_id = $1
+          AND environment_id = $2
+          AND release_id = $3
+          AND verification_evidence_id = $4`,
+        [
+          context.tenantId,
+          context.environmentId,
+          command.releaseId,
+          command.evidenceId,
+        ],
+      );
+      if (candidate.rows[0]?.content_hash !== binding.releaseRoot) {
+        throw failure(
+          'VERIFICATION_CANDIDATE_NOT_STAGED',
+          'verification execution requires the exact staged candidate root',
         );
-        if (candidate.rows[0]?.content_hash !== binding.releaseRoot) {
-          throw failure(
-            'VERIFICATION_CANDIDATE_NOT_STAGED',
-            'verification execution requires the exact staged candidate root',
-          );
-        }
-        await insertEvidence(client, context, command.evidenceId, executed);
-        if (workflows)
-          await persistWorkflowDefinitions(client, context, command, workflows);
-      },
-    );
+      }
+      await insertEvidence(client, context, command.evidenceId, executed);
+      if (workflows)
+        await persistWorkflowDefinitions(client, context, command, workflows);
+    };
+    if (workflowPool)
+      await withWorkflowVerifierTransaction(workflowPool, context, persist);
+    else await withTrustedRequestTransaction(this.pool, context, persist);
 
     const stored = await this.read(
       context,
@@ -565,35 +566,33 @@ export class PostgresReleaseVerificationService {
   ): Promise<DurableReleaseVerificationEvidence | null> {
     assertUuid(evidenceId, 'evidenceId');
     const binding = releaseVerificationBinding(compiledRelease);
-    const evidencePool = binding.workflows
-      ? this.workflowVerifierPool
-      : this.pool;
-    if (!evidencePool)
-      throw failure(
-        'WORKFLOW_VERIFIER_REQUIRED',
-        'The candidate requires a workflow verifier connection',
-      );
-    return withTrustedRequestTransaction(
-      evidencePool,
+    const evidence = await withTrustedRequestTransaction(
+      this.pool,
       context,
-      async (client) => {
-        const evidence = await readDurableVerificationEvidence(
-          client,
-          context,
-          evidenceId,
-          binding,
+      (client) =>
+        readDurableVerificationEvidence(client, context, evidenceId, binding),
+    );
+    if (evidence && binding.workflows) {
+      if (!this.workflowVerifierPool)
+        throw failure(
+          'WORKFLOW_VERIFIER_REQUIRED',
+          'The candidate requires a workflow verifier connection',
         );
-        if (evidence && binding.workflows)
-          await assertWorkflowEvidence(
+      const workflows = binding.workflows;
+      await withWorkflowVerifierTransaction(
+        this.workflowVerifierPool,
+        context,
+        (client) =>
+          assertWorkflowEvidence(
             client,
             context,
             evidenceId,
             binding.releaseRoot,
-            binding.workflows,
-          );
-        return evidence;
-      },
-    );
+            workflows,
+          ),
+      );
+    }
+    return evidence;
   }
 
   private async assertStagedCandidate(

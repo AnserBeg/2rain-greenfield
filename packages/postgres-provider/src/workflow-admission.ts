@@ -1,9 +1,12 @@
 import { canonicalize } from '@north-star/canonical-model';
 import type { CompileSuccess } from '@north-star/compiler';
 import type { MintedUuid } from '@north-star/platform-runtime';
-import type { TrustedRequestContext } from '@north-star/runtime';
+import {
+  assertTrustedRequestContext,
+  type TrustedRequestContext,
+} from '@north-star/runtime';
 import type { RequestRuntimeView } from '@north-star/runtime/request-runtime-view';
-import type { PoolClient } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 
 import type { WorkflowDefinition } from '../../canonical-model/src/schemas.js';
 import { readWorkflowBundle, verifyWorkflowBundle } from './workflow-bundle.js';
@@ -15,6 +18,59 @@ import {
   WORKFLOW_SDK_VERSION,
 } from './workflow-execution.js';
 import { recordVerifiedWorkflow } from './workflow-verification.js';
+
+/**
+ * Verification alone may assume the evidence writer. Ordinary request
+ * transactions still require the unprivileged runtime login.
+ */
+export async function withWorkflowVerifierTransaction<T>(
+  pool: Pool,
+  context: TrustedRequestContext,
+  run: (client: PoolClient) => Promise<T>,
+): Promise<T> {
+  assertTrustedRequestContext(context);
+  const client = await pool.connect();
+  let failure: Error | undefined;
+  try {
+    await client.query('BEGIN');
+    const authority = await client.query<{ verified: boolean }>(
+      `SELECT current_user = session_user
+          AND pg_has_role(session_user, 'north_star_workflow_verifier', 'MEMBER') AS verified`,
+    );
+    if (!authority.rows[0]?.verified)
+      throw new Error(
+        'Workflow verification needs the dedicated verifier authority',
+      );
+    await client.query(
+      `SELECT set_config('north_star.tenant_id', $1, true),
+              set_config('north_star.environment_id', $2, true),
+              set_config('north_star.principal_id', $3, true),
+              set_config('north_star.request_id', $4, true)`,
+      [
+        context.tenantId,
+        context.environmentId,
+        context.principalId,
+        context.requestId,
+      ],
+    );
+    const result = await run(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollback) {
+      failure = new AggregateError(
+        [error, rollback],
+        'Workflow verifier rollback failed',
+      );
+      throw failure;
+    }
+    throw error;
+  } finally {
+    client.release(failure);
+  }
+}
 
 export type WorkflowBinding = WorkflowDefinition & {
   readonly sdkDigest: string;
@@ -165,7 +221,7 @@ export async function persistWorkflowDefinitions(
       { id: binding.workflowId, digest: bindingDigest, grants: binding.grants },
       workflowEvidenceBytes(binding, executableDigest, sdkDeclarationDigest),
     );
-    await client.query('RESET ROLE');
+    await client.query('SET LOCAL ROLE north_star_runtime');
   }
 }
 
