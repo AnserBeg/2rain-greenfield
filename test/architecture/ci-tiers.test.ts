@@ -90,6 +90,26 @@ test('quick contains changed tests and the direct coverage for mapped source', (
   ) as string[])
     assert.ok(existsSync(path), path);
 });
+test('a decision record edit selects the test that reads decision records', () => {
+  assert.deepEqual(
+    probe(
+      selector,
+      "m.selectPaths([{status:'M',path:'docs/decisions/ADR-0010-lifecycle-audit-correction-and-recovery.md'},{status:'M',path:'docs/execution/ledger.md'}])",
+    ),
+    { tier: 'quick', files: ['test/integration/trust-substrate.test.ts'] },
+  );
+  for (const [prefix, tests] of probe(selector, 'm.documentReaders') as [
+    string,
+    string[],
+  ][]) {
+    assert.ok(existsSync(prefix), prefix);
+    for (const path of tests) {
+      assert.ok(existsSync(path), path);
+      // The mapping must name a reader of the prefix it covers.
+      assert.ok(readFileSync(path, 'utf8').includes(prefix), path);
+    }
+  }
+});
 test('merge window requires a successful full reachability job on the candidate in the run attempt', () => {
   const run = {
     event: 'workflow_dispatch',

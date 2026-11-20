@@ -33,6 +33,12 @@ export const sourceCoverage = new Map([
   ],
 ]);
 
+// Documents read by tests outside the fixed quick suites. Unit, compiler and
+// architecture already run on every quick tier.
+export const documentReaders = [
+  ['docs/decisions/', ['test/integration/trust-substrate.test.ts']],
+];
+
 const shared =
   /(?:^|\/)(?:package\.json|pnpm-lock\.yaml|fixtures?|helpers?|[^/]*[-.]fixture(?:\.[^/]*)?)(?:\/|$)|^(?:\.github|db|scripts|packages\/(?:canonical-model|compiler|runtime))\//u;
 const nodeFile =
@@ -57,10 +63,10 @@ export function selectPaths(changes) {
       path === 'apps/web/test/surface-runtime-contract.test.ts'
     ) {
       files.add(path);
-    } else if (
-      !/^docs\/(?:[\w.-]+\/)*[\w.-]+\.md$/u.test(path) &&
-      !['README.md', 'learnings.md'].includes(path)
-    ) {
+    } else if (/^docs\/(?:[\w.-]+\/)*[\w.-]+\.md$/u.test(path)) {
+      for (const [prefix, tests] of documentReaders)
+        if (path.startsWith(prefix)) for (const test of tests) files.add(test);
+    } else if (!['README.md', 'learnings.md'].includes(path)) {
       return { tier: 'full', reason: path };
     }
   }
