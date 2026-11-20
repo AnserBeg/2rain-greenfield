@@ -1,13 +1,13 @@
 name: CI
 # GitHub assigns run-name before a diff can be read. An automatic promotion
 # dispatches a named full run and propagates its exact result to the request.
-run-name: CI ${{ (github.ref == 'refs/heads/main' || inputs.tier == 'full' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository)) && 'full' || 'quick' }} · ${{ inputs.merge_sha || github.sha }}
+run-name: CI ${{ (github.ref == 'refs/heads/ci-3-controls/queued-main' || inputs.tier == 'full' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository)) && 'full' || 'quick' }} · ${{ inputs.merge_sha || github.sha }}
 
 on:
   pull_request:
   push:
     branches:
-      - main
+      - ci-3-controls/queued-main
   workflow_dispatch:
     inputs:
       tier:
@@ -29,9 +29,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ inputs.merge_sha && format('pr-{0}', inputs.pr_number) || github.ref }}-${{ github.ref != 'refs/heads/main' && inputs.tier || 'auto' }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' || inputs.merge_sha != '' }}
-  queue: ${{ github.ref == 'refs/heads/main' && inputs.merge_sha == '' && 'max' || 'single' }}
+  group: ci-${{ github.workflow }}-${{ inputs.merge_sha && format('pr-{0}', inputs.pr_number) || github.ref }}-${{ github.ref != 'refs/heads/ci-3-controls/queued-main' && inputs.tier || 'auto' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/ci-3-controls/queued-main' || inputs.merge_sha != '' }}
+  queue: ${{ github.ref == 'refs/heads/ci-3-controls/queued-main' && inputs.merge_sha == '' && 'max' || 'single' }}
 
 env:
   CI: '1'
