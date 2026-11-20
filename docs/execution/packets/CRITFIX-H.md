@@ -22,7 +22,7 @@ Eight regression controls failed against unchanged main code at 552b13d8. [Basel
   "schemaVersion":"northstar.record-claim/v1",
   "packet":"CRITFIX-H",
   "base":"888b0636423660d351d20eb48ebea98bab519259",
-  "head":"f91056f7a35d7180ff4ccff58c37078c31c6d565",
+  "head":"f309f51e218914d112178fc5c7e23109b38ad231",
   "changedPaths":["apps/api/src/main.ts","apps/web/src/component-registry.ts","apps/web/src/document-http.ts","apps/web/src/surface-client.ts","db/migrations/0046_document_attachment_authority.sql","db/schema.snapshot.json","packages/postgres-provider/package.json","packages/postgres-provider/src/composed-application-runtime.ts","packages/postgres-provider/src/document-attachments.ts","packages/postgres-provider/src/document-content.ts","packages/postgres-provider/src/document-pdf-worker.mjs","packages/postgres-provider/src/request-context.ts","packages/postgres-provider/src/serving-gateways.ts","packages/runtime/src/document-gateway.ts","packages/runtime/src/request-deadline.ts","test/architecture/release-persistence-boundary.test.ts","test/evidence/DOCS-1.expected-red.json","test/integration/document-http.test.ts","test/postgres/document-attachments.test.ts","test/postgres/inventory-storage.test.ts","test/postgres/migrations.test.ts","test/postgres/module-storage-transition.test.ts","test/postgres/trust-substrate.test.ts"],
   "symbols":[{"path":"packages/postgres-provider/src/document-attachments.ts","name":"PostgresDocumentGateway"},{"path":"apps/web/src/document-http.ts","name":"mountDocumentHttp"}]
 }
