@@ -191,7 +191,10 @@ before remedying the run.
 
 Approvals bind the exact canonical arguments, effect occurrence, release ID and
 root, activation fence, operation and company scope. Persist the approving
-human's identity. Check the active binding and current authority both when a
+human's identity. Derive authority from the pinned operation's target. For
+existing records, use the stored owner company. For creates, use the governed
+company operand. Shared targets require a tenant-wide grant. Check the active
+binding and current authority both when a
 person approves and before dispatch. Stale pending approvals and stale approvals
 whose effects have not committed become permanently ineligible. Keep their
 history visible and report the reason in the worklist and assistant. Returning
@@ -244,8 +247,9 @@ with workflows includes a workflow projection and raises the runtime floor on
 the existing required surface manifest that serving readers already check via
 `unsupportedRuntimeCapability`. Emit workflow facts only when declared. Refuse
 a missing, inconsistent or unsupported workflow projection for a
-workflow-bearing candidate. Workflow-bearing releases require surface reader 27, following Today metrics
-at 25 and Inspection metadata at 26.
+workflow-bearing candidate. Allocate the next free surface-reader rung from
+`origin/main` at integration. Re-allocate if the trunk's floor advances before
+the merge is pushed.
 
 The proposed Critical verifier change is limited to
 `PostgresReleaseVerificationService` candidate verification and evidence

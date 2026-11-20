@@ -63,13 +63,13 @@ export class PostgresWorkflowWorker {
             cursor: number;
             fence: string;
             digest: string;
-            companyId: string;
+            companyId: string | null;
             summary: string;
             operationId: string;
             input: unknown;
           }>(
             `SELECT run_id AS "runId", cursor, fence::text, plan_digest AS digest,
-                  plan.value->>'companyId' AS "companyId",
+                  approval.company_id AS "companyId",
                   plan.value #>> '{request,summary}' AS summary,
                   plan.value #>> '{request,operationId}' AS "operationId",
                   plan.value #> '{request,input}' AS input

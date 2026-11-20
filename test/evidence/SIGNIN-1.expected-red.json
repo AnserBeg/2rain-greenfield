@@ -5,7 +5,7 @@
     {
       "name": "staff-session-revocation",
       "claim": "An issued request cannot write after its session is revoked.",
-      "file": "db/migrations/0046_staff_session_integrity.sql",
+      "file": "db/migrations/0047_staff_session_integrity.sql",
       "original": "IF NOT FOUND OR s.revoked_at IS NOT NULL OR observed IS NULL OR observed < s.last_activity",
       "replacement": "IF NOT FOUND OR observed IS NULL OR observed < s.last_activity",
       "test": {
@@ -22,7 +22,7 @@
     {
       "name": "staff-session-idle",
       "claim": "Idle expiry is checked again in the transaction that performs the write.",
-      "file": "db/migrations/0046_staff_session_integrity.sql",
+      "file": "db/migrations/0047_staff_session_integrity.sql",
       "original": "OR observed >= LEAST(s.absolute_deadline,s.last_activity + interval '30 minutes')",
       "replacement": "OR observed >= s.absolute_deadline",
       "test": {
