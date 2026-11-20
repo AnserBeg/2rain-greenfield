@@ -3587,7 +3587,12 @@ async function loadObjectOwnershipRegistry(
     object_name: string;
     schema_name: string;
   }>(
-    `WITH registry AS (
+    `WITH btree_gist_members AS MATERIALIZED (
+       SELECT d.classid, d.objid FROM pg_catalog.pg_depend d
+       JOIN pg_catalog.pg_extension x ON x.oid=d.refobjid
+       WHERE d.refclassid='pg_catalog.pg_extension'::regclass AND d.deptype='e'
+         AND d.objsubid=0 AND x.extname='btree_gist'
+     ), registry AS (
        SELECT namespace.nspname AS schema_name,
               relation.relname AS object_name,
               CASE relation.relkind
@@ -3668,6 +3673,8 @@ async function loadObjectOwnershipRegistry(
          JOIN pg_namespace AS namespace ON namespace.oid = routine.pronamespace
         WHERE namespace.nspname !~ '^pg_'
           AND namespace.nspname <> 'information_schema'
+          AND NOT EXISTS (SELECT FROM btree_gist_members m
+            WHERE m.classid='pg_catalog.pg_proc'::regclass AND m.objid=routine.oid)
        UNION ALL
        SELECT namespace.nspname,
               relation.relname || '.' || trigger_record.tgname,
@@ -3719,18 +3726,24 @@ async function loadObjectOwnershipRegistry(
          JOIN pg_namespace AS namespace ON namespace.oid = operator_record.oprnamespace
         WHERE namespace.nspname !~ '^pg_'
           AND namespace.nspname <> 'information_schema'
+          AND NOT EXISTS (SELECT FROM btree_gist_members m
+            WHERE m.classid='pg_catalog.pg_operator'::regclass AND m.objid=operator_record.oid)
        UNION ALL
        SELECT namespace.nspname, operator_class.opcname, 'unknown:operator_class'
          FROM pg_opclass AS operator_class
          JOIN pg_namespace AS namespace ON namespace.oid = operator_class.opcnamespace
         WHERE namespace.nspname !~ '^pg_'
           AND namespace.nspname <> 'information_schema'
+          AND NOT EXISTS (SELECT FROM btree_gist_members m
+            WHERE m.classid='pg_catalog.pg_opclass'::regclass AND m.objid=operator_class.oid)
        UNION ALL
        SELECT namespace.nspname, operator_family.opfname, 'unknown:operator_family'
          FROM pg_opfamily AS operator_family
          JOIN pg_namespace AS namespace ON namespace.oid = operator_family.opfnamespace
         WHERE namespace.nspname !~ '^pg_'
           AND namespace.nspname <> 'information_schema'
+          AND NOT EXISTS (SELECT FROM btree_gist_members m
+            WHERE m.classid='pg_catalog.pg_opfamily'::regclass AND m.objid=operator_family.oid)
        UNION ALL
        SELECT namespace.nspname, statistics_record.stxname, 'unknown:statistics'
          FROM pg_statistic_ext AS statistics_record
