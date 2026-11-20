@@ -40,8 +40,8 @@
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "WORKFLOW-1",
-  "base": "8e3603b8e734a14ed350f2f2f7f64d1e2b034eb7",
-  "head": "45fe8b3fc1a80ef1833553c9ccbcc05b86bee66a",
+  "base": "3968bffe44e89f1829536d3271b1d8fbf7de12e2",
+  "head": "3ca7118b9ef6291a0b16dca98e2e5dafd2f703f1",
   "changedPaths": [
     "db/migrations/0054_workflow_retry_authority.sql", "db/schema.snapshot.json",
     "learnings.md", "packages/postgres-provider/src/current-policy.ts",
@@ -50,9 +50,10 @@
     "test/architecture/tenant-completeness.manifest.json", "test/architecture/tenant-completeness.test.ts",
     "test/evidence/WORKFLOW-1-slice3-fix.expected-red.json", "test/evidence/WORKFLOW-1-threat-model-fix.expected-red.json",
     "test/evidence/WORKFLOW-1.expected-red.json", "test/integration/workflow-admission.test.ts",
-    "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts",
-    "test/postgres/module-storage-transition.test.ts", "test/postgres/releases.test.ts",
-    "test/postgres/trust-substrate.test.ts", "test/postgres/workflow-consumer.test.ts"
+    "test/postgres/application-grants.tsv", "test/postgres/inventory-storage.test.ts",
+    "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts",
+    "test/postgres/releases.test.ts", "test/postgres/trust-substrate.test.ts",
+    "test/postgres/workflow-consumer.test.ts"
   ],
   "symbols": [
     {"path": "packages/postgres-provider/src/current-policy.ts", "name": "PostgresCurrentPolicyGateway"},
