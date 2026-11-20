@@ -1,0 +1,26 @@
+name: Slice 1 pre-change controls
+on:
+  push:
+    branches: [ci/UPGRADE-2-board-prechange]
+permissions:
+  contents: read
+jobs:
+  regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [unit, postgres, sandbox]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+      - run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      - if: matrix.suite == 'unit'
+        run: node --import tsx --test test/unit/customization-upgrade.test.ts
+      - if: matrix.suite == 'postgres'
+        run: node --import tsx --test --test-name-pattern='a tenant with Equipment|a record-type upgrade stages|a platform label upgrade' test/postgres/customization.test.ts
+      - if: matrix.suite == 'sandbox'
+        run: node --import tsx --test --test-name-pattern='upgrade diagnostics name|a whole-package upgrade rejection|addAddressField and addMapPlacement replay' test/unit/customization.test.ts
