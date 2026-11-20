@@ -244,6 +244,7 @@ export async function startComposedApplication(
       runtime.entry,
       {
         applicationExtension: COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION,
+        addresses: runtime.addresses,
         ...(runtime.documents ? { documents: runtime.documents } : {}),
         operationGateway: runtime.operationGateway,
         operationMediation: runtime.operationMediation,

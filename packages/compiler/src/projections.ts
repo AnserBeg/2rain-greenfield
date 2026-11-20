@@ -1,3 +1,4 @@
+import { ADDRESS_FIELD_READER, ADDRESS_MAP_READER, CONNECTOR_PAYLOAD, type AddressProjection } from '@north-star/canonical-model';
 import { LAYOUT_READER } from '@north-star/canonical-model';
 import {
   CALCULATED_DISPLAY_QUERY_READER,
@@ -94,6 +95,7 @@ type LoweredProjectionFamily = Exclude<
 >;
 
 const payloadSchemaVersions: Record<LoweredProjectionFamily, string> = {
+  [PROJECTION_FAMILY_IDS.connector]: CONNECTOR_PAYLOAD,
   [PROJECTION_FAMILY_IDS.documents]: DOCUMENTS_PAYLOAD_VERSION,
   [PROJECTION_FAMILY_IDS.agentDiscovery]:
     'northstar.agent-discovery-payload/v0-provisional',
@@ -120,6 +122,7 @@ const runtimeCapabilities: Record<
   LoweredProjectionFamily,
   RuntimeCapabilityRequirement
 > = {
+  [PROJECTION_FAMILY_IDS.connector]: {capabilityId:'northstar.runtime:capability.connector',minimumVersion:1},
   [PROJECTION_FAMILY_IDS.documents]: {
     capabilityId: 'northstar.runtime:capability.documents',
     minimumVersion: 1,
@@ -180,6 +183,7 @@ export function lowerBaseProjectionPayloads(
     NonNullable<ReturnType<typeof compileDocuments>>,
     { payload: unknown }
   >['payload'],
+  address?: AddressProjection,
 ): ProjectionPayloadPlan[] {
   const namespace = packageRevision.package.namespace;
   const packageScope: LogicalScope = {
@@ -369,6 +373,16 @@ export function lowerBaseProjectionPayloads(
     plans.push(
       plan(PROJECTION_FAMILY_IDS.documents, namespace, packageScope, documents),
     );
+  }
+  if (address) {
+    const consumers = [PROJECTION_FAMILY_IDS.queryCatalog, PROJECTION_FAMILY_IDS.operationCatalog, PROJECTION_FAMILY_IDS.surfaceManifest] as string[];
+    for (const projection of plans.filter(p => consumers.includes(p.familyId))) {
+      projection.payload = {...projection.payload as object,addressBindings:address.bindings};
+      if (projection.familyId === PROJECTION_FAMILY_IDS.surfaceManifest)
+        projection.requiredRuntimeCapability = {...projection.requiredRuntimeCapability,
+          minimumVersion:Math.max(projection.requiredRuntimeCapability.minimumVersion,address.placements.length ? ADDRESS_MAP_READER : ADDRESS_FIELD_READER)};
+    }
+    plans.push(plan(PROJECTION_FAMILY_IDS.connector, namespace, packageScope, address));
   }
   return plans;
 }

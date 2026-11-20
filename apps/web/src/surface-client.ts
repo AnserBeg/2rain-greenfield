@@ -627,6 +627,39 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
   });
 })();
 (() => {
+  for (const editor of document.querySelectorAll('[data-address-editor]')) {
+    const input=editor.querySelector('input[type=text]');
+    const install=editor.querySelector('select');
+    if(!input || !install) continue;
+    const result=editor.querySelector('[data-address-results]');
+    const choice=editor.querySelector('input[name$=".choice"]');
+    const session=editor.querySelector('input[name$=".session"]').value;
+    let generation=0,timer;
+    const update=()=>{
+      const current=++generation, text=input.value;
+      clearTimeout(timer);result.replaceChildren();choice.value='';
+      if(text.trim().length<3||!install.value)return;
+      timer=setTimeout(async()=>{
+        try {
+          const params=new URLSearchParams({fieldId:editor.dataset.field,queryId:editor.dataset.query,recordId:editor.dataset.record,
+            installationId:install.value,text,session});
+          const csrf=input.closest('form')?.querySelector('input[name="csrf"]')?.value;
+          if(csrf)params.set('csrf',csrf);
+          const r=await fetch('/address/suggest',{method:'POST',body:params});
+          if(!r.ok)throw Error();
+          const offered=await r.json();
+          if(current!==generation)return;
+          result.textContent=offered.attribution;
+          for(const row of offered.suggestions) {
+            const button=document.createElement('button');button.type='button';button.textContent=row.label;
+            button.onclick=()=>{choice.value=row.handle;result.textContent=row.label+' · '+offered.attribution;};
+            result.append(button);
+          }
+        } catch {if(current===generation)result.textContent='Suggestions unavailable. You can save the typed address.';}
+      },350);
+    };
+    input.addEventListener('input',update);install.addEventListener('change',update);
+  }
   for (const panel of document.querySelectorAll('[data-documents]')) {
     const status = panel.querySelector('[data-documents-status]');
     const requestURL = (mode) => {

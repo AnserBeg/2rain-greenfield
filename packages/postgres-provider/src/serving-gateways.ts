@@ -1,3 +1,4 @@
+import { PostgresAddresses } from './address-geocodes.js';
 import type { DocumentScanner } from './document-content.js';
 import {
   PostgresDocumentGateway,
@@ -70,6 +71,7 @@ export function composeServingGateways(
   options: {
     readonly providerErrorMappings: readonly ModuleProviderErrorMapping[];
     readonly capabilityOperationExecutorFactories?: readonly PostgresCapabilityOperationExecutorFactory[];
+    readonly localDemoIdentity?: true;
     readonly monotonicMilliseconds?: () => number;
   },
   documentOptions?: { scanner?: DocumentScanner | undefined },
@@ -200,6 +202,7 @@ export function composeServingGateways(
     policy,
     operationMediation,
   );
+  const addresses = new PostgresAddresses(runtimePool,queryGateway,servingFor,options.localDemoIdentity===true);
   const documents = documentOptions
     ? new PostgresDocumentGateway(
         runtimePool,
@@ -216,6 +219,7 @@ export function composeServingGateways(
     operationGateway,
     queryGateway,
     operationMediation,
+    addresses,
     documents,
   };
 }

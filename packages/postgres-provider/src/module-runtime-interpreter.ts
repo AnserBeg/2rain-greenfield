@@ -1,3 +1,5 @@
+import { enqueueAddress } from './address-geocodes.js';
+import { AddressWriteSchema, SavedAddressSchema } from '@north-star/canonical-model';
 import { createHash, randomUUID } from 'node:crypto';
 
 import {
@@ -480,7 +482,7 @@ export class PostgresModuleRuntimeInterpreter
           currentEntity,
           parsedInput,
         );
-        return withModuleRuntimeRole(client, async () => {
+        const accepted = await withModuleRuntimeRole(client, async () => {
           try {
             await requireActiveCreateLegalEntity(
               client,
@@ -491,13 +493,21 @@ export class PostgresModuleRuntimeInterpreter
             );
             // Assigned before the change is prepared, so the change document
             // records the number the record is created with.
-            const input = await assignDocumentNumbers(
+            const numbered = await assignDocumentNumbers(
               client,
               currentEntity,
               request.definition,
               parsedInput,
               this.#documentNumbers,
             );
+            // The host assigns a new field revision inside the idempotent write.
+            // Retrying the operation returns the original revision through its receipt.
+            const addressInputs = currentEntity.columns.filter(c => c.fieldContract.fieldKind === 'addressFieldType' && numbered.patch[c.canonicalFieldId] != null);
+            const requests = addressInputs.map(c=>{
+              const {locateFor,...value}=AddressWriteSchema.parse(numbered.patch[c.canonicalFieldId]);
+              return {fieldId:c.canonicalFieldId,locateFor,value:{...value,revision:randomUUID()}};
+            });
+            const input = requests.length ? {...numbered, patch:{...numbered.patch,...Object.fromEntries(requests.map(r=>[r.fieldId,r.value]))}} : numbered;
             const preparation = await prepareMutation(
               client,
               request,
@@ -523,6 +533,9 @@ export class PostgresModuleRuntimeInterpreter
               request.readBackDefinition.selections,
             );
             return Object.freeze({
+              addresses: requests.filter(r => !r.value.pin),
+              owner: requests.length && currentEntity.legalEntity ? await readRecordCompany(client,currentEntity,input.recordId) : null,
+              outboxId: ids.outboxId,
               command: acceptedCommand(
                 { ...request, policyVersion },
                 preparation,
@@ -539,6 +552,14 @@ export class PostgresModuleRuntimeInterpreter
             );
           }
         });
+        if (request.channel === 'UI' && this.#documentNumbers !== 'verificationSentinel') {
+          for(const address of accepted.addresses){
+            const selection=address.locateFor;
+            if (selection && (!accepted.owner || selection.companyId === accepted.owner))
+              await enqueueAddress(client,request.view,selection.companyId,currentEntity.entityId,parsedInput.recordId,address.fieldId,address.value.revision,accepted.outboxId,selection.installationId);
+          }
+        }
+        return {command:accepted.command,mutationResult:accepted.mutationResult};
       },
       undefined,
       async (client) => {
@@ -5624,6 +5645,7 @@ function scalarMatchesField(
   field: StorageEntity['columns'][number]['fieldContract'],
 ): boolean {
   const expected: Record<typeof field.fieldKind, CanonicalScalar['kind']> = {
+    addressFieldType: 'unsupported',
     booleanFieldType: 'booleanValue',
     dateFieldType: 'dateValue',
     dateTimeFieldType: 'dateTimeValue',
@@ -6459,6 +6481,9 @@ function validateFieldValue(
   }
   let valid = false;
   switch (field.fieldKind) {
+    case 'addressFieldType':
+      valid = AddressWriteSchema.safeParse(value).success;
+      break;
     case 'booleanFieldType':
       valid = typeof value === 'boolean';
       break;
@@ -6914,6 +6939,7 @@ function parameter(values: unknown[], value: unknown): string {
 }
 
 function databaseValue(value: ImmutableJsonValue): unknown {
+  if (isRecord(value) && SavedAddressSchema.safeParse(value).success) return JSON.stringify(value);
   if (Array.isArray(value) || isRecord(value)) {
     throw failure(
       'MODULE_VALUE_UNSUPPORTED',
@@ -6924,6 +6950,10 @@ function databaseValue(value: ImmutableJsonValue): unknown {
 }
 
 function immutableDatabaseValue(value: unknown): ImmutableJsonValue {
+  if (isRecord(value)) {
+    const address = SavedAddressSchema.safeParse(value);
+    if (address.success) return address.data;
+  }
   if (
     value === null ||
     typeof value === 'boolean' ||

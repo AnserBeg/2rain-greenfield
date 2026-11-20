@@ -251,7 +251,7 @@ export interface StorageTargetPayloadV1 {
     version: typeof BACKFILL_ADMISSIBILITY_VERSION;
   };
   entities: StorageEntityTarget[];
-  fieldTypeTable: typeof POSTGRESQL_FIELD_TYPE_TABLE;
+  fieldTypeTable: readonly ((typeof POSTGRESQL_FIELD_TYPE_TABLE)[number] | {canonicalType:'addressFieldType';postgresqlType:'jsonb'})[];
   kind: 'storageTargetPayload';
   physicalMapping: {
     digest: 'sha256';
@@ -473,6 +473,7 @@ export interface ModuleFieldContract {
   enumOptionIds: string[];
   fieldId: string;
   fieldKind:
+    | 'addressFieldType'
     | 'booleanFieldType'
     | 'dateFieldType'
     | 'dateTimeFieldType'
@@ -1281,7 +1282,8 @@ export function lowerStorageTargetV1(
       version: BACKFILL_ADMISSIBILITY_VERSION,
     },
     entities,
-    fieldTypeTable: POSTGRESQL_FIELD_TYPE_TABLE,
+    fieldTypeTable: entities.some(e=>e.columns.some(c=>c.fieldContract.fieldKind==='addressFieldType')) ?
+      [{canonicalType:'addressFieldType',postgresqlType:'jsonb'},...POSTGRESQL_FIELD_TYPE_TABLE] : POSTGRESQL_FIELD_TYPE_TABLE,
     kind: 'storageTargetPayload',
     physicalMapping: {
       digest: 'sha256',
@@ -2679,6 +2681,7 @@ export function validateStorageRendererStatements(
 }
 
 export function postgresqlTypeFor(fieldType: FieldType): string {
+  if (fieldType.kind === 'addressFieldType') return 'jsonb';
   switch (fieldType.kind) {
     case 'booleanFieldType':
       return 'boolean';

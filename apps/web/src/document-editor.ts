@@ -1,3 +1,4 @@
+import { addressFromForm } from './address-field.js';
 import { renderLayoutSection } from './component-registry.js';
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
@@ -3203,6 +3204,11 @@ function capture(
     // A decimal is kept in canonical spelling when it is one; anything else is
     // kept exactly as typed so the operator sees it, and save refuses it.
     const kind = inputs.get(field.fieldId)?.kind ?? '';
+    if (kind === 'addressFieldType' && value !== '') {
+      try { row.values[field.fieldId] = addressFromForm(inputName(row,field.fieldId),submission); }
+      catch { refused.push(field.label); }
+      continue;
+    }
     if (kind === 'booleanFieldType' && value !== '') {
       if (value === 'true' || value === 'false')
         row.values[field.fieldId] = value === 'true';

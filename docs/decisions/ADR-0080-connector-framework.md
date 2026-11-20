@@ -166,7 +166,9 @@ transition. Record verified duplicates without repeating a business change.
 
 ## What a business owner publishes
 
-In Customize, add an Address field to a first-party or tenant-authored record. The closed,
+Charter scope (2026-11-20): “any record type” means any ADR-0079-eligible record type. Protected-record annotations await a separate design ruling.
+
+In Customize, add an Address field to an eligible first-party or tenant-authored record. The closed,
 versioned `addAddressField` patch binds a stable field ID to a record type. Independently,
 `addMapPlacement` binds a stable placement ID, Address field, Record surface and section ID.
 Preview, approve and activate the pinned diff through the existing compare-and-swap flow.

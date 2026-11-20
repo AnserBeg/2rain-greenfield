@@ -25,9 +25,8 @@ Critical paths touched by CONNECT-1 in this slice are empty.
 2. Email through the same contract. The document action depends on DOCS-1 and N2-03.
    N2-04 exercises retries, duplicates, bounces, secrets, replay and recovery with a fake.
 
-Slice 1 scope needs an orchestrator ruling. The current patch writer accepts Party and refuses
-Goods Receipt and Purchase Order Line with `CUSTOMIZE_TARGET_IN_TIER_B_DEPENDENCY_SET`.
-[ADR-0079](../../decisions/ADR-0079-form-and-record-composition.md#slots-and-section-identity) excludes their sections. The charter also requests addresses on any record type.
+Charter scope: “any record type” means any ADR-0079-eligible record type. Protected-record annotations await a separate design ruling.
+Google static imagery stays disabled. A real embedded map needs browser-direct delivery and a CSP and privacy decision after sign-in.
 
 ## Test it yourself
 

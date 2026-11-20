@@ -1,0 +1,93 @@
+import { LayoutBodySchema } from './layout.js';
+import { z } from 'zod';
+
+// Canonical JSON admits integer numbers. Decimal degrees travel as decimal
+// strings through hashes, receipts and PostgreSQL without rounding.
+const degree = (limit: number) =>
+  z
+    .string()
+    .regex(/^-?(?:0|[1-9]\d{0,2})(?:\.\d{1,8})?$/u)
+    .refine((value) => Math.abs(Number(value)) <= limit);
+export const CoordinatesSchema = z.strictObject({
+  latitude: degree(90),
+  longitude: degree(180),
+});
+export const AddressInputSchema = z.strictObject({
+  schemaVersion: z.literal('northstar.address-value/v1'),
+  text: z
+    .string()
+    .max(512)
+    .refine((text) => text.trim().length > 0),
+  lines: z.array(z.string().trim().min(1).max(160)).max(4).optional(),
+  city: z.string().trim().min(1).max(120).optional(),
+  region: z.string().trim().min(1).max(120).optional(),
+  postalCode: z.string().trim().min(1).max(24).optional(),
+  country: z
+    .string()
+    .regex(/^[A-Z]{2}$/u)
+    .optional(),
+  place: z
+    .strictObject({
+      namespace: z.enum(['google.places', 'demo.places']),
+      id: z.string().regex(/^[A-Za-z0-9_-]{1,256}$/u),
+    })
+    .optional(),
+  pin: CoordinatesSchema.extend({ kind: z.literal('user') }).optional(),
+});
+// The editor can request enrichment for one reviewed installation. The host
+// strips that request before persisting the business value.
+export const AddressWriteSchema = AddressInputSchema.extend({
+  locateFor: z.strictObject({ companyId:z.uuid(), installationId:z.uuid() }).optional(),
+});
+export const SavedAddressSchema = AddressInputSchema.extend({
+  revision: z.uuid(),
+});
+export type AddressInput = z.infer<typeof AddressInputSchema>;
+export type SavedAddress = z.infer<typeof SavedAddressSchema>;
+export type Coordinates = z.infer<typeof CoordinatesSchema>;
+
+export const ADDRESS_FIELD_READER = 29;
+export const ADDRESS_MAP_READER = 30;
+export const CONNECTOR_FAMILY =
+  'northstar.compiler:projection-family.connector';
+export const CONNECTOR_PAYLOAD = 'northstar.connector-payload/v1';
+const id = z
+  .string()
+  .min(5)
+  .max(180)
+  .regex(
+    /^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+:[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/u,
+  );
+export const AddressBindingSchema = z.strictObject({
+  schemaVersion: z.literal('v6'),
+  fieldId: id,
+  entityId: id,
+  contractVersion: z.literal('northstar.address/v1'),
+  mappingVersion: z.literal('v1'),
+});
+export const MapPlacementSchema = z.strictObject({
+  schemaVersion: z.literal('v6'),
+  placementId: id,
+  fieldId: id,
+  surfaceId: id,
+  sectionId: z.string().min(1).max(512),
+});
+export const AddressProjectionSchema = z.strictObject({
+  kind: z.literal('connectorPayload'),
+  schemaVersion: z.literal(CONNECTOR_PAYLOAD),
+  bindings: z
+    .array(
+      AddressBindingSchema.extend({
+        recordQueryId: id,
+        editOperationIds: z.array(id).min(1),
+        suggestQueryId: id,
+        geocodeOperationId: id,
+        mapQueryId: id,
+      }),
+    )
+    .min(1)
+    .max(128),
+  placements: z.array(MapPlacementSchema).max(128),
+  layouts: z.array(LayoutBodySchema).max(128),
+});
+export type AddressProjection = z.infer<typeof AddressProjectionSchema>;

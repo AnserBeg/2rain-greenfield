@@ -1,3 +1,5 @@
+import { renderAddressField } from './address-field.js';
+import { AddressInputSchema, SavedAddressSchema } from '@north-star/canonical-model';
 import type { LayoutBody } from '@north-star/canonical-model';
 import { DocumentsProjectionSchema } from '../../../packages/canonical-model/src/schemas.js';
 import {
@@ -182,6 +184,8 @@ export type SurfaceDataRenderState =
   | {
       readonly records: readonly SemanticRecordDto[];
       readonly documentEditorSlots?: Readonly<Record<string, string>>;
+      readonly addressLayout?: LayoutBody;
+      readonly addressMaps?: Readonly<Record<string,string>>;
       readonly documentsSection?: string;
       readonly receiving?: ReceivingSection;
       readonly receivingNavigation?: ReceivingNavigation;
@@ -1278,6 +1282,7 @@ export function renderLayoutSection(
   ) => string | undefined,
   escape: (value: string) => string,
   mode: 'form' | 'detail',
+  mapHtml='',
 ): string {
   const wrap = (html: string) =>
     mode === 'form'
@@ -1303,7 +1308,7 @@ export function renderLayoutSection(
     label = escape(section.label.text);
   return mode === 'form'
     ? `<fieldset class="form-field--wide" data-layout-section="${id}"><legend>${label}</legend>${content}</fieldset>`
-    : `<section class="panel" data-composition-fields data-layout-section="${id}"><h2>${label}</h2>${content}</section>`;
+    : `<section class="panel" data-composition-fields data-layout-section="${id}"><h2>${label}</h2>${content}${mapHtml}</section>`;
 }
 
 function renderSections(context: SurfaceComponentContext): string {
@@ -1311,9 +1316,9 @@ function renderSections(context: SurfaceComponentContext): string {
     context.data?.status === 'READY'
       ? (context.data.documentsSection ?? '')
       : '';
-  const layout = context.surface.layouts?.find(
-    (l) => l.body.mode === 'detail',
-  )?.body;
+  const layout = context.surface.layouts?.find(l=>l.body.mode==='detail')?.body ??
+    (context.data?.status==='READY'?context.data.addressLayout:undefined);
+  const maps=context.data?.status==='READY'?context.data.addressMaps:undefined;
   if (context.data?.status === 'READY' && context.data.composition) {
     const data = context.data.composition;
     if (!layout)
@@ -1342,6 +1347,7 @@ function renderSections(context: SurfaceComponentContext): string {
               `<div data-field-id="${escapeHtml(f.id)}"><dt>${escapeHtml(f.label.text)}</dt><dd>${escapeHtml(data.fields.cells[f.binding] ?? '—')}</dd></div>`,
             escapeHtml,
             'detail',
+            maps?.[section.id],
           );
         })
         .join('') +
@@ -1370,7 +1376,7 @@ function renderSections(context: SurfaceComponentContext): string {
       slotPanel(
         context,
         record
-          ? `${data.status === 'READY' && data.receiving ? renderReceivingSection(data.receiving) : ''}${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${data.status === 'READY' && data.salesOrder ? renderSalesOrderSection(data.salesOrder) : ''}${data.status === 'READY' && data.packingDocument ? renderPackingDocument(data.packingDocument) : ''}${layout ? layout.sections.map((section) => renderLayoutSection(section, (f) => `<div data-field-id="${escapeHtml(f.id)}"><dt>${escapeHtml(f.label.text)}</dt><dd>${recordFieldValue(context, record, f.binding)}</dd></div>`, escapeHtml, 'detail')).join('') : `<section class="panel data-panel" data-data-state="exact"><details class="record-section-group" open><summary><h2>Details</h2></summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(labels.get(fieldId) ?? fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${recordFieldValue(context, record, fieldId)}</dd></div>`).join('')}</dl></details></section>`}`
+          ? `${data.status === 'READY' && data.receiving ? renderReceivingSection(data.receiving) : ''}${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${data.status === 'READY' && data.salesOrder ? renderSalesOrderSection(data.salesOrder) : ''}${data.status === 'READY' && data.packingDocument ? renderPackingDocument(data.packingDocument) : ''}${layout ? layout.sections.map((section) => renderLayoutSection(section, (f) => `<div data-field-id="${escapeHtml(f.id)}"><dt>${escapeHtml(f.label.text)}</dt><dd>${recordFieldValue(context, record, f.binding)}</dd></div>`, escapeHtml, 'detail', maps?.[section.id])).join('') : `<section class="panel data-panel" data-data-state="exact"><details class="record-section-group" open><summary><h2>Details</h2></summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(labels.get(fieldId) ?? fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${recordFieldValue(context, record, fieldId)}</dd></div>`).join('')}</dl></details></section>`}`
           : dataDiagnostic('QUERY_NOT_FOUND'),
         'sections-slot',
       ) + documents
@@ -2456,6 +2462,8 @@ export function renderFormControl(
   const kind = ` data-field-kind="${field.kind}"${describedBy}${extra}`;
   const html = (() => {
     switch (field.kind) {
+      case 'addressFieldType':
+        return renderAddressField(name, renderedValue, kind);
       case 'enumFieldType':
         return renderEnumControl(
           field.options,
@@ -2543,6 +2551,8 @@ function typedControlPreservesValue(
     case 'moneyFieldType':
     case 'quantityFieldType':
       return typeof value === 'string' && nativeNumberValue(value);
+    case 'addressFieldType':
+      return SavedAddressSchema.safeParse(value).success || AddressInputSchema.safeParse(value).success;
     case 'textFieldType':
     case 'dateTimeFieldType':
       return oneLineInputPreservesValue(value);

@@ -1,3 +1,7 @@
+import { AddressProjectionSchema, SavedAddressSchema } from '@north-star/canonical-model';
+import { withAddressEditor } from './address-context.js';
+import type { AddressGateway } from '../../../packages/runtime/src/address-gateway.js';
+import { addressFromForm } from './address-field.js';
 import {
   compositionRelationTargets,
   loadSurfaceComposition,
@@ -188,6 +192,7 @@ export interface SurfaceRuntimeResponse {
 
 export interface SurfaceRuntimeGateways {
   readonly applicationExtension?: SurfaceRuntimeApplicationExtension;
+  readonly addresses?: AddressGateway;
   readonly documents?: DocumentGateway;
   /**
    * The request clock, read once per request: a List's "before today" views,
@@ -267,6 +272,19 @@ export function renderSurfaceRuntime(
 
 /** Loads live DTOs through the semantic read gateway for one pinned surface. */
 export async function renderSurfaceRuntimeWithData(
+  view: RuntimeViewContract.RequestRuntimeView,
+  requestUrl: string,
+  gateways: SurfaceRuntimeGateways,
+  feedback: SurfaceOperationFeedback | null = null,
+  /**
+   * SPEED-1: the page's read snapshot. Its reads are finished before the
+   * page is rendered, so the snapshot is never held across rendering.
+   */
+  reads: { readonly finishReads: () => Promise<void> } | null = null,
+): Promise<SurfaceRuntimeResponse> {
+  return withAddressEditor(view,requestUrl,gateways.addresses,()=>renderSurfaceRuntimeWithDataInContext(view,requestUrl,gateways,feedback,reads));
+}
+async function renderSurfaceRuntimeWithDataInContext(
   view: RuntimeViewContract.RequestRuntimeView,
   requestUrl: string,
   gateways: SurfaceRuntimeGateways,
@@ -669,6 +687,25 @@ export async function renderSurfaceRuntimeWithData(
           surfaces: selection.surfaces,
           view,
         });
+      }
+      if(data.status==='READY' && data.records[0] && selection.selected.surfaceRole==='record' && view.projections.connector && gateways.addresses){
+        const definition=AddressProjectionSchema.parse(view.projections.connector.payload);
+        const record=data.records[0], company=workspaceContext?.selectedRecordId ?? legalEntitySelection[0];
+        const maps: Record<string,string>={};
+        const layout=definition.layouts.find(l=>l.surfaceId===selection.selected.surfaceId);
+        for(const p of definition.placements.filter(p=>p.surfaceId===selection.selected.surfaceId)){
+          const binding=definition.bindings.find(b=>b.fieldId===p.fieldId)!;
+          const value=SavedAddressSchema.safeParse(record.values[p.fieldId]).data;
+          if(!value)continue;
+          const pin=value.pin?{status:'ready' as const,pin:value.pin,attribution:'User pin',image:null}
+            :company?await gateways.addresses.pin(view,{fieldId:p.fieldId,recordId:record.recordId,companyId:company},binding.mapQueryId).catch(()=>({status:'unavailable' as const}))
+            :{status:'unavailable' as const};
+          const message=pin.status==='ready'?`${pin.pin.latitude}, ${pin.pin.longitude} · ${pin.attribution}`:
+            pin.status==='locating'?'Address saved · locating':'Address saved · map unavailable';
+          const img=pin.status==='ready'&&pin.image?`<img width="240" height="120" alt="${escapeHtml(message)}" src="data:image/svg+xml;base64,${Buffer.from(pin.image).toString('base64')}">`:'';
+          maps[p.sectionId]=(maps[p.sectionId]??'')+`<figure>${img}<figcaption>${escapeHtml(value.text)} · ${escapeHtml(message)}</figcaption></figure>`;
+        }
+        if(layout)data={...data,addressLayout:layout,addressMaps:maps};
       }
       if (
         data.status === 'READY' &&
@@ -1167,6 +1204,14 @@ export async function submitSurfaceRuntimeFragment(
   submission: SurfaceRuntimeSubmission,
   gateways: SurfaceRuntimeGateways,
 ): Promise<SurfaceRuntimeFragmentResponse> {
+  return withAddressEditor(view,requestUrl,gateways.addresses,()=>submitSurfaceRuntimeFragmentInContext(view,requestUrl,submission,gateways));
+}
+async function submitSurfaceRuntimeFragmentInContext(
+  view: RuntimeViewContract.RequestRuntimeView,
+  requestUrl: string,
+  submission: SurfaceRuntimeSubmission,
+  gateways: SurfaceRuntimeGateways,
+): Promise<SurfaceRuntimeFragmentResponse> {
   assertRequestRuntimeView(view);
   const fallback = Object.freeze({
     html: '',
@@ -1227,6 +1272,15 @@ export async function submitSurfaceRuntimeFragment(
  * the server's sort order to the control the user actually pressed.
  */
 export async function submitSurfaceRuntimeIntent(
+  view: RuntimeViewContract.RequestRuntimeView,
+  requestUrl: string,
+  submission: SurfaceRuntimeSubmission,
+  gateways: SurfaceRuntimeGateways,
+  transport: 'page' | 'task-fragment' = 'page',
+): Promise<SurfaceRuntimeResponse> {
+  return withAddressEditor(view,requestUrl,gateways.addresses,()=>submitSurfaceRuntimeIntentInContext(view,requestUrl,submission,gateways,transport));
+}
+async function submitSurfaceRuntimeIntentInContext(
   view: RuntimeViewContract.RequestRuntimeView,
   requestUrl: string,
   submission: SurfaceRuntimeSubmission,
@@ -1656,7 +1710,7 @@ function renderSelectedSurface(
     return { statusCode, html: surfaceContent(body) + queues };
   }
   const enhanceTaskDialog =
-    /<[a-z]+\s[^>]*\bdata-(?:reference-control|editor-create|documents)\b/u.test(
+    /<[a-z]+\s[^>]*\bdata-(?:reference-control|editor-create|documents|address-editor)\b/u.test(
       body,
     ) ||
     (data.status === 'READY' && nativeTask);
@@ -2347,6 +2401,11 @@ function fieldInput(
       submission[`${FORM_EMPTY_INTENT_PREFIX}${fieldId}`],
     );
     if (mutation.kind === 'nothing') continue;
+    if (field?.kind === 'addressFieldType' && mutation.kind === 'set') {
+      try { entries.push([fieldId, addressFromForm('value:'+fieldId,submission)]); }
+      catch { invalidFormSubmission(); }
+      continue;
+    }
     entries.push([fieldId, mutation.kind === 'clear' ? null : mutation.value]);
   }
   return Object.freeze(Object.fromEntries(entries));

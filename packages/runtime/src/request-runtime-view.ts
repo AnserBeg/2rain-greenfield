@@ -1,4 +1,4 @@
-import { LAYOUT_READER } from '@north-star/canonical-model';
+import { ADDRESS_MAP_READER, CONNECTOR_FAMILY } from '@north-star/canonical-model';
 import {
   assertTrustedRequestContext,
   type AuthenticatedRequestEntryAdapter,
@@ -37,6 +37,7 @@ export const REQUEST_RUNTIME_FORMULA_RULE_FAMILY =
 export type RequestRuntimeProjectionFamily =
   | (typeof REQUEST_RUNTIME_PROJECTION_FAMILIES)[keyof typeof REQUEST_RUNTIME_PROJECTION_FAMILIES]
   | typeof REQUEST_RUNTIME_FORMULA_RULE_FAMILY
+  | typeof CONNECTOR_FAMILY
   | typeof DOCUMENTS_PROJECTION_FAMILY;
 
 export type ImmutableJsonValue =
@@ -153,6 +154,7 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     { readonly capabilityId: string; readonly maximumSupportedVersion: number }
   >
 > = Object.freeze({
+  [CONNECTOR_FAMILY]: Object.freeze({capabilityId:'northstar.runtime:capability.connector',maximumSupportedVersion:1}),
   [DOCUMENTS_PROJECTION_FAMILY]: Object.freeze({
     capabilityId: 'northstar.runtime:capability.documents',
     maximumSupportedVersion: 1,
@@ -207,7 +209,7 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 25 adds Today metric cards.
     // 26 adds header relations, relation List columns and shared or lifecycle-less editors.
     // 27 adds internal document attachments. 28 adds record and form layout revisions.
-    maximumSupportedVersion: LAYOUT_READER,
+    maximumSupportedVersion: ADDRESS_MAP_READER,
   },
 });
 
@@ -283,6 +285,7 @@ export interface LoadedRequestRuntimeDefinition {
     readonly formulaRule?: RuntimeProjection<
       typeof REQUEST_RUNTIME_FORMULA_RULE_FAMILY
     >;
+    readonly connector?: RuntimeProjection<typeof CONNECTOR_FAMILY>;
     readonly documents?: RuntimeProjection<typeof DOCUMENTS_PROJECTION_FAMILY>;
     readonly operation: RuntimeProjection<
       typeof REQUEST_RUNTIME_PROJECTION_FAMILIES.operation
@@ -950,6 +953,7 @@ function constructRequestRuntimeView(
       definition.projections.operation,
       REQUEST_RUNTIME_PROJECTION_FAMILIES.operation,
     ),
+    ...(definition.projections.connector ? {connector:cloneProjection(definition.projections.connector,CONNECTOR_FAMILY)} : {}),
     ...(definition.projections.documents
       ? {
           documents: cloneProjection(

@@ -1,3 +1,4 @@
+import { compileAddressBindings } from './address.js';
 import { CALCULATED_DISPLAY_QUERY_READER } from '../../canonical-model/src/calculated-display-projection.js';
 import {
   CANONICALIZATION_PROFILE_VERSION,
@@ -405,6 +406,10 @@ function compileApplicationInternal(
   }
 
   const formula = compileLiteralFormulaRules(packageRevision);
+  const address = compileAddressBindings(packageRevision);
+  if (address && 'message' in address) {
+    return failure([{...compilerDiagnostic('COMPILER_TYPE_INVALID','typeCheck','$.connectorBindings',address.subjectId),rule:address.message}], maximumDiagnostics);
+  }
   const documents = compileDocuments(packageRevision);
   if (documents?.message) {
     return failure(
@@ -491,6 +496,7 @@ function compileApplicationInternal(
       formula.status === 'compiled' ? formula.payload : null,
       displays.fields,
       documents?.payload,
+      address?.payload,
     ),
     packageRevision,
   );
@@ -1448,7 +1454,7 @@ function projectionDispatchRevision(
               })),
               schemaVersion: LANGUAGE_VERSION,
             }
-          : { ...field.fieldType, schemaVersion: LANGUAGE_VERSION },
+          : field.fieldType.kind === 'addressFieldType' ? field.fieldType : { ...field.fieldType, schemaVersion: LANGUAGE_VERSION },
     })),
     languageVersion: LANGUAGE_VERSION,
     operations: packageRevision.operations.map((operation) => ({

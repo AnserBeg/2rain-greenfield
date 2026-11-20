@@ -64,6 +64,7 @@ const surfaceRoles = ['form', 'list', 'record'] as const;
  * mapping.
  */
 export const COMPILED_FIELD_KINDS = Object.freeze([
+  'addressFieldType',
   'booleanFieldType',
   'dateFieldType',
   'dateTimeFieldType',

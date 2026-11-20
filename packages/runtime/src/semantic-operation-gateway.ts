@@ -157,6 +157,7 @@ export interface RegisteredOperationInputContract {
     readonly enumOptionIds: readonly string[];
     readonly fieldId: string;
     readonly fieldKind:
+      | 'addressFieldType'
       | 'booleanFieldType'
       | 'dateFieldType'
       | 'dateTimeFieldType'
@@ -1924,6 +1925,7 @@ function assertOperationInputContract(
       typeof field.required !== 'boolean' ||
       field.writable !== true ||
       ![
+        'addressFieldType',
         'booleanFieldType',
         'dateFieldType',
         'dateTimeFieldType',
