@@ -87,8 +87,8 @@ A rerun of failed jobs alone cannot combine evidence from different attempts.
 GitHub assigns the run title before it reads the diff. A quick request that
 selects full dispatches a run named **CI full** and waits for its conclusion.
 Follow the full link in the promotion job summary. A promoted pull request tests
-the original synthetic merge and verifies its second parent against the dispatched
-branch SHA. Cite the run that executed the tests. New packet records carry a
+the original synthetic merge. The dispatcher uses the parent carrying that exact
+workflow version and the child verifies the parent SHA. Cite the run that executed the tests. New packet records carry a
 standalone line such as `CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/12345`.
 
 For the final full run, push the proposed integration commit to a candidate ref
