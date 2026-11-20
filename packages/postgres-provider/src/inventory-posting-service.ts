@@ -1,3 +1,4 @@
+import { setTrustedIdentity } from './request-context.js';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   InventoryPostingError,
@@ -1242,7 +1243,7 @@ export class PostgresInventoryPostingService {
       // savepoint occurs before this acquisition.
       await acquireStockIdentityLocks(client, identities);
       await assertRuntimeLogin(client);
-      await setTrustedContext(client, context);
+      await setTrustedIdentity(client, context);
       await acquirePostingRequestKeyLock(
         client,
         context,
@@ -3424,24 +3425,6 @@ async function assertRuntimeLogin(client: PoolClient): Promise<void> {
       'posting requires the unprivileged trusted runtime login',
     );
   }
-}
-
-async function setTrustedContext(
-  client: PoolClient,
-  context: TrustedRequestContext,
-): Promise<void> {
-  await client.query(
-    `SELECT set_config('north_star.tenant_id', $1, true),
-            set_config('north_star.environment_id', $2, true),
-            set_config('north_star.principal_id', $3, true),
-            set_config('north_star.request_id', $4, true)`,
-    [
-      context.tenantId,
-      context.environmentId,
-      context.principalId,
-      context.requestId,
-    ],
-  );
 }
 
 async function assumeModuleRole(client: PoolClient): Promise<void> {
