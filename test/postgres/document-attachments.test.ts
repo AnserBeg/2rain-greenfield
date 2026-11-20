@@ -901,8 +901,16 @@ test(
               await assert.rejects(submit(), { status: 422 });
               assert.equal(scans, 1);
               const stage = (
-                await pool.query<{ upload_id: string; digest: string }>(
-                  'SELECT upload_id,digest FROM platform.document_upload_staging WHERE scan_clean IS FALSE',
+                await pool.query<{
+                  upload_id: string;
+                  digest: string;
+                  principal_id: string;
+                  revision: string;
+                }>(
+                  `SELECT s.upload_id,s.digest,s.principal_id,
+                      platform.document_record_revision(s.tenant_id,s.environment_id,
+                        platform.document_storage(s.tenant_id,s.environment_id),s.entity_id,s.owner_scope,s.record_id) AS revision
+                    FROM platform.document_upload_staging s WHERE s.scan_clean IS FALSE`,
                 )
               ).rows[0]!;
               const role = rolePool(
@@ -914,14 +922,18 @@ test(
                 await assert.rejects(
                   withTrustedRequestTransaction(
                     role,
-                    await trustedContext(screening.identity),
+                    await trustedContext({
+                      ...screening.identity,
+                      principalId: stage.principal_id,
+                    }),
                     (client) =>
                       client.query(
-                        "SELECT platform.publish_document_upload($1,$2,'fixture/v1',$3,1,NULL,NULL)",
+                        "SELECT platform.publish_document_upload($1,$2,'fixture/v1',$3,$4,NULL,NULL)",
                         [
                           stage.upload_id,
                           stage.digest,
                           screening.activeReleaseId,
+                          stage.revision,
                         ],
                       ),
                   ),
