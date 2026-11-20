@@ -18,6 +18,7 @@ import {
 import { provisionInventoryScope } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { OperationsAgentSession } from '../../packages/operations-agent/src/session.js';
 import { COMPANY, worldOver } from '../agent/agent-world.js';
+import { applicationWithoutLineCreateValues } from '../helpers/application-without-line-create-values.js';
 import {
   archivedRuntimeRead,
   assertArchivedTenantEnvelope,
@@ -46,7 +47,11 @@ test(
       'address-connector',
       async ({ connection, pool }) => {
         const databaseUrl = `postgresql://${connection.user}@${connection.host}:${connection.port}/${connection.database}`;
-        const options = { databaseUrl, tenantSlug: 'address-connector' };
+        const options = {
+          databaseUrl,
+          tenantSlug: 'address-connector',
+          compiledApplication: applicationWithoutLineCreateValues().release,
+        };
         const app = await startComposedApplication({ ...options, port: 0 });
         const opened = await openCustomizeService(options);
         try {

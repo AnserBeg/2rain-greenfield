@@ -9,6 +9,8 @@ program authority in `docs/greenfield-north-star-erp-platform-plan.md`.
 
 PostgreSQL CI checks effective application table and column privileges against the [reviewed grant allowlist](../../test/postgres/application-grants.tsv).
 
+SECURITY DEFINER scope exception: `platform.attest_booking_approval` takes tenant, environment and principal from the approval issuer's arguments, not the trusted context, and has no company scope. It is safe because scope is enforced at consumption: `booking_apply` matches the grant on the trusted tenant, environment and principal, then authorizes the company ([ADR-0082](../decisions/ADR-0082-booking-over-time.md)).
+
 ## One-owner map
 
 | Concern | Sole named authority | Owning decision | Consumers that are not authorities |

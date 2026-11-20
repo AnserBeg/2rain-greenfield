@@ -11,7 +11,7 @@ import { z } from 'zod';
  * canonical field-kind union and `timezoneSemantics` are unchanged, and the
  * `dateOnly` editor's midnight-UTC encoding is never used.
  */
-export const DATE_TIME_FIELD_READER = 35;
+export const DATE_TIME_FIELD_READER = 37;
 export const DATE_TIME_PATCH_VERSION = 'northstar.date-time-field/v1';
 export const DATE_TIME_VALUE_VERSION = 'northstar.date-time-value/v1';
 export const DATE_TIME_ZONE_SOURCES = [

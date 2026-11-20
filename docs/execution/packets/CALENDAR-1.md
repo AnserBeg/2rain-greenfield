@@ -1,5 +1,7 @@
 # CALENDAR-1 · Board, calendar and resource timeline
 
+**Owner walkthrough deferred until the Board v2 fix lands.**
+
 Slice 0 established [ADR-0086](../../decisions/ADR-0086-board-calendar-and-resource-timeline.md) with the owner’s reference survey. Fable’s verdict was ACCEPT WITH AMENDMENTS; the orchestrator accepted A1–A14. The delivery order is 1a (Board form), 1b (pointer), 2 (Calendar), 3a (generic timeline) and 3b (Booking timeline).
 
 ## Design decisions
@@ -73,3 +75,31 @@ The tenant fixture publishes an Opportunity board with a declared Open → Won t
   ]
 }
 ```
+
+## Board v2 fix
+
+Required by the [view revision member shape ruling](../../decisions/ADR-0086-board-calendar-and-resource-timeline.md) after the independent Board review (verdict REVISE). The Board member becomes v2 with its own reader rung, and v1 is removed outright.
+
+A local dev tenant that already activated a v1 Board will not replay; run dev:reset.
+
+Required proofs:
+
+- Starting from a Board with zero facts, and again after retiring it, adding a field still compiles.
+- Starting from a Board with chosen facts, and again after retiring it: relabelling, hiding and reordering a chosen fact's List column, hiding the title column, narrowing a bound operation's permission and adding a validation rule to it all still compile.
+- A label-only base change to a stage, a fact column or an operation replays clean.
+- A removed operation, field, stage or transition yields `RETIRED_TARGET` naming its ID; a retargeted edge, a changed field type or tier o0 to o1 yields `INCOMPATIBLE_TYPE` naming its ID. Each case asserts its exact code; none is `WHOLE_PACKAGE_FAILURE`.
+- A base change of a bound operation's confirmation from none to humanRequired replays clean, and the Move Task then requires the review step.
+- A chain of active then retired, and of active then rebound, replays clean on a base that removed an operation only the first revision bound.
+- A new base operation between two chosen stages is not offered until a new revision chooses it. On the authoring base, a patch whose digest does not match its recorded IDs and contracts is refused.
+- Reader: the archived binary of the actual preceding reader (34 on main today) refuses a v2 release with `UNSUPPORTED_RUNTIME_CAPABILITY` before any request; a v1-shaped patch is refused by the parser; a Board-free tenant patch is byte-identical at the new rung.
+- UPGRADE-2's compatible-base case relabels something the Board binds.
+- Permission proofs (review finding 3):
+  - a company-scoped read and move;
+  - a cross-company negative;
+  - no Move card without the transition grant;
+  - a forged confirm returns 403;
+  - a narrowed transition disappears;
+  - a validation refusal leaves the card in place;
+  - an automation-only edge is never offered.
+- The scan-ceiling and timeout partial renders (finding 5).
+- The understated-floor serving branch (finding 6).

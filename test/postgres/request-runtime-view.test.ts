@@ -7,6 +7,9 @@ import test from 'node:test';
 import { promisify } from 'node:util';
 
 import pg from 'pg';
+import { BILLING_INTERVAL_READER } from '../../packages/canonical-model/src/billing.js';
+import { DATE_TIME_FIELD_READER } from '../../packages/canonical-model/src/date-time-field.js';
+import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../packages/canonical-model/src/surface-workspace.js';
 
 import {
   CANONICALIZATION_PROFILE_VERSION,
@@ -158,7 +161,24 @@ test('the capability comparison binds the family to its capability, then compare
     null,
   );
 
-  const surfaceFloors = [22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34];
+  const surfaceFloors = [
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    33,
+    34,
+    LINE_CREATE_VALUES_SURFACE_FLOOR,
+    BILLING_INTERVAL_READER,
+    DATE_TIME_FIELD_READER,
+  ];
   for (const reader of surfaceFloors) {
     for (const floor of surfaceFloors) {
       const refusal = unsupportedRuntimeCapability(
@@ -211,7 +231,7 @@ test('the capability comparison binds the family to its capability, then compare
   // capability on one side alone reds here rather than in production.
   assert.deepEqual(SUPPORTED_RUNTIME_CAPABILITIES[surface], {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
-    maximumSupportedVersion: 35,
+    maximumSupportedVersion: DATE_TIME_FIELD_READER,
   });
 });
 
@@ -784,8 +804,26 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
               loaded.projections.surface.requiredRuntimeCapability,
               {
                 capabilityId: 'northstar.runtime:capability.surface-manifest',
-                minimumVersion: 22,
+                minimumVersion: LINE_CREATE_VALUES_SURFACE_FLOOR,
               },
+            );
+            const requirement =
+              loaded.projections.surface.requiredRuntimeCapability;
+            assert.match(
+              unsupportedRuntimeCapability(
+                PROJECTION_FAMILY_IDS.surfaceManifest,
+                requirement,
+                {
+                  [PROJECTION_FAMILY_IDS.surfaceManifest]: {
+                    capabilityId: requirement.capabilityId,
+                    maximumSupportedVersion:
+                      LINE_CREATE_VALUES_SURFACE_FLOOR - 1,
+                  },
+                },
+              ) ?? '',
+              new RegExp(
+                `requires version ${LINE_CREATE_VALUES_SURFACE_FLOOR} and this runtime supports ${LINE_CREATE_VALUES_SURFACE_FLOOR - 1}`,
+              ),
             );
             // All FIVE loaded families carry their requirement, not just the
             // surface. Added on round-2 review, which named "carry it only for
@@ -812,7 +850,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
               ],
               {
                 capabilityId: 'northstar.runtime:capability.surface-manifest',
-                maximumSupportedVersion: 35,
+                maximumSupportedVersion: DATE_TIME_FIELD_READER,
               },
             );
           },
@@ -836,7 +874,9 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                   versionContext,
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
-              /requires version 999 and this runtime supports 34/,
+              new RegExp(
+                `requires version 999 and this runtime supports ${DATE_TIME_FIELD_READER}`,
+              ),
             );
           },
         );
@@ -865,7 +905,9 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                   versionContext,
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
-              /requires version 999 and this runtime supports 34/,
+              new RegExp(
+                `requires version 999 and this runtime supports ${DATE_TIME_FIELD_READER}`,
+              ),
             );
           },
         );

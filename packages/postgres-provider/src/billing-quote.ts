@@ -2,10 +2,11 @@ import type { Pool } from 'pg';
 import {
   BillingPlansSchema,
   BillingListAssignmentSchema,
-  BILLING_READER,
+  BILLING_INTERVAL_READER,
 } from '../../canonical-model/src/billing.js';
 import { BillingQuoteEvidenceSchema } from '../../canonical-model/src/billing-evidence.js';
 import { quoteBillingService } from '../../domain/src/billing/quote.js';
+import { canonicalize } from '../../canonical-model/src/canonicalize.js';
 import { compileRatePlan } from '../../domain/src/billing/terms.js';
 import {
   type ImmutableJsonValue,
@@ -35,7 +36,7 @@ export function billingQuoteReadModel(
     if (
       !p?.bindings ||
       (surface.requiredRuntimeCapability?.minimumVersion ?? 0) <
-        BILLING_READER ||
+        BILLING_INTERVAL_READER ||
       definition.queryType !== 'get' ||
       result.records.length !== 1 ||
       !args ||
@@ -83,74 +84,93 @@ export function billingQuoteReadModel(
       row.archived
     )
       throw new Error('Incomplete or stale service evidence');
-    const text = row.values[b.evidenceFieldId];
-    if (typeof text !== 'string' || Buffer.byteLength(text) > 1048576)
-      throw new Error('Missing bounded billing evidence');
-    const facts: unknown = JSON.parse(text);
+    const fields = b.agreedInterval;
+    if (!fields || b.evidenceFieldId)
+      throw new Error('BILLING_SOURCE_FIELDS_REQUIRED');
+    const customerId = row.values[fields.customerFieldId],
+      currency = row.values[fields.currencyFieldId],
+      anchor = row.values[fields.startFieldId],
+      end = row.values[fields.endFieldId];
+    // Both reads attest the same revision, company and commercial identity.
     if (
-      !facts ||
-      typeof facts !== 'object' ||
-      'tables' in facts ||
-      'assignments' in facts ||
-      'allocations' in facts
+      typeof customerId !== 'string' ||
+      !customerId ||
+      currency !== p.currency ||
+      base.values[fields.customerFieldId] !== customerId ||
+      base.values[fields.currencyFieldId] !== currency ||
+      typeof anchor !== 'string' ||
+      typeof end !== 'string'
     )
       throw new Error(
-        'Service facts cannot supply commercial terms or allocations',
+        'Billing source identity, currency or interval disagrees',
       );
-    const planDigest = compileRatePlan(p).digest;
-    const customerId = 'customerId' in facts ? facts.customerId : null;
-    const { tables, assignments } = await withTrustedRequestRead(
+    const { plan } = compileRatePlan(p);
+    const snapshot = await withTrustedRequestRead(
       pool,
       trustedContextForRequestRuntimeView(view),
       async (client) => {
-        const inputs = await client.query<{
-          assignments: unknown[];
+        const result = await client.query<{
           tables: unknown[];
-        }>(
-          `WITH assignments AS (
-       SELECT list_id,body FROM platform.billing_list_assignments
-        WHERE tenant_id=$1 AND environment_id=$2 AND company_id=$3 AND plan_digest=$4 AND customer_id=$5
-        ORDER BY effective_from,revision_id LIMIT 129
-     ), prices AS (
-       SELECT body FROM platform.billing_rate_tables
-        WHERE tenant_id=$1 AND environment_id=$2 AND company_id=$3 AND plan_digest=$4
-          AND (selector->>'kind'='base' OR (selector->>'kind'='customer' AND selector->>'customerId'=$5)
-            OR (selector->>'kind'='priceList' AND selector->>'listId' IN (SELECT list_id FROM assignments)))
-        ORDER BY effective_from,version_id LIMIT 257
-     ) SELECT ARRAY(SELECT body FROM assignments) AS assignments, ARRAY(SELECT body FROM prices) AS tables`,
-          [view.tenantId, view.environmentId, company, planDigest, customerId],
-        );
-        const snapshot = inputs.rows[0]!;
-        const assignments = snapshot.assignments.map((body) => {
-          const a = BillingListAssignmentSchema.parse(body);
-          if (a.customerId !== customerId)
-            throw new Error('Assignment owner mismatch');
-          return {
-            listId: a.listId,
-            revision: a.revision,
-            priority: a.priority,
-            effectiveFrom: a.effectiveFrom,
-            ...(a.effectiveEnd ? { effectiveEnd: a.effectiveEnd } : {}),
-          };
-        });
-        return { tables: snapshot.tables, assignments };
+          assignments: unknown[];
+          as_of: Date;
+        }>('SELECT * FROM platform.billing_quote_terms($1,$2,$3,$4)', [
+          view.release.releaseId,
+          company,
+          canonicalize(plan),
+          customerId,
+        ]);
+        return result.rows[0]!;
       },
     );
+    const assignments = snapshot.assignments.map((row) => {
+      if (!row || typeof row !== 'object' || !('publishedAt' in row))
+        throw new Error('Missing assignment publication');
+      const { publishedAt, ...body } = row;
+      const a = BillingListAssignmentSchema.parse(body);
+      if (a.customerId !== customerId)
+        throw new Error('Assignment owner mismatch');
+      return {
+        publishedAt,
+        listId: a.listId,
+        revision: a.revision,
+        priority: a.priority,
+        effectiveFrom: a.effectiveFrom,
+        ...(a.effectiveEnd ? { effectiveEnd: a.effectiveEnd } : {}),
+      };
+    });
+    const revision = String(row.revision);
     const evidence = BillingQuoteEvidenceSchema.parse({
-      ...facts,
-      tables,
+      schemaVersion: 'northstar.billing-quote-evidence/v1',
+      tenantId: view.tenantId,
+      environmentId: view.environmentId,
+      companyId: company,
+      serviceId: row.recordId,
+      sourceQueryId: source.queryId,
+      sourceRevision: revision,
+      cursor: revision,
+      release: view.release.contentHash,
+      customerId,
+      currency,
+      serviceUnit: p.serviceUnit,
+      zone: fields.zone,
+      anchor,
+      periodStart: anchor,
+      serviceEnd: end,
+      asOf: snapshot.as_of.toISOString(),
+      basis: 'agreed',
+      bands: [
+        {
+          id: row.recordId,
+          quantity: '1',
+          intervals: [{ id: row.recordId, revision, start: anchor, end }],
+        },
+      ],
+      pauses: [],
+      usage: [],
+      tables: snapshot.tables,
       assignments,
       allocations: [],
     });
-    if (
-      evidence.tenantId !== view.tenantId ||
-      evidence.environmentId !== view.environmentId ||
-      evidence.companyId !== company ||
-      evidence.serviceId !== row.recordId ||
-      evidence.sourceQueryId !== source.queryId ||
-      evidence.release !== view.release.contentHash
-    )
-      throw new Error('Billing source and release scope disagree');
     const quote = quoteBillingService(p, evidence);
     const target = definition.readModel?.resultFields.explanation;
     if (!target) throw new Error('Missing quote explanation binding');
@@ -162,7 +182,7 @@ export function billingQuoteReadModel(
           values: {
             ...base.values,
             [target]: JSON.stringify({
-              algorithm: quote.algorithm,
+              ...quote,
               plan: { id: p.id, version: p.version, digest: quote.planDigest },
               source: {
                 queryId: source.queryId,
@@ -173,12 +193,6 @@ export function billingQuoteReadModel(
                 basis: evidence.basis,
               },
               release: evidence.release,
-              lines: quote.lines,
-              terms: quote.terms,
-              calendar: quote.calendar,
-              coverage: quote.coverage,
-              inputDigest: quote.inputDigest,
-              resultDigest: quote.resultDigest,
             }),
           },
         },

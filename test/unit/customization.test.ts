@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import test from 'node:test';
 
 import type pg from 'pg';
+import { applicationWithoutLineCreateValues } from '../helpers/application-without-line-create-values.js';
 import { renderCompositionFields } from '../../apps/web/src/surface-composition.js';
 import {
   declaredListArguments,
@@ -513,7 +514,7 @@ test('tenant line tables use the document editor with or without company scope a
     label: 'Review source',
   };
   const accepted = await compileInSandbox(
-    sandboxRequest([change([header, lifecycle, lines])]),
+    surfaceCompatibilityRequest([change([header, lifecycle, lines])]),
   );
   assert.equal(
     accepted.status,
@@ -588,7 +589,9 @@ test('tenant line tables use the document editor with or without company scope a
     ],
     [header, ...links, lines, lifecycle],
   ]) {
-    const extended = await compileInSandbox(sandboxRequest([change(members)]));
+    const extended = await compileInSandbox(
+      surfaceCompatibilityRequest([change(members)]),
+    );
     assert.equal(
       extended.status,
       'compiled',
@@ -616,7 +619,10 @@ test('tenant line tables use the document editor with or without company scope a
     assert.equal(unsupportedRuntimeCapability(family, requirement), null);
   }
   const visual = await compileInSandbox(
-    sandboxRequest([patch(header), change([...links, lines, lifecycle])]),
+    surfaceCompatibilityRequest([
+      patch(header),
+      change([...links, lines, lifecycle]),
+    ]),
   );
   assert.deepEqual(visual, {
     message:
@@ -673,6 +679,11 @@ function sandboxRequest(chain: readonly CustomizationPatch[]) {
     chain,
     tip: serializeRelease(tip),
   };
+}
+
+function surfaceCompatibilityRequest(chain: readonly CustomizationPatch[]) {
+  const { authored: base, release } = applicationWithoutLineCreateValues();
+  return { acknowledgement, base, chain, tip: release.application };
 }
 
 test('a change set compiles only its final definition and refuses a broken dependency order', async () => {
@@ -1157,7 +1168,9 @@ test('Today compiles only declared numeric measures of a direct List', async () 
     label: 'Catalog prices in CAD',
     sumField: 'northstar.app:field.item_price_cad',
   };
-  const compiled = await compileInSandbox(sandboxRequest([patch(card)]));
+  const compiled = await compileInSandbox(
+    surfaceCompatibilityRequest([patch(card)]),
+  );
   assert.equal(compiled.status, 'compiled', JSON.stringify(compiled));
   assert.match(compiled.steps[0]!.rendered.text, /sums Price \(CAD\) in/u);
   const { projections } = parseSerializedRelease(compiled.steps[0]!.release)
@@ -1213,7 +1226,7 @@ test('a saved Location view compiles its own columns, sort and declared filter',
     ],
   };
   const saved = patch(baseView);
-  const compiled = await compileInSandbox(sandboxRequest([saved]));
+  const compiled = await compileInSandbox(surfaceCompatibilityRequest([saved]));
   assert.equal(compiled.status, 'compiled', JSON.stringify(compiled));
   const { projections } = parseSerializedRelease(compiled.steps[0]!.release)
     .compiled.bundle.releaseManifest;
@@ -1330,7 +1343,7 @@ test('a saved Location view compiles its own columns, sort and declared filter',
   );
 
   const refused = await compileInSandbox(
-    sandboxRequest([
+    surfaceCompatibilityRequest([
       patch({
         ...baseView,
         filters: [
@@ -1866,7 +1879,7 @@ test('layout revision replays an ordered first revision, binds each member and r
   });
   assert.equal(next.predecessor, revision.revisionId);
   const compiled = await compileInSandbox({
-    ...sandboxRequest(chain),
+    ...surfaceCompatibilityRequest(chain),
     startAt: 2,
   });
   assert.ok(
@@ -1879,7 +1892,7 @@ test('layout revision replays an ordered first revision, binds each member and r
   );
   assert.match(compiled.steps[0]!.rendered.text, /Shipping \(Instructions, /u);
   const replay = await compileInSandbox({
-    ...sandboxRequest(chain),
+    ...surfaceCompatibilityRequest(chain),
     startAt: 2,
   });
   assert.ok(replay.status === 'compiled');
@@ -2151,7 +2164,9 @@ test('tenant inspection edit sections share the extended header bindings and the
     member: edit.body.sections[0]!.id,
     label: 'Inspection details',
   });
-  const result = await compileInSandbox(sandboxRequest([change, revision]));
+  const result = await compileInSandbox(
+    surfaceCompatibilityRequest([change, revision]),
+  );
   assert.ok(
     result.status === 'compiled',
     JSON.stringify(result.status === 'compiled' ? null : result),
@@ -2204,7 +2219,9 @@ test('composed detail keeps calculated display values readable and outside edit 
     member: patch.field.fieldId,
     label: 'Margin shown',
   });
-  const result = await compileInSandbox(sandboxRequest([patch, relabel]));
+  const result = await compileInSandbox(
+    surfaceCompatibilityRequest([patch, relabel]),
+  );
   assert.ok(
     result.status === 'compiled',
     JSON.stringify(result.status === 'compiled' ? null : result),
@@ -2265,7 +2282,9 @@ test('record layout retains the file catalog and raises the Surface floor above 
     member: target.body.sections[0]!.id,
     label: 'Item identification',
   });
-  const result = await compileInSandbox(sandboxRequest([file, layout]));
+  const result = await compileInSandbox(
+    surfaceCompatibilityRequest([file, layout]),
+  );
   assert.ok(
     result.status === 'compiled',
     JSON.stringify(result.status === 'compiled' ? null : result),
@@ -2304,6 +2323,10 @@ test('addAddressField and addMapPlacement replay on a compatible base and identi
   const entity = 'northstar.app:entity.item';
   const surfaceId = 'northstar.app:surface.item_detail';
   const fieldId = 'northstar.app:field.custom_item_delivery_site';
+  const compatibility = applicationWithoutLineCreateValues();
+  const compatibilityTip = parseSerializedRelease(
+    compatibility.release.application,
+  ).compiled;
   const add = patch({
     kind: 'addAddressField',
     schemaVersion: 'v6',
@@ -2313,7 +2336,7 @@ test('addAddressField and addMapPlacement replay on a compatible base and identi
     required: false,
   });
   const variant = (label: string, moveSection: boolean) => {
-    const base = structuredClone(authored);
+    const base = structuredClone(compatibility.authored);
     const sku = (base.fields as { fieldId: string; label: string }[]).find(
       (f) => f.fieldId === 'northstar.app:field.item_sku',
     )!;
@@ -2333,7 +2356,7 @@ test('addAddressField and addMapPlacement replay on a compatible base and identi
         kind: 'compilerInput',
         dependencies: [],
         limits: { ...DEFAULT_COMPILER_LIMITS },
-        expectedActiveRelease: expectedActiveReleaseFrom(tip.compiled),
+        expectedActiveRelease: expectedActiveReleaseFrom(compatibilityTip),
         normalizedDefinitionBytes: new TextEncoder().encode(
           canonicalize(normalized),
         ),
@@ -2362,7 +2385,7 @@ test('addAddressField and addMapPlacement replay on a compatible base and identi
     fieldId,
   });
   const chain = [add, map];
-  const original = await compileInSandbox(sandboxRequest(chain));
+  const original = await compileInSandbox(surfaceCompatibilityRequest(chain));
   assert.ok(original.status === 'compiled', JSON.stringify(original));
   const family = PROJECTION_FAMILY_IDS.surfaceManifest;
   const floors = original.steps.map(({ release }) => {
@@ -2512,7 +2535,7 @@ test('Board revisions bind the tenant and purchase-order machines, cap facts, an
     );
   }
   const compiled = await compileInSandbox({
-    ...sandboxRequest([tenant, ...boards]),
+    ...surfaceCompatibilityRequest([tenant, ...boards]),
     startAt: 2,
   });
   assert.ok(
