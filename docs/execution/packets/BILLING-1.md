@@ -23,7 +23,7 @@ The narrow Fable re-read accepted [ADR-0083](../../decisions/ADR-0083-period-and
 - Migration 0054 revokes direct runtime access to rates and assignments. Publication validates the accepted receipt, audit, released operation, current company grant and proposal in one transaction. Reads require the released quote and source grants plus company scope. The application grant allowlist removes all four Billing table exceptions.
 - Rate selection uses effective and publication time at each occurrence opening. Saved explanations contain the plan, evidence and calendar required for replay. The service-end fee selects rates at the end instant.
 - Publication retries discover their recorded company before checking the proposal and repeat authorization. Allocated and reserved cents admit every entitlement within the fraction precision bound.
-- The compiler refuses notes as evidence with `BILLING_SOURCE_FIELDS_REQUIRED`. Reader 30 covers declarations and reader 34 covers typed interval bindings.
+- The compiler refuses notes as evidence with `BILLING_SOURCE_FIELDS_REQUIRED`. Reader 30 covers declarations and reader 35 covers typed interval bindings.
 
 ## Test it yourself
 
@@ -34,8 +34,8 @@ Run `node --import tsx --test test/postgres/billing-terms.test.ts` for direct SQ
 {
   "schemaVersion":"northstar.record-claim/v1",
   "packet":"BILLING-1",
-  "base":"3968bffe44e89f1829536d3271b1d8fbf7de12e2",
-  "head":"c73183ddb56367b70d80396994ced5079db9e06c",
+  "base":"9beaabd99c2a7343fba1b444dd6a858d9f0d4599",
+  "head":"f8be5f99f358e8077646b80af35160fd6853ae4a",
   "changedPaths":["db/migrations/0054_billing_publication.sql","db/schema.snapshot.json","learnings.md","packages/canonical-model/src/billing-evidence.ts","packages/canonical-model/src/billing.ts","packages/compiler/src/billing.ts","packages/compiler/src/projections.ts","packages/domain/src/billing/quote.ts","packages/domain/src/billing/terms.ts","packages/postgres-provider/src/billing-quote.ts","packages/postgres-provider/src/billing-terms.ts","packages/postgres-provider/src/release-repository.ts","packages/postgres-provider/src/trust/postgres-trust-service.ts","packages/runtime/src/request-runtime-view.ts","packages/runtime/src/semantic-operation-gateway.ts","test/architecture/release-persistence-boundary.test.ts","test/evidence/BILLING-1.expected-red.json","test/fixtures/g2/language-conformance/coverage-decisions.json","test/integration/billing-quote.test.ts","test/integration/billing-release.test.ts","test/postgres/application-grants.tsv","test/postgres/billing-terms.test.ts","test/postgres/inventory-storage.test.ts","test/postgres/migrations.test.ts","test/postgres/module-storage-transition.test.ts","test/postgres/request-runtime-view.test.ts","test/postgres/trust-substrate.test.ts"],
   "symbols":[{"path":"packages/domain/src/billing/quote.ts","name":"quoteBillingService"},{"path":"packages/postgres-provider/src/billing-quote.ts","name":"billingQuoteReadModel"},{"path":"packages/postgres-provider/src/billing-terms.ts","name":"BILLING_TERMS_FACTORY"}]
 }
