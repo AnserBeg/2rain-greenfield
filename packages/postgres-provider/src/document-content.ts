@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { decode } from 'jpeg-js';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { crc32, inflateSync } from 'node:zlib';
 import {
   DOCUMENT_BLOB_MAX_BYTES,
@@ -36,7 +37,6 @@ export function documentDigest(bytes: Buffer): string {
 
 const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const imagePixels = 16 * 1024 * 1024;
-const resolvePackage = createRequire(import.meta.url).resolve;
 
 export async function validateDocumentContent(
   bytes: Buffer,
@@ -226,6 +226,12 @@ function validatePng(bytes: Buffer): void {
 // heap limit alone cannot bound those allocations. prlimit execs the worker in place.
 async function validatePdf(bytes: Buffer, signal?: AbortSignal): Promise<void> {
   signal?.throwIfAborted();
+  const workerSpecifier = '@north-star/postgres-provider/document-pdf-worker';
+  // The production loader resolves from the source twin of a compiled module.
+  const workerPath =
+    typeof import.meta.resolve === 'function'
+      ? fileURLToPath(import.meta.resolve(workerSpecifier))
+      : createRequire(import.meta.url).resolve(workerSpecifier);
   const worker = spawn(
     'prlimit',
     [
@@ -236,7 +242,7 @@ async function validatePdf(bytes: Buffer, signal?: AbortSignal): Promise<void> {
       process.execPath,
       '--jitless',
       '--max-old-space-size=96',
-      resolvePackage('@north-star/postgres-provider/document-pdf-worker'),
+      workerPath,
     ],
     { stdio: ['pipe', 'ignore', 'ignore'], env: {} },
   );
