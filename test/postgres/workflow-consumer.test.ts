@@ -929,26 +929,35 @@ test(
                   WHERE tenant_id = $1 AND environment_id = $2 AND principal_id = $3`,
                 [tenantId, environmentId, automation.principalId],
               );
-              await restarted.step(scope, refusedRun);
-              assert.equal(
-                await operationReceiptCount(pool, refusedRun),
-                0,
-                'an actor without a current grant must leave no committed operation receipt',
-              );
-              assert.equal(await runStatus(pool, refusedRun), 'SUSPENDED');
-              assert.equal(await journalCount(pool, refusedRun, 'RESULT'), 0);
-              assert.deepEqual(
-                await restarted.remedy(
-                  operator,
-                  [refusedRun, firstRun],
-                  'cancel',
-                ),
-                [
-                  { runId: refusedRun, outcome: 'cancelled' },
-                  { runId: firstRun, outcome: 'ineligible' },
-                ],
-              );
-              assert.equal(await runStatus(pool, refusedRun), 'CANCELLED');
+              try {
+                await restarted.step(scope, refusedRun);
+                assert.equal(
+                  await operationReceiptCount(pool, refusedRun),
+                  0,
+                  'an actor without a current grant must leave no committed operation receipt',
+                );
+                assert.equal(await runStatus(pool, refusedRun), 'SUSPENDED');
+                assert.equal(await journalCount(pool, refusedRun, 'RESULT'), 0);
+                assert.deepEqual(
+                  await restarted.remedy(
+                    operator,
+                    [refusedRun, firstRun],
+                    'cancel',
+                  ),
+                  [
+                    { runId: refusedRun, outcome: 'cancelled' },
+                    { runId: firstRun, outcome: 'ineligible' },
+                  ],
+                );
+                assert.equal(await runStatus(pool, refusedRun), 'CANCELLED');
+              } finally {
+                await provisionLocalDemoAuthorization(
+                  pool,
+                  automation,
+                  bindings,
+                  'workflow-receipt-automation',
+                );
+              }
             },
           );
           const scheduled = await startComposedApplication({
