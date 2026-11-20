@@ -10,9 +10,7 @@ Slice 0 established [ADR-0086](../../decisions/ADR-0086-board-calendar-and-resou
 - Slice 1a uses the existing INTERACT-1 Task. It has no dependency on UI-COMPOSE-1 pop-ups. ADR-0082’s amendment re-read returned ACCEPT WITH AMENDMENTS. BOOKING-1 is applying A8, the `booking.resourceWindow/v1` contract. Slice 3b waits for BOOKING-1 slices 1a, 2 and 3. The Booking calendar separately requires its owner-collection window query.
 - Each executable capability takes its reader rung at merge. This design allocates no rung or migration.
 
-Calendar slice 2 can bind a typed point or interval, and timeline slice 3a a typed interval, by stable field ID and an expected-contract pin once the corresponding CUSTOMIZE-5 slice ships. The pin must match the field’s granularity and end convention. The view chooses its axis zone independently. For a two-date source, the view declares the convention and pins ADR-0083 A1 for derived midnight, business-day and inclusive-successor boundaries (first valid instant after a gap, earlier offset in a repeated hour). Slice 2 proves Toronto March 8 leave occupies March 8 alone on a Vancouver calendar through both paths. [ADR-0087](../../decisions/ADR-0087-tenant-date-time-and-interval-fields.md)
-
-Plan §8.6 item-4 evidence pairs the reference survey with the executable slice 1a walkthrough; that walkthrough is due with 1a.
+Tenant date-time/interval field authoring is queued separately with its own patch member and rung. Plan §8.6 item-4 evidence pairs the reference survey with the executable slice 1a walkthrough; that walkthrough is due with 1a.
 
 ## Gates
 

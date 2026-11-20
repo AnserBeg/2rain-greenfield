@@ -14,8 +14,6 @@ Fable’s narrow re-read accepted ADR-0082 with amendments. A1–A3 gate 1a, A4�
 6. Customize versions and retires both bindings. The Operation catalog gates entity declarations and the Surface manifest gates the picker. Dates and quantities on an owner line come from its booking.
 7. A hold is reversible. Workflows need recorded human approval even for a hold. No rung or migration is assigned by this amendment.
 
-Follow up ADR-0087 A3 by reconciling ADR-0082’s refusal of an unresolved date-only booking boundary with ADR-0083 A1 for system-derived boundaries.
-
 ## Checkpoints
 
 | Slice | Outcome and gate |
