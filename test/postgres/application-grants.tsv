@@ -190,8 +190,9 @@ north_star_workflow_worker	platform.workflow_pending_approvals	SELECT	*	Advance 
 north_star_workflow_worker	platform.workflow_receipt_scan_positions	INSERT	*	Advance and recover durable workflow executions on the worker connection.
 north_star_workflow_worker	platform.workflow_receipt_scan_positions	SELECT	*	Advance and recover durable workflow executions on the worker connection.
 north_star_workflow_worker	platform.workflow_receipt_scan_positions	UPDATE	fence,next_outbox_id,pointer_id	Advance and recover durable workflow executions on the worker connection.
+north_star_workflow_worker	platform.workflow_retry_decisions	SELECT	*	Validate a recorded human Retry before replay or effect dispatch.
 north_star_workflow_worker	platform.workflow_runs	INSERT	*	Advance and recover durable workflow executions on the worker connection.
 north_star_workflow_worker	platform.workflow_runs	SELECT	*	Advance and recover durable workflow executions on the worker connection.
-north_star_workflow_worker	platform.workflow_runs	UPDATE	execution_fence,poll_order,reason,status	Advance and recover durable workflow executions on the worker connection.
+north_star_workflow_worker	platform.workflow_runs	UPDATE	poll_order	Advance the worker polling cursor.
 north_star_workflow_worker	platform.workflow_timers	INSERT	*	Advance and recover durable workflow executions on the worker connection.
 north_star_workflow_worker	platform.workflow_timers	SELECT	*	Advance and recover durable workflow executions on the worker connection.
