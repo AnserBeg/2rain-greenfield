@@ -6,14 +6,14 @@ Slice 2a adds reviewed staff decisions. [Slice 1 and its gates](https://github.c
 
 - Release approval freezes the verified candidate, preparation, reviewed diff, source pointer and fence. The isolated activation verifier consumes the evidence and creates the prebound attempt in one transaction. The verifier reads the kernel’s scoped release evidence. It can update only the pointer’s release ID and fence. The kernel checks current authority, performs the swap and reads back the generation.
 - Customize uses the same release approval, with the exact patch payloads, bases and reviewed diff in the proof. A fresh passkey confirmation binds the principal, assurance, authentication time and decision time.
-- Retry records the company, suspended run, occurrence, definition, journal and original and restored fences. WORKFLOW-1’s join is the transaction that writes its retry decision and resumes the run. The database requires a matching proof consumption in the same transaction. Pilot scheduling remains closed pending effect reconciliation and that join.
+- Retry records the company, suspended run, occurrence, definition, journal and original and restored fences. WORKFLOW-1’s canonical remedy writer records the proof, restores the run fence and appends the control journal entry in the consumption transaction. The worker reconciles committed effects before further dispatch. Pilot scheduling stays closed.
 - Release and Customize cover every company on the environment pointer and require an unscoped membership. Retry takes the company from the event and checks the operator’s live membership. A reviewed batch binds each named target and its ordered aggregate.
 - Slice 2b stays closed pending CONNECT-1’s canonical connection and outward-send records and their writers. Only a database explicitly claimed for the local demo grants direct address installation writes. Pilot enablement awaits a proof-consuming function.
 - This slice uses a forward database migration and the existing surface reader. The orchestrator owns the independent post-merge read.
 
 ## Gates and test it yourself
 
-The four database controls temporarily remove single use, decision digest, scope and current authority in a disposable database. [Focused evidence run](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44793117835)
+The four database controls temporarily remove single use, decision digest, scope and current authority in a disposable database. [Focused evidence run](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44811891168)
 
 Run `node --import tsx --test test/postgres/release-approval.test.ts`. The staff subtest checks release and Customize decisions, refuses activation after membership loss, then observes a verified swap. The Retry case runs in `test/postgres/workflow-consumer.test.ts`. [Staff pilot instructions](../../operations/staff-signin.md#approvals-and-activation)
 
@@ -21,12 +21,12 @@ Run `node --import tsx --test test/postgres/release-approval.test.ts`. The staff
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "SIGNIN-1",
-  "base": "3968bffe44e89f1829536d3271b1d8fbf7de12e2",
-  "head": "285309aadfcdfcdfe70012e4fe701e84a7fdc8b2",
+  "base": "faf1b947c95c86403c838fcdbc0ff337d988c684",
+  "head": "88b5a905382158fa705f6a14e0d33d47626e4d55",
   "changedPaths": [
     "apps/api/src/staff-decisions.ts", "apps/api/src/staff-identity-http.ts",
     "apps/api/src/staff-identity.ts", "apps/api/src/staff-main.ts",
-    "apps/api/src/staff-protocol.ts", "db/migrations/0054_staff_decision_proofs.sql",
+    "apps/api/src/staff-protocol.ts", "db/migrations/0055_staff_decision_proofs.sql",
     "db/schema.snapshot.json",
     "docs/execution/packets/CONNECT-1.md", "docs/execution/packets/SIGNIN-1.md",
     "docs/operations/staff-signin.md",
