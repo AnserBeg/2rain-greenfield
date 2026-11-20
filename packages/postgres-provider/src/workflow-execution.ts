@@ -123,6 +123,12 @@ export class WorkflowPermanentEffectFailure extends Error {
   override readonly name = 'WorkflowPermanentEffectFailure';
 }
 
+export class WorkflowRemedyRefused extends Error {
+  override readonly name = 'WorkflowRemedyRefused';
+}
+
+type WorkflowRemedyOutcome = 'retried' | 'cancelled' | 'ineligible' | 'refused';
+
 type Dispatch = {
   readonly run: Run;
   readonly cursor: number;
@@ -131,6 +137,15 @@ type Dispatch = {
 };
 
 type Journal = Awaited<ReturnType<typeof loadJournal>>;
+type RunKey = Pick<Run, 'tenant_id' | 'environment_id' | 'run_id'>;
+type WorkflowBusinessClock = (client: PoolClient) => Date | Promise<Date>;
+
+async function transactionTime(client: PoolClient): Promise<Date> {
+  const result = await client.query<{ instant: Date }>(
+    'SELECT transaction_timestamp() AS instant',
+  );
+  return result.rows[0]!.instant;
+}
 
 export class PostgresWorkflowExecution {
   constructor(
@@ -138,9 +153,11 @@ export class PostgresWorkflowExecution {
     private readonly runtimePool: Pool,
     private readonly gateway: WorkflowGateway,
     private readonly afterOperationCommit?: () => Promise<void>,
+    private readonly businessClock: WorkflowBusinessClock = transactionTime,
   ) {}
 
   async tick(scope: WorkflowScope): Promise<void> {
+    await this.#wakeWaiting(scope);
     const candidates = await withWorkflowTransaction(
       this.workerPool,
       scope,
@@ -172,6 +189,53 @@ export class PostgresWorkflowExecution {
     }
     if (failures.length)
       throw new AggregateError(failures, 'Workflow run batch failed');
+  }
+
+  async #wakeWaiting(scope: WorkflowScope): Promise<void> {
+    await withWorkflowTransaction(this.workerPool, scope, async (client) => {
+      const pointer = await lockWorkflowPointer(client);
+      const scopeKey = [scope.tenant_id, scope.environment_id];
+      const stale = await client.query<RunKey & Pick<Run, 'execution_fence'>>(
+        `SELECT tenant_id, environment_id, run_id, execution_fence
+           FROM platform.workflow_runs
+          WHERE tenant_id = $1 AND environment_id = $2 AND status = 'WAITING'
+            AND (pointer_id, release_id, execution_fence) IS DISTINCT FROM ($3::uuid, $4::uuid, $5::bigint)
+          ORDER BY created_at, run_id LIMIT 16 FOR UPDATE SKIP LOCKED`,
+        [...scopeKey, pointer?.pointer_id, pointer?.release_id, pointer?.fence],
+      );
+      for (const run of stale.rows)
+        await setStatus(client, run, 'SUSPENDED', 'stale-release-pin');
+      if (!pointer) return;
+
+      const now = await this.businessClock(client);
+      await client.query(
+        `WITH ready AS (
+           SELECT r.run_id FROM platform.workflow_timers AS timer
+           JOIN platform.workflow_runs AS r USING (tenant_id, environment_id, run_id)
+            WHERE r.tenant_id = $1 AND r.environment_id = $2 AND r.status = 'WAITING'
+              AND (r.pointer_id, r.release_id, r.execution_fence) = ($3, $4, $5)
+              AND timer.due_at <= $6
+              AND NOT EXISTS (
+                SELECT 1 FROM platform.workflow_journal AS j
+                 WHERE (j.tenant_id, j.environment_id, j.run_id, j.cursor) =
+                       (timer.tenant_id, timer.environment_id, timer.run_id, timer.cursor)
+                   AND j.kind = 'RESULT'
+              )
+            ORDER BY timer.due_at, r.run_id, timer.cursor
+            LIMIT 16 FOR UPDATE OF r SKIP LOCKED
+         )
+         UPDATE platform.workflow_runs AS r SET status = 'RUNNABLE'
+           FROM ready
+          WHERE r.tenant_id = $1 AND r.environment_id = $2 AND r.run_id = ready.run_id`,
+        [
+          ...scopeKey,
+          pointer.pointer_id,
+          pointer.release_id,
+          pointer.fence,
+          now,
+        ],
+      );
+    });
   }
 
   async step(scope: WorkflowScope, runId: string): Promise<void> {
@@ -235,6 +299,41 @@ export class PostgresWorkflowExecution {
           return null;
         }
         const { call, cursor } = decision;
+        if (call.kind === 'now') {
+          const now = await this.businessClock(client);
+          await insertJournal(client, current, cursor, 'REQUEST', call);
+          await insertJournal(
+            client,
+            current,
+            cursor,
+            'RESULT',
+            now.toISOString(),
+          );
+          return null;
+        }
+        if (call.kind === 'sleep') {
+          const now = await this.businessClock(client);
+          if (!journal.pending) {
+            await insertJournal(client, current, cursor, 'REQUEST', call);
+            await client.query(
+              `INSERT INTO platform.workflow_timers
+                 (tenant_id, environment_id, run_id, cursor, due_at)
+               VALUES ($1, $2, $3, $4, $5::timestamptz + $6::double precision * INTERVAL '1 millisecond')`,
+              [...runKey(current), cursor, now, call.milliseconds],
+            );
+          }
+          const timer = await client.query<{ due: boolean }>(
+            `SELECT due_at <= $5 AS due FROM platform.workflow_timers
+              WHERE tenant_id = $1 AND environment_id = $2 AND run_id = $3 AND cursor = $4`,
+            [...runKey(current), cursor, now],
+          );
+          if (!timer.rows[0])
+            await setStatus(client, current, 'QUARANTINED', 'missing-timer');
+          else if (timer.rows[0].due)
+            await insertJournal(client, current, cursor, 'RESULT', null);
+          else await setStatus(client, current, 'WAITING', null);
+          return null;
+        }
         if (call.kind === 'requestApproval') {
           if (
             !('operationId' in call) ||
@@ -368,7 +467,7 @@ export class PostgresWorkflowExecution {
   ): Promise<
     readonly {
       runId: string;
-      outcome: 'retried' | 'cancelled' | 'ineligible';
+      outcome: WorkflowRemedyOutcome;
     }[]
   > {
     assertTrustedRequestContext(operator);
@@ -380,7 +479,7 @@ export class PostgresWorkflowExecution {
     };
     const results: {
       runId: string;
-      outcome: 'retried' | 'cancelled' | 'ineligible';
+      outcome: WorkflowRemedyOutcome;
     }[] = [];
     for (const runId of new Set(runIds)) {
       const snapshot = await this.#snapshot(scope, runId);
@@ -391,9 +490,8 @@ export class PostgresWorkflowExecution {
           : null;
       const recovered = pending && (await this.#readReceipt(pending));
       // Hold current operator authority through each committed transition.
-      const outcome = await this.gateway.withRemedyAuthority(
-        operator,
-        async () => {
+      const outcome = await this.gateway
+        .withRemedyAuthority(operator, async () => {
           if (!snapshot) return 'ineligible' as const;
           const applied = await this.#withCurrent(
             snapshot.run,
@@ -464,8 +562,23 @@ export class PostgresWorkflowExecution {
             },
           );
           return applied ?? 'ineligible';
-        },
-      );
+        })
+        .catch(async (error: unknown) => {
+          if (!(error instanceof WorkflowRemedyRefused)) throw error;
+          if (snapshot)
+            await this.#withCurrent(
+              snapshot.run,
+              snapshot.journal,
+              (client, run) =>
+                recordControl(
+                  client,
+                  run,
+                  `${action}-refused`,
+                  operator.principalId,
+                ),
+            );
+          return 'refused' as const;
+        });
       results.push({ runId, outcome });
     }
     return results;
@@ -821,7 +934,7 @@ function isEffect(call: WorkflowCall): call is EffectCall {
 
 async function insertJournal(
   client: PoolClient,
-  run: Run,
+  run: RunKey,
   cursor: number,
   kind: JournalRow['kind'] | 'CONTROL',
   value: unknown,
@@ -836,7 +949,7 @@ async function insertJournal(
 
 async function setStatus(
   client: PoolClient,
-  run: Run,
+  run: RunKey & Pick<Run, 'execution_fence'>,
   status: Run['status'],
   reason: string | null,
   operator: string | null = null,
@@ -851,7 +964,7 @@ async function setStatus(
 
 async function recordControl(
   client: PoolClient,
-  run: Run,
+  run: RunKey & Pick<Run, 'execution_fence'>,
   reason: string,
   operator: string | null,
   fence = run.execution_fence,
@@ -875,7 +988,7 @@ function runtimeAvailable(run: Run): boolean {
   );
 }
 
-function runKey(run: Run): [string, string, string] {
+function runKey(run: RunKey): [string, string, string] {
   return [run.tenant_id, run.environment_id, run.run_id];
 }
 

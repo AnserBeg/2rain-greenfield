@@ -21,6 +21,10 @@ h1,h2,h3,strong,th{font-weight:600}
 summary,label{font-weight:500}
 table{font:inherit;color:inherit;border-collapse:collapse}
 button,input,select,textarea{font:inherit;color:inherit}
+.workflow-plan-input{overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
+[data-workflow-approval] dl{overflow-wrap:anywhere}
+[data-workflow-approvals] button{min-height:44px}
+[data-workflow-approvals] li label{display:inline-flex;align-items:center;gap:8px;min-height:44px;overflow-wrap:anywhere}
 a{color:var(--accent-text);text-decoration:none}
 a:hover{text-decoration:underline;text-underline-offset:2px}
 a:not(.skip-link):not(.sidebar a):focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:not(.navigation-group > summary):not(.navigation-settings > summary):focus-visible,[tabindex]:not(a):focus-visible{outline:2px solid var(--focus-ring-surface);outline-offset:2px}

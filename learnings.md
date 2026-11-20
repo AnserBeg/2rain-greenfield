@@ -799,3 +799,8 @@ How to apply: Read the compiler-declared owner under the write lock and evaluate
 Date: 2026-11-19
 Why: A worker-written instance can cite a valid source event while supplying a different company and record.
 How to apply: Resolve scope from the event and its linked change document under the exact tenant, environment, and release before the guest or gateway sees it. [WORKFLOW-1](docs/execution/packets/WORKFLOW-1-threat-model-fix.md)
+
+## Give approval mutation probes their own runs
+Date: 2026-11-19
+Why: Bypassing the company guard changed a pending run that a later positive test reused, hiding the later release-verification check.
+How to apply: Use an independent occurrence for each authorization probe. Observe its decision and journal rows without making later checks depend on its state.
