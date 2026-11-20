@@ -40,8 +40,8 @@
       "name": "workflow-dispatch-role-narrowing",
       "claim": "Pinned role narrowing applies to both live workflow principals.",
       "file": "packages/postgres-provider/src/workflow-gateway.ts",
-      "original": "      bindings,\n      operations,\n",
-      "replacement": "      bindings,\n",
+      "original": "    const current = new PostgresCurrentPolicyGateway(\n      this.pool,\n      bindings,\n      operations,\n    );",
+      "replacement": "    const current = new PostgresCurrentPolicyGateway(\n      this.pool,\n      bindings,\n    );",
       "test": {
         "files": ["test/postgres/workflow-consumer.test.ts"]
       },
