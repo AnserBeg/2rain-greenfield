@@ -284,6 +284,26 @@ test('comparison canary reports exactly an unreachable synthetic test', () => {
   assert.deepEqual(unreachable, ['test/orphan-demo/orphan.test.ts']);
 });
 
+test('quick reachability requires every selected file while allowing the named omissions', () => {
+  withFixtureRepository((root, producer, evidence) => {
+    const requiredFiles = new Set(['test/example.test.ts']);
+    const skipped = 'test/unrelated.test.ts';
+    writeFileSync(resolve(root, skipped), 'export {};\n');
+    writeEvidence(root, producer, evidence);
+    assert.equal(
+      aggregateEvidence(root, [producer], { environment: {}, requiredFiles })
+        .discoveredCount,
+      1,
+    );
+    requiredFiles.add(skipped);
+    assert.throws(
+      () =>
+        aggregateEvidence(root, [producer], { environment: {}, requiredFiles }),
+      /Unreachable test files: test\/unrelated.test.ts/u,
+    );
+  });
+});
+
 test('aggregator fails closed on incomplete or invalid evidence', () => {
   withFixtureRepository((root, producer, evidence) => {
     assert.throws(

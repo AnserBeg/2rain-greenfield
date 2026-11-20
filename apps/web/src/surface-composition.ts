@@ -1,3 +1,4 @@
+import { SavedAddressSchema } from '@north-star/canonical-model';
 import { randomUUID } from 'node:crypto';
 import type { SurfaceComposition } from '../../../packages/canonical-model/src/index.js';
 import { calculatedDisplaysForQuery } from '../../../packages/runtime/src/calculated-display.js';
@@ -263,6 +264,8 @@ export function displayFieldValue(
   value: ImmutableJsonValue,
 ): string {
   const field = presentedField(view, fieldId);
+  if (field?.kind === 'addressFieldType')
+    return SavedAddressSchema.safeParse(value).data?.text ?? '';
   if (field?.kind === 'enumFieldType')
     return (
       field.options.find((option) => option.optionId === value)?.label ??

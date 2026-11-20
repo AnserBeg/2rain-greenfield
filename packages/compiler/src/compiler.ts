@@ -1,4 +1,9 @@
 import {
+  addressColumnId,
+  addressComponents,
+} from '@north-star/canonical-model';
+import { compileAddressBindings } from './address.js';
+import {
   BOOKING_OPERATION_READER,
   bookingDeclarationProblem,
   bookingCatalogTerms,
@@ -415,6 +420,23 @@ function compileApplicationInternal(
   }
 
   const formula = compileLiteralFormulaRules(packageRevision);
+  const address = compileAddressBindings(packageRevision);
+  if (address && 'message' in address) {
+    return failure(
+      [
+        {
+          ...compilerDiagnostic(
+            'COMPILER_TYPE_INVALID',
+            'typeCheck',
+            '$.connectorBindings',
+            address.subjectId,
+          ),
+          rule: address.message,
+        },
+      ],
+      maximumDiagnostics,
+    );
+  }
   const billingProblem = billingBindingProblem(packageRevision);
   if (billingProblem)
     return failure(
@@ -517,6 +539,7 @@ function compileApplicationInternal(
       formula.status === 'compiled' ? formula.payload : null,
       displays.fields,
       documents?.payload,
+      address?.payload,
     ),
     packageRevision,
   );
@@ -1493,7 +1516,9 @@ function projectionDispatchRevision(
               })),
               schemaVersion: LANGUAGE_VERSION,
             }
-          : { ...field.fieldType, schemaVersion: LANGUAGE_VERSION },
+          : field.fieldType.kind === 'addressFieldType'
+            ? field.fieldType
+            : { ...field.fieldType, schemaVersion: LANGUAGE_VERSION },
     })),
     languageVersion: LANGUAGE_VERSION,
     operations: packageRevision.operations.map((operation) => ({
@@ -2327,7 +2352,13 @@ function verifyCompleteness(
       )
     : [...collectStorageFields(emittedStorage).keys()];
   const expectedFields = new Set(
-    packageRevision.fields.map((field) => field.fieldId),
+    packageRevision.fields.flatMap((field) =>
+      field.fieldType.kind === 'addressFieldType'
+        ? addressComponents.map((component) =>
+            addressColumnId(field.fieldId, component),
+          )
+        : [field.fieldId],
+    ),
   );
   if (!setsEqual(new Set(storageFieldIds), expectedFields)) {
     diagnostics.push(

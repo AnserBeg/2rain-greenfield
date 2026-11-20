@@ -1,3 +1,4 @@
+import { SavedAddressSchema } from '@north-star/canonical-model';
 import type {
   SurfaceList,
   SurfaceListRowAction,
@@ -742,6 +743,8 @@ export function declaredCellText(
   if (column.format === 'money' && typeof value === 'string')
     return moneyText(value);
   if (present) return present(record, column.field, value);
+  const address = SavedAddressSchema.safeParse(value);
+  if (address.success) return address.data.text;
   const display = record.displayValues?.[column.field];
   if (typeof display === 'string') return display;
   return typeof value === 'string' ? value : JSON.stringify(value);
@@ -967,21 +970,56 @@ export function declaredListCsv(
   records: readonly SemanticRecordDto[],
   presentLabel: FieldPresenter,
   viewId: string | null = null,
+  addressIds: ReadonlySet<string> = new Set(),
 ): string {
+  const parts = [
+    'text',
+    'lines',
+    'city',
+    'region',
+    'postalCode',
+    'country',
+  ] as const;
+  const labels = [
+    'Address',
+    'Address lines',
+    'City',
+    'Region',
+    'Postal code',
+    'Country',
+  ];
   const columns = orderedColumns(list, viewId);
   const rows = [
-    columns.map((column) => csvCell(column.label)).join(','),
+    columns
+      .flatMap((c) =>
+        addressIds.has(c.field)
+          ? labels.map((l) => csvCell(c.label + ' · ' + l))
+          : [csvCell(c.label)],
+      )
+      .join(','),
     ...records.map((record) =>
       columns
-        .map((column) =>
-          csvCell(
-            declaredCellText(
-              { ...column, format: undefined },
-              record,
-              presentLabel,
-            ),
-          ),
-        )
+        .flatMap((c) => {
+          if (!addressIds.has(c.field))
+            return [
+              csvCell(
+                declaredCellText(
+                  { ...c, format: undefined },
+                  record,
+                  presentLabel,
+                ),
+              ),
+            ];
+          const address = SavedAddressSchema.safeParse(
+            record.values[c.field],
+          ).data;
+          return parts.map((key) => {
+            const part = address?.[key];
+            return csvCell(
+              Array.isArray(part) ? part.join(' / ') : (part ?? null),
+            );
+          });
+        })
         .join(','),
     ),
   ];

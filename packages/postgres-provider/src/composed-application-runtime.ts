@@ -1,3 +1,4 @@
+import type { AddressGateway } from '../../runtime/src/address-gateway.js';
 import type { DocumentGateway } from '../../runtime/src/document-gateway.js';
 import {
   DEMO_DOCUMENT_SCANNER,
@@ -199,6 +200,7 @@ export interface ComposedApplicationRuntime {
   readonly customizationUpgrade: UpgradePreparation | null;
   readonly activeReleaseId: MintedUuid;
   readonly entry: AuthenticatedRequestRuntimeEntryAdapter;
+  readonly addresses: AddressGateway;
   readonly documents: DocumentGateway | null;
   readonly freshTenantInstallEvidence: FreshTenantInstallEvidence | null;
   readonly identity: AuthenticatedIdentity;
@@ -434,6 +436,7 @@ export async function createComposedApplicationRuntime(
       operationMediation,
       queryGateway,
       policy,
+      addresses,
       documents,
     } = composeServingGateways(
       runtimePool,
@@ -475,6 +478,7 @@ export async function createComposedApplicationRuntime(
         await Promise.all(pools.map((pool) => pool.end()));
       },
       entry,
+      addresses,
       documents,
       freshTenantInstallEvidence,
       identity: identities.runtime,
