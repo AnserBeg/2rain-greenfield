@@ -7,10 +7,7 @@ import { git } from '../.github/scripts/ci-selection.mjs';
 // Legacy records predate tiers. Resolve the introduction on the current
 // first-parent lineage, so other packets that landed before rollout are legacy.
 const main = git('branch', '--remotes', '--list', 'origin/main').trim();
-const history =
-  main && git('ls-tree', main, '--', 'scripts/check-record-ci-tier.mjs')
-    ? main
-    : 'HEAD';
+const history = main || 'HEAD';
 const introduced = git(
   'log',
   '--first-parent',
@@ -22,7 +19,9 @@ const introduced = git(
 )
   .trim()
   .split('\n')[0];
-const baseline = introduced ? `${introduced}^1` : 'HEAD';
+const baseline = introduced
+  ? `${introduced}^1`
+  : git('merge-base', history, 'HEAD').trim();
 const directory = 'docs/execution/packets';
 const legacy = new Set(
   git('ls-tree', '-rz', '--name-only', baseline, '--', directory).split('\0'),

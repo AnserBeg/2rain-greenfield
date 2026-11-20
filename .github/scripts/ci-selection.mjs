@@ -34,7 +34,7 @@ export const sourceCoverage = new Map([
 ]);
 
 const shared =
-  /(?:^|\/)(?:package\.json|pnpm-lock\.yaml|fixtures?|helpers?|[^/]*[-.]fixture(?:\.[^/]*)?|[^/]*gateway[^/]*\.ts)(?:\/|$)|^(?:\.github|db|scripts|packages\/(?:canonical-model|compiler|runtime))\//u;
+  /(?:^|\/)(?:package\.json|pnpm-lock\.yaml|fixtures?|helpers?|[^/]*[-.]fixture(?:\.[^/]*)?)(?:\/|$)|^(?:\.github|db|scripts|packages\/(?:canonical-model|compiler|runtime))\//u;
 const nodeFile =
   /^test\/(?:architecture|unit|compiler|agent|integration|postgres)\/(?:[\w-]+\/)*[\w-]+\.test\.ts$/u;
 const browserFile =

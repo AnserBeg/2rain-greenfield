@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import test from 'node:test';
 import {
   existsSync,
@@ -12,6 +12,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { quickSelection } from '../helpers/quick-ci.js';
 
 // The selector and merge gate also run on a clean checkout before pnpm install.
 function probe(module: string, expression: string, cwd = process.cwd()) {
@@ -200,5 +201,82 @@ test('check-records rejects a new packet missing the tier attached to its CI run
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the token command refuses red main and an integration without exact full evidence', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ci-3-window-'));
+  const repo = join(dir, 'repo');
+  const git = (...args: string[]) =>
+    execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
+  try {
+    mkdirSync(repo);
+    git('init', '--quiet', '-b', 'main');
+    git('config', 'user.name', 'Fixture');
+    git('config', 'user.email', 'fixture@example.invalid');
+    writeFileSync(join(repo, 'AGENTS.md'), readFileSync('AGENTS.md'));
+    git('add', 'AGENTS.md');
+    git('commit', '-qm', 'main');
+    git('init', '--quiet', '--bare', join(dir, 'origin.git'));
+    git('remote', 'add', 'origin', join(dir, 'origin.git'));
+    git('push', '--quiet', 'origin', 'main');
+    git('switch', '-qc', 'packet/fixture');
+    mkdirSync(join(repo, 'db/migrations'), { recursive: true });
+    writeFileSync(join(repo, 'db/migrations/change.sql'), 'SELECT 1;');
+    git('add', 'db/migrations/change.sql');
+    git('commit', '-qm', 'packet');
+    git('switch', '-q', 'main');
+    git('merge', '--quiet', '--no-ff', 'packet/fixture', '-m', 'candidate');
+    const candidate = git('rev-parse', 'HEAD');
+    writeFileSync(
+      join(dir, 'gh'),
+      `#!/bin/sh
+case "$2" in
+  *branch=main*) printf '{"workflow_runs":[{"status":"completed","conclusion":"%s","html_url":"fixture"}]}' "$MAIN_RESULT" ;;
+  *head_sha=*) echo '{"workflow_runs":[]}' ;;
+  *) exit 2 ;;
+esac
+`,
+      { mode: 0o755 },
+    );
+    for (const [state, reason] of [
+      ['failure', /Merge window closed by main CI/u],
+      ['success', /Missing green full CI on exact integration commit/u],
+    ] as const) {
+      const check = spawnSync(
+        process.execPath,
+        [resolve(windowGate), 'fixture', candidate],
+        {
+          cwd: repo,
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            MAIN_RESULT: state,
+            PATH: `${dir}:${process.env.PATH}`,
+          },
+        },
+      );
+      assert.equal(check.status, 1);
+      assert.match(check.stderr, reason);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a newly selected unit or compiler file outside the fixed argv is scheduled by name', () => {
+  const paths = [
+    'test/compiler/new.test.ts',
+    'test/unit/new.test.ts',
+    'test/architecture/new.test.ts',
+    'test/unit/request-work-meter.test.ts',
+  ];
+  const old = process.env.CI_FILES;
+  try {
+    process.env.CI_FILES = JSON.stringify(paths);
+    assert.deepEqual(quickSelection().nodeFiles, paths.slice(0, 2));
+  } finally {
+    if (old === undefined) delete process.env.CI_FILES;
+    else process.env.CI_FILES = old;
   }
 });
