@@ -63,7 +63,6 @@ const identities = new Map<string, AuthenticatedIdentity>([
 test('migrations upgrade accepted G1 and converge with the checked-in snapshot', async () => {
   await withEphemeralPostgres('trust-upgrade', async ({ pool }) => {
     const migrations = await loadMigrations(checkedInMigrations);
-    assert.equal(migrations.at(-1)?.name, '0049_staff_login_creation.sql');
     assert.equal(
       migrations.at(-1)?.name,
       '0050_generated_document_sources.sql',
