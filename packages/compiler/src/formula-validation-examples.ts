@@ -88,6 +88,9 @@ function syntheticScalars(
   switch (type.kind) {
     case 'address':
       return [{ kind: 'text', value: '1 Main Street' }];
+    case 'dateTime':
+      // Written as typed entry by the verifier (ADR-0087).
+      return [{ kind: 'text', value: '2026-01-01T12:34' }];
     case 'boolean':
       return [true, false].map((value) => ({ kind: 'boolean', value }));
     case 'date': {

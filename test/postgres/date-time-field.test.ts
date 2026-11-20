@@ -239,8 +239,8 @@ test(
           assert.deepEqual(names, [
             'Sooner',
             'Later',
-            'Default zone',
-            'Linked zone',
+            'Linked zone', // 12:00 Toronto, 17:00Z
+            'Default zone', // 12:00 Edmonton, 19:00Z
             'Earlier boiler',
           ]);
           const display = listed.records.find(

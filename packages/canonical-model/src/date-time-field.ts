@@ -414,3 +414,113 @@ export function formatCivilDate(isoDate: string): string {
   if (!match) throw new Error('A civil date is malformed.');
   return `${MONTHS[Number(match[2]) - 1]} ${Number(match[3])}, ${match[1]}`;
 }
+
+export interface DateTimeRefusal {
+  readonly subjectId: string;
+  readonly path: string;
+  readonly message: string;
+}
+type Json = Record<string, unknown>;
+
+// Positions where the logical field is admitted: the field itself, its
+// declaration, the governed read (selection), entry (form, header editor),
+// display (record composition, list column, layouts) and the message anchor of
+// a presence rule. Everything else is a consumer v1 refuses.
+const ADMITTED = new Set([
+  'fields.fieldId',
+  'dateTimeFields.fieldId',
+  'queries.selections.field.targetId',
+  'surfaces.form.fields.fieldId',
+  'surfaces.documentEditor.headerFields.fieldId',
+  'surfaces.composition.fields.field',
+  'surfaces.list.columns.field',
+  'formulaRules.fieldAnchors',
+]);
+
+const CONSUMERS: readonly (readonly [string, string])[] = [
+  ['surfaces.list.filters', 'list filter'],
+  ['surfaces.list.views.filters', 'saved view filter'],
+  ['surfaces.list.views.before', 'list view date condition'],
+  ['surfaces.list.figures', 'list figure'],
+  ['surfaces.list.searchChildren', 'search'],
+  ['surfaces.launcher.metrics', 'metric card'],
+  ['queries.listSumFields', 'metric card'],
+  ['queries.aggregate', 'metric card'],
+  ['queries.resolveMatchKeys', 'search'],
+  ['queries.filter', 'filter'],
+  ['calculatedDisplayFields', 'calculated operand'],
+  ['workflows', 'workflow condition'],
+];
+
+function consumerFor(path: string): string {
+  return (
+    CONSUMERS.find(([prefix]) => path.startsWith(prefix))?.[1] ??
+    `consumer ${path}`
+  );
+}
+
+/**
+ * The first consumer of an active logical dateTime field that v1 does not
+ * admit, by logical type, before any backing scalar is inspected. Normalization
+ * and the compiler both call it, so every channel and forged bytes refuse alike.
+ */
+export function dateTimeConsumerRefusal(
+  def: Record<string, unknown>,
+  ids: ReadonlySet<string>,
+): DateTimeRefusal | null {
+  let found: DateTimeRefusal | null = null;
+  const walk = (value: unknown, keys: string[], ancestors: Json[]) => {
+    if (found) return;
+    if (typeof value === 'string') {
+      if (!ids.has(value)) return;
+      const path = keys.join('.');
+      if (ADMITTED.has(path) || path.startsWith('surfaces.layouts.')) return;
+      if (path.startsWith('formulaRules.')) {
+        const operand = ancestors.findLast(
+          (node) => node.kind === 'field' || node.kind === 'path',
+        );
+        const owner = ancestors.findLast(
+          (node) => node.kind === 'required' || node.kind === 'comparison',
+        );
+        // Presence on the whole value is admitted; everything else is a gap.
+        if (
+          owner?.kind === 'required' &&
+          operand?.kind === 'field' &&
+          operand.select === 'value'
+        )
+          return;
+        const position =
+          operand?.select === 'textLength'
+            ? 'maximum length'
+            : operand?.kind === 'path'
+              ? 'to-one comparison operand'
+              : owner?.kind === 'comparison'
+                ? 'comparison operand'
+                : 'rule operand';
+        found = {
+          subjectId: value,
+          path: '$.formulaRules',
+          message: `dateTime field ${value} cannot be a ${position}; comparing date-time values is a capability gap.`,
+        };
+        return;
+      }
+      found = {
+        subjectId: value,
+        path: `$.${keys[0] ?? ''}`,
+        message: `dateTime field ${value} cannot be used as a ${consumerFor(path)}; that is a capability gap for the dateTime type.`,
+      };
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item, keys, ancestors);
+      return;
+    }
+    if (value && typeof value === 'object') {
+      const node = value as Json;
+      for (const [key, child] of Object.entries(node))
+        walk(child, [...keys, key], [...ancestors, node]);
+    }
+  };
+  walk(def, [], []);
+  return found;
+}

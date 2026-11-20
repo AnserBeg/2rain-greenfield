@@ -1,4 +1,5 @@
 import { normalizeBillingPlan } from './billing-normalization.js';
+import { dateTimeConsumerRefusal } from './date-time-field.js';
 import {
   validateSurfaceCompositions,
   normalizeSurfaceComposition,
@@ -196,6 +197,34 @@ export function normalizeApplicationPackage(
   }
   enforceFamilyBounds(authored);
   validateAuthoredDerivedStateFields(authored);
+  // ADR-0087: an unadmitted consumer of a logical dateTime field refuses by
+  // logical type before any scalar-level rule sees its backing instant.
+  if (authored.languageVersion === 'v6' && authored.dateTimeFields) {
+    const declared = new Set(authored.dateTimeFields.map((d) => d.fieldId));
+    const active = new Set(
+      authored.fields
+        .filter(
+          (field) =>
+            declared.has(field.fieldId) &&
+            (field.lifecycle ?? 'active') === 'active',
+        )
+        .map((field) => field.fieldId),
+    );
+    const refusal = dateTimeConsumerRefusal(
+      authored as unknown as Record<string, unknown>,
+      active,
+    );
+    if (refusal)
+      throw new CanonicalModelError([
+        diagnostic(
+          'CANON_DATE_TIME_CONSUMER_UNSUPPORTED',
+          refusal.path,
+          refusal.message,
+          'display, sort, enter or require the dateTime field; other uses are capability gaps',
+          refusal.subjectId,
+        ),
+      ]);
+  }
   const fieldTypes = new Map(
     authored.fields.map((field) => [field.fieldId, field.fieldType] as const),
   );

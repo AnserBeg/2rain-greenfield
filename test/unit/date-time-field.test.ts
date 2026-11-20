@@ -53,6 +53,21 @@ const fieldId = appointment.fieldId;
 const patch = (input: unknown) =>
   customization.CustomizationPatchSchema.parse(input);
 
+function calculatedOnItem() {
+  const target = customization
+    .customizationTargets(normalizeApplicationPackage(base))
+    .calculatedDisplayTargets!.find(
+      (t) => t.recordSurfaceId === `${NS}:surface.item_detail`,
+    )!;
+  const draft = customization.calculatedDisplayDraft(target, {
+    label: 'Margin CAD',
+    operator: 'subtract',
+    leftFieldId: `${NS}:field.item_price_cad`,
+    rightFieldId: `${NS}:field.item_standard_cost_cad`,
+    listSurfaceId: `${NS}:surface.item_list`,
+  }) as unknown as { field: Record<string, unknown> };
+  return draft;
+}
 const note = {
   kind: 'addField',
   entity: equipment,
@@ -334,11 +349,20 @@ const consumers: [string, (def: Record<string, any>) => void, RegExp][] = [
   [
     'calculated display operand',
     (def) => {
-      def.calculatedDisplayFields = [
-        { fieldId: `${NS}:field.custom_equipment_forged`, operands: [fieldId] },
-      ];
+      const price = `${NS}:field.item_price_cad`;
+      const swap = (value: unknown): unknown =>
+        value === price
+          ? fieldId
+          : Array.isArray(value)
+            ? value.map(swap)
+            : value && typeof value === 'object'
+              ? Object.fromEntries(
+                  Object.entries(value).map(([k, v]) => [k, swap(v)]),
+                )
+              : value;
+      def.calculatedDisplayFields = [swap(calculatedOnItem().field)];
     },
-    /calculated operand|dateTime field/u,
+    /calculated operand/u,
   ],
 ];
 for (const [name, mutate, pattern] of consumers) {
@@ -444,6 +468,7 @@ test('presence is admitted on the whole value; comparison and length operands ar
 
 test('a saved list view filtering on the field refuses when saved, and a sort by it is admitted', async () => {
   const list = `${NS}:surface.custom_equipment_list`;
+  const title = `${NS}:list_column.custom_equipment_list_name`;
   const column = `${NS}:list_column.custom_equipment_list_custom_equipment_service_at`;
   const sorted = await compile([
     recordType,
@@ -452,7 +477,7 @@ test('a saved list view filtering on the field refuses when saved, and a sort by
       kind: 'saveListView',
       surface: list,
       label: 'By appointment',
-      columns: [column],
+      columns: [title, column],
       sort: [{ column, direction: 'ascending' }],
       filters: [],
     },
@@ -465,7 +490,7 @@ test('a saved list view filtering on the field refuses when saved, and a sort by
       kind: 'saveListView',
       surface: list,
       label: 'On a day',
-      columns: [column],
+      columns: [title, column],
       sort: [],
       filters: [{ field: fieldId, value: '2026-11-01' }],
     },

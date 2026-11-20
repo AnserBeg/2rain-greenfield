@@ -18,7 +18,15 @@ type Revision = Extract<
 >;
 type Field = Revision['fields'][number];
 export type FormulaValidationFieldType =
-  | { readonly kind: 'text' | 'boolean' | 'integer' | 'date' | 'address' }
+  | {
+      readonly kind:
+        | 'text'
+        | 'boolean'
+        | 'integer'
+        | 'date'
+        | 'address'
+        | 'dateTime';
+    }
   | {
       readonly kind: 'decimal';
       readonly precision: number;
@@ -250,6 +258,13 @@ export function bindLiteralValidation(
       )
       .map((field) => [field.fieldId, field]),
   );
+  // ADR-0087: a logical dateTime admits presence on its whole value only.
+  const dateTimeFieldIds = new Set(
+    (
+      (revision as { dateTimeFields?: readonly { fieldId: string }[] })
+        .dateTimeFields ?? []
+    ).map((declaration) => declaration.fieldId),
+  );
   const dependencies = new Map<string, FormulaValidationFieldType>();
   const contextDependencies = new Set<string>();
   const paths = new Map<string, BoundValidationPath>();
@@ -258,7 +273,11 @@ export function bindLiteralValidation(
   ): FormulaValidationFieldType | null => {
     if (operand.kind !== 'field') return null;
     const field = fields.get(operand.fieldId);
-    const type = field && formulaFieldType(field);
+    const type =
+      field &&
+      (dateTimeFieldIds.has(field.fieldId)
+        ? ({ kind: 'dateTime' } as const)
+        : formulaFieldType(field));
     if (!type || (operand.select === 'textLength' && type.kind !== 'text'))
       return null;
     dependencies.set(operand.fieldId, type);
@@ -284,7 +303,7 @@ export function bindLiteralValidation(
         return null;
       case 'comparison': {
         const left = fieldType(predicate.left);
-        if (!left || left.kind === 'address')
+        if (!left || left.kind === 'address' || left.kind === 'dateTime')
           return 'Compare a supported field on this record with a typed value.';
         if (
           predicate.operator !== 'equal' &&

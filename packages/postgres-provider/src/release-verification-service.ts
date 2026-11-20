@@ -2501,7 +2501,11 @@ class SemanticVerificationExecutor {
       writable.map((field) => [
         field.fieldId,
         Object.hasOwn(inputOverrides, field.fieldId)
-          ? inputOverrides[field.fieldId]
+          ? dateTimeFixtureValue(
+              storageEntity,
+              field.fieldId,
+              inputOverrides[field.fieldId],
+            )
           : verificationFieldValue(field, token, storageEntity),
       ]),
     );
@@ -3139,6 +3143,21 @@ function compiledProjectionBinding(
     contentHash: chunk.contentHash,
     payload: decode(chunk.canonicalBytes),
   });
+}
+
+/** A formula fixture's civil text becomes a whole typed dateTime entry. */
+function dateTimeFixtureValue(
+  entity: StorageTargetPayloadV1['entities'][number],
+  fieldId: string,
+  value: unknown,
+): unknown {
+  const dateTime = dateTimeCheck(entity, fieldId);
+  if (!dateTime || typeof value !== 'string') return value;
+  return {
+    schemaVersion: 'northstar.date-time-value/v1',
+    civil: value,
+    ...(dateTime.zoneSource === 'perRecordIana' ? { zone: 'Etc/UTC' } : {}),
+  };
 }
 
 function verificationFieldValue(
