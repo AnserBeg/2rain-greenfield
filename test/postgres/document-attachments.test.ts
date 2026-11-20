@@ -1,8 +1,11 @@
+import { CAPABILITY_EXECUTOR_FACTORIES } from '../../apps/api/src/erp-capabilities.js';
+import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import {
   COMPOSED_APPLICATION_INVENTORY_SCOPE,
+  readCompiledApplication,
   openCustomizeService,
   startComposedApplication,
 } from '../../apps/api/src/composition-root.js';
@@ -12,10 +15,13 @@ import {
   DOCUMENT_TENANT_MAX_BYTES,
   documentAttachOperation,
 } from '../../packages/canonical-model/src/documents.js';
-import type { DocumentMetadata } from '../../packages/runtime/src/document-gateway.js';
 import {
-  ensureScope,
+  DocumentRequestError,
+  type DocumentMetadata,
+} from '../../packages/runtime/src/document-gateway.js';
+import {
   rolePool,
+  createComposedApplicationRuntime,
   trustedContext,
 } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
@@ -40,7 +46,7 @@ const companySurface = 'northstar.app:surface.inventory_transaction_detail';
 test(
   'internal files use live record authority, scoped dedupe, bounded ingress and immutable audit',
   { timeout: 600_000 },
-  async () => {
+  async (t) => {
     await withEphemeralPostgres(
       'documents-internal',
       async ({ connection, pool }) => {
@@ -49,6 +55,7 @@ test(
           tenantSlug: 'documents-internal',
           port: 0,
         };
+        await pool.query("ALTER DATABASE postgres SET north_star.isolated_document_demo = 'on'");
         const app = await startComposedApplication({
           ...options,
           documentDemoScanner: true,
@@ -111,6 +118,11 @@ test(
             { code: 'NO_SUCH_REGISTERED_OPERATION' },
           );
 
+          await pool.query(`CREATE SEQUENCE public.observed_document_blob_writes;
+            CREATE FUNCTION public.count_document_blob_write() RETURNS trigger LANGUAGE plpgsql AS $$
+              BEGIN PERFORM nextval('public.observed_document_blob_writes'); RETURN NULL; END $$;
+            CREATE TRIGGER observe_blob_write AFTER INSERT OR UPDATE ON platform.document_blobs
+              FOR EACH ROW EXECUTE FUNCTION public.count_document_blob_write()`);
           const first = await upload(itemUrl, pixel, { retryKey });
           assert.equal(first.status, 201, await first.clone().text());
           const attachment = (await first.json()) as DocumentMetadata;
@@ -127,7 +139,22 @@ test(
             ((await second.json()) as DocumentMetadata).versionId,
             attachment.versionId,
           );
-          assert.equal((await upload(companyUrl, pixel)).status, 201);
+          const companyUpload = await upload(companyUrl, pixel);
+          assert.equal(companyUpload.status, 201);
+          const companyFile = (await companyUpload.json()) as DocumentMetadata;
+          await t.test(
+            'new and duplicate uploads both write the admitted bytes',
+            async () => {
+              const writes = await pool.query(
+                'SELECT last_value::integer AS writes FROM public.observed_document_blob_writes',
+              );
+              assert.equal(
+                writes.rows[0]?.writes,
+                3,
+                'each fresh upload writes its complete payload',
+              );
+            },
+          );
           const counts = async () =>
             (
               await pool.query(
@@ -206,7 +233,103 @@ test(
           );
           assert.deepEqual(await counts(), { blobs: 2, versions: 3, audit: 3 });
 
+          await t.test(
+            'file lists return bounded nonoverlapping cursor pages',
+            async () => {
+              const page = listUrl(itemUrl);
+              page.searchParams.set('limit', '1');
+              const firstPage = await fetch(page);
+              const rows = (await firstPage.json()) as DocumentMetadata[];
+              assert.equal(
+                rows.length,
+                1,
+                'list respects the requested page bound',
+              );
+              const next = firstPage.headers.get('x-next-document-link');
+              assert.equal(next, rows[0]!.linkId);
+              page.searchParams.set('after', next!);
+              const lastPage = await fetch(page);
+              const lastRows = (await lastPage.json()) as DocumentMetadata[];
+              assert.equal(lastRows.length, 1);
+              assert.notEqual(rows[0]!.linkId, lastRows[0]!.linkId);
+              assert.equal(lastPage.headers.get('x-next-document-link'), null);
+            },
+          );
+          await t.test(
+            'published versions and attachment audit reject every mutation',
+            async () => {
+              for (const table of [
+                'document_versions',
+                'document_attachment_audit',
+              ]) {
+                for (const statement of [
+                  `UPDATE platform.${table} SET link_id = link_id WHERE false`,
+                  `DELETE FROM platform.${table} WHERE false`,
+                  `TRUNCATE platform.${table} CASCADE`,
+                ]) {
+                  const client = await pool.connect();
+                  try {
+                    await client.query('BEGIN');
+                    await assert.rejects(client.query(statement), {
+                      code: '55000',
+                    });
+                  } finally {
+                    await client.query('ROLLBACK');
+                    client.release();
+                  }
+                }
+              }
+            },
+          );
           const { tenantId, environmentId, principalId } = app.runtime.identity;
+          const scopedRead = async (
+            scope: string,
+            entity: string,
+            id: string,
+            file: DocumentMetadata,
+          ) => {
+            const db = rolePool(options.databaseUrl, 'north_star_runtime', 1);
+            try {
+              return await withTrustedRequestTransaction(
+                db,
+                await trustedContext(app.runtime.identity),
+                (client) =>
+                  client.query(
+                    'SELECT metadata FROM platform.read_document_version($1,$2,$3,$4,$5)',
+                    [scope, entity, id, file.linkId, file.versionId],
+                  ),
+              );
+            } finally {
+              await db.end();
+            }
+          };
+          await t.test(
+            'scoped database reads follow live company membership',
+            async () => {
+              const read = () =>
+                scopedRead(
+                  company,
+                  'northstar.app:entity.inventory_transaction',
+                  transaction.recordId,
+                  companyFile,
+                );
+              assert.equal((await read()).rowCount, 1);
+              const restricted = await pool.query<{ membership_id: string }>(
+                `UPDATE platform.current_policy_memberships
+              SET legal_entity_id=$4 WHERE tenant_id=$1 AND environment_id=$2 AND principal_id=$3
+              AND legal_entity_id IS NULL RETURNING membership_id`,
+                [tenantId, environmentId, principalId, randomUUID()],
+              );
+              try {
+                assert.equal((await read()).rowCount, 0);
+              } finally {
+                await pool.query(
+                  'UPDATE platform.current_policy_memberships SET legal_entity_id=NULL WHERE membership_id=ANY($1::uuid[])',
+                  [restricted.rows.map((row) => row.membership_id)],
+                );
+              }
+            },
+          );
           const revoked = await pool.query(
             `UPDATE platform.current_policy_permission_grants
             SET revoked_at = clock_timestamp()
@@ -217,6 +340,21 @@ test(
             [tenantId, environmentId, principalId],
           );
           assert.ok(revoked.rowCount);
+          await t.test('revoked download is refused by the database', async () => {
+          assert.equal(
+            (
+              await scopedRead(
+                'shared',
+                'northstar.app:entity.item',
+                item.recordId,
+                attachment,
+              )
+            ).rowCount,
+            0,
+            'the database returned bytes after download revocation',
+          );
+
+          });
           assert.equal(
             (await fetch(byteUrl(itemUrl, attachment, 'download'))).status,
             404,
@@ -238,67 +376,114 @@ test(
           );
           assert.equal((await fetch(listUrl(itemUrl))).status, 404);
 
+          const manager = { cookie: 'northstar-demo-actor=manager' };
           await pool.query(
             `INSERT INTO platform.document_blobs (tenant_id, environment_id, owner_scope, digest, content_type, bytes)
          SELECT $1, $2, 'shared', encode(sha256(bytes), 'hex'), 'image/png', bytes
            FROM (SELECT decode(repeat(lpad(to_hex(i), 2, '0'), $3::integer), 'hex') bytes
-                   FROM generate_series(1, 5) i) quota`,
+                   FROM generate_series(1, 1) i) quota`,
             [tenantId, environmentId, DOCUMENT_TENANT_MAX_BYTES / 5],
           );
-          const manager = { cookie: 'northstar-demo-actor=manager' };
+          await pool.query(
+            `INSERT INTO platform.document_versions
+            SELECT v.tenant_id,v.environment_id,gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),v.owner_scope,
+              b.digest,v.entity_id,v.record_id,v.record_revision,v.field_id,v.category_id,v.retention_class,
+              v.file_name,v.actor_id,v.release_id,v.scan_policy_version,clock_timestamp()
+            FROM platform.document_versions v JOIN platform.document_blobs b USING (tenant_id,environment_id,owner_scope)
+            CROSS JOIN generate_series(1,5) WHERE v.link_id = $1 AND b.byte_length > 1000`,
+            [attachment.linkId],
+          );
+          await t.test(
+            'quota charges each published version of shared bytes',
+            async () => {
+              const differentPixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGOoAwAAgAB/ZMWU5gAAAABJRU5ErkJggg==','base64');
+              assert.equal(differentPixel.length,pixel.length);
+              const duplicate = await upload(itemUrl,pixel,{headers:manager});
+              const fresh = await upload(itemUrl,differentPixel,{headers:manager});
+              assert.equal(duplicate.status,413,'quota charges every version even when all five reference one blob');
+              assert.equal(fresh.status,duplicate.status);
+              assert.deepEqual(await fresh.json(),await duplicate.json());
+            },
+          );
+          await pool.query(
+            `INSERT INTO platform.document_blobs (tenant_id, environment_id, owner_scope, digest, content_type, bytes)
+         SELECT $1, $2, 'shared', encode(sha256(bytes), 'hex'), 'image/png', bytes
+           FROM (SELECT decode(repeat(lpad(to_hex(i), 2, '0'), $3::integer), 'hex') bytes
+                   FROM generate_series(2, 5) i) quota`,
+            [tenantId, environmentId, DOCUMENT_TENANT_MAX_BYTES / 5],
+          );
           const overQuota = await upload(itemUrl, pixel, { headers: manager });
           assert.equal(
             overQuota.status,
             413,
             'the stored-byte quota allowed publication',
           );
-          assert.deepEqual(await counts(), { blobs: 7, versions: 3, audit: 3 });
+          await t.test('refusals leave attachment counts unchanged', async () => { assert.deepEqual(await counts(), { blobs: 7, versions: 8, audit: 3 }); });
 
-          const other = (
-            await ensureScope(pool, 'documents-other', 'production')
-          ).runtime;
-          await pool.query(
-            `INSERT INTO platform.document_blobs (tenant_id, environment_id, owner_scope, digest, content_type, bytes)
-             VALUES ($1, $2, 'shared', encode(sha256($3), 'hex'), 'image/png', $3)`,
-            [other.tenantId, other.environmentId, pixel],
-          );
-          const runtimePool = rolePool(
-            options.databaseUrl,
-            'north_star_runtime',
-            1,
-          );
-          const context = await trustedContext(app.runtime.identity);
-          try {
-            await withTrustedRequestTransaction(
-              runtimePool,
-              context,
-              async (client) => {
-                const hidden = await client.query(
-                  'SELECT bytes FROM platform.document_blobs WHERE tenant_id = $1 AND environment_id = $2',
-                  [other.tenantId, other.environmentId],
+          await t.test(
+            'runtime has only scoped attachment entries and no scanner authority',
+            async () => {
+              const runtimePool = rolePool(
+                options.databaseUrl,
+                'north_star_runtime',
+                1,
+              );
+              const context = await trustedContext(app.runtime.identity);
+              try {
+                await withTrustedRequestTransaction(
+                  runtimePool,
+                  context,
+                  async (client) => {
+                    const access = await client.query<{
+                      table_name: string;
+                      direct_access: boolean;
+                    }>(
+                      `SELECT name AS table_name, has_table_privilege(current_user, 'platform.' || name, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE') AS direct_access
+                     FROM unnest(ARRAY['document_versions','document_blobs','document_attachment_audit','document_upload_staging']) AS name`,
+                    );
+                    assert.ok(
+                      access.rows.every((row) => !row.direct_access),
+                      'the serving role has direct attachment table access',
+                    );
+                    assert.equal(
+                      (
+                        await client.query(`SELECT has_function_privilege(current_user,
+                  'platform.record_document_scan(uuid,uuid,uuid,uuid,text,text,boolean)', 'EXECUTE') AS allowed`)
+                      ).rows[0]?.allowed,
+                      false,
+                    );
+                  },
                 );
-                assert.equal(
-                  hidden.rowCount,
-                  0,
-                  'a different tenant received stored bytes',
+                await assert.rejects(
+                  withTrustedRequestTransaction(
+                    runtimePool,
+                    context,
+                    (client) =>
+                      client.query(
+                        'DELETE FROM platform.document_versions WHERE link_id = $1',
+                        [attachment.linkId],
+                      ),
+                  ),
+                  { code: '42501' },
                 );
-              },
-            );
-            await assert.rejects(
-              withTrustedRequestTransaction(runtimePool, context, (client) =>
-                client.query(
-                  'DELETE FROM platform.document_versions WHERE link_id = $1',
-                  [attachment.linkId],
-                ),
-              ),
-              { code: '42501' },
-            );
-          } finally {
-            await runtimePool.end();
-          }
+              } finally {
+                await runtimePool.end();
+              }
+            },
+          );
         } finally {
           await app.close();
         }
+        await t.test(
+          'demo scanner refuses an unverified database',
+          async () => {
+            await assert.rejects(async () => {
+              await pool.query('ALTER DATABASE postgres RESET north_star.isolated_document_demo');
+                const unverified = await startComposedApplication({...options, documentDemoScanner: true});
+                await unverified.close();
+            }, /verified isolated demo database/u);
+          },
+        );
         const scannerless = await startComposedApplication(options);
         try {
           const item = scannerless.seededRecords.find(
@@ -322,10 +507,166 @@ test(
   },
 );
 
+test('staged attachment verdicts and deadlines govern publication', {timeout:600_000}, async t => {
+  await withEphemeralPostgres('document-screening', async ({pool,connection}) => {
+    const options = {databaseUrl:`postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
+      tenantSlug:'documents-screening', port:0};
+        // A scanner decision is durable across a second request with the same input.
+        let clean = false;
+        let scans = 0;
+        let afterScan: (() => Promise<void>) | undefined;
+        const seeded = await startComposedApplication(options);
+        const recordId = seeded.seededRecords.find(row => row.operationId === 'northstar.app:operation.item_create')!.recordId;
+        await seeded.close();
+        const screening = await createComposedApplicationRuntime({
+          databaseUrl: options.databaseUrl, tenantSlug: options.tenantSlug, localDemoIdentity:true,
+          compiledApplication: await readCompiledApplication(), migrationsDirectory:'db/migrations',
+          providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
+          capabilityOperationExecutorFactories: CAPABILITY_EXECUTOR_FACTORIES,
+          inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
+          documents: {scanner: {
+            mode: 'real',
+            label: 'Fixture scanner',
+            policyVersion: 'fixture/v1',
+            async scan({ digest }) {
+              scans++;
+              await afterScan?.();
+              return { digest, clean };
+            },
+          }},
+        });
+        try {
+          const retryKey = randomUUID();
+          const manager = {cookie:'northstar-demo-actor=manager'};
+          const submit = () => screening.entry.run({headers:manager}, view => screening.documents!.upload(view,
+            {surfaceId:itemSurface,recordId,companyId:null},
+            {retryKey,fieldId:null,categoryId:null,contentType:'image/png',fileName:'fixture.png'},
+            async () => pixel, new AbortController().signal));
+          await t.test(
+            'rejected digest-bound scans survive retries',
+            async () => {
+              await assert.rejects(submit(), {status:422});
+              clean = true;
+              await assert.rejects(submit(), {status:422});
+              assert.equal(scans, 1);
+              const evidence =
+                await pool.query(`SELECT scan_digest = digest AS bound, scan_policy
+            FROM platform.document_upload_staging WHERE scan_clean IS FALSE`);
+              assert.deepEqual(evidence.rows, [
+                { bound: true, scan_policy: 'fixture/v1' },
+              ]);
+            },
+          );
+          clean = true;
+          // Pause the publisher at the actual SQL lock. An injected monotonic deadline
+          // expires while it waits, before the lock is released.
+          await t.test(
+            'expiry during the publication lock rolls back the version',
+            async () => {
+              const locker = await pool.connect();
+              const {
+                rows: [backend],
+              } = await locker.query<{ pid: number }>(
+                'SELECT pg_backend_pid() AS pid',
+              );
+              const held = Promise.withResolvers<void>();
+              const clock = { remaining: 30000 };
+              const deadline = {
+                signal: new AbortController().signal,
+                remainingMilliseconds() {
+                  if (!clock.remaining)
+                    throw new DocumentRequestError(
+                      408,
+                      'The file response expired.',
+                    );
+                  return clock.remaining;
+                },
+              };
+              let locked = false;
+              try {
+                afterScan = async () => {
+                  await locker.query('BEGIN');
+                  locked = true;
+                  await locker.query(
+                    "SELECT pg_advisory_xact_lock(hashtextextended('documents:' || $1 || ':' || $2,0))",
+                    [
+                      screening.identity.tenantId,
+                      screening.identity.environmentId,
+                    ],
+                  );
+                  held.resolve();
+                };
+                const before = (
+                  await pool.query(
+                    'SELECT count(*) FROM platform.document_versions',
+                  )
+                ).rows[0]!.count;
+                const publication = screening.entry.run(
+                  { headers: manager },
+                  (view) =>
+                    screening.documents!.upload(
+                      view,
+                      { surfaceId: itemSurface, recordId, companyId: null },
+                      {
+                        retryKey: randomUUID(),
+                        fieldId: null,
+                        categoryId: null,
+                        fileName: 'deadline.png',
+                        contentType: 'image/png',
+                      },
+                      async () => pixel,
+                      deadline.signal,
+                      deadline,
+                    ),
+                );
+                // Surface an early request failure without waiting for the scanner barrier.
+                await Promise.race([
+                  held.promise,
+                  publication.then(() => {
+                    throw new Error('publication skipped scan');
+                  }),
+                ]);
+                const until = performance.now() + 10000;
+                while (
+                  !(
+                    await pool.query(
+                      'SELECT FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))',
+                      [backend!.pid],
+                    )
+                  ).rowCount
+                ) {
+                  if (performance.now() >= until)
+                    throw new Error('publication never reached quota lock');
+                  await new Promise((resolve) => setTimeout(resolve, 10));
+                }
+                clock.remaining = 0;
+                await locker.query('ROLLBACK');
+                locked = false;
+                await assert.rejects(publication, { status: 408 });
+                assert.equal(
+                  (
+                    await pool.query(
+                      'SELECT count(*) FROM platform.document_versions',
+                    )
+                  ).rows[0]!.count,
+                  before,
+                );
+              } finally {
+                if (locked) await locker.query('ROLLBACK');
+                locker.release();
+              }
+            },
+          );
+        } finally {
+          await screening.close();
+        }
+  }, LINEAGE_INSTALL_VOLUME);
+});
+
 test(
   'live Customize adds file fields with category and count contracts to tenant and first-party records',
   { timeout: 600_000 },
-  async () => {
+  async (t) => {
     await withEphemeralPostgres(
       'documents-fields',
       async ({ connection, pool }) => {
@@ -334,6 +675,7 @@ test(
           tenantSlug: 'documents-fields',
           port: 0,
         };
+        await pool.query("ALTER DATABASE postgres SET north_star.isolated_document_demo = 'on'");
         const app = await startComposedApplication({
           ...options,
           documentDemoScanner: true,
@@ -480,14 +822,33 @@ test(
           const itemAttachment = (await firstParty.json()) as DocumentMetadata;
           await service.rollback();
           const itemUrl = documentUrl(app.baseUrl, itemSurface, item.recordId);
-          assert.deepEqual(await (await fetch(listUrl(itemUrl))).json(), []);
-          assert.equal(
-            (await fetch(byteUrl(itemUrl, itemAttachment, 'download'))).status,
-            404,
-          );
-          assert.equal(
-            (await fetch(byteUrl(fieldUrl, published, 'download'))).status,
-            404,
+          await t.test(
+            'a field ID activated on another entity keeps rolled-back files hidden',
+            async () => {
+              const reused = await service.draft(
+                files(
+                  'northstar.app:entity.party',
+                  'northstar.app:field.custom_item_evidence',
+                ),
+                'visualBuilder',
+              );
+              assert.equal(reused.status, 'drafted');
+              await service.approve(reused.patchId);
+              await service.activate(reused.patchId);
+              assert.deepEqual(
+                await (await fetch(listUrl(itemUrl))).json(),
+                [],
+              );
+              assert.equal(
+                (await fetch(byteUrl(itemUrl, itemAttachment, 'download')))
+                  .status,
+                404,
+              );
+              assert.equal(
+                (await fetch(byteUrl(fieldUrl, published, 'download'))).status,
+                404,
+              );
+            },
           );
           assert.equal(
             (

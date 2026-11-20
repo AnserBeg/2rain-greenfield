@@ -83,3 +83,35 @@ test(
     }
   },
 );
+
+test('classic PDFs are accepted up to the parser page-tree depth limit', async () => {
+  const { validateDocumentContent } =
+    await import('../../packages/postgres-provider/src/document-content.js');
+  function pdfWithPageTree(depth: number) {
+    const objects = ['<< /Type /Catalog /Pages 2 0 R >>'];
+    for (let index = 0; index < depth; index++)
+      objects.push(`<< /Type /Pages /Count 1 /Kids [${index + 3} 0 R] >>`);
+    objects.push(
+      `<< /Type /Page /Parent ${depth + 1} 0 R /MediaBox [0 0 32 32] >>`,
+    );
+    let source = '%PDF-1.4\n';
+    const offsets = ['0000000000 65535 f '];
+    for (const [index, object] of objects.entries()) {
+      offsets.push(String(source.length).padStart(10, '0') + ' 00000 n ');
+      source += `${index + 1} 0 obj\n${object}\nendobj\n`;
+    }
+    const xref = source.length;
+    return Buffer.from(
+      source +
+        `xref\n0 ${offsets.length}\n${offsets.join('\n')}\ntrailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`,
+    );
+  }
+  assert.equal(
+    await validateDocumentContent(pdfWithPageTree(64), 'application/pdf'),
+    'application/pdf',
+  );
+  await assert.rejects(
+    validateDocumentContent(pdfWithPageTree(65), 'application/pdf'),
+    { status: 415 },
+  );
+});
