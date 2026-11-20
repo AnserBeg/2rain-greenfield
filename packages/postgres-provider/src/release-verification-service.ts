@@ -3128,6 +3128,11 @@ function verificationFieldValue(
   entity: StorageTargetPayloadV1['entities'][number],
 ): unknown {
   switch (field.fieldKind) {
+    case 'addressFieldType':
+      return {
+        schemaVersion: 'northstar.address-value/v1',
+        text: 'Verification address',
+      };
     case 'booleanFieldType':
       return verificationBooleanFieldValue(entity, field.fieldId);
     case 'enumFieldType':

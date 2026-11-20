@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
+import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
+import {
+  compileInSandbox,
+  parseSerializedRelease,
+  serializeRelease,
+} from '../../packages/customization/src/index.js';
+import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 
 import {
   COMPILED_FIELD_KINDS,
@@ -283,12 +291,44 @@ test('a v2 payload survives the production reader with its kinds and options', a
   // Both directions, from the fixture's own ids rather than hand-built ones.
   assert.equal(byId.get(EVERY_KIND_FIELD_IDS.active)?.required, false);
   assert.equal(byId.get(FIXTURE_IDS.fieldIds.parentName)?.required, true);
-  // Every kind the reader knows is reachable through this specimen, so the
-  // refusal tests below are refusing something the admission actually covers.
+  // Address first appeared in tenant-authored v6. Read that release as well as the historical fixture.
+  const authored = 'apps/web/release/app.authored.json';
+  const parent = parseCompiledApplication(
+    JSON.parse(readFileSync('apps/web/release/app.compiled.json', 'utf8')),
+  ).application;
+  const fieldId = 'northstar.app:field.custom_item_site';
+  const candidate = await compileInSandbox({
+    acknowledgement: readUnboundPermissionAcknowledgementFor(
+      authored,
+      'northstar.app:package.application',
+    ),
+    base: JSON.parse(readFileSync(authored, 'utf8')),
+    tip: serializeRelease(parent),
+    chain: [
+      {
+        kind: 'addAddressField',
+        schemaVersion: 'v6',
+        label: 'Site',
+        entity: 'northstar.app:entity.item',
+        fieldId,
+        required: false,
+      },
+    ],
+  });
+  assert.ok(candidate.status === 'compiled', JSON.stringify(candidate));
+  const tenantView = await viewOf(
+    parseSerializedRelease(candidate.steps[0]!.release).compiled,
+  );
+  const address = readCompiledSurfaceManifest(tenantView)
+    .surfaces.flatMap((s) => s.fields ?? [])
+    .find((f) => f.fieldId === fieldId);
+  assert.equal(address?.kind, 'addressFieldType');
   assert.deepEqual(
-    [...new Set(surface.fields.map((field) => field.kind))].sort(),
+    [
+      ...new Set([...surface.fields.map((field) => field.kind), address.kind]),
+    ].sort(),
     [...COMPILED_FIELD_KINDS].sort(),
-    'the fixture must exercise every kind in the reader vocabulary',
+    'the compiled forms must exercise every kind in the reader vocabulary',
   );
 });
 
