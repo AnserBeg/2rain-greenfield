@@ -22,6 +22,7 @@ const suiteDefinitions = [
   {
     discoveryPattern: 'test/unit/**/*.test.ts',
     expectedFiles: [
+      'test/unit/address-connector.test.ts',
       'test/unit/calculated-display.test.ts',
       'test/unit/canonical-model/diagnostic-ordering.test.ts',
       'test/unit/canonical-model/disclosure-tier.test.ts',
@@ -186,6 +187,7 @@ const suiteDefinitions = [
       'test/postgres/stock-serializer.test.ts',
     ],
     expectedFiles: [
+      'test/postgres/address-connector.test.ts',
       'test/postgres/agent-dev-tasks.test.ts',
       'test/postgres/agent-tasks.test.ts',
       'test/postgres/billing-terms.test.ts',
