@@ -28,7 +28,7 @@ export interface ModelPrices {
 
 /** Accumulates spend across every run that shares it. */
 export class SpendMeter {
-  #usd = 0;
+  #spend = { usd: 0 };
   readonly #prices: ModelPrices | null;
   readonly capUsd: number;
   constructor(prices: ModelPrices | null, capUsd: number) {
@@ -36,7 +36,13 @@ export class SpendMeter {
     this.capUsd = capUsd;
   }
   get usd(): number {
-    return this.#usd;
+    return this.#spend.usd;
+  }
+  /** Use the selected model's tariff, sharing the conversation's actual spend and cap. */
+  atPrices(prices: ModelPrices): SpendMeter {
+    const modelMeter = new SpendMeter(prices, this.capUsd);
+    modelMeter.#spend = this.#spend;
+    return modelMeter;
   }
   charge(usage: ModelUsage): number {
     if (!this.#prices) return 0;
@@ -46,11 +52,11 @@ export class SpendMeter {
         usage.cacheReadTokens * this.#prices.cacheRead +
         usage.cacheWriteTokens * this.#prices.cacheWrite) /
       1_000_000;
-    this.#usd += cost;
+    this.#spend.usd += cost;
     return cost;
   }
   exhausted(): boolean {
-    return this.#usd >= this.capUsd;
+    return this.#spend.usd >= this.capUsd;
   }
   /**
    * The output tokens one call may use (end review X13): what is left of the
@@ -62,7 +68,7 @@ export class SpendMeter {
     if (!this.#prices) return undefined;
     const left =
       this.capUsd -
-      this.#usd -
+      this.#spend.usd -
       (estimatedInputTokens *
         Math.max(
           this.#prices.input,

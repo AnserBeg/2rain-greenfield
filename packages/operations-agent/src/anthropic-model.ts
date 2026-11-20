@@ -13,6 +13,38 @@ import { asData } from './tools.js';
 /** Stated in the packet record; the owner may name another. */
 export const DEFAULT_ANTHROPIC_MODEL = 'claude-opus-5-5';
 
+export const SONNET_MODEL = 'claude-sonnet-5-5';
+// USD per million tokens, Anthropic's first-party API, 2026-11-19.
+export const SONNET_PRICES = Object.freeze({
+  input: 2,
+  output: 10,
+  cacheRead: 0.1,
+  cacheWrite: 2.5,
+});
+
+/** Route short, single requests without inspecting or naming any module. */
+export function assistantRoute(
+  request: string,
+  modelOverride?: string,
+): { modelId: string; effort: 'low' | 'high' } {
+  const fallback = {
+    modelId: modelOverride ?? DEFAULT_ANTHROPIC_MODEL,
+    effort: 'high',
+  } as const;
+  const text = request.trim();
+  if (
+    modelOverride ||
+    text.length > 200 ||
+    /[;\n]|\b(?:and|then|after|before|unless|except|each of|all of)\b/iu.test(
+      text,
+    )
+  )
+    return fallback;
+  const create = /^(?:add|create) (?:a |an |one )/iu.test(text);
+  if (create) return { modelId: SONNET_MODEL, effort: 'low' };
+  return fallback;
+}
+
 export interface AnthropicModelOptions {
   readonly key: ModelKey;
   readonly modelId?: string;

@@ -25,6 +25,9 @@ import { parseArgs } from 'node:util';
 import {
   agentPreamble,
   anthropicModel,
+  assistantRoute,
+  SONNET_MODEL,
+  SONNET_PRICES,
   DEFAULT_ANTHROPIC_MODEL,
   loadModelKey,
   OperationsAgentSession,
@@ -34,6 +37,12 @@ import {
 } from '../../packages/operations-agent/src/index.js';
 
 import { BUSINESS_CALENDAR, COMPANY, withAgentWorlds } from './agent-world.js';
+import {
+  generatedProof,
+  installProof,
+  type ProofTask,
+} from './generated-modules.js';
+import { median, measureParity } from './proof-metrics.js';
 import { snapshot } from './arrange.js';
 import { attemptsFor, DEV_TASKS, type DevTask } from './dev-tasks.js';
 
@@ -44,6 +53,7 @@ async function main(): Promise<void> {
     options: {
       model: { type: 'string', default: DEFAULT_ANTHROPIC_MODEL },
       effort: { type: 'string', default: 'high' },
+      routed: { type: 'boolean', default: false },
       'price-input': { type: 'string' },
       'price-output': { type: 'string' },
       'price-cache-read': { type: 'string' },
@@ -54,6 +64,7 @@ async function main(): Promise<void> {
       // `ten`: the pre-registered ten, one attempt each; `dev`: the AGENT-3
       // development set, three attempts per write task.
       set: { type: 'string', default: 'ten' },
+      'proof-seed': { type: 'string' },
       tasks: { type: 'string' },
       attempts: { type: 'string' },
       out: { type: 'string', default: 'docs/execution/evidence' },
@@ -80,10 +91,20 @@ async function main(): Promise<void> {
     throw new Error('--price-source and --price-date are required');
   const cap = Number(args.cap);
   const dev = args.set === 'dev';
+  if (!['ten', 'dev', 'proof'].includes(String(args.set)))
+    throw new Error('unknown eval set');
+  if (args.set === 'proof' && !args['proof-seed'])
+    throw new Error('proof requires the frozen --proof-seed');
+  const proof =
+    args.set === 'proof'
+      ? generatedProof(String(args['proof-seed']))
+      : undefined;
+  const routed = args.routed || proof !== undefined;
+  const available: readonly DevTask[] = proof?.tasks ?? DEV_TASKS;
   const selected = new Set(
     (
       args.tasks ??
-      (dev ? DEV_TASKS : DEV_TASKS.slice(0, 10))
+      (dev || proof ? available : available.slice(0, 10))
         .map((task) => task.id)
         .join(',')
     )
@@ -101,10 +122,18 @@ async function main(): Promise<void> {
     throw new Error('--cap must be positive and finite');
   if (
     !selected.size ||
-    [...selected].some((id) => !DEV_TASKS.some((task) => task.id === id))
+    [...selected].some((id) => !available.some((task) => task.id === id))
   )
     throw new Error('unknown eval task');
-  const attempts = (task: DevTask) => repeat ?? (dev ? attemptsFor(task) : 1);
+  if (
+    proof &&
+    ((repeat !== undefined && repeat < 3) || selected.size !== available.length)
+  )
+    throw new Error(
+      'module parity requires all matched tasks and three attempts each',
+    );
+  const attempts = (task: DevTask) =>
+    repeat ?? (proof ? 3 : dev ? attemptsFor(task) : 1);
   const date = new Date().toISOString().slice(0, 10);
   const stamp = new Date().toISOString().replaceAll(/[:.]/gu, '-');
   const outDirectory = resolve(String(args.out));
@@ -112,7 +141,7 @@ async function main(): Promise<void> {
   await mkdir(runDirectory, { recursive: true });
 
   const key = await loadModelKey('anthropic');
-  const model = anthropicModel({
+  const fixedModel = anthropicModel({
     key,
     modelId: String(args.model),
     effort: args.effort as 'high',
@@ -135,6 +164,13 @@ async function main(): Promise<void> {
     tokensOut: number;
     usd: number;
     seconds: number;
+    timing?: {
+      cardSeconds: number | null;
+      verifiedSeconds: number[];
+      elapsedSeconds: number;
+      modelCalls: number;
+      group?: ProofTask['group'];
+    };
     calls: Record<string, number>;
     answer: string;
     record: string;
@@ -142,11 +178,26 @@ async function main(): Promise<void> {
   const rows: Row[] = [];
   const log = (line: string) => process.stdout.write(`${line}\n`);
 
-  await withAgentWorlds('agent-eval', async (worlds) => {
-    for (const task of DEV_TASKS.filter((candidate) =>
-      selected.has(candidate.id),
-    ))
-      for (let attempt = 1; attempt <= attempts(task); attempt += 1) {
+  await withAgentWorlds(
+    'agent-eval',
+    async (worlds) => {
+      const tasks = available.filter((t) => selected.has(t.id));
+      const schedule = tasks.flatMap((task, order) =>
+        Array.from({ length: attempts(task) }, (_, index) => ({
+          task,
+          order,
+          attempt: index + 1,
+        })),
+      );
+      // Only the parity proof interleaves cohorts and reverses the second round.
+      // The development set retains its task order when the spend cap interrupts it.
+      if (proof)
+        schedule.sort(
+          (a, b) =>
+            a.attempt - b.attempt ||
+            (a.attempt % 2 ? a.order - b.order : b.order - a.order),
+        );
+      for (const { task, attempt } of schedule) {
         const record = join(
           runDirectory,
           `task-${String(task.id).padStart(2, '0')}${attempts(task) > 1 ? `-a${String(attempt)}` : ''}.jsonl`,
@@ -193,18 +244,35 @@ async function main(): Promise<void> {
         const world = await worlds.fresh(
           `eval-${String(task.id)}-${String(attempt)}`,
         );
+        const initialSpend = meter.usd;
+        const calls: Record<string, number> = {};
         try {
+          const proofTask = proof?.tasks.find((t) => t.id === task.id);
           const context = await task.arrange(world);
           const before = await snapshot(world);
           const request = task.request(context);
+          const route = routed ? assistantRoute(request) : undefined;
+          const model = route ? anthropicModel({ key, ...route }) : fixedModel;
+          const runMeter =
+            route?.modelId === SONNET_MODEL && route
+              ? meter.atPrices(SONNET_PRICES)
+              : meter;
           await append({
             kind: 'task',
             task: task.id,
             request,
             attempt,
+            ...(proofTask
+              ? {
+                  group: proofTask.group,
+                  shape: proofTask.shape,
+                  seed: args['proof-seed'],
+                }
+              : {}),
             actor: task.actor ?? 'buyer',
             database: world.databaseName,
             model: model.modelId,
+            effort: route?.effort ?? args.effort,
           });
           const session = new OperationsAgentSession({
             // The panel's act-then-undo (a host option since the end review X6).
@@ -228,14 +296,13 @@ async function main(): Promise<void> {
               return true;
             },
           });
-          const calls: Record<string, number> = {};
           started = performance.now();
           const run = await runOperationsAgent({
             model,
             executeAfterApproval: true,
             session,
             request,
-            meter,
+            meter: runMeter,
             ...(args.preamble === 'off'
               ? {}
               : {
@@ -300,17 +367,39 @@ async function main(): Promise<void> {
             },
           });
           const elapsedSeconds = (performance.now() - started) / 1000;
-          await append({
-            kind: 'timing',
+          const timing = {
             cardSeconds,
             verifiedSeconds,
             elapsedSeconds,
             modelCalls: run.turns,
+            ...(proofTask ? { group: proofTask.group } : {}),
+          };
+          await append({
+            kind: 'timing',
+            ...timing,
             toolCalls: run.toolCalls,
             usd: run.usd,
           });
           await queue;
-          const verdict = await task.check(world, context, before, run);
+          let verdict = await task.check(world, context, before, run);
+          if (proofTask) {
+            const steps = session
+              .executedPlans()
+              .flatMap((plan) => plan.results);
+            if (
+              run.stop !== 'answered' ||
+              granted.size !== 1 ||
+              confirmed.size !== 1 ||
+              steps.length !== 1 ||
+              steps[0]?.outcome !== 'succeeded' ||
+              steps[0]?.operationId !== proofTask.expectedOperation
+            ) {
+              verdict = {
+                pass: false,
+                reason: `${verdict.reason}; expected exactly one approved and verified ${proofTask.expectedOperation}`,
+              };
+            }
+          }
           await append({
             kind: 'verdict',
             pass: verdict.pass,
@@ -335,6 +424,7 @@ async function main(): Promise<void> {
             tokensOut: run.usage.outputTokens,
             usd: run.usd,
             seconds: run.seconds,
+            timing,
             calls,
             answer: run.answer,
             record,
@@ -347,7 +437,8 @@ async function main(): Promise<void> {
             error instanceof Error
               ? `${error.name}: ${error.message}`
               : String(error);
-          await append({ kind: 'harness-error', error: message });
+          const usd = meter.usd - initialSpend;
+          await append({ kind: 'harness-error', error: message, usd });
           rows.push({
             task: task.id,
             attempt,
@@ -356,15 +447,15 @@ async function main(): Promise<void> {
             pass: false,
             reason: `harness error: ${message}`,
             stop: 'harness-error',
-            toolCalls: 0,
-            approvals: 0,
+            toolCalls: Object.values(calls).reduce((sum, n) => sum + n, 0),
+            approvals: granted.size,
             tokensIn: 0,
             cacheRead: 0,
             cacheWrite: 0,
             tokensOut: 0,
-            usd: 0,
+            usd,
             seconds: 0,
-            calls: {},
+            calls,
             answer: '',
             record,
           });
@@ -373,7 +464,9 @@ async function main(): Promise<void> {
           await world.close();
         }
       }
-  });
+    },
+    proof ? (world) => installProof(world, proof.changes) : undefined,
+  );
 
   const passed = rows.filter((row) => row.pass).length;
   const byTask = new Map<number, Row[]>();
@@ -398,8 +491,8 @@ async function main(): Promise<void> {
   const report = [
     `# Agent eval — ${date}`,
     '',
-    `Model \`${model.modelId}\` (effort ${String(args.effort)}), acting as the demo buyer (task 34: the manager) on channel AGENT, business map ${args.preamble === 'off' ? 'off' : 'on'}, task set ${dev ? 'dev (AGENT-3 development set; write, multi-step and customized tasks three attempts)' : 'selected'}. Model effort and attempts are reported per run below. Each attempt on a fresh database; the harness granted every confirmation it was asked for and recorded it. Seconds are the agent run on a monotonic clock (arrangement excluded).`,
-    `Prices (USD per million tokens) from ${String(args['price-source'])}, read ${String(args['price-date'])}: input ${String(prices.input)}, output ${String(prices.output)}, cache read ${String(prices.cacheRead)}, cache write ${String(prices.cacheWrite)}. Spend cap USD ${String(cap)}.`,
+    `Model \`${routed ? 'deployed routing (per attempt in JSONL)' : fixedModel.modelId}\` (default effort ${String(args.effort)}), acting as each task’s declared demo actor on channel AGENT, business map ${args.preamble === 'off' ? 'off' : 'on'}, task set ${String(args.set)}. The JSONL records the model, effort and attempt for each task. Each attempt on a fresh database; the harness granted every confirmation it was asked for and recorded it. Seconds are the agent run on a monotonic clock (arrangement excluded).`,
+    `Prices (USD per million tokens) from ${String(args['price-source'])}, read ${String(args['price-date'])}: input ${String(prices.input)}, output ${String(prices.output)}, cache read ${String(prices.cacheRead)}, cache write ${String(prices.cacheWrite)}.${routed ? ` Routed Sonnet prices (input/output/cache read/cache write): ${Object.values(SONNET_PRICES).join('/')}.` : ''} Spend cap USD ${String(cap)}.`,
     '',
     '| task | kind | attempt | result | stop | tool calls | approvals | tokens in (uncached / cache read / cache write) | tokens out | USD | reason |',
     '|---|---|---|---|---|---|---|---|---|---|---|',
@@ -427,6 +520,18 @@ async function main(): Promise<void> {
           .join(', ')} |`,
     ),
     '',
+    '## Monotonic timing',
+    '',
+    '| task | attempt | elapsed s | first card s | yes to verified s (each card) | model calls |',
+    '|---|---|---|---|---|---|',
+    ...rows.flatMap((row) =>
+      row.timing
+        ? [
+            `| ${row.task} | ${row.attempt} | ${row.timing.elapsedSeconds.toFixed(3)} | ${row.timing.cardSeconds?.toFixed(3) ?? '—'} | ${row.timing.verifiedSeconds.map((v) => v.toFixed(3)).join(', ') || '—'} | ${row.timing.modelCalls} |`,
+          ]
+        : [],
+    ),
+    '',
     '## Final answers',
     '',
     ...rows.map(
@@ -435,6 +540,18 @@ async function main(): Promise<void> {
     ),
     '',
   ].join('\n');
+  if (proof) {
+    const parity = measureParity(proof.tasks, rows);
+    await writeFile(
+      join(outDirectory, `${stamp}-parity.json`),
+      JSON.stringify({ seed: args['proof-seed'], ...parity }, null, 2) + '\n',
+      { flag: 'wx' },
+    );
+    if (!parity.pass) {
+      log('Generated-module parity gate failed.');
+      process.exitCode = 1;
+    }
+  }
   const reportPath = join(outDirectory, `${stamp}-agent-eval.md`);
   await writeFile(reportPath, report, { flag: 'wx' });
   log(
@@ -481,13 +598,4 @@ function discoveryCalls(calls: Record<string, number>): number {
   return Object.entries(calls)
     .filter(([name]) => name.startsWith('erp_discover'))
     .reduce((sum, [, count]) => sum + count, 0);
-}
-
-function median(values: readonly number[]): number {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 1
-    ? sorted[middle]!
-    : (sorted[middle - 1]! + sorted[middle]!) / 2;
 }

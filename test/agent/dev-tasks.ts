@@ -96,9 +96,13 @@ async function masters(world: AgentWorld): Promise<Record<string, number>> {
  * Every row of a list query, adding the company scope only where the query
  * declares one (masters are not company-scoped; `world.list` assumes they are).
  */
-async function listRows(
+export async function listRows(
   world: AgentWorld,
   queryId: string,
+  filter: {
+    parentScope?: { relationId: string; recordId: string };
+    referenceScope?: { relationId: string; recordId: string };
+  } = {},
 ): Promise<readonly SemanticRecordDto[]> {
   return world.runtime.entry.run(
     { headers: { cookie: 'northstar-demo-actor=manager' } },
@@ -116,6 +120,7 @@ async function listRows(
             includeArchived: false,
             ...(scope ? { [scope]: COMPANY } : {}),
             list: {
+              ...filter,
               cursor,
               matchMode: 'substring',
               pageSize: 100,
