@@ -4,8 +4,14 @@ import process from 'node:process';
 
 import { reachabilityProducers } from '../../test/helpers/reachability-producers.ts';
 
+import { quickSelection } from '../../test/helpers/quick-ci.ts';
+
+const producers =
+  process.env.CI_TIER === 'quick'
+    ? quickSelection().producers
+    : reachabilityProducers;
 const rows = ['| Suite | Slowest files |', '| --- | --- |'];
-for (const producer of reachabilityProducers) {
+for (const producer of producers) {
   const { files } = JSON.parse(readFileSync(producer.evidencePath, 'utf8'));
   const slowest = files
     .filter((file) => Number.isFinite(file.durationMs))
@@ -24,6 +30,15 @@ appendFileSync(
     '',
     'Slowest three per suite. Node reports file elapsed time. Browser times sum test attempts and can overlap across workers. All file timings are in the reachability artifacts.',
     '',
+    ...(process.env.CI_TIER === 'quick'
+      ? [
+          `Expected skipped producers: ${reachabilityProducers
+            .filter((p) => !producers.some((active) => active.id === p.id))
+            .map((p) => p.id)
+            .join(', ')}`,
+          '',
+        ]
+      : []),
     ...rows,
     '',
   ].join('\n'),
