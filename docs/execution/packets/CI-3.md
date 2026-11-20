@@ -1,6 +1,6 @@
 # CI-3 — tiered packet and main CI
 
-Status: awaiting independent pre-merge read. The CI link tests the workflow at `b1fe527d`. The declared head also covers dispatch visibility and the documentation-only token exemption.
+Status: independent read REVISE at `e07f0fc9` (B1 red-main deadlock, N1 serialized main, N2 decision records). All three are fixed; integration full run and controls pending.
 
 CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44777281191
 
@@ -8,7 +8,8 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44777281
 
 1. Quick checks quality, security, architecture, unit, compiler and every selected test file. Shared, unknown and Critical changes promote to full.
 2. Full requires every producer, the composed replay and every repository test in the same run attempt. Quick verifies the fixed and selected files and names each expected skip.
-3. Main pushes queue. The merge-window command closes on red main and requires a full green on the exact proposed integration commit for Critical changes.
+3. Every main push runs full in its own concurrency group, in parallel; none is cancelled or held behind another. The merge-window command requires a full green on the exact proposed integration commit for Critical changes and whenever the latest completed main run is red or cancelled, so a fix or revert can still land.
+4. A decision record edit selects `test/integration/trust-substrate.test.ts`, which reads ADR-0010.
 
 ## Controls and timing
 

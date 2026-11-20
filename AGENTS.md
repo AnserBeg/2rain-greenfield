@@ -98,7 +98,7 @@ continues. Mechanics: `mission-cadence`.
 
 ## 5. Gates
 
-- [Tiered CI](docs/execution/evidence-on-demand.md#packet-and-main-ci) selects packet coverage and queues full on main. Before pushing main run `node scripts/check-merge-window.mjs <id> <integration-SHA>`. Run focused tests locally. CI owns the heavy suites.
+- [Tiered CI](docs/execution/evidence-on-demand.md#packet-and-main-ci) selects packet coverage and runs full on every main push, in parallel. Before pushing main run `node scripts/check-merge-window.mjs <id> <integration-SHA>`. Run focused tests locally. CI owns the heavy suites.
 - Integration is a `--no-ff` merge of the packet into `main`; the packet tip is
   the second parent (`check-review-record.sh` reads it). Every merge records one
   review-log row: `merged — no Critical path` or `merged — unread`.
