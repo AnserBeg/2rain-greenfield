@@ -51,7 +51,8 @@ export function billingBindingProblem(
         'textFieldType' ||
       selectedField(source, interval.currencyFieldId)?.fieldType.kind !==
         'textFieldType' ||
-      !outer?.selections.some(
+      outer?.queryType !== 'get' ||
+      !outer.selections.some(
         (s) => s.field.targetId === interval.customerFieldId,
       ) ||
       !outer.selections.some(
@@ -68,7 +69,6 @@ export function billingBindingProblem(
     if (
       owners.has(b.quoteQueryId) ||
       publishers.has(b.publishOperationId) ||
-      outer?.queryType !== 'get' ||
       outer.lifecycle !== 'active' ||
       outer.legalEntityScope?.cardinality !== 'exactlyOne' ||
       outer.permission.targetId !==

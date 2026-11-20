@@ -303,7 +303,7 @@ test('governed terms and scoped source facts produce a quote through the install
         notes: unknown,
         recordId: string = randomUUID(),
         currency = 'CAD',
-        company = f.scope,
+        company: string = f.scope,
       ) => {
         const values = {
           customer_party_id: f.customer,
