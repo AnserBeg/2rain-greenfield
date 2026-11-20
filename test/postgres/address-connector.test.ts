@@ -435,8 +435,8 @@ test(
               );
               const source = await readFile(file, 'utf8');
               const capped = source.replace(
-                'maximumSupportedVersion: REPLAYED_LAYOUT_READER,',
-                `maximumSupportedVersion: ${ADDRESS_FIELD_READER},`,
+                /(capability\.surface-manifest',[\s\S]*?maximumSupportedVersion: )[\w]+,/u,
+                `$1${ADDRESS_FIELD_READER},`,
               );
               assert.notEqual(capped, source, 'the surface cap moved');
               await writeFile(file, capped);

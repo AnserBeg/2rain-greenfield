@@ -784,7 +784,8 @@ test(
                 );
                 assert.equal(
                   usage.find((u) => u.installation_id === kept)?.calls,
-                  3,
+                  // One located pin and three suggestions.
+                  4,
                 );
               } finally {
                 await restoreDispatch();
@@ -806,13 +807,15 @@ test(
               companyId: COMPANY,
               installationId: dispatch,
             });
+            // Bound before the mock, or the reply would call the mock again.
             const fake = new FakeAddressProvider();
+            const original = fake.geocode.bind(fake);
             const geocode = t.mock.method(
               FakeAddressProvider.prototype,
               'geocode',
               async (text: string) => {
                 await during(item);
-                return fake.geocode(text);
+                return original(text);
               },
             );
             try {
