@@ -29,7 +29,7 @@ Hosted CI exercises the compiled app, SQL authority, the preceding reader and pe
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "DOCS-1",
-  "base": "08edc207bcd5be1982c9c0bcf1723172df9cb7ad", "head": "3b51afe209bca91ed0ed90406cffeca15426d49b",
+  "base": "08edc207bcd5be1982c9c0bcf1723172df9cb7ad", "head": "9a249458b2e892ed1d32043074ad1bc7e1662bcf",
   "changedPaths": [
     ".github/workflows/ci.yml", ".github/workflows/evidence.yml", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts",
     "apps/web/src/document-http.ts", "apps/web/src/document-template-form.ts", "apps/web/src/surface-client.ts", "apps/web/src/surface-composition.ts",
