@@ -1,3 +1,4 @@
+import { BILLING_INTERVAL_READER } from '../../canonical-model/src/billing.js';
 import {
   BOOKING_OPERATION_READER,
   CONNECTOR_FAMILY,
@@ -229,7 +230,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 33 adds Board lifecycle views and form-based moves.
     // 34 reads the versioned placement rule on replayed layouts.
     // 35 adds draft line create values.
-    // 36 replaces Board v1 with Board v2: chosen stages, moves and facts by
+    // 36 binds agreed billing intervals to selected source fields.
+    // 37 replaces Board v1 with Board v2: chosen stages, moves and facts by
     // stable ID with pinned contracts, labels from the release.
     maximumSupportedVersion: BOARD_READER,
   },

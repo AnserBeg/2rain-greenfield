@@ -87,10 +87,6 @@ north_star_runtime	platform.address_quota	SELECT	*	open debt: CONNECT-1
 north_star_runtime	platform.address_quota	UPDATE	calls,reserved_micros	open debt: CONNECT-1
 north_star_runtime	platform.app_package_revisions	INSERT	*	Persist and reload the package revision used to build a release.
 north_star_runtime	platform.app_package_revisions	SELECT	*	Persist and reload the package revision used to build a release.
-north_star_runtime	platform.billing_list_assignments	INSERT	*	open debt: BILLING-1
-north_star_runtime	platform.billing_list_assignments	SELECT	*	open debt: BILLING-1
-north_star_runtime	platform.billing_rate_tables	INSERT	*	open debt: BILLING-1
-north_star_runtime	platform.billing_rate_tables	SELECT	*	open debt: BILLING-1
 north_star_runtime	platform.current_policy_epochs	SELECT	*	Resolve current permission grants and their revocation epoch.
 north_star_runtime	platform.current_policy_memberships	SELECT	*	Resolve current permission grants and their revocation epoch.
 north_star_runtime	platform.current_policy_permission_grants	SELECT	*	Resolve current permission grants and their revocation epoch.

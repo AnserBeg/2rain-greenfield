@@ -438,10 +438,10 @@ test(
   },
 );
 
-// The actual preceding serving reader: main at rung 35 with the withdrawn v1
+// The actual preceding serving reader: main at rung 36 with the withdrawn v1
 // Board parser. It must refuse a Board v2 release on its capability rung,
 // before parsing any Board (CALENDAR-1 Board v2 fix, reader proof).
-const PRECEDING_SERVING_READER = 'b8a91a6f94c3c1ad6aa505fe81adee39412f6777';
+const PRECEDING_SERVING_READER = '67e4efce31eb663f12d6f161aa91c0ce1220dffc';
 test(
   'a preceding serving reader admits the same tenant until Board activation',
   { timeout: 600_000 },

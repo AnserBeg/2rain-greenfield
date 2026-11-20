@@ -274,7 +274,7 @@ test('Board v2 records explicit choices by stable ID, with the version literal 2
     issues.some((i) => i.path.join('.') === 'version'),
     JSON.stringify(issues),
   );
-  assert.equal(BOARD_READER, 36);
+  assert.equal(BOARD_READER, 37);
 });
 
 test('proof: from a Board with zero facts, and again after retiring it, adding a field still compiles', async () => {

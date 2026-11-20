@@ -4,7 +4,7 @@ import { STATUS_ROLES } from './constants.js';
 
 // Board v2 (ADR-0086, view revision member shape). Assigned against main
 // immediately before integration: one rung above the highest serving reader.
-export const BOARD_READER = 36;
+export const BOARD_READER = 37;
 export const BOARD_MEMBER_VERSION = 2;
 const id = z.string().min(5).max(180);
 const text = z.string().min(1).max(240);
