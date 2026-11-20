@@ -162,6 +162,7 @@ export interface RegisteredOperationInputContract {
     readonly enumOptionIds: readonly string[];
     readonly fieldId: string;
     readonly fieldKind:
+      | 'addressFieldType'
       | 'booleanFieldType'
       | 'dateFieldType'
       | 'dateTimeFieldType'
@@ -1267,6 +1268,7 @@ function parseOperationCatalogPayload(
       'kind',
       'operations',
       'schemaVersion',
+      ...(Object.hasOwn(payload, 'addressBindings') ? ['addressBindings'] : []),
       ...(Object.hasOwn(payload, 'documentBindings')
         ? ['documentBindings']
         : []),
@@ -1950,6 +1952,7 @@ function assertOperationInputContract(
       typeof field.required !== 'boolean' ||
       field.writable !== true ||
       ![
+        'addressFieldType',
         'booleanFieldType',
         'dateFieldType',
         'dateTimeFieldType',

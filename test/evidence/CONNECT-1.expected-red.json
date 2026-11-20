@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "packet": "CONNECT-1",
+  "entries": [
+    {
+      "name": "late-address-response",
+      "claim": "A late provider reply cannot attach coordinates after the source changes.",
+      "file": "packages/postgres-provider/src/address-geocodes.ts",
+      "original": "await checked(c);\n        await c.query(",
+      "replacement": "await active(c, view);\n        await c.query(",
+      "test": {
+        "files": ["test/postgres/address-connector.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/address-connector.test.ts",
+          "name": "Address publication preserves the old envelope, stops the prior reader, and serves governed user text without a provider",
+          "expected": "the late geocode was accepted after the source address changed"
+        }
+      ]
+    },
+    {
+      "name": "shared-record-company-pin",
+      "claim": "A shared record returns only the selected company installation’s provider pin.",
+      "file": "packages/postgres-provider/src/address-geocodes.ts",
+      "original": "FROM platform.address_geocodes WHERE tenant_id=$1 AND environment_id=$2 AND company_id=$3 AND installation_id=$4 AND record_id=$5 AND field_id=$6 AND address_revision=$7 AND release_id=$8 AND fence=$9",
+      "replacement": "FROM platform.address_geocodes WHERE tenant_id=$1 AND environment_id=$2 AND $3::uuid IS NOT NULL AND $4::uuid IS NOT NULL AND record_id=$5 AND field_id=$6 AND address_revision=$7 AND release_id=$8 AND fence=$9",
+      "test": {
+        "files": ["test/postgres/address-connector.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/address-connector.test.ts",
+          "name": "Address publication preserves the old envelope, stops the prior reader, and serves governed user text without a provider",
+          "expected": "the other company received a provider pin for this shared record"
+        }
+      ]
+    }
+  ]
+}
