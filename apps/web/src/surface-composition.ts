@@ -264,7 +264,8 @@ export function displayFieldValue(
   value: ImmutableJsonValue,
 ): string {
   const field = presentedField(view, fieldId);
-  if (field?.kind === 'addressFieldType') return SavedAddressSchema.safeParse(value).data?.text ?? '';
+  if (field?.kind === 'addressFieldType')
+    return SavedAddressSchema.safeParse(value).data?.text ?? '';
   if (field?.kind === 'enumFieldType')
     return (
       field.options.find((option) => option.optionId === value)?.label ??

@@ -1,7 +1,7 @@
 # CONNECT-1 — company connectors for addresses, maps and email
 
 Slice 0 is the docs-only design amended after Fable’s read. The orchestrator authorized slice 1.
-Critical paths touched by CONNECT-1 in this slice are empty.
+Slice 0 touched no Critical paths. The slice 1 branch changes the module materializer, release verification, and a migration with RLS and grants.
 
 ## Design claims and decisions
 
@@ -40,3 +40,12 @@ Open [ADR-0080](../../decisions/ADR-0080-connector-framework.md) and trace three
   safe window, or holds the send for reconciliation when acceptance cannot be determined.
 - Deliver the same signed bounce twice. Both acknowledgements refer to one captured event
   and one scoped message transition.
+
+## Slice 1 storage decision pending
+
+The draft stores Address as `jsonb` under the existing storage payload version.
+ADR-0011 freezes the field mapping. ADR-0027 and the posting adapter require the active
+release's exact v3 storage target. An Address field on Party changes that same release target.
+A versioned compound storage target therefore requires a decision on posting registration.
+An alternative needs a specified lowering from a logical Address to existing scalar columns.
+The branch has not merged. The older-reader, byte-parity and end-to-end demo proofs remain open.

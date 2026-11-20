@@ -105,7 +105,10 @@ export class FakeAddressProvider implements AddressProvider {
     };
   }
   staticMap(pin: Coordinates) {
-    const { latitude, longitude } = CoordinatesSchema.parse(pin);
+    const { latitude, longitude } = CoordinatesSchema.parse({
+      latitude: pin.latitude,
+      longitude: pin.longitude,
+    });
     const x = (((Number(longitude) + 180) / 360) * 240).toFixed(2);
     const y = (((90 - Number(latitude)) / 180) * 120).toFixed(2);
     return (

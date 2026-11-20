@@ -3205,8 +3205,14 @@ function capture(
     // kept exactly as typed so the operator sees it, and save refuses it.
     const kind = inputs.get(field.fieldId)?.kind ?? '';
     if (kind === 'addressFieldType' && value !== '') {
-      try { row.values[field.fieldId] = addressFromForm(inputName(row,field.fieldId),submission); }
-      catch { refused.push(field.label); }
+      try {
+        row.values[field.fieldId] = addressFromForm(
+          inputName(row, field.fieldId),
+          submission,
+        );
+      } catch {
+        refused.push(field.label);
+      }
       continue;
     }
     if (kind === 'booleanFieldType' && value !== '') {

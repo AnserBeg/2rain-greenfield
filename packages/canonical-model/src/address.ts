@@ -37,7 +37,9 @@ export const AddressInputSchema = z.strictObject({
 // The editor can request enrichment for one reviewed installation. The host
 // strips that request before persisting the business value.
 export const AddressWriteSchema = AddressInputSchema.extend({
-  locateFor: z.strictObject({ companyId:z.uuid(), installationId:z.uuid() }).optional(),
+  locateFor: z
+    .strictObject({ companyId: z.uuid(), installationId: z.uuid() })
+    .optional(),
 });
 export const SavedAddressSchema = AddressInputSchema.extend({
   revision: z.uuid(),

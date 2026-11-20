@@ -1658,7 +1658,7 @@ function addField(
       {schemaVersion:version, entityId,fieldId,contractVersion:'northstar.address/v1',mappingVersion:'v1'}];
   }
   // A tenant record type's own list shows the new field as a column.
-  if (!bindExisting && isTenantId(entityId)) {
+  if (!bindExisting && (address || isTenantId(entityId))) {
     for (const surface of list(authored, 'surfaces')) {
       const declared = surface.list as Json | undefined;
       if (
@@ -1670,7 +1670,7 @@ function addField(
       }
       const columns = declared.columns as Json[];
       columns.push({
-        columnId: `${namespace}:list_column.${entityLocal}_list_${fieldLocal.slice(entityLocal.length + 1)}`,
+        columnId: `${namespace}:list_column.${entityLocal}_list_${address ? slug(field.label) : fieldLocal.slice(entityLocal.length + 1)}`,
         field: fieldId,
         label: field.label.trim(),
         orderKey:

@@ -1,5 +1,8 @@
 import { renderAddressField } from './address-field.js';
-import { AddressInputSchema, SavedAddressSchema } from '@north-star/canonical-model';
+import {
+  AddressInputSchema,
+  SavedAddressSchema,
+} from '@north-star/canonical-model';
 import type { LayoutBody } from '@north-star/canonical-model';
 import { DocumentsProjectionSchema } from '../../../packages/canonical-model/src/schemas.js';
 import {
@@ -185,7 +188,7 @@ export type SurfaceDataRenderState =
       readonly records: readonly SemanticRecordDto[];
       readonly documentEditorSlots?: Readonly<Record<string, string>>;
       readonly addressLayout?: LayoutBody;
-      readonly addressMaps?: Readonly<Record<string,string>>;
+      readonly addressMaps?: Readonly<Record<string, string>>;
       readonly documentsSection?: string;
       readonly receiving?: ReceivingSection;
       readonly receivingNavigation?: ReceivingNavigation;
@@ -1282,7 +1285,7 @@ export function renderLayoutSection(
   ) => string | undefined,
   escape: (value: string) => string,
   mode: 'form' | 'detail',
-  mapHtml='',
+  mapHtml = '',
 ): string {
   const wrap = (html: string) =>
     mode === 'form'
@@ -1338,9 +1341,11 @@ function renderSections(context: SurfaceComponentContext): string {
     context.data?.status === 'READY'
       ? (context.data.documentsSection ?? '')
       : '';
-  const layout = context.surface.layouts?.find(l=>l.body.mode==='detail')?.body ??
-    (context.data?.status==='READY'?context.data.addressLayout:undefined);
-  const maps=context.data?.status==='READY'?context.data.addressMaps:undefined;
+  const layout =
+    context.surface.layouts?.find((l) => l.body.mode === 'detail')?.body ??
+    (context.data?.status === 'READY' ? context.data.addressLayout : undefined);
+  const maps =
+    context.data?.status === 'READY' ? context.data.addressMaps : undefined;
   if (context.data?.status === 'READY' && context.data.composition) {
     const data = context.data.composition;
     if (!layout)
@@ -2573,7 +2578,10 @@ function typedControlPreservesValue(
     case 'quantityFieldType':
       return typeof value === 'string' && nativeNumberValue(value);
     case 'addressFieldType':
-      return SavedAddressSchema.safeParse(value).success || AddressInputSchema.safeParse(value).success;
+      return (
+        SavedAddressSchema.safeParse(value).success ||
+        AddressInputSchema.safeParse(value).success
+      );
     case 'textFieldType':
     case 'dateTimeFieldType':
       return oneLineInputPreservesValue(value);

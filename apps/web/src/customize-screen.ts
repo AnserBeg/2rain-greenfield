@@ -555,13 +555,27 @@ function fieldForm(targets: CustomizationTargets): string {
 }
 
 function addressForms(targets: CustomizationTargets) {
-  const entities=targets.recordTypes.map(e=>`<option value="${escapeHtml(e.entityId)}">${escapeHtml(e.label)}</option>`).join('');
-  const mapForms=(targets.layouts??[]).filter(l=>l.body.mode==='detail').flatMap(l=>{
-    const fields=l.body.sections.flatMap(s=>s.fields).filter(f=>f.bindingType==='query:addressFieldType');
-    if (!fields.length) return [];
-    return [`<form method="post"><fieldset><legend>Map on ${escapeHtml(l.label)}</legend><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="addMapPlacement"><input type="hidden" name="surface" value="${escapeHtml(l.body.surfaceId)}"><label>Address<select name="fieldId">${fields.map(f=>`<option value="${escapeHtml(f.id)}">${escapeHtml(f.label.text)}</option>`).join('')}</select></label><label>Record section<select name="sectionId">${l.body.sections.map(s=>`<option value="${escapeHtml(s.id)}">${escapeHtml(s.label.text)}</option>`).join('')}</select></label><button>Draft map placement</button></fieldset></form>`];
-  });
-  return `<form method="post"><fieldset><legend>New address field</legend><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="addAddressField"><label>Record type<select required name="entity">${entities}</select></label><label>Field name<input name="label" required maxlength="80"></label><label><input type="checkbox" name="required"> Required</label><button>Draft address field</button></fieldset></form>`+mapForms.join('');
+  const entities = targets.recordTypes
+    .map(
+      (e) =>
+        `<option value="${escapeHtml(e.entityId)}">${escapeHtml(e.label)}</option>`,
+    )
+    .join('');
+  const mapForms = (targets.layouts ?? [])
+    .filter((l) => l.body.mode === 'detail')
+    .flatMap((l) => {
+      const fields = l.body.sections
+        .flatMap((s) => s.fields)
+        .filter((f) => f.bindingType === 'query:addressFieldType');
+      if (!fields.length) return [];
+      return [
+        `<form method="post"><fieldset><legend>Map on ${escapeHtml(l.label)}</legend><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="addMapPlacement"><input type="hidden" name="surface" value="${escapeHtml(l.body.surfaceId)}"><label>Address<select name="fieldId">${fields.map((f) => `<option value="${escapeHtml(f.id)}">${escapeHtml(f.label.text)}</option>`).join('')}</select></label><label>Record section<select name="sectionId">${l.body.sections.map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.label.text)}</option>`).join('')}</select></label><button>Draft map placement</button></fieldset></form>`,
+      ];
+    });
+  return (
+    `<form method="post"><fieldset><legend>New address field</legend><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="addAddressField"><label>Record type<select required name="entity">${entities}</select></label><label>Field name<input name="label" required maxlength="80"></label><label><input type="checkbox" name="required"> Required</label><button>Draft address field</button></fieldset></form>` +
+    mapForms.join('')
+  );
 }
 
 function documentFieldForm(targets: CustomizationTargets): string {
@@ -850,14 +864,28 @@ export function patchFromForm(
   };
   switch (form.kind) {
     case 'addAddressField': {
-      const entity=String(form.entity??'');
-      const [ns,local]=entity.split(':entity.');
-      const label=String(form.label??'').trim();
-      return {kind:'addAddressField',schemaVersion:'v6',entity,fieldId:ns+':field.custom_'+local+'_'+slug(label),label,required:form.required==='on'};
+      const entity = String(form.entity ?? '');
+      const [ns, local] = entity.split(':entity.');
+      const label = String(form.label ?? '').trim();
+      return {
+        kind: 'addAddressField',
+        schemaVersion: 'v6',
+        entity,
+        fieldId: ns + ':field.custom_' + local + '_' + slug(label),
+        label,
+        required: form.required === 'on',
+      };
     }
     case 'addMapPlacement': {
-      const fieldId=String(form.fieldId??'');
-      return {kind:'addMapPlacement',schemaVersion:'v6',placementId:fieldId.replace(':field.',':placement.')+'_map',surfaceId:form.surface,sectionId:form.sectionId,fieldId};
+      const fieldId = String(form.fieldId ?? '');
+      return {
+        kind: 'addMapPlacement',
+        schemaVersion: 'v6',
+        placementId: fieldId.replace(':field.', ':placement.') + '_map',
+        surfaceId: form.surface,
+        sectionId: form.sectionId,
+        fieldId,
+      };
     }
     case 'addDocumentField': {
       const entityId = String(form.entity ?? '');
@@ -1128,8 +1156,10 @@ function describe(patch: PatchSummary): string {
       return `New record type "${label}"`;
     case 'addField':
       return `New field "${label}"`;
-    case 'addAddressField': return 'New address field '+label;
-    case 'addMapPlacement': return 'Map placement on Record';
+    case 'addAddressField':
+      return 'New address field ' + label;
+    case 'addMapPlacement':
+      return 'Map placement on Record';
     case 'addDocumentField':
       return `New files field "${label}"`;
     case 'addChoice':

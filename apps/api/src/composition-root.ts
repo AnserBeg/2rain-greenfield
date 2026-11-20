@@ -162,6 +162,12 @@ export async function startComposedApplication(
   let seededRecords: readonly ComposedApplicationSeedReceipt[];
   let server: Server | undefined;
   let assistant: AssistantEndpoint | undefined;
+  let addressTimer: ReturnType<typeof setInterval> | undefined;
+  let pollingAddresses: Promise<void> | undefined;
+  async function stopAddresses() {
+    clearInterval(addressTimer);
+    await pollingAddresses;
+  }
   let workflows: ReturnType<typeof startWorkflowScheduler> | undefined;
   // The Host values the assistant answers to, known once the server listens;
   // nothing is accepted before then (end review X10).
@@ -240,6 +246,29 @@ export async function startComposedApplication(
         process.stderr.write('WORKFLOW_SCHEDULER_POLL_FAILED\n');
       });
     }
+    if (
+      runtime.identityMode === 'LOCAL_DEMO' &&
+      process.env.NORTH_STAR_CONNECTOR_WORKER === '1'
+    ) {
+      addressTimer = setInterval(() => {
+        if (pollingAddresses) return;
+        pollingAddresses = (async () => {
+          for (const actor of ['buyer', 'manager']) {
+            await runtime.entry.run(
+              { headers: { cookie: 'northstar-demo-actor=' + actor } },
+              (view) => runtime.addresses.workOne(view),
+            );
+          }
+        })()
+          .catch(() => {
+            process.stderr.write('ADDRESS_WORKER_UNAVAILABLE\n');
+          })
+          .finally(() => {
+            pollingAddresses = undefined;
+          });
+      }, 2000);
+      addressTimer.unref();
+    }
     server = createSurfaceRuntimeServer(
       runtime.entry,
       {
@@ -275,6 +304,7 @@ export async function startComposedApplication(
   } catch (error) {
     server?.close();
     assistant?.close();
+    await stopAddresses();
     await workflows?.close();
     await closeCustomization();
     await runtime.close();
@@ -287,6 +317,7 @@ export async function startComposedApplication(
         resolve();
       });
     });
+    await stopAddresses();
     await workflows?.close();
     await closeCustomization();
     await runtime.close();
@@ -303,6 +334,7 @@ export async function startComposedApplication(
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
       });
+      await stopAddresses();
       await workflows?.close();
       await closeCustomization();
       await runtime.close();

@@ -205,12 +205,18 @@ export function normalizeApplicationPackage(
       : undefined;
 
   const normalizedCandidate = {
-    ...(authored.languageVersion === 'v6' && authored.connectorBindings && {
-      connectorBindings: [...authored.connectorBindings].sort((a,b) => compareCodeUnits(a.fieldId,b.fieldId)),
-    }),
-    ...(authored.languageVersion === 'v6' && authored.mapPlacements && {
-      mapPlacements: [...authored.mapPlacements].sort((a,b) => compareCodeUnits(a.placementId,b.placementId)),
-    }),
+    ...(authored.languageVersion === 'v6' &&
+      authored.connectorBindings && {
+        connectorBindings: [...authored.connectorBindings].sort((a, b) =>
+          compareCodeUnits(a.fieldId, b.fieldId),
+        ),
+      }),
+    ...(authored.languageVersion === 'v6' &&
+      authored.mapPlacements && {
+        mapPlacements: [...authored.mapPlacements].sort((a, b) =>
+          compareCodeUnits(a.placementId, b.placementId),
+        ),
+      }),
     ...(authored.languageVersion === 'v6' &&
       authored.workflows && {
         workflows: authored.workflows

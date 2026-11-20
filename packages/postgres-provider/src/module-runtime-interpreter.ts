@@ -503,8 +503,15 @@ export class PostgresModuleRuntimeInterpreter
             // The host assigns a new field revision inside the idempotent write.
             // Retrying the operation returns the original revision through its receipt.
             const addressInputs = currentEntity.columns.filter(c => c.fieldContract.fieldKind === 'addressFieldType' && numbered.patch[c.canonicalFieldId] != null);
+            const prior = addressInputs.length && request.definition.effect.kind === 'updateRecordEffect'
+              ? await loadRawRecord(client,currentEntity,numbered.recordId,false,[],true) : null;
             const requests = addressInputs.map(c=>{
               const {locateFor,...value}=AddressWriteSchema.parse(numbered.patch[c.canonicalFieldId]);
+              const old = SavedAddressSchema.safeParse(prior?.values[c.canonicalFieldId]).data;
+              if (old) {
+                const {revision,...existing}=old;
+                if (canonicalize(existing)===canonicalize(value)) return {fieldId:c.canonicalFieldId, value:{...value,revision}};
+              }
               return {fieldId:c.canonicalFieldId,locateFor,value:{...value,revision:randomUUID()}};
             });
             const input = requests.length ? {...numbered, patch:{...numbered.patch,...Object.fromEntries(requests.map(r=>[r.fieldId,r.value]))}} : numbered;
@@ -5083,6 +5090,8 @@ function visibleFieldExpression(
 ): string {
   const value = qualified(tableAlias, column.physicalName);
   switch (column.fieldContract.fieldKind) {
+    case 'addressFieldType':
+      return `concat_ws(' ', ${value}->>'text', (SELECT string_agg(line, ' ') FROM jsonb_array_elements_text(${value}->'lines') AS line), ${value}->>'city', ${value}->>'region', ${value}->>'postalCode', ${value}->>'country')`;
     case 'booleanFieldType':
       return `CASE WHEN ${value} IS NULL THEN NULL WHEN ${value} THEN 'Yes' ELSE 'No' END`;
     case 'enumFieldType':

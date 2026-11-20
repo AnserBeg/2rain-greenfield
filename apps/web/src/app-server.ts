@@ -207,30 +207,78 @@ async function handleRequest(
   }
 
   const url = new URL(request.url ?? '/', 'http://surface-runtime.local');
-  if (gateways?.addresses && demoActors && url.pathname === '/address/settings') {
-    try{
-      if(request.method==='POST'&&!sameOriginRequest(request))throw Error();
-      const form=request.method==='POST'?await readFormSubmission(request):undefined;
-      const html=await entry.run({headers:request.headers},view=>addressSettings(view,gateways.addresses!,gateways.queryGateway,form));
-      response.writeHead(200,{'content-type':'text/html; charset=utf-8'});response.end(html);
-    } catch {response.writeHead(403);response.end('Company settings unavailable for this account.');}
+  if (
+    gateways?.addresses &&
+    demoActors &&
+    url.pathname === '/address/settings'
+  ) {
+    try {
+      if (request.method === 'POST' && !sameOriginRequest(request))
+        throw Error();
+      const form =
+        request.method === 'POST'
+          ? await readFormSubmission(request)
+          : undefined;
+      const html = await entry.run({ headers: request.headers }, (view) =>
+        addressSettings(view, gateways.addresses!, gateways.queryGateway, form),
+      );
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      response.end(html);
+    } catch {
+      response.writeHead(403);
+      response.end('Company settings unavailable for this account.');
+    }
     return;
   }
   if (gateways?.addresses && url.pathname === '/address/suggest') {
-    if (request.method !== 'POST' || !sameOriginRequest(request)) {response.writeHead(403);response.end();return;}
+    if (request.method !== 'POST' || !sameOriginRequest(request)) {
+      response.writeHead(403);
+      response.end();
+      return;
+    }
     try {
-      const form=await readFormSubmission(request);
-      const answer=await entry.run({headers:request.headers},async view=>{
-        const gateway=gateways.addresses!;
-        const account=(await gateway.installations(view)).find(i=>i.installationId===form.installationId);
-        if(!account) throw new Error();
-        const t={companyId:account.companyId,recordId:form.recordId??'',fieldId:form.fieldId??''};
-        const session=form.session??'';
-        const result=await gateway.suggest(view,t,form.queryId??'',form.text??'',session);
-        return {attribution:result.attribution,suggestions:offerPlaces(view,t.recordId,t.fieldId,account,session,result.suggestions,result.attribution)};
-      });
-      response.writeHead(200,{'content-type':'application/json'});response.end(JSON.stringify(answer));
-    } catch {response.writeHead(422);response.end();}
+      const form = await readFormSubmission(request);
+      const answer = await entry.run(
+        { headers: request.headers },
+        async (view) => {
+          const gateway = gateways.addresses!;
+          const account = (await gateway.installations(view)).find(
+            (i) => i.installationId === form.installationId,
+          );
+          if (!account) throw new Error();
+          const t = {
+            companyId: account.companyId,
+            recordId: form.recordId ?? '',
+            fieldId: form.fieldId ?? '',
+          };
+          const session = form.session ?? '';
+          const result = await gateway.suggest(
+            view,
+            t,
+            form.queryId ?? '',
+            form.text ?? '',
+            session,
+          );
+          return {
+            attribution: result.attribution,
+            suggestions: offerPlaces(
+              view,
+              t.recordId,
+              t.fieldId,
+              account,
+              session,
+              result.suggestions,
+              result.attribution,
+            ),
+          };
+        },
+      );
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify(answer));
+    } catch {
+      response.writeHead(422);
+      response.end();
+    }
     return;
   }
   if (documents && url.pathname === '/documents') {

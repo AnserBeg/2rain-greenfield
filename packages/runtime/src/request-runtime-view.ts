@@ -9,7 +9,6 @@ import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents
 import {
   WORKFLOW_PROJECTION_FAMILY,
   WORKFLOW_RUNTIME_CAPABILITY,
-  WORKFLOW_SURFACE_FLOOR,
 } from '../../canonical-model/src/workflows.js';
 
 export const REQUEST_RUNTIME_VIEW_VERSION =

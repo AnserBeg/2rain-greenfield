@@ -2,17 +2,17 @@ import { randomUUID } from 'node:crypto';
 import { withModuleRuntimeRole } from './module-runtime-interpreter.js';
 import type { AddressGateway, AddressInstallation } from '../../runtime/src/address-gateway.js';
 import type { Pool, PoolClient } from 'pg';
-import { AddressProjectionSchema, CoordinatesSchema, SavedAddressSchema, type AddressProjection, type SavedAddress } from '@north-star/canonical-model';
+import { AddressProjectionSchema, CoordinatesSchema, SavedAddressSchema , } from '@north-star/canonical-model';
 import type { RequestRuntimeView, CurrentPolicyGateway } from '../../runtime/src/request-runtime-view.js';
 import { authorizeCurrentPolicy, issueLegalEntityReadScope, trustedContextForRequestRuntimeView } from '../../runtime/src/request-runtime-view.js';
 import { parsePinnedOperationCatalog, OPERATION_BOUNDARY_PERMISSION_ID } from '../../runtime/src/semantic-operation-gateway.js';
 import { registeredQueryFromPinnedView, SEMANTIC_QUERY_REQUEST_VERSION, type SemanticQueryGateway } from '../../runtime/src/semantic-query-gateway.js';
-import { addressProvider, AddressProviderError, type AddressProvider, type InstallationIdentity, type Geocode } from './address-provider.js';
+import { addressProvider, AddressProviderError, type AddressProvider, type InstallationIdentity } from './address-provider.js';
 import { withTrustedRequestTransaction } from './request-context.js';
 import { currentPolicyVersionOf } from './current-policy.js';
 import type { StorageTargetPayloadV1 } from '@north-star/compiler';
 
-type Binding=AddressProjection['bindings'][number];
+
 type Entity=StorageTargetPayloadV1['entities'][number];
 interface Install extends InstallationIdentity {provider:'fake'|'google'; enrichment:boolean; period_calls:number; period_budget_micros:string}
 export interface AddressTarget { fieldId:string;recordId:string;companyId:string }
@@ -77,13 +77,19 @@ export class PostgresAddresses implements AddressGateway {
     return this.tx(view,async c=>{
       await active(c,view);
       const before=await installation(c,view,company);
-      if(before) await c.query('UPDATE platform.address_installations SET enabled=false WHERE tenant_id=$1 AND environment_id=$2 AND company_id=$3 AND enabled',key(view,company));
+      const same=before?.provider===options.provider && before.account===options.account;
       let id=before?.installationId;
-      if(options.enabled){
+      let change:'rotated'|'enabled'|'paused'='paused';
+      if(before && (!same || !options.enabled)) await c.query('UPDATE platform.address_installations SET enabled=false WHERE tenant_id=$1 AND environment_id=$2 AND company_id=$3 AND enabled',key(view,company));
+      if(options.enabled && same){
+        await c.query('UPDATE platform.address_installations SET enrichment=$4,period_calls=$5,period_budget_micros=$6 WHERE tenant_id=$1 AND environment_id=$2 AND company_id=$3 AND enabled',[...key(view,company),options.enrichment,options.calls,options.budgetMicros]);
+        change='rotated';
+      }else if(options.enabled){
         id=randomUUID();
         await c.query('INSERT INTO platform.address_installations(tenant_id,environment_id,company_id,installation_id,account,provider,enabled,enrichment,period_calls,period_budget_micros) VALUES($1,$2,$3,$4,$5,$6,true,$7,$8,$9)',[...key(view,company),id,options.account,options.provider,options.enrichment,options.calls,options.budgetMicros]);
+        change='enabled';
       }
-      if(id) await c.query('INSERT INTO platform.address_installation_history(tenant_id,environment_id,company_id,installation_id,principal_id,change) VALUES($1,$2,$3,$4,$5,$6)',[...key(view,company),id,view.principalId,options.enabled?'enabled':'paused']);
+      if(id) await c.query('INSERT INTO platform.address_installation_history(tenant_id,environment_id,company_id,installation_id,principal_id,change) VALUES($1,$2,$3,$4,$5,$6)',[...key(view,company),id,view.principalId,change]);
       return id;
     });
   }

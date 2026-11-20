@@ -1,4 +1,7 @@
-import { AddressProjectionSchema, SavedAddressSchema } from '@north-star/canonical-model';
+import {
+  AddressProjectionSchema,
+  SavedAddressSchema,
+} from '@north-star/canonical-model';
 import { withAddressEditor } from './address-context.js';
 import type { AddressGateway } from '../../../packages/runtime/src/address-gateway.js';
 import { addressFromForm } from './address-field.js';
@@ -282,7 +285,15 @@ export async function renderSurfaceRuntimeWithData(
    */
   reads: { readonly finishReads: () => Promise<void> } | null = null,
 ): Promise<SurfaceRuntimeResponse> {
-  return withAddressEditor(view,requestUrl,gateways.addresses,()=>renderSurfaceRuntimeWithDataInContext(view,requestUrl,gateways,feedback,reads));
+  return withAddressEditor(view, requestUrl, gateways.addresses, () =>
+    renderSurfaceRuntimeWithDataInContext(
+      view,
+      requestUrl,
+      gateways,
+      feedback,
+      reads,
+    ),
+  );
 }
 async function renderSurfaceRuntimeWithDataInContext(
   view: RuntimeViewContract.RequestRuntimeView,
@@ -688,24 +699,69 @@ async function renderSurfaceRuntimeWithDataInContext(
           view,
         });
       }
-      if(data.status==='READY' && data.records[0] && selection.selected.surfaceRole==='record' && view.projections.connector && gateways.addresses){
-        const definition=AddressProjectionSchema.parse(view.projections.connector.payload);
-        const record=data.records[0], company=workspaceContext?.selectedRecordId ?? legalEntitySelection[0];
-        const maps: Record<string,string>={};
-        const layout=definition.layouts.find(l=>l.surfaceId===selection.selected.surfaceId);
-        for(const p of definition.placements.filter(p=>p.surfaceId===selection.selected.surfaceId)){
-          const binding=definition.bindings.find(b=>b.fieldId===p.fieldId)!;
-          const value=SavedAddressSchema.safeParse(record.values[p.fieldId]).data;
-          if(!value)continue;
-          const pin=value.pin?{status:'ready' as const,pin:value.pin,attribution:'User pin',image:null}
-            :company?await gateways.addresses.pin(view,{fieldId:p.fieldId,recordId:record.recordId,companyId:company},binding.mapQueryId).catch(()=>({status:'unavailable' as const}))
-            :{status:'unavailable' as const};
-          const message=pin.status==='ready'?`${pin.pin.latitude}, ${pin.pin.longitude} · ${pin.attribution}`:
-            pin.status==='locating'?'Address saved · locating':'Address saved · map unavailable';
-          const img=pin.status==='ready'&&pin.image?`<img width="240" height="120" alt="${escapeHtml(message)}" src="data:image/svg+xml;base64,${Buffer.from(pin.image).toString('base64')}">`:'';
-          maps[p.sectionId]=(maps[p.sectionId]??'')+`<figure>${img}<figcaption>${escapeHtml(value.text)} · ${escapeHtml(message)}</figcaption></figure>`;
+      if (
+        data.status === 'READY' &&
+        data.records[0] &&
+        selection.selected.surfaceRole === 'record' &&
+        view.projections.connector &&
+        gateways.addresses
+      ) {
+        const definition = AddressProjectionSchema.parse(
+          view.projections.connector.payload,
+        );
+        const record = data.records[0],
+          company =
+            workspaceContext?.selectedRecordId ?? legalEntitySelection[0];
+        const maps: Record<string, string> = {};
+        const layout = definition.layouts.find(
+          (l) => l.surfaceId === selection.selected.surfaceId,
+        );
+        for (const p of definition.placements.filter(
+          (p) => p.surfaceId === selection.selected.surfaceId,
+        )) {
+          const binding = definition.bindings.find(
+            (b) => b.fieldId === p.fieldId,
+          )!;
+          const value = SavedAddressSchema.safeParse(
+            record.values[p.fieldId],
+          ).data;
+          if (!value) continue;
+          const pin = value.pin
+            ? {
+                status: 'ready' as const,
+                pin: value.pin,
+                attribution: 'User pin',
+                image: null,
+              }
+            : company
+              ? await gateways.addresses
+                  .pin(
+                    view,
+                    {
+                      fieldId: p.fieldId,
+                      recordId: record.recordId,
+                      companyId: company,
+                    },
+                    binding.mapQueryId,
+                  )
+                  .catch(() => ({ status: 'unavailable' as const }))
+              : { status: 'unavailable' as const };
+          const message =
+            pin.status === 'ready'
+              ? `${pin.pin.latitude}, ${pin.pin.longitude} · ${pin.attribution}`
+              : pin.status === 'locating'
+                ? 'Address saved · locating'
+                : 'Address saved · map unavailable';
+          const img =
+            pin.status === 'ready' && pin.image
+              ? `<img width="240" height="120" alt="${escapeHtml(message)}" src="data:image/svg+xml;base64,${Buffer.from(pin.image).toString('base64')}">`
+              : '';
+          maps[p.sectionId] =
+            (maps[p.sectionId] ?? '') +
+            `<figure>${img}<figcaption>${escapeHtml(value.text)} · ${escapeHtml(message)}</figcaption></figure>`;
         }
-        if(layout)data={...data,addressLayout:layout,addressMaps:maps};
+        if (layout)
+          data = { ...data, addressLayout: layout, addressMaps: maps };
       }
       if (
         data.status === 'READY' &&
@@ -1173,6 +1229,11 @@ async function exportDeclaredList(
               : JSON.stringify(value);
         },
         state.viewId,
+        new Set(
+          AddressProjectionSchema.safeParse(
+            view.projections.connector?.payload,
+          ).data?.bindings.map((b) => b.fieldId),
+        ),
       ),
       contentType: 'text/csv; charset=utf-8' as const,
       fileName: exportFileName(surface.label, now),
@@ -1204,7 +1265,14 @@ export async function submitSurfaceRuntimeFragment(
   submission: SurfaceRuntimeSubmission,
   gateways: SurfaceRuntimeGateways,
 ): Promise<SurfaceRuntimeFragmentResponse> {
-  return withAddressEditor(view,requestUrl,gateways.addresses,()=>submitSurfaceRuntimeFragmentInContext(view,requestUrl,submission,gateways));
+  return withAddressEditor(view, requestUrl, gateways.addresses, () =>
+    submitSurfaceRuntimeFragmentInContext(
+      view,
+      requestUrl,
+      submission,
+      gateways,
+    ),
+  );
 }
 async function submitSurfaceRuntimeFragmentInContext(
   view: RuntimeViewContract.RequestRuntimeView,
@@ -1278,7 +1346,15 @@ export async function submitSurfaceRuntimeIntent(
   gateways: SurfaceRuntimeGateways,
   transport: 'page' | 'task-fragment' = 'page',
 ): Promise<SurfaceRuntimeResponse> {
-  return withAddressEditor(view,requestUrl,gateways.addresses,()=>submitSurfaceRuntimeIntentInContext(view,requestUrl,submission,gateways,transport));
+  return withAddressEditor(view, requestUrl, gateways.addresses, () =>
+    submitSurfaceRuntimeIntentInContext(
+      view,
+      requestUrl,
+      submission,
+      gateways,
+      transport,
+    ),
+  );
 }
 async function submitSurfaceRuntimeIntentInContext(
   view: RuntimeViewContract.RequestRuntimeView,
@@ -2402,8 +2478,14 @@ function fieldInput(
     );
     if (mutation.kind === 'nothing') continue;
     if (field?.kind === 'addressFieldType' && mutation.kind === 'set') {
-      try { entries.push([fieldId, addressFromForm('value:'+fieldId,submission)]); }
-      catch { invalidFormSubmission(); }
+      try {
+        entries.push([
+          fieldId,
+          addressFromForm('value:' + fieldId, submission),
+        ]);
+      } catch {
+        invalidFormSubmission();
+      }
       continue;
     }
     entries.push([fieldId, mutation.kind === 'clear' ? null : mutation.value]);
