@@ -50,7 +50,7 @@ function declarations(def: Definition) {
         [list?.views, 'viewId'],
         [list?.columns, 'columnId'],
         [fieldType?.options, 'optionId'],
-        [member.metrics, 'metricId'],
+        [(member.launcher as Member | undefined)?.metrics, 'metricId'],
       ] as const) {
         if (Array.isArray(rows))
           for (const row of rows as Member[])
@@ -416,6 +416,9 @@ export function replayCustomizationPatches(
               });
         for (const id of created) failedIds.set(id, cause);
         if (layoutKey) failedLayouts.set(layoutKey, cause);
+        if (patch.kind === 'arrangeLayout')
+          for (const id of [...(patch.order ?? []), ...(patch.upFront ?? [])])
+            failedIds.set(id, cause);
         if (patch.kind === 'addLayoutRevision') {
           for (const [editIndex, edit] of patch.edits.entries()) {
             if (edit.kind === 'rename') continue;
