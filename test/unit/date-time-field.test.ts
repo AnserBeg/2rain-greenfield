@@ -494,3 +494,58 @@ test('with the member active and after its field retires, adding a field and arr
   });
   lastRelease(retired);
 });
+
+test('serving admission refuses disagreeing bindings, a missing catalog binding and an understated floor', async () => {
+  const { dateTimeBindingsProblem } =
+    await import('../../packages/postgres-provider/src/date-time-admission.js');
+  const binding = {
+    schemaVersion: 'v6',
+    fieldId,
+    entityId: equipment,
+    logicalType: 'dateTime',
+    zoneSource: { kind: 'perRecordIana', version: 'v1' },
+  };
+  const payload = { dateTimeBindings: [binding] };
+  assert.equal(
+    dateTimeBindingsProblem(
+      [payload, payload, payload],
+      DATE_TIME_FIELD_READER,
+    ),
+    null,
+  );
+  assert.equal(dateTimeBindingsProblem([{}, {}, {}], 34), null);
+  assert.match(
+    dateTimeBindingsProblem([payload, {}, payload], DATE_TIME_FIELD_READER) ??
+      '',
+    /disagree/u,
+  );
+  assert.match(
+    dateTimeBindingsProblem(
+      [
+        payload,
+        payload,
+        {
+          dateTimeBindings: [
+            {
+              ...binding,
+              zoneSource: { kind: 'companyBusinessCalendar', version: 'v1' },
+            },
+          ],
+        },
+      ],
+      DATE_TIME_FIELD_READER,
+    ) ?? '',
+    /disagree/u,
+  );
+  assert.match(
+    dateTimeBindingsProblem(
+      [payload, payload, payload],
+      DATE_TIME_FIELD_READER - 1,
+    ) ?? '',
+    /floor/u,
+  );
+  assert.match(
+    dateTimeBindingsProblem([{}, {}, {}], DATE_TIME_FIELD_READER) ?? '',
+    /floor without/u,
+  );
+});

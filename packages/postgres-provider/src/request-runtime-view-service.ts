@@ -1,4 +1,5 @@
 import { boardBindingsProblem } from './board-admission.js';
+import { dateTimeBindingsProblem } from './date-time-admission.js';
 import {
   ADDRESS_FIELD_READER,
   ADDRESS_MAP_READER,
@@ -6,8 +7,6 @@ import {
   CONNECTOR_FAMILY,
   CONNECTOR_PAYLOAD,
   BOOKING_OPERATION_READER,
-  DATE_TIME_FIELD_READER,
-  DateTimeBindingSchema,
   hasBookingOperations,
 } from '@north-star/canonical-model';
 import { layoutBindingsProblem } from './layout-admission.js';
@@ -911,34 +910,11 @@ function definitionFromSnapshotRows(
         'Address bindings or surface floor are invalid.',
       );
   }
-  // ADR-0087: the operation, query and surface catalogs carry identical
-  // dateTime bindings, and a binding raises the surface floor to its rung.
-  // Missing bindings and an understated floor refuse before serving.
-  const dateTimeBound = consumers.filter(
-    (p) => isRecord(p.payload) && Object.hasOwn(p.payload, 'dateTimeBindings'),
+  const dateTimeProblem = dateTimeBindingsProblem(
+    consumers.map((p) => p.payload),
+    floor,
   );
-  if (dateTimeBound.length > 0) {
-    const bindings = (dateTimeBound[0]!.payload as Record<string, unknown>)
-      .dateTimeBindings;
-    if (
-      dateTimeBound.length !== consumers.length ||
-      !Array.isArray(bindings) ||
-      bindings.length === 0 ||
-      !bindings.every((b) => DateTimeBindingSchema.safeParse(b).success) ||
-      floor < DATE_TIME_FIELD_READER ||
-      !dateTimeBound.every(
-        (p) =>
-          canonicalize(
-            (p.payload as Record<string, unknown>).dateTimeBindings,
-          ) === canonicalize(bindings),
-      )
-    )
-      throw malformedProjection(
-        'dateTime bindings or surface floor are invalid.',
-      );
-  } else if (floor === DATE_TIME_FIELD_READER) {
-    throw malformedProjection('dateTime floor without dateTime bindings.');
-  }
+  if (dateTimeProblem) throw malformedProjection(dateTimeProblem);
   const referencesDocuments = references.some(
     (entry) =>
       isRecord(entry) && entry.familyId === DOCUMENTS_PROJECTION_FAMILY,
