@@ -353,12 +353,14 @@ test(
             text: 'Invalid pin',
             pin: { ...manual.pin, latitude: '91' },
           };
-          const refused = await world.invoke('item_update', {
-            recordId,
-            expectedRevision: stored.revision,
-            patch: { [address.fieldId]: invalid },
-          });
-          assert.notEqual(refused.outcome, 'succeeded');
+          await assert.rejects(
+            world.invoke('item_update', {
+              recordId,
+              expectedRevision: stored.revision,
+              patch: { [address.fieldId]: invalid },
+            }),
+            { code: 'MODULE_FIELD_VALUE_INVALID' },
+          );
           assert.deepEqual(
             (await world.read('item', recordId)).values[address.fieldId],
             value,
