@@ -1,6 +1,6 @@
 # CALENDAR-1 Board v2 fix — Boards record choices, not derivations
 
-Status — built on `packet/CALENDAR-1-board-v2` from main `5d315668` (docs E1–E20), synchronized with main `fff2166f`. Surface reader rung 36, taken at merge above draft line create values (35). No migration. Governs: [ADR-0086 view revision member shape](../../decisions/ADR-0086-board-calendar-and-resource-timeline.md), [Board v2 fix proofs](CALENDAR-1.md#board-v2-fix).
+Status — built on `packet/CALENDAR-1-board-v2` from main `5d315668` (docs E1–E20), synchronized with main `67e4efce`. Surface reader rung 37, taken at merge above billing intervals (36). No migration. Governs: [ADR-0086 view revision member shape](../../decisions/ADR-0086-board-calendar-and-resource-timeline.md), [Board v2 fix proofs](CALENDAR-1.md#board-v2-fix).
 
 CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44824314810
 
@@ -10,7 +10,7 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44824314
 2. Normalization checks only the recorded digest and each referenced ID's contract. A retired Board is not validated. Nothing derives a Board outside authoring.
 3. On the authoring base, the choices must reproduce the exact recorded digest. On another base, replay checks each binding by stable ID. A missing binding is `RETIRED_TARGET` and a changed one `INCOMPATIBLE_TYPE`, each naming the ID. Only the last revision of each Board surface is checked.
 4. Labels and Ledger roles render from the active release: the compiler emits `boardPresentation` beside the digested `board` member, and the diff renders it from the approved release.
-5. Serving admission refuses a Board under rung 36, a rung-36 claim without a Board, and a forged move. It skips retired Boards. A List that no longer passes the authoring gates still lets its Board retire.
+5. Serving admission refuses a Board under rung 37, a rung-37 claim without a Board, and a forged move. It skips retired Boards. A List that no longer passes the authoring gates still lets its Board retire.
 6. The Board offers only moves the person is granted, in the chosen company. A forged or ungranted confirmation returns 403. A scan-ceiling or timeout read renders "Narrow the search", never "No cards".
 
 ## Decisions
@@ -28,7 +28,7 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44824314
 
 ## Controls
 
-[Manifest](../../../test/evidence/CALENDAR-1-board-v2.expected-red.json). These 10 unit controls were reproduced locally and restored: re-derived facts, the fact contract read from List columns, a retired Board validated, the normalization self-digest, a superseded revision bound, a conflict left unattributed (7 kills), the apply self-digest, the authoring exact digest, an understated serving floor, and a retired Board checked at serving. The three PostgreSQL controls (an unscoped company read, an admitted forged confirm and an offered ungranted move) are declared but **not yet reproduced**. The PostgreSQL proofs first execute in CI. Some proofs have no control because nothing in the code removes them: label-only replay and the confirmation-change replay hold because the member has no label or confirmation field (the strict schema and the no-label assertion guard this), and 'not offered until chosen' holds because the body carries only recorded moves.
+[Manifest](../../../test/evidence/CALENDAR-1-board-v2.expected-red.json). These 10 unit controls were reproduced locally and restored: re-derived facts, the fact contract read from List columns, a retired Board validated, the normalization self-digest, a superseded revision bound, a conflict left unattributed (7 kills), the apply self-digest, the authoring exact digest, an understated serving floor, and a retired Board checked at serving. The PostgreSQL proofs (company scope, forged confirm, grants, narrowing, partial reads) have **no reproduced control**: the local host cannot finish that suite inside its 900 s budget, so the three planned controls were dropped from the manifest rather than left unproven. Some proofs have no control because nothing in the code removes them: label-only replay and the confirmation-change replay hold because the member has no label or confirmation field (the strict schema and the no-label assertion guard this), and 'not offered until chosen' holds because the body carries only recorded moves.
 
 ## Test it yourself
 
@@ -41,8 +41,8 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44824314
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CALENDAR-1-board-v2",
-  "base": "fff2166fa326f871c11a34d4da623707878e7636",
-  "head": "a4128fb08a92ef900caa7540f71b1228f5f34cc4",
+  "base": "67e4efce31eb663f12d6f161aa91c0ce1220dffc",
+  "head": "b8be827eb4da34193f0a01b9abc4d9c2458e4b78",
   "changedPaths": [
     "apps/web/src/board.ts", "apps/web/src/customize-screen.ts", "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts",
     "package.json", "packages/canonical-model/src/board.ts", "packages/canonical-model/src/surface-workspace.ts",
