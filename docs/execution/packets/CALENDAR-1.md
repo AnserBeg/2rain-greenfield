@@ -82,6 +82,8 @@ Required by the [view revision member shape ruling](../../decisions/ADR-0086-boa
 
 A local dev tenant that already activated a v1 Board will not replay; run dev:reset.
 
+Build record, controls and the two proofs the platform cannot express: [CALENDAR-1-board-v2](CALENDAR-1-board-v2.md).
+
 Required proofs:
 
 - Starting from a Board with zero facts, and again after retiring it, adding a field still compiles.
