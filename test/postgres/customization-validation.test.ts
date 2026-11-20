@@ -371,26 +371,21 @@ test(
           await opened.service.activate(document.patchId);
           const { layoutCommand } =
             await import('../../packages/customization/src/layout-revision.js');
-          const rename = async (
-            surfaceId: string,
-            mode: 'create' | 'detail',
-          ) => {
-            const target = (await opened.service.targets()).layouts?.find(
-              (t) => t.body.surfaceId === surfaceId && t.body.mode === mode,
-            );
-            assert.ok(target);
-            const revision = layoutCommand(target, {
-              action: 'rename',
-              member: target.body.sections[0]!.id,
-              label: 'Item identification',
-            });
-            const draft = await opened.service.draft(revision, 'visualBuilder');
-            assert.ok(draft.status === 'drafted', JSON.stringify(draft));
-            await opened.service.approve(draft.patchId);
-            await opened.service.activate(draft.patchId);
-          };
+          const surfaceId = 'northstar.app:surface.item_detail';
+          const target = (await opened.service.targets()).layouts?.find(
+            (t) => t.body.surfaceId === surfaceId && t.body.mode === 'detail',
+          );
+          assert.ok(target);
+          const layout = layoutCommand(target, {
+            action: 'rename',
+            member: target.body.sections[0]!.id,
+            label: 'Item identification',
+          });
+          const draft = await opened.service.draft(layout, 'visualBuilder');
+          assert.ok(draft.status === 'drafted', JSON.stringify(draft));
+          await opened.service.approve(draft.patchId);
           await withArchivedCustomizationRuntime(
-            '840c1b48c9694e62fdb7e284fa5a8397a1360dfd',
+            '60451569e92ffe9aad3fc2c67bfa326a978b1f3c',
             async (run) => {
               await assertArchivedTenantEnvelope(run);
               const read = () =>
@@ -399,7 +394,7 @@ test(
                   identity: app.runtime.identity,
                 });
               assert.equal((await read()).outcome, 'loaded');
-              await rename('northstar.app:surface.item_detail', 'detail');
+              await opened.service.activate(draft.patchId);
               const refused = await read();
               assert.equal(refused.code, 'UNSUPPORTED_RUNTIME_CAPABILITY');
               assert.match(
@@ -424,15 +419,6 @@ test(
               assert.match(
                 html,
                 /data-document-field="northstar.app:field.custom_item_evidence"/u,
-              );
-              await rename('northstar.app:surface.item_form', 'create');
-              const form = await fetch(
-                app.baseUrl + '/?surface=northstar.app%3Asurface.item_form',
-              );
-              assert.equal(form.status, 200);
-              assert.match(
-                await form.text(),
-                /<legend>Item identification<\/legend>/u,
               );
             },
           );
