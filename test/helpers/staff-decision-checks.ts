@@ -239,6 +239,32 @@ async function exerciseProof(
     ).rowCount,
     0,
   );
+  // Disposable control checkout. Each probe runs inside a rollback-only verifier transaction.
+  const fresh=await issue(binding);
+  const consume=async(id:string,company:string|null=f.company)=>{
+    const c=await a.verifier.connect();
+    try{await c.query('BEGIN');await c.query("SELECT set_config('north_star.tenant_id',$1,true),set_config('north_star.environment_id',$2,true)",[f.tenantId,f.environmentId]);
+      await c.query('SELECT platform.staff_consume_decision($1,$2,$3,$4,$5,$6)',[f.tenantId,f.environmentId,company,kind,id,randomUUID()]);
+    }finally{await c.query('ROLLBACK');c.release();}
+  };
+  const red=async(name:string,check:()=>Promise<unknown>)=>{
+    await assert.rejects(check,{code:'ERR_ASSERTION',operator:'rejects',message:/Missing expected rejection/});
+    console.log('EXPECTED RED',kind,name);
+  };
+  const mutate=async(fn:string,from:RegExp,replacement:string,check:()=>Promise<unknown>)=>{
+    const original=(await admin.query('SELECT pg_get_functiondef($1::regproc) AS body',[fn])).rows[0].body;
+    const change=original.replace(from,replacement);
+    assert.notEqual(change,original);
+    try{await admin.query(change);await check();}finally{await admin.query(original);}
+  };
+  await mutate('platform.staff_issue_decision',/IF encode\(binding,'hex'\) IS DISTINCT FROM reviewed THEN/,'IF false THEN',()=>
+    red('exact reviewed digest',()=>assert.rejects(issue('00'.repeat(32)),/reviewed decision changed/)));
+  await mutate('platform.staff_consume_decision',/IF \(proof.tenant_id,proof.environment_id,proof.company_id,proof.decision_kind\) IS DISTINCT FROM \(t,e,company,kind\)/,'IF false',()=>
+    red('decision scope',()=>assert.rejects(consume(fresh,randomUUID()),/decision proof scope changed/)));
+  await eligibility(false);
+  try{await mutate('north_star_internal.staff_require_decision_authority',/OR \(SELECT eligible FROM platform.release_approver_eligibility_events[^;]+?IS DISTINCT FROM true/,'OR false',()=>
+    red('live approver authority',()=>assert.rejects(consume(fresh),/decision authority refused/)));}
+  finally{await eligibility(true);}
   const attempts = await apply();
   await assert.rejects(apply(), {
     code: '23505',
@@ -267,6 +293,9 @@ async function exerciseProof(
       ordered: true,
     },
   ]);
+  await admin.query('ALTER TABLE platform.staff_decision_receipts DROP CONSTRAINT staff_decision_receipts_pkey');
+  try{await red('single use',()=>assert.rejects(consume(proof),{code:'23505',constraint:'staff_decision_receipts_pkey'}));}
+  finally{await admin.query('ALTER TABLE platform.staff_decision_receipts ADD PRIMARY KEY(proof_id)');}
   return { attempts, proof };
 }
 
