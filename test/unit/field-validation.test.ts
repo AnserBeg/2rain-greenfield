@@ -175,3 +175,37 @@ test('a later-date guard compares both typed fields and distinguishes equality',
   });
   assert.deepEqual(check('2027-01-01'), { status: 'evaluated', value: 'true' });
 });
+
+test('a validation path refuses company-owned storage even with an unscoped get', () => {
+  const authored = parseVersionedAuthoredApplicationPackageJson(
+    readFileSync('apps/web/release/app.authored.json', 'utf8'),
+  );
+  assert.ok(authored.languageVersion === 'v6');
+  const revision = normalizeApplicationPackage(authored);
+  const target = customizationTargets(revision).validationTargets!.find(
+    (entry) => entry.entityId === entityId,
+  )!;
+  const { rule } = fieldComparisonValidationDraft(target, {
+    fieldId: name,
+    otherFieldId: name,
+    relationId: parent,
+    operator: 'notEqual',
+    message: 'Choose another name.',
+  });
+  const owned = 'northstar.app:entity.custom_depot';
+  const variant = JSON.parse(
+    JSON.stringify({ ...revision, formulaRules: [rule] }).replaceAll(
+      entityId,
+      owned,
+    ),
+  ) as typeof revision;
+  const result = compileLiteralFormulaRules({
+    ...variant,
+    entities: variant.entities.map((entity) =>
+      entity.entityId === owned
+        ? { ...entity, companyOwnership: 'entityOwned' as const }
+        : entity,
+    ),
+  });
+  assert.equal(result.status, 'refused');
+});

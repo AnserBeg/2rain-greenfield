@@ -46,6 +46,7 @@ export function emptyPartyDefinition(
   source: Record<string, unknown> = partyModuleDefinition(),
 ): Record<string, unknown> {
   const definition = structuredClone(source);
+  delete definition.formulaRules;
   for (const family of [
     'assertions',
     'entities',

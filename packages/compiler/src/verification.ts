@@ -400,7 +400,11 @@ export function validateExecutedVerificationPlan(
         scenarioId: scenario.scenarioId,
       });
     }
-    if (derivation && !validDerivation(derivation, scenario)) {
+    if (
+      derivation &&
+      (scenario.kind === 'formulaValidation' ||
+        !validDerivation(derivation, scenario))
+    ) {
       diagnostics.push({
         code: 'VERIFICATION_DERIVATION_INVALID',
         scenarioId: scenario.scenarioId,

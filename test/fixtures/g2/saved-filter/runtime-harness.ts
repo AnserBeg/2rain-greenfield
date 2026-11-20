@@ -70,8 +70,9 @@ export interface SavedFilterAdmissionRefusal {
  */
 export async function observeSavedFilterAdmissionRefusal(
   label: string,
+  definition?: Record<string, unknown>,
 ): Promise<SavedFilterAdmissionRefusal> {
-  const fixture = compilePlatformFixture();
+  const fixture = compilePlatformFixture(definition);
   const binding = releaseVerificationBinding(fixture.compiled);
   return withEphemeralPostgres(label, async ({ connection, pool }) => {
     await migrateAndSeed(pool);

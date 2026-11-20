@@ -10,6 +10,7 @@ import {
   type PredicateExpression,
   type VersionedNormalizedApplicationPackage,
 } from '@north-star/canonical-model';
+import { parseFormulaValidationBindings } from '../../canonical-model/src/formula-validation-projection.js';
 import type { Pool, PoolClient } from 'pg';
 
 import {
@@ -233,6 +234,18 @@ export class PostgresSavedFilterExecutor
   async #executeOperation(
     request: SemanticOperationExecutionRequest,
   ): Promise<SemanticOperationResultEnvelope> {
+    const formula = request.view.projections.formulaRule;
+    if (
+      formula &&
+      parseFormulaValidationBindings(formula.payload).some(({ rule }) =>
+        rule.boundOperationIds.includes(request.definition.operationId),
+      )
+    )
+      throw new SavedFilterContractError(
+        'SAVED_FILTER_VALIDATION_UNSUPPORTED',
+        'This saved-filter operation requires validation that the adapter cannot execute.',
+        '$.definition.operationId',
+      );
     const input = parseMutationInput(request, this.registration);
     const actor = await this.actorIssuer.issue(request.context);
     const receipt = await this.#trust.executeIdempotentAcceptedMutation(

@@ -6,6 +6,28 @@ import {
   openCustomizeService,
   startComposedApplication,
 } from '../../apps/api/src/composition-root.js';
+import { escapeIdentifier } from 'pg';
+import { PostgresModuleRuntimeInterpreter } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
+import {
+  PostgresReleaseVerificationService,
+  verificationEvidenceIdForCandidate,
+} from '../../packages/postgres-provider/src/release-verification-service.js';
+import { PROJECTION_FAMILY_IDS } from '../../packages/compiler/src/index.js';
+import type { FormulaRulePayload } from '../../packages/compiler/src/formula-validation-plan.js';
+import type { MintedUuid } from '../../packages/platform-runtime/src/index.js';
+import type { SemanticOperationExecutionRequest } from '../../packages/runtime/src/semantic-operation-gateway.js';
+import type { SemanticQueryExecutionRequest } from '../../packages/runtime/src/semantic-query-gateway.js';
+import { projectionPayload } from '../compiler/helpers.js';
+import {
+  contactDate,
+  datedPartyDefinition,
+} from '../fixtures/g2/party/validation.js';
+import { PARTY_IDS } from '../fixtures/g2/party/definition.js';
+import {
+  withRealPartyRuntime,
+  invokePartyOperation,
+  humanActorIssuer,
+} from '../fixtures/g2/party/runtime-harness.js';
 import { literalValidationDraft } from '../../packages/customization/src/validation-draft.js';
 import { OperationsAgentSession } from '../../packages/operations-agent/src/session.js';
 import { COMPANY, worldOver } from '../agent/agent-world.js';
@@ -152,3 +174,166 @@ test(
     );
   },
 );
+
+test('live date validation uses the tenant business period under the module role', async () => {
+  await withRealPartyRuntime(
+    'live-validation-date',
+    async (runtime) => {
+      const { tenantId } = runtime.contexts.a;
+      // Put the tenant boundary twelve hours from now, on the previous
+      // UTC day. This keeps both sample dates stable throughout the test.
+      await runtime.adminPool.query(
+        `INSERT INTO platform.inventory_tenant_calendars
+           (tenant_id,time_zone,business_day_boundary)
+         VALUES ($1, 'Etc/GMT+12', (transaction_timestamp() AT TIME ZONE 'UTC')::time)
+         ON CONFLICT (tenant_id) DO UPDATE SET time_zone=EXCLUDED.time_zone,business_day_boundary=EXCLUDED.business_day_boundary`,
+        [tenantId],
+      );
+      const {
+        rows: [dates],
+      } = await runtime.adminPool.query<{ today: string; tomorrow: string }>(
+        `SELECT d::text AS today,(d+1)::text AS tomorrow FROM north_star_internal.inventory_business_period($1,transaction_timestamp()) d`,
+        [tenantId],
+      );
+      assert.ok(dates);
+      const create = (date: string) =>
+        invokePartyOperation(runtime, runtime.views.a, 'party_create', {
+          recordId: randomUUID(),
+          values: {
+            [PARTY_IDS.fieldIds.name]: 'Contact',
+            [PARTY_IDS.fieldIds.number]: randomUUID(),
+            [contactDate]: date,
+          },
+        });
+      assert.equal((await create(dates.today)).outcome, 'succeeded');
+      await assert.rejects(create(dates.tomorrow), {
+        code: 'MODULE_VALIDATION_REFUSED',
+        message: 'Use today or an earlier contact date.',
+      });
+    },
+    datedPartyDefinition(),
+  );
+});
+
+test('verification creates use the compiled fixture overrides even when generated values would pass', async () => {
+  await withRealPartyRuntime(
+    'compiled-formula-fixtures',
+    async (runtime) => {
+      const party = runtime.storage.entities.find(
+        (entity) => entity.entityId === PARTY_IDS.entityIds.party,
+      )!;
+      const column = party.columns.find(
+        (field) => field.canonicalFieldId === contactDate,
+      )!;
+      const { witnesses } = projectionPayload<FormulaRulePayload>(
+        runtime.compiled,
+        PROJECTION_FAMILY_IDS.formulaRule,
+      );
+      const expected = new Set(
+        witnesses.map(
+          ({ satisfying }) => satisfying.values[contactDate]?.value,
+        ),
+      );
+      const { rows } = await runtime.adminPool.query<{ day: string }>(
+        `SELECT ${escapeIdentifier(column.physicalName)}::text AS day FROM north_star_module.${escapeIdentifier(party.physicalTableName)}
+         WHERE tenant_id=$1`,
+        [runtime.contexts.a.tenantId],
+      );
+      assert.ok(rows.length > witnesses.length);
+      assert.deepEqual(new Set(rows.map((row) => row.day)), expected);
+    },
+    datedPartyDefinition(),
+  );
+});
+
+for (const action of ['create', 'update'] as const)
+  test(`verification detects a formula ${action} that changed its target before reporting refusal`, async (t) => {
+    await withRealPartyRuntime(
+      `formula-refused-${action}`,
+      async (runtime) => {
+        const interpreter = new PostgresModuleRuntimeInterpreter(
+          runtime.runtimePool,
+          humanActorIssuer(),
+          [],
+          undefined,
+          undefined,
+          { documentNumbers: 'verificationSentinel' },
+        );
+        const execute = interpreter.execute.bind(interpreter);
+        const view = runtime.views.a;
+        t.mock.method(
+          interpreter,
+          'execute',
+          async (
+            request:
+              SemanticOperationExecutionRequest | SemanticQueryExecutionRequest,
+          ) => {
+            if ('arguments' in request) return execute(request);
+            try {
+              return await execute(request);
+            } catch (error) {
+              if (
+                request.definition.operationId !==
+                  `${PARTY_IDS.namespace}:operation.party_${action}` ||
+                !(
+                  error instanceof Error &&
+                  'code' in error &&
+                  error.code === 'MODULE_VALIDATION_REFUSED'
+                )
+              )
+                throw error;
+              const { recordId } = request.input as { recordId: string };
+              // Simulate a committed partial write behind the matching error.
+              // The update leaves the revision untouched so a revision-only
+              // readback would miss it.
+              const entity = runtime.storage.entities.find(
+                (e) => e.entityId === PARTY_IDS.entityIds.party,
+              )!;
+              const table =
+                'north_star_module.' +
+                escapeIdentifier(entity.physicalTableName);
+              const col = (id: string) =>
+                escapeIdentifier(
+                  entity.columns.find((c) => c.canonicalFieldId === id)!
+                    .physicalName,
+                );
+              const sql =
+                action === 'create'
+                  ? `INSERT INTO ${table} (tenant_id, environment_id, record_id, ${col(PARTY_IDS.fieldIds.name)}, ${col(PARTY_IDS.fieldIds.number)})
+                   VALUES ($1,$2,$3::uuid,'Fault fixture',($3::uuid)::text)`
+                  : `UPDATE ${table} SET ${col(PARTY_IDS.fieldIds.contactSummary)}='Changed by fault fixture'
+                    WHERE tenant_id=$1 AND environment_id=$2 AND record_id=$3`;
+              const written = await runtime.adminPool.query(sql, [
+                view.tenantId,
+                view.environmentId,
+                recordId,
+              ]);
+              assert.equal(written.rowCount, 1);
+              throw error;
+            }
+          },
+        );
+        const context = runtime.contexts.a;
+        const releaseId = view.release.releaseId as MintedUuid;
+        const command = {
+          releaseId,
+          compiledRelease: runtime.compiled,
+          evidenceId: verificationEvidenceIdForCandidate(
+            context,
+            releaseId,
+            runtime.compiled.releaseRoot,
+          ),
+        };
+        await assert.rejects(
+          new PostgresReleaseVerificationService(
+            runtime.runtimePool,
+          ).executeSemanticCandidateWithExecutor(context, command, {
+            execute: interpreter.execute.bind(interpreter),
+            recordNonAccepted: interpreter.recordNonAccepted.bind(interpreter),
+          }),
+          { code: 'VERIFICATION_FORMULA_TARGET_CHANGED' },
+        );
+      },
+      datedPartyDefinition(),
+    );
+  });
