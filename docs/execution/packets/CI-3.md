@@ -1,8 +1,8 @@
 # CI-3 — tiered packet and main CI
 
-Status: awaiting independent pre-merge read. The CI link covers the executable head in the declaration below.
+Status: awaiting independent pre-merge read. The CI link tests the workflow at `b1fe527d`. The declared head also tests dispatch visibility.
 
-CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44774344446
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44777281191
 
 ## Claims
 
@@ -13,12 +13,14 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44774344
 ## Controls and timing
 
 - The mapped billing change selects two additional files while a planted agent test is broken in the comparison base. [Quick](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44773229358) and [explicit full](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44773217257).
-- The [migration-only diff and full reachability control](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44773230084) withholds the agent artifact after quality checks finish. The promotion summary links to the full attempt.
-- The [unmapped root file](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44773231139) exercises automatic promotion. The dispatch summary links to the full run.
+- The [migration-only diff and full reachability control](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44777294642) withholds the agent artifact after quality checks finish. The promotion summary links to the full attempt.
+- The [unmapped root file](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44777295892) exercises automatic promotion. The dispatch summary links to the full run.
 - [The Customize documentation replay](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44774127523) reproduces all seven paths and blobs in the change accepted at `31c79749`. Use run creation to the completion of reachability for elapsed time including queues.
 - Two GitHub pushes three seconds apart use the main policy on an isolated ref, with only the branch matcher changed. [First](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44774534056) and [second](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44774541169).
 
-- Locally, twelve focused mutations each made its corresponding assertion fail, including removal of the red-main and missing-full refusals from the token command.
+- Locally, thirteen focused mutations each made its corresponding assertion fail, including removal of the red-main and missing-full refusals from the token command.
+
+- GitHub returned a [404 on the first status read](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44773230084/job/136419749586) after creating the child. The transport check retries the same ID and propagates success, failure or sustained invisibility.
 
 ## Decisions
 
@@ -35,7 +37,7 @@ Run `node --import tsx --test test/architecture/ci-tiers.test.ts test/architectu
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CI-3",
   "base": "032b87c00df3ee22184685050b9cecc01c62cc59",
-  "head": "39e142b8d2b05f7c40e610abd6fa059daaebe6a4",
+  "head": "7d5609c296b41956c8b403b9fcfd4bd41cc4af71",
   "changedPaths": [
     ".github/scripts/check-ci-results.mjs",
     ".github/scripts/ci-selection.mjs",
