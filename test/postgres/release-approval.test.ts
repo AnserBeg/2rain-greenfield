@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import test from 'node:test';
 
 import pg from 'pg';
+import { checkReleaseDecisions } from '../helpers/staff-decision-checks.js';
 
 import {
   CANONICALIZATION_PROFILE_VERSION,
@@ -1207,6 +1208,49 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
                 release_id: releaseOne,
               });
             }),
+        );
+        await t.test(
+          'staff release and Customize proofs bind the approval and verified activation',
+          async () => {
+            const scope = await new AuthenticatedRequestEntryAdapter(async () =>
+              identity(tenantA, environmentANew, makerA),
+            ).enter({});
+            const candidate = minted(randomUUID()),
+              initial = minted(randomUUID());
+            const evidence = verificationEvidenceIdForCandidate(
+              scope,
+              candidate,
+              vertical.releaseRoot,
+            );
+            await admitEmptyPlanRelease(
+              runtimePool,
+              repository,
+              scope,
+              releaseCommand(scope, candidate, revisionTwo, evidence, vertical),
+            );
+            await insertInitialPreparation(runtimePool, scope, {
+              compiled: vertical,
+              evidenceId: evidence,
+              pointer: await visiblePointer(runtimePool, scope),
+              preparationId: initial,
+              receiptId: minted(randomUUID()),
+              releaseId: candidate,
+              targetRootOverride: null,
+            });
+            await checkReleaseDecisions(
+              pool,
+              connection,
+              {
+                tenantId: tenantA,
+                environmentId: environmentANew,
+                principal: approverA,
+                company: null,
+              },
+              initial,
+              releaseOne,
+              candidate,
+            );
+          },
         );
       } finally {
         await runtimePool.end();

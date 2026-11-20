@@ -198,6 +198,21 @@ export class PostgresReleaseApprovalService {
   async createApproval(
     context: TrustedRequestContext,
     command: CreateReleaseApprovalCommand & {
+      readonly staffProofId?: MintedUuid;
+      readonly customizationUpgradeId?: MintedUuid;
+      readonly recoveryOfAttemptId?: MintedUuid;
+    },
+  ): Promise<CreatedReleaseApproval> {
+    return withTrustedRequestTransaction(this.pool, context, (client) =>
+      this.createApprovalOnClient(client, context, command),
+    );
+  }
+
+  async createApprovalOnClient(
+    client: PoolClient,
+    context: TrustedRequestContext,
+    command: CreateReleaseApprovalCommand & {
+      readonly staffProofId?: MintedUuid;
       readonly customizationUpgradeId?: MintedUuid;
       readonly recoveryOfAttemptId?: MintedUuid;
     },
@@ -206,38 +221,37 @@ export class PostgresReleaseApprovalService {
     const decidedAt = validNow(this.now());
     const expiresAt = approvalExpiry(decidedAt, command.expiresAt);
 
-    return withTrustedRequestTransaction(this.pool, context, async (client) => {
-      await lockAuthoritySnapshot(client, context.tenantId);
-      const pointer = await loadPointer(client, context);
-      const release = await loadTargetRelease(
-        client,
-        context,
-        command.targetReleaseId,
-      );
-      const preparation = await loadPreparation(
-        client,
-        context,
-        command.preparationId,
-        command.targetReleaseId,
-      );
-      const authority = await loadCurrentAuthority(
-        client,
-        context.tenantId,
-        command.approvingHumanId,
-      );
+    await lockAuthoritySnapshot(client, context.tenantId);
+    const pointer = await loadPointer(client, context);
+    const release = await loadTargetRelease(
+      client,
+      context,
+      command.targetReleaseId,
+    );
+    const preparation = await loadPreparation(
+      client,
+      context,
+      command.preparationId,
+      command.targetReleaseId,
+    );
+    const authority = await loadCurrentAuthority(
+      client,
+      context.tenantId,
+      command.approvingHumanId,
+    );
 
-      assertCurrentApprover(authority, release, command);
-      await assertCanonicalBinding(
-        client,
-        context,
-        pointer,
-        release,
-        preparation,
-        command.recoveryOfAttemptId ?? null,
-      );
+    assertCurrentApprover(authority, release, command);
+    await assertCanonicalBinding(
+      client,
+      context,
+      pointer,
+      release,
+      preparation,
+      command.recoveryOfAttemptId ?? null,
+    );
 
-      const approvalResult = await client.query<ApprovalRow>(
-        `INSERT INTO platform.release_approvals (
+    const approvalResult = await client.query<ApprovalRow>(
+      `INSERT INTO platform.release_approvals (
            tenant_id,
            environment_id,
            approval_id,
@@ -280,7 +294,7 @@ export class PostgresReleaseApprovalService {
            decided_at,
            expires_at,
            expiry_policy_version,
-           customization_upgrade_id, recovery_of_attempt_id
+           customization_upgrade_id, recovery_of_attempt_id, staff_proof_id
          )
          SELECT $1,
                 $2,
@@ -324,7 +338,7 @@ export class PostgresReleaseApprovalService {
                 $13,
                 $14,
                 $15,
-                $17, $18
+                $17, $18, $19
            FROM platform.release_activation_preparations AS preparation
            JOIN platform.transition_preparation_receipts AS receipt
              ON receipt.tenant_id = preparation.tenant_id
@@ -335,34 +349,35 @@ export class PostgresReleaseApprovalService {
             AND preparation.environment_id = $2
             AND preparation.preparation_id = $16
          RETURNING *`,
-        [
-          context.tenantId,
-          context.environmentId,
-          command.approvalId,
-          APPROVAL_CONTRACT_VERSION,
-          command.activationAttemptId,
-          authority.policyVersion,
-          APPROVER_AUTHORITY_POLICY_VERSION,
-          command.approvingHumanId,
-          command.issuingActorId,
-          command.initiatingHumanId,
-          command.sourceDecisionId ?? null,
-          command.rolloutId ?? null,
-          decidedAt,
-          expiresAt,
-          APPROVAL_EXPIRY_POLICY_VERSION,
-          command.preparationId,
-          command.customizationUpgradeId ?? null,
-          command.recoveryOfAttemptId ?? null,
-        ],
-      );
-      const approvalRow = requiredRow(
-        approvalResult.rows[0],
-        'canonical preparation disappeared while approval was being created',
-      );
+      [
+        context.tenantId,
+        context.environmentId,
+        command.approvalId,
+        APPROVAL_CONTRACT_VERSION,
+        command.activationAttemptId,
+        authority.policyVersion,
+        APPROVER_AUTHORITY_POLICY_VERSION,
+        command.approvingHumanId,
+        command.issuingActorId,
+        command.initiatingHumanId,
+        command.sourceDecisionId ?? null,
+        command.rolloutId ?? null,
+        decidedAt,
+        expiresAt,
+        APPROVAL_EXPIRY_POLICY_VERSION,
+        command.preparationId,
+        command.customizationUpgradeId ?? null,
+        command.recoveryOfAttemptId ?? null,
+        command.staffProofId ?? null,
+      ],
+    );
+    const approvalRow = requiredRow(
+      approvalResult.rows[0],
+      'canonical preparation disappeared while approval was being created',
+    );
 
-      const attemptResult = await client.query<AttemptRow>(
-        `INSERT INTO platform.release_activation_attempts (
+    const attemptResult = await client.query<AttemptRow>(
+      `INSERT INTO platform.release_activation_attempts (
            tenant_id,
            environment_id,
            activation_attempt_id,
@@ -373,25 +388,24 @@ export class PostgresReleaseApprovalService {
            attempt_state
          ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'PREBOUND')
          RETURNING *`,
-        [
-          context.tenantId,
-          context.environmentId,
-          command.activationAttemptId,
-          command.approvalId,
-          ACTIVATION_ATTEMPT_CONTRACT_VERSION,
-          SYSTEM_EXECUTION_PRINCIPAL.kind,
-          SYSTEM_EXECUTION_PRINCIPAL.principalId,
-        ],
-      );
-      return Object.freeze({
-        approval: approvalFromRow(approvalRow),
-        attempt: attemptFromRow(
-          requiredRow(
-            attemptResult.rows[0],
-            'prebound activation attempt was not created',
-          ),
+      [
+        context.tenantId,
+        context.environmentId,
+        command.activationAttemptId,
+        command.approvalId,
+        ACTIVATION_ATTEMPT_CONTRACT_VERSION,
+        SYSTEM_EXECUTION_PRINCIPAL.kind,
+        SYSTEM_EXECUTION_PRINCIPAL.principalId,
+      ],
+    );
+    return Object.freeze({
+      approval: approvalFromRow(approvalRow),
+      attempt: attemptFromRow(
+        requiredRow(
+          attemptResult.rows[0],
+          'prebound activation attempt was not created',
         ),
-      });
+      ),
     });
   }
 }

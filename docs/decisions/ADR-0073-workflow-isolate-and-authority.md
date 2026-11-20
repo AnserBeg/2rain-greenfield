@@ -220,6 +220,8 @@ operator can cancel the suspended run.
 `now` journals a trusted instant. `sleep` persists the computed UTC deadline
 and commits its wake result once. Restart reloads due timers. In-process elapsed
 time and budget checks use a monotonic source, and time tests inject their clocks.
+**Deferred by the WORKFLOW-2 amendment A4: `waitForEvent` is removed from the
+SDK for now and this description is a named gap, not current behaviour.**
 `waitForEvent` registers a durable wait for a pinned event contract and exact
 authorized correlation in the run's tenant, environment and company. Register
 the request and its visible-event baseline in one transaction, using source
@@ -313,6 +315,404 @@ before any tenant activates a workflow-bearing release.
 
 Never roll back code below the newest patch parser or release reader floor a
 tenant has used.
+
+## WORKFLOW-2 amendments (2026-11-20, proposed)
+
+**Status: proposed, for Fable's design read.** Nothing here is code yet. The
+trigger work (A1) waits for that read. The authoring-side work (A2, A3, A4 and
+the draft half of A6) does not depend on the trigger decisions and may start
+when this merges. The packet record is
+[WORKFLOW-2](../execution/packets/WORKFLOW-2.md). Source of the scope:
+Fable's workflow-script ruling of 2026-11-20 (read at main `5d315668`, kept in
+the orchestrator's missions folder as `workflow-scripts-ruling.fable.md`). Line
+references below were re-checked at `55543d77`.
+
+### A0. What this amendment keeps
+
+Scripts stay for workflow logic. There is no block interpreter. Waiting and
+approval stay fixed platform calls. Reminders and notify-only rules stay the
+declared rules of [ADR-0088](ADR-0088-governed-communications-and-reminders.md).
+Status changes stay in the declarative lifecycle. A script is only the glue:
+if, loop, compute, which call next. Nothing below widens what a script can do.
+The gateway, the grants intersection, approvals, run pinning and the limits in
+this ADR are unchanged.
+
+### A1. Triggers on customer-built record types
+
+**Today.** `WorkflowDefinitionSchema.trigger` is `z.literal('goodsReceiptPosted')`
+([schemas.ts:2892](../../packages/canonical-model/src/schemas.ts#L2892)), the
+fixture event is receipt-only
+([workflow-draft.ts:6](../../packages/customization/src/workflow-draft.ts#L6)),
+and unattended links must equal the receipt
+([workflow-gateway.ts:309](../../packages/postgres-provider/src/workflow-gateway.ts#L309)).
+No customer module can start a workflow.
+
+**A versioned discriminated trigger union.** `trigger` becomes the union of:
+
+- the bare string `'goodsReceiptPosted'`, kept as a member and **byte-for-byte
+  unchanged**. Reshaping it would reinterpret stored patches, which
+  ADR-0085 would then require a forward converter and a Manual activation, for
+  no gain;
+- three new object members, each with its own `kind` and `schemaVersion`
+  (`'v1'`), strict objects, add-only. A later schema version of a member is a
+  new version of that member, never an edit of `v1`.
+
+| Member | Persisted fields (stable IDs only, rule 10) | Fires when |
+| --- | --- | --- |
+| `recordCreated` | `recordTypeId` | A record of that tenant record type is committed for the first time. |
+| `recordTransitioned` | `recordTypeId`, `toStateId`, optional `fromStateId` | A committed lifecycle transition ends in `toStateId` (and began in `fromStateId`, if given). |
+| `scheduledOnField` | `recordTypeId`, `fieldId`, `fieldContract` (logical type `date` or `dateTime`, the field's own contract version and zone-source kind), `offset` `{direction: before \| at \| after, amount, unit}` | The resolved instant for the record's date or date-time value, moved by the offset, arrives. |
+
+Persist the author's CHOICES by ID, never a re-derived body (MIGRATION-RULE
+rule 10). The member stores the type ID, the state IDs and the field ID with the
+contract it expected. The digest of the workflow definition covers those IDs and
+contracts only. Labels, the transition's own ID and the type's state list render
+from the release and are not part of the member. Retired revisions are not
+validated. Admission checks, against the pinned release: the type exists and has
+one owning company per record (a type without a single owning company cannot
+trigger a workflow in v1, because the run needs a company scope); for
+`recordTransitioned` that at least one declared transition connects the states
+(`fromStateId` and `toStateId` differ); for `scheduledOnField` that the field's
+current contract equals `fieldContract`.
+
+Bounds on `offset`: `amount` is a whole number from 0 to 366 for `civilDays`, or
+0 to 8,784 for `hours` and `minutes` (`dateTime` fields only). Units: `civilDays`,
+`hours`, `minutes`. **Working days are a named gap**, as in ADR-0088: they need
+a governed, versioned working-date list, which does not exist. An interval
+field is also a named gap (ADR-0087 names intervals; a later member version may
+bind an interval's end).
+
+**Date rules for `scheduledOnField`** (ADR-0087 and ADR-0083 A1). A `date` value
+is a civil date. Subtract or add `civilDays` in the field's captured business
+calendar, then resolve the result to an instant at the captured business-day
+boundary, or at local midnight for a per-record zone. A `dateTime` value keeps
+its captured zone and local time for a `civilDays` offset, and uses elapsed time
+for `hours` and `minutes`. Every derived boundary uses ADR-0083 A1: a time in a
+DST gap resolves to the first valid instant after it, and a repeated time
+resolves to the earlier offset. The registration records the zone, the tzdb
+version, the boundary-rule version, the anchor value and the resolved UTC
+instant. A missing zone or calendar refuses the entry that would register it.
+The stored instant stays authoritative after a later tzdb change.
+
+**The event the script receives.** The fixture and the SDK type take the shape
+of the member: `{type, eventId, recordTypeId, recordId, legalEntityId}`, plus
+`fromStateId`, `toStateId` for a transition and `fieldId`, `anchor` (the civil
+date or instant) and `occurrenceKey` for a schedule. Record text and field values
+never ride in the event. The body reads them through a granted query like any
+other data. The SDK's `ReceiptEvent` type is replaced by a type generated from
+the declared member.
+
+**Where firing comes from.** Created and transitioned events come only from the
+committed change document and domain event that the same transaction already
+writes for a governed operation
+([module-runtime-interpreter.ts:1337](../../packages/postgres-provider/src/module-runtime-interpreter.ts#L1337)),
+read by the same scoped consumer and watermark as the receipt trigger. Worker
+state is never evidence of a source event (the trust model at the top of this
+ADR). **Source audit first (slice 1):** confirm from the change document alone
+that a create and a lifecycle transition can be told apart by record type,
+record ID and change kind. If the transition writer does not record the derived
+state change durably in the same transaction, the slice names the writer change.
+That change is a Critical touch of a tenant-record writer and a migration, taken
+under MIGRATION-RULE, and it stops the slice for an owner decision rather than
+being added quietly.
+
+**Exactly-once firing, and the occurrence key.** The existing unique start key
+(tenant, environment, source event, stable workflow identity) stays the
+mechanism. What changes is what the "source event" is for each member:
+
+- `recordCreated`: the create's domain event ID. A record has one create event.
+- `recordTransitioned`: the individual transition's domain event ID, not
+  (record, from, to). Records cycle through states, and each real transition
+  must be a separate occurrence.
+- `scheduledOnField`: the occurrence key (tenant, environment, company, stable
+  workflow ID, record ID, field ID, **anchor generation**). It excludes the
+  record revision, timer ID, resolved deadline and release fence, exactly as
+  [ADR-0088 R2](ADR-0088-governed-communications-and-reminders.md) defines its
+  reminder occurrence. Anchor generation is the stored cycle ID of a genuinely
+  recurring source, and is `0` for everything in v1. So v1 fires once per
+  record per field, even if the date is edited after it fired. Re-firing on a
+  new anchor generation is a named gap.
+
+A claim transaction commits the disposition and every matching run start
+together, as the consumer does today. A duplicate delivery, a polling retry or a
+restart cannot start a second run.
+
+**A scheduled trigger has two phases.**
+
+1. *Registration, before it fires.* It is a platform-owned registration derived
+   from the active release plus stored facts, not a pinned run (the same shape as
+   ADR-0088 R2). It is created when a record gains an eligible value, rescheduled
+   when the date, offset or calendar changes, and closed when the record is
+   archived or deleted, loses its value, or the release no longer declares the
+   trigger. A fence change re-derives it under the same occurrence key and does
+   not suspend anything. The firing claim re-reads the stored value and revision
+   under lock and fires only if the resolved instant still matches. Otherwise it
+   reschedules.
+2. *The run, after it fires.* From the start-key commit onward it is an ordinary
+   pinned run with ADR-0073's pins, suspension and Retry rules.
+
+**Dates already past.** A registration whose resolved instant is at or before
+the activation's watermark capture, or at or before the moment a record's value
+is entered or edited, starts zero runs and is recorded as pre-activation or
+already-past with the anchor and instant. Activating a trigger on an existing
+module never fires a burst for old records. The activation evidence counts the
+registrations it will arm, re-arm, close and skip as already past.
+
+**Rollback and upgrade** (consistent with ADR-0088 R2 and ADR-0085).
+
+- Any release that adds, changes or removes a trigger is workflow-bearing and is
+  **always Manual** (ADR-0085 "Workflow authority"). Its activation evidence
+  adds the pending-registration counts above to the in-flight run and pending
+  approval counts it already shows.
+- The watermark capture seeds pre-activation dispositions from the union of the
+  incoming and outgoing releases' subscriptions. The union is now keyed by
+  (event type, record type) for the new members, with the same bounded,
+  set-based statement. This is a Critical touch of the activation hook and
+  carries the same no-workflow byte-identity proof as the receipt hook.
+- Rolling back to a release without the trigger closes its registrations and
+  starts no runs for events committed before the rollback verified (they are
+  pre-activation, as for receipts). Rolling forward again re-derives unfired
+  registrations under the same key. A consumed occurrence stays consumed. An
+  instant that passed during the gap fires nothing.
+- A run already started keeps its pin. On the release change it suspends, takes
+  only cancel while another release serves, and takes a same-pin recorded human
+  Retry after an exact rollback (migration 0054). Nothing about triggers changes
+  that.
+- Each member takes **its own reader rung**, allocated at the merge of the slice
+  that introduces it, never reserved (the surface-floor rule). A binary below the
+  rung refuses the release by name through the archived production loader, and
+  the deploy rule applies: never roll code below a floor a tenant has used.
+
+**Replay and conflicts** (ADR-0085's closed diagnostic table; no new public code).
+A retired record type, state or field is `RETIRED_TARGET` naming the trigger and
+the missing ID. A field whose logical type or zone source changed is
+`INCOMPATIBLE_TYPE`. A type that lost its single owning company is
+`INCOMPATIBLE_SCOPE`. A label rename or an added field on the type replays clean.
+Each member gets a named replay test with one compatible base move and one real
+conflict, and the fail-closed vocabulary check descends into the union.
+
+**Unattended links may point at the triggering record.** Today only the receipt
+is allowed
+([workflow-gateway.ts:309-316](../../packages/postgres-provider/src/workflow-gateway.ts#L309)).
+The run row stores the triggering record ID and company from the verified event
+or registration, never from script input. The gateway generalises "links equal
+the receipt" to "links equal the run's stored trigger record ID", and the
+operation's company still equals the run's company. Everything else about
+unattended writes is unchanged: a proven create-only operation with no Tier B
+reach and an exact digest proof. A link to any other record is refused as it is
+today. The proof needs two companies in the same tenant, so the company check is
+the only thing that refuses, and an attempt to link a record the trigger did not
+name.
+
+**Loops.** An operation committed by a workflow run carries its run as the
+change document's causation. An event whose causation is a run of the **same
+workflow** starts nothing (disposition `self-caused`). An event caused by another
+workflow starts a run at causation depth one more than its cause, and a depth
+above 3 starts nothing (disposition `depth-exceeded`). Both dispositions are
+audited. A cycle is therefore bounded, and a person's edit always starts at
+depth 0.
+
+**Boundary with ADR-0088 reminders.** "Two days before X, tell the owner" and
+"prepare the customer email" are declared reminder rules, run by the platform,
+and not scripts. A `scheduledOnField` workflow is for logic: create a record,
+branch on the record's current values, sleep, ask for approval. The SDK has no
+notify call and gains none here. A workflow that needs to notify binds the
+governed event to ADR-0088's internal notify operation under its pinned grant, as
+ADR-0088 already allows. The drafter must answer a notify-only request with a
+reminder rule (or "unsupported"), never a script. The eval has this redirect as
+a case. The verifier does not try to prove intent. It refuses nothing on this
+basis.
+
+**Rule 12 (drafter support and eval).** The drafter's description of each
+trigger member is generated from the union's schema plus the release's record
+types, states and date fields by stable ID, replacing the hand-written line at
+[ai-draft.ts:454](../../packages/customization/src/ai-draft.ts#L454). The
+fixture event schema is generated per member the same way. A fail-closed test
+enumerates the trigger members (they all sit inside the one `saveWorkflow` patch
+kind, so the patch-kind check alone would miss them) and fails unless each has
+generated drafter coverage and an AI-BUILD-1 eval case, or a dated, named
+exception. Eval cases: created creates a linked record; transitioned requests
+approval; scheduled creates a task before a date; notify-only is redirected to a
+reminder; a wait-for-reply request is refused as the A4 gap; and a hostile
+record-type label does not change the drafted calls.
+
+### A2. The repair loop
+
+A failed draft goes back to the model, not to the user. When type-check, lint or
+the run-twice replay rejects a `saveWorkflow` draft, the drafter gets at most
+**two repair turns**. This is separate from, and keeps, the existing repair of a
+malformed tool call
+([ai-draft.ts:479-499](../../packages/customization/src/ai-draft.ts#L479)).
+
+- *What the model receives.* Structured diagnostics, not logs: kind (type-check,
+  lint, replay divergence, fixture failure), the line and column in its own body,
+  the message, and for replay the first diverging request and the expected one.
+  At most 20 diagnostics, each cut at 300 characters, 8 KiB in total, no stack
+  traces, paths or tenant data beyond identifiers it already received.
+- *What is not repaired.* A request outside the user's authority, an unsupported
+  request, an over-wide grant and a verification timeout go to the user as today.
+  Repair never relaxes a gate. Each repaired draft is a fresh `saveWorkflow`
+  draft that passes the same verification in the A6 sandbox.
+- *Cost and evidence.* Each repair turn is one drafting call under the existing
+  per-tenant cost cap and attribution. The draft record keeps the turn count and
+  the diagnostic kinds per turn, so AI-BUILD-1 can report "verified on first
+  draft" and "verified after at most two repairs" separately. If the second
+  repair fails, the user sees the last diagnostics in plain words and the turn
+  count, not only "did not pass verification"
+  ([customization-service.ts:1177](../../packages/postgres-provider/src/customization-service.ts#L1177)).
+
+### A3. Review before approval
+
+The pending draft shows what a person is approving, before approval. Today the
+source appears only after activation, and the pre-approval summary is built from
+declared grants alone
+([render.ts:99](../../packages/customization/src/render.ts#L99),
+[customize-screen.ts:513](../../apps/web/src/customize-screen.ts#L513)).
+
+1. **The source**, read-only, the exact bytes the body digest names.
+2. **A plain-words sample run**, rendered by a deterministic function (not a
+   model) from the ordered calls in the verifier's first fixture run: "Creates an
+   Inspection linked to the receipt. Waits 2 days. Asks a person to approve
+   'Escalate the inspection'." It names operations and queries by their release
+   labels, resolved by stable ID. It is labelled "from the test the drafter wrote,
+   with made-up values; it shows what the script does in that case, not every
+   case." The fixtures are the model's own (the ruling's "model writes its own
+   test" gap), and the label says so. Independent expectations belong to
+   AI-BUILD-1.
+3. **A summary derived from the actual call sites.** A TypeScript AST pass over
+   the compiled body lists each SDK call site, the target, whether it sits under
+   a branch or a loop, and its input field names. It is cross-checked with the
+   fixture journal. A grant that no call site uses is shown as "declared but never
+   called". The summary says what the script will do, and the grants list says
+   what it may.
+4. **The approval binds what was shown.** The reviewed diff the release approval
+   proof freezes (ADR-0081, SIGNIN-1) includes the body digest and the digest of
+   the rendered review model, which is a pure function of the body bundle and the
+   release. A test renders twice and compares bytes.
+
+### A4. `waitForEvent` is removed from the SDK, for now
+
+**A named gap: durable external-event waits.** The paragraph under "Timers,
+signals and external delivery" that describes a durable `waitForEvent` is
+**deferred, not implemented**. Today the SDK offers the call
+([workflow-sdk.ts:109](../../packages/postgres-provider/src/workflow-sdk.ts#L109)),
+a fixture can mock it, and the live runtime then suspends the run with
+`durable-call-unavailable`
+([workflow-execution.ts:373-381](../../packages/postgres-provider/src/workflow-execution.ts#L373)).
+A verified draft can therefore stall live.
+
+- The next SDK version drops `waitForEvent` from the generated declarations and
+  from the `admitCall` call kinds. A body that calls it fails type-check. A
+  fixture that mocks it is refused. The drafter's SDK text omits it and a
+  wait-for-event request gets "unsupported (named gap)".
+- The SDK digest and SDK version change, so they are new pins. A run and a
+  retained revision keep the digest and implementation they were pinned to. The
+  old host path that suspends a legacy `waitForEvent` call stays so a legacy pin
+  behaves as it did. It is not revived, and such a run can only be cancelled.
+- On upgrade or replay, a retained workflow whose body calls `waitForEvent`
+  conflicts as `REMOVED_ACTION`, naming the workflow binding and the absent call.
+  The slice scans the existing proofs and fixtures for the call before removing
+  it.
+- Reopening the gap needs its own ADR: a wait-registration table, the visible-event
+  baseline and first-match rule already described here, a reader rung, and
+  replay tests.
+
+### A5. Engine patch policy
+
+Written as an operations note,
+[engine-patch-policy.md](../operations/engine-patch-policy.md): named owner,
+advisory watch, severity deadlines, and the rule for moving in-flight runs. Its
+one load-bearing rule for this ADR: a run is never re-pinned to a patched engine
+by the worker. It moves only through a recorded human Retry (migration 0054), and
+the Retry replays its journal on the patched engine first.
+
+### A6. Isolation of unapproved scripts and of live runs
+
+**Draft time (decided).** A draft's type-check, lint and run-twice replay move
+out of the serving process into the existing forked sandbox
+([sandbox.ts:204](../../packages/customization/src/sandbox.ts#L204)), with a wall
+clock bound. Today they run in the serving process that holds database
+credentials, with no time bound
+([workflow-compile.ts:124](../../packages/postgres-provider/src/workflow-compile.ts#L124),
+[customization-service.ts:1163](../../packages/postgres-provider/src/customization-service.ts#L1163)).
+
+- A new request kind, `verifyWorkflowDraft`, with a new protocol version. The
+  parent sends the draft, the SDK declarations serialised from the pinned release
+  and the fixtures. The child returns data only: pass or fail, diagnostics and the
+  canonical journal. The parent validates the result against a schema and never
+  executes anything the child returns.
+- **The child's environment must be an allowlist.** The launcher today passes
+  `{...process.env, ...}`
+  ([sandbox.ts:110](../../packages/customization/src/sandbox.ts#L110)), so the
+  child inherits every credential in the serving process. The slice replaces it
+  for this request kind with the few variables the child needs, and a test
+  asserts the child sees no database or provider variable and opens no database
+  connection. A child holding no credentials is the point of the move.
+- Bounds, proposed: 30 s wall clock for the whole verification, 512 MB heap, one
+  fresh child per verification and none reused, output capped at 1 MiB. Expiry
+  kills the child. A timeout is a draft refusal with the repair loop's "not
+  repaired" rule and a plain message, not a public upgrade code.
+- **Open: candidate admission.** `workflow-admission.ts:114` runs the same replay
+  again at release verification. The ruling did not trace that process boundary.
+  Slice 1 traces it. If it already runs in the isolated activation verifier, the
+  slice records that. If not, candidate admission moves to the same child. Either
+  way, no unapproved or unactivated source runs in the credential-holding
+  process.
+
+**Live runs (decision needed): for Fable's design read.** The live guest runs in
+a worker thread of the serving process
+([workflow-isolate.ts:51](../../packages/postgres-provider/src/workflow-isolate.ts#L51)),
+a fresh thread and WASM instance for every step. A WASM-layer escape would land
+in a process that holds database credentials. Two options:
+
+- **Option A: a separate OS process for the guest.** A credential-free child
+  runs each step. Its only exit is the existing single `dispatch`, carried over
+  IPC to the serving process, which still runs the gateway, grants and approvals.
+  Cost: one process start per step (the isolate is already per step), an IPC
+  protocol, and more operating surface. Gain: an engine escape lands in a process
+  with nothing to steal.
+- **Option B: accept the WASM layer.** Keep the worker thread. Rely on the fixed
+  16 MiB memory, the removed ambient globals, the single exit, A5's patch policy
+  and the A7 rate limits. An engine-level escape lands in the credentialed
+  process, and the decision records that as accepted risk.
+
+**Choice: for Fable's design read.** Neither option blocks slices 1 to 6. Whatever
+is chosen is a gate before the first real tenant activates a workflow, as the
+local demo is the only place workflows run today.
+
+### A7. Nice-to-haves
+
+- **Retry before quarantine on a CPU overrun.** An overrun today quarantines the
+  run as `permanent-guest-failure`
+  ([workflow-execution.ts:698](../../packages/postgres-provider/src/workflow-execution.ts#L698)),
+  so a stalled host can quarantine a healthy run. A step is pure until its one
+  host exit, so it is safe to retry once in a fresh isolate. A second overrun
+  quarantines with a distinct reason, `cpu-limit-exceeded`. Both attempts go to
+  control evidence, not the replay journal. A watchdog kill of a stalled host is
+  recorded apart from a guest overrun.
+- **Per-tenant run-rate limits.** Proposed defaults, set by the platform
+  operator and not by a tenant: 600 run starts per tenant and environment per
+  rolling hour, 120 per workflow per hour, 200 concurrently active runs. Over the
+  limit the claim leaves the source event without a disposition and tries later
+  (bounded backlog). An event still waiting after 24 hours gets the disposition
+  `rate-limited-expired`, audited, and the worklist shows the count waiting.
+- **A sleep-length cap.** Refuse `sleep` above 90 days (7,776,000,000 ms) in
+  `admitCall` ([workflow-sdk.ts:298](../../packages/postgres-provider/src/workflow-sdk.ts#L298)),
+  by the same refusal path as any call outside its contract. The SDK text states
+  the cap. Today there is none.
+- **Named gaps, not built here:** an instruction or fuel budget instead of
+  wall-clock CPU; a soak test of long and suspended runs across an engine
+  upgrade (it joins A5's first engine bump); hostile-text probes (they are eval
+  cases under A1 and belong to AI-BUILD-1); a separate time bound for the
+  type-check beyond A6's sandbox bound.
+
+### A8. Order and gates
+
+Slices and their tests are in the packet record. Every trigger member and the
+activation hook are Critical. A migration takes the next free number and a rung
+takes the next free rung at merge, never a number named here. An independent read
+follows each Critical merge, from Fable or Codex sol, never from the writer's
+model.
 
 ## Bakeoff
 
