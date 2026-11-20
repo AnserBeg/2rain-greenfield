@@ -2598,7 +2598,7 @@ test('the message catalog honours the vocabulary it declares', () => {
   // SALES-PARITY adds the declared-List export refusal (never a partial file).
   // WAREHOUSE-MODE adds the two answers of a scan that opened nothing.
   // CUSTOMIZE-4 adds the archive refusal for active dependent records.
-  assert.equal(SURFACE_MESSAGE_CODES.length, 51);
+  assert.equal(SURFACE_MESSAGE_CODES.length, 56);
 
   for (const code of SURFACE_MESSAGE_CODES) {
     const entry = SURFACE_MESSAGE_CATALOG[code];
@@ -2727,6 +2727,7 @@ test('every registered code has a raise site outside the catalog', () => {
     'surface-composition.ts',
     'surface-launcher.ts',
     'surface-runtime.ts',
+    'workflow-approvals.ts',
   ].map((name) =>
     stripComments(readFileSync(`${webRoot}/src/${name}`, 'utf8')),
   );
