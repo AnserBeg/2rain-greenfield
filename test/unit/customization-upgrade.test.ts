@@ -368,6 +368,24 @@ for (const [kind, example] of Object.entries(cases)) {
     (compatible.fields as { fieldId: string; label: string }[]).find(
       (f) => f.fieldId === id('field.item_sku'),
     )!.label = 'Stock identifier';
+    if (kind === 'addBoardViewRevision') {
+      // The compatible move relabels what the Board binds: its title field,
+      // that field's List column and the transition its move operates.
+      const name = id('field.custom_equipment_name');
+      (compatible.fields as { fieldId: string; label: string }[]).find(
+        (f) => f.fieldId === name,
+      )!.label = 'Asset name';
+      (
+        (compatible.surfaces as { surfaceId: string; list?: Base }[]).find(
+          (s) => s.surfaceId === id('surface.custom_equipment_list'),
+        )!.list!.columns as { field: string; label: string }[]
+      ).find((c) => c.field === name)!.label = 'Asset';
+      (compatible.stateMachines as { transitions: { label: string }[] }[]).find(
+        (m) =>
+          (m as unknown as { entity: { targetId: string } }).entity.targetId ===
+          equipment,
+      )!.transitions[0]!.label = 'Certify';
+    }
     const result = await customization.compileInSandbox({
       acknowledgement,
       base: compatible,

@@ -438,6 +438,10 @@ test(
   },
 );
 
+// The actual preceding serving reader: main at rung 35 with the withdrawn v1
+// Board parser. It must refuse a Board v2 release on its capability rung,
+// before parsing any Board (CALENDAR-1 Board v2 fix, reader proof).
+const PRECEDING_SERVING_READER = 'b8a91a6f94c3c1ad6aa505fe81adee39412f6777';
 test(
   'a preceding serving reader admits the same tenant until Board activation',
   { timeout: 600_000 },
@@ -448,7 +452,6 @@ test(
         const options = {
           databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
           tenantSlug: 'customize-board-reader',
-          compiledApplication: applicationWithoutLineCreateValues().release,
         };
         const app = await startComposedApplication({ ...options, port: 0 });
         const opened = await openCustomizeService(options);
@@ -470,7 +473,7 @@ test(
           assert.ok(draft.status === 'drafted', JSON.stringify(draft));
           await opened.service.approve(draft.patchId);
           await withArchivedCustomizationRuntime(
-            '032b87c00df3ee22184685050b9cecc01c62cc59',
+            PRECEDING_SERVING_READER,
             async (run) => {
               await assertArchivedTenantEnvelope(run);
               const read = () =>
