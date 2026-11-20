@@ -1,3 +1,4 @@
+export * from './layout.js';
 export {
   ADOPTED_LANGUAGE_VERSION,
   ADOPTED_NORMALIZATION_PROFILE_VERSION,

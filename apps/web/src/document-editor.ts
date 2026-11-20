@@ -1,3 +1,4 @@
+import { renderLayoutSection } from './component-registry.js';
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import {
@@ -2966,8 +2967,20 @@ async function editorResponse(
     };
     const required = (surfaceId: string, fieldId: string) =>
       shape(surfaceId).inputs.get(fieldId)?.required ? ' *' : '';
+    const layout = recordRead.layouts?.find(
+      (l) => l.body.mode === (buffer.header.record ? 'edit' : 'create'),
+    )?.body;
+    const labels = new Map(
+      layout?.sections.flatMap((s) =>
+        s.fields.map((f) => [f.id, f.label.text] as const),
+      ),
+    );
     const headerParts = await Promise.all(
-      headerFields.map(async (field, index) => {
+      headerFields.map(async (boundField, index) => {
+        const labelOverride = labels.get(boundField.fieldId);
+        const field = labelOverride
+          ? { ...boundField, label: labelOverride }
+          : boundField;
         const html = await control(
           definition.headerFormSurfaceId,
           buffer.header,
@@ -3005,9 +3018,16 @@ async function editorResponse(
     const more = headerParts
       .filter((_, index) => headerFields[index]!.disclosure === 'more')
       .join('');
-    const header = more
-      ? `${first}<details class="draft-more form-field--wide"${more.includes('aria-invalid="true"') ? ' open' : ''}><summary>More details <span class="draft-more__names">${h(moreFields.map((field) => field.label).join(', '))}</span></summary><div class="form-fields draft-header">${more}</div></details>`
-      : first;
+    const bound = new Map(
+      headerFields.map((f, i) => [String(f.fieldId), headerParts[i]!]),
+    );
+    const header = layout
+      ? layout.sections
+          .map((s) => renderLayoutSection(s, (f) => bound.get(f.id), h, 'form'))
+          .join('')
+      : more
+        ? `${first}<details class="draft-more form-field--wide"${more.includes('aria-invalid="true"') ? ' open' : ''}><summary>More details <span class="draft-more__names">${h(moreFields.map((field) => field.label).join(', '))}</span></summary><div class="form-fields draft-header">${more}</div></details>`
+        : first;
     // One aligned row per line under shared column headings. Each control keeps
     // an accessible name of its own ("Line 2 quantity"), so the headings are a
     // visual aid, never the only label.
@@ -3122,7 +3142,7 @@ async function editorResponse(
         }${steps}<form id="draft-editor-form" method="post" action="${h(action)}" data-document-editor novalidate>
       <button class="sr-only" name="draftAction" value="refresh" tabindex="-1" data-draft-default>Update draft</button>
       <input type="hidden" name="draftSession" value="${h(buffer.id)}"><input type="hidden" name="draftVersion" value="${buffer.version}">
-      <fieldset><legend>${h(definition.headerLabel ?? 'Document details')}</legend><div class="form-fields draft-header">${header}</div></fieldset></form></section>`,
+      ${layout ? `<div class="form-fields draft-header">${header}</div>` : `<fieldset><legend>${h(definition.headerLabel ?? 'Document details')}</legend><div class="form-fields draft-header">${header}</div></fieldset>`}</form></section>`,
         sections: `<section class="panel draft-lines-panel" aria-label="${h(definition.linesLabel ?? 'Lines')}"><div class="panel__heading"><h2>${h(definition.linesLabel ?? 'Lines')}</h2>${!frozen ? '<button form="draft-editor-form" class="secondary-action" name="draftAction" value="add" formnovalidate>Add line</button>' : ''}</div>${lines.join('')}</section>`,
         commandBar: `<section class="panel"><div class="command-bar"><p data-save-boundary>${h(definition.saveDescription ?? 'Saving keeps this document as a draft.')}</p>${commands}</div></section>`,
       },
