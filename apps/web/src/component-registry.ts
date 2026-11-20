@@ -3180,5 +3180,5 @@ export function renderDocumentSection(
       : '';
     return `<div data-document-field="${id}"><h3>${label}</h3>${field ? `<p>Up to ${field.maxCount} files${field.required ? ' · Required for document tasks' : ''}</p>` : ''}<ul data-document-rows></ul>${form}</div>`;
   };
-  return `<section class="panel data-panel"><details data-documents="${escapeHtml(path)}"><summary><h2>Files</h2></summary>${scannerLabel ? `<p>${escapeHtml(scannerLabel)}</p>` : ''}<p role="status" data-documents-status></p>${section()}${fields.map((field) => section(field)).join('')}</details></section>`;
+  return `<section class="panel data-panel"><details data-documents="${escapeHtml(path)}"><summary><h2>Files</h2></summary>${scannerLabel ? `<p>${escapeHtml(scannerLabel)}</p>` : ''}<p role="status" data-documents-status></p>${section()}${fields.map((field) => section(field)).join('')}<button type="button" data-documents-more hidden>Show more files</button></details></section>`;
 }
