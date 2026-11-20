@@ -7,13 +7,13 @@ Slice 2 implements document templates and PDF generation from [ADR-0078](../../d
 1. Customize approves the exact template revision and selects it by a release pointer. Retirement ends issuance and preserves retained PDFs.
 2. Each render uses declared header fields and bounded parent-scoped line queries. Scoped database functions resolve the live governing record and check query authority. Publication locks the parent and compares the full live child set and revisions. List and byte reads enforce the saved source restrictions.
 3. PDFKit runs inside QuickJS with no host I/O. Its fixed metadata and pinned revision formats produce identical bytes for identical inputs.
-4. Generation applies the document content gate and publishes the version, source evidence and audit together. A committed retry returns the stored version after reauthorizing its source, even after template retirement. The HTTP timer waits for a publication commit already in flight.
+4. Generation applies the document content gate and publishes the version, source evidence and audit together. A committed retry requires view, upload and attach authority and returns the generated version after reauthorizing its source, even after template retirement. The HTTP timer waits for a publication commit already in flight.
 
 ## Decisions
 
 - Template sources are direct Q0 record reads and scoped child lists. Money uses the currency declared by its field type. Module reads return stored dates as civil text. Record pages and PDFs use the same calendar day. Layout uses the built-in Latin-script PDF fonts.
 - The company-brand resolver uses the company record name and the Ledger print palette without a logo. Shared records use the Ledger name. Each issued PDF saves brand revision `platform-default`.
-- Local demo issuance uses the demo scanner. SQL checks the governing Record grants, reads exact file categories and takes write limits and retention from the release. Scanner verdicts cannot publish across a policy change or release fence. Customer upload requests and signatures remain gated.
+- Local demo issuance uses the demo scanner. SQL requires the governing Record grants, including mandatory child queries. PO approval settings may be withheld. SQL checks exact file categories and takes write limits and retention from the release. The scanner refuses verdict access after a policy change or release switch. Customer upload requests and signatures remain gated.
 
 ## Test it yourself
 
@@ -29,7 +29,7 @@ Hosted CI exercises the compiled app, SQL authority, the preceding reader and pe
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "DOCS-1",
-  "base": "08edc207bcd5be1982c9c0bcf1723172df9cb7ad", "head": "0f2ba64c0dafa493f21f6d2410dc9daa7d6d2eb4",
+  "base": "08edc207bcd5be1982c9c0bcf1723172df9cb7ad", "head": "3b51afe209bca91ed0ed90406cffeca15426d49b",
   "changedPaths": [
     ".github/workflows/ci.yml", ".github/workflows/evidence.yml", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts",
     "apps/web/src/document-http.ts", "apps/web/src/document-template-form.ts", "apps/web/src/surface-client.ts", "apps/web/src/surface-composition.ts",
