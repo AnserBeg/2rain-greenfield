@@ -35,8 +35,7 @@ CREATE FUNCTION platform.document_record_revision(t uuid, e uuid, storage jsonb,
   scope text, record_key uuid, parent_relation text DEFAULT NULL, parent_key uuid DEFAULT NULL,
   lock_row boolean DEFAULT false)
 RETURNS bigint LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
-DECLARE target jsonb; relation jsonb; revision bigint;
-BEGIN
+DECLARE target jsonb; relation jsonb; revision bigint; BEGIN
   SELECT value INTO target FROM jsonb_array_elements(storage->'entities')
     WHERE value->>'entityId' = entity AND value->>'lifecycle' = 'active';
   IF target->>'storageClass' IS DISTINCT FROM 'dedicatedTable'
@@ -86,8 +85,7 @@ CREATE FUNCTION platform.document_source_allowed(app jsonb, issued_app jsonb, st
 RETURNS boolean LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
 DECLARE i record; q jsonb; issued_query jsonb; field jsonb; stored bigint;
   source_row jsonb; parent text := source->>'parentRelationId';
-  source_entity text := source->>'entityId';
-BEGIN
+  source_entity text := source->>'entityId'; BEGIN
   SELECT * INTO i FROM platform.document_identity();
   SELECT value INTO q FROM jsonb_array_elements(app->'queries') WHERE value->>'queryId' = source->>'queryId';
   SELECT value INTO issued_query FROM jsonb_array_elements(issued_app->'queries')
@@ -144,8 +142,7 @@ CREATE FUNCTION platform.document_generated_allowed(source jsonb, issued_release
   entity text, record_key uuid, verify_revision boolean)
 RETURNS boolean LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
 DECLARE i record; app jsonb; issued_app jsonb; storage jsonb; binding jsonb; brand jsonb; template jsonb;
-  block jsonb; binding_index integer := 1; required_field text;
-BEGIN
+  block jsonb; binding_index integer := 1; required_field text; BEGIN
   IF source IS NULL THEN RETURN true; END IF;
   SELECT * INTO i FROM platform.document_identity();
   app := platform.document_app(i.tenant_id, i.environment_id);
