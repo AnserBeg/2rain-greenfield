@@ -64,6 +64,9 @@ test(
           tenantSlug: 'document-templates',
           port: 0,
         };
+        await pool.query(
+          "ALTER DATABASE postgres SET north_star.isolated_document_demo = 'on'",
+        );
         const app = await startComposedApplication({
           ...options,
           documentDemoScanner: true,
