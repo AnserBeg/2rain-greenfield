@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const BILLING_CALCULATION_VERSION = 'northstar.billing-calculation/v1';
-export const BILLING_READER = 29;
+export const BILLING_READER = 30;
 export const BILLING_QUOTE_CAPABILITY = 'northstar.billing:capability.quote';
 export const BILLING_TERMS_CAPABILITY = 'northstar.billing:capability.terms';
 export const billingPeriods = [

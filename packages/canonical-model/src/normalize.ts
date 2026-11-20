@@ -222,6 +222,20 @@ export function normalizeApplicationPackage(
           ),
       }),
     ...(authored.languageVersion === 'v6' &&
+      authored.workflows && {
+        workflows: authored.workflows
+          .map((workflow) => ({
+            ...workflow,
+            grants: {
+              operations: sortedStrings(workflow.grants.operations),
+              queries: sortedStrings(workflow.grants.queries),
+            },
+          }))
+          .sort((left, right) =>
+            compareCodeUnits(left.workflowId, right.workflowId),
+          ),
+      }),
+    ...(authored.languageVersion === 'v6' &&
       authored.documentFields && {
         documentFields: authored.documentFields
           .map((field) => ({

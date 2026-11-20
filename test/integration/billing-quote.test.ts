@@ -147,6 +147,14 @@ test('service-anniversary windows price 36 days as CAD 490 + 100', () => {
   const p = plan(),
     e = evidence(p, 36, undefined, '2025-01-01T16:00:00.000Z');
   assert.equal(cents(p, e), 59000);
+  // The January enrollment minimum is already earned when February opens.
+  const minimum = plan([
+    { ...time, minimumDuration: { period: 'day', count: 29 } },
+  ]);
+  assert.equal(
+    cents(minimum, evidence(minimum, 36, undefined, e.anchor)),
+    59000,
+  );
   const first = roll(e.anchor, 31);
   assert.equal(cents(p, { ...e, asOf: first }), 49000);
   assert.equal(cents(p, allocate(e, p, first)), 10000);

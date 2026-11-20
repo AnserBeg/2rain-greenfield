@@ -154,7 +154,7 @@ function release() {
       profile: {
         ...MODULE_COMPILER_PROFILE,
         languageVersion: p.languageVersion,
-        normalizationProfileVersion: p.normalizationProfileVersion,
+        normalizationProfileVersion: args.profile.normalizationProfileVersion,
       },
     },
     {
@@ -241,9 +241,25 @@ test('governed terms and scoped source facts produce a quote through the install
       await f.measure('allow', undefined, undefined, 'billing_publish_terms');
       const published = await f.invoke('billing_publish', revision, key);
       assert.equal(published.outcome, 'succeeded');
+      const receipt = published.trust;
+      assert.ok(receipt);
+      const storedReceipt = await f.pool.query(
+        `SELECT outbox_id FROM platform.trust_outbox
+         WHERE tenant_id=$1 AND environment_id=$2 AND invocation_id=$3
+           AND change_document_id=$4 AND domain_event_id=$5 AND outbox_id=$6`,
+        [
+          ids.tenantId,
+          ids.environmentId,
+          receipt.invocationId,
+          receipt.changeDocumentId,
+          receipt.domainEventId,
+          receipt.outboxId,
+        ],
+      );
+      assert.equal(storedReceipt.rowCount, 1);
       assert.equal(
         (await f.invoke('billing_publish', revision, key)).trust?.invocationId,
-        published.trust?.invocationId,
+        receipt.invocationId,
       );
       const db = await f.pool.connect();
       try {

@@ -245,15 +245,18 @@ function calculate(
           values = t.values;
         const cover = bestCover(segments, w.monthDays, c, values, budget);
         const cap = c.cap ? decimal(values[c.cap]!) : null;
-        const floor = durationFloor(
-          calendar,
-          w.day,
-          w.next,
-          w.monthDays,
-          c,
-          values,
-          budget,
-        );
+        const floor =
+          c.minimumScope === 'perEnrollment' && enrollmentFloor !== null
+            ? zero
+            : durationFloor(
+                calendar,
+                w.day,
+                w.next,
+                w.monthDays,
+                c,
+                values,
+                budget,
+              );
         if (enrollmentFloor === null)
           enrollmentFloor = cap ? floor.min(cap) : floor;
         const gross =

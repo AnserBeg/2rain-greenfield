@@ -151,9 +151,22 @@ export function languageCoverageApplicationPackages() {
       },
     ],
   };
+  const workflowFixture = {
+    ...application,
+    workflows: [
+      {
+        schemaVersion: 'v6' as const,
+        workflowId: 'sample-receipt-workflow',
+        trigger: 'goodsReceiptPosted' as const,
+        bodyDigest: 'a'.repeat(64),
+        grants: { operations: [], queries: [] },
+      },
+    ],
+  };
   return [
     pageLayoutFixture,
     application,
+    workflowFixture,
     displayFixture,
     platformModuleDefinition(),
     validationFixture,
