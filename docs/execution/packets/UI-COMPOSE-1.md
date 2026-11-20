@@ -15,7 +15,7 @@ The orchestrator accepted ADR-0079 with Fable’s amendments on 2026-11-19.
 - [Design with Fable’s amendments](../../decisions/ADR-0079-form-and-record-composition.md).
 - 1a derives slot and field inventories from the active package and stores a layout only when the owner adopts a revision. Layouts require Surface reader 28, above the attachment reader at 27. No database migration.
 - 1b adds disclosure, upgrade refusals and assistant discovery.
-- Shell branding and pop-up actions can land in either order. Document branding follows DOCS-1 templates.
+- Shell branding and pop-up actions can land in either order. DOCS-1 issues PDFs with the Ledger defaults and records `platform-default` until this slice supplies approved company revisions through the company-brand resolver.
 
 ## Gates and test it yourself
 
