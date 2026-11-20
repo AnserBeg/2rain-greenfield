@@ -38,6 +38,8 @@ controls access to the booking detail. Company-owned owners can use their own or
 Shared owners can use shared resources. The writer verifies both persisted endpoints and any line’s
 parent in the transaction. Typed references retain referential and archive protection across release
 changes. An active allocation prevents archiving either endpoint. Closed bookings retain their links.
+The archive guard is integrity, not disclosure: it refuses whatever the archiving caller can see,
+because that caller is already authorized for the record.
 [ADR-0015](ADR-0015-legal-entity-business-dimension.md) · [ADR-0072](ADR-0072-tenant-document-editing-and-links.md)
 
 The pack publishes its typed configuration and exhaustive input/output dependency set. Mode and
@@ -179,6 +181,10 @@ O2 calls and multi-step plans. A workflow needs a recorded human decision for **
 write, including a hold or its cancellation. We accept that self-service and recurring workflow
 holds require that human decision until N5 grants are admitted. Expiry, scheduled completion
 and timed no-show derive only the authority to apply their recorded deadline and condition.
+Scope exception: `platform.attest_booking_approval` is SECURITY DEFINER and records the issuer's
+tenant, environment and principal arguments without trusted-context or company scoping. This is
+safe because scope is enforced at consumption: the booking writer matches the grant on the trusted
+tenant, environment and principal, then authorizes the owner's company.
 [Plan §9.4](../greenfield-north-star-erp-platform-plan.md) · [ADR-0073](ADR-0073-workflow-isolate-and-authority.md#computed-inputs-to-tier-b)
 
 ## How PostgreSQL prevents double booking
@@ -192,7 +198,9 @@ may still be out at 10:05. Its finite planned interval cannot protect the next p
    (`SELECT ... FOR UPDATE`). One persistent row already identifies each diary and stores its
    time floor. Using it avoids a second advisory-key identity. Resolve all affected resources
    (including swap, group and due members), lock in ascending durable key order, then lock the
-   request identity and affected endpoint/owner records in stable order. Recheck the discovered
+   request identity and affected endpoint/owner records in one global order: descendants before
+   ancestors (longest ownership path to a root, descending), then entity and record ID. The generic
+   module writer locks a child before its parent, so both writers share this order. Recheck the discovered
    set, liveness, scope and revisions. Restart discovery if another resource lock would be
    needed. Owner-row locking also serializes a first booking with archive of an untouched owner.
    The database routine checks `current_setting('transaction_isolation') = 'read committed'`
