@@ -1,6 +1,6 @@
 # BOOKING-1 — book a resource over time
 
-Fable accepted amended [ADR-0082](../../decisions/ADR-0082-booking-over-time.md). A1–A3 gate 1a, A4–A7 and A9–A10 gate 1b, A8 gates slice 2 and CALENDAR-1, and A9–A10 gate BILLING-1 slice 2.
+Fable accepted amended [ADR-0082](../../decisions/ADR-0082-booking-over-time.md). A1–A3 gate 1a, A4–A7 and A9–A10 gate 1b, A8 gates slice 2 and CALENDAR-1, and A9–A10 gate BILLING-1 slice 2. Follow up ADR-0087 A3 by reconciling ADR-0082’s refusal of an unresolved date-only booking boundary with ADR-0083 A1 for system-derived boundaries.
 
 ## Checkpoints
 
