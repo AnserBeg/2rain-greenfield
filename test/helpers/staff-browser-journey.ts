@@ -576,6 +576,12 @@ async function journey() {
           secondRefusal?.headers()['x-test-instance'],
         );
         await other.close();
+        // Run the independent passkey checks in a fresh 15-minute allowance.
+        // The recovery cases above spent three failed completions for this principal.
+        await pool.query(
+          "UPDATE platform.staff_attempts SET window_start=window_start-interval '15 minutes' WHERE tenant_id=$1 AND environment_id=$2",
+          [r.tenantId, r.environmentId],
+        );
         await passkeyChecks(
           page,
           devtools,
