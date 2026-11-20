@@ -627,7 +627,10 @@ test('CI aggregates only after every evidence-producing job succeeds', () => {
   assert.match(job, /actions\/download-artifact@[0-9a-f]{40}/u);
   assert.doesNotMatch(job, /if:\s*always\(\)/u);
   assert.match(job, /CI_JOB_RESULTS: \$\{\{ toJSON\(needs\) \}\}/u);
-  assert.match(job, /run: node \.github\/scripts\/check-ci-results\.mjs/u);
+  assert.match(
+    job,
+    /run: node --import tsx \.github\/scripts\/check-ci-results\.mjs/u,
+  );
   assert.match(job, /^ {6}- security$/mu);
   for (const [jobName, result, replay, accepted] of [
     ['postgres', 'success', 'success', true],
@@ -656,7 +659,7 @@ test('CI aggregates only after every evidence-producing job succeeds', () => {
     jobs[jobName].result = result;
     const run = spawnSync(
       process.execPath,
-      ['.github/scripts/check-ci-results.mjs'],
+      ['--import', 'tsx', '.github/scripts/check-ci-results.mjs'],
       {
         env: { ...process.env, CI_JOB_RESULTS: JSON.stringify(jobs) },
       },
