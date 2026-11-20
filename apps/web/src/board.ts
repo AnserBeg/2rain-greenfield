@@ -63,8 +63,10 @@ const hidden = (name: string, value: string | number) =>
   `<input type="hidden" name="${h(name)}" value="${h(String(value))}">`;
 const link = (url: URL, changes: Record<string, string | null>) => {
   const params = new URLSearchParams(url.search);
-  for (const [name, value] of Object.entries(changes))
-    value === null ? params.delete(name) : params.set(name, value);
+  for (const [name,value] of Object.entries(changes)) {
+    if(value === null) params.delete(name);
+    else params.set(name,value);
+  }
   return '/?' + params.toString();
 };
 type Move = BoardBody['moves'][number];

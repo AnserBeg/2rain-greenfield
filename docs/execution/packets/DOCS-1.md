@@ -12,6 +12,7 @@ Slice 1a implements [ADR-0078](../../decisions/ADR-0078-governed-documents-files
 ## Decisions
 
 - File-field requiredness applies to document task completion. Slice 1a allows attachments after saving and stores the flag for the later task.
+- Slice 1b entry condition (CRITFIX-H item 8 regression test): when a required file field has no file, the server refuses the declared completion and the stored state is unchanged.
 - Internal categories can accompany a field draft. Customer upload requests still require the external-identity ruling.
 - The server derives a scoped upload ID from the authenticated principal and the browser retry key.
 - Files and calculated displays share field-ID and label checks on the same record type.

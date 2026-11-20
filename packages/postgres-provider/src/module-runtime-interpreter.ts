@@ -2954,7 +2954,7 @@ async function listRecords(
 
 // The immutable surface projection is shared by warm views of the same release.
 const boardBindingsByManifest = new WeakMap<object, Map<string,SurfaceBoard>>();
-function admittedBoard(manifest:Record<string,ImmutableJsonValue>,surfaceId:unknown) {
+function admittedBoard(manifest:Readonly<Record<string,ImmutableJsonValue>>,surfaceId:unknown) {
   if (typeof surfaceId !== 'string') return undefined;
   let bindings=boardBindingsByManifest.get(manifest);
   if (!bindings) {
@@ -3056,9 +3056,15 @@ async function readBoardPage(
       columnFor(f.fieldId) + '::text = ' + parameter(values, f.value),
     );
   }
-  // 512 scoped physical keys per request, plus one probe. Even an empty stage
-  // on an existing unindexed table has a finite amount of work.
-  const result = await client.query<QueryResultRow>(
+  // The row ceiling bounds ranking. The statement deadline also bounds finding
+  // sparse authorized rows on an existing table without a covering index.
+  await client.query('SAVEPOINT board_page_read');
+  let result:QueryResult<QueryResultRow>;
+  try {
+    await client.query(`/* Board read work ceiling */ SELECT set_config('statement_timeout',
+      least(750,coalesce(nullif(setting::integer,0),750))::text,true)
+      FROM pg_catalog.pg_settings WHERE name='statement_timeout'`);
+    result=await client.query<QueryResultRow>(
     `WITH candidates AS MATERIALIZED (
       SELECT * FROM north_star_module.${quoted(entity.physicalTableName)} WHERE ${scopePredicates.join(' AND ')} ORDER BY ${id} LIMIT 513
     ), inspected AS MATERIALIZED (SELECT * FROM candidates ORDER BY ${id} LIMIT 512),
@@ -3070,6 +3076,17 @@ async function readBoardPage(
     ORDER BY ranked.${id}`,
     values,
   );
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code==='57014' && error.message.includes('statement timeout')) {
+      return {...queryResult(definition.queryId,'exact',[],null),
+        boardCoverage:{revisionId:board.revisionId,scanLimitReached:true}};
+    }
+    throw error;
+  } finally {
+    // Restore the caller's deadline, including when PostgreSQL cancelled a read.
+    await client.query('ROLLBACK TO SAVEPOINT board_page_read');
+    await client.query('RELEASE SAVEPOINT board_page_read');
+  }
   const records = result.rows
     .filter((r) => r[entity.recordIdentity.column] !== null)
     .map((r) => toDto(entity, rawRecord(entity, r), definition.selections));

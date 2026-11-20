@@ -3,7 +3,9 @@ import {
   type LayoutBody,
   type LayoutDefinition,
   type SurfaceLayout,
+  type SurfaceBoard,
 } from '@north-star/canonical-model';
+import { arrangeableLayoutFields } from './layout-revision.js';
 import { createHash } from 'node:crypto';
 
 import type { CalculatedDisplayField } from '@north-star/canonical-model';
@@ -94,7 +96,7 @@ export function renderReleaseDiff(input: {
   const lines: string[] = [];
   for (const s of to.surfaces) {
     const board = s.board as
-      import('@north-star/canonical-model').SurfaceBoard | undefined;
+      SurfaceBoard | undefined;
     if (
       !board ||
       (
@@ -343,7 +345,9 @@ export function renderReleaseDiff(input: {
         .map((id) => {
           const section = body.sections.find((s) => s.id === id);
           if (!section) return body.blocks.find((b) => b.id === id)!.label.text;
-          const fields = section.fields.map((f) => f.label.text);
+          const fields = arrangeableLayoutFields(body, section).map(
+            (f) => f.label.text,
+          );
           return fields.length
             ? section.label.text + ' (' + fields.join(', ') + ')'
             : section.label.text;
@@ -356,7 +360,7 @@ export function renderReleaseDiff(input: {
     for (const mode of modes) {
       const previous = oldLayouts.find((l) => l.body.mode === mode);
       const next = newLayouts.find((l) => l.body.mode === mode);
-      if (previous?.revisionId === next?.revisionId) continue;
+      if (previous?.resultLayoutDigest === next?.resultLayoutDigest) continue;
       const oldBody = previous?.body ?? baseLayout(from, before, mode);
       const newBody = next?.body ?? baseLayout(to, after, mode);
       if (!oldBody || !newBody)

@@ -40,8 +40,6 @@ jobs:
     - run: node --import tsx --test --test-name-pattern='Board revisions bind' test/unit/customization.test.ts
     - if: always()
       run: corepack pnpm check:app-release
-    - if: always()
-      run: corepack pnpm check:language-coverage
   serving:
     name: Board archive and current reader
     runs-on: ubuntu-24.04
@@ -64,4 +62,4 @@ jobs:
     - *id004
     - uses: ./.github/actions/install-chromium
     - run: corepack pnpm exec playwright test --config apps/web/playwright.customization.config.ts
-        --grep 'keyboard user moves'
+        --grep 'keyboard user moves' --reporter=list

@@ -3,6 +3,7 @@ import {
   draftBoardRevision,
   type BoardTarget,
   layoutCommand,
+  arrangeableLayoutFields,
   type LayoutTarget,
   recordTypeEntityId,
 } from '@north-star/customization';
@@ -1318,12 +1319,15 @@ function layoutEditor(target: LayoutTarget) {
             false,
             false,
           );
-        return `<section><h2>${escapeHtml(section.label.text)}</h2>${moveControls(id, section.label.text, body.order, false, true)}${section.fields
+        const fields = arrangeableLayoutFields(body, section);
+        return `<section><h2>${escapeHtml(section.label.text)}</h2>${moveControls(id, section.label.text, body.order, false, true)}${fields
           .map((f) =>
             moveControls(
               f.id,
               f.label.text,
-              section.fields.map((entry) => entry.id),
+              fields
+                .filter((entry) => entry.tier === f.tier)
+                .map((entry) => entry.id),
               true,
               true,
             ),

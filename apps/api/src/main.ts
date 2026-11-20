@@ -59,12 +59,14 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 
 try {
   const workflowScheduler = workflowSchedulerConfig(process.env);
+  const demoScanner = process.env.NORTH_STAR_DOCUMENT_DEMO_SCANNER === '1';
+  if (demoScanner && !managesContainer)
+    throw new Error('The demo scanner requires a managed local demo database.');
   if (managesContainer) await ensureLocalPostgres();
+  if (demoScanner) await markIsolatedDemoDatabase();
   application = await startComposedApplication({
     databaseUrl,
-    ...(process.env.NORTH_STAR_DOCUMENT_DEMO_SCANNER === '1'
-      ? { documentDemoScanner: true }
-      : {}),
+    ...(demoScanner ? { documentDemoScanner: true } : {}),
     ...(workflowScheduler ? { workflowScheduler } : {}),
     host: process.env.HOST ?? '127.0.0.1',
     port: Number.parseInt(process.env.PORT ?? '4174', 10),
@@ -227,6 +229,51 @@ async function stopContainer(): Promise<void> {
     if (/no such (container|object)/iu.test(stderr)) return;
     throw error;
   }
+}
+
+/** Only the inspected dev container can provision the database-owner marker. */
+async function markIsolatedDemoDatabase(): Promise<void> {
+  const inspect = await execFileAsync(
+    'docker',
+    ['container', 'inspect', container.name],
+    { encoding: 'utf8' },
+  );
+  const [local] = JSON.parse(inspect.stdout) as {
+    Config: { Image: string };
+    Mounts: { Name?: string; Destination: string }[];
+    NetworkSettings: {
+      Ports: Record<string, { HostIp: string; HostPort: string }[]>;
+    };
+  }[];
+  const ports = local?.NetworkSettings.Ports['5432/tcp'];
+  if (
+    local?.Config.Image !== postgresImage ||
+    !local.Mounts.some(
+      (mount) =>
+        mount.Name === container.volume &&
+        mount.Destination === '/var/lib/postgresql/data',
+    ) ||
+    ports?.length !== 1 ||
+    ports[0]?.HostIp !== '127.0.0.1' ||
+    ports[0].HostPort !== String(databasePort)
+  )
+    throw new Error(
+      'The demo scanner requires the isolated local demo container.',
+    );
+  await docker([
+    'exec',
+    container.name,
+    'psql',
+    '-X',
+    '-v',
+    'ON_ERROR_STOP=1',
+    '-U',
+    'postgres',
+    '-d',
+    'postgres',
+    '-c',
+    "ALTER DATABASE postgres SET north_star.isolated_document_demo = 'on'",
+  ]);
 }
 
 async function docker(arguments_: readonly string[]): Promise<void> {

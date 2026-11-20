@@ -78,20 +78,10 @@ export interface BoardSource {
   operations?: readonly Row[];
   stateMachines?: readonly Row[];
 }
-function scopeContract(query: Row) {
-  const scope = query.legalEntityScope as
-    { cardinality?: string; operand?: { parameterId?: string } } | undefined;
-  if (!scope) return null;
-  const params = query.parameters as
-    { parameterId: string; valueType?: unknown }[] | undefined;
-  const parameter = params?.find(
-    (p) => p.parameterId === scope.operand?.parameterId,
-  );
-  return {
-    cardinality: scope.cardinality ?? null,
-    valueType: parameter?.valueType ?? null,
-  };
-}
+const scopeCardinality = (query:Row) =>
+  (query.legalEntityScope as {cardinality?:string} | undefined)?.cardinality;
+const selectedFields = (query:Row) =>
+  (query.selections as {field:Ref}[]).map(selection=>selection.field.targetId);
 const target = (ref: unknown) => (ref as Ref | undefined)?.targetId;
 export const boardDigest = (body: BoardBody) =>
   canonicalizeAndHash(body).contentHash;
@@ -135,8 +125,8 @@ export function boardForList(
     target(ownerQuery.permission) !== target(query.permission) ||
     canonicalizeAndHash(ownerQuery.filter ?? null).contentHash !==
       canonicalizeAndHash(query.filter ?? null).contentHash ||
-    canonicalizeAndHash(scopeContract(ownerQuery)).contentHash !==
-      canonicalizeAndHash(scopeContract(query)).contentHash
+    scopeCardinality(ownerQuery) !== scopeCardinality(query) ||
+    canonicalizeAndHash(selectedFields(ownerQuery)).contentHash !== canonicalizeAndHash(selectedFields(query)).contentHash
   )
     return null;
   const machine = def.stateMachines?.find(
@@ -165,9 +155,7 @@ export function boardForList(
   const status = list.columns.find(
     (c) => c.field === stateFieldId && c.role === 'status',
   );
-  const selected = new Set(
-    (query.selections as { field: Ref }[]).map((s) => s.field.targetId),
-  );
+  const selected = new Set(selectedFields(query));
   if (
     !record ||
     !title ||

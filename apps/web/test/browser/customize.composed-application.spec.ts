@@ -2,6 +2,7 @@ import { performance } from 'node:perf_hooks';
 
 import { expect, test } from '@playwright/test';
 
+import {parseServerTiming} from '../../../../packages/postgres-provider/src/request-work-meter.js';
 import {randomUUID} from 'node:crypto';
 import {mock} from 'node:test';
 import {SEMANTIC_OPERATION_REQUEST_VERSION,SemanticOperationGateway} from '../../../../packages/runtime/src/semantic-operation-gateway.js';
@@ -343,10 +344,10 @@ for (const target of ['purchase_order', 'party'] as const) {
   });
 }
 
-test('a buyer creates a section and moves the bound vendor picker into it', async ({
+test('a buyer saves and reopens a purchase order with a moved Vendor, totals and next step', async ({
   page,
 }) => {
-  test.setTimeout(360_000);
+  test.setTimeout(600_000);
   page.setDefaultTimeout(30_000);
   await withEphemeralPostgres(
     'customize-layout-browser',
@@ -359,14 +360,14 @@ test('a buyer creates a section and moves the bound vendor picker into it', asyn
       });
       try {
         const customize = app.baseUrl + '/?customize';
-        const arrange = async () => {
+        const arrange = async (target = 'purchase_order_form/create') => {
           await page.goto(customize);
           const chooser = page.getByRole('group', {
             name: 'Arrange a form or record page',
           });
           await chooser
             .getByLabel('Page', { exact: true })
-            .selectOption('northstar.app:surface.purchase_order_form/create');
+            .selectOption('northstar.app:surface.' + target);
           await chooser.getByRole('button', { name: 'Choose page' }).click();
         };
         const activate = async () => {
@@ -434,6 +435,62 @@ test('a buyer creates a section and moves the bound vendor picker into it', asyn
           'data-selected-label',
           'Cascade Fastener Works',
         );
+        const product = page.getByRole('combobox', {
+          name: 'Line 1 product',
+          exact: true,
+        });
+        await product.fill('OFF-100');
+        await page
+          .getByRole('option')
+          .filter({ hasText: 'Field notebook' })
+          .click();
+        await expect(product).toHaveAttribute(
+          'data-selected-label',
+          'Field notebook',
+        );
+        await page.getByLabel('Order date *').fill('2026-11-18');
+        await page.getByLabel('Line 1 quantity', { exact: true }).fill('2');
+        await page.getByLabel('Line 1 unit cost', { exact: true }).fill('12.5');
+        await page
+          .getByRole('button', { name: 'Save draft', exact: true })
+          .click();
+        await expect(page).toHaveURL(/purchase_order_detail/u);
+        const saved = page.url();
+        const total = page.locator('.composition-totals > div:last-child dd');
+        await expect(total).toHaveText(/\d/u);
+        const savedTotal = await total.innerText();
+        const next = page.locator('.composition-progression-next');
+        await expect(next).toBeVisible();
+        const savedNext = await next.innerText();
+
+        await arrange('purchase_order_detail/detail');
+        await page
+          .getByRole('group', { name: 'Tables and totals', exact: true })
+          .getByRole('button', { name: 'Move up' })
+          .click();
+        await activate();
+        await page.goto(saved);
+        await expect(page.locator('.composition-subtitle')).toContainText(
+          'Cascade Fastener Works',
+        );
+        const movedTotal = page.locator(
+          '.composed-record-body .composition-collection .composition-totals',
+        );
+        const movedNext = page.locator(
+          '.composed-record-body [data-composition-progression] .composition-progression-next',
+        );
+        for (const width of [390, 1280]) {
+          await page.setViewportSize({ width, height: 840 });
+          await expect(movedTotal).toBeVisible();
+          await expect(total).toHaveText(savedTotal);
+          await expect(movedNext).toBeVisible();
+          await expect(movedNext).toHaveText(savedNext, { useInnerText: true });
+        }
+        await expect(
+          page.locator(
+            '.composed-record-body .composition-collection:has(.composition-totals) ~ [data-composition-progression]',
+          ),
+        ).toHaveCount(1);
       } finally {
         await app.close();
       }
@@ -487,16 +544,17 @@ test('a keyboard user moves a card through its reviewed Task with JavaScript dis
         const {runtime}=app;
         const identity={headers:{cookie:'northstar-demo-actor=manager'}};
         const recordId=randomUUID();
-        const card=await runtime.entry.run(identity,async view=>{
+        const createCard=(name:string,recordId:string)=>runtime.entry.run(identity,async view=>{
           const result=await runtime.operationGateway.invoke(view,{
             schemaVersion:SEMANTIC_OPERATION_REQUEST_VERSION,
             operationId:'northstar.app:operation.custom_opportunity_create',
             idempotencyKey:randomUUID(), confirmationGrant:null,
-            input:{recordId,values:{'northstar.app:field.custom_opportunity_name':'Westside renewal'}},
+            input:{recordId,values:{'northstar.app:field.custom_opportunity_name':name}},
           },runtime.operationMediation.issueInvocation(view,'UI'));
           if (!result.readBack) throw new Error('The Opportunity fixture could not be created.');
           return result.readBack;
         });
+        const card=await createCard('Westside renewal',recordId);
         const before=()=>runtime.entry.run(identity,async view=>{
           const result=await runtime.queryGateway.invoke(view,{schemaVersion:SEMANTIC_QUERY_REQUEST_VERSION,
             queryId:'northstar.app:query.custom_opportunity_get',arguments:{recordId}});
@@ -504,7 +562,7 @@ test('a keyboard user moves a card through its reviewed Task with JavaScript dis
           return result.records[0];
         });
         const invocation=mock.method(SemanticOperationGateway.prototype,'invoke');
-        const moves=()=>invocation.mock.calls.filter(call=>call.arguments[1].operationId==='northstar.app:operation.custom_opportunity_action_mark_won');
+        const moves=()=>invocation.mock.calls.filter(call=>(call.arguments[1] as {operationId:string}).operationId==='northstar.app:operation.custom_opportunity_action_mark_won');
         const chooser = page.getByRole('group', {
           name: 'Add view',
           exact: true,
@@ -532,7 +590,23 @@ test('a keyboard user moves a card through its reviewed Task with JavaScript dis
         await page
           .getByRole('link', { name: 'Pipeline', exact: true })
           .press('Enter');
+        const grid = page.locator('.surface-grid[data-surface-archetype="board"]');
+        for (const slot of ['surface-title-slot','saved-views-slot','board-selector-slot','board-columns-slot'])
+          await expect(grid.locator('.'+slot)).toHaveCount(1);
+        await expect(grid.locator('.board-column:visible')).toHaveCount(1);
         const boardUrl = page.url();
+        const measure=async()=>{
+          const response=await page.goto(boardUrl);
+          expect(response?.status()).toBe(200);
+          const work=parseServerTiming(await response!.headerValue('server-timing'));
+          expect(work).not.toBeNull();
+          expect(work!.transactions).toBeLessThanOrEqual(2);
+          expect(work!.statements).toBeLessThanOrEqual(40);
+          expect(work!.authorization).toBeLessThanOrEqual(3);
+          expect(work!.repeats).toBe(0);
+          return work!;
+        };
+        const sparse=await measure();
         const other = await context.newPage();
         await other.goto(boardUrl);
         for (const tab of [page, other]) {
@@ -583,6 +657,24 @@ test('a keyboard user moves a card through its reviewed Task with JavaScript dis
             .locator('html')
             .evaluate((el) => el.scrollWidth <= el.clientWidth),
         ).toBe(true);
+        for(let n=0;n<11;n++)await createCard('Prospect '+String(n+1),randomUUID());
+        const full=await measure();
+        expect(full.statements).toBe(sparse.statements);
+        const compactCards=page.locator('.board-column:visible li');
+        await expect(compactCards).toHaveCount(10);
+        await page.getByRole('link',{name:'More Open cards'}).press('Enter');
+        await expect(compactCards).toHaveCount(1);
+        await page.setViewportSize({width:1280,height:840});
+        await page.goto(boardUrl);
+        await expect(page.locator('.board-column:visible')).toHaveCount(2);
+        await page.goto(app.baseUrl+'/?customize');
+        await page.getByRole('button',{name:'Roll back the latest change'}).press('Enter');
+        await expect(page.locator('[data-customize-result="rolledBack"]')).toBeVisible({timeout:180_000});
+        await page.goto(boardUrl);
+        await expect(page.getByRole('heading',{name:'View not available'})).toBeVisible();
+        await page.getByRole('link',{name:'Open Opportunity'}).press('Enter');
+        await expect(page.getByRole('link',{name:'Pipeline',exact:true})).toHaveCount(0);
+        expect((await before()).revision).toBe(moved.revision);
       } finally {
         mock.restoreAll();
         await context.close();
