@@ -43,6 +43,7 @@ import {
   type CustomizationPatch,
 } from '../../packages/customization/src/index.js';
 import {
+  assertAgentOperationsPlannable,
   parseCompiledApplication,
   provisionInventoryScope,
   ReleaseRoutingOperationGateway,
@@ -84,6 +85,43 @@ const equipment = patch({
   ],
   kind: 'addRecordType',
   label: 'Equipment',
+});
+
+test('an active action must be exposed with its exact read-back when its module is activated', () => {
+  assert.doesNotThrow(() => assertAgentOperationsPlannable(tip));
+  const { compiled } = tip;
+  const family = compiled.bundle.releaseManifest.projections.find(
+    (p) => p.familyId === PROJECTION_FAMILY_IDS.agentDiscovery,
+  )!;
+  const manifest = compiled.bundle.artifacts.find(
+    (a) => a.contentHash === family.artifactRoot,
+  )!;
+  const chunk = (
+    JSON.parse(new TextDecoder().decode(manifest.canonicalBytes)) as {
+      chunks: { contentHash: string }[];
+    }
+  ).chunks[0]!;
+  const artifacts = compiled.bundle.artifacts.map((artifact) => {
+    if (artifact.contentHash !== chunk.contentHash) return artifact;
+    const profile = JSON.parse(
+      new TextDecoder().decode(artifact.canonicalBytes),
+    ) as { operations: { operationId: string }[] };
+    profile.operations = profile.operations.filter(
+      (op) => op.operationId !== 'northstar.app:operation.item_create',
+    );
+    return {
+      ...artifact,
+      canonicalBytes: new TextEncoder().encode(JSON.stringify(profile)),
+    };
+  });
+  assert.throws(
+    () =>
+      assertAgentOperationsPlannable({
+        ...tip,
+        compiled: { ...compiled, bundle: { ...compiled.bundle, artifacts } },
+      }),
+    /cannot plan and read back declared operation northstar.app:operation.item_create/u,
+  );
 });
 
 test('the v1 patch vocabulary is add-only', () => {

@@ -12,7 +12,7 @@ import { createInterface } from 'node:readline/promises';
 import {
   anthropicModel,
   agentPreamble,
-  DEFAULT_ANTHROPIC_MODEL,
+  assistantRoute,
   loadModelKey,
   OperationsAgentSession,
   runOperationsAgent,
@@ -100,7 +100,7 @@ try {
   });
   const model = anthropicModel({
     key,
-    modelId: process.env.NORTH_STAR_AGENT_MODEL ?? DEFAULT_ANTHROPIC_MODEL,
+    ...assistantRoute(request, process.env.NORTH_STAR_AGENT_MODEL),
   });
   out(`Agent (${model.modelId}) acting as the demo ${actor}, channel AGENT.`);
   const result = await runOperationsAgent({
