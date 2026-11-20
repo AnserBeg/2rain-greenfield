@@ -77,6 +77,7 @@ test('the composed application declares its Lists and they normalize unchanged',
     `${ns}:surface.purchase_order_approval_list`,
     `${ns}:surface.purchase_order_list`,
     salesList,
+    `${ns}:surface.stock_count_list`,
     // PAYABLES: the Bills List, by bill state.
     `${ns}:surface.vendor_bill_list`,
   ]);

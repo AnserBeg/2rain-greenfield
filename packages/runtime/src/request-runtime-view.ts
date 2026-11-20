@@ -1,5 +1,4 @@
 import {
-  REPLAYED_LAYOUT_READER,
   BOOKING_OPERATION_READER,
   CONNECTOR_FAMILY,
 } from '@north-star/canonical-model';
@@ -10,6 +9,7 @@ import {
   type UntrustedRequestInput,
 } from './request-context.js';
 import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents.js';
+import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../canonical-model/src/surface-workspace.js';
 import {
   WORKFLOW_PROJECTION_FAMILY,
   WORKFLOW_RUNTIME_CAPABILITY,
@@ -228,7 +228,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 29 adds workflows, 30 billing, 31 Address fields and 32 map placements.
     // 33 adds Board lifecycle views and form-based moves.
     // 34 reads the versioned placement rule on replayed layouts.
-    maximumSupportedVersion: REPLAYED_LAYOUT_READER,
+    // 35 adds draft line create values.
+    maximumSupportedVersion: LINE_CREATE_VALUES_SURFACE_FLOOR,
   },
 });
 

@@ -32,11 +32,21 @@ const LINE_OWNERS: Readonly<Record<string, string>> = {
   stock_count_line: 'stock_count',
 };
 /**
- * Stock documents (INVENTORY-PARITY): an operational List of its own name,
- * and the shared editor on the record and form pages, entered with a company.
+ * Stock documents (INVENTORY-PARITY) and stock counts (STOCK-COUNTS): each an
+ * operational List of its own name, and the shared editor on the record and
+ * form pages, entered with a company.
  */
-const STOCK_DOCUMENT = 'inventory_transaction';
-const STOCK_DOCUMENT_LIST_LABEL = 'Inventory transactions';
+const EDITED_DOCUMENTS: Readonly<Record<string, string>> = {
+  inventory_transaction: 'Inventory transactions',
+  stock_count: 'Stock counts',
+};
+/**
+ * The stock documents List reads the documents a person records through its
+ * own filtered query (STOCK-COUNTS, ADR-0049 condition 3).
+ */
+const LIST_QUERIES: Readonly<Record<string, string>> = {
+  inventory_transaction_list: 'inventory_document_list',
+};
 /** Read-only document compositions: their line datasets, by parent relation. */
 const DOCUMENT_LINES: Readonly<Record<string, readonly [string, string][]>> = {
   inventory_transaction_detail: [
@@ -46,8 +56,13 @@ const DOCUMENT_LINES: Readonly<Record<string, readonly [string, string][]>> = {
     ],
     ['inventory_movement_list', 'inventory_movement_transaction'],
   ],
-  stock_count_detail: [['stock_count_line_list', 'stock_count_line_session']],
 };
+/**
+ * The stock count page (STOCK-COUNTS): its lines through the count read
+ * model, the movements naming it, the counts superseding it, and its
+ * Correct, Reverse and Open actions.
+ */
+const COUNT_PAGE = 'stock_count_detail';
 
 function expectedInventoryWorkspace(namespace: string, surface: Value): Value {
   const surfaceId = String(surface.surfaceId);
@@ -59,10 +74,11 @@ function expectedInventoryWorkspace(namespace: string, surface: Value): Value {
   // A destination's placement (LOOK-1 round 2): an occasional one is listed
   // under its group's Other; one may be listed in another module's group.
   const placement = list ? composedDestinationPlacement(local) : null;
+  const edited = Object.hasOwn(EDITED_DOCUMENTS, document);
   const membership = list
     ? placement?.occasional
       ? 'setup'
-      : document === 'posted_stock_balance' || document === STOCK_DOCUMENT
+      : document === 'posted_stock_balance' || edited
         ? 'operational'
         : owner
           ? 'contextual'
@@ -80,7 +96,7 @@ function expectedInventoryWorkspace(namespace: string, surface: Value): Value {
     ...(owner ? { ownerSurfaceId: `${namespace}:surface.${owner}_list` } : {}),
     ...(owner ||
     document === 'posted_stock_balance' ||
-    document === STOCK_DOCUMENT ||
+    edited ||
     (list && COMPANY_SCOPED.has(document))
       ? {
           entry: {
@@ -197,6 +213,15 @@ function assertDocumentComposition(
     ]),
     `${local} composition may only show its own lines`,
   );
+  assertDocumentSlots(source, slots, local);
+}
+
+/** The two slots a document composition adds; key facts move last. */
+function assertDocumentSlots(
+  source: Value,
+  slots: unknown,
+  local = String(source.surfaceId).split(':surface.')[1] ?? '',
+): void {
   const original = source.slots as Value[];
   const slotId = `${String(source.surfaceId).replace(':surface.', ':slot.')}`;
   const content = original[0]!.content;
@@ -369,6 +394,130 @@ function assertStockDocumentEditor(namespace: string, editor: unknown): void {
 }
 
 /**
+ * The stock count editor (STOCK-COUNTS), pinned the same way: its pages and
+ * lines, editable while a draft or counting, the values its first save
+ * writes, and the zeros each new line starts its figures at.
+ */
+function assertStockCountEditor(namespace: string, editor: unknown): void {
+  const id = (kind: string, local: string) => `${namespace}:${kind}.${local}`;
+  record(editor);
+  assert.deepEqual(
+    [
+      editor.kind,
+      editor.headerFormSurfaceId,
+      editor.recordSurfaceId,
+      editor.lineFormSurfaceId,
+      editor.lineQueryId,
+      editor.parentRelationId,
+      editor.stateFieldId,
+      editor.editableStateIds,
+      editor.lineNumberFieldId,
+      editor.saveMode,
+    ],
+    [
+      'draftDocumentEditor',
+      id('surface', 'stock_count_form'),
+      id('surface', 'stock_count_detail'),
+      id('surface', 'stock_count_line_form'),
+      id('query', 'stock_count_line_list'),
+      id('relation', 'stock_count_line_session'),
+      id('field', 'stock_count_state'),
+      [
+        id('option', 'stock_count_state_draft'),
+        id('option', 'stock_count_state_counting'),
+      ],
+      id('field', 'stock_count_line_line_number'),
+      'sequential',
+    ],
+    'the stock count editor edits counts and their lines',
+  );
+  assert.deepEqual(
+    editor.createValues,
+    [
+      {
+        fieldId: id('field', 'stock_count_state'),
+        value: {
+          source: 'literal',
+          value: id('option', 'stock_count_state_draft'),
+        },
+      },
+      {
+        fieldId: id('field', 'stock_count_kind'),
+        value: {
+          source: 'literal',
+          value: id('option', 'stock_count_kind_initial'),
+        },
+      },
+      {
+        fieldId: id('field', 'stock_count_counted_at'),
+        value: { source: 'generated', value: 'instant' },
+      },
+    ],
+    'a stock count is saved as an initial draft with a provisional instant',
+  );
+  assert.deepEqual(
+    editor.lineCreateValues,
+    ['expected_quantity', 'counted_quantity', 'variance_quantity'].map(
+      (local) => ({
+        fieldId: id('field', `stock_count_line_${local}`),
+        value: { source: 'literal', value: '0' },
+      }),
+    ),
+    'a new count line starts its figures at zero for review to replace',
+  );
+}
+
+/** The stock count page's datasets and actions (STOCK-COUNTS). */
+function assertCountComposition(namespace: string, composition: unknown): void {
+  const id = (kind: string, local: string) => `${namespace}:${kind}.${local}`;
+  record(composition);
+  assert.equal(composition.kind, 'surfaceComposition');
+  const children = composition.children as Value[];
+  assert.deepEqual(
+    children.map((child) => [
+      (child.query as Value).targetId,
+      child.parent
+        ? [
+            (child.parent as Value).relationId,
+            (child.parent as Value).ownership,
+          ]
+        : (child.fieldScope as Value).fieldId,
+    ]),
+    [
+      [
+        id('query', 'stock_count_count_lines'),
+        [id('relation', 'stock_count_line_session'), 'parentScopedChild'],
+      ],
+      [
+        id('query', 'inventory_movement_list'),
+        id('field', 'inventory_movement_source_id'),
+      ],
+      [
+        id('query', 'stock_count_list'),
+        [id('relation', 'stock_count_supersedes'), 'reference'],
+      ],
+    ],
+    'the count page shows its lines, its movements and what supersedes it',
+  );
+  assert.deepEqual(
+    (composition.actions as Value[]).map((action) => action.actionId),
+    [
+      'count_start',
+      'count_review',
+      'count_post',
+      'count_reopen',
+      'count_cancel_draft',
+      'count_cancel_counting',
+      'count_cancel_reviewed',
+      'correct_count',
+      'reverse_count',
+      'open_compensation',
+    ].map((local) => id('action', local)),
+    'the count page offers its lifecycle and compensation actions',
+  );
+}
+
+/**
  * Composition may add only the independently pinned workspace declaration to
  * inventory surfaces -- and to stock documents their editor, List name and
  * the editor's command bar placement. Identity/count and every original
@@ -407,9 +556,10 @@ export function assertComposedInventoryCollection(
     const candidate = matches[0];
     record(candidate);
     const local = String(source.surfaceId).split(':surface.')[1] ?? '';
-    const document = Object.hasOwn(DOCUMENT_LINES, local);
-    const stockDocument =
-      local.replace(/_(list|detail|form)$/, '') === STOCK_DOCUMENT;
+    const document =
+      Object.hasOwn(DOCUMENT_LINES, local) || local === COUNT_PAGE;
+    const edited = local.replace(/_(list|detail|form)$/, '');
+    const stockDocument = Object.hasOwn(EDITED_DOCUMENTS, edited);
     const {
       workspace,
       composition,
@@ -423,14 +573,19 @@ export function assertComposedInventoryCollection(
     record(declared);
     const { slots: sourceSlots, ...protectedSource } = declared;
     if (stockDocument && source.surfaceRole !== 'list')
-      assertStockDocumentEditor(namespace, documentEditor);
+      (edited === 'stock_count'
+        ? assertStockCountEditor
+        : assertStockDocumentEditor)(namespace, documentEditor);
     else
       assert.equal(
         documentEditor,
         undefined,
         `editor added to ${String(source.surfaceId)}`,
       );
-    if (document)
+    if (local === COUNT_PAGE) {
+      assertCountComposition(namespace, composition);
+      assertDocumentSlots(source, slots);
+    } else if (document)
       assertDocumentComposition(namespace, local, source, composition, slots);
     else if (local === 'inventory_period_lock_detail')
       assertPeriodLockComposition(namespace, source, composition, slots);
@@ -455,11 +610,23 @@ export function assertComposedInventoryCollection(
     const plainName = composedDestinationLabel(local);
     assert.deepEqual(
       protectedSurface,
-      stockDocument && source.surfaceRole === 'list'
-        ? { ...protectedSource, label: STOCK_DOCUMENT_LIST_LABEL }
-        : plainName
-          ? { ...protectedSource, label: plainName }
-          : protectedSource,
+      {
+        ...protectedSource,
+        ...(stockDocument && source.surfaceRole === 'list'
+          ? { label: EDITED_DOCUMENTS[edited] }
+          : plainName
+            ? { label: plainName }
+            : {}),
+        ...(Object.hasOwn(LIST_QUERIES, local)
+          ? {
+              dataSource: {
+                kind: 'queryReference',
+                schemaVersion: 'v6',
+                targetId: `${namespace}:query.${LIST_QUERIES[local]!}`,
+              },
+            }
+          : {}),
+      },
       `composition altered protected bindings for ${String(source.surfaceId)}`,
     );
     assert.deepEqual(
