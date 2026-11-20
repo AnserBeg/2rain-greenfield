@@ -5,6 +5,7 @@ export const UPGRADE_PATCH_KINDS: ReadonlySet<string> = new Set([
   'addAddressField',
   'addMapPlacement',
   'addBoardViewRevision',
+  'addPopupActionRevision',
   'addRecordType',
   'addField',
   'addChoice',

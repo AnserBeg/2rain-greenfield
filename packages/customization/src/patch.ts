@@ -1,3 +1,4 @@
+import { PopupRevisionSchema } from '../../canonical-model/src/popup-actions.js';
 import { BoardViewRevisionSchema } from './board-revision.js';
 import { LayoutRevisionSchema } from './layout-revision.js';
 import {
@@ -239,6 +240,7 @@ export const CUSTOMIZATION_CHANGE_MEMBER_KINDS = Object.freeze(
 );
 
 const singlePatchKinds = [
+  PopupRevisionSchema.extend({ kind: z.literal('addPopupActionRevision') }),
   LayoutRevisionSchema,
   ...ChangeMemberSchema.options,
   z.strictObject({
@@ -325,6 +327,7 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'declareLifecycle',
   'arrangeLayout',
   'addLayoutRevision',
+  'addPopupActionRevision',
   'addBoardViewRevision',
   'saveListView',
   'addValidation',
