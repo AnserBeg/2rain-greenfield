@@ -1,20 +1,6 @@
 # BOOKING-1 — book a resource over time
 
-Fable approved [ADR-0082](../../decisions/ADR-0082-booking-over-time.md) with changes and rejected the original consumer contract. This docs-only amendment publishes the billing and event contracts.
-
-Fable’s narrow re-read accepted ADR-0082 with amendments. A1–A3 gate 1a, A4–A7 and A9–A10 gate 1b, A8 gates slice 2 and CALENDAR-1, and A9–A10 gate BILLING-1 slice 2.
-
-## Design decisions
-
-1. Each resource has one diary. Pool totals are effective-dated. A reserved class claim draws on its member units. Assign-unit ships later.
-2. The fact retains the requested target, assignment, group and slot, agreed and occupied intervals and fulfilment mode. A timed appointment can complete without possession.
-3. Actual-use legs carry quantities. Bounded corrections preserve both effective and recorded time. An onboarding operation admits existing work under the same capacity checks.
-4. PostgreSQL serializes writers and archive on registry rows. The exclusion constraint protects unit commitments. Open-leg uniqueness and the locked pool check protect physical handover.
-5. Each owner has a versioned usage projection and transactional cursor. A correction to a previously read pause reaches the next incremental read. Billing owns the monetary interpretation.
-6. Customize versions and retires both bindings. The Operation catalog gates entity declarations and the Surface manifest gates the picker. Dates and quantities on an owner line come from its booking.
-7. A hold is reversible. Workflows need recorded human approval even for a hold. No rung or migration is assigned by this amendment.
-
-Follow up ADR-0087 A3 by reconciling ADR-0082’s refusal of an unresolved date-only booking boundary with ADR-0083 A1 for system-derived boundaries.
+Fable accepted amended [ADR-0082](../../decisions/ADR-0082-booking-over-time.md). A1–A3 gate 1a, A4–A7 and A9–A10 gate 1b, A8 gates slice 2 and CALENDAR-1, and A9–A10 gate BILLING-1 slice 2. Follow up ADR-0087 A3 by reconciling ADR-0082’s refusal of an unresolved date-only booking boundary with ADR-0083 A1 for system-derived boundaries.
 
 ## Checkpoints
 
@@ -33,28 +19,42 @@ Follow up ADR-0087 A3 by reconciling ADR-0082’s refusal of an unresolved date-
 - Unit holds from two companies contend on the same occupied interval. Adjacent claims fit. Pools combine simultaneous demand and dated capacity changes. A failed reschedule keeps the original claim.
 - PostgreSQL checks the release fence, actor, company and endpoint revision, serializes archive, and commits history, owner cursor, typed event, trust rows and receipt together. The worker expires due holds using their original authority.
 - Date-only holds and changes preserve the agreement and clamp occupation at the post-lock instant. At equality expiry wins. A backward clock cannot reopen capacity early.
-- Regression controls remove unit exclusion for holds, allow a pool deficit, move occupation to the day boundary, and let a waiting confirmation run at its deadline.
+- Thirteen targeted mutations failed as expected. The restored candidate passed [packet CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44773309215), including Inventory confirmation replay.
 
 Migration 0050 replayed to the checked-in snapshot. [Packet CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44729321788) · [Four restored regression controls](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44729321814).
 
+## Slice 1a review fixes
+
+1. A booking command requires an active update or transition permission on its owner.
+2. Booking opts into single-use confirmations. A separate issuer attests the verified grant to the exact command. SQL consumes it once and records the approving human. Archive checks limit company visibility to current grants on the endpoint.
+3. Signed approvals and database grants bind the active fence. Reactivating a release requires a fresh approval.
+4. Both archive routines require READ COMMITTED. Archive rechecks allocation after locking the record.
+5. Expiry has its own receipt and outbox namespace. Each worker expiry rolls back independently on a unique conflict.
+6. After locking the diary, foreground writers lock both endpoints and all ancestors in order, then owner cursors in order. Workers skip locked diaries and busy owner cursors.
+7. With an 08:00 day boundary, a date-only hold entered at 06:00 retains the 08:00 agreement and occupies from 06:00.
+8. Company authority is exercised against the correct owner. Committed event cursors remain contiguous across a competing diary write that fails.
+9. Both tenant runners compare the complete v6 release envelope to the pre-booking compiler at `47594bc6`.
+
+The staff server accepts the issuer login through `STAFF_APPROVAL_DATABASE_URL`. A missing issuer connection refuses operations requiring approval.
+
 ## Test it yourself
 
-Run `node --import tsx --test test/postgres/booking-commitments.test.ts` with Docker running. The test creates and removes its own PostgreSQL instance. The compiler proof is `node --import tsx --test test/compiler/booking-commitments.test.ts`.
+Run `node --import tsx --test test/postgres/booking-commitments.test.ts` with Docker for the isolated database proofs. Run `CI=1 node --import tsx --test test/compiler/booking-commitments.test.ts` for compiler admission and both tenant runners.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "BOOKING-1",
-  "base": "47594bc60c4349d9a8b76dcdefe81503119aeaf8", "head": "f87dc25b814129f7d654a19531878fb783e361b8",
+  "base": "032b87c00df3ee22184685050b9cecc01c62cc59", "head": "048285f0d7d35c74349ca0ec7f025e8895ba91e6",
   "changedPaths": [
-    "apps/api/src/erp-capabilities.ts", "db/migrations/0050_booking_commitments.sql", "db/schema.snapshot.json", "package.json",
-    "packages/canonical-model/src/booking.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/schemas.ts", "packages/compiler/src/compiler.ts",
-    "packages/compiler/src/projections.ts", "packages/postgres-provider/package.json", "packages/postgres-provider/src/booking-capability-executor.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts",
-    "packages/postgres-provider/src/module-storage-materializer.ts", "packages/postgres-provider/src/release-repository.ts", "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/postgres-provider/src/workflow-worker.ts",
-    "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-operation-gateway.ts", "test/architecture/release-persistence-boundary.test.ts", "test/architecture/repository-hygiene.test.ts",
-    "test/architecture/tenant-completeness.manifest.json", "test/architecture/tenant-completeness.test.ts", "test/compiler/booking-commitments.test.ts", "test/evidence/BOOKING-1.expected-red.json",
-    "test/fixtures/booking-commitments.sql", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/reachability-producers.ts", "test/postgres/booking-commitments.test.ts",
-    "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts", "test/postgres/trust-substrate.test.ts"
+    "apps/api/src/pilot-composition-root.ts", "apps/api/src/staff-main.ts", "db/migrations/0053_booking_authority.sql",
+    "db/schema.snapshot.json", "packages/canonical-model/src/booking.ts", "packages/postgres-provider/src/booking-capability-executor.ts",
+    "packages/postgres-provider/src/capability-operation-executor-factory.ts", "packages/postgres-provider/src/composed-application-runtime.ts", "packages/postgres-provider/src/release-verification-service.ts", "packages/postgres-provider/src/serving-gateways.ts",
+    "packages/runtime/src/semantic-operation-gateway.ts", "test/architecture/release-persistence-boundary.test.ts", "test/architecture/tenant-completeness.manifest.json",
+    "test/architecture/tenant-completeness.test.ts", "test/compiler/booking-commitments.test.ts", "test/evidence/BOOKING-1.expected-red.json",
+    "test/fixtures/booking-commitments.sql", "test/integration/module-runtime.test.ts", "test/postgres/booking-commitments.test.ts",
+    "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts",
+    "test/postgres/trust-substrate.test.ts"
   ],
-  "symbols": [{"path":"packages/canonical-model/src/booking.ts","name":"BookingOperationBinding"},{"path":"packages/postgres-provider/src/booking-capability-executor.ts","name":"BookingCapabilityExecutor"}]
+  "symbols": [{"path":"packages/canonical-model/src/booking.ts","name":"bookingDeclarationProblem"},{"path":"packages/postgres-provider/src/booking-capability-executor.ts","name":"BookingCapabilityExecutor"}]
 }
 ```

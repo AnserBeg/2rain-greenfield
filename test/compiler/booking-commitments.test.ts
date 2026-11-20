@@ -9,6 +9,11 @@ import {
   compileApplication,
 } from '../../packages/compiler/src/index.js';
 import { composedApplicationDefinition } from '../../packages/domain/src/app/builder.js';
+import {
+  withArchivedCustomizationRuntime,
+  assertArchivedTenantEnvelope,
+} from '../helpers/archived-customization-runtime.js';
+
 import { assertPinnedOperationDefinition } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import {
   compilerInput,
@@ -16,6 +21,16 @@ import {
   mustCompile,
   projectionPayload,
 } from './helpers.js';
+
+test(
+  'both tenant runners reproduce the pre-booking v6 release without booking declarations',
+  { skip: !process.env.CI },
+  () =>
+    withArchivedCustomizationRuntime(
+      '47594bc60c4349d9a8b76dcdefe81503119aeaf8',
+      assertArchivedTenantEnvelope,
+    ),
+);
 
 test('an authored booking operation compiles to the pinned gateway contract and demands its operation reader', () => {
   const source = composedApplicationDefinition();
@@ -77,7 +92,7 @@ test('an authored booking operation compiles to the pinned gateway contract and 
     },
     booking: binding,
   };
-  const input = (op: typeof operation) =>
+  const input = (op: typeof operation & { permission?: unknown }) =>
     compilerInput(
       normalizedBytes({
         ...source,
@@ -88,6 +103,16 @@ test('an authored booking operation compiles to the pinned gateway contract and 
         operations: [...ops, op],
       }),
     );
+  assert.equal(
+    compileApplication(
+      input({
+        ...operation,
+        permission: { ...(owner.permission as object), targetId: read },
+      }),
+    ).status,
+    'failed',
+    'booking commands require a write permission on the owner',
+  );
   const compiled = mustCompile(input(operation));
   const family = PROJECTION_FAMILY_IDS.operationCatalog;
   const payload = projectionPayload<{
