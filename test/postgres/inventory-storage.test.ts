@@ -46,6 +46,7 @@ test('inventory platform authority is limited to calendars and release-recorded 
         assert.equal(
           migrated.applied.at(-1),
           '0046_workflow_approval_target_scope.sql',
+          '0047_booking_commitments.sql',
         );
         assert.equal(migrated.verified.length, migrations.length);
         await seedTenant(admin, tenantA, environmentA, 'tenant-a');

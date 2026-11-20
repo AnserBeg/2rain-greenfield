@@ -1,3 +1,7 @@
+import {
+  BOOKING_CAPABILITY,
+  BookingOperationBinding,
+} from '@north-star/canonical-model';
 import { recordCatalogParse } from './catalog-parse-count.js';
 import {
   createHash,
@@ -100,6 +104,7 @@ export interface RegisteredRecordOperationDefinition extends RegisteredOperation
 }
 
 export interface RegisteredCapabilityOperationDefinition extends RegisteredOperationDefinitionBase {
+  readonly booking?: BookingOperationBinding;
   readonly effect: {
     readonly capability: {
       readonly kind: string;
@@ -1437,6 +1442,7 @@ export function assertPinnedOperationDefinition(
       ...(hasInfrastructure ? ['infrastructure'] : []),
       ...(hasInputContract ? ['inputContract'] : []),
       ...(hasLabel ? ['label'] : []),
+      ...(Object.hasOwn(value, 'booking') ? ['booking'] : []),
       ...(hasExcludedRoles ? ['excludedRoleKeys'] : []),
     ],
     invalid,
@@ -1476,6 +1482,24 @@ export function assertPinnedOperationDefinition(
     !isRecord(value.precondition)
   ) {
     throw invalid('pinned operation definition has an invalid shape');
+  }
+  if (
+    Object.hasOwn(value, 'booking') ||
+    (isRecord(value.effect.capability) &&
+      value.effect.capability.targetId === BOOKING_CAPABILITY)
+  ) {
+    const binding = BookingOperationBinding.safeParse(value.booking);
+    if (
+      !binding.success ||
+      value.effect.kind !== 'registeredCapabilityEffect' ||
+      !isRecord(value.effect.capability) ||
+      value.effect.capability.targetId !== BOOKING_CAPABILITY ||
+      (binding.data.operation !== 'hold' &&
+        value.confirmation !== 'humanRequired')
+    )
+      throw invalid(
+        'booking operation requires a released binding and the declared approval',
+      );
   }
   if (value.effect.kind === 'registeredCapabilityEffect') {
     assertExactKeys(

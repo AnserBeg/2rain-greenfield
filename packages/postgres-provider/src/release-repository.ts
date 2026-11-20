@@ -1,4 +1,8 @@
 import {
+  BOOKING_OPERATION_READER,
+  hasBookingOperations,
+} from '@north-star/canonical-model';
+import {
   layoutDeclarationProblem,
   layoutBindingsProblem,
   declaredLayouts,
@@ -809,9 +813,11 @@ function verifyFormulaProjectionReference(
   const reference = references[0];
   if (
     references.length !== Number(Boolean(declaring)) ||
-    (rules.length
-      ? operationFloor !== requiredFormulaValidationOperationReader(rules)
-      : operationFloor >= LITERAL_VALIDATION_OPERATION_READER) ||
+    (hasBookingOperations(normalized)
+      ? operationFloor !== BOOKING_OPERATION_READER
+      : rules.length
+        ? operationFloor !== requiredFormulaValidationOperationReader(rules)
+        : operationFloor >= LITERAL_VALIDATION_OPERATION_READER) ||
     (displays.length
       ? queryFloor !== CALCULATED_DISPLAY_QUERY_READER
       : queryFloor >= CALCULATED_DISPLAY_QUERY_READER) ||

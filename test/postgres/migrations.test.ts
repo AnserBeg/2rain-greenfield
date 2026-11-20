@@ -285,6 +285,7 @@ test('inventory migration owns exactly two platform relations and no managed-mod
         assert.equal(
           migrations.at(-1)?.name,
           '0046_workflow_approval_target_scope.sql',
+          '0047_booking_commitments.sql',
         );
         const inventoryMigrationIndex = migrations.findIndex(
           (migration) =>

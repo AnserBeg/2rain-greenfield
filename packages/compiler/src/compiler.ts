@@ -1,3 +1,7 @@
+import {
+  BOOKING_OPERATION_READER,
+  hasBookingOperations,
+} from '@north-star/canonical-model';
 import { CALCULATED_DISPLAY_QUERY_READER } from '../../canonical-model/src/calculated-display-projection.js';
 import {
   CANONICALIZATION_PROFILE_VERSION,
@@ -2228,9 +2232,11 @@ function verifyCompleteness(
   if (
     ruleProjection.length !==
       Number(Boolean(declaredRules || declaredDisplays)) ||
-    (declaredRules &&
-      operationFloor !==
-        requiredFormulaValidationOperationReader(declaredRules)) ||
+    (hasBookingOperations(packageRevision)
+      ? operationFloor !== BOOKING_OPERATION_READER
+      : declaredRules &&
+        operationFloor !==
+          requiredFormulaValidationOperationReader(declaredRules)) ||
     (declaredDisplays && queryFloor !== CALCULATED_DISPLAY_QUERY_READER) ||
     ((declaredRules || declaredDisplays) &&
       (ruleReference?.instanceId !==
