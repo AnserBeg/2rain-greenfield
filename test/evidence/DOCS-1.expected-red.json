@@ -15,7 +15,7 @@
       "kills": [
         {
           "file": "test/postgres/document-attachments.test.ts",
-          "name": "internal files use live record authority, scoped dedupe, bounded ingress and immutable audit",
+          "name": "revoked download is refused by the database",
           "expected": "the database returned bytes after download revocation"
         }
       ]
@@ -100,12 +100,12 @@
       "replacement": "    this.depth++;\n    this.nodes++;",
       "test": {
         "files": ["test/integration/document-http.test.ts"],
-        "namePattern": "^classic PDFs are accepted up to the parser page-tree depth limit$"
+        "namePattern": "^parse-time nesting is checked outside the page tree$"
       },
       "kills": [
         {
           "file": "test/integration/document-http.test.ts",
-          "name": "classic PDFs are accepted up to the parser page-tree depth limit",
+          "name": "parse-time nesting is checked outside the page tree",
           "expected": "Missing expected rejection"
         }
       ]
@@ -118,13 +118,13 @@
       "replacement": "",
       "test": {
         "files": ["test/integration/document-http.test.ts"],
-        "namePattern": "^classic PDFs are accepted up to the parser page-tree depth limit$"
+        "namePattern": "^the PDF subprocess inherits the OS resource limits$"
       },
       "kills": [
         {
           "file": "test/integration/document-http.test.ts",
-          "name": "classic PDFs are accepted up to the parser page-tree depth limit",
-          "expected": "the PDF subprocess inherits the OS resource limits"
+          "name": "the PDF subprocess inherits the OS resource limits",
+          "expected": "Choose a valid PDF, JPEG or PNG file."
         }
       ]
     },
@@ -141,7 +141,7 @@
       "kills": [
         {
           "file": "test/postgres/document-attachments.test.ts",
-          "name": "internal files use live record authority, scoped dedupe, bounded ingress and immutable audit",
+          "name": "the SQL authority bounds Node rows and refuses stale or inaccessible records",
           "expected": "pg buffered more rows than the SQL page"
         }
       ]
@@ -177,8 +177,8 @@
       "kills": [
         {
           "file": "test/postgres/document-attachments.test.ts",
-          "name": "staged attachment verdicts and deadlines govern publication",
-          "expected": "the HTTP deadline awaits a publication COMMIT already in flight"
+          "name": "the HTTP deadline awaits a publication COMMIT already in flight",
+          "expected": "The file response expired."
         }
       ]
     }
