@@ -201,6 +201,52 @@
       ]
     },
     {
+      "name": "documents-optional-dependency-flag",
+      "claim": "A read-model dependency the compiled release declares required: false does not gate attachment reads.",
+      "file": "db/migrations/0052_generated_document_sources.sql",
+      "original": "    WHERE (reference.value->'required' = 'false'::jsonb) IS NOT TRUE",
+      "replacement": "    WHERE true",
+      "test": {
+        "files": ["test/postgres/document-templates.test.ts"],
+        "namePattern": "^approved template revisions publish governed PDFs, refuse hidden sources, and retire$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-templates.test.ts",
+          "name": "PO attachments stay visible when purchasing settings are withheld",
+          "expected": "an optional settings dependency hid the PO attachment"
+        },
+        {
+          "file": "test/postgres/document-templates.test.ts",
+          "name": "a read-model dependency without required: false stays mandatory",
+          "expected": "the declared optional dependency was treated as mandatory"
+        }
+      ]
+    },
+    {
+      "name": "documents-absent-flag-stays-mandatory",
+      "claim": "A read-model dependency without the required flag still gates attachment reads.",
+      "file": "db/migrations/0052_generated_document_sources.sql",
+      "original": "    WHERE (reference.value->'required' = 'false'::jsonb) IS NOT TRUE",
+      "replacement": "    WHERE (reference.value->'required' = 'true'::jsonb) IS NOT TRUE",
+      "test": {
+        "files": ["test/postgres/document-templates.test.ts"],
+        "namePattern": "^approved template revisions publish governed PDFs, refuse hidden sources, and retire$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-templates.test.ts",
+          "name": "SQL attachment reads require the commercial Record child-query grant",
+          "expected": "a file escaped the full Record permission set"
+        },
+        {
+          "file": "test/postgres/document-templates.test.ts",
+          "name": "a read-model dependency without required: false stays mandatory",
+          "expected": "a dependency without the flag was treated as optional"
+        }
+      ]
+    },
+    {
       "name": "generated-pdf-child-set-completeness",
       "claim": "Publication verifies the live child set even when the render captured no rows.",
       "file": "db/migrations/0052_generated_document_sources.sql",

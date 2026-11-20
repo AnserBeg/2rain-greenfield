@@ -621,7 +621,11 @@ test(
                   await (await fetch(record)).text(),
                   /Nov 18, 2026/u,
                 );
-                assert.equal((await read()).rowCount, 1);
+                assert.equal(
+                  (await read()).rowCount,
+                  1,
+                  'an optional settings dependency hid the PO attachment',
+                );
               } finally {
                 await restoreGrant(
                   permission,
@@ -664,7 +668,11 @@ test(
                     return result.rows[0]!.granted;
                   }, null);
                 // The compiled PO declaration reads with settings withheld.
-                assert.equal(await granted('declared'), true);
+                assert.equal(
+                  await granted('declared'),
+                  true,
+                  'the declared optional dependency was treated as mandatory',
+                );
                 // The same dependency with no flag is mandatory again.
                 assert.equal(
                   await granted('absent'),
@@ -672,7 +680,11 @@ test(
                   'a dependency without the flag was treated as optional',
                 );
                 // Only the JSON boolean false declares optionality.
-                assert.equal(await granted('text'), false);
+                assert.equal(
+                  await granted('text'),
+                  false,
+                  'a text flag was treated as optional',
+                );
               } finally {
                 await restoreGrant(
                   permission,
