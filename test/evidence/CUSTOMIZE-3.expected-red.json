@@ -9,12 +9,12 @@
       "original": "  const kind = patchKind(input);",
       "replacement": "  const kind = patchKind(input);\n  if (kind === 'unrecognizedTestKind')\n    return parseCustomizationPatch({ ...(input as object), kind: 'addRecordType' });",
       "test": {
-        "files": ["test/postgres/customization.test.ts"],
+        "files": ["test/postgres/customization-live.test.ts"],
         "namePattern": "a drafted change is recorded append-only"
       },
       "kills": [
         {
-          "file": "test/postgres/customization.test.ts",
+          "file": "test/postgres/customization-live.test.ts",
           "name": "a drafted change is recorded append-only beside its tenant revision and staged release, and nothing goes live",
           "expected": "the write parser refuses the unrecognized patch kind"
         }

@@ -1,6 +1,6 @@
 # CRITFIX-H — attachment publication and read authority
 
-Critical migration and grants. The packet is open pending the item 8 completion declaration.
+Critical migration and grants. This packet fixes eight attachment findings.
 
 1. Runtime reads require live document, record and company grants. Only the scanner can attest a staged digest. Publication commits the blob, version, audit and stage retirement together. Statement triggers protect published versions and audit.
 2. The active release supplies the field IDs for the governing entity on each list and byte read.
@@ -9,14 +9,14 @@ Critical migration and grants. The packet is open pending the item 8 completion 
 5. Concurrent scans lock one stage. A matching negative verdict survives retries. A stale or absent clean verdict refuses publication.
 6. The PDF parser bounds object count, nesting and page-tree traversal in a child process with OS address-space and CPU limits and a host deadline.
 7. The Files panel requests bounded cursor pages and offers the next page.
-8. ADR-0078 assigns required fields to a declared completion. DOCS-1 slice 1a has no such operation. The next declared completion belongs to slice 1b.
+8. The orchestrator deferred required-file enforcement to [DOCS-1 slice 1b](DOCS-1.md) under ADR-0078. Its entry condition names the server-side refusal and unchanged-state regression test for the first declared completion.
 9. Enabling the demo scanner requires a dedicated database marked by its owner. The dev launcher verifies the local container before marking it.
 ## Test it yourself
 
 Run `node --import tsx --test test/integration/document-http.test.ts` and `node --import tsx --test test/postgres/document-attachments.test.ts` with Docker available.
 ## Gates
 
-Eight regression controls failed against unchanged main code at 552b13d8. [Baseline run](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44685966955). [Packet CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44692069750) covers the combined migrations. Integration awaits the item 8 ruling.
+Eight regression controls failed against unchanged main code at 552b13d8. [Baseline run](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44685966955). [Packet CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44692069750) covers the combined migrations.
 ```record-claim
 {
   "schemaVersion":"northstar.record-claim/v1",
