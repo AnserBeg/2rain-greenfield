@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import type pg from 'pg';
 
+import { fieldComparisonValidationDraft } from '../../packages/customization/src/validation-draft.js';
 import { RECEIPT_POSTED_EVENT } from '../../packages/domain/src/purchasing/receipt-posted-event.js';
 
 import {
@@ -61,6 +62,14 @@ import {
 
 const operation = 'northstar.app:operation.custom_receipt_review_create';
 const entity = 'northstar.app:entity.custom_receipt_review';
+const reviewName = 'northstar.app:field.custom_receipt_review_name';
+const contextName = 'northstar.app:field.custom_review_context_name';
+const contextRead = 'northstar.app:permission.custom_review_context_read';
+const contextEntity = 'northstar.app:entity.custom_review_context';
+const contextLink = 'northstar.app:relation.custom_receipt_review_context';
+const companyReview = 'northstar.app:operation.custom_company_review_update';
+const companyName = 'northstar.app:field.custom_company_review_name';
+const excludedRole = 'workflow-receipt-excluded';
 
 test(
   'verified activation and restart-safe receipt consumption with same-pin remedy',
@@ -108,20 +117,99 @@ test(
           await assertNoWorkflowActivationOverhead(pool, tenantId);
 
           const service = customization.service;
-          const draft = await service.draft(
+          const recordsDraft = await service.draft(
             {
-              kind: 'addRecordType',
-              label: 'Receipt Review',
-              fields: [
-                { label: 'Name', type: 'text' },
-                { label: 'Receipt Reference', type: 'text' },
+              kind: 'changeSet',
+              patches: [
+                {
+                  kind: 'addRecordType',
+                  label: 'Review Context',
+                  fields: [{ label: 'Name', type: 'text' }],
+                },
+                {
+                  kind: 'addRecordType',
+                  label: 'Receipt Review',
+                  fields: [
+                    { label: 'Name', type: 'text' },
+                    { label: 'Receipt Reference', type: 'text' },
+                  ],
+                },
+                {
+                  kind: 'addLink',
+                  entity,
+                  label: 'Context',
+                  target: contextEntity,
+                },
+                {
+                  kind: 'addRecordType',
+                  label: 'Company Review',
+                  companyOwnership: 'entityOwned',
+                  fields: [{ label: 'Name', type: 'text' }],
+                },
               ],
             },
             'declarativeEditor',
           );
-          assert.equal(draft.status, 'drafted');
-          if (draft.status !== 'drafted')
-            throw new Error('Receipt review draft refused');
+          assert.ok(
+            recordsDraft.status === 'drafted',
+            JSON.stringify(recordsDraft),
+          );
+          await service.approve(recordsDraft.patchId);
+          await service.activate(recordsDraft.patchId);
+          const validationTarget = (
+            await service.targets()
+          ).validationTargets?.find((target) => target.entityId === entity);
+          assert.ok(validationTarget);
+          const validationDraft = await service.draft(
+            fieldComparisonValidationDraft(validationTarget, {
+              fieldId: reviewName,
+              operator: 'notEqual',
+              otherFieldId: contextName,
+              relationId: contextLink,
+              message: 'The review needs a different name from its context.',
+            }),
+            'declarativeEditor',
+          );
+          assert.ok(
+            validationDraft.status === 'drafted',
+            JSON.stringify(validationDraft),
+          );
+          await service.approve(validationDraft.patchId);
+          await service.activate(validationDraft.patchId);
+
+          const foreignCompany = randomUUID();
+          await world.invoke('legal_entity_create', {
+            recordId: foreignCompany,
+            values: {
+              'northstar.app:field.legal_entity_code': 'WORKFLOW-B',
+              'northstar.app:field.legal_entity_name':
+                'Workflow review company',
+              'northstar.app:field.legal_entity_is_default': false,
+              'northstar.app:field.legal_entity_status':
+                'northstar.app:option.legal_entity_status_active',
+            },
+          });
+          const foreignRecord = randomUUID();
+          await world.invoke('custom_company_review_create', {
+            legalEntityId: foreignCompany,
+            recordId: foreignRecord,
+            values: { [companyName]: 'Foreign review' },
+          });
+          await provisionLocalDemoAuthorization(
+            pool,
+            { tenantId, environmentId, principalId: randomUUID() },
+            [],
+            excludedRole,
+          );
+          const draft = await service.draft(
+            {
+              kind: 'narrowPermission',
+              roleKey: excludedRole,
+              target: { kind: 'operation', id: operation },
+            },
+            'declarativeEditor',
+          );
+          assert.ok(draft.status === 'drafted', JSON.stringify(draft));
           const approval = await service.approve(draft.patchId);
           const enrolled = await service.activate(draft.patchId);
           const approver = (
@@ -142,11 +230,24 @@ test(
             environmentId,
             principalId: approver,
           });
-          const bindings = ['create', 'read'].map((action) => ({
-            action,
-            permissionId: `northstar.app:permission.custom_receipt_review_${action}`,
-            resourceId: entity,
-          }));
+          const bindings = [
+            ...['create', 'read'].map((action) => ({
+              action,
+              permissionId: `northstar.app:permission.custom_receipt_review_${action}`,
+              resourceId: entity,
+            })),
+            {
+              action: 'read',
+              permissionId: contextRead,
+              resourceId: contextEntity,
+            },
+            {
+              action: 'update',
+              permissionId:
+                'northstar.app:permission.custom_company_review_update',
+              resourceId: 'northstar.app:entity.custom_company_review',
+            },
+          ];
           await provisionLocalDemoAuthorization(
             pool,
             automation,
@@ -160,7 +261,10 @@ test(
             'workflow-receipt-approver',
           );
           const gateways = new PostgresWorkflowGateway(runtimePool);
-          const grants = { queries: [], operations: [operation] };
+          const grants = {
+            queries: [],
+            operations: [operation, companyReview].sort(),
+          };
           const view = await gateways.loadView(automation);
           const sdk = generateWorkflowSdk(view, grants);
           const receivingReadModel =
@@ -542,6 +646,40 @@ test(
           };
 
           await t.test(
+            'the pinned role restriction applies to both workflow principals',
+            async () => {
+              for (const [principal, originalRole] of [
+                [automation, 'workflow-receipt-automation'],
+                [operator, 'workflow-receipt-approver'],
+              ] as const) {
+                const runId = await newRun();
+                await provisionLocalDemoAuthorization(
+                  pool,
+                  principal,
+                  bindings,
+                  excludedRole,
+                );
+                try {
+                  await restarted.step(scope, runId);
+                  assert.equal(
+                    await operationReceiptCount(pool, runId),
+                    0,
+                    'the excluded role authorized a workflow write',
+                  );
+                  assert.equal(await runStatus(pool, runId), 'SUSPENDED');
+                } finally {
+                  await provisionLocalDemoAuthorization(
+                    pool,
+                    principal,
+                    bindings,
+                    originalRole,
+                  );
+                }
+              }
+            },
+          );
+
+          await t.test(
             'R1 a create with unknown dependencies cannot write without approval',
             async () => {
               const runId = await newRun();
@@ -885,21 +1023,99 @@ test(
             ).executable,
           );
           await verify('human-approval');
+          const foreignWorkflow = 'approval-for-foreign-record';
+          await cloneDefinition(
+            pool,
+            enrolled.releaseId,
+            foreignWorkflow,
+            compileWorkflowBody(
+              `sdk.requestApproval('Update company review', '${companyReview}', ${JSON.stringify(
+                {
+                  recordId: foreignRecord,
+                  expectedRevision: 1,
+                  patch: { [companyName]: 'Review escalated' },
+                },
+              )});`,
+              sdk,
+            ).executable,
+          );
+          await verify(foreignWorkflow);
+
+          const validatedWorkflow = 'review-with-context';
+          await cloneDefinition(
+            pool,
+            enrolled.releaseId,
+            validatedWorkflow,
+            compileWorkflowBody(
+              `sdk.operation('${operation}', {
+                ...${createReviewInput}, relations: { '${contextLink}': event.receiptId }
+              });`,
+              sdk,
+            ).executable,
+          );
+          await verify(validatedWorkflow);
           await service.approve(draft.patchId);
           await service.activate(draft.patchId);
-          const startApproval = async () => {
+          const startRun = async (workflowId: string) => {
             await postReceipt(world);
             const receipt = await latestReceipt(pool, tenantId);
-            assert.equal(await consumer.claim(scope), 3);
-            const runId = await runFor(
-              pool,
-              receipt.outbox_id,
-              'human-approval',
-            );
+            assert.equal(await consumer.claim(scope), 5);
+            const runId = await runFor(pool, receipt.outbox_id, workflowId);
+            return { runId, receiptId: receipt.receipt_id };
+          };
+          const startApproval = async (workflowId = 'human-approval') => {
+            const { runId } = await startRun(workflowId);
             await restarted.step(scope, runId);
             assert.equal(await runStatus(pool, runId), 'WAITING');
             return runId;
           };
+
+          await t.test(
+            'a workflow create uses intersected authority for validation reads',
+            async () => {
+              const createLinked = async (contextLabel: string) => {
+                const { runId, receiptId } = await startRun(validatedWorkflow);
+                // Use the receipt ID to correlate the shared validation operand.
+                await world.invoke('custom_review_context_create', {
+                  recordId: receiptId,
+                  values: { [contextName]: contextLabel },
+                });
+                await restarted.step(scope, runId);
+                await restarted.step(scope, runId);
+                return runId;
+              };
+              const valid = await createLinked('Ready for review');
+              assert.equal(
+                await operationReceiptCount(pool, valid),
+                1,
+                'a valid workflow create could not read its validation operand',
+              );
+              const invalid = await createLinked('Pending');
+              assert.equal(await operationReceiptCount(pool, invalid), 0);
+              assert.equal(await runStatus(pool, invalid), 'QUARANTINED');
+
+              await provisionLocalDemoAuthorization(
+                pool,
+                automation,
+                bindings.filter(
+                  ({ permissionId }) => permissionId !== contextRead,
+                ),
+                'workflow-without-context-read',
+              );
+              try {
+                const denied = await createLinked('Ready for review');
+                assert.equal(await operationReceiptCount(pool, denied), 0);
+                assert.equal(await runStatus(pool, denied), 'QUARANTINED');
+              } finally {
+                await provisionLocalDemoAuthorization(
+                  pool,
+                  automation,
+                  bindings,
+                  'workflow-receipt-automation',
+                );
+              }
+            },
+          );
 
           const forged = await startApproval();
           await writeAdversarialApprovalResult(
@@ -966,7 +1182,7 @@ test(
           assert.equal(await journalCount(pool, ordinary, 'REQUEST'), 2);
 
           await t.test(
-            'a release approver needs live grants for the plan company and exact action',
+            'a shared approval needs a global grant for the exact action',
             async () => {
               const authorityProbe = await startApproval();
               const plan = await pendingApproval(pool, authorityProbe);
@@ -1015,14 +1231,14 @@ test(
                   ],
                 );
               try {
-                await setCompany(randomUUID());
+                await setCompany(COMPANY);
                 assert.equal(
                   await decide(),
                   false,
-                  'a release approver for another company recorded a decision',
+                  'a company-scoped release approver decided a shared plan',
                 );
                 assert.deepEqual(await list(), []);
-                await setCompany(COMPANY);
+                await setCompany(null);
                 await setCreateGrant(true);
                 assert.equal(
                   await decide(),
@@ -1039,6 +1255,57 @@ test(
                 assert.deepEqual(await list(), [{ run_id: authorityProbe }]);
               } finally {
                 await setCreateGrant(false);
+                await setCompany(null);
+              }
+            },
+          );
+
+          await t.test(
+            'the worklist and decision use the target record’s stored owner',
+            async () => {
+              const runId = await startApproval(foreignWorkflow);
+              const plan = await pendingApproval(pool, runId);
+              const decide = () =>
+                decideApproval(
+                  runtimePool,
+                  operator,
+                  runId,
+                  plan.plan_digest,
+                  plan.fence,
+                  'APPROVED',
+                );
+              const list = () =>
+                withTrustedRequestTransaction(
+                  runtimePool,
+                  operator,
+                  async (client) =>
+                    (
+                      await client.query<{ run_id: string }>(
+                        'SELECT run_id FROM platform.workflow_approval_worklist($1)',
+                        [runId],
+                      )
+                    ).rows,
+                );
+              const setCompany = (company: string | null) =>
+                pool.query(
+                  `UPDATE platform.current_policy_memberships SET legal_entity_id = $4
+                  WHERE tenant_id = $1 AND environment_id = $2 AND principal_id = $3`,
+                  [tenantId, environmentId, operator.principalId, company],
+                );
+              try {
+                await setCompany(COMPANY);
+                assert.equal(
+                  await decide(),
+                  false,
+                  'the receipt company authorized a foreign target',
+                );
+                assert.deepEqual(await list(), []);
+                assert.equal(await journalCount(pool, runId, 'RESULT'), 0);
+                await setCompany(foreignCompany);
+                assert.deepEqual(await list(), [{ run_id: runId }]);
+                assert.equal(await decide(), true);
+                assert.equal(await journalCount(pool, runId, 'RESULT'), 1);
+              } finally {
                 await setCompany(null);
               }
             },

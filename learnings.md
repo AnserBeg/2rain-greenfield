@@ -804,3 +804,9 @@ How to apply: Resolve scope from the event and its linked change document under 
 Date: 2026-11-19
 Why: Bypassing the company guard changed a pending run that a later positive test reused, hiding the later release-verification check.
 How to apply: Use an independent occurrence for each authorization probe. Observe its decision and journal rows without making later checks depend on its state.
+
+## Use the operation target’s scope when deciding a workflow approval
+
+Date: 2026-11-20
+Why: The receipt and the exact pending operation can refer to records owned by different companies.
+How to apply: Resolve the operation and storage mapping from the pinned release, then check live grants against the existing record’s stored owner or the governed create operand. Require a global grant for shared targets, and use the same scope for listing and deciding. [WORKFLOW-1](docs/execution/packets/WORKFLOW-1.md)

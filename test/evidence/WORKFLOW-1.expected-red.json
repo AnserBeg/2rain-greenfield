@@ -4,9 +4,9 @@
   "entries": [
     {
       "name": "workflow-approval-company",
-      "claim": "A release approver with only another company grant cannot decide the plan.",
-      "file": "db/migrations/0043_workflow_approval_scope.sql",
-      "original": "          AND (membership.legal_entity_id IS NULL OR membership.legal_entity_id::text = binding.company)\n",
+      "claim": "A company-scoped approver cannot decide a shared plan.",
+      "file": "db/migrations/0044_workflow_approval_target_scope.sql",
+      "original": "          AND (membership.legal_entity_id IS NULL OR membership.legal_entity_id = target_scope.company_id)\n",
       "replacement": "",
       "test": {
         "files": ["test/postgres/workflow-consumer.test.ts"]
@@ -14,15 +14,15 @@
       "kills": [
         {
           "file": "test/postgres/workflow-consumer.test.ts",
-          "name": "a release approver needs live grants for the plan company and exact action",
-          "expected": "a release approver for another company recorded a decision"
+          "name": "a shared approval needs a global grant for the exact action",
+          "expected": "a company-scoped release approver decided a shared plan"
         }
       ]
     },
     {
       "name": "workflow-approval-operation",
       "claim": "A release approver without the pinned operation grant cannot decide the plan.",
-      "file": "db/migrations/0043_workflow_approval_scope.sql",
+      "file": "db/migrations/0044_workflow_approval_target_scope.sql",
       "original": "          AND grant_row.permission_id = operation.value->>'permissionId'\n",
       "replacement": "",
       "test": {
@@ -31,8 +31,59 @@
       "kills": [
         {
           "file": "test/postgres/workflow-consumer.test.ts",
-          "name": "a release approver needs live grants for the plan company and exact action",
+          "name": "a shared approval needs a global grant for the exact action",
           "expected": "a release approver without the exact action grant recorded a decision"
+        }
+      ]
+    },
+    {
+      "name": "workflow-dispatch-role-narrowing",
+      "claim": "Pinned role narrowing applies to both live workflow principals.",
+      "file": "packages/postgres-provider/src/workflow-gateway.ts",
+      "original": "      bindings,\n      operations,\n",
+      "replacement": "      bindings,\n",
+      "test": {
+        "files": ["test/postgres/workflow-consumer.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-consumer.test.ts",
+          "name": "the pinned role restriction applies to both workflow principals",
+          "expected": "the excluded role authorized a workflow write"
+        }
+      ]
+    },
+    {
+      "name": "workflow-approval-stored-owner",
+      "claim": "Approval visibility and decisions follow the existing record owner.",
+      "file": "db/migrations/0044_workflow_approval_target_scope.sql",
+      "original": "          AND (membership.legal_entity_id IS NULL OR membership.legal_entity_id = target_scope.company_id)\n",
+      "replacement": "          AND (membership.legal_entity_id IS NULL OR membership.legal_entity_id = CASE WHEN target_scope.company_id IS NOT NULL THEN binding.company::uuid END)\n",
+      "test": {
+        "files": ["test/postgres/workflow-consumer.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-consumer.test.ts",
+          "name": "the worklist and decision use the target record’s stored owner",
+          "expected": "the receipt company authorized a foreign target"
+        }
+      ]
+    },
+    {
+      "name": "workflow-validation-read-authority",
+      "claim": "A permitted workflow create can evaluate its linked validation operand.",
+      "file": "packages/postgres-provider/src/workflow-gateway.ts",
+      "original": "        validationReadPolicy: async (releaseId) => {\n          if (releaseId !== run.release_id)\n            throw new WorkflowEffectRefusal('stale-release-pin');\n          return intersection;\n        },\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/workflow-consumer.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-consumer.test.ts",
+          "name": "a workflow create uses intersected authority for validation reads",
+          "expected": "a valid workflow create could not read its validation operand"
         }
       ]
     }

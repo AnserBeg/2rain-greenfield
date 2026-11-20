@@ -33,6 +33,7 @@ import {
 import {
   CURRENT_POLICY_RUNTIME_BINDINGS,
   currentPolicyBindingsFromPermissions,
+  extractLegalEntityScope,
   PostgresCurrentPolicyGateway,
   PostgresSemanticQueryDenialRecorder,
 } from './current-policy.js';
@@ -127,7 +128,14 @@ export class PostgresWorkflowGateway implements WorkflowGateway {
     }
 
     const bindings = await this.#loadBindings(actor, scope);
-    const current = new PostgresCurrentPolicyGateway(this.pool, bindings);
+    const operations = parsePinnedOperationCatalog(
+      actor.projections.operation.payload,
+    );
+    const current = new PostgresCurrentPolicyGateway(
+      this.pool,
+      bindings,
+      operations,
+    );
     const byPermission = new Map(
       [...CURRENT_POLICY_RUNTIME_BINDINGS, ...bindings].map(
         (binding) => [binding.permissionId, binding] as const,
@@ -137,15 +145,18 @@ export class PostgresWorkflowGateway implements WorkflowGateway {
       readCurrentVersion: (subject) => current.readCurrentVersion(subject),
       authorize: async (request) => {
         const binding = byPermission.get(request.permissionId);
-        const input = asObject(call.input);
-        // A company-scoped call was confined to the event company below.
-        // A shared call requires a tenant-wide grant for the resource.
-        const company =
-          call.kind === 'query' || input.legalEntityId !== undefined
-            ? run.legal_entity_id
-            : null;
+        // Validation reads have their own policy input. A shared read needs a
+        // global grant even when the enclosing write belongs to a company.
+        const scope = extractLegalEntityScope(
+          binding?.scopeMode === 'membershipOnly'
+            ? null
+            : request.decisionInput,
+        );
+        const company = scope.legalEntityIds[0] ?? null;
         const inSnapshot =
           binding &&
+          scope.status === 'valid' &&
+          scope.legalEntityIds.every((id) => id === run.legal_entity_id) &&
           run.approver_grants.some(
             ([permission, resource, scopeId]) =>
               permission === binding.permissionId &&
@@ -195,7 +206,14 @@ export class PostgresWorkflowGateway implements WorkflowGateway {
       [],
       undefined,
       undefined,
-      { workflowRunId: run.run_id },
+      {
+        workflowRunId: run.run_id,
+        validationReadPolicy: async (releaseId) => {
+          if (releaseId !== run.release_id)
+            throw new WorkflowEffectRefusal('stale-release-pin');
+          return intersection;
+        },
+      },
     );
     try {
       if (call.kind === 'query') {
@@ -254,9 +272,9 @@ export class PostgresWorkflowGateway implements WorkflowGateway {
         ) as ImmutableJsonValue;
       }
 
-      const operation = parsePinnedOperationCatalog(
-        actor.projections.operation.payload,
-      ).find((definition) => definition.operationId === call.id);
+      const operation = operations.find(
+        (definition) => definition.operationId === call.id,
+      );
       const proof = run.unattended_operations[call.id];
       if (
         operation?.tier !== 'o0' ||
