@@ -848,10 +848,10 @@ async function prepareMutation(
     throw failure('MODULE_RECORD_NOT_FOUND', 'module record was not found');
   }
   if (kind === 'archiveRecordEffect') {
-    await client.query('SELECT north_star_internal.require_record_archivable($1,$2)', [
-      entity.entityId,
-      input.recordId,
-    ]);
+    await client.query(
+      'SELECT north_star_internal.require_record_archivable($1,$2)',
+      [entity.entityId, input.recordId],
+    );
   }
   if (prior.revision !== input.expectedRevision) {
     throw failure(

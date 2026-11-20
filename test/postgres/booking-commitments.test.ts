@@ -395,10 +395,10 @@ test('booking commitment writer', async (t) => {
               [tenant, environment],
             );
             await assert.rejects(
-              admin.query('SELECT north_star_internal.require_record_archivable($1,$2)', [
-                'example.booking:entity.visit',
-                owner(18),
-              ]),
+              admin.query(
+                'SELECT north_star_internal.require_record_archivable($1,$2)',
+                ['example.booking:entity.visit', owner(18)],
+              ),
               /booking.activeAllocation/u,
             );
           } finally {
@@ -432,6 +432,34 @@ test('booking commitment writer', async (t) => {
           } finally {
             await admin.query(
               'DROP TRIGGER booking_drop_outbox ON platform.trust_outbox',
+            );
+          }
+        },
+      );
+      await t.test(
+        'a trigger writing a managed record aborts the booking',
+        async () => {
+          await admin.query(`CREATE FUNCTION public.touch_managed_owner() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+          UPDATE north_star_module.test_booking_owners SET revision=revision+1 WHERE record_id=md5('owner20')::uuid;
+          RETURN NEW; END $$;
+          CREATE TRIGGER booking_unexpected_write AFTER INSERT ON platform.booking_history FOR EACH ROW EXECUTE FUNCTION public.touch_managed_owner()`);
+          try {
+            await assert.rejects(
+              call(left, 'hold', hold(20, 11, window('09:00', '10:00'))),
+              /booking.unexpectedModuleWrite/u,
+            );
+            assert.equal(
+              (
+                await admin.query(
+                  'SELECT revision FROM north_star_module.test_booking_owners WHERE record_id=$1',
+                  [owner(20)],
+                )
+              ).rows[0]!.revision,
+              '1',
+            );
+          } finally {
+            await admin.query(
+              'DROP TRIGGER booking_unexpected_write ON platform.booking_history',
             );
           }
         },

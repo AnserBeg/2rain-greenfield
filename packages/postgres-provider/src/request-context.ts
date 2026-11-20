@@ -1,3 +1,4 @@
+import { requestDeadline } from '../../runtime/src/request-deadline.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 import {
@@ -42,6 +43,7 @@ export async function withTrustedRequestTransaction<T>(
   pool: Pool,
   context: TrustedRequestContext,
   run: (client: PoolClient) => Promise<T>,
+  remainingMilliseconds?: () => number,
 ): Promise<T> {
   assertTrustedRequestContext(context);
   // A transaction of its own never runs beside a held read snapshot on the
@@ -49,8 +51,19 @@ export async function withTrustedRequestTransaction<T>(
   // one request never holds two connections and a full pool cannot deadlock.
   const snapshot = currentReadSnapshot(pool);
   if (snapshot)
-    return snapshot.runOutside(() => runTrustedTransaction(pool, context, run));
-  return runTrustedTransaction(pool, context, run);
+    return snapshot.runOutside(() =>
+      runTrustedTransaction(pool, context, run, remainingMilliseconds),
+    );
+  return runTrustedTransaction(pool, context, run, remainingMilliseconds);
+}
+
+export async function setTransactionDeadline(
+  client: PoolClient,
+  remainingMilliseconds: () => number,
+) {
+  await client.query("SELECT set_config('statement_timeout', $1, true)", [
+    String(remainingMilliseconds()),
+  ]);
 }
 
 /**
@@ -91,6 +104,7 @@ async function runTrustedTransaction<T>(
   pool: Pool,
   context: TrustedRequestContext,
   run: (client: PoolClient) => Promise<T>,
+  remainingMilliseconds = requestDeadline.getStore(),
 ): Promise<T> {
   const client = await pool.connect();
   let hasPrimaryError = false;
@@ -101,9 +115,12 @@ async function runTrustedTransaction<T>(
   try {
     await client.query('BEGIN');
     transactionOpen = true;
+    if (remainingMilliseconds)
+      await setTransactionDeadline(client, remainingMilliseconds);
     await assertRuntimeLoginRole(client);
     await setTrustedIdentity(client, context);
     result = await run(client);
+    remainingMilliseconds?.();
     await client.query('COMMIT');
     transactionOpen = false;
   } catch (error) {

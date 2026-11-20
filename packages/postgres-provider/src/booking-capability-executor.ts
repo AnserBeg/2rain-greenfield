@@ -52,7 +52,8 @@ class BookingCapabilityExecutor implements RegisteredCapabilityOperationExecutor
       !object(input) ||
       typeof input.recordId !== 'string' ||
       typeof input.expectedRevision !== 'number' ||
-      !Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1 ||
+      !Number.isSafeInteger(input.expectedRevision) ||
+      input.expectedRevision < 1 ||
       !object(input.arguments) ||
       request.readBackDefinition.sourceEntityId !== booking.ownerEntity ||
       request.readBackDefinition.queryType !== 'get' ||
@@ -184,15 +185,25 @@ class BookingCapabilityExecutor implements RegisteredCapabilityOperationExecutor
     } catch (error) {
       if (!(error instanceof SemanticQueryPolicyDeniedError)) throw error;
     }
+    const decision: Record<string, string | number> = {
+      revision: result.revision,
+    };
+    if (result.bookingId) {
+      Object.assign(decision, {
+        bookingId: result.bookingId,
+        state: result.state,
+        deadline: result.deadline,
+      });
+    } else {
+      decision.resourceKey = result.resourceKey;
+    }
     return {
       kind: 'semanticOperationResult',
       schemaVersion: SEMANTIC_OPERATION_RESULT_VERSION,
       operationId: request.definition.operationId,
       outcome: 'succeeded',
       readBack: record,
-      ...(record ? {capabilityResult: result.bookingId
-        ? {bookingId:result.bookingId,revision:result.revision,state:result.state,deadline:result.deadline}
-        : {resourceKey:result.resourceKey,revision:result.revision}} : {}),
+      ...(record ? { capabilityResult: decision } : {}),
       trust: {
         changeDocumentId: result.changeDocumentId,
         domainEventId: result.domainEventId,

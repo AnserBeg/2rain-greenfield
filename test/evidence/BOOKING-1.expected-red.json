@@ -5,7 +5,7 @@
     {
       "name": "unit-exclusion",
       "claim": "Overlapping occupied intervals on one unit exclude each other.",
-      "file": "db/migrations/0048_booking_commitments.sql",
+      "file": "db/migrations/0049_booking_commitments.sql",
       "original": "WHERE (kind = 'unit' AND state IN ('hold','confirmed'))",
       "replacement": "WHERE (kind = 'unit' AND state = 'confirmed')",
       "test": {
@@ -22,7 +22,7 @@
     {
       "name": "pool-capacity",
       "claim": "A locked pool refuses a negative remaining quantity.",
-      "file": "db/migrations/0048_booking_commitments.sql",
+      "file": "db/migrations/0049_booking_commitments.sql",
       "original": "SELECT FROM segments WHERE remaining < 0",
       "replacement": "SELECT FROM segments WHERE false AND remaining < 0",
       "test": {
@@ -39,7 +39,7 @@
     {
       "name": "date-clamp",
       "claim": "A date-only hold made today occupies capacity from its decision.",
-      "file": "db/migrations/0048_booking_commitments.sql",
+      "file": "db/migrations/0049_booking_commitments.sql",
       "original": "IF date_only THEN occupied_start := decision;",
       "replacement": "IF date_only THEN occupied_start := start_at;",
       "test": {
@@ -56,7 +56,7 @@
     {
       "name": "equality",
       "claim": "Expiry wins at the post-lock decision instant.",
-      "file": "db/migrations/0048_booking_commitments.sql",
+      "file": "db/migrations/0049_booking_commitments.sql",
       "original": "AND state='hold' AND deadline<=decision ORDER BY",
       "replacement": "AND state='hold' AND deadline<decision ORDER BY",
       "test": {

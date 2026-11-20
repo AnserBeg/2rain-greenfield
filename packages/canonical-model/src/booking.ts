@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type {VersionedNormalizedApplicationPackage} from './schemas.js';
+import type { VersionedNormalizedApplicationPackage } from './schemas.js';
 
 export const BOOKING_CAPABILITY = 'northstar.booking:capability.commitments';
 export const BOOKING_OPERATION_READER = 5;
@@ -96,7 +96,9 @@ export function bookingDeclarationProblem(
       !ownerQuery ||
       ownerQuery.lifecycle !== 'active' ||
       ownerQuery.queryType !== 'get' ||
-      ownerQuery.tier !== 'q0' || ownerQuery.filter.kind !== 'booleanPredicate' || !ownerQuery.filter.value ||
+      ownerQuery.tier !== 'q0' ||
+      ownerQuery.filter.kind !== 'booleanPredicate' ||
+      !ownerQuery.filter.value ||
       ownerQuery.sourceEntity.targetId !== b.ownerEntity ||
       ownerQuery.permission.targetId !== b.ownerReadPermission
     )
@@ -105,7 +107,10 @@ export function bookingDeclarationProblem(
       !pkg.queries.some(
         (q) =>
           q.lifecycle === 'active' &&
-          q.queryType === 'get' && q.tier === 'q0' && q.filter.kind === 'booleanPredicate' && q.filter.value &&
+          q.queryType === 'get' &&
+          q.tier === 'q0' &&
+          q.filter.kind === 'booleanPredicate' &&
+          q.filter.value &&
           q.sourceEntity.targetId === b.resourceEntity &&
           q.permission.targetId === b.resourceReadPermission,
       )
