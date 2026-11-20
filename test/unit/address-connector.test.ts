@@ -214,8 +214,15 @@ test('the loader serves a consistent Address release with and without a map plac
   );
 });
 test('the loader refuses a connector link without its declaration', () => {
+  // Nothing else is wrong: no consumer is bound and the floor is below Address.
   assert.equal(
-    addressProjectionRefusal({ ...consistent(), declared: false }),
+    addressProjectionRefusal({
+      linked: true,
+      declared: false,
+      consumerPayloads: [{}, {}, {}],
+      surfaceFloor: 30,
+      connector: () => assert.fail('an undeclared connector was read'),
+    }),
     'Address declarations and consumers disagree.',
     'a linked but undeclared connector was served',
   );

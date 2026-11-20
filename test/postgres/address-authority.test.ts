@@ -152,7 +152,9 @@ test(
                 'northstar.app:field.item_sku': 'ADDR-' + recordId.slice(0, 8),
                 'northstar.app:field.item_name': text,
                 'northstar.app:field.item_base_unit': 'EA',
-                [ITEM_FIELD]: value(text),
+                // Locating saves a different text: an unchanged address keeps its
+                // revision and queues nothing.
+                [ITEM_FIELD]: value('Draft ' + text),
               },
             });
             assert.equal(created.outcome, 'succeeded', JSON.stringify(created));
