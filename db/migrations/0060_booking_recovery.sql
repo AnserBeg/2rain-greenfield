@@ -72,8 +72,8 @@ DECLARE
       h.revision=previous.revision AND h.operation='markNoShow') THEN RAISE EXCEPTION 'booking.closed'; END IF;
     PERFORM north_star_internal.booking_check_use(previous,d,NULL,effective,decision,f.out_quantity);
     IF previous.state='noShow' THEN
-      SELECT * INTO STRICT ev FROM north_star_internal.booking_current_evidence(previous)
-        WHERE evidence_kind='attendance' AND reason='noShow' AND NOT voided;
+      SELECT * INTO STRICT ev FROM north_star_internal.booking_current_evidence(previous) attendance
+        WHERE attendance.evidence_kind='attendance' AND attendance.reason='noShow' AND NOT attendance.voided;
       ev.voided:=true;
       PERFORM north_star_internal.booking_write_evidence(f,ev,decision); END IF;
     PERFORM north_star_internal.booking_open_use(f,effective,decision);
