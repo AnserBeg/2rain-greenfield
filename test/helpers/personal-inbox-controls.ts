@@ -18,6 +18,12 @@ interface InboxFixture {
  * savepoint after each observation makes both executions see identical rows.
  * The outer rollback removes the changed function, including on failure. */
 export async function checkInboxGuards(admin: PoolClient, f: InboxFixture) {
+  const {
+    rows: [notice],
+  } = await admin.query<{ entry_id: string }>(
+    'SELECT entry_id FROM platform.personal_inbox WHERE tenant_id=$1 AND environment_id=$2 AND company_id=$3 AND recipient_id=$4 AND thread_id=$5 AND message_id=$6',
+    [f.tenant, f.environment, f.company, f.person, f.thread, f.message],
+  );
   const args = [
     f.tenant,
     f.environment,
@@ -29,18 +35,18 @@ export async function checkInboxGuards(admin: PoolClient, f: InboxFixture) {
     f.thread,
     f.message,
     f.parent,
+    notice!.entry_id,
   ];
   // One SQL parameter list for the cases; unused parameters still have types.
   const params =
-    'WITH ids AS (SELECT $1::uuid t,$2::uuid e,$3::uuid c,$4::uuid other,$5::uuid person,$6::uuid author,$7::uuid parent_author,$8::uuid th,$9::uuid msg,$10::uuid parent) ';
+    'WITH ids AS (SELECT $1::uuid t,$2::uuid e,$3::uuid c,$4::uuid other,$5::uuid person,$6::uuid author,$7::uuid parent_author,$8::uuid th,$9::uuid msg,$10::uuid parent,$11::uuid entry) ';
   const member = 'north_star_internal.inbox_member(uuid,uuid)';
   const reasons = 'north_star_internal.inbox_reasons(uuid,uuid,uuid,uuid)';
   const rows =
     'north_star_internal.personal_inbox_rows(uuid,text,uuid,uuid,boolean,integer)';
   const read =
     'SELECT platform.discussion_notice_readable(c,th,msg,person) AS value FROM ids';
-  const visible = `SELECT EXISTS(SELECT FROM platform.personal_inbox_page(c,'staffDiscussion/v1',NULL) p WHERE p.message_id=msg) AS value FROM ids`;
-  const worker = 'north_star_workflow_worker';
+  const visible = `SELECT EXISTS(SELECT FROM platform.personal_inbox_entry(c,'staffDiscussion/v1',entry) p WHERE p.message_id=msg) AS value FROM ids`;
   const runtime = 'north_star_runtime';
   interface Control {
     name: string;
@@ -49,7 +55,7 @@ export async function checkInboxGuards(admin: PoolClient, f: InboxFixture) {
     removed: string;
     query: string;
     setup?: string;
-    role?: typeof worker | typeof runtime;
+    role?: typeof runtime;
     normal?: unknown;
     changed?: unknown;
   }
@@ -126,7 +132,7 @@ export async function checkInboxGuards(admin: PoolClient, f: InboxFixture) {
       guard: 'AND north_star_internal.inbox_can_read(c,th,s.parent_id,person)',
       removed: '',
       setup: `UPDATE public.fixture_discussion_messages SET author_id=person,visible_to='{}' FROM ids WHERE message_id=parent`,
-      query: `SELECT 'reply'=ANY(p.reasons) AS value FROM ids, LATERAL platform.personal_inbox_page(c,'staffDiscussion/v1',NULL) p WHERE p.message_id=msg`,
+      query: `SELECT 'reply'=ANY(p.reasons) AS value FROM ids, LATERAL platform.personal_inbox_entry(c,'staffDiscussion/v1',entry) p WHERE p.message_id=msg`,
       role: runtime,
     },
     {
@@ -213,13 +219,6 @@ export async function checkInboxGuards(admin: PoolClient, f: InboxFixture) {
           `UPDATE platform.personal_inbox SET reasons=ARRAY['mention'],archived_at=NULL,read_at=NULL FROM ids WHERE recipient_id=person AND message_id=msg`,
         args,
       );
-      // Keep the single message inside the fixed page even with the cap fixture.
-      if (control.query.includes('p.message_id=msg'))
-        await admin.query(
-          params +
-            'UPDATE platform.personal_inbox SET archived_at=clock_timestamp() FROM ids WHERE recipient_id=person AND message_id<>msg',
-          args,
-        );
       if (control.setup) await admin.query(params + control.setup, args);
       const observe = async () => {
         await admin.query('SAVEPOINT observation');
