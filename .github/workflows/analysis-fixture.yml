@@ -18,8 +18,12 @@ jobs:
         run: |
           set -euxo pipefail
           if ! command -v newuidmap || ! command -v dockerd-rootless-setuptool.sh; then
+            curl --fail --silent --show-error https://download.docker.com/linux/ubuntu/gpg -o "$RUNNER_TEMP/docker.asc"
+            test "$(gpg --show-keys --with-colons "$RUNNER_TEMP/docker.asc" | awk -F: '$1 == "fpr" { print $10; exit }')" = 9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+            sudo install -m 0644 "$RUNNER_TEMP/docker.asc" /etc/apt/keyrings/docker.asc
+            echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable" | sudo tee /etc/apt/sources.list.d/analysis-docker.list
             sudo apt-get update
-            sudo apt-get install -y uidmap docker-ce-rootless-extras
+            sudo apt-get install -y uidmap docker-ce docker-ce-cli containerd.io docker-ce-rootless-extras
           fi
           sudo loginctl enable-linger "$(id -un)"
           sudo systemctl start "user@$(id -u).service"
@@ -31,5 +35,6 @@ jobs:
           dockerd-rootless-setuptool.sh install --force
           systemctl --user start docker
           python3 analysis/runner/runtime.py
+      - run: python3 -B -m unittest discover -s analysis/tests
       - name: Measure limits and run discriminating controls serially
         run: python3 -u analysis/tests/spike.py
