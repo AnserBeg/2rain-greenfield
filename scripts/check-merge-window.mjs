@@ -110,7 +110,8 @@ function checkWindow(packet, candidate) {
   );
   // A red or cancelled main must not deadlock its own fix or revert. It
   // raises the bar instead: the exact candidate needs a full green.
-  const redMain = latest.conclusion !== 'success';
+  const redMain =
+    latest.status !== 'completed' || latest.conclusion !== 'success';
   const fullRange = requiresFull(base, candidate);
   if (redMain)
     console.log(

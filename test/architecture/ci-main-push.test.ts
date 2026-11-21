@@ -217,7 +217,11 @@ test('an octopus is refused even with a full green', (t) => {
 
 test('three merges use one exact full on the tip and one row per packet tip', (t) => {
   const { start, repo, packet, merge, check } = train(t);
-  const tips = [packet('code.ts'), packet('docs/b.md'), packet('docs/c.md')];
+  const tips = [
+    packet('code.ts'),
+    packet('docs/b.md'),
+    packet('docs/c.md'),
+  ] as const;
   const first = merge(start, tips[0]);
   const last = merge(merge(first, tips[1]), tips[2]);
   const wrong = check(last, first);
@@ -227,7 +231,7 @@ test('three merges use one exact full on the tip and one row per packet tip', (t
   assert.equal(green.status, 0, green.stderr);
   const log = join(repo, 'docs/execution/review-log.md');
   mkdirSync(dirname(log), { recursive: true });
-  const records = (rows: string[]) => {
+  const records = (rows: readonly string[]) => {
     writeFileSync(
       log,
       rows
