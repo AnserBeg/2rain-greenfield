@@ -2,9 +2,10 @@ import {
   REPORT_EXPORT_PERMISSION,
   reportColumnPermission,
 } from '../../canonical-model/src/declared-report.js';
-import type { RegisteredReport } from '../../compiler/src/declared-reports.js';
 import {
   REPORT_READER_POLICY,
+  registeredReportFromPinnedView,
+  type RegisteredReport,
   validReportParameters,
   type ReportRequest,
   type ReportResult,
@@ -486,29 +487,21 @@ export class SemanticQueryGateway {
     exporting: boolean,
   ) {
     assertRequestRuntimeView(view);
-    const payload = view.projections.query.payload;
-    const terms = isRecord(payload) ? payload.groupedReports : undefined;
-    const report = Array.isArray(terms)
-      ? (terms as unknown as RegisteredReport[]).find(
-          (r) => r.queryId === queryId,
-        )
-      : undefined;
-    if (!report || !this.executor?.executeGrouped) return null;
-    const source = registeredQueryFromPinnedView(
-      view,
-      report.revision.body.source.queryId,
-    );
+    const registration = registeredReportFromPinnedView(view, queryId);
+    if (!registration || !this.executor?.executeGrouped) return null;
+    const { report, collection } = registration;
+    const list = registeredQueryFromPinnedView(view, collection.queryId);
     if (
-      !source ||
-      source.queryType !== 'list' ||
-      source.lifecycle !== 'active' ||
-      source.sourceEntityId !== report.revision.body.source.entityId
+      !list ||
+      list.queryType !== 'list' ||
+      list.lifecycle !== 'active' ||
+      list.sourceEntityId !== collection.entityId
     )
       return null;
     const args = {
       legalEntityId: company,
-      ...(source.legalEntityScope && {
-        [source.legalEntityScope.operand.parameterId]: company,
+      ...(list.legalEntityScope && {
+        [list.legalEntityScope.operand.parameterId]: company,
       }),
     };
     const scope = await issueLegalEntityReadScope(this.currentPolicy, view, [
@@ -516,7 +509,7 @@ export class SemanticQueryGateway {
     ]);
     const permissions = [
       QUERY_BOUNDARY_PERMISSION_ID,
-      source.permissionId,
+      list.permissionId,
       report.queryId,
       ...report.columns.map((c) => reportColumnPermission(c.fieldId)),
       ...(exporting ? [REPORT_EXPORT_PERMISSION] : []),
@@ -548,7 +541,7 @@ export class SemanticQueryGateway {
       )
         return null;
     }
-    return { report, source, args, scope };
+    return { report, list, args, scope };
   }
 
   async previewReport(
@@ -591,7 +584,7 @@ export class SemanticQueryGateway {
           );
           if (!authorized || !this.executor?.executeGrouped)
             return { kind: 'unavailable' };
-          const { source, report, scope, args } = authorized;
+          const { list, report, scope, args } = authorized;
           remaining();
           if (
             !Number.isSafeInteger(req.pageSize) ||
@@ -604,19 +597,19 @@ export class SemanticQueryGateway {
           // Slice 1 accepts a generated Q0 collection only. Its literal row filter
           // and the provider's live narrowing both apply to the authorized facts.
           if (
-            source.filter.kind !== 'booleanPredicate' ||
-            source.filter.value !== true
+            list.filter.kind !== 'booleanPredicate' ||
+            list.filter.value !== true
           )
             return { kind: 'unavailable' };
           if (this.policyNarrowing)
             filterPlans.push(
               parsePolicyNarrowing(
                 await this.policyNarrowing.narrow({
-                  definition: source,
+                  definition: list,
                   view,
                   arguments: args,
                 }),
-                source,
+                list,
               ),
             );
           return await this.executor.executeGrouped({
@@ -624,9 +617,9 @@ export class SemanticQueryGateway {
             report,
             input: req,
             maximumFacts: Math.min(
-              source.maximumResultCount,
+              list.maximumResultCount,
               req.export
-                ? (source.exportMaximumResultCount ?? source.maximumResultCount)
+                ? (list.exportMaximumResultCount ?? list.maximumResultCount)
                 : Infinity,
             ),
             filterPlans,

@@ -12,6 +12,24 @@ import {
 import type { RegisteredReport } from '../../compiler/src/declared-reports.js';
 import type { RequestRuntimeView } from './request-runtime-view.js';
 
+export type { RegisteredReport };
+
+export function registeredReportFromPinnedView(
+  view: RequestRuntimeView,
+  queryId: string,
+) {
+  const payload = view.projections.query.payload;
+  if (!payload || typeof payload !== 'object' || !('groupedReports' in payload))
+    return undefined;
+  const terms = payload.groupedReports;
+  if (!Array.isArray(terms)) return undefined;
+  const report = (terms as unknown as RegisteredReport[]).find(
+    (term) => term.queryId === queryId,
+  );
+  if (!report) return undefined;
+  return { report, collection: report.revision.body.source };
+}
+
 export const REPORT_READER_POLICY = Object.freeze({
   facts: 10_000,
   groups: 500,
