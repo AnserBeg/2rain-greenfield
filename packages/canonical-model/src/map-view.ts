@@ -112,7 +112,7 @@ export function mapBindingConflicts(
     }
     if (
       q.tier !== 'q0' ||
-      q.readModel ||
+      (kind === 'list' && q.readModel) ||
       q.queryType !== kind ||
       target(q.sourceEntity) !== body.entityId
     )

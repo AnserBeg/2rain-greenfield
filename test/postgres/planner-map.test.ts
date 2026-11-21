@@ -28,7 +28,8 @@ import { readCompiledSurfaceManifest } from '../../apps/web/src/surface-contract
 import { physicalNameFor } from '../../packages/compiler/src/storage.js';
 import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../packages/runtime/src/semantic-query-gateway.js';
 import { fitMap } from '../../packages/canonical-model/src/map-viewport.js';
-import { COMPANY, worldOver } from '../agent/agent-world.js';
+import { COMPANY, seededId, worldOver } from '../agent/agent-world.js';
+import { draftMapRevision } from '../../packages/customization/src/map-revision.js';
 import {
   withArchivedCustomizationRuntime,
   archivedRuntimeRead,
@@ -524,6 +525,87 @@ test(
             [south],
           );
           assert.equal(candidateReads.at(-1), 1);
+
+          // The sales collection has a released currency filter and a governed
+          // Record read model. Exercise its saved view independently of day and route.
+          const orderList = 'northstar.app:surface.sales_order_list';
+          const orderAddress = 'northstar.app:field.custom_order_site';
+          await activate({
+            kind: 'changeSet',
+            patches: [
+              {
+                kind: 'addAddressField',
+                schemaVersion: 'v6',
+                entity: 'northstar.app:entity.sales_order',
+                fieldId: orderAddress,
+                label: 'Delivery site',
+                required: false,
+              },
+              {
+                kind: 'saveListView',
+                surface: orderList,
+                label: 'Euro deliveries',
+                columns: ['northstar.app:list_column.sales_order_list_number'],
+                filters: [
+                  {
+                    field: 'northstar.app:field.sales_order_currency',
+                    value: 'EUR',
+                  },
+                ],
+                sort: [],
+              },
+            ],
+          });
+          const orderTarget = (await customize.service.targets()).maps?.find(
+            (m) => m.frame.listSurfaceId === orderList,
+          );
+          assert.ok(orderTarget);
+          const savedViewId = orderTarget.savedViews.find((id) =>
+            id.endsWith('_euro_deliveries'),
+          );
+          assert.ok(savedViewId);
+          const deliveries = draftMapRevision(orderTarget, {
+            kind: 'addMapViewRevision',
+            surface: orderList,
+            label: 'Euro deliveries map',
+            addressFieldId: orderAddress,
+            orderFieldId: orderTarget.frame.label.fieldId,
+            direction: 'asc',
+            savedViewId,
+          });
+          await activate(deliveries);
+          const createOrder = (currency: string) =>
+            world.create('sales_order', {
+              customer_party_id: seededId('Ponoka Livestock Equipment'),
+              order_date: dispatchDay,
+              currency,
+            });
+          const euro = await createOrder('EUR');
+          const canadian = await createOrder('CAD');
+          const orders = await app.runtime.entry.run(
+            { headers: manager },
+            (view) =>
+              app.runtime.queryGateway.invoke(view, {
+                schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+                queryId: deliveries.body.listQueryId,
+                arguments: {
+                  'northstar.app:parameter.sales_order_list_legal_entity_scope':
+                    COMPANY,
+                  mapPage: {
+                    companyId: COMPANY,
+                    surfaceId: deliveries.surfaceId,
+                    revisionId: deliveries.revisionId,
+                  },
+                },
+              }),
+          );
+          assert.ok(
+            orders.records.some((row) => row.recordId === euro.recordId),
+          );
+          assert.ok(
+            !orders.records.some((row) => row.recordId === canadian.recordId),
+          );
+          assert.equal(candidateReads.at(-1), orders.records.length);
         } finally {
           await customize.close();
           await app.close();
