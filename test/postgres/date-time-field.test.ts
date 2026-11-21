@@ -998,15 +998,16 @@ test(
             `${NS}:surface.custom_equipment_form`,
           );
           const scope = `${NS}:parameter.on_hand_legal_entity_id`;
-          url.searchParams.set(scope, COMPANY);
+          const selected = (await createCompany('C5-OTHER', 'active')).recordId;
+          url.searchParams.set(scope, selected);
           const headers = {
             cookie: 'northstar-demo-actor=manager',
             origin: url.origin,
           };
           // Submit the rendered inputs, including blank-field intents. HTML
           // selects default to their first option when none is selected.
-          const form = async () => {
-            const page = await fetch(url, { headers });
+          const form = async (target = url) => {
+            const page = await fetch(target, { headers });
             const html = await page.text();
             const match =
               /<form id="surface-record-form" method="post" action="([^"]*)">([\s\S]*?)<\/form>/u.exec(
@@ -1043,13 +1044,15 @@ test(
           const first = await form();
           assert.equal(
             first.body.get(`value:${due.fieldId}:company`),
-            COMPANY,
+            selected,
             'the shared form pins the displayed workspace company',
           );
-          const other = await createCompany('C5-OTHER', 'active');
           const otherTab = new URL(url);
-          otherTab.searchParams.set(scope, other.recordId);
-          await (await fetch(otherTab, { headers })).text();
+          otherTab.searchParams.set(scope, COMPANY);
+          assert.equal(
+            (await form(otherTab)).body.get(`value:${due.fieldId}:company`),
+            COMPANY,
+          );
           first.body.set(`value:${NS}:field.custom_equipment_name`, 'Visit');
           first.body.set(`value:${due.fieldId}`, '2026-11-02T09:00');
           first.body.set(`value:${appointment.fieldId}`, '2026-11-02T10:00');
@@ -1057,7 +1060,7 @@ test(
           const confirmation = await first.post();
           assert.ok(
             confirmation.includes(
-              `name="value:${due.fieldId}:company" value="${COMPANY}"`,
+              `name="value:${due.fieldId}:company" value="${selected}"`,
             ),
             'the saved form keeps the workspace company shown on submit',
           );
@@ -1080,7 +1083,7 @@ test(
           ).zoneSource;
           assert.equal(
             source.kind === 'companyBusinessCalendar' && source.companyId,
-            COMPANY,
+            selected,
           );
           assert.equal(
             SavedDateTimeSchema.parse(prior.values[appointment.fieldId]).zone,
