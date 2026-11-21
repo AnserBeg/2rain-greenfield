@@ -23,7 +23,7 @@ import { PROJECTION_FAMILY_IDS } from '../../packages/compiler/src/index.js';
 import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import { projectionPayload } from '../compiler/helpers.js';
-import type { RegisteredReport } from '../../packages/compiler/src/declared-reports.js';
+import type { RegisteredReport } from '../../packages/canonical-model/src/declared-report.js';
 import { readGroupedSnapshot } from '../../packages/postgres-provider/src/grouped-report.js';
 import { REPORT_READER_POLICY } from '../../packages/runtime/src/declared-report.js';
 import {

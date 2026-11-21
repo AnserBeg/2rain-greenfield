@@ -4,7 +4,13 @@ import {
   type ReportBody,
   type ReportChoices,
   type ReportSource,
+  type ReportRevision,
+  type QueryLegalEntityScope,
 } from './schemas.js';
+import type {
+  GROUPED_AGGREGATE_PROFILE,
+  GROUPED_RESULT_VERSION,
+} from './grouped-aggregate.js';
 import { selectedFieldIds } from './board.js';
 
 type Row = Record<string, unknown>;
@@ -25,6 +31,34 @@ export interface ReportOffer {
     options?: { id: string; label: string }[];
   }[];
 }
+export interface RegisteredReport {
+  queryId: string;
+  tier: 'q1';
+  profile: typeof GROUPED_AGGREGATE_PROFILE;
+  resultContract: typeof GROUPED_RESULT_VERSION;
+  surfaceId: string;
+  label: string;
+  revision: ReportRevision;
+  legalEntityScope?: QueryLegalEntityScope;
+  columns: (ReportOperand & {
+    columnName: string;
+    label: string;
+    options?: { id: string; label: string }[];
+  })[];
+  accessPath: { table: string; index: string; keys: string[] };
+}
+
+export function isUnfilteredReportPredicate(filter: unknown): boolean {
+  return (
+    !!filter &&
+    typeof filter === 'object' &&
+    'kind' in filter &&
+    filter.kind === 'booleanPredicate' &&
+    'value' in filter &&
+    filter.value === true
+  );
+}
+
 const ref = (value: unknown) =>
   (value as { targetId?: string } | undefined)?.targetId;
 const live = (row: Row | undefined): row is Row =>
@@ -57,8 +91,7 @@ export function reportOffer(
     query.tier !== 'q0' ||
     query.queryType !== 'list' ||
     (query.filter !== undefined &&
-      ((query.filter as Row).kind !== 'booleanPredicate' ||
-        (query.filter as Row).value !== true)) ||
+      !isUnfilteredReportPredicate(query.filter)) ||
     query.readModel
   )
     return null;

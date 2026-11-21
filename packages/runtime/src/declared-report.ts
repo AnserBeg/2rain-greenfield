@@ -9,10 +9,8 @@ import {
   GROUPED_RESULT_VERSION,
   type GroupedRow,
 } from '@north-star/canonical-model';
-import type { RegisteredReport } from '../../compiler/src/declared-reports.js';
+import type { RegisteredReport } from '../../canonical-model/src/declared-report.js';
 import type { RequestRuntimeView } from './request-runtime-view.js';
-
-export type { RegisteredReport };
 
 export function registeredReportFromPinnedView(
   view: RequestRuntimeView,

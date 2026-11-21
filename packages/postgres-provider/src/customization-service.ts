@@ -1,4 +1,4 @@
-import type { RegisteredReport } from '../../compiler/src/declared-reports.js';
+import type { RegisteredReport } from '../../canonical-model/src/declared-report.js';
 import { previewReportIndexes } from './report-index-build.js';
 import { projectionBinding } from './serving-gateways.js';
 import { checkRetainedWorkflowReplay } from './release-verification-service.js';

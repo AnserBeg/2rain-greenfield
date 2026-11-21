@@ -1,6 +1,6 @@
-import { groupedReportHtml, reportRequest } from './grouped-report.js';
+import { reportRequest } from './grouped-report.js';
 import { reportQueryId } from '../../../packages/canonical-model/src/declared-report.js';
-import type { RegisteredReport } from '../../../packages/compiler/src/declared-reports.js';
+import type { RegisteredReport } from '../../../packages/canonical-model/src/declared-report.js';
 import {
   AddressProjectionSchema,
   SavedAddressSchema,
@@ -74,6 +74,7 @@ import {
   FORM_EMPTY_INTENT_PREFIX,
   recordWorkspaceOwners,
   renderRegisteredSurfaceComponent,
+  groupedReportHtml,
   renderDocumentSection,
   surfaceSupportsRuntimeIntent,
   surfaceHref,

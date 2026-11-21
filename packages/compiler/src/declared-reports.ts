@@ -7,13 +7,14 @@ import {
   reportQueryId,
   reportOffer,
   reportBindingProblem,
+  type RegisteredReport,
 } from '../../canonical-model/src/declared-report.js';
 import type { StorageTargetPayloadV1 } from './storage.js';
 
 export function lowerDeclaredReports(
   def: V6NormalizedApplicationPackage,
   storage: StorageTargetPayloadV1,
-) {
+): RegisteredReport[] {
   return def.surfaces.flatMap((s) => {
     if (!s.report || s.lifecycle !== 'active') return [];
     const { body } = s.report;
@@ -85,8 +86,7 @@ export function lowerDeclaredReports(
           index: path.physicalName,
           keys,
         },
-      },
+      } satisfies RegisteredReport,
     ];
   });
 }
-export type RegisteredReport = ReturnType<typeof lowerDeclaredReports>[number];

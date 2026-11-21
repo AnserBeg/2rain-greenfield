@@ -7,7 +7,7 @@ import {
   reportTargets,
   draftReport,
 } from '../../packages/customization/src/report-revision.js';
-import type { RegisteredReport } from '../../packages/compiler/src/declared-reports.js';
+import type { RegisteredReport } from '../../packages/canonical-model/src/declared-report.js';
 import type { ReportCatalogSource } from '../../packages/canonical-model/src/declared-report.js';
 import { CURRENCY_MINOR_UNITS_V0 } from '../../packages/canonical-model/src/constants.js';
 import { evaluateGroupedFacts } from '../../packages/canonical-model/src/grouped-aggregate.js';

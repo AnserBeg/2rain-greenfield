@@ -1,3 +1,10 @@
+import type { RegisteredReport } from '../../../packages/canonical-model/src/declared-report.js';
+import type { GroupedRow } from '@north-star/canonical-model';
+import {
+  displayGroupKey,
+  partitionLabel,
+  type ReportResult,
+} from '../../../packages/runtime/src/declared-report.js';
 import { dateTimeZones } from './date-time-zones.js';
 import { addressEditor } from './address-context.js';
 import { dateTimeBindings } from './date-time-field.js';
@@ -3504,4 +3511,189 @@ export function renderDateTimeEntry(
     );
   }
   return `<span class="date-time-entry">${parts.join('')}</span>`;
+}
+
+export function groupedReportHtml(
+  report: RegisteredReport,
+  url: URL,
+  company: string,
+  answer: Exclude<ReportResult, { kind: 'csv' }>,
+  canExport: boolean,
+) {
+  const base = new URLSearchParams(url.search);
+  for (const key of ['after', 'export', 'result']) base.delete(key);
+  const href = (params: URLSearchParams) =>
+    '/?' + escapeHtml(params.toString());
+  const filters = report.revision.body.filters.map((f) => {
+    const field = report.columns.find((c) => c.fieldId === f.fieldId)!;
+    const input = (id: string, label: string, type: string) =>
+      '<label>' +
+      escapeHtml(label) +
+      ' <input type="' +
+      type +
+      '" name="' +
+      escapeHtml(id) +
+      '" value="' +
+      escapeHtml(base.get(id) ?? '') +
+      '"></label>';
+    if (f.kind === 'dateRange')
+      return (
+        '<fieldset><legend>' +
+        escapeHtml(field.label) +
+        '</legend>' +
+        input(f.fieldId + '.from', 'From', 'date') +
+        input(f.fieldId + '.until', 'Before', 'date') +
+        '</fieldset>'
+      );
+    if (field.options)
+      return (
+        '<label>' +
+        escapeHtml(field.label) +
+        ' <select name="' +
+        escapeHtml(f.fieldId) +
+        '"' +
+        (f.kind === 'membership' ? ' multiple' : '') +
+        '><option value="">All</option>' +
+        field.options
+          .map(
+            (o) =>
+              '<option value="' +
+              escapeHtml(o.id) +
+              '"' +
+              (base.getAll(f.fieldId).includes(o.id) ? ' selected' : '') +
+              '>' +
+              escapeHtml(o.label) +
+              '</option>',
+          )
+          .join('') +
+        '</select></label>'
+      );
+    return input(f.fieldId, field.label, 'text');
+  });
+  const filterFields = new Set(
+    report.revision.body.filters.flatMap((f) => [
+      f.fieldId,
+      f.fieldId + '.from',
+      f.fieldId + '.until',
+    ]),
+  );
+  const hidden = [...base]
+    .filter(([k]) => !filterFields.has(k))
+    .map(
+      ([k, v]) =>
+        '<input type="hidden" name="' +
+        escapeHtml(k) +
+        '" value="' +
+        escapeHtml(v) +
+        '">',
+    )
+    .join('');
+  const form = filters.length
+    ? '<form method="get">' +
+      hidden +
+      filters.join('') +
+      '<button>Apply filters</button></form>'
+    : '';
+  if (answer.kind !== 'page') {
+    const text =
+      answer.kind === 'refresh'
+        ? 'Results changed. Refresh the report.'
+        : answer.kind === 'narrow'
+          ? 'Narrow the filter'
+          : 'View not available';
+    return (
+      form +
+      '<p role="status">' +
+      text +
+      '</p>' +
+      (answer.kind === 'refresh'
+        ? '<a href="' + href(base) + '">Refresh report</a>'
+        : '')
+    );
+  }
+  const isMoney = report.columns.some((c) => c.currency);
+  const headings = [
+    ...answer.dimensionLabels,
+    ...(isMoney ? ['Currency'] : []),
+    ...answer.measureLabels,
+  ];
+  const cell = (label: string, text: string) =>
+    '<td data-label="' + escapeHtml(label) + '">' + escapeHtml(text) + '</td>';
+  const row = (r: GroupedRow, total: boolean) =>
+    '<tr>' +
+    answer.dimensionLabels
+      .map((label, i) =>
+        cell(
+          label,
+          total
+            ? i === 0
+              ? 'All groups'
+              : ''
+            : displayGroupKey(report, i, r.keys[i] ?? null),
+        ),
+      )
+      .join('') +
+    (isMoney ? cell('Currency', partitionLabel(r)) : '') +
+    r.cells
+      .map((c, i) => {
+        const m = report.revision.body.measures[i]!;
+        const coverage =
+          m.operator.kind === 'sum'
+            ? ' <small>' +
+              c.recordsWithoutMeasure +
+              (c.recordsWithoutMeasure === 1
+                ? ' record without '
+                : ' records without ') +
+              escapeHtml(m.label) +
+              '</small>'
+            : '';
+        return (
+          '<td data-label="' +
+          escapeHtml(m.label) +
+          '">' +
+          escapeHtml(c.value) +
+          (c.unitId ? ' ' + escapeHtml(c.unitId) : '') +
+          coverage +
+          '</td>'
+        );
+      })
+      .join('') +
+    '</tr>';
+  const table =
+    '<table class="grouped-report-table"><caption>' +
+    escapeHtml(report.label) +
+    '</caption><thead><tr>' +
+    headings
+      .map((label) => '<th scope="col">' + escapeHtml(label) + '</th>')
+      .join('') +
+    '</tr></thead><tbody>' +
+    answer.groups.map((r) => row(r, false)).join('') +
+    '</tbody><tfoot>' +
+    answer.totals.map((r) => row(r, true)).join('') +
+    '</tfoot></table>';
+  const next = new URLSearchParams(base);
+  if (answer.next) next.set('after', answer.next);
+  const csv = new URLSearchParams(base);
+  csv.set('export', 'csv');
+  csv.set('result', answer.resultDigest);
+  return (
+    form +
+    '<p>Company ' +
+    escapeHtml(company) +
+    ' · Business date ' +
+    escapeHtml(answer.horizon.businessDate) +
+    ' · ' +
+    escapeHtml(answer.horizon.zone) +
+    ' at ' +
+    escapeHtml(answer.horizon.boundary) +
+    ' · Read at ' +
+    escapeHtml(answer.horizon.readInstant) +
+    '</p>' +
+    table +
+    (answer.groups.length ? '' : '<p>No matching records</p>') +
+    (answer.next
+      ? '<a rel="next" href="' + href(next) + '">Next page</a>'
+      : '') +
+    (canExport ? ' <a download href="' + href(csv) + '">Export CSV</a>' : '')
+  );
 }

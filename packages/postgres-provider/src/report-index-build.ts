@@ -1,6 +1,6 @@
 import type { PoolClient } from 'pg';
 import type { StorageTransitionElement } from '@north-star/compiler';
-import type { RegisteredReport } from '../../compiler/src/declared-reports.js';
+import type { RegisteredReport } from '../../canonical-model/src/declared-report.js';
 import { reportIndexReady } from './grouped-report.js';
 
 type AccessPath = RegisteredReport['accessPath'];
