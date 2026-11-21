@@ -232,6 +232,7 @@ const suiteDefinitions = [
       'test/postgres/release-approval.test.ts',
       'test/postgres/releases.test.ts',
       'test/postgres/report-company-reader.test.ts',
+      'test/postgres/report-reader-bounds.test.ts',
       'test/postgres/request-runtime-view.test.ts',
       'test/postgres/saved-filter.test.ts',
       'test/postgres/speed-fixes.test.ts',

@@ -741,3 +741,145 @@ test('a keyboard user moves a card through its reviewed Task with JavaScript dis
     LINEAGE_INSTALL_VOLUME,
   );
 });
+
+test('a person groups Inspection outcomes, renames and retires the report, and restores it by rollback', async ({
+  page,
+}) => {
+  test.setTimeout(900_000);
+  const { firstPartyAuthored } =
+    await import('../../../../test/helpers/customization-fixture.js');
+  const { singleTransitionApplication } =
+    await import('../../../../test/helpers/application-without-line-create-values.js');
+  const { worldOver, COMPANY } =
+    await import('../../../../test/agent/agent-world.js');
+  await withEphemeralPostgres(
+    'report-inspection-browser',
+    async ({ connection }) => {
+      const options = {
+        tenantSlug: 'inspection-reports',
+        databaseUrl: `postgresql://postgres@127.0.0.1:${connection.port}/postgres`,
+        compiledApplication:
+          singleTransitionApplication(firstPartyAuthored).release,
+      };
+      const app = await startComposedApplication({ ...options, port: 0 });
+      const opened = await openCustomizeService(options);
+      try {
+        const type = await opened.service.draft(
+          {
+            kind: 'addRecordType',
+            label: 'Inspection',
+            companyOwnership: 'entityOwned',
+            fields: [
+              { label: 'Name', type: 'text' },
+              { label: 'Outcome', type: 'choice', options: ['Pass', 'Fail'] },
+            ],
+          },
+          'visualBuilder',
+        );
+        if (type.status !== 'drafted') throw Error(JSON.stringify(type));
+        await opened.service.approve(type.patchId);
+        await opened.service.activate(type.patchId);
+        const world = worldOver(app.runtime, 'postgres');
+        const listId = 'northstar.app:surface.custom_inspection_list';
+        const target = (await opened.service.targets()).reports!.find(
+          (t) => t.source.listSurfaceId === listId,
+        )!;
+        const outcome = target.fields.find((f) => f.label === 'Outcome')!;
+        for (const [i, value] of ['Pass', 'Fail', 'Pass'].entries())
+          await world.create('custom_inspection', {
+            name: 'Inspection ' + i,
+            outcome: outcome.options!.find((o) => o.label === value)!.id,
+          });
+        const publish = async () => {
+          await page
+            .getByRole('button', { name: 'Approve', exact: true })
+            .click({ timeout: 180_000 });
+          await page
+            .getByRole('button', { name: 'Activate now' })
+            .click({ timeout: 180_000 });
+          await expect(
+            page.locator('[data-customize-result="activated"]'),
+          ).toBeVisible({ timeout: 180_000 });
+        };
+        const editor = new URL('/?customize', app.baseUrl);
+        editor.searchParams.set('report', listId);
+        const list = new URL('/', app.baseUrl);
+        list.searchParams.set('surface', listId);
+        list.searchParams.set(
+          'northstar.app:parameter.custom_inspection_list_legal_entity_scope',
+          COMPANY,
+        );
+        await page.goto(editor.href);
+        await page.getByLabel('Report name').fill('Inspections by outcome');
+        await page
+          .getByLabel('Group 1', { exact: true })
+          .selectOption(outcome.operand.fieldId);
+        await page
+          .getByRole('button', { name: 'Draft report', exact: true })
+          .click();
+        await publish();
+        await page.goto(list.href);
+        await page
+          .getByRole('link', { name: 'Inspections by outcome', exact: true })
+          .click();
+        const reportUrl = page.url();
+        const table = page.getByRole('table', {
+          name: 'Inspections by outcome',
+        });
+        await expect(
+          table.getByRole('row', { name: 'Pass 2', exact: true }),
+        ).toBeVisible();
+        await expect(
+          table.getByRole('row', { name: 'Fail 1', exact: true }),
+        ).toBeVisible();
+        await expect(table.locator('tfoot')).toContainText('3');
+        await page.setViewportSize({ width: 390, height: 844 });
+        await expect(
+          table.getByRole('row', { name: 'Pass 2', exact: true }),
+        ).toBeVisible();
+        await page.goto(editor.href);
+        await page
+          .getByRole('link', { name: 'Inspections by outcome' })
+          .click();
+        await page.getByLabel('Report name').fill('Inspection totals');
+        await page
+          .getByRole('button', { name: 'Draft report', exact: true })
+          .click();
+        await publish();
+        await page.goto(reportUrl);
+        await expect(
+          page.getByRole('heading', { name: 'Inspection totals' }),
+        ).toBeVisible();
+        await page.goto(editor.href);
+        await page.getByRole('link', { name: 'Inspection totals' }).click();
+        await page.getByRole('button', { name: 'Draft retirement' }).click();
+        await publish();
+        await page.goto(reportUrl);
+        await expect(
+          page.getByRole('heading', { name: 'View not available' }),
+        ).toBeVisible();
+        await page.goto(list.href);
+        await expect(
+          page.getByRole('link', { name: 'Inspection totals' }),
+        ).toHaveCount(0);
+        await page.goto(app.baseUrl + '/?customize');
+        await page
+          .getByRole('button', { name: 'Roll back the latest change' })
+          .click();
+        await expect(
+          page.locator('[data-customize-result="rolledBack"]'),
+        ).toBeVisible({ timeout: 180_000 });
+        await page.goto(reportUrl);
+        await expect(
+          page
+            .getByRole('table', { name: 'Inspection totals' })
+            .locator('tfoot'),
+        ).toContainText('3');
+      } finally {
+        await opened.close();
+        await app.close();
+      }
+    },
+    LINEAGE_INSTALL_VOLUME,
+  );
+});
