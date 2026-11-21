@@ -212,6 +212,16 @@ const withEquipmentLifecycle = applied(extended, [
 const equipmentBoard = customization
   .customizationTargets(normalizeApplicationPackage(withEquipmentLifecycle))
   .boards!.find((target) => target.frame.entityId === equipment)!;
+const depotAddress = {
+  ...address,
+  entity: equipment,
+  fieldId: id('field.custom_equipment_depot'),
+};
+const depotBase = applied(extended, [depotAddress]);
+const depotMap = customization
+  .customizationTargets(normalizeApplicationPackage(depotBase))
+  .maps!.find((t) => t.frame.entityId === equipment)!;
+
 const cases = {
   addBoardViewRevision: {
     source: withEquipmentLifecycle,
@@ -221,6 +231,19 @@ const cases = {
       'Equipment inspections',
       customization.defaultBoardChoices(equipmentBoard),
     ),
+    code: 'RETIRED_TARGET',
+  },
+  addMapViewRevision: {
+    source: depotBase,
+    conflict: extended,
+    change: customization.draftMapRevision(depotMap, {
+      kind: 'addMapViewRevision',
+      surface: depotMap.frame.listSurfaceId,
+      label: 'Depot map',
+      addressFieldId: depotAddress.fieldId,
+      orderFieldId: depotMap.frame.label.fieldId,
+      direction: 'asc',
+    }),
     code: 'RETIRED_TARGET',
   },
   addAddressField: occupied(address, 'FIELD_COLLISION'),
