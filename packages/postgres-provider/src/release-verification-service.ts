@@ -1271,7 +1271,7 @@ interface VerificationQueryContractBase {
   }[];
   readonly selections: readonly { readonly fieldId: string }[];
   readonly sourceEntityId: string;
-  readonly tier: 'q0' | 'q1';
+  readonly tier: 'q0' | 'q1' | 'q2';
 }
 
 interface VerificationAggregateQueryContract extends VerificationQueryContractBase {

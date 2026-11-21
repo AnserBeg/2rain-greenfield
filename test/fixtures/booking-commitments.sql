@@ -41,7 +41,7 @@ BEGIN
   INSERT INTO platform.current_policy_memberships(tenant_id,environment_id,membership_id,principal_id,role_id) VALUES(t,e,gen_random_uuid(),p,role);
   INSERT INTO platform.inventory_tenant_calendars(tenant_id,time_zone,business_day_boundary) VALUES(t,'America/Denver','08:00');
   INSERT INTO north_star_module.test_booking_owners(tenant_id,environment_id,record_id,legal_entity_id)
-    SELECT t,e,md5('owner'||n)::uuid,md5('company'||(n%2))::uuid FROM generate_series(1,60) n;
+    SELECT t,e,md5('owner'||n)::uuid,md5('company'||(n%2))::uuid FROM generate_series(1,90) n;
   INSERT INTO north_star_module.test_booking_parents
     SELECT tenant_id,environment_id,record_id,legal_entity_id,revision,archived_at FROM north_star_module.test_booking_owners;
   UPDATE north_star_module.test_booking_owners SET parent_id=record_id;
@@ -62,7 +62,7 @@ BEGIN
   INSERT INTO platform.current_policy_permission_grants(tenant_id,environment_id,role_id,permission_id,resource_id)
     VALUES(t,e,md5('visit-archiver')::uuid,'example.booking:permission.archive_visit','example.booking:entity.account');
   INSERT INTO north_star_module.test_booking_resources(tenant_id,environment_id,record_id)
-    SELECT t,e,md5('resource'||n)::uuid FROM generate_series(1,48) n;
+    SELECT t,e,md5('resource'||n)::uuid FROM generate_series(1,75) n;
   FOREACH kind IN ARRAY ARRAY['unit','pool'] LOOP
     FOREACH verb IN ARRAY ARRAY['hold','holdTracked','confirm','changeInterval','cancel','setCapacity','start','return','swap','pause','resume','noShow','changeQuantity','correctActuals','recordExisting'] LOOP
       IF verb='setCapacity' AND kind='unit' THEN CONTINUE; END IF;
@@ -84,6 +84,13 @@ BEGIN
           'stewardPermission','example.booking:permission.steward','maxCorrectionAgeDays',90)); END IF;
       ops := ops||jsonb_build_array(op);
     END LOOP;
+  END LOOP;
+  FOREACH verb IN ARRAY ARRAY['hold','confirm','cancel'] LOOP
+    SELECT value INTO STRICT op FROM jsonb_array_elements(ops) WHERE value->>'operationId'='example.booking:operation.'||verb||'_unit';
+    op:=jsonb_set(op,'{operationId}',to_jsonb('example.booking:operation.kit'||verb||'_unit'));
+    op:=jsonb_set(op,'{booking}',(op->'booking')||jsonb_build_object('bindingVersion','booking.kit/v1',
+      'memberOperations',jsonb_build_array('example.booking:operation.'||verb||'_unit','example.booking:operation.'||verb||'_pool')));
+    ops:=ops||jsonb_build_array(op);
   END LOOP;
   INSERT INTO platform.current_policy_permission_grants(tenant_id,environment_id,role_id,permission_id,resource_id)
     VALUES(t,e,role,'example.booking:permission.visit',owner_entity),(t,e,role,'example.booking:permission.asset',target_entity);

@@ -92,7 +92,7 @@ class BookingCapabilityExecutor implements RegisteredCapabilityOperationExecutor
       request.readBackDefinition.queryType !== 'get' ||
       Object.keys(input.arguments).some(
         (key) =>
-          !(callKeys[booking.operation] as readonly string[]).includes(key),
+          !(booking.bindingVersion==='booking.kit/v1' ? ['members','groupId','reason'] : callKeys[booking.operation] as readonly string[]).includes(key),
       )
     )
       return refused();
@@ -211,6 +211,7 @@ class BookingCapabilityExecutor implements RegisteredCapabilityOperationExecutor
           result: {
             refused?: string;
             bookingId?: string;
+            groupId?: string;
             revision: number;
             state: string;
             deadline: string;
@@ -257,6 +258,7 @@ class BookingCapabilityExecutor implements RegisteredCapabilityOperationExecutor
     const decision: Record<string, string | number> = {
       revision: result.revision,
     };
+    if (result.groupId) decision.groupId=result.groupId;
     if (result.bookingId) {
       Object.assign(decision, {
         bookingId: result.bookingId,

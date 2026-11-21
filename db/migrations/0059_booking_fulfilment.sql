@@ -281,6 +281,107 @@ REVOKE ALL ON FUNCTION north_star_internal.booking_current_evidence(platform.boo
   north_star_internal.booking_check_handover(platform.booking_resources,platform.booking_commitments,timestamptz,boolean),
   north_star_internal.booking_check_use(platform.booking_commitments,platform.booking_resources,uuid,timestamptz,timestamptz,numeric) FROM PUBLIC;
 
+ALTER TABLE platform.booking_commitments DROP CONSTRAINT booking_commitments_check1,
+  ADD CONSTRAINT booking_group_pair CHECK ((group_id IS NULL AND group_kind IS NULL) OR
+    (group_id IS NOT NULL AND group_kind IS NOT DISTINCT FROM 'kit'));
+CREATE INDEX booking_kit_members ON platform.booking_commitments(tenant_id,environment_id,group_id) WHERE group_id IS NOT NULL;
+ALTER TABLE platform.booking_history DROP CONSTRAINT booking_history_owner_key_cursor_value_key,
+  ADD UNIQUE(owner_key,cursor_value,booking_id);
+
+-- A due held kit connects diaries. Discover the complete connected set before
+-- taking diary locks, then check again against a fresh READ COMMITTED snapshot.
+CREATE FUNCTION north_star_internal.booking_diaries(keys uuid[]) RETURNS uuid[]
+LANGUAGE sql STABLE SET search_path = pg_catalog, pg_temp AS $$
+  WITH RECURSIVE closure(key) AS (SELECT unnest(keys) UNION
+    SELECT m.resource_key FROM closure c JOIN platform.booking_commitments f ON f.resource_key=c.key AND f.state='hold'
+    JOIN platform.booking_commitments m USING (tenant_id,environment_id,group_id) WHERE m.state='hold')
+  SELECT array_agg(key ORDER BY key) FROM closure
+$$;
+CREATE FUNCTION north_star_internal.booking_lock_diaries(keys uuid[]) RETURNS uuid[]
+LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp AS $$
+DECLARE closure uuid[]:=north_star_internal.booking_diaries(keys); BEGIN
+  IF cardinality(closure)>256 THEN RAISE EXCEPTION 'booking.lockSetLimit'; END IF;
+  PERFORM FROM platform.booking_resources WHERE resource_key=ANY(closure) ORDER BY resource_key FOR UPDATE;
+  IF closure IS DISTINCT FROM north_star_internal.booking_diaries(keys) THEN RAISE EXCEPTION 'booking.endpointChanged' USING ERRCODE='40001'; END IF;
+  RETURN closure; END $$;
+
+CREATE FUNCTION north_star_internal.booking_lock_kit_endpoints(t uuid,e uuid,storage jsonb,plans jsonb)
+RETURNS void LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp AS $$
+DECLARE closure jsonb; locked jsonb; node record; pass integer; live boolean; BEGIN
+  FOR pass IN 1..2 LOOP
+    closure:='[]';
+    FOR node IN WITH endpoints AS (
+      SELECT p->'binding'->>'ownerEntity' AS entity,(p->'member'->>'recordId')::uuid AS id FROM jsonb_array_elements(plans) p
+      UNION SELECT p->'binding'->>'resourceEntity',(p->>'target')::uuid FROM jsonb_array_elements(plans) p),
+      nodes AS (SELECT DISTINCT tree.* FROM endpoints ep CROSS JOIN LATERAL
+        north_star_internal.booking_endpoint_tree(t,e,storage,ep.entity,ep.id) tree)
+      SELECT * FROM nodes ORDER BY north_star_internal.booking_entity_height(storage,entity_id) DESC,entity_id,record_id LOOP
+      closure:=closure||jsonb_build_array(to_jsonb(node));
+      IF pass=1 THEN
+        EXECUTE format('SELECT true FROM north_star_module.%I WHERE tenant_id=$1 AND environment_id=$2 AND record_id=$3 AND archived_at IS NULL FOR UPDATE',node.table_name)
+          INTO live USING t,e,node.record_id;
+        IF live IS DISTINCT FROM true THEN RAISE EXCEPTION 'booking.endpointUnavailable'; END IF; END IF; END LOOP;
+    IF pass=1 THEN locked:=closure; ELSIF closure<>locked THEN RAISE EXCEPTION 'booking.endpointChanged' USING ERRCODE='40001'; END IF; END LOOP; END $$;
+
+CREATE FUNCTION north_star_internal.booking_record_kit(t uuid,e uuid,kit uuid,r uuid,actor jsonb,action text,key uuid,input jsonb,
+  decision timestamptz,effective timestamptz) RETURNS jsonb LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp AS $$
+DECLARE own platform.booking_owner_cursors; f platform.booking_commitments; lead_fact platform.booking_commitments;
+  previous jsonb; members jsonb; owners jsonb:='[]'; receipt uuid:=gen_random_uuid(); scope jsonb; BEGIN
+  FOR own IN SELECT o.* FROM platform.booking_owner_cursors o WHERE EXISTS(SELECT FROM platform.booking_commitments b WHERE
+    (b.tenant_id,b.environment_id,b.group_id,b.owner_key)=(t,e,kit,o.owner_key)) ORDER BY o.owner_key LOOP
+    UPDATE platform.booking_owner_cursors SET cursor_value=cursor_value+1 WHERE owner_key=own.owner_key RETURNING * INTO STRICT own;
+    members:='[]';
+    FOR f IN SELECT * FROM platform.booking_commitments WHERE (tenant_id,environment_id,group_id,owner_key)=(t,e,kit,own.owner_key) ORDER BY booking_id LOOP
+      previous:=NULL;
+      IF f.revision>1 THEN SELECT after_fact INTO STRICT previous FROM platform.booking_history
+        WHERE (tenant_id,environment_id,booking_id,revision)=(t,e,f.booking_id,f.revision-1); END IF;
+      INSERT INTO platform.booking_history VALUES(t,e,f.booking_id,f.revision,own.owner_key,own.cursor_value,previous,to_jsonb(f),
+        action,input->>'reason',effective,decision,receipt);
+      IF NOT EXISTS(SELECT FROM platform.booking_history h WHERE
+        (h.booking_id,h.revision,h.cursor_value,h.receipt_id,h.after_fact)=(f.booking_id,f.revision,own.cursor_value,receipt,to_jsonb(f))
+        AND h.before_fact IS NOT DISTINCT FROM previous) THEN RAISE EXCEPTION 'booking.evidenceMismatch'; END IF;
+      members:=members||jsonb_build_array(jsonb_build_object('bookingId',f.booking_id,'revision',f.revision));
+      IF lead_fact.booking_id IS NULL THEN lead_fact:=f; END IF; END LOOP;
+    owners:=owners||jsonb_build_array(jsonb_build_object('ownerRef',jsonb_build_object('entityId',own.entity_id,'recordId',own.record_id),
+      'previousCursor',(own.cursor_value-1)::text,'cursor',own.cursor_value::text,'bookings',members));
+    scope:=CASE WHEN own.company_id IS NULL THEN '{"kind":"shared"}'::jsonb ELSE jsonb_build_object('kind','company','companyId',own.company_id) END; END LOOP;
+  IF lead_fact.booking_id IS NULL THEN RAISE EXCEPTION 'booking.evidenceMismatch'; END IF;
+  RETURN north_star_internal.booking_evidence(t,e,r,actor,action,key,input,receipt,lead_fact.booking_id,lead_fact.revision,
+    CASE WHEN lead_fact.revision>1 THEN jsonb_build_object('groupId',kit) END,to_jsonb(lead_fact),decision,'booking.changed',
+    jsonb_build_object('operation',action,'effectiveAt',effective,'ownerScope',scope,'owners',owners),
+    jsonb_build_object('groupId',kit,'bookingId',lead_fact.booking_id,'revision',lead_fact.revision,'state',lead_fact.state,'deadline',lead_fact.deadline)); END $$;
+
+CREATE FUNCTION north_star_internal.booking_expire_kit(t uuid,e uuid,kit uuid,decision timestamptz)
+RETURNS void LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp AS $$
+DECLARE source platform.booking_receipts; key uuid; actor jsonb; due timestamptz; count_members integer; BEGIN
+  -- Foreground callers already hold the closure. A sweeper skips the whole kit
+  -- when another writer holds any member diary or owner cursor.
+  PERFORM FROM platform.booking_resources d WHERE EXISTS(SELECT FROM platform.booking_commitments f WHERE
+    (f.tenant_id,f.environment_id,f.group_id,f.resource_key)=(t,e,kit,d.resource_key)) ORDER BY resource_key FOR UPDATE NOWAIT;
+  PERFORM FROM platform.booking_owner_cursors o WHERE EXISTS(SELECT FROM platform.booking_commitments f WHERE
+    (f.tenant_id,f.environment_id,f.group_id,f.owner_key)=(t,e,kit,o.owner_key)) ORDER BY owner_key FOR UPDATE NOWAIT;
+  SELECT greatest(decision,max(d.decision_floor),north_star_internal.booking_now()) INTO decision FROM platform.booking_resources d
+    JOIN platform.booking_commitments f USING(resource_key) WHERE (f.tenant_id,f.environment_id,f.group_id)=(t,e,kit);
+  SELECT max(deadline),count(*) INTO due,count_members FROM platform.booking_commitments WHERE (tenant_id,environment_id,group_id)=(t,e,kit)
+    HAVING bool_and(state='hold' AND deadline<=decision) AND min(deadline)=max(deadline);
+  IF due IS NULL THEN RETURN; END IF;
+  SELECT DISTINCT b.* INTO STRICT source FROM platform.booking_receipts b JOIN platform.booking_history h USING (tenant_id,environment_id,receipt_id)
+    WHERE (h.tenant_id,h.environment_id)=(t,e) AND h.revision=1 AND h.after_fact->>'group_id'=kit::text;
+  key:=md5('booking.expireKit/'||kit||'/'||source.receipt_id)::uuid;
+  actor:=jsonb_build_object('executionPrincipal',jsonb_build_object('kind','SYSTEM','principalId',md5('northstar.booking/expiry/'||t||'/'||e)::uuid),
+    'requestId',key,'cause',source.receipt_id,'channel','SYSTEM','policyVersion','acceptedHoldDeadline');
+  UPDATE platform.booking_resources d SET decision_floor=decision WHERE EXISTS(SELECT FROM platform.booking_commitments f
+    WHERE (f.tenant_id,f.environment_id,f.group_id,f.resource_key)=(t,e,kit,d.resource_key));
+  UPDATE platform.booking_commitments SET state='cancelled',revision=revision+1 WHERE (tenant_id,environment_id,group_id)=(t,e,kit);
+  IF (SELECT count(*) FROM platform.booking_commitments WHERE (tenant_id,environment_id,group_id,state)=(t,e,kit,'cancelled'))<>count_members
+    THEN RAISE EXCEPTION 'booking.evidenceMismatch'; END IF;
+  PERFORM north_star_internal.booking_record_kit(t,e,kit,source.release_id,actor,'expireHold',key,
+    jsonb_build_object('groupId',kit,'reason','hold expired'),decision,due); END $$;
+REVOKE ALL ON FUNCTION north_star_internal.booking_diaries(uuid[]),north_star_internal.booking_lock_diaries(uuid[]),
+  north_star_internal.booking_lock_kit_endpoints(uuid,uuid,jsonb,jsonb),
+  north_star_internal.booking_record_kit(uuid,uuid,uuid,uuid,jsonb,text,uuid,jsonb,timestamptz,timestamptz),
+  north_star_internal.booking_expire_kit(uuid,uuid,uuid,timestamptz) FROM PUBLIC;
+
 CREATE FUNCTION north_star_internal.booking_finalize_due(previous platform.booking_commitments,decision timestamptz)
 RETURNS void LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp AS $$
 DECLARE
@@ -291,7 +392,9 @@ DECLARE
   request_key uuid := md5('booking/'||action||'/'||previous.booking_id||'/'||previous.revision)::uuid;
   actor jsonb; attendance platform.booking_use_revisions; BEGIN
   IF previous.state='hold' THEN
-    IF previous.deadline<=decision THEN PERFORM north_star_internal.booking_expire_one(previous,decision); END IF;
+    IF previous.deadline<=decision THEN
+      IF previous.group_id IS NULL THEN PERFORM north_star_internal.booking_expire_one(previous,decision);
+      ELSE PERFORM north_star_internal.booking_expire_kit(previous.tenant_id,previous.environment_id,previous.group_id,decision); END IF; END IF;
     RETURN; END IF;
   UPDATE platform.booking_commitments SET
     state=CASE action WHEN 'completeScheduled' THEN 'completed' ELSE 'noShow' END,
@@ -595,6 +698,131 @@ DECLARE f platform.booking_commitments; term record; minimum_time timestamptz;
   RETURN f; END $$;
 REVOKE ALL ON FUNCTION north_star_internal.booking_import(platform.booking_owner_cursors,platform.booking_resources,jsonb,jsonb,jsonb,timestamptz) FROM PUBLIC;
 
+CREATE FUNCTION north_star_internal.booking_apply_kit(t uuid,e uuid,r uuid,fence_number bigint,group_op jsonb,key uuid,input jsonb,actor jsonb)
+RETURNS jsonb LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp SET timezone='UTC' AS $$
+DECLARE
+  binding jsonb:=group_op->'booking'; command text:=binding->>'operation'; action text:=group_op->>'operationId';
+  principal uuid:=nullif(current_setting('north_star.principal_id',true),'')::uuid;
+  catalog jsonb:=north_star_internal.booking_projection(t,e,r,'operationCatalogPayload');
+  storage jsonb:=north_star_internal.booking_projection(t,e,r,'storageTargetPayload');
+  m jsonb; member_op jsonb; slot jsonb; plans jsonb:='[]'; plan jsonb; prepared jsonb:='[]';
+  group_id_arg uuid:=CASE WHEN command='hold' THEN gen_random_uuid() ELSE (input->>'groupId')::uuid END;
+  d platform.booking_resources; f platform.booking_commitments; o platform.booking_owner_cursors;
+  diary_keys uuid[]:='{}'; cursors uuid[]:='{}'; company uuid; group_company uuid; company_set boolean:=false;
+  root_found boolean:=false; target_id uuid; owner_id uuid; owner_revision bigint; owner_table text;
+  previous_receipt platform.booking_receipts; approval platform.booking_approval_grants;
+  policy_version text; decision timestamptz; kit_deadline timestamptz; term record; qty numeric; calendar jsonb;
+  member_count integer; n integer; BEGIN
+  PERFORM north_star_internal.booking_require_isolation();
+  IF jsonb_typeof(input->'members') IS DISTINCT FROM 'array' THEN RAISE EXCEPTION 'booking.invalidGroup'; END IF;
+  member_count:=jsonb_array_length(input->'members');
+  IF member_count NOT BETWEEN 2 AND 20 OR group_id_arg IS NULL OR (command='hold' AND input ? 'groupId')
+    OR command NOT IN ('hold','confirm','cancel') THEN RAISE EXCEPTION 'booking.invalidGroup'; END IF;
+  FOR m IN SELECT value FROM jsonb_array_elements(input->'members')
+    ORDER BY value->>'resourceId',value->>'operationId',value->>'recordId' LOOP
+    IF NOT coalesce((binding->'memberOperations') ? (m->>'operationId'),false) THEN RAISE EXCEPTION 'booking.invalidGroup'; END IF;
+    SELECT value INTO STRICT member_op FROM jsonb_array_elements(catalog->'operations') WHERE value->>'operationId'=m->>'operationId'
+      AND value->>'lifecycle'='active' AND value#>>'{effect,capability,targetId}'='northstar.booking:capability.commitments'
+      AND value#>>'{booking,bindingVersion}'='booking.commitment/v1' AND value#>>'{booking,operation}'=command;
+    slot:=member_op->'booking'; owner_id:=(m->>'recordId')::uuid;
+    IF command='hold' THEN
+      target_id:=(m->>'resourceId')::uuid;
+    ELSE
+      SELECT d1.record_id INTO STRICT target_id FROM platform.booking_commitments c JOIN platform.booking_resources d1 USING(resource_key)
+        JOIN platform.booking_owner_cursors o1 USING(owner_key) WHERE (c.tenant_id,c.environment_id,c.group_id,c.booking_id)=(t,e,group_id_arg,(m->>'bookingId')::uuid)
+        AND (c.slot_id,d1.entity_id,o1.entity_id,o1.record_id)=(slot->>'slotId',slot->>'resourceEntity',slot->>'ownerEntity',owner_id); END IF;
+    d:=north_star_internal.booking_register_resource(t,e,storage,slot,target_id); diary_keys:=array_append(diary_keys,d.resource_key);
+    plans:=plans||jsonb_build_array(jsonb_build_object('member',m,'binding',slot,'target',target_id,'diary',d.resource_key,
+      'permission',member_op->'permissionId','excludedRoles',coalesce(member_op->'excludedRoleKeys','[]'))); END LOOP;
+  diary_keys:=north_star_internal.booking_lock_diaries(diary_keys);
+  PERFORM pg_advisory_xact_lock(hashtextextended(t::text||e::text||key::text,0));
+  PERFORM north_star_internal.booking_lock_kit_endpoints(t,e,storage,plans);
+  policy_version:=platform.lock_current_policy_epoch(t,e)::text;
+  IF actor->>'policyVersion' IS DISTINCT FROM 'northstar.current-policy/'||policy_version THEN RAISE EXCEPTION 'booking.stalePolicy'; END IF;
+  FOR plan IN SELECT value FROM jsonb_array_elements(plans) ORDER BY value#>>'{binding,ownerEntity}',value#>>'{member,recordId}' LOOP
+    m:=plan->'member'; slot:=plan->'binding'; owner_id:=(m->>'recordId')::uuid;
+    SELECT * INTO STRICT d FROM platform.booking_resources WHERE resource_key=(plan->>'diary')::uuid;
+    company:=north_star_internal.booking_endpoint(t,e,storage,slot->>'ownerEntity',owner_id,false);
+    IF (company_set AND company IS DISTINCT FROM group_company) OR (d.company_id IS NOT NULL AND d.company_id IS DISTINCT FROM company)
+      OR north_star_internal.booking_endpoint(t,e,storage,d.entity_id,d.record_id,false) IS DISTINCT FROM d.company_id
+      OR (d.kind,d.unit,d.quantity_scale) IS DISTINCT FROM (slot->>'kind',slot->>'unit',(slot->>'scale')::integer)
+      THEN RAISE EXCEPTION 'booking.endpointUnavailable'; END IF;
+    IF (m->>'recordId',slot->>'ownerEntity')=(input->>'recordId',binding->>'ownerEntity') THEN
+      IF m->'expectedOwnerRevision' IS DISTINCT FROM input->'expectedOwnerRevision' THEN RAISE EXCEPTION 'booking.staleOwnerRevision'; END IF;
+      root_found:=true; END IF;
+    group_company:=company; company_set:=true;
+    PERFORM north_star_internal.booking_require_permission(t,e,principal,company,plan->>'permission',slot->>'ownerEntity',plan->'excludedRoles');
+    PERFORM north_star_internal.booking_require_permission(t,e,principal,company,slot->>'ownerReadPermission',slot->>'ownerEntity');
+    PERFORM north_star_internal.booking_require_permission(t,e,principal,d.company_id,slot->>'resourceReadPermission',d.entity_id);
+    INSERT INTO platform.booking_owner_cursors(tenant_id,environment_id,company_id,entity_id,record_id)
+      VALUES(t,e,company,slot->>'ownerEntity',owner_id) ON CONFLICT DO NOTHING;
+    SELECT * INTO STRICT o FROM platform.booking_owner_cursors WHERE (tenant_id,environment_id,entity_id,record_id)=(t,e,slot->>'ownerEntity',owner_id)
+      AND company_id IS NOT DISTINCT FROM company;
+    cursors:=array_append(cursors,o.owner_key); prepared:=prepared||jsonb_build_array(plan||jsonb_build_object('ownerKey',o.owner_key)); END LOOP;
+  IF NOT root_found OR (SELECT count(DISTINCT (p->>'ownerKey',p#>>'{binding,slotId}')) FROM jsonb_array_elements(prepared) p)<>member_count
+    THEN RAISE EXCEPTION 'booking.invalidGroup'; END IF;
+  PERFORM north_star_internal.booking_require_permission(t,e,principal,group_company,group_op->>'permissionId',binding->>'ownerEntity',coalesce(group_op->'excludedRoleKeys','[]'));
+  PERFORM north_star_internal.booking_require_permission(t,e,principal,group_company,binding->>'ownerReadPermission',binding->>'ownerEntity');
+  IF group_op->>'confirmation'='humanRequired' OR actor->>'channel'='WORKFLOW' THEN
+    SELECT g.* INTO approval FROM platform.booking_approval_grants g WHERE g.grant_id=(actor->>'approvalGrantId')::uuid
+      AND (g.tenant_id,g.environment_id,g.principal_id,g.release_id,g.fence,g.operation_id,g.request_key,g.input,g.channel)=
+        (t,e,principal,r,fence_number,action,key,booking_apply_kit.input,actor->>'channel') FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'booking.approvalRequired'; END IF;
+    actor:=actor||jsonb_build_object('approvingHumanId',approval.human_id); END IF;
+  SELECT * INTO previous_receipt FROM platform.booking_receipts WHERE NOT system_expiry AND (tenant_id,environment_id,request_key)=(t,e,key);
+  IF FOUND THEN
+    IF (previous_receipt.actor_id,previous_receipt.release_id,previous_receipt.operation_id,previous_receipt.input) IS DISTINCT FROM (principal,r,action,input)
+      THEN RAISE EXCEPTION 'booking.requestKeyConflict'; END IF;
+    RETURN previous_receipt.result; END IF;
+  IF approval.consumed THEN RAISE EXCEPTION 'booking.approvalSpent'; END IF;
+  IF approval.grant_id IS NOT NULL THEN UPDATE platform.booking_approval_grants SET consumed=true WHERE grant_id=approval.grant_id; END IF;
+  PERFORM FROM platform.booking_owner_cursors oc WHERE oc.owner_key=ANY(cursors) OR EXISTS(SELECT FROM platform.booking_commitments b
+    WHERE b.resource_key=ANY(diary_keys) AND b.state IN ('hold','confirmed') AND b.owner_key=oc.owner_key) ORDER BY oc.owner_key FOR UPDATE;
+  SELECT greatest(north_star_internal.booking_now(),max(decision_floor)) INTO decision FROM platform.booking_resources WHERE resource_key=ANY(diary_keys);
+  UPDATE platform.booking_resources SET decision_floor=decision WHERE resource_key=ANY(diary_keys);
+  FOR d IN SELECT * FROM platform.booking_resources WHERE resource_key=ANY(diary_keys) ORDER BY resource_key LOOP
+    PERFORM north_star_internal.booking_expire(d.resource_key,decision); END LOOP;
+  /* A failed last member rolls back every proposed change, after committing any independently due history. */ BEGIN
+    IF command<>'hold' AND (SELECT count(*) FROM platform.booking_commitments c WHERE
+      (c.tenant_id,c.environment_id,c.group_id)=(t,e,group_id_arg))<>member_count THEN RAISE EXCEPTION 'booking.invalidGroup'; END IF;
+    SELECT jsonb_build_object('id',tenant_id,'zone',time_zone,'boundary',business_day_boundary) INTO STRICT calendar
+      FROM platform.inventory_tenant_calendars WHERE tenant_id=t;
+    FOR plan IN SELECT value FROM jsonb_array_elements(prepared) LOOP
+      m:=plan->'member'; slot:=plan->'binding';
+      SELECT value->>'physicalTableName' INTO STRICT owner_table FROM jsonb_array_elements(storage->'entities') WHERE value->>'entityId'=slot->>'ownerEntity';
+      EXECUTE format('SELECT revision FROM north_star_module.%I WHERE tenant_id=$1 AND environment_id=$2 AND record_id=$3',owner_table)
+        INTO STRICT owner_revision USING t,e,(m->>'recordId')::uuid;
+      IF owner_revision IS DISTINCT FROM (m->>'expectedOwnerRevision')::bigint THEN RAISE EXCEPTION 'booking.staleOwnerRevision'; END IF;
+      IF command='hold' THEN
+        SELECT * INTO STRICT d FROM platform.booking_resources WHERE resource_key=(plan->>'diary')::uuid;
+        qty:=(m->>'quantity')::numeric;
+        IF qty IS NULL OR qty<=0 OR qty>='Infinity' OR trunc(qty,d.quantity_scale)<>qty OR (d.kind='unit' AND qty<>1) THEN RAISE EXCEPTION 'booking.invalidQuantity'; END IF;
+        SELECT * INTO term FROM north_star_internal.booking_resolve_window(m->'interval',calendar,decision,NULL);
+        kit_deadline:=least(kit_deadline,upper(term.occupied),decision+make_interval(secs=>(slot->>'holdSeconds')::integer));
+        INSERT INTO platform.booking_commitments(tenant_id,environment_id,owner_key,slot_id,resource_key,kind,assigned_unit_key,
+          group_id,group_kind,fulfilment_mode,binding,calendar,entered_interval,agreed_interval,occupied_interval,quantity,unit,state,deadline,revision)
+        VALUES(t,e,(plan->>'ownerKey')::uuid,slot->>'slotId',d.resource_key,d.kind,CASE WHEN d.kind='unit' THEN d.resource_key END,
+          group_id_arg,'kit',slot->>'fulfilmentMode',slot,calendar,m->'interval',term.agreed,term.occupied,qty,d.unit,'hold',kit_deadline,1);
+      ELSE
+        UPDATE platform.booking_commitments c SET state=CASE command WHEN 'confirm' THEN 'confirmed' ELSE 'cancelled' END,revision=c.revision+1
+          WHERE (c.tenant_id,c.environment_id,c.group_id,c.booking_id,c.owner_key,c.resource_key,c.revision)=
+            (t,e,group_id_arg,(m->>'bookingId')::uuid,(plan->>'ownerKey')::uuid,(plan->>'diary')::uuid,(m->>'bookingRevision')::integer)
+            AND (c.state='hold' OR (command='cancel' AND c.state='confirmed'));
+        IF NOT FOUND THEN RAISE EXCEPTION 'booking.staleRevision'; END IF; END IF; END LOOP;
+    IF command='hold' THEN
+      UPDATE platform.booking_commitments c SET deadline=kit_deadline WHERE (c.tenant_id,c.environment_id,c.group_id)=(t,e,group_id_arg);
+      GET DIAGNOSTICS n=ROW_COUNT; IF n<>member_count THEN RAISE EXCEPTION 'booking.evidenceMismatch'; END IF;
+      FOR f IN SELECT * FROM platform.booking_commitments c WHERE (c.tenant_id,c.environment_id,c.group_id)=(t,e,group_id_arg) LOOP
+        SELECT * INTO STRICT d FROM platform.booking_resources WHERE resource_key=f.resource_key;
+        IF d.kind='pool' THEN PERFORM north_star_internal.booking_check_capacity(d.resource_key); END IF;
+        PERFORM north_star_internal.booking_check_remaining(d,decision,f.occupied_interval); END LOOP; END IF;
+    RETURN north_star_internal.booking_record_kit(t,e,group_id_arg,r,actor,action,key,input,decision,decision);
+  EXCEPTION WHEN exclusion_violation THEN RETURN jsonb_build_object('refused','booking.noLongerAvailable');
+    WHEN unique_violation THEN IF SQLERRM LIKE '%booking_live_owner_slot%' THEN RETURN jsonb_build_object('refused','booking.slotOccupied'); ELSE RAISE; END IF;
+    WHEN raise_exception THEN IF SQLERRM LIKE 'booking.%' AND SQLERRM<>'booking.evidenceMismatch' THEN RETURN jsonb_build_object('refused',SQLERRM); ELSE RAISE; END IF; END;
+EXCEPTION WHEN no_data_found OR too_many_rows THEN RAISE EXCEPTION 'booking.endpointUnavailable'; END $$;
+REVOKE ALL ON FUNCTION north_star_internal.booking_apply_kit(uuid,uuid,uuid,bigint,jsonb,uuid,jsonb,jsonb) FROM PUBLIC;
+
 CREATE OR REPLACE FUNCTION north_star_internal.booking_apply(r uuid,expected_fence bigint,action text,key uuid,input jsonb,actor jsonb)
 RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp SET timezone='UTC' AS $$
 DECLARE
@@ -608,7 +836,7 @@ DECLARE
   decision timestamptz; amount numeric; term record; capacity platform.booking_pool_capacity;
   receipt uuid := gen_random_uuid(); result jsonb; expected_rev integer := (input->>'expectedRevision')::integer;
   latest integer; policy_version text; owner_table text; owner_revision bigint; approval platform.booking_approval_grants;
-  dest platform.booking_resources; keys uuid[]; imported_target uuid; locked_diary platform.booking_resources; effective timestamptz; BEGIN
+  dest platform.booking_resources; keys uuid[]; endpoint_keys uuid[]; imported_target uuid; locked_diary platform.booking_resources; effective timestamptz; BEGIN
   IF current_setting('transaction_isolation') <> 'read committed' THEN RAISE EXCEPTION 'booking.requiresReadCommitted'; END IF;
   IF principal IS NULL OR (actor->'executionPrincipal'->>'principalId')::uuid IS DISTINCT FROM principal
     OR (actor->>'requestId')::uuid IS DISTINCT FROM nullif(current_setting('north_star.request_id',true),'')::uuid
@@ -619,6 +847,9 @@ DECLARE
     WHERE value->>'operationId'=action AND value->>'lifecycle'='active' AND
       value->'effect'->'capability'->>'targetId'='northstar.booking:capability.commitments';
   released_binding := op->'booking'; command := released_binding->>'operation';
+  IF released_binding->>'bindingVersion'='booking.kit/v1' THEN
+    IF command<>'hold' AND op->>'confirmation' IS DISTINCT FROM 'humanRequired' THEN RAISE EXCEPTION 'booking.unsupportedBinding'; END IF;
+    RETURN north_star_internal.booking_apply_kit(t,e,r,expected_fence,op,key,input,actor); END IF;
   IF released_binding->>'kind' IS NULL OR released_binding->>'kind' NOT IN ('pool','unit') OR command IS NULL OR
     (CASE released_binding->>'bindingVersion'
       WHEN 'booking.commitment/v1' THEN command NOT IN ('hold','confirm','cancel','changeInterval','setCapacity')
@@ -648,11 +879,11 @@ DECLARE
       WHERE (u.tenant_id,u.environment_id,u.booking_id,u.evidence_id,u.revision)=
         (t,e,(input->>'bookingId')::uuid,(input->>'evidenceId')::uuid,(input->>'evidenceRevision')::integer); END IF;
   keys:=array_remove(keys||ARRAY[diary.resource_key,dest.resource_key],NULL);
-  PERFORM FROM platform.booking_resources WHERE resource_key=ANY(keys) ORDER BY resource_key FOR UPDATE;
+  endpoint_keys:=keys; keys:=north_star_internal.booking_lock_diaries(keys);
   PERFORM pg_advisory_xact_lock(hashtextextended(t::text||e::text||key::text,0));
-  IF cardinality(keys)=1 THEN
+  IF cardinality(endpoint_keys)=1 THEN
     PERFORM north_star_internal.booking_lock_endpoints(t,e,storage,released_binding->>'ownerEntity',owner_id,released_binding->>'resourceEntity',target);
-  ELSE PERFORM north_star_internal.booking_lock_resource_endpoints(t,e,storage,released_binding->>'ownerEntity',owner_id,keys); END IF;
+  ELSE PERFORM north_star_internal.booking_lock_resource_endpoints(t,e,storage,released_binding->>'ownerEntity',owner_id,endpoint_keys); END IF;
   owner_company := north_star_internal.booking_endpoint(t,e,storage,released_binding->>'ownerEntity',owner_id,false);
   target_company := north_star_internal.booking_endpoint(t,e,storage,released_binding->>'resourceEntity',target,false);
   IF (diary.kind,diary.unit,diary.quantity_scale) IS DISTINCT FROM (released_binding->>'kind',released_binding->>'unit',(released_binding->>'scale')::integer)
@@ -665,7 +896,7 @@ DECLARE
   PERFORM north_star_internal.booking_require_permission(t,e,principal,target_company,released_binding->>'resourceReadPermission',diary.entity_id);
   IF command IN ('correctActuals','recordExisting') THEN
     PERFORM north_star_internal.booking_require_permission(t,e,principal,owner_company,released_binding->>'stewardPermission',released_binding->>'ownerEntity'); END IF;
-  FOR locked_diary IN SELECT * FROM platform.booking_resources WHERE resource_key=ANY(keys) AND resource_key<>diary.resource_key LOOP
+  FOR locked_diary IN SELECT * FROM platform.booking_resources WHERE resource_key=ANY(endpoint_keys) AND resource_key<>diary.resource_key LOOP
     target_company:=north_star_internal.booking_endpoint(t,e,storage,locked_diary.entity_id,locked_diary.record_id,false);
     IF (locked_diary.kind,locked_diary.unit,locked_diary.quantity_scale) IS DISTINCT FROM (diary.kind,diary.unit,diary.quantity_scale)
       OR target_company IS DISTINCT FROM locked_diary.company_id OR (target_company IS NOT NULL AND target_company IS DISTINCT FROM owner_company)
@@ -752,6 +983,7 @@ DECLARE
     ELSE
       SELECT * INTO STRICT prior_fact FROM platform.booking_commitments WHERE (tenant_id,environment_id,booking_id,owner_key,resource_key)=
         (t,e,(input->>'bookingId')::uuid,owner_row.owner_key,diary.resource_key);
+      IF prior_fact.group_id IS NOT NULL AND command IN ('confirm','cancel','changeInterval') THEN RAISE EXCEPTION 'booking.groupOperationRequired'; END IF;
       IF prior_fact.state IN ('cancelled','completed','noShow','returned') AND command<>'correctActuals'
         AND NOT (prior_fact.state='noShow' AND prior_fact.fulfilment_mode='tracked' AND command='start')
         THEN RAISE EXCEPTION 'booking.closed'; END IF;

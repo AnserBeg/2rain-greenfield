@@ -57,8 +57,13 @@ const fulfilment = commitment.extend({
   stewardPermission: id,
   maxCorrectionAgeDays: z.int().nonnegative(),
 });
+const kit = commitment.extend({
+  bindingVersion: z.literal('booking.kit/v1'),
+  operation: z.enum(['hold','confirm','cancel']),
+  memberOperations: z.array(id).min(1).max(20),
+});
 export const BookingOperationBinding = z
-  .discriminatedUnion('bindingVersion', [commitment, fulfilment])
+  .discriminatedUnion('bindingVersion', [commitment, fulfilment, kit])
   .refine((binding) => binding.kind !== 'unit' || binding.scale === 0)
   .refine(
     (binding) =>
@@ -76,7 +81,7 @@ export function bookingReaderFloor(value: unknown): number {
       typeof binding === 'object' &&
       binding !== null &&
       'bindingVersion' in binding &&
-      binding.bindingVersion === 'booking.fulfilment/v1',
+      ['booking.fulfilment/v1','booking.kit/v1'].includes(String(binding.bindingVersion)),
   )
     ? BOOKING_FULFILMENT_READER
     : BOOKING_OPERATION_READER;
@@ -86,17 +91,40 @@ export function hasBookingOperations(value: unknown): boolean {
   return bookingReaderFloor(value) > 0;
 }
 
+const record = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+export function bookingUsageCatalogTerms(value: unknown): unknown[] {
+  if (!record(value) || !Array.isArray(value.queries)) return [];
+  const queries = value.queries.filter(record);
+  const terms = (q: Record<string, unknown>) => [
+    q.queryId,
+    q.queryType,
+    q.tier,
+    q.lifecycle,
+    q.filter,
+    record(q.permission) ? q.permission.targetId : q.permissionId,
+    record(q.sourceEntity) ? q.sourceEntity.targetId : q.sourceEntityId,
+  ];
+  return queries.flatMap((q) => {
+    const model = q.readModel;
+    if (
+      !record(model) ||
+      !record(model.capability) ||
+      model.capability.targetId !== BOOKING_USAGE_CAPABILITY
+    )
+      return [];
+    const owner =
+      record(model.queries) && record(model.queries.owner)
+        ? model.queries.owner.targetId
+        : undefined;
+    const source = queries.find((candidate) => candidate.queryId === owner);
+    return [[terms(q), model, source ? terms(source) : null]];
+  });
+}
+
 export function hasBookingUsage(value: unknown): boolean {
-  if (
-    !value ||
-    typeof value !== 'object' ||
-    !('queries' in value) ||
-    !Array.isArray(value.queries)
-  )
-    return false;
-  return value.queries.some(
-    (q) => q?.readModel?.capability?.targetId === BOOKING_USAGE_CAPABILITY,
-  );
+  return bookingUsageCatalogTerms(value).length > 0;
 }
 
 /** The provider may use only the released entities and the read permissions
@@ -106,6 +134,7 @@ export function bookingDeclarationProblem(
 ): string | undefined {
   const configs = new Map<string, string>();
   for (const query of pkg.queries) {
+    if (query.tier === 'q2' && (!('readModel' in query) || query.readModel?.capability.targetId !== BOOKING_USAGE_CAPABILITY)) return query.queryId;
     if (
       !('readModel' in query) ||
       query.readModel?.capability.targetId !== BOOKING_USAGE_CAPABILITY
@@ -121,7 +150,7 @@ export function bookingDeclarationProblem(
       Object.keys(model.resultFields).length !== 1 ||
       Object.keys(model.queries).length !== 1 ||
       query.queryType !== 'get' ||
-      query.tier !== 'q0' ||
+      query.tier !== 'q2' ||
       query.lifecycle !== 'active' ||
       query.filter.kind !== 'booleanPredicate' ||
       !query.filter.value ||
@@ -187,6 +216,13 @@ export function bookingDeclarationProblem(
       !['update', 'transition'].includes(permission.action)
     )
       return operation.operationId;
+    if (b.bindingVersion === 'booking.kit/v1') {
+      if (new Set(b.memberOperations).size !== b.memberOperations.length || b.memberOperations.some(id=>{
+        const member=pkg.operations.find(o=>o.operationId===id);
+        return !member || member.lifecycle !== 'active' || !('booking' in member) || !member.booking ||
+          member.booking.bindingVersion !== 'booking.commitment/v1' || member.booking.operation !== b.operation;
+      })) return operation.operationId;
+    }
     if (b.bindingVersion === 'booking.fulfilment/v1') {
       const steward = pkg.permissions.find(
         (p) => p.permissionId === b.stewardPermission,

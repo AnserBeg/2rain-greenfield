@@ -9,6 +9,7 @@ import {
   bookingReaderFloor,
   bookingDeclarationProblem,
   bookingCatalogTerms,
+  bookingUsageCatalogTerms,
   hasBookingOperations,
 } from '@north-star/canonical-model';
 import { CALCULATED_DISPLAY_QUERY_READER } from '../../canonical-model/src/calculated-display-projection.js';
@@ -2334,6 +2335,12 @@ function verifyCompleteness(
   const bookingProblem = bookingDeclarationProblem(packageRevision);
   if (
     bookingProblem ||
+    canonicalize(bookingUsageCatalogTerms(packageRevision)) !==
+      canonicalize(
+        bookingUsageCatalogTerms(
+          byFamily.get(PROJECTION_FAMILY_IDS.queryCatalog),
+        ),
+      ) ||
     canonicalize(bookingCatalogTerms(packageRevision)) !==
       canonicalize(
         bookingCatalogTerms(
