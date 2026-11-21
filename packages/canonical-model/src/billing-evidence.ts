@@ -11,6 +11,14 @@ const interval = z.strictObject({
   start: time,
   end: time.nullable(),
 });
+const assignment = z.strictObject({
+  publishedAt: time,
+  listId: id,
+  priority: z.int(),
+  effectiveFrom: time,
+  effectiveEnd: time.optional(),
+  revision: id,
+});
 export const BillingQuoteEvidenceSchema = z.strictObject({
   schemaVersion: z.literal('northstar.billing-quote-evidence/v1'),
   release: id,
@@ -53,18 +61,7 @@ export const BillingQuoteEvidenceSchema = z.strictObject({
       }),
     )
     .max(2048),
-  assignments: z
-    .array(
-      z.strictObject({
-        publishedAt: time,
-        listId: id,
-        priority: z.int(),
-        effectiveFrom: time,
-        effectiveEnd: time.optional(),
-        revision: id,
-      }),
-    )
-    .max(128),
+  assignments: z.array(assignment).max(128),
   tables: z
     .array(BillingRateTableSchema.extend({ publishedAt: time }))
     .min(1)
@@ -79,5 +76,19 @@ export const BillingQuoteEvidenceSchema = z.strictObject({
       }),
     )
     .max(4096),
+  // Allow daily windows and the distinct calendar boundaries of 32 components.
+  // Allocations keep the exact terms from the allocating quote by opening.
+  termPins: z
+    .array(
+      z.strictObject({
+        opening: time,
+        publishedAt: time,
+        tableDigest: z.string().regex(/^[0-9a-f]{64}$/u),
+        version: id,
+        assignment: assignment.nullable(),
+      }),
+    )
+    .max(8192)
+    .optional(),
 });
 export type BillingQuoteEvidence = z.infer<typeof BillingQuoteEvidenceSchema>;

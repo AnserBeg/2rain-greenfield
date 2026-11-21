@@ -109,6 +109,21 @@ interface Line {
   derivation: readonly unknown[];
 }
 const occurrenceId = (...parts: string[]) => JSON.stringify(parts);
+const legacyCalculation = 'northstar.billing-calculation/v1';
+type CalculationVersion =
+  typeof legacyCalculation | typeof BILLING_CALCULATION_VERSION;
+
+function termPin(at: number, selection: ReturnType<typeof selectTable>) {
+  const { publishedAt, ...table } = selection.table;
+  return {
+    opening: iso(at),
+    publishedAt,
+    tableDigest: digest(table),
+    version: table.version,
+    assignment: selection.assignment,
+  };
+}
+
 export function quoteBillingService(
   planInput: unknown,
   evidenceInput: unknown,
@@ -122,6 +137,7 @@ export function replayBillingQuote(
     quote.inputs.plan,
     quote.inputs.evidence,
     quote.calendar,
+    quote.algorithm,
   );
   if (
     replay.inputDigest !== quote.inputDigest ||
@@ -134,6 +150,7 @@ function calculate(
   planInput: unknown,
   evidenceInput: unknown,
   pinned?: CalendarPin,
+  algorithm: CalculationVersion = BILLING_CALCULATION_VERSION,
 ) {
   const { plan, digest: planDigest } = compileRatePlan(planInput);
   const e = BillingQuoteEvidenceSchema.parse(evidenceInput);
@@ -176,6 +193,22 @@ function calculate(
     (a, b) =>
       order(a.componentId, b.componentId) || order(a.occurrence, b.occurrence),
   );
+  const termPins = new Map(
+    e.termPins?.map((pin) => [instant(pin.opening), pin]),
+  );
+  if (e.termPins) {
+    if (termPins.size !== e.termPins.length)
+      throw new Error('Duplicate billing term pin');
+    e.termPins.sort((a, b) => order(a.opening, b.opening));
+  }
+  if (
+    algorithm !== legacyCalculation &&
+    !termPins.size &&
+    e.allocations.some(
+      (a) => a.allocatedCents !== '0' || a.reservedCents !== '0',
+    )
+  )
+    throw new Error('Prior allocation requires pinned billing terms');
   const calendar = new BillingCalendar(anchor, e.zone, pinned),
     coverage = deriveCoverage(e, anchor, through);
   const windows = pricingWindows(
@@ -188,7 +221,36 @@ function calculate(
   function terms(at: number) {
     let selection = prices.get(at);
     if (!selection) {
-      selection = selectTable(tables, e.customerId, e.assignments, at);
+      const pin = termPins.get(at);
+      const publishedThrough = algorithm === legacyCalculation ? at : asOf;
+      if (pin) {
+        const table = tables.find((t) => t.version === pin.version);
+        const assignments = pin.assignment
+          ? e.assignments.filter(
+              (a) =>
+                a.listId === pin.assignment!.listId &&
+                a.revision === pin.assignment!.revision,
+            )
+          : [];
+        selection = selectTable(
+          table ? [table] : [],
+          e.customerId,
+          assignments,
+          at,
+          publishedThrough,
+        );
+        if (digest(termPin(at, selection)) !== digest(pin))
+          throw new Error('Pinned billing terms disagree');
+      } else {
+        selection = selectTable(
+          tables,
+          e.customerId,
+          e.assignments,
+          at,
+          publishedThrough,
+        );
+      }
+      termPins.set(at, termPin(at, selection));
       prices.set(at, selection);
     }
     return selection;
@@ -434,7 +496,7 @@ function calculate(
       'Prior allocation has no matching occurrence or quantity band',
     );
   const result = {
-    algorithm: BILLING_CALCULATION_VERSION,
+    algorithm,
     planDigest,
     lines,
     coverage: coverage.bands.map((b) => ({
@@ -447,18 +509,9 @@ function calculate(
       zoneData: pinned?.zoneData ?? process.versions.tz!,
       boundaries: calendar.boundaries,
     },
-    terms: [...prices.entries()]
+    terms: [...termPins.entries()]
       .sort(([a], [b]) => a - b)
-      .map(([at, selection]) => {
-        const { publishedAt, ...table } = selection.table;
-        return {
-          opening: iso(at),
-          publishedAt,
-          tableDigest: digest(table),
-          version: table.version,
-          assignment: selection.assignment,
-        };
-      }),
+      .map(([, pin]) => pin),
   };
   return {
     ...result,

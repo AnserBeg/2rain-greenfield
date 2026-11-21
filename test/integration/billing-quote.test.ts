@@ -119,6 +119,7 @@ function allocate(e: BillingQuoteEvidence, p: BillingPlan, firstEnd: string) {
   return {
     ...e,
     periodStart: firstEnd,
+    termPins: first.terms,
     allocations: first.lines.map((l) => ({
       componentId: l.componentId,
       occurrence: l.occurrence,
@@ -204,6 +205,7 @@ test('pause unions, quantity identity, and corrections preserve the original all
   assert.equal(cents(p, e), 16000);
   const corrected = {
     ...e,
+    termPins: quoteBillingService(p, e).terms,
     pauses: [
       ...e.pauses,
       {
@@ -602,11 +604,40 @@ test('a different currency on the selected table alone refuses the quote', () =>
   );
 });
 
-test('publication after opening preserves CAD 100 plus 30 even on a late first quote', () => {
+test('a first publication can price an already open window', () => {
+  const p = plan(),
+    e = evidence(p, 8);
+  e.tables[0]!.effectiveFrom = e.anchor;
+  e.tables[0]!.publishedAt = roll(e.anchor, 2);
+  assert.equal(cents(p, e), 13000);
+  assert.throws(
+    () => cents(p, { ...e, asOf: roll(e.anchor, 1) }),
+    /Missing effective rate table/,
+  );
+  e.tables[0]!.effectiveFrom = roll(e.anchor, 1);
+  assert.throws(() => cents(p, e), /Missing effective rate table/);
+});
+
+test('a same-day customer override applies before the first allocation', () => {
+  const p = plan(),
+    e = evidence(p, 8);
+  e.tables.push({
+    ...e.tables[0]!,
+    version: 'same-day',
+    effectiveFrom: e.anchor,
+    publishedAt: roll(e.anchor, 0.25),
+    selector: { kind: 'customer', customerId: e.customerId },
+    values: { daily: '10', weekly: '50' },
+  });
+  assert.equal(cents(p, e), 6000);
+});
+
+test('publication after first allocation never reprices that window', () => {
   const p = plan(),
     e = evidence(p, 8);
   const boundary = roll(e.anchor, 4);
   e.tables[0]!.effectiveFrom = e.anchor;
+  e.tables[0]!.publishedAt = roll(e.anchor, 2);
   const split = allocate(e, p, boundary);
   const successor = {
     ...e.tables[0]!,
@@ -617,9 +648,20 @@ test('publication after opening preserves CAD 100 plus 30 even on a late first q
   e.tables.push(successor);
   assert.equal(split.allocations[0]?.allocatedCents, '10000');
   assert.equal(cents(p, split), 3000);
-  assert.equal(cents(p, e), 13000);
-  assert.equal(cents(p, { ...e, asOf: roll(start, 36) }), 54000);
-  // A newly published list assignment must obey the same opening fence.
+  assert.equal(cents(p, e), 6000);
+  const acrossWindows = quoteBillingService(p, {
+    ...split,
+    asOf: roll(start, 36),
+  });
+  assert.deepEqual(
+    acrossWindows.terms.map((pin) => pin.version),
+    ['t1', 'backdated'],
+  );
+  assert.throws(
+    () => quoteBillingService(p, { ...split, termPins: [] }),
+    /Prior allocation requires pinned billing terms/,
+  );
+  // A new list assignment can affect the first allocation only.
   e.tables.push({
     ...successor,
     publishedAt: e.tables[0]!.publishedAt,
@@ -634,6 +676,10 @@ test('publication after opening preserves CAD 100 plus 30 even on a late first q
     publishedAt: successor.publishedAt,
   });
   assert.equal(cents(p, split), 3000);
+  assert.equal(
+    quoteBillingService(p, e).terms[0]!.assignment?.revision,
+    'joined',
+  );
 });
 
 test('a service-end fee uses the end occurrence across invoice schedules', () => {
