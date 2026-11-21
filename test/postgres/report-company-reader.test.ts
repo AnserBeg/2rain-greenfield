@@ -349,7 +349,7 @@ test(
       await import('../../packages/canonical-model/src/declared-report.js');
     const { firstPartyAuthored } =
       await import('../helpers/customization-fixture.js');
-    const { singleTransitionApplication } =
+    const { nextPlatformRelease, singleTransitionApplication } =
       await import('../helpers/application-without-line-create-values.js');
     const compiledApplication =
       singleTransitionApplication(firstPartyAuthored).release;
@@ -720,22 +720,6 @@ test(
             await run({ export: { resultDigest: page.resultDigest } }),
             { kind: 'refresh' },
           );
-          const revoke = async (permission: string) => {
-            const revoked = await pool.query(
-              'UPDATE platform.current_policy_permission_grants SET revoked_at=clock_timestamp() WHERE tenant_id=$1 AND environment_id=$2 AND permission_id=$4 AND role_id IN (SELECT role_id FROM platform.current_policy_memberships WHERE principal_id=$3)',
-              [tenantId, environmentId, principalId, permission],
-            );
-            assert.ok(revoked.rowCount);
-          };
-          await revoke(REPORT_EXPORT_PERMISSION);
-          const after = await run();
-          assert.ok(after.kind === 'page');
-          assert.deepEqual(
-            await run({ export: { resultDigest: after.resultDigest } }),
-            { kind: 'unavailable' },
-          );
-          await revoke(reportColumnPermission(id('currency')));
-          assert.deepEqual(await run(), { kind: 'unavailable' });
           // A second range needs its own existing-table index. The size check counts
           // both companies and runs again under the same lock as CREATE INDEX.
           const dueDate = id('due_date');
@@ -814,6 +798,98 @@ test(
               delete process.env.NORTH_STAR_REPORT_INDEX_ROW_CEILING;
             else process.env.NORTH_STAR_REPORT_INDEX_ROW_CEILING = previous;
           }
+          const beforeUpgrade = await run();
+          assert.ok(beforeUpgrade.kind === 'page');
+          const unbound = structuredClone(firstPartyAuthored);
+          const invoice = (
+            unbound.entities as {
+              entityId: string;
+              reportSource?: { amounts: { fieldId: string }[] };
+            }[]
+          ).find((entity) => entity.entityId === target.source.entityId)!;
+          const balance = id('balance');
+          assert.ok(invoice.reportSource);
+          assert.ok(
+            invoice.reportSource.amounts.some(
+              (amount) => amount.fieldId === balance,
+            ),
+          );
+          invoice.reportSource.amounts = invoice.reportSource.amounts.filter(
+            (amount) => amount.fieldId !== balance,
+          );
+          const conflict = await openComposedApplicationRuntime({
+            ...options,
+            compiledApplication: nextPlatformRelease(
+              compiledApplication,
+              unbound,
+            ),
+          });
+          try {
+            const refusal = conflict.customizationUpgrade;
+            assert.ok(refusal?.status === 'refused', JSON.stringify(refusal));
+            assert.ok(
+              refusal.report?.findings.some(
+                (finding) => finding.subject === balance,
+              ),
+              JSON.stringify(refusal),
+            );
+            assert.equal(conflict.activeReleaseId, draft.releaseId);
+            const stillServing = await conflict.entry.run({}, (view) =>
+              conflict.queryGateway.invokeGrouped(view, request),
+            );
+            assert.ok(stillServing.kind === 'page');
+            assert.deepEqual(stillServing.totals, beforeUpgrade.totals);
+          } finally {
+            await conflict.close();
+          }
+
+          const relabelled = structuredClone(firstPartyAuthored);
+          const field = (
+            relabelled.fields as { fieldId: string; label: string }[]
+          ).find((field) => field.fieldId === balance)!;
+          field.label = 'Remaining balance';
+          const compatible = {
+            ...options,
+            compiledApplication: nextPlatformRelease(
+              compiledApplication,
+              relabelled,
+            ),
+          };
+          const nextRuntime = await openComposedApplicationRuntime(compatible);
+          try {
+            const upgrade = nextRuntime.customizationUpgrade;
+            assert.ok(upgrade?.status === 'drafted', JSON.stringify(upgrade));
+            const publisher = await openCustomizeService(compatible);
+            try {
+              await publisher.service.approve(upgrade.upgradeId);
+              await publisher.service.activate(upgrade.upgradeId);
+            } finally {
+              await publisher.close();
+            }
+            const replayed = await nextRuntime.entry.run({}, (view) =>
+              nextRuntime.queryGateway.invokeGrouped(view, request),
+            );
+            assert.ok(replayed.kind === 'page');
+            assert.deepEqual(replayed.totals, beforeUpgrade.totals);
+          } finally {
+            await nextRuntime.close();
+          }
+          const revoke = async (permission: string) => {
+            const revoked = await pool.query(
+              'UPDATE platform.current_policy_permission_grants SET revoked_at=clock_timestamp() WHERE tenant_id=$1 AND environment_id=$2 AND permission_id=$4 AND role_id IN (SELECT role_id FROM platform.current_policy_memberships WHERE principal_id=$3)',
+              [tenantId, environmentId, principalId, permission],
+            );
+            assert.ok(revoked.rowCount);
+          };
+          await revoke(REPORT_EXPORT_PERMISSION);
+          const after = await run();
+          assert.ok(after.kind === 'page');
+          assert.deepEqual(
+            await run({ export: { resultDigest: after.resultDigest } }),
+            { kind: 'unavailable' },
+          );
+          await revoke(reportColumnPermission(id('currency')));
+          assert.deepEqual(await run(), { kind: 'unavailable' });
         } finally {
           await opened.close();
           await app.close();

@@ -42,10 +42,41 @@ function compileFixture() {
 
 /** Install a test's chosen first-party source directly after the retained bootstrap. */
 export function singleTransitionApplication(authored: Record<string, unknown>) {
-  const authoredPath = resolve('apps/web/release/app.authored.json');
   const { bootstrap } = parseCompiledApplication(
     JSON.parse(readFileSync('apps/web/release/app.compiled.json', 'utf8')),
   );
+  return {
+    authored,
+    release: {
+      schemaVersion: 'northstar.web:compiled-application-release/v1',
+      application: compileAfter(authored, bootstrap),
+      bootstrap: serializeRelease(bootstrap),
+    },
+  };
+}
+
+/** Stage a new first-party base above the exact lineage installed by the test. */
+export function nextPlatformRelease(
+  previous: unknown,
+  authored: Record<string, unknown>,
+) {
+  const { application, applications, bootstrap } =
+    parseCompiledApplication(previous);
+  return {
+    schemaVersion: 'northstar.web:compiled-application-release/v2',
+    applications: [
+      ...applications.map(serializeRelease),
+      compileAfter(authored, application),
+    ],
+    bootstrap: serializeRelease(bootstrap),
+  };
+}
+
+function compileAfter(
+  authored: Record<string, unknown>,
+  parent: ReturnType<typeof parseCompiledApplication>['bootstrap'],
+) {
+  const authoredPath = resolve('apps/web/release/app.authored.json');
   const normalized = normalizeApplicationPackage(authored);
   const normalizedDefinitionBytes = new TextEncoder().encode(
     canonicalize(normalized),
@@ -54,7 +85,7 @@ export function singleTransitionApplication(authored: Record<string, unknown>) {
     {
       kind: 'compilerInput',
       dependencies: [],
-      expectedActiveRelease: expectedActiveReleaseFrom(bootstrap.compiled),
+      expectedActiveRelease: expectedActiveReleaseFrom(parent.compiled),
       limits: { ...DEFAULT_COMPILER_LIMITS },
       normalizedDefinitionBytes,
       profile: {
@@ -72,12 +103,5 @@ export function singleTransitionApplication(authored: Record<string, unknown>) {
     compiled.status === 'compiled',
     JSON.stringify(compiled.status === 'compiled' ? [] : compiled.diagnostics),
   );
-  return {
-    authored,
-    release: {
-      schemaVersion: 'northstar.web:compiled-application-release/v1',
-      application: serializeRelease({ compiled, normalizedDefinitionBytes }),
-      bootstrap: serializeRelease(bootstrap),
-    },
-  };
+  return serializeRelease({ compiled, normalizedDefinitionBytes });
 }
