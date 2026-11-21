@@ -8,7 +8,8 @@ import {
   ReportChoicesSchema,
 } from '../../packages/canonical-model/src/index.js';
 import {
-  applyCustomizationPatches,
+  compileInSandbox,
+  serializeRelease,
   parseSerializedRelease,
 } from '../../packages/customization/src/index.js';
 import {
@@ -17,12 +18,17 @@ import {
 } from '../../packages/customization/src/report-revision.js';
 import type { StorageTargetPayloadV1 } from '../../packages/compiler/src/storage.js';
 import { PROJECTION_FAMILY_IDS } from '../../packages/compiler/src/index.js';
-import { singleTransitionApplication } from '../helpers/application-without-line-create-values.js';
+import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
+import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import { projectionPayload } from '../compiler/helpers.js';
-import { lowerDeclaredReports } from '../../packages/compiler/src/declared-reports.js';
+import type { RegisteredReport } from '../../packages/compiler/src/declared-reports.js';
 import { readGroupedSnapshot } from '../../packages/postgres-provider/src/grouped-report.js';
 import { REPORT_READER_POLICY } from '../../packages/runtime/src/declared-report.js';
-import { firstPartyAuthored } from '../helpers/customization-fixture.js';
+import {
+  firstPartyAuthored,
+  compiledApplication,
+  authoredPath,
+} from '../helpers/customization-fixture.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 
 test('the PostgreSQL Invoice candidate probe uses the named date index and stops at cap plus one before any residual, even with hidden facts', async () => {
@@ -61,18 +67,33 @@ test('the PostgreSQL Invoice candidate probe uses the named date index and stops
       outputs: [{ kind: 'table' }, { kind: 'csv' }],
     }),
   );
-  const applied = applyCustomizationPatches(firstPartyAuthored, [patch]);
-  assert.ok(applied.status === 'applied');
-  const definition = normalize(applied.authored);
-  const candidate = singleTransitionApplication(applied.authored);
+  const candidate = await compileInSandbox({
+    base: firstPartyAuthored,
+    tip: serializeRelease(
+      parseCompiledApplication(compiledApplication).application,
+    ),
+    chain: [patch],
+    acknowledgement: readUnboundPermissionAcknowledgementFor(
+      authoredPath,
+      'northstar.app:package.application',
+    ),
+  });
+  assert.ok(
+    candidate.status === 'compiled',
+    JSON.stringify(candidate.status === 'compiled' ? [] : candidate),
+  );
+  const compiled = parseSerializedRelease(candidate.steps[0]!.release).compiled;
   const storage = projectionPayload<StorageTargetPayloadV1>(
-    parseSerializedRelease(candidate.release.application).compiled,
+    compiled,
     PROJECTION_FAMILY_IDS.storageTarget,
   );
   const entity = storage.entities.find(
     (e) => e.entityId === target.source.entityId,
   )!;
-  const [report] = lowerDeclaredReports(definition, storage);
+  const [report] = projectionPayload<{ groupedReports: RegisteredReport[] }>(
+    compiled,
+    PROJECTION_FAMILY_IDS.queryCatalog,
+  ).groupedReports;
   assert.ok(report);
   const { table, index, keys } = report.accessPath;
   const col = (local: string) =>

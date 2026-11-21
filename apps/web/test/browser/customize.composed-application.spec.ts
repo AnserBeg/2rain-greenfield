@@ -825,8 +825,8 @@ test('a person groups Inspection outcomes, renames and retires the report, and r
         await page.goto(editor.href);
         await page.getByLabel('Report name').fill('Inspections by outcome');
         await page
-          .getByLabel('Group 1', { exact: true })
-          .selectOption(outcome.operand.fieldId);
+          .getByRole('combobox', { name: 'Group 1', exact: true })
+          .selectOption({ label: 'Outcome' }, { timeout: 15_000 });
         await page
           .getByRole('button', { name: 'Draft report', exact: true })
           .click();
