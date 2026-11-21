@@ -3406,8 +3406,7 @@ async function readMapCandidates(
   const direction = body.order.direction === 'asc' ? 'ASC' : 'DESC';
   const result = await client.query(
     `WITH candidates AS MATERIALIZED (
-    SELECT * FROM north_star_module.${quoted(entity.physicalTableName)} WHERE ${predicates.join(' AND ')}
-    ORDER BY ${id} LIMIT 513
+    ${selectSql(entity, predicates, `ORDER BY ${id} LIMIT 513`)}
   ) SELECT candidates.*, ${group}::text AS map_group, ${order} IS NOT NULL AS map_ordered,
     row_number() OVER (PARTITION BY ${group} ORDER BY ${order} ${direction} NULLS LAST,${id}) AS map_ordinal
     FROM candidates ORDER BY map_group NULLS LAST,map_ordinal`,

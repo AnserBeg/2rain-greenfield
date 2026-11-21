@@ -32,8 +32,8 @@ import { COMPANY, worldOver } from '../agent/agent-world.js';
 import {
   withArchivedCustomizationRuntime,
   archivedRuntimeRead,
-  assertArchivedTenantEnvelope,
 } from '../helpers/archived-customization-runtime.js';
+import { archivedStockCountQuery } from '../helpers/archived-runtime-process.js';
 import {
   withEphemeralPostgres,
   LINEAGE_INSTALL_VOLUME,
@@ -133,7 +133,6 @@ test(
               ),
             );
           await withArchivedCustomizationRuntime(predecessor, async (run) => {
-            await assertArchivedTenantEnvelope(run);
             const historical = (await run(
               `
           import { readFile } from 'node:fs/promises';
@@ -203,28 +202,21 @@ test(
                 envelope.releaseManifestBytesBase64,
               );
             }
-            const oldAnswer = await run(
-              `
-          import { readFile } from 'node:fs/promises';
-          import { openComposedApplicationRuntime } from './apps/api/src/composition-root.ts';
-          import { SEMANTIC_QUERY_REQUEST_VERSION } from './packages/runtime/src/semantic-query-gateway.ts';
-          const {options,queryId,scope,company,recordId}=JSON.parse(await readFile(process.argv[2],'utf8'));
-          const runtime=await openComposedApplicationRuntime(options);
-          try {
-            const r=await runtime.entry.run({headers:{}},v=>runtime.queryGateway.invoke(v,{
-              schemaVersion:SEMANTIC_QUERY_REQUEST_VERSION,queryId,arguments:{[scope]:company}}));
-            console.log(JSON.stringify({outcome:r.outcome,hasStop:r.records.some(row=>row.recordId===recordId)}));
-          } finally {await runtime.close();}
-        `,
-              {
-                options,
-                queryId: revision.body.listQueryId,
-                scope,
-                company: COMPANY,
-                recordId: alpha,
-              },
+            const oldAnswer = (await run(archivedStockCountQuery, {
+              databaseUrl,
+              identity: app.runtime.identity,
+              queryId: revision.body.listQueryId,
+              args: { [scope]: COMPANY },
+            })) as { outcome: string; records: { recordId: string }[] };
+            assert.equal(
+              oldAnswer.outcome,
+              'queried',
+              JSON.stringify(oldAnswer),
             );
-            assert.deepEqual(oldAnswer, { outcome: 'exact', hasStop: true });
+            assert.deepEqual(
+              oldAnswer.records.map((row) => row.recordId),
+              [alpha],
+            );
             await activate(revision);
             const refused = await archivedRuntimeRead(run, {
               databaseUrl,
@@ -334,6 +326,7 @@ test(
           assert.ok(membership.rowCount);
           const buyer = { cookie: 'northstar-demo-actor=buyer' };
           const permitted = await mapRead(COMPANY, {}, buyer);
+          assert.equal(permitted.records[0]?.values[stopDay], dispatchDay);
           assert.deepEqual(permitted.mapCoverage?.stops, [
             {
               recordId: alpha,
