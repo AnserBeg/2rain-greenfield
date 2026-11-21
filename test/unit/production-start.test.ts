@@ -68,3 +68,62 @@ test('SPEED-1 compiled start: workspace TypeScript resolves to dist; third-party
   );
   assert.equal(seen.at(-1)?.parentURL, compiledParent);
 });
+
+test('the compiled sandbox launcher resolves its fork and loader from the workspace', async (t) => {
+  const { mkdtemp, mkdir, symlink, writeFile, rm, readFile } =
+    await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const ts = await import('typescript');
+  const temporary = await mkdtemp(join(tmpdir(), 'workflow-compiled-launch-'));
+  t.after(() => rm(temporary, { recursive: true, force: true }));
+  await symlink(resolvePath('packages'), join(temporary, 'packages'));
+  const out = join(temporary, 'dist/packages/customization/src');
+  await mkdir(out, { recursive: true });
+  await writeFile(join(temporary, 'dist/package.json'), '{"type":"module"}');
+  const source = await readFile(
+    resolvePath('packages/customization/src/sandbox.ts'),
+    'utf8',
+  );
+  await writeFile(
+    join(out, 'sandbox.js'),
+    ts.transpileModule(source, {
+      compilerOptions: {
+        target: ts.ScriptTarget.ES2022,
+        module: ts.ModuleKind.ESNext,
+      },
+    }).outputText,
+  );
+  const compiled = (await import(
+    pathToFileURL(join(out, 'sandbox.js')).href
+  )) as typeof import('../../packages/customization/src/sandbox.js');
+  for (const kind of ['verifyWorkflowDraft', 'compile'] as const) {
+    const marker = new Error('observed launch');
+    assert.throws(
+      () =>
+        compiled.runSandboxRequest(
+          kind,
+          {},
+          {
+            launch: (path, argv) => {
+              assert.ok(path.startsWith(join(temporary, 'packages/')));
+              assert.ok(
+                argv.includes(
+                  pathToFileURL(
+                    join(
+                      temporary,
+                      'packages/customization/src/sandbox-loader.mjs',
+                    ),
+                  ).href,
+                ),
+              );
+              throw marker;
+            },
+          },
+          { heapLimitMegabytes: 512, wallClockLimitMilliseconds: 30000 },
+          (v) => v,
+        ),
+      marker,
+    );
+  }
+});

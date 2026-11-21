@@ -93,16 +93,23 @@ export interface SandboxRunnerOptions {
   readonly wallClockLimitMilliseconds?: number;
 }
 
-const workerPath = fileURLToPath(
-  new URL('./sandbox-worker.ts', import.meta.url),
+// The production entry lives under dist/. Its workspace dependencies and the
+// fork's native TypeScript loader are installed alongside the source packages.
+const root = new URL(
+  import.meta.url.endsWith('.ts') ? '../../../' : '../../../../',
+  import.meta.url,
 );
+const workers = {
+  compile: 'packages/customization/src/sandbox-worker.ts',
+  verifyWorkflowDraft:
+    'packages/postgres-provider/src/workflow-draft-worker.ts',
+} as const;
 
 export async function compileInSandbox(
   request: SandboxRequest,
   options: SandboxRunnerOptions = {},
 ): Promise<SandboxResponse> {
   return runSandboxRequest(
-    workerPath,
     'compile',
     request,
     options,
@@ -113,7 +120,6 @@ export async function compileInSandbox(
 
 /** A fresh fork and the same closed environment for every protocol request. */
 export function runSandboxRequest<T>(
-  path: string,
   kind: 'compile' | 'verifyWorkflowDraft',
   request: unknown,
   options: SandboxRunnerOptions,
@@ -131,7 +137,7 @@ export function runSandboxRequest<T>(
     options.wallClockLimitMilliseconds ?? Infinity,
     limits.wallClockLimitMilliseconds,
   );
-  const root = new URL('../../../', import.meta.url);
+  const path = fileURLToPath(new URL(workers[kind], root));
   const execArgv = [
     `--max-old-space-size=${heap}`,
     '--permission',
@@ -141,7 +147,7 @@ export function runSandboxRequest<T>(
     ),
     '--experimental-transform-types',
     '--import',
-    new URL('./sandbox-loader.mjs', import.meta.url).href,
+    new URL('packages/customization/src/sandbox-loader.mjs', root).href,
   ];
   const environment = { NORTH_STAR_SANDBOX_WALL_CLOCK_MS: String(wallClock) };
   const child = (options.launch ?? defaultLaunch)(path, execArgv, environment);

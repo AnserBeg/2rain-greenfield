@@ -737,3 +737,31 @@ test('a workflow review gesture binds the observed release fence, draft and rend
   assert.notEqual(shown, workflowReviewDecision('other', 'digest', pointer));
   assert.notEqual(shown, workflowReviewDecision('draft', 'other', pointer));
 });
+
+test('the parent refuses a passed verification response missing the requested journal', async () => {
+  const { fork } = await import('node:child_process');
+  await assert.rejects(
+    verifyWorkflowBundle(
+      view,
+      { operations: [], queries: [] },
+      {
+        body: 'sdk.now();',
+        fixtures: [
+          { event, effects: [{ call: { kind: 'now' }, result: day }] },
+        ],
+      },
+      {
+        launch: (_path, _argv, env) =>
+          fork('unused', [], {
+            env,
+            execArgv: [
+              '-e',
+              `process.on('message',({protocol}) => process.send({protocol,response:JSON.stringify({status:'passed',executable:'function run(){}',journals:[],coverage:[],sites:[]})}));`,
+            ],
+            stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
+          }),
+      },
+    ),
+    /mismatched fixture journal/,
+  );
+});

@@ -8,7 +8,6 @@ import {
   WorkflowVerificationResultSchema,
   type WorkflowBodyBundle,
 } from '../../customization/src/workflow-draft.js';
-import { fileURLToPath } from 'node:url';
 import {
   runSandboxRequest,
   type SandboxRunnerOptions,
@@ -82,7 +81,6 @@ export async function verifyWorkflowBundle(
     })),
   };
   const result = await runSandboxRequest(
-    fileURLToPath(new URL('./workflow-draft-worker.ts', import.meta.url)),
     'verifyWorkflowDraft',
     request,
     options,
@@ -100,6 +98,27 @@ export async function verifyWorkflowBundle(
     if (result.removedAction) throw new RemovedWorkflowAction();
     throw new Error(result.message);
   }
+  if (
+    result.coverage.length !== request.fixtures.length ||
+    result.journals.length !== request.fixtures.length ||
+    request.fixtures.some(({ effects }, i) => {
+      const journal = result.journals[i]!;
+      const coverage = result.coverage[i]!;
+      return (
+        journal.length !== effects.length ||
+        coverage.length !== effects.length ||
+        effects.some(
+          ({ call, result: mock }, n) =>
+            journal[n]?.request !== canonicalize(call) ||
+            journal[n]?.result !== canonicalize(mock) ||
+            result.sites[coverage[n]!] === undefined,
+        )
+      );
+    })
+  )
+    throw new Error(
+      'Workflow verification returned an incomplete or mismatched fixture journal',
+    );
   return { sdk, ...result };
 }
 
