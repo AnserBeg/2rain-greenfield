@@ -410,6 +410,74 @@
           "expected": "'cancelled'"
         }
       ]
+    },
+    {
+      "name": "owner-identity-order",
+      "claim": "Fresh owner cursors are created in the same global identity order as kit writers.",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "ORDER BY (identity).entity_id,(identity).record_id LOOP",
+      "replacement": "ORDER BY (identity).record_id,(identity).entity_id LOOP",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "fencing fresh owners acquires their identity rows in the same entity and record order as kit writers",
+          "expected": "example.booking:entity.account"
+        }
+      ]
+    },
+    {
+      "name": "planned-history",
+      "claim": "Backdated handover charges historical occupation even without a possession leg.",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "h.after_fact->>'resource_key'=d.resource_key::text AND from_time<lower(f.occupied_interval)",
+      "replacement": "false AND from_time<lower(f.occupied_interval)",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "a backdated start checks historical scheduled occupation from before its own live claim",
+          "expected": "booking.historicalOverlap"
+        }
+      ]
+    },
+    {
+      "name": "late-handover",
+      "claim": "Late recovery refuses capacity already allocated for the new handover.",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "OR\n       (NOT planned AND b.state IN ('hold','confirmed')",
+      "replacement": "OR\n       (false AND b.state IN ('hold','confirmed')",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "a timed tracked absence recovers at its effective start only while the handover still fits",
+          "expected": "booking.capacityTaken"
+        }
+      ]
+    },
+    {
+      "name": "compiler-steward",
+      "claim": "The compiler requires the released correction operation to name its steward permission.",
+      "file": "packages/canonical-model/src/booking.ts",
+      "original": "? permission.permissionId !== steward.permissionId",
+      "replacement": "? false",
+      "test": {
+        "files": ["test/postgres/booking-serving.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-serving.test.ts",
+          "name": "the compiler requires a distinct steward write for a correction and admits its separate 90-day age",
+          "expected": "'compiled'"
+        }
+      ]
     }
   ]
 }
