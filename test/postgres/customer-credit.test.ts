@@ -422,13 +422,15 @@ test('tenant-wide customer read with a restricted company list withholds credit 
       assert.ok(result.readBack);
       return result.readBack.recordId;
     };
-    const seedOpenInvoice = async (company: string, balance: string) => {
-      const order = await create('sales_order', company, {
+    const draftOrder = (company: string) =>
+      create('sales_order', company, {
         customer_party_id: customer,
         order_date: now,
         currency: 'CAD',
         ...shipTo,
       });
+    const seedOpenInvoice = async (company: string, balance: string) => {
+      const order = await draftOrder(company);
       const id = await create(
         'customer_invoice',
         company,
@@ -459,10 +461,10 @@ test('tenant-wide customer read with a restricted company list withholds credit 
         ],
       );
       assert.equal(seeded.rowCount, 1);
-      return order;
     };
-    const ownOrder = await seedOpenInvoice(scope, '5000');
+    await seedOpenInvoice(scope, '5000');
     await seedOpenInvoice(other.recordId, '80000');
+    const ownOrder = await draftOrder(scope);
     await kit.setCredit({ credit_limit: '50000' });
     const full = {
       credit_limit: '50000.00',

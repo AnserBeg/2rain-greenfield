@@ -212,26 +212,16 @@ export class PostgresAddresses implements AddressGateway {
     );
   }
   async installations(view: RequestRuntimeView) {
+    // The installation read policy filters by the trusted principal's live
+    // company memberships on this connection.
     return this.tx(
       view,
       async (c) =>
         (
           await c.query<AddressInstallation>(
-            `SELECT i.company_id AS "companyId", i.installation_id AS "installationId",
-                    i.account, i.provider, i.enrichment
-               FROM platform.address_installations AS i
-              WHERE i.tenant_id = $1 AND i.environment_id = $2 AND i.enabled
-                AND EXISTS (
-                  SELECT 1
-                    FROM platform.current_policy_memberships AS m
-                    JOIN platform.current_policy_roles AS r
-                      USING (tenant_id, environment_id, role_id)
-                   WHERE m.tenant_id = i.tenant_id AND m.environment_id = i.environment_id
-                     AND m.principal_id = $3 AND m.revoked_at IS NULL AND r.revoked_at IS NULL
-                     AND (m.legal_entity_id IS NULL OR m.legal_entity_id = i.company_id)
-                )
-              ORDER BY i.account, i.company_id`,
-            [view.tenantId, view.environmentId, view.principalId],
+            `SELECT company_id AS "companyId", installation_id AS "installationId", account,provider,enrichment
+      FROM platform.address_installations WHERE tenant_id=$1 AND environment_id=$2 AND enabled ORDER BY account,company_id`,
+            [view.tenantId, view.environmentId],
           )
         ).rows,
     );
