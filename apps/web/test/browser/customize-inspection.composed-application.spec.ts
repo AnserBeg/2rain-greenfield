@@ -24,6 +24,7 @@ import {
 import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../../../packages/runtime/src/semantic-query-gateway.js';
 import {
   archivedRuntimeRead,
+  draftBeforeCompanyAccessIndex,
   withArchivedCustomizationRuntime,
 } from '../../../../test/helpers/archived-runtime-process.js';
 import {
@@ -34,7 +35,6 @@ import {
   inspectionStates,
   inspectionTransitions,
 } from '../../../../test/fixtures/inspection-customization.js';
-import { draftBeforeCompanyAccessIndex } from '../../../../test/helpers/pre-index-customization-draft.js';
 import { inspectionLinkRecords } from '../../../../test/fixtures/inspection-link-records.js';
 import {
   LINEAGE_INSTALL_VOLUME,

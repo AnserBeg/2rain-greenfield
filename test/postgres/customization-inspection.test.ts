@@ -6,7 +6,7 @@ import {
   openCustomizeService,
   startComposedApplication,
 } from '../../apps/api/src/composition-root.js';
-import { draftBeforeCompanyAccessIndex } from '../helpers/pre-index-customization-draft.js';
+import { draftBeforeCompanyAccessIndex } from '../helpers/archived-runtime-process.js';
 import { OperationsAgentSession } from '../../packages/operations-agent/src/session.js';
 import { COMPANY, worldOver, seededId } from '../agent/agent-world.js';
 import {
