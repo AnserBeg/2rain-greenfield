@@ -3115,7 +3115,7 @@ end-to-end support, not merely a DSL keyword.
 | Event and effect      | typed domain events, transactional outbox, idempotent consumers, retries, dead-letter/reconciliation, subscriptions                            |
 | Workflow              | trigger, steps, branching, wait, timer, approval, human task, service task, compensation, versioned instance semantics; authored as sandboxed TypeScript bodies (section 12.5) |
 | Schedule              | one-time/recurring schedules, tenant timezone, catch-up policy, concurrency, cancellation, observability                                       |
-| Surface               | navigation, list, detail, form, table, child collection, board, calendar, dashboard, document, mobile workflow, accessible component registry  |
+| Surface               | navigation, list, detail, form, table, child collection, board, calendar, resource timeline, map, planner, dashboard, document, mobile workflow, accessible component registry  |
 | Search and reporting  | registered search projections, dimensions/measures, aggregates, drill-through, exports, governed ad hoc analysis                               |
 | Documents             | templates, generated documents, attachments, versions, signatures, retention, business-object linking                                          |
 | Communication         | threads, participants, messages, templates, channel policy, consent, provider delivery, inbound correlation, attachments, retention            |

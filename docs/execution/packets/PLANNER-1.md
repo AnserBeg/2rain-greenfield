@@ -1,33 +1,45 @@
-# PLANNER-1 — map stops and schedule a job on a resource
+# PLANNER-1 — map stops and schedule work on a dispatch desk
 
-**Slice 0 · 2026-11-21 · proposed design.** The owner chartered this packet for the N4 Surface family. The orchestrator’s independent Fable read precedes implementation and merge. This checkpoint changes documentation only.
+**Slice 0 · docs only · 2026-11-21.** Fable returned REVISE on `11d0e030`. The single amendment round is ready for the targeted re-check of A1, A2, A3 and A5–A8. The owner receives the provider estimate for morning sign-off. [Amended ADR](../../decisions/ADR-0090-map-resource-assignment-and-planner-workspace.md)
 
-## Decisions for review
+## Amendments
 
-1. Render a bounded List as a static map and accessible stop list. An explicit next-stop relation establishes each route leg. [ADR-0090 §1](../../decisions/ADR-0090-map-resource-assignment-and-planner-workspace.md#1-draw-the-map-on-the-server)
-2. CONNECT-1 owns imagery and point provenance. Use an approved OSM installation for live imagery and preserve Google’s attributed-text fallback. [§2](../../decisions/ADR-0090-map-resource-assignment-and-planner-workspace.md#2-let-connect-1-own-imagery-and-disclosure)
-3. Extend CALENDAR-1’s timeline with a typed resource link, job interval and one atomic assignment operation. Booking retains its capacity and hidden-commitment rules. [§3](../../decisions/ADR-0090-map-resource-assignment-and-planner-workspace.md#3-bind-a-timeline-to-the-resource-the-company-uses)
-4. Compose Unassigned, Map and Timeline in one shell. Both a drop and the no-script Schedule form open the same Task for review and confirmation. [§4](../../decisions/ADR-0090-map-resource-assignment-and-planner-workspace.md#4-compose-the-desk-and-review-one-assignment)
-5. Authorize each binding, page by stable keys and meter the entire workspace against one SPEED-1 page budget. [§5](../../decisions/ADR-0090-map-resource-assignment-and-planner-workspace.md#5-bound-the-read-before-drawing)
-6. Builder and AI author the same immutable revisions. Each incompatible capability earns a rung and needs replay, reader and live drafting proofs. [§6](../../decisions/ADR-0090-map-resource-assignment-and-planner-workspace.md#6-publish-replay-and-retire-the-same-choices)
-
-## Slices and their acceptance cases
-
-| Slice | User-visible case |
+| Finding | Design decision |
 | --- | --- |
-| 0 · Design, this branch | Read the dispatcher scenario and inspect the three owner choices below. |
-| 1 · Many-record map | Page 101 stops, follow an authorized leg across pages, retain the unlocated pickup, exercise a provider outage and compare the 390 px list with the graphic. |
-| 2 · Any-resource timeline | After CALENDAR-1 3a and typed intervals, bind truck and technician record types. Race two assignments for the same job and retry the winner’s lost response. Expect one change and one receipt. |
-| 3 · Planner workspace | Schedule through a drop and through a keyboard-only Task, revoke a grant during review, then fill all three panels and measure the served request. |
+| A1 | Map and Planner have closed archetypes, named slots and compact projections. Plan §12.2 includes both and resource timeline. [Grammar](../../decisions/ADR-0090-map-resource-assignment-and-planner-workspace.md#1-draw-the-map-on-the-server) |
+| A2 | Recommend Geoapify API 25 at USD 109/month before tax for 20 users, 3,000 viewport renders and 1,000 address calls/day. One installation provides suggest, geocode and hosted OSM imagery. CONNECT-1 lands the viewport amendment and adapters. Google requires direct browser delivery. [Provider, terms and cost](../../decisions/ADR-0090-map-resource-assignment-and-planner-workspace.md#2-let-connect-1-own-imagery-and-disclosure) |
+| A3 | Apply the day, saved filters and route before the 100-stop cap. Pan/zoom queries the visible area. Page by group, stop order and key, with route-local pin numbers and a prompt to narrow. [Map limits](../../decisions/ADR-0090-map-resource-assignment-and-planner-workspace.md#5-bound-the-read-before-drawing) |
+| A4 | Slice 1 ships the §2a amendment for map-region pan/zoom and drag-to-pan, canonical URLs, three size presets, linked overlay pins and script-off navigation back to the map. |
+| A5 | One date drives all panels. The day opens on a 06:00–18:00 axis with 48 quarter-hour starts. Show on map seeks the authorized stop across pages. [Desk](../../decisions/ADR-0090-map-resource-assignment-and-planner-workspace.md#4-compose-the-desk-and-review-one-assignment) |
+| A6 | Slice 2 ships Schedule, Reschedule, Reassign and Unassign as one-job forms, including Needs time on an assigned row. Booking keeps its single-edge Change interval contract. |
+| A7 | Route-order v1 supports a sortable field (truck and interval start by default on the desk) and an explicit next-stop link. The latter has bounded edge, splice, cycle and fork rules. |
+| A8 | A job type declares an O1 assignment operation with a stable ID, write/confirm action, protected field pair and schema-backed Customize member. Views bind its released contract. [Operation and forms](../../decisions/ADR-0090-map-resource-assignment-and-planner-workspace.md#declare-the-operation-on-the-job-type) |
+| A9 | Exclusive capacity uses Booking. Ordinary diary review shows only visible overlapping work as an advisory. |
+| A10 | Shared rows carry a standing hidden-work notice. One Restricted map group covers all unreadable targets. A hidden next stop leaves no leg or list hint. |
+| A11 | Slice 3 widens behaviour eight under §2a. A drop selects the offered resource and start, then opens Schedule for explicit review. |
+| A12 | Per-slice, same-tenant/two-company controls isolate map/list/legend/fit/leg/image, queue, rows/bars, writer and decision fences. No new planner table is planned. [Controls](../../decisions/ADR-0090-map-resource-assignment-and-planner-workspace.md#delivery-after-the-targeted-check) |
+| A13 | Builder and drafter name unsupported multi-resource jobs, to-many crews, related addresses, live position, bulk moves, bar-body drag and whole-plan publishing. A Route may have its own draft/published lifecycle. |
+| A14 | Each slice names its executable dependencies, rungs and stops. Retiring a referenced child refuses the candidate. Escalate a whole-desk budget over 40 statements. |
+| A15 | Take the next free ADR number on freshly fetched main at merge and update every reference. The ledger and walkthrough identify `11d0e030` as the reviewed tip. |
+
+**S1–S5 adopted.** Measure the 160-stop day against the 100-segment cap, allow saved resource filters, offer Schedule in the map list, report “7 of 12 on the map” at compact width, and keep company/viewer data out of the public basemap cache key.
+
+## Slices and acceptance cases
+
+1. **Map.** Consume CONNECT-1 Address and its next viewport slice. In the enabled local demo, save ordinary addresses and see real geocoded pins over an attributed basemap. A fake-only checkpoint stays blocked.
+2. **Any-resource timeline.** After CALENDAR-1 3a and executable ADR-0087 intervals, bind a truck type and a technician type. Exercise all four forms, race two dispatchers and retry a lost response. Expect one change and receipt. Stop if the writer cannot protect the field pair on every path.
+3. **Planner.** After slices 1–2 and CALENDAR-1 1b, schedule by drop and keyboard on separate fixtures. Verify the route, queue and bar after confirm, then advance the common day. Run compact, company and whole-page budget gates.
 
 ## Test it yourself
 
-From this checkout, run `git diff --stat 630e2aa6 16465cce` to see the complete design change. Open the [ADR](../../decisions/ADR-0090-map-resource-assignment-and-planner-workspace.md). Follow the pickup from the list to truck 12 at 09:00. The drop opens Schedule, the person supplies the finish and Confirm commits the reviewed interval. A competing dispatcher gets the current permitted state. In the same example with Google imagery unavailable, the dispatcher can still use the list and finish the Task.
+From the packet checkout, run `git diff --stat 630e2aa6 11d0e030` for the reviewed design and `git diff --stat 11d0e030 HEAD` for this amendment. Read the [dispatch walkthrough](../../decisions/ADR-0090-map-resource-assignment-and-planner-workspace.md#4-compose-the-desk-and-review-one-assignment) against these design checkpoints (under ten minutes).
 
-The [owner questions](../../decisions/ADR-0090-map-resource-assignment-and-planner-workspace.md#questions-for-the-owner) concern the first live basemap, the meaning of a route line and whether ordinary technician jobs can overlap.
+1. Open Today's north route. The stop list and pins use the same stop numbers. Pan north and the area query can reach a stop beyond the first 100. With script off a pin still opens its Record.
+2. Schedule a located pickup on truck 12 at 09:00, enter 10:30 and confirm. The pickup leaves the queue, appears on the 09:00 row and joins the truck's line from its stored start. Overlap review describes only jobs the dispatcher can read.
+3. Reassign the pickup to truck 7, reschedule it, then unassign it. Each form shows both old and proposed values. A stale second dispatcher sees the permitted current state. A failed background still leaves the list and forms usable.
 
 ## Gates
 
-The local slice gate `scripts/check-records.sh` passed. The CI reference below is the successful full run on the unchanged executable base, `630e2aa6`. The map, timeline and Task acceptance cases belong to future slices.
+`scripts/check-records.sh` passed for the docs-only amendment. The successful full CI reference below covers the unchanged executable base `630e2aa6`. The live map, writer and browser proofs belong to their executable slices.
 
 CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44880757599
