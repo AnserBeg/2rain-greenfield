@@ -2199,6 +2199,66 @@ test('booking commitment writer', async (t) => {
         },
       );
       await t.test(
+        'a late start refuses a completed scheduled appointment in the gap after a timed no-show',
+        async () => {
+          await time('2030-02-11T15:00Z');
+          const rental = await call(
+            left,
+            'holdTracked',
+            hold(75, 50, window('10:00', '11:00')),
+          );
+          const confirmed = await call(left, 'confirm', terms(75, rental));
+          assert.equal(confirmed.state, 'confirmed');
+          const state = async (booking: Result) =>
+            (
+              await admin.query(
+                'SELECT state,revision FROM platform.booking_commitments WHERE booking_id=$1',
+                [booking.bookingId],
+              )
+            ).rows[0];
+          await time('2030-02-11T18:00Z');
+          await admin.query('SELECT platform.booking_sweep_due(128)');
+          assert.deepEqual(await state(rental), {
+            state: 'noShow',
+            revision: 3,
+          });
+
+          await time('2030-02-11T18:05Z');
+          const visit = await call(
+            left,
+            'hold',
+            hold(76, 50, window('11:30', '12:00')),
+          );
+          assert.equal(
+            (await call(left, 'confirm', terms(76, visit))).state,
+            'confirmed',
+          );
+          await time('2030-02-11T19:00Z');
+          await admin.query('SELECT platform.booking_sweep_due(128)');
+          assert.deepEqual(await state(visit), {
+            state: 'completed',
+            revision: 3,
+          });
+
+          await time('2030-02-11T19:15Z');
+          const late = await call(left, 'start', {
+            ...terms(75, confirmed),
+            expectedRevision: 3,
+            effectiveAt: '2030-02-11T17:30Z',
+            reason: 'late handover report',
+          });
+          assert.equal(
+            late.refused,
+            'booking.capacityTaken',
+            JSON.stringify(late),
+          );
+          assert.deepEqual(await state(rental), {
+            state: 'noShow',
+            revision: 3,
+          });
+        },
+      );
+      await t.test(
         'a timed tracked absence recovers at its effective start only while the handover still fits',
         async () => {
           await time('2030-02-11T14:00Z');
