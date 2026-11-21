@@ -101,6 +101,9 @@ BEGIN
     VALUES(t,e,md5('steward')::uuid,'example.booking:permission.steward',owner_entity);
   INSERT INTO platform.current_policy_permission_grants(tenant_id,environment_id,role_id,permission_id,resource_id)
     VALUES(t,e,role,'example.booking:permission.usage',owner_entity);
+  INSERT INTO platform.current_policy_permission_grants(tenant_id,environment_id,role_id,permission_id,resource_id)
+    VALUES(t,e,role,'example.booking:permission.account_detail','example.booking:entity.account'),
+          (t,e,role,'example.booking:permission.account_usage','example.booking:entity.account');
   FOREACH family IN ARRAY ARRAY['operation-catalog','query-catalog','storage-target'] LOOP
     payload := CASE WHEN family='operation-catalog' THEN jsonb_build_object('kind','operationCatalogPayload','operations',ops)
       WHEN family='query-catalog' THEN jsonb_build_object('kind','queryCatalogPayload','queries',jsonb_build_array(
@@ -115,6 +118,14 @@ BEGIN
         jsonb_build_object('entityId','example.booking:entity.account','lifecycle','active','legalEntity',jsonb_build_object('column','legal_entity_id'),'physicalTableName','test_booking_parents'),
         jsonb_build_object('entityId',owner_entity,'lifecycle','active','legalEntity',jsonb_build_object('column','legal_entity_id'),'physicalTableName','test_booking_owners'),
         jsonb_build_object('entityId',target_entity,'lifecycle','active','physicalTableName','test_booking_resources'))) END;
+    IF family='query-catalog' THEN
+      payload:=jsonb_set(payload,'{queries}',(payload->'queries')||jsonb_build_array(
+        (payload#>'{queries,0}')||jsonb_build_object('queryId','example.booking:query.account_detail',
+          'sourceEntityId','example.booking:entity.account','permissionId','example.booking:permission.account_detail'),
+        jsonb_set((payload#>'{queries,1}')||jsonb_build_object('queryId','example.booking:query.account_usage',
+          'sourceEntityId','example.booking:entity.account','permissionId','example.booking:permission.account_usage'),
+          '{readModel,queries,owner,targetId}',to_jsonb('example.booking:query.account_detail'::text))));
+    END IF;
     chunk := encode(sha256(convert_to(payload::text,'UTF8')),'hex');
     manifest := encode(sha256(convert_to(family,'UTF8')),'hex');
     INSERT INTO platform.release_artifact_blobs VALUES

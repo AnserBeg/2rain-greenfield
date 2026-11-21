@@ -2231,6 +2231,40 @@ test('booking commitment writer', async (t) => {
           );
         },
       );
+      await t.test(
+        'fencing fresh owners acquires their identity rows in the same entity and record order as kit writers',
+        async () => {
+          await admin.query(`
+          CREATE TABLE public.booking_observed_owner_order (sequence bigint GENERATED ALWAYS AS IDENTITY,entity_id text);
+          CREATE FUNCTION public.observe_booking_owner_order() RETURNS trigger LANGUAGE plpgsql AS $$
+          BEGIN INSERT INTO public.booking_observed_owner_order(entity_id) VALUES(NEW.entity_id); RETURN NEW; END $$;
+          CREATE TRIGGER observe_identity AFTER INSERT ON platform.booking_owner_cursors FOR EACH ROW EXECUTE FUNCTION public.observe_booking_owner_order()`);
+          const [first, last] = [owner(74), owner(76)].sort();
+          const result = await bookingOwnerCursorFence(
+            left,
+            release,
+            activeFence,
+            [
+              { queryId: 'example.booking:query.usage', recordId: first! },
+              {
+                queryId: 'example.booking:query.account_usage',
+                recordId: last!,
+              },
+            ],
+          );
+          assert.deepEqual(
+            result.owners.map((o) => o.cursor),
+            ['0', '0'],
+          );
+          const order = await admin.query(
+            'SELECT entity_id FROM public.booking_observed_owner_order ORDER BY sequence',
+          );
+          assert.deepEqual(
+            order.rows.map((row) => row.entity_id),
+            ['example.booking:entity.account', 'example.booking:entity.visit'],
+          );
+        },
+      );
     } finally {
       issuer.release();
       left.release();

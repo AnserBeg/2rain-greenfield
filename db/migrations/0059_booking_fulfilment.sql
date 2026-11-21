@@ -1138,14 +1138,19 @@ DECLARE
 
 CREATE FUNCTION platform.booking_owner_cursor_fence(r uuid,fence_number bigint,owners jsonb)
 RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
-DECLARE own platform.booking_owner_cursors; entry jsonb; keys uuid[]:='{}'; result jsonb:='[]'; BEGIN
+DECLARE own platform.booking_owner_cursors; keys uuid[]:='{}'; result jsonb:='[]'; BEGIN
   PERFORM north_star_internal.booking_require_isolation();
   IF jsonb_typeof(owners) IS DISTINCT FROM 'array' OR jsonb_array_length(owners) NOT BETWEEN 1 AND 128 THEN RAISE EXCEPTION 'booking.invalidLimit'; END IF;
   PERFORM FROM platform.active_release_pointers WHERE
     (tenant_id,environment_id,release_id,fence)=(north_star_internal.trusted_tenant_id(),north_star_internal.trusted_environment_id(),r,fence_number) FOR SHARE;
   IF NOT FOUND THEN RAISE EXCEPTION 'booking.staleRelease'; END IF;
-  FOR entry IN SELECT value FROM jsonb_array_elements(owners) ORDER BY value->>'recordId',value->>'queryId' LOOP
-    own:=north_star_internal.booking_usage_owner(r,fence_number,entry->>'queryId',(entry->>'recordId')::uuid);
+  -- Creating absent identities also acquires a unique-index lock. Kit writers
+  -- initialize these same rows in entity/record order before locking by owner key.
+  FOR own IN
+    WITH resolved AS MATERIALIZED (
+      SELECT north_star_internal.booking_usage_owner(r,fence_number,entry->>'queryId',(entry->>'recordId')::uuid) AS identity
+      FROM jsonb_array_elements(owners) entry)
+    SELECT (identity).* FROM resolved ORDER BY (identity).entity_id,(identity).record_id LOOP
     IF own.owner_key IS NULL THEN
       INSERT INTO platform.booking_owner_cursors(tenant_id,environment_id,company_id,entity_id,record_id) VALUES
         (own.tenant_id,own.environment_id,own.company_id,own.entity_id,own.record_id) ON CONFLICT DO NOTHING;
