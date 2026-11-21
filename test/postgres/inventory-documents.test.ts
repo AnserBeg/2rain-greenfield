@@ -2,6 +2,12 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 
+import { workspaceList } from '../../apps/web/src/workspace-entry.js';
+import {
+  SEMANTIC_QUERY_REQUEST_VERSION,
+  SemanticQueryPolicyDeniedError,
+} from '../../packages/runtime/src/semantic-query-gateway.js';
+
 import {
   fulfillmentColumn,
   fulfillmentTable,
@@ -125,6 +131,195 @@ function canonical(value: unknown): string {
     ? text.replace(/(\.\d*?[1-9])0+$|\.0+$/u, '$1')
     : text;
 }
+
+test('company-scoped staff see only their companies and can open their own List and Record', async (t) => {
+  await withOrderEntryFixture(async (fixture) => {
+    const { app, pool, scope } = fixture;
+    const other = await fixture.create(
+      'legal_entity',
+      {
+        code: 'OTHER',
+        name: 'Other company',
+        status: `${ns}:option.legal_entity_status_active`,
+        is_default: false,
+      },
+      {},
+      false,
+    );
+    const draft = async (companyId: string) => {
+      const recordId = randomUUID();
+      const now = new Date().toISOString();
+      const result = await fixture.invoke(
+        'inventory_transaction_create',
+        {
+          recordId,
+          legalEntityId: companyId,
+          relations: {},
+          values: {
+            [field('actor_id')]: 'company-scope-test',
+            [field('effective_at')]: now,
+            [field('recorded_at')]: now,
+            [field('reason_code')]: 'SETUP',
+            [field('reason_narrative')]: 'Company scope specimen',
+            [field('source_id')]: recordId,
+            [field('source_type')]: 'inventoryTransaction',
+            [field('state')]: option('state_draft'),
+            [field('type')]: option('type_adjustment'),
+          },
+        },
+        undefined,
+        'manager',
+      );
+      assert.equal(result.outcome, 'succeeded');
+      assert.ok(result.readBack);
+      const number = result.readBack.values[field('number')];
+      assert.equal(typeof number, 'string');
+      return { recordId, number: String(number) };
+    };
+    const own = await draft(scope);
+    const foreign = await draft(other.recordId);
+    const headers = { cookie: 'northstar-demo-actor=buyer' };
+    const query = (local: string, args: Record<string, string> = {}) =>
+      app.runtime.entry.run({ headers }, (view) =>
+        app.runtime.queryGateway.invoke(view, {
+          schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+          queryId: `${ns}:query.${local}`,
+          arguments: args,
+        }),
+      );
+    const companyIds = async () =>
+      (await query('legal_entity_list')).records
+        .map((row) => row.recordId)
+        .sort();
+    assert.deepEqual(await companyIds(), [scope, other.recordId].sort());
+    const principalId = await app.runtime.entry.run(
+      { headers },
+      (view) => view.principalId,
+    );
+    const updated = await pool.query(
+      `UPDATE platform.current_policy_memberships
+          SET legal_entity_id = $4
+        WHERE tenant_id = $1 AND environment_id = $2 AND principal_id = $3
+          AND revoked_at IS NULL`,
+      [
+        app.runtime.identity.tenantId,
+        app.runtime.identity.environmentId,
+        principalId,
+        scope,
+      ],
+    );
+    assert.ok(updated.rowCount);
+
+    const loadPage = async (url: string) => {
+      const response = await fetch(url, { headers });
+      return {
+        url: response.url,
+        status: response.status,
+        html: await response.text(),
+      };
+    };
+    const listScope = `${ns}:parameter.inventory_document_list_legal_entity_scope`;
+    const pagePath = (company?: string, record?: string) => {
+      const url = new URL(app.baseUrl);
+      url.searchParams.set(
+        'surface',
+        `${ns}:surface.inventory_transaction_${record ? 'detail' : 'list'}`,
+      );
+      if (record) url.searchParams.set('record', record);
+      if (company)
+        url.searchParams.set(
+          record
+            ? `${ns}:parameter.inventory_transaction_get_legal_entity_scope`
+            : listScope,
+          company,
+        );
+      return url.href;
+    };
+
+    await t.test(
+      'both company list paths return only member companies',
+      async () => {
+        // The company switcher also checks each company's business query, so
+        // exercise the company list directly to catch a leak it would hide.
+        assert.deepEqual(
+          await companyIds(),
+          [scope],
+          'plain company list rows',
+        );
+        const sharedCompanyIds = await app.runtime.entry.run(
+          { headers },
+          async (view) =>
+            (
+              await workspaceList(
+                view,
+                app.runtime.queryGateway,
+                `${ns}:query.legal_entity_list`,
+                null,
+              )
+            ).map((row) => row.recordId),
+        );
+        assert.deepEqual(sharedCompanyIds, [scope], 'paged company list rows');
+      },
+    );
+    await t.test(
+      'a company membership does not grant other unscoped reads',
+      async () => {
+        await assert.rejects(
+          query('legal_entity_get', { recordId: scope }),
+          SemanticQueryPolicyDeniedError,
+        );
+        await assert.rejects(
+          query('party_list'),
+          SemanticQueryPolicyDeniedError,
+        );
+      },
+    );
+    await t.test('the List and Record open in the member company', async () => {
+      const list = await loadPage(pagePath());
+      assert.equal(list.status, 200);
+      assert.equal(new URL(list.url).searchParams.get(listScope), scope);
+      assert.ok(
+        list.html.includes(own.recordId),
+        'own stock document appears in the List',
+      );
+      assert.ok(
+        !list.html.includes(foreign.recordId),
+        'other stock document is absent from the List',
+      );
+      const switcher =
+        /<nav[^>]*aria-label="Company"[^>]*>([\s\S]*?)<\/nav>/u.exec(
+          list.html,
+        )?.[1];
+      assert.ok(switcher);
+      assert.deepEqual(
+        [...switcher.matchAll(/data-legal-entity-id="([^"]+)"/gu)].map(
+          (match) => match[1],
+        ),
+        [scope],
+      );
+
+      const record = await loadPage(pagePath(scope, own.recordId));
+      assert.equal(record.status, 200);
+      assert.ok(
+        record.html.includes(own.number),
+        'own stock document rendered',
+      );
+    });
+    await t.test('the List and Record refuse the other company', async () => {
+      for (const url of [
+        pagePath(other.recordId),
+        pagePath(other.recordId, foreign.recordId),
+      ]) {
+        const denied = await loadPage(url);
+        assert.equal(denied.status, 422);
+        assert.match(
+          denied.html,
+          /data-diagnostic-code="WORKSPACE_COMPANY_UNAVAILABLE"/u,
+        );
+      }
+    });
+  });
+});
 
 test(
   'INVENTORY-PARITY: a stock document is numbered by the server and posts as itself: an adjustment, a transfer and opening stock, each refused by name when wrong',
