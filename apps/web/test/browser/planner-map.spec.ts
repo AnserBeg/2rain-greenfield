@@ -154,6 +154,21 @@ test('dispatchers pan just the map, return with Back and can open each stop with
             `0 0 ${width} ${height}`,
           );
         }
+        const hit = canvas.locator('a .map-hit').first();
+        await hit.scrollIntoViewIfNeeded();
+        expect(
+          await hit.evaluate((el) => {
+            const rect = el.getBoundingClientRect();
+            return (
+              document
+                .elementFromPoint(
+                  rect.x + rect.width / 2 + 20,
+                  rect.y + rect.height / 2,
+                )
+                ?.closest('a') === el.closest('a')
+            );
+          }),
+        ).toBe(true);
         const zoom = canvas.getByRole('link', { name: 'Zoom out' });
         await zoom.focus();
         await tab.keyboard.press('Enter');

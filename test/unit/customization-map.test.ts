@@ -401,3 +401,10 @@ test('Map admission binds the reader, collection, selected fields, slots and con
     ),
   );
 });
+
+test('a Map beyond its candidate budget asks the dispatcher to narrow the search', () => {
+  const partial = renderMapStopList([], { partial: true }, null);
+  assert.match(partial, /Narrow the search/);
+  assert.doesNotMatch(partial, /No stops/);
+  assert.match(renderMapStopList([], { partial: false }, null), /No stops/);
+});

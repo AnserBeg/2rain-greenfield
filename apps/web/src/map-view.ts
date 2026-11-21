@@ -405,7 +405,9 @@ export function renderMapStopList(
       : '') +
     (items.length
       ? '<ol class="map-stops">' + items.join('') + '</ol>'
-      : '<p>No stops in this filter.</p>') +
+      : page.partial
+        ? ''
+        : '<p>No stops in this filter.</p>') +
     (nextUrl
       ? '<p role="status">Showing ' +
         items.length +
