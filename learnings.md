@@ -828,3 +828,9 @@ How to apply: Require a scoped human decision for a fence advance and its replay
 Date: 2026-11-20
 Why: A backdated successor reduced an eight-day entitlement below the amount already allocated after four days.
 How to apply: At each occurrence opening, select among the terms and assignments published by then. Save the inputs served to the caller and replay them after publishing a successor. [BILLING-1](docs/execution/packets/BILLING-1.md)
+
+## Check company-list coverage before stating a tenant-wide total
+
+Date: 2026-11-20
+Why: A tenant-wide customer reader with a company-scoped List could see partial receivables exposure as the full balance.
+How to apply: Carry the policy restriction on the list result, and leave totals unstated when the calculation needs every company. Exercise the mixed-grant principal with a balance in a company it cannot enumerate.

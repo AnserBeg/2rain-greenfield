@@ -26,6 +26,8 @@ import type {
 
 type Read = Pick<SemanticQueryGateway, 'invoke'>;
 
+class RestrictedCompanyListError extends Error {}
+
 /** A whole money amount in cents, or `null` for anything else. */
 function cents(value: ImmutableJsonValue | undefined): bigint | null {
   const parsed = parseExact(value);
@@ -39,9 +41,9 @@ function cents(value: ImmutableJsonValue | undefined): bigint | null {
  * A customer's credit position, read through the read model's declared
  * dependency queries under current policy (SALES-EXTRAS), in one currency
  * across every company of the tenant -- the same figures the receivables
- * capability checks when an order is confirmed. A withheld read of any
- * company's invoices or orders states no figures rather than a partial sum;
- * so does a confirmed order whose total cannot be stated.
+ * capability checks when an order is confirmed. A restricted company list
+ * withholds the entire position. A denied dependency or an unstated order
+ * total leaves the stored limit and hold visible while withholding exposure.
  */
 export async function readCreditPosition(input: {
   readonly view: RequestRuntimeView;
@@ -52,7 +54,7 @@ export async function readCreditPosition(input: {
   readonly party: SemanticRecordDto;
   /** The currency the figures are in: the order's, else the customer's. */
   readonly currency: string | null;
-}): Promise<CreditPosition> {
+}): Promise<CreditPosition | null> {
   const { view, gateway, namespace: ns } = input;
   const field = (name: string) => `${ns}:field.${name}`;
   const values = input.party.values;
@@ -102,36 +104,38 @@ export async function readCreditPosition(input: {
     const records: SemanticRecordDto[] = [];
     let cursor: string | null = null;
     do {
+      const result = await gateway.invoke(view, {
+        schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+        queryId: query.queryId,
+        arguments: {
+          includeArchived: false,
+          ...(query.legalEntityScope
+            ? { [query.legalEntityScope.operand.parameterId]: company }
+            : {}),
+          list: {
+            schemaVersion: SHARED_LIST_QUERY_VERSION,
+            cursor,
+            matchMode: 'substring',
+            pageSize: 100,
+            search: '',
+            sort: [],
+            relationLabels: [],
+            ...(list.parentScope ? { parentScope: list.parentScope } : {}),
+            ...(list.referenceScope
+              ? { referenceScope: list.referenceScope }
+              : {}),
+            ...(list.fieldFilters
+              ? { fieldFilters: list.fieldFilters.map((value) => value) }
+              : {}),
+          },
+        },
+      });
+      if (result.companyScopeRestricted) {
+        throw new RestrictedCompanyListError();
+      }
       const page: ReturnType<
         typeof requireSharedListResult<SemanticRecordDto>
-      > = requireSharedListResult(
-        await gateway.invoke(view, {
-          schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
-          queryId: query.queryId,
-          arguments: {
-            includeArchived: false,
-            ...(query.legalEntityScope
-              ? { [query.legalEntityScope.operand.parameterId]: company }
-              : {}),
-            list: {
-              schemaVersion: SHARED_LIST_QUERY_VERSION,
-              cursor,
-              matchMode: 'substring',
-              pageSize: 100,
-              search: '',
-              sort: [],
-              relationLabels: [],
-              ...(list.parentScope ? { parentScope: list.parentScope } : {}),
-              ...(list.referenceScope
-                ? { referenceScope: list.referenceScope }
-                : {}),
-              ...(list.fieldFilters
-                ? { fieldFilters: list.fieldFilters.map((value) => value) }
-                : {}),
-            },
-          },
-        }),
-      );
+      > = requireSharedListResult(result);
       const coverage = page.listCoverage;
       const scope = list.parentScope ?? list.referenceScope;
       const applied = list.parentScope
@@ -250,8 +254,10 @@ export async function readCreditPosition(input: {
     }
     return position(open, onOrder);
   } catch (error) {
-    if (!(error instanceof SemanticQueryPolicyDeniedError)) throw error;
-    return position(null, null);
+    if (error instanceof RestrictedCompanyListError) return null;
+    if (error instanceof SemanticQueryPolicyDeniedError)
+      return position(null, null);
+    throw error;
   }
 }
 

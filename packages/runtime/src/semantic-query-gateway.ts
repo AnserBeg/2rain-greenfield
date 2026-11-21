@@ -57,6 +57,26 @@ import {
   type SharedListCoverage,
 } from './list-behavior/index.js';
 
+export const COMPANY_LIST_QUERY = Object.freeze({
+  queryId: 'northstar.app:query.legal_entity_list',
+  permissionId: 'northstar.app:permission.legal_entity_read',
+  sourceEntityId: 'northstar.app:entity.legal_entity',
+  policyInputKind: 'registeredCompanyListPolicyInput',
+} as const);
+
+export function isCompanyListQuery(
+  definition: RegisteredSemanticQueryDefinition,
+): boolean {
+  return (
+    definition.queryId === COMPANY_LIST_QUERY.queryId &&
+    definition.permissionId === COMPANY_LIST_QUERY.permissionId &&
+    definition.sourceEntityId === COMPANY_LIST_QUERY.sourceEntityId &&
+    definition.queryType === 'list' &&
+    definition.legalEntityScope === undefined &&
+    definition.readModel === undefined
+  );
+}
+
 export const SEMANTIC_QUERY_REQUEST_VERSION =
   'northstar.semantic-query-request/v1' as const;
 export const SEMANTIC_QUERY_RESULT_VERSION =
@@ -108,6 +128,8 @@ export interface SemanticQueryResultEnvelope {
     readonly scanLimitReached: boolean;
   };
   readonly listCoverage?: SharedListCoverage;
+  /** The company list was limited by the principal’s company grants. */
+  readonly companyScopeRestricted?: true;
   readonly unsupportedReason: string | null;
 }
 
@@ -216,6 +238,10 @@ export interface SemanticQueryExecutionContext {
 
 export interface SemanticQueryExecutionRequest {
   readonly arguments: ImmutableJsonValue;
+  readonly companyListScope?: Readonly<{
+    legalEntityIds: readonly string[];
+    policyVersion: string;
+  }>;
   readonly context: TrustedRequestContext;
   readonly definition: RegisteredQueryDefinition;
   readonly filterPlans: readonly QueryFilterLoweringPlan[];
@@ -390,7 +416,12 @@ export class SemanticQueryGateway {
     if (!definition || definition.lifecycle !== 'active') return 'ineligible';
     for (const [permissionId, kind] of [
       [QUERY_BOUNDARY_PERMISSION_ID, 'semanticQueryPolicyInput'],
-      [definition.permissionId, 'registeredSemanticQueryPolicyInput'],
+      [
+        definition.permissionId,
+        isCompanyListQuery(definition)
+          ? COMPANY_LIST_QUERY.policyInputKind
+          : 'registeredSemanticQueryPolicyInput',
+      ],
     ] as const) {
       const decision = await authorizeCurrentPolicy(
         this.currentPolicy,
@@ -538,7 +569,9 @@ export class SemanticQueryGateway {
       definition.permissionId,
       Object.freeze({
         arguments: request.arguments,
-        kind: 'registeredSemanticQueryPolicyInput',
+        kind: isCompanyListQuery(definition)
+          ? COMPANY_LIST_QUERY.policyInputKind
+          : 'registeredSemanticQueryPolicyInput',
         queryId: request.queryId,
         requestId: view.requestId,
         schemaVersion: QUERY_POLICY_INPUT_VERSION,
@@ -701,6 +734,14 @@ export class SemanticQueryGateway {
       result = await this.executor.execute(
         Object.freeze({
           arguments: request.arguments,
+          ...(queryDecision.companyListLegalEntityIds === undefined
+            ? {}
+            : {
+                companyListScope: Object.freeze({
+                  legalEntityIds: queryDecision.companyListLegalEntityIds,
+                  policyVersion: queryDecision.policyVersion,
+                }),
+              }),
           context: trustedContextForRequestRuntimeView(view),
           definition,
           filterPlans: Object.freeze(filterPlans),
@@ -754,6 +795,12 @@ export class SemanticQueryGateway {
       assertRecordResultEnvelope(result);
     } else {
       assertAggregateResultEnvelope(result);
+    }
+    if (
+      result.kind === 'semanticQueryResult' &&
+      queryDecision.companyListLegalEntityIds !== undefined
+    ) {
+      return Object.freeze({ ...result, companyScopeRestricted: true });
     }
     return result;
   }
