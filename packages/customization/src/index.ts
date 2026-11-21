@@ -10,3 +10,9 @@ export * from './sandbox.js';
 export * from './targets.js';
 export * from './calculated-display-draft.js';
 export * from './ai-draft.js';
+
+export {
+  draftReport,
+  ReportDraftSchema,
+  type ReportTarget,
+} from './report-revision.js';

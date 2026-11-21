@@ -6,6 +6,8 @@ import { recordCatalogParse } from '../../../packages/runtime/src/catalog-parse-
 import {
   BoardPresentationSchema,
   SurfaceBoardSchema,
+  ReportRevisionSchema,
+  type ReportRevision,
   type BoardPresentation,
   type SurfaceBoard,
   canonicalize,
@@ -312,6 +314,7 @@ export function formFieldIds(
 }
 
 export interface CompiledSurfaceDefinition {
+  readonly report?: ReportRevision;
   readonly board?: SurfaceBoard;
   /** The Board's labels and roles, compiled from this release beside `board`. */
   readonly boardPresentation?: BoardPresentation;
@@ -1139,6 +1142,9 @@ function parseSurface(
   const fields = parseSurfaceFields(value, index);
 
   return Object.freeze({
+    ...(value.report
+      ? { report: ReportRevisionSchema.parse(value.report) }
+      : {}),
     ...(archetype === 'board'
       ? {
           board: SurfaceBoardSchema.parse(value.board),

@@ -1,3 +1,5 @@
+import { reportEditor, reportSubmission } from './customize-report.js';
+import type { ReportTarget } from '@north-star/customization';
 import type { AddressInstallation } from '../../../packages/runtime/src/address-gateway.js';
 import { canonicalizeAndHash, layoutDigest } from '@north-star/canonical-model';
 import {
@@ -62,6 +64,7 @@ interface CustomizationStatus {
   readonly patches: readonly ScreenPatch[];
 }
 interface CustomizationTargets {
+  readonly reports?: readonly ReportTarget[];
   readonly boards?: readonly BoardTarget[];
   readonly layouts?: readonly LayoutTarget[];
   readonly documentTargets?: readonly {
@@ -261,6 +264,19 @@ export async function renderCustomizeScreen(
           ? page('Arrange page', layoutEditor(target) + backLink())
           : failure('Choose an available page.');
       }
+      const report = url.searchParams.get('report');
+      if (report) {
+        const target = (await loadTargets()).reports?.find(
+          (r) => r.source.listSurfaceId === report,
+        );
+        return target
+          ? page(
+              'Report',
+              reportEditor(target, url.searchParams.get('editReport')) +
+                backLink(),
+            )
+          : failure('Report source unavailable.');
+      }
       const board = url.searchParams.get('board');
       if (board) {
         const target = (await loadTargets()).boards?.find(
@@ -305,27 +321,35 @@ export async function renderCustomizeScreen(
       case 'draft':
         return drafted(
           await service.draft(
-            submission.kind === 'addBoardViewRevision'
-              ? boardSubmission((await loadTargets()).boards ?? [], submission)
-              : submission.kind === 'addLayoutRevision'
-                ? layoutSubmission(
-                    (await loadTargets()).layouts ?? [],
+            submission.kind === 'addReportRevision'
+              ? reportSubmission(
+                  (await loadTargets()).reports ?? [],
+                  submission,
+                )
+              : submission.kind === 'addBoardViewRevision'
+                ? boardSubmission(
+                    (await loadTargets()).boards ?? [],
                     submission,
                   )
-                : patchFromForm(
-                    submission,
-                    submission.kind === 'addValidation'
-                      ? (await loadTargets()).validationTargets?.find(
-                          ({ entityId }) => entityId === submission.entity,
-                        )
-                      : undefined,
-                    submission.kind === 'addCalculatedDisplayField'
-                      ? (await loadTargets()).calculatedDisplayTargets?.find(
-                          ({ recordSurfaceId }) =>
-                            recordSurfaceId === submission.surface,
-                        )
-                      : undefined,
-                  ),
+                : submission.kind === 'addLayoutRevision'
+                  ? layoutSubmission(
+                      (await loadTargets()).layouts ?? [],
+                      submission,
+                    )
+                  : patchFromForm(
+                      submission,
+                      submission.kind === 'addValidation'
+                        ? (await loadTargets()).validationTargets?.find(
+                            ({ entityId }) => entityId === submission.entity,
+                          )
+                        : undefined,
+                      submission.kind === 'addCalculatedDisplayField'
+                        ? (await loadTargets()).calculatedDisplayTargets?.find(
+                            ({ recordSurfaceId }) =>
+                              recordSurfaceId === submission.surface,
+                          )
+                        : undefined,
+                    ),
             'visualBuilder',
             undefined,
             actor,
@@ -477,6 +501,9 @@ async function overview(
     '<p><a href="/?customize=address">Company address and map settings</a></p>',
     documentFieldForm(targets),
     choiceForm(targets),
+    targets.reports?.length
+      ? `<form method="get"><fieldset><legend>Reports</legend><input type="hidden" name="customize" value=""><label>Record type <select name="report">${targets.reports.map((t) => `<option value="${escapeHtml(t.source.listSurfaceId)}">${escapeHtml(t.label)}</option>`).join('')}</select></label> <button>Add report</button></fieldset></form>`
+      : '',
     targets.boards?.length
       ? `<form method="get"><fieldset><legend>Add view</legend><input type="hidden" name="customize" value=""><label>Record type <select name="board">${targets.boards.map((t) => `<option value="${escapeHtml(t.frame.listSurfaceId)}">${escapeHtml(t.listLabel)}</option>`).join('')}</select></label> <button>Add Board view</button></fieldset></form>`
       : '',

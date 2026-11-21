@@ -1,3 +1,5 @@
+import { lowerDeclaredReports } from './declared-reports.js';
+import { DECLARED_REPORT_READER } from '../../canonical-model/src/declared-report.js';
 import {
   BILLING_READER,
   BILLING_INTERVAL_READER,
@@ -380,6 +382,50 @@ export function lowerBaseProjectionPayloads(
         ...(calculatedFields.length > 0 ? { calculatedFields } : {}),
       }),
     );
+  }
+  if (
+    verificationPackageRevision.languageVersion === 'v6' &&
+    currentStorageTarget &&
+    verificationPackageRevision.surfaces.some((s) => s.report)
+  ) {
+    const registrations = lowerDeclaredReports(
+      verificationPackageRevision,
+      currentStorageTarget,
+    );
+    for (const projection of plans) {
+      if (projection.familyId === PROJECTION_FAMILY_IDS.surfaceManifest) {
+        projection.requiredRuntimeCapability = {
+          ...projection.requiredRuntimeCapability,
+          minimumVersion: Math.max(
+            DECLARED_REPORT_READER,
+            projection.requiredRuntimeCapability.minimumVersion,
+          ),
+        };
+      }
+      if (!registrations.length) continue;
+      if (projection.familyId === PROJECTION_FAMILY_IDS.queryCatalog)
+        projection.payload = {
+          ...(projection.payload as object),
+          groupedReports: registrations,
+        };
+      else if (
+        [
+          PROJECTION_FAMILY_IDS.reporting,
+          PROJECTION_FAMILY_IDS.verificationPlan,
+          PROJECTION_FAMILY_IDS.agentDiscovery,
+          PROJECTION_FAMILY_IDS.policyReferences,
+        ].some((f) => f === projection.familyId)
+      )
+        projection.payload = {
+          ...(projection.payload as object),
+          groupedReports: registrations.map((r) => ({
+            reportId: r.revision.reportId,
+            revisionId: r.revision.revisionId,
+            queryId: r.queryId,
+            surfaceId: r.surfaceId,
+          })),
+        };
+    }
   }
   if (documents) {
     const catalogs = new Set<ProjectionFamilyId>([
@@ -1207,6 +1253,9 @@ function surfaceManifestPayload(
                   },
           }),
           // Labels and roles render from this release, beside the digested member.
+          ...(declared && 'report' in declared && declared.report
+            ? { report: declared.report }
+            : {}),
           ...(declared && 'board' in declared && declared.board
             ? {
                 board: declared.board,

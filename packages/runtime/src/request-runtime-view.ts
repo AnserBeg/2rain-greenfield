@@ -10,7 +10,7 @@ import {
   type UntrustedRequestInput,
 } from './request-context.js';
 import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents.js';
-import { REPORT_SOURCE_READER } from '../../canonical-model/src/constants.js';
+import { DECLARED_REPORT_READER } from '../../canonical-model/src/declared-report.js';
 import {
   WORKFLOW_PROJECTION_FAMILY,
   WORKFLOW_RUNTIME_CAPABILITY,
@@ -234,7 +234,7 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 37 replaces Board v1 with Board v2: chosen stages, moves and facts by
     // stable ID with pinned contracts, labels from the release.
     // 38 admits the optional company access index on new record types.
-    maximumSupportedVersion: REPORT_SOURCE_READER,
+    maximumSupportedVersion: DECLARED_REPORT_READER,
   },
 });
 

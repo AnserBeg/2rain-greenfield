@@ -1,4 +1,6 @@
 import type { ReplayOrigin } from './upgrade-diagnostics.js';
+import { applyReportRevision, supersededReports } from './report-revision.js';
+import type { ReportCatalogSource } from '../../canonical-model/src/declared-report.js';
 import {
   applyBoardRevision,
   type BoardApplyProblem,
@@ -66,6 +68,7 @@ export type CustomizationRefusalCode =
   | 'CUSTOMIZE_LIST_VIEW_INVALID'
   | 'CUSTOMIZE_FIELD_NOT_ON_LIST'
   | 'CUSTOMIZE_BOARD_CONFLICT'
+  | 'CUSTOMIZE_REPORT_CONFLICT'
   | 'CUSTOMIZE_LAYOUT_CONFLICT';
 
 export interface CustomizationRefusal {
@@ -103,6 +106,7 @@ export function applyCustomizationPatches(
   const authored = structuredClone(base) as Json;
   const previous: SingleCustomizationPatch[] = [];
   const superseded = supersededBoardRevisions(patches);
+  const pastReports = supersededReports(patches);
   for (const [index, change] of patches.entries()) {
     const members = change.kind === 'changeSet' ? change.patches : [change];
     for (const patch of members) {
@@ -133,7 +137,14 @@ export function applyCustomizationPatches(
                   : ('authoring' as const),
             }
           : undefined;
-      const outcome = applyOne(authored, patch, previous, layoutReplay, board);
+      const outcome = applyOne(
+        authored,
+        patch,
+        previous,
+        layoutReplay,
+        board,
+        patch.kind === 'addReportRevision' && pastReports.has(patch.revisionId),
+      );
       if (outcome) return Object.freeze({ ...outcome, patchIndex: index });
       previous.push(patch);
     }
@@ -220,6 +231,7 @@ export function applyOne(
   board: { check: BoardCheck; problem?: BoardApplyProblem | undefined } = {
     check: 'authoring',
   },
+  reportIdentityOnly = false,
 ): Outcome | null {
   switch (patch.kind) {
     case 'addAddressField':
@@ -260,6 +272,24 @@ export function applyOne(
       return addLineTable(authored, patch);
     case 'declareLifecycle':
       return declareLifecycle(authored, patch);
+    case 'addReportRevision': {
+      if (
+        previous.some(
+          (p) =>
+            p.kind === 'addReportRevision' && p.revisionId === patch.revisionId,
+        )
+      )
+        return refusal(
+          'CUSTOMIZE_REPORT_CONFLICT',
+          'This report revision ID has already been used.',
+        );
+      const problem = applyReportRevision(
+        authored as unknown as ReportCatalogSource & { surfaces: Json[] },
+        patch,
+        reportIdentityOnly,
+      );
+      return problem ? refusal('CUSTOMIZE_REPORT_CONFLICT', problem) : null;
+    }
     case 'addBoardViewRevision': {
       const problem = previous.some(
         (p) =>

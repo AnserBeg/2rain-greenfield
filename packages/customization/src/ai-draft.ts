@@ -1,3 +1,5 @@
+import { z } from 'zod';
+import { ReportDraftSchema, draftReport } from './report-revision.js';
 import { defaultBoardChoices, draftBoardRevision } from './board-revision.js';
 import { layoutCommand } from './layout-revision.js';
 import { WorkflowDraftSchema, type WorkflowDraft } from './workflow-draft.js';
@@ -99,6 +101,7 @@ const fieldSchema = {
   required: ['label', 'type'],
 } as const;
 
+const reportDraftToolSchema = z.toJSONSchema(ReportDraftSchema);
 const singlePatchSchema = {
   type: 'object',
   properties: {
@@ -107,6 +110,7 @@ const singlePatchSchema = {
       enum: CUSTOMIZATION_CHANGE_MEMBER_KINDS,
     },
     label: { type: 'string' },
+    report: reportDraftToolSchema,
     fields: { type: 'array', items: fieldSchema },
     entity: { type: 'string' },
     target: { type: 'string' },
@@ -382,6 +386,23 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
       (form) =>
         `- ${form.surfaceId} — ${form.label}: ${form.fields.map((field) => `${field.fieldId} "${field.label}"`).join(', ')}`,
     ),
+    `- addReportRevision {kind,report}: ${JSON.stringify(reportDraftToolSchema)}`,
+    ...(targets.reports ?? []).map((target) =>
+      JSON.stringify({
+        source: target.source.listSurfaceId,
+        label: target.label,
+        reportFields: target.fields.map((f) => ({
+          fieldId: f.operand.fieldId,
+          label: f.label,
+          type: f.operand.type,
+          sum: !!(f.operand.currency || f.operand.unitId),
+          dateRange: !!f.operand.basis,
+        })),
+        existing: target.reports
+          .filter((r) => r.lifecycle === 'active')
+          .map((r) => ({ id: r.revision.reportId, label: r.label })),
+      }),
+    ),
     '- addBoardViewRevision {kind,surface,label,stageIds,operationIds,factFieldIds}: choose a listed collection, its ordered lifecycle stages, the moves offered between them (by operation ID) and up to three card facts (by field ID). Each choice is recorded by ID.',
     ...(targets.boards ?? []).map(
       (t) =>
@@ -522,6 +543,43 @@ function readToolInput(
   input: unknown,
   targets: CustomizationTargets,
 ): DraftedRequest {
+  if (
+    input &&
+    typeof input === 'object' &&
+    'kind' in input &&
+    input.kind === 'addReportRevision' &&
+    'report' in input
+  ) {
+    const proposal = ReportDraftSchema.safeParse(input.report);
+    if (!proposal.success)
+      return {
+        status: 'invalid',
+        issues: proposal.error.issues.map((i) => i.message),
+      };
+    const draft = proposal.data;
+    const target = targets.reports?.find(
+      (t) => t.source.listSurfaceId === draft.listSurfaceId,
+    );
+    if (!target)
+      return {
+        status: 'invalid',
+        issues: ['Choose an available report source.'],
+      };
+    try {
+      return {
+        status: 'parsed',
+        patch: draftReport(
+          target,
+          draft.label,
+          draft.choices,
+          draft.reportId,
+          draft.status,
+        ),
+      };
+    } catch (error) {
+      return { status: 'invalid', issues: [(error as Error).message] };
+    }
+  }
   if (
     input &&
     typeof input === 'object' &&

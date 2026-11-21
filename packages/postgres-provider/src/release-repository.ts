@@ -1,3 +1,5 @@
+import { lowerDeclaredReports } from '../../compiler/src/declared-reports.js';
+import { DECLARED_REPORT_READER } from '../../canonical-model/src/declared-report.js';
 import {
   BILLING_READER,
   BILLING_INTERVAL_READER,
@@ -618,6 +620,20 @@ function verifyCompiledRelease(
       'The company access index declaration and surface reader floor disagree.',
     );
   }
+  const hasReports =
+    isRecord(layoutDefinition) &&
+    Array.isArray(layoutDefinition.surfaces) &&
+    layoutDefinition.surfaces.some((s: unknown) => isRecord(s) && s.report);
+  if (
+    hasReports
+      ? surfaceFloor < DECLARED_REPORT_READER
+      : surfaceFloor === DECLARED_REPORT_READER
+  )
+    throw integrity(
+      'REPORT_READER_MISMATCH',
+      'Declared reports and the surface reader floor disagree.',
+    );
+  const reportInputs = new Map<string, unknown>();
   const sourceTerms = (value: unknown, activeOnly: boolean) => {
     if (!isRecord(value) || !Array.isArray(value.entities)) return [];
     return value.entities.flatMap((e: unknown) =>
@@ -768,6 +784,33 @@ function verifyCompiledRelease(
       projectionPayloadBytes,
     );
     if (
+      revision.languageVersion === 'v6' &&
+      [
+        PROJECTION_FAMILY_IDS.queryCatalog,
+        PROJECTION_FAMILY_IDS.policyReferences,
+        PROJECTION_FAMILY_IDS.reporting,
+        PROJECTION_FAMILY_IDS.agentDiscovery,
+        PROJECTION_FAMILY_IDS.verificationPlan,
+        PROJECTION_FAMILY_IDS.surfaceManifest,
+        PROJECTION_FAMILY_IDS.storageTarget,
+      ].some((f) => f === reference.familyId)
+    ) {
+      const payload = decodeCanonicalObject(
+        projectionPayloadBytes[0]!,
+        'PROJECTION_CHUNK_NOT_CANONICAL',
+      );
+      if (hasReports) reportInputs.set(reference.familyId, payload);
+      else if (
+        Object.hasOwn(payload, 'groupedReports') ||
+        (Array.isArray(payload.surfaces) &&
+          payload.surfaces.some((s: unknown) => isRecord(s) && s.report))
+      )
+        throw integrity(
+          'REPORT_DECLARATION_MISMATCH',
+          'A projection carries an undeclared report.',
+        );
+    }
+    if (
       reference.familyId === PROJECTION_FAMILY_IDS.reporting &&
       revision.languageVersion === 'v6'
     ) {
@@ -885,6 +928,72 @@ function verifyCompiledRelease(
     }
   }
 
+  if (hasReports) {
+    const def = parseNormalizedApplicationPackageJson(revision.desiredState);
+    if (def.languageVersion !== 'v6')
+      throw integrity(
+        'REPORT_DECLARATION_MISMATCH',
+        'Unexpected report language.',
+      );
+    const payload = (family: string) =>
+      reportInputs.get(family) as Record<string, unknown> | undefined;
+    const target = payload(PROJECTION_FAMILY_IDS.storageTarget);
+    if (!target)
+      throw integrity(
+        'REPORT_DECLARATION_MISMATCH',
+        'Missing report storage target.',
+      );
+    const registrations = lowerDeclaredReports(
+      def,
+      target as unknown as import('../../compiler/src/storage.js').StorageTargetPayloadV1,
+    );
+    const refs = registrations.map((r) => ({
+      reportId: r.revision.reportId,
+      revisionId: r.revision.revisionId,
+      queryId: r.queryId,
+      surfaceId: r.surfaceId,
+    }));
+    for (const family of [
+      PROJECTION_FAMILY_IDS.queryCatalog,
+      PROJECTION_FAMILY_IDS.policyReferences,
+      PROJECTION_FAMILY_IDS.reporting,
+      PROJECTION_FAMILY_IDS.agentDiscovery,
+      PROJECTION_FAMILY_IDS.verificationPlan,
+    ]) {
+      const catalog = payload(family);
+      const expected = registrations.length
+        ? family === PROJECTION_FAMILY_IDS.queryCatalog
+          ? registrations
+          : refs
+        : null;
+      if (
+        !catalog ||
+        canonicalize(catalog.groupedReports ?? null) !== canonicalize(expected)
+      )
+        throw integrity(
+          'REPORT_DECLARATION_MISMATCH',
+          'Report registration disagrees with ' + family,
+        );
+    }
+    const surfaceTerms = (surfaces: unknown) =>
+      Array.isArray(surfaces)
+        ? surfaces.flatMap((s: unknown) =>
+            isRecord(s) && s.report
+              ? [{ surfaceId: s.surfaceId, report: s.report }]
+              : [],
+          )
+        : [];
+    if (
+      canonicalize(surfaceTerms(def.surfaces)) !==
+      canonicalize(
+        surfaceTerms(payload(PROJECTION_FAMILY_IDS.surfaceManifest)?.surfaces),
+      )
+    )
+      throw integrity(
+        'REPORT_DECLARATION_MISMATCH',
+        'The grouped List disagrees with the declared report.',
+      );
+  }
   if (needsLayout) {
     const payload = (family: string) => {
       const bytes = layoutInputs.get(family);

@@ -183,3 +183,14 @@ export type { FormulaValidationRule } from './formula-validation-schema.js';
 export * from './address.js';
 
 export * from './booking.js';
+export {
+  ReportBodySchema,
+  ReportChoicesSchema,
+  ReportRevisionSchema,
+  type ReportBody,
+  type ReportChoices,
+  type ReportRevision,
+  type ReportSource,
+  type ReportCurrencyBinding,
+} from './schemas.js';
+export * from './grouped-aggregate.js';

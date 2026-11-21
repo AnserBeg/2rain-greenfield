@@ -1,3 +1,14 @@
+import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
+import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
+import { composedApplicationDefinition } from '../../packages/domain/src/app/builder.js';
+import {
+  reportTargets,
+  draftReport,
+} from '../../packages/customization/src/report-revision.js';
+import type { RegisteredReport } from '../../packages/compiler/src/declared-reports.js';
+import type { ReportCatalogSource } from '../../packages/canonical-model/src/declared-report.js';
 import { CURRENCY_MINOR_UNITS_V0 } from '../../packages/canonical-model/src/constants.js';
 import { evaluateGroupedFacts } from '../../packages/canonical-model/src/grouped-aggregate.js';
 import {
@@ -8,6 +19,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   COMPANY_ACCESS_INDEX,
+  ReportChoicesSchema,
   normalizeApplicationPackage,
   parseAuthoredApplicationPackageJson,
   COMPANY_ACCESS_INDEX_READER,
@@ -19,6 +31,9 @@ import {
 } from '../../packages/compiler/src/index.js';
 import {
   compileInSandbox,
+  applyCustomizationPatches,
+  type CustomizationPatch,
+  serializeRelease,
   CustomizationPatchSchema,
   parseSerializedRelease,
   preparePatchForRecording,
@@ -272,5 +287,179 @@ test('amount operands must resolve locally and fixed currencies require the stor
   assert.throws(
     make({ kind: 'stored', fieldId: SALES_IDS.stateFieldId, codes: ['EUR'] }),
     /CANON_REPORT_SOURCE_INVALID/u,
+  );
+});
+
+test('a report keeps selected contracts across list edits, renames and retirement, and refuses a removed operand or stale predecessor', () => {
+  const def = composedApplicationDefinition();
+  const catalog = def as unknown as ReportCatalogSource;
+  const target = reportTargets(catalog).find((t) =>
+    t.source.queryId.endsWith(':query.customer_invoice_list'),
+  )!;
+  const id = (end: string) =>
+    target.fields.find((f) => f.operand.fieldId.endsWith(end))!.operand.fieldId;
+  const choices = ReportChoicesSchema.parse({
+    dimensions: [{ kind: 'direct', fieldId: id('_customer_party_id') }],
+    filters: [{ kind: 'dateRange', fieldId: id('_invoice_date') }],
+    measures: [
+      {
+        kind: 'inline',
+        measureId: 'northstar.app:measure.custom_balance',
+        label: 'Balance',
+        operator: { kind: 'sum', fieldId: id('_balance') },
+      },
+    ],
+    outputs: [{ kind: 'table' }, { kind: 'csv' }],
+  });
+  const first = draftReport(target, 'Balance by customer', choices);
+  const apply = (base: unknown, chain: CustomizationPatch[]) =>
+    applyCustomizationPatches(base as Record<string, unknown>, chain);
+  const active = apply(def, [first]);
+  assert.equal(active.status, 'applied');
+  assert.ok(active.status === 'applied');
+  const nextTarget = reportTargets(
+    active.authored as unknown as ReportCatalogSource,
+  ).find((t) => t.source.queryId === target.source.queryId)!;
+  const rename = draftReport(
+    nextTarget,
+    'Customer balance',
+    undefined,
+    first.reportId,
+  );
+  const stale = apply(def, [
+    first,
+    rename,
+    { ...rename, revisionId: randomUUID() },
+  ]);
+  assert.equal(stale.status, 'refused');
+  const retire = draftReport(
+    nextTarget,
+    'Balance by customer',
+    undefined,
+    first.reportId,
+    'retired',
+  );
+  assert.equal(
+    apply(def, [first, retire, { ...rename, revisionId: randomUUID() }]).status,
+    'refused',
+  );
+  const relabel = structuredClone(catalog);
+  relabel.fields.find((f) => f.fieldId === id('_balance'))!.label =
+    'Open amount';
+  assert.equal(apply(relabel, [first, rename]).status, 'applied');
+  const removed = structuredClone(catalog);
+  removed.fields.find((f) => f.fieldId === id('_balance'))!.lifecycle =
+    'retired';
+  assert.deepEqual(apply(removed, [first]), {
+    status: 'refused',
+    code: 'CUSTOMIZE_REPORT_CONFLICT',
+    patchIndex: 0,
+    message: id('_balance'),
+  });
+  assert.equal(apply(removed, [first, retire]).status, 'applied');
+  const broken = {
+    ...first,
+    body: { ...first.body, outputs: [{ kind: 'chart' }] },
+  };
+  assert.equal(CustomizationPatchSchema.safeParse(broken).success, false);
+  assert.equal(
+    CustomizationPatchSchema.safeParse({
+      kind: 'changeSet',
+      patches: [first, broken],
+    }).success,
+    false,
+  );
+});
+
+test('report publish alone plans the Invoice date index in the approved attempt and registers a grouped query with the same physical key', async () => {
+  const def = composedApplicationDefinition();
+  const target = reportTargets(def as unknown as ReportCatalogSource).find(
+    (t) => t.source.queryId.endsWith(':query.customer_invoice_list'),
+  )!;
+  const field = (end: string) =>
+    target.fields.find((f) => f.operand.fieldId.endsWith(end))!.operand.fieldId;
+  const revision = draftReport(
+    target,
+    'Balances',
+    ReportChoicesSchema.parse({
+      dimensions: [{ kind: 'direct', fieldId: field('_customer_party_id') }],
+      filters: [{ kind: 'dateRange', fieldId: field('_invoice_date') }],
+      measures: [
+        {
+          kind: 'inline',
+          measureId: 'northstar.app:measure.custom_balance',
+          label: 'Balance',
+          operator: { kind: 'sum', fieldId: field('_balance') },
+        },
+      ],
+      outputs: [{ kind: 'table' }, { kind: 'csv' }],
+    }),
+  );
+  const app = parseCompiledApplication(
+    JSON.parse(readFileSync('apps/web/release/app.compiled.json', 'utf8')),
+  ).application;
+  const storage = (compiled: typeof app.compiled) =>
+    projectionPayload<StorageTargetPayloadV1>(
+      compiled,
+      PROJECTION_FAMILY_IDS.storageTarget,
+    );
+  assert.deepEqual(
+    storage(app.compiled)
+      .entities.find((e) => e.entityId === target.source.entityId)!
+      .indexes.filter((i) => i.indexKind === 'reportAccess'),
+    [],
+  );
+  const result = await compileInSandbox({
+    base: def,
+    tip: serializeRelease(app),
+    chain: [revision],
+    acknowledgement: readUnboundPermissionAcknowledgementFor(
+      'apps/web/release/app.authored.json',
+      'northstar.app:package.application',
+    ),
+  });
+  assert.ok(
+    result.status === 'compiled',
+    result.status === 'compiled' ? '' : JSON.stringify(result),
+  );
+  const { compiled } = parseSerializedRelease(result.steps[0]!.release);
+  const registrations = projectionPayload<{
+    groupedReports: RegisteredReport[];
+  }>(compiled, PROJECTION_FAMILY_IDS.queryCatalog).groupedReports;
+  assert.equal(registrations.length, 1);
+  const registration = registrations[0]!;
+  assert.equal(registration.profile, 'northstar.query-aggregate-profile/v2');
+  assert.equal(
+    registration.resultContract,
+    'northstar.grouped-query-result/v1',
+  );
+  assert.equal(registration.legalEntityScope!.cardinality, 'exactlyOne');
+  const entity = storage(compiled).entities.find(
+    (e) => e.entityId === target.source.entityId,
+  )!;
+  const [idx] = entity.indexes.filter((i) => i.indexKind === 'reportAccess');
+  assert.ok(idx);
+  assert.deepEqual(registration.accessPath, {
+    table: entity.physicalTableName,
+    index: idx.physicalName,
+    keys: [
+      'tenant_id',
+      'environment_id',
+      'legal_entity_id',
+      entity.columns.find((c) => c.canonicalFieldId === field('_invoice_date'))!
+        .physicalName,
+      'record_id',
+    ],
+  });
+  const elements = projectionPayload<StorageTransitionEnvelope>(
+    compiled,
+    PROJECTION_FAMILY_IDS.storageTransition,
+  ).elements.filter((e) => e.kind === 'createIndex');
+  assert.deepEqual(
+    elements.map((e) => [
+      e.physicalObjectName,
+      e.classification.preparationValidity,
+    ]),
+    [[idx.physicalName, 'deferredOnlineFamily']],
   );
 });

@@ -1,3 +1,4 @@
+import type { ReportRevision } from '../../canonical-model/src/schemas.js';
 import { createHash } from 'node:crypto';
 
 import {
@@ -833,8 +834,40 @@ export function lowerStorageTargetV1(
       const indexes: StorageIndexTarget[] = [];
       // The author's optional key is the only trigger. Recompiling an earlier
       // company-owned type must reproduce its original storage target exactly.
-      if ('companyAccessIndex' in entity && entity.companyAccessIndex) {
-        const columnNames = [...businessKeyScopeColumns, 'record_id'];
+      const reportKeys = new Map<string, string[]>();
+      const retainReportKey = (columns: string[]) =>
+        reportKeys.set(columns.join('/'), columns);
+      if ('companyAccessIndex' in entity && entity.companyAccessIndex)
+        retainReportKey([...businessKeyScopeColumns, 'record_id']);
+      for (const surface of packageRevision.surfaces) {
+        if (
+          !('report' in surface) ||
+          !surface.report ||
+          surface.lifecycle === 'retired'
+        )
+          continue;
+        const { body } = surface.report as ReportRevision;
+        if (body.source.entityId !== entity.entityId) continue;
+        const date = body.filters.find((f) => f.kind === 'dateRange');
+        const dateColumn =
+          date && columns.find((c) => c.canonicalFieldId === date.fieldId);
+        if (date && !dateColumn)
+          throw new Error('REPORT_DATE_INDEX_UNAVAILABLE: ' + date.fieldId);
+        if (dateColumn || entityOwned)
+          retainReportKey([
+            ...businessKeyScopeColumns,
+            ...(dateColumn ? [dateColumn.physicalName] : []),
+            'record_id',
+          ]);
+      }
+      // A successor or retirement no longer needs the old range, but cannot
+      // remove an index an earlier approved attempt installed.
+      for (const old of previousEntity?.indexes ?? [])
+        if (old.indexKind === 'reportAccess')
+          retainReportKey([...old.columnNames]);
+      for (const columnNames of [...reportKeys.values()].sort((a, b) =>
+        compare(a.join('/'), b.join('/')),
+      )) {
         const identity =
           entity.entityId + '/report-access/' + columnNames.join('/');
         const index: StorageIndexTarget = {
@@ -2080,6 +2113,27 @@ export function buildStorageTransitionEnvelope(
           [addedColumnElementIds.get(check.canonicalFieldId)].filter(
             (dependency): dependency is string => dependency !== undefined,
           ),
+          'existing',
+        ),
+      );
+    }
+    for (const index of entity.indexes.filter(
+      (i) => i.indexKind === 'reportAccess',
+    )) {
+      if (oldEntity.indexes.some((i) => i.physicalName === index.physicalName))
+        continue;
+      const dateColumn = entity.columns.find((c) =>
+        index.columnNames.includes(c.physicalName),
+      );
+      const added =
+        dateColumn && addedColumnElementIds.get(dateColumn.canonicalFieldId);
+      elements.push(
+        element(
+          'createIndex',
+          entity.entityId,
+          dateColumn?.canonicalFieldId ?? null,
+          index.physicalName,
+          added ? [added] : [],
           'existing',
         ),
       );

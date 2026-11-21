@@ -1,3 +1,4 @@
+import { reportBindingProblem } from './declared-report.js';
 import { normalizeBillingPlan } from './billing-normalization.js';
 import {
   validateSurfaceCompositions,
@@ -1272,6 +1273,28 @@ function validateSemantics(
   validateReferenceLocality(packageRevision, diagnostics);
   if (packageRevision.languageVersion === 'v6')
     validateReportSources(packageRevision, diagnostics);
+  if (packageRevision.languageVersion === 'v6')
+    for (const surface of packageRevision.surfaces) {
+      if (!surface.report || surface.lifecycle === 'retired') continue;
+      const { body, reportId } = surface.report;
+      const problem =
+        surface.archetype !== 'list' ||
+        surface.dataSource?.targetId !== body.source.queryId ||
+        surface.surfaceId !==
+          reportId.replace(':report.custom_', ':surface.custom_report_')
+          ? reportId
+          : reportBindingProblem(packageRevision, body);
+      if (problem)
+        diagnostics.push(
+          diagnostic(
+            'CANON_REPORT_BINDING_INVALID',
+            '$.surfaces.report',
+            'The report source or selected operand changed.',
+            'Revise the report against an available source.',
+            problem,
+          ),
+        );
+    }
   validateSurfaceVocabulary(packageRevision, diagnostics);
   validateSetCollections(packageRevision, diagnostics);
   validateOrderKeys(packageRevision, diagnostics);
