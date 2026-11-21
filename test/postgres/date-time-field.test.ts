@@ -12,7 +12,8 @@ import {
 } from '../../packages/canonical-model/src/index.js';
 import {
   archivedRuntimeRead,
-  archivedTenantEnvelope,
+  archivedServingQuery,
+  assertArchivedTenantEnvelopeForChange,
   withArchivedCustomizationRuntime,
 } from '../helpers/archived-customization-runtime.js';
 import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../packages/runtime/src/semantic-query-gateway.js';
@@ -535,7 +536,7 @@ test(
 );
 
 // The preceding production tree: re-pinned to main's tip at merge time.
-const previousReader = '630e2aa6';
+const previousReader = 'd083dd4a';
 
 test(
   'releases without the field keep their persisted bytes, the prior parser refuses the member and the prior loader refuses a declaring release',
@@ -573,7 +574,14 @@ test(
           await withArchivedCustomizationRuntime(
             previousReader,
             async (run) => {
-              const historical = await archivedTenantEnvelope(run);
+              const historical = await assertArchivedTenantEnvelopeForChange(
+                run,
+                {
+                  kind: 'addField',
+                  entity: `${NS}:entity.item`,
+                  field: { label: 'Inspection notes', type: 'text' },
+                },
+              );
               assert.equal(persisted.content_hash, historical.releaseRoot);
               assert.equal(
                 persisted.desired_state.toString('base64'),
@@ -607,6 +615,17 @@ test(
                   identity: app.runtime.identity,
                 });
               assert.equal((await read()).outcome, 'loaded');
+              const query = (queryId: string) =>
+                run(archivedServingQuery, {
+                  databaseUrl,
+                  identity: app.runtime.identity,
+                  queryId,
+                }) as Promise<{ outcome: string; code?: string }>;
+              // Rule 13: the preceding reader answers a query, not only loads.
+              assert.equal(
+                (await query(`${NS}:query.item_list`)).outcome,
+                'served',
+              );
               const record = await opened.service.draft(
                 {
                   kind: 'addRecordType',
@@ -629,6 +648,11 @@ test(
               await opened.service.activate(field.patchId);
               const refusal = await read();
               assert.equal(refusal.code, 'UNSUPPORTED_RUNTIME_CAPABILITY');
+              const refusedQuery = await query(
+                `${NS}:query.custom_equipment_list`,
+              );
+              assert.equal(refusedQuery.outcome, 'refused');
+              assert.equal(refusedQuery.code, 'UNSUPPORTED_RUNTIME_CAPABILITY');
               assert.match(
                 refusal.message ?? '',
                 new RegExp(

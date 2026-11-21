@@ -1,3 +1,4 @@
+import { DOCUMENT_TEMPLATES_SURFACE_FLOOR } from '../../packages/canonical-model/src/documents.js';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
@@ -180,6 +181,7 @@ test('the capability comparison binds the family to its capability, then compare
     LINE_CREATE_VALUES_SURFACE_FLOOR,
     BILLING_INTERVAL_READER,
     BOARD_READER,
+    DOCUMENT_TEMPLATES_SURFACE_FLOOR,
     DATE_TIME_FIELD_READER,
   ];
   for (const reader of surfaceFloors) {

@@ -305,6 +305,18 @@ export function normalizeApplicationPackage(
           ),
       }),
     ...(authored.languageVersion === 'v6' &&
+      authored.documentTemplateRevisions && {
+        documentTemplateRevisions: [...authored.documentTemplateRevisions].sort(
+          (left, right) => compareCodeUnits(left.revisionId, right.revisionId),
+        ),
+      }),
+    ...(authored.languageVersion === 'v6' &&
+      authored.documentTemplatePointers && {
+        documentTemplatePointers: [...authored.documentTemplatePointers].sort(
+          (left, right) => compareCodeUnits(left.templateId, right.templateId),
+        ),
+      }),
+    ...(authored.languageVersion === 'v6' &&
       authored.formulaRules && {
         formulaRules: authored.formulaRules
           .map((rule) => ({

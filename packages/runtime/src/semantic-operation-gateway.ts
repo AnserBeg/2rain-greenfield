@@ -1308,6 +1308,9 @@ function parseOperationCatalogPayload(
       ...(Object.hasOwn(payload, 'documentBindings')
         ? ['documentBindings']
         : []),
+      ...(Object.hasOwn(payload, 'documentTemplatePointers')
+        ? ['documentTemplatePointers']
+        : []),
     ],
     (message) => new MalformedPinnedOperationCatalogError(message),
   );

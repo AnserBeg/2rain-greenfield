@@ -5340,14 +5340,23 @@ function listSelectList(
   supply = false,
 ): string {
   const rawColumns = [
-    entity.recordIdentity.column,
-    entity.optimisticRevision.column,
-    entity.archive.archivedAtColumn,
-    ...entity.columns.map((column) => column.physicalName),
-  ].map(
-    (column) =>
-      `${dateTimeColumnExpression(entity, column, qualified(sourceAlias, column)) ?? qualified(sourceAlias, column)} AS ${quoted(column)}`,
-  );
+    ...[
+      entity.recordIdentity.column,
+      entity.optimisticRevision.column,
+      entity.archive.archivedAtColumn,
+    ].map((column) => `${qualified(sourceAlias, column)} AS ${quoted(column)}`),
+    ...entity.columns.map((column) => {
+      const reference = qualified(sourceAlias, column.physicalName);
+      const text = dateTimeColumnExpression(
+        entity,
+        column.physicalName,
+        reference,
+      );
+      return text
+        ? `${text} AS ${quoted(column.physicalName)}`
+        : rawFieldSelection(column, reference);
+    }),
+  ];
   const displays = selectedColumns.map(
     (column, index) =>
       `${visibleFieldExpression(column, sourceAlias)} AS ${quoted(`nsm_table_display_${String(index)}`)}`,
@@ -5556,6 +5565,8 @@ function visibleFieldExpression(
       return `CASE WHEN ${value} IS NULL THEN NULL WHEN ${value} THEN 'Yes' ELSE 'No' END`;
     case 'enumFieldType':
       return `initcap(replace(regexp_replace(${value}::text, '^.*[.:]', ''), '_', ' '))`;
+    case 'dateFieldType':
+      return civilDateSql(value);
     default:
       return `${value}::text`;
   }
@@ -6341,23 +6352,53 @@ function selectSql(
   suffix: string,
   extraColumns: readonly string[] = [],
 ): string {
-  const columns = [
+  const names = new Set([
     entity.recordIdentity.column,
     entity.optimisticRevision.column,
     entity.archive.archivedAtColumn,
-    ...entity.columns.map((column) => column.physicalName),
-  ];
-  for (const column of extraColumns)
-    if (!columns.includes(column)) columns.push(column);
-  return `SELECT ${columns
-    .map((column) => {
-      const text = dateTimeColumnExpression(entity, column, quoted(column));
-      return text ? `${text} AS ${quoted(column)}` : quoted(column);
-    })
-    .join(', ')}
+  ]);
+  const columns = [...names].map(quoted);
+  for (const column of entity.columns) {
+    names.add(column.physicalName);
+    const text = dateTimeColumnExpression(
+      entity,
+      column.physicalName,
+      quoted(column.physicalName),
+    );
+    columns.push(
+      text
+        ? `${text} AS ${quoted(column.physicalName)}`
+        : column.fieldContract.fieldKind === 'dateFieldType'
+          ? rawFieldSelection(column, quoted(column.physicalName))
+          : quoted(column.physicalName),
+    );
+  }
+  for (const column of extraColumns) {
+    if (names.has(column)) continue;
+    names.add(column);
+    columns.push(quoted(column));
+  }
+  return `SELECT ${columns.join(', ')}
             FROM north_star_module.${quoted(entity.physicalTableName)}
            WHERE ${predicates.length > 0 ? predicates.join(' AND ') : 'true'}
            ${suffix}`;
+}
+
+function rawFieldSelection(
+  column: StorageEntity['columns'][number],
+  reference: string,
+): string {
+  const value =
+    column.fieldContract.fieldKind === 'dateFieldType'
+      ? civilDateSql(reference)
+      : reference;
+  return `${value} AS ${quoted(column.physicalName)}`;
+}
+
+// PostgreSQL DATE is a civil day. Select it as ISO text before the driver can
+// interpret it as midnight in the process time zone.
+function civilDateSql(reference: string): string {
+  return `to_char(${reference}::timestamp, 'YYYY-MM-DD')`;
 }
 
 function archivePredicate(

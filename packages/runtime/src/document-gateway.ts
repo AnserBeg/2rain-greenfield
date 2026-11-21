@@ -39,15 +39,19 @@ export interface DocumentDeadline {
   readonly signal: AbortSignal;
   /** Throws on cancellation or expiry, even if the event loop delayed the timer. */
   remainingMilliseconds(): number;
+  readonly beginPublicationCommit?: (() => void) | undefined;
 }
 
 export function documentDeadline(
   signal = new AbortController().signal,
   now = () => performance.now(),
+  beginPublicationCommit?: () => void,
+  durationMilliseconds = DOCUMENT_RESPONSE_MILLISECONDS,
 ): DocumentDeadline {
-  const expires = now() + DOCUMENT_RESPONSE_MILLISECONDS;
+  const expires = now() + durationMilliseconds;
   return {
     signal,
+    beginPublicationCommit,
     remainingMilliseconds() {
       signal.throwIfAborted();
       const remaining = expires - now();
@@ -62,6 +66,21 @@ export const DOCUMENT_PAGE_SIZE = 50;
 
 export interface DocumentGateway {
   readonly scannerLabel: string | null;
+  generate?(
+    view: RequestRuntimeView,
+    target: DocumentTarget,
+    templateId: string,
+    retryKey: string,
+    signal: AbortSignal,
+    deadline?: DocumentDeadline,
+  ): Promise<DocumentMetadata>;
+  previewTemplate?(
+    view: RequestRuntimeView,
+    target: DocumentTarget,
+    templateId: string,
+    signal: AbortSignal,
+    deadline?: DocumentDeadline,
+  ): Promise<Buffer>;
   list(
     view: RequestRuntimeView,
     target: DocumentTarget,

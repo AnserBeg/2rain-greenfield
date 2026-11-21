@@ -322,6 +322,9 @@ export function applyOne(
       return saveListView(authored, patch);
     case 'addMetricCard':
       return addMetricCard(authored, patch);
+    case 'addDocumentTemplateRevision':
+    case 'retireDocumentTemplate':
+      return applyDocumentTemplate(authored, patch);
     case 'saveWorkflow': {
       const workflows =
         authored.workflows === undefined ? [] : list(authored, 'workflows');
@@ -1611,6 +1614,77 @@ function statePrecondition(fieldId: string, stateId: string): Json {
     schemaVersion: version,
     value: { kind: 'textValue', schemaVersion: version, value: stateId },
   };
+}
+
+function applyDocumentTemplate(
+  authored: Json,
+  patch: Extract<
+    SingleCustomizationPatch,
+    { kind: 'addDocumentTemplateRevision' | 'retireDocumentTemplate' }
+  >,
+): Outcome | null {
+  const pointers = authored.documentTemplatePointers
+    ? list(authored, 'documentTemplatePointers')
+    : [];
+  const revisions = authored.documentTemplateRevisions
+    ? list(authored, 'documentTemplateRevisions')
+    : [];
+  const pointer = pointers.find(
+    ({ templateId }) => templateId === patch.templateId,
+  );
+  if (
+    pointer?.activeRevisionId === null ||
+    (pointer?.activeRevisionId ?? null) !== patch.previousRevisionId
+  ) {
+    return refusal(
+      'CUSTOMIZE_TARGET_NOT_FOUND',
+      'Choose the current active template revision.',
+    );
+  }
+
+  if (patch.kind === 'retireDocumentTemplate') {
+    pointer!.activeRevisionId = null;
+    return null;
+  }
+
+  const { templateId, revisionId } = patch;
+  if (
+    ![templateId, revisionId].every(
+      (id) => isTenantId(id) && id.split(':')[0] === namespaceOf(authored),
+    ) ||
+    revisions.some((revision) => revision.revisionId === revisionId)
+  ) {
+    return refusal(
+      'CUSTOMIZE_TARGET_NOT_FOUND',
+      'Use unique stable tenant IDs for the template and revision.',
+    );
+  }
+  authored.documentTemplateRevisions = [
+    ...revisions,
+    {
+      schemaVersion: version,
+      templateId,
+      revisionId,
+      entityId: patch.entityId,
+      label: patch.label,
+      documentKind: patch.documentKind,
+      headerQueryId: patch.headerQueryId,
+      identityFieldId: patch.identityFieldId,
+      currencyFieldId: patch.currencyFieldId,
+      format: patch.format,
+      layout: patch.layout,
+      pageNumbers: patch.pageNumbers,
+    },
+  ];
+  authored.documentTemplatePointers = [
+    ...pointers.filter((pointer) => pointer.templateId !== templateId),
+    {
+      schemaVersion: version,
+      templateId,
+      activeRevisionId: revisionId,
+    },
+  ];
+  return null;
 }
 
 function addDocumentDeclaration(

@@ -40,6 +40,8 @@ const declarationKeys = {
   permissions: 'permissionId',
   documentFields: 'fieldId',
   documentCategories: 'categoryId',
+  documentTemplatePointers: 'templateId',
+  documentTemplateRevisions: 'revisionId',
   calculatedDisplayFields: 'fieldId',
   formulaRules: 'ruleId',
   workflows: 'workflowId',

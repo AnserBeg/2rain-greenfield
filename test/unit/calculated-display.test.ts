@@ -125,8 +125,15 @@ test('v6 compiles a calculated display to its governed read sinks and refuses mi
   assert.ok(parsed.languageVersion === 'v6');
   const normalized = normalizeApplicationPackage(parsed);
   const encoder = new TextEncoder();
+  // Without DOCS-1's optional read-model dependencies (query rung 5), so the
+  // floor below is the calculated display's own rung.
+  const flagFree = structuredClone(authored);
+  for (const query of flagFree.queries)
+    if ('readModel' in query && query.readModel)
+      for (const dependency of Object.values(query.readModel.queries))
+        delete (dependency as { required?: false }).required;
   const compilerFixture = normalizeApplicationPackage({
-    ...authored,
+    ...flagFree,
     calculatedDisplayFields: [patch.field],
   });
   const compiled = mustCompile(
