@@ -71,7 +71,11 @@ function compileFixture() {
   };
 }
 
-/** Restore the archived count declarations as a set, including the legacy queries and surfaces. */
+/**
+ * Restore the archived count definitions, including the legacy queries and
+ * surfaces. The fixture shares the current permission acknowledgement file,
+ * so it keeps the transition permission declarations without their operations.
+ */
 export function withoutStockCountWorkflow(authored: Record<string, unknown>) {
   historical ??= JSON.parse(
     execFileSync(
@@ -86,7 +90,6 @@ export function withoutStockCountWorkflow(authored: Record<string, unknown>) {
   const collections = {
     fields: 'fieldId',
     operations: 'operationId',
-    permissions: 'permissionId',
     queries: 'queryId',
     relations: 'relationId',
     surfaces: 'surfaceId',
@@ -96,7 +99,7 @@ export function withoutStockCountWorkflow(authored: Record<string, unknown>) {
     ...Object.fromEntries(
       Object.entries(collections).map(([collection, key]) => {
         const isCount = (entry: Record<string, unknown>) =>
-          /:(?:field|operation|permission|query|relation|surface)\.stock_count_/u.test(
+          /:(?:field|operation|query|relation|surface)\.stock_count_/u.test(
             String(entry[key]),
           );
         const current = authored[collection] as Record<string, unknown>[];
