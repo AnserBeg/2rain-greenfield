@@ -1,3 +1,7 @@
+import {
+  popupCommand,
+  popupOptionId,
+} from '../../packages/customization/src/popup-revision.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
@@ -212,6 +216,13 @@ const withEquipmentLifecycle = applied(extended, [
 const equipmentBoard = customization
   .customizationTargets(normalizeApplicationPackage(withEquipmentLifecycle))
   .boards!.find((target) => target.frame.entityId === equipment)!;
+const equipmentPopup = customization
+  .customizationTargets(normalizeApplicationPackage(extended))
+  .popupActions!.find(
+    (o) =>
+      o.surface === id('surface.custom_equipment_detail') &&
+      o.target.kind === 'update',
+  )!;
 const appointment = {
   kind: 'addDateTimeField',
   schemaVersion: 'northstar.date-time-field/v1',
@@ -222,6 +233,13 @@ const appointment = {
   zoneSource: { kind: 'perRecordIana', version: 'v1' },
 };
 const cases = {
+  addPopupActionRevision: retired(
+    popupCommand([equipmentPopup], {
+      option: popupOptionId(equipmentPopup),
+      label: 'Edit equipment name',
+      inputs: [{ binding: id('field.custom_equipment_name'), source: 'entry' }],
+    }),
+  ),
   addDateTimeField: occupied(appointment, 'FIELD_COLLISION', extended),
   addBoardViewRevision: {
     source: withEquipmentLifecycle,
