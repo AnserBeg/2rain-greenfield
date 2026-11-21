@@ -176,6 +176,13 @@ export function generateWorkflowSdk(
         case 'requestApproval':
           if (typeof value.summary !== 'string' || !value.summary.trim())
             throw new Error('Workflow approval needs a summary');
+          if (
+            version !== LEGACY_WORKFLOW_SDK_VERSION &&
+            /[\p{Cc}\u2028\u2029]/u.test(value.summary)
+          )
+            throw new Error(
+              'Workflow approval summary must be a single line without control characters',
+            );
           if (!legacyApproval && Object.hasOwn(value, 'operationId')) {
             assertKeys(value, ['kind', 'summary', 'operationId', 'input']);
             const operation =

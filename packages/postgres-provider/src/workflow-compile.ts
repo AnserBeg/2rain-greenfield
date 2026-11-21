@@ -86,24 +86,22 @@ export function compileWorkflowBody(body: string, sdk: WorkflowSdk) {
   ) {
     throw new Error('Workflow reference directives are forbidden');
   }
-  const scanner = ts.createScanner(
-    ts.ScriptTarget.ES2022,
-    false,
-    ts.LanguageVariant.Standard,
-    body,
-  );
-  for (
-    let token = scanner.scan();
-    token !== ts.SyntaxKind.EndOfFileToken;
-    token = scanner.scan()
-  ) {
-    if (
-      (token === ts.SyntaxKind.SingleLineCommentTrivia ||
-        token === ts.SyntaxKind.MultiLineCommentTrivia) &&
-      /@ts-(?:ignore|nocheck|expect-error)\b/u.test(scanner.getTokenText())
-    )
-      throw new Error('Workflow compiler suppression is forbidden');
+  // The parser rescans template tails and regular expressions in context.
+  // Only inspect the trivia before its tokens, never the text of a literal.
+  function checkTrivia(node: ts.Node): void {
+    if (ts.isToken(node)) {
+      if (
+        /@ts-(?:ignore|nocheck|expect-error)\b/u.test(
+          source.slice(node.pos, node.getStart(file)),
+        )
+      )
+        throw new Error('Workflow compiler suppression is forbidden');
+      return;
+    }
+    for (const child of node.getChildren(file)) checkTrivia(child);
   }
+  checkTrivia(file);
+  lintWorkflowBody(declaration.body, file, sdk.version);
 
   const host = ts.createCompilerHost(options);
   const defaultLibPath = host.getDefaultLibLocation!();
@@ -142,17 +140,6 @@ export function compileWorkflowBody(body: string, sdk: WorkflowSdk) {
 
   const program = ts.createProgram([fileName, sdkFileName], options, host);
   const diagnostics = ts.getPreEmitDiagnostics(program);
-  if (
-    sdk.version === WORKFLOW_SDK_VERSION &&
-    diagnostics.some(
-      (d) =>
-        d.code === 2339 &&
-        ts.flattenDiagnosticMessageText(d.messageText, '\n') ===
-          "Property 'waitForEvent' does not exist on type 'WorkflowSdk'.",
-    )
-  )
-    throw new RemovedWorkflowAction();
-  lintWorkflowBody(declaration.body, file);
   if (diagnostics.length) {
     throw new Error(
       ts
@@ -282,7 +269,23 @@ function workflowSites(
   return sites;
 }
 
-function lintWorkflowBody(node: ts.Node, file: ts.SourceFile): void {
+function lintWorkflowBody(
+  node: ts.Node,
+  file: ts.SourceFile,
+  version: WorkflowSdk['version'],
+): void {
+  if (
+    isSdkAccess(node) &&
+    node.name.text === 'waitForEvent' &&
+    version === WORKFLOW_SDK_VERSION
+  )
+    throw new RemovedWorkflowAction();
+  if (
+    ts.isCallExpression(node) &&
+    isSdkAccess(node.expression) &&
+    node.arguments.some(ts.isSpreadElement)
+  )
+    throw new Error('Workflow SDK calls cannot use spread arguments');
   if (
     (ts.isIdentifier(node) &&
       node.text === 'sdk' &&
@@ -321,5 +324,5 @@ function lintWorkflowBody(node: ts.Node, file: ts.SourceFile): void {
       `Workflow uses forbidden syntax: ${node.getText(file).slice(0, 80)}`,
     );
   }
-  ts.forEachChild(node, (child) => lintWorkflowBody(child, file));
+  ts.forEachChild(node, (child) => lintWorkflowBody(child, file, version));
 }
