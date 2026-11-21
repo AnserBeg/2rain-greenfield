@@ -1,3 +1,4 @@
+import type { ReportLimits } from '../../runtime/src/declared-report.js';
 import {
   REPORT_EXPORT_PERMISSION,
   reportColumnPermission,
@@ -86,6 +87,7 @@ export function composeServingGateways(
     readonly approvalPool?: pg.Pool;
     readonly localDemoIdentity?: true;
     readonly monotonicMilliseconds?: () => number;
+    readonly reportLimits?: Partial<Omit<ReportLimits, 'deadlineMs'>>;
   },
   documentOptions?: {
     scanner?: DocumentScanner | undefined;
@@ -101,6 +103,7 @@ export function composeServingGateways(
       undefined,
       undefined,
       {
+        ...(options.reportLimits && { reportLimits: options.reportLimits }),
         validationReadPolicy: async (releaseId) =>
           (await servingFor(releaseId)).policy,
       },

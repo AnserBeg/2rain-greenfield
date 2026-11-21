@@ -3,6 +3,15 @@ import test from 'node:test';
 import type { Pool, PoolClient } from 'pg';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { StorageTargetPayloadV1 } from '../../packages/compiler/src/storage.js';
+import { CAPABILITY_EXECUTOR_FACTORIES } from '../../apps/api/src/erp-capabilities.js';
+import {
+  composeServingGateways,
+  loadServingRelease,
+} from '../../packages/postgres-provider/src/serving-gateways.js';
+import {
+  rolePool,
+  trustedContext,
+} from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import type { ReportRequest } from '../../packages/runtime/src/declared-report.js';
 import {
   openCustomizeService,
@@ -533,6 +542,38 @@ test(
             ],
             [6, 4, 4],
           );
+          const reader = rolePool(options.databaseUrl, 'north_star_runtime', 4);
+          try {
+            const context = await trustedContext(app.runtime.identity);
+            const serving = await loadServingRelease(
+              reader,
+              context,
+              draft.releaseId,
+            );
+            const bounded = composeServingGateways(
+              reader,
+              reader,
+              context,
+              serving,
+              app.runtime.metrics,
+              {
+                providerErrorMappings: [],
+                capabilityOperationExecutorFactories:
+                  CAPABILITY_EXECUTOR_FACTORIES,
+                reportLimits: { bytes: 256 },
+                localDemoIdentity: true,
+              },
+            );
+            assert.deepEqual(
+              await app.runtime.entry.run({}, (view) =>
+                bounded.queryGateway.invokeGrouped(view, request),
+              ),
+              { kind: 'narrow' },
+              'the byte budget is reader policy on the same stored report revision',
+            );
+          } finally {
+            await reader.end();
+          }
           const blocker = await pool.connect();
           try {
             await blocker.query('BEGIN');
