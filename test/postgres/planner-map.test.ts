@@ -31,10 +31,9 @@ import { fitMap } from '../../packages/canonical-model/src/map-viewport.js';
 import { COMPANY, seededId, worldOver } from '../agent/agent-world.js';
 import { draftMapRevision } from '../../packages/customization/src/map-revision.js';
 import {
+  archivedStockCountQuery,
   withArchivedCustomizationRuntime,
-  archivedRuntimeRead,
-} from '../helpers/archived-customization-runtime.js';
-import { archivedStockCountQuery } from '../helpers/archived-runtime-process.js';
+} from '../helpers/archived-runtime-process.js';
 import {
   withEphemeralPostgres,
   LINEAGE_INSTALL_VOLUME,
@@ -203,15 +202,19 @@ test(
                 envelope.releaseManifestBytesBase64,
               );
             }
-            const oldAnswer = (await run(archivedStockCountQuery, {
-              databaseUrl,
-              identity: app.runtime.identity,
-              queryId: revision.body.listQueryId,
-              args: { [scope]: COMPANY },
-            })) as { outcome: string; records: { recordId: string }[] };
-            assert.equal(
-              oldAnswer.outcome,
-              'queried',
+            const readAsPredecessor = () =>
+              run(archivedStockCountQuery, {
+                databaseUrl,
+                identity: app.runtime.identity,
+                queryId: revision.body.listQueryId,
+                args: { [scope]: COMPANY },
+              }) as Promise<
+                | { outcome: 'queried'; records: { recordId: string }[] }
+                | { outcome: 'refused'; code: string; message: string }
+              >;
+            const oldAnswer = await readAsPredecessor();
+            assert.ok(
+              oldAnswer.outcome === 'queried',
               JSON.stringify(oldAnswer),
             );
             assert.deepEqual(
@@ -219,10 +222,8 @@ test(
               [alpha],
             );
             await activate(revision);
-            const refused = await archivedRuntimeRead(run, {
-              databaseUrl,
-              identity: app.runtime.identity,
-            });
+            const refused = await readAsPredecessor();
+            assert.ok(refused.outcome === 'refused', JSON.stringify(refused));
             assert.equal(refused.code, 'UNSUPPORTED_RUNTIME_CAPABILITY');
             assert.match(
               refused.message ?? '',
@@ -354,6 +355,31 @@ test(
             ['zoom', fitted.zoom],
           ] as const)
             assert.equal(canonical.searchParams.get(key), String(expected));
+
+          const observed = t.mock.method(app.runtime.queryGateway, 'invoke');
+          try {
+            const fragment = await fetch(canonical, {
+              method: 'POST',
+              headers: {
+                ...manager,
+                origin: canonical.origin,
+                'x-rain-fragment': 'map',
+              },
+              body: new URLSearchParams(),
+            });
+            assert.equal(fragment.status, 200);
+            assert.equal(fragment.headers.get('x-rain-fragment'), 'fragment');
+            assert.match(await fragment.text(), /data-map-state=/u);
+            assert.equal(observed.mock.callCount(), 1);
+            assert.partialDeepStrictEqual(
+              observed.mock.calls[0]!.arguments[1],
+              {
+                queryId: revision.body.listQueryId,
+              },
+            );
+          } finally {
+            observed.mock.restore();
+          }
 
           const mapRead = (
             company: string,
