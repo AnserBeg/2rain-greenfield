@@ -1,6 +1,6 @@
 # WORKFLOW-2 — verify and review a workflow before approving it
 
-Slices 1, 3 and 4 on the packet branch. Pre-tenant. No migration or reader rung.
+Slices 1, 3 and 4 integrated at `aecd42967bf7524ae4f3c4f54eaca2350e3dc8fa`. Pre-tenant. No migration or reader rung.
 [Accepted amendments to ADR-0073](../../decisions/ADR-0073-workflow-isolate-and-authority.md#workflow-2-amendments-2026-11-20-accepted-with-amendments-fable-2026-11-20) · [Original slice charter and trigger proofs](https://github.com/AnserBeg/2rain-greenfield/blob/0a9f7ca52304969c65092893f50375c90f8c2265/docs/execution/packets/WORKFLOW-2.md)
 
 ## Claims and decisions
@@ -20,7 +20,7 @@ Slices 1, 3 and 4 on the packet branch. Pre-tenant. No migration or reader rung.
 
 ## Gates and controls
 
-CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44872291907
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44900933831
 
 The workflow-host tests exercise both fork kinds with credential sentinels, a protected key and a socket observer, the injected deadline, SDK contracts, reviewed bytes and retry outcomes. The PostgreSQL journey checks admission, durable control rows and a suspended v1 event wait. The browser journey refuses an external wait, reopens the pending review and approves the displayed digest. The historical pre-workflow reader answers an item query before its named refusal after activation.
 
