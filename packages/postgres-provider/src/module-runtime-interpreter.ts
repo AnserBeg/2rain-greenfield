@@ -560,6 +560,7 @@ export class PostgresModuleRuntimeInterpreter
                   request.definition.effect.kind,
                   assigned,
                   calendar,
+                  request.dateTimeWorkingCompany ?? null,
                 )
               : rejectStrayDateTimeValues(currentEntity, assigned);
             // The host assigns a new field revision inside the idempotent write.
@@ -1669,6 +1670,7 @@ async function resolveDateTimeInput(
   effect: string,
   input: MutationInput,
   calendar: BusinessCalendarContext | null,
+  workingCompany: string | null,
 ): Promise<MutationInput> {
   rejectStrayDateTimeValues(entity, input);
   const update = effect === 'updateRecordEffect';
@@ -1676,13 +1678,15 @@ async function resolveDateTimeInput(
     ? await loadRawRecord(client, entity, input.recordId, false, [], true)
     : null;
   // The owning company: the stored one on update, the created one on create.
+  // A shared record uses the writer's working company, which the gateway
+  // authorized under this operation's policy (ADR-0087 ruling 2026-11-21).
   const companyId = entity.legalEntity
     ? update
       ? await readRecordCompany(client, entity, input.recordId)
       : input.systemInput && typeof input.systemInput.value === 'string'
         ? input.systemInput.value
         : null
-    : null;
+    : workingCompany;
   try {
     return {
       ...input,

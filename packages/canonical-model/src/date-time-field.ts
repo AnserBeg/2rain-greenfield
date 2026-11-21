@@ -82,6 +82,12 @@ export const DateTimeWriteSchema = z.strictObject({
   civil: z.string().max(40),
   zone: z.string().min(1).max(64).optional(),
   offsetSeconds: z.int().min(-64800).max(64800).optional(),
+  /**
+   * The writer's working company, for a company-sourced field on a shared
+   * record type. The gateway authorizes it before the write; an owned record
+   * always uses its stored company instead.
+   */
+  companyId: z.uuid().optional(),
 });
 export type DateTimeWrite = z.infer<typeof DateTimeWriteSchema>;
 export const SavedDateTimeSchema = z.strictObject({

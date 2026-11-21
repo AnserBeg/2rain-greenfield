@@ -2560,7 +2560,16 @@ function operationInput(
   legalEntitySelection: readonly string[],
   dateTime: ReadonlyMap<string, unknown> = new Map(),
 ): SurfaceOperationInput {
-  const values = fieldInput(surface, operation, intent, submission, dateTime);
+  // A company-sourced dateTime on a shared record resolves through the one
+  // company the writer is working in; the gateway authorizes it.
+  const values = fieldInput(
+    surface,
+    operation,
+    intent,
+    submission,
+    dateTime,
+    legalEntitySelection.length === 1 ? legalEntitySelection[0] : undefined,
+  );
   if (intent === 'create') {
     // ADR-0052: relations travel as a sibling of `values`, keyed by relation id
     // and carrying record ids as strings. `parseMutationInput` reads them
@@ -2645,6 +2654,7 @@ function fieldInput(
   intent: SurfaceOperationIntent,
   submission: SurfaceRuntimeSubmission,
   dateTime: ReadonlyMap<string, unknown> = new Map(),
+  workingCompany?: string,
 ): Readonly<Record<string, RuntimeViewContract.ImmutableJsonValue>> {
   const fields = new Map(
     (operation.inputFields ?? []).map((field) => [field.fieldId, field]),
@@ -2665,7 +2675,16 @@ function fieldInput(
     if (mutation.kind === 'nothing') continue;
     if (dateTime.has(fieldId) && mutation.kind === 'set') {
       const entered = dateTimeFromForm(`value:${fieldId}`, submission);
-      if (entered.kind === 'set') entries.push([fieldId, entered.value]);
+      const binding = dateTime.get(fieldId) as
+        { zoneSource?: { kind?: string } } | undefined;
+      if (entered.kind === 'set')
+        entries.push([
+          fieldId,
+          binding?.zoneSource?.kind === 'companyBusinessCalendar' &&
+          workingCompany
+            ? { ...entered.value, companyId: workingCompany }
+            : entered.value,
+        ]);
       continue;
     }
     if (field?.kind === 'addressFieldType' && mutation.kind === 'set') {

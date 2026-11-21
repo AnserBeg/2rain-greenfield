@@ -479,6 +479,51 @@ test(
             }),
             { code: 'MODULE_VALIDATION_REFUSED' },
           );
+
+          // Ruling 2026-11-21: on a shared record type a company-sourced
+          // field resolves through the writer's authorized working company;
+          // without one the entry is refused by name and kept.
+          await opened.service.activate(
+            await ship({
+              kind: 'addRecordType',
+              label: 'Visit',
+              companyOwnership: 'tenantShared',
+              fields: [{ label: 'Name', type: 'text', required: true }],
+            }),
+          );
+          const visitEntity = `${NS}:entity.custom_visit`;
+          const visitDue = {
+            ...due,
+            target: { kind: 'tenantRecordType', recordTypeId: visitEntity },
+            fieldId: `${NS}:field.custom_visit_due_at`,
+          };
+          await opened.service.activate(await ship(visitDue));
+          const visit = (entry: Record<string, unknown>) =>
+            world.invoke('custom_visit_create', {
+              recordId: randomUUID(),
+              relations: {},
+              values: {
+                [`${NS}:field.custom_visit_name`]: 'Visit',
+                [visitDue.fieldId]: entry,
+              },
+            });
+          const unscoped = await visit(value('2026-11-04T10:00')).then(
+            () => null,
+            (error: { code: string; details: Record<string, string> }) => error,
+          );
+          assert.equal(unscoped?.code, 'MODULE_FIELD_VALUE_INVALID');
+          assert.equal(unscoped?.details.reason, 'DATE_TIME_COMPANY_REQUIRED');
+          const scoped = await visit(
+            value('2026-11-04T10:00', { companyId: COMPANY }),
+          );
+          const shared = SavedDateTimeSchema.parse(
+            scoped.readBack!.values[visitDue.fieldId],
+          );
+          assert.equal(
+            shared.zoneSource.kind === 'companyBusinessCalendar' &&
+              shared.zoneSource.companyId,
+            COMPANY,
+          );
         } finally {
           await opened.close();
           await app.close();
