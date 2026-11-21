@@ -112,7 +112,7 @@ BEGIN
           'readModel',jsonb_build_object('capability',jsonb_build_object('targetId','northstar.booking:capability.owner_usage'),
           'binding','northstar.booking:protocol.owner_usage_v1','queries',jsonb_build_object('owner',jsonb_build_object('targetId','example.booking:query.owner'))))))
       ELSE jsonb_build_object('kind','storageTargetPayload','relations',jsonb_build_array(
-        jsonb_build_object('sourceEntityId', owner_entity,'targetEntityId','example.booking:entity.account',
+        jsonb_build_object('relationId','example.booking:relation.account','sourceEntityId', owner_entity,'targetEntityId','example.booking:entity.account',
           'ownership','parentScopedChild','relationColumn',jsonb_build_object('physicalName','parent_id'))),
       'entities',jsonb_build_array(
         jsonb_build_object('entityId','example.booking:entity.account','lifecycle','active','legalEntity',jsonb_build_object('column','legal_entity_id'),'physicalTableName','test_booking_parents'),
