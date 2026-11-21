@@ -591,12 +591,14 @@ export class PostgresModuleStorageMaterializer {
             element,
             client,
           );
-          await beginLocked(client);
-          await setMaterializerScope(client, command.context);
-        } else {
-          await beginLocked(client);
-          await setMaterializerScope(client, command.context);
         }
+        await beginLocked(
+          client,
+          element.kind === 'createIndex'
+            ? 'BEGIN ISOLATION LEVEL READ COMMITTED'
+            : 'BEGIN',
+        );
+        await setMaterializerScope(client, command.context);
         await assertApprovedAttempt(client, command, generation.preparation_id);
         if (!(await hasAppliedAttemptElement(client, command, element))) {
           if (element.kind !== 'backfill') {
@@ -5912,11 +5914,6 @@ async function loadPreparationAuthority(
   };
 }
 
-async function beginLocked(client: PoolClient): Promise<void> {
-  await client.query('BEGIN');
-  await acquireSharedMigrationLock(client);
-}
-
 async function setMaterializerScope(
   client: PoolClient,
   context: TrustedRequestContext,
@@ -5928,13 +5925,18 @@ async function setMaterializerScope(
   );
 }
 
-async function acquireSharedMigrationLock(client: PoolClient): Promise<void> {
+async function beginLocked(
+  client: PoolClient,
+  begin: 'BEGIN' | 'BEGIN ISOLATION LEVEL READ COMMITTED' = 'BEGIN',
+): Promise<void> {
   const started = performance.now();
   for (
     let attempt = 0;
     attempt <= MODULE_STORAGE_MIGRATION_LOCK.maximumRetries;
     attempt += 1
   ) {
+    // Every retry needs a fresh post-lock snapshot for a window-index count.
+    await client.query(begin);
     const result = await client.query<{ locked: boolean }>(
       'SELECT pg_try_advisory_xact_lock(hashtext($1)) AS locked',
       [MODULE_STORAGE_MIGRATION_LOCK.key],
@@ -5954,7 +5956,6 @@ async function acquireSharedMigrationLock(client: PoolClient): Promise<void> {
     await new Promise<void>((resolve) =>
       setTimeout(resolve, MODULE_STORAGE_MIGRATION_LOCK.retryDelayMilliseconds),
     );
-    await client.query('BEGIN');
   }
 }
 
