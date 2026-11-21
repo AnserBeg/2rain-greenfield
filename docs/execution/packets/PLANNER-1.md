@@ -48,6 +48,8 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44880757
 
 The packet branch contains the sortable-field Map, public Demo Maps imagery, the Customize member, and draft database and browser proofs. Reader values 38 and 39 are provisional. Neither rung has been taken on main.
 
+The seven imagery and customization tests and the suite-inventory check passed. Three isolated mutations made the matching tests fail: omitting the requesting-company check, adding company to the public cache key, and allowing an exact stop at the viewport centre. PostgreSQL, browser, older-reader and SPEED-1 gates are outstanding.
+
 The grammar pin fails with `UX003_VOCABULARY_DRIFT`. The Map needs the archetype and its four slots in the protected UX skill. The live drafter inventory and eval registry are still on the active AI-BUILD-1 slice 2 branch. The orchestrator must resolve these dependencies before review. Slice 1 has no CI receipt.
 
 Try the fake provider and Customize from the packet checkout with `node --import tsx --test --test-concurrency=1 test/unit/map-imagery.test.ts test/unit/customization-map.test.ts`.

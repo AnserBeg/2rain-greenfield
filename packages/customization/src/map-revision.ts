@@ -284,7 +284,7 @@ export function applyMapRevision(
     workspace: {
       membership: 'contextual',
       ownerSurfaceId: body.listSurfaceId,
-      ...(entry && { entry }),
+      ...(entry ? { entry } : {}),
     },
     slots: SURFACE_SLOTS.map.map((slot, i) => ({
       kind: 'surfaceSlot',

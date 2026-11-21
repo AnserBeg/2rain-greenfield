@@ -28,6 +28,13 @@ export function mapPageBinding(request: SemanticQueryExecutionRequest) {
     (request.arguments as Record<string, unknown>).mapPage,
   );
   const m = request.view.projections.surface.payload;
+  if (
+    m === null ||
+    typeof m !== 'object' ||
+    !('surfaces' in m) ||
+    !Array.isArray(m.surfaces)
+  )
+    throw new Error('The Map selection is unavailable.');
   let available = bindings.get(m);
   if (!available) {
     available = new Map();
