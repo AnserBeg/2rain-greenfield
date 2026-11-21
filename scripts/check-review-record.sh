@@ -204,6 +204,19 @@ fi
 
 # Walk main's own line. For a merge commit, <sha>^ is main's previous tip, so the
 # diff is everything the merge brought in — which is what actually landed.
+# CI-4 is the first integration governed by exact packet-tip rows. Older
+# arrivals retain their recorded coverage, including fast-forward history.
+train_rollout=$(git log --first-parent --diff-filter=A --format=%H "$BRANCH" -- test/evidence/CI-4.expected-red.json | tail -1) || exit 2
+exact_rows=false
+if [ -n "$train_rollout" ] && git merge-base --is-ancestor "$train_rollout" "$BASELINE"; then
+  exact_rows=true
+fi
+declare -A packet_rows=()
+if [ -f "$LOG" ]; then
+  while read -r tip; do packet_rows["$tip"]=1; done < <(
+    sed -nE 's/^\|[[:space:]]*`?([0-9a-f]{40})`?[[:space:]]*\|.*/\1/p' "$LOG"
+  )
+fi
 load_records
 mapfile -t COMMITS < <(git rev-list --first-parent --reverse "$BASELINE..$BRANCH" 2>/dev/null)
 
@@ -213,6 +226,12 @@ CHECKED=0
 
 for sha in "${COMMITS[@]:-}"; do
   [ -n "$sha" ] || continue
+  if [ "$sha" = "$train_rollout" ]; then exact_rows=true; fi
+  if $exact_rows && second=$(git rev-parse --verify --quiet "$sha^2"); then
+    CHECKED=$((CHECKED + 1))
+    [ -n "${packet_rows[$second]:-}" ] || UNCOVERED+=("$sha")
+    continue
+  fi
   touches_executable "$sha" || continue
   if doctrine_only "$sha"; then
     EXEMPT+=("$sha")
@@ -223,7 +242,7 @@ for sha in "${COMMITS[@]:-}"; do
 done
 
 if [ "${#UNCOVERED[@]}" -eq 0 ]; then
-  echo "review-record: OK ($CHECKED executable commit(s) since ${BASELINE:0:7}, all covered by ${#RECORDED[@]} record(s)${EXEMPT:+, ${#EXEMPT[@]} doctrine-only})"
+  echo "review-record: OK ($CHECKED integration or executable commit(s) since ${BASELINE:0:7}, all covered by ${#RECORDED[@]} record(s)${EXEMPT:+, ${#EXEMPT[@]} doctrine-only})"
   exit 0
 fi
 
@@ -233,7 +252,7 @@ fi
   for sha in "${UNCOVERED[@]:-}"; do
     [ -n "$sha" ] || continue
     packet="$(packet_of "$sha")"
-    echo "  ${sha:0:7} ${packet:+($packet) }changed executable content and no recorded SHA contains it"
+    echo "  ${sha:0:7} ${packet:+($packet) }is missing its review-log record"
   done
   cat <<EOF
 
