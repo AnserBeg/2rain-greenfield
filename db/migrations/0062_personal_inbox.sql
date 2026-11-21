@@ -16,7 +16,8 @@ CREATE UNIQUE INDEX discussion_notice_lease ON platform.discussion_notice_occurr
 
 CREATE TABLE platform.personal_inbox (
   tenant_id uuid NOT NULL, environment_id uuid NOT NULL, company_id uuid NOT NULL,
-  recipient_id uuid NOT NULL, entry_id bigint GENERATED ALWAYS AS IDENTITY,
+  recipient_id uuid NOT NULL, entry_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  entry_number bigint GENERATED ALWAYS AS IDENTITY,
   channel text NOT NULL CHECK (channel='staffDiscussion/v1'),
   thread_id uuid NOT NULL, message_id uuid NOT NULL,
   reasons text[] NOT NULL, read_at timestamptz, archived_at timestamptz,
@@ -25,6 +26,8 @@ CREATE TABLE platform.personal_inbox (
   FOREIGN KEY (tenant_id,environment_id,company_id,thread_id) REFERENCES platform.communication_threads,
   FOREIGN KEY (tenant_id,environment_id,recipient_id) REFERENCES platform.staff_accounts
 );
+CREATE INDEX personal_inbox_recipient_page ON platform.personal_inbox
+  (tenant_id,environment_id,company_id,recipient_id,channel,entry_number DESC) WHERE archived_at IS NULL;
 ALTER TABLE platform.personal_inbox ENABLE ROW LEVEL SECURITY;
 ALTER TABLE platform.personal_inbox FORCE ROW LEVEL SECURITY;
 ALTER TABLE platform.discussion_notice_occurrences ENABLE ROW LEVEL SECURITY;
@@ -162,26 +165,28 @@ DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_inte
 
 -- A locator is meaningful only to its own recipient. Every query, including a
 -- copied ID and the count, rechecks the exact current message and reply parent.
-CREATE FUNCTION north_star_internal.personal_inbox_rows(c uuid, via text, before_id bigint, exact_id bigint, unread_only boolean, row_limit integer)
-RETURNS TABLE(entry_id bigint,thread_id uuid,message_id uuid,reasons text[],unread boolean)
+CREATE FUNCTION north_star_internal.personal_inbox_rows(c uuid, via text, before_id uuid, exact_id uuid, unread_only boolean, row_limit integer)
+RETURNS TABLE(entry_id uuid,thread_id uuid,message_id uuid,reasons text[],unread boolean)
 LANGUAGE sql STABLE SET search_path = pg_catalog, pg_temp AS $$
   SELECT n.entry_id,n.thread_id,n.message_id,r.reasons,n.read_at IS NULL
   FROM platform.personal_inbox n
   CROSS JOIN LATERAL (SELECT north_star_internal.inbox_reasons(c,n.thread_id,n.message_id,n.recipient_id) AS reasons OFFSET 0) r
   WHERE (n.tenant_id,n.environment_id,n.company_id,n.recipient_id,n.channel)=(north_star_internal.trusted_tenant_id(),
     north_star_internal.trusted_environment_id(),c,north_star_internal.address_principal(),via)
-    AND (before_id IS NULL OR n.entry_id<before_id) AND (exact_id IS NULL OR n.entry_id=exact_id)
+    AND (before_id IS NULL OR n.entry_number<(SELECT b.entry_number FROM platform.personal_inbox b
+      WHERE (b.tenant_id,b.environment_id,b.company_id,b.recipient_id,b.channel,b.entry_id)=
+        (n.tenant_id,n.environment_id,n.company_id,n.recipient_id,n.channel,before_id))) AND (exact_id IS NULL OR n.entry_id=exact_id)
     AND (NOT unread_only OR n.read_at IS NULL)
     AND via='staffDiscussion/v1' AND n.archived_at IS NULL AND cardinality(n.reasons)>0 AND cardinality(r.reasons)>0
-  ORDER BY n.entry_id DESC LIMIT row_limit
+  ORDER BY n.entry_number DESC LIMIT row_limit
 $$;
-CREATE FUNCTION platform.personal_inbox_page(c uuid, via text, before_id bigint DEFAULT NULL)
-RETURNS TABLE(entry_id bigint,thread_id uuid,message_id uuid,reasons text[],unread boolean)
+CREATE FUNCTION platform.personal_inbox_page(c uuid, via text, before_id uuid DEFAULT NULL)
+RETURNS TABLE(entry_id uuid,thread_id uuid,message_id uuid,reasons text[],unread boolean)
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
   SELECT * FROM north_star_internal.personal_inbox_rows(c,via,before_id,NULL,false,25)
 $$;
-CREATE FUNCTION platform.personal_inbox_entry(c uuid, via text, id bigint)
-RETURNS TABLE(entry_id bigint,thread_id uuid,message_id uuid,reasons text[],unread boolean)
+CREATE FUNCTION platform.personal_inbox_entry(c uuid, via text, id uuid)
+RETURNS TABLE(entry_id uuid,thread_id uuid,message_id uuid,reasons text[],unread boolean)
 LANGUAGE sql STABLE STRICT SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
   SELECT * FROM north_star_internal.personal_inbox_rows(c,via,NULL,id,false,1)
 $$;
@@ -189,7 +194,7 @@ CREATE FUNCTION platform.personal_inbox_unread(c uuid, via text) RETURNS integer
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
   SELECT count(*)::integer FROM north_star_internal.personal_inbox_rows(c,via,NULL,NULL,true,100)
 $$;
-CREATE FUNCTION platform.personal_inbox_mark(c uuid, via text, id bigint, action text) RETURNS boolean
+CREATE FUNCTION platform.personal_inbox_mark(c uuid, via text, id uuid, action text) RETURNS boolean
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_internal.trusted_environment_id();
   person uuid:=north_star_internal.address_principal(); n record; BEGIN
@@ -206,15 +211,15 @@ DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_inte
   RETURN FOUND; END $$;
 REVOKE ALL ON FUNCTION north_star_internal.inbox_require_writer(),north_star_internal.inbox_source(uuid,uuid,uuid),
   north_star_internal.inbox_member(uuid,uuid),north_star_internal.inbox_can_read(uuid,uuid,uuid,uuid),
-  north_star_internal.inbox_reasons(uuid,uuid,uuid,uuid),north_star_internal.personal_inbox_rows(uuid,text,bigint,bigint,boolean,integer) FROM PUBLIC;
+  north_star_internal.inbox_reasons(uuid,uuid,uuid,uuid),north_star_internal.personal_inbox_rows(uuid,text,uuid,uuid,boolean,integer) FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform.enqueue_discussion_notice(uuid,uuid,uuid,uuid),platform.claim_discussion_notice(),
   platform.acknowledge_discussion_notice(uuid,uuid,uuid,uuid),platform.lock_discussion_notice(uuid,uuid,uuid),
   platform.discussion_notice_source(uuid,uuid,uuid),platform.discussion_notice_readable(uuid,uuid,uuid,uuid),
-  platform.reconcile_discussion_notice(uuid,uuid,uuid,jsonb),platform.personal_inbox_page(uuid,text,bigint),
-  platform.personal_inbox_entry(uuid,text,bigint),platform.personal_inbox_unread(uuid,text),platform.personal_inbox_mark(uuid,text,bigint,text) FROM PUBLIC;
+  platform.reconcile_discussion_notice(uuid,uuid,uuid,jsonb),platform.personal_inbox_page(uuid,text,uuid),
+  platform.personal_inbox_entry(uuid,text,uuid),platform.personal_inbox_unread(uuid,text),platform.personal_inbox_mark(uuid,text,uuid,text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION platform.enqueue_discussion_notice(uuid,uuid,uuid,uuid) TO north_star_communication_operation;
 GRANT EXECUTE ON FUNCTION platform.claim_discussion_notice(),platform.acknowledge_discussion_notice(uuid,uuid,uuid,uuid),
   platform.lock_discussion_notice(uuid,uuid,uuid),platform.discussion_notice_source(uuid,uuid,uuid),
   platform.discussion_notice_readable(uuid,uuid,uuid,uuid),platform.reconcile_discussion_notice(uuid,uuid,uuid,jsonb) TO north_star_workflow_worker;
-GRANT EXECUTE ON FUNCTION platform.personal_inbox_page(uuid,text,bigint),platform.personal_inbox_entry(uuid,text,bigint),
-  platform.personal_inbox_unread(uuid,text),platform.personal_inbox_mark(uuid,text,bigint,text) TO north_star_runtime;
+GRANT EXECUTE ON FUNCTION platform.personal_inbox_page(uuid,text,uuid),platform.personal_inbox_entry(uuid,text,uuid),
+  platform.personal_inbox_unread(uuid,text),platform.personal_inbox_mark(uuid,text,uuid,text) TO north_star_runtime;

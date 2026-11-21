@@ -347,12 +347,24 @@ test('personal inbox on committed discussion occurrences', async (t) => {
               first.at(-1)!.entry_id,
             );
             assert.equal(second.length, 25);
-            const keys = [...first, ...second].map((row) =>
-              BigInt(row.entry_id),
+            const ordered = await admin.query<{ entry_id: string }>(
+              `SELECT entry_id FROM platform.personal_inbox WHERE recipient_id=$1
+              AND cardinality(reasons)>0 AND archived_at IS NULL ORDER BY entry_number DESC LIMIT 50`,
+              [mentioned],
             );
-            assert.ok(
-              keys.slice(1).every((id, index) => id < keys[index]!),
+            assert.deepEqual(
+              [...first, ...second].map((row) => row.entry_id),
+              ordered.rows.map((row) => row.entry_id),
               'keyset repeated or reordered entries',
+            );
+            const other = await admin.query<{ entry_id: string }>(
+              'SELECT entry_id FROM platform.personal_inbox WHERE recipient_id=$1',
+              [parentAuthor],
+            );
+            assert.deepEqual(
+              await inbox.page(reader, west, other.rows[0]!.entry_id),
+              [],
+              'a copied cursor positioned a different inbox',
             );
             assert.equal(
               (
@@ -439,7 +451,7 @@ test('personal inbox on committed discussion occurrences', async (t) => {
             try {
               await assert.rejects(
                 admin.query(
-                  "SELECT platform.personal_inbox_mark($1,$2,1,'archive')",
+                  "SELECT platform.personal_inbox_mark($1,$2,gen_random_uuid(),'archive')",
                   [west, DISCUSSION_INBOX_CHANNEL],
                 ),
                 /inbox.requiresReadCommitted/,
@@ -450,7 +462,7 @@ test('personal inbox on committed discussion occurrences', async (t) => {
             }
             await assert.rejects(
               admin.query(
-                "SELECT platform.personal_inbox_mark($1,$2,1,'reset')",
+                "SELECT platform.personal_inbox_mark($1,$2,gen_random_uuid(),'reset')",
                 [west, DISCUSSION_INBOX_CHANNEL],
               ),
               /inbox.invalidAction/,
