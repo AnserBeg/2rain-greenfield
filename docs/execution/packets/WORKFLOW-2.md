@@ -34,7 +34,7 @@ Fable or Codex sol, never from the writer's model.
    process boundary. Tests: the child sees no database variable and opens no
    connection; an infinite loop in a draft is killed at the bound; each check
    fails when removed. Not Critical.
-2. **Repair loop (A2).** Diagnostics feed, turn counter, cost cap, evidence.
+2. **Repair loop (A2), owned by AI-BUILD-1 slice 2.** Diagnostics feed, turn counter, cost cap, evidence.
    Tests: a seeded type error, a lint error and a replay divergence are each
    repaired in at most two turns; a third failure reaches the user with the
    diagnostics; authority and unsupported refusals are not repaired.

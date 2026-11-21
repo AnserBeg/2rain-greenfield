@@ -4,12 +4,17 @@ import type { RequestRuntimeView } from '@north-star/runtime/request-runtime-vie
 import type { PoolClient } from 'pg';
 import {
   WorkflowBodyBundleSchema,
+  WorkflowVerificationResultSchema,
   type WorkflowBodyBundle,
 } from '../../customization/src/workflow-draft.js';
-import { compileWorkflowBody } from './workflow-compile.js';
+import { fileURLToPath } from 'node:url';
+import {
+  runSandboxRequest,
+  type SandboxRunnerOptions,
+} from '../../customization/src/sandbox.js';
+import type { WorkflowVerificationRequest } from './workflow-draft-worker.js';
 import { sha256 } from './workflow-execution.js';
 import { MAXIMUM_WORKFLOW_SOURCE_BYTES } from './workflow-isolate.js';
-import { verifyWorkflowReplay } from './workflow-run.js';
 import { generateWorkflowSdk, type WorkflowGrants } from './workflow-sdk.js';
 
 export async function storeWorkflowBundle(
@@ -60,18 +65,36 @@ export async function verifyWorkflowBundle(
   view: RequestRuntimeView,
   grants: WorkflowGrants,
   bundle: Pick<WorkflowBodyBundle, 'body' | 'fixtures'>,
+  options: SandboxRunnerOptions = {},
 ) {
   const sdk = generateWorkflowSdk(view, grants);
-  const compiled = compileWorkflowBody(bundle.body, sdk);
-  await verifyWorkflowReplay(
-    compiled,
-    bundle.fixtures.map(({ event, effects }) => ({
+  const request: WorkflowVerificationRequest = {
+    body: bundle.body,
+    declarations: sdk.declarations,
+    release: sdk.release,
+    fixtures: bundle.fixtures.map(({ event, effects }) => ({
       event,
       effects: effects.map(({ call, result }) => ({
         call: sdk.admitCall(call),
         result,
       })),
     })),
+  };
+  const result = await runSandboxRequest(
+    fileURLToPath(new URL('./workflow-draft-worker.ts', import.meta.url)),
+    'verifyWorkflowDraft',
+    request,
+    options,
+    { heapLimitMegabytes: 512, wallClockLimitMilliseconds: 30_000 },
+    (response) => {
+      if (
+        typeof response !== 'string' ||
+        Buffer.byteLength(response) > 1024 * 1024
+      )
+        throw new Error('Invalid workflow verification response');
+      return WorkflowVerificationResultSchema.parse(JSON.parse(response));
+    },
   );
-  return compiled;
+  if (result.status === 'refused') throw new Error(result.message);
+  return { sdk, executable: result.executable, journals: result.journals };
 }

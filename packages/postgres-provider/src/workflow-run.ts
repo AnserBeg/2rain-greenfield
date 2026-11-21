@@ -224,7 +224,8 @@ export interface WorkflowVerificationFixture {
 export async function verifyWorkflowReplay(
   workflow: CompiledWorkflow,
   fixtures: readonly WorkflowVerificationFixture[],
-): Promise<void> {
+) {
+  const journals = [];
   if (!fixtures.length)
     throw new Error('Workflow verification requires a fixture');
   for (const { event, effects } of fixtures) {
@@ -251,6 +252,7 @@ export async function verifyWorkflowReplay(
     if (cursor !== effects.length)
       throw new Error(`Workflow left a mock unused at cursor ${cursor}`);
     const recorded = first.snapshot();
+    journals.push(recorded.prefix);
     const replay = new InMemoryWorkflowRun(workflow, event, {
       ...recorded,
       terminal: null,
@@ -261,4 +263,5 @@ export async function verifyWorkflowReplay(
         `Workflow replay failed at cursor ${step.cursor} (${step.kind})`,
       );
   }
+  return journals;
 }

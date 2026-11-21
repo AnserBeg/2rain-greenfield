@@ -16,7 +16,7 @@ import type { SerializedRelease } from './release-envelope.js';
  * command line -- never compiles a tenant definition itself.
  */
 export const SANDBOX_PROTOCOL_VERSION =
-  'northstar.customization-sandbox/v1' as const;
+  'northstar.customization-sandbox/v2' as const;
 export const SANDBOX_DEFAULT_LIMITS = Object.freeze({
   heapLimitMegabytes: 1024,
   wallClockLimitMilliseconds: 90_000,
@@ -101,22 +101,51 @@ export async function compileInSandbox(
   request: SandboxRequest,
   options: SandboxRunnerOptions = {},
 ): Promise<SandboxResponse> {
-  const heap =
-    options.heapLimitMegabytes ?? SANDBOX_DEFAULT_LIMITS.heapLimitMegabytes;
-  const wallClock =
-    options.wallClockLimitMilliseconds ??
-    SANDBOX_DEFAULT_LIMITS.wallClockLimitMilliseconds;
-  const execArgv = [`--max-old-space-size=${String(heap)}`, '--import', 'tsx'];
-  const environment = {
-    ...process.env,
-    NORTH_STAR_SANDBOX_WALL_CLOCK_MS: String(wallClock),
-  };
-  const child = (options.launch ?? defaultLaunch)(
+  return runSandboxRequest(
     workerPath,
-    execArgv,
-    environment,
+    'compile',
+    request,
+    options,
+    SANDBOX_DEFAULT_LIMITS,
+    (value) => value as SandboxResponse,
   );
-  return new Promise<SandboxResponse>((resolve, reject) => {
+}
+
+/** A fresh fork and the same closed environment for every protocol request. */
+export function runSandboxRequest<T>(
+  path: string,
+  kind: 'compile' | 'verifyWorkflowDraft',
+  request: unknown,
+  options: SandboxRunnerOptions,
+  limits: {
+    readonly heapLimitMegabytes: number;
+    readonly wallClockLimitMilliseconds: number;
+  },
+  parse: (response: unknown) => T,
+): Promise<T> {
+  const heap = Math.min(
+    options.heapLimitMegabytes ?? Infinity,
+    limits.heapLimitMegabytes,
+  );
+  const wallClock = Math.min(
+    options.wallClockLimitMilliseconds ?? Infinity,
+    limits.wallClockLimitMilliseconds,
+  );
+  const root = new URL('../../../', import.meta.url);
+  const execArgv = [
+    `--max-old-space-size=${heap}`,
+    '--permission',
+    ...(kind === 'verifyWorkflowDraft' ? ['--allow-worker'] : []),
+    ...['packages', 'node_modules', 'package.json'].map(
+      (name) => `--allow-fs-read=${fileURLToPath(new URL(name, root))}`,
+    ),
+    '--experimental-transform-types',
+    '--import',
+    new URL('./sandbox-loader.mjs', import.meta.url).href,
+  ];
+  const environment = { NORTH_STAR_SANDBOX_WALL_CLOCK_MS: String(wallClock) };
+  const child = (options.launch ?? defaultLaunch)(path, execArgv, environment);
+  return new Promise<T>((resolve, reject) => {
     let settled = false;
     const settle = (action: () => void) => {
       if (settled) return;
@@ -130,7 +159,7 @@ export async function compileInSandbox(
         reject(
           new SandboxFailure(
             'SANDBOX_TIMED_OUT',
-            `the isolated compile did not finish within ${String(wallClock)} ms`,
+            `the isolated ${kind} did not finish within ${String(wallClock)} ms`,
           ),
         );
       });
@@ -147,14 +176,14 @@ export async function compileInSandbox(
           reject(
             new SandboxFailure(
               'SANDBOX_PROTOCOL_INVALID',
-              'the isolated compile answered outside its protocol',
+              'the sandbox answered outside its protocol',
             ),
           );
           return;
         }
         const answer = message as {
           environmentRefusal?: string;
-          response?: SandboxResponse;
+          response?: unknown;
         };
         if (answer.environmentRefusal) {
           reject(
@@ -169,12 +198,16 @@ export async function compileInSandbox(
           reject(
             new SandboxFailure(
               'SANDBOX_PROTOCOL_INVALID',
-              'the isolated compile sent no response',
+              'the sandbox sent no response',
             ),
           );
           return;
         }
-        resolve(answer.response);
+        try {
+          resolve(parse(answer.response));
+        } catch (error) {
+          reject(error);
+        }
       });
     });
     child.once('exit', (code, signal) => {
@@ -182,7 +215,7 @@ export async function compileInSandbox(
         reject(
           new SandboxFailure(
             'SANDBOX_CRASHED',
-            `the isolated compile exited before answering (${String(code ?? signal)})`,
+            `the isolated ${kind} exited before answering (${String(code ?? signal)})`,
           ),
         );
       });
@@ -192,7 +225,7 @@ export async function compileInSandbox(
         reject(new SandboxFailure('SANDBOX_CRASHED', error.message));
       });
     });
-    child.send({ protocol: SANDBOX_PROTOCOL_VERSION, request });
+    child.send({ protocol: SANDBOX_PROTOCOL_VERSION, kind, request });
   });
 }
 

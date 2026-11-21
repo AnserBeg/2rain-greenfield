@@ -1,3 +1,4 @@
+import { verifyWorkflowBundle } from '../../packages/postgres-provider/src/workflow-bundle.js';
 import assert from 'node:assert/strict';
 import test, { before } from 'node:test';
 
@@ -30,6 +31,7 @@ import {
 } from '../../packages/runtime/src/request-runtime-view.js';
 import {
   compilePartyFixture,
+  partyDefinitionBytes,
   partyRuntimeProjections,
 } from '../fixtures/g2/party/compiler.js';
 import { PARTY_IDS } from '../fixtures/g2/party/definition.js';
@@ -468,5 +470,104 @@ test('workflow verification derives the complete Tier B relation and ownership c
   assert.deepEqual(
     [...dependencies].sort(),
     [receipt, child, indirect, capabilityTarget].sort(),
+  );
+});
+
+test('both sandbox requests discard serving credentials and cannot open the connector key', async (t) => {
+  const { fork } = await import('node:child_process');
+  const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { compileInSandbox } =
+    await import('../../packages/customization/src/sandbox.js');
+  const directory = await mkdtemp(join(tmpdir(), 'workflow-test-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const key = join(directory, 'connector');
+  await writeFile(key, 'fixture');
+  const keys = [
+    'DATABASE_URL',
+    'PGPASSWORD',
+    'NORTH_STAR_AGENT_KEY_FILE',
+    'NORTH_STAR_CONNECTOR_KEY_FILE',
+    'PROVIDER_TOKEN',
+    'NODE_OPTIONS',
+  ];
+  for (const name of keys) {
+    const previous = process.env[name];
+    process.env[name] = key;
+    t.after(() => {
+      if (previous === undefined) delete process.env[name];
+      else process.env[name] = previous;
+    });
+  }
+  const probe = `import assert from 'node:assert/strict';
+  import {readFileSync} from 'node:fs';
+  import {subscribe} from 'node:diagnostics_channel';
+  for (const key of ${JSON.stringify(keys)}) assert.equal(process.env[key], undefined);
+  assert.throws(() => readFileSync(${JSON.stringify(key)}), {code: 'ERR_ACCESS_DENIED'});
+  subscribe('net.client.socket', () => process.exit(79));`;
+  let launches = 0;
+  const options = {
+    launch(path: string, argv: readonly string[], env: NodeJS.ProcessEnv) {
+      launches++;
+      return fork(path, [], {
+        execArgv: [
+          ...argv,
+          '--import',
+          `data:text/javascript,${encodeURIComponent(probe)}`,
+        ],
+        env,
+        serialization: 'advanced',
+        stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
+      });
+    },
+  };
+  const result = await verifyWorkflowBundle(
+    view,
+    { queries: [], operations: [] },
+    {
+      body: 'sdk.now();',
+      fixtures: [{ event, effects: [{ call: { kind: 'now' }, result: day }] }],
+    },
+    options,
+  );
+  assert.deepEqual(result.journals, [
+    [{ request: '{"kind":"now"}', result: JSON.stringify(day) }],
+  ]);
+  const { serializeRelease } =
+    await import('../../packages/customization/src/release-envelope.js');
+  const compiled = await compileInSandbox(
+    {
+      chain: [],
+      base: {},
+      acknowledgement: { packageId: 'party', entries: [] },
+      tip: serializeRelease({
+        compiled: fixtureRelease,
+        normalizedDefinitionBytes: partyDefinitionBytes(
+          compilePartyFixture().definition,
+        ),
+      }),
+    },
+    options,
+  );
+  assert.equal(compiled.status, 'compiled');
+  assert.equal(launches, 2);
+});
+
+test('the parent kills an unfinished workflow draft at its verification deadline', async () => {
+  await assert.rejects(
+    verifyWorkflowBundle(
+      view,
+      { queries: [], operations: [] },
+      { body: 'for (;;) {}', fixtures: [{ event, effects: [] }] },
+      {
+        startTimer(milliseconds, expire) {
+          assert.equal(milliseconds, 30_000);
+          queueMicrotask(expire);
+          return () => undefined;
+        },
+      },
+    ),
+    { code: 'SANDBOX_TIMED_OUT' },
   );
 });
