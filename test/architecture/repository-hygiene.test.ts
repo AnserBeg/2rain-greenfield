@@ -254,6 +254,8 @@ const suiteDefinitions = [
       'test:postgres:5',
       'test:postgres:6',
       'test:postgres:7',
+      'test:postgres:8',
+      'test:postgres:9',
     ],
   },
   {
@@ -316,6 +318,7 @@ const suiteDefinitions = [
     ],
     scripts: [
       'test:postgres:inventory:balances',
+      'test:postgres:inventory:counts',
       'test:postgres:inventory:posting',
     ],
   },
@@ -803,10 +806,13 @@ test('CI runs every scaffold gate from a frozen install', () => {
     'corepack pnpm test:postgres:5',
     'corepack pnpm test:postgres:6',
     'corepack pnpm test:postgres:7',
+    'corepack pnpm test:postgres:8',
+    'corepack pnpm test:postgres:9',
     'corepack pnpm test:postgres:composed',
     'corepack pnpm test:postgres:commercial',
     'corepack pnpm test:postgres:sales',
     'corepack pnpm test:postgres:inventory:balances',
+    'corepack pnpm test:postgres:inventory:counts',
     'corepack pnpm test:postgres:inventory:posting',
     'corepack pnpm test:locale',
     'corepack pnpm test:browser',
@@ -829,6 +835,7 @@ test('CI runs every scaffold gate from a frozen install', () => {
   assert.match(workflow, /^ {2}postgres-commercial:$/mu);
   assert.match(workflow, /^ {2}postgres-sales:$/mu);
   assert.match(workflow, /^ {2}postgres-inventory:$/mu);
+  assert.match(workflow, /^ {2}postgres-inventory-counts:$/mu);
   assert.match(workflow, /^ {2}browser:$/mu);
   assert.match(workflow, /^ {2}browser-operations:$/mu);
   assert.match(workflow, /^ {2}browser-inventory:$/mu);
