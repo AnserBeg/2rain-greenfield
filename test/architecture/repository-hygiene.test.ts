@@ -199,6 +199,7 @@ const suiteDefinitions = [
       'test/postgres/billing-terms.test.ts',
       'test/postgres/board-policy.test.ts',
       'test/postgres/booking-commitments.test.ts',
+      'test/postgres/booking-serving.test.ts',
       'test/postgres/catalog-extras.test.ts',
       'test/postgres/catalog-runtime.test.ts',
       'test/postgres/current-policy.test.ts',

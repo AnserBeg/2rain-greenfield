@@ -57,6 +57,29 @@ export async function withTrustedRequestTransaction<T>(
   return runTrustedTransaction(pool, context, run, remainingMilliseconds);
 }
 
+/** A booking and an ordinary record write may lock non-owning relation targets
+ * in different orders. Retry the complete idempotent write after rollback. */
+export async function withIdempotentTransaction<T>(
+  pool: Pool,
+  context: TrustedRequestContext,
+  run: (client: PoolClient) => Promise<T>,
+): Promise<T> {
+  try {
+    return await withTrustedRequestTransaction(pool, context, run);
+  } catch (error) {
+    if (!(error instanceof Error)) throw error;
+    const state =
+      'providerMetadata' in error &&
+      typeof error.providerMetadata === 'object' &&
+      error.providerMetadata !== null &&
+      'sqlstate' in error.providerMetadata
+        ? error.providerMetadata.sqlstate
+        : 'code' in error && error.code;
+    if (state !== '40P01') throw error;
+  }
+  return withTrustedRequestTransaction(pool, context, run);
+}
+
 /** Only the separately provisioned verifier process has this login. */
 export async function withActivationVerifierTransaction<T>(
   pool: Pool,

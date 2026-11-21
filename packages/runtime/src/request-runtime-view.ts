@@ -1,5 +1,6 @@
 import {
-  BOOKING_OPERATION_READER,
+  BOOKING_FULFILMENT_READER,
+  BOOKING_USAGE_QUERY_READER,
   CONNECTOR_FAMILY,
 } from '@north-star/canonical-model';
 import {
@@ -185,7 +186,7 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.operation]: {
     capabilityId: 'northstar.runtime:capability.operation-catalog',
-    maximumSupportedVersion: BOOKING_OPERATION_READER,
+    maximumSupportedVersion: BOOKING_FULFILMENT_READER,
   },
   [REQUEST_RUNTIME_FORMULA_RULE_FAMILY]: {
     capabilityId: 'northstar.runtime:capability.formula-rule',
@@ -193,7 +194,7 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.query]: {
     capabilityId: 'northstar.runtime:capability.query-catalog',
-    maximumSupportedVersion: 4,
+    maximumSupportedVersion: BOOKING_USAGE_QUERY_READER,
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.surface]: {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
