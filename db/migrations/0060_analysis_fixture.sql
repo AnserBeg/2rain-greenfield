@@ -162,8 +162,7 @@ LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp AS $$ BEGIN
     INSERT INTO north_star_internal.analysis_operator_controls(scope,disabled,generation)
       SELECT target,stop,1 WHERE stop OR EXISTS (SELECT FROM north_star_internal.analysis_operator_controls WHERE scope=target)
       ON CONFLICT(scope) DO UPDATE SET disabled=excluded.disabled,generation=north_star_internal.analysis_operator_controls.generation+1
-      WHERE north_star_internal.analysis_operator_controls.disabled IS DISTINCT FROM excluded.disabled;
-  END IF;
+      WHERE north_star_internal.analysis_operator_controls.disabled IS DISTINCT FROM excluded.disabled; END IF;
   IF stop THEN
     UPDATE platform.analysis_runs SET status='cancelled' WHERE status='queued' AND target IN ('global','tenant/'||tenant_id,'image/'||image);
     RETURN QUERY UPDATE platform.analysis_runs SET status='stopping' WHERE status IN ('reserved','stopping')
