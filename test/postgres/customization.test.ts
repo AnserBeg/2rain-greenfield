@@ -206,6 +206,43 @@ test(
           await runtime.close();
         }
 
+        const protectedBase = structuredClone(firstPartyAuthored);
+        (
+          protectedBase.fields as { fieldId: string; classification: string }[]
+        ).find(
+          (f) => f.fieldId === 'northstar.app:field.item_sku',
+        )!.classification = 'restricted';
+        const privateConflict = platformLabelVariant(
+          'Shelf code',
+          false,
+          undefined,
+          compiledApplication,
+          false,
+          false,
+          protectedBase,
+        );
+        const redacted = await openComposedApplicationRuntime({
+          ...options,
+          compiledApplication: privateConflict.envelope,
+        });
+        try {
+          const result = redacted.customizationUpgrade;
+          assert.ok(result?.status === 'rejected');
+          const finding = result.report?.findings.find(
+            (f) => f.code === 'FIELD_COLLISION',
+          );
+          assert.deepEqual(
+            [finding?.subject, finding?.expected, finding?.observed],
+            ['Restricted field', 'Restricted', 'Restricted'],
+          );
+          assert.doesNotMatch(
+            JSON.stringify(result),
+            /Shelf code|northstar\.app:field\.item_sku/u,
+          );
+        } finally {
+          await redacted.close();
+        }
+
         // The tenant relabels this column. Both proposed platform labels
         // disappear in the replay, leaving one candidate for different bases.
         const discardedBase = platformLabelVariant(
