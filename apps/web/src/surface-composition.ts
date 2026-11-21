@@ -1,3 +1,4 @@
+import { availablePopups } from '../../../packages/runtime/src/popup-actions.js';
 import { SavedAddressSchema } from '@north-star/canonical-model';
 import { randomUUID } from 'node:crypto';
 import type { SurfaceComposition } from '../../../packages/canonical-model/src/index.js';
@@ -2116,6 +2117,7 @@ const identity = (view: RequestRuntimeView) =>
     view.environmentId,
     view.principalId,
     view.release.releaseId,
+    view.pointer.fence,
   ]);
 
 /** Defaults are read once as a task opens. A shared input needs one common row value. */
@@ -2318,7 +2320,12 @@ export async function submitCompositionAction(
         renderData,
         422,
       );
-    const dialogPolicy = surface.composition?.presentation?.task;
+    const popup = surface.popupActions?.find(
+      (p) => p.revision.actionId === session?.action.actionId,
+    );
+    const dialogPolicy = popup
+      ? { fallback: 'page' }
+      : surface.composition?.presentation?.task;
     const taskPolicy = session?.action.presentation?.task;
     const mainReferences = taskPolicy
       ? [
@@ -2368,7 +2375,7 @@ export async function submitCompositionAction(
         })
         .join('') ?? '';
     if (dialogPolicy && renderData && session) {
-      const header = surface.composition!.presentation!.header;
+      const header = surface.composition?.presentation?.header;
       const phase = session.committedWithheld
         ? 'recovery'
         : finished(session)
@@ -2378,13 +2385,14 @@ export async function submitCompositionAction(
             : session.prepared && submission.taskStage !== 'edit'
               ? 'review'
               : 'entry';
-      const title = renderData.fields.cells[header.title] ?? surface.label;
-      const context = header.subtitle
+      const title =
+        (header && renderData.fields.cells[header.title]) ?? surface.label;
+      const context = (header?.subtitle ?? [])
         .map((id) => renderData!.fields.cells[id])
         .filter(Boolean)
         .join(' · ');
       return renderTask(
-        `<section class="composition-task-resume" data-task-resume hidden><div><strong>${h(session.action.label)}</strong><span>Closing dismisses the dialog; it does not cancel submitted work.</span></div><button type="button" data-task-open>${phase === 'result' || phase === 'recovery' ? 'View task outcome' : 'Continue task'}</button><a href="${h(renderData.url)}">Refresh record</a></section><dialog open id="composition-task" class="composition-task-dialog" data-composition-task data-task-fallback="${h(dialogPolicy.fallback)}" data-task-phase="${phase}" aria-labelledby="composition-task-heading"><header class="composition-task-header"><div><p>${h(title)}${context ? ` · ${h(context)}` : ''}</p><h2 id="composition-task-heading" data-task-heading tabindex="-1"${phase === 'entry' ? '' : ' data-task-initial-focus'}>${h(session.action.label)}</h2><span class="muted">${phase === 'entry' ? '1 · Enter details' : phase === 'review' ? '2 · Review and confirm' : phase === 'result' ? '3 · Result' : 'Outcome and recovery'}</span></div><button type="button" class="secondary-action" data-task-close hidden aria-label="Close task">×</button></header><div class="composition-task-body">${taskTransportError}${taskPolicy && phase === 'entry' ? renderTaskSummary(renderData, taskPolicy) : ''}${!taskPolicy && selection ? `<section class="composition-task-context" aria-label="Current selection">${selection}</section>` : ''}${html()}${taskPolicy && selection ? `<details class="composition-task-support"><summary>Supporting details</summary>${selection}</details>` : ''}</div></dialog>`,
+        `<section class="composition-task-resume" data-task-resume hidden><div><strong>${h(session.action.label)}</strong><span>Closing dismisses the dialog; it does not cancel submitted work.</span></div><button type="button" data-task-open>${phase === 'result' || phase === 'recovery' ? 'View task outcome' : 'Continue task'}</button><a href="${h(renderData.url)}">Refresh record</a></section><dialog open id="composition-task" class="composition-task-dialog" data-composition-task data-task-fallback="${h(dialogPolicy.fallback)}" data-task-phase="${phase}" aria-labelledby="composition-task-heading"><header class="composition-task-header"><div><p>${h(title)}${context ? ` · ${h(context)}` : ''}</p><h2 id="composition-task-heading" data-task-heading tabindex="-1"${phase === 'entry' ? '' : ' data-task-initial-focus'}>${h(session.action.label)}</h2><span class="muted">${phase === 'entry' ? '1 · Enter details' : phase === 'review' ? '2 · Review and confirm' : phase === 'result' ? '3 · Result' : 'Outcome and recovery'}</span></div><button type="button" class="secondary-action" data-task-close hidden aria-label="Close task">×</button></header><div class="composition-task-body">${taskTransportError}${popup ? `<p>Operation: ${h(popup.revision.target.operationId)} · Record: ${h(renderData.record.recordId)}</p>` : ''}${taskPolicy && phase === 'entry' ? renderTaskSummary(renderData, taskPolicy) : ''}${!taskPolicy && selection ? `<section class="composition-task-context" aria-label="Current selection">${selection}</section>` : ''}${html()}${taskPolicy && selection ? `<details class="composition-task-support"><summary>Supporting details</summary>${selection}</details>` : ''}</div></dialog>`,
         renderData,
         200,
         outcome ? { inline: true, html: outcome() } : undefined,
@@ -2412,6 +2420,13 @@ export async function submitCompositionAction(
     (!session ||
       session.identity !== identity(view) ||
       session.surfaceId !== surface.surfaceId ||
+      session.action.actionId !== submission.compositionAction ||
+      (surface.popupActions?.some(
+        (p) => p.revision.actionId === session?.action.actionId,
+      ) &&
+        session.data.url !==
+          new URL(requestUrl, 'http://surface-runtime.local').pathname +
+            new URL(requestUrl, 'http://surface-runtime.local').search) ||
       new URL(requestUrl, 'http://surface-runtime.local').searchParams.get(
         'record',
       ) !== session.data.record.recordId)
@@ -2468,7 +2483,23 @@ export async function submitCompositionAction(
       scope,
       gateways,
     );
-    if (!applicable(action, data) || !action.steps.length)
+    const popup = surface.popupActions?.find(
+      (p) => p.revision.actionId === action.actionId,
+    );
+    if (
+      (popup &&
+        !(
+          await availablePopups(
+            view,
+            [popup],
+            data.record,
+            scope,
+            gateways.operationGateway,
+          )
+        ).length) ||
+      !applicable(action, data) ||
+      !action.steps.length
+    )
       return taskDocument(() =>
         compositionMessage('COMPOSITION_TASK_UNAVAILABLE', 'alert'),
       );
@@ -2508,11 +2539,63 @@ export async function submitCompositionAction(
     sessions.set(token, session);
   }
   const current = session;
-  const direct = taskCanApplyDirectly(view, current.action);
+  const popup = surface.popupActions?.find(
+    (p) => p.revision.actionId === current.action.actionId,
+  );
+  // Re-read the actual record before advancing an open pop-up. The invocation
+  // still carries the revision seen on open and checks it inside the write.
+  if (popup && submission.taskToken && !current.confirmed) {
+    const fresh = await query(
+      view,
+      gateways,
+      surface.dataSourceQueryId,
+      current.data.scope,
+      recordArguments(view, surface, current.data.record.recordId),
+    );
+    const record = fresh.records[0];
+    if (
+      fresh.outcome !== 'exact' ||
+      !record ||
+      record.recordId !== current.data.record.recordId ||
+      record.revision !== current.data.record.revision ||
+      !(
+        await availablePopups(
+          view,
+          [popup],
+          record,
+          current.data.scope,
+          gateways.operationGateway,
+        )
+      ).length
+    ) {
+      sessions.delete(token!);
+      return renderTask(
+        compositionMessage('COMPOSITION_TASK_UNAVAILABLE', 'alert'),
+        null,
+        422,
+      );
+    }
+  }
+  const boundSources =
+    popup?.task?.steps[0]?.bindings.filter(
+      (b) =>
+        b.path.length === 2 &&
+        ['arguments', 'patch', 'values'].includes(b.path[0]!) &&
+        (b.value.source === 'record' || b.value.source === 'literal'),
+    ) ?? [];
+  const sourcesReview = () =>
+    boundSources
+      .map(
+        (b) =>
+          `<div><dt>${h(b.path.at(-1)!)} · ${b.value.source === 'record' ? 'Record field ' + h(b.value.field) : 'Fixed value'}</dt><dd>${h(text(resolveValue(b.value, current.data, {}, {}, {})))}</dd></div>`,
+      )
+      .join('');
+  const direct =
+    !boundSources.length && taskCanApplyDirectly(view, current.action);
   const apply =
     submission.taskStage === 'apply' && direct && !current.confirmed;
   const url = current.data.url;
-  const back = `<p><a href="${h(url)}">Back to order</a></p>`;
+  const back = `<p><a href="${h(url)}">${popup ? 'Cancel' : 'Back to order'}</a></p>`;
   // A multi-row Task: its rows as they were when it started, the inputs asked
   // once per row and those the operator types (a derived one is read).
   const taskRowsDeclared = current.action.rows;
@@ -2600,7 +2683,7 @@ export async function submitCompositionAction(
           current.action.presentation.task,
           current.prepared.presentation,
         )
-      : `<dl class="composition-reviewed-inputs">${headerInputs.map((input) => `<div><dt>${h(input.label)}</dt><dd>${h(shownInput(input, displayInputs[input.inputId] ?? ''))}</dd></div>`).join('')}</dl>${previewRows(figures)}`;
+      : `<dl class="composition-reviewed-inputs">${sourcesReview()}${headerInputs.map((input) => `<div><dt>${h(input.label)}</dt><dd>${h(shownInput(input, displayInputs[input.inputId] ?? ''))}</dd></div>`).join('')}</dl>${previewRows(figures)}`;
   const confirmLabel = () => {
     const declared =
       current.action.presentation?.task?.confirmation.confirmLabel;
@@ -2861,6 +2944,10 @@ export async function submitCompositionAction(
           prepared,
         );
     }
+  }
+  if (submission.taskStage === 'edit' && !current.confirmed) {
+    ++current.preparation;
+    current.prepared = null;
   }
   if (
     submission.taskStage === 'confirm' &&

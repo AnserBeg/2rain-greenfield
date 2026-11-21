@@ -1,3 +1,4 @@
+import { popupCommand, popupOptionId } from './popup-revision.js';
 import { defaultBoardChoices, draftBoardRevision } from './board-revision.js';
 import { layoutCommand } from './layout-revision.js';
 import { WorkflowDraftSchema, type WorkflowDraft } from './workflow-draft.js';
@@ -232,6 +233,29 @@ const toolSchema = {
       items: { type: 'string' },
     },
     mode: { type: 'string', enum: ['create', 'edit', 'detail'] },
+    button: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        option: { type: 'string' },
+        label: { type: 'string' },
+        inputs: {
+          type: 'array',
+          maxItems: 12,
+          items: {
+            type: 'object',
+            properties: {
+              binding: { type: 'string' },
+              source: { enum: ['entry', 'constant', 'record'] },
+              value: { type: 'string' },
+              fieldId: { type: 'string' },
+            },
+            required: ['binding', 'source'],
+          },
+        },
+      },
+      required: ['option', 'label', 'inputs'],
+    },
     layoutEdit: {
       type: 'object',
       additionalProperties: false,
@@ -382,6 +406,29 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
       (form) =>
         `- ${form.surfaceId} — ${form.label}: ${form.fields.map((field) => `${field.fieldId} "${field.label}"`).join(', ')}`,
     ),
+    ...(targets.popupActions?.length
+      ? [
+          'addPopupActionRevision {kind,button:{option,label,inputs:[{binding,source}]}} adds a secondary record button. Use an offered option and binding IDs. For entry, ask the person. For constant, supply value. For record, supply fieldId. Keep all inputs of an existing Task.',
+          ...targets.popupActions.map((o) =>
+            JSON.stringify({
+              option: popupOptionId(o),
+              page: o.page,
+              operation: o.label,
+              inputs: o.fields.map((f) => ({
+                binding: f.id,
+                label: f.label,
+                sources: f.automatic
+                  ? ['entry', 'constant', 'record']
+                  : ['entry'],
+              })),
+              recordFields: o.sources.map((s) => ({
+                fieldId: s.id,
+                label: s.label,
+              })),
+            }),
+          ),
+        ]
+      : []),
     '- addBoardViewRevision {kind,surface,label,stageIds,operationIds,factFieldIds}: choose a listed collection, its ordered lifecycle stages, the moves offered between them (by operation ID) and up to three card facts (by field ID). Each choice is recorded by ID.',
     ...(targets.boards ?? []).map(
       (t) =>
@@ -604,6 +651,22 @@ function readToolInput(
             : 'The validation selection is invalid.',
         ],
       };
+    }
+  }
+  if (
+    input &&
+    typeof input === 'object' &&
+    'kind' in input &&
+    input.kind === 'addPopupActionRevision' &&
+    'button' in input
+  ) {
+    try {
+      return {
+        status: 'parsed',
+        patch: popupCommand(targets.popupActions ?? [], input.button),
+      };
+    } catch (error) {
+      return { status: 'invalid', issues: [String(error)] };
     }
   }
   if (

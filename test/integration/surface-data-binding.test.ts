@@ -15937,3 +15937,130 @@ test('SALES-EXTRAS: a counter sale runs each line’s reserve and ship against t
   );
   assert.equal(payment[id('field', 'customer_payment_reference')], null);
 });
+
+test('a tenant record button opens, reviews its bound field, and submits one ordinary update through the gateway', async () => {
+  const {
+    applyCustomizationPatches,
+    customizationTargets,
+    compileInSandbox,
+    parseSerializedRelease,
+    serializeRelease,
+    parseCustomizationPatch,
+  } = await import('../../packages/customization/src/index.js');
+  const { popupCommand, popupOptionId } =
+    await import('../../packages/customization/src/popup-revision.js');
+  const { readFile } = await import('node:fs/promises');
+  const { readUnboundPermissionAcknowledgementFor } =
+    await import('../../apps/web/scripts/unbound-permission-acknowledgement.js');
+  const path = 'apps/web/release/app.authored.json';
+  const base = JSON.parse(await readFile(path, 'utf8')) as Record<
+    string,
+    unknown
+  >;
+  const { parseCompiledApplication } =
+    await import('../../packages/postgres-provider/src/composed-application-runtime.js');
+  const firstParty = parseCompiledApplication(
+    JSON.parse(await readFile('apps/web/release/app.compiled.json', 'utf8')),
+  );
+  const createType = parseCustomizationPatch({
+    kind: 'addRecordType',
+    label: 'Cabinet',
+    companyOwnership: 'tenantShared',
+    fields: [
+      { type: 'text', label: 'Name', required: true },
+      { type: 'text', label: 'Description' },
+    ],
+  });
+  assert.ok(createType.status === 'parsed');
+  const source = applyCustomizationPatches(base, [createType.patch]);
+  assert.ok(source.status === 'applied');
+  const options =
+    customizationTargets(normalizeApplicationPackage(source.authored))
+      .popupActions ?? [];
+  const option = options.find(
+    (o) => o.surface.includes('custom_cabinet') && o.target.kind === 'update',
+  );
+  assert.ok(option, 'the tenant record declares a secondary action position');
+  const name = option.fields.find((f) => f.label === 'Name')!,
+    description = option.fields.find((f) => f.label === 'Description')!;
+  const button = popupCommand([option], {
+    option: popupOptionId(option),
+    label: 'Copy cabinet name',
+    inputs: [{ binding: description.id, source: 'record', fieldId: name.id }],
+  });
+  const result = await compileInSandbox({
+    base,
+    acknowledgement: readUnboundPermissionAcknowledgementFor(
+      path,
+      'northstar.app:package.application',
+    ),
+    chain: [createType.patch, button],
+    tip: serializeRelease(firstParty.application),
+  });
+  assert.ok(
+    result.status === 'compiled',
+    JSON.stringify(result.status === 'compiled' ? null : result),
+  );
+  const { compiled } = parseSerializedRelease(result.steps.at(-1)!.release);
+  const policy = new RecordingPolicy('ALLOW'),
+    executor = new InMemoryGenericExecutor();
+  const view = await issuedView(
+    runtimeEntry(compiled, policy, {
+      a: identity(tenantA, environmentA, principalA),
+    }),
+    'a',
+  );
+  const recordId = executor.seedValues(
+    tenantA,
+    { [name.id]: 'Stores <A>', [description.id]: 'Old description' },
+    'northstar.app:entity.custom_cabinet',
+  );
+  const gateways = semanticGateways(policy, executor);
+  const url =
+    '/?' +
+    new URLSearchParams({
+      surface: option.surface,
+      record: recordId,
+    }).toString();
+  const page = await renderSurfaceRuntimeWithData(view, url, gateways);
+  assert.ok(
+    page.html.includes(button.actionId),
+    page.html.match(/data-message="[^"]*"/g)?.join(' '),
+  );
+  const submit = (body: Record<string, string>) =>
+    submitSurfaceRuntimeIntent(
+      view,
+      url,
+      { compositionAction: button.actionId, ...body },
+      gateways,
+    );
+  const open = async () => {
+    const { html } = await submit({});
+    assert.match(html, /<dialog open[^>]*data-task-fallback="page"/u);
+    return hiddenValue(html, 'taskToken');
+  };
+  const taskToken = await open(),
+    stale = await open();
+  assert.equal(executor.operationCalls.length, 0);
+  const review = await submit({ taskToken, taskStage: 'prepare' });
+  assert.match(review.html, /Record field/u);
+  assert.match(review.html, /Stores &lt;A&gt;/u);
+  assert.equal(executor.operationCalls.length, 0);
+  const done = await submit({
+    taskToken,
+    taskStage: 'confirm',
+    preparedId: hiddenValue(review.html, 'preparedId'),
+  });
+  assert.match(done.html, /Copy cabinet name: done/u);
+  assert.equal(executor.operationCalls.length, 1);
+  assert.equal(
+    executor.operationCalls[0]!.definition.operationId,
+    option.target.operationId,
+  );
+  assert.deepEqual(asRecord(executor.operationCalls[0]!.input).patch, {
+    [description.id]: 'Stores <A>',
+  });
+  const refused = await submit({ taskToken: stale, taskStage: 'prepare' });
+  assert.match(refused.html, /COMPOSITION_TASK_UNAVAILABLE/u);
+  assert.equal(executor.operationCalls.length, 1);
+});

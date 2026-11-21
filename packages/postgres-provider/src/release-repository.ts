@@ -3,6 +3,10 @@ import {
   BILLING_INTERVAL_READER,
 } from '../../canonical-model/src/billing.js';
 import {
+  popupDeclarationProblem,
+  popupBindingsProblem,
+} from './popup-admission.js';
+import {
   boardBindingsProblem,
   boardDeclarationProblem,
   hasBoardDeclaration,
@@ -593,6 +597,11 @@ function verifyCompiledRelease(
     layoutDefinition,
   );
   const needsLayout =
+    (isRecord(layoutDefinition) &&
+      Array.isArray(layoutDefinition.surfaces) &&
+      layoutDefinition.surfaces.some(
+        (s) => isRecord(s) && Object.hasOwn(s, 'popupActions'),
+      )) ||
     hasBoardDeclaration(layoutDefinition) ||
     declaredLayouts(isRecord(layoutDefinition) ? layoutDefinition.surfaces : [])
       .length > 0;
@@ -754,6 +763,13 @@ function verifyCompiledRelease(
         projectionPayloadBytes[0]!,
         'PROJECTION_CHUNK_NOT_CANONICAL',
       );
+      const popupProblem = popupDeclarationProblem(
+        layoutDefinition,
+        payload,
+        reference.requiredRuntimeCapability.minimumVersion,
+      );
+      if (popupProblem)
+        throw integrity('POPUP_PROJECTION_CONTRACT_MISMATCH', popupProblem);
       if (
         canonicalize(payload.billingPlans ?? null) !==
           canonicalize(billingPlans ?? null) ||
@@ -827,6 +843,14 @@ function verifyCompiledRelease(
         ? decodeCanonicalObject(bytes, 'PROJECTION_CHUNK_NOT_CANONICAL')
         : null;
     };
+    const popupProblem = popupBindingsProblem(
+      payload(PROJECTION_FAMILY_IDS.surfaceManifest),
+      surfaceReference!.requiredRuntimeCapability.minimumVersion,
+      payload(PROJECTION_FAMILY_IDS.operationCatalog),
+      payload(PROJECTION_FAMILY_IDS.queryCatalog),
+    );
+    if (popupProblem)
+      throw integrity('POPUP_PROJECTION_CONTRACT_MISMATCH', popupProblem);
     const problem =
       boardBindingsProblem(
         payload(PROJECTION_FAMILY_IDS.surfaceManifest),
