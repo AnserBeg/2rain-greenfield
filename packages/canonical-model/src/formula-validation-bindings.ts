@@ -20,12 +20,7 @@ type Field = Revision['fields'][number];
 export type FormulaValidationFieldType =
   | {
       readonly kind:
-        | 'text'
-        | 'boolean'
-        | 'integer'
-        | 'date'
-        | 'address'
-        | 'dateTime';
+        'text' | 'boolean' | 'integer' | 'date' | 'address' | 'dateTime';
     }
   | {
       readonly kind: 'decimal';
