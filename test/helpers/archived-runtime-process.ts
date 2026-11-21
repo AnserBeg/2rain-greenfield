@@ -25,6 +25,9 @@ export function archivedRuntimeRead(
 export async function withArchivedCustomizationRuntime<T>(
   revision: string,
   work: (run: ArchivedRunner) => Promise<T>,
+  // Edits the extracted tree before install, for a reader build that no
+  // commit ever carried (a capability cap below the revision's own).
+  prepare?: (workspace: string) => Promise<void>,
 ): Promise<T> {
   const temporary = await mkdtemp(join(tmpdir(), 'north-star-old-reader-'));
   const workspace = join(temporary, 'workspace');
@@ -37,6 +40,7 @@ export async function withArchivedCustomizationRuntime<T>(
     });
     await writeFile(archive, commit.stdout);
     await execute('tar', ['-xf', archive, '-C', workspace]);
+    await prepare?.(workspace);
     const install = [
       'pnpm',
       'install',
