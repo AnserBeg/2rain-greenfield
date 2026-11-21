@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { appendFileSync, lstatSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
@@ -77,11 +77,15 @@ export const git = (...args) =>
   execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 export function criticalDiff(base, tip) {
   // Read the definition at the accepted base, including when the packet edits it.
-  const doctrine = git('show', `${base}:AGENTS.md`);
-  const rules = doctrine.match(
-    /<!-- critical-pathspecs -->\n([\s\S]+?)\n<!-- end-critical-pathspecs -->/u,
-  )?.[1];
+  const definition =
+    /<!-- critical-pathspecs -->\n([\s\S]+?)\n<!-- end-critical-pathspecs -->/u;
+  const rules = git('show', `${base}:AGENTS.md`).match(definition)?.[1];
   if (!rules) return true; // Includes the CI-3 bootstrap from the prose-only definition.
+  if (
+    !git('ls-tree', tip, '--', 'AGENTS.md') ||
+    git('show', `${tip}:AGENTS.md`).match(definition)?.[1] !== rules
+  )
+    return true;
   const paths = [...rules.matchAll(/^`([^`\n]+)`$/gmu)].map(
     (match) => match[1],
   );
@@ -109,7 +113,89 @@ export function criticalDiff(base, tip) {
   return false;
 }
 
-export function selectRange(base, tip) {
+export function docsOnly(base, tip) {
+  const policy = 'scripts/non-executable-pathspec.json';
+  if (git('diff', '--no-renames', '--name-only', base, tip, '--', policy))
+    return false;
+  if (!git('ls-tree', base, '--', policy)) return false;
+  const nonExecutablePaths = JSON.parse(git('show', `${base}:${policy}`));
+
+  // The record pathspec includes whole directories. Only regular Markdown
+  // qualifies for quick CI there. Inspect both modes, including on deletion.
+  const fields = git('diff', '--raw', '--no-renames', '-z', base, tip).split(
+    '\0',
+  );
+  for (let i = 0; i < fields.length - 1; i += 2) {
+    if (
+      !fields[i + 1].endsWith('.md') ||
+      !/^:(?:000000|100644) (?:000000|100644) /u.test(fields[i])
+    )
+      return false;
+  }
+  return !git(
+    'diff',
+    '--no-renames',
+    '--name-only',
+    '-z',
+    base,
+    tip,
+    '--',
+    '.',
+    ...nonExecutablePaths,
+    ':!README.md',
+  );
+}
+
+function fullDiff(base, tip) {
+  return !docsOnly(base, tip) || criticalDiff(base, tip);
+}
+
+export function requiresFull(base, tip) {
+  if (fullDiff(base, tip)) return true;
+  // The endpoint diff can be empty after two packets undo each other.
+  // Inspect the first-parent change of each commit introduced by the push.
+  const history = git('rev-list', '--parents', `${base}..${tip}`).trim();
+  for (const line of history.split('\n').filter(Boolean)) {
+    const [commit, parent] = line.split(' ');
+    if (!parent) return true;
+    if ((parent !== base || commit !== tip) && fullDiff(parent, commit))
+      return true;
+  }
+  return false;
+}
+
+function selectMainPush(event, head) {
+  const before = event.before;
+  if (
+    event.created ||
+    !/^[0-9a-f]{40}$/u.test(before) ||
+    /^0+$/u.test(before) ||
+    spawnSync('git', ['cat-file', '-e', `${before}^{commit}`]).status !== 0
+  )
+    return { tier: 'full', reason: 'No usable push base' };
+  if (requiresFull(before, head))
+    return { tier: 'full', reason: 'Executable or Critical push range' };
+  // The main docs exemption also covers deletions and renames. Include every
+  // affected document reader, regardless of change status.
+  const files = new Set();
+  for (const [prefix, tests] of documentReaders)
+    if (
+      git(
+        'diff',
+        '--no-renames',
+        '--name-only',
+        '-z',
+        before,
+        head,
+        '--',
+        prefix,
+      )
+    )
+      for (const test of tests) files.add(test);
+  return { tier: 'quick', files: [...files].sort() };
+}
+
+export function selectRange(base, tip, packetRef = false) {
   const fields = git(
     'diff',
     '--no-renames',
@@ -122,7 +208,7 @@ export function selectRange(base, tip) {
   for (let i = 0; i < fields.length - 1; i += 2)
     changes.push({ status: fields[i], path: fields[i + 1] });
   const plan = selectPaths(changes);
-  if (plan.tier === 'quick' && criticalDiff(base, tip))
+  if (!packetRef && plan.tier === 'quick' && criticalDiff(base, tip))
     return { tier: 'full', reason: 'Critical diff' };
   if (plan.tier === 'quick') {
     for (const path of [
@@ -140,8 +226,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
   const pr = event.pull_request;
   const head = git('rev-parse', 'HEAD').trim();
+  const main = process.env.GITHUB_REF === 'refs/heads/main';
+  const mainPush = main && process.env.GITHUB_EVENT_NAME === 'push';
   const forced =
-    process.env.GITHUB_REF === 'refs/heads/main' ||
+    (main && !mainPush) ||
     event.inputs?.tier === 'full' ||
     (pr && pr.head.repo.full_name !== process.env.GITHUB_REPOSITORY);
   if (
@@ -169,11 +257,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   }
   const plan = forced
     ? { tier: 'full', reason: 'full requested' }
-    : selectRange(
-        pr?.base.sha ?? git('merge-base', 'origin/main', head).trim(),
-        head,
-      );
-  const promote = !forced && plan.tier === 'full';
+    : mainPush
+      ? selectMainPush(event, head)
+      : selectRange(
+          pr?.base.sha ?? git('merge-base', 'origin/main', head).trim(),
+          head,
+          (pr?.head.ref ?? process.env.GITHUB_REF_NAME)?.startsWith('packet/'),
+        );
+  const promote = !mainPush && !forced && plan.tier === 'full';
   // A lane opened before CI-3 may still have CI-2 on its head. Dispatch
   // from the parent that supplies the workflow GitHub actually selected.
   let dispatchRef = process.env.GITHUB_REF_NAME;
