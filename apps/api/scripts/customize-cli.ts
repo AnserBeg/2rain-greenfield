@@ -26,7 +26,8 @@ const usage = [
   'usage: corepack pnpm customize <command>',
   '  draft <patch.json>     record a change and print what it would do',
   '  ask "<request>"        draft a change from plain English',
-  '  approve <change-id>    approve a drafted change',
+  '  review <change-id>    read a workflow draft and its approval digest',
+  '  approve <change-id> [digest]    approve the reviewed draft',
   '  activate <change-id>   make an approved change live (no restart)',
   '  rollback               hide the live change; its records are kept',
   '  recover                verify the live activation and reconcile scopes',
@@ -37,6 +38,7 @@ const usage = [
 const commands = [
   'draft',
   'ask',
+  'review',
   'approve',
   'activate',
   'rollback',
@@ -51,7 +53,8 @@ if (
   (command === 'recover' &&
     rest.length > 0 &&
     (rest.length !== 1 || argument !== '--revert')) ||
-  (['draft', 'ask', 'approve', 'activate'].includes(command) && !argument)
+  (['draft', 'ask', 'review', 'approve', 'activate'].includes(command) &&
+    !argument)
 ) {
   process.stderr.write(`${usage}\n`);
   process.exit(2);
@@ -78,8 +81,20 @@ try {
     exitCode = report(await opened.service.draft(patch, 'declarativeEditor'));
   } else if (command === 'ask') {
     exitCode = report(await opened.service.draftFromRequest(argument!));
+  } else if (command === 'review') {
+    const review = await opened.service.reviewWorkflow(argument!);
+    process.stdout.write(
+      [
+        review.renderedDiff,
+        'Approve with: corepack pnpm customize approve ' +
+          argument +
+          ' ' +
+          review.workflowReviewDigest,
+        '',
+      ].join('\n'),
+    );
   } else if (command === 'approve') {
-    const approved = await opened.service.approve(argument!);
+    const approved = await opened.service.approve(argument!, rest[1]);
     process.stdout.write(
       [
         `Approved change ${argument!}:`,
@@ -171,6 +186,14 @@ function report(outcome: DraftOutcome): number {
         `Drafted change ${outcome.patchId}${outcome.reused ? ' (already drafted; nothing new recorded)' : ''}`,
         '',
         outcome.renderedDiff,
+        ...(outcome.workflowReviewDigest
+          ? [
+              'Approve with: corepack pnpm customize approve ' +
+                outcome.patchId +
+                ' ' +
+                outcome.workflowReviewDigest,
+            ]
+          : []),
         '',
         `Release ${outcome.releaseRoot.slice(0, 12)} is ready for approval. Nothing is live yet.`,
         '',

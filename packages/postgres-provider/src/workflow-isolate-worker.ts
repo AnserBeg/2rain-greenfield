@@ -4,7 +4,9 @@ import { parentPort, workerData } from 'node:worker_threads';
 import type * as QuickJS from 'quickjs-emscripten';
 
 const data = workerData as {
+  readonly traceMethods?: readonly string[];
   readonly cpuMs: number;
+  readonly legacyWait?: boolean;
   readonly engine: string;
   readonly executable: string;
   readonly input: string;
@@ -152,16 +154,26 @@ try {
         }
       }
 
-      const sdk = freeze({
+      const sdk = {
         now: () => dispatch({ kind: 'now' }),
         sleep: (milliseconds) => dispatch({ kind: 'sleep', milliseconds }),
-        waitForEvent: (eventType, timeoutMs) => dispatch({ kind: 'waitForEvent', eventType, timeoutMs }),
+        ${data.legacyWait ? "waitForEvent: (eventType, timeoutMs) => dispatch({ kind: 'waitForEvent', eventType, timeoutMs })," : ''}
         requestApproval: (summary, ...args) => dispatch(args.length === 0
           ? { kind: 'requestApproval', summary }
           : { kind: 'requestApproval', summary, operationId: args[0], input: args[1] }),
         query: (id, input) => dispatch({ kind: 'query', id, input }),
         operation: (id, input) => dispatch({ kind: 'operation', id, input }),
-      });
+      };
+      const sites = [];
+      const methods = ${JSON.stringify(data.traceMethods ?? [])};
+      for (let i = 0; i < methods.length; i++) {
+        const method = sdk[methods[i]];
+        sdk['site' + i] = (...args) => {
+          sites[sites.length] = i;
+          return method(...args);
+        };
+      }
+      freeze(sdk);
       let failed = false;
       try {
         const run = createFunction(${JSON.stringify(`'use strict';\n${data.executable}\nreturn run;`)})();
@@ -174,7 +186,7 @@ try {
       if (invalid) return '{"kind":"invalid-call"}';
       if (failed) return '{"kind":"execution-failed"}';
       if (request !== undefined) return '{"kind":"call","request":' + stringify(request) + '}';
-      return '{"kind":"done"}';
+      return ${data.traceMethods ? 'stringify({kind:"done", sites})' : '\'{"kind":"done"}\''};
     })();
   `;
   const deadline = performance.now() + data.cpuMs;

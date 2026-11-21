@@ -1,15 +1,20 @@
+import { RemovedWorkflowAction } from './workflow-sdk-version.js';
 import { canonicalize } from '@north-star/canonical-model';
 import type { TrustedRequestContext } from '@north-star/runtime';
 import type { RequestRuntimeView } from '@north-star/runtime/request-runtime-view';
 import type { PoolClient } from 'pg';
 import {
   WorkflowBodyBundleSchema,
+  WorkflowVerificationResultSchema,
   type WorkflowBodyBundle,
 } from '../../customization/src/workflow-draft.js';
-import { compileWorkflowBody } from './workflow-compile.js';
+import {
+  runSandboxRequest,
+  type SandboxRunnerOptions,
+} from '../../customization/src/sandbox.js';
+import type { WorkflowVerificationRequest } from './workflow-draft-worker.js';
 import { sha256 } from './workflow-execution.js';
 import { MAXIMUM_WORKFLOW_SOURCE_BYTES } from './workflow-isolate.js';
-import { verifyWorkflowReplay } from './workflow-run.js';
 import { generateWorkflowSdk, type WorkflowGrants } from './workflow-sdk.js';
 
 export async function storeWorkflowBundle(
@@ -60,18 +65,85 @@ export async function verifyWorkflowBundle(
   view: RequestRuntimeView,
   grants: WorkflowGrants,
   bundle: Pick<WorkflowBodyBundle, 'body' | 'fixtures'>,
+  options: SandboxRunnerOptions = {},
 ) {
   const sdk = generateWorkflowSdk(view, grants);
-  const compiled = compileWorkflowBody(bundle.body, sdk);
-  await verifyWorkflowReplay(
-    compiled,
-    bundle.fixtures.map(({ event, effects }) => ({
+  const request: WorkflowVerificationRequest = {
+    body: bundle.body,
+    declarations: sdk.declarations,
+    release: sdk.release,
+    fixtures: bundle.fixtures.map(({ event, effects }) => ({
       event,
       effects: effects.map(({ call, result }) => ({
         call: sdk.admitCall(call),
         result,
       })),
     })),
+  };
+  const result = await runSandboxRequest(
+    'verifyWorkflowDraft',
+    request,
+    options,
+    { heapLimitMegabytes: 512, wallClockLimitMilliseconds: 30_000 },
+    (response) => {
+      if (
+        typeof response !== 'string' ||
+        Buffer.byteLength(response) > 1024 * 1024
+      )
+        throw new Error('Invalid workflow verification response');
+      return WorkflowVerificationResultSchema.parse(JSON.parse(response));
+    },
   );
-  return compiled;
+  if (result.status === 'refused') {
+    if (result.removedAction) throw new RemovedWorkflowAction();
+    throw new Error(result.message);
+  }
+  if (
+    result.coverage.length !== request.fixtures.length ||
+    result.journals.length !== request.fixtures.length ||
+    request.fixtures.some(({ effects }, i) => {
+      const journal = result.journals[i]!;
+      const coverage = result.coverage[i]!;
+      return (
+        journal.length !== effects.length ||
+        coverage.length !== effects.length ||
+        effects.some(
+          ({ call, result: mock }, n) =>
+            journal[n]?.request !== canonicalize(call) ||
+            journal[n]?.result !== canonicalize(mock) ||
+            result.sites[coverage[n]!] === undefined,
+        )
+      );
+    })
+  )
+    throw new Error(
+      'Workflow verification returned an incomplete or mismatched fixture journal',
+    );
+  return { sdk, ...result };
+}
+
+/** Check the effective retained body, including unexercised branches, before an upgrade is staged. */
+export async function verifyRetainedWorkflow(
+  view: RequestRuntimeView,
+  workflow: { workflowId: string; grants: WorkflowGrants },
+  bundle: WorkflowBodyBundle,
+) {
+  try {
+    await verifyWorkflowBundle(view, workflow.grants, bundle);
+    return null;
+  } catch (error) {
+    return error instanceof RemovedWorkflowAction
+      ? {
+          code: 'REMOVED_ACTION' as const,
+          subject: workflow.workflowId,
+          expected: 'waitForEvent',
+          observed: null,
+        }
+      : {
+          code: 'WORKFLOW_FIXTURE_FAILED' as const,
+          subject: workflow.workflowId,
+          expected: 'passing fixtures',
+          observed: error instanceof Error ? error.message : String(error),
+        };
+  }
 }
