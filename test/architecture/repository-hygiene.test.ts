@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
+import { getReachabilityProducer } from '../helpers/reachability-producers.js';
 
 const workflowPath = '.github/workflows/ci.yml';
 const packagePath = 'package.json';
@@ -55,6 +56,7 @@ const suiteDefinitions = [
       'test/unit/production-start.test.ts',
       'test/unit/purchasing-definition.test.ts',
       'test/unit/query-catalog-memo.test.ts',
+      'test/unit/reminder-deadline.test.ts',
       'test/unit/request-work-meter.test.ts',
       'test/unit/sales-definition.test.ts',
       'test/unit/surface-assets.test.ts',
@@ -229,6 +231,7 @@ const suiteDefinitions = [
       'test/postgres/module-storage-transition.test.ts',
       'test/postgres/observability-health.test.ts',
       'test/postgres/party-runtime.test.ts',
+      'test/postgres/personal-inbox.test.ts',
       'test/postgres/predicate-absent-semantics.test.ts',
       'test/postgres/predicate-parity-corpus.test.ts',
       'test/postgres/query-aggregate-semantics.test.ts',
@@ -441,6 +444,16 @@ test('suite commands exactly cover all independently discovered test files', () 
       `${scriptNames.join(', ')} diverges from ${suite.discoveryPattern}`,
     );
   }
+});
+
+test('the unit evidence manifest matches every unit test argument in execution order', () => {
+  const { scripts } = JSON.parse(readFileSync(packagePath, 'utf8')) as {
+    scripts: Record<string, string>;
+  };
+  const unitFiles = shellTokens(scripts['test:unit']!)
+    .map((token) => token.value)
+    .filter((argument) => argument.endsWith('.test.ts'));
+  assert.deepEqual(getReachabilityProducer('unit').argv, unitFiles);
 });
 
 test('every test-script glob is quoted before the shell can expand it', () => {
