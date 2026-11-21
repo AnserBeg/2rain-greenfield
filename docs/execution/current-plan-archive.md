@@ -17,6 +17,9 @@ carries the detail. No packet is chartered from this table without a user ruling
 
 | packet | date | finding (one sentence) | record |
 |---|---|---|---|
+| UPGRADE-2 F6 | 2026-11-20 | Three older boot paths can overwrite a scoped refusal outside the preparation lock. Reconcile them when implementing wave reports. | [UPGRADE-2 fixes](packets/UPGRADE-2-fixes.md) |
+| UPGRADE-2 F7 | 2026-11-20 | A later ordinary layout revision drops the placement-rule marker. Decide its lifetime in the next layout slice. | [UPGRADE-2 fixes](packets/UPGRADE-2-fixes.md) |
+| UPGRADE-2 F8 | 2026-11-20 | The archived floor-33 proof observes a load before refusal. Its serving leg still owes a successful query. | [UPGRADE-2 fixes](packets/UPGRADE-2-fixes.md) |
 | CALENDAR-1 | 2026-11-20 | Timed intervals on customer-authored types require a separately queued tenant date-time/interval field capability with its own patch member and reader rung. | [ADR-0086](../decisions/ADR-0086-board-calendar-and-resource-timeline.md) |
 | CONNECT-1 | 2026-11-19 | **Filed under sign-in packet item 1.** The runtime can fabricate who connected, enabled or rotated an account and who confirmed an external disclosure. Real authority stays confined to the explicitly enabled local demo. | [ADR-0080](../decisions/ADR-0080-connector-framework.md#who-can-connect-a-company) |
 | AGENT-SPEED-1 | 2026-11-19 | Atomic creation with lines needs CUSTOMIZE-4 Option A. Recipes depend on WORKFLOW-1 bodies. Habit shortcuts need a durable run record. | [Packet](packets/AGENT-SPEED-1.md) |
