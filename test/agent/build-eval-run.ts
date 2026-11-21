@@ -49,11 +49,15 @@ async function main(): Promise<void> {
       cap: { type: 'string', default: '15' },
       model: { type: 'string', default: DEFAULT_ANTHROPIC_MODEL },
       effort: { type: 'string', default: 'medium' },
+      // The eval's cache lifetime (slice 2 cost cuts): the shared prefix must
+      // survive the 4-5 minute compiles between requests. The app keeps 5m.
+      'cache-ttl': { type: 'string', default: '1h' },
       // USD per million tokens, Anthropic first-party API (Opus 5.5).
       'price-input': { type: 'string', default: '4' },
       'price-output': { type: 'string', default: '20' },
       'price-cache-read': { type: 'string', default: '0.2' },
-      'price-cache-write': { type: 'string', default: '5' },
+      // Default: 1.25x input for a 5-minute write, 2x for a 1-hour write.
+      'price-cache-write': { type: 'string', default: '' },
       'price-source': {
         type: 'string',
         default: 'https://platform.claude.com/docs/en/about-claude/pricing',
@@ -74,7 +78,9 @@ async function main(): Promise<void> {
     input: Number(args['price-input']),
     output: Number(args['price-output']),
     cacheRead: Number(args['price-cache-read']),
-    cacheWrite: Number(args['price-cache-write']),
+    cacheWrite: args['price-cache-write']
+      ? Number(args['price-cache-write'])
+      : Number(args['price-input']) * (args['cache-ttl'] === '5m' ? 1.25 : 2),
   };
   if (Object.values(prices).some((p) => !Number.isFinite(p) || p < 0))
     throw new Error('prices must be non-negative numbers');
@@ -110,6 +116,7 @@ async function main(): Promise<void> {
         key,
         maxTokens: 8_000,
         modelId: String(args.model),
+        cacheTtl: args['cache-ttl'] === '5m' ? '5m' : '1h',
       })
     : undefined;
   const meter = new SpendMeter(prices, cap);
@@ -268,6 +275,7 @@ function notRun(c: BuildCase): CaseResult {
     activated: false,
     firstTry: false,
     afterRepair: false,
+    repairTurns: null,
     e2e: null,
     behaviour: false,
     reasons: ['not run: spend cap reached'],
@@ -299,6 +307,11 @@ function report(
     summarize(results.filter((r) => r.split === name));
   const dev = split('dev');
   const test = split('test');
+  const added = new Set(
+    BUILD_CASES.filter((c) => c.added === 'slice2').map((c) => c.id),
+  );
+  const slice1 = summarize(results.filter((r) => !added.has(r.id)));
+  const slice2 = summarize(results.filter((r) => added.has(r.id)));
   const ran = results.filter((r) => r.status !== 'not-run');
   const median = (values: number[]) => {
     const sorted = [...values].sort((a, b) => a - b);
@@ -319,20 +332,40 @@ function report(
       .map(([k, v]) => `${k} ${String(v)}`)
       .join(', ')}. Spend cap USD ${String(run.cap)}.`,
     '',
-    '| measure | all | dev | held-out test |',
-    '|---|---|---|---|',
-    `| requests run | ${String(summary.ran)} | ${String(dev.ran)} | ${String(test.ran)} |`,
-    `| verified first try (draftable) | ${summary.firstTry} | ${dev.firstTry} | ${test.firstTry} |`,
-    `| verified after repair (draftable) | ${summary.afterRepair} | ${dev.afterRepair} | ${test.afterRepair} |`,
-    `| end to end (draftable) | ${summary.e2e} | ${dev.e2e} | ${test.e2e} |`,
-    `| behaviour correct (all) | ${summary.behaviour} | ${dev.behaviour} | ${test.behaviour} |`,
-    `| correct refusals | ${summary.correctRefusals} | ${dev.correctRefusals} | ${test.correctRefusals} |`,
-    `| refusal names the right capability | ${summary.rightReason} | ${dev.rightReason} | ${test.rightReason} |`,
-    `| false refusals / false accepts | ${String(summary.falseRefusals)} / ${String(summary.falseAccepts)} | ${String(dev.falseRefusals)} / ${String(dev.falseAccepts)} | ${String(test.falseRefusals)} / ${String(test.falseAccepts)} |`,
-    `| hostile probes that changed the calls | ${String(summary.injected)} | ${String(dev.injected)} | ${String(test.injected)} |`,
-    `| over-granted workflows | ${String(summary.overGranted)} | ${String(dev.overGranted)} | ${String(test.overGranted)} |`,
-    `| model calls | ${String(summary.modelCalls)} | ${String(dev.modelCalls)} | ${String(test.modelCalls)} |`,
-    `| spend USD | ${summary.usd.toFixed(4)} | ${dev.usd.toFixed(4)} | ${test.usd.toFixed(4)} |`,
+    '| measure | all | dev | held-out test | slice 1 set (30) | slice 2 additions |',
+    '|---|---|---|---|---|---|',
+    ...(
+      [
+        ['requests run', (x) => String(x.ran)],
+        ['verified first try (draftable)', (x) => x.firstTry],
+        ['verified after repair (draftable)', (x) => x.afterRepair],
+        [
+          'rescued by repair turn 1 / turn 2',
+          (x) =>
+            `${String(x.repairedAfterOne)} / ${String(x.repairedAfterTwo)}`,
+        ],
+        ['end to end (draftable)', (x) => x.e2e],
+        ['behaviour correct (all)', (x) => x.behaviour],
+        ['correct refusals', (x) => x.correctRefusals],
+        ['refusal names the right capability', (x) => x.rightReason],
+        [
+          'false refusals / false accepts',
+          (x) => `${String(x.falseRefusals)} / ${String(x.falseAccepts)}`,
+        ],
+        ['hostile probes that changed the calls', (x) => String(x.injected)],
+        ['over-granted workflows', (x) => String(x.overGranted)],
+        ['model calls', (x) => String(x.modelCalls)],
+        ['spend USD', (x) => x.usd.toFixed(4)],
+        [
+          'tokens in / out / cache read / cache write',
+          (x) =>
+            `${String(x.tokens.input)} / ${String(x.tokens.output)} / ${String(x.tokens.cacheRead)} / ${String(x.tokens.cacheWrite)}`,
+        ],
+      ] as [string, (x: typeof summary) => string][]
+    ).map(
+      ([name, cellOf]) =>
+        `| ${name} | ${cellOf(summary)} | ${cellOf(dev)} | ${cellOf(test)} | ${cellOf(slice1)} | ${cellOf(slice2)} |`,
+    ),
     '',
     `Median model latency per request ${(median(ran.map((r) => r.modelMs)) / 1000).toFixed(1)} s; median wall time per request (draft, compile, approve, activate, score) ${(median(ran.map((r) => r.wallMs)) / 1000).toFixed(1)} s.`,
     '',
@@ -342,11 +375,11 @@ function report(
         .join('; ') || 'none'
     }.`,
     '',
-    '| id | split | category | expected | status | calls | first try | after repair | e2e | behaviour | model s | wall s | USD | reasons |',
-    '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
+    '| id | split | category | expected | status | calls | first try | after repair | e2e | behaviour | model s | wall s | USD | cache read | reasons |',
+    '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
     ...results.map(
       (r) =>
-        `| ${r.id} | ${r.split} | ${r.category} | ${r.expected} | ${r.status}${r.missingCapability ? ` (${cell(r.missingCapability)})` : ''} | ${String(r.modelCalls)} | ${r.firstTry ? 'yes' : 'no'} | ${r.afterRepair ? 'yes' : 'no'} | ${r.e2e === null ? '—' : r.e2e ? 'yes' : 'no'} | ${r.behaviour ? 'pass' : 'fail'} | ${(r.modelMs / 1000).toFixed(1)} | ${(r.wallMs / 1000).toFixed(1)} | ${r.usd.toFixed(4)} | ${cell(r.reasons.join('; ').slice(0, 400))} |`,
+        `| ${r.id} | ${r.split} | ${r.category} | ${r.expected} | ${r.status}${r.missingCapability ? ` (${cell(r.missingCapability)})` : ''} | ${String(r.modelCalls)} | ${r.firstTry ? 'yes' : 'no'} | ${r.afterRepair ? 'yes' : 'no'} | ${r.e2e === null ? '—' : r.e2e ? 'yes' : 'no'} | ${r.behaviour ? 'pass' : 'fail'} | ${(r.modelMs / 1000).toFixed(1)} | ${(r.wallMs / 1000).toFixed(1)} | ${r.usd.toFixed(4)} | ${String(r.tokens.cacheRead)} | ${cell(r.reasons.join('; ').slice(0, 400))} |`,
     ),
     '',
   ].join('\n');
