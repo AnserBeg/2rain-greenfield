@@ -1,0 +1,222 @@
+{
+  "version": 1,
+  "packet": "COMMS-2",
+  "entries": [
+    {
+      "name": "discussion-inbox-read-channel",
+      "claim": "Only an in-app notice supplies a link or count.",
+      "file": "packages/runtime/src/discussion-inbox.ts",
+      "original": "  if (reader.message.channel !== DISCUSSION_INBOX_CHANNEL) return [];\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/unit/discussion-inbox.test.ts"],
+        "namePattern": "^an email or unknown channel cannot resolve a discussion link or enter the thread transaction$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/discussion-inbox.test.ts",
+          "name": "an email or unknown channel cannot resolve a discussion link or enter the thread transaction",
+          "expected": "an unsupported channel resolved a staff notice"
+        }
+      ]
+    },
+    {
+      "name": "discussion-inbox-claim-channel",
+      "claim": "A foreign-channel occurrence never takes a staff thread lock.",
+      "file": "packages/runtime/src/discussion-inbox.ts",
+      "original": "  if (claim.message.channel !== DISCUSSION_INBOX_CHANNEL)\n    throw new Error('Unsupported discussion inbox channel');\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/unit/discussion-inbox.test.ts"],
+        "namePattern": "^an email or unknown channel cannot resolve a discussion link or enter the thread transaction$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/discussion-inbox.test.ts",
+          "name": "an email or unknown channel cannot resolve a discussion link or enter the thread transaction",
+          "expected": "an unsupported occurrence entered the thread transaction"
+        }
+      ]
+    },
+    {
+      "name": "discussion-inbox-message-read",
+      "claim": "Recipient needs current visibility of the specific message.",
+      "file": "packages/runtime/src/discussion-inbox.ts",
+      "original": "  if (!(await reader.canReadMessage(principalId, reader.message.messageId)))\n    return [];\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/unit/discussion-inbox.test.ts"],
+        "namePattern": "^notice reasons require visibility of this message and, for replies, its specific parent$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/discussion-inbox.test.ts",
+          "name": "notice reasons require visibility of this message and, for replies, its specific parent",
+          "expected": "a hidden message supplied a notice"
+        }
+      ]
+    },
+    {
+      "name": "discussion-inbox-parent-read",
+      "claim": "The reply reason also requires current parent visibility.",
+      "file": "packages/runtime/src/discussion-inbox.ts",
+      "original": "parent && (await reader.canReadMessage(principalId, parent.messageId))",
+      "replacement": "parent",
+      "test": {
+        "files": ["test/unit/discussion-inbox.test.ts"],
+        "namePattern": "^notice reasons require visibility of this message and, for replies, its specific parent$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/discussion-inbox.test.ts",
+          "name": "notice reasons require visibility of this message and, for replies, its specific parent",
+          "expected": "a hidden parent supplied a reply notice"
+        }
+      ]
+    },
+    {
+      "name": "discussion-inbox-sender",
+      "claim": "A sender cannot notify themself.",
+      "file": "packages/runtime/src/discussion-inbox.ts",
+      "original": "!current || principalId === current.authorId",
+      "replacement": "!current",
+      "test": {
+        "files": ["test/unit/discussion-inbox.test.ts"],
+        "namePattern": "^notice reasons require visibility of this message and, for replies, its specific parent$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/discussion-inbox.test.ts",
+          "name": "notice reasons require visibility of this message and, for replies, its specific parent",
+          "expected": "the sender received a self-mention"
+        }
+      ]
+    },
+    {
+      "name": "discussion-inbox-mentions",
+      "claim": "Unmentioned staff never receive a mention.",
+      "file": "packages/runtime/src/discussion-inbox.ts",
+      "original": "current.mentionedPrincipalIds.includes(principalId)",
+      "replacement": "true",
+      "test": {
+        "files": ["test/unit/discussion-inbox.test.ts"],
+        "namePattern": "^a replay reconciles distinct recipients against the current in-app revision$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/discussion-inbox.test.ts",
+          "name": "a replay reconciles distinct recipients against the current in-app revision",
+          "expected": "withdrawal must suppress inbox reads before reconciliation"
+        }
+      ]
+    },
+    {
+      "name": "discussion-inbox-reply-author",
+      "claim": "Only the author of a visible parent receives its reply reason.",
+      "file": "packages/runtime/src/discussion-inbox.ts",
+      "original": "current.replyTo?.authorId === principalId ? current.replyTo : null",
+      "replacement": "current.replyTo",
+      "test": {
+        "files": ["test/unit/discussion-inbox.test.ts"],
+        "namePattern": "^notice reasons require visibility of this message and, for replies, its specific parent$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/discussion-inbox.test.ts",
+          "name": "notice reasons require visibility of this message and, for replies, its specific parent",
+          "expected": "a non-recipient received a notice"
+        }
+      ]
+    },
+    {
+      "name": "discussion-inbox-withdraw",
+      "claim": "Ineligible recipients have no countable inbox row.",
+      "file": "packages/runtime/src/discussion-inbox.ts",
+      "original": "if (reasons.length) recipients.set(principalId, reasons);",
+      "replacement": "recipients.set(principalId, reasons);",
+      "test": {
+        "files": ["test/unit/discussion-inbox.test.ts"],
+        "namePattern": "^notice reasons require visibility of this message and, for replies, its specific parent$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/discussion-inbox.test.ts",
+          "name": "notice reasons require visibility of this message and, for replies, its specific parent",
+          "expected": "an empty reason set left a countable recipient"
+        }
+      ]
+    },
+    {
+      "name": "discussion-inbox-lease-order",
+      "claim": "Reconciliation commits before the lease can be acknowledged.",
+      "file": "packages/runtime/src/discussion-inbox.ts",
+      "original": "  await port.withLockedMessage(claim.message, async (transaction) => {",
+      "replacement": "  await port.acknowledge(claim);\n  await port.withLockedMessage(claim.message, async (transaction) => {",
+      "test": {
+        "files": ["test/unit/discussion-inbox.test.ts"],
+        "namePattern": "^a failed inbox write leaves the claim retryable and no partial notice$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/discussion-inbox.test.ts",
+          "name": "a failed inbox write leaves the claim retryable and no partial notice",
+          "expected": "Expected values to be strictly deep-equal"
+        }
+      ]
+    },
+    {
+      "name": "discussion-inbox-tombstone",
+      "claim": "The deleted message leaves no visible notice at read time.",
+      "file": "packages/runtime/src/discussion-inbox.ts",
+      "original": "if (!current || principalId === current.authorId)",
+      "replacement": "if (principalId === current.authorId)",
+      "test": {
+        "files": ["test/unit/discussion-inbox.test.ts"],
+        "namePattern": "^a replay reconciles distinct recipients against the current in-app revision$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/discussion-inbox.test.ts",
+          "name": "a replay reconciles distinct recipients against the current in-app revision",
+          "expected": "Cannot read properties of null"
+        }
+      ]
+    },
+    {
+      "name": "discussion-inbox-discard-old",
+      "claim": "A tombstone also withdraws any persisted reasons.",
+      "file": "packages/runtime/src/discussion-inbox.ts",
+      "original": "    await transaction.reconcileRecipients(recipients);",
+      "replacement": "    if (current) await transaction.reconcileRecipients(recipients);",
+      "test": {
+        "files": ["test/unit/discussion-inbox.test.ts"],
+        "namePattern": "^a replay reconciles distinct recipients against the current in-app revision$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/discussion-inbox.test.ts",
+          "name": "a replay reconciles distinct recipients against the current in-app revision",
+          "expected": "tombstone left reasons behind"
+        }
+      ]
+    },
+    {
+      "name": "discussion-inbox-idle",
+      "claim": "An empty claim exits before the thread transaction.",
+      "file": "packages/runtime/src/discussion-inbox.ts",
+      "original": "  if (!claim) return;\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/unit/discussion-inbox.test.ts"],
+        "namePattern": "^an idle inbox worker acquires no thread or inbox lock$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/discussion-inbox.test.ts",
+          "name": "an idle inbox worker acquires no thread or inbox lock",
+          "expected": "Cannot read properties of null"
+        }
+      ]
+    }
+  ]
+}
