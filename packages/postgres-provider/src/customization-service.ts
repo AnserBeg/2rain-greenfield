@@ -127,6 +127,7 @@ export type CustomizationRefusalCode =
   | 'CUSTOMIZE_CHANGE_NOT_FOUND'
   | 'CUSTOMIZE_DRAFT_STALE'
   | 'CUSTOMIZE_NOT_APPROVED'
+  | 'REPORT_INDEX_UNAVAILABLE'
   | 'CUSTOMIZE_ALREADY_ACTIVE'
   | 'CUSTOMIZE_NOTHING_TO_ROLL_BACK'
   | 'CUSTOMIZE_ACTIVATION_FAILED'
@@ -221,6 +222,25 @@ export type DraftOutcome =
       readonly missingCapability?: string;
       readonly status: 'invalid' | 'refused' | 'rejected' | 'unsupported';
     };
+
+function publishedReports(candidate: ParsedRelease, patch: CustomizationPatch) {
+  const members = patch.kind === 'changeSet' ? patch.patches : [patch];
+  const ids = new Set(
+    members.flatMap((member) =>
+      member.kind === 'addReportRevision' && member.status === 'active'
+        ? [member.reportId]
+        : [],
+    ),
+  );
+  if (!ids.size) return [];
+  const catalog = projectionBinding(
+    candidate.compiled,
+    PROJECTION_FAMILY_IDS.queryCatalog,
+  ).payload as { groupedReports?: RegisteredReport[] };
+  return (catalog.groupedReports ?? []).filter((report) =>
+    ids.has(report.revision.reportId),
+  );
+}
 
 export interface PatchRecord {
   readonly compilerAcknowledgement?: AcknowledgementInput | null;
@@ -1433,19 +1453,8 @@ export class PostgresCustomizationService {
     const { steps } = compiled;
     const step = steps.at(-1)!;
     const candidate = parseSerializedRelease(step.release);
-    const members = patch.kind === 'changeSet' ? patch.patches : [patch];
-    const reportIds = new Set(
-      members.flatMap((m) =>
-        m.kind === 'addReportRevision' && m.status === 'active'
-          ? [m.reportId]
-          : [],
-      ),
-    );
-    if (reportIds.size) {
-      const registrations = projectionBinding(
-        candidate.compiled,
-        PROJECTION_FAMILY_IDS.queryCatalog,
-      ).payload as { groupedReports?: RegisteredReport[] };
+    const reports = publishedReports(candidate, patch);
+    if (reports.length) {
       const transition = projectionBinding(
         candidate.compiled,
         PROJECTION_FAMILY_IDS.storageTransition,
@@ -1454,9 +1463,7 @@ export class PostgresCustomizationService {
       try {
         const problem = await previewReportIndexes(
           client,
-          (registrations.groupedReports ?? []).filter((r) =>
-            reportIds.has(r.revision.reportId),
-          ),
+          reports,
           transition.elements,
         );
         if (problem)
@@ -1856,6 +1863,24 @@ export class PostgresCustomizationService {
             `the storage change did not become ready: ${executed.disposition}`,
           );
         }
+      }
+      // A report may reuse an index without any DDL in this attempt. Verify its
+      // actual keys and readiness again after approval, before switching releases.
+      if (
+        'kind' in record &&
+        (record.kind === 'addReportRevision' || record.kind === 'changeSet')
+      ) {
+        const [patch] = await this.#readPatches(context, [record]);
+        const problem = await previewReportIndexes(
+          admin,
+          publishedReports(candidate, patch!),
+          [],
+        );
+        if (problem)
+          throw new CustomizationServiceRefusal(
+            'REPORT_INDEX_UNAVAILABLE',
+            problem,
+          );
       }
       const desiredState = await this.#desiredState(
         context,

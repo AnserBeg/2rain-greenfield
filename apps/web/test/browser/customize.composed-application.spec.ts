@@ -764,7 +764,7 @@ test('a person groups Inspection outcomes, renames and retires the report, and r
   const compiledApplication = singleTransitionApplication(authored).release;
   await withEphemeralPostgres(
     'report-inspection-browser',
-    async ({ connection }) => {
+    async ({ connection, pool }) => {
       const options = {
         tenantSlug: 'inspection-reports',
         compiledApplication,
@@ -818,13 +818,25 @@ test('a person groups Inspection outcomes, renames and retires the report, and r
             );
             expect(created.outcome).toBe('succeeded');
           });
-        const publish = async () => {
+        const publish = async (
+          beforeActivation?: (patchId: string) => Promise<void>,
+        ) => {
           await page
             .getByRole('button', { name: 'Approve', exact: true })
             .click({ noWaitAfter: true });
           await expect(
             page.getByRole('heading', { name: 'Approved', exact: true }),
           ).toBeVisible({ timeout: 180_000 });
+          if (beforeActivation) {
+            const form = page
+              .locator('form')
+              .filter({
+                has: page.getByRole('button', { name: 'Activate now' }),
+              });
+            await beforeActivation(
+              await form.locator('input[name="patchId"]').inputValue(),
+            );
+          }
           await page
             .getByRole('button', { name: 'Activate now' })
             .click({ noWaitAfter: true });
@@ -880,7 +892,29 @@ test('a person groups Inspection outcomes, renames and retires the report, and r
         await page
           .getByRole('button', { name: 'Draft report', exact: true })
           .click();
-        await publish();
+        await publish(async (patchId) => {
+          const index =
+            'nsm_i_57kahsinwt3fo73cpq5mduuaqnwmyh6a7jjowaafqx5jvwtbwnsa';
+          const { rows } = await pool.query<{ ddl: string }>(
+            'SELECT pg_get_indexdef($1::regclass) AS ddl',
+            ['north_star_module.' + index],
+          );
+          const prior = (await opened.service.status()).activeReleaseId;
+          await pool.query('DROP INDEX north_star_module.' + index);
+          try {
+            await expect(
+              opened.service.activate(patchId),
+            ).rejects.toMatchObject({
+              code: 'REPORT_INDEX_UNAVAILABLE',
+              message: expect.stringMatching(
+                /Inspection totals.*tenant_id, environment_id, legal_entity_id, record_id/u,
+              ),
+            });
+            expect((await opened.service.status()).activeReleaseId).toBe(prior);
+          } finally {
+            await pool.query(rows[0]!.ddl);
+          }
+        });
         await page.goto(reportUrl);
         await expect(
           page.getByRole('heading', { name: 'Inspection totals' }),

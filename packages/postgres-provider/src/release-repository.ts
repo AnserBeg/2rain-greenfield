@@ -1,3 +1,4 @@
+import type { StorageTargetPayloadV1 } from '../../compiler/src/storage.js';
 import { lowerDeclaredReports } from '../../compiler/src/declared-reports.js';
 import { DECLARED_REPORT_READER } from '../../canonical-model/src/declared-report.js';
 import {
@@ -945,7 +946,7 @@ function verifyCompiledRelease(
       );
     const registrations = lowerDeclaredReports(
       def,
-      target as unknown as import('../../compiler/src/storage.js').StorageTargetPayloadV1,
+      target as unknown as StorageTargetPayloadV1,
     );
     const refs = registrations.map((r) => ({
       reportId: r.revision.reportId,
