@@ -376,6 +376,40 @@
           "expected": "the contender never waited on the other session"
         }
       ]
+    },
+    {
+      "name": "kit-member-revision",
+      "claim": "A stale final kit member leaves all original revisions and cursors intact.",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "(m->>'bookingRevision')::integer)\n            AND (c.state",
+      "replacement": "c.revision)\n            AND (c.state",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "kit hold, confirm, cancel and expiry change every member and advance both owners once",
+          "expected": "booking.staleRevision"
+        }
+      ]
+    },
+    {
+      "name": "kit-expiry",
+      "claim": "The timer closes the whole held kit and advances every affected owner.",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "ELSE PERFORM north_star_internal.booking_expire_kit(previous.tenant_id,previous.environment_id,previous.group_id,decision);",
+      "replacement": "ELSE NULL;",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "kit hold, confirm, cancel and expiry change every member and advance both owners once",
+          "expected": "'cancelled'"
+        }
+      ]
     }
   ]
 }
