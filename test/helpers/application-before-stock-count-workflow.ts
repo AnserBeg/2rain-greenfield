@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -16,24 +17,21 @@ import {
 import { serializeRelease } from '../../packages/customization/src/index.js';
 import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 
+export const STOCK_COUNT_PRECEDING_READER =
+  '7900ebd0448cc81699dbb61e5060ee16d841d7e8';
 let fixture: ReturnType<typeof compileFixture> | undefined;
+let historical: Record<string, unknown> | undefined;
 
-/** Isolate earlier surface features from the stock count editor's reader requirement. */
-export function applicationWithoutLineCreateValues() {
+/** Isolate earlier surface features on a base with the original stock-count evidence. */
+export function applicationBeforeStockCountWorkflow() {
   return (fixture ??= compileFixture());
 }
 
 function compileFixture() {
   const authoredPath = resolve('apps/web/release/app.authored.json');
-  const authored = JSON.parse(readFileSync(authoredPath, 'utf8')) as Record<
-    string,
-    unknown
-  >;
-  for (const { documentEditor } of authored.surfaces as {
-    documentEditor?: { lineCreateValues?: unknown };
-  }[]) {
-    if (documentEditor) delete documentEditor.lineCreateValues;
-  }
+  const authored = withoutStockCountWorkflow(
+    JSON.parse(readFileSync(authoredPath, 'utf8')),
+  );
   const { bootstrap } = parseCompiledApplication(
     JSON.parse(readFileSync('apps/web/release/app.compiled.json', 'utf8')),
   );
@@ -70,5 +68,47 @@ function compileFixture() {
       application: serializeRelease({ compiled, normalizedDefinitionBytes }),
       bootstrap: serializeRelease(bootstrap),
     },
+  };
+}
+
+/** Restore the archived count declarations as a set, including the legacy queries and surfaces. */
+export function withoutStockCountWorkflow(authored: Record<string, unknown>) {
+  historical ??= JSON.parse(
+    execFileSync(
+      'git',
+      [
+        'show',
+        `${STOCK_COUNT_PRECEDING_READER}:apps/web/release/app.authored.json`,
+      ],
+      { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
+    ),
+  ) as Record<string, unknown>;
+  const collections = {
+    fields: 'fieldId',
+    operations: 'operationId',
+    permissions: 'permissionId',
+    queries: 'queryId',
+    relations: 'relationId',
+    surfaces: 'surfaceId',
+  } as const;
+  return {
+    ...authored,
+    ...Object.fromEntries(
+      Object.entries(collections).map(([collection, key]) => {
+        const isCount = (entry: Record<string, unknown>) =>
+          /:(?:field|operation|permission|query|relation|surface)\.stock_count_/u.test(
+            String(entry[key]),
+          );
+        const current = authored[collection] as Record<string, unknown>[];
+        const prior = historical![collection] as Record<string, unknown>[];
+        return [
+          collection,
+          [
+            ...current.filter((entry) => !isCount(entry)),
+            ...prior.filter(isCount),
+          ],
+        ];
+      }),
+    ),
   };
 }

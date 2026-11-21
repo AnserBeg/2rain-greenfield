@@ -1,0 +1,209 @@
+{
+  "version": 1,
+  "packet": "STOCK-COUNTS-fixes",
+  "entries": [
+    {
+      "name": "stock-count-negative-fraction",
+      "claim": "A signed fractional variance between -1 and zero can post through the kernel.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "/^(?:0|-?(?:[1-9][0-9]*(?:\\.[0-9]*[1-9])?|0\\.[0-9]*[1-9]))$/u",
+      "replacement": "/^(?:0|-[1-9][0-9]*|[1-9][0-9]*)(?:\\.[0-9]*[1-9])?$/u",
+      "test": {
+        "files": ["test/postgres/inventory-stock-counts.test.ts"],
+        "namePattern": "STOCK-COUNTS: posts a fractional downward count|STOCK-COUNTS: reverses a fractional upward count"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-counts.test.ts",
+          "name": "STOCK-COUNTS: posts a fractional downward count",
+          "expected": "line\\.varianceQuantity must be a canonical signed decimal"
+        },
+        {
+          "file": "test/postgres/inventory-stock-counts.test.ts",
+          "name": "STOCK-COUNTS: reverses a fractional upward count",
+          "expected": "line\\.varianceQuantity must be a canonical signed decimal"
+        }
+      ]
+    },
+    {
+      "name": "stock-count-reopen-keeps-figures",
+      "claim": "Returning to counting clears persisted review figures and preserves physical entries.",
+      "file": "packages/postgres-provider/src/stock-count-route.ts",
+      "original": "} else if (command === 'reopen') {\n          for (const line of count.lines)",
+      "replacement": "} else if (command === 'reopen' && false) {\n          for (const line of count.lines)",
+      "test": {
+        "files": ["test/postgres/inventory-stock-counts.test.ts"],
+        "namePattern": "STOCK-COUNTS: a recount retains physical entries and clears the stored review figures"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-counts.test.ts",
+          "name": "STOCK-COUNTS: a recount retains physical entries and clears the stored review figures",
+          "expected": "reopen clears every stored review figure"
+        }
+      ]
+    },
+    {
+      "name": "stock-count-mode-still-editable",
+      "claim": "Generic edit cannot change a started count’s mode.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "  if (Object.hasOwn(patch, mode) && patch[mode] !== prior[mode]) {",
+      "replacement": "  if (false && Object.hasOwn(patch, mode) && patch[mode] !== prior[mode]) {",
+      "test": {
+        "files": ["test/postgres/inventory-stock-counts.test.ts"],
+        "namePattern": "STOCK-COUNTS: counting mode is fixed after Start even through a state reset"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-counts.test.ts",
+          "name": "STOCK-COUNTS: counting mode is fixed after Start even through a state reset",
+          "expected": "Missing expected rejection: the mode cannot change during counting"
+        }
+      ]
+    },
+    {
+      "name": "stock-count-can-reset-to-draft",
+      "claim": "Generic edit cannot reset a started count to draft to bypass the mode freeze.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "  if (Object.hasOwn(patch, state) && patch[state] !== prior[state]) {",
+      "replacement": "  if (false && Object.hasOwn(patch, state) && patch[state] !== prior[state]) {",
+      "test": {
+        "files": ["test/postgres/inventory-stock-counts.test.ts"],
+        "namePattern": "STOCK-COUNTS: counting mode is fixed after Start even through a state reset"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-counts.test.ts",
+          "name": "STOCK-COUNTS: counting mode is fixed after Start even through a state reset",
+          "expected": "Missing expected rejection: the header cannot be reset to draft to change the mode"
+        }
+      ]
+    },
+    {
+      "name": "stock-count-reader-follows-editor-only",
+      "claim": "The count workflow requires reader rung 35 even without editor defaults.",
+      "file": "packages/compiler/src/projections.ts",
+      "original": "    hasStockCountWorkflow(original) ||\n    original.surfaces.some(",
+      "replacement": "    original.surfaces.some(",
+      "test": {
+        "files": ["test/architecture/surface-grammar-conformance.test.ts"],
+        "namePattern": "STOCK-COUNTS: the reader floor follows the workflow without editor defaults"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/surface-grammar-conformance.test.ts",
+          "name": "STOCK-COUNTS: the reader floor follows the workflow without editor defaults",
+          "expected": "the stock count workflow requires the reader even without editor line defaults"
+        }
+      ]
+    },
+    {
+      "name": "stock-count-route-owner-unchecked",
+      "claim": "The route checks the locked count’s company against the company authorized for the command.",
+      "file": "packages/postgres-provider/src/stock-count-route.ts",
+      "original": "        if (count.legalEntityId !== authorizedLegalEntityId) {",
+      "replacement": "        if (false && count.legalEntityId !== authorizedLegalEntityId) {",
+      "test": {
+        "files": ["test/postgres/inventory-stock-counts.test.ts"],
+        "namePattern": "STOCK-COUNTS: commands and count-line reads use the stored company within one tenant and environment"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-counts.test.ts",
+          "name": "STOCK-COUNTS: commands and count-line reads use the stored company within one tenant and environment",
+          "expected": "Missing expected rejection: the route must recheck the company under the row lock"
+        }
+      ]
+    },
+    {
+      "name": "stock-count-reversal-incomplete",
+      "claim": "Reversal Review requires the complete set of original stock movements.",
+      "file": "packages/postgres-provider/src/stock-count-route.ts",
+      "original": "  if (movements.rows.length !== original.lines.length) {",
+      "replacement": "  if (false && movements.rows.length !== original.lines.length) {",
+      "test": {
+        "files": ["test/postgres/inventory-stock-counts.test.ts"],
+        "namePattern": "STOCK-COUNTS: reversal Review refuses a movement missing from the original lines"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-counts.test.ts",
+          "name": "STOCK-COUNTS: reversal Review refuses a movement missing from the original lines",
+          "expected": "Missing expected rejection: reversal must cover every original movement"
+        }
+      ]
+    },
+    {
+      "name": "stock-count-review-accepts-duplicates",
+      "claim": "Review refuses duplicate item lines before changing any count evidence.",
+      "file": "packages/postgres-provider/src/stock-count-route.ts",
+      "original": "    if (items.has(line.itemId)) {",
+      "replacement": "    if (false && items.has(line.itemId)) {",
+      "test": {
+        "files": ["test/postgres/inventory-stock-counts.test.ts"],
+        "namePattern": "STOCK-COUNTS: Review refuses a repeated product"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-counts.test.ts",
+          "name": "STOCK-COUNTS: Review refuses a repeated product",
+          "expected": "Missing expected rejection: Review must refuse a repeated product"
+        }
+      ]
+    },
+    {
+      "name": "stock-count-review-accepts-negative-physical",
+      "claim": "Review refuses negative physical quantities before changing any count evidence.",
+      "file": "packages/postgres-provider/src/stock-count-route.ts",
+      "original": "    if (line.physicalQuantity!.startsWith('-')) {",
+      "replacement": "    if (false && line.physicalQuantity!.startsWith('-')) {",
+      "test": {
+        "files": ["test/postgres/inventory-stock-counts.test.ts"],
+        "namePattern": "STOCK-COUNTS: Review refuses a negative physical quantity"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-counts.test.ts",
+          "name": "STOCK-COUNTS: Review refuses a negative physical quantity",
+          "expected": "Missing expected rejection: Review must refuse a negative physical quantity"
+        }
+      ]
+    },
+    {
+      "name": "stock-count-blind-shows-book",
+      "claim": "The blind count read model withholds book quantities even for a principal allowed to read posted stock.",
+      "file": "packages/postgres-provider/src/inventory-count-read-model.ts",
+      "original": "  if (counting && !blind && typeof location === 'string') {",
+      "replacement": "  if (counting && typeof location === 'string') {",
+      "test": {
+        "files": ["test/postgres/inventory-stock-counts.test.ts"],
+        "namePattern": "STOCK-COUNTS: a blind counter can enter counts but cannot read the book or supervise"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-counts.test.ts",
+          "name": "STOCK-COUNTS: a blind counter can enter counts but cannot read the book or supervise",
+          "expected": "the blind projection hides the book even when stock read is granted"
+        }
+      ]
+    },
+    {
+      "name": "stock-count-post-grant-ignored",
+      "claim": "The gateway refuses posting when the principal has the read grant but lacks the Post transition grant.",
+      "file": "packages/runtime/src/semantic-operation-gateway.ts",
+      "original": "        if (decision.decision === 'DENY') {\n          throw new SemanticOperationPolicyDeniedError(",
+      "replacement": "        if (decision.decision === 'DENY' &&\n          (request.operationId !== 'northstar.app:operation.stock_count_post' || permissionId !== definition.permissionId)) {\n          throw new SemanticOperationPolicyDeniedError(",
+      "test": {
+        "files": ["test/postgres/inventory-stock-counts.test.ts"],
+        "namePattern": "STOCK-COUNTS: each transition refuses when its own permission is absent"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-counts.test.ts",
+          "name": "STOCK-COUNTS: each transition refuses when its own permission is absent",
+          "expected": "Missing expected rejection: missing post grant must refuse"
+        }
+      ]
+    }
+  ]
+}

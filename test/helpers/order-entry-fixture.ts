@@ -119,10 +119,11 @@ async function seed(
     relations: Record<string, string> = {},
     scoped = true,
     recordId: string = randomUUID(),
+    companyId: string = scope,
   ) => {
     const result = await invoke(`${local}_create`, {
       recordId,
-      ...(scoped ? { legalEntityId: scope } : {}),
+      ...(scoped ? { legalEntityId: companyId } : {}),
       values: Object.fromEntries(
         Object.entries(values).map(([name, value]) => [
           `${ns}:field.${local}_${name}`,

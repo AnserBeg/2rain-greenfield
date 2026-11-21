@@ -3,6 +3,7 @@ import {
   canonicalizeAndHash,
   languageHasMaterializedStateFields,
   type NormalizedApplicationPackage,
+  type VersionedNormalizedApplicationPackage,
 } from '@north-star/canonical-model';
 
 import { compilerDiagnostic } from './diagnostics.js';
@@ -2190,18 +2191,14 @@ export interface AuthoredOperationConformanceInput {
   }[];
 }
 
-export function validateModuleConformance(
-  packageRevision: NormalizedApplicationPackage,
-  authoredOperations: AuthoredOperationConformanceInput = packageRevision,
-): CompilerDiagnostic[] {
-  if (packageRevision.languageVersion !== LANGUAGE_VERSION) return [];
-  const diagnostics: CompilerDiagnostic[] = [];
-  validateRequiredInventoryEntitySet(packageRevision, diagnostics);
-  validateRecordedTimeProjectionRetention(packageRevision, diagnostics);
-  // The workflow is an extension to the original count evidence storage.
-  // Require the complete extension whenever there is a workflow operation
-  // or one of its evidence fields. Historical definitions keep their shape.
-  const stockCountWorkflow =
+/** Workflow commands and their evidence are one release compatibility boundary. */
+export function hasStockCountWorkflow(
+  packageRevision: Pick<
+    VersionedNormalizedApplicationPackage,
+    'fields' | 'operations'
+  >,
+): boolean {
+  return (
     packageRevision.fields.some((field) =>
       STOCK_COUNT_WORKFLOW_FIELDS.has(
         canonicalFieldLocalId(field.fieldId) ?? '',
@@ -2213,7 +2210,19 @@ export function validateModuleConformance(
         /:operation\.stock_count_(start|review|post|reopen|cancel)$/u.test(
           operation.operationId,
         ),
-    );
+    )
+  );
+}
+
+export function validateModuleConformance(
+  packageRevision: NormalizedApplicationPackage,
+  authoredOperations: AuthoredOperationConformanceInput = packageRevision,
+): CompilerDiagnostic[] {
+  if (packageRevision.languageVersion !== LANGUAGE_VERSION) return [];
+  const diagnostics: CompilerDiagnostic[] = [];
+  validateRequiredInventoryEntitySet(packageRevision, diagnostics);
+  validateRecordedTimeProjectionRetention(packageRevision, diagnostics);
+  const stockCountWorkflow = hasStockCountWorkflow(packageRevision);
   validatePinnedInventoryCountRelations(
     packageRevision,
     stockCountWorkflow,
