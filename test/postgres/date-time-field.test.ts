@@ -498,7 +498,7 @@ test(
             fieldId: `${NS}:field.custom_visit_due_at`,
           };
           await opened.service.activate(await ship(visitDue));
-          const visit = (entry: Record<string, unknown>) =>
+          const visit = (entry: ReturnType<typeof value>) =>
             world.invoke('custom_visit_create', {
               recordId: randomUUID(),
               relations: {},
@@ -506,7 +506,7 @@ test(
                 [`${NS}:field.custom_visit_name`]: 'Visit',
                 [visitDue.fieldId]: entry,
               },
-            });
+            } as Parameters<typeof world.invoke>[1]);
           const unscoped = await visit(value('2026-11-04T10:00')).then(
             () => null,
             (error: { code: string; details: Record<string, string> }) => error,
