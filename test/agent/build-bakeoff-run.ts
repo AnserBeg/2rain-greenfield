@@ -231,6 +231,10 @@ async function main(): Promise<void> {
       'drafts-out': { type: 'string' },
       'drafts-in': { type: 'string' },
       'sandbox-ms': { type: 'string', default: '120000' },
+      'idle-load': { type: 'string', default: '8' },
+      // No spend: a case that needs a repair turn stops there and is
+      // reported as needing one, never sent to the model.
+      'no-repairs': { type: 'boolean', default: false },
     },
   });
   if (!args.prompts) throw new Error('--prompts is required');
@@ -298,6 +302,13 @@ async function main(): Promise<void> {
     say(`reused ${name} from ${args.reuse}`);
   }
   const running = candidates.filter((c) => !reused.has(c.name));
+  const noRepairs: ModelAdapter = {
+    modelId: 'no-repairs',
+    next: () =>
+      Promise.reject(
+        new Error('needed a repair turn (not run: no spend in this phase)'),
+      ),
+  };
   const live = new Map(running.map((c) => [c.name, adapter(c, keys)]));
   // Phase 2, every candidate: first drafts back to back (warm caches).
   const ahead = new Map<
@@ -406,6 +417,16 @@ async function main(): Promise<void> {
         [];
       const worker = async () => {
         for (let c = queue.shift(); c; c = queue.shift()) {
+          // One case at a time on an idle host (1-minute load under the
+          // limit), at most an hour's wait.
+          const idleLoad = Number(args['idle-load']);
+          for (const started = Date.now(); idleLoad;) {
+            const load = Number(
+              (await readFile('/proc/loadavg', 'utf8')).split(' ')[0],
+            );
+            if (load < idleLoad || Date.now() - started > 3_600_000) break;
+            await new Promise((done) => setTimeout(done, 30_000));
+          }
           const drafted = drafts.get(c.id)!;
           const key = `${c.id}:${JSON.stringify(drafted.turn.toolCalls.map((call) => call.input))}`;
           const prior = scored.get(key);
@@ -446,15 +467,19 @@ async function main(): Promise<void> {
           try {
             const result = await runBuildCase(world, c, {
               provider: () =>
-                draftedAheadModel(drafted, live.get(candidate.name)!, () => {
-                  mismatched.add(c.id);
-                  log({ kind: 'prompt-mismatch' });
-                  // Never re-draft live: that would mix drafters and spend
-                  // outside the measured first turn.
-                  throw new Error(
-                    'the in-app request differs from the captured one',
-                  );
-                }),
+                draftedAheadModel(
+                  drafted,
+                  args['no-repairs'] ? noRepairs : live.get(candidate.name)!,
+                  () => {
+                    mismatched.add(c.id);
+                    log({ kind: 'prompt-mismatch' });
+                    // Never re-draft live: that would mix drafters and spend
+                    // outside the measured first turn.
+                    throw new Error(
+                      'the in-app request differs from the captured one',
+                    );
+                  },
+                ),
               meter: scoring,
               sandboxWallClockMilliseconds:
                 Number(args['sandbox-ms']) || 90_000,
