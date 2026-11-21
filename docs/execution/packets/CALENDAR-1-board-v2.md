@@ -2,7 +2,7 @@
 
 Status — built on `packet/CALENDAR-1-board-v2` from main `5d315668` (docs E1–E20), synchronized with main `67e4efce`. Surface reader rung 37, taken at merge above billing intervals (36). No migration. Governs: [ADR-0086 view revision member shape](../../decisions/ADR-0086-board-calendar-and-resource-timeline.md), [Board v2 fix proofs](CALENDAR-1.md#board-v2-fix).
 
-CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44824314810
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44839630057
 
 ## Claims
 
@@ -42,7 +42,7 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44824314
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CALENDAR-1-board-v2",
   "base": "67e4efce31eb663f12d6f161aa91c0ce1220dffc",
-  "head": "b8be827eb4da34193f0a01b9abc4d9c2458e4b78",
+  "head": "b0177eb681967fcb1ba3754b14716b0b8909087b",
   "changedPaths": [
     "apps/web/src/board.ts", "apps/web/src/customize-screen.ts", "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts",
     "package.json", "packages/canonical-model/src/board.ts", "packages/canonical-model/src/surface-workspace.ts",
