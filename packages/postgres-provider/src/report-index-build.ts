@@ -49,6 +49,17 @@ export async function previewReportIndexes(
     );
     if (!planned)
       return report.label + ' needs a ready index on ' + path.keys.join(', ');
+    const occupied = await client.query(
+      'SELECT pg_catalog.to_regclass($1) AS existing',
+      ['north_star_module.' + path.index],
+    );
+    if (occupied.rows[0]?.existing)
+      return (
+        report.label +
+        ' cannot build the index on ' +
+        path.keys.join(', ') +
+        ': the index name is already in use by an unavailable access path.'
+      );
     if (planned.classification.preparationValidity !== 'deferredOnlineFamily')
       continue;
     const problem = await reportIndexCeilingProblem(client, path, report.label);

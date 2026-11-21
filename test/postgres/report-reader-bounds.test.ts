@@ -16,6 +16,8 @@ import {
   draftReport,
   reportTargets,
 } from '../../packages/customization/src/report-revision.js';
+import type { StorageTransitionEnvelope } from '../../packages/compiler/src/protocol.js';
+import { previewReportIndexes } from '../../packages/postgres-provider/src/report-index-build.js';
 import type { StorageTargetPayloadV1 } from '../../packages/compiler/src/storage.js';
 import { PROJECTION_FAMILY_IDS } from '../../packages/compiler/src/index.js';
 import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
@@ -219,7 +221,31 @@ test('the PostgreSQL Invoice candidate probe uses the named date index and stops
         /"Node Type":"Limit"[^}]*"Actual Rows":4/u,
         'provider scanned past the fourth scoped candidate',
       );
+      const transition = projectionPayload<StorageTransitionEnvelope>(
+        compiled,
+        PROJECTION_FAMILY_IDS.storageTransition,
+      );
+      await client.query(
+        'UPDATE pg_catalog.pg_index SET indisvalid=false WHERE indexrelid=$1::regclass',
+        ['north_star_module.' + index],
+      );
+      assert.deepEqual(await run(3, 2, true), { kind: 'unavailable' });
+      const invalid = await previewReportIndexes(
+        client,
+        [report],
+        transition.elements,
+      );
+      assert.ok(
+        invalid?.includes('already in use') &&
+          invalid.includes(keys.join(', ')),
+        invalid ?? 'invalid path was accepted',
+      );
       await client.query('DROP INDEX north_star_module.' + index);
+      const missing = await previewReportIndexes(client, [report], []);
+      assert.ok(
+        missing?.includes(keys.join(', ')),
+        'a missing, unplanned index must be refused by key',
+      );
       assert.deepEqual(await run(3, 2, true), { kind: 'unavailable' });
       await client.query('ROLLBACK');
     } finally {
