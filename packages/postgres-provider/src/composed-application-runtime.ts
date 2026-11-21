@@ -1172,6 +1172,7 @@ function parseRelease(value: unknown, label: string): ParsedRelease {
     `${label}.normalizedDefinitionBytesBase64`,
   );
   const compiled = {
+    normalizedDefinitionBytes,
     attestation: value.attestation,
     bundle: {
       artifacts,

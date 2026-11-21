@@ -1,8 +1,12 @@
 import { CAPABILITY_EXECUTOR_FACTORIES } from '../../apps/api/src/erp-capabilities.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import test from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { mountDocumentHttp } from '../../apps/web/src/document-http.js';
 import { applicationWithoutLineCreateValues } from '../helpers/application-without-line-create-values.js';
 import {
   COMPOSED_APPLICATION_INVENTORY_SCOPE,
@@ -30,6 +34,7 @@ import { withTrustedRequestTransaction } from '../../packages/postgres-provider/
 import { worldOver } from '../agent/agent-world.js';
 import {
   archivedRuntimeRead,
+  assertArchivedTenantEnvelopeForChange,
   withArchivedCustomizationRuntime,
 } from '../helpers/archived-customization-runtime.js';
 import {
@@ -69,19 +74,20 @@ test(
           )!;
           const world = worldOver(app.runtime, String(connection.database));
           const transactionId = randomUUID();
+          const transactionValues = {
+            actor_id: 'document-test',
+            recorded_at: new Date().toISOString(),
+            source_id: transactionId,
+            source_type: 'inventoryTransaction',
+            state: 'northstar.app:option.inventory_transaction_state_draft',
+            effective_at: new Date().toISOString(),
+            reason_code: 'SETUP',
+            reason_narrative: 'Attachment evidence',
+            type: 'northstar.app:option.inventory_transaction_type_adjustment',
+          };
           const transaction = await world.create(
             'inventory_transaction',
-            {
-              actor_id: 'document-test',
-              recorded_at: new Date().toISOString(),
-              source_id: transactionId,
-              source_type: 'inventoryTransaction',
-              state: 'northstar.app:option.inventory_transaction_state_draft',
-              effective_at: new Date().toISOString(),
-              reason_code: 'SETUP',
-              reason_narrative: 'Attachment evidence',
-              type: 'northstar.app:option.inventory_transaction_type_adjustment',
-            },
+            transactionValues,
             {},
             transactionId,
           );
@@ -288,6 +294,195 @@ test(
             },
           );
           await t.test(
+            'the SQL authority bounds Node rows and refuses stale or inaccessible records',
+            async () => {
+              const { tenantId, environmentId, principalId } =
+                app.runtime.identity;
+              const client = await pool.connect();
+              const entity = 'northstar.app:entity.item';
+              const target = ['shared', entity, item.recordId];
+              const scanDigest = createHash('sha256')
+                .update(pixel)
+                .digest('hex');
+              const uploadId = randomUUID();
+              const policy = 'sql-fixture/v1';
+              const scanArgs = [
+                tenantId,
+                environmentId,
+                principalId,
+                uploadId,
+                scanDigest,
+                policy,
+              ];
+              const stage = (id = uploadId, record = target) =>
+                client.query(
+                  'SELECT platform.stage_document_upload($1,$2,$3,$4,NULL,NULL,$5,$6,$7)',
+                  [...record, id, 'sql-fixture.png', 'image/png', pixel],
+                );
+              const list = (limit: number) =>
+                client.query(
+                  'SELECT * FROM platform.list_document_versions($1,$2,$3,NULL,$4)',
+                  [...target, limit],
+                );
+              const read = () =>
+                client.query(
+                  'SELECT * FROM platform.read_document_version($1,$2,$3,$4,$5)',
+                  [...target, attachment.linkId, attachment.versionId],
+                );
+              async function withRole<T>(
+                role: 'north_star_runtime' | 'north_star_document_scanner',
+                operation: () => Promise<T>,
+              ) {
+                await client.query('SAVEPOINT role_test');
+                await client.query('SET LOCAL ROLE ' + role);
+                try {
+                  const result = await operation();
+                  await client.query('RESET ROLE');
+                  return result;
+                } catch (error) {
+                  await client.query('ROLLBACK TO SAVEPOINT role_test');
+                  throw error;
+                } finally {
+                  await client.query('RELEASE SAVEPOINT role_test');
+                }
+              }
+              const serving = <T>(run: () => Promise<T>) =>
+                withRole('north_star_runtime', run);
+              const scanner = <T>(run: () => Promise<T>) =>
+                withRole('north_star_document_scanner', run);
+              try {
+                await client.query('BEGIN');
+                await client.query(
+                  `SELECT set_config('north_star.tenant_id',$1,true),
+                set_config('north_star.environment_id',$2,true), set_config('north_star.principal_id',$3,true)`,
+                  [tenantId, environmentId, principalId],
+                );
+                const fixture = await client.query<{ release_id: string }>(
+                  'SELECT release_id FROM platform.document_versions WHERE link_id = $1',
+                  [attachment.linkId],
+                );
+                const publish = (revision: number) =>
+                  client.query(
+                    'SELECT platform.publish_document_upload($1,$2,$3,$4,$5,NULL,NULL)',
+                    [
+                      uploadId,
+                      scanDigest,
+                      policy,
+                      fixture.rows[0]!.release_id,
+                      revision,
+                    ],
+                  );
+                const versions = await client.query(
+                  `INSERT INTO platform.document_versions
+                (tenant_id,environment_id,link_id,version_id,upload_id,owner_scope,digest,entity_id,record_id,
+                 record_revision,field_id,category_id,retention_class,file_name,actor_id,release_id,scan_policy_version)
+                SELECT tenant_id,environment_id,gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),owner_scope,
+                  digest,entity_id,record_id,record_revision,field_id,category_id,retention_class,file_name,actor_id,
+                  release_id,scan_policy_version
+                FROM platform.document_versions CROSS JOIN generate_series(1,55) WHERE link_id = $1`,
+                  [attachment.linkId],
+                );
+                assert.equal(versions.rowCount, 55);
+                assert.equal(
+                  (await serving(() => list(51))).rows.length,
+                  51,
+                  'pg buffered more rows than the SQL page',
+                );
+                assert.equal((await serving(read)).rows.length, 1);
+                await serving(stage);
+                await scanner(() =>
+                  client.query(
+                    'SELECT platform.record_document_scan($1,$2,$3,$4,$5,$6,true)',
+                    scanArgs,
+                  ),
+                );
+                await assert.rejects(
+                  serving(() => publish(999)),
+                  { code: 'D0409' },
+                );
+                await assert.rejects(
+                  serving(() =>
+                    stage(randomUUID(), [
+                      randomUUID(),
+                      'northstar.app:entity.inventory_transaction',
+                      transaction.recordId,
+                    ]),
+                  ),
+                  { code: 'D0404' },
+                );
+
+                await client.query('SAVEPOINT boundary_test');
+                const revoked = await client.query(
+                  `UPDATE platform.current_policy_permission_grants
+                SET revoked_at = clock_timestamp() WHERE (tenant_id,environment_id) = ($1,$2)
+                  AND permission_id = 'northstar.runtime:permission.semantic-query-boundary'`,
+                  [tenantId, environmentId],
+                );
+                assert.ok(revoked.rowCount);
+                assert.equal((await serving(() => list(51))).rows.length, 0);
+                assert.equal((await serving(read)).rows.length, 0);
+                await assert.rejects(
+                  serving(() => stage(randomUUID())),
+                  { code: 'D0404' },
+                );
+                await assert.rejects(
+                  serving(() => publish(1)),
+                  { code: 'D0404' },
+                );
+                await client.query('ROLLBACK TO SAVEPOINT boundary_test');
+
+                const table = await client.query<{
+                  name: string;
+                  archive: string;
+                }>(
+                  `SELECT quote_ident(value->>'physicalTableName') AS name,
+                  quote_ident(value #>> '{archive,archivedAtColumn}') AS archive
+                  FROM jsonb_array_elements(platform.document_storage($1,$2)->'entities')
+                  WHERE value->>'entityId' = $3`,
+                  [tenantId, environmentId, entity],
+                );
+                const { name, archive } = table.rows[0]!;
+                const archived = await client.query(
+                  `UPDATE north_star_module.${name} SET ${archive} = clock_timestamp()
+                WHERE (tenant_id,environment_id,record_id) = ($1,$2,$3)`,
+                  [tenantId, environmentId, item.recordId],
+                );
+                assert.equal(archived.rowCount, 1);
+                assert.equal((await serving(() => list(51))).rows.length, 0);
+                assert.equal((await serving(read)).rows.length, 0);
+                await assert.rejects(
+                  serving(() => stage(randomUUID())),
+                  { code: 'D0404' },
+                );
+                await assert.rejects(
+                  serving(() => publish(1)),
+                  { code: 'D0404' },
+                );
+                await assert.rejects(
+                  scanner(() =>
+                    client.query(
+                      'SELECT platform.lock_document_scan($1,$2,$3,$4,$5,$6)',
+                      scanArgs,
+                    ),
+                  ),
+                  { code: 'D0409' },
+                );
+                await assert.rejects(
+                  scanner(() =>
+                    client.query(
+                      'SELECT platform.record_document_scan($1,$2,$3,$4,$5,$6,true)',
+                      scanArgs,
+                    ),
+                  ),
+                  { code: 'D0409' },
+                );
+              } finally {
+                await client.query('ROLLBACK');
+                client.release();
+              }
+            },
+          );
+          await t.test(
             'published versions and attachment audit reject every mutation',
             async () => {
               for (const table of [
@@ -336,24 +531,94 @@ test(
             }
           };
           await t.test(
-            'scoped database reads follow live company membership',
+            'a company membership authorizes both boundaries in its own company only',
             async () => {
-              const read = () =>
-                scopedRead(
-                  company,
-                  'northstar.app:entity.inventory_transaction',
-                  transaction.recordId,
-                  companyFile,
-                );
-              assert.equal((await read()).rowCount, 1);
-              const restricted = await pool.query<{ membership_id: string }>(
-                `UPDATE platform.current_policy_memberships
-              SET legal_entity_id=$4 WHERE tenant_id=$1 AND environment_id=$2 AND principal_id=$3
-              AND legal_entity_id IS NULL RETURNING membership_id`,
-                [tenantId, environmentId, principalId, randomUUID()],
+              const otherCompany = randomUUID();
+              assert.equal(
+                (
+                  await world.invoke('legal_entity_create', {
+                    recordId: otherCompany,
+                    relations: {},
+                    values: {
+                      'northstar.app:field.legal_entity_code':
+                        'DOCUMENTS-OTHER',
+                      'northstar.app:field.legal_entity_is_default': false,
+                      'northstar.app:field.legal_entity_name':
+                        'Other documents company',
+                      'northstar.app:field.legal_entity_status':
+                        'northstar.app:option.legal_entity_status_active',
+                    },
+                  })
+                ).outcome,
+                'succeeded',
               );
+              const otherRecord = randomUUID();
+              assert.equal(
+                (
+                  await world.invoke('inventory_transaction_create', {
+                    recordId: otherRecord,
+                    legalEntityId: otherCompany,
+                    relations: {},
+                    values: Object.fromEntries(
+                      Object.entries({
+                        ...transactionValues,
+                        source_id: otherRecord,
+                      }).map(([key, value]) => [
+                        'northstar.app:field.inventory_transaction_' + key,
+                        value,
+                      ]),
+                    ),
+                  })
+                ).outcome,
+                'succeeded',
+              );
+              const otherUrl = documentUrl(
+                app.baseUrl,
+                companySurface,
+                otherRecord,
+                otherCompany,
+              );
+              const other = await upload(otherUrl, pixel);
+              assert.equal(other.status, 201, await other.clone().text());
+              const otherFile = (await other.json()) as DocumentMetadata;
+              const restricted = await pool.query<{ membership_id: string }>(
+                `UPDATE platform.current_policy_memberships SET legal_entity_id=$4
+              WHERE tenant_id=$1 AND environment_id=$2 AND principal_id=$3
+              AND legal_entity_id IS NULL RETURNING membership_id`,
+                [tenantId, environmentId, principalId, company],
+              );
+              assert.ok(restricted.rowCount);
               try {
-                assert.equal((await read()).rowCount, 0);
+                const entity = 'northstar.app:entity.inventory_transaction';
+                assert.equal(
+                  (
+                    await scopedRead(
+                      company,
+                      entity,
+                      transaction.recordId,
+                      companyFile,
+                    )
+                  ).rowCount,
+                  1,
+                  'the company-scoped principal lost its own attachment query grant',
+                );
+                assert.equal(
+                  (
+                    await scopedRead(
+                      otherCompany,
+                      entity,
+                      otherRecord,
+                      otherFile,
+                    )
+                  ).rowCount,
+                  0,
+                );
+                assert.equal(
+                  (await upload(companyUrl, pixel)).status,
+                  201,
+                  'the company-scoped principal lost its own attachment operation grant',
+                );
+                assert.equal((await upload(otherUrl, pixel)).status, 404);
               } finally {
                 await pool.query(
                   'UPDATE platform.current_policy_memberships SET legal_entity_id=NULL WHERE membership_id=ANY($1::uuid[])',
@@ -411,6 +676,7 @@ test(
           assert.equal((await fetch(listUrl(itemUrl))).status, 404);
 
           const manager = { cookie: 'northstar-demo-actor=manager' };
+          const beforeQuota = (await counts())!;
           await pool.query(
             `INSERT INTO platform.document_blobs (tenant_id, environment_id, owner_scope, digest, content_type, bytes)
          SELECT $1, $2, 'shared', encode(sha256(bytes), 'hex'), 'image/png', bytes
@@ -467,9 +733,9 @@ test(
             'refusals leave attachment counts unchanged',
             async () => {
               assert.deepEqual(await counts(), {
-                blobs: 7,
-                versions: 8,
-                audit: 3,
+                blobs: beforeQuota.blobs + 5,
+                versions: beforeQuota.versions + 5,
+                audit: beforeQuota.audit,
               });
             },
           );
@@ -635,6 +901,60 @@ test(
               clean = true;
               await assert.rejects(submit(), { status: 422 });
               assert.equal(scans, 1);
+              const stage = (
+                await pool.query<{
+                  upload_id: string;
+                  digest: string;
+                  principal_id: string;
+                  revision: string;
+                }>(
+                  `SELECT s.upload_id,s.digest,s.principal_id,
+                      platform.document_record_revision(s.tenant_id,s.environment_id,
+                        platform.document_storage(s.tenant_id,s.environment_id),s.entity_id,s.owner_scope,s.record_id) AS revision
+                    FROM platform.document_upload_staging s WHERE s.scan_clean IS FALSE`,
+                )
+              ).rows[0]!;
+              const role = rolePool(
+                options.databaseUrl,
+                'north_star_runtime',
+                1,
+              );
+              try {
+                await assert.rejects(
+                  withTrustedRequestTransaction(
+                    role,
+                    await trustedContext({
+                      ...screening.identity,
+                      principalId: stage.principal_id,
+                    }),
+                    (client) =>
+                      client.query(
+                        "SELECT platform.publish_document_upload($1,$2,'fixture/v1',$3,$4,NULL,NULL)",
+                        [
+                          stage.upload_id,
+                          stage.digest,
+                          screening.activeReleaseId,
+                          stage.revision,
+                        ],
+                      ),
+                  ),
+                  {
+                    code: 'D0409',
+                    message: 'This staged upload has no current clean verdict.',
+                  },
+                );
+                assert.equal(
+                  (
+                    await pool.query(
+                      'SELECT 1 FROM platform.document_versions WHERE upload_id=$1',
+                      [stage.upload_id],
+                    )
+                  ).rowCount,
+                  0,
+                );
+              } finally {
+                await role.end();
+              }
               const evidence =
                 await pool.query(`SELECT scan_digest = digest AS bound, scan_policy
             FROM platform.document_upload_staging WHERE scan_clean IS FALSE`);
@@ -644,6 +964,116 @@ test(
             },
           );
           clean = true;
+          await t.test(
+            'the HTTP deadline awaits a publication COMMIT already in flight',
+            async () => {
+              const responseMilliseconds = 2_000;
+              const handle = mountDocumentHttp(
+                screening.entry,
+                screening.documents!,
+                responseMilliseconds,
+              );
+              const server = createServer((request, response) => {
+                void handle(
+                  request,
+                  response,
+                  new URL(request.url!, 'http://localhost'),
+                  true,
+                );
+              });
+              await new Promise<void>((done) =>
+                server.listen(0, '127.0.0.1', done),
+              );
+              const baseUrl =
+                'http://127.0.0.1:' + (server.address() as AddressInfo).port;
+              const locker = await pool.connect();
+              let held = false;
+              try {
+                await pool.query(`CREATE FUNCTION public.pause_document_test_commit() RETURNS trigger
+                  LANGUAGE plpgsql AS $$
+                  BEGIN PERFORM pg_advisory_xact_lock(84217); RETURN NEW; END $$;
+                  CREATE FUNCTION public.allow_test_commit_to_outlive_response() RETURNS trigger
+                    LANGUAGE plpgsql AS $$
+                    BEGIN PERFORM set_config('statement_timeout', '0', true); RETURN NEW; END $$;
+                  CREATE TRIGGER allow_test_commit_to_outlive_response
+                    BEFORE INSERT ON platform.document_versions
+                    FOR EACH ROW WHEN (NEW.file_name = 'commit-evidence.png')
+                    EXECUTE FUNCTION public.allow_test_commit_to_outlive_response();
+                  CREATE CONSTRAINT TRIGGER pause_document_test_commit
+                    AFTER INSERT ON platform.document_versions DEFERRABLE INITIALLY DEFERRED
+                    FOR EACH ROW WHEN (NEW.file_name = 'commit-evidence.png')
+                    EXECUTE FUNCTION public.pause_document_test_commit()`);
+                const {
+                  rows: [backend],
+                } = await locker.query<{ pid: number }>(
+                  'SELECT pg_backend_pid() AS pid',
+                );
+                await locker.query('BEGIN');
+                held = true;
+                await locker.query('SELECT pg_advisory_xact_lock(84217)');
+                const started = performance.now();
+                const response = upload(
+                  documentUrl(baseUrl, itemSurface, recordId),
+                  pixel,
+                  { headers: manager, fileName: 'commit-evidence.png' },
+                );
+                async function waitForCommit() {
+                  const until = performance.now() + 10_000;
+                  while (
+                    !(
+                      await pool.query(
+                        "SELECT FROM pg_stat_activity WHERE query = 'COMMIT' AND $1 = ANY(pg_blocking_pids(pid))",
+                        [backend!.pid],
+                      )
+                    ).rowCount
+                  ) {
+                    assert.ok(
+                      performance.now() < until,
+                      'publication COMMIT did not reach the deferred trigger',
+                    );
+                    await new Promise<void>((resolve) => setImmediate(resolve));
+                  }
+                }
+                const early = await Promise.race([
+                  waitForCommit().then(() => undefined),
+                  response,
+                ]);
+                assert.equal(
+                  early,
+                  undefined,
+                  'response before COMMIT: ' + (early?.status ?? ''),
+                );
+                await delay(responseMilliseconds + 50);
+                assert.ok(performance.now() - started > responseMilliseconds);
+                assert.ok(
+                  (
+                    await pool.query(
+                      "SELECT FROM pg_stat_activity WHERE query = 'COMMIT' AND $1 = ANY(pg_blocking_pids(pid))",
+                      [backend!.pid],
+                    )
+                  ).rowCount,
+                  'COMMIT must still be in flight after actual expiry',
+                );
+                await locker.query('ROLLBACK');
+                held = false;
+                const issued = await response;
+                assert.equal(issued.status, 201, await issued.clone().text());
+                const result = (await issued.json()) as DocumentMetadata;
+                const stored = await pool.query(
+                  'SELECT version_id FROM platform.document_versions WHERE link_id = $1',
+                  [result.linkId],
+                );
+                assert.deepEqual(stored.rows, [
+                  { version_id: result.versionId },
+                ]);
+              } finally {
+                if (held) await locker.query('ROLLBACK');
+                locker.release();
+                server.closeAllConnections();
+                await new Promise<void>((done) => server.close(() => done()));
+              }
+            },
+          );
           // Pause the publisher at the actual SQL lock. An injected monotonic deadline
           // expires while it waits, before the lock is released.
           await t.test(
@@ -743,6 +1173,130 @@ test(
               }
             },
           );
+          await t.test(
+            'a committed uploader revocation makes staged authority unusable after regrant',
+            async (t) => {
+              const { tenantId, environmentId, principalId } =
+                screening.identity;
+              const runtime = rolePool(
+                options.databaseUrl,
+                'north_star_runtime',
+                1,
+              );
+              const scanner = rolePool(
+                options.databaseUrl,
+                'north_star_document_scanner',
+                1,
+              );
+              const context = await trustedContext(screening.identity);
+              const uploadId = randomUUID();
+              const unscannedId = randomUUID();
+              const hash = createHash('sha256').update(pixel).digest('hex');
+              const run = <T>(
+                operation: Parameters<
+                  typeof withTrustedRequestTransaction<T>
+                >[2],
+              ) => withTrustedRequestTransaction(runtime, context, operation);
+              const publish = () =>
+                run((client) =>
+                  client.query(
+                    "SELECT platform.publish_document_upload($1,$2,'fixture/v1',$3,1,NULL,NULL)",
+                    [uploadId, hash, screening.activeReleaseId],
+                  ),
+                );
+              const permission =
+                'northstar.runtime:permission.semantic-query-boundary';
+              const scanArgs = (id: string) => [
+                tenantId,
+                environmentId,
+                principalId,
+                id,
+                hash,
+                'fixture/v1',
+              ];
+              const readScan = (id: string) =>
+                scanner.query<{ clean: boolean | null }>(
+                  'SELECT platform.lock_document_scan($1,$2,$3,$4,$5,$6) AS clean',
+                  scanArgs(id),
+                );
+              const recordScan = (id: string) =>
+                scanner.query(
+                  'SELECT platform.record_document_scan($1,$2,$3,$4,$5,$6,true)',
+                  scanArgs(id),
+                );
+              try {
+                for (const id of [uploadId, unscannedId]) {
+                  await run((client) =>
+                    client.query(
+                      "SELECT platform.stage_document_upload('shared','northstar.app:entity.item',$1,$2,NULL,NULL,'revoked.png','image/png',$3)",
+                      [recordId, id, pixel],
+                    ),
+                  );
+                }
+                await recordScan(uploadId);
+                assert.equal((await readScan(uploadId)).rows[0]?.clean, true);
+                assert.equal(
+                  (await readScan(unscannedId)).rows[0]?.clean,
+                  null,
+                );
+                const grants = await pool.query<{ role_id: string }>(
+                  `UPDATE platform.current_policy_permission_grants SET revoked_at=clock_timestamp()
+                WHERE (tenant_id,environment_id,permission_id)=($1,$2,$3) AND revoked_at IS NULL
+                AND role_id IN (SELECT role_id FROM platform.current_policy_memberships
+                  WHERE (tenant_id,environment_id,principal_id)=($1,$2,$4) AND revoked_at IS NULL)
+                RETURNING role_id`,
+                  [tenantId, environmentId, permission, principalId],
+                );
+                assert.ok(grants.rowCount);
+                await t.test(
+                  'scanner cannot reuse a verdict while the uploader grant is revoked',
+                  async () => {
+                    await assert.rejects(readScan(uploadId), { code: 'D0409' });
+                  },
+                );
+                await t.test(
+                  'scanner cannot record a verdict while the uploader grant is revoked',
+                  async () => {
+                    await assert.rejects(recordScan(unscannedId), {
+                      code: 'D0409',
+                    });
+                    const stage = await pool.query(
+                      'SELECT scan_clean FROM platform.document_upload_staging WHERE upload_id=$1',
+                      [unscannedId],
+                    );
+                    assert.deepEqual(stage.rows, [{ scan_clean: null }]);
+                  },
+                );
+                await assert.rejects(publish(), { code: 'D0404' });
+                await pool.query(
+                  `UPDATE platform.current_policy_permission_grants SET revoked_at=NULL
+                WHERE (tenant_id,environment_id,permission_id)=($1,$2,$3) AND role_id=ANY($4::uuid[])`,
+                  [
+                    tenantId,
+                    environmentId,
+                    permission,
+                    grants.rows.map(({ role_id }) => role_id),
+                  ],
+                );
+                await assert.rejects(publish(), {
+                  code: 'D0404',
+                  message: 'Unavailable staged upload authority',
+                });
+                assert.equal(
+                  (
+                    await pool.query(
+                      'SELECT 1 FROM platform.document_versions WHERE upload_id=$1',
+                      [uploadId],
+                    )
+                  ).rowCount,
+                  0,
+                );
+              } finally {
+                await runtime.end();
+                await scanner.end();
+              }
+            },
+          );
         } finally {
           await screening.close();
         }
@@ -798,42 +1352,41 @@ test(
             companyOwnership: 'entityOwned',
             fields: [{ type: 'text', label: 'Name', required: true }],
           };
-          const candidate = await service.draft(
-            {
-              kind: 'changeSet',
-              patches: [
-                equipmentDeclaration,
-                files(
-                  'northstar.app:entity.item',
-                  'northstar.app:field.custom_item_evidence',
-                ),
-                {
-                  ...files(entityId, fieldId),
-                  allowedCategoryIds: [categoryId],
-                },
-                {
-                  kind: 'addUploadCategory',
-                  schemaVersion: 'northstar.document-category/v1',
-                  entityId,
-                  fieldId,
-                  categoryId,
-                  label: 'Photographs',
-                  contentTypes: ['image/png'],
-                  maxBytes: 1024,
-                  maxCount: 1,
-                  required: true,
-                  retentionClass: 'northstar.documents:retention.manual',
-                  visibility: 'internal',
-                  documentExpiryDate: null,
-                },
-              ],
-            },
-            'visualBuilder',
-          );
+          const fileChange = {
+            kind: 'changeSet',
+            patches: [
+              equipmentDeclaration,
+              files(
+                'northstar.app:entity.item',
+                'northstar.app:field.custom_item_evidence',
+              ),
+              {
+                ...files(entityId, fieldId),
+                maxCount: 5,
+                allowedCategoryIds: [categoryId],
+              },
+              {
+                kind: 'addUploadCategory',
+                schemaVersion: 'northstar.document-category/v1',
+                entityId,
+                fieldId,
+                categoryId,
+                label: 'Photographs',
+                contentTypes: ['image/png'],
+                maxBytes: 1024,
+                maxCount: 1,
+                required: true,
+                retentionClass: 'northstar.documents:retention.manual',
+                visibility: 'internal',
+                documentExpiryDate: null,
+              },
+            ],
+          };
+          const candidate = await service.draft(fileChange, 'visualBuilder');
           assert.equal(candidate.status, 'drafted', JSON.stringify(candidate));
           assert.match(
             candidate.renderedDiff,
-            /Evidence.+Maximum 1.+Required.+Photographs/u,
+            /Evidence.+Maximum 5.+Required.+Photographs/u,
           );
           await service.approve(candidate.patchId);
           const activate = () => service.activate(candidate.patchId);
@@ -857,6 +1410,56 @@ test(
             );
           } else {
             await activate();
+          }
+          if (process.env.CI) {
+            await withArchivedCustomizationRuntime(
+              '2042780bcc3889022af36493a2dcaa3a62b8cb56',
+              async (run) => {
+                const archived = await assertArchivedTenantEnvelopeForChange(
+                  run,
+                  fileChange,
+                );
+                const expected = archived.artifacts
+                  .filter((artifact) => {
+                    if (artifact.artifactKind !== 'projectionChunk')
+                      return false;
+                    const payload = JSON.parse(
+                      Buffer.from(
+                        String(artifact.canonicalBytesBase64),
+                        'base64',
+                      ).toString('utf8'),
+                    ) as { kind: string };
+                    return payload.kind === 'documentsPayload';
+                  })
+                  .map(({ canonicalBytesBase64, contentHash }) => ({
+                    bytes_base64: canonicalBytesBase64,
+                    hash: contentHash,
+                  }));
+                assert.equal(
+                  expected.length,
+                  1,
+                  'archived candidate must declare the Documents projection',
+                );
+                const { tenantId, environmentId } = app.runtime.identity;
+                const persisted = await pool.query(
+                  `
+                SELECT replace(encode(blob.canonical_bytes,'base64'), chr(10), '') AS bytes_base64,
+                    blob.content_hash AS hash
+                  FROM platform.active_release_pointers ptr
+                  JOIN platform.tenant_release_projection_links projection USING (tenant_id,environment_id,release_id)
+                  JOIN platform.tenant_release_chunk_links chunk USING (tenant_id,environment_id,release_id,projection_instance_id)
+                  JOIN platform.release_artifact_blobs blob ON blob.content_hash=chunk.chunk_hash
+                 WHERE (ptr.tenant_id,ptr.environment_id)=($1,$2)
+                   AND projection.projection_family_id='northstar.compiler:projection-family.documents'`,
+                  [tenantId, environmentId],
+                );
+                assert.deepEqual(
+                  persisted.rows,
+                  expected,
+                  'file-only Documents projection bytes changed in storage',
+                );
+              },
+            );
           }
           const world = worldOver(app.runtime, String(connection.database));
           const equipment = await world.create('custom_equipment', {
@@ -903,6 +1506,178 @@ test(
           const published = (await uploads
             .find(({ status }) => status === 201)!
             .json()) as DocumentMetadata;
+          const scope = COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId;
+          const uploadId = (
+            await pool.query<{ upload_id: string }>(
+              'SELECT upload_id FROM platform.document_versions WHERE version_id = $1',
+              [published.versionId],
+            )
+          ).rows[0]!.upload_id;
+          const generatedReceipt = async (templateId: string | null) => {
+            const runtime = rolePool(
+              options.databaseUrl,
+              'north_star_runtime',
+              1,
+            );
+            try {
+              const context = await trustedContext(app.runtime.identity);
+              return await withTrustedRequestTransaction(
+                runtime,
+                context,
+                async (client) => {
+                  const receipt = await client.query<{
+                    metadata: DocumentMetadata | null;
+                  }>(
+                    'SELECT platform.read_generated_document_receipt($1,$2,$3,$4,$5) AS metadata',
+                    [scope, entityId, equipment.recordId, uploadId, templateId],
+                  );
+                  return receipt.rows[0]!.metadata;
+                },
+              );
+            } finally {
+              await runtime.end();
+            }
+          };
+          await t.test(
+            'the generated receipt cannot return ordinary upload metadata',
+            async () => {
+              const list = await fetch(listUrl(fieldUrl));
+              assert.equal(list.status, 200);
+              assert.deepEqual(await list.json(), [published]);
+              assert.equal(await generatedReceipt(null), null);
+              assert.equal(
+                await generatedReceipt('northstar.app:template.custom_pdf'),
+                null,
+              );
+            },
+          );
+          await t.test(
+            'the SQL boundary applies the compiled category count and retention',
+            async () => {
+              const { tenantId, environmentId, principalId } =
+                app.runtime.identity;
+              const runtime = rolePool(
+                options.databaseUrl,
+                'north_star_runtime',
+                1,
+              );
+              const scanner = rolePool(
+                options.databaseUrl,
+                'north_star_document_scanner',
+                1,
+              );
+              const context = await trustedContext(app.runtime.identity);
+              const uploadId = randomUUID();
+              const hash = createHash('sha256').update(pixel).digest('hex');
+              const scope = COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId;
+              const original = (
+                await pool.query<{
+                  release_id: string;
+                  retention_class: string;
+                }>(
+                  'SELECT release_id,retention_class FROM platform.document_versions WHERE version_id=$1',
+                  [published.versionId],
+                )
+              ).rows[0]!;
+              assert.equal(
+                original.retention_class,
+                'northstar.documents:retention.manual',
+              );
+              try {
+                await withTrustedRequestTransaction(
+                  runtime,
+                  context,
+                  (client) =>
+                    client.query(
+                      "SELECT platform.stage_document_upload($1,$2,$3,$4,$5,$6,'category-extra.png','image/png',$7)",
+                      [
+                        scope,
+                        entityId,
+                        equipment.recordId,
+                        uploadId,
+                        fieldId,
+                        categoryId,
+                        pixel,
+                      ],
+                    ),
+                );
+                await scanner.query(
+                  'SELECT platform.record_document_scan($1,$2,$3,$4,$5,$6,true)',
+                  [
+                    tenantId,
+                    environmentId,
+                    principalId,
+                    uploadId,
+                    hash,
+                    'fixture/v1',
+                  ],
+                );
+                await assert.rejects(
+                  withTrustedRequestTransaction(runtime, context, (client) =>
+                    client.query(
+                      "SELECT platform.publish_document_upload($1,$2,'fixture/v1',$3,1,99,'northstar.documents:retention.forged')",
+                      [uploadId, hash, original.release_id],
+                    ),
+                  ),
+                  {
+                    code: 'D0409',
+                    message: 'This file field or category is full.',
+                  },
+                );
+                const fresh = await world.create('custom_equipment', {
+                  name: 'Retention test',
+                });
+                const freshUpload = randomUUID();
+                await withTrustedRequestTransaction(
+                  runtime,
+                  context,
+                  (client) =>
+                    client.query(
+                      "SELECT platform.stage_document_upload($1,$2,$3,$4,$5,$6,'retention.png','image/png',$7)",
+                      [
+                        scope,
+                        entityId,
+                        fresh.recordId,
+                        freshUpload,
+                        fieldId,
+                        categoryId,
+                        pixel,
+                      ],
+                    ),
+                );
+                await scanner.query(
+                  'SELECT platform.record_document_scan($1,$2,$3,$4,$5,$6,true)',
+                  [
+                    tenantId,
+                    environmentId,
+                    principalId,
+                    freshUpload,
+                    hash,
+                    'fixture/v1',
+                  ],
+                );
+                await withTrustedRequestTransaction(
+                  runtime,
+                  context,
+                  (client) =>
+                    client.query(
+                      "SELECT platform.publish_document_upload($1,$2,'fixture/v1',$3,1,99,'northstar.documents:retention.forged')",
+                      [freshUpload, hash, original.release_id],
+                    ),
+                );
+                const version = await pool.query(
+                  'SELECT retention_class FROM platform.document_versions WHERE upload_id=$1',
+                  [freshUpload],
+                );
+                assert.deepEqual(version.rows, [
+                  { retention_class: 'northstar.documents:retention.manual' },
+                ]);
+              } finally {
+                await runtime.end();
+                await scanner.end();
+              }
+            },
+          );
           const firstParty = await upload(
             documentUrl(app.baseUrl, itemSurface, item.recordId),
             pixel,
@@ -946,13 +1721,41 @@ test(
               );
             },
           );
+          await t.test(
+            'reactivating the same file field without its category keeps the old version hidden',
+            async () => {
+              await service.rollback();
+              const uncategorized = await service.draft(
+                {
+                  kind: 'changeSet',
+                  patches: [equipmentDeclaration, files(entityId, fieldId)],
+                },
+                'visualBuilder',
+              );
+              assert.equal(
+                uncategorized.status,
+                'drafted',
+                JSON.stringify(uncategorized),
+              );
+              await service.approve(uncategorized.patchId);
+              await service.activate(uncategorized.patchId);
+              const list = await fetch(listUrl(fieldUrl));
+              assert.equal(list.status, 200);
+              assert.deepEqual(await list.json(), []);
+              assert.equal(
+                (await fetch(byteUrl(fieldUrl, published, 'download'))).status,
+                404,
+              );
+              assert.equal(await generatedReceipt(null), null);
+            },
+          );
           assert.equal(
             (
               await pool.query(
                 'SELECT count(*)::int AS count FROM platform.document_versions',
               )
             ).rows[0]?.count,
-            2,
+            3,
           );
         } finally {
           await customize.close();
@@ -1003,13 +1806,14 @@ function upload(
     fieldId?: string;
     categoryId?: string;
     contentType?: string;
+    fileName?: string;
     headers?: Record<string, string>;
   } = {},
 ): Promise<Response> {
   const url = new URL(target);
   url.searchParams.set('mode', 'upload');
   url.searchParams.set('retryKey', options.retryKey ?? randomUUID());
-  url.searchParams.set('fileName', 'evidence.png');
+  url.searchParams.set('fileName', options.fileName ?? 'evidence.png');
   if (options.fieldId) url.searchParams.set('field', options.fieldId);
   if (options.categoryId) url.searchParams.set('category', options.categoryId);
   return fetch(url, {

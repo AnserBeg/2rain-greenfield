@@ -1,6 +1,8 @@
 import {
-  BOOKING_OPERATION_READER,
+  DATE_TIME_FIELD_READER,
+  BOOKING_FULFILMENT_READER,
   CONNECTOR_FAMILY,
+  OPTIONAL_DEPENDENCY_QUERY_READER,
 } from '@north-star/canonical-model';
 import {
   assertTrustedRequestContext,
@@ -9,7 +11,6 @@ import {
   type UntrustedRequestInput,
 } from './request-context.js';
 import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents.js';
-import { BOARD_READER } from '../../canonical-model/src/board.js';
 import {
   WORKFLOW_PROJECTION_FAMILY,
   WORKFLOW_RUNTIME_CAPABILITY,
@@ -185,7 +186,7 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.operation]: {
     capabilityId: 'northstar.runtime:capability.operation-catalog',
-    maximumSupportedVersion: BOOKING_OPERATION_READER,
+    maximumSupportedVersion: BOOKING_FULFILMENT_READER,
   },
   [REQUEST_RUNTIME_FORMULA_RULE_FAMILY]: {
     capabilityId: 'northstar.runtime:capability.formula-rule',
@@ -193,7 +194,9 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.query]: {
     capabilityId: 'northstar.runtime:capability.query-catalog',
-    maximumSupportedVersion: 4,
+    // 2 read models, 3 list sums, 4 calculated displays, 5 booking owner
+    // usage, 6 optional read-model dependencies.
+    maximumSupportedVersion: OPTIONAL_DEPENDENCY_QUERY_READER,
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.surface]: {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
@@ -232,7 +235,9 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 36 binds agreed billing intervals to selected source fields.
     // 37 replaces Board v1 with Board v2: chosen stages, moves and facts by
     // stable ID with pinned contracts, labels from the release.
-    maximumSupportedVersion: BOARD_READER,
+    // 38 adds document templates and governed PDF generation.
+    // 39 reads tenant dateTime fields (ADR-0087).
+    maximumSupportedVersion: DATE_TIME_FIELD_READER,
   },
 });
 

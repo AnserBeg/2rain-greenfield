@@ -452,6 +452,10 @@ test(
         const options = {
           databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
           tenantSlug: 'customize-board-reader',
+          // Query-catalog rung 5 (DOCS-1's optional dependencies) is above
+          // this reader too; the fixture leaves them out so only the Board
+          // rung is measured.
+          compiledApplication: applicationWithoutLineCreateValues().release,
         };
         const app = await startComposedApplication({ ...options, port: 0 });
         const opened = await openCustomizeService(options);

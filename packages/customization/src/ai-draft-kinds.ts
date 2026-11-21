@@ -197,6 +197,11 @@ export const DRAFTER_KINDS = {
     guidance:
       'Create a section (label), rename a member, move a field to a destination section, or move a member up or down, on a listed layout, using its listed IDs.',
   },
+  addDateTimeField: {
+    input: member('addDateTimeField'),
+    guidance:
+      'A date-and-time field (an instant with its time zone) on a tenant record type, including one created earlier in the change set. target is {kind: "tenantRecordType", recordTypeId: the entity ID}; fieldId is northstar.app:field.custom_<record type local>_<label in lowercase with underscores>.',
+  },
   addAddressField: {
     input: DRAFTER_SELECTION_SCHEMAS.addAddressField,
     guidance:
@@ -249,7 +254,20 @@ export const DRAFTER_KINDS = {
 /** Kinds the drafter does not emit yet, each dated and named. */
 export const DRAFTER_EXCEPTIONS: Readonly<
   Partial<Record<CustomizationPatchKind, DrafterException>>
-> = Object.freeze({});
+> = Object.freeze({
+  addDocumentTemplateRevision: {
+    since: '2026-11-21',
+    owner: 'AI-BUILD-1 slice 3',
+    reason:
+      'DOCS-1 slice 2 merged after the slice 2 eval. A template binds header and line queries, fields and layout by ID; it needs a choice-shaped builder over listed template targets (rule 10) so the model never invents those IDs, plus eval cases.',
+  },
+  retireDocumentTemplate: {
+    since: '2026-11-21',
+    owner: 'AI-BUILD-1 slice 3',
+    reason:
+      'Ships with the template builder above: retiring needs the listed live template and its current revision ID.',
+  },
+});
 
 export type DrafterKindName = keyof typeof DRAFTER_KINDS;
 export const DRAFTER_KIND_NAMES = Object.freeze(

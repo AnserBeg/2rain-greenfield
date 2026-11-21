@@ -1,4 +1,5 @@
 import { boardBindingsProblem } from './board-admission.js';
+import { dateTimeBindingsProblem } from './date-time-admission.js';
 import {
   ADDRESS_FIELD_READER,
   ADDRESS_MAP_READER,
@@ -6,7 +7,9 @@ import {
   CONNECTOR_FAMILY,
   CONNECTOR_PAYLOAD,
   BOOKING_OPERATION_READER,
-  hasBookingOperations,
+  BOOKING_USAGE_QUERY_READER,
+  hasBookingUsage,
+  bookingReaderFloor,
 } from '@north-star/canonical-model';
 import { layoutBindingsProblem } from './layout-admission.js';
 import { servingPointersSql } from './verified-release-generation.js';
@@ -15,6 +18,7 @@ import { createHash } from 'node:crypto';
 import { canonicalize } from '@north-star/canonical-model';
 import {
   DOCUMENT_FILES_SURFACE_FLOOR,
+  DOCUMENT_TEMPLATES_SURFACE_FLOOR,
   DOCUMENTS_PAYLOAD_VERSION,
   DOCUMENTS_PROJECTION_FAMILY,
 } from '../../canonical-model/src/documents.js';
@@ -65,6 +69,10 @@ import {
   type RuntimeProjection,
 } from '@north-star/runtime/request-runtime-view';
 import type { Pool, PoolClient } from 'pg';
+import {
+  declaresOptionalReadModelDependency,
+  OPTIONAL_DEPENDENCY_QUERY_READER,
+} from '../../canonical-model/src/read-model-dependencies.js';
 import {
   CALCULATED_DISPLAY_QUERY_READER,
   parseCalculatedDisplayProjection,
@@ -889,6 +897,11 @@ function definitionFromSnapshotRows(
   });
   if (addressRefusal) throw malformedProjection(addressRefusal);
   if (declared) connector ??= projectionFor(CONNECTOR_FAMILY);
+  const dateTimeProblem = dateTimeBindingsProblem(
+    consumers.map((p) => p.payload),
+    surface.requiredRuntimeCapability?.minimumVersion ?? 0,
+  );
+  if (dateTimeProblem) throw malformedProjection(dateTimeProblem);
   const referencesDocuments = references.some(
     (entry) =>
       isRecord(entry) && entry.familyId === DOCUMENTS_PROJECTION_FAMILY,
@@ -899,7 +912,9 @@ function definitionFromSnapshotRows(
   const catalogs = [agent, operation, query, surface];
   const consumesDocuments = catalogs.some(
     ({ payload }) =>
-      isRecord(payload) && Object.hasOwn(payload, 'documentBindings'),
+      isRecord(payload) &&
+      (Object.hasOwn(payload, 'documentBindings') ||
+        Object.hasOwn(payload, 'documentTemplatePointers')),
   );
   if (
     referencesDocuments !== consumesDocuments ||
@@ -917,13 +932,20 @@ function definitionFromSnapshotRows(
     if (
       !parsed.success ||
       (surface.requiredRuntimeCapability?.minimumVersion ?? 0) <
-        DOCUMENT_FILES_SURFACE_FLOOR ||
+        (parsed.data.templates
+          ? DOCUMENT_TEMPLATES_SURFACE_FLOOR
+          : DOCUMENT_FILES_SURFACE_FLOOR) ||
       !catalogs.every(
         ({ payload }) =>
           isRecord(payload) &&
           Object.hasOwn(payload, 'documentBindings') &&
           canonicalize(payload.documentBindings) ===
-            canonicalize(parsed.data.bindings),
+            canonicalize(parsed.data.bindings) &&
+          (parsed.data.templates
+            ? Object.hasOwn(payload, 'documentTemplatePointers') &&
+              canonicalize(payload.documentTemplatePointers) ===
+                canonicalize(parsed.data.templates.pointers)
+            : !Object.hasOwn(payload, 'documentTemplatePointers')),
       )
     ) {
       throw malformedProjection(
@@ -977,17 +999,55 @@ function definitionFromSnapshotRows(
   );
   const operationFloor =
     operation.requiredRuntimeCapability?.minimumVersion ?? 0;
-  const booking = hasBookingOperations(operation.payload);
-  if (booking !== (operationFloor === BOOKING_OPERATION_READER))
+  const expectedBookingFloor = bookingReaderFloor(operation.payload);
+  const booking = expectedBookingFloor > 0;
+  if (
+    booking
+      ? operationFloor !== expectedBookingFloor
+      : operationFloor >= BOOKING_OPERATION_READER
+  )
     throw malformedProjection(
       'booking operations and the mandatory reader floor disagree',
     );
   const consumesRules =
     !booking && operationFloor >= LITERAL_VALIDATION_OPERATION_READER;
   const queryFloor = query.requiredRuntimeCapability?.minimumVersion ?? 0;
-  const consumesDisplays = queryFloor === CALCULATED_DISPLAY_QUERY_READER;
+  // The query floor is the HIGHEST catalog feature present: optional
+  // read-model dependencies, then booking owner usage, both read from the
+  // catalog itself. Above the display rung the floor no longer says whether
+  // displays are declared, so the formula projection's own declaration does.
+  const usage = hasBookingUsage(query.payload);
+  const optionalDependencies = declaresOptionalReadModelDependency(
+    isRecord(query.payload) ? query.payload.queries : undefined,
+  );
+  const featureFloor = optionalDependencies
+    ? OPTIONAL_DEPENDENCY_QUERY_READER
+    : usage
+      ? BOOKING_USAGE_QUERY_READER
+      : 0;
+  if (
+    featureFloor
+      ? queryFloor !== featureFloor
+      : queryFloor >= BOOKING_USAGE_QUERY_READER
+  )
+    throw malformedProjection(
+      'query catalog features and the mandatory query reader floor disagree',
+    );
+  const earlyFormula =
+    queryFloor > CALCULATED_DISPLAY_QUERY_READER &&
+    declaresRuleProjection &&
+    hasRuleProjectionLink
+      ? projectionFor(REQUEST_RUNTIME_FORMULA_RULE_FAMILY)
+      : null;
+  const consumesDisplays =
+    queryFloor === CALCULATED_DISPLAY_QUERY_READER ||
+    (isRecord(earlyFormula?.payload) &&
+      Object.hasOwn(earlyFormula.payload, 'calculatedFields'));
+
   const consumesFormula =
-    consumesRules || consumesDisplays || (booking && declaresRuleProjection);
+    consumesRules ||
+    consumesDisplays ||
+    ((booking || usage) && declaresRuleProjection);
   if (
     declaresRuleProjection !== consumesFormula ||
     hasRuleProjectionLink !== consumesFormula
@@ -997,7 +1057,7 @@ function definitionFromSnapshotRows(
     );
   }
   const formulaRule = consumesFormula
-    ? projectionFor(REQUEST_RUNTIME_FORMULA_RULE_FAMILY)
+    ? (earlyFormula ?? projectionFor(REQUEST_RUNTIME_FORMULA_RULE_FAMILY))
     : null;
   if (formulaRule) {
     try {
@@ -1010,7 +1070,12 @@ function definitionFromSnapshotRows(
           operationFloor !== requiredFormulaValidationOperationReader(rules))
       )
         throw new Error('operation floor does not match bound operands');
-      if (consumesDisplays)
+      if (
+        consumesDisplays ||
+        (usage &&
+          isRecord(formulaRule.payload) &&
+          Object.hasOwn(formulaRule.payload, 'calculatedFields'))
+      )
         parseCalculatedDisplayProjection(formulaRule.payload);
       else if (
         isRecord(formulaRule.payload) &&

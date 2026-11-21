@@ -18,7 +18,11 @@ import {
   uploadCategoryMember,
 } from './field-member-draft.js';
 import { layoutCommand } from './layout-revision.js';
-import { parseCustomizationPatch, unsupported } from './patch.js';
+import {
+  AddDateTimeFieldSchema,
+  parseCustomizationPatch,
+  unsupported,
+} from './patch.js';
 import type { CustomizationPatch, UnsupportedCustomization } from './patch.js';
 import { customizationTargets, type CustomizationTargets } from './targets.js';
 import {
@@ -82,6 +86,9 @@ export interface DraftingModel {
 }
 
 export const DRAFT_CUSTOMIZATION_TOOL = 'draft_customization' as const;
+export function draftingToolInputSchema(): Readonly<Record<string, unknown>> {
+  return TOOL.inputSchema;
+}
 
 export type DraftedRequest =
   | { readonly patch: CustomizationPatch; readonly status: 'parsed' }
@@ -115,6 +122,26 @@ const TOOL = Object.freeze({
   inputSchema: drafterToolSchema(),
   name: DRAFT_CUSTOMIZATION_TOOL,
 });
+
+// ADR-0087: addDateTimeField's drafter keys, generated from the member's own
+// schema (kept for the date-time suite; the tool includes them via
+// ai-draft-kinds.ts).
+const {
+  kind: _dateTimeKind,
+  label: _dateTimeLabel,
+  required: _dateTimeRequired,
+  ...dateTimeMemberProperties
+} = (
+  z.toJSONSchema(AddDateTimeFieldSchema) as {
+    properties: Record<string, unknown>;
+  }
+).properties;
+void _dateTimeKind;
+void _dateTimeLabel;
+void _dateTimeRequired;
+export const DATE_TIME_DRAFTER_PROPERTIES = Object.freeze(
+  dateTimeMemberProperties,
+);
 
 /** The drafting tool as the model is offered it (for tests and the eval). */
 export const DRAFTING_TOOL: {
@@ -365,7 +392,7 @@ export function workflowPromptSection(
     'For a receipt workflow use saveWorkflow with workflow {schemaVersion:"v6", workflowId, trigger:"goodsReceiptPosted", grants:{operations,queries}}, a TypeScript body and fixtures.',
     `workflowId matches ${WORKFLOW_ID_PATTERN}: lowercase letters, digits and hyphens, starting with a letter (no underscores).`,
     ...rules,
-    'Each fixture has an event {type:"goodsReceiptPosted", eventId, receiptId, legalEntityId} (UUIDs) and effects in execution order {call, result}. Use the exact canonical IDs in these SDK declarations and declare only the calls the body makes. Sleep uses milliseconds and yields null. requestApproval yields a boolean. Never call operations or read live records to test a draft.',
+    'Each fixture has an event {type:"goodsReceiptPosted", eventId, receiptId, legalEntityId} (UUIDs) and effects in execution order {call, result}. Use the exact canonical IDs in these SDK declarations and declare only the calls the body makes. Sleep uses milliseconds (up to 90 days) and yields null. For requests to wait for an external event, return unsupported with missingCapability "durable external-event waits (named gap)". requestApproval yields a boolean. Never call operations or read live records to test a draft.',
     sdk,
   ].join('\n');
 }

@@ -181,15 +181,15 @@ branded printouts and in-place signing. The implementation follows the
 ## Templates and PDF
 
 - `DocumentTemplateDefinition` is a versioned object with a stable template ID, an admitted
-  record type, document kind (quote, purchase order or invoice), page layout, typed
-  bindings, and branding. Each revision pins locale, time zone, currency, date and
+  record type, document kind (quote, purchase order, invoice, work order or contract), page layout,
+  and typed data bindings. Each revision pins locale, time zone, currency, date and
   number formats, and page size. The issued identity comes from the governed source
   operation or query and is stored with the version. Preview has no issued identity.
   A release selects one active revision per template with an explicit pointer.
   Activation may advance or retire that pointer through a versioned patch. Retirement
   ends new generation while retained versions keep their original revision. The first layout supports
-  headings, text, line tables, page numbers, colors and a scoped logo asset. Use predefined
-  fonts and sanitized PNG/JPEG asset bytes. A compiler resolves named bindings only to
+  headings, text, line tables and page numbers. Use predefined
+  fonts and sanitized PNG/JPEG bytes for company logo assets. A compiler resolves named bindings only to
   declared Semantic Queries and typed result fields. Bound cardinality and permitlist the
   output positions. The template has no expressions, scripts, raw HTML, paths or URLs. The
   published query supplies money, totals and other business facts. Missing, hidden or
@@ -204,18 +204,20 @@ branded printouts and in-place signing. The implementation follows the
   only when current record policy and the classification of every rendered field permit
   that disclosure. A template approval or signer grant alone cannot release restricted data.
   Tenant template approval binds the exact revision and shows the target type, visible
-  content and branding, and bound query fields before activation.
-- Render server-side with pinned PDFKit in a separate unprivileged Linux process.
-  PDFKit draws directly to a PDF stream. Start the process in a fresh network
-  namespace without network interfaces attached. Deny socket creation with seccomp,
-  mount the packaged runtime read-only, and pass only the input and output pipes.
-  Enforce OS memory and CPU limits and a host monotonic deadline. Refuse to render
-  if isolation cannot be set up. Pass typed values, bundled font bytes and checked
-  image bytes into the worker. Bound input rows and
-  image expansion and cap runtime, memory, pages and output bytes. Before publishing, apply
+  content and bound query fields before activation.
+- Render server-side with pinned PDFKit in the ADR-0073 QuickJS WebAssembly isolate or in
+  a separate unprivileged Linux process. The isolate supplies no host I/O or callbacks and
+  enforces heap, CPU and wall-time limits. A separate process requires a fresh network
+  namespace with no network interfaces attached, seccomp denial of socket creation, a
+  read-only packaged runtime, pipe-only input and output, and OS memory and CPU limits.
+  Refuse rendering if the chosen boundary is unavailable. The isolated renderer receives
+  only formatted values, predefined fonts and checked image bytes. Bound input rows,
+  image expansion, runtime, memory, pages and output bytes.
+  Before publishing, apply
   the file content gate and recheck the pinned release, recorded source revisions, current
   grants and target state. Store the resulting bytes as a normal version, together with
   template revision, source query and record revisions, release root and renderer version.
+  DOCS-1 ships with a company-brand resolver using the company record name, the Ledger print palette and no logo. Shared records use the Ledger name. Each issued PDF stores `platform-default` as its brand revision until UI-COMPOSE-1 supplies approved company revisions.
   Retry by idempotency key and input digest. A later render creates a new version.
   [PDFKit stream API](https://pdfkit.org/docs/getting_started.html) ·
   [PDFKit images](https://pdfkit.org/docs/images.html) ·

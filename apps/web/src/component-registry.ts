@@ -1,4 +1,12 @@
 import { addressEditor } from './address-context.js';
+import { dateTimeBindings } from './date-time-field.js';
+import {
+  SavedDateTimeSchema,
+  canonicalZone,
+  formatRecordZone,
+  offsetLabel,
+  type DateTimeBinding,
+} from '@north-star/canonical-model';
 import {
   AddressInputSchema,
   SavedAddressSchema,
@@ -2366,8 +2374,22 @@ function renderFormFields(
           ? canonicalStoredDecimal(value)
           : value;
       const choices = context.formReferences?.[fieldId];
-      const control =
-        choices?.status === 'ready'
+      const dateTime = dateTimeBindings(
+        context.view.projections.surface.payload,
+      ).get(fieldId);
+      const control = dateTime
+        ? {
+            html: renderDateTimeEntry(
+              dateTime,
+              `value:${escapeHtml(fieldId)}`,
+              value,
+              invalid.has(fieldId)
+                ? ` aria-invalid="true" aria-describedby="${validationMessageId}"`
+                : '',
+            ),
+            storedValueUnavailable: false,
+          }
+        : choices?.status === 'ready'
           ? renderFormReferenceControl(choices.options, fieldId, value)
           : renderFormControl(
               field,
@@ -3272,6 +3294,33 @@ export function renderDocumentSection(
       record: target.recordId,
       ...(target.companyId ? { company: target.companyId } : {}),
     });
+  const templates = declaration?.templates;
+  const actions = (templates?.pointers ?? [])
+    .flatMap(({ templateId, activeRevisionId }) => {
+      const template = templates?.revisions.find(
+        (revision) =>
+          revision.revisionId === activeRevisionId &&
+          revision.entityId === target.entityId,
+      );
+      if (
+        !template ||
+        !declaration?.bindings.some(
+          ({ entityId, surfaceIds }) =>
+            entityId === target.entityId &&
+            surfaceIds.some((id) => id === target.surfaceId),
+        )
+      )
+        return [];
+      const preview = new URLSearchParams(path.slice(path.indexOf('?') + 1));
+      preview.set('mode', 'template-preview');
+      preview.set('template', templateId);
+      return [
+        `<form data-document-generate="${escapeHtml(templateId)}"><span>${escapeHtml(template.label)}</span>
+      <a href="/documents?${escapeHtml(preview.toString())}" target="_blank" rel="noopener">Preview template</a>
+      ${scannerLabel ? '<button type="submit">Generate PDF</button>' : ''}</form>`,
+      ];
+    })
+    .join('');
   const section = (field?: (typeof fields)[number]) => {
     const categories =
       declaration?.categories.filter(
@@ -3287,7 +3336,7 @@ export function renderDocumentSection(
       : '';
     return `<div data-document-field="${id}"><h3>${label}</h3>${field ? `<p>Up to ${field.maxCount} files${field.required ? ' · Required for document tasks' : ''}</p>` : ''}<ul data-document-rows></ul>${form}</div>`;
   };
-  return `<section class="panel data-panel"><details data-documents="${escapeHtml(path)}"><summary><h2>Files</h2></summary>${scannerLabel ? `<p>${escapeHtml(scannerLabel)}</p>` : ''}<p role="status" data-documents-status></p>${section()}${fields.map((field) => section(field)).join('')}<button type="button" data-documents-more hidden>Show more files</button></details></section>`;
+  return `<section class="panel data-panel"><details data-documents="${escapeHtml(path)}"><summary><h2>Files</h2></summary>${scannerLabel ? `<p>${escapeHtml(scannerLabel)}</p>` : ''}<p role="status" data-documents-status></p>${actions}${section()}${fields.map((field) => section(field)).join('')}<button type="button" data-documents-more hidden>Show more files</button></details></section>`;
 }
 
 function renderAddressField(name: string, value: unknown, attributes: string) {
@@ -3346,4 +3395,73 @@ function renderAddressField(name: string, value: unknown, attributes: string) {
     component('longitude', 'Your pin longitude', current?.pin?.longitude, 14) +
     '</details>'
   );
+}
+
+let zones: readonly string[] | null = null;
+function zoneOptions(): readonly string[] {
+  zones ??= [
+    ...new Set(
+      Intl.supportedValuesOf('timeZone').flatMap((name) => {
+        const canonical = canonicalZone(name);
+        return canonical ? [canonical] : [];
+      }),
+    ),
+  ].sort();
+  return zones;
+}
+
+interface ProposedEntry {
+  readonly civil?: string;
+  readonly zone?: string;
+  readonly offsetSeconds?: number;
+  readonly offsets?: readonly number[];
+}
+
+/**
+ * ADR-0087: a logical dateTime entry -- a civil date and time in one-minute
+ * steps, a zone for a per-record field, the recorded capture kept for the
+ * untouched rule, and both offsets after a refused repeated hour.
+ */
+export function renderDateTimeEntry(
+  binding: DateTimeBinding,
+  name: string,
+  value: unknown,
+  attributes: string,
+): string {
+  const saved = SavedDateTimeSchema.safeParse(value).data;
+  const proposed = (saved ? null : (value as ProposedEntry | null)) ?? null;
+  const civil = (saved?.civil ?? proposed?.civil ?? '').slice(0, 16);
+  const zone = saved?.zone ?? proposed?.zone ?? '';
+  const parts = [
+    `<input type="datetime-local" step="60"${attributes} data-date-time-field="${escapeHtml(binding.zoneSource.kind)}" name="${name}" value="${escapeHtml(civil)}" autocomplete="off">`,
+  ];
+  if (saved) {
+    // The recorded capture: re-sending it unchanged leaves it untouched.
+    parts.push(
+      `<input type="hidden" name="${name}:recorded" value="${escapeHtml(`${saved.civil}|${saved.zone}|${String(saved.offsetSeconds)}`)}">`,
+      `<small class="form-hint">Recorded ${escapeHtml(formatRecordZone(saved))}</small>`,
+    );
+  }
+  if (binding.zoneSource.kind === 'perRecordIana') {
+    const options = zoneOptions()
+      .map(
+        (option) =>
+          `<option value="${escapeHtml(option)}"${option === zone ? ' selected' : ''}>${escapeHtml(option)}</option>`,
+      )
+      .join('');
+    parts.push(
+      `<select name="${name}:zone" aria-label="Time zone"><option value="">Company calendar zone</option>${options}</select>`,
+    );
+  }
+  if (proposed?.offsets?.length) {
+    parts.push(
+      `<select name="${name}:offset" required aria-label="Which ${escapeHtml(civil.slice(11))}"><option value="">Choose the offset</option>${proposed.offsets
+        .map(
+          (offset) =>
+            `<option value="${String(offset)}">${escapeHtml(offsetLabel(offset))}</option>`,
+        )
+        .join('')}</select>`,
+    );
+  }
+  return `<span class="date-time-entry">${parts.join('')}</span>`;
 }
