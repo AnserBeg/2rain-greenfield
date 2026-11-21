@@ -4,6 +4,7 @@ import {
   fitMap,
   mapCentre,
   mapExtent,
+  panMap,
   MAP_SIZES,
   projectPin,
 } from '../../packages/canonical-model/src/map-viewport.js';
@@ -121,4 +122,15 @@ test('a cold refusal makes no provider call and leaves the viewport retryable', 
     service.image(handle, companyA, async () => {}),
     /unavailable/,
   );
+});
+
+test('keyboard pan reaches the next coarse cell on every size at maximum zoom', () => {
+  for (const size of ['small', 'medium', 'large'] as const) {
+    const view = { x: 9000, y: 4500, zoom: 13, size };
+    const [, height] = MAP_SIZES[size];
+    const north = panMap(view, 0, -height / 3);
+    assert.ok(north.y > view.y);
+    assert.deepEqual(panMap(north, 0, height / 3), view);
+    assert.deepEqual(panMap({ ...view, y: 8999 }, 0, -1), { ...view, y: 8999 });
+  }
 });

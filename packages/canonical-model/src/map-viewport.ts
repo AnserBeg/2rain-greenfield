@@ -86,14 +86,22 @@ export function fitMap(
   return { ...centre, size, zoom: 0 };
 }
 export function panMap(v: MapViewport, dx: number, dy: number): MapViewport {
-  const c = mapCentre(v),
-    s = mapExtent(v).scale;
+  const scale = mapExtent(v).scale;
   const [width, height] = MAP_SIZES[v.size];
+  // A coarse provider grid still needs a reachable next cell at maximum zoom.
+  const shift = (
+    index: number,
+    pixels: number,
+    dimension: number,
+    last: number,
+  ) => {
+    const bounded = Math.max(-dimension, Math.min(pixels, dimension));
+    const cells = Math.round(bounded * scale * 50) || Math.sign(bounded);
+    return clamp(index + cells, last);
+  };
   return {
     ...v,
-    ...cell({
-      longitude: c.longitude + Math.max(-width, Math.min(dx, width)) * s,
-      latitude: c.latitude - Math.max(-height, Math.min(dy, height)) * s,
-    }),
+    x: shift(v.x, dx, width, 17999),
+    y: shift(v.y, -dy, height, 8999),
   };
 }
