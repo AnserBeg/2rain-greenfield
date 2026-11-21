@@ -697,6 +697,7 @@ test(
                 connection,
                 { tenantId, environmentId, principal, company: COMPANY },
                 secondRun,
+                foreignCompany,
               );
             },
           );

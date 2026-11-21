@@ -696,17 +696,9 @@ export async function checkRetryDecision(
   connection: pg.PoolConfig,
   f: Fixture,
   run: string,
+  company: string,
 ) {
-  const company = randomUUID();
   const outsider = randomUUID();
-  const companyRow = await admin.query(
-    `INSERT INTO platform.inventory_posting_configurations
-     SELECT (jsonb_populate_record(configuration, jsonb_build_object('legal_entity_id',$4::uuid))).*
-       FROM platform.inventory_posting_configurations configuration
-      WHERE (tenant_id,environment_id,legal_entity_id)=($1,$2,$3)`,
-    [f.tenantId, f.environmentId, f.company, company],
-  );
-  assert.equal(companyRow.rowCount, 1);
   await admin.query(
     'SELECT platform.set_release_approver_eligibility($1,$2,true,$3,$4)',
     [f.tenantId, outsider, f.principal, randomUUID()],
@@ -773,10 +765,11 @@ export async function checkRetryDecision(
                   "SELECT set_config('north_star.principal_id',$1,true),set_config('north_star.request_id',$2,true)",
                   [f.principal, randomUUID()],
                 );
-                return client.query(
+                await client.query(
                   "SELECT platform.workflow_apply_remedy($1,$2,$3,'retry',$4)",
                   [run, pin!.previous, pin!.fence, pin!.count],
                 );
+                throw new Error('proofless workflow Retry returned');
               }),
               /workflow Retry requires its current staff decision/,
             );
