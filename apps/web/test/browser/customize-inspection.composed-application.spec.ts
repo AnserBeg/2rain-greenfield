@@ -530,7 +530,11 @@ process.stdout.write(JSON.stringify(applicationWithoutLineCreateValues().release
       try {
         const opened = await openCustomizeService(options);
         try {
-          const recordDraft = await opened.service.draft('declarativeEditor');
+          const recordDraft = await draftBeforeCompanyAccessIndex(
+            options,
+            inspectionChange,
+            'declarativeEditor',
+          );
           if (recordDraft.status !== 'drafted')
             throw new Error(JSON.stringify(recordDraft));
           const approved = await opened.service.approve(recordDraft.patchId);
