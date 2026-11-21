@@ -56,12 +56,25 @@ ALTER TABLE platform.communication_participants FORCE ROW LEVEL SECURITY;
 REVOKE ALL ON platform.communication_discussion_anchors,platform.communication_threads,
   platform.communication_record_links,platform.communication_participants FROM PUBLIC,north_star_runtime,north_star_communication_operation;
 
+CREATE FUNCTION north_star_internal.communication_admission_table() RETURNS boolean
+LANGUAGE plpgsql STABLE SET search_path = pg_catalog, pg_temp AS $$ BEGIN
+  IF to_regclass('pg_temp.communication_admissions') IS NULL THEN RETURN false; END IF;
+  IF NOT EXISTS (SELECT FROM pg_class WHERE oid=to_regclass('pg_temp.communication_admissions')
+    AND relowner=current_user::regrole AND relkind='r') THEN RAISE EXCEPTION 'communication.unavailable'; END IF;
+  RETURN true; END $$;
+CREATE FUNCTION north_star_internal.communication_before_threads() RETURNS void
+LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp AS $$ BEGIN
+  IF north_star_internal.communication_admission_table() THEN
+    IF EXISTS (SELECT FROM pg_temp.communication_admissions WHERE creation_locked OR thread_id IS NOT NULL)
+      THEN RAISE EXCEPTION 'communication.lockOrder'; END IF; END IF; END $$;
+
 -- Pre-R11. The channel operation validates its released bindings, exact reads,
 -- field disclosure and action grants under these same fences before resolution.
 CREATE FUNCTION platform.communication_fence(company uuid, released uuid, expected_fence bigint) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_internal.trusted_environment_id(); BEGIN
   IF current_setting('transaction_isolation') <> 'read committed' THEN RAISE EXCEPTION 'communication.requiresReadCommitted'; END IF;
+  PERFORM north_star_internal.communication_before_threads();
   PERFORM FROM platform.active_release_pointers WHERE (tenant_id,environment_id,release_id,fence)=(t,e,released,expected_fence) FOR SHARE;
   IF NOT FOUND THEN RAISE EXCEPTION 'communication.staleRelease'; END IF;
   PERFORM platform.lock_current_policy_epoch(t,e);
@@ -102,18 +115,16 @@ CREATE TYPE platform.communication_admission AS (
 CREATE FUNCTION north_star_internal.communication_ticket(a platform.communication_admission) RETURNS uuid
 LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp AS $$
 DECLARE ticket uuid:=gen_random_uuid(); BEGIN
-  IF to_regclass('pg_temp.communication_admissions') IS NULL THEN
-    CREATE TEMP TABLE communication_admissions (id uuid PRIMARY KEY, admission platform.communication_admission NOT NULL, thread_id uuid) ON COMMIT DROP;
-    REVOKE ALL ON pg_temp.communication_admissions FROM PUBLIC;
-  ELSIF NOT EXISTS (SELECT FROM pg_class WHERE oid=to_regclass('pg_temp.communication_admissions')
-    AND relowner=current_user::regrole AND relkind='r') THEN RAISE EXCEPTION 'communication.unavailable'; END IF;
+  IF NOT north_star_internal.communication_admission_table() THEN
+    CREATE TEMP TABLE communication_admissions (id uuid PRIMARY KEY, admission platform.communication_admission NOT NULL, thread_id uuid, creation_locked boolean NOT NULL DEFAULT false,
+      participants_locked boolean NOT NULL DEFAULT false) ON COMMIT DROP;
+    REVOKE ALL ON pg_temp.communication_admissions FROM PUBLIC; END IF;
   INSERT INTO pg_temp.communication_admissions (id,admission) VALUES (ticket,a);
   RETURN ticket; END $$;
 CREATE FUNCTION north_star_internal.communication_admitted(ticket uuid) RETURNS platform.communication_admission
 LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp AS $$
 DECLARE a platform.communication_admission; BEGIN
-  IF NOT EXISTS (SELECT FROM pg_class WHERE oid=to_regclass('pg_temp.communication_admissions')
-    AND relowner=current_user::regrole AND relkind='r') THEN RAISE EXCEPTION 'communication.unavailable'; END IF;
+  IF NOT north_star_internal.communication_admission_table() THEN RAISE EXCEPTION 'communication.unavailable'; END IF;
   SELECT (admission).* INTO a FROM pg_temp.communication_admissions WHERE id=ticket;
   IF NOT FOUND OR (a.tenant_id,a.environment_id,a.principal_id) IS DISTINCT FROM
     (north_star_internal.trusted_tenant_id(),north_star_internal.trusted_environment_id(),north_star_internal.address_principal())
@@ -191,6 +202,7 @@ DECLARE a platform.communication_admission; BEGIN
 CREATE FUNCTION platform.communication_register_discussion(ticket uuid) RETURNS void
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE a platform.communication_admission:=north_star_internal.communication_admitted(ticket); BEGIN
+  PERFORM north_star_internal.communication_before_threads();
   IF a.primary_record IS NULL OR a.channel IS DISTINCT FROM 'staffDiscussion/v1' THEN RAISE EXCEPTION 'communication.invalidScope'; END IF;
   INSERT INTO platform.communication_discussion_anchors VALUES
     (a.tenant_id,a.environment_id,a.company_id,a.primary_entity,a.primary_record,a.requirements)
@@ -215,11 +227,15 @@ DECLARE ticket uuid; a platform.communication_admission; keys bigint[]:='{}'; ke
   FOREACH ticket IN ARRAY tickets LOOP
     a:=north_star_internal.communication_admitted(ticket);
     PERFORM north_star_internal.communication_require_anchor(a);
+    IF (SELECT creation_locked FROM pg_temp.communication_admissions WHERE id=ticket) THEN CONTINUE; END IF;
     identity:=CASE WHEN a.primary_record IS NULL THEN jsonb_build_array('staffDirect',a.staff)
       ELSE jsonb_build_array('record',a.primary_entity,a.primary_record) END;
     keys:=array_append(keys,hashtextextended(jsonb_build_array('communication.thread/v1',a.tenant_id,a.environment_id,a.company_id,identity)::text,0)); END LOOP;
+  IF cardinality(keys)=0 THEN RETURN; END IF;
+  PERFORM north_star_internal.communication_before_threads();
   FOR key IN SELECT DISTINCT k FROM unnest(keys) k ORDER BY k LOOP
-    PERFORM pg_advisory_xact_lock(key); END LOOP; END $$;
+    PERFORM pg_advisory_xact_lock(key); END LOOP;
+  UPDATE pg_temp.communication_admissions SET creation_locked=true WHERE id=ANY(tickets); END $$;
 
 -- Accept admissions only from a governed operation, within the admitting transaction.
 -- Earlier fences (and the reminder occurrence if applicable) are already held.
@@ -227,6 +243,7 @@ CREATE FUNCTION platform.communication_resolve_thread(ticket uuid) RETURNS uuid
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE a platform.communication_admission:=north_star_internal.communication_admitted(ticket); id_value uuid; BEGIN
   PERFORM platform.communication_lock_creations(ARRAY[ticket]);
+  IF EXISTS (SELECT FROM pg_temp.communication_admissions WHERE participants_locked) THEN RAISE EXCEPTION 'communication.lockOrder'; END IF;
   IF a.primary_record IS NULL THEN
     SELECT thread_id INTO id_value FROM platform.communication_threads
       WHERE (tenant_id,environment_id,company_id,direct_pair)=(a.tenant_id,a.environment_id,a.company_id,a.staff) FOR UPDATE;
@@ -256,6 +273,7 @@ DECLARE a platform.communication_admission:=north_star_internal.communication_ad
       SELECT 'staff' AS kind,'' AS entity,s AS subject FROM unnest(a.staff) s UNION
       SELECT 'contact',k.entity_id,k.record_id FROM unnest(a.contacts) k) p ORDER BY p.kind,p.entity,p.subject
     ON CONFLICT DO NOTHING;
+  UPDATE pg_temp.communication_admissions t SET participants_locked=true WHERE t.id=ticket;
   RETURN QUERY SELECT p.participant_id FROM platform.communication_participants p
     WHERE (p.tenant_id,p.environment_id,p.company_id,p.thread_id,p.channel)=(a.tenant_id,a.environment_id,a.company_id,id,a.channel)
       AND ((p.participant_kind='staff' AND p.subject_id=ANY(a.staff)) OR
@@ -268,13 +286,19 @@ CREATE FUNCTION platform.communication_lock_thread(ticket uuid, id uuid) RETURNS
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE a platform.communication_admission:=north_star_internal.communication_admitted(ticket); BEGIN
   PERFORM north_star_internal.communication_require_anchor(a);
+  IF EXISTS (SELECT FROM pg_temp.communication_admissions WHERE participants_locked) THEN RAISE EXCEPTION 'communication.lockOrder'; END IF;
+  -- By-ID operations can lock several threads; order their scoped IDs and
+  -- refuse a backwards acquisition before touching the next row.
+  IF EXISTS (SELECT FROM pg_temp.communication_admissions WHERE thread_id>communication_lock_thread.id)
+    THEN RAISE EXCEPTION 'communication.lockOrder'; END IF;
   PERFORM FROM platform.communication_threads
     WHERE (tenant_id,environment_id,company_id,thread_id)=(a.tenant_id,a.environment_id,a.company_id,id)
       AND ((audience='record' AND (primary_entity,primary_record,linked_records)=(a.primary_entity,a.primary_record,a.links))
         OR (audience='staffDirect' AND a.primary_record IS NULL AND direct_pair=a.staff)) FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'communication.unavailable'; END IF;
   UPDATE pg_temp.communication_admissions t SET thread_id=communication_lock_thread.id WHERE t.id=ticket; END $$;
-REVOKE ALL ON FUNCTION north_star_internal.communication_related(jsonb,text,uuid,text[]),
+REVOKE ALL ON FUNCTION north_star_internal.communication_before_threads(),north_star_internal.communication_admission_table(),
+  north_star_internal.communication_related(jsonb,text,uuid,text[]),
   north_star_internal.communication_require_anchor(platform.communication_admission),
   north_star_internal.communication_ticket(platform.communication_admission),
   north_star_internal.communication_admitted(uuid),north_star_internal.communication_check_staff(uuid,uuid[]),

@@ -111,6 +111,10 @@ test('shared communication writer', async (t) => {
       `);
         for (const c of [left, right])
           await c.query('SET ROLE north_star_communication_operation');
+        t.afterEach(async () => {
+          await left.query('ROLLBACK');
+          await right.query('ROLLBACK');
+        });
         // Tests roll back their own failed attempts, so each refusal is tested on a live connection.
         await t.test(
           'only governed SQL operations may invoke the writer',
@@ -173,68 +177,62 @@ test('shared communication writer', async (t) => {
           'each authorization fence refuses independently',
           async () => {
             const denied = async (
+              reason: string,
               actor: string,
               call: () => Promise<unknown>,
-              pattern: RegExp,
+              pattern = /communication.unavailable/,
             ) => {
               await begin(left, actor);
               try {
-                await assert.rejects(call, pattern);
+                await assert.rejects(call, pattern, reason);
               } finally {
                 await left.query('ROLLBACK');
               }
             };
-            // Correct company1 owner, complete action grants, membership only in company0.
             await denied(
+              'foreign company admitted the correct owner',
               'west',
               () =>
                 admit(left, email, { company: 'company1', record: 'owner1' }),
-              /communication.unavailable/,
+            );
+            await denied('foreign record entered the thread', 'staff', () =>
+              admit(left, email, { record: 'owner1', bindings: [] }),
+            );
+            await denied('foreign contact entered the thread', 'staff', () =>
+              admit(left, email, { contacts: ['owner1'] }),
+            );
+            await denied('foreign staff entered the thread', 'staff', () =>
+              admit(left, email, { staff: ['east'] }),
             );
             await denied(
-              'staff',
-              () => admit(left, email, { record: 'owner1', bindings: [] }),
-              /communication.unavailable/,
-            );
-            await denied(
-              'staff',
-              () => admit(left, email, { contacts: ['owner1'] }),
-              /communication.unavailable/,
-            );
-            await denied(
-              'staff',
-              () => admit(left, email, { staff: ['east'] }),
-              /communication.unavailable/,
-            );
-            await denied(
+              'unknown channel admitted',
               'staff',
               () => admit(left, 'unbound'),
               /communication.invalidScope/,
             );
             await denied(
+              'stale activation admitted',
               'staff',
               () => admit(left, email, { fence: 99 }),
               /communication.staleRelease/,
             );
-            await denied(
-              'staff',
-              () => admit(left, email, { bindings: ['unknown'] }),
-              /communication.unavailable/,
+            await denied('missing binding admitted', 'staff', () =>
+              admit(left, email, { bindings: ['unknown'] }),
             );
             await denied(
+              'outbound contact admitted to discussion',
               'staff',
               () => admit(left, discussion, { contacts: ['owner2'] }),
               /communication.invalidScope/,
             );
             await denied(
+              'direct chat with self admitted',
               'staff',
               () => direct(left, 'staff'),
               /communication.invalidScope/,
             );
-            await denied(
-              'staff',
-              () => direct(left, 'east'),
-              /communication.unavailable/,
+            await denied('foreign direct peer admitted', 'staff', () =>
+              direct(left, 'east'),
             );
             await begin(left, 'staff', true);
             try {
@@ -255,6 +253,7 @@ test('shared communication writer', async (t) => {
               );
               try {
                 await denied(
+                  'revoked ' + perm + ' admitted',
                   'staff',
                   () => admit(left, channel),
                   /communication.unavailable/,
@@ -269,6 +268,23 @@ test('shared communication writer', async (t) => {
           },
         );
 
+        await t.test(
+          'the scope guard covers a shared record independently of its write grant',
+          async () => {
+            await begin(admin, 'west');
+            try {
+              await assert.rejects(
+                admin.query(
+                  "SELECT platform.communication_fence(md5('company1')::uuid,md5('release')::uuid,1)",
+                ),
+                /communication.unavailable/,
+                'writer fence admitted a nonmember',
+              );
+            } finally {
+              await admin.query('ROLLBACK');
+            }
+          },
+        );
         // Observe the actual contested lock. A second successful call after commit alone
         // would also pass with sequential scheduling or the wrong lock class.
         const race = async (first: string, second: string, same: boolean) => {
@@ -421,6 +437,92 @@ test('shared communication writer', async (t) => {
             assert.equal(staffIds.length, 1);
             assert.ok(!ids.some(({ id }) => id === staffIds[0]?.id));
             await left.query('COMMIT');
+          },
+        );
+        await t.test(
+          'a transaction cannot return to earlier lock classes',
+          async () => {
+            await begin(left);
+            const first = await admit(left, email);
+            const next = await admit(left, email, { record: 'owner4' });
+            await left.query(
+              'SELECT platform.communication_lock_thread($1,$2)',
+              [first, shared],
+            );
+            await left.query('SAVEPOINT by_id');
+            await assert.rejects(
+              resolveThread(left, next),
+              /communication.lockOrder/,
+              'by-ID locker acquired a later creation key',
+            );
+            await left.query('ROLLBACK TO by_id');
+            await assert.rejects(
+              admit(left, email),
+              /communication.lockOrder/,
+              'record fences taken after the thread',
+            );
+            await left.query('ROLLBACK TO by_id');
+            await participants(left, first, shared);
+            await assert.rejects(
+              left.query('SELECT platform.communication_lock_thread($1,$2)', [
+                first,
+                shared,
+              ]),
+              /communication.lockOrder/,
+              'thread row locked after participant rows',
+            );
+          },
+        );
+        await t.test(
+          'release, membership, saved record, thread and participant stay locked until commit',
+          async () => {
+            await begin(left);
+            const live = await admit(left, email, { contacts: ['owner2'] });
+            await left.query(
+              'SELECT platform.communication_lock_thread($1,$2)',
+              [live, shared],
+            );
+            await participants(left, live, shared);
+            for (const [name, sql, args] of [
+              [
+                'release',
+                "SELECT FROM platform.active_release_pointers WHERE tenant_id=md5('tenant')::uuid FOR UPDATE NOWAIT",
+                [],
+              ],
+              [
+                'policy',
+                "SELECT FROM platform.current_policy_epochs WHERE tenant_id=md5('tenant')::uuid FOR UPDATE NOWAIT",
+                [],
+              ],
+              [
+                'saved record',
+                "SELECT FROM north_star_module.test_booking_owners WHERE record_id=md5('owner2')::uuid FOR UPDATE NOWAIT",
+                [],
+              ],
+              [
+                'thread',
+                'SELECT FROM platform.communication_threads WHERE thread_id=$1 FOR UPDATE NOWAIT',
+                [shared],
+              ],
+              [
+                'existing participant',
+                "SELECT FROM platform.communication_participants WHERE thread_id=$1 AND channel='email/v1' FOR UPDATE NOWAIT",
+                [shared],
+              ],
+            ] as const) {
+              await assert.rejects(
+                admin.query(sql, [...args]),
+                { code: '55P03' },
+                name + ' lock released before commit',
+              );
+            }
+            assert.equal(
+              await scalar(
+                left,
+                "SELECT count(*)::text AS value FROM pg_locks WHERE locktype='advisory' AND pid=pg_backend_pid()",
+              ),
+              '0',
+            );
           },
         );
         await t.test(
