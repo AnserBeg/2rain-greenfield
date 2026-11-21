@@ -2,7 +2,19 @@ name: Analysis fixture
 on:
   push:
     branches: [packet/ANALYZE-1-s1a, main]
-    paths: ['analysis/**', '.github/workflows/analysis-fixture.yml']
+    paths:
+      [
+        'analysis/**',
+        'db/migrations/*analysis*.sql',
+        '.github/workflows/analysis-fixture.yml',
+      ]
+  pull_request:
+    paths:
+      [
+        'analysis/**',
+        'db/migrations/*analysis*.sql',
+        '.github/workflows/analysis-fixture.yml',
+      ]
   workflow_dispatch:
 permissions:
   contents: read
@@ -49,23 +61,4 @@ jobs:
       - run: corepack pnpm install --frozen-lockfile --reporter=append-only
       - run: python3 -B analysis/tests/science.py
       - name: Run and replay the fixture through the controller
-        run: analysis/tests/fixture-db.sh --science
-
-  catalog:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version-file: .node-version
-      - run: corepack pnpm install --frozen-lockfile --reporter=append-only
-      - run: node --import tsx test/helpers/regenerate-schema-snapshot.ts
-      - run: node --import tsx test/helpers/generate-fresh-tenant-full-replay-schema.ts
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: fixture-schemas
-          path: |
-            db/schema.snapshot.json
-            test/postgres/fresh-tenant-full-replay-schema.snapshot.json
+        run: analysis/tests/hosted-transport.sh

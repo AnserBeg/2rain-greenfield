@@ -16,7 +16,9 @@ export async function requestWorker(op, job, remote, image) {
   const command = remote ? 'ssh' : 'python3';
   const args = remote
     ? [
-        ...(process.env.ANALYSIS_SSH_CONFIG ? ['-F',process.env.ANALYSIS_SSH_CONFIG] : []),
+        ...(process.env.ANALYSIS_SSH_CONFIG
+          ? ['-F', process.env.ANALYSIS_SSH_CONFIG]
+          : []),
         '-T',
         '-oBatchMode=yes',
         '-oStrictHostKeyChecking=yes',
@@ -86,7 +88,15 @@ export async function requestWorker(op, job, remote, image) {
 }
 
 export class FixtureController {
-  constructor(pool, scope, { remote = process.env.ANALYSIS_RUNNER_HOST, slots = 1, shared = false } = {}) {
+  constructor(
+    pool,
+    scope,
+    {
+      remote = process.env.ANALYSIS_RUNNER_HOST,
+      slots = 1,
+      shared = false,
+    } = {},
+  ) {
     this.pool = pool;
     this.scope = scope;
     this.remote = remote;
