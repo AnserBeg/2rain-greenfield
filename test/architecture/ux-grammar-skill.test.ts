@@ -44,6 +44,7 @@ test('Task dialog presentation retains the Record archetype and explicit page fa
     'builder',
     'home',
     'list',
+    'map',
     'record',
     'task',
   ]);

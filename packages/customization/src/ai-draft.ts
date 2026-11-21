@@ -1,3 +1,5 @@
+import { z } from 'zod';
+import { MapDraftSchema, draftMapRevision } from './map-revision.js';
 import { defaultBoardChoices, draftBoardRevision } from './board-revision.js';
 import { layoutCommand } from './layout-revision.js';
 import { WorkflowDraftSchema, type WorkflowDraft } from './workflow-draft.js';
@@ -99,6 +101,9 @@ const fieldSchema = {
   required: ['label', 'type'],
 } as const;
 
+const mapDraftProperties = z.toJSONSchema(
+  MapDraftSchema.omit({ kind: true, label: true, surface: true }),
+).properties;
 const singlePatchSchema = {
   type: 'object',
   properties: {
@@ -137,6 +142,7 @@ const singlePatchSchema = {
       },
     },
     field: fieldSchema,
+    ...mapDraftProperties,
     enumField: { type: 'string' },
     option: { type: 'string' },
     surface: { type: 'string' },
@@ -382,6 +388,18 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
       (form) =>
         `- ${form.surfaceId} — ${form.label}: ${form.fields.map((field) => `${field.fieldId} "${field.label}"`).join(', ')}`,
     ),
+    'Map view draft schema: ' + JSON.stringify(z.toJSONSchema(MapDraftSchema)),
+    ...(targets.maps ?? []).map((t) =>
+      JSON.stringify({
+        surface: t.frame.listSurfaceId,
+        collection: t.listLabel,
+        addresses: t.addresses,
+        order: t.orders,
+        groups: t.groups,
+        dates: t.dates,
+        savedViews: t.savedViews,
+      }),
+    ),
     '- addBoardViewRevision {kind,surface,label,stageIds,operationIds,factFieldIds}: choose a listed collection, its ordered lifecycle stages, the moves offered between them (by operation ID) and up to three card facts (by field ID). Each choice is recorded by ID.',
     ...(targets.boards ?? []).map(
       (t) =>
@@ -522,6 +540,37 @@ function readToolInput(
   input: unknown,
   targets: CustomizationTargets,
 ): DraftedRequest {
+  if (
+    input &&
+    typeof input === 'object' &&
+    'kind' in input &&
+    input.kind === 'addMapViewRevision'
+  ) {
+    const parsed = MapDraftSchema.safeParse(input);
+    if (!parsed.success)
+      return {
+        status: 'invalid',
+        issues: parsed.error.issues.map((i) => i.message),
+      };
+    const target = targets.maps?.find(
+      (t) => t.frame.listSurfaceId === parsed.data.surface,
+    );
+    if (!target)
+      return {
+        status: 'invalid',
+        issues: ['Choose a collection with a direct Address.'],
+      };
+    try {
+      return { status: 'parsed', patch: draftMapRevision(target, parsed.data) };
+    } catch (error) {
+      return {
+        status: 'invalid',
+        issues: [
+          error instanceof Error ? error.message : 'Invalid Map choices.',
+        ],
+      };
+    }
+  }
   if (
     input &&
     typeof input === 'object' &&
