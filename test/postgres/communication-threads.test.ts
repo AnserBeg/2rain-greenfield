@@ -124,6 +124,7 @@ test('shared communication writer', async (t) => {
               'record_links',
               'participants',
               'discussion_anchors',
+              'participant_channels',
             ];
             for (const name of tables) {
               await assert.rejects(
@@ -451,8 +452,20 @@ test('shared communication writer', async (t) => {
             );
             const staffIds = await participants(left, staff, shared);
             assert.equal(staffIds.length, 1);
-            assert.ok(!ids.some(({ id }) => id === staffIds[0]?.id));
+            assert.ok(
+              ids.some(({ id }) => id === staffIds[0]?.id),
+              'one staff subject has two participant identities',
+            );
+
             await left.query('COMMIT');
+            const { rows: channelRows } = await admin.query(
+              'SELECT channel,count(*)::int AS count FROM platform.communication_participant_channels WHERE thread_id=$1 GROUP BY channel ORDER BY channel',
+              [shared],
+            );
+            assert.deepEqual(channelRows, [
+              { channel: email, count: 2 },
+              { channel: discussion, count: 1 },
+            ]);
           },
         );
         await t.test(
@@ -554,7 +567,7 @@ test('shared communication writer', async (t) => {
               ],
               [
                 'existing participant',
-                "SELECT FROM platform.communication_participants WHERE thread_id=$1 AND channel='email/v1' FOR UPDATE NOWAIT",
+                'SELECT FROM platform.communication_participants WHERE thread_id=$1 FOR UPDATE NOWAIT',
                 [shared],
               ],
             ] as const) {

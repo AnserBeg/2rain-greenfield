@@ -35,14 +35,19 @@ CREATE TABLE platform.communication_record_links (
 );
 CREATE TABLE platform.communication_participants (
   tenant_id uuid NOT NULL, environment_id uuid NOT NULL, company_id uuid NOT NULL,
-  thread_id uuid NOT NULL, channel text NOT NULL, participant_kind text NOT NULL,
+  thread_id uuid NOT NULL, participant_kind text NOT NULL,
   entity_id text NOT NULL, subject_id uuid NOT NULL, participant_id uuid NOT NULL DEFAULT gen_random_uuid(),
-  PRIMARY KEY (tenant_id,environment_id,company_id,thread_id,channel,participant_kind,entity_id,subject_id),
+  PRIMARY KEY (tenant_id,environment_id,company_id,thread_id,participant_kind,entity_id,subject_id),
   UNIQUE (tenant_id,environment_id,company_id,thread_id,participant_id),
   FOREIGN KEY (tenant_id,environment_id,company_id,thread_id) REFERENCES platform.communication_threads,
-  CHECK (channel IN ('email/v1','staffDiscussion/v1')),
-  CHECK ((participant_kind='staff' AND entity_id='') OR
-         (participant_kind='contact' AND entity_id<>'' AND channel='email/v1'))
+  CHECK ((participant_kind='staff' AND entity_id='') OR (participant_kind='contact' AND entity_id<>''))
+);
+CREATE TABLE platform.communication_participant_channels (
+  tenant_id uuid NOT NULL, environment_id uuid NOT NULL, company_id uuid NOT NULL,
+  thread_id uuid NOT NULL, participant_id uuid NOT NULL, channel text NOT NULL CHECK (channel IN ('email/v1','staffDiscussion/v1')),
+  PRIMARY KEY (tenant_id,environment_id,company_id,thread_id,participant_id,channel),
+  FOREIGN KEY (tenant_id,environment_id,company_id,thread_id,participant_id)
+    REFERENCES platform.communication_participants (tenant_id,environment_id,company_id,thread_id,participant_id)
 );
 -- RLS defaults to deny. No connection role reads or writes these relations directly.
 ALTER TABLE platform.communication_discussion_anchors ENABLE ROW LEVEL SECURITY;
@@ -53,8 +58,10 @@ ALTER TABLE platform.communication_record_links ENABLE ROW LEVEL SECURITY;
 ALTER TABLE platform.communication_record_links FORCE ROW LEVEL SECURITY;
 ALTER TABLE platform.communication_participants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE platform.communication_participants FORCE ROW LEVEL SECURITY;
+ALTER TABLE platform.communication_participant_channels ENABLE ROW LEVEL SECURITY;
+ALTER TABLE platform.communication_participant_channels FORCE ROW LEVEL SECURITY;
 REVOKE ALL ON platform.communication_discussion_anchors,platform.communication_threads,
-  platform.communication_record_links,platform.communication_participants FROM PUBLIC,north_star_runtime,north_star_communication_operation;
+  platform.communication_record_links,platform.communication_participants,platform.communication_participant_channels FROM PUBLIC,north_star_runtime,north_star_communication_operation;
 
 CREATE FUNCTION north_star_internal.communication_admission_table() RETURNS boolean
 LANGUAGE plpgsql STABLE SET search_path = pg_catalog, pg_temp AS $$ BEGIN
@@ -270,17 +277,21 @@ RETURNS SETOF uuid LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = 
 DECLARE a platform.communication_admission:=north_star_internal.communication_admitted(ticket); BEGIN
   IF NOT EXISTS (SELECT FROM pg_temp.communication_admissions t WHERE t.id=ticket AND t.thread_id=communication_write_participants.id)
     THEN RAISE EXCEPTION 'communication.unavailable'; END IF;
-  INSERT INTO platform.communication_participants (tenant_id,environment_id,company_id,thread_id,channel,participant_kind,entity_id,subject_id)
-    SELECT a.tenant_id,a.environment_id,a.company_id,id,a.channel,p.kind,p.entity,p.subject FROM (
+  INSERT INTO platform.communication_participants (tenant_id,environment_id,company_id,thread_id,participant_kind,entity_id,subject_id)
+    SELECT a.tenant_id,a.environment_id,a.company_id,id,p.kind,p.entity,p.subject FROM (
       SELECT 'staff' AS kind,'' AS entity,s AS subject FROM unnest(a.staff) s UNION
       SELECT 'contact',k.entity_id,k.record_id FROM unnest(a.contacts) k) p ORDER BY p.kind,p.entity,p.subject
     ON CONFLICT DO NOTHING;
   UPDATE pg_temp.communication_admissions t SET participants_locked=true WHERE t.id=ticket;
-  RETURN QUERY SELECT p.participant_id FROM platform.communication_participants p
-    WHERE (p.tenant_id,p.environment_id,p.company_id,p.thread_id,p.channel)=(a.tenant_id,a.environment_id,a.company_id,id,a.channel)
+  RETURN QUERY WITH locked AS (SELECT p.participant_id FROM platform.communication_participants p
+    WHERE (p.tenant_id,p.environment_id,p.company_id,p.thread_id)=(a.tenant_id,a.environment_id,a.company_id,id)
       AND ((p.participant_kind='staff' AND p.subject_id=ANY(a.staff)) OR
            (p.participant_kind='contact' AND ROW(p.entity_id,p.subject_id)::platform.communication_record=ANY(a.contacts)))
-    ORDER BY p.participant_kind,p.entity_id,p.subject_id FOR UPDATE; END $$;
+    ORDER BY p.participant_kind,p.entity_id,p.subject_id FOR UPDATE),
+  bound AS (INSERT INTO platform.communication_participant_channels
+    SELECT a.tenant_id,a.environment_id,a.company_id,id,l.participant_id,a.channel FROM locked l
+    ON CONFLICT DO NOTHING)
+  SELECT l.participant_id FROM locked l ORDER BY l.participant_id; END $$;
 
 -- Existing-thread consumers pass the channel after their channel-specific
 -- admission. They never acquire a creation key while holding a thread row.

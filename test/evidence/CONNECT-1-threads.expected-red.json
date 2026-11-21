@@ -261,8 +261,8 @@
       "name": "thread-participant-lock",
       "claim": "An existing participant remains locked before message work.",
       "file": "db/migrations/0060_communication_threads.sql",
-      "original": "ORDER BY p.participant_kind,p.entity_id,p.subject_id FOR UPDATE;",
-      "replacement": "ORDER BY p.participant_kind,p.entity_id,p.subject_id;",
+      "original": "ORDER BY p.participant_kind,p.entity_id,p.subject_id FOR UPDATE),",
+      "replacement": "ORDER BY p.participant_kind,p.entity_id,p.subject_id),",
       "test": {
         "files": ["test/postgres/communication-threads.test.ts"]
       },
