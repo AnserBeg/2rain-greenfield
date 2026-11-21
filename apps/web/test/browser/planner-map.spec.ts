@@ -137,7 +137,12 @@ test('dispatchers pan just the map, return with Back and can open each stop with
         const list = tab.locator('.map-list'),
           canvas = tab.locator('.map-canvas');
         if (width === 390) {
-          for (const slot of ['map-title', 'map-views', 'map-list', 'map-canvas'])
+          for (const slot of [
+            'map-title',
+            'map-views',
+            'map-list',
+            'map-canvas',
+          ])
             await expect(tab.locator('.' + slot)).toBeVisible();
           expect((await list.boundingBox())!.y).toBeLessThan(
             (await canvas.boundingBox())!.y,
