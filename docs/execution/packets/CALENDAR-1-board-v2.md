@@ -1,8 +1,8 @@
 # CALENDAR-1 Board v2 fix — Boards record choices, not derivations
 
-Status — built on `packet/CALENDAR-1-board-v2` from main `5d315668` (docs E1–E20), synchronized with main `af102f7a`. Surface reader rung 37, taken at merge above billing intervals (36). No migration. Governs: [ADR-0086 view revision member shape](../../decisions/ADR-0086-board-calendar-and-resource-timeline.md), [Board v2 fix proofs](CALENDAR-1.md#board-v2-fix).
+Status — integrated at `f3d0dcd4` from packet tip `ff14d44a`. Built on `packet/CALENDAR-1-board-v2` from main `5d315668` (docs E1–E20), synchronized with main `af102f7a`. Surface reader rung 37, taken at merge above billing intervals (36). No migration. Governs: [ADR-0086 view revision member shape](../../decisions/ADR-0086-board-calendar-and-resource-timeline.md), [Board v2 fix proofs](CALENDAR-1.md#board-v2-fix).
 
-CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44839630057
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44854660364
 
 ## Claims
 
