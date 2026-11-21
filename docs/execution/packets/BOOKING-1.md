@@ -34,27 +34,39 @@ The follow-up checks authorized archive against every active allocation and lock
 Kit-member rescheduling is a slice 2 decision in the pending-items charter. Slice 1b accepts kit holds, confirmation, cancellation and expiry.
 The [mutation manifest](../../../test/evidence/BOOKING-1.expected-red.json) names the guard and the observable change in its regression.
 The preceding production reader answered a baseline item query and refused the released Operation and Query catalog floors independently by name. This slice introduces released bindings. The two Customize members and their drafter evals belong to slice 3.
-Slice 1b merged at `d48c870bdf7cae3858a84e1dde6ea8125750e28d` on exact full CI. Migration 0059 and the Operation Catalog (6) and Query Catalog (5) reader floors kept their numbers. The regenerated schema snapshot was byte-identical, and the history scan passed with the two approved Gitleaks fingerprints.
-CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44879121890
+Slice 1b merged at `d48c870bdf7cae3858a84e1dde6ea8125750e28d` on [exact full CI 44879121890](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44879121890). Migration 0059 and the Operation Catalog (6) and Query Catalog (5) reader floors kept their numbers. The regenerated schema snapshot was byte-identical, and the history scan passed with the two approved Gitleaks fingerprints.
+
+## Slice 1b fix round · 2026-11-21
+
+- **B1 reproduced** on merged 0059. The timer closed rental A at 11:00. Appointment B was booked at 11:05 and completed at 12:00. At 12:15 the unfixed writer admitted A’s 10:30 Start as `inUse`, revision 4. The fix returns `booking.capacityTaken`; A stays `noShow`, revision 3.
+- **R1.** A successful recovery appends a void revision of the attendance outcome and opens use at one owner cursor. The old snapshot retains the absence; the next incremental page retracts it. Active attendance IDs remain available for outcome corrections.
+- **R12.** Independent controls remove each company-scoped read permission, the swap destination company check, the stored correction-age check and the kit member company check. The age test voids an old closed pause without proposing new dates.
+- **R3.** Historical occupation uses a resource index and the next booking revision, including a swap away. Kit expiry finds the original receipt through member booking IDs.
+- **R4.** Kit expiry uses the caller’s decision and the highest locked member floor. Sweeping preserves any higher floor set while expiring the kit.
+- **R5.** ADR-0082 requires a single fence call for all owners and places record locks before the fence.
+- **R6.** Kit writers order new owner identities by entity and UUID. The insert-order test uses mixed-case input.
+- **R7.** The booking facade maps SQLSTATE 40001 with `booking.endpointChanged` to `booking.tryAgain`. Other serialization failures propagate.
+- **R9.** The first sweep or diary touch after 0059 closes overdue slice 1a confirmations under `acceptedBookingEnd`. Those confirmations predate that authority field. No production tenant existed at migration.
+- **R11.** Slice 1b’s last executable commit was `30a0c46e`. Fable read packet tip `89e39a42` on [green tip CI 44871414335](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44871414335).
+
+All seven new mutations failed at their named assertions on PostgreSQL 16; the restored writer tests passed. [Expected-red manifest](../../../test/evidence/BOOKING-1.expected-red.json) · [Full packet CI for the SQL at `a9c50c69`](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44883389027). Migration 0060 is provisional until the merge line assigns the number.
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44883389027
 
 ## Test it yourself
 
-Run `node --import tsx --test test/postgres/booking-commitments.test.ts` with Docker. Inspect the kit rollback, late correction and zero-cursor cases. Run `CI=1 node --import tsx --test test/postgres/booking-serving.test.ts` for the production query and archived reader.
+With Docker running, execute `node --import tsx --test test/postgres/booking-commitments.test.ts`. The late Start in the gap must refuse; the owner snapshot and incremental page must agree on the recovered absence.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "BOOKING-1",
-  "base": "0a9f7ca52304969c65092893f50375c90f8c2265", "head": "30a0c46e81b6887bc6febafe0d054dcc3d6654c7",
+  "base": "630e2aa690906af9256c5964c398ba90585515d2", "head": "1953e6cab60a7595e24c3d4a7ff4b7f5be26e70e",
   "changedPaths": [
-    ".gitleaksignore", "db/migrations/0059_booking_fulfilment.sql", "db/schema.snapshot.json", "packages/canonical-model/src/booking.ts",
-    "packages/canonical-model/src/schemas.ts", "packages/compiler/src/compiler.ts", "packages/compiler/src/projections.ts", "packages/postgres-provider/package.json",
-    "packages/postgres-provider/src/booking-capability-executor.ts", "packages/postgres-provider/src/booking-owner-usage.ts", "packages/postgres-provider/src/release-repository.ts", "packages/postgres-provider/src/release-verification-service.ts",
-    "packages/postgres-provider/src/request-context.ts", "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/postgres-provider/src/serving-gateways.ts", "packages/postgres-provider/src/trust/postgres-trust-service.ts",
-    "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-query-gateway.ts", "test/architecture/release-persistence-boundary.test.ts", "test/architecture/repository-hygiene.test.ts",
-    "test/architecture/tenant-completeness.manifest.json", "test/architecture/tenant-completeness.test.ts", "test/evidence/BOOKING-1.expected-red.json", "test/fixtures/booking-commitments.sql",
-    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/postgres/booking-commitments.test.ts", "test/postgres/booking-serving.test.ts", "test/postgres/inventory-storage.test.ts",
-    "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts", "test/postgres/trust-substrate.test.ts"
+    "db/migrations/0060_booking_recovery.sql", "db/schema.snapshot.json",
+    "test/architecture/release-persistence-boundary.test.ts", "test/evidence/BOOKING-1.expected-red.json",
+    "test/fixtures/booking-commitments.sql", "test/postgres/booking-commitments.test.ts",
+    "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts",
+    "test/postgres/module-storage-transition.test.ts", "test/postgres/trust-substrate.test.ts"
   ],
-  "symbols": [{"path":"packages/canonical-model/src/booking.ts","name":"bookingDeclarationProblem"},{"path":"packages/postgres-provider/src/booking-owner-usage.ts","name":"bookingOwnerCursorFence"}]
+  "symbols": []
 }
 ```
