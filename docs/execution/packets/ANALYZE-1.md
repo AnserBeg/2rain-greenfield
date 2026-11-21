@@ -1,6 +1,6 @@
 # ANALYZE-1 · Run Python on company data and share a saved finding
 
-**Slice 0 · Design amended, 2026-11-21.** Fable read `6b62b00f` and returned ACCEPT WITH AMENDMENTS. This is the single rule-14 docs amendment round for the orchestrator's targeted check. The owner approved the charter and the orchestrator ruled on default AI access. [Amended ADR-0090](../../decisions/ADR-0090-python-analysis-and-saved-evidence.md)
+**Slice 0 · Design accepted, 2026-11-21.** The orchestrator accepted `65bdc9f1` after Fable’s design read and the targeted check. The owner approved the charter and the orchestrator ruled on default AI access. [Amended ADR-0090](../../decisions/ADR-0090-python-analysis-and-saved-evidence.md)
 
 ## Decisions from the design read
 
@@ -18,6 +18,11 @@
 | A10 | ADR-0090 is provisional. BOOT-CHECK, PLANNER-1 and COMMS-2 also claim 0090. At merge fetch main, take the next free ADR number, rename the file and update its title, every link and the ledger row. Re-fetch just before pushing and repeat on collision. The ledger cites the reviewed tip `6b62b00f`. |
 
 **Other dispositions.** S1 drops the host SQL transform and validator PORT from v1. Python can use SQLite on its sealed input. S2 makes pre-launch refusals free and refunds host failures once. S3 counts per environment and reserves 2 of 20 daily person starts and 10 of 100 tenant starts for scheduled occurrences. S4 records field-ID visibility in published code. S5 accepts residual timing signals on shared hosts. S6 defers standing shares. S7 corrects the reviewed SHA in the ledger.
+
+## Entry conditions from the targeted check
+
+- **1b/2 · Capture and purge (§4).** Serialize sealing and purge in tenant/environment scope. Check current contributor tombstones under the lock. Pause a capture after its read, commit purge, then resume and verify zero retained payload bytes and no usable handle. Reverse the order and verify purge erases the sealed copy. Cover trials in 1b and saved versions in 2.
+- **3 · Profile disclosure (§5).** On the first profile-only model call, before any sample or output, assert exactly draft code, run on this same sealed snapshot and finish. Dispatch a share request from that context and verify refusal with no share.
 
 ## Build checkpoints after the targeted check
 
