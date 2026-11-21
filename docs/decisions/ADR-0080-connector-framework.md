@@ -48,7 +48,7 @@ browser on explicit navigation after confirmation. It grants no scripts or provi
 The compiler checks both ends of every mapping, including types, bounds, required values,
 disclosure and company scope. The host validates requests and provider results. An unknown
 version, undeclared target, invalid result or missing adapter gives a typed refusal.
-Only the host connector runtime can reach provider networks. Each adapter owns fixed HTTPS
+The host connector runtime owns provider calls except for the browser display amendment below. Each adapter owns fixed HTTPS
 destinations, methods and paths. Forbid caller-supplied URLs, redirect following, raw headers
 and executable mappings. Bound request/response bytes and elapsed time.
 
@@ -60,7 +60,7 @@ returns its recorded result, subject to data retention. Where the result cannot 
 journaled, exclude the query from the workflow SDK. WORKFLOW-1 keeps its present call set.
 [ADR-0073, external delivery](ADR-0073-workflow-isolate-and-authority.md#timers-signals-and-external-delivery)
 
-**Viewport amendment (2026-11-21).** A human opening or panning a released Map may request one bounded public basemap through the enabled acting-company installation. Recheck the requesting company, viewer, release fence, view and disclosure grant before cache access. Reserve maximum cost and volume on a cold request. Only the normalized viewport reaches the adapter. PLANNER-1 owns this seam under the existing installation writer and scoped key rules. Its initial adapter is network-free Demo Maps. [Map contract](ADR-0092-map-resource-assignment-and-planner-workspace.md#2-let-connect-1-own-imagery-and-disclosure)
+**Viewport amendment (2026-11-21).** A human opening or panning a released Map may request one bounded public basemap through the enabled acting-company installation. Recheck the requesting company, viewer, release fence, view and disclosure grant before cache access. Reserve maximum cost and volume on a cold request. Only the normalized viewport reaches the adapter. PLANNER-1 owns this seam under the existing installation writer and scoped key rules. The Google Maps owner ruling permits the browser to retrieve the display script and tiles directly. The company installation, current grants and activation fence authorize a single browser map load and reserve its quota before the browser receives its display credential. The owner creates a dedicated key for this application in Google Cloud, restricts it to the app domains by HTTP referrer and to the Maps JavaScript API, and sets `NORTH_STAR_GOOGLE_MAPS_BROWSER_KEY` in this app's environment. Only that browser key enters the isolated frame. The geocoding and route credentials stay server-side. The normalized camera is the only location sent to Google. Google geocodes are plotted only over a loaded Google map. CI binds the network-free fake, and the existing supported-region and local-demo restrictions apply to live display. [Map contract](ADR-0092-map-resource-assignment-and-planner-workspace.md#2-let-connect-1-own-imagery-and-disclosure)
 
 ## Who can connect a company
 

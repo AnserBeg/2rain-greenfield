@@ -15,6 +15,7 @@ export const LEDGER_STYLES = `
 .surface-grid[data-surface-archetype="map"]{display:flex;flex-direction:column;reading-flow:flex-visual;gap:1rem}
 .map-canvas svg{display:block;width:100%;max-width:1024px;background:var(--sheet);touch-action:none}
 .map-canvas nav a,.map-list a,.map-canvas summary,.map-views button{display:inline-flex;align-items:center;min-height:44px;padding:0 .65rem}
+.map-canvas [data-map-frame],.map-canvas iframe{width:100%;height:100%;border:0;display:block}
 .map-hit{fill:transparent;stroke:transparent;stroke-width:44px;vector-effect:non-scaling-stroke;pointer-events:all}.map-pin{fill:var(--ink)}.map-canvas svg text{fill:var(--sheet);pointer-events:none}
 .map-route{stroke:var(--ink);stroke-width:2;fill:none}.map-route.group-1{stroke-dasharray:8 3}.map-route.group-2{stroke-dasharray:2 4}.map-route.group-3{stroke-dasharray:8 3 2 3}
 .map-pin.group-1,.map-pin.group-3{fill:var(--accent)}.map-route.group-1,.map-route.group-3{stroke:var(--accent)}

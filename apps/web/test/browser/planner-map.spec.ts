@@ -198,3 +198,96 @@ test('dispatchers pan just the map, return with Back and can open each stop with
     await exit;
   }
 });
+
+test('the isolated Google loader uses the public camera and an origin referrer', async ({
+  page,
+}) => {
+  const { basemapCsp, googleBasemapDocument } =
+    await import('../../src/google-basemap.js');
+  const { SURFACE_CLIENT_SCRIPT } = await import('../../src/surface-client.js');
+  const { mapCentre } =
+    await import('../../../../packages/canonical-model/src/map-viewport.js');
+  const viewport = { x: 3324, y: 7175, zoom: 8, size: 'small' } as const;
+  const centre = mapCentre(viewport);
+  const app = 'https://map-test.invalid';
+  const requests: string[] = [];
+  let referrer: string | undefined;
+  await page.route('**/*', async (route) => {
+    const url = new URL(route.request().url());
+    requests.push(url.href);
+    if (url.origin === app && url.pathname === '/')
+      return route.fulfill({
+        contentType: 'text/html',
+        body:
+          '<div class="surface-grid" data-surface-archetype="map"><h1 data-map-state="/?private=stop#map"></h1><svg><foreignObject width="320" height="240"><div xmlns="http://www.w3.org/1999/xhtml" data-map-frame="/map/display?image=test"></div></foreignObject><g data-map-overlay visibility="hidden"></g></svg><p data-map-status>Map background unavailable.</p></div><script>' +
+          SURFACE_CLIENT_SCRIPT +
+          '</script>',
+      });
+    if (url.origin === app && url.pathname === '/map/display')
+      return route.fulfill({
+        headers: {
+          'content-type': 'text/html',
+          'content-security-policy': basemapCsp,
+          'referrer-policy': 'origin',
+        },
+        body: googleBasemapDocument({
+          provider: 'google',
+          browserKey: 'fixture-browser-key',
+          viewport,
+        }),
+      });
+    if (
+      url.origin === 'https://maps.googleapis.com' &&
+      url.pathname === '/maps/api/js'
+    ) {
+      referrer = route.request().headers().referer;
+      return route.fulfill({
+        contentType: 'text/javascript',
+        body: `
+        window.google = {maps:{version:'3.66.0',Map:class {
+          constructor(el,options) { window.camera=options; }
+          getCenter() { return {lat:()=>window.camera.center.lat, lng:()=>window.camera.center.lng}; }
+          getZoom() { return window.camera.zoom; }
+          addListener(name,callback) { if(name==='tilesloaded') callback(); }
+        }}};
+        initBasemap();`,
+      });
+    }
+    return route.abort();
+  });
+  await page.goto(app + '/?private=stop');
+  await expect(page.locator('[data-map-overlay]')).toHaveAttribute(
+    'visibility',
+    'visible',
+  );
+  expect(referrer).toBe(app + '/');
+  const urls = requests.filter((href) => new URL(href).origin !== app);
+  expect(urls).toHaveLength(1);
+  expect(Object.fromEntries(new URL(urls[0]!).searchParams)).toEqual({
+    key: 'fixture-browser-key',
+    v: '3.66',
+    loading: 'async',
+    callback: 'initBasemap',
+    auth_referrer_policy: 'origin',
+  });
+  const child = page
+    .frames()
+    .find((frame) => frame.url().includes('/map/display'))!;
+  expect(
+    await child.evaluate(() => Reflect.get(window, 'camera').center),
+  ).toEqual({ lat: centre.latitude, lng: centre.longitude });
+  expect(
+    await child.evaluate(() => {
+      try {
+        return Boolean(parent.document);
+      } catch {
+        return false;
+      }
+    }),
+  ).toBe(false);
+  await child.evaluate(() => Reflect.get(window, 'gm_authFailure')());
+  await expect(page.locator('[data-map-overlay]')).toHaveAttribute(
+    'visibility',
+    'hidden',
+  );
+});

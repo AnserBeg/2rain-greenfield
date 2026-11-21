@@ -254,17 +254,32 @@ export async function readMapSlots(
       page.installationId,
       v,
     );
-  const image = handle
-    ? '<image width="' +
-      width +
-      '" height="' +
-      height +
-      '" href="/map/image?company=' +
-      encodeURIComponent(company) +
-      '&amp;image=' +
-      encodeURIComponent(handle) +
-      '"/>'
-    : '';
+  const browserDisplay = page.display === 'browser';
+  const image =
+    handle && browserDisplay
+      ? '<foreignObject width="' +
+        width +
+        '" height="' +
+        height +
+        '"><div xmlns="http://www.w3.org/1999/xhtml" data-map-frame="/map/display?image=' +
+        encodeURIComponent(handle) +
+        '"></div></foreignObject>' +
+        '<rect width="' +
+        width +
+        '" height="' +
+        (height - 24) +
+        '" fill="transparent"/>'
+      : handle
+        ? '<image width="' +
+          width +
+          '" height="' +
+          height +
+          '" href="/map/image?company=' +
+          encodeURIComponent(company) +
+          '&amp;image=' +
+          encodeURIComponent(handle) +
+          '"/>'
+        : '';
   const next = new URLSearchParams(params);
   if (page.hasNext) next.set('stops', page.hasNext);
   const all = new URLSearchParams(params);
@@ -295,18 +310,26 @@ export async function readMapSlots(
       link('All stops in this filter', localUrl(all)),
     ].join(' ') +
     '</nav>' +
-    (handle ? '' : '<p role="status">Map background unavailable.</p>') +
+    (browserDisplay
+      ? '<p data-map-status role="status">Map background unavailable.</p>'
+      : handle
+        ? ''
+        : '<p role="status">Map background unavailable.</p>') +
     '<svg data-map-drag viewBox="0 0 ' +
     width +
     ' ' +
     height +
     '" aria-label="Map of stops">' +
-    (handle ? '<text x="8" y="24">Map background unavailable.</text>' : '') +
+    (!browserDisplay && handle
+      ? '<text x="8" y="24">Map background unavailable.</text>'
+      : '') +
     image +
+    (browserDisplay ? '<g data-map-overlay visibility="hidden">' : '') +
     lines.join('') +
     pins.join('') +
+    (browserDisplay ? '</g>' : '') +
     '</svg>' +
-    (handle ? '<p>Demo Maps · simulated basemap</p>' : '') +
+    (!browserDisplay && handle ? '<p>Demo Maps · simulated basemap</p>' : '') +
     '<p>Order of the stops you can see · straight lines, not roads</p>' +
     (b.group
       ? '<ul aria-label="Route legend">' +

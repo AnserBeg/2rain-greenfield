@@ -3,6 +3,7 @@ import type { PoolClient } from 'pg';
 import { z } from 'zod';
 import {
   MapViewportSchema,
+  MERCATOR_LIMIT,
   mapExtent,
   SurfaceMapSchema,
   type SurfaceMap,
@@ -67,7 +68,7 @@ export interface MapCandidate {
 }
 type Located = MapCandidate & {
   point: Point | null;
-  source: 'User pin' | 'Demo Maps' | 'Location unavailable';
+  source: string;
 };
 const anchors = new Map<string, { context: string; last: string }>();
 function newAnchor(context: string, last: string) {
@@ -92,6 +93,7 @@ export async function finishMapPage(
       hasNext?: string;
       restarted?: boolean;
       installationId?: string;
+      display?: 'browser' | 'raster';
     },
   ) => ({
     kind: 'semanticQueryResult' as const,
@@ -124,19 +126,20 @@ export async function finishMapPage(
   // One runtime-role statement for the installation and all authorized address revisions.
   const result = await client.query<{
     installation_id: string;
+    provider: 'google' | 'fake';
     record_id: string | null;
     latitude: string | null;
     longitude: string | null;
   }>(
     `
     WITH installed AS MATERIALIZED (
-      SELECT installation_id FROM platform.address_installations() WHERE company_id=$1 AND provider='fake'
+      SELECT installation_id,provider FROM platform.address_installations() WHERE company_id=$1
     ), located AS (
       SELECT ids.record_id, p.latitude,p.longitude FROM installed i
       CROSS JOIN unnest($2::uuid[],$3::uuid[]) ids(record_id,revision)
       CROSS JOIN LATERAL platform.address_pin($1,i.installation_id,$4,ids.record_id,$5,ids.revision) p
       WHERE p.usable AND p.state='ready'
-    ) SELECT i.installation_id,p.* FROM installed i LEFT JOIN located p ON true`,
+    ) SELECT i.installation_id,i.provider,p.* FROM installed i LEFT JOIN located p ON true`,
     [
       company,
       candidates.map((r) => r.record.recordId),
@@ -146,6 +149,7 @@ export async function finishMapPage(
     ],
   );
   const installationId = result.rows[0]?.installation_id;
+  const browserDisplay = result.rows[0]?.provider === 'google';
   const pins = new Map(
     result.rows
       .filter((r) => r.record_id && r.latitude !== null && r.longitude !== null)
@@ -161,8 +165,16 @@ export async function finishMapPage(
       : (pins.get(c.record.recordId) ?? null);
     return {
       ...c,
-      point,
-      source: user ? 'User pin' : point ? 'Demo Maps' : 'Location unavailable',
+      point: point && Math.abs(point.latitude) <= MERCATOR_LIMIT ? point : null,
+      source: !point
+        ? 'Location unavailable'
+        : Math.abs(point.latitude) > MERCATOR_LIMIT
+          ? 'Outside map coverage'
+          : user
+            ? 'User pin'
+            : browserDisplay
+              ? 'Google Maps'
+              : 'Demo Maps',
     };
   });
   const area = input.area && mapExtent(input.area);
@@ -204,7 +216,10 @@ export async function finishMapPage(
   const rows = filtered.slice(start, start + pageSize);
   return page(rows, {
     partial: false,
-    ...(installationId && { installationId }),
+    ...(installationId && {
+      installationId,
+      display: browserDisplay ? 'browser' : 'raster',
+    }),
     ...(input.cursor && !valid && { restarted: true }),
     ...(start + rows.length < filtered.length && {
       hasNext: newAnchor(context, rows.at(-1)!.record.recordId),

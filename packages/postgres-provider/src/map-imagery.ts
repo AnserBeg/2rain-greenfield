@@ -4,6 +4,7 @@ import {
   MAP_SIZES,
   MapViewportSchema,
   mapExtent,
+  mercatorLatitude,
   type MapViewport,
 } from '../../canonical-model/src/map-viewport.js';
 
@@ -17,7 +18,15 @@ const contract = Object.freeze({
   attribution: 'Demo Maps · simulated basemap',
 });
 export interface MapImageryProvider {
-  readonly contract: typeof contract;
+  readonly contract: {
+    id: string;
+    style: string;
+    language: string;
+    attribution: string;
+    maxBytes: number;
+    deadlineMs: number;
+    maxCalls: 1;
+  };
   raster(viewport: MapViewport, signal: AbortSignal): Promise<Buffer>;
 }
 function chunk(kind: string, data: Buffer) {
@@ -49,7 +58,8 @@ export class FakeMapImageryProvider implements MapImageryProvider {
     );
     for (let y = 0; y < height; y++) {
       const start = y * (width + 1) + 1;
-      if (grid(box.north - y * box.scale)) rows.fill(1, start, start + width);
+      if (grid(mercatorLatitude(box.top - y * box.scale)))
+        rows.fill(1, start, start + width);
       else meridians.copy(rows, start);
     }
     const header = Buffer.alloc(13);
@@ -116,11 +126,7 @@ export class MapImagery {
     const request = this.requests.get(handle);
     return request && request.expires > this.now() ? request : undefined;
   }
-  async image(
-    handle: string,
-    live: MapImageScope,
-    reserve: () => Promise<void>,
-  ) {
+  private authorized(handle: string, live: MapImageScope) {
     const req = this.request(handle);
     if (
       !req ||
@@ -135,6 +141,25 @@ export class MapImagery {
       req.scope.installationId !== live.installationId
     )
       throw new Error('Map image unavailable.');
+    return req;
+  }
+  async browserViewport(
+    handle: string,
+    live: MapImageScope,
+    reserve: () => Promise<void>,
+  ) {
+    const req = this.authorized(handle, live);
+    if (req.called) throw new Error('Map display unavailable.');
+    req.called = true;
+    await reserve();
+    return req.viewport;
+  }
+  async image(
+    handle: string,
+    live: MapImageScope,
+    reserve: () => Promise<void>,
+  ) {
+    const req = this.authorized(handle, live);
     const { viewport: v } = req,
       c = this.provider.contract;
     const key = JSON.stringify([

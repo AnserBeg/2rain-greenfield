@@ -821,6 +821,26 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
   const region = () => document.querySelector('.surface-grid[data-surface-archetype="map"]');
   const state = root => root?.querySelector('[data-map-state]')?.dataset.mapState;
   if (!state(region()) || typeof fetch !== 'function' || typeof DOMParser !== 'function') return;
+  const mountBasemap = root => {
+    const slot = root.querySelector('[data-map-frame]');
+    if (!slot) return;
+    const frame = document.createElement('iframe');
+    frame.setAttribute('sandbox','allow-scripts allow-popups allow-popups-to-escape-sandbox');
+    frame.referrerPolicy = 'origin';
+    frame.title = 'Google Maps';
+    frame.src = slot.dataset.mapFrame;
+    slot.replaceChildren(frame);
+  };
+  window.addEventListener('message', event => {
+    const root = region();
+    const frame = root?.querySelector('[data-map-frame] iframe');
+    if (!frame || event.source !== frame.contentWindow || event.origin !== 'null') return;
+    if (event.data !== 'basemap-ready' && event.data !== 'basemap-unavailable') return;
+    const ready = event.data === 'basemap-ready';
+    root.querySelector('[data-map-overlay]').setAttribute('visibility', ready ? 'visible' : 'hidden');
+    root.querySelector('[data-map-status]').hidden = ready;
+  });
+  mountBasemap(region());
   let generation = 0;
   let drag = null;
   history.replaceState(history.state, '', state(region()));
@@ -844,6 +864,7 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
       const canonical = new URL(state(next),location.href);
       if (!next || !state(next) || canonical.origin!==location.origin || canonical.pathname!=='/') throw Error();
       origin.replaceWith(next);
+      mountBasemap(next);
       if(push) history.pushState(null,'',canonical.href);
       else history.replaceState(history.state,'',canonical.href);
       const focus = Array.from(next.querySelectorAll('a,button,select,input')).find(el=>

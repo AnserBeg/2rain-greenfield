@@ -129,6 +129,7 @@ export interface SemanticQueryResultEnvelope {
     readonly partial: boolean;
     readonly restarted?: boolean;
     readonly installationId?: string;
+    readonly display?: 'browser' | 'raster';
     readonly hasNext?: string;
     readonly stops: readonly {
       recordId: string;

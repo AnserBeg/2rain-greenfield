@@ -213,3 +213,26 @@ test('late, oversized and mismatched rasters never populate the public cache', a
     assert.equal(calls, 2);
   }
 });
+
+test('browser display binds the live installation and reserves once across concurrent loads', async () => {
+  const service = new MapImagery(undefined, () => 0);
+  const handle = service.issue(companyA, v);
+  let calls = 0;
+  const reserve = async () => {
+    calls++;
+  };
+  for (const field of Object.keys(companyA) as (keyof MapImageScope)[]) {
+    await assert.rejects(
+      service.browserViewport(
+        handle,
+        { ...companyA, [field]: 'changed' },
+        reserve,
+      ),
+    );
+  }
+  assert.equal(calls, 0);
+  const pending = service.browserViewport(handle, companyA, reserve);
+  await assert.rejects(service.browserViewport(handle, companyA, reserve));
+  assert.deepEqual(await pending, v);
+  assert.equal(calls, 1);
+});

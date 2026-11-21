@@ -233,6 +233,35 @@ export class PostgresAddresses implements AddressGateway {
     handle: string,
     companyId: string,
   ) {
+    const display = await this.viewportAccess(view, handle, companyId, 'fake');
+    return this.imagery.image(handle, display.scope, display.reserve);
+  }
+  async viewportDisplay(view: RequestRuntimeView, handle: string) {
+    const company = this.imagery.request(handle)?.scope.companyId;
+    const key = process.env.NORTH_STAR_GOOGLE_MAPS_BROWSER_KEY;
+    if (
+      !company ||
+      !key ||
+      process.env.CI ||
+      !this.demo ||
+      process.env.NORTH_STAR_CONNECTOR_DEMO !== '1' ||
+      process.env.NORTH_STAR_GOOGLE_MAPS_TERMS !== 'non-eea'
+    )
+      throw denied();
+    const display = await this.viewportAccess(view, handle, company, 'google');
+    const viewport = await this.imagery.browserViewport(
+      handle,
+      display.scope,
+      display.reserve,
+    );
+    return { provider: 'google' as const, browserKey: key, viewport };
+  }
+  private async viewportAccess(
+    view: RequestRuntimeView,
+    handle: string,
+    companyId: string,
+    provider: Install['provider'],
+  ) {
     const request = this.imagery.request(handle);
     if (!request || !isUuid(companyId)) throw denied();
     const { surfaceId } = request.scope;
@@ -285,20 +314,19 @@ export class PostgresAddresses implements AddressGateway {
     const live = async (c: PoolClient) => {
       await active(c, view);
       const i = await installation(c, view, companyId);
-      if (!i || i.provider !== 'fake') throw denied();
+      if (!i || i.provider !== provider) throw denied();
       return i;
     };
     const i = await this.tx(view, live);
-    return this.imagery.image(
-      handle,
-      this.viewportScope(view, surfaceId, companyId, i.installationId),
-      () =>
+    return {
+      scope: this.viewportScope(view, surfaceId, companyId, i.installationId),
+      reserve: () =>
         this.tx(view, async (c) => {
           const current = await live(c);
           if (current.installationId !== i.installationId) throw denied();
           await reserve(c, current);
         }),
-    );
+    };
   }
   private tx<T>(
     view: RequestRuntimeView,

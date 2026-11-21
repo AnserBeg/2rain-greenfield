@@ -1,3 +1,4 @@
+import { basemapCsp, googleBasemapDocument } from './google-basemap.js';
 import { addressSettings } from './address-settings.js';
 import { offerPlaces } from './address-context.js';
 import { createServer } from 'node:http';
@@ -236,6 +237,33 @@ async function handleRequest(
     request.headers['sec-purpose'],
     request.headers.purpose,
   ].some((purpose) => /prefetch|prerender/iu.test(String(purpose)));
+  if (url.pathname === '/map/display') {
+    try {
+      if (
+        speculative ||
+        request.method !== 'GET' ||
+        request.headers['sec-fetch-dest'] !== 'iframe' ||
+        !gateways?.addresses?.viewportDisplay
+      )
+        throw Error();
+      const display = await entry.run({ headers: request.headers }, (view) =>
+        gateways.addresses!.viewportDisplay!(
+          view,
+          url.searchParams.get('image') ?? '',
+        ),
+      );
+      response.writeHead(200, {
+        'content-type': 'text/html; charset=utf-8',
+        'referrer-policy': 'origin',
+        'content-security-policy': basemapCsp,
+      });
+      response.end(googleBasemapDocument(display));
+    } catch {
+      response.writeHead(404);
+      response.end();
+    }
+    return;
+  }
   if (url.pathname === '/map/image') {
     if (
       request.method !== 'GET' ||
@@ -606,6 +634,12 @@ async function handleRequest(
       (demoActors && selectedDemoActor?.(request.headers.cookie)) || 'buyer',
       workflowApprovals && WORKFLOW_APPROVALS_HREF,
     );
+    if (page.html.includes('data-surface-archetype="map"')) {
+      response.setHeader(
+        'content-security-policy',
+        response.getHeader('content-security-policy') + "; frame-src 'self'",
+      );
+    }
     writeHtml(
       response,
       assistant

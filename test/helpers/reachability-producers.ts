@@ -65,6 +65,8 @@ export const reachabilityProducers = [
     'test/unit/web-surface-hex-literal-ratchet.test.ts',
     'test/unit/workspace-contract.test.ts',
     'test/unit/address-connector.test.ts',
+    'test/unit/customization-map.test.ts',
+    'test/unit/map-imagery.test.ts',
     'test/unit/reminder-deadline.test.ts',
   ]),
   nodeProducer('compiler', 'quality', 'test:compiler', [

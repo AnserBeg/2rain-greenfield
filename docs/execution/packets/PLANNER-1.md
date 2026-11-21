@@ -1,13 +1,13 @@
 # PLANNER-1 — map stops and schedule work on a dispatch desk
 
-**Slice 0 · docs only · 2026-11-21.** Fable returned REVISE on `11d0e030`. The orchestrator accepted the amendment at `467535a4` with the clarifications recorded in the ADR. The owner receives the provider estimate for morning sign-off. [Amended ADR](../../decisions/ADR-0092-map-resource-assignment-and-planner-workspace.md)
+**Slice 0 · docs only · 2026-11-21.** Fable returned REVISE on `11d0e030`. The orchestrator accepted the amendment at `467535a4` with the clarifications recorded in the ADR. The owner selected Google Maps for display. [Amended ADR](../../decisions/ADR-0092-map-resource-assignment-and-planner-workspace.md)
 
 ## Amendments
 
 | Finding | Design decision |
 | --- | --- |
 | A1 | Map and Planner have closed archetypes, named slots and compact projections. Plan §12.2 includes both and resource timeline. [Grammar](../../decisions/ADR-0092-map-resource-assignment-and-planner-workspace.md#1-draw-the-map-on-the-server) |
-| A2 | Recommend Geoapify API 25 at USD 109/month before tax for 20 users, 3,000 viewport renders and 1,000 address calls/day. One installation provides suggest, geocode and hosted OSM imagery. PLANNER-1 owns the viewport contract and fake imagery adapter in the existing connector host while CONNECT-1 is inactive. Google requires direct browser delivery. [Provider, terms and cost](../../decisions/ADR-0092-map-resource-assignment-and-planner-workspace.md#2-let-connect-1-own-imagery-and-disclosure) |
+| A2 | The owner selected Google Maps JS. PLANNER-1 binds live browser display and a network-free raster fake through the company-scoped viewport seam. [Provider and disclosure](../../decisions/ADR-0092-map-resource-assignment-and-planner-workspace.md#2-let-connect-1-own-imagery-and-disclosure) |
 | A3 | Apply the day, saved filters and route before the 100-stop cap. Pan/zoom queries the visible area. Page by group, stop order and key, with route-local pin numbers and a prompt to narrow. [Map limits](../../decisions/ADR-0092-map-resource-assignment-and-planner-workspace.md#5-bound-the-read-before-drawing) |
 | A4 | Slice 1 ships the §2a amendment for map-region pan/zoom and drag-to-pan, canonical URLs, three size presets, linked overlay pins and script-off navigation back to the map. |
 | A5 | One date drives all panels. The day opens on a 06:00–18:00 axis with 48 quarter-hour starts. Show on map seeks the authorized stop across pages. [Desk](../../decisions/ADR-0092-map-resource-assignment-and-planner-workspace.md#4-compose-the-desk-and-review-one-assignment) |
@@ -26,7 +26,7 @@
 
 ## Slices and acceptance cases
 
-1. **Map.** Consume CONNECT-1 Address and implement the viewport seam in the ADR-0080 single-writer framework. The checkpoint uses Demo Maps only, without network or credentials. Geoapify is pending owner approval. Sortable-field order ships first.
+1. **Map.** Consume CONNECT-1 Address and implement the viewport seam in the ADR-0080 single-writer framework. The checkpoint uses Demo Maps only, without network or credentials. Live display uses Google Maps JS with the new app-specific browser key. Sortable-field order ships first.
 2. **Any-resource timeline.** After CALENDAR-1 3a and executable ADR-0087 intervals, bind a truck type and a technician type. Exercise all four forms, race two dispatchers and retry a lost response. Expect one change and receipt. Stop if the writer cannot protect the field pair on every path.
 3. **Planner.** After slices 1–2 and CALENDAR-1 1b, schedule by drop and keyboard on separate fixtures. Verify the route, queue and bar after confirm, then advance the common day. Run compact, company and whole-page budget gates.
 
@@ -46,7 +46,7 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44880757
 
 ## Slice 1 build checkpoint · 2026-11-21
 
-The many-record Map renders server-side Demo Maps imagery, linked SVG pins and a numbered list. PLANNER-1 owns the viewport contract and fake adapter in the ADR-0080 connector host while CONNECT-1 is inactive. Geoapify sign-off is pending. Reader rungs 40 (viewport) and 41 (Map and Customize) are provisional against main at `af255bf7`. The design moves to ADR-0092 after BOOT-CHECK and ANALYZE-1. The collection Map, ordered overlay and public viewport adapter serve rental deliveries, field service visits and distribution pickups.
+The collection Map serves rental deliveries, field-service visits and distribution pickups. The owner selected Google Maps JS behind the viewport seam. The licensed basemap runs in an isolated browser frame, with the ordered links and accessible list in the parent. CI uses Demo Maps. Reader rungs 40 and 41 are provisional until integration. Slice 3 will compose registered views with shared context and quick-create, including a phone desk without a map.
 
 | Gate | Evidence at this checkpoint |
 | --- | --- |
@@ -57,7 +57,7 @@ The many-record Map renders server-side Demo Maps imagery, linked SVG pins and a
 | Compatibility and SPEED-1 | The archived and current compilers reproduced the pre-Map Stop release, root `d9b8ff30` and 23 artifacts. The archived query, stored bytes and warm sparse/full SQL counts and p95 await CI. Other lanes were using Docker. |
 | Customize, replay and drafter | Seven focused Map tests passed, including label-only upgrade for active and retired revisions and both schema-generated draft order directions. The exhaustive replay inventory and its conflicting/compatible Map case also passed. |
 | Rule 12 | 2026-11-21 exception for live eval registration of `addMapViewRevision`. AI-BUILD-1 owns the inventory and registry in PR #136 until merge. |
-| A1 and CI | The mounted UX skill is read-only. The actual pin fails `UX003_VOCABULARY_DRIFT`. The four-file patch in `/tmp/PLANNER-1-A1.patch` passes apply-check. The packet full is reserved for the completed grammar commit. |
+| A1 and CI | The orchestrator landed the Map grammar and four slots at `1fe5b169`. The slice uses the CI-5 shard split from main at `352e43b7`. |
 
 **Try it yourself** · `node --import tsx --test --test-concurrency=1 test/unit/map-imagery.test.ts test/unit/customization-map.test.ts` exercises the fake raster, scope checks, page sizes, route filters, Customize and replay.
 

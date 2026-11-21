@@ -30,6 +30,11 @@ export interface AddressSettings {
   budgetMicros: number;
   enabled: boolean;
 }
+export interface BrowserBasemap {
+  provider: 'google';
+  browserKey: string;
+  viewport: MapViewport;
+}
 export interface AddressGateway {
   issueViewport?(
     view: RequestRuntimeView,
@@ -38,6 +43,10 @@ export interface AddressGateway {
     installationId: string,
     viewport: MapViewport,
   ): string;
+  viewportDisplay?(
+    view: RequestRuntimeView,
+    handle: string,
+  ): Promise<BrowserBasemap>;
   viewportImage?(
     view: RequestRuntimeView,
     handle: string,
