@@ -234,7 +234,22 @@ test(
           url.searchParams.set('surface', revision.surfaceId);
           url.searchParams.set(scope, COMPANY);
           url.searchParams.set('day', dispatchDay);
-          const serve = () => fetch(url, { headers: manager });
+          const navigation = {
+            ...manager,
+            'sec-fetch-dest': 'document',
+            'sec-fetch-user': '?1',
+          };
+          const serve = () => fetch(url, { headers: navigation });
+          for (const headers of [
+            manager,
+            { ...navigation, purpose: 'prefetch' },
+          ]) {
+            const nonInteractive = await fetch(url, { headers });
+            assert.equal(nonInteractive.status, 200);
+            const text = await nonInteractive.text();
+            assert.ok(text.includes(alpha));
+            assert.doesNotMatch(text, /href="\/map\/image/u);
+          }
           await (await serve()).arrayBuffer();
           await (await serve()).arrayBuffer();
           const before = catalogParseCount(),
@@ -275,15 +290,57 @@ test(
             ?.replaceAll('&amp;', '&');
           assert.ok(src);
           const image = new URL(src, app.baseUrl);
-          assert.equal((await fetch(image, { headers: manager })).status, 200);
+          const quotaCalls = async () =>
+            Number(
+              (
+                await pool.query(
+                  'SELECT coalesce(sum(calls),0) AS n FROM platform.address_quota WHERE tenant_id=$1 AND environment_id=$2',
+                  [
+                    app.runtime.identity.tenantId,
+                    app.runtime.identity.environmentId,
+                  ],
+                )
+              ).rows[0].n,
+            );
+          const beforeFirstImage = await quotaCalls();
+          const firstImage = await fetch(image, { headers: manager });
+          assert.equal(firstImage.status, 200);
+          const firstRaster = Buffer.from(await firstImage.arrayBuffer());
+          const afterFirstImage = await quotaCalls();
+          assert.equal(afterFirstImage, beforeFirstImage + 1);
           image.searchParams.set('company', other);
           assert.equal((await fetch(image, { headers: manager })).status, 404);
           const bUrl = new URL(url);
           bUrl.searchParams.set(scope, other);
-          const bHtml = await (await fetch(bUrl, { headers: manager })).text();
+          const fitted = fitMap(
+            [{ latitude: 53.52, longitude: -113.5 }],
+            'medium',
+          );
+          for (const [param, value] of Object.entries({
+            cx: fitted.x,
+            cy: fitted.y,
+            zoom: fitted.zoom,
+            size: fitted.size,
+          }))
+            bUrl.searchParams.set(param, String(value));
+          const bHtml = await (
+            await fetch(bUrl, { headers: navigation })
+          ).text();
           assert.ok(bHtml.includes(beta) && !bHtml.includes(alpha));
           const alphaPoint = { latitude: 53.52, longitude: -113.5 };
-          const fitted = fitMap([alphaPoint], 'medium');
+          const bSrc = bHtml
+            .match(/href="(\/map\/image\?[^"]+)"/u)?.[1]
+            ?.replaceAll('&amp;', '&');
+          assert.ok(bSrc && bSrc !== src);
+          const reused = await fetch(new URL(bSrc, app.baseUrl), {
+            headers: manager,
+          });
+          assert.equal(reused.status, 200);
+          assert.deepEqual(
+            Buffer.from(await reused.arrayBuffer()),
+            firstRaster,
+          );
+          assert.equal(await quotaCalls(), afterFirstImage);
           const canonical = new URL(
             html
               .match(/data-map-state="([^"]+)"/u)![1]!

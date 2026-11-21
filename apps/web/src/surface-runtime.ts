@@ -203,6 +203,7 @@ export interface SurfaceRuntimeResponse {
 }
 
 export interface SurfaceRuntimeGateways {
+  readonly viewportNavigation?: boolean;
   readonly applicationExtension?: SurfaceRuntimeApplicationExtension;
   readonly addresses?: AddressGateway;
   readonly documents?: DocumentGateway;

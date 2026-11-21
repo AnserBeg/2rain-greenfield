@@ -245,6 +245,7 @@ export async function readMapSlots(
     );
   }
   const handle =
+    gateways.viewportNavigation &&
     page.installationId &&
     gateways.addresses?.issueViewport?.(
       view,
@@ -300,6 +301,7 @@ export async function readMapSlots(
     ' ' +
     height +
     '" aria-label="Map of stops">' +
+    (handle ? '<text x="8" y="24">Map background unavailable.</text>' : '') +
     image +
     lines.join('') +
     pins.join('') +

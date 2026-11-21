@@ -232,15 +232,15 @@ async function handleRequest(
     }
     return;
   }
+  const speculative = [
+    request.headers['sec-purpose'],
+    request.headers.purpose,
+  ].some((purpose) => /prefetch|prerender/iu.test(String(purpose)));
   if (url.pathname === '/map/image') {
     if (
       request.method !== 'GET' ||
       !gateways?.addresses?.viewportImage ||
-      ['prefetch', 'prerender'].some((v) =>
-        String(
-          request.headers['sec-purpose'] ?? request.headers.purpose,
-        ).includes(v),
-      )
+      speculative
     ) {
       response.writeHead(403);
       response.end();
@@ -408,7 +408,10 @@ async function handleRequest(
       if (mapRequest) {
         const render = () =>
           entry.run({ headers: request.headers }, (view) =>
-            mapFragment(view, url.href, gateways),
+            mapFragment(view, url.href, {
+              ...gateways,
+              viewportNavigation: !speculative,
+            }),
           );
         const result = readSnapshot
           ? await readSnapshot(render)
@@ -555,23 +558,44 @@ async function handleRequest(
       });
       return;
     }
-    const result = gateways
+    // Only a user-activated document navigation or the owned same-origin Map
+    // form can issue a handle. Programmatic reads still get the linked stops.
+    const pageGateways = gateways && {
+      ...gateways,
+      viewportNavigation:
+        request.method === 'GET' &&
+        !speculative &&
+        request.headers['sec-fetch-user'] === '?1' &&
+        request.headers['sec-fetch-dest'] === 'document',
+    };
+    const result = pageGateways
       ? submission
         ? taskStep(submission)
           ? await submitTask(submission, false)
           : await entry.run({ headers: request.headers }, (view) =>
-              submitSurfaceRuntimeIntent(view, url.href, submission, gateways),
+              submitSurfaceRuntimeIntent(
+                view,
+                url.href,
+                submission,
+                pageGateways,
+              ),
             )
         : readSnapshot
           ? await readSnapshot((finishReads) =>
               entry.run({ headers: request.headers }, (view) =>
-                renderSurfaceRuntimeWithData(view, url.href, gateways, null, {
-                  finishReads,
-                }),
+                renderSurfaceRuntimeWithData(
+                  view,
+                  url.href,
+                  pageGateways,
+                  null,
+                  {
+                    finishReads,
+                  },
+                ),
               ),
             )
           : await entry.run({ headers: request.headers }, (view) =>
-              renderSurfaceRuntimeWithData(view, url.href, gateways),
+              renderSurfaceRuntimeWithData(view, url.href, pageGateways),
             )
       : await entry.run({ headers: request.headers }, (view) =>
           renderSurfaceRuntime(view, url.href),
