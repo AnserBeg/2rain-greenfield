@@ -7,6 +7,7 @@ import {
 } from 'node:crypto';
 import pg from 'pg';
 import { readFile } from 'node:fs/promises';
+import type { TestContext } from 'node:test';
 import {
   applyStaffDecision,
   runDecisionVerifier,
@@ -318,6 +319,7 @@ async function exerciseProof(
 }
 
 export async function checkReleaseDecisions(
+  test: TestContext,
   admin: pg.Pool,
   connection: pg.PoolConfig,
   f: Fixture,
@@ -373,25 +375,29 @@ export async function checkReleaseDecisions(
     }
   }
   await withDecisionAccount(admin, connection, f, async (a) => {
-    await admin.query(
-      'UPDATE platform.current_policy_memberships SET legal_entity_id=$2 WHERE membership_id=$1',
-      [a.membership, randomUUID()],
+    await test.test(
+      'company-scoped membership cannot approve an environment release',
+      async () => {
+        await admin.query(
+          'UPDATE platform.current_policy_memberships SET legal_entity_id=$2 WHERE membership_id=$1',
+          [a.membership, randomUUID()],
+        );
+        try {
+          await assert.rejects(
+            a.identity.review(
+              { kind: 'release', targets: [prep], company: null },
+              a.handle,
+            ),
+            /decision authority refused/,
+          );
+        } finally {
+          await admin.query(
+            'UPDATE platform.current_policy_memberships SET legal_entity_id=NULL WHERE membership_id=$1',
+            [a.membership],
+          );
+        }
+      },
     );
-    try {
-      await assert.rejects(
-        a.identity.review(
-          { kind: 'release', targets: [prep], company: null },
-          a.handle,
-        ),
-        /decision authority refused/,
-      );
-    } finally {
-      await admin.query(
-        'UPDATE platform.current_policy_memberships SET legal_entity_id=NULL WHERE membership_id=$1',
-        [a.membership],
-      );
-    }
-
     const actor = await new AuthenticatedRequestEntryAdapter(async () => ({
       tenantId: f.tenantId,
       environmentId: f.environmentId,
@@ -425,49 +431,60 @@ export async function checkReleaseDecisions(
     )) as { rows: [{ created_by: string }] };
     const asVerifier = <T>(work: (client: pg.PoolClient) => Promise<T>) =>
       withActivationVerifierTransaction(a.verifier, actor, work);
-    await assert.rejects(
-      asVerifier((client) => approval(client, prep)),
-      { code: 'P0002' },
+    await test.test('approval binding refuses a missing proof', async () => {
+      await assert.rejects(
+        asVerifier((client) => approval(client, prep)),
+        { code: 'P0002' },
+      );
+    });
+    await test.test(
+      'approval binding refuses a receipt from a prior transaction',
+      async () => {
+        const earlier = await issueReviewed(a, f, 'release', prep);
+        await asVerifier((client) => consume(client, f, 'release', earlier));
+        await assert.rejects(
+          asVerifier((client) => approval(client, prep, earlier)),
+          { code: 'P0002' },
+        );
+      },
     );
-
-    const earlier = await issueReviewed(a, f, 'release', prep);
-    await asVerifier((client) => consume(client, f, 'release', earlier));
-    await assert.rejects(
-      asVerifier((client) => approval(client, prep, earlier)),
-      { code: 'P0002' },
+    await test.test(
+      'approval binding refuses a proof for another preparation',
+      async () => {
+        const different = await issueReviewed(a, f, 'release', otherPrep);
+        await assert.rejects(
+          asVerifier(async (client) => {
+            await consume(client, f, 'release', different);
+            await approval(client, prep, different);
+          }),
+          { code: 'P0002' },
+        );
+      },
     );
-
-    const different = await issueReviewed(a, f, 'release', otherPrep);
-    await assert.rejects(
-      asVerifier(async (client) => {
-        await consume(client, f, 'release', different);
-        await approval(client, prep, different);
-      }),
-      { code: 'P0002' },
-    );
-
-    const misleading = await issueReviewed(a, f, 'release', unfaithfulPrep);
-    await assert.rejects(
-      applyStaffDecision(a.verifier, a.realm, {
-        proof_id: misleading,
-        decision_kind: 'release',
-        company_id: null,
-      }),
-      { code: 'REVIEWED_DIFF_MISMATCH' },
-    );
-    assert.equal(
-      (
-        await admin.query(
+    await test.test(
+      'verifier refuses reviewed text that differs from the release diff',
+      async () => {
+        const misleading = await issueReviewed(a, f, 'release', unfaithfulPrep);
+        await assert.rejects(
+          applyStaffDecision(a.verifier, a.realm, {
+            proof_id: misleading,
+            decision_kind: 'release',
+            company_id: null,
+          }),
+          { code: 'REVIEWED_DIFF_MISMATCH' },
+        );
+        const receipt = await admin.query(
           'SELECT FROM platform.staff_decision_receipts WHERE proof_id=$1',
           [misleading],
-        )
-      ).rowCount,
-      0,
+        );
+        assert.equal(receipt.rowCount, 0);
+      },
     );
 
     const pending = await issueReviewed(a, f, 'release', prep);
-    for (const [change, message] of [
+    for (const [name, change, message] of [
       [
+        'proof refuses a source release restored at a new fence',
         async (client: pg.PoolClient) => {
           for (const releaseId of [candidate, source]) {
             await client.query(
@@ -480,6 +497,7 @@ export async function checkReleaseDecisions(
         /decision target unavailable/,
       ],
       [
+        'proof expires while its session remains live',
         async (client: pg.PoolClient) => {
           const {
             rows: [row],
@@ -498,6 +516,7 @@ export async function checkReleaseDecisions(
         /decision proof expired/,
       ],
       [
+        'proof refuses a revoked session',
         async (client: pg.PoolClient) => {
           await client.query(
             'UPDATE platform.staff_sessions SET revoked_at=now() WHERE identity_digest=$1',
@@ -507,20 +526,22 @@ export async function checkReleaseDecisions(
         /decision session unavailable/,
       ],
     ] as const) {
-      const client = await admin.connect();
-      try {
-        await client.query('BEGIN');
-        await change(client);
-        await client.query('SET LOCAL ROLE north_star_activation_verifier');
-        await client.query(
-          "SELECT set_config('north_star.tenant_id',$1,true),set_config('north_star.environment_id',$2,true)",
-          [f.tenantId, f.environmentId],
-        );
-        await assert.rejects(consume(client, f, 'release', pending), message);
-      } finally {
-        await client.query('ROLLBACK');
-        client.release();
-      }
+      await test.test(name, async () => {
+        const client = await admin.connect();
+        try {
+          await client.query('BEGIN');
+          await change(client);
+          await client.query('SET LOCAL ROLE north_star_activation_verifier');
+          await client.query(
+            "SELECT set_config('north_star.tenant_id',$1,true),set_config('north_star.environment_id',$2,true)",
+            [f.tenantId, f.environmentId],
+          );
+          await assert.rejects(consume(client, f, 'release', pending), message);
+        } finally {
+          await client.query('ROLLBACK');
+          client.release();
+        }
+      });
     }
     const release = await exerciseProof(admin, a, f, 'release', prep);
     assert.equal(release.attempts.length, 1);
@@ -670,6 +691,7 @@ export async function checkReleaseDecisions(
 }
 
 export async function checkRetryDecision(
+  test: TestContext,
   admin: pg.Pool,
   connection: pg.PoolConfig,
   f: Fixture,
@@ -703,13 +725,26 @@ export async function checkRetryDecision(
       { ...f, principal: outsider, company },
       async (account) => {
         const selection = { kind: 'retry', targets: [run], company: f.company };
-        await assert.rejects(
-          account.identity.review(selection, account.handle),
-          /decision authority refused/,
+        await test.test(
+          'company membership refuses the correctly scoped Retry in another company',
+          async () => {
+            await assert.rejects(
+              account.identity.review(selection, account.handle),
+              /decision authority refused/,
+            );
+          },
         );
-        await assert.rejects(
-          account.identity.review({ ...selection, company }, account.handle),
-          /decision target unavailable/,
+        await test.test(
+          'Retry terms refuse a run whose recorded company differs',
+          async () => {
+            await assert.rejects(
+              account.identity.review(
+                { ...selection, company },
+                account.handle,
+              ),
+              /decision target unavailable/,
+            );
+          },
         );
       },
     );
@@ -728,31 +763,47 @@ export async function checkRetryDecision(
           WHERE r.run_id=$1`,
         [run],
       );
-      try {
-        await assert.rejects(
-          scoped(runtime, account.realm, async (client) => {
-            await client.query(
-              "SELECT set_config('north_star.principal_id',$1,true),set_config('north_star.request_id',$2,true)",
-              [f.principal, randomUUID()],
+      await test.test(
+        'pilot Retry evidence requires a current proof',
+        async () => {
+          try {
+            await assert.rejects(
+              scoped(runtime, account.realm, async (client) => {
+                await client.query(
+                  "SELECT set_config('north_star.principal_id',$1,true),set_config('north_star.request_id',$2,true)",
+                  [f.principal, randomUUID()],
+                );
+                return client.query(
+                  "SELECT platform.workflow_apply_remedy($1,$2,$3,'retry',$4)",
+                  [run, pin!.previous, pin!.fence, pin!.count],
+                );
+              }),
+              /workflow Retry requires its current staff decision/,
             );
-            return client.query(
-              "SELECT platform.workflow_apply_remedy($1,$2,$3,'retry',$4)",
-              [run, pin!.previous, pin!.fence, pin!.count],
+          } finally {
+            await runtime.end();
+          }
+        },
+      );
+      await test.test(
+        'pilot run guard independently refuses a proofless advance',
+        async () => {
+          const direct = await admin.connect();
+          try {
+            await direct.query('BEGIN');
+            await assert.rejects(
+              direct.query(
+                `UPDATE platform.workflow_runs SET status='RUNNABLE', reason=NULL, execution_fence=$2
+              WHERE run_id=$1`,
+                [run, pin!.fence],
+              ),
+              /workflow run advance requires its current staff Retry decision/,
             );
-          }),
-          /workflow Retry requires its current staff decision/,
-        );
-      } finally {
-        await runtime.end();
-      }
-      // Isolate the run guard from the earlier Retry evidence trigger.
-      await assert.rejects(
-        admin.query(
-          `UPDATE platform.workflow_runs SET status='RUNNABLE', reason=NULL, execution_fence=$2
-          WHERE run_id=$1`,
-          [run, pin!.fence],
-        ),
-        /workflow run advance requires its current staff Retry decision/,
+          } finally {
+            await direct.query('ROLLBACK');
+            direct.release();
+          }
+        },
       );
       const result = await exerciseProof(admin, account, f, 'retry', run);
       assert.deepEqual(result.attempts, []);

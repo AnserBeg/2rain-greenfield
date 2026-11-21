@@ -1216,7 +1216,7 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
         );
         await t.test(
           'staff release and Customize proofs bind the approval and verified activation',
-          async () => {
+          async (staff) => {
             const scope = await new AuthenticatedRequestEntryAdapter(async () =>
               identity(tenantA, environmentANew, makerA),
             ).enter({});
@@ -1323,6 +1323,7 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
                 diff,
               );
             await checkReleaseDecisions(
+              staff,
               pool,
               connection,
               {

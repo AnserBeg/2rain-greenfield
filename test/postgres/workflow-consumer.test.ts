@@ -685,13 +685,14 @@ test(
           );
           await t.test(
             'staff Retry proof binds the suspended occurrence and restored fence',
-            async () => {
+            async (staff) => {
               const principal = randomUUID();
               await pool.query(
                 'SELECT platform.set_release_approver_eligibility($1,$2,true,$3,$4)',
                 [tenantId, principal, operator.principalId, randomUUID()],
               );
               await checkRetryDecision(
+                staff,
                 pool,
                 connection,
                 { tenantId, environmentId, principal, company: COMPANY },
