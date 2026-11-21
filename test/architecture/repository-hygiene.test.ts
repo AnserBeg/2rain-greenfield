@@ -226,6 +226,7 @@ const suiteDefinitions = [
       'test/postgres/module-storage-transition.test.ts',
       'test/postgres/observability-health.test.ts',
       'test/postgres/party-runtime.test.ts',
+      'test/postgres/personal-inbox.test.ts',
       'test/postgres/predicate-absent-semantics.test.ts',
       'test/postgres/predicate-parity-corpus.test.ts',
       'test/postgres/query-aggregate-semantics.test.ts',
