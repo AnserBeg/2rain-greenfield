@@ -2,6 +2,17 @@
 
 **Slice 0 · Accepted design, 2026-11-20 (Fable read, amendments R1–R12 incorporated).** An owner can declare who receives a reminder, when it appears, and which email a person may approve. The [communications ADR](../../decisions/ADR-0088-governed-communications-and-reminders.md) defines the contract. The Fable read is complete. This checkpoint changes documentation only.
 
+## Slice 1 · Notifications and the personal inbox
+
+The 2026-11-21 build instruction moves in-app notifications and reminders ahead of email templates and outbound delivery.
+
+- The branch starts at main `d083dd4a` and merges CONNECT-1's published thread writer at `ec519295` in `38f97a2bd`. DOCS-1 had already used migration 0060. The thread writer is provisionally 0061 on this branch. PostgreSQL 16 applied all 61 migrations and regenerated the identical schema snapshot.
+- `resolveReminderDeadline` applies ADR-0083 A1 to each derived civil deadline, including company day boundaries and per-record local midnight. Elapsed hours use the stored instant. Working-day leads require a versioned calendar covering the requested horizon. The supported lead is 1–720 units.
+- **Identity decision open.** ADR-0088 specifies the record owner as a recipient. Booking’s stored owner links a booking to its owning business record and company. Its audit also identifies the actor. An explicit staff assignment and the creating actor can designate different people. The build lane recommends a governed staff assignment on the source record.
+- Remaining slice work includes delivery by role, ownership and mention, the personal inbox and thread queries, the COMMS-2 port, company-isolation controls, the declared reminder member and its scheduler journal, Customize and drafter/eval admission, persisted parity, replay and preceding-reader proof. No packet CI run or merge-line claim.
+- Focused verification covers five deadline cases and 17 billing regressions. The guard controls are in `test/evidence/COMMS-1-deadlines.expected-red.json`.
+- **Try it yourself.** Run `node --import tsx --test test/unit/reminder-deadline.test.ts`. Expect five passing tests, including March 8 at 03:00 MDT for the Edmonton gap and 00:30Z for the earlier London overlap.
+
 ## Slice plan
 
 | Slice | User outcome | Dependency and acceptance |
@@ -31,3 +42,26 @@
 **Design gate.** All 24 hosted jobs passed at `9d24e862` before synchronization with main. [Packet CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44768626226)
 
 Run `scripts/check-records.sh` at the repository root and expect exit zero. Executable acceptance will use the archived production loader, actual scoped database roles, persisted release rows and a deterministic fake provider. Each incompatible capability gets its rung and any migration number at its own merge. Binary deployment observes tenant parser and reader high-water marks.
+
+```record-claim
+{
+  "schemaVersion": "northstar.record-claim/v1",
+  "packet": "COMMS-1",
+  "base": "38f97a2bd3847ff3b02666c08e6094f1655fb538",
+  "head": "0c5af0172b7ae62113a2f8a0a865023f9a822779",
+  "changedPaths": [
+    "package.json",
+    "packages/domain/src/billing/calendar.ts",
+    "packages/domain/src/communication/reminder-deadline.ts",
+    "test/architecture/repository-hygiene.test.ts",
+    "test/evidence/COMMS-1-deadlines.expected-red.json",
+    "test/unit/reminder-deadline.test.ts"
+  ],
+  "symbols": [
+    {
+      "path": "packages/domain/src/communication/reminder-deadline.ts",
+      "name": "resolveReminderDeadline"
+    }
+  ]
+}
+```
