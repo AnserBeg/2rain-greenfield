@@ -15,6 +15,7 @@ import {
 import type { ReportRequest } from '../../packages/runtime/src/declared-report.js';
 import {
   openCustomizeService,
+  openComposedApplicationRuntime,
   startComposedApplication,
 } from '../../apps/api/src/composition-root.js';
 import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
@@ -175,6 +176,8 @@ test(
           try {
             const draft=await opened.service.draft(change,'visualBuilder');
             if(draft.status!=='drafted')throw new Error(JSON.stringify(draft));
+            await opened.service.approve(draft.patchId);
+            await opened.service.activate(draft.patchId);
             console.log(JSON.stringify(draft.patchId));
           } finally {await opened.close();}
         `,
@@ -186,6 +189,11 @@ test(
                   change,
                 },
               )) as string;
+              assert.deepEqual(
+                await run(archivedQuery, readInput),
+                control,
+                'the preceding binary serves the customized pre-key release too',
+              );
               const old = await recordedPatch(pool, historical);
               assert.deepEqual(JSON.parse(old.payload.toString()), change);
               const reproduced = await compileInSandbox({
@@ -242,6 +250,7 @@ test(
                 const source=await readFile(file,'utf8');
                 const guard='if (requirement.minimumVersion > entry.maximumSupportedVersion)';
                 assert.equal(source.split(guard).length,2);
+                await writeFile(file+'.before-report-check',source);
                 await writeFile(file,source.replace(guard,'if (false)'));
                 console.log('null');
               `,
@@ -257,6 +266,59 @@ test(
                 'without the floor check the preceding loader admitted the indexed release',
               );
 
+              await run(
+                `
+                import {readFile, writeFile} from 'node:fs/promises';
+                const file='packages/runtime/src/request-runtime-view.ts';
+                await writeFile(file,await readFile(file+'.before-report-check'));
+                console.log('null');
+              `,
+                {},
+              );
+              const patchBytes = async () =>
+                (
+                  await pool.query(
+                    'SELECT patch_id,payload,payload_digest,base_release_root FROM platform.customization_patches WHERE tenant_id=$1 AND environment_id=$2 ORDER BY patch_id',
+                    [
+                      readInput.identity.tenantId,
+                      readInput.identity.environmentId,
+                    ],
+                  )
+                ).rows;
+              const beforeBinding = await patchBytes();
+              const current = {
+                databaseUrl: options.databaseUrl,
+                tenantSlug: options.tenantSlug,
+              };
+              const upgraded = await openComposedApplicationRuntime(current);
+              const publisher = await openCustomizeService(current);
+              try {
+                const proposal = upgraded.customizationUpgrade;
+                assert.ok(
+                  proposal?.status === 'drafted',
+                  JSON.stringify(proposal),
+                );
+                assert.equal(upgraded.activeReleaseId, draft.releaseId);
+                await publisher.service.approve(proposal.upgradeId);
+                await publisher.service.activate(proposal.upgradeId);
+                assert.deepEqual(await patchBytes(), beforeBinding);
+                const older = await run(archivedQuery, readInput);
+                assert.deepEqual(older, {
+                  outcome: 'refused',
+                  phase: 'load',
+                  code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
+                  message:
+                    'runtime capability northstar.runtime:capability.surface-manifest requires version ' +
+                    (
+                      await import('../../packages/canonical-model/src/constants.js')
+                    ).REPORT_SOURCE_READER +
+                    ' and this runtime supports 37',
+                });
+                await assertStoredBytes(pool, app.runtime.activeReleaseId, tip);
+              } finally {
+                await publisher.close();
+                await upgraded.close();
+              }
               await assertStoredBytes(
                 pool,
                 old.resulting_release_id,
