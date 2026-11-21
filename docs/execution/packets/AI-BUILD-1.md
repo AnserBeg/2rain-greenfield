@@ -57,7 +57,7 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44854101
 
 ## Gates
 
-- Full CI 44838134807 green at `4da63373` (all harness code but the replay and fallback commits). Full CI 44854101419 at `1b6aa091` (last executable commit plus evidence) was queued at hand-back; merge waits for it.
+- Full CI 44838134807 green at `4da63373` (all harness code but the replay and fallback commits). Full CI 44854101419 green at `1b6aa091` (last executable commit plus evidence; the secret scans read the transcripts). Later commits are docs only.
 - Evidence: [live run](../evidence/2026-11-20-build-eval-2026-11-20T23-03-14-492Z/summary.md), [T08 rerun](../evidence/2026-11-21-build-eval-2026-11-21T01-32-08-200Z/summary.md), [final merged table](../evidence/2026-11-21-build-eval-rescore-2026-11-21T01-52-38-712Z/summary.md).
 
 ## Test it yourself
