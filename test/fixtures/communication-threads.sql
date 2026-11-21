@@ -11,11 +11,12 @@ BEGIN
   storage:=north_star_internal.booking_projection(t,e,md5('release')::uuid,'storageTargetPayload');
   -- Keep every competing Record/get for these entities while bounding fixture work.
   app:=jsonb_build_object('permissions',app->'permissions','queries',(SELECT jsonb_agg(q) FROM jsonb_array_elements(app->'queries') q
-      WHERE q#>>'{sourceEntity,targetId}' IN ('northstar.app:entity.purchase_order','northstar.app:entity.party') OR q->>'queryId'='northstar.app:query.commercial_purchase_lines'),
+      WHERE q#>>'{sourceEntity,targetId}' IN ('northstar.app:entity.purchase_order','northstar.app:entity.party') OR q->>'queryId' IN ('northstar.app:query.commercial_purchase_lines','northstar.app:query.purchase_order_line_list')),
     'surfaces',(SELECT jsonb_agg(s) FROM jsonb_array_elements(app->'surfaces') s WHERE s->>'surfaceRole'='record'
       AND s#>>'{dataSource,targetId}' IN (SELECT q->>'queryId' FROM jsonb_array_elements(app->'queries') q
         WHERE q#>>'{sourceEntity,targetId}' IN ('northstar.app:entity.purchase_order','northstar.app:entity.party'))),
-    'relations',jsonb_build_array(jsonb_build_object('relationId','example.booking:relation.account','lifecycle','active','joinEligibility','query',
+    'relations',(SELECT jsonb_agg(v) FROM jsonb_array_elements(app->'relations') v
+      WHERE v#>>'{targetEntity,targetId}'='northstar.app:entity.purchase_order')||jsonb_build_array(jsonb_build_object('relationId','example.booking:relation.account','lifecycle','active','joinEligibility','query',
       'sourceEntity',jsonb_build_object('targetId','example.booking:entity.visit'),'targetEntity',jsonb_build_object('targetId','example.booking:entity.account'))));
   FOR source,perm IN VALUES ('visit','visit'),('account','account_detail'),('asset','asset') LOOP
     query:=jsonb_build_object('queryId','example.booking:query.'||source,'tier','q0','lifecycle','active','queryType','get',
