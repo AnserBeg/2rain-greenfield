@@ -767,13 +767,13 @@ test('approval summaries reject control characters and render as one JSON-quoted
   const { renderWorkflowReview } =
     await import('../../packages/postgres-provider/src/workflow-review.js');
   const review = renderWorkflowReview(
-    {
+    WorkflowDefinitionSchema.parse({
       schemaVersion: 'v6',
       workflowId: 'review',
       trigger: 'goodsReceiptPosted',
       bodyDigest: '1'.repeat(64),
       grants,
-    },
+    }),
     '',
     {
       coverage: [[0]],

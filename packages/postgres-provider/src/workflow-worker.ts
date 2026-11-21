@@ -23,7 +23,7 @@ export class PostgresWorkflowWorker {
   readonly #gateway: PostgresWorkflowGateway;
 
   constructor(
-    workerPool: Pool,
+    private readonly workerPool: Pool,
     private readonly runtimePool: Pool,
     businessClock?: WorkflowBusinessClock,
   ) {
