@@ -23,7 +23,7 @@ Status: executable, merged on CI green. Critical paths touched: `db/migrations/0
 **Decisions.**
 - Window index: a new `indexKind` literal `dateTimeWindow`, and capture checks in a new optional entity key `dateTimeCaptureChecks` (`checkKind: 'dateTimeCapture'`). Ruled under ADR-0047 §3 as anticipated widening of storage-target literal types, not a language event: emitted only when declared, payload version unchanged, field-free releases byte-identical. A literal is needed because the planner selects indexes by kind; reusing `resolveAccess` would collide with resolve-match emission.
 - The probe counts physical rows through a `SECURITY DEFINER` boolean (`north_star_internal.module_table_exceeds`), because module tables force RLS and the materializer sees one tenant; it runs under the build's SHARE lock.
-- Ceiling: `DATE_TIME_WINDOW_ROW_CEILING = 10_000`; `NORTH_STAR_DATE_TIME_WINDOW_ROW_CEILING` may lower it; higher values refuse. Measured writer blocking at the ceiling: longest concurrent write 1,427 ms during a 4,388 ms activation (B-tree, 10,000 rows, loaded laptop; the hosted run logs its own figure). Below the 2,000 ms trigger, so the ceiling stays 10,000.
+- Ceiling: `DATE_TIME_WINDOW_ROW_CEILING = 10_000`; `NORTH_STAR_DATE_TIME_WINDOW_ROW_CEILING` may lower it; higher values refuse. Measured writer blocking at the ceiling (B-tree, 10,000 rows): longest concurrent write 504–524 ms during a 1.6 s activation on hosted CI, 1,427 ms on a loaded laptop. Below the 2,000 ms trigger, so the ceiling stays 10,000.
 - Civil storage is `timestamp(3) without time zone` (storage-only `localWallTime` contract); temporal columns leave PostgreSQL through `to_char`, so no driver `Date` or process zone touches them.
 - Zones: ICU resolution plus a CLDR→IANA rename table (`Asia/Calcutta`→`Asia/Kolkata`); tzdb version is `process.versions.tz`.
 - Company source uses the tenant business calendar (calendar ID = tenant ID, as Booking) and the record's stored company; a company-sourced field on a shared record type refuses entry (no working company reaches the write) — named gap.
@@ -40,7 +40,7 @@ Status: executable, merged on CI green. Critical paths touched: `db/migrations/0
 3. Enter `2026-11-01 01:30` Toronto → the form asks for UTC−04:00 or UTC−05:00. Choose UTC−05:00 → the Record shows **November 1, 2026, 01:30 UTC−05:00 America/Toronto**. Save a second job at 01:30 UTC−04:00; sort the list by Appointment: the −04:00 job comes first.
 4. Add a second field with *Company business calendar*: entries resolve in the tenant calendar zone (Edmonton in the demo) and record the company.
 
-**Controls** (`test/evidence/CUSTOMIZE-5.expected-red.json`): consumer refusal, comparison refusal, reader floor, ceiling probe, capture all-or-none; each reds its own test.
+**Controls** (`test/evidence/CUSTOMIZE-5.expected-red.json`, all six reproduced locally with `check-expected-red.sh --run`): consumer refusal, comparison refusal, compiled floor, serving floor, ceiling probe, capture all-or-none; each reds its own test.
 
 ## Test it yourself
 
@@ -68,7 +68,7 @@ Status: executable, merged on CI green. Critical paths touched: `db/migrations/0
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-5",
   "base": "67e4efce31eb663f12d6f161aa91c0ce1220dffc",
-  "head": "b81d2f32951930a913dd0101d1a207bb219775ea",
+  "head": "5af93939ed5b921f99fd0339e82012aa2e6a4163",
   "changedPaths": [
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/date-time-field.ts",
     "apps/web/src/surface-composition.ts", "apps/web/src/surface-runtime.ts", "db/migrations/0058_date_time_window_probe.sql",
