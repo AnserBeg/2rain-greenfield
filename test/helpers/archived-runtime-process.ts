@@ -83,3 +83,41 @@ try {
   await pool.end();
 }
 `;
+
+/** Use the archived loader and its governed query gateway on persisted releases. */
+export const archivedServingQuery = `
+import { readFile } from 'node:fs/promises';
+import { ObservabilityMetrics } from './packages/observability/src/index.ts';
+import { rolePool, trustedContext } from './packages/postgres-provider/src/composed-application-runtime.ts';
+import { PostgresRequestRuntimeViewService } from './packages/postgres-provider/src/request-runtime-view-service.ts';
+import { composeServingGateways, loadServingRelease } from './packages/postgres-provider/src/serving-gateways.ts';
+import { AuthenticatedRequestRuntimeEntryAdapter } from './packages/runtime/src/request-runtime-view.ts';
+import { AuthenticatedRequestEntryAdapter } from './packages/runtime/src/request-context.ts';
+import { SEMANTIC_QUERY_REQUEST_VERSION } from './packages/runtime/src/semantic-query-gateway.ts';
+const { databaseUrl, identity, queryId, args } = JSON.parse(await readFile(process.argv[2], 'utf8'));
+const pool = rolePool(databaseUrl, 'north_star_runtime', 2);
+try {
+  const service = new PostgresRequestRuntimeViewService(pool);
+  const context = await trustedContext(identity);
+  const active = await service.load(context);
+  const serving = await loadServingRelease(pool, context, active.release.releaseId);
+  const gates = composeServingGateways(pool, pool, context, serving, new ObservabilityMetrics(), {
+    providerErrorMappings: [],
+  });
+  const entry = new AuthenticatedRequestRuntimeEntryAdapter(
+    new AuthenticatedRequestEntryAdapter(async () => identity),
+    service,
+    gates.policy,
+  );
+  const result = await entry.run({ headers: {} }, (view) => gates.queryGateway.invoke(view, {
+    schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+    queryId,
+    arguments: args,
+  }));
+  console.log(JSON.stringify({ outcome: 'queried', root: active.release.contentHash, records: result.records }));
+} catch (error) {
+  console.log(JSON.stringify({ outcome: 'refused', code: error.code, message: error.message }));
+} finally {
+  await pool.end();
+}
+`;

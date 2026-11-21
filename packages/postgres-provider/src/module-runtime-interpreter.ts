@@ -979,6 +979,7 @@ async function prepareMutation(
       { ...prior.values, ...input.patch },
       'projected',
     );
+    requireStockCountCountingMode(entity, prior.values, input.patch);
     if (bindings.length)
       await requireFormulaValidation(
         client,
@@ -1318,6 +1319,39 @@ function requirePeriodLockDirection(
         : 'a period lock reopens only a closed period, to an earlier closed-through instant',
       entity.entityId,
     );
+}
+
+function requireStockCountCountingMode(
+  entity: StorageEntity,
+  prior: Readonly<Record<string, ImmutableJsonValue>>,
+  patch: Readonly<Record<string, ImmutableJsonValue>>,
+): void {
+  const suffix = ':entity.stock_count';
+  if (!entity.entityId.endsWith(suffix)) return;
+  const namespace = entity.entityId.slice(0, -suffix.length);
+  const state = `${namespace}:field.stock_count_state`;
+  const mode = `${namespace}:field.stock_count_counting_mode`;
+  // Older count definitions do not have a mode.
+  if (
+    !Object.hasOwn(prior, mode) ||
+    prior[state] !== `${namespace}:option.stock_count_state_counting`
+  ) {
+    return;
+  }
+  if (Object.hasOwn(patch, mode) && patch[mode] !== prior[mode]) {
+    throw failure(
+      'MODULE_OPERATION_PRECONDITION_REFUSED',
+      'counting mode is fixed after Start counting',
+      entity.entityId,
+    );
+  }
+  if (Object.hasOwn(patch, state) && patch[state] !== prior[state]) {
+    throw failure(
+      'MODULE_OPERATION_PRECONDITION_REFUSED',
+      'use a stock count command to leave counting',
+      entity.entityId,
+    );
+  }
 }
 
 function acceptedCommand(

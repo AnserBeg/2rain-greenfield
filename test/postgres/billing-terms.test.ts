@@ -37,7 +37,7 @@ import {
   firstPartyAuthored,
   compiledApplication,
 } from '../helpers/customization-fixture.js';
-import { applicationWithoutLineCreateValues } from '../helpers/application-without-line-create-values.js';
+import { applicationBeforeStockCountWorkflow } from '../helpers/application-before-stock-count-workflow.js';
 import { withOrderEntryFixture } from '../helpers/order-entry-fixture.js';
 
 const id = (name: string) => 'northstar.app:' + name;
@@ -93,7 +93,7 @@ const plan = BillingPlanSchema.parse({
 });
 function release(mode: 'bound' | 'legacy' | 'declaration' = 'bound') {
   const compatibility =
-    mode === 'declaration' ? applicationWithoutLineCreateValues() : undefined;
+    mode === 'declaration' ? applicationBeforeStockCountWorkflow() : undefined;
   const p = parseAuthoredApplicationPackageJson(
     JSON.stringify(compatibility?.authored ?? firstPartyAuthored),
   );

@@ -317,10 +317,9 @@ export function stockCountPostingCommand(
  * lines are derived instead, each the exact inverse of a movement the count
  * it reverses posted.
  *
- * Return to counting (reviewed -> counting, never a reversal) keeps what was
- * entered for Review to read again; Cancel count (draft, counting or
- * reviewed -> cancelled) ends a count that is not posted. Neither touches a
- * line.
+ * Return to counting (reviewed -> counting, never a reversal) keeps physical
+ * entries and clears the figures derived at Review. Cancel count (draft,
+ * counting or reviewed -> cancelled) ends a count without changing its lines.
  *
  * Each runs as an idempotent accepted mutation: a key with a receipt replays
  * it whatever the count's revision is now, and only a new execution is held
@@ -435,6 +434,15 @@ export async function executeStockCountChange(
             count.kind === 'reversal'
               ? await deriveReversalLines(client, binding, request, count)
               : await reviewCountedLines(client, binding, request, count, now);
+        } else if (command === 'reopen') {
+          for (const line of count.lines) {
+            await updateLine(client, binding, request, count, line, {
+              counted: '0',
+              expected: '0',
+              variance: '0',
+            });
+          }
+          lineCount = count.lines.length;
         }
         const updated = await client.query<{ revision: number }>(
           `UPDATE ${table(binding.count)}
@@ -1018,7 +1026,7 @@ async function updateLine(
   if (updated.rowCount !== 1) {
     throw new InventoryPostingError(
       'INVENTORY_TRANSACTION_STATE_CONFLICT',
-      `count line ${line.lineNumber} changed while the count was reviewed`,
+      `count line ${line.lineNumber} changed while updating its review figures`,
     );
   }
 }

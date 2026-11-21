@@ -10,7 +10,7 @@ import test from 'node:test';
 
 import type pg from 'pg';
 
-import { applicationWithoutLineCreateValues } from '../helpers/application-without-line-create-values.js';
+import { applicationBeforeStockCountWorkflow } from '../helpers/application-before-stock-count-workflow.js';
 
 import { readActiveRelease } from '../../packages/postgres-provider/src/active-release-root.js';
 import {
@@ -1357,7 +1357,7 @@ test(
     await withEphemeralPostgres(
       'upgrade-layout-survival',
       async ({ connection, pool }) => {
-        const compatibility = applicationWithoutLineCreateValues();
+        const compatibility = applicationBeforeStockCountWorkflow();
         const options = {
           databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
           tenantSlug: 'upgrade-layout',
