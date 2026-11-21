@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import childProcess, { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { syncBuiltinESMExports } from 'node:module';
 import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import { mountDocumentHttp } from '../../apps/web/src/document-http.js';
@@ -86,28 +87,34 @@ test(
   },
 );
 
+function pdfWithPageTree(depth: number, nesting = 0) {
+  const objects = ['<< /Type /Catalog /Pages 2 0 R >>'];
+  for (let index = 0; index < depth; index++)
+    objects.push(`<< /Type /Pages /Count 1 /Kids [${index + 3} 0 R] >>`);
+  objects.push(
+    `<< /Type /Page /Parent ${depth + 1} 0 R /MediaBox [0 0 32 32] >>`,
+  );
+  if (nesting)
+    objects.push(
+      '<< /Fixture ' + '['.repeat(nesting) + '0' + ']'.repeat(nesting) + ' >>',
+    );
+  let source = '%PDF-1.4\n';
+  const offsets = ['0000000000 65535 f '];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(String(source.length).padStart(10, '0') + ' 00000 n ');
+    source += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
+  const xref = source.length;
+  return Buffer.from(
+    source +
+      `xref\n0 ${offsets.length}\n${offsets.join('\n')}\ntrailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`,
+  );
+}
+
 test('classic PDFs are accepted up to the parser page-tree depth limit', async (t) => {
   const { validateDocumentContent } =
     await import('../../packages/postgres-provider/src/document-content.js');
-  function pdfWithPageTree(depth: number) {
-    const objects = ['<< /Type /Catalog /Pages 2 0 R >>'];
-    for (let index = 0; index < depth; index++)
-      objects.push(`<< /Type /Pages /Count 1 /Kids [${index + 3} 0 R] >>`);
-    objects.push(
-      `<< /Type /Page /Parent ${depth + 1} 0 R /MediaBox [0 0 32 32] >>`,
-    );
-    let source = '%PDF-1.4\n';
-    const offsets = ['0000000000 65535 f '];
-    for (const [index, object] of objects.entries()) {
-      offsets.push(String(source.length).padStart(10, '0') + ' 00000 n ');
-      source += `${index + 1} 0 obj\n${object}\nendobj\n`;
-    }
-    const xref = source.length;
-    return Buffer.from(
-      source +
-        `xref\n0 ${offsets.length}\n${offsets.join('\n')}\ntrailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`,
-    );
-  }
+
   assert.equal(
     await validateDocumentContent(pdfWithPageTree(64), 'application/pdf'),
     'application/pdf',
@@ -140,5 +147,77 @@ test('classic PDFs are accepted up to the parser page-tree depth limit', async (
         'application/pdf',
       );
     },
+  );
+});
+
+test('parse-time nesting is checked outside the page tree', async () => {
+  const { validateDocumentContent } =
+    await import('../../packages/postgres-provider/src/document-content.js');
+  assert.equal(
+    await validateDocumentContent(pdfWithPageTree(1, 10), 'application/pdf'),
+    'application/pdf',
+  );
+  await assert.rejects(
+    validateDocumentContent(pdfWithPageTree(1, 65), 'application/pdf'),
+    { status: 415 },
+  );
+});
+test('the PDF subprocess inherits the OS resource limits', async (t) => {
+  const { validateDocumentContent } =
+    await import('../../packages/postgres-provider/src/document-content.js');
+  const spawn = childProcess.spawn;
+  t.mock.method(
+    childProcess,
+    'spawn',
+    (command: string, args: string[], options: childProcess.SpawnOptions) => {
+      const probe = `
+      import { readFileSync } from 'node:fs';
+      const limits = readFileSync('/proc/self/limits', 'utf8');
+      if (!/^Max address space\\s+1073741824\\s+1073741824/m.test(limits) ||
+          !/^Max cpu time\\s+4\\s+4/m.test(limits) ||
+          !/^Max core file size\\s+0\\s+0/m.test(limits)) process.exitCode = 1;
+      for await (const chunk of process.stdin) { void chunk; }
+    `;
+      return spawn(
+        command,
+        [...args.slice(0, -1), '--input-type=module', '-e', probe],
+        options,
+      );
+    },
+  );
+  syncBuiltinESMExports();
+  try {
+    assert.equal(
+      await validateDocumentContent(pdfWithPageTree(1), 'application/pdf'),
+      'application/pdf',
+    );
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  }
+});
+
+test('the API entry point refuses the demo scanner with an external database URL', () => {
+  const started = spawnSync(
+    process.execPath,
+    ['--import', 'tsx', 'apps/api/src/main.ts'],
+    {
+      env: {
+        ...process.env,
+        DATABASE_URL: 'invalid-external-database-url',
+        NORTH_STAR_DOCUMENT_DEMO_SCANNER: '1',
+        NORTH_STAR_DEV_DATABASE_CONTAINER:
+          'dev-composed-app-postgres-docs-1-test',
+        PORT: '0',
+      },
+      encoding: 'utf8',
+      timeout: 90_000,
+    },
+  );
+  assert.ifError(started.error);
+  assert.equal(started.status, 1, started.stderr);
+  assert.match(
+    started.stderr,
+    /The demo scanner requires a managed local demo database\./u,
   );
 });

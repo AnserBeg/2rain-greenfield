@@ -12,6 +12,7 @@ import { DOCUMENT_RESPONSE_MILLISECONDS } from '../../../packages/canonical-mode
 export function mountDocumentHttp(
   entry: AuthenticatedRequestRuntimeEntryAdapter,
   gateway: DocumentGateway,
+  responseMilliseconds = DOCUMENT_RESPONSE_MILLISECONDS,
 ) {
   let reads = 0;
   let writes = 0;
@@ -24,6 +25,12 @@ export function mountDocumentHttp(
   ) => {
     const mode = url.searchParams.get('mode');
     const upload = request.method === 'POST' && mode === 'upload';
+    const generate =
+      request.method === 'POST' && mode === 'generate' && gateway.generate;
+    const templatePreview =
+      request.method === 'GET' &&
+      mode === 'template-preview' &&
+      gateway.previewTemplate;
     const byteRead =
       request.method === 'GET' && (mode === 'download' || mode === 'preview');
     const list = request.method === 'GET' && mode === 'list';
@@ -33,23 +40,33 @@ export function mountDocumentHttp(
       "default-src 'none'; sandbox; frame-ancestors 'none'",
     );
     response.setHeader('x-content-type-options', 'nosniff');
-    if (!(upload || byteRead || list) || (upload && !sameOrigin)) {
+    const write = upload || Boolean(generate);
+    const read = byteRead || Boolean(templatePreview);
+    if (!(write || read || list) || (write && !sameOrigin)) {
       documentError(
         response,
-        upload ? 403 : 405,
+        write ? 403 : 405,
         'This file request is unavailable.',
       );
       return;
     }
-    if ((upload && writes >= 2) || (byteRead && reads >= 2)) {
+    if ((write && writes >= 2) || (read && reads >= 2)) {
       response.setHeader('retry-after', '1');
       documentError(response, 429, 'File transfers are busy. Try again.');
       return;
     }
-    if (upload) writes++;
-    if (byteRead) reads++;
+    if (write) writes++;
+    if (read) reads++;
     const controller = new AbortController();
-    const deadline = documentDeadline(controller.signal);
+    let publicationCommitting = false;
+    const deadline = documentDeadline(
+      controller.signal,
+      undefined,
+      () => {
+        publicationCommitting = true;
+      },
+      responseMilliseconds,
+    );
     let settle: () => void;
     const responseDone = new Promise<void>((resolve) => {
       settle = resolve;
@@ -63,12 +80,13 @@ export function mountDocumentHttp(
     response.once('close', close);
     response.once('finish', () => settle());
     const timer = setTimeout(() => {
+      if (publicationCommitting) return;
       controller.abort(
         new DocumentRequestError(408, 'The file response expired.'),
       );
       if (response.headersSent) response.destroy();
       else documentError(response, 408, 'The file response expired.');
-    }, DOCUMENT_RESPONSE_MILLISECONDS);
+    }, responseMilliseconds);
     const { remainingMilliseconds } = deadline;
 
     try {
@@ -80,6 +98,37 @@ export function mountDocumentHttp(
       await requestDeadline.run(remainingMilliseconds, () =>
         entry.run({ headers: request.headers }, async (view) => {
           remainingMilliseconds();
+          if (generate) {
+            const metadata = await generate.call(
+              gateway,
+              view,
+              target,
+              url.searchParams.get('template') ?? '',
+              url.searchParams.get('retryKey') ?? '',
+              controller.signal,
+              deadline,
+            );
+            if (!publicationCommitting) remainingMilliseconds();
+            return json(response, 201, metadata);
+          }
+          if (templatePreview) {
+            const bytes = await templatePreview.call(
+              gateway,
+              view,
+              target,
+              url.searchParams.get('template') ?? '',
+              controller.signal,
+              deadline,
+            );
+            remainingMilliseconds();
+            response.setHeader('content-type', 'application/pdf');
+            response.setHeader('content-length', bytes.length);
+            response.setHeader(
+              'content-disposition',
+              'inline; filename="template-preview.pdf"',
+            );
+            return response.end(bytes);
+          }
           if (upload) {
             const metadata = await gateway.upload(
               view,
@@ -121,7 +170,7 @@ export function mountDocumentHttp(
               controller.signal,
               deadline,
             );
-            remainingMilliseconds();
+            if (!publicationCommitting) remainingMilliseconds();
             return json(response, 201, metadata);
           }
           if (list) {
@@ -187,8 +236,8 @@ export function mountDocumentHttp(
       await responseDone;
       clearTimeout(timer);
       response.off('close', close);
-      if (upload) writes--;
-      if (byteRead) reads--;
+      if (write) writes--;
+      if (read) reads--;
     }
   };
 }
