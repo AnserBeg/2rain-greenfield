@@ -236,8 +236,11 @@ async function main(): Promise<void> {
     throw new Error('--cap must be a positive number of USD, at most 50');
   const wanted = args.cases.split(',').map((id) => id.trim());
   const cases = BUILD_CASES.filter((c) => wanted.includes(c.id));
+  // In the order given: under a hard cap, the last ones are the ones cut.
   const candidates = args.candidates
-    ? CANDIDATES.filter((c) => args.candidates!.split(',').includes(c.name))
+    ? args.candidates
+        .split(',')
+        .flatMap((name) => CANDIDATES.filter((c) => c.name === name.trim()))
     : CANDIDATES;
   if (!cases.length || !candidates.length)
     throw new Error('no cases or candidates selected');
