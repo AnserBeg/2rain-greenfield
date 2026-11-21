@@ -1,3 +1,4 @@
+import { applyMapRevision } from './map-revision.js';
 import type { ReplayOrigin } from './upgrade-diagnostics.js';
 import {
   applyBoardRevision,
@@ -65,6 +66,7 @@ export type CustomizationRefusalCode =
   | 'CUSTOMIZE_TARGET_NOT_FOUND'
   | 'CUSTOMIZE_LIST_VIEW_INVALID'
   | 'CUSTOMIZE_FIELD_NOT_ON_LIST'
+  | 'CUSTOMIZE_MAP_CONFLICT'
   | 'CUSTOMIZE_BOARD_CONFLICT'
   | 'CUSTOMIZE_LAYOUT_CONFLICT';
 
@@ -124,7 +126,8 @@ export function applyCustomizationPatches(
         layoutReplay = { source: target.body, findings: [], blocked: [] };
       }
       const board =
-        patch.kind === 'addBoardViewRevision'
+        patch.kind === 'addBoardViewRevision' ||
+        patch.kind === 'addMapViewRevision'
           ? {
               check: superseded.has(patch.revisionId)
                 ? ('identity' as const)
@@ -260,6 +263,28 @@ export function applyOne(
       return addLineTable(authored, patch);
     case 'declareLifecycle':
       return declareLifecycle(authored, patch);
+    case 'addMapViewRevision': {
+      if (
+        previous.some(
+          (p) =>
+            p.kind === 'addMapViewRevision' &&
+            p.revisionId === patch.revisionId,
+        )
+      )
+        return refusal(
+          'CUSTOMIZE_MAP_CONFLICT',
+          'This Map revision ID has already been used.',
+        );
+      const problem = applyMapRevision(
+        authored as unknown as BoardSource & { surfaces: Json[] },
+        patch,
+        board.check,
+      );
+      if (problem) board.problem = problem;
+      return problem
+        ? refusal('CUSTOMIZE_MAP_CONFLICT', problem.message)
+        : null;
+    }
     case 'addBoardViewRevision': {
       const problem = previous.some(
         (p) =>

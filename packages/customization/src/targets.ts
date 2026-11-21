@@ -1,3 +1,4 @@
+import { mapTargets, type MapTarget } from './map-revision.js';
 import { boardTargets, type BoardTarget } from './board-revision.js';
 import { currentLayout, type LayoutTarget } from './layout-revision.js';
 import { displayTypeForField } from '../../canonical-model/src/calculated-display-bindings.js';
@@ -25,6 +26,7 @@ import type { LiteralValidationTarget } from './validation-draft.js';
  * again when it is applied.
  */
 export interface CustomizationTargets {
+  readonly maps?: readonly MapTarget[];
   readonly boards?: readonly BoardTarget[];
   readonly layouts?: readonly LayoutTarget[];
   readonly documentTargets?: readonly {
@@ -560,6 +562,7 @@ export function customizationTargets(definition: {
         }))
         .sort((left, right) => left.label.localeCompare(right.label)),
     }),
+    maps: mapTargets(definition),
     boards: boardTargets(definition),
     layouts: definition.surfaces.flatMap((s) =>
       (['create', 'edit', 'detail'] as const).flatMap((mode) => {

@@ -91,6 +91,17 @@ export const AddressProjectionSchema = z
       )
       .max(128),
     retiredFieldIds: z.array(id).min(1).max(128).optional(),
+    viewports: z
+      .array(
+        z.strictObject({
+          surfaceId: id,
+          fieldId: id,
+          contract: z.literal('map.viewport/v1'),
+        }),
+      )
+      .min(1)
+      .max(128)
+      .optional(),
     placements: z.array(MapPlacementSchema).max(128),
     layouts: z.array(LayoutBodySchema).max(128),
   })

@@ -371,7 +371,8 @@ export function replayCustomizationPatches(
         // A Board checks its own bindings by stable ID, and only on the last
         // revision of each Board surface (ADR-0086 items 4 and 5).
         const board =
-          patch.kind === 'addBoardViewRevision'
+          patch.kind === 'addBoardViewRevision' ||
+          patch.kind === 'addMapViewRevision'
             ? {
                 check: (superseded.has(patch.revisionId)
                   ? 'identity'

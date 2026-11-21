@@ -180,3 +180,5 @@ export type { FormulaValidationRule } from './formula-validation-schema.js';
 export * from './address.js';
 
 export * from './booking.js';
+export * from './map-view.js';
+export * from './map-viewport.js';

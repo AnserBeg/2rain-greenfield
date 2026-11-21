@@ -6,6 +6,8 @@ import { recordCatalogParse } from '../../../packages/runtime/src/catalog-parse-
 import {
   BoardPresentationSchema,
   SurfaceBoardSchema,
+  SurfaceMapSchema,
+  type SurfaceMap,
   type BoardPresentation,
   type SurfaceBoard,
   canonicalize,
@@ -57,6 +59,7 @@ type SurfaceManifestPayloadVersion =
 
 const archetypes = [
   'board',
+  'map',
   'builder',
   'home',
   'list',
@@ -88,6 +91,7 @@ export const COMPILED_FIELD_KINDS = Object.freeze([
   'timeFieldType',
 ] as const);
 const slotsByArchetype = Object.freeze({
+  map: Object.freeze(['title', 'savedViews', 'mapCanvas', 'stopList']),
   board: Object.freeze(['title', 'savedViews', 'stageSelector', 'columns']),
   builder: Object.freeze([
     'modeSwitch',
@@ -312,6 +316,7 @@ export function formFieldIds(
 }
 
 export interface CompiledSurfaceDefinition {
+  readonly map?: SurfaceMap;
   readonly board?: SurfaceBoard;
   /** The Board's labels and roles, compiled from this release beside `board`. */
   readonly boardPresentation?: BoardPresentation;
@@ -1139,6 +1144,7 @@ function parseSurface(
   const fields = parseSurfaceFields(value, index);
 
   return Object.freeze({
+    ...(archetype === 'map' ? { map: SurfaceMapSchema.parse(value.map) } : {}),
     ...(archetype === 'board'
       ? {
           board: SurfaceBoardSchema.parse(value.board),

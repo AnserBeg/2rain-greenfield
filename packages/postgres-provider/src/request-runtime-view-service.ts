@@ -1,5 +1,7 @@
+import { mapBindingsProblem } from './map-admission.js';
 import { boardBindingsProblem } from './board-admission.js';
 import {
+  VIEWPORT_READER,
   ADDRESS_FIELD_READER,
   ADDRESS_MAP_READER,
   AddressProjectionSchema,
@@ -1042,6 +1044,12 @@ function definitionFromSnapshotRows(
     }
   }
   const problem =
+    mapBindingsProblem(
+      surface.payload,
+      surface.requiredRuntimeCapability?.minimumVersion ?? 0,
+      query.payload,
+      connector?.payload,
+    ) ??
     boardBindingsProblem(
       surface.payload,
       surface.requiredRuntimeCapability?.minimumVersion ?? 0,
@@ -1449,9 +1457,11 @@ export function addressProjectionRefusal(release: {
   if (!release.declared) return null;
   const parsed = AddressProjectionSchema.safeParse(release.connector());
   if (!parsed.success) return invalid;
-  const required = parsed.data.placements.length
-    ? ADDRESS_MAP_READER
-    : ADDRESS_FIELD_READER;
+  const required = parsed.data.viewports?.length
+    ? VIEWPORT_READER
+    : parsed.data.placements.length
+      ? ADDRESS_MAP_READER
+      : ADDRESS_FIELD_READER;
   if (floor < required) return invalid;
   const pinned = canonicalize(parsed.data.bindings);
   if (

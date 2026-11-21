@@ -4,6 +4,7 @@ import type { CustomizationPatchKind } from './patch.js';
 export const UPGRADE_PATCH_KINDS: ReadonlySet<string> = new Set([
   'addAddressField',
   'addMapPlacement',
+  'addMapViewRevision',
   'addBoardViewRevision',
   'addRecordType',
   'addField',

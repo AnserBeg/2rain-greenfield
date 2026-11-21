@@ -1,4 +1,9 @@
 import {
+  hasMapDeclaration,
+  mapDeclarationProblem,
+  mapBindingsProblem,
+} from './map-admission.js';
+import {
   BILLING_READER,
   BILLING_INTERVAL_READER,
 } from '../../canonical-model/src/billing.js';
@@ -593,6 +598,7 @@ function verifyCompiledRelease(
     layoutDefinition,
   );
   const needsLayout =
+    hasMapDeclaration(layoutDefinition) ||
     hasBoardDeclaration(layoutDefinition) ||
     declaredLayouts(isRecord(layoutDefinition) ? layoutDefinition.surfaces : [])
       .length > 0;
@@ -769,6 +775,7 @@ function verifyCompiledRelease(
           'The billing plan or reader floor disagrees with the release.',
         );
       const problem =
+        mapDeclarationProblem(layoutDefinition, payload) ??
         boardDeclarationProblem(
           layoutDefinition,
           payload,
@@ -785,6 +792,7 @@ function verifyCompiledRelease(
     if (
       needsLayout &&
       [
+        PROJECTION_FAMILY_IDS.connector,
         PROJECTION_FAMILY_IDS.surfaceManifest,
         PROJECTION_FAMILY_IDS.queryCatalog,
         PROJECTION_FAMILY_IDS.operationCatalog,
@@ -828,6 +836,12 @@ function verifyCompiledRelease(
         : null;
     };
     const problem =
+      mapBindingsProblem(
+        payload(PROJECTION_FAMILY_IDS.surfaceManifest),
+        surfaceReference!.requiredRuntimeCapability.minimumVersion,
+        payload(PROJECTION_FAMILY_IDS.queryCatalog),
+        payload(PROJECTION_FAMILY_IDS.connector),
+      ) ??
       boardBindingsProblem(
         payload(PROJECTION_FAMILY_IDS.surfaceManifest),
         surfaceReference!.requiredRuntimeCapability.minimumVersion,

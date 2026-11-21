@@ -7,6 +7,8 @@ import {
   ADDRESS_MAP_READER,
   CONNECTOR_PAYLOAD,
   type AddressProjection,
+  VIEWPORT_READER,
+  MAP_VIEW_READER,
   BOARD_READER,
   boardPresentation,
   type BoardSource,
@@ -425,9 +427,11 @@ export function lowerBaseProjectionPayloads(
           ...projection.requiredRuntimeCapability,
           minimumVersion: Math.max(
             projection.requiredRuntimeCapability.minimumVersion,
-            address.placements.length
-              ? ADDRESS_MAP_READER
-              : ADDRESS_FIELD_READER,
+            address.viewports?.length
+              ? VIEWPORT_READER
+              : address.placements.length
+                ? ADDRESS_MAP_READER
+                : ADDRESS_FIELD_READER,
           ),
         };
     }
@@ -1098,25 +1102,27 @@ function surfaceManifestPayload(
       ),
   );
   // Board v2 is the highest rung: a Board release needs it whatever else it has.
-  const surfaceFloor = original.surfaces.some((s) => s.archetype === 'board')
-    ? BOARD_READER
-    : lineCreateValues
-      ? LINE_CREATE_VALUES_SURFACE_FLOOR
-      : replayedLayout
-        ? REPLAYED_LAYOUT_READER
-        : original.surfaces.some((s) => 'layouts' in s && s.layouts)
-          ? LAYOUT_READER
-          : extendedEditor || declaredRelationList
-            ? 26
-            : hasMetrics(original)
-              ? 25
-              : hasSavedListLayouts(original)
-                ? 24
-                : recordFieldPresentation
-                  ? 23
-                  : rankedDefaultsOrChainedTasks
-                    ? 22
-                    : null;
+  const surfaceFloor = original.surfaces.some((s) => s.archetype === 'map')
+    ? MAP_VIEW_READER
+    : original.surfaces.some((s) => s.archetype === 'board')
+      ? BOARD_READER
+      : lineCreateValues
+        ? LINE_CREATE_VALUES_SURFACE_FLOOR
+        : replayedLayout
+          ? REPLAYED_LAYOUT_READER
+          : original.surfaces.some((s) => 'layouts' in s && s.layouts)
+            ? LAYOUT_READER
+            : extendedEditor || declaredRelationList
+              ? 26
+              : hasMetrics(original)
+                ? 25
+                : hasSavedListLayouts(original)
+                  ? 24
+                  : recordFieldPresentation
+                    ? 23
+                    : rankedDefaultsOrChainedTasks
+                      ? 22
+                      : null;
   const payloadSchemaVersion = composed
     ? COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION
     : navigation
@@ -1197,6 +1203,9 @@ function surfaceManifestPayload(
                   },
           }),
           // Labels and roles render from this release, beside the digested member.
+          ...(declared && 'map' in declared && declared.map
+            ? { map: declared.map }
+            : {}),
           ...(declared && 'board' in declared && declared.board
             ? {
                 board: declared.board,
