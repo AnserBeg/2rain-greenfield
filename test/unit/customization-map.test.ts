@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
+import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { renderMapStopList } from '../../apps/web/src/map-view.js';
@@ -13,6 +15,8 @@ import {
 } from '../../packages/canonical-model/src/index.js';
 import {
   applyCustomizationPatches,
+  compileInSandbox,
+  serializeRelease,
   CustomizationPatchSchema,
   customizationTargets,
   draftMapRevision,
@@ -232,6 +236,70 @@ test('overflow displays the governed page size', async () => {
     assert.doesNotMatch(
       renderMapStopList([], last.mapCoverage!, null),
       /Showing|Next/u,
+    );
+  }
+});
+
+test('a label-only upgrade compiles active and retired Map choices', async () => {
+  const { target, choice } = offered();
+  const active = draftMapRevision(target, choice);
+  const retired = draftMapRevision(
+    target,
+    choice,
+    {
+      surfaceId: active.surfaceId,
+      revisionId: active.revisionId,
+      body: active.body,
+      lifecycle: 'active',
+      label: active.label,
+    },
+    true,
+  );
+  const authoring = applied(chain);
+  const relabelled = structuredClone(authoring);
+  const field = (
+    relabelled.fields as { fieldId: string; label: string }[]
+  ).find((f) => f.fieldId === choice.orderFieldId)!;
+  field.label = 'Visit order';
+  const followups = [
+    CustomizationPatchSchema.parse({
+      kind: 'addField',
+      entity,
+      field: { type: 'text', label: 'Arrival instructions' },
+      screens: 'record',
+    }),
+    CustomizationPatchSchema.parse({
+      kind: 'arrangeLayout',
+      surface: choice.surface,
+      relabel: [{ field: choice.orderFieldId, label: 'Visit number' }],
+    }),
+  ];
+  const { application } = parseCompiledApplication(
+    JSON.parse(readFileSync('apps/web/release/app.compiled.json', 'utf8')),
+  );
+  const tip = serializeRelease(application);
+  const acknowledgement = readUnboundPermissionAcknowledgementFor(
+    'apps/web/release/app.authored.json',
+    'northstar.app:package.application',
+  );
+  for (const revisions of [[active], [active, retired]]) {
+    const changes = [...revisions, ...followups];
+    const result = await compileInSandbox({
+      base: relabelled,
+      acknowledgement,
+      tip,
+      chain: changes,
+      upgradeBaseRoot: tip.releaseRoot,
+      origins: changes.map((_, i) => ({
+        patchId: randomUUID(),
+        differentBase: true,
+        ...(i === 0 && { parent: authoring }),
+      })),
+    });
+    assert.equal(
+      result.status,
+      'compiled',
+      JSON.stringify(result.status === 'compiled' ? null : result),
     );
   }
 });
