@@ -165,7 +165,9 @@ export function runSandboxRequest<T>(
         reject(
           new SandboxFailure(
             'SANDBOX_TIMED_OUT',
-            `the isolated ${kind} did not finish within ${String(wallClock)} ms`,
+            kind === 'verifyWorkflowDraft'
+              ? 'The workflow draft took too long to verify.'
+              : `the isolated compile did not finish within ${String(wallClock)} ms`,
           ),
         );
       });

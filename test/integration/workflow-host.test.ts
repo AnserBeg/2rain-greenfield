@@ -566,6 +566,8 @@ test('both sandbox requests discard serving credentials and cannot open the conn
 });
 
 test('the parent kills an unfinished workflow draft at its verification deadline', async () => {
+  const { fork } = await import('node:child_process');
+  let exitSignal: Promise<NodeJS.Signals | null> | undefined;
   let limit;
   await assert.rejects(
     verifyWorkflowBundle(
@@ -573,6 +575,18 @@ test('the parent kills an unfinished workflow draft at its verification deadline
       { queries: [], operations: [] },
       { body: 'for (;;) {}', fixtures: [{ event, effects: [] }] },
       {
+        launch(path, argv, env) {
+          const child = fork(path, [], {
+            env,
+            execArgv: [...argv],
+            serialization: 'advanced',
+            stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+          });
+          exitSignal = new Promise((resolve) =>
+            child.once('exit', (_code, signal) => resolve(signal)),
+          );
+          return child;
+        },
         startTimer(milliseconds, expire) {
           limit = milliseconds;
           queueMicrotask(expire);
@@ -580,19 +594,23 @@ test('the parent kills an unfinished workflow draft at its verification deadline
         },
       },
     ),
-    { code: 'SANDBOX_TIMED_OUT' },
+    {
+      code: 'SANDBOX_TIMED_OUT',
+      message: 'The workflow draft took too long to verify.',
+    },
   );
+  assert.equal(await exitSignal, 'SIGKILL');
   assert.equal(limit, 30_000);
 });
 
-test('review uses each of the first five journals and marks the exact unvisited call site', async () => {
+test('workflow review traces the exact site even when both branches call the same method', async () => {
   const body =
     'if (event.receiptId === event.eventId) { sdk.now(); } else { for (let i=0;i<1;i++) sdk.now(); }';
   const mocked = { call: { kind: 'now' }, result: day };
   const grants = { queries: [queryId], operations: [] };
   const verified = await verifyWorkflowBundle(view, grants, {
     body,
-    fixtures: Array.from({ length: 6 }, () => ({ event, effects: [mocked] })),
+    fixtures: [{ event, effects: [mocked] }],
   });
   const { renderWorkflowReview } =
     await import('../../packages/postgres-provider/src/workflow-review.js');
@@ -612,10 +630,10 @@ test('review uses each of the first five journals and marks the exact unvisited 
       new Set(),
     );
   const review = render(body);
-  assert.deepEqual(verified.coverage, [[1], [1], [1], [1], [1], [1]]);
+  assert.deepEqual(verified.coverage, [[1]]);
   assert.equal(
     review.text.match(/Reads the current time without asking/g)?.length,
-    5,
+    1,
   );
   assert.match(review.text, /now \(conditional\) · not shown in any test/);
   assert.match(review.text, /now \(conditional\) \(in a loop\)\n/);
@@ -778,5 +796,52 @@ test('the parent refuses a passed verification response missing the requested jo
       },
     ),
     /mismatched fixture journal/,
+  );
+});
+
+test('review uses each of the first five journals in order', async () => {
+  const { renderWorkflowReview } =
+    await import('../../packages/postgres-provider/src/workflow-review.js');
+  const sites = [
+    {
+      method: 'sleep' as const,
+      target: null,
+      line: 1,
+      fields: [],
+      branch: false,
+      loop: false,
+    },
+  ];
+  const days = [1, 2, 3, 4, 5, 6];
+  const model = {
+    sites,
+    coverage: days.map(() => [0]),
+    journals: days.map((d) => [
+      {
+        request: canonicalize({ kind: 'sleep', milliseconds: d * 86400000 }),
+        result: 'null',
+      },
+    ]),
+  };
+  const workflow = {
+    schemaVersion: 'v6' as const,
+    workflowId: 'delay',
+    trigger: 'goodsReceiptPosted' as const,
+    bodyDigest: '1'.repeat(64),
+    grants: { queries: [], operations: [] },
+  };
+  const review = renderWorkflowReview(
+    workflow,
+    'sdk.sleep(1);',
+    model,
+    new Map(),
+    new Set(),
+  );
+  assert.deepEqual(
+    review.text.split('\n').filter((line) => line.startsWith('Waits ')),
+    [
+      'Waits 1 day without asking.',
+      ...days.slice(1, 5).map((d) => `Waits ${d} days without asking.`),
+    ],
   );
 });
