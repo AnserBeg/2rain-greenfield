@@ -123,6 +123,9 @@ export function recordingModel(
         ? await meteredNext(inner, meter, request)
         : { turn: await inner.next(request), usd: 0 };
       const previous = request.conversation.at(-1);
+      // A turn drafted ahead (draft-first runs) carries its own latency.
+      const recorded = (turn as { recordedLatencyMs?: number })
+        .recordedLatencyMs;
       calls.push({
         turn: calls.length + 1,
         feedback:
@@ -134,7 +137,7 @@ export function recordingModel(
             : previous?.role === 'user' && calls.length > 0
               ? previous.text.slice(0, 2000)
               : '',
-        latencyMs: Math.round(performance.now() - started),
+        latencyMs: recorded ?? Math.round(performance.now() - started),
         usage: turn.usage,
         usd,
         stop: turn.stop,
@@ -929,6 +932,88 @@ async function installBase(
     await service.activate(draft.patchId);
   }
 }
+
+// ---------------------------------------------------------------- draft first
+
+/** The exact first request the in-app path sends the drafting model for a case. */
+export interface CapturedPrompt {
+  readonly id: string;
+  readonly system: string;
+  readonly tools: Parameters<ModelAdapter['next']>[0]['tools'];
+  readonly conversation: Parameters<ModelAdapter['next']>[0]['conversation'];
+}
+
+class PromptCaptured extends Error {}
+
+/**
+ * Draft-first runs (slice 2 cost cuts): the case's base is installed on a
+ * fresh world and the in-app path is started, but its first model request is
+ * recorded and stopped. Nothing is drafted or recorded in the database.
+ */
+export async function capturePrompt(
+  world: AgentWorld,
+  c: BuildCase,
+): Promise<CapturedPrompt> {
+  let captured: CapturedPrompt | undefined;
+  const opened = await openCustomizeService({
+    databaseUrl: world.databaseUrl,
+    tenantSlug: world.tenantSlug,
+    draftingProvider: () =>
+      Promise.resolve({
+        modelId: 'capture',
+        next(request) {
+          captured = {
+            id: c.id,
+            system: request.system,
+            tools: request.tools,
+            conversation: request.conversation,
+          };
+          return Promise.reject(new PromptCaptured('captured'));
+        },
+      } satisfies ModelAdapter),
+  });
+  try {
+    if (c.base?.length) await installBase(opened.service, c.base);
+    await opened.service.draftFromRequest(c.request).catch((error: unknown) => {
+      if (!(error instanceof PromptCaptured)) throw error;
+    });
+  } finally {
+    await opened.close();
+  }
+  if (!captured) throw new Error(`${c.id}: no drafting request was made`);
+  return captured;
+}
+
+/**
+ * The model for the scoring phase of a draft-first run: the first turn is the
+ * one drafted ahead (replayed only if the in-app path sends exactly the
+ * captured request), later turns (repairs) go to the live model.
+ */
+export function draftedAheadModel(
+  ahead: { readonly prompt: CapturedPrompt; readonly turn: ModelTurnAhead },
+  live: ModelAdapter,
+  onMismatch: () => void,
+): ModelAdapter {
+  let first = true;
+  return {
+    modelId: live.modelId,
+    next(request) {
+      const replay =
+        first &&
+        request.system === ahead.prompt.system &&
+        JSON.stringify(request.tools) === JSON.stringify(ahead.prompt.tools) &&
+        JSON.stringify(request.conversation) ===
+          JSON.stringify(ahead.prompt.conversation);
+      if (first && !replay) onMismatch();
+      first = false;
+      return replay ? Promise.resolve(ahead.turn) : live.next(request);
+    },
+  };
+}
+
+export type ModelTurnAhead = Awaited<ReturnType<ModelAdapter['next']>> & {
+  readonly recordedLatencyMs: number;
+};
 
 export interface CaseOptions {
   /** A fresh adapter for this case: the live model, or a scripted one. */

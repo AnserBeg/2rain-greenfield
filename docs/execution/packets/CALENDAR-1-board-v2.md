@@ -21,7 +21,7 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44839630
 - The builder offers every list-query-selected field of the type as a fact. The type's key facts and column priority remain the default (E11).
 - **Not expressible today:** a validation rule binds only create and update operations (`CANON_VALIDATION_BINDING_UNSUPPORTED`). The E15 validation case and finding 3's "validation refusal leaves the card in place" have no platform form. A test pins that refusal.
 - A company-scoped membership cannot list companies, so it cannot open any workspace page (Lists included; existing behaviour). The scoped Board read is proven at the query gateway; the HTTP pages use the unscoped buyer with an explicit company.
-- Drafter coverage (MIGRATION-RULE item 12) is a named exception until AI-BUILD-1 adds the fail-closed test; the drafter emits v2 with explicit IDs.
+- Drafter coverage (MIGRATION-RULE item 12) is a named exception until AI-BUILD-1 adds the fail-closed test; the drafter emits v2 with explicit IDs.  Closed 2026-11-21 by AI-BUILD-1 slice 2: `test/unit/customization-ai-draft-slice2.test.ts` fails closed on drafter coverage, and the drafter also drafts a board with its new record type.
 - The automation-only proof grants the transitions to a separate policy principal and withholds them from the person. It does not deploy a workflow.
 - A stage relabel replays clean. Shipping it is refused by the storage planner's retype rule (`COMPILER_STORAGE_RETYPE_UNSUPPORTED`), which is not a Board rule. The proof therefore checks replay and normalization for that case and compiles the fact-column and operation relabels.
 - Local dev tenants that activated a v1 Board need `dev:reset` (E14).

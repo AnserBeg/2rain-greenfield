@@ -19,6 +19,7 @@
  */
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { performance } from 'node:perf_hooks';
 import { parseArgs } from 'node:util';
 
 import {
@@ -26,6 +27,7 @@ import {
   AGENT_KEY_FILE_VARIABLE,
   DEFAULT_ANTHROPIC_MODEL,
   loadModelKey,
+  meteredNext,
   scriptedModel,
   SpendMeter,
 } from '../../packages/operations-agent/src/index.js';
@@ -33,11 +35,15 @@ import {
 import { withAgentWorlds } from './agent-world.js';
 import { BUILD_CASES, type BuildCase } from './build-eval-cases.js';
 import {
+  capturePrompt,
+  draftedAheadModel,
   errorText,
   redactSecrets,
   runBuildCase,
   summarize,
+  type CapturedPrompt,
   type CaseResult,
+  type ModelTurnAhead,
 } from './build-eval.js';
 
 async function main(): Promise<void> {
@@ -69,6 +75,14 @@ async function main(): Promise<void> {
       // Rescore: replay the drafts recorded in an earlier run's transcripts
       // through a scripted model, so only the scorer runs again. No key.
       replay: { type: 'string' },
+      // Draft first (slice 2 cost cuts): capture every case's first request,
+      // draft them back to back while the prompt cache is warm, then compile,
+      // verify, activate and score each from its saved draft. Repair turns
+      // need the compile result, so they stay inline with the 1-hour cache.
+      'draft-first': { type: 'boolean', default: true },
+      // Where the captured prompts go (scratch, never committed), so a later
+      // bake-off sends exactly the in-app requests.
+      'prompts-out': { type: 'string' },
     },
   });
   const cap = Number(args.cap);
@@ -132,7 +146,61 @@ async function main(): Promise<void> {
     process.stdout.write(`${redactSecrets(line, secrets)}\n`);
 
   const results: CaseResult[] = [];
+  const mismatched: string[] = [];
   await withAgentWorlds('build-eval', async (worlds) => {
+    const ahead = new Map<
+      string,
+      { prompt: CapturedPrompt; turn: ModelTurnAhead }
+    >();
+    if (model && args['draft-first']) {
+      const prompts: CapturedPrompt[] = [];
+      for (const c of cases) {
+        const world = await worlds.fresh(`capture-${c.id}`);
+        try {
+          prompts.push(await capturePrompt(world, c));
+          say(`${c.id}: prompt captured`);
+        } catch (error) {
+          say(`${c.id}: prompt not captured: ${errorText(error, secrets)}`);
+        } finally {
+          await world.close();
+        }
+      }
+      const promptsOut = args['prompts-out'];
+      if (promptsOut) {
+        await mkdir(resolve(promptsOut), { recursive: true });
+        for (const prompt of prompts)
+          await writeFile(
+            join(resolve(promptsOut), `${prompt.id}.json`),
+            redactSecrets(JSON.stringify(prompt), secrets),
+          );
+      }
+      // The drafts, back to back. Charged here only to keep the cap; the
+      // scoring phase charges the same turn to the run's meter.
+      const draftMeter = new SpendMeter(prices, cap);
+      for (const prompt of prompts) {
+        if (draftMeter.exhausted()) break;
+        const started = performance.now();
+        try {
+          const { turn } = await meteredNext(model, draftMeter, {
+            system: prompt.system,
+            tools: prompt.tools,
+            conversation: prompt.conversation,
+          });
+          ahead.set(prompt.id, {
+            prompt,
+            turn: {
+              ...turn,
+              recordedLatencyMs: Math.round(performance.now() - started),
+            },
+          });
+          say(
+            `${prompt.id}: drafted ahead · cache read ${String(turn.usage.cacheReadTokens)} · total $${draftMeter.usd.toFixed(4)}`,
+          );
+        } catch (error) {
+          say(`${prompt.id}: not drafted ahead: ${errorText(error, secrets)}`);
+        }
+      }
+    }
     for (const c of cases) {
       if (meter.exhausted()) {
         results.push(notRun(c));
@@ -154,9 +222,13 @@ async function main(): Promise<void> {
         const recorded = replays
           ? await recordedTurns(replays, c.id)
           : undefined;
+        const drafted = ahead.get(c.id);
         const result = await runBuildCase(world, c, {
           provider: () =>
-            model ?? scriptedModel(recorded!.turns.map((turn) => () => turn)),
+            model && drafted
+              ? draftedAheadModel(drafted, model, () => mismatched.push(c.id))
+              : (model ??
+                scriptedModel(recorded!.turns.map((turn) => () => turn))),
           ...(model ? { meter } : {}),
           log,
         });
@@ -201,6 +273,10 @@ async function main(): Promise<void> {
           model: modelId,
           effort: args.effort,
           ...(replay ? { rescoredFrom: replay, rescored: wanted } : {}),
+          draftFirst: !!(model && args['draft-first']),
+          // Cases whose in-app first request differed from the captured one
+          // (their first turn was then drafted live, not ahead).
+          promptMismatches: mismatched,
           cap,
           prices,
           summary,
