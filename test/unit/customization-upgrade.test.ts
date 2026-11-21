@@ -136,6 +136,30 @@ const workflow = {
     grants: { queries: [id('query.custom_equipment_list')], operations: [] },
   },
 };
+const template = {
+  kind: 'addDocumentTemplateRevision',
+  schemaVersion: 'northstar.document-template-revision/v1',
+  templateId: id('template.custom_equipment_sheet'),
+  revisionId: id('revision.custom_equipment_sheet_1'),
+  previousRevisionId: null,
+  entityId: equipment,
+  label: 'Equipment sheet',
+  documentKind: 'workOrder',
+  headerQueryId: id('query.custom_equipment_get'),
+  identityFieldId: id('field.custom_equipment_name'),
+  currencyFieldId: null,
+  format: {
+    locale: 'en-CA',
+    timeZone: 'America/Edmonton',
+    currency: 'CAD',
+    dateStyle: 'medium',
+    numberGrouping: true,
+    pageSize: 'LETTER',
+  },
+  layout: [{ kind: 'heading', text: 'Equipment sheet' }],
+  pageNumbers: true,
+};
+const templated = applied(extended, [template]);
 interface ReplayCase {
   source: Base;
   conflict: Base;
@@ -278,6 +302,18 @@ const cases = {
       },
     ],
   }),
+  addDocumentTemplateRevision: retired(template),
+  retireDocumentTemplate: {
+    source: templated,
+    conflict: extended,
+    change: {
+      kind: 'retireDocumentTemplate',
+      schemaVersion: 'northstar.document-template-retire/v1',
+      templateId: template.templateId,
+      previousRevisionId: template.revisionId,
+    },
+    code: 'RETIRED_TARGET',
+  },
   narrowPermission: occupied(limit, 'WHOLE_PACKAGE_FAILURE'),
   unNarrowPermission: {
     source: applied(base, [limit]),
@@ -289,6 +325,36 @@ const cases = {
   changeSet: retired({ kind: 'changeSet', patches: [field, files] }),
 } satisfies Record<customization.CustomizationPatchKind, ReplayCase>;
 
+test('an active or retired template never blocks editing its record type', async () => {
+  const retire = {
+    kind: 'retireDocumentTemplate',
+    schemaVersion: 'northstar.document-template-retire/v1',
+    templateId: template.templateId,
+    previousRevisionId: template.revisionId,
+  };
+  const arrange = {
+    kind: 'arrangeLayout',
+    surface: id('surface.custom_equipment_list'),
+    relabel: [{ field: id('field.custom_equipment_name'), label: 'Tool' }],
+  };
+  for (const state of [[template], [template, retire]])
+    for (const edit of [field, arrange]) {
+      const result = await customization.compileInSandbox({
+        acknowledgement,
+        base: extended,
+        chain: [...state, edit].map(patch),
+        tip: customization.serializeRelease(tip),
+      });
+      assert.equal(
+        result.status,
+        'compiled',
+        `${state.length === 1 ? 'active' : 'retired'} template, ${edit.kind}: ${JSON.stringify(result)}`.slice(
+          0,
+          2000,
+        ),
+      );
+    }
+});
 test('upgrade replay admission and its named cases cover the independently parsed vocabulary', () => {
   const admitted = [...customization.UPGRADE_PATCH_KINDS].sort();
   assert.deepEqual(

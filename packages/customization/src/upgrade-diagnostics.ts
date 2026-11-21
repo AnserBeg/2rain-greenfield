@@ -19,6 +19,8 @@ export const UPGRADE_PATCH_KINDS: ReadonlySet<string> = new Set([
   'addMetricCard',
   'addDocumentField',
   'addUploadCategory',
+  'addDocumentTemplateRevision',
+  'retireDocumentTemplate',
   'narrowPermission',
   'unNarrowPermission',
   'saveWorkflow',
