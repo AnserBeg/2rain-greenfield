@@ -1164,11 +1164,11 @@ function governedScripts(): readonly (readonly [string, string])[] {
   // individually leased, CI-invoked scripts. Its outer lease spans their children.
   assert.equal(
     manifest.scripts?.['test:postgres'],
-    "node scripts/run-with-test-lock.mjs exclusive -- bash -c 'corepack pnpm test:postgres:1 && corepack pnpm test:postgres:2 && corepack pnpm test:postgres:3 && corepack pnpm test:postgres:4 && corepack pnpm test:postgres:5 && corepack pnpm test:postgres:6 && corepack pnpm test:postgres:7'",
+    "node scripts/run-with-test-lock.mjs exclusive -- bash -c 'corepack pnpm test:postgres:1 && corepack pnpm test:postgres:2 && corepack pnpm test:postgres:3 && corepack pnpm test:postgres:4 && corepack pnpm test:postgres:5 && corepack pnpm test:postgres:6 && corepack pnpm test:postgres:7 && corepack pnpm test:postgres:8 && corepack pnpm test:postgres:9'",
   );
   assert.equal(
     manifest.scripts?.['test:postgres:inventory'],
-    "node scripts/run-with-test-lock.mjs exclusive -- bash -c 'corepack pnpm test:postgres:inventory:balances && corepack pnpm test:postgres:inventory:posting'",
+    "node scripts/run-with-test-lock.mjs exclusive -- bash -c 'corepack pnpm test:postgres:inventory:balances && corepack pnpm test:postgres:inventory:counts && corepack pnpm test:postgres:inventory:posting'",
   );
   return Object.entries(manifest.scripts ?? {}).filter(
     ([script]) =>

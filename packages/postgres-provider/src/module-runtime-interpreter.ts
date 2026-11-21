@@ -29,6 +29,7 @@ import {
   addressComponents,
   addressJson,
 } from '@north-star/canonical-model';
+import { declaredDateTimeFields } from './date-time-admission.js';
 import { enqueueAddress } from './address-geocodes.js';
 import {
   DateTimeEntryError,
@@ -43,6 +44,7 @@ import {
   type BusinessCalendarContext,
 } from './date-time-storage.js';
 import {
+  CONTENT_HASH_DOMAIN,
   DateTimeWriteSchema,
   canonicalZone,
   formatRecordZone,
@@ -732,6 +734,7 @@ export class PostgresModuleRuntimeInterpreter
         const disagreement = dateTimeStorageDisagreement(
           request.view.projections.operation.payload,
           currentStorage,
+          currentStorage.retiredDateTimeFields,
         );
         if (disagreement)
           throw failure(
@@ -770,6 +773,7 @@ export class PostgresModuleRuntimeInterpreter
               ? await resolveDateTimeInput(
                   client,
                   currentEntity,
+                  currentStorage,
                   request.definition.effect.kind,
                   assigned,
                   calendar,
@@ -1030,12 +1034,16 @@ export class PostgresModuleRuntimeInterpreter
   #loadPinnedStorageTarget(
     client: PoolClient,
     request: Pick<SemanticQueryExecutionRequest, 'view' | 'context'>,
-  ): Promise<StorageTargetPayloadV1> {
+  ): Promise<PinnedStorageTarget> {
     const key = pinnedStorageTargetCacheKey(request);
     return this.#pinnedStorageTargets.get(key, (observeValidation) =>
       loadPinnedStorageTarget(client, request, observeValidation),
     );
   }
+}
+
+interface PinnedStorageTarget extends StorageTargetPayloadV1 {
+  retiredDateTimeFields: ReadonlySet<string>;
 }
 
 export interface PinnedStorageTargetCacheKey {
@@ -1067,8 +1075,8 @@ type PinnedStorageTargetValidationObservation = (
 ) => void;
 
 class ValidatedPinnedStorageTargetCache {
-  readonly #inFlight = new Map<string, Promise<StorageTargetPayloadV1>>();
-  readonly #validated = new Map<string, StorageTargetPayloadV1>();
+  readonly #inFlight = new Map<string, Promise<PinnedStorageTarget>>();
+  readonly #validated = new Map<string, PinnedStorageTarget>();
 
   constructor(
     private readonly observe:
@@ -1079,8 +1087,8 @@ class ValidatedPinnedStorageTargetCache {
     key: PinnedStorageTargetCacheKey,
     load: (
       observeValidation: PinnedStorageTargetValidationObservation,
-    ) => Promise<StorageTargetPayloadV1>,
-  ): Promise<StorageTargetPayloadV1> {
+    ) => Promise<PinnedStorageTarget>,
+  ): Promise<PinnedStorageTarget> {
     const identity = pinnedStorageTargetCacheIdentity(key);
     const validated = this.#validated.get(identity);
     if (validated) {
@@ -1908,6 +1916,7 @@ function rejectStrayDateTimeValues(
 async function resolveDateTimeInput(
   client: PoolClient,
   entity: StorageEntity,
+  storage: StorageTargetPayloadV1,
   effect: string,
   input: MutationInput,
   calendar: BusinessCalendarContext | null,
@@ -1927,7 +1936,10 @@ async function resolveDateTimeInput(
       : input.systemInput && typeof input.systemInput.value === 'string'
         ? input.systemInput.value
         : null
-    : workingCompany;
+    : workingCompany &&
+        (await lockActiveCompany(client, storage, workingCompany))
+      ? workingCompany
+      : null;
   try {
     return {
       ...input,
@@ -6753,7 +6765,7 @@ async function loadPinnedStorageTarget(
   client: PoolClient,
   request: Pick<SemanticQueryExecutionRequest, 'view' | 'context'>,
   observeValidation: PinnedStorageTargetValidationObservation,
-): Promise<StorageTargetPayloadV1> {
+): Promise<PinnedStorageTarget> {
   const result = await client.query<ArtifactRow>(
     `SELECT artifact_kind, content_hash, domain_tag, media_type, canonical_bytes
        FROM platform.read_tenant_release_artifacts($1)`,
@@ -6836,8 +6848,33 @@ async function loadPinnedStorageTarget(
   }
   const validated = target as unknown as StorageTargetPayloadV1;
   assertModuleSemanticStorageContract(validated);
+  let retired = new Set<string>();
+  if (validated.entities.some((entity) => dateTimeChecks(entity).length)) {
+    const { rows } = await client.query<{ desired_state: Buffer }>(
+      `SELECT revision.desired_state FROM platform.tenant_releases AS release
+         JOIN platform.app_package_revisions AS revision
+           ON revision.tenant_id = release.tenant_id AND revision.revision_id = release.app_package_revision_id
+        WHERE release.tenant_id = $1 AND release.environment_id = $2 AND release.release_id = $3`,
+      [
+        request.context.tenantId,
+        request.context.environmentId,
+        request.view.release.releaseId,
+      ],
+    );
+    const bytes = rows[0]?.desired_state;
+    if (
+      !bytes ||
+      hashBytes(CONTENT_HASH_DOMAIN, bytes) !==
+        manifest.normalizedDefinitionDigest
+    )
+      throw failure(
+        'MODULE_STORAGE_TARGET_MALFORMED',
+        'dateTime storage has no matching pinned definition',
+      );
+    retired = declaredDateTimeFields(bytes).retired;
+  }
   observeValidation('schemaValidated');
-  return validated;
+  return { ...validated, retiredDateTimeFields: retired };
 }
 
 export function assertSupportedStorageTargetArtifactVersions(versions: {
@@ -7226,14 +7263,28 @@ async function requireActiveCreateLegalEntity(
       definition.operationId,
     );
   }
+  if (!(await lockActiveCompany(client, storage, input.systemInput.value))) {
+    throw failure(
+      'MODULE_LEGAL_ENTITY_CREATE_INACTIVE',
+      'legal entity is not active for new work',
+      input.systemInput.value,
+    );
+  }
+}
+
+async function lockActiveCompany(
+  client: PoolClient,
+  storage: StorageTargetPayloadV1,
+  companyId: string,
+): Promise<boolean> {
   const masters = storage.entities.filter(
     (candidate) => candidate.legalEntityMaster !== undefined,
   );
   if (masters.length !== 1) {
     throw failure(
       'MODULE_STORAGE_TARGET_MALFORMED',
-      'entity-owned create requires exactly one legal-entity master',
-      entity.entityId,
+      'company selection requires exactly one legal-entity master',
+      companyId,
     );
   }
   const master = masters[0]!;
@@ -7257,18 +7308,12 @@ async function requireActiveCreateLegalEntity(
         AND environment_id = north_star_internal.trusted_environment_id()
         AND ${quoted(master.recordIdentity.column)} = $1
       FOR NO KEY UPDATE`,
-    [input.systemInput.value],
+    [companyId],
   );
-  if (
-    selected.rows[0]?.status !== descriptor.activeStatusValue ||
-    selected.rows[0]?.archivedAt !== null
-  ) {
-    throw failure(
-      'MODULE_LEGAL_ENTITY_CREATE_INACTIVE',
-      'legal entity is not active for new work',
-      input.systemInput.value,
-    );
-  }
+  return (
+    selected.rows[0]?.status === descriptor.activeStatusValue &&
+    selected.rows[0].archivedAt === null
+  );
 }
 
 function validateFieldValue(

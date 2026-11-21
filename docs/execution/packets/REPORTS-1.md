@@ -6,7 +6,7 @@
 
 The Invoice date query uses `nsm_i_kyu3zu6vouaduhmjm5lbunvswejls2t4ls5svgycueyib3fqieka`. The provider probe, row policy, group ceiling, unavailable index, and pre-key byte identity have focused PostgreSQL/compiler witnesses. The actual Invoice page and downloaded bytes share the registered query. A failed audit append withholds the download. [Regression controls](../../../test/evidence/REPORTS-1-s1.expected-red.json)
 
-Preview and activation use CUSTOMIZE-5’s pooled-table probe from migration 0061. The approved attempt checks the ceiling under the table lock. The predecessor at `af255bf7` supports surface rung 39. The optional company access key requires 40, the Invoice source binding 41 and grouped reports 42. The historical fixtures issue a governed query through that predecessor.
+Preview and activation use CUSTOMIZE-5’s pooled-table probe from migration 0061. The approved attempt checks the ceiling under the table lock. The predecessor at `6a991b21` supports surface rung 39. The optional company access key requires 40, the Invoice source binding 41 and grouped reports 42. The historical fixtures issue a governed query through that predecessor.
 
 Grouped table and CSV output, scoped index admission and revision replay serve distribution (Invoices), field service (Inspections) and clinics (visits). Each business selects its record type, operands and labels in the declaration.
 
@@ -47,7 +47,7 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44888115
 
 ## Slice 1 drafting evaluation
 
-2026-11-21 · Rule 12 exception, REPORTS-1 BUILD lane. The in-app drafter derives the report member from its schema. Its Invoice case in `test/unit/customization-ai-draft.test.ts` also exercises refusal of an unavailable operand source. The live module-building runner is in AI-BUILD-1 slice 2 and is absent from the fetched main (`af255bf7`). At integration with that runner, register these cases under the report member.
+2026-11-21 · Rule 12 exception, REPORTS-1 BUILD lane. The in-app drafter derives the report member from its schema. Its Invoice case in `test/unit/customization-ai-draft.test.ts` also exercises refusal of an unavailable operand source. The live module-building runner is in AI-BUILD-1 slice 2 and is absent from the fetched main (`6a991b21`). At integration with that runner, register these cases under the report member.
 
 | User request | Required grading observation |
 | --- | --- |

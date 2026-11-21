@@ -70,6 +70,12 @@ test(
   'approved template revisions publish governed PDFs, refuse hidden sources, and retire',
   { timeout: 600_000 },
   async (t) => {
+    const previousZone = process.env.TZ;
+    process.env.TZ = 'UTC';
+    t.after(() => {
+      if (previousZone === undefined) delete process.env.TZ;
+      else process.env.TZ = previousZone;
+    });
     await withEphemeralPostgres(
       'document-templates',
       async ({ connection, pool }) => {
@@ -106,6 +112,18 @@ test(
                   { label: 'Name', type: 'text', required: true },
                   { label: 'Service Date', type: 'date', required: true },
                 ],
+              },
+              {
+                kind: 'addDateTimeField',
+                schemaVersion: 'northstar.date-time-field/v1',
+                target: {
+                  kind: 'tenantRecordType',
+                  recordTypeId: id('entity', tenant),
+                },
+                fieldId: id('field', tenant + '_appointment'),
+                label: 'Appointment',
+                required: false,
+                zoneSource: { kind: 'perRecordIana', version: 'v1' },
               },
               {
                 kind: 'addLineTable',
@@ -147,6 +165,11 @@ test(
             kind: 'field',
             label: 'Service date',
             fieldId: id('field', tenant + '_service_date'),
+          });
+          serviceSheet.layout.push({
+            kind: 'field',
+            label: 'Appointment',
+            fieldId: id('field', tenant + '_appointment'),
           });
           const localBrand = await service.draft(
             { ...po, branding: { displayName: 'Template-local brand' } },
@@ -194,7 +217,14 @@ test(
             /Service work order[\s\S]*Description/u,
           );
           const world = worldOver(app.runtime, String(connection.database));
+          const appointment = {
+            schemaVersion: 'northstar.date-time-value/v1',
+            civil: '2026-11-01T01:30',
+            zone: 'America/Toronto',
+            offsetSeconds: -18000,
+          };
           const sheet = await world.create(tenant, {
+            appointment,
             name: 'WO-17',
             service_date: '2026-11-18',
           });
@@ -433,6 +463,15 @@ test(
           assert.match(
             documentPdfText(firstBytes),
             /Service date: Nov 18, 2026/u,
+          );
+          await t.test(
+            'the UTC process prints the captured appointment in the issued PDF',
+            () => {
+              assert.match(
+                documentPdfText(firstBytes),
+                /Appointment: November 1, 2026, 01:30 UTC-05:00 America\/Toronto/u,
+              );
+            },
           );
           assert.deepEqual(await bytes(secondAttachment), firstBytes);
           assert.notDeepEqual(
@@ -878,6 +917,7 @@ test(
             'publication refuses when new children arrive after staging even from an empty table',
             async () => {
               const empty = await world.create(tenant, {
+                appointment,
                 name: 'WO-EMPTY',
                 service_date: '2026-11-18',
               });
