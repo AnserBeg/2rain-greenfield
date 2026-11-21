@@ -15,6 +15,9 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44861594
 
 - Saved layout digests keep their original bytes. Cross-base checks read the authoring and destination contracts for the edited members.
 - The compiler uses the authenticated predecessor definition to recover labels included in historical column fingerprints. Storage targets and existing reader floors retain their wire format.
+- B1(a). The provider's widening branch compares a strict ID superset in either direction, identical remaining contract properties, and identical remaining column properties except the fingerprint. It already admits a widening plus relabel. Planner and provider will share this lowered enum comparison beside `widensEnumDomain`, including zero added IDs. The planner also authenticates source-only properties such as option order keys.
+- B1(b). Keep the complete wider column. With equal domains, keep the complete column with the lexicographically smaller fingerprint in either order.
+- B1(c). Enum storage is PostgreSQL text. CHECK DDL and catalog verification both use `enumCheckExpression` over option IDs. Index definitions use physical columns and predicates. Option labels reach the historical fingerprint alone on this storage path, so a pure relabel needs zero storage steps.
 - No Customize member, migration, capability rung or drafter exception is introduced.
 - Focused mutations cover the choice comparison, layout bindings, tier, section children, sibling order, identity collisions, report ordering, scope, source lineage, rule placement, admission floor and storage relabel checks.
 - The shared history scan matched a booking SQL column assignment twice in commit `42766ca9`. Two exact historical fingerprints cover the migration line and its generated snapshot.

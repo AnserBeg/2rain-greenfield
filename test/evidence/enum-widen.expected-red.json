@@ -21,6 +21,24 @@
       ]
     },
     {
+      "name": "enum-relabel-is-never-recognised",
+      "claim": "A pure relabel compiles with zero storage elements while strict widening remains enabled.",
+      "file": "packages/compiler/src/storage.ts",
+      "original": " &&\n        !enumRelabel(oldField, field, sourceField)",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/module-storage-transition.test.ts"],
+        "namePattern": "plans exactly one widenEnumDomain element"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/module-storage-transition.test.ts",
+          "name": "an enum-domain widening plans exactly one widenEnumDomain element and a label change has no storage effect",
+          "expected": "COMPILER_STORAGE_RETYPE_UNSUPPORTED"
+        }
+      ]
+    },
+    {
       "name": "widening-ignores-everything-but-the-id-set",
       "claim": "An enum widening keeps existing option IDs, order keys and storage properties. Ignoring the previous fingerprint admits a reordered option.",
       "file": "packages/compiler/src/storage.ts",
@@ -186,7 +204,7 @@
       "name": "column-merge-refuses-the-widened-contract",
       "claim": "A column whose field contract differs from a sibling root's only by an enum-domain widening is merged rather than refused; shapeFingerprint moves with the option list and is excluded from that comparison, as it already is for the additive search-mapping pair.",
       "file": "packages/postgres-provider/src/module-storage-materializer.ts",
-      "original": "        !enumDomainWideningIsCompatible &&\n",
+      "original": "        !enumTransition &&\n",
       "replacement": "",
       "test": {
         "files": ["test/postgres/module-storage-transition.test.ts"],

@@ -1,5 +1,6 @@
 import { verifiedGenerationsSql } from './verified-release-generation.js';
 import { createHash, randomUUID } from 'node:crypto';
+import { getSystemErrorMap } from 'node:util';
 
 import { RECEIPT_POSTED_EVENT } from '../../domain/src/purchasing/receipt-posted-event.js';
 import {
@@ -11,6 +12,7 @@ import {
 } from '@north-star/canonical-model';
 import {
   compileInSandbox,
+  SandboxFailure,
   finalFormulaConflict,
   UPGRADE_CODES_V1,
   unadmittedMembers,
@@ -318,6 +320,30 @@ export function discloseUpgradeReport(
     ),
   };
 }
+/** Log only classifier metadata. Database details, worker messages and thrown
+ * values can all contain tenant data. */
+function preparationErrorFields(error: unknown) {
+  if (error instanceof SandboxFailure)
+    return { errorClass: 'SandboxFailure', errorCode: error.code };
+  if (error instanceof pg.DatabaseError)
+    return {
+      errorClass: 'DatabaseError',
+      errorCode: /^[0-9A-Z]{5}$/u.test(error.code ?? '')
+        ? error.code
+        : 'UNKNOWN',
+    };
+  const systemCode =
+    error instanceof Error &&
+    'errno' in error &&
+    typeof error.errno === 'number'
+      ? getSystemErrorMap().get(error.errno)?.[0]
+      : undefined;
+  return {
+    errorClass: error instanceof Error ? error.constructor.name : 'Unknown',
+    errorCode: systemCode ?? 'UNKNOWN',
+  };
+}
+
 /** Only opaque release and change identities leave the tenant review channel. */
 export function upgradeLogFields(upgrade: UpgradePreparation) {
   if (upgrade.status === 'drafted')
@@ -418,6 +444,10 @@ export class PostgresCustomizationService {
       return await this.#prepareUpgrade();
     } catch (error) {
       if (error instanceof CustomizationServiceRefusal) throw error;
+      console.error(
+        'UPGRADE_PREPARATION_FAILED',
+        preparationErrorFields(error),
+      );
       return {
         status: 'refused',
         code: 'UPGRADE_PREPARATION_FAILED',

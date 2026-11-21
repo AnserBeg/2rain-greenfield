@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 import {
   CanonicalIdSchema,
+  canonicalize,
   parseNormalizedApplicationPackageJson,
   ADDRESS_COMPONENTS,
   addressComponents,
@@ -1749,7 +1750,7 @@ export function buildStorageTransitionEnvelope(
     if (
       !previousDefinitionBytes ||
       field.fieldType.kind !== 'enumFieldType' ||
-      previousColumn.fieldContract?.fieldKind !== 'enumFieldType'
+      !enumColumnTransition(previousColumn, column)
     )
       return false;
     // Older storage targets hash labels into the column fingerprint. Restore
@@ -2397,17 +2398,12 @@ function isAdditiveEnumDomainTransition(
   candidateField: Field,
 ): boolean {
   if (
-    !Object.hasOwn(previous, 'fieldContract') ||
-    previous.fieldContract.fieldKind !== 'enumFieldType' ||
-    candidateField.fieldType.kind !== 'enumFieldType'
+    candidateField.fieldType.kind !== 'enumFieldType' ||
+    enumColumnTransition(previous, candidate) !== 'widening'
   ) {
     return false;
   }
   const previousIds = previous.fieldContract.enumOptionIds;
-  const candidateIds = candidateField.fieldType.options
-    .map((option) => option.optionId)
-    .sort(compare);
-  if (!isStrictOptionSuperset(previousIds, candidateIds)) return false;
   const previousSet = new Set(previousIds);
   const withoutNewOptions: Field = {
     ...candidateField,
@@ -2448,27 +2444,51 @@ export function widensEnumDomain(
     candidate.checkKind === 'enumDomain' &&
     previous.validated === false &&
     candidate.validated === false &&
-    isStrictOptionSuperset(previous.enumOptionIds, candidate.enumOptionIds)
+    enumDomainTransition(previous.enumOptionIds, candidate.enumOptionIds) ===
+      'widening'
   );
 }
 
-function isStrictOptionSuperset(
+/** The lowered enum shape available to both planner and catalog merge. The
+ * planner additionally authenticates properties carried only in the fingerprint. */
+export function enumColumnTransition(
+  previous: StorageColumnTarget,
+  candidate: StorageColumnTarget,
+): 'sameDomain' | 'widening' | undefined {
+  if (
+    previous.fieldContract?.fieldKind !== 'enumFieldType' ||
+    candidate.fieldContract?.fieldKind !== 'enumFieldType'
+  )
+    return;
+  const shape = (column: StorageColumnTarget) =>
+    canonicalize({
+      ...column,
+      shapeFingerprint: null,
+      fieldContract: { ...column.fieldContract, enumOptionIds: null },
+    });
+  if (shape(previous) !== shape(candidate)) return;
+  return enumDomainTransition(
+    previous.fieldContract.enumOptionIds,
+    candidate.fieldContract.enumOptionIds,
+  );
+}
+
+function enumDomainTransition(
   previous: readonly string[],
   candidate: readonly string[],
-): boolean {
+): 'sameDomain' | 'widening' | undefined {
   const previousSet = new Set(previous);
   const candidateSet = new Set(candidate);
   if (
     previousSet.size !== previous.length ||
     candidateSet.size !== candidate.length
-  ) {
-    return false;
-  }
-  if (candidateSet.size <= previousSet.size) return false;
+  )
+    return;
   for (const optionId of previousSet) {
-    if (!candidateSet.has(optionId)) return false;
+    if (!candidateSet.has(optionId)) return;
   }
-  return true;
+  if (candidate.length > previous.length) return 'widening';
+  if (previous.every((id, i) => id === candidate[i])) return 'sameDomain';
 }
 
 export function classifyStorageTransitionElement(

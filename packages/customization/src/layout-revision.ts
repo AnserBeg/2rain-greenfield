@@ -276,13 +276,29 @@ export function compatibleFieldType(before: unknown, after: unknown) {
   return canonicalize(before ?? null) === canonicalize(after ?? null);
 }
 
-function withoutLabels(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(withoutLabels);
+// Only these binding-contract paths contain display labels. Future bindings,
+// including a property named "label", participate in replay by default.
+const displayLabelPaths = new Set([
+  'calculation.label',
+  'editor.label',
+  'editor.presentation.options[].label',
+  'editor.reference.details.values[].label',
+  'editor.reference.create.label',
+  'editor.reference.create.fields[].label',
+  'editor.reference.create.fields[].presentation.options[].label',
+]);
+
+function withoutDisplayLabels(value: unknown, path = ''): unknown {
+  if (Array.isArray(value))
+    return value.map((entry) => withoutDisplayLabels(entry, path + '[]'));
   if (!value || typeof value !== 'object') return value;
   return Object.fromEntries(
-    Object.entries(value)
-      .filter(([key]) => key !== 'label')
-      .map(([key, child]) => [key, withoutLabels(child)]),
+    Object.entries(value).flatMap(([key, child]) => {
+      const childPath = path ? path + '.' + key : key;
+      return displayLabelPaths.has(childPath)
+        ? []
+        : [[key, withoutDisplayLabels(child, childPath)]];
+    }),
   );
 }
 
@@ -292,8 +308,8 @@ function compatibleBinding(
 ) {
   if (!old || !next || !compatibleFieldType(old.type, next.type)) return false;
   return (
-    canonicalize(withoutLabels({ ...old, type: null })) ===
-    canonicalize(withoutLabels({ ...next, type: null }))
+    canonicalize(withoutDisplayLabels({ ...old, type: null })) ===
+    canonicalize(withoutDisplayLabels({ ...next, type: null }))
   );
 }
 
@@ -495,13 +511,30 @@ export function applyLayoutRevision(
       if (!visible.some((f) => f.id === field.id))
         return `${field.label.text} has no input in the document editor.`;
       const oldPosition = visible.findIndex((f) => f.id === field.id);
+      const previousFields =
+        replay && edit.kind === 'move' && edit.destination === section.id
+          ? [...section.fields]
+          : undefined;
       applyEdit(body, edit, !original);
       if (
         edit.kind === 'move' &&
         edit.destination === section.id &&
         arrangeableLayoutFields(body, section)[oldPosition]?.id === field.id
-      )
+      ) {
+        if (replay && previousFields) {
+          section.fields = previousFields;
+          replay.findings.push({
+            code: 'MOVED_MEMBER',
+            subject: edit.id,
+            expected: edit.position,
+            observed: { tier: field.tier, position: oldPosition },
+            editIndex,
+          });
+          failed.set(edit.id, editIndex);
+          continue;
+        }
         return 'This move leaves the field in the same place. Reorder it within its up-front or More details group.';
+      }
     }
   } catch (error) {
     return (error as Error).message;

@@ -68,6 +68,8 @@ fired:
 
 An option or lifecycle-stage label is presentation. Compare released enum columns using the previous labels for shared IDs. A pure relabel plans zero elements; a relabel alongside new options plans the same widening. Existing option order, IDs and all other column properties retain the checks below.
 
+The planner and provider use the same lowered enum-column comparison. All column and contract properties must match except the historical fingerprint and added option IDs. The planner verifies source properties hidden in the fingerprint against the authenticated predecessor. When live roots coexist, the catalog merge keeps the wider column, or the complete column with the lexicographically smaller fingerprint for equal domains. The CHECK still contains only option IDs.
+
 ## Original decision
 
 **1. A `widenEnumDomain` element exists, and a widening plans as exactly one.**

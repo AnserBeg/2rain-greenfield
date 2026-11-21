@@ -126,6 +126,7 @@ export {
   relaxesRelationRequiredness,
   validatePhysicalMappingRecords,
   validateStorageRendererStatements,
+  enumColumnTransition,
   widensEnumDomain,
   type StorageTargetPayloadV1,
 } from './storage.js';

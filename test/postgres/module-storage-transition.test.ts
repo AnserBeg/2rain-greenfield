@@ -61,6 +61,7 @@ import { PostgresReleaseActivationService } from '../../packages/postgres-provid
 import { PostgresReleaseApprovalService } from '../../packages/postgres-provider/src/release-approval-service.js';
 import { buildFoldedMatchPredicate } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
 import {
+  mergeExpectedTables,
   ModuleStorageMaterializationError,
   PostgresModuleStorageMaterializer,
 } from '../../packages/postgres-provider/src/module-storage-materializer.js';
@@ -4186,6 +4187,210 @@ test('a released required relation is widened by executed DDL, and a mixed live-
   );
 });
 
+test('merging old and relabelled enum columns keeps the same complete record in both orders', () => {
+  const previous = mustCompile(moduleInput(ordinaryModuleV2()));
+  const relabelled = mustCompile(
+    moduleInput(tierModule('relabelled'), expectedActiveReleaseFrom(previous)),
+  );
+  const storageTarget = (release: CompileSuccess) =>
+    projectionPayload<StorageTargetPayloadV1>(
+      release,
+      PROJECTION_FAMILY_IDS.storageTarget,
+    );
+  const before = storageTarget(previous);
+  const after = storageTarget(relabelled);
+  const parent = (target: StorageTargetPayloadV1) =>
+    target.entities.find(
+      (entity) => entity.entityId === FIXTURE_IDS.entityIds.parent,
+    )!;
+  const tier = (entity: StorageTargetPayloadV1['entities'][number]) =>
+    entity.columns.find(
+      (column) => column.canonicalFieldId === FIXTURE_IDS.fieldIds.parentTier,
+    )!;
+  const oldColumn = tier(parent(before));
+  const newColumn = tier(parent(after));
+  assert.notEqual(oldColumn.shapeFingerprint, newColumn.shapeFingerprint);
+  const expected =
+    oldColumn.shapeFingerprint < newColumn.shapeFingerprint
+      ? oldColumn
+      : newColumn;
+  for (const order of [
+    [before, after],
+    [after, before],
+  ]) {
+    assert.deepEqual(
+      tier(mergeExpectedTables(order).get(parent(before).physicalTableName)!),
+      expected,
+    );
+  }
+});
+
+test('one tenant prepares and activates a relabelled enum plus a new column from the old root', () =>
+  exerciseEnumRelabel('one tenant'));
+test('a storage-changing prepare succeeds while tenant A serves a relabelled enum and B serves the old root', () =>
+  exerciseEnumRelabel('mixed roots'));
+
+async function exerciseEnumRelabel(scenario: 'one tenant' | 'mixed roots') {
+  const empty = emptyModuleDefinition();
+  const previous = ordinaryModuleV2();
+  const source = mustCompile(moduleInput(empty));
+  const old = mustCompile(
+    moduleInput(previous, expectedActiveReleaseFrom(source)),
+  );
+  await withEphemeralPostgres('enum-relabel', async ({ connection, pool }) => {
+    const admin = await pool.connect();
+    try {
+      await runMigrations(admin, await loadMigrations(migrations));
+      await seedScope(admin);
+    } finally {
+      admin.release();
+    }
+    const runtime = new pg.Pool({
+      ...connection,
+      user: 'north_star_runtime',
+    });
+    const ddl = new pg.Pool({
+      ...connection,
+      user: 'north_star_module_materializer',
+    });
+    const module = new pg.Pool({
+      ...connection,
+      user: 'north_star_module_runtime',
+    });
+    try {
+      const contexts = await trustedContexts();
+      const materializer = new PostgresModuleStorageMaterializer(ddl, module);
+      const prepare = (
+        context: TrustedRequestContext,
+        target: ReleasePair,
+        generationId = randomUUID(),
+        preparationId = randomUUID(),
+      ) =>
+        materializer.prepare({
+          context,
+          targetReleaseId: target.target,
+          generationId,
+          preparationId,
+          initiatedBy: context.principalId,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        });
+      await grantExecutorAuthority(pool);
+      const installOld = async (context: TrustedRequestContext) => {
+        const release = await persistReleasePair(
+          runtime,
+          context,
+          source,
+          definitionBytes(empty),
+          old,
+          definitionBytes(previous),
+        );
+        await activateFixtureRelease(
+          pool,
+          runtime,
+          context.tenantId,
+          context.environmentId,
+          release.source,
+        );
+        await prepare(context, release);
+        await activatePreparedFixture(pool, runtime, context, release);
+        return release;
+      };
+      let active = await installOld(contexts.a);
+      if (scenario === 'mixed roots') {
+        const b = await installOld(contexts.b);
+        const definition = tierModule('relabelled');
+        const relabelled = mustCompile(
+          moduleInput(definition, expectedActiveReleaseFrom(old)),
+        );
+        assert.deepEqual(
+          projectionPayload<StorageTransitionEnvelope>(
+            relabelled,
+            PROJECTION_FAMILY_IDS.storageTransition,
+          ).elements,
+          [],
+        );
+        active = await persistNextRelease(
+          runtime,
+          contexts.a,
+          active.target,
+          relabelled,
+          definitionBytes(definition),
+        );
+        await activatePreparedFixture(pool, runtime, contexts.a, active);
+        const pointers = await pool.query(
+          'SELECT tenant_id, release_id FROM platform.active_release_pointers ORDER BY tenant_id',
+        );
+        assert.deepEqual(pointers.rows, [
+          { tenant_id: tenantA, release_id: active.target },
+          { tenant_id: tenantB, release_id: b.target },
+        ]);
+      }
+      const definition = tierModule('relabelledPlusColumn');
+      const candidate = mustCompile(
+        moduleInput(definition, expectedActiveReleaseFrom(active.compiled)),
+      );
+      const next = await persistNextRelease(
+        runtime,
+        contexts.a,
+        active.target,
+        candidate,
+        definitionBytes(definition),
+      );
+      const generationId = randomUUID();
+      const preparationId = randomUUID();
+      const prepared = await prepare(
+        contexts.a,
+        next,
+        generationId,
+        preparationId,
+      );
+      assert.deepEqual(
+        prepared.diff.elements.map((element) => [
+          element.kind,
+          element.disposition,
+        ]),
+        [['addColumn', 'APPLIED']],
+      );
+      assert.equal(prepared.receipt.catalogVerified, true);
+      assert.equal(prepared.targetReleaseId, next.target);
+      if (scenario === 'one tenant') {
+        const attemptId = await createV2Approval(
+          runtime,
+          pool,
+          contexts,
+          next,
+          candidate,
+          prepared,
+          preparationId,
+        );
+        const executed = await materializer.executeApprovedAttempt({
+          activationAttemptId: attemptId,
+          context: contexts.a,
+          coordinatorId: randomUUID(),
+          generationId,
+        });
+        assert.equal(executed.disposition, 'READY_TO_SWAP');
+        await admitPreparedTarget(runtime, contexts.a, next);
+        const activated = await new PostgresReleaseActivationService(
+          runtime,
+        ).activate(contexts.system, {
+          activationAttemptId: minted(attemptId),
+        });
+        assert.equal(activated.status, 'SWAPPED_VERIFIED');
+        assert.equal(activated.releaseId, next.target);
+        assert.deepEqual(
+          (await materializer.verifyLiveCatalog(contexts.a)).drift,
+          [],
+        );
+      }
+    } finally {
+      await module.end();
+      await ddl.end();
+      await runtime.end();
+    }
+  });
+}
+
 test('an enum-domain CHECK replacement is one statement under ACCESS EXCLUSIVE and leaves no unconstrained window', async () => {
   // Stop-condition 1 of the ENUM-WIDEN charter, committed rather than left in
   // a scratch probe. PostgreSQL has no ALTER CONSTRAINT for a CHECK
@@ -6411,6 +6616,7 @@ function tierModule(
     | 'narrowed'
     | 'rebound'
     | 'relabelled'
+    | 'relabelledPlusColumn'
     | 'widened'
     | 'widenedAndRelabelled'
     | 'widenedAndReordered'
@@ -6480,8 +6686,11 @@ function tierModule(
       name.fieldType.maximumLength += 1;
       break;
     }
+    case 'relabelledPlusColumn':
     case 'widenedPlusColumn':
-      options.unshift(basic);
+      if (variant === 'relabelledPlusColumn')
+        options[1]!.label = 'Premium plus';
+      else options.unshift(basic);
       definition.fields.push({
         classification: 'internal',
         collation: 'binary',
@@ -6794,64 +7003,79 @@ async function persistPairForBothTenants(
   target: CompileSuccess,
   targetBytes: Uint8Array,
 ): Promise<{ a: ReleasePair; b: ReleasePair }> {
-  const repository = new PostgresImmutableReleaseRepository(runtimePool);
-  const persist = async (
-    context: TrustedRequestContext,
-  ): Promise<ReleasePair> => {
-    const sourceRevision = minted(randomUUID());
-    const targetRevision = minted(randomUUID());
-    const sourceRelease = minted(randomUUID());
-    const targetRelease = minted(randomUUID());
-    await repository.storeAppPackageRevision(
-      context,
-      revisionCommand(context, sourceRevision, sourceBytes),
-    );
-    await repository.storeAppPackageRevision(
-      context,
-      revisionCommand(context, targetRevision, targetBytes),
-    );
-    const stagedSource = await repository.stageTenantReleaseCandidate(context, {
-      appPackageRevisionId: sourceRevision,
-      compiledRelease: source,
-      createdBy: context.principalId,
-      environmentId: context.environmentId,
-      releaseId: sourceRelease,
-      tenantId: context.tenantId,
-    });
-    await new PostgresReleaseVerificationService(
+  const persist = (context: TrustedRequestContext) =>
+    persistReleasePair(
       runtimePool,
-    ).executeSemanticCandidateAndPersist(context, {
-      compiledRelease: source,
-      evidenceId: stagedSource.verificationEvidenceId,
-      releaseId: sourceRelease,
-    });
-    await repository.registerTenantRelease(
       context,
-      releaseCommand(
-        context,
-        sourceRelease,
-        sourceRevision,
-        stagedSource.verificationEvidenceId,
-        source,
-      ),
+      source,
+      sourceBytes,
+      target,
+      targetBytes,
     );
-    const stagedTarget = await repository.stageTenantReleaseCandidate(context, {
-      appPackageRevisionId: targetRevision,
-      compiledRelease: target,
-      createdBy: context.principalId,
-      environmentId: context.environmentId,
-      releaseId: targetRelease,
-      tenantId: context.tenantId,
-    });
-    return {
-      compiled: target,
-      revisionId: targetRevision,
-      source: sourceRelease,
-      target: targetRelease,
-      targetEvidence: stagedTarget.verificationEvidenceId,
-    };
-  };
   return { a: await persist(contexts.a), b: await persist(contexts.b) };
+}
+
+async function persistReleasePair(
+  runtimePool: pg.Pool,
+  context: TrustedRequestContext,
+  source: CompileSuccess,
+  sourceBytes: Uint8Array,
+  target: CompileSuccess,
+  targetBytes: Uint8Array,
+): Promise<ReleasePair> {
+  const repository = new PostgresImmutableReleaseRepository(runtimePool);
+  const sourceRevision = minted(randomUUID());
+  const targetRevision = minted(randomUUID());
+  const sourceRelease = minted(randomUUID());
+  const targetRelease = minted(randomUUID());
+  await repository.storeAppPackageRevision(
+    context,
+    revisionCommand(context, sourceRevision, sourceBytes),
+  );
+  await repository.storeAppPackageRevision(
+    context,
+    revisionCommand(context, targetRevision, targetBytes),
+  );
+  const stagedSource = await repository.stageTenantReleaseCandidate(context, {
+    appPackageRevisionId: sourceRevision,
+    compiledRelease: source,
+    createdBy: context.principalId,
+    environmentId: context.environmentId,
+    releaseId: sourceRelease,
+    tenantId: context.tenantId,
+  });
+  await new PostgresReleaseVerificationService(
+    runtimePool,
+  ).executeSemanticCandidateAndPersist(context, {
+    compiledRelease: source,
+    evidenceId: stagedSource.verificationEvidenceId,
+    releaseId: sourceRelease,
+  });
+  await repository.registerTenantRelease(
+    context,
+    releaseCommand(
+      context,
+      sourceRelease,
+      sourceRevision,
+      stagedSource.verificationEvidenceId,
+      source,
+    ),
+  );
+  const stagedTarget = await repository.stageTenantReleaseCandidate(context, {
+    appPackageRevisionId: targetRevision,
+    compiledRelease: target,
+    createdBy: context.principalId,
+    environmentId: context.environmentId,
+    releaseId: targetRelease,
+    tenantId: context.tenantId,
+  });
+  return {
+    compiled: target,
+    revisionId: targetRevision,
+    source: sourceRelease,
+    target: targetRelease,
+    targetEvidence: stagedTarget.verificationEvidenceId,
+  };
 }
 
 async function persistNextRelease(

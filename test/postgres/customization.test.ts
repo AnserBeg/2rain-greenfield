@@ -8,7 +8,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import test from 'node:test';
 
-import type pg from 'pg';
+import pg from 'pg';
 
 import { applicationWithoutLineCreateValues } from '../helpers/application-without-line-create-values.js';
 
@@ -1112,7 +1112,7 @@ async function assertUpgradePersistence(
 test(
   'a record-type upgrade stages for approval and an unknown live kind can roll back',
   { timeout: 900_000 },
-  async () => {
+  async (t) => {
     await withEphemeralPostgres(
       'refused-upgrade',
       async ({ connection, pool }) => {
@@ -1245,6 +1245,7 @@ test(
                   blocked: [],
                 },
               );
+              const log = t.mock.method(console, 'error', () => {});
               await pool.query(
                 'ALTER TABLE platform.customization_patches RENAME TO unavailable_patches',
               );
@@ -1257,6 +1258,48 @@ test(
                   'ALTER TABLE platform.unavailable_patches RENAME TO customization_patches',
                 );
               }
+              assert.deepEqual(
+                log.mock.calls.map((call) => call.arguments),
+                [
+                  [
+                    'UPGRADE_PREPARATION_FAILED',
+                    { errorClass: 'DatabaseError', errorCode: '42P01' },
+                  ],
+                ],
+              );
+              // Fail only the disclosure read of the customized revision. The
+              // independent KIND_NOT_ADMITTED verdict has already been computed.
+              const query = pg.Client.prototype.query;
+              let disclosureReads = 0;
+              const fault = t.mock.method(
+                pg.Client.prototype,
+                'query',
+                function (this: pg.Client, ...args: unknown[]) {
+                  if (
+                    typeof args[0] === 'string' &&
+                    args[0].startsWith(
+                      'SELECT desired_state FROM platform.app_package_revisions',
+                    )
+                  ) {
+                    disclosureReads++;
+                    throw new Error('private disclosure read detail');
+                  }
+                  return Reflect.apply(query, this, args);
+                },
+              );
+              try {
+                const transient = await opened.service.prepareUpgrade();
+                assert.equal(disclosureReads, 1);
+                assert.ok(transient.status === 'refused');
+                assert.equal(transient.code, 'UPGRADE_PREPARATION_FAILED');
+              } finally {
+                fault.mock.restore();
+              }
+              assert.deepEqual(log.mock.calls.at(-1)?.arguments, [
+                'UPGRADE_PREPARATION_FAILED',
+                { errorClass: 'Error', errorCode: 'UNKNOWN' },
+              ]);
+              log.mock.restore();
               assert.deepEqual(
                 (await opened.service.status()).upgradeRefusal,
                 status.upgradeRefusal,

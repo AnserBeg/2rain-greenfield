@@ -14,6 +14,7 @@ import {
   STORAGE_TARGET_PAYLOAD_VERSION,
   STORAGE_TRANSITION_ENVELOPE_VERSION,
   relaxesRelationRequiredness,
+  enumColumnTransition,
   widensEnumDomain,
   type StorageRendererStatement,
   type StorageTargetPayloadV1,
@@ -5182,36 +5183,7 @@ async function loadAccountedLiveTargets(
   return targets;
 }
 
-/**
- * A column's field contract, viewed as the enum-domain CHECK it implies, so the
- * compiler's one widening rule can judge both. The physical name is fixed to a
- * placeholder because the rule compares the two members against each other,
- * not against the catalog.
- */
-function enumDomainShadow(
-  column: StorageEntityTarget['columns'][number],
-): StorageEntityTarget['checkConstraints'][number] {
-  return {
-    canonicalFieldId: column.canonicalFieldId,
-    checkKind: 'enumDomain',
-    enumOptionIds: column.fieldContract.enumOptionIds,
-    physicalName: column.physicalName,
-    validated: false,
-  };
-}
-
-function withoutOptionIds(
-  contract: StorageEntityTarget['columns'][number]['fieldContract'],
-): Omit<
-  StorageEntityTarget['columns'][number]['fieldContract'],
-  'enumOptionIds'
-> {
-  const { enumOptionIds: _enumOptionIds, ...rest } = contract;
-  void _enumOptionIds;
-  return rest;
-}
-
-function mergeExpectedTables(
+export function mergeExpectedTables(
   targets: readonly StorageTargetPayloadV1[],
 ): Map<string, StorageEntityTarget> {
   const result = new Map<string, StorageEntityTarget>();
@@ -5351,22 +5323,6 @@ function mergeCompatibleEntity(
         new Set([existing.searchMapping, column.searchMapping]).has(
           'normalizedTextIndex',
         );
-      // A field contract whose option list widened is the column-side shadow
-      // of the CHECK tolerance above: same contract otherwise, and one option
-      // set strictly containing the other, in either direction.
-      const enumDomainWidened =
-        Object.hasOwn(existing, 'fieldContract') &&
-        Object.hasOwn(column, 'fieldContract') &&
-        (widensEnumDomain(
-          enumDomainShadow(existing),
-          enumDomainShadow(column),
-        ) ||
-          widensEnumDomain(
-            enumDomainShadow(column),
-            enumDomainShadow(existing),
-          )) &&
-        canonicalize(withoutOptionIds(existing.fieldContract)) ===
-          canonicalize(withoutOptionIds(column.fieldContract));
       const contractsMatch =
         !Object.hasOwn(existing, 'fieldContract') ||
         !Object.hasOwn(column, 'fieldContract') ||
@@ -5377,28 +5333,16 @@ function mergeCompatibleEntity(
         contractsMatch &&
         canonicalize(withoutSearchMetadata(existing)) ===
           canonicalize(withoutSearchMetadata(column));
-      // `shapeFingerprint` covers `fieldType` wholesale and therefore moves
-      // with the option list, so the widened pair is compared without it --
-      // the same exclusion the additive search-mapping pair already needs.
-      const withoutContractAndFingerprint = (
-        value: StorageEntityTarget['columns'][number],
-      ) => {
-        const {
-          fieldContract: _fieldContract,
-          shapeFingerprint: _shapeFingerprint,
-          ...shape
-        } = value;
-        void _fieldContract;
-        void _shapeFingerprint;
-        return shape;
-      };
-      const enumDomainWideningIsCompatible =
-        enumDomainWidened &&
-        canonicalize(withoutContractAndFingerprint(existing)) ===
-          canonicalize(withoutContractAndFingerprint(column));
+      const enumTransition = enumColumnTransition(existing, column);
+      const keepExistingEnum =
+        enumTransition === 'sameDomain'
+          ? existing.shapeFingerprint <= column.shapeFingerprint
+          : !enumTransition &&
+            enumColumnTransition(column, existing) === 'widening';
+      if (keepExistingEnum) continue;
       if (
         !additiveSearchMappingIsCompatible &&
-        !enumDomainWideningIsCompatible &&
+        !enumTransition &&
         (canonicalize(withoutContract(existing)) !==
           canonicalize(withoutContract(column)) ||
           !contractsMatch)
@@ -5407,14 +5351,6 @@ function mergeCompatibleEntity(
           'LIVE_SET_SHAPE_CONFLICT',
           `conflicting live roots claim ${next.physicalTableName}.${column.physicalName}`,
         );
-      }
-      // The wider contract is the physical truth; a narrower sibling root does
-      // not replace it.
-      if (
-        enumDomainWideningIsCompatible &&
-        widensEnumDomain(enumDomainShadow(column), enumDomainShadow(existing))
-      ) {
-        continue;
       }
       if (
         Object.hasOwn(column, 'fieldContract') &&

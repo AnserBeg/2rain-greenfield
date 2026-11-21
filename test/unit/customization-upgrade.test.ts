@@ -716,7 +716,7 @@ test('a document header label preserves the tenant override on a different base'
     'Office label',
   );
 });
-test('an early optional detail field changes the eighth field tier and goes last when it has no predecessor', () => {
+function shiftedDetailsFold() {
   const target = applied(base, [
     {
       ...field,
@@ -726,6 +726,11 @@ test('an early optional detail field changes the eighth field tier and goes last
   ]);
   const added = id('field.custom_sales_order_dock_code');
   salesColumns(target).find((c) => c.field === added)!.orderKey = 1;
+  return { target, added };
+}
+
+test('an early optional detail field changes the eighth field tier and goes last when it has no predecessor', () => {
+  const { target, added } = shiftedDetailsFold();
   const eighth = salesPage.body.sections[0]!.fields[7]!;
   assert.equal(eighth.tier, 'always');
   const layout = replayedLayout(target, rename(salesPage, eighth.id));
@@ -738,6 +743,65 @@ test('an early optional detail field changes the eighth field tier and goes last
   assert.equal(fields.at(-1)!.id, added);
   assert.equal(layout.placementRuleVersion, 1);
 });
+test('a move across a shifted Details fold names the affected tenant edit', () => {
+  const { target } = shiftedDetailsFold();
+  const fields = salesPage.body.sections[0]!.fields;
+  for (const [member, action] of [
+    [fields[7]!.id, 'up'],
+    [fields[6]!.id, 'down'],
+  ] as const) {
+    const move = customization.layoutCommand(salesPage, { action, member });
+    replayApplied(base, move);
+    const result = inspectReplay(target, [move]);
+    assert.equal(result.status, 'replayConflict');
+    assert.deepEqual(
+      result.findings.map((f) => [f.patchId, f.editIndex, f.subject, f.code]),
+      [['1', 0, member, 'MOVED_MEMBER']],
+    );
+  }
+});
+
+function customerLookupFixture() {
+  const target = structuredClone(base);
+  const customer = id('field.sales_order_customer_party_id');
+  const editor = (target.surfaces as Base[])
+    .map(
+      (s) =>
+        s.documentEditor as
+          { headerFormSurfaceId: string; headerFields: Base[] } | undefined,
+    )
+    .find((e) => e?.headerFormSurfaceId === form.body.surfaceId)!;
+  const reference = editor.headerFields.find((f) => f.fieldId === customer)!
+    .reference as Base;
+  return { target, customer, reference };
+}
+
+test('a changed document lookup query conflicts with the tenant field override', () => {
+  const { target, customer, reference } = customerLookupFixture();
+  reference.queryId = id('query.item_list');
+  const result = inspectReplay(target, [rename(form, customer)]);
+  assert.equal(result.status, 'replayConflict');
+  assert.deepEqual(
+    result.findings.map((f) => [f.subject, f.code]),
+    [[customer, 'INCOMPATIBLE_TYPE']],
+  );
+});
+
+test('a future binding named label outside the display paths still conflicts', () => {
+  const { target, customer, reference } = customerLookupFixture();
+  reference.label = id('field.item_sku');
+  const result = replayCustomizationPatches(
+    target,
+    [patch(rename(form, customer))],
+    [{ parent: base, differentBase: true, patchId: 'saved' }],
+  );
+  assert.equal(result.status, 'replayConflict');
+  assert.deepEqual(
+    result.findings.map((f) => [f.subject, f.code]),
+    [[customer, 'INCOMPATIBLE_TYPE']],
+  );
+});
+
 test('moving a section does not bind its untouched children', () => {
   const shipping = salesPage.body.sections.find((s) =>
     s.fields.some((f) => f.id === city),
