@@ -503,7 +503,7 @@ test('governed terms and scoped source facts produce a quote through the install
             recordId: notesOnly.recordId,
             expectedRevision: notesOnly.revision,
           }),
-        /BILLING_TERMS_INVALID/,
+        { code: 'BILLING_TERMS_INVALID' },
       );
       const published = await f.invoke('billing_publish', revision, key);
       assert.equal(published.outcome, 'succeeded');
