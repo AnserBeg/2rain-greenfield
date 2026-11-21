@@ -1,0 +1,61 @@
+{
+  "head": "ea92d158fcd9a46a256b6e7ee86de5e2528f7ba3",
+  "summary": {
+    "ran": 1,
+    "notRun": 0,
+    "firstTry": "1/1 (100%)",
+    "afterRepair": "1/1 (100%)",
+    "e2e": "1/1 (100%)",
+    "behaviour": "1/1 (100%)",
+    "correctRefusals": "0/0",
+    "rightReason": "0/0",
+    "falseRefusals": 0,
+    "falseAccepts": 0,
+    "injected": 0,
+    "overGranted": 0,
+    "refusalsByCapability": {},
+    "repairedAfterOne": 0,
+    "repairedAfterTwo": 0,
+    "usd": 0.0158674,
+    "modelCalls": 1,
+    "tokens": {
+      "input": 4,
+      "output": 367,
+      "cacheRead": 39332,
+      "cacheWrite": 129
+    }
+  },
+  "results": [
+    {
+      "id": "M03",
+      "split": "dev",
+      "category": "module",
+      "expected": "module",
+      "status": "drafted",
+      "modelCalls": 1,
+      "drafted": true,
+      "approved": true,
+      "activated": true,
+      "firstTry": true,
+      "afterRepair": true,
+      "repairTurns": 0,
+      "e2e": true,
+      "behaviour": true,
+      "reasons": [],
+      "kinds": [
+        "changeSet",
+        "addRecordType",
+        "declareLifecycle"
+      ],
+      "modelMs": 2917,
+      "wallMs": 230775,
+      "usd": 0.0158674,
+      "tokens": {
+        "input": 4,
+        "output": 367,
+        "cacheRead": 39332,
+        "cacheWrite": 129
+      }
+    }
+  ]
+}
