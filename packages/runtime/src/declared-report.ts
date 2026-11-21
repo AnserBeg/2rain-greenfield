@@ -180,9 +180,10 @@ export function reportPage(
   const dimensionLabels = report.revision.body.dimensions.map(
     (d) => report.columns.find((c) => c.fieldId === d.fieldId)!.label,
   );
-  const dimensionTypes = report.revision.body.dimensions.map(
-    (d) => report.columns.find((c) => c.fieldId === d.fieldId)!.type,
-  );
+  const dimensionTypes = report.revision.body.dimensions.map((d) => {
+    const field = report.columns.find((c) => c.fieldId === d.fieldId)!;
+    return field.basis === 'civilDate' ? 'date' : field.type;
+  });
   const measureLabels = report.revision.body.measures.map((m) => m.label);
   const result = {
     groups: snapshot.groups,

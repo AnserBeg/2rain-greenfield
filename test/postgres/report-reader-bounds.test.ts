@@ -289,6 +289,32 @@ test('the PostgreSQL Invoice candidate probe uses the named date index and stops
         combined.groups.map((r) => [r.keys, r.cells[0]?.value]),
         [[['a'], '14.000000000000000000']],
       );
+      await client.query("SET TIME ZONE 'America/Edmonton'");
+      const civil = await readGroupedSnapshot(
+        client,
+        entity,
+        {
+          view,
+          scope,
+          input,
+          report: {
+            ...report,
+            revision: {
+              ...report.revision,
+              body: {
+                ...report.revision.body,
+                dimensions: [{ kind: 'direct', fieldId: date }],
+              },
+            },
+          },
+          remaining: () => 5000,
+        },
+        horizon,
+        (_, predicates) => predicates.push('visible'),
+      );
+      assert.ok(!('kind' in civil) && civil.groups.length > 0);
+      for (const row of civil.groups)
+        assert.deepEqual(row.keys, ['2026-11-01']);
     } finally {
       client.release();
     }
