@@ -186,7 +186,7 @@
         {
           "file": "test/postgres/booking-commitments.test.ts",
           "name": "tracked unit handover keeps both assignments, closes pauses and blocks an overdue second start",
-          "expected": "assignment"
+          "expected": "'assignment'"
         }
       ]
     },
@@ -357,6 +357,23 @@
           "file": "test/postgres/booking-commitments.test.ts",
           "name": "onboarding admits documented overdue possession once under its stable source key",
           "expected": "booking.invalidImport"
+        }
+      ]
+    },
+    {
+      "name": "booking-consumer-fence",
+      "claim": "A consuming transaction holds an existing owner cursor until commit.",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "WHERE owner_key=ANY(keys) ORDER BY owner_key FOR UPDATE LOOP",
+      "replacement": "WHERE owner_key=ANY(keys) ORDER BY owner_key LOOP",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "the consuming transaction fences a zero cursor through the first booking commit",
+          "expected": "the contender never waited on the other session"
         }
       ]
     }

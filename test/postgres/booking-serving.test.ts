@@ -236,7 +236,7 @@ async function withBookingApplication(
 
 const archivedQuery = `
 import { readFile } from 'node:fs/promises';
-import { ObservabilityMetrics } from '@north-star/observability';
+import { ObservabilityMetrics } from './packages/observability/src/index.ts';
 import { AuthenticatedRequestEntryAdapter } from './packages/runtime/src/request-context.ts';
 import { AuthenticatedRequestRuntimeEntryAdapter } from './packages/runtime/src/request-runtime-view.ts';
 import { SEMANTIC_QUERY_REQUEST_VERSION } from './packages/runtime/src/semantic-query-gateway.ts';

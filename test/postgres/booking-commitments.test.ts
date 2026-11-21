@@ -2022,6 +2022,33 @@ test('booking commitment writer', async (t) => {
             change('confirm', 1),
           );
           assert.equal(confirmed.state, 'confirmed');
+          const outbox = await admin.query<{
+            owners: {
+              ownerRef: { recordId: string };
+              cursor: string;
+              previousCursor: string;
+              bookings: { bookingId: string; revision: number }[];
+            }[];
+          }>(
+            "SELECT payload->'owners'->'value' AS owners FROM platform.trust_domain_events WHERE domain_event_id=$1",
+            [confirmed.domainEventId],
+          );
+          assert.deepEqual(
+            outbox.rows[0]!.owners.map((o) => [
+              o.ownerRef.recordId,
+              o.previousCursor,
+              o.cursor,
+              o.bookings,
+            ]).sort(),
+            held
+              .map((f) => [
+                f.record_id,
+                '1',
+                '2',
+                [{ bookingId: f.booking_id, revision: 2 }],
+              ])
+              .sort(),
+          );
           assert.deepEqual(
             (await facts(first.groupId)).map((f) => [
               f.revision,
@@ -2171,6 +2198,39 @@ test('booking commitment writer', async (t) => {
                 effectiveAt: '2030-02-11T17:00:00Z',
               })
             ).state,
+            'inUse',
+          );
+        },
+      );
+      await t.test(
+        'a timed tracked absence recovers at its effective start only while the handover still fits',
+        async () => {
+          await time('2030-02-11T14:00Z');
+          async function confirmed(n: number, asset: number, interval: object) {
+            const h = await call(left, 'holdTracked', hold(n, asset, interval));
+            return call(left, 'confirm', terms(n, h));
+          }
+          const missed = await confirmed(70, 46, window('10:00', '11:00'));
+          const taken = await confirmed(71, 47, window('10:00', '11:00'));
+          const next = await confirmed(72, 47, window('11:00', '13:00'));
+          await time('2030-02-11T18:15Z');
+          await admin.query('SELECT platform.booking_sweep_due(128)');
+          const late = (n: number, b: Result) => ({
+            ...terms(n, b),
+            expectedRevision: b.revision + 1,
+            effectiveAt: '2030-02-11T17:15:00Z',
+            reason: 'recorded after handover',
+          });
+          assert.equal(
+            (await call(left, 'start', late(70, missed))).state,
+            'inUse',
+          );
+          assert.equal(
+            (await call(right, 'start', late(71, taken))).refused,
+            'booking.capacityTaken',
+          );
+          assert.equal(
+            (await call(right, 'start', terms(72, next))).state,
             'inUse',
           );
         },
