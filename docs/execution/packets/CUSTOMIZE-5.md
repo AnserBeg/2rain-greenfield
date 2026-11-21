@@ -67,8 +67,8 @@ Status: executable, merged on CI green. Critical paths touched: `db/migrations/0
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-5",
-  "base": "67e4efce31eb663f12d6f161aa91c0ce1220dffc",
-  "head": "5af93939ed5b921f99fd0339e82012aa2e6a4163",
+  "base": "af102f7a79f8e97a469a7ca48ec0e10fb2d04a54",
+  "head": "e38601252d55b616447dbaf8e7c25c53b5d59c39",
   "changedPaths": [
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/date-time-field.ts",
     "apps/web/src/surface-composition.ts", "apps/web/src/surface-runtime.ts", "db/migrations/0059_date_time_window_probe.sql",
