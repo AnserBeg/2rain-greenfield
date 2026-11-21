@@ -827,4 +827,10 @@ How to apply: Require a scoped human decision for a fence advance and its replay
 
 Date: 2026-11-20
 Why: A backdated successor reduced an eight-day entitlement below the amount already allocated after four days.
-How to apply: At each occurrence opening, select among the terms and assignments published by then. Save the inputs served to the caller and replay them after publishing a successor. [BILLING-1](docs/execution/packets/BILLING-1.md)
+How to apply: Evaluate effectiveness at opening and pin the exact visible terms and assignment at first allocation. Save the allocating quote inputs and replay them after publishing a successor. [BILLING-1](docs/execution/packets/BILLING-1.md)
+
+## Compare receipt xmin using the native transaction ID cast
+
+Date: 2026-11-20
+Why: The decimal text of an xid8 includes the transaction epoch and can exceed the xid input range.
+How to apply: Compare receipt xmin with `pg_current_xact_id()::xid` when proving both writes occurred in the same transaction.

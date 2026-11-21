@@ -63,7 +63,7 @@ const identities = new Map<string, AuthenticatedIdentity>([
 test('migrations upgrade accepted G1 and converge with the checked-in snapshot', async () => {
   await withEphemeralPostgres('trust-upgrade', async ({ pool }) => {
     const migrations = await loadMigrations(checkedInMigrations);
-    assert.equal(migrations.at(-1)?.name, '0057_billing_publication.sql');
+    assert.equal(migrations.at(-1)?.name, '0058_billing_publication_xid.sql');
     const admin = await pool.connect();
     try {
       const acceptedG1 = await runMigrations(admin, migrations.slice(0, 5));
@@ -131,6 +131,7 @@ test('migrations upgrade accepted G1 and converge with the checked-in snapshot',
         '0055_staff_decision_proofs.sql',
         '0056_booking_lock_order.sql',
         '0057_billing_publication.sql',
+        '0058_billing_publication_xid.sql',
       ]);
       assert.equal(upgraded.verified.length, migrations.length);
       await assertSchemaMatchesSnapshot(admin, checkedInSnapshot);
