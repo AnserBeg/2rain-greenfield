@@ -4,6 +4,8 @@ import { resolve } from 'node:path';
 import test from 'node:test';
 
 import pg from 'pg';
+import { serializeRelease } from '../../packages/customization/src/index.js';
+import { PostgresCustomizationService } from '../../packages/postgres-provider/src/customization-service.js';
 import { checkReleaseDecisions } from '../helpers/staff-decision-checks.js';
 import { PostgresReleaseActivationService } from '../../packages/postgres-provider/src/release-activation-service.js';
 import {
@@ -46,7 +48,12 @@ import {
   type AuthenticatedIdentity,
   type TrustedRequestContext,
 } from '../../packages/runtime/src/request-context.js';
-import { compilerInput, fixtureBytes } from '../compiler/helpers.js';
+import {
+  authoredFixture,
+  compilerInput,
+  fixtureBytes,
+  normalizedBytes,
+} from '../compiler/helpers.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 import {
   admitEmptyPlanRelease,
@@ -1231,18 +1238,69 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
                   SYSTEM_EXECUTION_PRINCIPAL.principalId,
                 ),
             ).enter({});
+            const empty = authoredFixture('bootstrap');
+            const sourceAuthored = {
+              ...empty,
+              schemaVersion: 'v6',
+              languageVersion: 'v6',
+              normalizationProfileVersion: 'northstar.normalization/v6',
+              package: {
+                ...empty.package,
+                schemaVersion: 'v6',
+                namespace: 'northstar.app',
+                packageId: 'northstar.app:package.staff_proposal_fixture',
+              },
+              capabilityRequirements: [
+                {
+                  kind: 'capabilityRequirement',
+                  schemaVersion: 'v6',
+                  capabilityId:
+                    'northstar.app:capability.standard_surface_content',
+                  capabilityVersion: 1,
+                  declaredEffects: ['read'],
+                  requiredProjections: [
+                    'storage',
+                    'policy',
+                    'query',
+                    'operation',
+                    'surface',
+                    'agent',
+                    'reporting',
+                    'verification',
+                  ],
+                  supportStatus: 'supported',
+                },
+              ],
+            };
+            const sourceBytes = normalizedBytes(sourceAuthored);
+            const candidateBytes = normalizedBytes({
+              ...sourceAuthored,
+              package: { ...sourceAuthored.package, version: '0.1.1' },
+            });
+            const sourceCompiled = mustCompile(sourceBytes);
+            const candidateCompiled = mustCompile(candidateBytes);
             const source = minted(randomUUID());
             const candidate = minted(randomUUID());
+            const sourceRevision = minted(randomUUID());
+            const candidateRevision = minted(randomUUID());
             const initial = minted(randomUUID());
             const sourceEvidence = verificationEvidenceIdForCandidate(
               scope,
               source,
-              bootstrap.releaseRoot,
+              sourceCompiled.releaseRoot,
             );
             const evidence = verificationEvidenceIdForCandidate(
               scope,
               candidate,
-              vertical.releaseRoot,
+              candidateCompiled.releaseRoot,
+            );
+            await repository.storeAppPackageRevision(
+              scope,
+              revisionCommand(scope, sourceRevision, sourceBytes),
+            );
+            await repository.storeAppPackageRevision(
+              scope,
+              revisionCommand(scope, candidateRevision, candidateBytes),
             );
             await admitEmptyPlanRelease(
               runtimePool,
@@ -1251,19 +1309,25 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
               releaseCommand(
                 scope,
                 source,
-                revisionOne,
+                sourceRevision,
                 sourceEvidence,
-                bootstrap,
+                sourceCompiled,
               ),
             );
             await admitEmptyPlanRelease(
               runtimePool,
               repository,
               scope,
-              releaseCommand(scope, candidate, revisionTwo, evidence, vertical),
+              releaseCommand(
+                scope,
+                candidate,
+                candidateRevision,
+                evidence,
+                candidateCompiled,
+              ),
             );
             await insertInitialPreparation(runtimePool, scope, {
-              compiled: bootstrap,
+              compiled: sourceCompiled,
               evidenceId: sourceEvidence,
               pointer: await visiblePointer(runtimePool, scope),
               preparationId: initial,
@@ -1303,25 +1367,58 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
             const pointer = await visiblePointer(runtimePool, scope);
             const binding = releaseDiffBinding(
               {
-                compiled: bootstrap,
-                normalizedDefinitionBytes: bootstrapBytes,
+                compiled: sourceCompiled,
+                normalizedDefinitionBytes: sourceBytes,
               },
-              { compiled: vertical, normalizedDefinitionBytes: verticalBytes },
+              {
+                compiled: candidateCompiled,
+                normalizedDefinitionBytes: candidateBytes,
+              },
             );
             const prepare = (diff = binding) =>
               prepareReleaseWithoutStorageTransition(
                 runtimePool,
                 scope,
                 pointer,
-                bootstrap.releaseRoot,
+                sourceCompiled.releaseRoot,
                 {
                   releaseId: candidate,
-                  revisionId: revisionTwo,
+                  revisionId: candidateRevision,
                   evidenceId: evidence,
                 },
-                vertical,
+                candidateCompiled,
                 diff,
               );
+            const application = serializeRelease({
+              compiled: sourceCompiled,
+              normalizedDefinitionBytes: sourceBytes,
+            });
+            const customization = new PostgresCustomizationService(
+              {
+                adminPool: pool,
+                runtimePool,
+                materializerPool: runtimePool,
+                modulePool: runtimePool,
+                identities: {
+                  runtime: scope,
+                  approver: human,
+                  authorityOperatorId: authorityOperator,
+                },
+              },
+              {
+                acknowledgement: {
+                  entries: [],
+                  packageId: sourceAuthored.package.packageId,
+                },
+                compiledApplication: {
+                  schemaVersion:
+                    'northstar.web:compiled-application-release/v1',
+                  application,
+                  bootstrap: application,
+                },
+                firstPartyAuthored: sourceAuthored,
+              },
+            );
             await checkReleaseDecisions(
               staff,
               pool,
@@ -1336,6 +1433,7 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
               binding,
               source,
               candidate,
+              customization,
             );
           },
         );

@@ -27,7 +27,6 @@ import { PostgresModuleRuntimeInterpreter } from '../../packages/postgres-provid
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
 import { renderedDiffDigest } from '../../packages/customization/src/index.js';
 import { NoSuchRegisteredQueryError } from '../../packages/runtime/src/semantic-query-gateway.js';
-import { checkStaffCustomizationWriter } from '../helpers/staff-decision-checks.js';
 import { recordedPatch } from '../helpers/customization-patch-record.js';
 import {
   LINEAGE_INSTALL_VOLUME,
@@ -393,13 +392,6 @@ test(
                 message: /unrecognizedTestKind/u,
               },
               'replay names the unsupported kind and refuses approval',
-            );
-            await checkStaffCustomizationWriter(
-              pool,
-              connection,
-              runtime.identity,
-              opened.service,
-              { ...vehicle, label: 'Service truck' },
             );
           } finally {
             await opened.close();

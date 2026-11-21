@@ -329,6 +329,7 @@ export async function checkReleaseDecisions(
   binding: ReleaseDiffBinding,
   source: string,
   candidate: MintedUuid,
+  customization: PostgresCustomizationService,
 ) {
   const prep = await prepare();
   const otherPrep = await prepare();
@@ -342,6 +343,15 @@ export async function checkReleaseDecisions(
   await admin.query(
     "INSERT INTO platform.staff_relying_parties VALUES($1,$2,'localhost','https://localhost:6100','https://erp.localhost:6101')",
     [f.tenantId, f.environmentId],
+  );
+  await test.test(
+    'production Customize drafts use the authenticated pilot proposal writer',
+    () =>
+      checkStaffCustomizationWriter(admin, connection, f, customization, {
+        kind: 'addRecordType',
+        label: 'Service tool',
+        fields: [{ label: 'Name', type: 'text' }],
+      }),
   );
   for (const role of ['north_star_runtime', 'north_star_workflow_worker']) {
     const pool = new pg.Pool({ ...connection, user: role });
@@ -860,7 +870,7 @@ export async function checkRetryDecision(
   }
 }
 
-export async function checkStaffCustomizationWriter(
+async function checkStaffCustomizationWriter(
   admin: pg.Pool,
   connection: pg.PoolConfig,
   scope: Pick<Fixture, 'tenantId' | 'environmentId'>,
@@ -868,10 +878,6 @@ export async function checkStaffCustomizationWriter(
   patch: unknown,
 ) {
   const f = { ...scope, principal: randomUUID(), company: null };
-  await admin.query(`DO $$ BEGIN
-    TRUNCATE north_star_internal.staff_store_mode;
-    PERFORM platform.claim_staff_store_mode('pilot');
-  END $$`);
   await withDecisionAccount(admin, connection, f, async (account) => {
     const runtime = new pg.Pool({ ...connection, user: 'north_star_runtime' });
     try {
