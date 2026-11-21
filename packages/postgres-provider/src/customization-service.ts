@@ -1,3 +1,6 @@
+import type { RegisteredReport } from '../../compiler/src/declared-reports.js';
+import { previewReportIndexes } from './report-index-build.js';
+import { projectionBinding } from './serving-gateways.js';
 import { verifiedGenerationsSql } from './verified-release-generation.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { retypedCalculatedDisplayField } from '../../canonical-model/src/calculated-display-bindings.js';
@@ -36,6 +39,8 @@ import {
   type SandboxStep,
 } from '@north-star/customization';
 import {
+  PROJECTION_FAMILY_IDS,
+  type StorageTransitionEnvelope,
   compilerAttestationFromManifest,
   type ReleaseManifestEnvelope,
   type ContentAddressedArtifact,
@@ -1425,6 +1430,42 @@ export class PostgresCustomizationService {
     const { steps } = compiled;
     const step = steps.at(-1)!;
     const candidate = parseSerializedRelease(step.release);
+    const members = patch.kind === 'changeSet' ? patch.patches : [patch];
+    const reportIds = new Set(
+      members.flatMap((m) =>
+        m.kind === 'addReportRevision' && m.status === 'active'
+          ? [m.reportId]
+          : [],
+      ),
+    );
+    if (reportIds.size) {
+      const registrations = projectionBinding(
+        candidate.compiled,
+        PROJECTION_FAMILY_IDS.queryCatalog,
+      ).payload as { groupedReports?: RegisteredReport[] };
+      const transition = projectionBinding(
+        candidate.compiled,
+        PROJECTION_FAMILY_IDS.storageTransition,
+      ).payload as StorageTransitionEnvelope;
+      const client = await this.connection.materializerPool.connect();
+      try {
+        const problem = await previewReportIndexes(
+          client,
+          (registrations.groupedReports ?? []).filter((r) =>
+            reportIds.has(r.revision.reportId),
+          ),
+          transition.elements,
+        );
+        if (problem)
+          return {
+            status: 'refused',
+            code: 'REPORT_INDEX_UNAVAILABLE',
+            message: problem,
+          };
+      } finally {
+        client.release();
+      }
+    }
     const payload = new TextEncoder().encode(canonicalize(patch));
     const payloadDigest = createHash('sha256').update(payload).digest('hex');
     const normalized = parseNormalizedApplicationPackageJson(

@@ -867,6 +867,7 @@ test('a person groups Inspection outcomes, renames and retires the report, and r
         await page.getByRole('link', { name: 'Inspection totals' }).click();
         await page.getByRole('button', { name: 'Draft retirement' }).click();
         await publish();
+        const retired = (await opened.service.status()).activeChain.at(-1)!;
         await page.goto(reportUrl);
         await expect(
           page.getByRole('heading', { name: 'View not available' }),
@@ -888,6 +889,9 @@ test('a person groups Inspection outcomes, renames and retires the report, and r
             .getByRole('table', { name: 'Inspection totals' })
             .locator('tfoot'),
         ).toContainText('3');
+        await expect(
+          opened.service.activate(retired.patchId),
+        ).rejects.toMatchObject({ code: 'CUSTOMIZE_NOT_APPROVED' });
       } finally {
         await opened.close();
         await app.close();

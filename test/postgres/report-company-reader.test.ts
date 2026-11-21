@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { StorageTargetPayloadV1 } from '../../packages/compiler/src/storage.js';
 import type { ReportRequest } from '../../packages/runtime/src/declared-report.js';
 import {
@@ -407,9 +408,10 @@ test(
             amount: string | null,
             currency: string | null,
             day = '2026-11-01',
+            writer: Pool | PoolClient = pool,
           ) => {
             const record = randomUUID();
-            await pool.query(
+            await writer.query(
               `INSERT INTO ${table} (tenant_id,environment_id,legal_entity_id,record_id,revision,${orderColumn},${['number', 'state', 'invoice_date', 'customer_party_id', 'balance', 'currency'].map(col).join(',')}) VALUES ($1,$2,$3,$4,1,$11,$5,$6,$7,$8,$9,$10)`,
               [
                 tenantId,
@@ -588,6 +590,84 @@ test(
           );
           await revoke(reportColumnPermission(id('currency')));
           assert.deepEqual(await run(), { kind: 'unavailable' });
+          // A second range needs its own existing-table index. The size check counts
+          // both companies and runs again under the same lock as CREATE INDEX.
+          const dueDate = id('due_date');
+          const second = draftReport(
+            target,
+            'Due balances by customer',
+            ReportChoicesSchema.parse({
+              dimensions: revision.body.dimensions,
+              measures: revision.body.measures,
+              outputs: revision.body.outputs,
+              filters: [{ kind: 'dateRange', fieldId: dueDate }],
+            }),
+          );
+          const size = Number(
+            (await pool.query('SELECT count(*) AS n FROM ' + table)).rows[0]!.n,
+          );
+          const previous = process.env.NORTH_STAR_REPORT_INDEX_ROW_CEILING;
+          const writer = await pool.connect();
+          try {
+            process.env.NORTH_STAR_REPORT_INDEX_ROW_CEILING = String(size - 1);
+            const tooLarge = await opened.service.draft(
+              second,
+              'visualBuilder',
+            );
+            assert.ok(tooLarge.status === 'refused', JSON.stringify(tooLarge));
+            assert.match(tooLarge.message, /Due balances by customer/u);
+            assert.ok(tooLarge.message.includes(col('due_date')));
+            process.env.NORTH_STAR_REPORT_INDEX_ROW_CEILING = String(size);
+            const atCeiling = await opened.service.draft(
+              second,
+              'visualBuilder',
+            );
+            assert.ok(
+              atCeiling.status === 'drafted',
+              JSON.stringify(atCeiling),
+            );
+            await opened.service.approve(atCeiling.patchId);
+            await writer.query('BEGIN');
+            await insert(south, customer, '1', 'CAD', '2026-11-01', writer);
+            const outcome = opened.service.activate(atCeiling.patchId).then(
+              () => null,
+              (error: unknown) => error,
+            );
+            const bound = performance.now() + 60_000;
+            let waiting = false;
+            while (!waiting && performance.now() < bound) {
+              waiting =
+                (
+                  await pool.query(
+                    "SELECT 1 FROM pg_locks WHERE relation=$1::regclass AND mode='ShareLock' AND NOT granted",
+                    [table],
+                  )
+                ).rowCount === 1;
+              if (!waiting) await delay(25);
+            }
+            assert.ok(
+              waiting,
+              'the approved report build must wait on the pooled Invoice table',
+            );
+            await writer.query('COMMIT');
+            const failure = await outcome;
+            assert.ok(
+              failure instanceof Error &&
+                failure.message.includes(col('due_date')) &&
+                /ceiling/u.test(failure.message),
+              String(failure),
+            );
+            assert.equal(
+              (await opened.service.status()).activeReleaseId,
+              draft.releaseId,
+            );
+          } finally {
+            await writer.query('ROLLBACK');
+            writer.release();
+            if (previous === undefined)
+              delete process.env.NORTH_STAR_REPORT_INDEX_ROW_CEILING;
+            else process.env.NORTH_STAR_REPORT_INDEX_ROW_CEILING = previous;
+          }
         } finally {
           await opened.close();
           await app.close();
