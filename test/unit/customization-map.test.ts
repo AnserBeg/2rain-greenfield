@@ -4,12 +4,18 @@ import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { renderMapStopList } from '../../apps/web/src/map-view.js';
+import {
+  mapBindingsProblem,
+  mapDeclarationProblem,
+} from '../../packages/postgres-provider/src/map-admission.js';
 import { finishMapPage } from '../../packages/postgres-provider/src/map-page.js';
 import type { SemanticQueryExecutionRequest } from '../../packages/runtime/src/semantic-query-gateway.js';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
   normalizeApplicationPackage,
+  MAP_VIEW_READER,
+  SURFACE_SLOTS,
   mapBindingConflicts,
   mapDigest,
 } from '../../packages/canonical-model/src/index.js';
@@ -291,4 +297,107 @@ test('a label-only upgrade compiles active and retired Map choices', async () =>
       JSON.stringify(result.status === 'compiled' ? null : result),
     );
   }
+});
+
+test('Map admission binds the reader, collection, selected fields, slots and connector to the released revision', () => {
+  const { target, choice } = offered();
+  const { surfaceId, lifecycle, body, revisionId, predecessor, resultDigest } =
+    draftMapRevision(target, choice);
+  const surface = {
+    surfaceId,
+    archetype: 'map',
+    lifecycle,
+    map: { body, revisionId, predecessor, resultDigest },
+    slots: SURFACE_SLOTS.map.map((slot) => ({ slot })),
+    workspace: { ownerSurfaceId: body.listSurfaceId },
+    dataSourceQueryId: body.listQueryId,
+  };
+  const list = {
+    surfaceId: body.listSurfaceId,
+    dataSourceQueryId: body.listQueryId,
+    lifecycle: 'active',
+  };
+  const record = {
+    surfaceId: body.recordSurfaceId,
+    dataSourceQueryId: body.getQueryId,
+    lifecycle: 'active',
+  };
+  const query = {
+    queryId: body.listQueryId,
+    queryType: 'list',
+    sourceEntityId: body.entityId,
+    legalEntityScope: { cardinality: body.companyScope },
+    selections: [
+      body.label.fieldId,
+      body.addressFieldId,
+      body.order.field.fieldId,
+      body.group!.fieldId,
+    ].map((fieldId) => ({ fieldId })),
+  };
+  const get = {
+    queryId: body.getQueryId,
+    queryType: 'get',
+    sourceEntityId: body.entityId,
+  };
+  const viewport = {
+    fieldId: body.addressFieldId,
+    surfaceId,
+    contract: body.viewport,
+  };
+  const inspect = (
+    surfaces: unknown[] = [surface, list, record],
+    floor = MAP_VIEW_READER,
+    queries: unknown[] = [query, get],
+    viewports: unknown[] = [viewport],
+  ) => mapBindingsProblem({ surfaces }, floor, { queries }, { viewports });
+  assert.equal(inspect(), null);
+  assert.ok(inspect(undefined, MAP_VIEW_READER - 1));
+  assert.ok(inspect([list, record], MAP_VIEW_READER, undefined, []));
+  for (const replacement of [
+    { ...surface, archetype: 'list' },
+    { ...surface, slots: surface.slots.slice(1) },
+    { ...surface, map: { ...surface.map, resultDigest: '0'.repeat(64) } },
+    { ...surface, map: { ...surface.map, predecessor: revisionId } },
+    { ...surface, dataSourceQueryId: body.getQueryId },
+    { ...surface, workspace: { ownerSurfaceId: body.recordSurfaceId } },
+  ])
+    assert.ok(inspect([replacement, list, record]));
+  assert.ok(inspect([surface, list]));
+  assert.ok(inspect([surface, record]));
+  assert.ok(inspect(undefined, undefined, [query]));
+  assert.ok(inspect(undefined, undefined, [get]));
+  assert.ok(
+    inspect(undefined, undefined, [
+      { ...query, legalEntityScope: { cardinality: 'different' } },
+      get,
+    ]),
+  );
+  for (const { fieldId } of query.selections)
+    assert.ok(
+      inspect(undefined, undefined, [
+        {
+          ...query,
+          selections: query.selections.filter((s) => s.fieldId !== fieldId),
+        },
+        get,
+      ]),
+    );
+  assert.ok(
+    inspect(undefined, undefined, undefined, [
+      { ...viewport, fieldId: body.label.fieldId },
+    ]),
+  );
+  assert.equal(
+    mapDeclarationProblem(
+      { surfaces: [surface] },
+      { surfaces: [surface, list, record] },
+    ),
+    null,
+  );
+  assert.ok(
+    mapDeclarationProblem(
+      { surfaces: [surface] },
+      { surfaces: [{ ...surface, lifecycle: 'retired' }] },
+    ),
+  );
 });
