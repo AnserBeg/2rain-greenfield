@@ -98,6 +98,7 @@ const suiteDefinitions = [
       'test/integration/catalog-runtime.test.ts',
       'test/integration/disclosure-tier-round-trip.test.ts',
       'test/integration/document-http.test.ts',
+      'test/integration/document-pdf.test.ts',
       'test/integration/field-kind-round-trip.test.ts',
       'test/integration/location-runtime.test.ts',
       'test/integration/module-runtime.test.ts',
@@ -121,6 +122,7 @@ const suiteDefinitions = [
     discoveryPattern: 'test/architecture/**/*.test.ts',
     expectedFiles: [
       'test/architecture/canonical-contracts-purity.test.ts',
+      'test/architecture/ci-main-push.test.ts',
       'test/architecture/ci-tiers.test.ts',
       'test/architecture/compiler-hermeticity.test.ts',
       'test/architecture/customization-sandbox-boundary.test.ts',
@@ -216,6 +218,7 @@ const suiteDefinitions = [
       'test/postgres/declared-list.test.ts',
       'test/postgres/document-attachments.test.ts',
       'test/postgres/document-numbering.test.ts',
+      'test/postgres/document-templates.test.ts',
       'test/postgres/location-runtime.test.ts',
       'test/postgres/locations.test.ts',
       'test/postgres/migrations.test.ts',

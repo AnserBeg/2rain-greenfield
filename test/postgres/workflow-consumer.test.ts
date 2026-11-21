@@ -1,3 +1,4 @@
+import { LEGACY_WORKFLOW_SDK_VERSION } from '../../packages/postgres-provider/src/workflow-sdk-version.js';
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
 import { canonicalize } from '@north-star/canonical-model';
@@ -39,7 +40,7 @@ import {
 } from '../../packages/postgres-provider/src/workflow-execution.js';
 import { PostgresWorkflowGateway } from '../../packages/postgres-provider/src/workflow-gateway.js';
 import { storeWorkflowBundle } from '../../packages/postgres-provider/src/workflow-bundle.js';
-import { InMemoryWorkflowRun } from '../../packages/postgres-provider/src/workflow-run.js';
+import { verifyWorkflowDefinitions } from '../../packages/postgres-provider/src/workflow-admission.js';
 import { generateWorkflowSdk } from '../../packages/postgres-provider/src/workflow-sdk.js';
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
 import { PostgresImmutableReleaseRepository } from '../../packages/postgres-provider/src/release-repository.js';
@@ -1540,6 +1541,67 @@ test(
           );
 
           await t.test(
+            'two CPU overruns quarantine without an effect, and a v1 event wait still suspends',
+            async () => {
+              const legacy = generateWorkflowSdk(
+                view,
+                grants,
+                LEGACY_WORKFLOW_SDK_VERSION,
+              );
+              await service.rollback();
+              await cloneDefinition(
+                pool,
+                enrolled.releaseId,
+                'over-budget',
+                compileWorkflowBody('while(true) {}', sdk).executable,
+              );
+              await cloneDefinition(
+                pool,
+                enrolled.releaseId,
+                'legacy-wait',
+                compileWorkflowBody(
+                  "sdk.waitForEvent('goodsReceiptPosted',1);",
+                  legacy,
+                ).executable,
+                undefined,
+                legacy,
+              );
+              await verify('over-budget');
+              await verify('legacy-wait');
+              await service.approve(draft.patchId);
+              await service.activate(draft.patchId);
+              await postReceipt(world);
+              const receipt = await latestReceipt(pool, tenantId);
+              await consumer.claim(scope);
+              for (const [id, status, reason] of [
+                ['over-budget', 'QUARANTINED', 'cpu-limit-exceeded'],
+                ['legacy-wait', 'SUSPENDED', 'durable-call-unavailable'],
+              ] as const) {
+                const runId = await runFor(pool, receipt.outbox_id, id);
+                await restarted.step(scope, runId);
+                const run = await pool.query(
+                  'SELECT status,reason FROM platform.workflow_runs WHERE run_id=$1',
+                  [runId],
+                );
+                assert.deepEqual(run.rows[0], { status, reason });
+                assert.equal(await journalCount(pool, runId, 'REQUEST'), 0);
+                if (id === 'over-budget') {
+                  const evidence = await pool.query(
+                    "SELECT convert_from(canonical_bytes,'UTF8')::jsonb->>'reason' AS reason FROM platform.workflow_journal WHERE run_id=$1 AND kind='CONTROL'",
+                    [runId],
+                  );
+                  for (const attempt of [1, 2])
+                    assert.ok(
+                      evidence.rows.some(
+                        (row) => row.reason === `attempt-${attempt}-cpu-limit`,
+                      ),
+                    );
+                }
+              }
+            },
+          );
+
+          await t.test(
             'a restarted worker wakes a durable timer once at its business deadline',
             async () => {
               const workflowId = 'receipt-timer';
@@ -1614,7 +1676,6 @@ test(
               assert.equal(await journalCount(pool, stale, 'RESULT'), 1);
             },
           );
-
           const fixtureGrants = { queries: [], operations: [] };
           const fixtureBody = 'sdk.sleep(10);';
           const fixtureDigest = await withTrustedRequestTransaction(
@@ -1657,41 +1718,50 @@ test(
             },
           });
           await t.test(
-            'candidate admission refuses post-fixture replay divergence',
+            'candidate admission independently refuses a stored body that diverges from its fixture',
             async () => {
-              const candidate = await service.draft(
-                workflowPatch('divergent-replay'),
-                'conversationalAi',
+              const body = 'sdk.sleep(11);';
+              const digest = await withTrustedRequestTransaction(
+                runtimePool,
+                operator,
+                (client) =>
+                  storeWorkflowBundle(client, operator, {
+                    body,
+                    authoredBy: operator.principalId,
+                    executable: compileWorkflowBody(
+                      body,
+                      generateWorkflowSdk(view, fixtureGrants),
+                    ).executable,
+                    fixtures: [
+                      {
+                        event: {
+                          type: 'goodsReceiptPosted',
+                          eventId: randomUUID(),
+                          receiptId: randomUUID(),
+                          legalEntityId: COMPANY,
+                        },
+                        effects: [
+                          {
+                            call: { kind: 'sleep', milliseconds: 10 },
+                            result: null,
+                          },
+                        ],
+                      },
+                    ],
+                  }),
               );
-              assert.ok(
-                candidate.status === 'drafted',
-                JSON.stringify(candidate),
+              await assert.rejects(
+                withTrustedRequestTransaction(runtimePool, operator, (client) =>
+                  verifyWorkflowDefinitions(client, operator, view, [
+                    {
+                      ...workflowPatch('divergent-replay').workflow,
+                      bodyDigest: digest,
+                      sdkDigest: sha256(sdk.declarations),
+                    },
+                  ]),
+                ),
+                /unmocked call/u,
               );
-              const step = InMemoryWorkflowRun.prototype.step;
-              const firstPass = new WeakSet<InMemoryWorkflowRun>();
-              const divergence = t.mock.method(
-                InMemoryWorkflowRun.prototype,
-                'step',
-                async function (this: InMemoryWorkflowRun) {
-                  if (!firstPass.has(this) && this.snapshot().prefix.length > 0)
-                    return {
-                      kind: 'quarantined',
-                      cursor: 0,
-                      reason: 'changed-request',
-                    } as const;
-                  firstPass.add(this);
-                  return step.call(this);
-                },
-              );
-              try {
-                await assert.rejects(
-                  service.approve(candidate.patchId),
-                  /Workflow replay failed at cursor 0 \(quarantined\)/u,
-                  'candidate was admitted without running the recorded fixture again',
-                );
-              } finally {
-                divergence.mock.restore();
-              }
             },
           );
 
@@ -1706,7 +1776,14 @@ test(
                 complete.status === 'drafted',
                 JSON.stringify(complete),
               );
-              await service.approve(complete.patchId);
+              await assert.rejects(
+                service.approve(complete.patchId, '0'.repeat(64)),
+                /Review the workflow source/,
+              );
+              await service.approve(
+                complete.patchId,
+                complete.workflowReviewDigest,
+              );
               await service.activate(complete.patchId);
               const candidate = await service.draft(
                 workflowPatch('missing-evidence'),
@@ -1730,7 +1807,10 @@ test(
             `);
               try {
                 await assert.rejects(
-                  service.approve(candidate.patchId),
+                  service.approve(
+                    candidate.patchId,
+                    candidate.workflowReviewDigest,
+                  ),
                   /Workflow verification evidence is incomplete or does not match the candidate/u,
                   'candidate was admitted with one declared workflow missing evidence',
                 );
@@ -2121,12 +2201,13 @@ async function cloneDefinition(
   id: string,
   executable?: string,
   eventType?: string,
+  sdk?: ReturnType<typeof generateWorkflowSdk>,
 ) {
   await pool.query(
     `INSERT INTO platform.workflow_definitions
      SELECT tenant_id, environment_id, release_id, $2, COALESCE($5, event_type), body_digest,
             COALESCE($3, executable), COALESCE($4, executable_digest),
-            sdk_digest, engine_build, host_version, sdk_version,
+            COALESCE($6, sdk_digest), engine_build, host_version, COALESCE($7,sdk_version),
             automation_principal_id, authored_by, grants
        FROM platform.workflow_definitions WHERE release_id = $1 AND workflow_id = 'receipt-review'`,
     [
@@ -2135,6 +2216,8 @@ async function cloneDefinition(
       executable === undefined ? null : Buffer.from(executable),
       executable === undefined ? null : sha256(executable),
       eventType ?? null,
+      sdk ? sha256(sdk.declarations) : null,
+      sdk?.version ?? null,
     ],
   );
 }

@@ -40,8 +40,16 @@ process.once('message', (message: unknown) => {
     reply({ environmentRefusal: observed });
     return;
   }
-  const envelope = message as { protocol?: unknown; request?: SandboxRequest };
-  if (envelope.protocol !== SANDBOX_PROTOCOL_VERSION || !envelope.request) {
+  const envelope = message as {
+    protocol?: unknown;
+    kind?: unknown;
+    request?: SandboxRequest;
+  };
+  if (
+    envelope.protocol !== SANDBOX_PROTOCOL_VERSION ||
+    envelope.kind !== 'compile' ||
+    !envelope.request
+  ) {
     reply({
       environmentRefusal: 'the request is outside the sandbox protocol',
     });

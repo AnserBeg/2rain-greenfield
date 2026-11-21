@@ -1582,6 +1582,9 @@ export function registeredSemanticQueryFromPinnedView(
       ...(Object.hasOwn(payload, 'documentBindings')
         ? ['documentBindings']
         : []),
+      ...(Object.hasOwn(payload, 'documentTemplatePointers')
+        ? ['documentTemplatePointers']
+        : []),
     ],
     (message) => new MalformedPinnedQueryCatalogError(message),
   );

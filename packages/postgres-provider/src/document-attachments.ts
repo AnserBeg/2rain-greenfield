@@ -1,12 +1,16 @@
 import { createHash } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
+import { canonicalize } from '@north-star/canonical-model';
 import type { StorageTargetPayloadV1 } from '@north-star/compiler';
 import {
   DOCUMENT_BLOB_MAX_BYTES,
   DOCUMENT_PERMISSIONS,
+  DOCUMENT_TEMPLATE_RENDERER,
   documentAttachPermission,
   documentAttachOperation,
+  documentGenerateOperation,
 } from '../../canonical-model/src/documents.js';
+import type { DocumentTemplateRevision } from '../../canonical-model/src/document-template-schema.js';
 import { DocumentsProjectionSchema } from '../../canonical-model/src/schemas.js';
 import {
   DocumentRequestError,
@@ -20,10 +24,12 @@ import {
 } from '../../runtime/src/document-gateway.js';
 import {
   authorizeCurrentPolicy,
+  LEGAL_ENTITY_READ_SCOPE_PERMISSION_ID,
   trustedContextForRequestRuntimeView,
   type RequestRuntimeView,
 } from '../../runtime/src/request-runtime-view.js';
 import {
+  QUERY_BOUNDARY_PERMISSION_ID,
   registeredQueryFromPinnedView,
   SEMANTIC_QUERY_REQUEST_VERSION,
   type SemanticQueryGateway,
@@ -43,6 +49,7 @@ import {
 } from './document-content.js';
 import { withModuleRuntimeRole } from './module-runtime-interpreter.js';
 import {
+  withReadSnapshot,
   setTransactionDeadline,
   withTrustedRequestTransaction,
 } from './request-context.js';
@@ -53,11 +60,30 @@ import {
 } from '../../runtime/src/semantic-operation-gateway.js';
 import type { PostgresDocumentPublication } from './document-publication.js';
 
+import {
+  DOCUMENT_BRAND_COMPANY_ENTITY,
+  type CompanyDocumentBrandResolver,
+} from './document-company-brand.js';
+import { renderDocumentPdf } from './document-pdf.js';
+import {
+  documentQueryDigest,
+  documentSourceField,
+  documentSourceQuery,
+  isDocumentSqlCancellation,
+  readDocumentTemplateSources,
+  safeDocumentPdfText,
+  unavailableBinding,
+  type DocumentFieldAuthority,
+  type DocumentQuerySource,
+  type GeneratedDocumentSource,
+} from './document-template-sources.js';
+
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 type Entity = StorageTargetPayloadV1['entities'][number];
 type DocumentRelease = {
   readonly policy: PostgresCurrentPolicyGateway;
   readonly storage: StorageTargetPayloadV1 | null;
+  readonly documentFields: ReadonlyMap<string, DocumentFieldAuthority> | null;
 };
 
 interface GoverningRecord {
@@ -98,6 +124,7 @@ export class PostgresDocumentGateway implements DocumentGateway {
     private readonly publication: PostgresDocumentPublication,
     private readonly operations: SemanticOperationGateway,
     private readonly mediation: SemanticOperationMediationAuthority,
+    private readonly companyBrand: CompanyDocumentBrandResolver,
   ) {}
 
   get scannerLabel() {
@@ -182,6 +209,325 @@ export class PostgresDocumentGateway implements DocumentGateway {
     signal: AbortSignal,
     deadline = documentDeadline(signal),
   ): Promise<DocumentMetadata> {
+    return this.acceptUpload(view, target, upload, receive, deadline, null);
+  }
+
+  async generate(
+    view: RequestRuntimeView,
+    target: DocumentTarget,
+    templateId: string,
+    retryKey: string,
+    signal: AbortSignal,
+    deadline = documentDeadline(signal),
+  ): Promise<DocumentMetadata> {
+    if (!uuid.test(retryKey))
+      throw new DocumentRequestError(400, 'Invalid PDF retry key.');
+    const receipt = await this.withRecord(
+      view,
+      target,
+      [DOCUMENT_PERMISSIONS.view],
+      deadline,
+      async (client, record) => {
+        const { rows } = await client.query<{
+          metadata: DocumentMetadata | null;
+        }>(
+          'SELECT platform.read_generated_document_receipt($1,$2,$3,$4,$5) AS metadata',
+          [
+            record.scope,
+            record.entity.entityId,
+            record.recordId,
+            scopedUploadId(view, retryKey),
+            templateId,
+          ],
+        );
+        return rows[0]!.metadata;
+      },
+    );
+    if (receipt) return receipt;
+    if (!this.scanner || !this.scannerPool)
+      throw new DocumentRequestError(
+        503,
+        'PDF generation requires an active document content scanner.',
+      );
+    const template = this.activeTemplate(view, target, templateId);
+    const rendered = await this.renderTemplate(
+      view,
+      target,
+      template,
+      false,
+      deadline,
+    );
+    const generated: GeneratedDocumentSource = {
+      templateId,
+      revisionId: template.revisionId,
+      issuedIdentity: rendered.input.identity!,
+      releaseRoot: view.release.contentHash,
+      renderer: DOCUMENT_TEMPLATE_RENDERER,
+      brandRevision: rendered.brandRevision,
+      companyBrandSource: rendered.companyBrandSource,
+      recordId: target.recordId,
+      queries: rendered.queries,
+      logo: rendered.logo,
+      inputDigest: documentDigest(
+        Buffer.from(
+          canonicalize({
+            revision: template,
+            brandRevision: rendered.brandRevision,
+            companyBrandSource: rendered.companyBrandSource,
+            input: rendered.input,
+            recordId: target.recordId,
+            queries: rendered.queries,
+            logo: rendered.logo,
+          }),
+        ),
+      ),
+    };
+    const title = template.label.slice(
+      0,
+      175 - generated.issuedIdentity.length,
+    );
+    const fileName = `${title} ${generated.issuedIdentity}.pdf`;
+    return this.acceptUpload(
+      view,
+      target,
+      {
+        retryKey,
+        fieldId: null,
+        categoryId: null,
+        fileName,
+        contentType: 'application/pdf',
+      },
+      async () => rendered.bytes,
+      deadline,
+      generated,
+    );
+  }
+
+  async previewTemplate(
+    view: RequestRuntimeView,
+    target: DocumentTarget,
+    templateId: string,
+    signal: AbortSignal,
+    deadline = documentDeadline(signal),
+  ): Promise<Buffer> {
+    const template = this.activeTemplate(view, target, templateId);
+    const rendered = await this.renderTemplate(
+      view,
+      target,
+      template,
+      true,
+      deadline,
+    );
+    return rendered.bytes;
+  }
+
+  private activeTemplate(
+    view: RequestRuntimeView,
+    target: DocumentTarget,
+    templateId: string,
+  ) {
+    const projection = documentDefinition(view);
+    const pointer = projection?.templates?.pointers.find(
+      (entry) => entry.templateId === templateId,
+    );
+    const template = projection?.templates?.revisions.find(
+      (entry) =>
+        entry.templateId === templateId &&
+        entry.revisionId === pointer?.activeRevisionId,
+    );
+    if (
+      !template ||
+      !projection?.bindings.some(
+        ({ entityId, surfaceIds, generateOperationId }) =>
+          entityId === template.entityId &&
+          generateOperationId === documentGenerateOperation(entityId) &&
+          surfaceIds.some((id) => id === target.surfaceId),
+      )
+    )
+      throw notFound();
+    return template;
+  }
+
+  private async renderTemplate(
+    view: RequestRuntimeView,
+    target: DocumentTarget,
+    template: DocumentTemplateRevision,
+    preview: boolean,
+    deadline: DocumentDeadline,
+  ) {
+    const { storage, documentFields } = await this.release(
+      view.release.releaseId,
+    );
+    if (!storage || !documentFields) throw unavailableBinding();
+    const permissions = preview
+      ? [DOCUMENT_PERMISSIONS.view, DOCUMENT_PERMISSIONS.download]
+      : [DOCUMENT_PERMISSIONS.view, DOCUMENT_PERMISSIONS.upload];
+    const initial = await this.withRecord(
+      view,
+      target,
+      permissions,
+      deadline,
+      async (client, record) => {
+        if (!preview) await this.authorizeAttach(client, view, record);
+        return record;
+      },
+    );
+    const context = { storage, fields: documentFields };
+    const { inputs, brand } = await withReadSnapshot(
+      this.pool,
+      async () => ({
+        inputs: await readDocumentTemplateSources(
+          view,
+          target,
+          template,
+          context,
+          this.queryGateway,
+          preview,
+          deadline.signal,
+        ),
+        brand: await this.companyBrand.resolve(view, target.companyId, context),
+      }),
+      { retry: false, deadline },
+    ).catch((error) => documentDatabaseError(error, deadline));
+    if (inputs.record.revision !== initial.revision) throw unavailableBinding();
+
+    const input = {
+      ...inputs.input,
+      name: safeDocumentPdfText(brand.displayName),
+      ink: brand.ink,
+      accent: brand.accent,
+      logoDataUri: null,
+    };
+    const bytes = await renderDocumentPdf(input, deadline.signal);
+    await validateDocumentContent(bytes, 'application/pdf', deadline.signal);
+    const sources = {
+      queries: inputs.queries,
+      companyBrandSource: brand.companySource,
+      logo: null,
+    };
+    await this.withRecord(
+      view,
+      target,
+      permissions,
+      deadline,
+      async (client, record) => {
+        checkSameRecord(initial, record);
+        if (!preview) await this.authorizeAttach(client, view, record);
+        await this.authorizeGenerated(client, view, record, sources);
+      },
+      { lockSources: true },
+    );
+    return { input, bytes, brandRevision: brand.revision, ...sources };
+  }
+
+  private async authorizeGenerated(
+    client: PoolClient,
+    view: RequestRuntimeView,
+    governing: GoverningRecord,
+    generated: Pick<GeneratedDocumentSource, 'queries' | 'companyBrandSource'>,
+  ) {
+    const { storage, documentFields, policy } = await this.release(
+      view.release.releaseId,
+    );
+    if (!storage || !documentFields) throw unavailableBinding();
+    const context = { storage, fields: documentFields };
+    const check = async (source: DocumentQuerySource, entityId: string) => {
+      const { query, entity, relation } = documentSourceQuery(
+        view,
+        context,
+        source,
+        entityId,
+      );
+      if (
+        entity.entityId !== source.entityId ||
+        documentQueryDigest(query) !== source.queryDigest
+      )
+        throw unavailableBinding();
+      for (const field of source.fields) {
+        const current = documentSourceField(
+          context,
+          query,
+          entity,
+          field.fieldId,
+        );
+        if (
+          current.classification !== field.classification ||
+          current.fieldKind !== field.fieldKind ||
+          current.currencyCode !== field.currencyCode
+        )
+          throw unavailableBinding();
+      }
+      await this.authorize(client, policy, view, source.companyId ?? 'shared', [
+        QUERY_BOUNDARY_PERMISSION_ID,
+        query.permissionId,
+        ...(source.companyId ? [LEGAL_ENTITY_READ_SCOPE_PERMISSION_ID] : []),
+      ]);
+      const revisions = await withModuleRuntimeRole(client, async () =>
+        client.query<{ id: string; revision: string }>(
+          `SELECT ${identifier(entity.recordIdentity.column)} AS id,
+                  ${identifier(entity.optimisticRevision.column)}::text AS revision
+             FROM north_star_module.${identifier(entity.physicalTableName)}
+            WHERE tenant_id = $1 AND environment_id = $2
+              AND ($6::boolean OR ${identifier(entity.recordIdentity.column)} = ANY($3::uuid[]))
+              AND ${identifier(entity.archive.archivedAtColumn)} IS NULL
+              AND ${entity.legalEntity ? identifier(entity.legalEntity.column) + ' = $4::uuid' : '$4::uuid IS NULL'}
+              AND ${relation ? identifier(relation.relationColumn.physicalName) + ' = $5::uuid' : '$5::uuid IS NULL'}
+            ORDER BY ${identifier(entity.recordIdentity.column)} LIMIT 101 FOR SHARE`,
+          [
+            view.tenantId,
+            view.environmentId,
+            source.rows.map(({ recordId }) => recordId),
+            source.companyId,
+            relation ? governing.recordId : null,
+            relation !== null,
+          ],
+        ),
+      );
+      const byId = new Map(
+        revisions.rows.map(({ id, revision }) => [id, Number(revision)]),
+      );
+      if (
+        byId.size !== source.rows.length ||
+        source.rows.some(
+          ({ recordId, revision }) => byId.get(recordId) !== revision,
+        )
+      )
+        throw unavailableBinding();
+    };
+    for (const source of generated.queries) {
+      if (
+        (source.companyId ?? 'shared') !== governing.scope ||
+        (!source.parentRelationId &&
+          (source.rows.length !== 1 ||
+            source.rows[0]?.recordId !== governing.recordId))
+      )
+        throw unavailableBinding();
+      await check(source, governing.entity.entityId);
+    }
+    const company = generated.companyBrandSource;
+    if (governing.scope !== 'shared') {
+      if (
+        !company ||
+        company.companyId !== null ||
+        company.parentRelationId !== null ||
+        company.rows.length !== 1 ||
+        company.rows[0]?.recordId !== governing.scope
+      )
+        throw unavailableBinding();
+      await check(company, DOCUMENT_BRAND_COMPANY_ENTITY);
+    } else if (company) {
+      throw unavailableBinding();
+    }
+  }
+
+  private async acceptUpload(
+    view: RequestRuntimeView,
+    target: DocumentTarget,
+    upload: DocumentUpload,
+    receive: (maximumBytes: number) => Promise<Buffer>,
+    deadline: DocumentDeadline,
+    generated: GeneratedDocumentSource | null,
+  ): Promise<DocumentMetadata> {
     if (!this.scanner || !this.scannerPool)
       throw new DocumentRequestError(
         503,
@@ -265,7 +611,7 @@ export class PostgresDocumentGateway implements DocumentGateway {
         const result = await client.query<{
           metadata: DocumentMetadata | null;
         }>(
-          'SELECT platform.stage_document_upload($1,$2,$3,$4,$5,$6,$7,$8,$9) AS metadata',
+          'SELECT platform.stage_document_upload($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) AS metadata',
           [
             record.scope,
             record.entity.entityId,
@@ -276,10 +622,12 @@ export class PostgresDocumentGateway implements DocumentGateway {
             fileName,
             contentType,
             bytes,
+            generated,
           ],
         );
         return result.rows[0]!.metadata;
       },
+      { lockSources: generated !== null },
     );
     if (receipt) return receipt;
     const clean = await scanStage(
@@ -304,6 +652,7 @@ export class PostgresDocumentGateway implements DocumentGateway {
         record: targetRecord.record,
         query: targetRecord.query,
         companyId: target.companyId,
+        ...(generated ? { generated: true as const } : {}),
         uploadId,
         commit: () =>
           this.withRecord(
@@ -331,6 +680,12 @@ export class PostgresDocumentGateway implements DocumentGateway {
                 ],
               );
               return result.rows[0]!.metadata;
+            },
+            {
+              ...(deadline.beginPublicationCommit && {
+                onCommitStart: deadline.beginPublicationCommit,
+              }),
+              lockSources: generated !== null,
             },
           ),
       },
@@ -386,6 +741,7 @@ export class PostgresDocumentGateway implements DocumentGateway {
     permissions: readonly string[],
     deadline: DocumentDeadline,
     work: (client: PoolClient, record: GoverningRecord) => Promise<T>,
+    options: { onCommitStart?: () => void; lockSources?: boolean } = {},
   ): Promise<T> {
     const context = trustedContextForRequestRuntimeView(view);
     deadline.remainingMilliseconds();
@@ -416,8 +772,7 @@ export class PostgresDocumentGateway implements DocumentGateway {
       !query ||
       query.lifecycle !== 'active' ||
       query.queryType !== 'get' ||
-      query.tier !== 'q0' ||
-      query.readModel
+      query.tier !== 'q0'
     )
       throw notFound();
     const entity = storage.entities.find(
@@ -432,6 +787,7 @@ export class PostgresDocumentGateway implements DocumentGateway {
     const canonicalBinding = documentDefinition(view)?.bindings.find(
       (entry) => entry.entityId === entity.entityId,
     );
+    if (query.readModel && !canonicalBinding) throw notFound();
     if (
       canonicalBinding &&
       (canonicalBinding.queryId !== query.queryId ||
@@ -531,7 +887,7 @@ export class PostgresDocumentGateway implements DocumentGateway {
               FROM north_star_module.${identifier(entity.physicalTableName)}
              WHERE tenant_id = $1 AND environment_id = $2
                AND ${identifier(entity.recordIdentity.column)} = $3
-               AND ${identifier(entity.archive.archivedAtColumn)} IS NULL FOR SHARE`,
+               AND ${identifier(entity.archive.archivedAtColumn)} IS NULL FOR ${options.lockSources ? 'UPDATE' : 'SHARE'}`,
             [view.tenantId, view.environmentId, target.recordId],
           ),
         );
@@ -555,6 +911,7 @@ export class PostgresDocumentGateway implements DocumentGateway {
         });
       },
       deadline.remainingMilliseconds,
+      options.onCommitStart,
     ).catch((error) => documentDatabaseError(error, deadline));
   }
 }
@@ -614,9 +971,9 @@ function documentDatabaseError(
   deadline: DocumentDeadline,
 ): never {
   deadline.remainingMilliseconds();
+  if (isDocumentSqlCancellation(error))
+    throw new DocumentRequestError(408, 'The file response expired.');
   if (error instanceof Error && 'code' in error) {
-    if (error.code === '57014')
-      throw new DocumentRequestError(408, 'The file response expired.');
     if (
       typeof error.code === 'string' &&
       /^D0(404|409|413|422)$/u.test(error.code)

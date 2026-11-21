@@ -27,6 +27,7 @@ import {
 import { startComposedApplication } from '../../apps/api/src/composition-root.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 import { withArchivedCustomizationRuntime } from '../helpers/archived-runtime-process.js';
+import { applicationWithoutLineCreateValues } from '../helpers/application-without-line-create-values.js';
 
 const item = 'northstar.app:entity.item';
 const detailQuery = 'northstar.app:query.item_get';
@@ -39,12 +40,21 @@ const ref = (kind: string, targetId: string) => ({
   targetId,
   schemaVersion: 'v6',
 });
+// DOCS-1's optional read-model dependencies sit at query-catalog rung 6,
+// above booking's rungs, so this suite starts from the base without them and
+// measures booking's own reader floors.
+const bookingBase = structuredClone(firstPartyAuthored) as {
+  queries: { readModel?: { queries: Record<string, { required?: false }> } }[];
+};
+for (const { readModel } of bookingBase.queries)
+  for (const dependency of Object.values(readModel?.queries ?? {}))
+    delete dependency.required;
 function bookingRelease(
   mode: 'operation' | 'query',
   ordinaryCorrection = false,
 ) {
   const source = parseAuthoredApplicationPackageJson(
-    JSON.stringify(firstPartyAuthored),
+    JSON.stringify(bookingBase),
   );
   const detail = source.queries.find((q) => q.queryId === detailQuery)!;
   assert.ok(detail.queryType === 'get');
@@ -265,7 +275,9 @@ test(
       async (run) => {
         for (const mode of ['baseline', 'operation', 'query'] as const) {
           await withBookingApplication(
-            mode === 'baseline' ? undefined : bookingRelease(mode),
+            mode === 'baseline'
+              ? applicationWithoutLineCreateValues().release
+              : bookingRelease(mode),
             async (f) => {
               const probe = (await run(archivedQuery, {
                 databaseUrl: f.databaseUrl,

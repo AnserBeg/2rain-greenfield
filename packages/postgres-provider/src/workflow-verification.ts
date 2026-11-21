@@ -31,7 +31,9 @@ type WorkflowVerificationRelease = {
 };
 
 function pinnedProjection(
-  release: WorkflowVerificationRelease,
+  release: Pick<WorkflowVerificationRelease, 'artifacts'> & {
+    release: { contentHash: string };
+  },
   family: ProjectionFamilyId,
 ): unknown {
   function read<T>(hash: string | undefined, kind: string): T {
@@ -72,7 +74,9 @@ function pinnedProjection(
 }
 
 export function compileWorkflowUnattendedOperations(
-  release: WorkflowVerificationRelease,
+  release: Pick<WorkflowVerificationRelease, 'artifacts'> & {
+    release: { contentHash: string };
+  },
   grants: WorkflowGrants,
 ) {
   if (!grants.operations.length) return {};
