@@ -514,7 +514,7 @@ export async function draftPatchFromRequest(
   const system =
     draftingSystemPrompt(targets) +
     (targets.workflowSdk
-      ? `\nFor a receipt workflow use saveWorkflow with workflow {schemaVersion:"v6", workflowId, trigger:"goodsReceiptPosted", grants:{operations,queries}}, a TypeScript body and fixtures. Each fixture has an event {type:"goodsReceiptPosted", eventId, receiptId, legalEntityId} and effects in execution order {call, result}. Use the exact canonical IDs in these SDK declarations and declare only the calls the body makes. Sleep uses milliseconds and yields null. requestApproval yields a boolean. Never call operations or read live records to test a draft.\n${targets.workflowSdk}`
+      ? `\nFor a receipt workflow use saveWorkflow with workflow {schemaVersion:"v6", workflowId, trigger:"goodsReceiptPosted", grants:{operations,queries}}, a TypeScript body and fixtures. Each fixture has an event {type:"goodsReceiptPosted", eventId, receiptId, legalEntityId} and effects in execution order {call, result}. Use the exact canonical IDs in these SDK declarations and declare only the calls the body makes. Sleep uses milliseconds (up to 90 days) and yields null. For requests to wait for an external event, return unsupported with missingCapability "durable external-event waits (named gap)". requestApproval yields a boolean. Never call operations or read live records to test a draft.\n${targets.workflowSdk}`
       : '');
   const conversation: DraftingConversationEntry[] = [{ role: 'user', text }];
   let issues: readonly string[] = ['the model proposed no change'];

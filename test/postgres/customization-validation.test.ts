@@ -447,7 +447,7 @@ test(
   { timeout: 600_000 },
   async () => {
     await withArchivedCustomizationRuntime(
-      '5cffd0994f79f5f6bc6c32ba5e80b56ecdaecf37',
+      'aecd42967bf7524ae4f3c4f54eaca2350e3dc8fa',
       async (run) => {
         await assertArchivedTenantEnvelope(run);
         await withEphemeralPostgres(
