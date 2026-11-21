@@ -203,6 +203,7 @@ const suiteDefinitions = [
       'test/postgres/booking-serving.test.ts',
       'test/postgres/catalog-extras.test.ts',
       'test/postgres/catalog-runtime.test.ts',
+      'test/postgres/communication-threads.test.ts',
       'test/postgres/current-policy.test.ts',
       'test/postgres/customization-display.test.ts',
       'test/postgres/customization-formulas.test.ts',
