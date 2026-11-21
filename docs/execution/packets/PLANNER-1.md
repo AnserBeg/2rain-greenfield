@@ -52,7 +52,7 @@ The collection Map serves rental deliveries, field-service visits and distributi
 | --- | --- |
 | Paging and order | Seven-row and 100-row page limits and the visible overflow count pass. The PostgreSQL gate covers numeric route order, day, separate companies, area rank, cursor restart, candidate ceiling and a published sales currency filter. |
 | §2a | Chromium with injected rows passed linked pins, a route leg, fragment pan, shell identity, focus, Back, 390 px list-first Tab order and script-off zoom. The database-backed tests cover actual gateway calls, cancelled drag, newest reply, sizes and pin-to-Record navigation. |
-| Company and image | Eight imagery tests passed. Isolated removals of the company binding, public cache sharing, single-stop coarsening, single-call rule and seven raster/deadline checks each failed their test. The served test checks prefetch, company swap and cache reuse against quota rows. |
+| Company and image | Nine network-free imagery tests passed, including concurrent browser display reservations. Isolated removals of the company binding, public cache sharing, single-stop coarsening, single-call rule and seven raster/deadline checks each failed their test. The served test checks prefetch, company swap and cache reuse against quota rows. |
 | Dispatcher message | Hardcoding 100 made the seven-row overflow assertion fail. The checked-in renderer uses the visible count. |
 | Compatibility and SPEED-1 | The archived and current compilers reproduced the pre-Map Stop release, root `d9b8ff30` and 23 artifacts. The archived query, stored bytes and warm sparse/full SQL counts and p95 await CI. Other lanes were using Docker. |
 | Customize, replay and drafter | Seven focused Map tests passed, including label-only upgrade for active and retired revisions and both schema-generated draft order directions. The exhaustive replay inventory and its conflicting/compatible Map case also passed. |
@@ -64,7 +64,7 @@ The collection Map serves rental deliveries, field-service visits and distributi
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "PLANNER-1",
-  "base": "352e43b7e428ed1115fd9328db3a6427cf36a58f", "head": "3794af0b1031a43eee8d49320b030c6a683fa31e",
+  "base": "352e43b7e428ed1115fd9328db3a6427cf36a58f", "head": "9a9692fe08b3ae0cff1cd362ba8c749d2f46b044",
   "changedPaths": [".agents/skills/ux-grammar/SKILL.md", "apps/web/src/app-server.ts", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/google-basemap.ts", "apps/web/src/ledger-styles.ts", "apps/web/src/map-view.ts",
     "apps/web/src/surface-client.ts", "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts", "apps/web/src/workspace-entry.ts", "apps/web/test/browser/planner-map.spec.ts", "apps/web/test/browser/surface-grammar.spec.ts", "docs/decisions/ADR-0036-minimum-client-capability.md",
     "docs/decisions/ADR-0080-connector-framework.md", "docs/decisions/ADR-0092-map-resource-assignment-and-planner-workspace.md", "docs/execution/ledger.md", "docs/execution/packets/CONNECT-1.md", "docs/execution/packets/PLANNER-1.md", "docs/greenfield-north-star-erp-platform-plan.md", "package.json",
