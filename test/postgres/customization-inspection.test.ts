@@ -6,7 +6,7 @@ import {
   openCustomizeService,
   startComposedApplication,
 } from '../../apps/api/src/composition-root.js';
-import { DRAFT_CUSTOMIZATION_TOOL } from '../../packages/customization/src/ai-draft.js';
+import { draftBeforeCompanyAccessIndex } from '../helpers/pre-index-customization-draft.js';
 import { OperationsAgentSession } from '../../packages/operations-agent/src/session.js';
 import { COMPANY, worldOver, seededId } from '../agent/agent-world.js';
 import {
@@ -23,7 +23,6 @@ import {
   LINEAGE_INSTALL_VOLUME,
   withEphemeralPostgres,
 } from '../helpers/postgres.js';
-import { scriptedModel } from '../../packages/operations-agent/src/model.js';
 
 test(
   'one inspection change activates linked records and owned lines, and an assistant transition needs a yes',
@@ -44,29 +43,14 @@ test(
         });
         const request =
           'Set up an inspection process for incoming goods with result lines and pass, fail, conditional and quarantine outcomes.';
-        const opened = await openCustomizeService({
-          ...options,
-          draftingProvider: () =>
-            Promise.resolve(
-              scriptedModel([
-                (conversation) => {
-                  assert.deepEqual(conversation, [
-                    { role: 'user', text: request },
-                  ]);
-                  return {
-                    toolCalls: [
-                      {
-                        name: DRAFT_CUSTOMIZATION_TOOL,
-                        input: inspectionChange,
-                      },
-                    ],
-                  };
-                },
-              ]),
-            ),
-        });
+        const opened = await openCustomizeService(options);
         try {
-          const drafted = await opened.service.draftFromRequest(request);
+          const drafted = await draftBeforeCompanyAccessIndex(
+            options,
+            inspectionChange,
+            'declarativeEditor',
+            request,
+          );
           assert.equal(
             drafted.status,
             'drafted',

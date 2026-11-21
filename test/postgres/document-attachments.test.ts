@@ -1,3 +1,4 @@
+import { draftBeforeCompanyAccessIndex } from '../helpers/pre-index-customization-draft.js';
 import { CAPABILITY_EXECUTOR_FACTORIES } from '../../apps/api/src/erp-capabilities.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
 import assert from 'node:assert/strict';
@@ -798,7 +799,8 @@ test(
             companyOwnership: 'entityOwned',
             fields: [{ type: 'text', label: 'Name', required: true }],
           };
-          const candidate = await service.draft(
+          const candidate = await draftBeforeCompanyAccessIndex(
+            options,
             {
               kind: 'changeSet',
               patches: [

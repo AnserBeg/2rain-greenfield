@@ -34,6 +34,7 @@ import {
   inspectionStates,
   inspectionTransitions,
 } from '../../../../test/fixtures/inspection-customization.js';
+import { draftBeforeCompanyAccessIndex } from '../../../../test/helpers/pre-index-customization-draft.js';
 import { inspectionLinkRecords } from '../../../../test/fixtures/inspection-link-records.js';
 import {
   LINEAGE_INSTALL_VOLUME,
@@ -529,10 +530,7 @@ process.stdout.write(JSON.stringify(applicationWithoutLineCreateValues().release
       try {
         const opened = await openCustomizeService(options);
         try {
-          const recordDraft = await opened.service.draft(
-            inspectionChange,
-            'declarativeEditor',
-          );
+          const recordDraft = await opened.service.draft('declarativeEditor');
           if (recordDraft.status !== 'drafted')
             throw new Error(JSON.stringify(recordDraft));
           const approved = await opened.service.approve(recordDraft.patchId);
