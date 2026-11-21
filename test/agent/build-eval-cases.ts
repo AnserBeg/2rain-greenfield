@@ -37,16 +37,19 @@ export interface TypeSpec {
 
 /** Hand-written buckets for the free-text `missingCapability`. */
 export const CAPABILITY_BUCKETS = {
-  address: /address|map|pin|location on a map|geo/iu,
-  board: /board|kanban/iu,
-  booking: /book|reserv|availab|calendar|date range/iu,
-  email: /e-?mail|notif|remind|sms|text message|message/iu,
+  // Word boundaries (slice 2, item 6): "pin" must not match "overlapping".
+  address: /\baddress(?:es)?\b|\bmaps?\b|\bpins?\b|\bgeo/iu,
+  board: /\bboards?\b|\bkanban/iu,
+  booking:
+    /\bbook(?:s|ing|ings|able)?\b|\breserv|\bavailab|\bcalendar|\bdate[- ]range/iu,
+  email: /\be-?mails?\b|\bnotif|\bremind|\bsms\b|\btext messages?\b|\bmessag/iu,
   linkLater:
-    /links? on a published record type|existing record type|link.*(later|existing)/iu,
-  template: /template|pdf|print|document generat|signature|sign/iu,
+    /\blinks? on a published record type|\bexisting record type|\blinks?\b.*\b(?:later|existing)\b/iu,
+  template:
+    /\btemplates?\b|\bpdfs?\b|\bprint|\bdocument generat|\bsignatures?\b|\be-?sign/iu,
   trigger:
-    /trigger|event|subscription|automat|workflow|when .*(changes|created|status)/iu,
-  file: /file|attachment|upload|photo/iu,
+    /\btriggers?\b|\bevents?\b|\bsubscriptions?\b|\bautomat|\bworkflows?\b|\bon (?:create|status change)/iu,
+  file: /\bfiles?\b|\battachments?\b|\buploads?\b|\bphotos?\b/iu,
 } as const;
 export type CapabilityBucket = keyof typeof CAPABILITY_BUCKETS;
 
