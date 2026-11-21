@@ -41,10 +41,12 @@ import { AuthenticatedRequestRuntimeEntryAdapter } from './packages/runtime/src/
 import { SEMANTIC_QUERY_REQUEST_VERSION } from './packages/runtime/src/semantic-query-gateway.ts';
 const {databaseUrl,identity}=JSON.parse(await readFile(process.argv[2],'utf8'));
 const pool=rolePool(databaseUrl,'north_star_runtime',4);
+let phase='load';
 try {
   const loader=new PostgresRequestRuntimeViewService(pool);
   const context=await trustedContext(identity);
   const {release}=await loader.load(context);
+  phase='query';
   const serving=await loadServingRelease(pool,context,release.releaseId);
   const {policy,queryGateway}=composeServingGateways(pool,pool,context,serving,new ObservabilityMetrics(),{
     providerErrorMappings:[],capabilityOperationExecutorFactories:CAPABILITY_EXECUTOR_FACTORIES,localDemoIdentity:true,
@@ -53,7 +55,7 @@ try {
   const result=await entry.run({},view=>queryGateway.invoke(view,{schemaVersion:SEMANTIC_QUERY_REQUEST_VERSION,queryId:'northstar.app:query.legal_entity_list',arguments:{}}));
   console.log(JSON.stringify({outcome:'answered', ids:result.records.map(r=>r.recordId)}));
 } catch(error) {
-  console.log(JSON.stringify({outcome:'refused',code:error.code,message:error.message}));
+  console.log(JSON.stringify({outcome:'refused',phase,code:error.code,message:error.message}));
 } finally { await pool.end(); }
 `;
 
@@ -210,14 +212,41 @@ test(
                 ['north_star_module.' + index],
               );
               assert.equal(ready.rows[0]?.ready, true);
-              assert.deepEqual(await run(archivedQuery, readInput), {
-                outcome: 'refused',
-                code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
-                message:
-                  'runtime capability northstar.runtime:capability.surface-manifest requires version ' +
-                  COMPANY_ACCESS_INDEX_READER +
-                  ' and this runtime supports 37',
-              });
+              const requireRefusal = async () =>
+                assert.deepEqual(await run(archivedQuery, readInput), {
+                  outcome: 'refused',
+                  phase: 'load',
+                  code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
+                  message:
+                    'runtime capability northstar.runtime:capability.surface-manifest requires version ' +
+                    COMPANY_ACCESS_INDEX_READER +
+                    ' and this runtime supports 37',
+                });
+              await requireRefusal();
+              // Mutate only the extracted production loader in this disposable archive.
+              await run(
+                `
+                import assert from 'node:assert/strict';
+                import {readFile, writeFile} from 'node:fs/promises';
+                const file='packages/runtime/src/request-runtime-view.ts';
+                const source=await readFile(file,'utf8');
+                const guard='if (requirement.minimumVersion > entry.maximumSupportedVersion)';
+                assert.equal(source.split(guard).length,2);
+                await writeFile(file,source.replace(guard,'if (false)'));
+                console.log('null');
+              `,
+                {},
+              );
+              await assert.rejects(requireRefusal, { name: 'AssertionError' });
+              const mutant = (await run(archivedQuery, readInput)) as {
+                phase?: string;
+                outcome: string;
+              };
+              assert.ok(
+                mutant.phase === 'query' || mutant.outcome === 'answered',
+                'without the floor check the preceding loader admitted the indexed release',
+              );
+
               await assertStoredBytes(
                 pool,
                 old.resulting_release_id,
