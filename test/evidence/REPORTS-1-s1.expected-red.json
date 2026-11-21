@@ -73,6 +73,24 @@
           "expected": "Expected values to be strictly equal"
         }
       ]
+    },
+    {
+      "name": "reports-company-index-admission",
+      "claim": "An internally consistent release that understates the company access index reader is refused before its staging transaction.",
+      "file": "packages/postgres-provider/src/release-repository.ts",
+      "original": "(indexedType && surfaceFloor < COMPANY_ACCESS_INDEX_READER) ||",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/releases.test.ts"],
+        "namePattern": "release admission refuses a company access index"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/releases.test.ts",
+          "name": "release admission refuses a company access index whose release understates its reader floor",
+          "expected": "Understated candidate reached the staging transaction"
+        }
+      ]
     }
   ]
 }
