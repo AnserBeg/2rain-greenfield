@@ -243,18 +243,7 @@ test('overflow displays the governed page size', async () => {
 test('a label-only upgrade compiles active and retired Map choices', async () => {
   const { target, choice } = offered();
   const active = draftMapRevision(target, choice);
-  const retired = draftMapRevision(
-    target,
-    choice,
-    {
-      surfaceId: active.surfaceId,
-      revisionId: active.revisionId,
-      body: active.body,
-      lifecycle: 'active',
-      label: active.label,
-    },
-    true,
-  );
+  const retired = draftMapRevision(target, choice, active, true);
   const authoring = applied(chain);
   const relabelled = structuredClone(authoring);
   const field = (

@@ -12,7 +12,7 @@
  * floor on phone-width targets.
  */
 export const LEDGER_STYLES = `
-.surface-grid[data-surface-archetype="map"]{display:flex;flex-direction:column;gap:1rem}
+.surface-grid[data-surface-archetype="map"]{display:flex;flex-direction:column;reading-flow:flex-visual;gap:1rem}
 .map-canvas svg{display:block;width:100%;max-width:1024px;background:var(--sheet);touch-action:none}
 .map-canvas nav a,.map-list a,.map-canvas summary,.map-views button{display:inline-flex;align-items:center;min-height:44px;padding:0 .65rem}
 .map-hit{fill:transparent}.map-pin{fill:var(--ink)}.map-canvas svg text{fill:var(--sheet);pointer-events:none}

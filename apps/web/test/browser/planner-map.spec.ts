@@ -131,6 +131,15 @@ test('dispatchers pan just the map, return with Back and can open each stop with
           expect((await list.boundingBox())!.y).toBeLessThan(
             (await canvas.boundingBox())!.y,
           );
+        const route = tab.getByRole('combobox', { name: 'Route' });
+        await route.selectOption({ label: 'North' });
+        await tab.getByRole('button', { name: 'Apply filters' }).press('Enter');
+        await expect(list.getByRole('link')).toHaveCount(2);
+        if (width === 390) {
+          await tab.getByRole('button', { name: 'Apply filters' }).focus();
+          await tab.keyboard.press('Tab');
+          await expect(list.getByRole('link').first()).toBeFocused();
+        }
         for (const [size, width, height] of [
           ['small', 320, 240],
           ['medium', 768, 512],
