@@ -49,6 +49,7 @@ import {
   platformModuleDefinition,
 } from '../../packages/domain/src/index.js';
 import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/index.js';
+import { withoutStockCountWorkflow } from '../helpers/application-before-stock-count-workflow.js';
 import { purchasingModuleDefinition } from '../../packages/domain/src/purchasing/index.js';
 import { withPurchaseOrderApprovals } from '../../packages/domain/src/purchasing/approvals.js';
 import { salesModuleDefinition } from '../../packages/domain/src/sales/index.js';
@@ -216,6 +217,21 @@ test('compiler-produced fixtures cover all five archetypes, required slots, focu
   );
 });
 
+test('STOCK-COUNTS: the reader floor follows the workflow without editor defaults', () => {
+  const withoutLineDefaults = composedApplicationWithInventory() as {
+    surfaces: { documentEditor?: { lineCreateValues?: unknown } }[];
+  };
+  for (const { documentEditor } of withoutLineDefaults.surfaces) {
+    if (documentEditor) delete documentEditor.lineCreateValues;
+  }
+  assert.equal(
+    compiledSurfaceManifest(compileDefinition(withoutLineDefaults))
+      .requiredRuntimeCapability.minimumVersion,
+    LINE_CREATE_VALUES_SURFACE_FLOOR,
+    'the stock count workflow requires the reader even without editor line defaults',
+  );
+});
+
 test('compiled navigation stays flat within budget and groups mounted modules beyond it', () => {
   const flatManifest = compiledSurfaceManifest(
     compileDefinition(composedApplicationBelowNavigationBudget()),
@@ -333,7 +349,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // Each half of 22 holds it alone: without the price lists' tiers the
   // counter sale's Tasks still require it; without both, the floor is 21.
   const floorWithout = (counterSales: boolean) => {
-    const source = composedApplicationWithInventory() as {
+    const source = withoutStockCountWorkflow(
+      composedApplicationWithInventory(),
+    ) as {
       surfaces: Array<{
         documentEditor?: Record<
           'headerFields' | 'lineFields',
@@ -345,7 +363,7 @@ test('compiled navigation stays flat within budget and groups mounted modules be
               tiers?: unknown;
             };
           }>
-        > & { lineCreateValues?: unknown };
+        >;
         composition?: {
           actions: Array<{ actionId: string }>;
           presentation?: {
@@ -356,7 +374,6 @@ test('compiled navigation stays flat within budget and groups mounted modules be
     };
     for (const surface of source.surfaces) {
       const editor = surface.documentEditor;
-      if (editor) delete editor.lineCreateValues;
       if (editor)
         for (const key of ['headerFields', 'lineFields'] as const) {
           // A field the tiers alone derive (the line's price list) goes.
