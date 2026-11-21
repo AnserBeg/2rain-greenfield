@@ -395,6 +395,8 @@ export interface CurrentPolicyDecisionRequest extends CurrentPolicySubject {
 }
 
 export interface CurrentPolicyDecision {
+  /** Row restriction issued only for the registered company list. */
+  readonly companyListLegalEntityIds?: readonly string[];
   readonly decision: 'ALLOW' | 'DENY';
   readonly decisionVersion: typeof CURRENT_POLICY_DECISION_VERSION;
   readonly policyVersion: string;

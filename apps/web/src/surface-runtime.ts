@@ -1901,10 +1901,8 @@ async function submitSurfaceRuntimeIntentInContext(
     record: result.readBack,
     trustLinked: result.trust !== null,
   };
-  const pageRecordId = new URL(
-    requestUrl,
-    'http://surface-runtime.local',
-  ).searchParams.get('record');
+  const request = new URL(requestUrl, 'http://surface-runtime.local');
+  const pageRecordId = request.searchParams.get('record');
   if (boardOperation && selection.selected.board) {
     const url = new URL(requestUrl, 'http://surface-runtime.local');
     const body = selection.selected.board.body;
@@ -1932,6 +1930,15 @@ async function submitSurfaceRuntimeIntentInContext(
     // a record in the URL and archive responses use the operation read-back.
     return renderSurfaceRuntimeWithData(view, requestUrl, gateways, feedback);
 
+  const companyContext =
+    selection.selected.surfaceRole === 'form' && !binding.query.legalEntityScope
+      ? await landingCompanyContext(
+          view,
+          selection,
+          gateways.queryGateway,
+          request,
+        )
+      : null;
   return renderSelectedSurface(
     view,
     selection,
@@ -1939,11 +1946,8 @@ async function submitSurfaceRuntimeIntentInContext(
     feedback,
     offeredOperations,
     200,
-    legalEntitySelectionForSurface(
-      binding,
-      new URL(requestUrl, 'http://surface-runtime.local'),
-    ),
-    null,
+    legalEntitySelectionForSurface(binding, request),
+    companyContext,
     Object.freeze({}),
     binding.relationInputs,
   );
@@ -2000,6 +2004,14 @@ function renderSelectedSurface(
       data,
       feedback,
       ...(formReferences ? { formReferences } : {}),
+      ...(workspaceContext?.selectedRecordId
+        ? {
+            workingCompany: {
+              parameterId: workspaceContext.parameterId,
+              recordId: workspaceContext.selectedRecordId,
+            },
+          }
+        : {}),
       legalEntitySelection,
       operations,
       queryParameterValues,
@@ -2756,14 +2768,16 @@ function fieldInput(
       const entered = dateTimeFromForm(`value:${fieldId}`, submission);
       const binding = dateTime.get(fieldId) as
         { zoneSource?: { kind?: string } } | undefined;
-      if (entered.kind === 'set')
+      if (entered.kind === 'set') {
+        const company =
+          workingCompany ?? submission[`value:${fieldId}:company`];
         entries.push([
           fieldId,
-          binding?.zoneSource?.kind === 'companyBusinessCalendar' &&
-          workingCompany
-            ? { ...entered.value, companyId: workingCompany }
+          binding?.zoneSource?.kind === 'companyBusinessCalendar' && company
+            ? { ...entered.value, companyId: company }
             : entered.value,
         ]);
+      }
       continue;
     }
     if (field?.kind === 'addressFieldType' && mutation.kind === 'set') {

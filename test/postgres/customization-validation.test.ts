@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
-import { applicationWithoutLineCreateValues } from '../helpers/application-without-line-create-values.js';
+import { applicationBeforeStockCountWorkflow } from '../helpers/application-before-stock-count-workflow.js';
 
 import {
   openCustomizeService,
@@ -37,6 +37,7 @@ import {
   assertArchivedTenantEnvelope,
   withArchivedCustomizationRuntime,
 } from '../helpers/archived-customization-runtime.js';
+import { archivedStockCountQuery } from '../helpers/archived-runtime-process.js';
 import {
   LINEAGE_INSTALL_VOLUME,
   withEphemeralPostgres,
@@ -52,7 +53,7 @@ test(
         const options = {
           databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
           tenantSlug: 'customize-validation',
-          compiledApplication: applicationWithoutLineCreateValues().release,
+          compiledApplication: applicationBeforeStockCountWorkflow().release,
         };
         const app = await startComposedApplication({ ...options, port: 0 });
         const opened = await openCustomizeService(options);
@@ -350,7 +351,7 @@ test(
         const options = {
           databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
           tenantSlug: 'customize-layout-reader',
-          compiledApplication: applicationWithoutLineCreateValues().release,
+          compiledApplication: applicationBeforeStockCountWorkflow().release,
         };
         const app = await startComposedApplication({ ...options, port: 0 });
         const opened = await openCustomizeService(options);
@@ -447,7 +448,7 @@ test(
   { timeout: 600_000 },
   async () => {
     await withArchivedCustomizationRuntime(
-      'f7eae58f9054960313aaf0b276e6eae96a8f507a',
+      '352e43b7e428ed1115fd9328db3a6427cf36a58f',
       async (run) => {
         await assertArchivedTenantEnvelope(run);
         await withEphemeralPostgres(
@@ -508,14 +509,31 @@ test(
                 )?.[1];
               assert.ok(patchId, draft.slice(-2500));
               await opened.service.approve(patchId);
-              const historicalRead = () =>
-                archivedRuntimeRead(run, {
+              const record = app.seededRecords.find((r) =>
+                r.operationId.endsWith(':operation.item_create'),
+              );
+              assert.ok(record);
+              const historicalRead = async () =>
+                (await run(archivedStockCountQuery, {
                   databaseUrl: options.databaseUrl,
                   identity: app.runtime.identity,
-                });
-              assert.equal((await historicalRead()).outcome, 'loaded');
+                  queryId: 'northstar.app:query.item_get',
+                  args: { includeArchived: false, recordId: record.recordId },
+                })) as {
+                  outcome: string;
+                  code?: string;
+                  message?: string;
+                  records?: { recordId: string }[];
+                };
+              const served = await historicalRead();
+              assert.equal(served.outcome, 'queried', JSON.stringify(served));
+              assert.deepEqual(
+                served.records?.map((row) => row.recordId),
+                [record.recordId],
+              );
               await opened.service.activate(patchId);
               const refusal = await historicalRead();
+              assert.equal(refusal.outcome, 'refused');
               assert.equal(refusal.code, 'UNSUPPORTED_RUNTIME_CAPABILITY');
               assert.match(
                 refusal.message ?? '',
@@ -527,9 +545,6 @@ test(
                 (o) => o.surface === surface && o.target.kind === 'update',
               )!;
               const revision = option.existing[0]!;
-              const record = app.seededRecords.find((r) =>
-                r.operationId.endsWith(':operation.item_create'),
-              )!;
               const url = new URL('/', app.baseUrl);
               url.searchParams.set('surface', surface);
               url.searchParams.set('record', record.recordId);
@@ -811,10 +826,10 @@ test(
         const options = {
           databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
           tenantSlug: 'customize-board-reader',
-          // Query-catalog rung 5 (DOCS-1's optional dependencies) is above
+          // Query-catalog rung 6 (DOCS-1's optional dependencies) is above
           // this reader too; the fixture leaves them out so only the Board
           // rung is measured.
-          compiledApplication: applicationWithoutLineCreateValues().release,
+          compiledApplication: applicationBeforeStockCountWorkflow().release,
         };
         const app = await startComposedApplication({ ...options, port: 0 });
         const opened = await openCustomizeService(options);

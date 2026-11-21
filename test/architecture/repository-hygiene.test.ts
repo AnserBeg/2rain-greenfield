@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
+import { getReachabilityProducer } from '../helpers/reachability-producers.js';
 
 const workflowPath = '.github/workflows/ci.yml';
 const packagePath = 'package.json';
@@ -55,6 +56,7 @@ const suiteDefinitions = [
       'test/unit/production-start.test.ts',
       'test/unit/purchasing-definition.test.ts',
       'test/unit/query-catalog-memo.test.ts',
+      'test/unit/reminder-deadline.test.ts',
       'test/unit/request-work-meter.test.ts',
       'test/unit/sales-definition.test.ts',
       'test/unit/surface-assets.test.ts',
@@ -203,8 +205,10 @@ const suiteDefinitions = [
       'test/postgres/board-policy.test.ts',
       'test/postgres/booking-commitments.test.ts',
       'test/postgres/booking-serving.test.ts',
+      'test/postgres/boot-capabilities.test.ts',
       'test/postgres/catalog-extras.test.ts',
       'test/postgres/catalog-runtime.test.ts',
+      'test/postgres/communication-threads.test.ts',
       'test/postgres/current-policy.test.ts',
       'test/postgres/customization-display.test.ts',
       'test/postgres/customization-formulas.test.ts',
@@ -227,6 +231,7 @@ const suiteDefinitions = [
       'test/postgres/module-storage-transition.test.ts',
       'test/postgres/observability-health.test.ts',
       'test/postgres/party-runtime.test.ts',
+      'test/postgres/personal-inbox.test.ts',
       'test/postgres/predicate-absent-semantics.test.ts',
       'test/postgres/predicate-parity-corpus.test.ts',
       'test/postgres/query-aggregate-semantics.test.ts',
@@ -253,6 +258,8 @@ const suiteDefinitions = [
       'test:postgres:5',
       'test:postgres:6',
       'test:postgres:7',
+      'test:postgres:8',
+      'test:postgres:9',
     ],
   },
   {
@@ -315,6 +322,7 @@ const suiteDefinitions = [
     ],
     scripts: [
       'test:postgres:inventory:balances',
+      'test:postgres:inventory:counts',
       'test:postgres:inventory:posting',
     ],
   },
@@ -436,6 +444,16 @@ test('suite commands exactly cover all independently discovered test files', () 
       `${scriptNames.join(', ')} diverges from ${suite.discoveryPattern}`,
     );
   }
+});
+
+test('the unit evidence manifest matches every unit test argument in execution order', () => {
+  const { scripts } = JSON.parse(readFileSync(packagePath, 'utf8')) as {
+    scripts: Record<string, string>;
+  };
+  const unitFiles = shellTokens(scripts['test:unit']!)
+    .map((token) => token.value)
+    .filter((argument) => argument.endsWith('.test.ts'));
+  assert.deepEqual(getReachabilityProducer('unit').argv, unitFiles);
 });
 
 test('every test-script glob is quoted before the shell can expand it', () => {
@@ -802,10 +820,13 @@ test('CI runs every scaffold gate from a frozen install', () => {
     'corepack pnpm test:postgres:5',
     'corepack pnpm test:postgres:6',
     'corepack pnpm test:postgres:7',
+    'corepack pnpm test:postgres:8',
+    'corepack pnpm test:postgres:9',
     'corepack pnpm test:postgres:composed',
     'corepack pnpm test:postgres:commercial',
     'corepack pnpm test:postgres:sales',
     'corepack pnpm test:postgres:inventory:balances',
+    'corepack pnpm test:postgres:inventory:counts',
     'corepack pnpm test:postgres:inventory:posting',
     'corepack pnpm test:locale',
     'corepack pnpm test:browser',
@@ -828,6 +849,7 @@ test('CI runs every scaffold gate from a frozen install', () => {
   assert.match(workflow, /^ {2}postgres-commercial:$/mu);
   assert.match(workflow, /^ {2}postgres-sales:$/mu);
   assert.match(workflow, /^ {2}postgres-inventory:$/mu);
+  assert.match(workflow, /^ {2}postgres-inventory-counts:$/mu);
   assert.match(workflow, /^ {2}browser:$/mu);
   assert.match(workflow, /^ {2}browser-operations:$/mu);
   assert.match(workflow, /^ {2}browser-inventory:$/mu);

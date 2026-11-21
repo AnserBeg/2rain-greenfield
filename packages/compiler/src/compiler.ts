@@ -27,6 +27,7 @@ import {
   NORMALIZATION_PROFILE_VERSION,
   SUPPORTED_LANGUAGE_VERSIONS,
   CanonicalModelError,
+  CONTENT_HASH_DOMAIN,
   canonicalLanguageProfileFor,
   languageHasMaterializedStateFields,
   languageHasV3Features,
@@ -794,6 +795,7 @@ function compileApplicationInternal(
     },
     diagnostics: [],
     releaseRoot,
+    normalizedDefinitionBytes: input.normalizedDefinitionBytes,
     stagedArtifacts: allArtifacts,
     status: 'compiled',
   };
@@ -1032,6 +1034,9 @@ export function expectedActiveReleaseFrom(
   );
   if (!chunk) throw new Error('compiled bundle has no storage target chunk');
   return {
+    ...(compiled.normalizedDefinitionBytes && {
+      normalizedDefinitionBytes: compiled.normalizedDefinitionBytes,
+    }),
     normalizedDefinitionDigest:
       compiled.bundle.releaseManifest.normalizedDefinitionDigest,
     releaseManifestBytes: compiled.bundle.releaseManifestBytes,
@@ -1923,6 +1928,9 @@ function validateExpectedActive(
     const chunk = projectionManifest.chunks[0];
     const valid =
       validHashes &&
+      (!expected.normalizedDefinitionBytes ||
+        hashBytes(CONTENT_HASH_DOMAIN, expected.normalizedDefinitionBytes) ===
+          expected.normalizedDefinitionDigest) &&
       releaseManifest.kind === 'releaseManifest' &&
       releaseManifest.manifestVersion === RELEASE_MANIFEST_VERSION &&
       releaseManifest.outputProtocolVersion === OUTPUT_PROTOCOL_VERSION &&
@@ -2135,6 +2143,7 @@ function lowerStorageTransition(
         toStorageTargetSemanticDigest:
           candidateStorage.reference.semanticDigest,
       },
+      expected.normalizedDefinitionBytes,
     );
     if ('diagnostic' in lowered) return lowered;
     return emitStorageTransitionProjection(

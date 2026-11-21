@@ -7,7 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { mountDocumentHttp } from '../../apps/web/src/document-http.js';
-import { applicationWithoutLineCreateValues } from '../helpers/application-without-line-create-values.js';
+import { applicationBeforeStockCountWorkflow } from '../helpers/application-before-stock-count-workflow.js';
 import {
   COMPOSED_APPLICATION_INVENTORY_SCOPE,
   readCompiledApplication,
@@ -1316,7 +1316,7 @@ test(
         const options = {
           databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
           tenantSlug: 'documents-fields',
-          compiledApplication: applicationWithoutLineCreateValues().release,
+          compiledApplication: applicationBeforeStockCountWorkflow().release,
           port: 0,
         };
         await pool.query(

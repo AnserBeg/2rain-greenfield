@@ -343,7 +343,7 @@ test('a drafted receipt workflow links an inspection and requests escalation aft
     async ({ connection, pool }) => {
       const databaseUrl = `postgresql://postgres@${String(connection.host)}:${String(connection.port)}/postgres`;
       const tenantSlug = 'inspection-workflow-browser';
-      // Compile with the current permissions and omit the count editor's floor.
+      // Compile with current permissions and the legacy stock count definitions.
       // Run the existing compiler fixture through tsx, as the Node suites do.
       const { stdout } = await promisify(execFile)(
         process.execPath,
@@ -351,8 +351,8 @@ test('a drafted receipt workflow links an inspection and requests escalation aft
           '--import',
           'tsx',
           '-e',
-          `const { applicationWithoutLineCreateValues } = require('./test/helpers/application-without-line-create-values.ts');
-process.stdout.write(JSON.stringify(applicationWithoutLineCreateValues().release));`,
+          `const { applicationBeforeStockCountWorkflow } = require('./test/helpers/application-before-stock-count-workflow.ts');
+process.stdout.write(JSON.stringify(applicationBeforeStockCountWorkflow().release));`,
         ],
         {
           cwd: fileURLToPath(new URL('../../../../', import.meta.url)),

@@ -2,15 +2,37 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 
+import { rolePool } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import {
   fulfillmentColumn,
   fulfillmentTable,
 } from '../../packages/postgres-provider/src/fulfillment.js';
 import { InventoryPostingError } from '../../packages/postgres-provider/src/inventory-posting-error.js';
 import { ModuleRuntimeInterpreterError } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
-import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../packages/runtime/src/semantic-query-gateway.js';
+import {
+  executeStockCountChange,
+  stockCountBinding,
+} from '../../packages/postgres-provider/src/stock-count-route.js';
+import { TrustedActorEnvelopeIssuer } from '../../packages/postgres-provider/src/trust/trusted-actor-envelope.js';
+import {
+  QUERY_BOUNDARY_PERMISSION_ID,
+  SEMANTIC_QUERY_REQUEST_VERSION,
+  SemanticQueryPolicyDeniedError,
+  registeredQueryFromPinnedView,
+} from '../../packages/runtime/src/semantic-query-gateway.js';
+import {
+  OPERATION_BOUNDARY_PERMISSION_ID,
+  SEMANTIC_OPERATION_POLICY_EVALUATOR_VERSION,
+  SemanticOperationPolicyDeniedError,
+  parsePinnedOperationCatalog,
+  type RegisteredCapabilityOperationDefinition,
+} from '../../packages/runtime/src/semantic-operation-gateway.js';
 import { SHARED_LIST_QUERY_VERSION } from '../../packages/runtime/src/list-behavior/index.js';
-import type { ImmutableJsonValue } from '../../packages/runtime/src/request-runtime-view.js';
+import {
+  LEGAL_ENTITY_READ_SCOPE_PERMISSION_ID,
+  trustedContextForRequestRuntimeView,
+  type ImmutableJsonValue,
+} from '../../packages/runtime/src/request-runtime-view.js';
 import { governedStorageTarget } from '../helpers/governed-storage-target.js';
 import { withOrderEntryFixture } from '../helpers/order-entry-fixture.js';
 
@@ -44,6 +66,9 @@ const moduleRefusal = (code: string) => (error: unknown) => {
   assert.equal(error.code, code);
   return true;
 };
+const commandDenied = (action: string) => (error: unknown) =>
+  error instanceof SemanticOperationPolicyDeniedError &&
+  error.operationId === `${ns}:operation.stock_count_${action}`;
 
 /** A stored exact decimal as a person reads it: `-2`, not `-2.000…`. */
 function canonical(value: unknown): string {
@@ -58,7 +83,7 @@ function canonical(value: unknown): string {
  * location, a count's state and lines, the movements naming a source, and
  * the companion transactions the kernel writes.
  */
-async function storage(fixture: Fixture) {
+async function storage(fixture: Fixture, companyId: string = fixture.scope) {
   const target = await governedStorageTarget();
   const entity = (local: string) =>
     target.entities.find(
@@ -69,7 +94,7 @@ async function storage(fixture: Fixture) {
   const scope = [
     fixture.app.runtime.identity.tenantId,
     fixture.app.runtime.identity.environmentId,
-    fixture.scope,
+    companyId,
   ];
   const balance = entity('posted_stock_balance');
   const onHand = async (location: string) =>
@@ -191,6 +216,7 @@ async function listed(
   fixture: Fixture,
   query: string,
   extra: Record<string, ImmutableJsonValue> = {},
+  companyId: string = fixture.scope,
 ) {
   return fixture.app.runtime.entry.run({ headers: {} }, (view) =>
     fixture.app.runtime.queryGateway.invoke(view, {
@@ -198,7 +224,7 @@ async function listed(
       queryId: `${ns}:query.${query}`,
       arguments: {
         includeArchived: false,
-        [`${ns}:parameter.${query}_legal_entity_scope`]: fixture.scope,
+        [`${ns}:parameter.${query}_legal_entity_scope`]: companyId,
         list: {
           cursor: null,
           matchMode: 'substring',
@@ -219,7 +245,7 @@ async function listed(
  * values its first save writes, each command on the posting route, each line
  * written as the editor writes one.
  */
-function counts(fixture: Fixture) {
+function counts(fixture: Fixture, companyId: string = fixture.scope) {
   const create = async (
     location: string,
     options: {
@@ -245,6 +271,9 @@ function counts(fixture: Fixture) {
         counting_mode: `${ns}:option.stock_count_counting_mode_${options.mode ?? 'open'}`,
       },
       options.supersedes ? { supersedes: options.supersedes } : {},
+      true,
+      randomUUID(),
+      companyId,
     );
   const command = (
     action: 'cancel' | 'post' | 'reopen' | 'review' | 'start',
@@ -285,9 +314,512 @@ function counts(fixture: Fixture) {
         variance_quantity: '0',
       },
       { session: count },
+      true,
+      randomUUID(),
+      companyId,
     );
   return { command, create, enter, found };
 }
+
+async function buyerPolicy(fixture: Fixture) {
+  const { tenantId, environmentId, principalId } = fixture.app.runtime.identity;
+  const [buyer] = (
+    await fixture.pool.query<{ role_id: string }>(
+      `SELECT role_id FROM platform.current_policy_roles
+      WHERE tenant_id = $1 AND environment_id = $2 AND role_key = 'local-demo-full-release'`,
+      [tenantId, environmentId],
+    )
+  ).rows;
+  assert.ok(buyer);
+  const role = [tenantId, environmentId, buyer.role_id];
+  return {
+    scope: (companyId: string) =>
+      fixture.pool.query(
+        `UPDATE platform.current_policy_memberships SET legal_entity_id = $5
+        WHERE tenant_id = $1 AND environment_id = $2 AND role_id = $3 AND principal_id = $4`,
+        [...role, principalId, companyId],
+      ),
+    only: (permissions: string[]) =>
+      fixture.pool.query(
+        `UPDATE platform.current_policy_permission_grants SET revoked_at = clock_timestamp()
+        WHERE tenant_id = $1 AND environment_id = $2 AND role_id = $3
+          AND permission_id <> ALL($4::text[])`,
+        [...role, permissions],
+      ),
+    revoke: (action: string, revoked: boolean) =>
+      fixture.pool.query(
+        `UPDATE platform.current_policy_permission_grants
+          SET revoked_at = CASE WHEN $5 THEN clock_timestamp() ELSE NULL END
+        WHERE tenant_id = $1 AND environment_id = $2 AND role_id = $3 AND permission_id = $4`,
+        [...role, `${ns}:permission.stock_count_${action}`, revoked],
+      ),
+  };
+}
+
+const countLinesOf = (recordId: string) => ({
+  parentScope: {
+    relationId: `${ns}:relation.stock_count_line_session`,
+    recordId,
+  },
+});
+
+test(
+  'STOCK-COUNTS: a blind counter can enter counts but cannot read the book or supervise',
+  { timeout: 300_000 },
+  async () => {
+    await withOrderEntryFixture(async (fixture) => {
+      const count = counts(fixture);
+      const created = await count.create(fixture.location, { mode: 'blind' });
+      const started = await count.command(
+        'start',
+        created.recordId,
+        created.revision,
+      );
+      const parent = countLinesOf(created.recordId);
+      const lineIn = (rows: Awaited<ReturnType<typeof listed>>['records']) => {
+        const line = rows.find(
+          (row) => row.values[lineField('item_id')] === fixture.item,
+        );
+        assert.ok(line);
+        return line;
+      };
+      assert.ok(
+        (await listed(fixture, 'posted_stock_balance_list')).records.length,
+      );
+      const before = lineIn(
+        (await listed(fixture, 'stock_count_count_lines', parent)).records,
+      );
+      assert.equal(
+        before.values[`${ns}:metric.count_book`],
+        null,
+        'the blind projection hides the book even when stock read is granted',
+      );
+
+      const buyer = await buyerPolicy(fixture);
+      await buyer.scope(fixture.scope);
+      await buyer.only([
+        QUERY_BOUNDARY_PERMISSION_ID,
+        OPERATION_BOUNDARY_PERMISSION_ID,
+        LEGAL_ENTITY_READ_SCOPE_PERMISSION_ID,
+        ...[
+          'stock_count_read',
+          'stock_count_line_read',
+          'stock_count_line_update',
+        ].map((name) => `${ns}:permission.${name}`),
+      ]);
+      const line = lineIn(
+        (await listed(fixture, 'stock_count_count_lines', parent)).records,
+      );
+      assert.equal(line.values[`${ns}:metric.count_book`], null);
+      assert.equal(line.values[`${ns}:metric.count_variance`], null);
+      const saved = await count.enter(line, '2');
+      assert.equal(
+        canonical(saved.readBack?.values[lineField('physical_quantity')]),
+        '2',
+      );
+      for (const query of [
+        'posted_stock_balance_list',
+        'item_stock_positions',
+      ]) {
+        await assert.rejects(
+          listed(
+            fixture,
+            query,
+            query === 'item_stock_positions'
+              ? {
+                  fieldFilters: [
+                    {
+                      fieldId: `${ns}:field.posted_stock_balance_item_id`,
+                      value: fixture.item,
+                    },
+                  ],
+                }
+              : {},
+          ),
+          (error: unknown) =>
+            error instanceof SemanticQueryPolicyDeniedError &&
+            error.queryId === `${ns}:query.${query}`,
+        );
+      }
+      const revision = started.readBack!.revision;
+      await assert.rejects(
+        count.command('review', created.recordId, revision),
+        SemanticOperationPolicyDeniedError,
+      );
+      const manager = (action: string, expectedRevision: number) =>
+        fixture.invoke(
+          `stock_count_${action}`,
+          { recordId: created.recordId, expectedRevision },
+          randomUUID(),
+          'manager',
+        );
+      for (const other of (
+        await listed(fixture, 'stock_count_count_lines', parent)
+      ).records)
+        if (other.recordId !== line.recordId) await count.enter(other, '0');
+      const reviewed = await manager('review', revision);
+      await assert.rejects(
+        count.command('reopen', created.recordId, reviewed.readBack!.revision),
+        SemanticOperationPolicyDeniedError,
+      );
+      await manager('reopen', reviewed.readBack!.revision);
+      const recount = lineIn(
+        (await listed(fixture, 'stock_count_line_list', parent)).records,
+      );
+      for (const field of [
+        'expected_quantity',
+        'counted_quantity',
+        'variance_quantity',
+      ])
+        assert.equal(canonical(recount.values[lineField(field)]), '0');
+      assert.equal(
+        canonical(recount.values[lineField('physical_quantity')]),
+        '2',
+      );
+    });
+  },
+);
+
+test(
+  'STOCK-COUNTS: commands and count-line reads use the stored company within one tenant and environment',
+  { timeout: 300_000 },
+  async () => {
+    await withOrderEntryFixture(async (fixture) => {
+      const other = await fixture.create(
+        'legal_entity',
+        {
+          code: 'COUNT-B',
+          name: 'Count company B',
+          is_default: false,
+          status: `${ns}:option.legal_entity_status_active`,
+        },
+        {},
+        false,
+      );
+      const count = counts(fixture);
+      const otherCompany = counts(fixture, other.recordId);
+      const foreign = await otherCompany.create(fixture.location, {
+        type: 'opening',
+      });
+      await otherCompany.found(foreign.recordId, fixture.item, '1', '4');
+      const home = await count.create(fixture.location);
+      const readForeign = await storage(fixture, other.recordId);
+      const before = await readForeign.stored(foreign.recordId);
+      assert.equal(
+        (
+          await listed(
+            fixture,
+            'stock_count_count_lines',
+            countLinesOf(foreign.recordId),
+            other.recordId,
+          )
+        ).records.length,
+        1,
+      );
+      const buyer = await buyerPolicy(fixture);
+      assert.equal((await buyer.scope(fixture.scope)).rowCount, 1);
+
+      await assert.rejects(
+        count.command('start', foreign.recordId, foreign.revision),
+        commandDenied('start'),
+      );
+      await assert.rejects(
+        listed(
+          fixture,
+          'stock_count_count_lines',
+          countLinesOf(foreign.recordId),
+          other.recordId,
+        ),
+        SemanticQueryPolicyDeniedError,
+      );
+      // Even using an authorized scope cannot return the foreign count's lines.
+      assert.deepEqual(
+        (
+          await listed(
+            fixture,
+            'stock_count_count_lines',
+            countLinesOf(foreign.recordId),
+          )
+        ).records,
+        [],
+      );
+      assert.equal(
+        (await count.command('start', home.recordId, home.revision)).outcome,
+        'succeeded',
+      );
+      assert.ok(
+        (
+          await listed(
+            fixture,
+            'stock_count_count_lines',
+            countLinesOf(home.recordId),
+          )
+        ).records.length,
+      );
+      assert.deepEqual(await readForeign.stored(foreign.recordId), before);
+
+      // Isolate execution's locked-row check from the gateway's earlier decision.
+      // The stored owner is B while the authorization handed to the route is A.
+      const runtime = fixture.app.runtime;
+      const binding = stockCountBinding(await governedStorageTarget());
+      assert.ok(binding);
+      const { user, host, port, database } = fixture.pool.options;
+      const runtimePool = rolePool(
+        `postgresql://${String(user)}@${String(host)}:${String(port)}/${String(database)}`,
+        'north_star_runtime',
+        1,
+      );
+      try {
+        await runtime.entry.run({ headers: {} }, async (view) => {
+          const context = trustedContextForRequestRuntimeView(view);
+          const input = {
+            expectedRevision: foreign.revision,
+            recordId: foreign.recordId,
+          };
+          const definition = parsePinnedOperationCatalog(
+            view.projections.operation.payload,
+          ).find(
+            (operation) =>
+              operation.operationId === `${ns}:operation.stock_count_start`,
+          );
+          assert.equal(definition?.effect.kind, 'registeredCapabilityEffect');
+          const readBackDefinition = registeredQueryFromPinnedView(
+            view,
+            `${ns}:query.stock_count_get`,
+          );
+          assert.ok(readBackDefinition);
+          const actorIssuer = new TrustedActorEnvelopeIssuer({
+            async resolve() {
+              return {
+                approvingHumanId: null,
+                delegation: null,
+                executionPrincipal: {
+                  kind: 'HUMAN',
+                  principalId: context.principalId,
+                },
+                initiatingHumanId: context.principalId,
+                subject: null,
+              };
+            },
+          });
+          await assert.rejects(
+            executeStockCountChange(
+              {
+                actorIssuer,
+                currentInstant: () => new Date().toISOString(),
+                pool: runtimePool,
+                projection: () => {
+                  throw new Error('Start uses the resolved storage binding');
+                },
+                queryGateway: runtime.queryGateway,
+                releaseId: view.release.releaseId,
+                releaseContentHash: view.release.contentHash,
+              },
+              binding,
+              {
+                authorization: {
+                  decisionInput: { legalEntityId: fixture.scope },
+                  legalEntityReadScopeIds: [fixture.scope],
+                  readBackArguments: { recordId: input.recordId },
+                },
+                channel: 'UI',
+                context,
+                definition:
+                  definition as RegisteredCapabilityOperationDefinition,
+                idempotencyKey: randomUUID(),
+                input,
+                inputDigest: 'a'.repeat(64),
+                policyVersion: view.entryPolicyVersion,
+                policyEvaluatorVersion:
+                  SEMANTIC_OPERATION_POLICY_EVALUATOR_VERSION,
+                readBackDefinition,
+                view,
+              },
+              'start',
+              input,
+              fixture.scope,
+            ),
+            refusal(
+              'INVENTORY_POSTING_INPUT_INVALID',
+              /the count scope changed after authorization/u,
+            ),
+            'the route must recheck the company under the row lock',
+          );
+        });
+      } finally {
+        await runtimePool.end();
+      }
+      assert.deepEqual(await readForeign.stored(foreign.recordId), before);
+    });
+  },
+);
+
+for (const [scenario, second, message] of [
+  [
+    'a repeated product',
+    'duplicate',
+    /counts a product another line already counts/u,
+  ],
+  [
+    'a negative physical quantity',
+    'negative',
+    /a physical count is never negative/u,
+  ],
+] as const) {
+  test(
+    `STOCK-COUNTS: Review refuses ${scenario}`,
+    { timeout: 300_000 },
+    async () => {
+      await withOrderEntryFixture(async (fixture) => {
+        const count = counts(fixture);
+        const read = await storage(fixture);
+        const created = await count.create(fixture.location, {
+          type: 'opening',
+        });
+        const started = await count.command(
+          'start',
+          created.recordId,
+          created.revision,
+        );
+        if (second === 'duplicate') {
+          await count.found(created.recordId, fixture.item, '1', '2');
+          await count.found(created.recordId, fixture.item, '2', '1');
+        } else {
+          await count.found(created.recordId, fixture.item, '1', '-1');
+        }
+        const before = await read.lines(created.recordId);
+        await assert.rejects(
+          count.command('review', created.recordId, started.readBack!.revision),
+          refusal('INVENTORY_POSTING_INPUT_INVALID', message),
+          `Review must refuse ${scenario}`,
+        );
+        assert.equal(
+          (await read.stored(created.recordId))?.state,
+          state('counting'),
+        );
+        assert.deepEqual(await read.lines(created.recordId), before);
+      });
+    },
+  );
+}
+
+test(
+  'STOCK-COUNTS: reversal Review refuses a movement missing from the original lines',
+  { timeout: 300_000 },
+  async () => {
+    await withOrderEntryFixture(async (fixture) => {
+      const count = counts(fixture);
+      const read = await storage(fixture);
+      const original = await count.create(VANCOUVER_WAREHOUSE, {
+        type: 'opening',
+      });
+      const started = await count.command(
+        'start',
+        original.recordId,
+        original.revision,
+      );
+      const line = await count.found(original.recordId, fixture.item, '1', '2');
+      const reviewed = await count.command(
+        'review',
+        original.recordId,
+        started.readBack!.revision,
+      );
+      await count.command(
+        'post',
+        original.recordId,
+        reviewed.readBack!.revision,
+      );
+      assert.equal((await read.movements(original.recordId)).length, 1);
+      // Simulate an incomplete original read-back without changing its ledger.
+      const binding = stockCountBinding(await governedStorageTarget());
+      assert.ok(binding);
+      const archived = await fixture.pool.query(
+        `UPDATE ${fulfillmentTable(binding.line)}
+          SET ${binding.line.archive.archivedAtColumn} = now()
+        WHERE tenant_id = $1 AND environment_id = $2 AND ${binding.legalEntityColumn} = $3
+          AND ${binding.line.recordIdentity.column} = $4`,
+        [
+          fixture.app.runtime.identity.tenantId,
+          fixture.app.runtime.identity.environmentId,
+          fixture.scope,
+          line.recordId,
+        ],
+      );
+      assert.equal(archived.rowCount, 1);
+
+      const reversal = await count.create(VANCOUVER_WAREHOUSE, {
+        kind: 'reversal',
+        state: 'counting',
+        supersedes: original.recordId,
+      });
+      await assert.rejects(
+        count.command('review', reversal.recordId, reversal.revision),
+        refusal(
+          'INVENTORY_POSTING_INPUT_INVALID',
+          /the reversed count does not read back as it posted/u,
+        ),
+        'reversal must cover every original movement',
+      );
+      assert.equal(
+        (await read.stored(reversal.recordId))?.state,
+        state('counting'),
+      );
+      assert.deepEqual(await read.lines(reversal.recordId), []);
+    });
+  },
+);
+
+test(
+  'STOCK-COUNTS: each transition refuses when its own permission is absent',
+  { timeout: 300_000 },
+  async () => {
+    await withOrderEntryFixture(async (fixture) => {
+      const count = counts(fixture);
+      const read = await storage(fixture);
+      const buyer = await buyerPolicy(fixture);
+      const created = await count.create(fixture.location, { type: 'opening' });
+      const attempt = async (
+        action: Parameters<typeof count.command>[0],
+        revision: number,
+        id = created.recordId,
+      ) => {
+        const before = {
+          header: await read.stored(id),
+          lines: await read.lines(id),
+          movements: await read.movements(id),
+        };
+        assert.equal((await buyer.revoke(action, true)).rowCount, 1);
+        await assert.rejects(
+          count.command(action, id, revision),
+          commandDenied(action),
+          `missing ${action} grant must refuse`,
+        );
+        assert.deepEqual(
+          {
+            header: await read.stored(id),
+            lines: await read.lines(id),
+            movements: await read.movements(id),
+          },
+          before,
+        );
+        assert.equal((await buyer.revoke(action, false)).rowCount, 1);
+        return count.command(action, id, revision);
+      };
+      const started = await attempt('start', created.revision);
+      await count.found(created.recordId, fixture.item, '1', '2');
+      const reviewed = await attempt('review', started.readBack!.revision);
+      const reopened = await attempt('reopen', reviewed.readBack!.revision);
+      const readyToPost = await count.command(
+        'review',
+        created.recordId,
+        reopened.readBack!.revision,
+      );
+      await attempt('post', readyToPost.readBack!.revision);
+      const draft = await count.create(fixture.location);
+      await attempt('cancel', draft.revision, draft.recordId);
+    });
+  },
+);
 
 /**
  * A stock document posted through its own route: one line of the demo item,
@@ -338,6 +870,182 @@ async function postAdjustment(
   await fixture.invoke('inventory_transaction_post', {
     recordId: adjustment,
     expectedRevision: header.revision,
+  });
+}
+
+test(
+  'STOCK-COUNTS: a recount retains physical entries and clears the stored review figures',
+  { timeout: 300_000 },
+  async () => {
+    await withOrderEntryFixture(async (fixture) => {
+      const read = await storage(fixture);
+      const count = counts(fixture);
+      const created = await count.create(fixture.location, { mode: 'blind' });
+      const started = await count.command(
+        'start',
+        created.recordId,
+        created.revision,
+      );
+      const line = (await read.lines(created.recordId)).find(
+        (row) => row.item === fixture.item,
+      )!;
+      await count.enter(line, '2');
+      for (const other of await read.lines(created.recordId)) {
+        if (other.item !== fixture.item) await count.enter(other, '0');
+      }
+      const reviewed = await count.command(
+        'review',
+        created.recordId,
+        started.readBack!.revision,
+      );
+      const frozen = (await read.lines(created.recordId)).find(
+        (row) => row.item === fixture.item,
+      )!;
+      assert.notEqual(frozen.expected, '0');
+      assert.equal(frozen.counted, '2');
+      assert.notEqual(frozen.variance, '0');
+
+      const reopened = await count.command(
+        'reopen',
+        created.recordId,
+        reviewed.readBack!.revision,
+      );
+      assert.equal(
+        reopened.readBack?.values[countField('state')],
+        state('counting'),
+      );
+      const recount = (await read.lines(created.recordId)).find(
+        (row) => row.item === fixture.item,
+      )!;
+      assert.deepEqual(
+        [recount.expected, recount.counted, recount.variance],
+        ['0', '0', '0'],
+        'reopen clears every stored review figure',
+      );
+      assert.equal(recount.physical, '2');
+      assert.equal(recount.revision, frozen.revision + 1);
+      await count.enter(recount, '3');
+      await count.command(
+        'review',
+        created.recordId,
+        reopened.readBack!.revision,
+      );
+      const recounted = (await read.lines(created.recordId)).find(
+        (row) => row.item === fixture.item,
+      )!;
+      assert.equal(recounted.counted, '3');
+    });
+  },
+);
+
+test(
+  'STOCK-COUNTS: counting mode is fixed after Start even through a state reset',
+  { timeout: 300_000 },
+  async () => {
+    await withOrderEntryFixture(async (fixture) => {
+      const count = counts(fixture);
+      const created = await count.create(fixture.location);
+      const save = (revision: number, patch: Record<string, string>) =>
+        fixture.invoke('stock_count_update', {
+          recordId: created.recordId,
+          expectedRevision: revision,
+          patch,
+        });
+      const blind = `${ns}:option.stock_count_counting_mode_blind`;
+      const open = `${ns}:option.stock_count_counting_mode_open`;
+      const draft = await save(created.revision, {
+        [countField('counting_mode')]: blind,
+      });
+      assert.equal(draft.readBack?.values[countField('counting_mode')], blind);
+      const started = await count.command(
+        'start',
+        created.recordId,
+        draft.readBack!.revision,
+      );
+      const revision = started.readBack!.revision;
+      await assert.rejects(
+        save(revision, { [countField('counting_mode')]: open }),
+        moduleRefusal('MODULE_OPERATION_PRECONDITION_REFUSED'),
+        'the mode cannot change during counting',
+      );
+      await assert.rejects(
+        save(revision, { [countField('state')]: state('draft') }),
+        moduleRefusal('MODULE_OPERATION_PRECONDITION_REFUSED'),
+        'the header cannot be reset to draft to change the mode',
+      );
+      const saved = await save(revision, {
+        [countField('counting_mode')]: blind,
+        [countField('reason_narrative')]: 'Check the adjacent bay again',
+      });
+      assert.equal(saved.readBack?.values[countField('counting_mode')], blind);
+    });
+  },
+);
+
+for (const [scenario, physical, delta] of [
+  ['posts a fractional downward count', '9.5', '-0.5'],
+  ['reverses a fractional upward count', '10.5', '0.5'],
+] as const) {
+  test(`STOCK-COUNTS: ${scenario}`, { timeout: 300_000 }, async () => {
+    await withOrderEntryFixture(async (fixture) => {
+      const read = await storage(fixture);
+      const count = counts(fixture);
+      const location = VANCOUVER_WAREHOUSE;
+      await postAdjustment(fixture, {
+        location,
+        quantity: '10',
+        effectiveAt: new Date().toISOString(),
+        reason: 'FOUND',
+        narrative: 'Stock in the second warehouse',
+      });
+      const original = await count.create(location);
+      const started = await count.command(
+        'start',
+        original.recordId,
+        original.revision,
+      );
+      const [line] = await read.lines(original.recordId);
+      assert.ok(line);
+      await count.enter(line, physical);
+      const reviewed = await count.command(
+        'review',
+        original.recordId,
+        started.readBack!.revision,
+      );
+      await count.command(
+        'post',
+        original.recordId,
+        reviewed.readBack!.revision,
+      );
+      const [movement] = await read.movements(original.recordId);
+      assert.equal(movement?.delta, delta);
+      assert.equal((await read.onHand(location)).get(fixture.item), physical);
+
+      if (delta === '0.5') {
+        const reversal = await count.create(location, {
+          kind: 'reversal',
+          state: 'counting',
+          supersedes: original.recordId,
+        });
+        const reversed = await count.command(
+          'review',
+          reversal.recordId,
+          reversal.revision,
+        );
+        await count.command(
+          'post',
+          reversal.recordId,
+          reversed.readBack!.revision,
+        );
+        const [inverse] = await read.movements(reversal.recordId);
+        assert.equal(inverse?.delta, '-0.5');
+        assert.equal(
+          (await read.lines(reversal.recordId))[0]?.reversal,
+          movement?.movementId,
+        );
+        assert.equal((await read.onHand(location)).get(fixture.item), '10');
+      }
+    });
   });
 }
 

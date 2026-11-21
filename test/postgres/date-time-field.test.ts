@@ -819,6 +819,57 @@ test(
             patch: { [`${NS}:field.custom_equipment_name`]: 'Still serving' },
           });
           assert.equal(updated.outcome, 'succeeded');
+          // A login default of REPEATABLE READ must not freeze the count
+          // before the index step obtains SHARE. The old snapshot has 10,000.
+          await settle(10_000);
+          await pool.query(
+            "ALTER ROLE north_star_module_materializer SET default_transaction_isolation = 'repeatable read'",
+          );
+          const racing = await openCustomizeService(options);
+          const blocker = await pool.connect();
+          let activationResult: Promise<unknown> | undefined;
+          try {
+            await blocker.query('BEGIN');
+            await blocker.query(
+              `INSERT INTO ${table} (tenant_id, environment_id, legal_entity_id, record_id, revision, ${nameColumn})
+               SELECT tenant_id, environment_id, legal_entity_id, gen_random_uuid(), 1, 'Bulk race'
+               FROM ${table} WHERE record_id = $1`,
+              [seeded.readBack!.recordId],
+            );
+            activationResult = racing.service.activate(field.patchId).then(
+              () => null,
+              (error: unknown) => error,
+            );
+            const deadline = performance.now() + 45_000;
+            while (true) {
+              const locks = await blocker.query(
+                `SELECT 1 FROM pg_locks WHERE relation = $1::regclass
+                  AND mode = 'ShareLock' AND NOT granted
+                  AND pg_backend_pid() = ANY(pg_blocking_pids(pid))`,
+                [table],
+              );
+              if (locks.rowCount) break;
+              assert.ok(
+                performance.now() < deadline,
+                'index step must be waiting on the uncommitted crossing row',
+              );
+              await new Promise((resolve) => setTimeout(resolve, 20));
+            }
+            await blocker.query('COMMIT');
+            assert.equal(
+              ((await activationResult) as { code?: string } | null)?.code,
+              'DATE_TIME_WINDOW_CEILING_EXCEEDED',
+              'the post-lock count includes the committed crossing row',
+            );
+          } finally {
+            await blocker.query('ROLLBACK');
+            blocker.release();
+            await activationResult;
+            await racing.close();
+            await pool.query(
+              'ALTER ROLE north_star_module_materializer RESET default_transaction_isolation',
+            );
+          }
           // At exactly the ceiling the attempt resumes and builds the index.
           // A concurrent writer measures how long the build blocks writes.
           await settle(10_000);
@@ -849,6 +900,209 @@ test(
             (await opened.service.status()).activeReleaseRoot,
             sourceRoot,
           );
+        } finally {
+          await opened.close();
+          await app.close();
+        }
+      },
+      LINEAGE_INSTALL_VOLUME,
+    );
+  },
+);
+
+test(
+  'a shared appointment form saves the displayed company and reopens its own zone',
+  { timeout: 600_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'date-time-shared-form',
+      async ({ connection, pool }) => {
+        const databaseUrl = `postgresql://${connection.user}@${connection.host}:${connection.port}/${connection.database}`;
+        const options = { databaseUrl, tenantSlug: 'date-time-shared-form' };
+        const app = await startComposedApplication({ ...options, port: 0 });
+        const opened = await openCustomizeService(options);
+        const world = worldOver(app.runtime, String(connection.database));
+        try {
+          const change = await opened.service.draft(
+            {
+              kind: 'changeSet',
+              patches: [
+                {
+                  kind: 'addRecordType',
+                  label: 'Equipment',
+                  companyOwnership: 'tenantShared',
+                  fields: [{ label: 'Name', type: 'text', required: true }],
+                },
+                appointment,
+                due,
+              ],
+            },
+            'visualBuilder',
+          );
+          assert.equal(change.status, 'drafted', JSON.stringify(change));
+          await opened.service.approve(change.patchId);
+          await opened.service.activate(change.patchId);
+          await pool.query(
+            "UPDATE platform.inventory_tenant_calendars SET time_zone = 'America/Toronto'",
+          );
+          const createCompany = async (
+            code: string,
+            status: 'active' | 'archived',
+          ) => {
+            const result = await world.invoke('legal_entity_create', {
+              recordId: randomUUID(),
+              relations: {},
+              values: {
+                [`${NS}:field.legal_entity_name`]: code,
+                [`${NS}:field.legal_entity_code`]: code,
+                [`${NS}:field.legal_entity_is_default`]: false,
+                [`${NS}:field.legal_entity_status`]: `${NS}:option.legal_entity_status_${status}`,
+              },
+            });
+            return result.readBack!;
+          };
+          const inactive = await createCompany('C5-INACTIVE', 'archived');
+          const archived = await createCompany('C5-ARCHIVED', 'active');
+          await world.invoke('legal_entity_archive', {
+            recordId: archived.recordId,
+            expectedRevision: archived.revision,
+          });
+          for (const companyId of [
+            randomUUID(),
+            inactive.recordId,
+            archived.recordId,
+          ]) {
+            await assert.rejects(
+              world.invoke('custom_equipment_create', {
+                recordId: randomUUID(),
+                relations: {},
+                values: {
+                  [`${NS}:field.custom_equipment_name`]: 'Refused visit',
+                  [due.fieldId]: {
+                    schemaVersion: 'northstar.date-time-value/v1',
+                    civil: '2026-11-02T12:00',
+                    companyId,
+                  },
+                },
+              }),
+              {
+                code: 'MODULE_FIELD_VALUE_INVALID',
+                details: { reason: 'DATE_TIME_COMPANY_REQUIRED' },
+              },
+              'shared capture requires a live working company',
+            );
+          }
+          const url = new URL('/', app.baseUrl);
+          url.searchParams.set(
+            'surface',
+            `${NS}:surface.custom_equipment_form`,
+          );
+          const scope = `${NS}:parameter.on_hand_legal_entity_id`;
+          const selected = (await createCompany('C5-OTHER', 'active')).recordId;
+          url.searchParams.set(scope, selected);
+          const headers = {
+            cookie: 'northstar-demo-actor=manager',
+            origin: url.origin,
+          };
+          // Submit the rendered inputs, including blank-field intents. HTML
+          // selects default to their first option when none is selected.
+          const form = async (target = url) => {
+            const page = await fetch(target, { headers });
+            const html = await page.text();
+            const match =
+              /<form id="surface-record-form" method="post" action="([^"]*)">([\s\S]*?)<\/form>/u.exec(
+                html,
+              );
+            assert.ok(match, 'the shared record form was rendered');
+            const body = new URLSearchParams();
+            for (const [input] of match[2]!.matchAll(/<input\b[^>]*>/gu)) {
+              const name = /\bname="([^"]+)"/u.exec(input)?.[1];
+              if (name)
+                body.set(name, /\bvalue="([^"]*)"/u.exec(input)?.[1] ?? '');
+            }
+            for (const [, name, options] of match[2]!.matchAll(
+              /<select\b[^>]*\bname="([^"]+)"[^>]*>([\s\S]*?)<\/select>/gu,
+            )) {
+              const chosen =
+                /<option value="([^"]*)" selected>/u.exec(options!) ??
+                /<option value="([^"]*)"/u.exec(options!);
+              if (chosen) body.set(name!, chosen[1]!);
+            }
+            return {
+              body,
+              post: async () => {
+                const response = await fetch(
+                  new URL(match[1]!.replaceAll('&amp;', '&'), url),
+                  { method: 'POST', headers, body },
+                );
+                const result = await response.text();
+                assert.equal(response.status, 200, result.slice(-1500));
+                return result;
+              },
+            };
+          };
+          const first = await form();
+          assert.equal(
+            first.body.get(`value:${due.fieldId}:company`),
+            selected,
+            'the shared form pins the displayed workspace company',
+          );
+          const otherTab = new URL(url);
+          otherTab.searchParams.set(scope, COMPANY);
+          assert.equal(
+            (await form(otherTab)).body.get(`value:${due.fieldId}:company`),
+            COMPANY,
+          );
+          first.body.set(`value:${NS}:field.custom_equipment_name`, 'Visit');
+          first.body.set(`value:${due.fieldId}`, '2026-11-02T09:00');
+          first.body.set(`value:${appointment.fieldId}`, '2026-11-02T10:00');
+          first.body.set(`value:${appointment.fieldId}:zone`, 'UTC');
+          const confirmation = await first.post();
+          assert.ok(
+            confirmation.includes(
+              `name="value:${due.fieldId}:company" value="${selected}"`,
+            ),
+            'the saved form keeps the workspace company shown on submit',
+          );
+          const recordId = first.body.get('recordId')!;
+          const read = () =>
+            app.runtime.entry.run(
+              { headers },
+              async (view) =>
+                (
+                  await app.runtime.queryGateway.invoke(view, {
+                    schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+                    queryId: `${NS}:query.custom_equipment_get`,
+                    arguments: { recordId },
+                  })
+                ).records[0]!,
+            );
+          const prior = await read();
+          const source = SavedDateTimeSchema.parse(
+            prior.values[due.fieldId],
+          ).zoneSource;
+          assert.equal(
+            source.kind === 'companyBusinessCalendar' && source.companyId,
+            selected,
+          );
+          assert.equal(
+            SavedDateTimeSchema.parse(prior.values[appointment.fieldId]).zone,
+            'Etc/UTC',
+          );
+          url.searchParams.set('record', recordId);
+          const reopened = await form();
+          reopened.body.set(`value:${appointment.fieldId}`, '2026-11-02T12:00');
+          await reopened.post();
+          const saved = SavedDateTimeSchema.parse(
+            (await read()).values[appointment.fieldId],
+          );
+          assert.equal(
+            saved.instant,
+            '2026-11-02T12:00:00.000Z',
+            'editing the reopened UTC value keeps noon UTC',
+          );
+          assert.equal(saved.zone, 'Etc/UTC');
+          assert.equal(saved.zoneSource.kind, 'perRecordIana');
         } finally {
           await opened.close();
           await app.close();

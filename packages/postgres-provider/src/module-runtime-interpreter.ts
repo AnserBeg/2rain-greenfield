@@ -10,6 +10,7 @@ import {
   addressComponents,
   addressJson,
 } from '@north-star/canonical-model';
+import { declaredDateTimeFields } from './date-time-admission.js';
 import { enqueueAddress } from './address-geocodes.js';
 import {
   DateTimeEntryError,
@@ -24,6 +25,7 @@ import {
   type BusinessCalendarContext,
 } from './date-time-storage.js';
 import {
+  CONTENT_HASH_DOMAIN,
   DateTimeWriteSchema,
   canonicalZone,
   formatRecordZone,
@@ -99,6 +101,7 @@ import type {
 import {
   QUERY_BOUNDARY_PERMISSION_ID,
   QUERY_POLICY_INPUT_VERSION,
+  isCompanyListQuery,
   SEMANTIC_AGGREGATE_RESULT_VERSION,
   SEMANTIC_QUERY_RESULT_VERSION,
 } from '../../runtime/src/semantic-query-gateway.js';
@@ -228,6 +231,7 @@ export interface ModuleProviderErrorMapping {
 }
 
 interface VerifiedLegalEntityReadScope {
+  readonly companyListOnly?: true;
   readonly legalEntityIds: readonly string[];
 }
 
@@ -421,6 +425,8 @@ export class PostgresModuleRuntimeInterpreter
         async (client, snapshot) => {
           const storage = await this.#loadPinnedStorageTarget(client, request);
           if (snapshot) return { storage };
+          if ('companyListScope' in request && request.companyListScope)
+            await assertScopePolicyCurrent(client, request);
           return {
             result: await withModuleRuntimeRole(client, () =>
               executeQueryOnClient(
@@ -451,7 +457,11 @@ export class PostgresModuleRuntimeInterpreter
               snapshot,
             );
           // The snapshot finished in between: a read of its own, as alone.
-          if (!snapshot) return withModuleRuntimeRole(client, execute);
+          if (!snapshot) {
+            if ('companyListScope' in request && request.companyListScope)
+              await assertScopePolicyCurrent(client, request);
+            return withModuleRuntimeRole(client, execute);
+          }
           const key = identicalReadKey(request);
           return key === null ? execute() : snapshot.memo(key, execute);
         },
@@ -519,6 +529,7 @@ export class PostgresModuleRuntimeInterpreter
         const disagreement = dateTimeStorageDisagreement(
           request.view.projections.operation.payload,
           currentStorage,
+          currentStorage.retiredDateTimeFields,
         );
         if (disagreement)
           throw failure(
@@ -557,6 +568,7 @@ export class PostgresModuleRuntimeInterpreter
               ? await resolveDateTimeInput(
                   client,
                   currentEntity,
+                  currentStorage,
                   request.definition.effect.kind,
                   assigned,
                   calendar,
@@ -820,12 +832,16 @@ export class PostgresModuleRuntimeInterpreter
       | SemanticAggregateQueryExecutionRequest
       | SemanticOperationExecutionRequest
       | SemanticQueryExecutionRequest,
-  ): Promise<StorageTargetPayloadV1> {
+  ): Promise<PinnedStorageTarget> {
     const key = pinnedStorageTargetCacheKey(request);
     return this.#pinnedStorageTargets.get(key, (observeValidation) =>
       loadPinnedStorageTarget(client, request, observeValidation),
     );
   }
+}
+
+interface PinnedStorageTarget extends StorageTargetPayloadV1 {
+  retiredDateTimeFields: ReadonlySet<string>;
 }
 
 export interface PinnedStorageTargetCacheKey {
@@ -857,8 +873,8 @@ type PinnedStorageTargetValidationObservation = (
 ) => void;
 
 class ValidatedPinnedStorageTargetCache {
-  readonly #inFlight = new Map<string, Promise<StorageTargetPayloadV1>>();
-  readonly #validated = new Map<string, StorageTargetPayloadV1>();
+  readonly #inFlight = new Map<string, Promise<PinnedStorageTarget>>();
+  readonly #validated = new Map<string, PinnedStorageTarget>();
 
   constructor(
     private readonly observe:
@@ -869,8 +885,8 @@ class ValidatedPinnedStorageTargetCache {
     key: PinnedStorageTargetCacheKey,
     load: (
       observeValidation: PinnedStorageTargetValidationObservation,
-    ) => Promise<StorageTargetPayloadV1>,
-  ): Promise<StorageTargetPayloadV1> {
+    ) => Promise<PinnedStorageTarget>,
+  ): Promise<PinnedStorageTarget> {
     const identity = pinnedStorageTargetCacheIdentity(key);
     const validated = this.#validated.get(identity);
     if (validated) {
@@ -1028,6 +1044,7 @@ async function prepareMutation(
       { ...prior.values, ...input.patch },
       'projected',
     );
+    requireStockCountCountingMode(entity, prior.values, input.patch);
     if (bindings.length)
       await requireFormulaValidation(
         client,
@@ -1369,6 +1386,39 @@ function requirePeriodLockDirection(
     );
 }
 
+function requireStockCountCountingMode(
+  entity: StorageEntity,
+  prior: Readonly<Record<string, ImmutableJsonValue>>,
+  patch: Readonly<Record<string, ImmutableJsonValue>>,
+): void {
+  const suffix = ':entity.stock_count';
+  if (!entity.entityId.endsWith(suffix)) return;
+  const namespace = entity.entityId.slice(0, -suffix.length);
+  const state = `${namespace}:field.stock_count_state`;
+  const mode = `${namespace}:field.stock_count_counting_mode`;
+  // Older count definitions do not have a mode.
+  if (
+    !Object.hasOwn(prior, mode) ||
+    prior[state] !== `${namespace}:option.stock_count_state_counting`
+  ) {
+    return;
+  }
+  if (Object.hasOwn(patch, mode) && patch[mode] !== prior[mode]) {
+    throw failure(
+      'MODULE_OPERATION_PRECONDITION_REFUSED',
+      'counting mode is fixed after Start counting',
+      entity.entityId,
+    );
+  }
+  if (Object.hasOwn(patch, state) && patch[state] !== prior[state]) {
+    throw failure(
+      'MODULE_OPERATION_PRECONDITION_REFUSED',
+      'use a stock count command to leave counting',
+      entity.entityId,
+    );
+  }
+}
+
 function acceptedCommand(
   request: SemanticOperationExecutionRequest,
   preparation: MutationPreparation,
@@ -1667,6 +1717,7 @@ function rejectStrayDateTimeValues(
 async function resolveDateTimeInput(
   client: PoolClient,
   entity: StorageEntity,
+  storage: StorageTargetPayloadV1,
   effect: string,
   input: MutationInput,
   calendar: BusinessCalendarContext | null,
@@ -1686,7 +1737,10 @@ async function resolveDateTimeInput(
       : input.systemInput && typeof input.systemInput.value === 'string'
         ? input.systemInput.value
         : null
-    : workingCompany;
+    : workingCompany &&
+        (await lockActiveCompany(client, storage, workingCompany))
+      ? workingCompany
+      : null;
   try {
     return {
       ...input,
@@ -2177,7 +2231,9 @@ export async function assertScopePolicyCurrent(
   request:
     SemanticAggregateQueryExecutionRequest | SemanticQueryExecutionRequest,
 ): Promise<void> {
-  const scope = request.legalEntityReadScope;
+  const scope =
+    ('companyListScope' in request && request.companyListScope) ||
+    request.legalEntityReadScope;
   // Only a scope this provider's live policy issued names its epoch; one
   // issued by another policy gateway (a test double) has no epoch here.
   if (!scope || !isCurrentPolicyVersion(scope.policyVersion)) return;
@@ -2263,6 +2319,7 @@ export function identicalReadKey(
       request.filterPlans,
       request.list,
       request.legalEntityReadScope?.legalEntityIds ?? null,
+      'companyListScope' in request ? (request.companyListScope ?? null) : null,
     ])}`;
   } catch {
     return null;
@@ -2308,7 +2365,7 @@ async function executeQueryOnClient(
     definition.queryType === 'list' && list
       ? searchChildrenPlan(storage, entity, list)
       : null;
-  const readScope = await verifyLegalEntityReadScope(
+  let readScope = await verifyLegalEntityReadScope(
     client,
     snapshot,
     storage,
@@ -2322,6 +2379,24 @@ async function executeQueryOnClient(
       ...(searchChildPlans ?? []).map((plan) => plan.child),
     ],
   );
+  const companyListScope =
+    'companyListScope' in request ? request.companyListScope : undefined;
+  if (companyListScope) {
+    if (
+      !isCompanyListQuery(definition) ||
+      !entity.legalEntityMaster ||
+      readScope
+    )
+      throw failure(
+        'MODULE_QUERY_CONTRACT_INVALID',
+        'Company list scope requires the registered company master list.',
+        definition.queryId,
+      );
+    readScope = {
+      companyListOnly: true,
+      legalEntityIds: companyListScope.legalEntityIds,
+    };
+  }
   if (definition.queryType === 'aggregate') {
     return executeAggregateQuery(
       client,
@@ -6494,7 +6569,7 @@ async function loadPinnedStorageTarget(
     | SemanticOperationExecutionRequest
     | SemanticQueryExecutionRequest,
   observeValidation: PinnedStorageTargetValidationObservation,
-): Promise<StorageTargetPayloadV1> {
+): Promise<PinnedStorageTarget> {
   const result = await client.query<ArtifactRow>(
     `SELECT artifact_kind, content_hash, domain_tag, media_type, canonical_bytes
        FROM platform.read_tenant_release_artifacts($1)`,
@@ -6577,8 +6652,33 @@ async function loadPinnedStorageTarget(
   }
   const validated = target as unknown as StorageTargetPayloadV1;
   assertModuleSemanticStorageContract(validated);
+  let retired = new Set<string>();
+  if (validated.entities.some((entity) => dateTimeChecks(entity).length)) {
+    const { rows } = await client.query<{ desired_state: Buffer }>(
+      `SELECT revision.desired_state FROM platform.tenant_releases AS release
+         JOIN platform.app_package_revisions AS revision
+           ON revision.tenant_id = release.tenant_id AND revision.revision_id = release.app_package_revision_id
+        WHERE release.tenant_id = $1 AND release.environment_id = $2 AND release.release_id = $3`,
+      [
+        request.context.tenantId,
+        request.context.environmentId,
+        request.view.release.releaseId,
+      ],
+    );
+    const bytes = rows[0]?.desired_state;
+    if (
+      !bytes ||
+      hashBytes(CONTENT_HASH_DOMAIN, bytes) !==
+        manifest.normalizedDefinitionDigest
+    )
+      throw failure(
+        'MODULE_STORAGE_TARGET_MALFORMED',
+        'dateTime storage has no matching pinned definition',
+      );
+    retired = declaredDateTimeFields(bytes).retired;
+  }
   observeValidation('schemaValidated');
-  return validated;
+  return { ...validated, retiredDateTimeFields: retired };
 }
 
 export function assertSupportedStorageTargetArtifactVersions(versions: {
@@ -6967,14 +7067,28 @@ async function requireActiveCreateLegalEntity(
       definition.operationId,
     );
   }
+  if (!(await lockActiveCompany(client, storage, input.systemInput.value))) {
+    throw failure(
+      'MODULE_LEGAL_ENTITY_CREATE_INACTIVE',
+      'legal entity is not active for new work',
+      input.systemInput.value,
+    );
+  }
+}
+
+async function lockActiveCompany(
+  client: PoolClient,
+  storage: StorageTargetPayloadV1,
+  companyId: string,
+): Promise<boolean> {
   const masters = storage.entities.filter(
     (candidate) => candidate.legalEntityMaster !== undefined,
   );
   if (masters.length !== 1) {
     throw failure(
       'MODULE_STORAGE_TARGET_MALFORMED',
-      'entity-owned create requires exactly one legal-entity master',
-      entity.entityId,
+      'company selection requires exactly one legal-entity master',
+      companyId,
     );
   }
   const master = masters[0]!;
@@ -6998,18 +7112,12 @@ async function requireActiveCreateLegalEntity(
         AND environment_id = north_star_internal.trusted_environment_id()
         AND ${quoted(master.recordIdentity.column)} = $1
       FOR NO KEY UPDATE`,
-    [input.systemInput.value],
+    [companyId],
   );
-  if (
-    selected.rows[0]?.status !== descriptor.activeStatusValue ||
-    selected.rows[0]?.archivedAt !== null
-  ) {
-    throw failure(
-      'MODULE_LEGAL_ENTITY_CREATE_INACTIVE',
-      'legal entity is not active for new work',
-      input.systemInput.value,
-    );
-  }
+  return (
+    selected.rows[0]?.status === descriptor.activeStatusValue &&
+    selected.rows[0].archivedAt === null
+  );
 }
 
 function validateFieldValue(
@@ -7309,8 +7417,13 @@ function appendLegalEntityReadScopePredicate(
   predicates: string[],
   alias?: string,
 ): void {
-  const requirement = legalEntityReadScopeRequirement(entity);
-  if (!requirement) return;
+  // The company master identifies itself by its primary key. Its list's
+  // restriction comes from memberships for that list permission.
+  const columnName =
+    entity.legalEntityMaster && readScope?.companyListOnly
+      ? entity.recordIdentity.column
+      : legalEntityReadScopeRequirement(entity)?.column;
+  if (!columnName) return;
   if (!readScope) {
     throw failure(
       'MODULE_LEGAL_ENTITY_READ_SCOPE_REQUIRED',
@@ -7318,9 +7431,7 @@ function appendLegalEntityReadScopePredicate(
       entity.entityId,
     );
   }
-  const column = alias
-    ? qualified(alias, requirement.column)
-    : quoted(requirement.column);
+  const column = alias ? qualified(alias, columnName) : quoted(columnName);
   predicates.push(
     `${column} = ANY(${parameter(values, [...readScope.legalEntityIds])}::uuid[])`,
   );
