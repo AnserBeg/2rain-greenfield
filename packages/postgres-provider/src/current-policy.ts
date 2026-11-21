@@ -14,6 +14,7 @@ import {
   type RegisteredOperationDefinition,
 } from '../../runtime/src/semantic-operation-gateway.js';
 import {
+  COMPANY_LIST_QUERY,
   QUERY_BOUNDARY_PERMISSION_ID,
   type SemanticQueryDenialRecorder,
 } from '../../runtime/src/semantic-query-gateway.js';
@@ -304,6 +305,28 @@ export class PostgresCurrentPolicyGateway implements CurrentPolicyGateway {
         )
         .map((row) => row.legal_entity_id?.toLowerCase() ?? null);
       const global = memberships.includes(null);
+      // Only the company list can turn scoped grants into a row restriction.
+      // Use the grant rows that passed all live policy checks above.
+      if (
+        !global &&
+        binding.permissionId === COMPANY_LIST_QUERY.permissionId &&
+        binding.resourceId === COMPANY_LIST_QUERY.sourceEntityId &&
+        binding.action === 'read' &&
+        isRecord(input) &&
+        input.kind === COMPANY_LIST_QUERY.policyInputKind &&
+        input.queryId === COMPANY_LIST_QUERY.queryId
+      ) {
+        const companyIds = memberships.filter((id) => id !== null);
+        return Object.freeze({
+          decision:
+            companyIds.length > 0 ? ('ALLOW' as const) : ('DENY' as const),
+          decisionVersion: CURRENT_POLICY_DECISION_VERSION,
+          policyVersion: version,
+          companyListLegalEntityIds: Object.freeze(
+            [...new Set(companyIds)].sort(),
+          ),
+        });
+      }
       const allowed =
         binding.scopeMode === 'membershipOnly'
           ? memberships.length > 0
@@ -439,6 +462,7 @@ export function currentPolicyBindingsFromPermissions(
  * snapshot's grants; an operation's or a capability's decision never is.
  */
 const REUSABLE_READ_DECISION_KINDS: ReadonlySet<string> = new Set([
+  COMPANY_LIST_QUERY.policyInputKind,
   'legalEntityReadScopePolicyInput',
   'registeredSemanticListFiguresPolicyInput',
   'registeredSemanticListProgressPolicyInput',
