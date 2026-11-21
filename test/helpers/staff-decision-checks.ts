@@ -25,7 +25,9 @@ import type { ReleaseDiffBinding } from '../../packages/postgres-provider/src/re
 import { PostgresReleaseApprovalService } from '../../packages/postgres-provider/src/release-approval-service.js';
 import {
   staffRequestEntry,
+  recordStaffCustomizationProposal,
   withActivationVerifierTransaction,
+  withTrustedRequestTransaction,
 } from '../../packages/postgres-provider/src/request-context.js';
 import { AuthenticatedRequestEntryAdapter } from '../../packages/runtime/src/request-context.js';
 
@@ -573,22 +575,19 @@ export async function checkReleaseDecisions(
             user: 'north_star_runtime',
           });
           try {
+            const authorContext = await staffRequestEntry(runtime, () => ({
+              tenantId: f.tenantId,
+              environmentId: f.environmentId,
+              digest: digest(maker.erpHandle),
+              foreground: false,
+            })).enter({});
             const submit = () =>
-              scoped(
-                runtime,
-                a.realm,
-                async (c) =>
-                  (
-                    await c.query<{ id: string }>(
-                      'SELECT platform.staff_propose_customization($1,$2,$3,$4) AS id',
-                      [
-                        f.tenantId,
-                        f.environmentId,
-                        digest(maker.erpHandle),
-                        profile,
-                      ],
-                    )
-                  ).rows[0]!.id,
+              withTrustedRequestTransaction(runtime, authorContext, (client) =>
+                recordStaffCustomizationProposal(
+                  client,
+                  authorContext,
+                  profile,
+                ),
               );
             await assert.rejects(
               submit(),
@@ -601,6 +600,7 @@ export async function checkReleaseDecisions(
               [maker.membership],
             );
             const patchId = await submit();
+            assert.ok(patchId);
             assert.equal(
               (
                 await admin.query(
