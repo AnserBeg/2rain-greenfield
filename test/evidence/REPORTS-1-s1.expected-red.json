@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "packet": "REPORTS-1-s1",
+  "entries": [
+    {
+      "name": "reports-company-index-recording",
+      "claim": "A new company-owned record type records the versioned index choice before the patch is persisted.",
+      "file": "packages/customization/src/patch.ts",
+      "original": "{ ...member, companyAccessIndex: COMPANY_ACCESS_INDEX }",
+      "replacement": "member",
+      "test": {
+        "files": ["test/compiler/report-company-access.test.ts"],
+        "namePattern": "recording a company-owned"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/report-company-access.test.ts",
+          "name": "recording a company-owned type binds its access path once, including in a change set",
+          "expected": "Expected values to be strictly deep-equal"
+        }
+      ]
+    },
+    {
+      "name": "reports-company-index-shared",
+      "claim": "Tenant-shared types reject the company index declaration.",
+      "file": "packages/customization/src/patch.ts",
+      "original": "if (patch.companyAccessIndex && patch.companyOwnership !== 'entityOwned')",
+      "replacement": "if (false)",
+      "test": {
+        "files": ["test/compiler/report-company-access.test.ts"],
+        "namePattern": "recording a company-owned"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/report-company-access.test.ts",
+          "name": "recording a company-owned type binds its access path once, including in a change set",
+          "expected": "Missing expected exception"
+        }
+      ]
+    },
+    {
+      "name": "reports-company-index-floor",
+      "claim": "A release that introduces the optional entity key requires the new surface reader.",
+      "file": "packages/compiler/src/projections.ts",
+      "original": "(entity) => 'companyAccessIndex' in entity && entity.companyAccessIndex,",
+      "replacement": "() => false,",
+      "test": {
+        "files": ["test/compiler/report-company-access.test.ts"],
+        "namePattern": "the new Inspection"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/report-company-access.test.ts",
+          "name": "the new Inspection declares one named, same-plan secondary index and its own reader floor",
+          "expected": "35 !== 38"
+        }
+      ]
+    },
+    {
+      "name": "reports-company-index-old",
+      "claim": "Replaying a pre-key company-owned type preserves the historical release and plans no index build.",
+      "file": "packages/compiler/src/storage.ts",
+      "original": "if ('companyAccessIndex' in entity && entity.companyAccessIndex)",
+      "replacement": "if (entityOwned && entity.entityId.includes(':entity.custom_'))",
+      "test": {
+        "files": ["test/compiler/report-company-access.test.ts"],
+        "namePattern": "an archived pre-key"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/report-company-access.test.ts",
+          "name": "an archived pre-key company-owned Inspection reproduces every release byte, root and floor and adds zero indexes on replay",
+          "expected": "Expected values to be strictly equal"
+        }
+      ]
+    }
+  ]
+}

@@ -80,6 +80,7 @@ export const reachabilityProducers = [
     'test/compiler/predicate-lowering.test.ts',
     'test/compiler/publish-path-breadth-envelope.test.ts',
     'test/compiler/relation-target-projection.test.ts',
+    'test/compiler/report-company-access.test.ts',
   ]),
   nodeProducer('performance', 'performance', 'test:performance', [
     'test/compiler/performance-budget.test.ts',
