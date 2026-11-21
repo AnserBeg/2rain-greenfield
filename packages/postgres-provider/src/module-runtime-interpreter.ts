@@ -11,7 +11,11 @@ import {
   type ReportLimits,
   type ReportResult,
 } from '../../runtime/src/declared-report.js';
-import { readGroupedSnapshot, reportHorizon } from './grouped-report.js';
+import {
+  activeReportCompany,
+  readGroupedSnapshot,
+  reportHorizon,
+} from './grouped-report.js';
 import { withReadSnapshot } from './request-context.js';
 import {
   addressColumns,
@@ -376,8 +380,18 @@ export class PostgresModuleRuntimeInterpreter
             report.revision.body.source.entityId,
           );
           const horizon = await reportHorizon(client, view.tenantId);
-          return withModuleRuntimeRole(client, () =>
-            readGroupedSnapshot(
+          return withModuleRuntimeRole(client, async () => {
+            if (
+              !(await activeReportCompany(
+                client,
+                storage.entities,
+                view.tenantId,
+                view.environmentId,
+                input.company,
+              ))
+            )
+              return { kind: 'unavailable' } as const;
+            return readGroupedSnapshot(
               client,
               entity,
               request,
@@ -397,8 +411,8 @@ export class PostgresModuleRuntimeInterpreter
                     : {},
                 ),
               limits,
-            ),
-          );
+            );
+          });
         }),
       { retry: false },
     );

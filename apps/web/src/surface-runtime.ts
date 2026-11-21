@@ -392,19 +392,28 @@ async function renderSurfaceRuntimeWithDataInContext(
   }
 
   const url = new URL(requestUrl, 'http://surface-runtime.local');
-  const entry = await resolveWorkspaceEntry(
-    view,
-    selection.selected,
-    url,
-    gateways.queryGateway,
-  );
+  const legalEntitySelection = legalEntitySelectionForSurface(binding, url);
+  // A saved report link is authorized for its one named company by the grouped
+  // gateway, including active company status. Opening it needs no directory-wide grant.
+  const explicitReport =
+    selection.selected.report &&
+    (binding.query.legalEntityScope
+      ? legalEntitySelection.length === 1
+      : url.searchParams.getAll('collectionCompany').length === 1);
+  const entry = explicitReport
+    ? null
+    : await resolveWorkspaceEntry(
+        view,
+        selection.selected,
+        url,
+        gateways.queryGateway,
+      );
   if (entry?.redirect)
     return { html: '', statusCode: 303, location: entry.redirect };
   if (entry?.invalid)
     return renderApplicationDiagnostic(422, {
       code: 'WORKSPACE_COMPANY_UNAVAILABLE',
     });
-  const legalEntitySelection = legalEntitySelectionForSurface(binding, url);
   const offeredOperations = await offeredSurfaceOperations(
     view,
     binding.operations,

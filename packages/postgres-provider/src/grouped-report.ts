@@ -18,6 +18,26 @@ const ident = (v: string) => {
   return '"' + v + '"';
 };
 
+/** Report entry can name a single company without permission to enumerate the directory. */
+export async function activeReportCompany(
+  client: PoolClient,
+  entities: readonly StorageEntityTarget[],
+  tenantId: string,
+  environmentId: string,
+  company: string,
+): Promise<boolean> {
+  const directory = entities.find((e) => e.legalEntityMaster);
+  const master = directory?.legalEntityMaster;
+  if (!directory || !master) return false;
+  const { rowCount } = await client.query(
+    `SELECT 1 FROM north_star_module.${ident(directory.physicalTableName)}
+       WHERE tenant_id=$1 AND environment_id=$2 AND record_id=$3 AND archived_at IS NULL
+         AND ${ident(master.fieldColumns.status)}=$4`,
+    [tenantId, environmentId, company, master.activeStatusValue],
+  );
+  return rowCount === 1;
+}
+
 export async function reportHorizon(
   client: PoolClient,
   tenantId: string,

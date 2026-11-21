@@ -508,6 +508,20 @@ test(
           await insert(north, customer, '3.00', null);
           await insert(south, customer, '90.00', 'CAD');
           await insert(north, customer, '100', 'CAD', '2026-11-02');
+          // The aggregate itself checks the stored company. The fixture role still
+          // has a workspace-wide grant here, so policy alone would allow this UUID.
+          const unknown = randomUUID();
+          await app.runtime.entry.run({}, async (view) => {
+            assert.deepEqual(
+              await app.runtime.queryGateway.invokeGrouped(view, {
+                queryId: reportQueryId(revision.reportId),
+                company: unknown,
+                parameters: {},
+                pageSize: 1,
+              }),
+              { kind: 'unavailable' },
+            );
+          });
           const membership = await pool.query(
             'UPDATE platform.current_policy_memberships SET legal_entity_id=$4 WHERE (tenant_id,environment_id,principal_id)=($1,$2,$3) AND legal_entity_id IS NULL',
             [tenantId, environmentId, principalId, north],
