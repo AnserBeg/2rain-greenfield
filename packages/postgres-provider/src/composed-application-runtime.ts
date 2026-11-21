@@ -13,12 +13,14 @@ import {
   type DocumentScanner,
 } from './document-content.js';
 import {
+  assertServingRuntimeCapabilities,
   composeServingGateways,
   releasePolicyBindings,
   loadServingRelease,
   projectionBinding,
   requiredProjection,
   type ServingRelease,
+  UnsupportedReleaseRuntimeCapabilityError,
 } from './serving-gateways.js';
 import { readVerifiedServing } from './serving-gateways.js';
 import { servingPointersSql } from './verified-release-generation.js';
@@ -366,6 +368,10 @@ export async function createComposedApplicationRuntime(
     );
     const { serving, freshTenantInstallEvidence } = selected;
     const metrics = options.metrics ?? new ObservabilityMetrics();
+    assertServingRuntimeCapabilities(
+      serving.releaseId,
+      serving.releaseManifest,
+    );
     if (options.localDemoIdentity) {
       await provisionLocalDemoReleaseAuthorization(
         adminPool,
@@ -997,6 +1003,7 @@ async function selectBootRelease(
       compiledApplication,
     };
   } catch (error) {
+    if (error instanceof UnsupportedReleaseRuntimeCapabilityError) throw error;
     if (!previous || options.releaseSelection?.kind === 'rollback') throw error;
     const verified = await readVerifiedServing(runtimePool, runtimeContext);
     if (!verified) throw error;
@@ -1041,6 +1048,7 @@ function servingReleaseFromParsed(
     projection: (familyId: string) =>
       projectionBinding(release.compiled, familyId),
     releaseId,
+    releaseManifest: release.compiled.bundle.releaseManifest,
     releaseRoot: release.compiled.releaseRoot,
   });
 }
