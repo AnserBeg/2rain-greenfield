@@ -1,6 +1,14 @@
 # COMMS-2 — Discuss any saved record and chat with staff
 
-**Slice 0 · docs only.** The independent design read returned REVISE on `675d76ee`. [ADR-0090](../../decisions/ADR-0090-governed-record-discussions-and-staff-chat.md) incorporates the single amendment round. Critical paths touched: none. This checkpoint stops after the amendment push.
+**Slice 1 · blocked on CONNECT-1.** The orchestrator accepted the amended design at `5ecafc89`. Fresh main at `630e2aa6` ships CONNECT-1 Address and Maps. Its shared thread, participant and business-object link writer and its outbound preparation path belong to CONNECT-1 slice 2. [Dependency](CONNECT-1.md) · [Accepted design](../../decisions/ADR-0090-governed-record-discussions-and-staff-chat.md#after-the-design-read)
+
+## Slice 1 checkpoint
+
+- COMMS-1's inbox is absent. `DiscussionInboxPort` names the seam. Its test double exercises lease claim, locked reconciliation from the current revision, and acknowledgement after commit. Ordinary notice reads check the channel, recipient, exact message and reply parent. Six unit tests and twelve isolated mutations exercise the seam.
+- `discussion-compatibility.test.ts` recompiles a panel-free first-party release, stages an ordinary tenant field through Customize, compares the stored definition, root, manifest and projection bytes to the archived tree, and queries a saved item on the first-party release with that tree's serving gateway.
+- The preceding reader answered the first-party query against saved data in the initial run. That run timed out during tenant activation. The narrowed run timed out during archived-runtime setup on the shared host. Tenant byte parity and refusal of a declaring Discussion release remain unverified.
+- The live record panel, message storage, Mark read, A1 and A6 database races and same-tenant company isolation require the shared writer. A7 publication on Purchase Order and Inspection requires executable discussion operation bindings. The member, replay and preceding-reader refusal remain open. Migration and surface reader rung are unassigned.
+- **Try it yourself** — run `node --import tsx --test test/unit/discussion-inbox.test.ts`. Withdrawing a mention before replay leaves only the eligible reply reason. A failed reconciliation leaves the lease unacknowledged.
 
 ## Design claims
 
@@ -57,3 +65,12 @@ Open the ADR and trace these design walkthroughs in under ten minutes.
 5. Alex leaves the company. Sam posts in their direct chat while Alex is away. Alex rejoins, then Sam posts again before Alex opens the chat. Follow §§3, 4 and 7 and expect the same direct pair and only the post after rejoin. Earlier edits, quotes, notices and attachment links give Alex no earlier history.
 
 Run `scripts/check-records.sh` at the repository root and expect exit zero.
+
+```record-claim
+{
+  "schemaVersion": "northstar.record-claim/v1", "packet": "COMMS-2",
+  "base": "5ecafc891cadd19e74288ca08fcbad7422a000d8", "head": "71e24e115b7a0a5023632dd7da12f18669bd61c4",
+  "changedPaths": ["package.json", "packages/runtime/src/discussion-inbox.ts", "test/architecture/repository-hygiene.test.ts", "test/evidence/COMMS-2.expected-red.json", "test/helpers/archived-runtime-process.ts", "test/postgres/booking-serving.test.ts", "test/postgres/discussion-compatibility.test.ts", "test/unit/discussion-inbox.test.ts"],
+  "symbols": [{"path":"packages/runtime/src/discussion-inbox.ts","name":"reconcileNextDiscussionNotice"}]
+}
+```
