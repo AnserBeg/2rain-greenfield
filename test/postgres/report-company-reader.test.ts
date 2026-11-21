@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import type { Pool } from 'pg';
 import {
@@ -25,14 +24,11 @@ import {
   withEphemeralPostgres,
 } from '../helpers/postgres.js';
 
-const predecessor = '0a9f7ca52304969c65092893f50375c90f8c2265';
-const readPrevious = (path: string) =>
-  JSON.parse(
-    execFileSync('git', ['show', predecessor + ':' + path], {
-      encoding: 'utf8',
-      maxBuffer: 32 * 1024 * 1024,
-    }),
-  );
+import {
+  reportsPredecessor,
+  readReportsPredecessor,
+} from '../helpers/reports-preceding-release.js';
+
 const archivedQuery = `
 import { readFile } from 'node:fs/promises';
 import { CAPABILITY_EXECUTOR_FACTORIES } from './apps/api/src/erp-capabilities.ts';
@@ -112,7 +108,7 @@ test(
   { timeout: 900_000 },
   async () => {
     const path = 'apps/web/release/app.authored.json';
-    const compiledApplication = readPrevious(
+    const compiledApplication = readReportsPredecessor(
       'apps/web/release/app.compiled.json',
     );
     const tip = serializeRelease(
@@ -133,25 +129,31 @@ test(
             identity: app.runtime.identity,
             databaseUrl: options.databaseUrl,
           };
-          await withArchivedCustomizationRuntime(predecessor, async (run) => {
-            await assertStoredBytes(pool, app.runtime.activeReleaseId, tip);
-            const control = (await run(archivedQuery, readInput)) as {
-              outcome: string;
-              ids: string[];
-            };
-            assert.equal(control.outcome, 'answered', JSON.stringify(control));
-            assert.ok(
-              control.ids.length > 0,
-              'the scoped company list actually returned a company',
-            );
-            const change = CustomizationPatchSchema.parse({
-              kind: 'addRecordType',
-              companyOwnership: 'entityOwned',
-              label: 'Historical inspection',
-              fields: [{ type: 'text', label: 'Name' }],
-            });
-            const historical = (await run(
-              `
+          await withArchivedCustomizationRuntime(
+            reportsPredecessor,
+            async (run) => {
+              await assertStoredBytes(pool, app.runtime.activeReleaseId, tip);
+              const control = (await run(archivedQuery, readInput)) as {
+                outcome: string;
+                ids: string[];
+              };
+              assert.equal(
+                control.outcome,
+                'answered',
+                JSON.stringify(control),
+              );
+              assert.ok(
+                control.ids.length > 0,
+                'the scoped company list actually returned a company',
+              );
+              const change = CustomizationPatchSchema.parse({
+                kind: 'addRecordType',
+                companyOwnership: 'entityOwned',
+                label: 'Historical inspection',
+                fields: [{ type: 'text', label: 'Name' }],
+              });
+              const historical = (await run(
+                `
           import {readFile} from 'node:fs/promises';
           import {openCustomizeService} from './apps/api/src/composition-root.ts';
           const {options,change}=JSON.parse(await readFile(process.argv[2],'utf8'));
@@ -163,65 +165,66 @@ test(
             console.log(JSON.stringify(draft.patchId));
           } finally {await opened.close();}
         `,
-              {
-                options: {
-                  databaseUrl: options.databaseUrl,
-                  tenantSlug: options.tenantSlug,
+                {
+                  options: {
+                    databaseUrl: options.databaseUrl,
+                    tenantSlug: options.tenantSlug,
+                  },
+                  change,
                 },
-                change,
-              },
-            )) as string;
-            const old = await recordedPatch(pool, historical);
-            assert.deepEqual(JSON.parse(old.payload.toString()), change);
-            const reproduced = await compileInSandbox({
-              base: readPrevious(path),
-              chain: [change],
-              tip,
-              acknowledgement: readUnboundPermissionAcknowledgementFor(
-                path,
-                'northstar.app:package.application',
-              ),
-            });
-            assert.ok(reproduced.status === 'compiled');
-            await assertStoredBytes(
-              pool,
-              old.resulting_release_id,
-              reproduced.steps[0]!.release,
-            );
-            assert.deepEqual(await run(archivedQuery, readInput), control);
-            const draft = await opened.service.draft(
-              { ...change, label: 'Inspection' },
-              'visualBuilder',
-            );
-            assert.ok(draft.status === 'drafted', JSON.stringify(draft));
-            const fresh = await recordedPatch(pool, draft.patchId);
-            assert.equal(
-              JSON.parse(fresh.payload.toString()).companyAccessIndex,
-              COMPANY_ACCESS_INDEX,
-            );
-            await opened.service.approve(draft.patchId);
-            await opened.service.activate(draft.patchId);
-            const index =
-              'nsm_i_57kahsinwt3fo73cpq5mduuaqnwmyh6a7jjowaafqx5jvwtbwnsa';
-            const ready = await pool.query(
-              'SELECT indisready AND indisvalid AS ready FROM pg_catalog.pg_index WHERE indexrelid=pg_catalog.to_regclass($1)',
-              ['north_star_module.' + index],
-            );
-            assert.equal(ready.rows[0]?.ready, true);
-            assert.deepEqual(await run(archivedQuery, readInput), {
-              outcome: 'refused',
-              code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
-              message:
-                'runtime capability northstar.runtime:capability.surface-manifest requires version ' +
-                COMPANY_ACCESS_INDEX_READER +
-                ' and this runtime supports 37',
-            });
-            await assertStoredBytes(
-              pool,
-              old.resulting_release_id,
-              reproduced.steps[0]!.release,
-            );
-          });
+              )) as string;
+              const old = await recordedPatch(pool, historical);
+              assert.deepEqual(JSON.parse(old.payload.toString()), change);
+              const reproduced = await compileInSandbox({
+                base: readReportsPredecessor(path),
+                chain: [change],
+                tip,
+                acknowledgement: readUnboundPermissionAcknowledgementFor(
+                  path,
+                  'northstar.app:package.application',
+                ),
+              });
+              assert.ok(reproduced.status === 'compiled');
+              await assertStoredBytes(
+                pool,
+                old.resulting_release_id,
+                reproduced.steps[0]!.release,
+              );
+              assert.deepEqual(await run(archivedQuery, readInput), control);
+              const draft = await opened.service.draft(
+                { ...change, label: 'Inspection' },
+                'visualBuilder',
+              );
+              assert.ok(draft.status === 'drafted', JSON.stringify(draft));
+              const fresh = await recordedPatch(pool, draft.patchId);
+              assert.equal(
+                JSON.parse(fresh.payload.toString()).companyAccessIndex,
+                COMPANY_ACCESS_INDEX,
+              );
+              await opened.service.approve(draft.patchId);
+              await opened.service.activate(draft.patchId);
+              const index =
+                'nsm_i_57kahsinwt3fo73cpq5mduuaqnwmyh6a7jjowaafqx5jvwtbwnsa';
+              const ready = await pool.query(
+                'SELECT indisready AND indisvalid AS ready FROM pg_catalog.pg_index WHERE indexrelid=pg_catalog.to_regclass($1)',
+                ['north_star_module.' + index],
+              );
+              assert.equal(ready.rows[0]?.ready, true);
+              assert.deepEqual(await run(archivedQuery, readInput), {
+                outcome: 'refused',
+                code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
+                message:
+                  'runtime capability northstar.runtime:capability.surface-manifest requires version ' +
+                  COMPANY_ACCESS_INDEX_READER +
+                  ' and this runtime supports 37',
+              });
+              await assertStoredBytes(
+                pool,
+                old.resulting_release_id,
+                reproduced.steps[0]!.release,
+              );
+            },
+          );
         } finally {
           await opened.close();
           await app.close();

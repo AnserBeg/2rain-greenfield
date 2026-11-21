@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import {
   COMPANY_ACCESS_INDEX,
@@ -18,12 +17,13 @@ import {
   serializeRelease,
   storageElements,
 } from '../../packages/customization/src/index.js';
-import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
-import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import { projectionPayload } from './helpers.js';
 import { withArchivedCustomizationRuntime } from '../helpers/archived-runtime-process.js';
 
-const precedingReader = '0a9f7ca52304969c65092893f50375c90f8c2265';
+import {
+  compileReportFixture,
+  reportsPredecessor,
+} from '../helpers/reports-preceding-release.js';
 const inspection = {
   kind: 'addRecordType',
   label: 'Inspection',
@@ -60,31 +60,7 @@ test('recording a company-owned type binds its access path once, including in a 
 });
 
 test('the new Inspection declares one named, same-plan secondary index and its own reader floor', async () => {
-  const path = 'apps/web/release/app.authored.json';
-  const before = (file: string) =>
-    JSON.parse(
-      execFileSync('git', ['show', precedingReader + ':' + file], {
-        encoding: 'utf8',
-        maxBuffer: 32 * 1024 * 1024,
-      }),
-    );
-  const result = await compileInSandbox({
-    acknowledgement: readUnboundPermissionAcknowledgementFor(
-      path,
-      'northstar.app:package.application',
-    ),
-    base: before(path),
-    tip: serializeRelease(
-      parseCompiledApplication(before('apps/web/release/app.compiled.json'))
-        .application,
-    ),
-    chain: [recording(inspection)],
-  });
-  assert.ok(
-    result.status === 'compiled',
-    result.status === 'compiled' ? '' : JSON.stringify(result),
-  );
-  const { compiled } = parseSerializedRelease(result.steps[0]!.release);
+  const { compiled } = await compileReportFixture([recording(inspection)]);
   const target = projectionPayload<StorageTargetPayloadV1>(
     compiled,
     PROJECTION_FAMILY_IDS.storageTarget,
@@ -144,7 +120,7 @@ test('an archived pre-key company-owned Inspection reproduces every release byte
       ],
     }),
   ];
-  await withArchivedCustomizationRuntime(precedingReader, async (run) => {
+  await withArchivedCustomizationRuntime(reportsPredecessor, async (run) => {
     const historical = (await run(
       `
       import { readFile } from 'node:fs/promises';

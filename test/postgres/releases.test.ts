@@ -7,6 +7,7 @@ import test from 'node:test';
 import pg from 'pg';
 
 import {
+  COMPANY_ACCESS_INDEX_READER,
   CANONICALIZATION_PROFILE_VERSION,
   CONTENT_HASH_ALGORITHM,
   canonicalize,
@@ -90,6 +91,7 @@ import {
   fixtureBytes,
   normalizedBytes,
 } from '../compiler/helpers.js';
+import { compileReportFixture } from '../helpers/reports-preceding-release.js';
 import { datedPartyDefinition } from '../fixtures/g2/party/validation.js';
 import { compilePartyFixture } from '../fixtures/g2/party/compiler.js';
 import type { FormulaRulePayload } from '../../packages/compiler/src/formula-validation-plan.js';
@@ -2051,6 +2053,44 @@ test('immutable release persistence verifies bytes, identities, links, RLS, and 
         await runtimePool.end();
       }
     },
+  );
+});
+
+test('release admission refuses a company access index whose release understates its reader floor', async (t) => {
+  const { compiled: candidate, normalizedDefinitionBytes: bytes } =
+    await compileReportFixture([
+      {
+        kind: 'addRecordType',
+        label: 'Inspection',
+        companyOwnership: 'entityOwned',
+        companyAccessIndex: 'scopeRecordId/v1',
+        fields: [{ label: 'Name', type: 'text' }],
+      },
+    ]);
+  const surface = candidate.bundle.releaseManifest.projections.find(
+    (p) => p.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
+  );
+  assert.ok(surface);
+  surface.requiredRuntimeCapability.minimumVersion =
+    COMPANY_ACCESS_INDEX_READER - 1;
+  const context = await contextFor(requestEntry(), 'session-a');
+  const pool = new pg.Pool();
+  t.after(() => pool.end());
+  const repository = new PostgresImmutableReleaseRepository(pool);
+  t.mock.method(repository, 'getAppPackageRevision', async () => ({
+    ...revisionCommand(context, revisionA, bytes),
+    createdAt: '2026-11-20T00:00:00.000Z',
+  }));
+  await assert.rejects(
+    repository.stageTenantReleaseCandidate(context, {
+      appPackageRevisionId: revisionA,
+      compiledRelease: rebuildReleaseRoot(candidate),
+      createdBy: context.principalId,
+      environmentId: context.environmentId,
+      releaseId: releaseA,
+      tenantId: context.tenantId,
+    }),
+    { code: 'REPORT_INDEX_READER_MISMATCH' },
   );
 });
 
