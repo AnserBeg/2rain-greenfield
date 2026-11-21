@@ -390,7 +390,7 @@
         {
           "file": "test/postgres/booking-commitments.test.ts",
           "name": "kit hold, confirm, cancel and expiry change every member and advance both owners once",
-          "expected": "booking.staleRevision"
+          "expected": "booking.evidenceMismatch"
         }
       ]
     },
