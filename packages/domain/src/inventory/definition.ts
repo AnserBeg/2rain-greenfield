@@ -563,7 +563,7 @@ export function inventoryModuleDefinition(
           'reviewed',
           'posted',
           // STOCK-COUNTS: appended, so every released option keeps its order.
-          'cancelled',
+          ...(documentEntry ? ['cancelled'] : []),
         ]),
       ),
       field(
@@ -618,37 +618,41 @@ export function inventoryModuleDefinition(
         text(1000),
         { optional: true },
       ),
-      // STOCK-COUNTS: what kind of count this is -- a label, and whether
-      // Start counting lists the location's products (a cycle count or an
-      // annual stocktake does; a quick correction or an opening count starts
-      // empty).
-      field(
-        definitionIds,
-        entityIds.stockCount,
-        fieldIds.stockCount.countType,
-        'Count type',
-        100,
-        enumeration(definitionIds, 'stock_count_count_type', [
-          'correction',
-          'cycle',
-          'annual',
-          'opening',
-        ]),
-        { optional: true },
-      ),
-      // STOCK-COUNTS: a blind count hides what is expected until review.
-      field(
-        definitionIds,
-        entityIds.stockCount,
-        fieldIds.stockCount.countingMode,
-        'Counting mode',
-        110,
-        enumeration(definitionIds, 'stock_count_counting_mode', [
-          'open',
-          'blind',
-        ]),
-        { optional: true },
-      ),
+      ...(documentEntry
+        ? [
+            // STOCK-COUNTS: what kind of count this is -- a label, and whether
+            // Start counting lists the location's products (a cycle count or an
+            // annual stocktake does; a quick correction or an opening count starts
+            // empty).
+            field(
+              definitionIds,
+              entityIds.stockCount,
+              fieldIds.stockCount.countType,
+              'Count type',
+              100,
+              enumeration(definitionIds, 'stock_count_count_type', [
+                'correction',
+                'cycle',
+                'annual',
+                'opening',
+              ]),
+              { optional: true },
+            ),
+            // STOCK-COUNTS: a blind count hides what is expected until review.
+            field(
+              definitionIds,
+              entityIds.stockCount,
+              fieldIds.stockCount.countingMode,
+              'Counting mode',
+              110,
+              enumeration(definitionIds, 'stock_count_counting_mode', [
+                'open',
+                'blind',
+              ]),
+              { optional: true },
+            ),
+          ]
+        : []),
 
       field(
         definitionIds,
@@ -708,19 +712,23 @@ export function inventoryModuleDefinition(
         text(80),
         { optional: true },
       ),
-      // STOCK-COUNTS: what the counter found, entered while counting; empty
-      // until the line is counted. Review copies it into the counted quantity
-      // and reads expected from the ledger, so nobody types expected or
-      // variance.
-      field(
-        definitionIds,
-        entityIds.stockCountLine,
-        fieldIds.stockCountLine.physicalQuantity,
-        'Physical count',
-        80,
-        decimal(),
-        { optional: true },
-      ),
+      ...(documentEntry
+        ? [
+            // STOCK-COUNTS: what the counter found, entered while counting; empty
+            // until the line is counted. Review copies it into the counted quantity
+            // and reads expected from the ledger, so nobody types expected or
+            // variance.
+            field(
+              definitionIds,
+              entityIds.stockCountLine,
+              fieldIds.stockCountLine.physicalQuantity,
+              'Physical count',
+              80,
+              decimal(),
+              { optional: true },
+            ),
+          ]
+        : []),
 
       field(
         definitionIds,
@@ -926,7 +934,11 @@ export function inventoryModuleDefinition(
               definitionIds,
               local,
               entityId,
-              standardOperationPreconditions(definitionIds, local),
+              standardOperationPreconditions(
+                definitionIds,
+                local,
+                documentEntry,
+              ),
             ),
       ),
       postingOperation(definitionIds),
@@ -980,7 +992,7 @@ export function inventoryModuleDefinition(
     queries: [
       ...standardEntities.flatMap(([local, , entityId]) => {
         const entityFields = [
-          ...fieldsForEntity(fieldIds, local),
+          ...fieldsForEntity(fieldIds, local, documentEntry),
           ...(companyReorderRule && local === 'legal_entity'
             ? [fieldIds.companyReorderPointPercent]
             : []),
@@ -1045,7 +1057,7 @@ export function inventoryModuleDefinition(
         // STOCK-COUNTS (`companion-writers-not-closed`): retired from every
         // generic create input and form. The column stays in storage and the
         // posting kernel stays its only writer.
-        'retired',
+        documentEntry ? 'retired' : 'active',
       ),
       relation(
         definitionIds.relationIds.stockCountSupersedes,
@@ -1071,7 +1083,7 @@ export function inventoryModuleDefinition(
         'reference',
         false,
         // STOCK-COUNTS: retired from every generic input, as above.
-        'retired',
+        documentEntry ? 'retired' : 'active',
       ),
     ],
     schemaVersion: version,
@@ -1119,6 +1131,7 @@ type StandardOperationPreconditions = Partial<
 function standardOperationPreconditions(
   ids: InventoryIds,
   local: string,
+  documentEntry: boolean,
 ): StandardOperationPreconditions | undefined {
   // ADR-0034's terminal guard, and STOCK-COUNTS' freeze: a count and its
   // lines (through the parent guard) are editable while draft or counting.
@@ -1149,11 +1162,14 @@ function standardOperationPreconditions(
     ],
   });
   if (local === 'stock_count') {
+    const mutable = documentEntry
+      ? stockCountMutable
+      : () => notInState('posted');
     return {
-      archive: stockCountMutable(),
-      create: stockCountMutable(),
-      restore: stockCountMutable(),
-      update: stockCountMutable(),
+      archive: mutable(),
+      create: mutable(),
+      restore: mutable(),
+      update: mutable(),
     };
   }
   if (local !== 'inventory_transaction') return undefined;
@@ -1282,6 +1298,7 @@ function queryParameter(
 function fieldsForEntity(
   fieldIds: InventoryIds['fieldIds'],
   local: string,
+  documentEntry = false,
 ): readonly string[] {
   switch (local) {
     case 'legal_entity':
@@ -1292,10 +1309,24 @@ function fieldsForEntity(
       return Object.values(fieldIds.transactionLine);
     case 'inventory_period_lock':
       return Object.values(fieldIds.periodLock);
-    case 'stock_count':
-      return Object.values(fieldIds.stockCount);
-    case 'stock_count_line':
-      return Object.values(fieldIds.stockCountLine);
+    case 'stock_count': {
+      const entries = Object.values(fieldIds.stockCount);
+      return documentEntry
+        ? entries
+        : entries.filter(
+            (id) =>
+              id !== fieldIds.stockCount.countType &&
+              id !== fieldIds.stockCount.countingMode,
+          );
+    }
+    case 'stock_count_line': {
+      const entries = Object.values(fieldIds.stockCountLine);
+      return documentEntry
+        ? entries
+        : entries.filter(
+            (id) => id !== fieldIds.stockCountLine.physicalQuantity,
+          );
+    }
     default:
       throw new TypeError(`unknown inventory entity ${local}`);
   }

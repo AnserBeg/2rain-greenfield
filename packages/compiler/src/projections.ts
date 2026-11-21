@@ -46,6 +46,7 @@ import {
   WORKFLOW_SURFACE_FLOOR,
 } from '../../canonical-model/src/workflows.js';
 import { workflowSdkBindingDigest } from './workflows.js';
+import { hasStockCountWorkflow } from './conformance.js';
 
 import {
   FORMULA_RULE_PAYLOAD_VERSION,
@@ -1081,12 +1082,16 @@ function surfaceManifestPayload(
         (column) => column.relation,
       ),
   );
-  const lineCreateValues = original.surfaces.some(
-    (surface) =>
-      'documentEditor' in surface &&
-      (surface.documentEditor as SurfaceDocumentEditor | undefined)
-        ?.lineCreateValues !== undefined,
-  );
+  // Rung 35 reads both the workflow definition and editor line defaults.
+  // Removing an editor must not admit the workflow to a reader without it.
+  const needsStockCountReader =
+    hasStockCountWorkflow(original) ||
+    original.surfaces.some(
+      (surface) =>
+        'documentEditor' in surface &&
+        (surface.documentEditor as SurfaceDocumentEditor | undefined)
+          ?.lineCreateValues !== undefined,
+    );
   const replayedLayout = original.surfaces.some(
     (s) =>
       'layouts' in s &&
@@ -1094,7 +1099,7 @@ function surfaceManifestPayload(
         (layout) => layout.placementRuleVersion === 1,
       ),
   );
-  const surfaceFloor = lineCreateValues
+  const surfaceFloor = needsStockCountReader
     ? LINE_CREATE_VALUES_SURFACE_FLOOR
     : replayedLayout
       ? REPLAYED_LAYOUT_READER

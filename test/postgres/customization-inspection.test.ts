@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applicationWithoutLineCreateValues } from '../helpers/application-without-line-create-values.js';
+import { applicationBeforeStockCountWorkflow } from '../helpers/application-before-stock-count-workflow.js';
 
 import {
   openCustomizeService,
@@ -35,7 +35,7 @@ test(
         const options = {
           databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
           tenantSlug: 'customize-inspection',
-          compiledApplication: applicationWithoutLineCreateValues().release,
+          compiledApplication: applicationBeforeStockCountWorkflow().release,
         };
         const app = await startComposedApplication({
           ...options,

@@ -3,7 +3,7 @@ import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provi
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
-import { applicationWithoutLineCreateValues } from '../helpers/application-without-line-create-values.js';
+import { applicationBeforeStockCountWorkflow } from '../helpers/application-before-stock-count-workflow.js';
 import {
   COMPOSED_APPLICATION_INVENTORY_SCOPE,
   readCompiledApplication,
@@ -762,7 +762,7 @@ test(
         const options = {
           databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
           tenantSlug: 'documents-fields',
-          compiledApplication: applicationWithoutLineCreateValues().release,
+          compiledApplication: applicationBeforeStockCountWorkflow().release,
           port: 0,
         };
         await pool.query(
