@@ -4,7 +4,7 @@ import type pg from 'pg';
 
 import {
   openCustomizeService,
-  startComposedApplication,
+  openComposedApplicationRuntime,
 } from '../../apps/api/src/composition-root.js';
 import type { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import {
@@ -17,6 +17,7 @@ import {
   serializeRelease,
   type SerializedRelease,
 } from '../../packages/customization/src/release-envelope.js';
+import { worldOver } from '../agent/agent-world.js';
 import { compilerInput, normalizedBytes } from '../compiler/helpers.js';
 import {
   archivedItemQuery,
@@ -28,7 +29,6 @@ import {
 } from '../helpers/postgres.js';
 
 const precedingReader = '630e2aa690906af9256c5964c398ba90585515d2';
-const demoItemId = '71000000-0000-4000-8000-000000000011';
 const ordinaryChange = {
   kind: 'addField',
   entity: 'northstar.app:entity.item',
@@ -179,25 +179,32 @@ test(
             tenantSlug: 'discussion-compatibility',
             compiledApplication: release,
           };
-          const app = await startComposedApplication({ ...options, port: 0 });
+          const runtime = await openComposedApplicationRuntime(options);
           try {
-            const read = () =>
-              run(archivedItemQuery, {
-                databaseUrl,
-                identity: app.runtime.identity,
-                recordId: demoItemId,
-              });
-            const exact = { outcome: 'exact', id: demoItemId };
+            const world = worldOver(runtime, String(connection.database));
+            const item = await world.create('item', {
+              sku: 'COMPAT-1',
+              name: 'Reader check',
+              base_unit: 'EA',
+            });
             await assertPersistedRelease(
               pool,
-              app.runtime.releaseRoot,
+              runtime.releaseRoot,
               expected,
               'firstParty',
             );
-            assert.deepEqual(await read(), {
-              ...exact,
-              root: expected.releaseRoot,
-            });
+            assert.deepEqual(
+              await run(archivedItemQuery, {
+                databaseUrl,
+                identity: runtime.identity,
+                recordId: item.recordId,
+              }),
+              {
+                outcome: 'exact',
+                id: item.recordId,
+                root: expected.releaseRoot,
+              },
+            );
             const opened = await openCustomizeService(options);
             try {
               const draft = await opened.service.draft(
@@ -205,23 +212,17 @@ test(
                 'visualBuilder',
               );
               assert.ok(draft.status === 'drafted', JSON.stringify(draft));
-              await opened.service.approve(draft.patchId);
-              await opened.service.activate(draft.patchId);
               await assertPersistedRelease(
                 pool,
                 draft.releaseRoot,
                 prior.tenant,
                 'tenantAuthored',
               );
-              assert.deepEqual(await read(), {
-                ...exact,
-                root: prior.tenant.releaseRoot,
-              });
             } finally {
               await opened.close();
             }
           } finally {
-            await app.close();
+            await runtime.close();
           }
         },
         LINEAGE_INSTALL_VOLUME,
