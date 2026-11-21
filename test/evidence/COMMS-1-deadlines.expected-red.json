@@ -181,6 +181,42 @@
           "expected": "did not match"
         }
       ]
+    },
+    {
+      "name": "comms-reminder-first-valid-in-gap",
+      "claim": "A missing local time resolves at the first valid instant after the gap.",
+      "file": "packages/domain/src/billing/calendar.ts",
+      "original": "      ms = hi;",
+      "replacement": "      ms = wall - firstOffset;",
+      "test": {
+        "files": ["test/unit/reminder-deadline.test.ts"],
+        "namePattern": "Edmonton civil subtraction uses the first instant after a gap and the earlier offset in a fold"
+      },
+      "kills": [
+        {
+          "file": "test/unit/reminder-deadline.test.ts",
+          "name": "Edmonton civil subtraction uses the first instant after a gap and the earlier offset in a fold",
+          "expected": "2026-03-08T09:00"
+        }
+      ]
+    },
+    {
+      "name": "comms-reminder-earlier-offset",
+      "claim": "Repeated derived civil times resolve to the earlier instant.",
+      "file": "packages/domain/src/billing/calendar.ts",
+      "original": "ms = Math.min(...candidates);",
+      "replacement": "ms = Math.max(...candidates);",
+      "test": {
+        "files": ["test/unit/reminder-deadline.test.ts"],
+        "namePattern": "Edmonton civil subtraction uses the first instant after a gap and the earlier offset in a fold"
+      },
+      "kills": [
+        {
+          "file": "test/unit/reminder-deadline.test.ts",
+          "name": "Edmonton civil subtraction uses the first instant after a gap and the earlier offset in a fold",
+          "expected": "2026-11-01T07:30"
+        }
+      ]
     }
   ]
 }

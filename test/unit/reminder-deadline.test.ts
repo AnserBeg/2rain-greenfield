@@ -122,7 +122,8 @@ test('refuse a missing capture and invalid leads', () => {
     () => resolveReminderDeadline({ ...anchor, zone: '' }, lead),
     /captured zone/u,
   );
-  const { tzdbVersion: _version, ...legacyCapture } = anchor;
+  const legacyCapture = { ...anchor };
+  delete legacyCapture.tzdbVersion;
   assert.equal(
     resolveReminderDeadline(legacyCapture, lead).tzdbVersion,
     process.versions.tz,
