@@ -1,3 +1,4 @@
+import { checkRetainedWorkflowReplay } from './release-verification-service.js';
 import { RemovedWorkflowAction } from './workflow-sdk-version.js';
 import type { WorkflowDefinition } from '../../canonical-model/src/schemas.js';
 import {
@@ -94,7 +95,6 @@ import {
   readWorkflowBundle,
   storeWorkflowBundle,
   verifyWorkflowBundle,
-  verifyRetainedWorkflow,
 } from './workflow-bundle.js';
 
 /**
@@ -624,28 +624,6 @@ export class PostgresCustomizationService {
     const candidateDefinition = parseNormalizedApplicationPackageJson(
       candidate.normalizedDefinitionBytes,
     );
-    if (
-      'workflows' in candidateDefinition &&
-      candidateDefinition.workflows?.length
-    ) {
-      const view = await new PostgresWorkflowGateway(
-        this.connection.runtimePool,
-      ).loadView(context);
-      for (const workflow of candidateDefinition.workflows) {
-        const bundle = await withTrustedRequestTransaction(
-          this.connection.runtimePool,
-          context,
-          (client) => readWorkflowBundle(client, context, workflow.bodyDigest),
-        );
-        const finding = await verifyRetainedWorkflow(view, workflow, bundle);
-        if (finding)
-          throw new CustomizationServiceRefusal(
-            finding.code,
-            `${workflow.workflowId}: ${finding.expected} — ${UPGRADE_CODES_V1[finding.code]}`,
-            { findings: [finding], blocked: [] },
-          );
-      }
-    }
     const inheritedRule = retypedFormulaRule(
       sourceDefinition,
       targetBase,
@@ -675,16 +653,47 @@ export class PostgresCustomizationService {
         record.sourceReleaseId === active.releaseId &&
         record.baseReleaseId === baseReleaseId,
     );
-    if (existing) {
-      if (
-        (await this.#root(context, existing.candidateReleaseId)) !==
-        candidate.compiled.releaseRoot
-      ) {
-        throw new CustomizationServiceRefusal(
-          'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
-          'the recorded upgrade no longer reproduces',
+    const identity = existing
+      ? {
+          releaseId: existing.candidateReleaseId,
+          revisionId: existing.candidateRevisionId,
+        }
+      : await ensurePersistedRelease(
+          this.connection.runtimePool,
+          context,
+          candidate,
+          active.revisionId,
+          'tenantAuthored',
         );
-      }
+    if (
+      existing &&
+      (await this.#root(context, identity.releaseId)) !==
+        candidate.compiled.releaseRoot
+    ) {
+      throw new CustomizationServiceRefusal(
+        'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
+        'the recorded upgrade no longer reproduces',
+      );
+    }
+    if (
+      'workflows' in candidateDefinition &&
+      candidateDefinition.workflows?.length
+    ) {
+      const finding = await checkRetainedWorkflowReplay(
+        this.connection.runtimePool,
+        context,
+        candidate.compiled,
+        identity.releaseId,
+        candidateDefinition.workflows,
+      );
+      if (finding)
+        throw new CustomizationServiceRefusal(
+          finding.code,
+          `${finding.subject}: ${finding.expected} — ${UPGRADE_CODES_V1[finding.code]}`,
+          { findings: [finding], blocked: [] },
+        );
+    }
+    if (existing) {
       return {
         status: 'drafted' as const,
         upgradeId: existing.upgradeId,
@@ -692,13 +701,6 @@ export class PostgresCustomizationService {
         releaseRoot: candidate.compiled.releaseRoot,
       };
     }
-    const identity = await ensurePersistedRelease(
-      this.connection.runtimePool,
-      context,
-      candidate,
-      active.revisionId,
-      'tenantAuthored',
-    );
     const upgradeId = randomUUID() as MintedUuid;
     const payload = Buffer.from(
       canonicalize({

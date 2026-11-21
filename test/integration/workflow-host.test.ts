@@ -1,5 +1,11 @@
+import type { MintedUuid } from '@north-star/platform-runtime';
+import type { Pool } from 'pg';
+import { WorkflowDefinitionSchema } from '../../packages/canonical-model/src/schemas.js';
 import { WorkflowWatchdogExpired } from '../../packages/postgres-provider/src/workflow-isolate.js';
-import { LEGACY_WORKFLOW_SDK_VERSION } from '../../packages/postgres-provider/src/workflow-sdk-version.js';
+import {
+  LEGACY_WORKFLOW_SDK_VERSION,
+  RemovedWorkflowAction,
+} from '../../packages/postgres-provider/src/workflow-sdk-version.js';
 import {
   verifyWorkflowBundle,
   verifyRetainedWorkflow,
@@ -614,13 +620,13 @@ test('workflow review traces the exact site even when both branches call the sam
   });
   const { renderWorkflowReview } =
     await import('../../packages/postgres-provider/src/workflow-review.js');
-  const workflow = {
-    schemaVersion: 'v6' as const,
+  const workflow = WorkflowDefinitionSchema.parse({
+    schemaVersion: 'v6',
     workflowId: 'review',
     trigger: 'goodsReceiptPosted' as const,
     bodyDigest: '1'.repeat(64),
     grants,
-  };
+  });
   const render = (source: string) =>
     renderWorkflowReview(
       workflow,
@@ -690,6 +696,14 @@ test('v2 drops event waits and caps sleep while a v1 pin retains both contracts'
   );
   assert.match(current.declarations, /90 days/);
   assert.throws(() => compileWorkflowBody(body, current), /waitForEvent/);
+  assert.throws(
+    () =>
+      compileWorkflowBody(
+        "const wait = sdk.waitForEvent; wait('goodsReceiptPosted', 1);",
+        current,
+      ),
+    RemovedWorkflowAction,
+  );
   const wait = {
     kind: 'waitForEvent',
     eventType: 'goodsReceiptPosted',
@@ -843,5 +857,71 @@ test('review uses each of the first five journals in order', async () => {
       'Waits 1 day without asking.',
       ...days.slice(1, 5).map((d) => `Waits ${d} days without asking.`),
     ],
+  );
+});
+
+test('retained workflow replay uses the proposed catalog for the same stored body', async () => {
+  const { createHash, randomUUID } = await import('node:crypto');
+  const { checkRetainedWorkflowReplay } =
+    await import('../../packages/postgres-provider/src/release-verification-service.js');
+  const { trustedContextForRequestRuntimeView } =
+    await import('../../packages/runtime/src/request-runtime-view.js');
+  const context = trustedContextForRequestRuntimeView(view);
+  const bundle = Buffer.from(
+    canonicalize({
+      authoredBy: context.principalId,
+      body: 'sdk.now();',
+      executable: compileWorkflowBody('sdk.now();', sdk).executable,
+      fixtures: [{ event, effects: [{ call: { kind: 'now' }, result: day }] }],
+    }),
+  );
+  // Only the unchanged pointer and workflow blob are read from storage.
+  // The proposed release supplies the query contract on this read-only path.
+  const client = {
+    async query(sql: string) {
+      if (sql.includes('FROM pg_catalog.pg_roles'))
+        return {
+          rows: [
+            {
+              role: 'north_star_runtime',
+              session_role: 'north_star_runtime',
+              can_login: true,
+            },
+          ],
+        };
+      if (sql.includes('FROM platform.active_release_pointers'))
+        return { rows: [{ pointer_id: view.pointer.pointerId, fence: '1' }] };
+      if (sql.includes('FROM platform.workflow_body_blobs'))
+        return { rows: [{ bundle }] };
+      return { rows: [] };
+    },
+    release() {},
+  };
+  const pool = { connect: async () => client } as unknown as Pool;
+  const binding = WorkflowDefinitionSchema.parse({
+    schemaVersion: 'v6',
+    workflowId: 'inspect-party',
+    trigger: 'goodsReceiptPosted',
+    bodyDigest: createHash('sha256').update(bundle).digest('hex'),
+    grants: { queries: [queryId], operations: [] },
+  });
+  const id = randomUUID() as MintedUuid;
+  assert.equal(
+    await checkRetainedWorkflowReplay(pool, context, fixtureRelease, id, [
+      binding,
+    ]),
+    null,
+  );
+  const missing = await checkRetainedWorkflowReplay(
+    pool,
+    context,
+    compilePartyFixture().empty,
+    id,
+    [binding],
+  );
+  assert.equal(missing?.code, 'WORKFLOW_FIXTURE_FAILED');
+  assert.equal(
+    missing?.observed,
+    'Workflow query grant does not resolve: ' + queryId,
   );
 });

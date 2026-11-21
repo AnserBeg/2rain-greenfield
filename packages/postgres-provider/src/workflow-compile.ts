@@ -104,7 +104,6 @@ export function compileWorkflowBody(body: string, sdk: WorkflowSdk) {
     )
       throw new Error('Workflow compiler suppression is forbidden');
   }
-  lintWorkflowBody(declaration.body, file);
 
   const host = ts.createCompilerHost(options);
   const defaultLibPath = host.getDefaultLibLocation!();
@@ -153,6 +152,7 @@ export function compileWorkflowBody(body: string, sdk: WorkflowSdk) {
     )
   )
     throw new RemovedWorkflowAction();
+  lintWorkflowBody(declaration.body, file);
   if (diagnostics.length) {
     throw new Error(
       ts
