@@ -143,7 +143,8 @@ test('a timed-out adapter is cancelled and an issued navigation reserves at most
   const service = new MapImagery(
     {
       contract: fake.contract,
-      raster(_view, signal) {
+      raster(view, signal) {
+        if (reserves > 1) return fake.raster(view);
         started.resolve(signal);
         return new Promise<Buffer>(() => {});
       },
