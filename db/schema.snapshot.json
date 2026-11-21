@@ -41067,7 +41067,7 @@
       "language": "plpgsql",
       "owner": "postgres",
       "result_type": "boolean",
-      "definition": "CREATE OR REPLACE FUNCTION north_star_internal.module_table_exceeds(table_name text, ceiling integer)\n RETURNS boolean\n LANGUAGE plpgsql\n STABLE SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$\nDECLARE exceeds boolean; BEGIN\n  IF ceiling IS NULL OR ceiling < 0 OR ceiling > 10000 THEN\n    RAISE EXCEPTION 'module.invalidCeiling'; END IF;\n  IF NOT EXISTS (\n    SELECT FROM pg_catalog.pg_class AS relation\n      JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace\n     WHERE namespace.nspname = 'north_star_module'\n       AND relation.relname = table_name\n       AND relation.relkind IN ('r', 'p')\n  ) THEN\n    RAISE EXCEPTION 'module.unknownTable'; END IF;\n  EXECUTE format(\n    'SELECT count(*) > %s FROM (SELECT FROM north_star_module.%I LIMIT %s) AS probe',\n    ceiling, table_name, ceiling + 1\n  ) INTO exceeds;\n  RETURN exceeds; END $function$\n",
+      "definition": "CREATE OR REPLACE FUNCTION north_star_internal.module_table_exceeds(table_name text, ceiling integer)\n RETURNS boolean\n LANGUAGE plpgsql\n STABLE SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'pg_temp'\n SET row_security TO 'off'\nAS $function$\nDECLARE exceeds boolean; BEGIN\n  IF ceiling IS NULL OR ceiling < 0 OR ceiling > 10000 THEN\n    RAISE EXCEPTION 'module.invalidCeiling'; END IF;\n  IF NOT EXISTS (\n    SELECT FROM pg_catalog.pg_class AS relation\n      JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace\n     WHERE namespace.nspname = 'north_star_module'\n       AND relation.relname = table_name\n       AND relation.relkind IN ('r', 'p')\n  ) THEN\n    RAISE EXCEPTION 'module.unknownTable'; END IF;\n  EXECUTE format(\n    'SELECT count(*) > %s FROM (SELECT FROM north_star_module.%I LIMIT %s) AS probe',\n    ceiling, table_name, ceiling + 1\n  ) INTO exceeds;\n  RETURN exceeds; END $function$\n",
       "security_definer": true,
       "leakproof": false,
       "strict": false,
@@ -41076,7 +41076,7 @@
       "parallel_safety": "u",
       "cost": 100,
       "estimated_rows": 0,
-      "configuration": ["search_path=pg_catalog, pg_temp"]
+      "configuration": ["row_security=off", "search_path=pg_catalog, pg_temp"]
     },
     {
       "schema": "north_star_internal",

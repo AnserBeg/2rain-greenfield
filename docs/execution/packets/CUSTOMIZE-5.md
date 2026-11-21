@@ -16,7 +16,7 @@ Each field uses the ordinary draft, diff, verification, approval, activation and
 
 ## Slice 1 · Service appointment (`dateTime` point) — record
 
-Status: executable, merged on CI green. Critical paths touched: `db/migrations/0059_date_time_window_probe.sql` (definer probe), `module-storage-materializer.ts` (capture check, window index, ceiling probe). Stops taken: none.
+Status: executable; integrates on a full green of the exact integration commit. Critical paths touched: `db/migrations/0059_date_time_window_probe.sql` (definer probe), `module-storage-materializer.ts` (capture check, window index, ceiling probe). Stops taken: none.
 
 **Claims.** (1) `addDateTimeField` parses alone and inside a change set; the preceding parser refuses it as unsupported, by kind, before any edit. (2) The logical field is one existing scalar (millisecond UTC instant) plus the optional v6 `dateTimeFields` declaration; omission emits no key, binding or floor, and a field-free customization's persisted release row equals the preceding compiler's bytes. (3) Operation, query and surface catalogs carry identical `dateTimeBindings` at surface reader rung 35; the serving loader refuses disagreeing bindings, an understated floor and a rung-35 floor without bindings; the archived production loader refuses a declaring release. (4) Typed entry, for both zone sources and every channel, refuses the DST gap with the entry preserved, asks for an offset in the repeated hour, refuses a foreign offset, unknown and `Etc/GMT±n` zones and sub-millisecond input; untouched values keep their capture. (5) Record-zone display: lists, exports and the Record print the captured civil value, offset and IANA name; the formatter prints `01:30 UTC−05:00` and `March 8, 2026` in UTC, Kiritimati and Edmonton processes. (6) Lists sort by stored instant with record ID breaking ties; filters, saved-view filters, metric sums, search, comparison, maximum-length, to-one and calculated operands refuse by logical type and field name; presence is admitted. (7) Added to a populated record type, the field runs exactly one `deferredOnlineFamily` `createIndex` in the approved attempt, ready and valid, after inert columns and before its `NOT VALID` capture check, which the catalog verifier accepts; earlier rows read absent. (8) One row over the 10,000-row ceiling — counted across every tenant's rows — refuses by name (`DATE_TIME_WINDOW_CEILING_EXCEEDED`, naming type, field and ceiling) while the source release keeps serving reads and writes. (9) The table itself refuses a partial capture and a civil/offset/instant disagreement, independent of session zone.
 
@@ -28,10 +28,7 @@ Status: executable, merged on CI green. Critical paths touched: `db/migrations/0
 - Zones: ICU resolution plus a CLDR→IANA rename table (`Asia/Calcutta`→`Asia/Kolkata`); tzdb version is `process.versions.tz`.
 - Company source uses the tenant business calendar (calendar ID = tenant ID, as Booking) and the record's stored company; a company-sourced field on a shared record type refuses entry (no working company reaches the write) — named gap.
 - A required field added to an existing type is refused by the storage planner (`COMPILER_BACKFILL_INADMISSIBLE`), so no appointment is invented.
-- The viewer-zone switch follows slice 1 (packet allows it).
-- Reader rung 37 and migration 0059 were assigned at merge (35, 36 and 0055–0058 landed first).
-- The in-app drafter's keys for the member are generated from its schema; module-building eval cases wait for AI-BUILD-1.
-- Upgrade replay is proven by the named compatible-and-conflicting case in `customization-upgrade.test.ts`; a PostgreSQL upgrade that reopens and writes a value is owed with slice 2.
+- Scope notes: the viewer-zone switch follows slice 1 (packet allows it); rung 37 and migration 0059 were assigned at merge; the drafter's keys come from the member schema (AI-BUILD-1 eval cases are not yet written); upgrade replay is proven by the named case in `customization-upgrade.test.ts`, and a PostgreSQL upgrade that reopens and writes a value is not yet built.
 - PDF text not proven: no document generator is on `main` (DOCS-1 slice 2 is unmerged). The no-viewer formatter is proven in UTC processes and at the list/export reader; templates must bind it when they land.
 
 **Test it yourself (slice 1, under ten minutes).** `corepack pnpm dev`, sign in as manager, open **Customize**.
@@ -70,22 +67,14 @@ Status: executable, merged on CI green. Critical paths touched: `db/migrations/0
   "base": "af102f7a79f8e97a469a7ca48ec0e10fb2d04a54",
   "head": "e38601252d55b616447dbaf8e7c25c53b5d59c39",
   "changedPaths": [
-    "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/date-time-field.ts",
-    "apps/web/src/surface-composition.ts", "apps/web/src/surface-runtime.ts", "db/migrations/0059_date_time_window_probe.sql",
-    "db/schema.snapshot.json", "docs/execution/packets/CUSTOMIZE-5.md", "package.json",
-    "packages/canonical-model/src/date-time-field.ts", "packages/canonical-model/src/formula-validation-bindings.ts", "packages/canonical-model/src/index.ts",
-    "packages/canonical-model/src/normalize.ts", "packages/canonical-model/src/schemas.ts", "packages/compiler/src/compiler.ts",
-    "packages/compiler/src/date-time.ts", "packages/compiler/src/formula-validation-examples.ts", "packages/compiler/src/projections.ts",
-    "packages/compiler/src/storage.ts", "packages/customization/src/ai-draft.ts", "packages/customization/src/apply.ts",
-    "packages/customization/src/patch.ts", "packages/customization/src/upgrade-diagnostics.ts", "packages/customization/src/upgrade-replay.ts",
-    "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/date-time-admission.ts", "packages/postgres-provider/src/date-time-storage.ts",
-    "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/module-storage-materializer.ts", "packages/postgres-provider/src/release-verification-service.ts",
-    "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/runtime/src/formula-validation.ts", "packages/runtime/src/request-runtime-view.ts",
-    "packages/runtime/src/semantic-operation-gateway.ts", "packages/runtime/src/semantic-query-gateway.ts", "test/evidence/CUSTOMIZE-5.expected-red.json",
-    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/archived-customization-runtime.ts", "test/postgres/date-time-field.test.ts",
-    "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts",
-    "test/postgres/request-runtime-view.test.ts", "test/postgres/trust-substrate.test.ts", "test/unit/customization-upgrade.test.ts",
-    "test/unit/date-time-field.test.ts"
+    "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/date-time-field.ts", "apps/web/src/surface-composition.ts", "apps/web/src/surface-runtime.ts", "db/migrations/0059_date_time_window_probe.sql",
+    "db/schema.snapshot.json", "docs/execution/packets/CUSTOMIZE-5.md", "package.json", "packages/canonical-model/src/date-time-field.ts", "packages/canonical-model/src/formula-validation-bindings.ts", "packages/canonical-model/src/index.ts",
+    "packages/canonical-model/src/normalize.ts", "packages/canonical-model/src/schemas.ts", "packages/compiler/src/compiler.ts", "packages/compiler/src/date-time.ts", "packages/compiler/src/formula-validation-examples.ts", "packages/compiler/src/projections.ts",
+    "packages/compiler/src/storage.ts", "packages/customization/src/ai-draft.ts", "packages/customization/src/apply.ts", "packages/customization/src/patch.ts", "packages/customization/src/upgrade-diagnostics.ts", "packages/customization/src/upgrade-replay.ts",
+    "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/date-time-admission.ts", "packages/postgres-provider/src/date-time-storage.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/module-storage-materializer.ts", "packages/postgres-provider/src/release-verification-service.ts",
+    "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/runtime/src/formula-validation.ts", "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-operation-gateway.ts", "packages/runtime/src/semantic-query-gateway.ts", "test/evidence/CUSTOMIZE-5.expected-red.json",
+    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/archived-customization-runtime.ts", "test/postgres/date-time-field.test.ts", "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts",
+    "test/postgres/request-runtime-view.test.ts", "test/postgres/trust-substrate.test.ts", "test/unit/customization-upgrade.test.ts", "test/unit/date-time-field.test.ts"
   ],
   "symbols": [
     {"path": "packages/canonical-model/src/date-time-field.ts", "name": "resolveTypedEntry"},
