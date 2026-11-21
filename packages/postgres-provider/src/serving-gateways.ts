@@ -1,3 +1,5 @@
+import { BOOKING_USAGE_CAPABILITY } from '@north-star/canonical-model';
+import { bookingOwnerUsageReadModel } from './booking-owner-usage.js';
 import { PostgresAddresses } from './address-geocodes.js';
 import { BILLING_QUOTE_CAPABILITY } from '../../canonical-model/src/billing.js';
 import { billingQuoteReadModel } from './billing-quote.js';
@@ -116,6 +118,7 @@ export function composeServingGateways(
     options.monotonicMilliseconds,
   );
   const readModels = {
+    [BOOKING_USAGE_CAPABILITY]: bookingOwnerUsageReadModel(runtimePool),
     [BILLING_QUOTE_CAPABILITY]: billingQuoteReadModel(runtimePool),
     [FULFILLMENT_CAPABILITY_ID]: fulfillmentReadModel,
     [COMMERCIAL_CAPABILITY_ID]: commercialReadModelWithInventoryCost,

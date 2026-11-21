@@ -15,7 +15,7 @@ import {
   boardPresentation,
   type BoardSource,
   type SurfaceBoard,
-  BOOKING_OPERATION_READER,
+  bookingReaderFloor,
   LAYOUT_READER,
   REPLAYED_LAYOUT_READER,
   type SurfaceLayout,
@@ -274,7 +274,7 @@ export function lowerBaseProjectionPayloads(
     hasMetrics(verificationPackageRevision) ? 4 : 1,
   );
   const operationFloor = hasBookingOperations(verificationPackageRevision)
-    ? BOOKING_OPERATION_READER
+    ? bookingReaderFloor(verificationPackageRevision)
     : formulaRules
       ? requiredFormulaValidationOperationReader(
           formulaRules.bindings.map(({ rule }) => rule),

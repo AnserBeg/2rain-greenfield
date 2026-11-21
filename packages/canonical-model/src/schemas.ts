@@ -2746,6 +2746,7 @@ const exportMaximumResultCount = z.int().min(1).max(10_000).optional();
 const listSumFields = z.array(CanonicalIdSchema).min(1).max(8).optional();
 const normalizedV6QueryDefinition = z.union([
   normalizedV4RowQueryDefinition.extend({
+    tier: z.enum(['q0', 'q1', 'q2']),
     readModel: QueryReadModelSchema.optional(),
     exportMaximumResultCount,
     listSumFields,
@@ -2754,6 +2755,7 @@ const normalizedV6QueryDefinition = z.union([
 ]);
 const authoredV6QueryDefinition = z.union([
   authoredV4RowQueryDefinition.extend({
+    tier: z.enum(['q0', 'q1', 'q2']),
     readModel: QueryReadModelSchema.optional(),
     exportMaximumResultCount,
     listSumFields,

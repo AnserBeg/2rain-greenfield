@@ -5,9 +5,9 @@
     {
       "name": "unit-exclusion",
       "claim": "Overlapping occupied intervals on one unit exclude each other.",
-      "file": "db/migrations/0050_booking_commitments.sql",
-      "original": "WHERE (kind = 'unit' AND state IN ('hold','confirmed'))",
-      "replacement": "WHERE (kind = 'unit' AND state = 'confirmed')",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "WHERE (kind='unit' AND state IN ('hold','confirmed','inUse'))",
+      "replacement": "WHERE (kind='unit' AND state IN ('confirmed','inUse'))",
       "test": {
         "files": ["test/postgres/booking-commitments.test.ts"]
       },
@@ -32,7 +32,7 @@
     {
       "name": "pool-capacity",
       "claim": "A locked pool refuses a negative remaining quantity.",
-      "file": "db/migrations/0050_booking_commitments.sql",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
       "original": "SELECT FROM segments WHERE remaining < 0",
       "replacement": "SELECT FROM segments WHERE false AND remaining < 0",
       "test": {
@@ -81,9 +81,9 @@
     {
       "name": "equality",
       "claim": "Expiry wins at the post-lock decision instant.",
-      "file": "db/migrations/0053_booking_authority.sql",
-      "original": "WHERE resource_key=diary AND state='hold' AND deadline<=decision ORDER BY",
-      "replacement": "WHERE resource_key=diary AND state='hold' AND deadline<decision ORDER BY",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "IF previous.deadline<=decision THEN",
+      "replacement": "IF previous.deadline<decision THEN",
       "test": {
         "files": ["test/postgres/booking-commitments.test.ts"]
       },
@@ -98,7 +98,7 @@
     {
       "name": "booking-endpoint-lock-order",
       "claim": "A booking locks a child endpoint before its parent, the generic writer's order, even when the parent's entity id sorts first.",
-      "file": "db/migrations/0056_booking_lock_order.sql",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
       "original": "ORDER BY north_star_internal.booking_entity_height(storage,n.entity_id) DESC,n.entity_id,n.record_id",
       "replacement": "ORDER BY n.entity_id,n.record_id",
       "test": {
@@ -120,9 +120,9 @@
     {
       "name": "booking-archive-lock-unscoped",
       "claim": "Archive locks an owner's allocation diaries whatever the archiving caller can see.",
-      "file": "db/migrations/0056_booking_lock_order.sql",
-      "original": "AND f.resource_key=d.resource_key AND f.state IN ('hold','confirmed')))",
-      "replacement": "AND EXISTS (SELECT FROM platform.current_policy_memberships m JOIN platform.current_policy_permission_grants g USING (tenant_id,environment_id,role_id) WHERE (m.tenant_id,m.environment_id,m.principal_id,g.resource_id)=(o.tenant_id,o.environment_id,nullif(current_setting('north_star.principal_id',true),'')::uuid,o.entity_id) AND (m.legal_entity_id IS NULL OR m.legal_entity_id=o.company_id)) AND f.resource_key=d.resource_key AND f.state IN ('hold','confirmed')))",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "AND f.resource_key=d.resource_key AND f.state IN ('hold','confirmed','inUse')))",
+      "replacement": "AND EXISTS (SELECT FROM platform.current_policy_memberships m JOIN platform.current_policy_permission_grants g USING (tenant_id,environment_id,role_id) WHERE (m.tenant_id,m.environment_id,m.principal_id,g.resource_id)=(o.tenant_id,o.environment_id,nullif(current_setting('north_star.principal_id',true),'')::uuid,o.entity_id) AND (m.legal_entity_id IS NULL OR m.legal_entity_id=o.company_id)) AND f.resource_key=d.resource_key AND f.state IN ('hold','confirmed','inUse')))",
       "test": {
         "files": ["test/postgres/booking-commitments.test.ts"]
       },
@@ -137,7 +137,7 @@
     {
       "name": "booking-archive-check-unscoped",
       "claim": "An active allocation refuses archive of its owner whatever the archiving caller can see.",
-      "file": "db/migrations/0056_booking_lock_order.sql",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
       "original": "AND ((d.entity_id,d.record_id)=(entity,record) OR (o.entity_id,o.record_id)=(entity,record))",
       "replacement": "AND ((d.entity_id,d.record_id)=(entity,record) OR ((o.entity_id,o.record_id)=(entity,record) AND EXISTS (SELECT FROM platform.current_policy_memberships m JOIN platform.current_policy_permission_grants g USING (tenant_id,environment_id,role_id) WHERE (m.tenant_id,m.environment_id,m.principal_id,g.resource_id)=(o.tenant_id,o.environment_id,nullif(current_setting('north_star.principal_id',true),'')::uuid,o.entity_id) AND (m.legal_entity_id IS NULL OR m.legal_entity_id=o.company_id))))",
       "test": {
@@ -159,7 +159,7 @@
     {
       "name": "booking-workflow-hold-grant",
       "claim": "A WORKFLOW-channel hold refuses without an attested human decision.",
-      "file": "db/migrations/0053_booking_authority.sql",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
       "original": "IF op->>'confirmation'='humanRequired' OR actor->>'channel'='WORKFLOW' THEN",
       "replacement": "IF op->>'confirmation'='humanRequired' THEN",
       "test": {
@@ -170,6 +170,312 @@
           "file": "test/postgres/booking-commitments.test.ts",
           "name": "a workflow hold needs an attested human decision",
           "expected": "Missing expected rejection."
+        }
+      ]
+    },
+    {
+      "name": "unit-assignments",
+      "claim": "Unit handover retains dated unit assignments.",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "PERFORM north_star_internal.booking_write_evidence(f,ev,decision); END IF; END $$;",
+      "replacement": "NULL; END IF; END $$;",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "tracked unit handover keeps both assignments, closes pauses and blocks an overdue second start",
+          "expected": "'assignment'"
+        }
+      ]
+    },
+    {
+      "name": "swap-resource",
+      "claim": "A swap moves physical possession to the replacement diary.",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "f.resource_key:=dest.resource_key; f.assigned_unit_key:=dest.resource_key;",
+      "replacement": "f.resource_key:=d.resource_key; f.assigned_unit_key:=d.resource_key;",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "tracked unit handover keeps both assignments, closes pauses and blocks an overdue second start",
+          "expected": "booking.capacityTaken"
+        }
+      ]
+    },
+    {
+      "name": "pause-resume",
+      "claim": "Pauses preserve their effective end at resume.",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "ev.effective_end:=effective; END IF;\n    PERFORM",
+      "replacement": "ev.effective_end:=ev.effective_start; END IF;\n    PERFORM",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "tracked unit handover keeps both assignments, closes pauses and blocks an overdue second start",
+          "expected": "17:20"
+        }
+      ]
+    },
+    {
+      "name": "partial-quantity",
+      "claim": "A partial return admits exactly the remaining quantity.",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "f.out_quantity:=f.out_quantity-amount;",
+      "replacement": "f.out_quantity:=amount;",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "pool quantity and partial return preserve the agreement and release the exact remainder",
+          "expected": "booking.noLongerAvailable"
+        }
+      ]
+    },
+    {
+      "name": "change-quantity",
+      "claim": "A pool quantity change consumes its new demand.",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "f.quantity:=amount;",
+      "replacement": "NULL;",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "pool quantity and partial return preserve the agreement and release the exact remainder",
+          "expected": "booking.noLongerAvailable"
+        }
+      ]
+    },
+    {
+      "name": "manual-noshow",
+      "claim": "A dispatcher can report absence only from the scheduled start.",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "f.state<>'confirmed' OR decision<lower(f.agreed_interval)",
+      "replacement": "f.state<>'confirmed'",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "manual no-show requires the scheduled start and releases only unstarted work",
+          "expected": "booking.invalidState"
+        }
+      ]
+    },
+    {
+      "name": "steward",
+      "claim": "A correction consumes a distinct steward grant in company scope.",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "IF command IN ('correctActuals','recordExisting') THEN",
+      "replacement": "IF false THEN",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "an owner snapshot stays at its committed cursor and a steward correction pages past a billing checkpoint",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    },
+    {
+      "name": "correction-age",
+      "claim": "The separate steward correction horizon admits old evidence.",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "actual_day_limit integer:=(binding->>'maxCorrectionAgeDays')::integer",
+      "replacement": "actual_day_limit integer:=(f.binding->>'maxBackdateDays')::integer",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "an owner snapshot stays at its committed cursor and a steward correction pages past a billing checkpoint",
+          "expected": "returned"
+        }
+      ]
+    },
+    {
+      "name": "pinned-report",
+      "claim": "A historical owner cursor reconstructs its original evidence.",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "MATERIALIZED (SELECT h.* FROM platform.booking_history h WHERE h.owner_key=own.owner_key AND h.cursor_value<=pinned)",
+      "replacement": "MATERIALIZED (SELECT h.* FROM platform.booking_history h WHERE h.owner_key=own.owner_key)",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "an owner snapshot stays at its committed cursor and a steward correction pages past a billing checkpoint",
+          "expected": "effectiveEnd"
+        }
+      ]
+    },
+    {
+      "name": "incremental-page",
+      "claim": "Incremental delivery cannot advance past the last delivered cursor.",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "ORDER BY h.cursor_value LIMIT page_size)",
+      "replacement": "ORDER BY h.cursor_value)",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "an owner snapshot stays at its committed cursor and a steward correction pages past a billing checkpoint",
+          "expected": "'6' !== '1'"
+        }
+      ]
+    },
+    {
+      "name": "reviewed-import",
+      "claim": "Reviewed import enforces the earliest attested evidence date.",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "ev.effective_start<minimum_time OR ev.effective_end<ev.effective_start",
+      "replacement": "ev.effective_end<ev.effective_start",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "onboarding admits documented overdue possession once under its stable source key",
+          "expected": "booking.invalidImport"
+        }
+      ]
+    },
+    {
+      "name": "booking-consumer-fence",
+      "claim": "A consuming transaction holds an existing owner cursor until commit.",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "WHERE owner_key=ANY(keys) ORDER BY owner_key FOR UPDATE LOOP",
+      "replacement": "WHERE owner_key=ANY(keys) ORDER BY owner_key LOOP",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "the consuming transaction fences a zero cursor through the first booking commit",
+          "expected": "the contender never waited on the other session"
+        }
+      ]
+    },
+    {
+      "name": "kit-member-revision",
+      "claim": "A stale final kit member leaves all original revisions and cursors intact.",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "(m->>'bookingRevision')::integer)\n            AND (c.state",
+      "replacement": "c.revision)\n            AND (c.state",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "kit hold, confirm, cancel and expiry change every member and advance both owners once",
+          "expected": "booking.evidenceMismatch"
+        }
+      ]
+    },
+    {
+      "name": "kit-expiry",
+      "claim": "The timer closes the whole held kit and advances every affected owner.",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "ELSE PERFORM north_star_internal.booking_expire_kit(previous.tenant_id,previous.environment_id,previous.group_id,decision);",
+      "replacement": "ELSE NULL;",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "kit hold, confirm, cancel and expiry change every member and advance both owners once",
+          "expected": "'cancelled'"
+        }
+      ]
+    },
+    {
+      "name": "owner-identity-order",
+      "claim": "Fresh owner cursors are created in the same global identity order as kit writers.",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "ORDER BY (identity).entity_id,(identity).record_id LOOP",
+      "replacement": "ORDER BY (identity).record_id,(identity).entity_id LOOP",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "fencing fresh owners acquires their identity rows in the same entity and record order as kit writers",
+          "expected": "example.booking:entity.account"
+        }
+      ]
+    },
+    {
+      "name": "planned-history",
+      "claim": "Backdated handover charges historical occupation even without a possession leg.",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "h.after_fact->>'resource_key'=d.resource_key::text AND from_time<lower(f.occupied_interval)",
+      "replacement": "false AND from_time<lower(f.occupied_interval)",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "a backdated start checks historical scheduled occupation from before its own live claim",
+          "expected": "booking.historicalOverlap"
+        }
+      ]
+    },
+    {
+      "name": "late-handover",
+      "claim": "Late recovery refuses capacity already allocated for the new handover.",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "OR\n       (NOT planned AND b.state IN ('hold','confirmed')",
+      "replacement": "OR\n       (false AND b.state IN ('hold','confirmed')",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "a timed tracked absence recovers at its effective start only while the handover still fits",
+          "expected": "booking.capacityTaken"
+        }
+      ]
+    },
+    {
+      "name": "compiler-steward",
+      "claim": "The compiler requires the released correction operation to name its steward permission.",
+      "file": "packages/canonical-model/src/booking.ts",
+      "original": "? permission.permissionId !== steward.permissionId",
+      "replacement": "? false",
+      "test": {
+        "files": ["test/postgres/booking-serving.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-serving.test.ts",
+          "name": "the compiler requires a distinct steward write for a correction and admits its separate 90-day age",
+          "expected": "'compiled'"
         }
       ]
     }
