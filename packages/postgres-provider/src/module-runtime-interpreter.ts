@@ -82,6 +82,7 @@ import type {
 import {
   QUERY_BOUNDARY_PERMISSION_ID,
   QUERY_POLICY_INPUT_VERSION,
+  isCompanyListQuery,
   SEMANTIC_AGGREGATE_RESULT_VERSION,
   SEMANTIC_QUERY_RESULT_VERSION,
 } from '../../runtime/src/semantic-query-gateway.js';
@@ -211,6 +212,7 @@ export interface ModuleProviderErrorMapping {
 }
 
 interface VerifiedLegalEntityReadScope {
+  readonly companyListOnly?: true;
   readonly legalEntityIds: readonly string[];
 }
 
@@ -404,6 +406,8 @@ export class PostgresModuleRuntimeInterpreter
         async (client, snapshot) => {
           const storage = await this.#loadPinnedStorageTarget(client, request);
           if (snapshot) return { storage };
+          if ('companyListScope' in request && request.companyListScope)
+            await assertScopePolicyCurrent(client, request);
           return {
             result: await withModuleRuntimeRole(client, () =>
               executeQueryOnClient(
@@ -434,7 +438,11 @@ export class PostgresModuleRuntimeInterpreter
               snapshot,
             );
           // The snapshot finished in between: a read of its own, as alone.
-          if (!snapshot) return withModuleRuntimeRole(client, execute);
+          if (!snapshot) {
+            if ('companyListScope' in request && request.companyListScope)
+              await assertScopePolicyCurrent(client, request);
+            return withModuleRuntimeRole(client, execute);
+          }
           const key = identicalReadKey(request);
           return key === null ? execute() : snapshot.memo(key, execute);
         },
@@ -2028,7 +2036,9 @@ export async function assertScopePolicyCurrent(
   request:
     SemanticAggregateQueryExecutionRequest | SemanticQueryExecutionRequest,
 ): Promise<void> {
-  const scope = request.legalEntityReadScope;
+  const scope =
+    ('companyListScope' in request && request.companyListScope) ||
+    request.legalEntityReadScope;
   // Only a scope this provider's live policy issued names its epoch; one
   // issued by another policy gateway (a test double) has no epoch here.
   if (!scope || !isCurrentPolicyVersion(scope.policyVersion)) return;
@@ -2114,6 +2124,7 @@ export function identicalReadKey(
       request.filterPlans,
       request.list,
       request.legalEntityReadScope?.legalEntityIds ?? null,
+      'companyListScope' in request ? (request.companyListScope ?? null) : null,
     ])}`;
   } catch {
     return null;
@@ -2159,7 +2170,7 @@ async function executeQueryOnClient(
     definition.queryType === 'list' && list
       ? searchChildrenPlan(storage, entity, list)
       : null;
-  const readScope = await verifyLegalEntityReadScope(
+  let readScope = await verifyLegalEntityReadScope(
     client,
     snapshot,
     storage,
@@ -2173,6 +2184,24 @@ async function executeQueryOnClient(
       ...(searchChildPlans ?? []).map((plan) => plan.child),
     ],
   );
+  const companyListScope =
+    'companyListScope' in request ? request.companyListScope : undefined;
+  if (companyListScope) {
+    if (
+      !isCompanyListQuery(definition) ||
+      !entity.legalEntityMaster ||
+      readScope
+    )
+      throw failure(
+        'MODULE_QUERY_CONTRACT_INVALID',
+        'Company list scope requires the registered company master list.',
+        definition.queryId,
+      );
+    readScope = {
+      companyListOnly: true,
+      legalEntityIds: companyListScope.legalEntityIds,
+    };
+  }
   if (definition.queryType === 'aggregate') {
     return executeAggregateQuery(
       client,
@@ -7084,8 +7113,13 @@ function appendLegalEntityReadScopePredicate(
   predicates: string[],
   alias?: string,
 ): void {
-  const requirement = legalEntityReadScopeRequirement(entity);
-  if (!requirement) return;
+  // The company master identifies itself by its primary key. Its list's
+  // restriction comes from memberships for that list permission.
+  const columnName =
+    entity.legalEntityMaster && readScope?.companyListOnly
+      ? entity.recordIdentity.column
+      : legalEntityReadScopeRequirement(entity)?.column;
+  if (!columnName) return;
   if (!readScope) {
     throw failure(
       'MODULE_LEGAL_ENTITY_READ_SCOPE_REQUIRED',
@@ -7093,9 +7127,7 @@ function appendLegalEntityReadScopePredicate(
       entity.entityId,
     );
   }
-  const column = alias
-    ? qualified(alias, requirement.column)
-    : quoted(requirement.column);
+  const column = alias ? qualified(alias, columnName) : quoted(columnName);
   predicates.push(
     `${column} = ANY(${parameter(values, [...readScope.legalEntityIds])}::uuid[])`,
   );
