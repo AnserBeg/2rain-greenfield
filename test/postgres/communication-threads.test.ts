@@ -151,20 +151,32 @@ test('shared communication writer', async (t) => {
             );
           },
         );
-        await t.test('canonical requirements precede creation', async () => {
-          await begin(left);
-          const ticket = await admit(left, discussion);
-          await assert.rejects(
-            resolveThread(left, ticket),
-            /communication.unavailable/,
-          );
-          await left.query('ROLLBACK');
+        for (const record of ['owner2', 'owner6']) {
           await begin(left);
           await left.query(
             'SELECT platform.communication_register_discussion($1)',
-            [await admit(left, discussion)],
+            [await admit(left, discussion, { record })],
           );
           await left.query('COMMIT');
+        }
+        await t.test('canonical requirements precede creation', async () => {
+          await begin(left);
+          const ticket = await admit(left, discussion, { record: 'owner8' });
+          await assert.rejects(
+            resolveThread(left, ticket),
+            /communication.unavailable/,
+            'unregistered anchor created a thread',
+          );
+          await left.query('ROLLBACK');
+          await begin(left);
+          await assert.rejects(
+            left.query(
+              'SELECT platform.communication_register_discussion($1)',
+              [await admit(left, discussion, { bindings: [] })],
+            ),
+            /communication.unavailable/,
+            'saved anchor requirements changed',
+          );
           assert.equal(
             await scalar(
               admin,
@@ -337,27 +349,31 @@ test('shared communication writer', async (t) => {
           right,
           'SELECT pg_backend_pid()::text AS value',
         );
-        let shared = '';
+        await begin(left);
+        const sharedTicket = await admit(left, email, { contacts: ['owner2'] });
+        const shared = await resolveThread(left, sharedTicket);
+        await participants(left, sharedTicket, shared);
+        await left.query('COMMIT');
         await t.test(
           'first post and email share the primary key and only identical link sets',
           async () => {
             await begin(left);
             await begin(right);
-            shared = await race(
-              await admit(left, discussion),
-              await admit(right, email),
+            const created = await race(
+              await admit(left, discussion, { record: 'owner6' }),
+              await admit(right, email, { record: 'owner6' }),
               true,
             );
             await begin(left);
             await begin(right);
             await race(
-              await admit(left, discussion),
-              await admit(right, email, { bindings: [] }),
+              await admit(left, discussion, { record: 'owner6' }),
+              await admit(right, email, { bindings: [], record: 'owner6' }),
               false,
             );
             const { rows } = await admin.query(
-              "SELECT entity_id,record_id=md5('owner2')::uuid AS saved FROM platform.communication_record_links WHERE thread_id=$1 ORDER BY entity_id",
-              [shared],
+              "SELECT entity_id,record_id=md5('owner6')::uuid AS saved FROM platform.communication_record_links WHERE thread_id=$1 ORDER BY entity_id",
+              [created],
             );
             assert.deepEqual(rows, [
               { entity_id: account, saved: true },
