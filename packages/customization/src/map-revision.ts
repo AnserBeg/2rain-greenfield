@@ -47,7 +47,7 @@ export const MapDraftSchema = z.strictObject({
   timeZone: z.string().max(100).optional(),
   savedViewId: z.string().min(1).max(180).optional(),
 });
-export type MapDraft = z.infer<typeof MapDraftSchema>;
+export type MapDraft = z.input<typeof MapDraftSchema>;
 export function mapTargets(def: BoardSource) {
   return def.surfaces
     .filter((s) => s.archetype === 'list' && live(s))
@@ -157,7 +157,8 @@ function bodyFor(t: MapTarget, draft: MapDraft): MapBody {
   };
   if (
     t.frame.listSurfaceId !== draft.surface ||
-    (draft.savedViewId && !t.savedViews.includes(draft.savedViewId)) ||
+    (draft.savedViewId &&
+      !t.savedViews.some((id) => id === draft.savedViewId)) ||
     Boolean(draft.dayFieldId) !== Boolean(draft.timeZone)
   )
     throw new Error('Choose an offered Map collection, view and day.');
