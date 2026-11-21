@@ -1,3 +1,7 @@
+import {
+  popupOptions,
+  type PopupOption,
+} from '../../canonical-model/src/popup-actions.js';
 import type {
   DocumentTemplatePointer,
   DocumentTemplateRevision,
@@ -51,6 +55,7 @@ export interface DocumentTemplateTarget {
 }
 
 export interface CustomizationTargets {
+  readonly popupActions?: readonly PopupOption[];
   readonly documentTemplateTargets?: readonly DocumentTemplateTarget[];
   readonly boards?: readonly BoardTarget[];
   readonly layouts?: readonly LayoutTarget[];
@@ -682,6 +687,9 @@ export function customizationTargets(definition: {
         }))
         .sort((left, right) => left.label.localeCompare(right.label)),
     }),
+    popupActions: definition.surfaces.flatMap((s) =>
+      popupOptions(definition, s),
+    ),
     boards: boardTargets(definition),
     layouts: definition.surfaces.flatMap((s) =>
       (['create', 'edit', 'detail'] as const).flatMap((mode) => {
