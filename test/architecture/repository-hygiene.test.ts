@@ -54,6 +54,7 @@ const suiteDefinitions = [
       'test/unit/production-start.test.ts',
       'test/unit/purchasing-definition.test.ts',
       'test/unit/query-catalog-memo.test.ts',
+      'test/unit/reminder-deadline.test.ts',
       'test/unit/request-work-meter.test.ts',
       'test/unit/sales-definition.test.ts',
       'test/unit/surface-assets.test.ts',
