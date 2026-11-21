@@ -14,6 +14,10 @@ import {
 } from '@north-star/canonical-model';
 import { CALCULATED_DISPLAY_QUERY_READER } from '../../canonical-model/src/calculated-display-projection.js';
 import {
+  declaresOptionalReadModelDependency,
+  OPTIONAL_DEPENDENCY_QUERY_READER,
+} from '../../canonical-model/src/read-model-dependencies.js';
+import {
   CANONICALIZATION_PROFILE_VERSION,
   LANGUAGE_VERSION,
   ADOPTED_LANGUAGE_VERSION,
@@ -457,7 +461,7 @@ function compileApplicationInternal(
       maximumDiagnostics,
     );
   const documents = compileDocuments(packageRevision);
-  if (documents?.message) {
+  if (documents && 'message' in documents) {
     return failure(
       [
         {
@@ -1601,6 +1605,9 @@ function decorateV3ProjectionPlans(
       const hasReadModels = packageRevision.queries.some(
         (query) => 'readModel' in query && query.readModel,
       );
+      const hasOptionalDependencies = declaresOptionalReadModelDependency(
+        packageRevision.queries,
+      );
       const payload = plan.payload as {
         kind: string;
         queries: Array<Record<string, unknown>>;
@@ -1617,6 +1624,9 @@ function decorateV3ProjectionPlans(
                   hasListSums ? 3 : 2,
                   hasBookingUsage(packageRevision)
                     ? BOOKING_USAGE_QUERY_READER
+                    : 0,
+                  hasOptionalDependencies
+                    ? OPTIONAL_DEPENDENCY_QUERY_READER
                     : 0,
                 ),
               },
@@ -2315,8 +2325,14 @@ function verifyCompleteness(
       : declaredRules &&
         operationFloor !==
           requiredFormulaValidationOperationReader(declaredRules)) ||
-    (hasBookingUsage(packageRevision)
-      ? queryFloor !== BOOKING_USAGE_QUERY_READER
+    // The query floor is the highest catalog feature present, so a lower
+    // feature's floor is exact only when no higher feature rides the catalog.
+    (hasBookingUsage(packageRevision) ||
+    declaresOptionalReadModelDependency(packageRevision.queries)
+      ? queryFloor !==
+        (declaresOptionalReadModelDependency(packageRevision.queries)
+          ? OPTIONAL_DEPENDENCY_QUERY_READER
+          : BOOKING_USAGE_QUERY_READER)
       : declaredDisplays && queryFloor !== CALCULATED_DISPLAY_QUERY_READER) ||
     ((declaredRules || declaredDisplays) &&
       (ruleReference?.instanceId !==
