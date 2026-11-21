@@ -134,7 +134,17 @@ test('effective application grants match the reviewed allowlist', async (t) => {
               );
               await assert.rejects(
                 checkApplicationGrants(client, mode),
-                /^north_star_runtime	platform\.mode_grant_probe	INSERT	\*$/m,
+                (error: Error) =>
+                  error.message
+                    .split('\n')
+                    .includes(
+                      [
+                        'north_star_runtime',
+                        'platform.mode_grant_probe',
+                        'INSERT',
+                        '*',
+                      ].join('\t'),
+                    ),
               );
             } finally {
               await client.query('ROLLBACK');
