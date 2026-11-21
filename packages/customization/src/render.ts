@@ -1,3 +1,4 @@
+import type { PopupRevision } from '../../canonical-model/src/popup-actions.js';
 import {
   baseLayout,
   type LayoutBody,
@@ -380,6 +381,19 @@ export function renderReleaseDiff(input: {
     if (!before || !after) continue;
     const beforeMetrics = ((before.launcher as Json | undefined)?.metrics ??
       []) as Json[];
+    for (const revision of (after.popupActions ?? []) as PopupRevision[]) {
+      const prior = ((before.popupActions ?? []) as PopupRevision[]).find(
+        (r) => r.actionId === revision.actionId,
+      );
+      if (prior?.revisionId === revision.revisionId) continue;
+      lines.push(
+        `On ${String(after.label)}, ${revision.status === 'retired' ? 'retire' : prior ? 'change' : 'add'} the button "${revision.label.text}". It opens ${revision.target.operationId}.`,
+      );
+      for (const input of revision.inputs)
+        lines.push(
+          `${input.binding}: ${input.source.kind === 'userEntry' ? 'entered by the person' : input.source.kind === 'constant' ? JSON.stringify(input.source.value) : input.source.fieldId}.`,
+        );
+    }
     const oldLayouts = (before.layouts ?? []) as SurfaceLayout[];
     const newLayouts = (after.layouts ?? []) as SurfaceLayout[];
     const describeBody = (body: LayoutBody) =>
