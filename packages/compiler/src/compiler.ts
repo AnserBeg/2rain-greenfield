@@ -1,8 +1,11 @@
 import {
+  DATE_TIME_COMPONENTS,
+  dateTimeComponentId,
   addressColumnId,
   addressComponents,
 } from '@north-star/canonical-model';
 import { compileAddressBindings } from './address.js';
+import { compileDateTimeFields } from './date-time.js';
 import {
   BOOKING_USAGE_QUERY_READER,
   hasBookingUsage,
@@ -24,6 +27,7 @@ import {
   NORMALIZATION_PROFILE_VERSION,
   SUPPORTED_LANGUAGE_VERSIONS,
   CanonicalModelError,
+  CONTENT_HASH_DOMAIN,
   canonicalLanguageProfileFor,
   languageHasMaterializedStateFields,
   languageHasV3Features,
@@ -444,6 +448,23 @@ function compileApplicationInternal(
       maximumDiagnostics,
     );
   }
+  const dateTime = compileDateTimeFields(packageRevision);
+  if (dateTime && 'message' in dateTime) {
+    return failure(
+      [
+        {
+          ...compilerDiagnostic(
+            'COMPILER_TYPE_INVALID',
+            'typeCheck',
+            dateTime.path,
+            dateTime.subjectId,
+          ),
+          rule: dateTime.message,
+        },
+      ],
+      maximumDiagnostics,
+    );
+  }
   const billingProblem = billingBindingProblem(packageRevision);
   if (billingProblem)
     return failure(
@@ -547,6 +568,7 @@ function compileApplicationInternal(
       displays.fields,
       documents?.payload,
       address?.payload,
+      dateTime?.payload,
     ),
     packageRevision,
   );
@@ -773,6 +795,7 @@ function compileApplicationInternal(
     },
     diagnostics: [],
     releaseRoot,
+    normalizedDefinitionBytes: input.normalizedDefinitionBytes,
     stagedArtifacts: allArtifacts,
     status: 'compiled',
   };
@@ -1011,6 +1034,9 @@ export function expectedActiveReleaseFrom(
   );
   if (!chunk) throw new Error('compiled bundle has no storage target chunk');
   return {
+    ...(compiled.normalizedDefinitionBytes && {
+      normalizedDefinitionBytes: compiled.normalizedDefinitionBytes,
+    }),
     normalizedDefinitionDigest:
       compiled.bundle.releaseManifest.normalizedDefinitionDigest,
     releaseManifestBytes: compiled.bundle.releaseManifestBytes,
@@ -1902,6 +1928,9 @@ function validateExpectedActive(
     const chunk = projectionManifest.chunks[0];
     const valid =
       validHashes &&
+      (!expected.normalizedDefinitionBytes ||
+        hashBytes(CONTENT_HASH_DOMAIN, expected.normalizedDefinitionBytes) ===
+          expected.normalizedDefinitionDigest) &&
       releaseManifest.kind === 'releaseManifest' &&
       releaseManifest.manifestVersion === RELEASE_MANIFEST_VERSION &&
       releaseManifest.outputProtocolVersion === OUTPUT_PROTOCOL_VERSION &&
@@ -2114,6 +2143,7 @@ function lowerStorageTransition(
         toStorageTargetSemanticDigest:
           candidateStorage.reference.semanticDigest,
       },
+      expected.normalizedDefinitionBytes,
     );
     if ('diagnostic' in lowered) return lowered;
     return emitStorageTransitionProjection(
@@ -2387,13 +2417,26 @@ function verifyCompleteness(
         entity.columns.map((field) => field.canonicalFieldId),
       )
     : [...collectStorageFields(emittedStorage).keys()];
+  const dateTimeFieldIds = new Set(
+    (packageRevision.languageVersion === 'v6'
+      ? (packageRevision.dateTimeFields ?? [])
+      : []
+    ).map((declaration) => declaration.fieldId),
+  );
   const expectedFields = new Set(
     packageRevision.fields.flatMap((field) =>
       field.fieldType.kind === 'addressFieldType'
         ? addressComponents.map((component) =>
             addressColumnId(field.fieldId, component),
           )
-        : [field.fieldId],
+        : dateTimeFieldIds.has(field.fieldId)
+          ? [
+              field.fieldId,
+              ...DATE_TIME_COMPONENTS.map((component) =>
+                dateTimeComponentId(field.fieldId, component),
+              ),
+            ]
+          : [field.fieldId],
     ),
   );
   if (!setsEqual(new Set(storageFieldIds), expectedFields)) {

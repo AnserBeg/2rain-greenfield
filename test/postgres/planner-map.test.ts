@@ -40,7 +40,7 @@ import {
 } from '../helpers/postgres.js';
 
 // This is the serving binary at the preceding main tip. Refresh it when assigning the merge rungs.
-const predecessor = '8e811d817c0b1d23044e53b832d683eb4bf8b45a';
+const predecessor = 'af255bf703360090d4dda013c1237234c62996ef';
 test(
   'serve a published Map through the dispatcher’s collection, connector and preceding reader',
   { timeout: 900_000 },

@@ -1,4 +1,5 @@
 import { AddressBindingSchema, MapPlacementSchema } from './address.js';
+import { DateTimeFieldDeclarationSchema } from './date-time-field.js';
 import { BillingPlansSchema } from './billing.js';
 import { SurfaceMapSchema } from './map-view.js';
 import { SurfaceBoardSchema } from './board.js';
@@ -2967,6 +2968,11 @@ const v6NormalizedShape = {
   operations: z.array(normalizedV6OperationDefinition),
   connectorBindings: z.array(AddressBindingSchema).min(1).max(128).optional(),
   mapPlacements: z.array(MapPlacementSchema).min(1).max(128).optional(),
+  dateTimeFields: z
+    .array(DateTimeFieldDeclarationSchema)
+    .min(1)
+    .max(128)
+    .optional(),
   billingPlans: BillingPlansSchema.optional(),
   documentFields,
   documentCategories,
@@ -3106,6 +3112,11 @@ const v6AuthoredShape = {
   operations: z.array(authoredV6OperationDefinition),
   connectorBindings: z.array(AddressBindingSchema).min(1).max(128).optional(),
   mapPlacements: z.array(MapPlacementSchema).min(1).max(128).optional(),
+  dateTimeFields: z
+    .array(DateTimeFieldDeclarationSchema)
+    .min(1)
+    .max(128)
+    .optional(),
   billingPlans: BillingPlansSchema.optional(),
   documentFields,
   documentCategories,

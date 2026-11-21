@@ -46,6 +46,7 @@ export interface AddressGateway {
   installations(
     view: RequestRuntimeView,
   ): Promise<readonly AddressInstallation[]>;
+  canConfigure(view: RequestRuntimeView, companyId: string): Promise<boolean>;
   configure(
     view: RequestRuntimeView,
     company: string,

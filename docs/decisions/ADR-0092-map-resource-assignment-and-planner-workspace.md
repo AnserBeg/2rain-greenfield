@@ -1,4 +1,4 @@
-# ADR-0090. Plan work on a map and a resource timeline
+# ADR-0092. Plan work on a map and a resource timeline
 
 **Accepted · PLANNER-1 · 2026-11-21.** The orchestrator accepted the revised design at `467535a4` with the five clarifications below. The ADR number is assigned at merge. The owner approved the capability and will receive the provider cost for sign-off.
 

@@ -1,4 +1,5 @@
 import {
+  MAP_VIEW_READER,
   BOOKING_FULFILMENT_READER,
   CONNECTOR_FAMILY,
   OPTIONAL_DEPENDENCY_QUERY_READER,
@@ -10,7 +11,6 @@ import {
   type UntrustedRequestInput,
 } from './request-context.js';
 import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents.js';
-import { MAP_VIEW_READER } from '../../canonical-model/src/map-view.js';
 import {
   WORKFLOW_PROJECTION_FAMILY,
   WORKFLOW_RUNTIME_CAPABILITY,
@@ -235,7 +235,9 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 36 binds agreed billing intervals to selected source fields.
     // 37 replaces Board v1 with Board v2: chosen stages, moves and facts by
     // stable ID with pinned contracts, labels from the release.
-    // 38 adds document templates, 39 the viewport contract and 40 the Map.
+    // 38 adds document templates and governed PDF generation.
+    // 39 reads tenant dateTime fields (ADR-0087).
+    // 40 reads viewport declarations and 41 renders Map views.
     maximumSupportedVersion: MAP_VIEW_READER,
   },
 });
@@ -393,6 +395,8 @@ export interface CurrentPolicyDecisionRequest extends CurrentPolicySubject {
 }
 
 export interface CurrentPolicyDecision {
+  /** Row restriction issued only for the registered company list. */
+  readonly companyListLegalEntityIds?: readonly string[];
   readonly decision: 'ALLOW' | 'DENY';
   readonly decisionVersion: typeof CURRENT_POLICY_DECISION_VERSION;
   readonly policyVersion: string;

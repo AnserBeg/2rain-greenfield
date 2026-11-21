@@ -17,6 +17,23 @@ import {
 } from '@north-star/canonical-model';
 import { enqueueAddress } from './address-geocodes.js';
 import {
+  DateTimeEntryError,
+  dateTimeCheck,
+  dateTimeChecks,
+  dateTimeColumnExpression,
+  dateTimeStorageDisagreement,
+  expandDateTimePatch,
+  isDateTimeComponent,
+  readDateTime,
+  resolveDateTimePatch,
+  type BusinessCalendarContext,
+} from './date-time-storage.js';
+import {
+  DateTimeWriteSchema,
+  canonicalZone,
+  formatRecordZone,
+} from '@north-star/canonical-model';
+import {
   AddressWriteSchema,
   SavedAddressSchema,
 } from '@north-star/canonical-model';
@@ -87,6 +104,7 @@ import type {
 import {
   QUERY_BOUNDARY_PERMISSION_ID,
   QUERY_POLICY_INPUT_VERSION,
+  isCompanyListQuery,
   SEMANTIC_AGGREGATE_RESULT_VERSION,
   SEMANTIC_QUERY_RESULT_VERSION,
 } from '../../runtime/src/semantic-query-gateway.js';
@@ -216,6 +234,7 @@ export interface ModuleProviderErrorMapping {
 }
 
 interface VerifiedLegalEntityReadScope {
+  readonly companyListOnly?: true;
   readonly legalEntityIds: readonly string[];
 }
 
@@ -435,6 +454,8 @@ export class PostgresModuleRuntimeInterpreter
         async (client, snapshot) => {
           const storage = await this.#loadPinnedStorageTarget(client, request);
           if (snapshot) return { storage };
+          if ('companyListScope' in request && request.companyListScope)
+            await assertScopePolicyCurrent(client, request);
           return {
             result: await withModuleRuntimeRole(client, () =>
               executeQueryOnClient(
@@ -465,7 +486,11 @@ export class PostgresModuleRuntimeInterpreter
               snapshot,
             );
           // The snapshot finished in between: a read of its own, as alone.
-          if (!snapshot) return withModuleRuntimeRole(client, execute);
+          if (!snapshot) {
+            if ('companyListScope' in request && request.companyListScope)
+              await assertScopePolicyCurrent(client, request);
+            return withModuleRuntimeRole(client, execute);
+          }
           const key = identicalReadKey(request);
           return key === null ? execute() : snapshot.memo(key, execute);
         },
@@ -530,6 +555,25 @@ export class PostgresModuleRuntimeInterpreter
           currentEntity,
           parsedInput,
         );
+        const disagreement = dateTimeStorageDisagreement(
+          request.view.projections.operation.payload,
+          currentStorage,
+        );
+        if (disagreement)
+          throw failure(
+            'MODULE_STORAGE_TARGET_MALFORMED',
+            'dateTime bindings and storage disagree',
+            disagreement,
+          );
+        // ADR-0087: the business calendar is read as the runtime login role,
+        // inside this write, only when a logical dateTime value is entered.
+        const touchesDateTime = Object.entries(parsedInput.patch).some(
+          ([fieldId, value]) =>
+            value !== null && dateTimeCheck(currentEntity, fieldId),
+        );
+        const calendar = touchesDateTime
+          ? await readBusinessCalendar(client)
+          : null;
         const accepted = await withModuleRuntimeRole(client, async () => {
           try {
             await requireActiveCreateLegalEntity(
@@ -541,13 +585,23 @@ export class PostgresModuleRuntimeInterpreter
             );
             // Assigned before the change is prepared, so the change document
             // records the number the record is created with.
-            const numbered = await assignDocumentNumbers(
+            const assigned = await assignDocumentNumbers(
               client,
               currentEntity,
               request.definition,
               parsedInput,
               this.#documentNumbers,
             );
+            const numbered = touchesDateTime
+              ? await resolveDateTimeInput(
+                  client,
+                  currentEntity,
+                  request.definition.effect.kind,
+                  assigned,
+                  calendar,
+                  request.dateTimeWorkingCompany ?? null,
+                )
+              : rejectStrayDateTimeValues(currentEntity, assigned);
             // The host assigns a new field revision inside the idempotent write.
             // Retrying the operation returns the original revision through its receipt.
             const addressInputs = currentEntity.columns.filter(
@@ -620,7 +674,10 @@ export class PostgresModuleRuntimeInterpreter
               currentStorage,
               currentEntity,
               request,
-              expandAddressInputs(currentEntity, input),
+              expandDateTimeInputs(
+                currentEntity,
+                expandAddressInputs(currentEntity, input),
+              ),
               request.readBackDefinition.selections,
             );
             return Object.freeze({
@@ -1010,6 +1067,7 @@ async function prepareMutation(
       { ...prior.values, ...input.patch },
       'projected',
     );
+    requireStockCountCountingMode(entity, prior.values, input.patch);
     if (bindings.length)
       await requireFormulaValidation(
         client,
@@ -1351,6 +1409,39 @@ function requirePeriodLockDirection(
     );
 }
 
+function requireStockCountCountingMode(
+  entity: StorageEntity,
+  prior: Readonly<Record<string, ImmutableJsonValue>>,
+  patch: Readonly<Record<string, ImmutableJsonValue>>,
+): void {
+  const suffix = ':entity.stock_count';
+  if (!entity.entityId.endsWith(suffix)) return;
+  const namespace = entity.entityId.slice(0, -suffix.length);
+  const state = `${namespace}:field.stock_count_state`;
+  const mode = `${namespace}:field.stock_count_counting_mode`;
+  // Older count definitions do not have a mode.
+  if (
+    !Object.hasOwn(prior, mode) ||
+    prior[state] !== `${namespace}:option.stock_count_state_counting`
+  ) {
+    return;
+  }
+  if (Object.hasOwn(patch, mode) && patch[mode] !== prior[mode]) {
+    throw failure(
+      'MODULE_OPERATION_PRECONDITION_REFUSED',
+      'counting mode is fixed after Start counting',
+      entity.entityId,
+    );
+  }
+  if (Object.hasOwn(patch, state) && patch[state] !== prior[state]) {
+    throw failure(
+      'MODULE_OPERATION_PRECONDITION_REFUSED',
+      'use a stock count command to leave counting',
+      entity.entityId,
+    );
+  }
+}
+
 function acceptedCommand(
   request: SemanticOperationExecutionRequest,
   preparation: MutationPreparation,
@@ -1587,6 +1678,106 @@ async function assignDocumentNumbers(
     patch[field.fieldId] = number;
   }
   return Object.freeze({ ...input, patch: Object.freeze(patch) });
+}
+
+function expandDateTimeInputs(
+  entity: StorageEntity,
+  input: MutationInput,
+): MutationInput {
+  if (dateTimeChecks(entity).length === 0) return input;
+  return {
+    ...input,
+    patch: Object.freeze(
+      expandDateTimePatch(entity, input.patch) as Record<
+        string,
+        ImmutableJsonValue
+      >,
+    ),
+  };
+}
+
+async function readBusinessCalendar(
+  client: PoolClient,
+): Promise<BusinessCalendarContext | null> {
+  const result = await client.query<{
+    calendar_id: string;
+    time_zone: string;
+    day_boundary: string;
+  }>(
+    `SELECT tenant_id::text AS calendar_id,
+            time_zone,
+            to_char(business_day_boundary, 'HH24:MI:SS.MS') AS day_boundary
+       FROM platform.inventory_tenant_calendars
+      WHERE tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid`,
+  );
+  const row = result.rows[0];
+  const zone = row && canonicalZone(row.time_zone);
+  return row && zone
+    ? { calendarId: row.calendar_id, zone, dayBoundary: row.day_boundary }
+    : null;
+}
+
+/** A logical dateTime value is written only to a field that declares one. */
+function rejectStrayDateTimeValues(
+  entity: StorageEntity,
+  input: MutationInput,
+): MutationInput {
+  for (const [fieldId, value] of Object.entries(input.patch)) {
+    if (
+      isRecord(value) &&
+      !dateTimeCheck(entity, fieldId) &&
+      !hasAddress(entity, fieldId)
+    )
+      throw failure(
+        'MODULE_FIELD_VALUE_INVALID',
+        'operation input field violates its compiled value contract',
+        fieldId,
+      );
+  }
+  return input;
+}
+
+async function resolveDateTimeInput(
+  client: PoolClient,
+  entity: StorageEntity,
+  effect: string,
+  input: MutationInput,
+  calendar: BusinessCalendarContext | null,
+  workingCompany: string | null,
+): Promise<MutationInput> {
+  rejectStrayDateTimeValues(entity, input);
+  const update = effect === 'updateRecordEffect';
+  const prior = update
+    ? await loadRawRecord(client, entity, input.recordId, false, [], true)
+    : null;
+  // The owning company: the stored one on update, the created one on create.
+  // A shared record uses the writer's working company, which the gateway
+  // authorized under this operation's policy (ADR-0087 ruling 2026-11-21).
+  const companyId = entity.legalEntity
+    ? update
+      ? await readRecordCompany(client, entity, input.recordId)
+      : input.systemInput && typeof input.systemInput.value === 'string'
+        ? input.systemInput.value
+        : null
+    : workingCompany;
+  try {
+    return {
+      ...input,
+      patch: Object.freeze(
+        resolveDateTimePatch(entity, input.patch, {
+          calendar,
+          companyId,
+          prior: prior?.values ?? null,
+        }) as Record<string, ImmutableJsonValue>,
+      ),
+    };
+  } catch (error) {
+    if (!(error instanceof DateTimeEntryError)) throw error;
+    throw failure('MODULE_FIELD_VALUE_INVALID', error.message, error.fieldId, {
+      ...error.details,
+      reason: error.code,
+    });
+  }
 }
 
 function expandAddressInputs(
@@ -2059,7 +2250,9 @@ export async function assertScopePolicyCurrent(
   request:
     SemanticAggregateQueryExecutionRequest | SemanticQueryExecutionRequest,
 ): Promise<void> {
-  const scope = request.legalEntityReadScope;
+  const scope =
+    ('companyListScope' in request && request.companyListScope) ||
+    request.legalEntityReadScope;
   // Only a scope this provider's live policy issued names its epoch; one
   // issued by another policy gateway (a test double) has no epoch here.
   if (!scope || !isCurrentPolicyVersion(scope.policyVersion)) return;
@@ -2145,6 +2338,7 @@ export function identicalReadKey(
       request.filterPlans,
       request.list,
       request.legalEntityReadScope?.legalEntityIds ?? null,
+      'companyListScope' in request ? (request.companyListScope ?? null) : null,
     ])}`;
   } catch {
     return null;
@@ -2190,7 +2384,7 @@ async function executeQueryOnClient(
     definition.queryType === 'list' && list
       ? searchChildrenPlan(storage, entity, list)
       : null;
-  const readScope = await verifyLegalEntityReadScope(
+  let readScope = await verifyLegalEntityReadScope(
     client,
     snapshot,
     storage,
@@ -2204,6 +2398,24 @@ async function executeQueryOnClient(
       ...(searchChildPlans ?? []).map((plan) => plan.child),
     ],
   );
+  const companyListScope =
+    'companyListScope' in request ? request.companyListScope : undefined;
+  if (companyListScope) {
+    if (
+      !isCompanyListQuery(definition) ||
+      !entity.legalEntityMaster ||
+      readScope
+    )
+      throw failure(
+        'MODULE_QUERY_CONTRACT_INVALID',
+        'Company list scope requires the registered company master list.',
+        definition.queryId,
+      );
+    readScope = {
+      companyListOnly: true,
+      legalEntityIds: companyListScope.legalEntityIds,
+    };
+  }
   if (definition.queryType === 'aggregate') {
     return executeAggregateQuery(
       client,
@@ -4875,9 +5087,12 @@ async function listSharedRecords(
     sourceAlias,
   );
   const searchExpressions = [
-    ...selectedColumns.map((column) =>
-      foldedVisibleFieldExpression(entity, column, sourceAlias),
-    ),
+    // Search is a capability gap for the dateTime type (ADR-0087).
+    ...selectedColumns
+      .filter((column) => !dateTimeCheck(entity, column.canonicalFieldId))
+      .map((column) =>
+        foldedVisibleFieldExpression(entity, column, sourceAlias),
+      ),
     ...relationPlans.map((plan) =>
       foldedVisibleFieldExpression(
         plan.target,
@@ -5315,9 +5530,17 @@ function listSelectList(
       entity.optimisticRevision.column,
       entity.archive.archivedAtColumn,
     ].map((column) => `${qualified(sourceAlias, column)} AS ${quoted(column)}`),
-    ...entity.columns.map((column) =>
-      rawFieldSelection(column, qualified(sourceAlias, column.physicalName)),
-    ),
+    ...entity.columns.map((column) => {
+      const reference = qualified(sourceAlias, column.physicalName);
+      const text = dateTimeColumnExpression(
+        entity,
+        column.physicalName,
+        reference,
+      );
+      return text
+        ? `${text} AS ${quoted(column.physicalName)}`
+        : rawFieldSelection(column, reference);
+    }),
   ];
   const displays = selectedColumns.map(
     (column, index) =>
@@ -5477,10 +5700,18 @@ function toListDto(
       : base;
   const displayValues = Object.freeze(
     Object.fromEntries([
-      ...selectedColumns.map((column, index) => [
-        column.canonicalFieldId,
-        nullableDisplayValue(row[`nsm_table_display_${String(index)}`]),
-      ]),
+      ...selectedColumns.map((column, index) => {
+        // Record-zone display, rendered from the capture: no process or
+        // session zone reaches a list cell or an export.
+        const dateTime = dateTimeCheck(entity, column.canonicalFieldId);
+        const saved = dateTime ? readDateTime(dateTime, row) : null;
+        return [
+          column.canonicalFieldId,
+          dateTime
+            ? saved && formatRecordZone(saved)
+            : nullableDisplayValue(row[`nsm_table_display_${String(index)}`]),
+        ];
+      }),
       ...figures.flatMap((figure, index) =>
         figure.label
           ? [
@@ -6314,10 +6545,17 @@ function selectSql(
   const columns = [...names].map(quoted);
   for (const column of entity.columns) {
     names.add(column.physicalName);
+    const text = dateTimeColumnExpression(
+      entity,
+      column.physicalName,
+      quoted(column.physicalName),
+    );
     columns.push(
-      column.fieldContract.fieldKind === 'dateFieldType'
-        ? rawFieldSelection(column, quoted(column.physicalName))
-        : quoted(column.physicalName),
+      text
+        ? `${text} AS ${quoted(column.physicalName)}`
+        : column.fieldContract.fieldKind === 'dateFieldType'
+          ? rawFieldSelection(column, quoted(column.physicalName))
+          : quoted(column.physicalName),
     );
   }
   for (const column of extraColumns) {
@@ -6364,15 +6602,27 @@ function rawRecord(entity: StorageEntity, row: QueryResultRow): RawRecord {
   }
   const values = Object.fromEntries(
     entity.columns
-      .filter((column) => !isAddressComponent(entity, column.canonicalFieldId))
-      .map((column) => [
-        column.canonicalFieldId,
-        hasAddress(entity, column.canonicalFieldId)
-          ? addressJson(
-              readAddress(addressColumns(entity, column.canonicalFieldId), row),
-            )
-          : immutableDatabaseValue(row[column.physicalName]),
-      ]),
+      .filter(
+        (column) =>
+          !isAddressComponent(entity, column.canonicalFieldId) &&
+          !isDateTimeComponent(entity, column.canonicalFieldId),
+      )
+      .map((column) => {
+        const dateTime = dateTimeCheck(entity, column.canonicalFieldId);
+        return [
+          column.canonicalFieldId,
+          dateTime
+            ? (readDateTime(dateTime, row) as ImmutableJsonValue)
+            : hasAddress(entity, column.canonicalFieldId)
+              ? addressJson(
+                  readAddress(
+                    addressColumns(entity, column.canonicalFieldId),
+                    row,
+                  ),
+                )
+              : immutableDatabaseValue(row[column.physicalName]),
+        ];
+      }),
   );
   return Object.freeze({
     archivedAt: (row[entity.archive.archivedAtColumn] ?? null) as
@@ -6998,13 +7248,17 @@ function validateFieldValue(
         isValidIsoTime(value, field.temporal.precision);
       break;
     case 'dateTimeFieldType':
+      // A logical ADR-0087 value is checked against its declaration inside
+      // the write; a plain instant field refuses an object there.
       valid =
-        typeof value === 'string' &&
-        isValidIsoDateTime(
-          value,
-          field.temporal.precision,
-          field.temporal.timezoneSemantics,
-        );
+        (typeof value === 'string' &&
+          isValidIsoDateTime(
+            value,
+            field.temporal.precision,
+            field.temporal.timezoneSemantics,
+          )) ||
+        (field.temporal.timezoneSemantics === 'utcInstant' &&
+          DateTimeWriteSchema.safeParse(value).success);
       break;
   }
   if (!valid) {
@@ -7240,8 +7494,13 @@ function appendLegalEntityReadScopePredicate(
   predicates: string[],
   alias?: string,
 ): void {
-  const requirement = legalEntityReadScopeRequirement(entity);
-  if (!requirement) return;
+  // The company master identifies itself by its primary key. Its list's
+  // restriction comes from memberships for that list permission.
+  const columnName =
+    entity.legalEntityMaster && readScope?.companyListOnly
+      ? entity.recordIdentity.column
+      : legalEntityReadScopeRequirement(entity)?.column;
+  if (!columnName) return;
   if (!readScope) {
     throw failure(
       'MODULE_LEGAL_ENTITY_READ_SCOPE_REQUIRED',
@@ -7249,9 +7508,7 @@ function appendLegalEntityReadScopePredicate(
       entity.entityId,
     );
   }
-  const column = alias
-    ? qualified(alias, requirement.column)
-    : quoted(requirement.column);
+  const column = alias ? qualified(alias, columnName) : quoted(columnName);
   predicates.push(
     `${column} = ANY(${parameter(values, [...readScope.legalEntityIds])}::uuid[])`,
   );

@@ -49,6 +49,7 @@ import {
 } from './request-context.js';
 import {
   currentPolicyVersionOf,
+  ADDRESS_CONNECTOR_CONFIGURE_BINDING,
   MAP_VIEWPORT_READ_BINDING,
 } from './current-policy.js';
 import type { StorageTargetPayloadV1 } from '@north-star/compiler';
@@ -310,6 +311,8 @@ export class PostgresAddresses implements AddressGateway {
     );
   }
   async installations(view: RequestRuntimeView) {
+    // The installation read policy filters by the trusted principal's live
+    // company memberships on this connection.
     return withTrustedRequestRead(
       this.pool,
       trustedContextForRequestRuntimeView(view),
@@ -322,6 +325,21 @@ export class PostgresAddresses implements AddressGateway {
         ).rows,
     );
   }
+  async canConfigure(view: RequestRuntimeView, company: string) {
+    if (!this.demo || !isUuid(company)) return false;
+    const { policy } = await this.release(view.release.releaseId);
+    const decision = await authorizeCurrentPolicy(
+      policy,
+      view,
+      ADDRESS_CONNECTOR_CONFIGURE_BINDING.permissionId,
+      { legalEntityId: company },
+    );
+    return (
+      decision.decision === 'ALLOW' &&
+      decision.policyVersion === view.entryPolicyVersion
+    );
+  }
+
   async configure(
     view: RequestRuntimeView,
     company: string,
@@ -343,8 +361,7 @@ export class PostgresAddresses implements AddressGateway {
       !Number.isSafeInteger(options.budgetMicros)
     )
       throw denied();
-    const { policy } = await this.release(view.release.releaseId);
-    await issueLegalEntityReadScope(policy, view, [company]);
+    if (!(await this.canConfigure(view, company))) throw denied();
     // The single entry point for enabling a provider. SIGNIN-1 slice 2b adds
     // its passkey decision proof to platform.address_configure.
     return this.tx(view, async (c) => {

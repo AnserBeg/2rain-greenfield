@@ -224,6 +224,8 @@ export interface CompilerDependency {
 }
 
 export interface ExpectedActiveRelease {
+  /** Historical input for comparing enum contracts across a presentation-only relabel. */
+  normalizedDefinitionBytes?: Uint8Array;
   normalizedDefinitionDigest: string;
   releaseManifestBytes: Uint8Array;
   releaseRoot: string;
@@ -585,6 +587,8 @@ export interface CompilerAttestation {
 }
 
 export interface CompileSuccess {
+  /** Historical input for comparing enum contracts across a presentation-only relabel. */
+  normalizedDefinitionBytes?: Uint8Array;
   attestation: CompilerAttestation;
   bundle: CompiledReleaseBundle;
   diagnostics: [];

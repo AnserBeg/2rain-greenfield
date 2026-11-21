@@ -3,6 +3,8 @@ import {
   BILLING_INTERVAL_READER,
 } from '../../canonical-model/src/billing.js';
 import {
+  DATE_TIME_FIELD_READER,
+  type DateTimeBinding,
   ADDRESS_FIELD_READER,
   ADDRESS_MAP_READER,
   CONNECTOR_PAYLOAD,
@@ -52,6 +54,7 @@ import {
   WORKFLOW_SURFACE_FLOOR,
 } from '../../canonical-model/src/workflows.js';
 import { workflowSdkBindingDigest } from './workflows.js';
+import { hasStockCountWorkflow } from './conformance.js';
 
 import {
   FORMULA_RULE_PAYLOAD_VERSION,
@@ -218,6 +221,7 @@ export function lowerBaseProjectionPayloads(
     { payload: unknown }
   >['payload'],
   address?: AddressProjection,
+  dateTimeBindings?: readonly DateTimeBinding[],
 ): ProjectionPayloadPlan[] {
   const namespace = packageRevision.package.namespace;
   const packageScope: LogicalScope = {
@@ -444,6 +448,31 @@ export function lowerBaseProjectionPayloads(
     plans.push(
       plan(PROJECTION_FAMILY_IDS.connector, namespace, packageScope, address),
     );
+  }
+  // ADR-0087: each consumer carries the same bindings and the surface reader
+  // floor rises to the dateTime rung. Omission emits nothing.
+  if (dateTimeBindings?.length) {
+    const consumers = [
+      PROJECTION_FAMILY_IDS.queryCatalog,
+      PROJECTION_FAMILY_IDS.operationCatalog,
+      PROJECTION_FAMILY_IDS.surfaceManifest,
+    ] as string[];
+    for (const projection of plans.filter((p) =>
+      consumers.includes(p.familyId),
+    )) {
+      projection.payload = {
+        ...(projection.payload as object),
+        dateTimeBindings,
+      };
+      if (projection.familyId === PROJECTION_FAMILY_IDS.surfaceManifest)
+        projection.requiredRuntimeCapability = {
+          ...projection.requiredRuntimeCapability,
+          minimumVersion: Math.max(
+            projection.requiredRuntimeCapability.minimumVersion,
+            DATE_TIME_FIELD_READER,
+          ),
+        };
+    }
   }
   if (
     verificationPackageRevision.languageVersion === 'v6' &&
@@ -1094,12 +1123,16 @@ function surfaceManifestPayload(
         (column) => column.relation,
       ),
   );
-  const lineCreateValues = original.surfaces.some(
-    (surface) =>
-      'documentEditor' in surface &&
-      (surface.documentEditor as SurfaceDocumentEditor | undefined)
-        ?.lineCreateValues !== undefined,
-  );
+  // Rung 35 reads both the workflow definition and editor line defaults.
+  // Removing an editor must not admit the workflow to a reader without it.
+  const needsStockCountReader =
+    hasStockCountWorkflow(original) ||
+    original.surfaces.some(
+      (surface) =>
+        'documentEditor' in surface &&
+        (surface.documentEditor as SurfaceDocumentEditor | undefined)
+          ?.lineCreateValues !== undefined,
+    );
   const replayedLayout = original.surfaces.some(
     (s) =>
       'layouts' in s &&
@@ -1107,12 +1140,12 @@ function surfaceManifestPayload(
         (layout) => layout.placementRuleVersion === 1,
       ),
   );
-  // Board v2 is the highest rung: a Board release needs it whatever else it has.
+  // Map and Board each require their renderer even when other bindings are present.
   const surfaceFloor = original.surfaces.some((s) => s.archetype === 'map')
     ? MAP_VIEW_READER
     : original.surfaces.some((s) => s.archetype === 'board')
       ? BOARD_READER
-      : lineCreateValues
+      : needsStockCountReader
         ? LINE_CREATE_VALUES_SURFACE_FLOOR
         : replayedLayout
           ? REPLAYED_LAYOUT_READER

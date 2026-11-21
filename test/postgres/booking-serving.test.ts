@@ -27,7 +27,7 @@ import {
 import { startComposedApplication } from '../../apps/api/src/composition-root.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 import { withArchivedCustomizationRuntime } from '../helpers/archived-runtime-process.js';
-import { applicationWithoutLineCreateValues } from '../helpers/application-without-line-create-values.js';
+import { applicationBeforeStockCountWorkflow } from '../helpers/application-before-stock-count-workflow.js';
 
 const item = 'northstar.app:entity.item';
 const detailQuery = 'northstar.app:query.item_get';
@@ -276,7 +276,7 @@ test(
         for (const mode of ['baseline', 'operation', 'query'] as const) {
           await withBookingApplication(
             mode === 'baseline'
-              ? applicationWithoutLineCreateValues().release
+              ? applicationBeforeStockCountWorkflow().release
               : bookingRelease(mode),
             async (f) => {
               const probe = (await run(archivedQuery, {
