@@ -27,7 +27,13 @@ Critical posting kernel. This packet closes Fable findings F1–F5 on STOCK-COUN
 
 CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44844516542
 
-Expected-red run for the executable head: https://github.com/AnserBeg/2rain-greenfield/actions/runs/44844296951
+Ten controls passed at `7b05412d`. The company control used an administrator connection and stopped before entering the route. [Control run](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44844296951)
+
+The company control reruns with the runtime login at `12b0b689`. [Company control](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44845970947)
+
+The earlier full run also exposed a stale browser fixture import and an approval timeout. The workflow browser test now uses the legacy count fixture. The exact candidate run checks both browser journeys.
+
+The archived reader check passed in the PostgreSQL shard at `7b05412d`. [Archived reader check](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44844516542/job/136661047721)
 
 ## Try it yourself
 
@@ -38,8 +44,9 @@ Start a blind cycle count as a supervisor. Enter a physical quantity half a unit
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "STOCK-COUNTS-fixes",
   "base": "67e4efce31eb663f12d6f161aa91c0ce1220dffc",
-  "head": "7b05412d3817033ab52684ea2d63d08143bb79cf",
+  "head": "8e9c91a2e629857ccb84bad86327bef48d2e0ddf",
   "changedPaths": [
+    "apps/web/test/browser/customize-inspection.composed-application.spec.ts",
     "packages/compiler/src/conformance.ts", "packages/compiler/src/projections.ts",
     "packages/domain/src/inventory/definition.ts", "packages/postgres-provider/src/inventory-posting-service.ts",
     "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/stock-count-route.ts",
