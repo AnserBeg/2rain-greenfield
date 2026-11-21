@@ -24,11 +24,17 @@ import {
   type StorageTargetPayloadV1,
   PROJECTION_FAMILY_IDS,
   type CompileSuccess,
+  type ReleaseManifestEnvelope,
 } from '@north-star/compiler';
 import type { ObservabilityMetrics } from '@north-star/observability';
 import { monotonicMilliseconds } from '@north-star/observability';
 import type { MintedUuid } from '@north-star/platform-runtime';
 import type { TrustedRequestContext } from '@north-star/runtime';
+import {
+  RequestRuntimeViewRefusalError,
+  SUPPORTED_RUNTIME_CAPABILITIES,
+  unsupportedRuntimeCapability,
+} from '@north-star/runtime/request-runtime-view';
 import {
   SemanticOperationGateway,
   parsePinnedOperationCatalog,
@@ -50,6 +56,7 @@ import {
   type ModuleProviderErrorMapping,
 } from './module-runtime-interpreter.js';
 import {
+  ADDRESS_CONNECTOR_CONFIGURE_BINDING,
   PostgresCurrentPolicyGateway,
   PostgresSemanticQueryDenialRecorder,
   currentPolicyBindingsFromPermissions,
@@ -146,10 +153,13 @@ export function composeServingGateways(
   const policyFor = (release: ServingRelease) =>
     new PostgresCurrentPolicyGateway(
       runtimePool,
-      releasePolicyBindings(
-        release.normalizedDefinitionBytes,
-        documentOptions !== undefined,
-      ),
+      [
+        ...releasePolicyBindings(
+          release.normalizedDefinitionBytes,
+          documentOptions !== undefined,
+        ),
+        ADDRESS_CONNECTOR_CONFIGURE_BINDING,
+      ],
       parsePinnedOperationCatalog(
         release.projection(PROJECTION_FAMILY_IDS.operationCatalog).payload,
       ),
@@ -285,6 +295,7 @@ export function composeServingGateways(
 export interface ServingRelease {
   readonly normalizedDefinitionBytes: Uint8Array;
   readonly projection: (familyId: string) => PinnedCapabilityProjection;
+  readonly releaseManifest: ReleaseManifestEnvelope;
   readonly releaseId: MintedUuid;
   readonly releaseRoot: string;
 }
@@ -295,6 +306,58 @@ interface ReleaseServing {
   readonly operationGateway: SemanticOperationGateway;
   readonly policy: PostgresCurrentPolicyGateway;
   readonly queryGateway: SemanticQueryGateway;
+}
+
+// The request-view registry covers request projections. Whole releases also
+// carry these platform projections, whose declared capabilities are at v1.
+const servingRuntimeCapabilities = {
+  ...SUPPORTED_RUNTIME_CAPABILITIES,
+  [PROJECTION_FAMILY_IDS.policyReferences]: {
+    capabilityId: 'northstar.runtime:capability.policy-references',
+    maximumSupportedVersion: 1,
+  },
+  [PROJECTION_FAMILY_IDS.reporting]: {
+    capabilityId: 'northstar.runtime:capability.reporting-projection',
+    maximumSupportedVersion: 1,
+  },
+  [PROJECTION_FAMILY_IDS.storageTarget]: {
+    capabilityId: 'northstar.runtime:capability.storage-target',
+    maximumSupportedVersion: 1,
+  },
+  [PROJECTION_FAMILY_IDS.storageTransition]: {
+    capabilityId: 'northstar.runtime:capability.storage-transition',
+    maximumSupportedVersion: 1,
+  },
+  [PROJECTION_FAMILY_IDS.verificationPlan]: {
+    capabilityId: 'northstar.runtime:capability.verification-plan',
+    maximumSupportedVersion: 1,
+  },
+};
+
+export class UnsupportedReleaseRuntimeCapabilityError extends RequestRuntimeViewRefusalError {
+  constructor(releaseId: MintedUuid, reason: string) {
+    super('UNSUPPORTED_RUNTIME_CAPABILITY');
+    this.message = `release ${releaseId}: ${reason}`;
+  }
+}
+
+export function assertServingRuntimeCapabilities(
+  releaseId: MintedUuid,
+  manifest: Pick<ReleaseManifestEnvelope, 'projections'>,
+): void {
+  for (const { familyId, requiredRuntimeCapability } of manifest.projections) {
+    const unsupported = unsupportedRuntimeCapability(
+      familyId,
+      requiredRuntimeCapability,
+      servingRuntimeCapabilities,
+    );
+    if (unsupported !== null) {
+      throw new UnsupportedReleaseRuntimeCapabilityError(
+        releaseId,
+        unsupported,
+      );
+    }
+  }
 }
 
 /** A registered release read back from its immutable rows. */
@@ -323,15 +386,17 @@ export async function loadServingRelease(
   if (!manifest) {
     throw new Error(`release ${releaseId} has no release manifest artifact`);
   }
+  const releaseManifest = JSON.parse(
+    new TextDecoder().decode(manifest.canonicalBytes),
+  ) as ReleaseManifestEnvelope;
+  assertServingRuntimeCapabilities(releaseId, releaseManifest);
   const compiled = {
     bundle: {
       artifacts: persisted.artifacts.map((artifact) => ({
         ...artifact,
         kind: 'contentAddressedArtifact' as const,
       })),
-      releaseManifest: JSON.parse(
-        new TextDecoder().decode(manifest.canonicalBytes),
-      ) as unknown,
+      releaseManifest,
     },
     releaseRoot: persisted.release.contentHash,
   } as unknown as CompileSuccess;
@@ -339,6 +404,7 @@ export async function loadServingRelease(
     normalizedDefinitionBytes: revision.desiredState,
     projection: (familyId: string) => projectionBinding(compiled, familyId),
     releaseId,
+    releaseManifest,
     releaseRoot: persisted.release.contentHash,
   });
 }

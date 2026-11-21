@@ -828,3 +828,21 @@ How to apply: Require a scoped human decision for a fence advance and its replay
 Date: 2026-11-20
 Why: A backdated successor reduced an eight-day entitlement below the amount already allocated after four days.
 How to apply: At each occurrence opening, select among the terms and assignments published by then. Save the inputs served to the caller and replay them after publishing a successor. [BILLING-1](docs/execution/packets/BILLING-1.md)
+
+## Check company-list coverage before stating a tenant-wide total
+
+Date: 2026-11-20
+Why: A tenant-wide customer reader with a company-scoped List could see partial receivables exposure as the full balance.
+How to apply: Carry the policy restriction on the list result, and leave totals unstated when the calculation needs every company. Exercise the mixed-grant principal with a balance in a company it cannot enumerate.
+
+## Check privileges after deployment mode is claimed
+
+Date: 2026-11-20
+Why: Grants assigned while claiming pilot or demo were invisible to checks on a freshly migrated store.
+How to apply: Claim each supported mode and compare its effective privileges against reviewed rows. Keep the unclaimed assertion for the migration baseline. [SIGNIN-1 slice 2a fixes](docs/execution/packets/SIGNIN-1-2a-fixes.md)
+
+## Clear review figures before reopening restricted work
+
+Date: 2026-11-20
+Why: A blind recount's ordinary line queries exposed stored supervisor figures after Return to counting.
+How to apply: Clear stale derived figures in the state transition. Exercise ordinary and derived queries with an actor allowed to enter data and denied access to the source figures. [STOCK-COUNTS-fixes](docs/execution/packets/STOCK-COUNTS-fixes.md)

@@ -8,9 +8,9 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import test from 'node:test';
 
-import type pg from 'pg';
+import pg from 'pg';
 
-import { applicationWithoutLineCreateValues } from '../helpers/application-without-line-create-values.js';
+import { applicationBeforeStockCountWorkflow } from '../helpers/application-before-stock-count-workflow.js';
 
 import { readActiveRelease } from '../../packages/postgres-provider/src/active-release-root.js';
 import {
@@ -1112,7 +1112,7 @@ async function assertUpgradePersistence(
 test(
   'a record-type upgrade stages for approval and an unknown live kind can roll back',
   { timeout: 900_000 },
-  async () => {
+  async (t) => {
     await withEphemeralPostgres(
       'refused-upgrade',
       async ({ connection, pool }) => {
@@ -1218,6 +1218,94 @@ test(
                   cli.split('\n').find((line) => line.startsWith('{'))!,
                 ),
                 report,
+              );
+              const target =
+                parseCompiledApplication(compiledApplication).application;
+              const pkg =
+                normalizeApplicationPackage(firstPartyAuthored).package;
+              const identity = {
+                version: 'northstar.upgrade-report/v1',
+                tenantId: boot.identity.tenantId,
+                environmentId: boot.identity.environmentId,
+                sourceReleaseId: source,
+                sourceFence: String(status.activeFence),
+                targetPackageId: pkg.packageId,
+                targetVersion: pkg.version,
+                targetRoot: target.compiled.releaseRoot,
+                approvalMode: 'Manual',
+              };
+              assert.deepEqual(
+                { ...report, findings: [], blocked: [] },
+                {
+                  ...identity,
+                  upgradeId: createHash('sha256')
+                    .update(canonicalize(identity))
+                    .digest('hex'),
+                  findings: [],
+                  blocked: [],
+                },
+              );
+              const log = t.mock.method(console, 'error', () => {});
+              await pool.query(
+                'ALTER TABLE platform.customization_patches RENAME TO unavailable_patches',
+              );
+              try {
+                const transient = await opened.service.prepareUpgrade();
+                assert.ok(transient.status === 'refused');
+                assert.equal(transient.code, 'UPGRADE_PREPARATION_FAILED');
+              } finally {
+                await pool.query(
+                  'ALTER TABLE platform.unavailable_patches RENAME TO customization_patches',
+                );
+              }
+              assert.deepEqual(
+                log.mock.calls.map((call) => call.arguments),
+                [
+                  [
+                    'UPGRADE_PREPARATION_FAILED',
+                    { errorClass: 'DatabaseError', errorCode: '42P01' },
+                  ],
+                ],
+              );
+              // Fail only the disclosure read of the customized revision. The
+              // independent KIND_NOT_ADMITTED verdict has already been computed.
+              const query = pg.Client.prototype.query;
+              let disclosureReads = 0;
+              const fault = t.mock.method(
+                pg.Client.prototype,
+                'query',
+                function (this: pg.Client, ...args: unknown[]) {
+                  if (
+                    typeof args[0] === 'string' &&
+                    args[0].startsWith(
+                      'SELECT desired_state FROM platform.app_package_revisions',
+                    )
+                  ) {
+                    disclosureReads++;
+                    throw new Error('private disclosure read detail');
+                  }
+                  return Reflect.apply(query, this, args);
+                },
+              );
+              // Metered pools bind each client's query method on connection.
+              const disclosure = await openCustomizeService(next);
+              try {
+                const transient = await disclosure.service.prepareUpgrade();
+                assert.equal(disclosureReads, 1);
+                assert.ok(transient.status === 'refused');
+                assert.equal(transient.code, 'UPGRADE_PREPARATION_FAILED');
+              } finally {
+                fault.mock.restore();
+                await disclosure.close();
+              }
+              assert.deepEqual(log.mock.calls.at(-1)?.arguments, [
+                'UPGRADE_PREPARATION_FAILED',
+                { errorClass: 'Error', errorCode: 'UNKNOWN' },
+              ]);
+              log.mock.restore();
+              assert.deepEqual(
+                (await opened.service.status()).upgradeRefusal,
+                status.upgradeRefusal,
               );
               assert.equal(report.sourceReleaseId, source);
               assert.equal(report.sourceFence, String(status.activeFence));
@@ -1357,7 +1445,7 @@ test(
     await withEphemeralPostgres(
       'upgrade-layout-survival',
       async ({ connection, pool }) => {
-        const compatibility = applicationWithoutLineCreateValues();
+        const compatibility = applicationBeforeStockCountWorkflow();
         const options = {
           databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
           tenantSlug: 'upgrade-layout',
@@ -1546,6 +1634,27 @@ test(
             (await listEquipment(boot)).records.map((r) => r.recordId),
             [recordId],
           );
+          const later = await newer.service.draft(
+            draftLayoutRevision(layout, [
+              {
+                kind: 'rename',
+                schemaVersion: 'v6',
+                id: delivery,
+                parent: layout.body.slotId,
+                label: { schemaVersion: 'v6', text: 'Receiving dock' },
+              },
+            ]),
+            'declarativeEditor',
+          );
+          assert.ok(later.status === 'drafted', JSON.stringify(later));
+          const withDraft = await patches();
+          assert.deepEqual(
+            withDraft.filter(
+              ({ row }) =>
+                (row as { patch_id: string }).patch_id !== later.patchId,
+            ),
+            before,
+          );
           assert.equal(
             (
               await newer.service.rollback(
@@ -1555,7 +1664,7 @@ test(
             ).releaseId,
             source,
           );
-          assert.deepEqual(await patches(), before);
+          assert.deepEqual(await patches(), withDraft);
         } finally {
           await newer.close();
           await boot.close();

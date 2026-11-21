@@ -16,8 +16,12 @@ import * as customization from '../../packages/customization/src/index.js';
 import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 
 const authoredPath = resolve('apps/web/release/app.authored.json');
-const base = readReportsPredecessor('apps/web/release/app.authored.json') as Record<string, unknown>;
-const tip = parseCompiledApplication(readReportsPredecessor('apps/web/release/app.compiled.json')).application;
+const base = readReportsPredecessor(
+  'apps/web/release/app.authored.json',
+) as Record<string, unknown>;
+const tip = parseCompiledApplication(
+  readReportsPredecessor('apps/web/release/app.compiled.json'),
+).application;
 const acknowledgement = readUnboundPermissionAcknowledgementFor(
   authoredPath,
   'northstar.app:package.application',

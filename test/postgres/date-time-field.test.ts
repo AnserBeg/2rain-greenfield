@@ -548,7 +548,13 @@ test(
       'date-time-reader',
       async ({ connection, pool }) => {
         const databaseUrl = `postgresql://${connection.user}@${connection.host}:${connection.port}/${connection.database}`;
-        const options = { databaseUrl, tenantSlug: 'date-time-reader', compiledApplication: readReportsPredecessor('apps/web/release/app.compiled.json') };
+        const options = {
+          databaseUrl,
+          tenantSlug: 'date-time-reader',
+          compiledApplication: readReportsPredecessor(
+            'apps/web/release/app.compiled.json',
+          ),
+        };
         const app = await startComposedApplication({ ...options, port: 0 });
         const opened = await openCustomizeService(options);
         try {

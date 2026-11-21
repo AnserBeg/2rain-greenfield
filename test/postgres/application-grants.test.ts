@@ -13,7 +13,12 @@ import { withEphemeralPostgres } from '../helpers/postgres.js';
 
 const allowlist = 'test/postgres/application-grants.tsv';
 
-async function checkApplicationGrants(client: PoolClient): Promise<void> {
+type StoreMode = 'unclaimed' | 'demo' | 'pilot';
+
+async function checkApplicationGrants(
+  client: PoolClient,
+  mode: StoreMode = 'unclaimed',
+): Promise<void> {
   // has_*_privilege accounts for ownership, PUBLIC and inherited memberships.
   // Check SET ROLE targets in their own right too. The bootstrap administrator
   // (OID 10) and PostgreSQL's predefined non-login roles are infrastructure.
@@ -63,6 +68,33 @@ async function checkApplicationGrants(client: PoolClient): Promise<void> {
     allowed.add(entry);
   }
 
+  const modeRows = await readFile(
+    'test/postgres/application-grants-by-mode.tsv',
+    'utf8',
+  );
+  for (const line of modeRows.trimEnd().split('\n').slice(1)) {
+    const [store, action, role, table, privilege, columns, reason] =
+      line.split('\t');
+    assert.ok(
+      (store === 'demo' || store === 'pilot') &&
+        (action === 'add' || action === 'remove') &&
+        reason?.trim() &&
+        columns,
+      `Invalid mode allowlist row: ${line}`,
+    );
+    if (store !== mode) continue;
+    const entry = [role, table, privilege, columns].join('\t');
+    if (action === 'add') {
+      assert.ok(
+        !allowed.has(entry),
+        `Duplicate ${mode} allowlist row: ${entry}`,
+      );
+      allowed.add(entry);
+    } else {
+      assert.ok(allowed.delete(entry), `Unknown ${mode} exclusion: ${entry}`);
+    }
+  }
+
   const unexpected = rows.filter(({ entry }) => !allowed.delete(entry));
   if (unexpected.length > 0) {
     assert.fail(
@@ -83,6 +115,43 @@ test('effective application grants match the reviewed allowlist', async (t) => {
       const migrations = await loadMigrations('db/migrations');
       await runMigrations(client, migrations);
       await checkApplicationGrants(client);
+
+      for (const mode of ['pilot', 'demo'] as const) {
+        await t.test(
+          `${mode} grants match after claiming the store`,
+          async () => {
+            await client.query('BEGIN');
+            try {
+              await client.query('SELECT platform.claim_staff_store_mode($1)', [
+                mode,
+              ]);
+              await checkApplicationGrants(client, mode);
+              await client.query(
+                'CREATE TABLE platform.mode_grant_probe (enabled boolean)',
+              );
+              await client.query(
+                'GRANT INSERT ON platform.mode_grant_probe TO north_star_runtime',
+              );
+              await assert.rejects(
+                checkApplicationGrants(client, mode),
+                (error: Error) =>
+                  error.message
+                    .split('\n')
+                    .includes(
+                      [
+                        'north_star_runtime',
+                        'platform.mode_grant_probe',
+                        'INSERT',
+                        '*',
+                      ].join('\t'),
+                    ),
+              );
+            } finally {
+              await client.query('ROLLBACK');
+            }
+          },
+        );
+      }
 
       await t.test(
         'a temporary migration cannot widen table or inherited column access',
