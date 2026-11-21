@@ -2,6 +2,7 @@ import {
   AddressProjectionSchema,
   SavedAddressSchema,
 } from '@north-star/canonical-model';
+import { dateTimeBindings, dateTimeFromForm } from './date-time-field.js';
 import { withAddressEditor } from './address-context.js';
 import type { AddressGateway } from '../../../packages/runtime/src/address-gateway.js';
 import { addressFromForm } from './address-field.js';
@@ -1693,6 +1694,7 @@ async function submitSurfaceRuntimeIntentInContext(
         binding,
         new URL(requestUrl, 'http://surface-runtime.local'),
       ),
+      dateTimeBindings(view.projections.surface.payload),
     );
   } catch (error) {
     if (error instanceof InvalidSurfaceSubmissionError) {
@@ -1735,6 +1737,16 @@ async function submitSurfaceRuntimeIntentInContext(
       gateways.operationMediation.issueInvocation(view, 'UI'),
     );
   } catch (error) {
+    const entry = dateTimeEntryRefusal(error, input);
+    if (selection.selected.surfaceRole === 'form' && entry) {
+      const page = await renderSurfaceRuntimeWithData(
+        view,
+        requestUrl,
+        gateways,
+        { validation: entry },
+      );
+      return { ...page, statusCode: 422 };
+    }
     const rule = validationRefusalForOperation(
       view,
       operation.operationId,
@@ -1838,14 +1850,12 @@ async function submitSurfaceRuntimeIntentInContext(
     record: result.readBack,
     trustLinked: result.trust !== null,
   };
-  const pageRecordId = new URL(
-    requestUrl,
-    'http://surface-runtime.local',
-  ).searchParams.get('record');
+  const request = new URL(requestUrl, 'http://surface-runtime.local');
+  const pageRecordId = request.searchParams.get('record');
   if (boardOperation && selection.selected.board) {
     const url = new URL(requestUrl, 'http://surface-runtime.local');
     const body = selection.selected.board.body;
-    const stage = result.readBack.values[body.grouping.stateFieldId];
+    const stage = result.readBack.values[body.grouping.state.fieldId];
     if (
       typeof stage === 'string' &&
       body.grouping.stages.some((s) => s.stateId === stage)
@@ -1869,6 +1879,15 @@ async function submitSurfaceRuntimeIntentInContext(
     // a record in the URL and archive responses use the operation read-back.
     return renderSurfaceRuntimeWithData(view, requestUrl, gateways, feedback);
 
+  const companyContext =
+    selection.selected.surfaceRole === 'form' && !binding.query.legalEntityScope
+      ? await landingCompanyContext(
+          view,
+          selection,
+          gateways.queryGateway,
+          request,
+        )
+      : null;
   return renderSelectedSurface(
     view,
     selection,
@@ -1876,11 +1895,8 @@ async function submitSurfaceRuntimeIntentInContext(
     feedback,
     offeredOperations,
     200,
-    legalEntitySelectionForSurface(
-      binding,
-      new URL(requestUrl, 'http://surface-runtime.local'),
-    ),
-    null,
+    legalEntitySelectionForSurface(binding, request),
+    companyContext,
     Object.freeze({}),
     binding.relationInputs,
   );
@@ -1910,6 +1926,14 @@ function renderSelectedSurface(
       data,
       feedback,
       ...(formReferences ? { formReferences } : {}),
+      ...(workspaceContext?.selectedRecordId
+        ? {
+            workingCompany: {
+              parameterId: workspaceContext.parameterId,
+              recordId: workspaceContext.selectedRecordId,
+            },
+          }
+        : {}),
       legalEntitySelection,
       operations,
       queryParameterValues,
@@ -2546,8 +2570,18 @@ function operationInput(
   intent: SurfaceOperationIntent,
   submission: SurfaceRuntimeSubmission,
   legalEntitySelection: readonly string[],
+  dateTime: ReadonlyMap<string, unknown> = new Map(),
 ): SurfaceOperationInput {
-  const values = fieldInput(surface, operation, intent, submission);
+  // A company-sourced dateTime on a shared record resolves through the one
+  // company the writer is working in; the gateway authorizes it.
+  const values = fieldInput(
+    surface,
+    operation,
+    intent,
+    submission,
+    dateTime,
+    legalEntitySelection.length === 1 ? legalEntitySelection[0] : undefined,
+  );
   if (intent === 'create') {
     // ADR-0052: relations travel as a sibling of `values`, keyed by relation id
     // and carrying record ids as strings. `parseMutationInput` reads them
@@ -2631,6 +2665,8 @@ function fieldInput(
   operation: CompiledSurfaceDataBinding['operations'][number],
   intent: SurfaceOperationIntent,
   submission: SurfaceRuntimeSubmission,
+  dateTime: ReadonlyMap<string, unknown> = new Map(),
+  workingCompany?: string,
 ): Readonly<Record<string, RuntimeViewContract.ImmutableJsonValue>> {
   const fields = new Map(
     (operation.inputFields ?? []).map((field) => [field.fieldId, field]),
@@ -2649,6 +2685,22 @@ function fieldInput(
       submission[`${FORM_EMPTY_INTENT_PREFIX}${fieldId}`],
     );
     if (mutation.kind === 'nothing') continue;
+    if (dateTime.has(fieldId) && mutation.kind === 'set') {
+      const entered = dateTimeFromForm(`value:${fieldId}`, submission);
+      const binding = dateTime.get(fieldId) as
+        { zoneSource?: { kind?: string } } | undefined;
+      if (entered.kind === 'set') {
+        const company =
+          workingCompany ?? submission[`value:${fieldId}:company`];
+        entries.push([
+          fieldId,
+          binding?.zoneSource?.kind === 'companyBusinessCalendar' && company
+            ? { ...entered.value, companyId: company }
+            : entered.value,
+        ]);
+      }
+      continue;
+    }
     if (field?.kind === 'addressFieldType' && mutation.kind === 'set') {
       try {
         entries.push([
@@ -2759,6 +2811,49 @@ function readEmptyIntent(
     invalidFormSubmission();
   }
   return value as EmptyIntent;
+}
+
+/**
+ * A refused date-time entry (ADR-0087) comes back as a field error on the
+ * same form with the typed values preserved; a repeated hour carries both
+ * offsets so the control asks for one.
+ */
+function dateTimeEntryRefusal(
+  error: unknown,
+  input: SurfaceOperationInput,
+): {
+  fieldIds: readonly string[];
+  message: string;
+  proposedValues: Readonly<Record<string, unknown>>;
+} | null {
+  if (
+    !(error instanceof Error) ||
+    !('code' in error) ||
+    error.code !== 'MODULE_FIELD_VALUE_INVALID' ||
+    !('details' in error) ||
+    !('subjectId' in error) ||
+    typeof error.subjectId !== 'string'
+  )
+    return null;
+  const details = error.details as Record<string, string>;
+  if (!details.reason?.startsWith('DATE_TIME_')) return null;
+  const values = (input.values ?? input.patch) as
+    Record<string, unknown> | undefined;
+  if (!values || typeof values !== 'object') return null;
+  const entered = values[error.subjectId] as Record<string, unknown> | null;
+  return {
+    fieldIds: [error.subjectId],
+    message: error.message,
+    proposedValues: {
+      ...values,
+      [error.subjectId]: {
+        ...(entered ?? {}),
+        ...(details.offsets
+          ? { offsets: details.offsets.split(',').map(Number) }
+          : {}),
+      },
+    },
+  };
 }
 
 function invalidFormSubmission(): never {

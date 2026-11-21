@@ -12,6 +12,7 @@ import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/
 import { parseAuthoredApplicationPackageJson } from '../../packages/canonical-model/src/index.js';
 import {
   BillingPlanSchema,
+  BILLING_ALLOCATION_READER,
   BILLING_TERMS_CAPABILITY,
   BILLING_QUOTE_CAPABILITY,
 } from '../../packages/canonical-model/src/billing.js';
@@ -24,9 +25,9 @@ import {
   replayBillingQuote,
 } from '../../packages/domain/src/billing/quote.js';
 import {
-  archivedRuntimeRead,
+  type ArchivedRunner,
   withArchivedCustomizationRuntime,
-} from '../helpers/archived-customization-runtime.js';
+} from '../helpers/archived-runtime-process.js';
 import { compileRatePlan } from '../../packages/domain/src/billing/terms.js';
 import {
   compileApplicationRelease,
@@ -42,9 +43,9 @@ import {
   firstPartyAuthored,
   compiledApplication,
 } from '../helpers/customization-fixture.js';
-import { applicationWithoutLineCreateValues } from '../helpers/application-without-line-create-values.js';
 import { withOrderEntryFixture } from '../helpers/order-entry-fixture.js';
 import {
+  archivedBillingBase,
   archivedBillingMigration,
   archivedBillingQuery,
 } from '../helpers/archived-billing-probes.js';
@@ -59,7 +60,9 @@ const quoteId = id('query.billable_quote'),
   sourceId = id('query.sales_order_get'),
   notesField = id('field.sales_order_notes'),
   proposalField = id('field.sales_order_billing_proposal');
-const precedingIntervalReader = 'f1829ea9ce70a886a050e043dce23cb12267335d'; // 67e4efce^1
+const precedingDeclarationReader = 'f25df5af44df132045c67ba29eb9aebe1084dcc7';
+const precedingPublicationWriter = 'f1829ea9ce70a886a050e043dce23cb12267335d';
+const precedingAllocationReader = '352e43b7e428ed1115fd9328db3a6427cf36a58f';
 const readPermission = id('permission.billing_quote'),
   publishPermission = id('permission.billing_publish_terms');
 const plan = BillingPlanSchema.parse({
@@ -102,12 +105,21 @@ const plan = BillingPlanSchema.parse({
     assignmentOperationId: id('operation.billing_assign'),
   },
 });
-function billingFixture(mode: 'bound' | 'legacy' | 'declaration') {
-  const compatibility =
-    mode === 'declaration' ? applicationWithoutLineCreateValues() : undefined;
-  const p = parseAuthoredApplicationPackageJson(
-    JSON.stringify(compatibility?.authored ?? firstPartyAuthored),
-  );
+type BillingFixtureBase = { authored: unknown; release: unknown };
+const currentBase = {
+  authored: firstPartyAuthored,
+  release: compiledApplication,
+};
+
+async function archivedBase(run: ArchivedRunner): Promise<BillingFixtureBase> {
+  return (await run(archivedBillingBase, null)) as BillingFixtureBase;
+}
+
+function billingFixture(
+  mode: 'bound' | 'legacy' | 'declaration',
+  base: BillingFixtureBase = currentBase,
+) {
+  const p = parseAuthoredApplicationPackageJson(JSON.stringify(base.authored));
   const source = p.queries.find((q) => q.queryId === sourceId)!;
   if (source.queryType !== 'get')
     throw new Error('Expected an exact fixture query');
@@ -220,9 +232,7 @@ function billingFixture(mode: 'bound' | 'legacy' | 'declaration') {
             ],
           }
         : boundInput;
-  const old = parseCompiledApplication(
-    compatibility?.release ?? compiledApplication,
-  );
+  const old = parseCompiledApplication(base.release);
   const bytes = normalizedBytes(JSON.parse(JSON.stringify(input))),
     ack = readUnboundPermissionAcknowledgementFor(
       authoredPath,
@@ -231,9 +241,14 @@ function billingFixture(mode: 'bound' | 'legacy' | 'declaration') {
   return { bytes, old, permissions, ack, languageVersion: p.languageVersion };
 }
 
-function release(mode: 'bound' | 'legacy' | 'declaration' = 'bound') {
-  const { bytes, old, permissions, ack, languageVersion } =
-    billingFixture(mode);
+function release(
+  mode: 'bound' | 'legacy' | 'declaration' = 'bound',
+  base?: BillingFixtureBase,
+) {
+  const { bytes, old, permissions, ack, languageVersion } = billingFixture(
+    mode,
+    base,
+  );
   const args = compilerInput(
     bytes,
     expectedActiveReleaseFrom(old.application.compiled),
@@ -335,95 +350,115 @@ test('the compiler refuses an editable notes source', () => {
   release('legacy');
 });
 
-test('the archived serving reader refuses the declaring capacity release', async () => {
-  await withOrderEntryFixture(
-    async (f) => {
-      const { host, port, database, user } = f.pool.options;
-      await withArchivedCustomizationRuntime(
-        'f25df5af44df132045c67ba29eb9aebe1084dcc7',
-        async (run) => {
-          const result = await archivedRuntimeRead(run, {
-            databaseUrl: `postgresql://${user}@${host}:${port}/${database}`,
-            identity: f.app.runtime.identity,
-          });
-          assert.equal(result.code, 'UNSUPPORTED_RUNTIME_CAPABILITY');
-          assert.match(
-            result.message ?? '',
-            /surface-manifest requires version 30/,
-          );
-        },
-      );
-    },
-    'demo',
-    0,
-    0,
-    release('declaration'),
-  );
-});
-
-test('reader 35 answers a stored query and refuses the bound interval release by name', async () => {
-  await withArchivedCustomizationRuntime(
-    precedingIntervalReader,
-    async (run) => {
-      const probe = async (
-        f: Parameters<Parameters<typeof withOrderEntryFixture>[0]>[0],
-      ) => {
-        const { host, port, database, user } = f.pool.options;
-        const stored = () =>
-          f.pool.query(`SELECT
+async function probeArchivedBilling(
+  run: ArchivedRunner,
+  f: Parameters<Parameters<typeof withOrderEntryFixture>[0]>[0],
+) {
+  const { host, port, database, user } = f.pool.options;
+  const stored = () =>
+    f.pool.query(`SELECT
         (SELECT jsonb_agg(to_jsonb(p) ORDER BY to_jsonb(p)) FROM platform.active_release_pointers p) AS pointers,
         (SELECT jsonb_agg(to_jsonb(r) ORDER BY to_jsonb(r)) FROM platform.tenant_releases r) AS releases,
         (SELECT jsonb_agg(to_jsonb(p) ORDER BY to_jsonb(p)) FROM platform.tenant_release_projection_links p) AS projections,
         (SELECT jsonb_agg(to_jsonb(c) ORDER BY to_jsonb(c)) FROM platform.tenant_release_chunk_links c) AS chunks,
         (SELECT jsonb_agg(to_jsonb(r) - 'desired_state' || jsonb_build_object('desired_state', encode(sha256(desired_state), 'hex')) ORDER BY to_jsonb(r)) FROM platform.app_package_revisions r) AS revisions,
         (SELECT jsonb_agg(to_jsonb(b) - 'canonical_bytes' || jsonb_build_object('canonical_bytes', encode(sha256(canonical_bytes), 'hex')) ORDER BY b.content_hash, b.artifact_kind) FROM platform.release_artifact_blobs b) AS artifacts`);
-        const before = (await stored()).rows;
-        const result = (await run(archivedBillingQuery, {
-          databaseUrl: `postgresql://${user}@${host}:${port}/${database}`,
-          identity: f.app.runtime.identity,
-          item: f.item,
-        })) as {
-          outcome: string;
-          code?: string;
-          message?: string;
-          recordIds?: string[];
-        };
-        assert.deepEqual(
-          (await stored()).rows,
-          before,
-          'the archived probe changed stored release bytes',
-        );
-        return result;
-      };
-      await withOrderEntryFixture(async (f) => {
-        assert.deepEqual(await probe(f), {
-          outcome: 'exact',
-          recordIds: [f.item],
-        });
-      });
+  const before = (await stored()).rows;
+  const result = (await run(archivedBillingQuery, {
+    databaseUrl: `postgresql://${user}@${host}:${port}/${database}`,
+    identity: f.app.runtime.identity,
+    item: f.item,
+  })) as {
+    outcome: string;
+    code?: string;
+    message?: string;
+    recordIds?: string[];
+  };
+  assert.deepEqual(
+    (await stored()).rows,
+    before,
+    'the archived probe changed stored release bytes',
+  );
+  return result;
+}
+
+test('the archived serving reader refuses the declaring capacity release', async () => {
+  await withArchivedCustomizationRuntime(
+    precedingDeclarationReader,
+    async (run) => {
+      const base = await archivedBase(run);
       await withOrderEntryFixture(
         async (f) => {
-          const result = await probe(f);
-          assert.equal(result.code, 'UNSUPPORTED_RUNTIME_CAPABILITY');
-          assert.match(
-            result.message ?? '',
-            /surface-manifest requires version 36 and this runtime supports 35/,
-          );
+          assert.deepEqual(await probeArchivedBilling(run, f), {
+            outcome: 'exact',
+            recordIds: [f.item],
+          });
         },
         'demo',
         0,
         0,
-        release(),
+        base.release,
+      );
+      await withOrderEntryFixture(
+        async (f) => {
+          assert.deepEqual(await probeArchivedBilling(run, f), {
+            outcome: 'refused',
+            code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
+            message:
+              'runtime capability northstar.runtime:capability.surface-manifest requires version 30 and this runtime supports 29',
+          });
+        },
+        'demo',
+        0,
+        0,
+        release('declaration', base),
+      );
+    },
+  );
+});
+
+test('the preceding serving reader answers a stored query and refuses first-allocation billing by name', async () => {
+  await withArchivedCustomizationRuntime(
+    precedingAllocationReader,
+    async (run) => {
+      const base = await archivedBase(run);
+      await withOrderEntryFixture(
+        async (f) => {
+          assert.deepEqual(await probeArchivedBilling(run, f), {
+            outcome: 'exact',
+            recordIds: [f.item],
+          });
+        },
+        'demo',
+        0,
+        0,
+        base.release,
+      );
+      await withOrderEntryFixture(
+        async (f) => {
+          assert.deepEqual(await probeArchivedBilling(run, f), {
+            outcome: 'refused',
+            code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
+            message: `runtime capability northstar.runtime:capability.surface-manifest requires version ${BILLING_ALLOCATION_READER} and this runtime supports 39`,
+          });
+        },
+        'demo',
+        0,
+        0,
+        release('bound', base),
       );
     },
   );
 });
 
 test('the billing migrations preserve rates and assignments published by the preceding runtime', async () => {
-  const { bytes, permissions } = billingFixture('legacy');
   await withArchivedCustomizationRuntime(
-    precedingIntervalReader,
+    precedingPublicationWriter,
     async (run) => {
+      const { bytes, permissions } = billingFixture(
+        'legacy',
+        await archivedBase(run),
+      );
       assert.deepEqual(
         await run(archivedBillingMigration, {
           definition: Buffer.from(bytes).toString('utf8'),

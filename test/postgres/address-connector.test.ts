@@ -4,6 +4,9 @@ import {
   AddressProviderError,
 } from '../../packages/postgres-provider/src/address-provider.js';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import test from 'node:test';
 import {
   COMPOSED_APPLICATION_INVENTORY_SCOPE,
@@ -12,13 +15,14 @@ import {
 } from '../../apps/api/src/composition-root.js';
 import {
   ADDRESS_FIELD_READER,
+  ADDRESS_MAP_READER,
   AddressProjectionSchema,
   SavedAddressSchema,
 } from '@north-star/canonical-model';
 import { provisionInventoryScope } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { OperationsAgentSession } from '../../packages/operations-agent/src/session.js';
 import { COMPANY, worldOver } from '../agent/agent-world.js';
-import { applicationWithoutLineCreateValues } from '../helpers/application-without-line-create-values.js';
+import { applicationBeforeStockCountWorkflow } from '../helpers/application-before-stock-count-workflow.js';
 import {
   archivedRuntimeRead,
   assertArchivedTenantEnvelope,
@@ -50,7 +54,7 @@ test(
         const options = {
           databaseUrl,
           tenantSlug: 'address-connector',
-          compiledApplication: applicationWithoutLineCreateValues().release,
+          compiledApplication: applicationBeforeStockCountWorkflow().release,
         };
         const app = await startComposedApplication({ ...options, port: 0 });
         const opened = await openCustomizeService(options);
@@ -369,6 +373,79 @@ test(
           assert.deepEqual(
             (await world.read('item', recordId)).values[address.fieldId],
             value,
+          );
+
+          // Reader 32. No commit ever carried a reader capped at 31, so build
+          // one: this tree's production loader with its surface cap lowered to
+          // the Address field rung. It serves the Address field release and
+          // refuses the release that adds a map placement.
+          const authored = JSON.parse(
+            readFileSync('apps/web/release/app.authored.json', 'utf8'),
+          ) as {
+            surfaces: {
+              surfaceId: string;
+              slots: { slot: string; slotId: string }[];
+            }[];
+          };
+          const surfaceId = 'northstar.app:surface.item_detail';
+          const sections = authored.surfaces
+            .find((s) => s.surfaceId === surfaceId)!
+            .slots.find((s) => s.slot === 'sections')!;
+          const mapDraft = await opened.service.draft(
+            {
+              kind: 'addMapPlacement',
+              schemaVersion: 'v6',
+              placementId: 'northstar.app:placement.custom_item_site_map',
+              surfaceId,
+              sectionId: [surfaceId, 'detail', sections.slotId, 'details'].join(
+                '/',
+              ),
+              fieldId: address.fieldId,
+            },
+            'visualBuilder',
+          );
+          assert.ok(mapDraft.status === 'drafted', JSON.stringify(mapDraft));
+          await opened.service.approve(mapDraft.patchId);
+          await withArchivedCustomizationRuntime(
+            'HEAD',
+            async (run) => {
+              const read = () =>
+                archivedRuntimeRead(run, {
+                  databaseUrl,
+                  identity: app.runtime.identity,
+                });
+              assert.equal(
+                (await read()).outcome,
+                'loaded',
+                'a reader 31 build refused the Address field release',
+              );
+              await opened.service.activate(mapDraft.patchId);
+              const refusal = await read();
+              assert.equal(
+                refusal.code,
+                'UNSUPPORTED_RUNTIME_CAPABILITY',
+                'a reader 31 build did not refuse a map placement release by its floor',
+              );
+              assert.match(
+                refusal.message ?? '',
+                new RegExp(
+                  `surface-manifest requires version ${ADDRESS_MAP_READER}`,
+                ),
+              );
+            },
+            async (workspace) => {
+              const file = join(
+                workspace,
+                'packages/runtime/src/request-runtime-view.ts',
+              );
+              const source = await readFile(file, 'utf8');
+              const capped = source.replace(
+                /(capability\.surface-manifest',[\s\S]*?maximumSupportedVersion: )[\w]+,/u,
+                `$1${ADDRESS_FIELD_READER},`,
+              );
+              assert.notEqual(capped, source, 'the surface cap moved');
+              await writeFile(file, capped);
+            },
           );
         } finally {
           await opened.close();

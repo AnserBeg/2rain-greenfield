@@ -12,7 +12,7 @@ Slice 2a adds reviewed staff decisions. [Slice 1 and its gates](https://github.c
 
 ## Slice 2b — provider enablement and outward sends
 
-Slice 2b stays closed pending CONNECT-1’s canonical connection and outward-send records and their writers. Only a database explicitly claimed for the local demo grants direct address installation writes. Pilot enablement awaits a proof-consuming function. Outward-send confirmation must consume its proof in CONNECT-1’s writer. [ADR-0088](../../decisions/ADR-0088-governed-communications-and-reminders.md)
+Slice 2b stays closed pending CONNECT-1’s canonical connection and outward-send records and their writers. No store mode grants direct address installation writes (CONNECT-1 fix round): `platform.address_configure` is the single enablement entry point and accepts only a database claimed for the local demo. Pilot enablement awaits slice 2b’s proof consumed in that function. Outward-send confirmation must consume its proof in CONNECT-1’s writer. [ADR-0088](../../decisions/ADR-0088-governed-communications-and-reminders.md)
 
 ## Gates and test it yourself
 

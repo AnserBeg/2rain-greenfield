@@ -1,11 +1,15 @@
+import { BOOKING_USAGE_CAPABILITY } from '@north-star/canonical-model';
+import { bookingOwnerUsageReadModel } from './booking-owner-usage.js';
 import { PostgresAddresses } from './address-geocodes.js';
 import { BILLING_QUOTE_CAPABILITY } from '../../canonical-model/src/billing.js';
 import { billingQuoteReadModel } from './billing-quote.js';
+import { LedgerDocumentBrandResolver } from './document-company-brand.js';
 import type { DocumentScanner } from './document-content.js';
 import {
   PostgresDocumentGateway,
   documentPermissionBindings,
 } from './document-attachments.js';
+import type { DocumentFieldAuthority } from './document-template-sources.js';
 import { PostgresDocumentPublication } from './document-publication.js';
 import type pg from 'pg';
 import { parseNormalizedApplicationPackageJson } from '@north-star/canonical-model';
@@ -14,11 +18,17 @@ import {
   type StorageTargetPayloadV1,
   PROJECTION_FAMILY_IDS,
   type CompileSuccess,
+  type ReleaseManifestEnvelope,
 } from '@north-star/compiler';
 import type { ObservabilityMetrics } from '@north-star/observability';
 import { monotonicMilliseconds } from '@north-star/observability';
 import type { MintedUuid } from '@north-star/platform-runtime';
 import type { TrustedRequestContext } from '@north-star/runtime';
+import {
+  RequestRuntimeViewRefusalError,
+  SUPPORTED_RUNTIME_CAPABILITIES,
+  unsupportedRuntimeCapability,
+} from '@north-star/runtime/request-runtime-view';
 import {
   SemanticOperationGateway,
   parsePinnedOperationCatalog,
@@ -40,6 +50,7 @@ import {
   type ModuleProviderErrorMapping,
 } from './module-runtime-interpreter.js';
 import {
+  ADDRESS_CONNECTOR_CONFIGURE_BINDING,
   PostgresCurrentPolicyGateway,
   PostgresSemanticQueryDenialRecorder,
   currentPolicyBindingsFromPermissions,
@@ -116,6 +127,7 @@ export function composeServingGateways(
     options.monotonicMilliseconds,
   );
   const readModels = {
+    [BOOKING_USAGE_CAPABILITY]: bookingOwnerUsageReadModel(runtimePool),
     [BILLING_QUOTE_CAPABILITY]: billingQuoteReadModel(runtimePool),
     [FULFILLMENT_CAPABILITY_ID]: fulfillmentReadModel,
     [COMMERCIAL_CAPABILITY_ID]: commercialReadModelWithInventoryCost,
@@ -133,10 +145,13 @@ export function composeServingGateways(
   const policyFor = (release: ServingRelease) =>
     new PostgresCurrentPolicyGateway(
       runtimePool,
-      releasePolicyBindings(
-        release.normalizedDefinitionBytes,
-        documentOptions !== undefined,
-      ),
+      [
+        ...releasePolicyBindings(
+          release.normalizedDefinitionBytes,
+          documentOptions !== undefined,
+        ),
+        ADDRESS_CONNECTOR_CONFIGURE_BINDING,
+      ],
       parsePinnedOperationCatalog(
         release.projection(PROJECTION_FAMILY_IDS.operationCatalog).payload,
       ),
@@ -188,6 +203,28 @@ export function composeServingGateways(
       ),
       policy,
       queryGateway,
+      documentFields: documentOptions
+        ? new Map(
+            parseNormalizedApplicationPackageJson(
+              release.normalizedDefinitionBytes,
+            ).fields.flatMap((field) =>
+              field.lifecycle === 'active'
+                ? [
+                    [
+                      field.fieldId,
+                      {
+                        classification: field.classification,
+                        fieldKind: field.fieldType.kind,
+                        ...(field.fieldType.kind === 'moneyFieldType' && {
+                          currencyCode: field.fieldType.currencyCode,
+                        }),
+                      },
+                    ] as const,
+                  ]
+                : [],
+            ),
+          )
+        : null,
       storage: (() => {
         if (!documentOptions) return null;
         const payload = release.projection(
@@ -234,6 +271,7 @@ export function composeServingGateways(
         documentPublication,
         operationGateway,
         operationMediation,
+        new LedgerDocumentBrandResolver(queryGateway),
       )
     : null;
   return {
@@ -249,15 +287,69 @@ export function composeServingGateways(
 export interface ServingRelease {
   readonly normalizedDefinitionBytes: Uint8Array;
   readonly projection: (familyId: string) => PinnedCapabilityProjection;
+  readonly releaseManifest: ReleaseManifestEnvelope;
   readonly releaseId: MintedUuid;
   readonly releaseRoot: string;
 }
 
 interface ReleaseServing {
+  readonly documentFields: ReadonlyMap<string, DocumentFieldAuthority> | null;
   readonly storage: StorageTargetPayloadV1 | null;
   readonly operationGateway: SemanticOperationGateway;
   readonly policy: PostgresCurrentPolicyGateway;
   readonly queryGateway: SemanticQueryGateway;
+}
+
+// The request-view registry covers request projections. Whole releases also
+// carry these platform projections, whose declared capabilities are at v1.
+const servingRuntimeCapabilities = {
+  ...SUPPORTED_RUNTIME_CAPABILITIES,
+  [PROJECTION_FAMILY_IDS.policyReferences]: {
+    capabilityId: 'northstar.runtime:capability.policy-references',
+    maximumSupportedVersion: 1,
+  },
+  [PROJECTION_FAMILY_IDS.reporting]: {
+    capabilityId: 'northstar.runtime:capability.reporting-projection',
+    maximumSupportedVersion: 1,
+  },
+  [PROJECTION_FAMILY_IDS.storageTarget]: {
+    capabilityId: 'northstar.runtime:capability.storage-target',
+    maximumSupportedVersion: 1,
+  },
+  [PROJECTION_FAMILY_IDS.storageTransition]: {
+    capabilityId: 'northstar.runtime:capability.storage-transition',
+    maximumSupportedVersion: 1,
+  },
+  [PROJECTION_FAMILY_IDS.verificationPlan]: {
+    capabilityId: 'northstar.runtime:capability.verification-plan',
+    maximumSupportedVersion: 1,
+  },
+};
+
+export class UnsupportedReleaseRuntimeCapabilityError extends RequestRuntimeViewRefusalError {
+  constructor(releaseId: MintedUuid, reason: string) {
+    super('UNSUPPORTED_RUNTIME_CAPABILITY');
+    this.message = `release ${releaseId}: ${reason}`;
+  }
+}
+
+export function assertServingRuntimeCapabilities(
+  releaseId: MintedUuid,
+  manifest: Pick<ReleaseManifestEnvelope, 'projections'>,
+): void {
+  for (const { familyId, requiredRuntimeCapability } of manifest.projections) {
+    const unsupported = unsupportedRuntimeCapability(
+      familyId,
+      requiredRuntimeCapability,
+      servingRuntimeCapabilities,
+    );
+    if (unsupported !== null) {
+      throw new UnsupportedReleaseRuntimeCapabilityError(
+        releaseId,
+        unsupported,
+      );
+    }
+  }
 }
 
 /** A registered release read back from its immutable rows. */
@@ -286,15 +378,17 @@ export async function loadServingRelease(
   if (!manifest) {
     throw new Error(`release ${releaseId} has no release manifest artifact`);
   }
+  const releaseManifest = JSON.parse(
+    new TextDecoder().decode(manifest.canonicalBytes),
+  ) as ReleaseManifestEnvelope;
+  assertServingRuntimeCapabilities(releaseId, releaseManifest);
   const compiled = {
     bundle: {
       artifacts: persisted.artifacts.map((artifact) => ({
         ...artifact,
         kind: 'contentAddressedArtifact' as const,
       })),
-      releaseManifest: JSON.parse(
-        new TextDecoder().decode(manifest.canonicalBytes),
-      ) as unknown,
+      releaseManifest,
     },
     releaseRoot: persisted.release.contentHash,
   } as unknown as CompileSuccess;
@@ -302,6 +396,7 @@ export async function loadServingRelease(
     normalizedDefinitionBytes: revision.desiredState,
     projection: (familyId: string) => projectionBinding(compiled, familyId),
     releaseId,
+    releaseManifest,
     releaseRoot: persisted.release.contentHash,
   });
 }

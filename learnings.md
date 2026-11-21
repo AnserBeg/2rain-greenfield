@@ -834,3 +834,22 @@ How to apply: Evaluate effectiveness at opening and pin the exact visible terms 
 Date: 2026-11-20
 Why: The decimal text of an xid8 includes the transaction epoch and can exceed the xid input range.
 How to apply: Compare receipt xmin with `pg_current_xact_id()::xid` when proving both writes occurred in the same transaction.
+
+
+## Check company-list coverage before stating a tenant-wide total
+
+Date: 2026-11-20
+Why: A tenant-wide customer reader with a company-scoped List could see partial receivables exposure as the full balance.
+How to apply: Carry the policy restriction on the list result, and leave totals unstated when the calculation needs every company. Exercise the mixed-grant principal with a balance in a company it cannot enumerate.
+
+## Check privileges after deployment mode is claimed
+
+Date: 2026-11-20
+Why: Grants assigned while claiming pilot or demo were invisible to checks on a freshly migrated store.
+How to apply: Claim each supported mode and compare its effective privileges against reviewed rows. Keep the unclaimed assertion for the migration baseline. [SIGNIN-1 slice 2a fixes](docs/execution/packets/SIGNIN-1-2a-fixes.md)
+
+## Clear review figures before reopening restricted work
+
+Date: 2026-11-20
+Why: A blind recount's ordinary line queries exposed stored supervisor figures after Return to counting.
+How to apply: Clear stale derived figures in the state transition. Exercise ordinary and derived queries with an actor allowed to enter data and denied access to the source figures. [STOCK-COUNTS-fixes](docs/execution/packets/STOCK-COUNTS-fixes.md)

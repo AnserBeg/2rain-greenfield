@@ -25,6 +25,9 @@ export function archivedRuntimeRead(
 export async function withArchivedCustomizationRuntime<T>(
   revision: string,
   work: (run: ArchivedRunner) => Promise<T>,
+  // Edits the extracted tree before install, for a reader build that no
+  // commit ever carried (a capability cap below the revision's own).
+  prepare?: (workspace: string) => Promise<void>,
 ): Promise<T> {
   const temporary = await mkdtemp(join(tmpdir(), 'north-star-old-reader-'));
   const workspace = join(temporary, 'workspace');
@@ -37,6 +40,7 @@ export async function withArchivedCustomizationRuntime<T>(
     });
     await writeFile(archive, commit.stdout);
     await execute('tar', ['-xf', archive, '-C', workspace]);
+    await prepare?.(workspace);
     const install = [
       'pnpm',
       'install',
@@ -77,6 +81,70 @@ const pool = rolePool(databaseUrl, 'north_star_runtime', 1);
 try {
   const view = await new PostgresRequestRuntimeViewService(pool).load(await trustedContext(identity));
   console.log(JSON.stringify({ outcome: 'loaded', root: view.release.contentHash }));
+} catch (error) {
+  console.log(JSON.stringify({ outcome: 'refused', code: error.code, message: error.message }));
+} finally {
+  await pool.end();
+}
+`;
+
+/**
+ * The previous serving binary's request path with one query issued: it loads
+ * the request view (where capability refusals happen), then resolves a query
+ * from the pinned catalog, which parses that whole catalog. "loaded" alone is
+ * not proof that a reader can serve a release, because catalogs parse lazily.
+ */
+export const archivedServingQuery = `
+import { readFile } from 'node:fs/promises';
+import { rolePool, trustedContext } from './packages/postgres-provider/src/composed-application-runtime.ts';
+import { PostgresRequestRuntimeViewService } from './packages/postgres-provider/src/request-runtime-view-service.ts';
+import { registeredSemanticQueryFromPinnedView } from './packages/runtime/src/semantic-query-gateway.ts';
+const { databaseUrl, identity, queryId } = JSON.parse(await readFile(process.argv[2], 'utf8'));
+const pool = rolePool(databaseUrl, 'north_star_runtime', 1);
+let stage = 'load';
+try {
+  const view = await new PostgresRequestRuntimeViewService(pool).load(await trustedContext(identity));
+  stage = 'query';
+  const query = registeredSemanticQueryFromPinnedView(view, queryId);
+  console.log(JSON.stringify({ outcome: 'served', root: view.release.contentHash, queryId: query.queryId }));
+} catch (error) {
+  console.log(JSON.stringify({ outcome: 'refused', stage, code: error.code ?? error.name, message: error.message }));
+} finally {
+  await pool.end();
+}
+`;
+
+/** Use the archived loader and its governed query gateway on persisted releases. */
+export const archivedStockCountQuery = `
+import { readFile } from 'node:fs/promises';
+import { ObservabilityMetrics } from './packages/observability/src/index.ts';
+import { rolePool, trustedContext } from './packages/postgres-provider/src/composed-application-runtime.ts';
+import { PostgresRequestRuntimeViewService } from './packages/postgres-provider/src/request-runtime-view-service.ts';
+import { composeServingGateways, loadServingRelease } from './packages/postgres-provider/src/serving-gateways.ts';
+import { AuthenticatedRequestRuntimeEntryAdapter } from './packages/runtime/src/request-runtime-view.ts';
+import { AuthenticatedRequestEntryAdapter } from './packages/runtime/src/request-context.ts';
+import { SEMANTIC_QUERY_REQUEST_VERSION } from './packages/runtime/src/semantic-query-gateway.ts';
+const { databaseUrl, identity, queryId, args } = JSON.parse(await readFile(process.argv[2], 'utf8'));
+const pool = rolePool(databaseUrl, 'north_star_runtime', 2);
+try {
+  const service = new PostgresRequestRuntimeViewService(pool);
+  const context = await trustedContext(identity);
+  const active = await service.load(context);
+  const serving = await loadServingRelease(pool, context, active.release.releaseId);
+  const gates = composeServingGateways(pool, pool, context, serving, new ObservabilityMetrics(), {
+    providerErrorMappings: [],
+  });
+  const entry = new AuthenticatedRequestRuntimeEntryAdapter(
+    new AuthenticatedRequestEntryAdapter(async () => identity),
+    service,
+    gates.policy,
+  );
+  const result = await entry.run({ headers: {} }, (view) => gates.queryGateway.invoke(view, {
+    schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+    queryId,
+    arguments: args,
+  }));
+  console.log(JSON.stringify({ outcome: 'queried', root: active.release.contentHash, records: result.records }));
 } catch (error) {
   console.log(JSON.stringify({ outcome: 'refused', code: error.code, message: error.message }));
 } finally {

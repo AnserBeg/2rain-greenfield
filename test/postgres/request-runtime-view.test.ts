@@ -1,16 +1,30 @@
+import { DOCUMENT_TEMPLATES_SURFACE_FLOOR } from '../../packages/canonical-model/src/documents.js';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
 
 import pg from 'pg';
-import { BILLING_INTERVAL_READER } from '../../packages/canonical-model/src/billing.js';
+import {
+  BILLING_ALLOCATION_READER,
+  BILLING_INTERVAL_READER,
+} from '../../packages/canonical-model/src/billing.js';
+import { DATE_TIME_FIELD_READER } from '../../packages/canonical-model/src/date-time-field.js';
 import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../packages/canonical-model/src/surface-workspace.js';
+import { BOARD_READER } from '../../packages/canonical-model/src/board.js';
+import { startComposedApplication } from '../../apps/api/src/composition-root.js';
+import { STOCK_COUNT_PRECEDING_READER } from '../helpers/application-before-stock-count-workflow.js';
+import {
+  archivedStockCountQuery,
+  withArchivedCustomizationRuntime,
+} from '../helpers/archived-runtime-process.js';
 
 import {
+  ADDRESS_MAP_READER,
   CANONICALIZATION_PROFILE_VERSION,
   CONTENT_HASH_ALGORITHM,
   canonicalize,
@@ -83,6 +97,163 @@ import {
 
 const execFileAsync = promisify(execFile);
 const checkedInMigrations = resolve('db/migrations');
+
+test(
+  'STOCK-COUNTS: the archived rung-34 reader serves the prior release and refuses the shipped count release by name',
+  { timeout: 600_000 },
+  async () => {
+    const archivedRevision = STOCK_COUNT_PRECEDING_READER;
+    const releasePath = 'apps/web/release/app.compiled.json';
+    const old = JSON.parse(
+      (
+        await execFileAsync(
+          'git',
+          ['show', `${archivedRevision}:${releasePath}`],
+          {
+            encoding: 'utf8',
+            maxBuffer: 64 * 1024 * 1024,
+          },
+        )
+      ).stdout,
+    );
+    const prior = old.application ?? old.applications.at(-1);
+    const shipped = JSON.parse(await readFile(releasePath, 'utf8'));
+    const priorIndex = shipped.applications.findIndex(
+      (release: { releaseRoot: string }) =>
+        release.releaseRoot === prior.releaseRoot,
+    );
+    assert.ok(priorIndex >= 0 && shipped.applications[priorIndex + 1]);
+    assert.deepEqual(shipped.applications[priorIndex], prior);
+    assert.deepEqual(shipped.bootstrap, old.bootstrap);
+
+    await withEphemeralPostgres(
+      'stock-count-reader',
+      async ({ connection, pool }) => {
+        const databaseUrl = `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`;
+        const currentApp = await startComposedApplication({
+          compiledApplication: {
+            ...shipped,
+            applications: shipped.applications.slice(0, priorIndex + 2),
+          },
+          databaseUrl,
+          port: 0,
+          tenantSlug: 'stock-count-fenced',
+        });
+        try {
+          const [row] = (
+            await pool.query<{
+              desired_state: Buffer;
+              artifacts: Record<string, string>;
+            }>(
+              `SELECT r.desired_state, (
+          SELECT jsonb_object_agg(b.content_hash, encode(b.canonical_bytes, 'base64'))
+            FROM platform.release_artifact_blobs b
+           WHERE b.content_hash = t.content_hash OR EXISTS (
+             SELECT FROM platform.tenant_release_artifact_links l
+              WHERE l.tenant_id = t.tenant_id AND l.environment_id = t.environment_id
+                AND l.release_id = t.release_id AND l.content_hash = b.content_hash
+                AND l.artifact_kind = b.artifact_kind)
+        ) AS artifacts
+          FROM platform.tenant_releases t
+          JOIN platform.app_package_revisions r
+            ON r.tenant_id = t.tenant_id AND r.revision_id = t.app_package_revision_id
+         WHERE t.tenant_id = $1 AND t.environment_id = $2 AND t.content_hash = $3`,
+              [
+                currentApp.runtime.identity.tenantId,
+                currentApp.runtime.identity.environmentId,
+                prior.releaseRoot,
+              ],
+            )
+          ).rows;
+          assert.ok(
+            row,
+            'the prior admitted release is persisted in the shipped lineage',
+          );
+          assert.deepEqual(
+            row.desired_state,
+            Buffer.from(prior.normalizedDefinitionBytesBase64, 'base64'),
+          );
+          const persistedArtifacts = Object.fromEntries(
+            Object.entries(row.artifacts).map(([hash, bytes]) => [
+              hash,
+              Buffer.from(bytes, 'base64'),
+            ]),
+          );
+          assert.deepEqual(
+            persistedArtifacts,
+            Object.fromEntries(
+              prior.artifacts.map(
+                (artifact: {
+                  contentHash: string;
+                  canonicalBytesBase64: string;
+                }) => [
+                  artifact.contentHash,
+                  Buffer.from(artifact.canonicalBytesBase64, 'base64'),
+                ],
+              ),
+            ),
+          );
+
+          const priorApp = await startComposedApplication({
+            compiledApplication: old,
+            databaseUrl,
+            port: 0,
+            tenantSlug: 'stock-count-prior',
+          });
+          try {
+            const item = '71000000-0000-4000-8000-000000000011';
+            const request = {
+              databaseUrl,
+              queryId: 'northstar.app:query.item_get',
+              args: { includeArchived: false, recordId: item },
+            };
+            await withArchivedCustomizationRuntime(
+              archivedRevision,
+              async (run) => {
+                const served = (await run(archivedStockCountQuery, {
+                  ...request,
+                  identity: priorApp.runtime.identity,
+                })) as {
+                  outcome: string;
+                  root?: string;
+                  records?: { recordId: string }[];
+                };
+                assert.equal(served.outcome, 'queried', JSON.stringify(served));
+                assert.equal(served.root, prior.releaseRoot);
+                assert.deepEqual(
+                  served.records?.map((record) => record.recordId),
+                  [item],
+                );
+                const refused = (await run(archivedStockCountQuery, {
+                  ...request,
+                  identity: currentApp.runtime.identity,
+                })) as {
+                  outcome: string;
+                  code?: string;
+                  message?: string;
+                };
+                assert.equal(refused.outcome, 'refused');
+                assert.equal(
+                  refused.code,
+                  'UNSUPPORTED_RUNTIME_CAPABILITY',
+                  JSON.stringify(refused),
+                );
+                assert.match(
+                  refused.message ?? '',
+                  /northstar\.runtime:capability\.surface-manifest.*requires version 35 and this runtime supports 34/u,
+                );
+              },
+            );
+          } finally {
+            await priorApp.close();
+          }
+        } finally {
+          await currentApp.close();
+        }
+      },
+    );
+  },
+);
 
 const tenantA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const tenantB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -176,6 +347,10 @@ test('the capability comparison binds the family to its capability, then compare
     34,
     LINE_CREATE_VALUES_SURFACE_FLOOR,
     BILLING_INTERVAL_READER,
+    BOARD_READER,
+    DOCUMENT_TEMPLATES_SURFACE_FLOOR,
+    DATE_TIME_FIELD_READER,
+    BILLING_ALLOCATION_READER,
   ];
   for (const reader of surfaceFloors) {
     for (const floor of surfaceFloors) {
@@ -229,7 +404,7 @@ test('the capability comparison binds the family to its capability, then compare
   // capability on one side alone reds here rather than in production.
   assert.deepEqual(SUPPORTED_RUNTIME_CAPABILITIES[surface], {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
-    maximumSupportedVersion: BILLING_INTERVAL_READER,
+    maximumSupportedVersion: BILLING_ALLOCATION_READER,
   });
 });
 
@@ -285,6 +460,19 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
   const unsupportedCapabilityForCorruption = withSurfaceCapabilityFloor(
     grouped,
     998,
+  );
+  // CONNECT-1: a surface consumer bound to Address with no connector
+  // declaration, and an Address map floor with no Address consumer at all.
+  const addressBoundUndeclared = withSurfaceCapabilityFloor(
+    grouped,
+    22,
+    (payload) => {
+      payload.addressBindings = [];
+    },
+  );
+  const addressFloorUnbound = withSurfaceCapabilityFloor(
+    grouped,
+    ADDRESS_MAP_READER,
   );
 
   await withEphemeralPostgres(
@@ -402,6 +590,8 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
             [groupedBytes, unsupportedCapabilityFloor],
             [groupedBytes, unsupportedCapabilityAndBadPayload],
             [groupedBytes, unsupportedCapabilityForCorruption],
+            [groupedBytes, addressBoundUndeclared],
+            [groupedBytes, addressFloorUnbound],
           ],
         );
         const policy = new VersionedPolicyAdapter();
@@ -848,7 +1038,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
               ],
               {
                 capabilityId: 'northstar.runtime:capability.surface-manifest',
-                maximumSupportedVersion: BILLING_INTERVAL_READER,
+                maximumSupportedVersion: BILLING_ALLOCATION_READER,
               },
             );
           },
@@ -873,7 +1063,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
               new RegExp(
-                `requires version 999 and this runtime supports ${BILLING_INTERVAL_READER}`,
+                `requires version 999 and this runtime supports ${BILLING_ALLOCATION_READER}`,
               ),
             );
           },
@@ -904,7 +1094,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
               new RegExp(
-                `requires version 999 and this runtime supports ${BILLING_INTERVAL_READER}`,
+                `requires version 999 and this runtime supports ${BILLING_ALLOCATION_READER}`,
               ),
             );
           },
@@ -948,6 +1138,47 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
         // the descriptor and digest checks keeps all four controls green while
         // misreporting both as an under-supported reader. Routed to
         // `runtime-integrity-attribution-untwinned`.
+        // Before the chunk corruption below: the Address map-floor release
+        // shares the grouped surface chunk that subtest corrupts.
+        for (const [index, name, message] of [
+          [
+            6,
+            'a surface bound to Address without a connector declaration',
+            'an Address consumer without a declaration was served',
+          ],
+          [
+            7,
+            'an Address map floor without an Address consumer',
+            'an Address floor without a consumer was served',
+          ],
+        ] as const) {
+          await t.test(`${name} refuses to load`, async () => {
+            await activateRelease(
+              runtimePool,
+              pool,
+              activationService,
+              versionApproverContext,
+              versionContext,
+              versionSystemContext,
+              versionReleases[index]!,
+            );
+            const outcome = await new PostgresRequestRuntimeViewService(
+              runtimePool,
+            )
+              .load(versionContext)
+              .then(
+                () => 'loaded',
+                (error: unknown) =>
+                  `${(error as { code?: string }).code}: ${(error as Error).message}`,
+              );
+            assert.equal(
+              outcome,
+              'MALFORMED_REQUIRED_PROJECTION: Address declarations and consumers disagree.',
+              message,
+            );
+          });
+        }
+
         await t.test(
           'a chunk failing artifact verification reports malformed, not unsupported capability',
           async () => {

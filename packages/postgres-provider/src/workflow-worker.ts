@@ -10,6 +10,8 @@ import {
   WorkflowRemedyRefused,
   type WorkflowBusinessClock,
 } from './workflow-execution.js';
+import { reconcileNextDiscussionNotice } from '../../runtime/src/discussion-inbox.js';
+import { discussionInboxPort } from './personal-inbox.js';
 import { PostgresWorkflowGateway } from './workflow-gateway.js';
 
 /** One scheduler pass. Separate pools keep enumeration off the request role. */
@@ -42,6 +44,13 @@ export class PostgresWorkflowWorker {
       failures.push(error);
     }
     for (const scope of await this.#consumer.scopes()) {
+      try {
+        await reconcileNextDiscussionNotice(
+          discussionInboxPort(this.workerPool, scope),
+        );
+      } catch (error) {
+        failures.push(error);
+      }
       try {
         await this.#consumer.claim(scope);
         await this.#execution.tick(scope);

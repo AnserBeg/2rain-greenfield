@@ -2,6 +2,12 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 
+import { SHARED_LIST_QUERY_VERSION } from '../../packages/runtime/src/list-behavior/index.js';
+import {
+  SEMANTIC_QUERY_REQUEST_VERSION,
+  SemanticQueryPolicyDeniedError,
+} from '../../packages/runtime/src/semantic-query-gateway.js';
+
 import {
   fulfillmentColumn,
   fulfillmentTable,
@@ -125,6 +131,352 @@ function canonical(value: unknown): string {
     ? text.replace(/(\.\d*?[1-9])0+$|\.0+$/u, '$1')
     : text;
 }
+
+test('company-scoped staff see only their companies and can open their own List and Record', async (t) => {
+  await withOrderEntryFixture(async (fixture) => {
+    const { app, pool, scope } = fixture;
+    const other = await fixture.create(
+      'legal_entity',
+      {
+        code: 'OTHER',
+        name: 'Other company',
+        status: `${ns}:option.legal_entity_status_active`,
+        is_default: false,
+      },
+      {},
+      false,
+    );
+    const third = await fixture.create(
+      'legal_entity',
+      {
+        code: 'THIRD',
+        name: 'Third company',
+        status: `${ns}:option.legal_entity_status_active`,
+        is_default: false,
+      },
+      {},
+      false,
+    );
+    const draft = async (companyId: string) => {
+      const recordId = randomUUID();
+      const now = new Date().toISOString();
+      const result = await fixture.invoke(
+        'inventory_transaction_create',
+        {
+          recordId,
+          legalEntityId: companyId,
+          relations: {},
+          values: {
+            [field('actor_id')]: 'company-scope-test',
+            [field('effective_at')]: now,
+            [field('recorded_at')]: now,
+            [field('reason_code')]: 'SETUP',
+            [field('reason_narrative')]: 'Company scope specimen',
+            [field('source_id')]: recordId,
+            [field('source_type')]: 'inventoryTransaction',
+            [field('state')]: option('state_draft'),
+            [field('type')]: option('type_adjustment'),
+          },
+        },
+        undefined,
+        'manager',
+      );
+      assert.equal(result.outcome, 'succeeded');
+      assert.ok(result.readBack);
+      const number = result.readBack.values[field('number')];
+      assert.equal(typeof number, 'string');
+      return { recordId, number: String(number) };
+    };
+    const own = await draft(scope);
+    const foreign = await draft(other.recordId);
+    const headers = { cookie: 'northstar-demo-actor=buyer' };
+    const query = (
+      local: string,
+      args: Record<string, ImmutableJsonValue> = {},
+    ) =>
+      app.runtime.entry.run({ headers }, (view) =>
+        app.runtime.queryGateway.invoke(view, {
+          schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+          queryId: `${ns}:query.${local}`,
+          arguments: args,
+        }),
+      );
+    const companyList = (paged = false) =>
+      query(
+        'legal_entity_list',
+        paged
+          ? {
+              list: {
+                schemaVersion: SHARED_LIST_QUERY_VERSION,
+                cursor: null,
+                matchMode: 'substring',
+                pageSize: 100,
+                search: '',
+                sort: [],
+                relationLabels: [],
+              },
+            }
+          : {},
+      );
+    const companyIds = (result: Awaited<ReturnType<typeof companyList>>) =>
+      result.records.map((row) => row.recordId).sort();
+    const initialCompanies = await companyList();
+    assert.equal(initialCompanies.companyScopeRestricted, undefined);
+    assert.deepEqual(
+      companyIds(initialCompanies),
+      [scope, other.recordId, third.recordId].sort(),
+    );
+    const principalId = await app.runtime.entry.run(
+      { headers },
+      (view) => view.principalId,
+    );
+    const updated = await pool.query(
+      `UPDATE platform.current_policy_memberships
+          SET legal_entity_id = $4
+        WHERE tenant_id = $1 AND environment_id = $2 AND principal_id = $3
+          AND revoked_at IS NULL`,
+      [
+        app.runtime.identity.tenantId,
+        app.runtime.identity.environmentId,
+        principalId,
+        scope,
+      ],
+    );
+    assert.ok(updated.rowCount);
+
+    const loadPage = async (url: string) => {
+      const response = await fetch(url, { headers });
+      return {
+        url: response.url,
+        status: response.status,
+        html: await response.text(),
+      };
+    };
+    const listScope = `${ns}:parameter.inventory_document_list_legal_entity_scope`;
+    const pagePath = (company?: string, record?: string) => {
+      const url = new URL(app.baseUrl);
+      url.searchParams.set(
+        'surface',
+        `${ns}:surface.inventory_transaction_${record ? 'detail' : 'list'}`,
+      );
+      if (record) url.searchParams.set('record', record);
+      if (company)
+        url.searchParams.set(
+          record
+            ? `${ns}:parameter.inventory_transaction_get_legal_entity_scope`
+            : listScope,
+          company,
+        );
+      return url.href;
+    };
+
+    await t.test(
+      'both company list paths return only member companies',
+      async () => {
+        // The company switcher also checks each company's business query, so
+        // exercise the company list directly to catch a leak it would hide.
+        for (const paged of [false, true]) {
+          const companies = await companyList(paged);
+          assert.equal(companies.companyScopeRestricted, true);
+          assert.deepEqual(
+            companyIds(companies),
+            [scope],
+            paged ? 'paged company list rows' : 'plain company list rows',
+          );
+        }
+      },
+    );
+    await t.test(
+      'a company membership does not grant other unscoped reads',
+      async () => {
+        await assert.rejects(
+          query('legal_entity_get', { recordId: scope }),
+          SemanticQueryPolicyDeniedError,
+        );
+        await assert.rejects(
+          query('party_list'),
+          SemanticQueryPolicyDeniedError,
+        );
+      },
+    );
+    await t.test('the List and Record open in the member company', async () => {
+      const list = await loadPage(pagePath());
+      assert.equal(list.status, 200);
+      assert.equal(new URL(list.url).searchParams.get(listScope), scope);
+      assert.ok(
+        list.html.includes(own.recordId),
+        'own stock document appears in the List',
+      );
+      assert.ok(
+        !list.html.includes(foreign.recordId),
+        'other stock document is absent from the List',
+      );
+      const switcher =
+        /<nav[^>]*aria-label="Company"[^>]*>([\s\S]*?)<\/nav>/u.exec(
+          list.html,
+        )?.[1];
+      assert.ok(switcher);
+      assert.deepEqual(
+        [...switcher.matchAll(/data-legal-entity-id="([^"]+)"/gu)].map(
+          (match) => match[1],
+        ),
+        [scope],
+      );
+
+      const record = await loadPage(pagePath(scope, own.recordId));
+      assert.equal(record.status, 200);
+      assert.ok(
+        record.html.includes(own.number),
+        'own stock document rendered',
+      );
+    });
+    await t.test('the List and Record refuse the other company', async () => {
+      for (const url of [
+        pagePath(other.recordId),
+        pagePath(other.recordId, foreign.recordId),
+      ]) {
+        const denied = await loadPage(url);
+        assert.equal(denied.status, 422);
+        assert.match(
+          denied.html,
+          /data-diagnostic-code="WORKSPACE_COMPANY_UNAVAILABLE"/u,
+        );
+      }
+    });
+
+    const settingsUrl = new URL('/?customize=address', app.baseUrl);
+    const options = {
+      provider: 'fake',
+      account: 'own-maps',
+      calls: 10,
+      budgetMicros: 0,
+      enabled: true,
+      enrichment: false,
+    } as const;
+    const managerHeaders = { cookie: 'northstar-demo-actor=manager' };
+    const addresses = app.runtime.addresses;
+    await app.runtime.entry.run({ headers: managerHeaders }, async (view) => {
+      assert.ok(await addresses.configure(view, scope, options));
+      assert.ok(
+        await addresses.configure(view, other.recordId, {
+          ...options,
+          account: 'other-maps',
+        }),
+      );
+    });
+    await t.test('Address settings require the configure grant', async () => {
+      const manager = await fetch(settingsUrl, { headers: managerHeaders });
+      assert.equal(manager.status, 200);
+      const html = await manager.text();
+      assert.match(html, /own-maps/u);
+      assert.match(html, /other-maps/u);
+
+      const buyer = await fetch(settingsUrl, { headers });
+      assert.equal(
+        buyer.status,
+        403,
+        'settings GET requires connector configure',
+      );
+      const attemptedPause = await fetch(settingsUrl, {
+        method: 'POST',
+        headers: { ...headers, origin: settingsUrl.origin },
+        body: new URLSearchParams({
+          companyId: scope,
+          account: options.account,
+          provider: options.provider,
+          action: 'pause',
+          calls: String(options.calls),
+          budget: '0',
+        }),
+      });
+      assert.equal(attemptedPause.status, 403);
+    });
+    await t.test(
+      'Address installations use the member’s companies',
+      async () => {
+        await app.runtime.entry.run({ headers }, async (view) => {
+          assert.deepEqual(
+            (await addresses.installations(view)).map(
+              (account) => account.companyId,
+            ),
+            [scope],
+            'installation lookup stays within the membership',
+          );
+        });
+      },
+    );
+    await t.test(
+      'a manager loses Address write access when the configure grant is revoked',
+      async () => {
+        const { tenantId, environmentId } = app.runtime.identity;
+        const revoked = await pool.query(
+          `UPDATE platform.current_policy_permission_grants SET revoked_at = CURRENT_TIMESTAMP
+          WHERE tenant_id = $1 AND environment_id = $2 AND permission_id = $3
+            AND revoked_at IS NULL`,
+          [
+            tenantId,
+            environmentId,
+            'northstar.runtime:permission.connector_configure',
+          ],
+        );
+        assert.equal(revoked.rowCount, 1);
+        await app.runtime.entry.run(
+          { headers: managerHeaders },
+          async (view) => {
+            await assert.rejects(
+              addresses.configure(view, scope, { ...options, enabled: false }),
+              { reason: 'unconfigured' },
+            );
+            assert.ok(
+              (await addresses.installations(view)).some(
+                (account) => account.companyId === scope,
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    await t.test(
+      'two scoped memberships are combined and a tenant-wide grant takes precedence',
+      async () => {
+        const addMembership = async (company: string | null) => {
+          const { tenantId, environmentId } = app.runtime.identity;
+          const added = await pool.query(
+            `INSERT INTO platform.current_policy_memberships
+             (tenant_id, environment_id, membership_id, principal_id, role_id, legal_entity_id)
+           SELECT tenant_id, environment_id, $5, principal_id, role_id, $6
+             FROM platform.current_policy_memberships
+            WHERE tenant_id = $1 AND environment_id = $2 AND principal_id = $3
+              AND legal_entity_id = $4 AND revoked_at IS NULL`,
+            [
+              tenantId,
+              environmentId,
+              principalId,
+              scope,
+              randomUUID(),
+              company,
+            ],
+          );
+          assert.equal(added.rowCount, 1);
+        };
+
+        await addMembership(other.recordId);
+        const scoped = await companyList(true);
+        assert.equal(scoped.companyScopeRestricted, true);
+        assert.deepEqual(companyIds(scoped), [scope, other.recordId].sort());
+
+        await addMembership(null);
+        const mixed = await companyList(true);
+        assert.equal(mixed.companyScopeRestricted, undefined);
+        assert.deepEqual(
+          companyIds(mixed),
+          [scope, other.recordId, third.recordId].sort(),
+        );
+      },
+    );
+  });
+});
 
 test(
   'INVENTORY-PARITY: a stock document is numbered by the server and posts as itself: an adjustment, a transfer and opening stock, each refused by name when wrong',

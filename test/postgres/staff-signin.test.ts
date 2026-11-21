@@ -405,7 +405,9 @@ test('staff sign-in integrity under the pilot database roles', async (suite) => 
             );
             await pool.query('TRUNCATE north_star_internal.staff_store_mode');
             await claim('demo');
-            await checkConnectorWrites(true);
+            // CONNECT-1: no store mode grants a direct connector write; the
+            // demo claim is checked inside platform.address_configure.
+            await checkConnectorWrites(false);
             const other = randomUUID();
             await pool.query(
               'INSERT INTO platform.environments(tenant_id,id,slug) VALUES($1,$2,$2::uuid::text)',

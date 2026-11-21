@@ -66,7 +66,11 @@ export function parseSerializedRelease(
   const byHash = new Map(
     artifacts.map((artifact) => [artifact.contentHash, artifact]),
   );
+  const normalizedDefinitionBytes = bytes(
+    value.normalizedDefinitionBytesBase64,
+  );
   const compiled = {
+    normalizedDefinitionBytes,
     attestation: value.attestation,
     bundle: {
       artifacts,
@@ -87,7 +91,7 @@ export function parseSerializedRelease(
   } as unknown as CompileSuccess;
   return {
     compiled,
-    normalizedDefinitionBytes: bytes(value.normalizedDefinitionBytesBase64),
+    normalizedDefinitionBytes,
   };
 }
 

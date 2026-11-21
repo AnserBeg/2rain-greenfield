@@ -1,8 +1,16 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import {
+  discloseUpgradeReport,
+  type UpgradeReport,
+} from '../../packages/postgres-provider/src/customization-service.js';
+import { replayCustomizationPatches } from '../../packages/customization/src/upgrade-replay.js';
 import * as customization from '../../packages/customization/src/index.js';
-import { normalizeApplicationPackage } from '../../packages/canonical-model/src/index.js';
+import {
+  normalizeApplicationPackage,
+  type SurfaceLayout,
+} from '../../packages/canonical-model/src/index.js';
 import { VALIDATION_NODE_VERSION } from '../../packages/canonical-model/src/formula-validation.js';
 import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
@@ -41,6 +49,7 @@ const record = {
     { label: 'Status', type: 'choice', options: ['Ready', 'Held'] },
   ],
 };
+
 const extended = applied(base, [record]);
 const field = {
   kind: 'addField',
@@ -115,49 +124,86 @@ const calculated = customization.calculatedDisplayDraft(
     listSurfaceId: id('surface.item_list'),
   },
 );
-const layout = customization
-  .customizationTargets(normalizeApplicationPackage(extended))
-  .layouts!.find(
-    (l) =>
-      l.body.surfaceId === id('surface.custom_equipment_form') &&
-      l.body.mode === 'create',
-  )!;
-const revision = customization.layoutCommand(layout, {
-  action: 'create',
-  label: 'Delivery',
-});
-const workflow = {
-  kind: 'saveWorkflow',
-  workflow: {
-    workflowId: 'after-receiving',
-    schemaVersion: 'v6',
-    trigger: 'goodsReceiptPosted',
-    bodyDigest: 'a'.repeat(64),
-    grants: { queries: [id('query.custom_equipment_list')], operations: [] },
+const template = {
+  kind: 'addDocumentTemplateRevision',
+  schemaVersion: 'northstar.document-template-revision/v1',
+  templateId: id('template.custom_equipment_sheet'),
+  revisionId: id('revision.custom_equipment_sheet_1'),
+  previousRevisionId: null,
+  entityId: equipment,
+  label: 'Equipment sheet',
+  documentKind: 'workOrder',
+  headerQueryId: id('query.custom_equipment_get'),
+  identityFieldId: id('field.custom_equipment_name'),
+  currencyFieldId: null,
+  format: {
+    locale: 'en-CA',
+    timeZone: 'America/Edmonton',
+    currency: 'CAD',
+    dateStyle: 'medium',
+    numberGrouping: true,
+    pageSize: 'LETTER',
   },
+  layout: [{ kind: 'heading', text: 'Equipment sheet' }],
+  pageNumbers: true,
 };
+const templated = applied(extended, [template]);
+function declaration(def: Base, table: string, key: string, subject: string) {
+  const found = (def[table] as Base[]).find((row) => row[key] === subject);
+  assert.ok(found, subject);
+  return found;
+}
 interface ReplayCase {
-  source: Base;
+  source?: Base;
+  prefix?: unknown[];
   conflict: Base;
   change: unknown;
   code: string;
+  subject: string;
 }
-const retired = (change: unknown): ReplayCase => ({
-  source: extended,
-  conflict: base,
-  change,
-  code: 'RETIRED_TARGET',
-});
-const occupied = (
+function retirement(
+  table: string,
+  key: string,
+  subject: string,
   change: unknown,
-  code: string,
-  source = base,
-): ReplayCase => ({
-  source,
-  conflict: applied(source, [change]),
-  change,
-  code,
-});
+): ReplayCase {
+  const conflict = structuredClone(base);
+  declaration(conflict, table, key, subject).lifecycle = 'retired';
+  return { conflict, change, subject, code: 'RETIRED_TARGET' };
+}
+function collision(
+  change: unknown,
+  subject: string,
+  mutate: (target: Base) => void,
+  code = 'ID_COLLISION',
+): ReplayCase {
+  const conflict = structuredClone(base);
+  mutate(conflict);
+  return { conflict, change, subject, code };
+}
+const changeSet = (...patches: unknown[]) => ({ kind: 'changeSet', patches });
+const item = id('entity.item');
+const itemList = id('surface.item_list');
+const itemSku = id('field.item_sku');
+const itemFiles = {
+  ...files,
+  entityId: item,
+  fieldId: id('field.custom_item_photos'),
+};
+const itemRetired = (change: unknown) =>
+  retirement('entities', 'entityId', item, change);
+const listRetired = (change: unknown) =>
+  retirement('surfaces', 'surfaceId', itemList, change);
+const retiredAction = (change: unknown) =>
+  retirement('operations', 'operationId', action.id, change);
+const board = targets.boards!.find(
+  (t) => t.frame.listSurfaceId === id('surface.purchase_order_list'),
+)!;
+const form = targets.layouts!.find(
+  (l) =>
+    l.body.surfaceId === id('surface.sales_order_form') &&
+    l.body.mode === 'create',
+)!;
 const address = {
   kind: 'addAddressField',
   schemaVersion: 'v6',
@@ -176,93 +222,141 @@ const map = {
   sectionId:
     mapSurface + '/detail/northstar.app:slot.item_detail_sections/details',
 };
-const withEquipmentLifecycle = applied(extended, [
-  {
-    kind: 'declareLifecycle',
-    entity: equipment,
-    initial: 'Pending',
-    states: [{ label: 'Pending' }, { label: 'Passed' }],
-    transitions: [{ from: 'Pending', to: 'Passed', label: 'Pass' }],
-  },
-]);
-const equipmentBoard = customization
-  .customizationTargets(normalizeApplicationPackage(withEquipmentLifecycle))
-  .boards!.find((target) => target.body.entityId === equipment)!;
+const appointment = {
+  kind: 'addDateTimeField',
+  schemaVersion: 'northstar.date-time-field/v1',
+  target: { kind: 'tenantRecordType', recordTypeId: equipment },
+  fieldId: id('field.custom_equipment_service_at'),
+  label: 'Service appointment',
+  required: false,
+  zoneSource: { kind: 'perRecordIana', version: 'v1' },
+};
+const cancel = id('operation.purchase_order_draft_cancel');
+const newOption = id('option.custom_equipment_status_loaned');
+const terms = id('field.sales_order_payment_terms');
+function appendOption(target: Base, optionId: string, label: string) {
+  const type = declaration(target, 'fields', 'fieldId', terms).fieldType as {
+    options: Base[];
+  };
+  type.options.push({ ...type.options[0], optionId, label, orderKey: 90 });
+}
 const cases = {
-  addBoardViewRevision: {
-    source: withEquipmentLifecycle,
-    conflict: extended,
-    change: customization.draftBoardRevision(
-      equipmentBoard,
-      'Equipment inspections',
-      equipmentBoard.body.grouping.stages.map((stage) => stage.stateId),
+  addDateTimeField: {
+    source: extended,
+    conflict: applied(extended, [appointment]),
+    change: appointment,
+    code: 'FIELD_COLLISION',
+    subject: appointment.fieldId,
+  },
+  addBoardViewRevision: retirement(
+    'operations',
+    'operationId',
+    cancel,
+    customization.draftBoardRevision(
+      board,
+      'Purchasing stages',
+      customization.defaultBoardChoices(board),
     ),
-    code: 'RETIRED_TARGET',
-  },
-  addAddressField: occupied(address, 'FIELD_COLLISION'),
-  addMapPlacement: {
-    source: applied(base, [address]),
-    conflict: base,
-    change: map,
-    code: 'RETIRED_TARGET',
-  },
-  addRecordType: occupied(record, 'WHOLE_PACKAGE_FAILURE'),
-  addField: retired(field),
-  addChoice: retired({
-    kind: 'addChoice',
-    enumField: id('field.custom_equipment_status'),
-    option: 'Loaned',
-  }),
-  addLink: retired({
-    kind: 'addLink',
-    entity: equipment,
-    target: id('entity.item'),
-    label: 'Product',
-  }),
-  addLineTable: retired({
-    kind: 'addLineTable',
-    entity: equipment,
-    label: 'Parts',
-    fields: [{ label: 'Part', type: 'text' }],
-  }),
-  declareLifecycle: retired({
-    kind: 'declareLifecycle',
-    entity: equipment,
-    initial: 'Pending',
-    states: [{ label: 'Pending' }, { label: 'Passed' }],
-    transitions: [{ from: 'Pending', to: 'Passed', label: 'Pass' }],
-  }),
-  arrangeLayout: retired({
+  ),
+  addAddressField: itemRetired(address),
+  addMapPlacement: retirement(
+    'surfaces',
+    'surfaceId',
+    mapSurface,
+    changeSet(address, map),
+  ),
+  addRecordType: collision(
+    record,
+    String((base.modules as Base[])[0]!.moduleId),
+    (target) => {
+      (target.modules as Base[])[0]!.label = 'Equipment';
+    },
+  ),
+  addField: itemRetired({ ...field, entity: item }),
+  addChoice: collision(
+    changeSet(record, {
+      kind: 'addChoice',
+      enumField: id('field.custom_equipment_status'),
+      option: 'Loaned',
+    }),
+    newOption,
+    (target) => appendOption(target, newOption, 'Loan terms'),
+  ),
+  addLink: itemRetired(
+    changeSet(record, {
+      kind: 'addLink',
+      entity: equipment,
+      target: item,
+      label: 'Product',
+    }),
+  ),
+  addLineTable: collision(
+    changeSet(record, {
+      kind: 'addLineTable',
+      entity: equipment,
+      label: 'Parts',
+      fields: [{ label: 'Part', type: 'text' }],
+    }),
+    id('entity.custom_equipment_lines'),
+    (target) => {
+      (target.entities as Base[]).push({
+        ...(target.entities as Base[])[0],
+        entityId: id('entity.custom_equipment_lines'),
+        label: 'Equipment lines',
+      });
+    },
+  ),
+  declareLifecycle: collision(
+    changeSet(record, {
+      kind: 'declareLifecycle',
+      entity: equipment,
+      initial: 'Pending',
+      states: [{ label: 'Pending' }, { label: 'Passed' }],
+      transitions: [{ from: 'Pending', to: 'Passed', label: 'Pass' }],
+    }),
+    id('permission.custom_equipment_action_pass'),
+    (target) => {
+      (target.permissions as Base[]).push({
+        ...(target.permissions as Base[])[0],
+        permissionId: id('permission.custom_equipment_action_pass'),
+      });
+    },
+  ),
+  arrangeLayout: listRetired({
     kind: 'arrangeLayout',
-    surface: id('surface.custom_equipment_list'),
-    relabel: [{ field: id('field.custom_equipment_name'), label: 'Tool' }],
+    surface: itemList,
+    relabel: [{ field: itemSku, label: 'Code' }],
   }),
-  addLayoutRevision: retired(revision),
-  saveListView: retired({
+  addLayoutRevision: retirement(
+    'surfaces',
+    'surfaceId',
+    form.body.surfaceId,
+    customization.layoutCommand(form, { action: 'create', label: 'Delivery' }),
+  ),
+  saveListView: listRetired({
     kind: 'saveListView',
-    surface: id('surface.custom_equipment_list'),
-    label: 'All tools',
-    columns: [id('list_column.custom_equipment_list_name')],
+    surface: itemList,
+    label: 'Stock codes',
+    columns: [id('list_column.item_list_sku')],
     sort: [],
     filters: [],
   }),
-  addValidation: occupied(rule, 'WHOLE_PACKAGE_FAILURE'),
-  addCalculatedDisplayField: occupied(calculated, 'FIELD_COLLISION'),
-  addMetricCard: retired({
+  addValidation: retirement('fields', 'fieldId', price, rule),
+  addCalculatedDisplayField: retirement('fields', 'fieldId', price, calculated),
+  addMetricCard: listRetired({
     kind: 'addMetricCard',
-    surface: id('surface.custom_equipment_list'),
-    label: 'Equipment count',
+    surface: itemList,
+    label: 'Stock count',
   }),
-  addDocumentField: retired(files),
-  addUploadCategory: retired({
-    kind: 'changeSet',
-    patches: [
+  addDocumentField: itemRetired(itemFiles),
+  addUploadCategory: itemRetired(
+    changeSet(
       {
         kind: 'addUploadCategory',
         schemaVersion: 'northstar.document-category/v1',
-        entityId: equipment,
-        fieldId: files.fieldId,
-        categoryId: id('category.custom_equipment_evidence'),
+        entityId: item,
+        fieldId: itemFiles.fieldId,
+        categoryId: id('category.custom_item_evidence'),
         label: 'Evidence',
         contentTypes: ['image/png'],
         maxBytes: 1024,
@@ -273,22 +367,78 @@ const cases = {
         documentExpiryDate: null,
       },
       {
-        ...files,
-        allowedCategoryIds: [id('category.custom_equipment_evidence')],
+        ...itemFiles,
+        allowedCategoryIds: [id('category.custom_item_evidence')],
       },
-    ],
-  }),
-  narrowPermission: occupied(limit, 'WHOLE_PACKAGE_FAILURE'),
-  unNarrowPermission: {
-    source: applied(base, [limit]),
+    ),
+  ),
+  addDocumentTemplateRevision: {
+    source: extended,
     conflict: base,
-    change: { ...limit, kind: 'unNarrowPermission' },
-    code: 'WHOLE_PACKAGE_FAILURE',
+    change: template,
+    code: 'RETIRED_TARGET',
+    subject: equipment,
   },
-  saveWorkflow: retired(workflow),
-  changeSet: retired({ kind: 'changeSet', patches: [field, files] }),
+  retireDocumentTemplate: {
+    source: templated,
+    conflict: extended,
+    change: {
+      kind: 'retireDocumentTemplate',
+      schemaVersion: 'northstar.document-template-retire/v1',
+      templateId: template.templateId,
+      previousRevisionId: template.revisionId,
+    },
+    code: 'RETIRED_TARGET',
+    subject: template.templateId,
+  },
+  narrowPermission: retiredAction(limit),
+  unNarrowPermission: {
+    ...retiredAction({ ...limit, kind: 'unNarrowPermission' }),
+    prefix: [limit],
+  },
+  saveWorkflow: retirement('queries', 'queryId', id('query.item_list'), {
+    kind: 'saveWorkflow',
+    workflow: {
+      workflowId: 'after-receiving',
+      schemaVersion: 'v6',
+      trigger: 'goodsReceiptPosted',
+      bodyDigest: 'a'.repeat(64),
+      grants: { queries: [id('query.item_list')], operations: [] },
+    },
+  }),
+  changeSet: itemRetired(changeSet({ ...field, entity: item }, itemFiles)),
 } satisfies Record<customization.CustomizationPatchKind, ReplayCase>;
 
+test('an active or retired template never blocks editing its record type', async () => {
+  const retire = {
+    kind: 'retireDocumentTemplate',
+    schemaVersion: 'northstar.document-template-retire/v1',
+    templateId: template.templateId,
+    previousRevisionId: template.revisionId,
+  };
+  const arrange = {
+    kind: 'arrangeLayout',
+    surface: id('surface.custom_equipment_list'),
+    relabel: [{ field: id('field.custom_equipment_name'), label: 'Tool' }],
+  };
+  for (const state of [[template], [template, retire]])
+    for (const edit of [field, arrange]) {
+      const result = await customization.compileInSandbox({
+        acknowledgement,
+        base: extended,
+        chain: [...state, edit].map(patch),
+        tip: customization.serializeRelease(tip),
+      });
+      assert.equal(
+        result.status,
+        'compiled',
+        `${state.length === 1 ? 'active' : 'retired'} template, ${edit.kind}: ${JSON.stringify(result)}`.slice(
+          0,
+          2000,
+        ),
+      );
+    }
+});
 test('upgrade replay admission and its named cases cover the independently parsed vocabulary', () => {
   const admitted = [...customization.UPGRADE_PATCH_KINDS].sort();
   assert.deepEqual(
@@ -320,6 +470,8 @@ test('upgrade diagnostic codes and meanings match v1', () => {
     INCOMPATIBLE_SCOPE: 'A subject has a different scope.',
     FIELD_COLLISION:
       'A first-party field occupies the proposed tenant field ID or name.',
+    ID_COLLISION:
+      'A first-party declaration occupies the proposed tenant ID or name.',
     MISSING_BODY: 'A bound artifact body is missing.',
     REMOVED_ACTION: 'A workflow action is absent.',
     CHANGED_ACTION_SIGNATURE:
@@ -336,16 +488,15 @@ test('upgrade diagnostic codes and meanings match v1', () => {
       'The package cannot be replayed or the refusal is unclassified.',
   });
 });
-for (const [kind, example] of Object.entries(cases)) {
+for (const [kind, example] of Object.entries<ReplayCase>(cases)) {
   test(`upgrade replay of ${kind} accepts a compatible base and identifies a conflicting base`, async () => {
-    const chain = [patch(example.change)];
-    const origins = [
-      {
-        patchId: '7d2d4a88-f026-4485-b081-3be230bc587f',
-        parent: example.source,
-        differentBase: true,
-      },
-    ];
+    const source = example.source ?? base;
+    const chain = [...(example.prefix ?? []), example.change].map(patch);
+    const origins = chain.map((_, index) => ({
+      patchId: String(index + 1),
+      differentBase: true,
+      ...(index === 0 && { parent: source }),
+    }));
     const conflict = customization.compileCustomizationCandidate({
       acknowledgement,
       base: example.conflict,
@@ -359,15 +510,15 @@ for (const [kind, example] of Object.entries(cases)) {
       conflict.findings.some(
         (f) =>
           (kind === 'changeSet' || f.patchKind === kind) &&
+          f.subject === example.subject &&
           f.code === example.code &&
-          f.patchId === origins[0]!.patchId,
+          f.patchId === origins.at(-1)!.patchId,
       ),
       JSON.stringify(conflict),
     );
-    const compatible = structuredClone(example.source);
-    (compatible.fields as { fieldId: string; label: string }[]).find(
-      (f) => f.fieldId === id('field.item_sku'),
-    )!.label = 'Stock identifier';
+    const compatible = structuredClone(source);
+    declaration(compatible, 'fields', 'fieldId', itemSku).label =
+      'Stock identifier';
     const result = await customization.compileInSandbox({
       acknowledgement,
       base: compatible,
@@ -571,5 +722,456 @@ test('an unrelated layout edit is still checked when its sibling refers to a fai
   assert.deepEqual(
     result.blocked.map((b) => [b.patchId, b.editIndex, b.blockedBy.patchId]),
     [['2', 0, '1']],
+  );
+});
+
+function replayApplied(target: Base, change: unknown) {
+  const result = replayCustomizationPatches(
+    target,
+    [patch(change)],
+    [{ parent: base, differentBase: true, patchId: 'saved' }],
+  );
+  assert.ok(
+    result.status === 'applied',
+    JSON.stringify(result.status === 'applied' ? null : result),
+  );
+  return result.authored;
+}
+function replayedLayout(target: Base, revision: customization.LayoutRevision) {
+  const result = replayApplied(target, revision);
+  const surface = declaration(
+    result,
+    'surfaces',
+    'surfaceId',
+    revision.surface,
+  );
+  return (surface.layouts as SurfaceLayout[]).find(
+    (l) => l.body.mode === revision.mode,
+  )!;
+}
+function salesColumns(target: Base) {
+  const page = declaration(
+    target,
+    'surfaces',
+    'surfaceId',
+    salesPage.body.surfaceId,
+  );
+  return (page.composition as { fields: { field: string; orderKey: number }[] })
+    .fields;
+}
+function rename(target: customization.LayoutTarget, member: string) {
+  return customization.layoutCommand(target, {
+    action: 'rename',
+    member,
+    label: 'Office label',
+  });
+}
+test('an appended choice preserves a list column and a form override', () => {
+  const target = structuredClone(base);
+  appendOption(target, id('option.sales_order_payment_terms_net_90'), 'Net 90');
+  const edited = replayApplied(target, {
+    kind: 'arrangeLayout',
+    surface: id('surface.sales_order_list'),
+    order: [terms],
+    relabel: [{ field: terms, label: 'Due terms' }],
+  });
+  const list = declaration(
+    edited,
+    'surfaces',
+    'surfaceId',
+    id('surface.sales_order_list'),
+  ).list as { columns: Base[] };
+  assert.equal(list.columns.find((c) => c.field === terms)?.label, 'Due terms');
+  const layout = replayedLayout(target, rename(form, terms));
+  assert.equal(
+    layout.body.sections.flatMap((s) => s.fields).find((f) => f.id === terms)!
+      .label.text,
+    'Office label',
+  );
+});
+test('a document header label preserves the tenant override on a different base', () => {
+  const target = structuredClone(base);
+  const customer = id('field.sales_order_customer_party_id');
+  for (const surface of target.surfaces as Base[]) {
+    const editor = surface.documentEditor as
+      { headerFormSurfaceId: string; headerFields: Base[] } | undefined;
+    if (editor?.headerFormSurfaceId === form.body.surfaceId)
+      editor.headerFields.find((f) => f.fieldId === customer)!.label = 'Client';
+  }
+  const layout = replayedLayout(target, rename(form, customer));
+  assert.equal(
+    layout.body.sections.flatMap((s) => s.fields).find((f) => f.id === customer)
+      ?.label.text,
+    'Office label',
+  );
+});
+function shiftedDetailsFold() {
+  const target = applied(base, [
+    {
+      ...field,
+      entity: id('entity.sales_order'),
+      field: { label: 'Dock code', type: 'text' },
+    },
+  ]);
+  const added = id('field.custom_sales_order_dock_code');
+  salesColumns(target).find((c) => c.field === added)!.orderKey = 1;
+  return { target, added };
+}
+
+test('an early optional detail field changes the eighth field tier and goes last when it has no predecessor', () => {
+  const { target, added } = shiftedDetailsFold();
+  const eighth = salesPage.body.sections[0]!.fields[7]!;
+  assert.equal(eighth.tier, 'always');
+  const layout = replayedLayout(target, rename(salesPage, eighth.id));
+  const fields = layout.body.sections[0]!.fields;
+  assert.equal(fields.find((f) => f.id === eighth.id)!.tier, 'progressive');
+  assert.equal(
+    fields.find((f) => f.id === eighth.id)!.label.text,
+    'Office label',
+  );
+  assert.equal(fields.at(-1)!.id, added);
+  assert.equal(layout.placementRuleVersion, 1);
+});
+test('a move across a shifted Details fold names the affected tenant edit', () => {
+  const { target } = shiftedDetailsFold();
+  const fields = salesPage.body.sections[0]!.fields;
+  for (const [member, action] of [
+    [fields[7]!.id, 'up'],
+    [fields[6]!.id, 'down'],
+  ] as const) {
+    const move = customization.layoutCommand(salesPage, { action, member });
+    replayApplied(base, move);
+    const result = inspectReplay(target, [move]);
+    assert.equal(result.status, 'replayConflict');
+    assert.deepEqual(
+      result.findings.map((f) => [f.patchId, f.editIndex, f.subject, f.code]),
+      [['1', 0, member, 'MOVED_MEMBER']],
+    );
+  }
+});
+
+function customerLookupFixture() {
+  const target = structuredClone(base);
+  const customer = id('field.sales_order_customer_party_id');
+  const editor = (target.surfaces as Base[])
+    .map(
+      (s) =>
+        s.documentEditor as
+          { headerFormSurfaceId: string; headerFields: Base[] } | undefined,
+    )
+    .find((e) => e?.headerFormSurfaceId === form.body.surfaceId)!;
+  const reference = editor.headerFields.find((f) => f.fieldId === customer)!
+    .reference as Base;
+  return { target, customer, reference };
+}
+
+test('a changed document lookup query conflicts with the tenant field override', () => {
+  const { target, customer, reference } = customerLookupFixture();
+  reference.queryId = id('query.item_list');
+  const result = inspectReplay(target, [rename(form, customer)]);
+  assert.equal(result.status, 'replayConflict');
+  assert.deepEqual(
+    result.findings.map((f) => [f.subject, f.code]),
+    [[customer, 'INCOMPATIBLE_TYPE']],
+  );
+});
+
+test('a future binding named label outside the display paths still conflicts', () => {
+  const { target, customer, reference } = customerLookupFixture();
+  reference.label = id('field.item_sku');
+  const result = replayCustomizationPatches(
+    target,
+    [patch(rename(form, customer))],
+    [{ parent: base, differentBase: true, patchId: 'saved' }],
+  );
+  assert.equal(result.status, 'replayConflict');
+  assert.deepEqual(
+    result.findings.map((f) => [f.subject, f.code]),
+    [[customer, 'INCOMPATIBLE_TYPE']],
+  );
+});
+
+test('moving a section does not bind its untouched children', () => {
+  const shipping = salesPage.body.sections.find((s) =>
+    s.fields.some((f) => f.id === city),
+  )!;
+  const layout = replayedLayout(
+    salesDefinition('retired'),
+    customization.layoutCommand(salesPage, {
+      action: 'up',
+      member: shipping.id,
+    }),
+  );
+  assert.ok(
+    !layout.body.sections.flatMap((s) => s.fields).some((f) => f.id === city),
+  );
+  assert.equal(
+    layout.body.order.indexOf(shipping.id),
+    salesPage.body.order.indexOf(shipping.id) - 1,
+  );
+});
+test('a renamed member may cross an untouched sibling on its base', () => {
+  const target = structuredClone(base);
+  const region = id('field.sales_order_ship_to_region');
+  const fields = salesColumns(target);
+  const a = fields.find((c) => c.field === city)!;
+  const b = fields.find((c) => c.field === region)!;
+  [a.orderKey, b.orderKey] = [b.orderKey, a.orderKey];
+  const layout = replayedLayout(target, rename(salesPage, region));
+  const group = layout.body.sections.find((s) =>
+    s.fields.some((f) => f.id === region),
+  )!.fields;
+  assert.ok(
+    group.findIndex((f) => f.id === region) <
+      group.findIndex((f) => f.id === city),
+  );
+  assert.equal(group.find((f) => f.id === region)!.label.text, 'Office label');
+});
+test('a change of scope reports the expected and observed classification', () => {
+  const target = structuredClone(base);
+  declaration(target, 'fields', 'fieldId', price).classification =
+    'confidential';
+  const result = inspectReplay(target, [rule]);
+  assert.equal(result.status, 'replayConflict');
+  assert.deepEqual(
+    result.findings.map((f) => [f.code, f.subject, f.expected, f.observed]),
+    [['INCOMPATIBLE_SCOPE', price, 'internal', 'confidential']],
+  );
+});
+test('a valid historical edit must reproduce on its recorded parent', () => {
+  const revision = rename(form, terms);
+  revision.resultLayoutDigest = '0'.repeat(64);
+  const result = inspectReplay(base, [revision]);
+  assert.equal(result.status, 'replayConflict');
+  assert.deepEqual(
+    result.findings.map((f) => [f.patchId, f.code]),
+    [['1', 'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE']],
+  );
+  assert.match(String(result.findings[0]!.observed), /digest/u);
+});
+test('an ordinary draft needs the authoring parent of each different-base layout', () => {
+  const result = customization.applyCustomizationPatches(
+    base,
+    [rename(form, terms)],
+    [{ patchId: 'saved', differentBase: true }],
+  );
+  assert.equal(result.status, 'refused');
+  assert.match(result.message, /authoring parent is missing/u);
+});
+test('report subjects are sorted inside each edit before moving to the next patch', () => {
+  const target = structuredClone(base);
+  const sku = id('field.item_sku'),
+    name = id('field.item_name');
+  for (const subject of [sku, name])
+    declaration(target, 'fields', 'fieldId', subject).lifecycle = 'retired';
+  const result = inspectReplay(target, [
+    {
+      kind: 'arrangeLayout',
+      surface: itemList,
+      relabel: [
+        { field: sku, label: 'Code' },
+        { field: name, label: 'Title' },
+      ],
+    },
+    {
+      kind: 'arrangeLayout',
+      surface: itemList,
+      relabel: [{ field: name, label: 'Stock' }],
+    },
+  ]);
+  assert.equal(result.status, 'replayConflict');
+  assert.deepEqual(
+    result.findings.map((f) => [f.patchIndex, f.editIndex, f.subject]),
+    [
+      [0, 0, name],
+      [0, 0, sku],
+      [1, 0, name],
+    ],
+  );
+});
+
+test('the final formula check identifies retired and retyped operands of rules and calculations', () => {
+  const original = normalizeApplicationPackage(base);
+  for (const change of [rule, calculated]) {
+    const source = normalizeApplicationPackage(applied(base, [change]));
+    for (const retired of [true, false]) {
+      const destination = structuredClone(original);
+      const operand = destination.fields.find((f) => f.fieldId === price)!;
+      if (retired) operand.lifecycle = 'retired';
+      else
+        operand.fieldType = {
+          ...operand.fieldType,
+          kind: 'textFieldType',
+          maximumLength: 64,
+        } as typeof operand.fieldType;
+      const finding = customization.finalFormulaConflict(
+        source,
+        destination,
+        original,
+        [patch(change)],
+        [{ patchId: 'formula' }],
+      );
+      assert.deepEqual(
+        [finding?.patchId, finding?.subject, finding?.code],
+        ['formula', price, retired ? 'RETIRED_TARGET' : 'INCOMPATIBLE_TYPE'],
+      );
+    }
+  }
+});
+
+test('a removed or reordered choice keeps its field conflict on lists and forms', () => {
+  for (const change of ['remove', 'reorder']) {
+    const target = structuredClone(base);
+    const type = declaration(target, 'fields', 'fieldId', terms).fieldType as {
+      options: Base[];
+    };
+    if (change === 'remove') type.options.pop();
+    else type.options[0]!.orderKey = 5;
+    for (const edit of [
+      {
+        kind: 'arrangeLayout',
+        surface: id('surface.sales_order_list'),
+        order: [terms],
+      },
+      rename(form, terms),
+    ]) {
+      const result = inspectReplay(target, [edit]);
+      assert.equal(result.status, 'replayConflict');
+      assert.deepEqual(
+        result.findings.map((f) => [f.subject, f.code]),
+        [[terms, 'INCOMPATIBLE_TYPE']],
+      );
+    }
+  }
+});
+
+test('permission replay distinguishes an occupied restriction from a missing operation or restriction', () => {
+  const retired = structuredClone(base);
+  declaration(retired, 'operations', 'operationId', action.id).lifecycle =
+    'retired';
+  for (const [target, edit, code] of [
+    [applied(base, [limit]), limit, 'ID_COLLISION'],
+    [retired, limit, 'RETIRED_TARGET'],
+    [base, { ...limit, kind: 'unNarrowPermission' }, 'RETIRED_TARGET'],
+  ] as const) {
+    const result = replayCustomizationPatches(target, [patch(edit)]);
+    assert.equal(result.status, 'replayConflict');
+    assert.deepEqual(
+      result.findings.map((f) => [f.code, f.subject]),
+      [[code, action.id]],
+    );
+  }
+});
+
+test('an unclassified package refusal carries the package ID and no patch attribution', () => {
+  const target = applied(
+    base,
+    Array.from({ length: 8 }, (_, i) => ({
+      kind: 'addMetricCard',
+      label: 'Platform count ' + i,
+      surface: itemList,
+    })),
+  );
+  const result = inspectReplay(target, [
+    { kind: 'addMetricCard', surface: itemList, label: 'Office count' },
+  ]);
+  assert.equal(result.status, 'replayConflict');
+  assert.deepEqual(
+    result.findings.map((f) => [
+      f.code,
+      f.subject,
+      f.patchId,
+      f.patchIndex,
+      f.patchKind,
+    ]),
+    [
+      [
+        'WHOLE_PACKAGE_FAILURE',
+        id('package.application'),
+        undefined,
+        undefined,
+        undefined,
+      ],
+    ],
+  );
+});
+
+test('a refused report redacts protected evidence on either side, its issue and summary', () => {
+  const report: UpgradeReport = {
+    version: 'northstar.upgrade-report/v1',
+    upgradeId: 'upgrade',
+    tenantId: 'tenant',
+    environmentId: 'env',
+    sourceReleaseId: 'source',
+    sourceFence: '2',
+    targetPackageId: 'pkg',
+    targetVersion: '3',
+    targetRoot: 'root',
+    approvalMode: 'Manual',
+    blocked: [],
+    findings: [
+      {
+        code: 'INCOMPATIBLE_SCOPE',
+        subject: 'one',
+        expected: { field: 'private-id' },
+        observed: 'public',
+      },
+      {
+        code: 'INCOMPATIBLE_SCOPE',
+        subject: 'two',
+        expected: null,
+        observed: { label: 'Confidential label' },
+      },
+      {
+        code: 'INCOMPATIBLE_SCOPE',
+        subject: 'three',
+        expected: 'internal',
+        observed: 'public',
+      },
+    ],
+  };
+  const fields = [
+    { fieldId: 'private-id', label: 'Private', classification: 'restricted' },
+    {
+      fieldId: 'sensitive-id',
+      label: 'Confidential label',
+      classification: 'confidential',
+    },
+    { fieldId: 'three', label: 'Public label', classification: 'public' },
+  ];
+  const visible = discloseUpgradeReport(
+    report,
+    'Changed private-id',
+    'INCOMPATIBLE_SCOPE',
+    fields,
+  );
+  assert.equal(
+    visible.message,
+    customization.UPGRADE_CODES_V1.INCOMPATIBLE_SCOPE,
+  );
+  assert.deepEqual(
+    visible.report.findings.map((f) => [f.subject, f.expected, f.observed]),
+    [
+      ['Restricted field', 'Restricted', 'Restricted'],
+      ['Restricted field', 'Restricted', 'Restricted'],
+      ['three', 'internal', 'public'],
+    ],
+  );
+  assert.deepEqual(
+    visible.issues.map((i) => JSON.parse(i)),
+    visible.report.findings,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(visible),
+    /private-id|Confidential label/u,
+  );
+  const historical = discloseUpgradeReport(
+    report,
+    'Detailed refusal',
+    'INCOMPATIBLE_SCOPE',
+    null,
+  );
+  assert.ok(
+    historical.report.findings.every((f) => f.subject === 'Restricted field'),
   );
 });

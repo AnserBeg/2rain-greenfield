@@ -1,8 +1,9 @@
-import { BILLING_INTERVAL_READER } from '../../canonical-model/src/billing.js';
 import {
-  BOOKING_OPERATION_READER,
+  BOOKING_FULFILMENT_READER,
   CONNECTOR_FAMILY,
+  OPTIONAL_DEPENDENCY_QUERY_READER,
 } from '@north-star/canonical-model';
+import { BILLING_ALLOCATION_READER } from '../../canonical-model/src/billing.js';
 import {
   assertTrustedRequestContext,
   type AuthenticatedRequestEntryAdapter,
@@ -185,7 +186,7 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.operation]: {
     capabilityId: 'northstar.runtime:capability.operation-catalog',
-    maximumSupportedVersion: BOOKING_OPERATION_READER,
+    maximumSupportedVersion: BOOKING_FULFILMENT_READER,
   },
   [REQUEST_RUNTIME_FORMULA_RULE_FAMILY]: {
     capabilityId: 'northstar.runtime:capability.formula-rule',
@@ -193,7 +194,9 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.query]: {
     capabilityId: 'northstar.runtime:capability.query-catalog',
-    maximumSupportedVersion: 4,
+    // 2 read models, 3 list sums, 4 calculated displays, 5 booking owner
+    // usage, 6 optional read-model dependencies.
+    maximumSupportedVersion: OPTIONAL_DEPENDENCY_QUERY_READER,
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.surface]: {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
@@ -230,7 +233,12 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 34 reads the versioned placement rule on replayed layouts.
     // 35 adds draft line create values.
     // 36 binds agreed billing intervals to selected source fields.
-    maximumSupportedVersion: BILLING_INTERVAL_READER,
+    // 37 replaces Board v1 with Board v2: chosen stages, moves and facts by
+    // stable ID with pinned contracts, labels from the release.
+    // 38 adds document templates and governed PDF generation.
+    // 39 reads tenant dateTime fields (ADR-0087).
+    // 40 pins the terms and assignment at first billing allocation.
+    maximumSupportedVersion: BILLING_ALLOCATION_READER,
   },
 });
 
@@ -387,6 +395,8 @@ export interface CurrentPolicyDecisionRequest extends CurrentPolicySubject {
 }
 
 export interface CurrentPolicyDecision {
+  /** Row restriction issued only for the registered company list. */
+  readonly companyListLegalEntityIds?: readonly string[];
   readonly decision: 'ALLOW' | 'DENY';
   readonly decisionVersion: typeof CURRENT_POLICY_DECISION_VERSION;
   readonly policyVersion: string;

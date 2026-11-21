@@ -1,4 +1,5 @@
-import { draftBoardRevision } from './board-revision.js';
+import { defaultBoardChoices, draftBoardRevision } from './board-revision.js';
+import { z } from 'zod';
 import { layoutCommand } from './layout-revision.js';
 import { WorkflowDraftSchema, type WorkflowDraft } from './workflow-draft.js';
 import {
@@ -10,6 +11,7 @@ import {
   CUSTOMIZATION_CHANGE_MEMBER_KINDS,
   CUSTOMIZATION_PATCH_KINDS,
   MAX_CUSTOMIZATION_CHANGE_PATCHES,
+  AddDateTimeFieldSchema,
   parseCustomizationPatch,
   unsupported,
 } from './patch.js';
@@ -78,6 +80,9 @@ export interface DraftingModel {
 }
 
 export const DRAFT_CUSTOMIZATION_TOOL = 'draft_customization' as const;
+export function draftingToolInputSchema(): Readonly<Record<string, unknown>> {
+  return TOOL.inputSchema;
+}
 
 export type DraftedRequest =
   | { readonly patch: CustomizationPatch; readonly status: 'parsed' }
@@ -99,6 +104,28 @@ const fieldSchema = {
   required: ['label', 'type'],
 } as const;
 
+// ADR-0087: the drafter's keys for addDateTimeField are generated from the
+// member's own schema, so the drafter and the parser cannot drift apart. Its
+// object target joins addLink's string target rather than replacing it.
+const {
+  kind: _dateTimeKind,
+  label: _dateTimeLabel,
+  required: _dateTimeRequired,
+  target: dateTimeTarget,
+  ...dateTimeMemberProperties
+} = (
+  z.toJSONSchema(AddDateTimeFieldSchema) as {
+    properties: Record<string, unknown>;
+  }
+).properties;
+void _dateTimeKind;
+void _dateTimeLabel;
+void _dateTimeRequired;
+export const DATE_TIME_DRAFTER_PROPERTIES = Object.freeze({
+  ...dateTimeMemberProperties,
+  target: dateTimeTarget,
+});
+
 const singlePatchSchema = {
   type: 'object',
   properties: {
@@ -109,7 +136,8 @@ const singlePatchSchema = {
     label: { type: 'string' },
     fields: { type: 'array', items: fieldSchema },
     entity: { type: 'string' },
-    target: { type: 'string' },
+    target: { anyOf: [{ type: 'string' }, dateTimeTarget] },
+    ...dateTimeMemberProperties,
     required: { type: 'boolean' },
     companyOwnership: { enum: ['entityOwned', 'tenantShared'] },
     initial: { type: 'string' },
@@ -382,16 +410,32 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
       (form) =>
         `- ${form.surfaceId} — ${form.label}: ${form.fields.map((field) => `${field.fieldId} "${field.label}"`).join(', ')}`,
     ),
-    '- addBoardViewRevision {kind,surface,label,stageIds}: choose a listed collection and ordered lifecycle stages.',
+    '- addBoardViewRevision {kind,surface,label,stageIds,operationIds,factFieldIds}: choose a listed collection, its ordered lifecycle stages, the moves offered between them (by operation ID) and up to three card facts (by field ID). Each choice is recorded by ID.',
     ...(targets.boards ?? []).map(
       (t) =>
-        t.body.listSurfaceId +
+        t.frame.listSurfaceId +
         ' ' +
         t.listLabel +
-        ' ' +
-        t.body.grouping.stages
-          .map((stage) => stage.stateId + ' ' + stage.label)
-          .join(', '),
+        ' stages: ' +
+        t.stages.map((stage) => stage.stateId + ' ' + stage.label).join(', ') +
+        '; moves: ' +
+        (t.moves
+          .map(
+            (m) =>
+              m.operationId +
+              ' ' +
+              m.label +
+              ' (' +
+              m.fromStateId +
+              ' -> ' +
+              m.toStateId +
+              ')',
+          )
+          .join(', ') || 'none') +
+        '; facts: ' +
+        (t.facts.map((f) => f.fieldId + ' ' + f.label).join(', ') || 'none') +
+        '; default facts: ' +
+        (t.defaultFacts.join(', ') || 'none'),
     ),
     '- addLayoutRevision {kind,surface,mode,layoutEdit:{action,member?,destination?,label?}}. Create a section with label. Rename a member, move a field to a destination section, or move a member up/down. Use listed IDs.',
     ...(targets.layouts ?? []).map(
@@ -451,7 +495,7 @@ export async function draftPatchFromRequest(
   const system =
     draftingSystemPrompt(targets) +
     (targets.workflowSdk
-      ? `\nFor a receipt workflow use saveWorkflow with workflow {schemaVersion:"v6", workflowId, trigger:"goodsReceiptPosted", grants:{operations,queries}}, a TypeScript body and fixtures. Each fixture has an event {type:"goodsReceiptPosted", eventId, receiptId, legalEntityId} and effects in execution order {call, result}. Use the exact canonical IDs in these SDK declarations and declare only the calls the body makes. Sleep uses milliseconds and yields null. requestApproval yields a boolean. Never call operations or read live records to test a draft.\n${targets.workflowSdk}`
+      ? `\nFor a receipt workflow use saveWorkflow with workflow {schemaVersion:"v6", workflowId, trigger:"goodsReceiptPosted", grants:{operations,queries}}, a TypeScript body and fixtures. Each fixture has an event {type:"goodsReceiptPosted", eventId, receiptId, legalEntityId} and effects in execution order {call, result}. Use the exact canonical IDs in these SDK declarations and declare only the calls the body makes. Sleep uses milliseconds (up to 90 days) and yields null. For requests to wait for an external event, return unsupported with missingCapability "durable external-event waits (named gap)". requestApproval yields a boolean. Never call operations or read live records to test a draft.\n${targets.workflowSdk}`
       : '');
   const conversation: DraftingConversationEntry[] = [{ role: 'user', text }];
   let issues: readonly string[] = ['the model proposed no change'];
@@ -598,22 +642,36 @@ function readToolInput(
   ) {
     const req = input as Record<string, unknown>;
     const target = targets.boards?.find(
-      (t) => t.body.listSurfaceId === req.surface,
+      (t) => t.frame.listSurfaceId === req.surface,
     );
+    const ids = (value: unknown): value is string[] =>
+      Array.isArray(value) && value.every((id) => typeof id === 'string');
     if (
       !target ||
       typeof req.label !== 'string' ||
-      !Array.isArray(req.stageIds) ||
-      !req.stageIds.every((id): id is string => typeof id === 'string')
+      !ids(req.stageIds) ||
+      (req.operationIds !== undefined && !ids(req.operationIds)) ||
+      (req.factFieldIds !== undefined && !ids(req.factFieldIds))
     )
       return {
         status: 'invalid',
         issues: ['Choose a declared collection and its lifecycle stages.'],
       };
+    // The drafter may leave moves or facts to the builder's default offer; the
+    // patch still records the resulting explicit IDs.
+    const offered = defaultBoardChoices(target, req.stageIds);
     try {
       return {
         status: 'parsed',
-        patch: draftBoardRevision(target, req.label, req.stageIds),
+        patch: draftBoardRevision(target, req.label, {
+          stateIds: req.stageIds,
+          operationIds: ids(req.operationIds)
+            ? req.operationIds
+            : offered.operationIds,
+          factFieldIds: ids(req.factFieldIds)
+            ? req.factFieldIds
+            : offered.factFieldIds,
+        }),
       };
     } catch (error) {
       return { status: 'invalid', issues: [(error as Error).message] };

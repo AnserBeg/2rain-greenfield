@@ -64,8 +64,7 @@ test('INVENTORY-PARITY: the standalone kernel harness keeps the module it has al
   assert.deepEqual(inventoryModuleDefinition(ns, {}), standalone);
   const declared = fields(standalone);
   assert.equal(declared.get(transaction('number'))!.numbering, undefined);
-  // Only the two documents' numbers differ between the two: the stock
-  // document's STK- and the stock count's CNT- (STOCK-COUNTS).
+  // Document entry adds numbering and the stock count workflow's evidence.
   const composed = fields(
     inventoryModuleDefinition(ns, { documentEntry: true }),
   );
@@ -77,6 +76,10 @@ test('INVENTORY-PARITY: the standalone kernel harness keeps the module it has al
   assert.deepEqual(differing, [
     transaction('number'),
     `${ns}:field.stock_count_number`,
+    `${ns}:field.stock_count_state`,
+    `${ns}:field.stock_count_count_type`,
+    `${ns}:field.stock_count_counting_mode`,
+    `${ns}:field.stock_count_line_physical_quantity`,
   ]);
 });
 

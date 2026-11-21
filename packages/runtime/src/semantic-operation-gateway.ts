@@ -2,6 +2,7 @@ import {
   BOOKING_CAPABILITY,
   BookingOperationBinding,
 } from '@north-star/canonical-model';
+import { authorizedDateTimeWorkingCompany } from './date-time-working-company.js';
 import { recordCatalogParse } from './catalog-parse-count.js';
 import {
   createHash,
@@ -266,6 +267,11 @@ export interface SemanticOperationExecutionRequest {
   readonly policyVersion: string;
   readonly readBackDefinition: RegisteredQueryDefinition;
   readonly view: IssuedRequestRuntimeView;
+  /**
+   * ADR-0087: the writer's working company for a company-sourced dateTime
+   * field on a shared record type, authorized by this operation's policy.
+   */
+  readonly dateTimeWorkingCompany?: string;
 }
 
 export interface RegisteredCapabilityOperationExecutionRequest {
@@ -984,7 +990,14 @@ export class SemanticOperationGateway {
             schemaVersion: OPERATION_POLICY_INPUT_VERSION,
           }),
         );
+      const dateTimeWorkingCompany = await authorizedDateTimeWorkingCompany(
+        view.projections.operation.payload,
+        definition,
+        request.input,
+        authorizeOperation,
+      );
       const commonExecution = {
+        ...(dateTimeWorkingCompany ? { dateTimeWorkingCompany } : {}),
         channel: invocation.channel,
         context: trustedContextForRequestRuntimeView(view),
         idempotencyKey: request.idempotencyKey,
@@ -1289,8 +1302,14 @@ function parseOperationCatalogPayload(
       'operations',
       'schemaVersion',
       ...(Object.hasOwn(payload, 'addressBindings') ? ['addressBindings'] : []),
+      ...(Object.hasOwn(payload, 'dateTimeBindings')
+        ? ['dateTimeBindings']
+        : []),
       ...(Object.hasOwn(payload, 'documentBindings')
         ? ['documentBindings']
+        : []),
+      ...(Object.hasOwn(payload, 'documentTemplatePointers')
+        ? ['documentTemplatePointers']
         : []),
     ],
     (message) => new MalformedPinnedOperationCatalogError(message),

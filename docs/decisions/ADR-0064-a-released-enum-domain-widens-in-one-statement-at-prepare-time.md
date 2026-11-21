@@ -64,7 +64,13 @@ fired:
    missing element was. What remains is a scope limit — the scenario probes one
    witness, the first-declared option — and it is filed, not fixed here.
 
-## Decision
+## UPGRADE-2 amendment (2026-11-20)
+
+An option or lifecycle-stage label is presentation. Compare released enum columns using the previous labels for shared IDs. A pure relabel plans zero elements; a relabel alongside new options plans the same widening. Existing option order, IDs and all other column properties retain the checks below.
+
+The planner and provider use the same lowered enum-column comparison. All column and contract properties must match except the historical fingerprint and added option IDs. The planner verifies source properties hidden in the fingerprint against the authenticated predecessor. The provider checks physical compatibility and the planner additionally refuses reorder. When live roots coexist, the catalog merge keeps the wider column, or the complete column with the lexicographically smaller fingerprint for equal domains. The CHECK still contains only option IDs.
+
+## Original decision
 
 **1. A `widenEnumDomain` element exists, and a widening plans as exactly one.**
 When the previous release carries an enum-domain CHECK under the same physical

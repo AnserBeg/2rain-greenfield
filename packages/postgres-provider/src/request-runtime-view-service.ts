@@ -1,12 +1,19 @@
 import { boardBindingsProblem } from './board-admission.js';
 import {
+  dateTimeBindingsProblem,
+  declaredDateTimeFields,
+} from './date-time-admission.js';
+import {
+  CONTENT_HASH_DOMAIN,
   ADDRESS_FIELD_READER,
   ADDRESS_MAP_READER,
   AddressProjectionSchema,
   CONNECTOR_FAMILY,
   CONNECTOR_PAYLOAD,
   BOOKING_OPERATION_READER,
-  hasBookingOperations,
+  BOOKING_USAGE_QUERY_READER,
+  hasBookingUsage,
+  bookingReaderFloor,
 } from '@north-star/canonical-model';
 import { layoutBindingsProblem } from './layout-admission.js';
 import { servingPointersSql } from './verified-release-generation.js';
@@ -15,6 +22,7 @@ import { createHash } from 'node:crypto';
 import { canonicalize } from '@north-star/canonical-model';
 import {
   DOCUMENT_FILES_SURFACE_FLOOR,
+  DOCUMENT_TEMPLATES_SURFACE_FLOOR,
   DOCUMENTS_PAYLOAD_VERSION,
   DOCUMENTS_PROJECTION_FAMILY,
 } from '../../canonical-model/src/documents.js';
@@ -65,6 +73,10 @@ import {
   type RuntimeProjection,
 } from '@north-star/runtime/request-runtime-view';
 import type { Pool, PoolClient } from 'pg';
+import {
+  declaresOptionalReadModelDependency,
+  OPTIONAL_DEPENDENCY_QUERY_READER,
+} from '../../canonical-model/src/read-model-dependencies.js';
 import {
   CALCULATED_DISPLAY_QUERY_READER,
   parseCalculatedDisplayProjection,
@@ -142,6 +154,7 @@ interface PointerAuthority {
 }
 
 interface SnapshotRow {
+  desired_state: Uint8Array | null;
   artifact_canonical_bytes: Uint8Array | null;
   artifact_content_hash: string | null;
   artifact_domain_tag: string | null;
@@ -275,6 +288,7 @@ const authoritativeSnapshotSql = `
          release.output_protocol_version AS release_output_protocol_version,
          admission.release_id AS semantic_admission_release_id,
          intermediate.release_id AS transition_admission_release_id,
+         CASE WHEN artifact.content_hash = release.content_hash THEN revision.desired_state END AS desired_state,
          artifact.artifact_kind,
          artifact.content_hash AS artifact_content_hash,
          artifact.domain_tag AS artifact_domain_tag,
@@ -290,6 +304,9 @@ const authoritativeSnapshotSql = `
       ON release.tenant_id = pointer.tenant_id
      AND release.environment_id = pointer.environment_id
      AND release.release_id = pointer.release_id
+    LEFT JOIN platform.app_package_revisions AS revision
+      ON revision.tenant_id = release.tenant_id
+     AND revision.revision_id = release.app_package_revision_id
     LEFT JOIN platform.tenant_release_admissions AS admission
       ON admission.tenant_id = release.tenant_id
      AND admission.environment_id = release.environment_id
@@ -874,41 +891,42 @@ function definitionFromSnapshotRows(
   const agent = projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.agent);
   const surface = projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.surface);
   const consumers = [operation, query, surface];
-  const linked = projectionLinks.some((p) => p.familyId === CONNECTOR_FAMILY);
   const declared = references.some(
     (p) => isRecord(p) && p.familyId === CONNECTOR_FAMILY,
   );
-  const bound = consumers.some(
-    (p) => isRecord(p.payload) && Object.hasOwn(p.payload, 'addressBindings'),
-  );
-  const floor = surface.requiredRuntimeCapability?.minimumVersion ?? 0;
+  let connector: ReturnType<
+    typeof projectionFor<typeof CONNECTOR_FAMILY>
+  > | null = null;
+  const addressRefusal = addressProjectionRefusal({
+    linked: projectionLinks.some((p) => p.familyId === CONNECTOR_FAMILY),
+    declared,
+    consumerPayloads: consumers.map((p) => p.payload),
+    surfaceFloor: surface.requiredRuntimeCapability?.minimumVersion ?? 0,
+    connector: () => (connector ??= projectionFor(CONNECTOR_FAMILY)).payload,
+  });
+  if (addressRefusal) throw malformedProjection(addressRefusal);
+  if (declared) connector ??= projectionFor(CONNECTOR_FAMILY);
+  const revision = rows.find(
+    (row) => row.desired_state !== null,
+  )?.desired_state;
   if (
-    linked !== declared ||
-    declared !== bound ||
-    (!bound && [ADDRESS_FIELD_READER, ADDRESS_MAP_READER].includes(floor))
+    !revision ||
+    hashBytes(CONTENT_HASH_DOMAIN, revision) !==
+      releaseManifest.normalizedDefinitionDigest
   )
-    throw malformedProjection('Address declarations and consumers disagree.');
-  const connector = declared ? projectionFor(CONNECTOR_FAMILY) : null;
-  if (connector) {
-    const parsed = AddressProjectionSchema.safeParse(connector.payload);
-    if (
-      !parsed.success ||
-      floor <
-        (parsed.data.placements.length
-          ? ADDRESS_MAP_READER
-          : ADDRESS_FIELD_READER) ||
-      !consumers.every(
-        (p) =>
-          isRecord(p.payload) &&
-          Object.hasOwn(p.payload, 'addressBindings') &&
-          canonicalize(p.payload.addressBindings) ===
-            canonicalize(parsed.data.bindings),
-      )
-    )
-      throw malformedProjection(
-        'Address bindings or surface floor are invalid.',
-      );
+    throw malformedRelease('release definition disagrees with its manifest');
+  let declarations;
+  try {
+    declarations = declaredDateTimeFields(revision);
+  } catch {
+    throw malformedProjection('invalid dateTime field declaration');
   }
+  const dateTimeProblem = dateTimeBindingsProblem(
+    consumers.map((p) => p.payload),
+    surface.requiredRuntimeCapability?.minimumVersion ?? 0,
+    declarations.active,
+  );
+  if (dateTimeProblem) throw malformedProjection(dateTimeProblem);
   const referencesDocuments = references.some(
     (entry) =>
       isRecord(entry) && entry.familyId === DOCUMENTS_PROJECTION_FAMILY,
@@ -919,7 +937,9 @@ function definitionFromSnapshotRows(
   const catalogs = [agent, operation, query, surface];
   const consumesDocuments = catalogs.some(
     ({ payload }) =>
-      isRecord(payload) && Object.hasOwn(payload, 'documentBindings'),
+      isRecord(payload) &&
+      (Object.hasOwn(payload, 'documentBindings') ||
+        Object.hasOwn(payload, 'documentTemplatePointers')),
   );
   if (
     referencesDocuments !== consumesDocuments ||
@@ -937,13 +957,20 @@ function definitionFromSnapshotRows(
     if (
       !parsed.success ||
       (surface.requiredRuntimeCapability?.minimumVersion ?? 0) <
-        DOCUMENT_FILES_SURFACE_FLOOR ||
+        (parsed.data.templates
+          ? DOCUMENT_TEMPLATES_SURFACE_FLOOR
+          : DOCUMENT_FILES_SURFACE_FLOOR) ||
       !catalogs.every(
         ({ payload }) =>
           isRecord(payload) &&
           Object.hasOwn(payload, 'documentBindings') &&
           canonicalize(payload.documentBindings) ===
-            canonicalize(parsed.data.bindings),
+            canonicalize(parsed.data.bindings) &&
+          (parsed.data.templates
+            ? Object.hasOwn(payload, 'documentTemplatePointers') &&
+              canonicalize(payload.documentTemplatePointers) ===
+                canonicalize(parsed.data.templates.pointers)
+            : !Object.hasOwn(payload, 'documentTemplatePointers')),
       )
     ) {
       throw malformedProjection(
@@ -997,17 +1024,55 @@ function definitionFromSnapshotRows(
   );
   const operationFloor =
     operation.requiredRuntimeCapability?.minimumVersion ?? 0;
-  const booking = hasBookingOperations(operation.payload);
-  if (booking !== (operationFloor === BOOKING_OPERATION_READER))
+  const expectedBookingFloor = bookingReaderFloor(operation.payload);
+  const booking = expectedBookingFloor > 0;
+  if (
+    booking
+      ? operationFloor !== expectedBookingFloor
+      : operationFloor >= BOOKING_OPERATION_READER
+  )
     throw malformedProjection(
       'booking operations and the mandatory reader floor disagree',
     );
   const consumesRules =
     !booking && operationFloor >= LITERAL_VALIDATION_OPERATION_READER;
   const queryFloor = query.requiredRuntimeCapability?.minimumVersion ?? 0;
-  const consumesDisplays = queryFloor === CALCULATED_DISPLAY_QUERY_READER;
+  // The query floor is the HIGHEST catalog feature present: optional
+  // read-model dependencies, then booking owner usage, both read from the
+  // catalog itself. Above the display rung the floor no longer says whether
+  // displays are declared, so the formula projection's own declaration does.
+  const usage = hasBookingUsage(query.payload);
+  const optionalDependencies = declaresOptionalReadModelDependency(
+    isRecord(query.payload) ? query.payload.queries : undefined,
+  );
+  const featureFloor = optionalDependencies
+    ? OPTIONAL_DEPENDENCY_QUERY_READER
+    : usage
+      ? BOOKING_USAGE_QUERY_READER
+      : 0;
+  if (
+    featureFloor
+      ? queryFloor !== featureFloor
+      : queryFloor >= BOOKING_USAGE_QUERY_READER
+  )
+    throw malformedProjection(
+      'query catalog features and the mandatory query reader floor disagree',
+    );
+  const earlyFormula =
+    queryFloor > CALCULATED_DISPLAY_QUERY_READER &&
+    declaresRuleProjection &&
+    hasRuleProjectionLink
+      ? projectionFor(REQUEST_RUNTIME_FORMULA_RULE_FAMILY)
+      : null;
+  const consumesDisplays =
+    queryFloor === CALCULATED_DISPLAY_QUERY_READER ||
+    (isRecord(earlyFormula?.payload) &&
+      Object.hasOwn(earlyFormula.payload, 'calculatedFields'));
+
   const consumesFormula =
-    consumesRules || consumesDisplays || (booking && declaresRuleProjection);
+    consumesRules ||
+    consumesDisplays ||
+    ((booking || usage) && declaresRuleProjection);
   if (
     declaresRuleProjection !== consumesFormula ||
     hasRuleProjectionLink !== consumesFormula
@@ -1017,7 +1082,7 @@ function definitionFromSnapshotRows(
     );
   }
   const formulaRule = consumesFormula
-    ? projectionFor(REQUEST_RUNTIME_FORMULA_RULE_FAMILY)
+    ? (earlyFormula ?? projectionFor(REQUEST_RUNTIME_FORMULA_RULE_FAMILY))
     : null;
   if (formulaRule) {
     try {
@@ -1030,7 +1095,12 @@ function definitionFromSnapshotRows(
           operationFloor !== requiredFormulaValidationOperationReader(rules))
       )
         throw new Error('operation floor does not match bound operands');
-      if (consumesDisplays)
+      if (
+        consumesDisplays ||
+        (usage &&
+          isRecord(formulaRule.payload) &&
+          Object.hasOwn(formulaRule.payload, 'calculatedFields'))
+      )
         parseCalculatedDisplayProjection(formulaRule.payload);
       else if (
         isRecord(formulaRule.payload) &&
@@ -1421,6 +1491,49 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function malformedRelease(message: string): RequestRuntimeViewLoadError {
   return loadError('MALFORMED_RELEASE', message);
+}
+
+/**
+ * The loader's Address agreement (ADR-0080): the connector declaration, its
+ * link and the bound consumers agree; the surface floor covers an Address and
+ * any map placement; every consumer pins the connector's exact bindings.
+ * Null when the release may serve. Each check stands on its own line.
+ */
+export function addressProjectionRefusal(release: {
+  readonly linked: boolean;
+  readonly declared: boolean;
+  readonly consumerPayloads: readonly unknown[];
+  readonly surfaceFloor: number;
+  readonly connector: () => unknown;
+}): string | null {
+  const disagree = 'Address declarations and consumers disagree.';
+  const invalid = 'Address bindings or surface floor are invalid.';
+  const floor = release.surfaceFloor;
+  const bound = release.consumerPayloads.some(
+    (payload) => isRecord(payload) && Object.hasOwn(payload, 'addressBindings'),
+  );
+  if (release.linked !== release.declared) return disagree;
+  if (release.declared !== bound) return disagree;
+  if (!bound && [ADDRESS_FIELD_READER, ADDRESS_MAP_READER].includes(floor))
+    return disagree;
+  if (!release.declared) return null;
+  const parsed = AddressProjectionSchema.safeParse(release.connector());
+  if (!parsed.success) return invalid;
+  const required = parsed.data.placements.length
+    ? ADDRESS_MAP_READER
+    : ADDRESS_FIELD_READER;
+  if (floor < required) return invalid;
+  const pinned = canonicalize(parsed.data.bindings);
+  if (
+    !release.consumerPayloads.every(
+      (payload) =>
+        isRecord(payload) &&
+        Object.hasOwn(payload, 'addressBindings') &&
+        canonicalize(payload.addressBindings) === pinned,
+    )
+  )
+    return invalid;
+  return null;
 }
 
 function malformedProjection(message: string): RequestRuntimeViewLoadError {

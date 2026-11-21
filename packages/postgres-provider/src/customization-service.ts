@@ -1,10 +1,18 @@
+import { checkRetainedWorkflowReplay } from './release-verification-service.js';
+import { RemovedWorkflowAction } from './workflow-sdk-version.js';
+import type { WorkflowDefinition } from '../../canonical-model/src/schemas.js';
+import {
+  renderWorkflowReview,
+  workflowReviewDecision,
+} from './workflow-review.js';
+import { compileWorkflowUnattendedOperations } from './workflow-verification.js';
 import { verifiedGenerationsSql } from './verified-release-generation.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { retypedCalculatedDisplayField } from '../../canonical-model/src/calculated-display-bindings.js';
-import { retypedFormulaRule } from '../../canonical-model/src/formula-validation-bindings.js';
+import { getSystemErrorMap } from 'node:util';
 
 import { RECEIPT_POSTED_EVENT } from '../../domain/src/purchasing/receipt-posted-event.js';
 import {
+  CanonicalModelError,
   canonicalAuthoredProjection,
   canonicalize,
   normalizeApplicationPackage,
@@ -12,6 +20,8 @@ import {
 } from '@north-star/canonical-model';
 import {
   compileInSandbox,
+  SandboxFailure,
+  finalFormulaConflict,
   UPGRADE_CODES_V1,
   unadmittedMembers,
   type UpgradeFinding,
@@ -30,7 +40,6 @@ import {
   type DraftingModel,
   type CustomizationTargets,
   type CustomizationPatch,
-  SandboxFailure,
   type SandboxRunnerOptions,
   type SandboxStep,
 } from '@north-star/customization';
@@ -79,7 +88,10 @@ import {
   authorizeReverseTransitionIfApplicable,
   ReleaseReverseTransitionRefusal,
 } from './release-reverse-transition-policy.js';
-import { withTrustedRequestTransaction } from './request-context.js';
+import {
+  recordStaffCustomizationProposal,
+  withTrustedRequestTransaction,
+} from './request-context.js';
 import { parsePinnedOperationCatalog } from '../../runtime/src/semantic-operation-gateway.js';
 import { PostgresWorkflowGateway } from './workflow-gateway.js';
 import { generateWorkflowSdk } from './workflow-sdk.js';
@@ -198,6 +210,7 @@ export type DraftOutcome =
       readonly releaseId: MintedUuid;
       readonly releaseRoot: string;
       readonly renderedDigest: string;
+      readonly workflowReviewDigest?: string;
       readonly renderedDiff: string;
       readonly revisionId: MintedUuid;
       readonly reused: boolean;
@@ -271,6 +284,78 @@ type UpgradeRefusal = Exclude<
   readonly sourceReleaseId: MintedUuid;
   readonly baseReleaseRoot: string;
 };
+type DisclosureField = {
+  fieldId: string;
+  label: string;
+  classification: string;
+};
+
+/** Both sides of a finding, its serialized issue and the summary have the
+ * same disclosure boundary. An unreadable historical definition hides all. */
+export function discloseUpgradeReport(
+  report: UpgradeReport,
+  message: string,
+  code: UpgradeCode,
+  fields: readonly DisclosureField[] | null,
+) {
+  const terms =
+    fields &&
+    new Set(
+      fields
+        .filter(
+          (f) =>
+            f.classification !== 'public' && f.classification !== 'internal',
+        )
+        .flatMap((f) => [f.fieldId, f.label]),
+    );
+  const restricted = (value: unknown) => {
+    if (!terms) return true;
+    const text = JSON.stringify(value);
+    for (const term of terms) if (text.includes(term)) return true;
+    return false;
+  };
+  const findings = report.findings.map((finding) =>
+    restricted(finding)
+      ? {
+          ...finding,
+          subject: 'Restricted field',
+          expected: 'Restricted',
+          observed: 'Restricted',
+        }
+      : finding,
+  );
+  return {
+    report: { ...report, findings },
+    message: restricted(message) ? UPGRADE_CODES_V1[code] : message,
+    issues: [...findings, ...report.blocked].map((issue) =>
+      JSON.stringify(issue),
+    ),
+  };
+}
+/** Log only classifier metadata. Database details, worker messages and thrown
+ * values can all contain tenant data. */
+function preparationErrorFields(error: unknown) {
+  if (error instanceof SandboxFailure)
+    return { errorClass: 'SandboxFailure', errorCode: error.code };
+  if (error instanceof pg.DatabaseError)
+    return {
+      errorClass: 'DatabaseError',
+      errorCode: /^[0-9A-Z]{5}$/u.test(error.code ?? '')
+        ? error.code
+        : 'UNKNOWN',
+    };
+  const systemCode =
+    error instanceof Error &&
+    'errno' in error &&
+    typeof error.errno === 'number'
+      ? getSystemErrorMap().get(error.errno)?.[0]
+      : undefined;
+  return {
+    errorClass: error instanceof Error ? error.constructor.name : 'Unknown',
+    errorCode: systemCode ?? 'UNKNOWN',
+  };
+}
+
 /** Only opaque release and change identities leave the tenant review channel. */
 export function upgradeLogFields(upgrade: UpgradePreparation) {
   if (upgrade.status === 'drafted')
@@ -367,6 +452,23 @@ export class PostgresCustomizationService {
   /** Boot stages a replay against the new base, under the same scope lock as
    * approval and activation. Serving continues on the recorded live pointer. */
   async prepareUpgrade(): Promise<UpgradePreparation> {
+    try {
+      return await this.#prepareUpgrade();
+    } catch (error) {
+      if (error instanceof CustomizationServiceRefusal) throw error;
+      console.error(
+        'UPGRADE_PREPARATION_FAILED',
+        preparationErrorFields(error),
+      );
+      return {
+        status: 'refused',
+        code: 'UPGRADE_PREPARATION_FAILED',
+        message: 'The upgrade could not be prepared. Try again.',
+      };
+    }
+  }
+
+  async #prepareUpgrade(): Promise<UpgradePreparation> {
     const context = await this.#context();
     return withReleaseScopeLock(
       this.connection.adminPool,
@@ -401,21 +503,18 @@ export class PostgresCustomizationService {
           const known =
             error instanceof CustomizationServiceRefusal ||
             error instanceof CustomizationLineageError ||
-            error instanceof SandboxFailure ||
             error instanceof PersistedReleaseConflict;
+          if (!known) throw error;
           result = {
             status: 'refused',
-            code:
-              known && Object.hasOwn(UPGRADE_CODES_V1, error.code)
-                ? error.code
-                : 'WHOLE_PACKAGE_FAILURE',
+            code: Object.hasOwn(UPGRADE_CODES_V1, error.code)
+              ? error.code
+              : 'WHOLE_PACKAGE_FAILURE',
             ...(error instanceof CustomizationServiceRefusal &&
               error.replayDiagnostics && {
                 replayDiagnostics: error.replayDiagnostics,
               }),
-            message: known
-              ? error.message
-              : 'The platform upgrade could not be prepared.',
+            message: error.message,
           };
         }
         const baseReleaseRoot = this.#tip.compiled.releaseRoot;
@@ -482,33 +581,14 @@ export class PostgresCustomizationService {
             blocked: [],
           }),
         };
-        const protectedTerms = await this.#restrictedUpgradeTerms(
+        const fields = await this.#upgradeDisclosureFields(
           context,
           sourceReleaseId,
         );
-        const restricted = (value: unknown) =>
-          protectedTerms === null ||
-          protectedTerms.some((term) => JSON.stringify(value).includes(term));
-        report.findings = report.findings.map((finding) =>
-          restricted(finding)
-            ? {
-                ...finding,
-                subject: 'Restricted field',
-                expected: 'Restricted',
-                observed: 'Restricted',
-              }
-            : finding,
-        );
         const diagnostic: UpgradeRefusal = {
           ...outcome,
-          ...(restricted(outcome.message) && {
-            message: UPGRADE_CODES_V1[code],
-          }),
           code,
-          report,
-          issues: [...report.findings, ...report.blocked].map((issue) =>
-            JSON.stringify(issue),
-          ),
+          ...discloseUpgradeReport(report, outcome.message, code, fields),
           sourceReleaseId,
           baseReleaseRoot,
         };
@@ -522,10 +602,10 @@ export class PostgresCustomizationService {
   }
 
   /** A reader that cannot interpret one side can still return a scoped, redacted refusal. */
-  async #restrictedUpgradeTerms(
+  async #upgradeDisclosureFields(
     context: TrustedRequestContext,
     sourceReleaseId: MintedUuid,
-  ): Promise<string[] | null> {
+  ): Promise<DisclosureField[] | null> {
     try {
       const source = await this.#identity(context, sourceReleaseId);
       const old = parseNormalizedApplicationPackageJson(
@@ -534,19 +614,10 @@ export class PostgresCustomizationService {
       const next = parseNormalizedApplicationPackageJson(
         this.#tip.normalizedDefinitionBytes,
       );
-      return [
-        ...new Set(
-          [...old.fields, ...next.fields]
-            .filter(
-              (f) =>
-                f.classification !== 'public' &&
-                f.classification !== 'internal',
-            )
-            .flatMap((f) => [f.fieldId, f.label]),
-        ),
-      ];
-    } catch {
-      return null;
+      return [...old.fields, ...next.fields];
+    } catch (error) {
+      if (error instanceof CanonicalModelError) return null;
+      throw error;
     }
   }
 
@@ -615,24 +686,26 @@ export class PostgresCustomizationService {
     const candidateDefinition = parseNormalizedApplicationPackageJson(
       candidate.normalizedDefinitionBytes,
     );
-    const inheritedRule = retypedFormulaRule(
-      sourceDefinition,
-      targetBase,
-      sourceBase,
-    );
-    assertCalculatedDisplayCompatibility(
-      sourceDefinition,
-      targetBase,
-      sourceBase,
-    );
-    const retypedRule =
-      inheritedRule ??
-      retypedFormulaRule(sourceDefinition, candidateDefinition);
-    assertCalculatedDisplayCompatibility(sourceDefinition, candidateDefinition);
-    if (retypedRule)
+    const finding =
+      finalFormulaConflict(
+        sourceDefinition,
+        targetBase,
+        sourceBase,
+        patches,
+        active.chain,
+      ) ??
+      finalFormulaConflict(
+        sourceDefinition,
+        candidateDefinition,
+        undefined,
+        patches,
+        active.chain,
+      );
+    if (finding)
       throw new CustomizationServiceRefusal(
-        'INCOMPATIBLE_TYPE',
-        `The upgrade retires or retypes a target of validation rule ${retypedRule}.`,
+        finding.code,
+        UPGRADE_CODES_V1[finding.code],
+        { findings: [finding], blocked: [] },
       );
     await this.#assertActiveRestrictionRoles(
       admin,
@@ -644,16 +717,47 @@ export class PostgresCustomizationService {
         record.sourceReleaseId === active.releaseId &&
         record.baseReleaseId === baseReleaseId,
     );
-    if (existing) {
-      if (
-        (await this.#root(context, existing.candidateReleaseId)) !==
-        candidate.compiled.releaseRoot
-      ) {
-        throw new CustomizationServiceRefusal(
-          'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
-          'the recorded upgrade no longer reproduces',
+    const identity = existing
+      ? {
+          releaseId: existing.candidateReleaseId,
+          revisionId: existing.candidateRevisionId,
+        }
+      : await ensurePersistedRelease(
+          this.connection.runtimePool,
+          context,
+          candidate,
+          active.revisionId,
+          'tenantAuthored',
         );
-      }
+    if (
+      existing &&
+      (await this.#root(context, identity.releaseId)) !==
+        candidate.compiled.releaseRoot
+    ) {
+      throw new CustomizationServiceRefusal(
+        'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
+        'the recorded upgrade no longer reproduces',
+      );
+    }
+    if (
+      'workflows' in candidateDefinition &&
+      candidateDefinition.workflows?.length
+    ) {
+      const finding = await checkRetainedWorkflowReplay(
+        this.connection.runtimePool,
+        context,
+        candidate.compiled,
+        identity.releaseId,
+        candidateDefinition.workflows,
+      );
+      if (finding)
+        throw new CustomizationServiceRefusal(
+          finding.code,
+          `${finding.subject}: ${finding.expected} — ${UPGRADE_CODES_V1[finding.code]}`,
+          { findings: [finding], blocked: [] },
+        );
+    }
+    if (existing) {
       return {
         status: 'drafted' as const,
         upgradeId: existing.upgradeId,
@@ -661,13 +765,6 @@ export class PostgresCustomizationService {
         releaseRoot: candidate.compiled.releaseRoot,
       };
     }
-    const identity = await ensurePersistedRelease(
-      this.connection.runtimePool,
-      context,
-      candidate,
-      active.revisionId,
-      'tenantAuthored',
-    );
     const upgradeId = randomUUID() as MintedUuid;
     const payload = Buffer.from(
       canonicalize({
@@ -1172,6 +1269,12 @@ export class PostgresCustomizationService {
             storeWorkflowBundle(client, context, { ...bundle, executable }),
         );
       } catch (error) {
+        if (error instanceof RemovedWorkflowAction)
+          return {
+            status: 'unsupported',
+            missingCapability: 'durable external-event waits',
+            message: error.message,
+          };
         return {
           status: 'invalid',
           message: 'The workflow draft did not pass verification.',
@@ -1365,18 +1468,24 @@ export class PostgresCustomizationService {
     const context = await this.#context(actor);
     const active = await this.#active(context);
     const change = parsed.patch;
+    let workflowReview;
     if (change.kind === 'saveWorkflow') {
       try {
-        await withTrustedRequestTransaction(
-          this.connection.runtimePool,
+        workflowReview = await this.#workflowReview(
           context,
-          (client) =>
-            readWorkflowBundle(client, context, change.workflow.bodyDigest),
+          active.releaseId,
+          change.workflow,
         );
       } catch (error) {
+        if (error instanceof RemovedWorkflowAction)
+          return {
+            status: 'unsupported',
+            missingCapability: 'durable external-event waits',
+            message: error.message,
+          };
         return {
           status: 'invalid',
-          message: 'The workflow body could not be loaded.',
+          message: 'The workflow draft did not pass verification.',
           issues: [error instanceof Error ? error.message : String(error)],
         };
       }
@@ -1501,46 +1610,66 @@ export class PostgresCustomizationService {
         }
         throw error;
       }
-      const patchId = randomUUID() as MintedUuid;
-      await withTrustedRequestTransaction(
+      const patchId = await withTrustedRequestTransaction(
         this.connection.runtimePool,
         context,
         async (client) => {
           signal?.throwIfAborted();
+          const proposal = {
+            patch_version: CUSTOMIZATION_PATCH_VERSION,
+            patch_kind: parsed.patch.kind,
+            payload: '\\x' + Buffer.from(payload).toString('hex'),
+            payload_digest: payloadDigest,
+            channel,
+            base_package_id: firstParty.package.packageId,
+            base_package_version: firstParty.package.version,
+            base_revision_id: baseRevisionId,
+            base_release_root: this.#tip.compiled.releaseRoot,
+            parent_revision_id: active.revisionId,
+            resulting_revision_id: identity.revisionId,
+            resulting_release_id: identity.releaseId,
+            language_version: normalized.languageVersion,
+            normalization_profile_version:
+              normalized.normalizationProfileVersion,
+            display_label: patchDisplayLabel(patch),
+            compiler_acknowledgement: this.options.acknowledgement,
+          };
+          const staffPatch = await recordStaffCustomizationProposal(
+            client,
+            context,
+            proposal,
+          );
+          if (staffPatch) {
+            signal?.throwIfAborted();
+            return staffPatch;
+          }
+          const demoPatch = randomUUID() as MintedUuid;
           await client.query(
             `INSERT INTO platform.customization_patches (
-             tenant_id, environment_id, patch_id, patch_version, patch_kind,
-             payload, payload_digest, channel, authored_by, base_package_id,
-             base_package_version, base_revision_id, base_release_root,
-             parent_revision_id, resulting_revision_id, resulting_release_id,
-             language_version, normalization_profile_version, display_label, compiler_acknowledgement
-           ) VALUES (
-             $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20
-           )`,
+               tenant_id, environment_id, patch_id, patch_version, patch_kind,
+               payload, payload_digest, channel, authored_by, base_package_id,
+               base_package_version, base_revision_id, base_release_root, parent_revision_id,
+               resulting_revision_id, resulting_release_id, language_version,
+               normalization_profile_version, display_label, compiler_acknowledgement
+             )
+             SELECT tenant_id, environment_id, patch_id, patch_version, patch_kind,
+                    payload, payload_digest, channel, authored_by, base_package_id,
+                    base_package_version, base_revision_id, base_release_root, parent_revision_id,
+                    resulting_revision_id, resulting_release_id, language_version,
+                    normalization_profile_version, display_label, compiler_acknowledgement
+             FROM jsonb_populate_record(NULL::platform.customization_patches, $1::jsonb)`,
             [
-              context.tenantId,
-              context.environmentId,
-              patchId,
-              CUSTOMIZATION_PATCH_VERSION,
-              parsed.patch.kind,
-              Buffer.from(payload),
-              payloadDigest,
-              channel,
-              context.principalId,
-              firstParty.package.packageId,
-              firstParty.package.version,
-              baseRevisionId,
-              this.#tip.compiled.releaseRoot,
-              active.revisionId,
-              identity.revisionId,
-              identity.releaseId,
-              normalized.languageVersion,
-              normalized.normalizationProfileVersion,
-              patchDisplayLabel(patch),
-              this.options.acknowledgement,
+              {
+                ...proposal,
+                tenant_id: context.tenantId,
+                environment_id: context.environmentId,
+                authored_by: context.principalId,
+                patch_id: demoPatch,
+              },
             ],
           );
           signal?.throwIfAborted();
+          return demoPatch;
         },
       );
       return {
@@ -1552,17 +1681,121 @@ export class PostgresCustomizationService {
       };
     });
     if (recorded.status === 'refused') return recorded;
+    const rendered = withWorkflowReview(step.rendered.text, workflowReview);
     return Object.freeze({
       canonicalDiffDigest: step.diff.canonicalDiffDigest,
       patchId: recorded.patchId,
       releaseId: recorded.releaseId,
       releaseRoot: candidate.compiled.releaseRoot,
-      renderedDigest: step.rendered.renderedDigest,
-      renderedDiff: step.rendered.text,
+      renderedDigest: rendered.renderedDigest,
+      renderedDiff: rendered.renderedText,
+      ...(workflowReview && {
+        workflowReviewDigest: workflowReviewDecision(
+          recorded.patchId,
+          rendered.renderedDigest,
+          active.pointer,
+        ),
+      }),
       revisionId: recorded.revisionId,
       reused: recorded.reused,
       status: 'drafted' as const,
     });
+  }
+
+  async #workflowReview(
+    context: TrustedRequestContext,
+    releaseId: MintedUuid,
+    workflow: WorkflowDefinition,
+  ) {
+    const base = await this.#loadRelease(context, releaseId);
+    const view = await new PostgresWorkflowGateway(
+      this.connection.runtimePool,
+    ).loadView(context);
+    if (
+      view.release.releaseId !== releaseId ||
+      view.release.contentHash !== base.compiled.releaseRoot
+    )
+      throw new CustomizationServiceRefusal(
+        'CUSTOMIZE_DRAFT_STALE',
+        'The release changed. Review this workflow again.',
+      );
+    const bundle = await withTrustedRequestTransaction(
+      this.connection.runtimePool,
+      context,
+      (client) => readWorkflowBundle(client, context, workflow.bodyDigest),
+    );
+    const verified = await verifyWorkflowBundle(view, workflow.grants, bundle);
+    if (verified.executable !== bundle.executable)
+      throw new Error('Workflow executable does not match the pinned bundle');
+    const definition = parseNormalizedApplicationPackageJson(
+      base.normalizedDefinitionBytes,
+    );
+    const labels = new Map<string, string>(
+      definition.fields.map((f) => [f.fieldId, f.label]),
+    );
+    for (const operation of parsePinnedOperationCatalog(
+      view.projections.operation.payload,
+    ))
+      if (operation.label) labels.set(operation.operationId, operation.label);
+    for (const query of definition.queries) {
+      const entity = definition.entities.find(
+        (e) => e.entityId === query.sourceEntity.targetId,
+      );
+      if (entity)
+        labels.set(query.queryId, entity.label + ' (' + query.queryType + ')');
+    }
+    const unattended = compileWorkflowUnattendedOperations(
+      {
+        release: { contentHash: base.compiled.releaseRoot },
+        artifacts: base.compiled.bundle.artifacts,
+      },
+      workflow.grants,
+    );
+    return renderWorkflowReview(
+      workflow,
+      bundle.body,
+      verified,
+      labels,
+      new Set(Object.keys(unattended)),
+    );
+  }
+
+  async reviewWorkflow(patchId: string, actor?: TrustedRequestContext) {
+    const context = await this.#context(actor);
+    const active = await this.#active(context);
+    const record = await this.#patch(context, patchId);
+    if (record.parentRevisionId !== active.revisionId)
+      throw new CustomizationServiceRefusal(
+        'CUSTOMIZE_DRAFT_STALE',
+        'The workflow draft is out of date.',
+      );
+    const [patch] = await this.#readPatches(context, [record]);
+    if (patch?.kind !== 'saveWorkflow')
+      throw new Error('This change is not a workflow draft');
+    const { parent, candidate } = await this.#reproduce(
+      context,
+      active,
+      record,
+    );
+    const review = await this.#workflowReview(
+      context,
+      active.releaseId,
+      patch.workflow,
+    );
+    const binding = withWorkflowReview(
+      releaseDiffBinding(parent, candidate).renderedText,
+      review,
+    );
+    return {
+      status: 'drafted' as const,
+      patchId,
+      renderedDiff: binding.renderedText,
+      workflowReviewDigest: workflowReviewDecision(
+        patchId,
+        binding.renderedDigest,
+        active.pointer,
+      ),
+    };
   }
 
   /**
@@ -1571,7 +1804,10 @@ export class PostgresCustomizationService {
    * plain-language text returned here (the approver's view); for a storage
    * change the prepared plan must be the plan that diff names.
    */
-  async approve(patchId: string): Promise<ApprovalOutcome> {
+  async approve(
+    patchId: string,
+    reviewedDigest?: string,
+  ): Promise<ApprovalOutcome> {
     return this.#locked(async (admin, context, active) => {
       const upgrade = (await this.#upgrades(context)).find(
         (entry) => entry.upgradeId === patchId,
@@ -1627,7 +1863,32 @@ export class PostgresCustomizationService {
           this.options.capabilityOperationExecutorFactories ?? [],
           this.connection.adminPool,
         );
-      const binding = releaseDiffBinding(parent, candidate);
+      let binding = releaseDiffBinding(parent, candidate);
+      if ('kind' in record && record.kind === 'saveWorkflow') {
+        const [patch] = await this.#readPatches(context, [record]);
+        if (patch?.kind !== 'saveWorkflow')
+          throw new Error('Workflow patch is missing');
+        const review = await this.#workflowReview(
+          context,
+          active.releaseId,
+          patch.workflow,
+        );
+        binding = {
+          ...binding,
+          ...withWorkflowReview(binding.renderedText, review),
+        };
+        if (
+          workflowReviewDecision(
+            patchId,
+            binding.renderedDigest,
+            active.pointer,
+          ) !== reviewedDigest
+        )
+          throw new CustomizationServiceRefusal(
+            'CUSTOMIZE_DRAFT_STALE',
+            'Review the workflow source and sample runs before approving this change.',
+          );
+      }
       const approver = await trustedContext(
         this.connection.identities.approver,
       );
@@ -2317,9 +2578,16 @@ export class PostgresCustomizationService {
   }
 
   #materializer(): PostgresModuleStorageMaterializer {
+    // ADR-0087 A4: the window-index row ceiling is deploy policy. A
+    // deployment may lower it; the materializer refuses a higher value.
+    const ceiling = process.env.NORTH_STAR_DATE_TIME_WINDOW_ROW_CEILING;
     return new PostgresModuleStorageMaterializer(
       this.connection.materializerPool,
       this.connection.modulePool,
+      {},
+      ceiling === undefined
+        ? {}
+        : { dateTimeWindowRowCeiling: Number(ceiling) },
     );
   }
 
@@ -2771,17 +3039,6 @@ export async function openCustomizationService(
   }
 }
 
-function assertCalculatedDisplayCompatibility(
-  ...comparison: Parameters<typeof retypedCalculatedDisplayField>
-) {
-  const retyped = retypedCalculatedDisplayField(...comparison);
-  if (retyped)
-    throw new CustomizationServiceRefusal(
-      'INCOMPATIBLE_TYPE',
-      `The upgrade retires or retypes a target of calculated display field ${retyped}.`,
-    );
-}
-
 interface PatchRow {
   compiler_acknowledgement: AcknowledgementInput | null;
   base_release_root: string;
@@ -2824,6 +3081,7 @@ function patchDisplayLabel(patch: CustomizationPatch): string | null {
     case 'addLineTable':
     case 'addDocumentField':
     case 'addUploadCategory':
+    case 'addDocumentTemplateRevision':
     case 'saveListView':
     case 'addMetricCard':
       return patch.label;
@@ -2932,4 +3190,14 @@ function parseUpgradeRecord(row: UpgradeRow): UpgradeRecord | null {
     candidateRevisionId: row.candidate_revision_id,
     patchIds: patchIds as MintedUuid[],
   };
+}
+
+function withWorkflowReview(
+  diff: string,
+  review?: ReturnType<typeof renderWorkflowReview>,
+) {
+  const renderedText = review
+    ? [diff, 'Workflow review ' + review.digest, review.text].join('\n\n')
+    : diff;
+  return { renderedText, renderedDigest: renderedDiffDigest(renderedText) };
 }

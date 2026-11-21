@@ -1,3 +1,12 @@
+export const archivedBillingBase = `
+import { readFile } from 'node:fs/promises';
+const [authored, release] = await Promise.all(
+  ['app.authored.json', 'app.compiled.json'].map(async (file) =>
+    JSON.parse(await readFile('apps/web/release/' + file, 'utf8'))),
+);
+console.log(JSON.stringify({ authored, release }));
+`;
+
 export const archivedBillingQuery = `
 import { readFile } from 'node:fs/promises';
 import { rolePool, trustedContext } from './packages/postgres-provider/src/composed-application-runtime.ts';
@@ -99,7 +108,7 @@ await withOrderEntryFixture(async (f) => {
     const migrations = await loadMigrations(migrationDirectory);
     const result = await runMigrations(admin, migrations);
     assert.ok(result.applied.includes('0057_billing_publication.sql'));
-    assert.ok(result.applied.some((name) => name.endsWith('_billing_publication_xid.sql')));
+    assert.ok(result.applied.includes('0067_billing_publication_xid.sql'));
     const after = [];
     for (const [table] of tables) {
       const stored = await admin.query("SELECT to_jsonb(b) - ARRAY['invocation_id','published_at'] AS row, invocation_id, published_at FROM platform." + table + ' b');

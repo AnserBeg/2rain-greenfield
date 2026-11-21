@@ -1,14 +1,20 @@
 import {
   BILLING_READER,
-  BILLING_INTERVAL_READER,
+  BILLING_ALLOCATION_READER,
+  BILLING_CALCULATION_VERSION,
 } from '../../canonical-model/src/billing.js';
 import {
+  DATE_TIME_FIELD_READER,
+  type DateTimeBinding,
   ADDRESS_FIELD_READER,
   ADDRESS_MAP_READER,
   CONNECTOR_PAYLOAD,
   type AddressProjection,
   BOARD_READER,
-  BOOKING_OPERATION_READER,
+  boardPresentation,
+  type BoardSource,
+  type SurfaceBoard,
+  bookingReaderFloor,
   LAYOUT_READER,
   REPLAYED_LAYOUT_READER,
   type SurfaceLayout,
@@ -36,6 +42,7 @@ import {
 import { requiredFormulaValidationOperationReader } from '../../canonical-model/src/formula-validation-reader.js';
 import {
   DOCUMENT_FILES_SURFACE_FLOOR,
+  DOCUMENT_TEMPLATES_SURFACE_FLOOR,
   DOCUMENTS_PAYLOAD_VERSION,
 } from '../../canonical-model/src/documents.js';
 import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../canonical-model/src/surface-workspace.js';
@@ -46,6 +53,7 @@ import {
   WORKFLOW_SURFACE_FLOOR,
 } from '../../canonical-model/src/workflows.js';
 import { workflowSdkBindingDigest } from './workflows.js';
+import { hasStockCountWorkflow } from './conformance.js';
 
 import {
   FORMULA_RULE_PAYLOAD_VERSION,
@@ -212,6 +220,7 @@ export function lowerBaseProjectionPayloads(
     { payload: unknown }
   >['payload'],
   address?: AddressProjection,
+  dateTimeBindings?: readonly DateTimeBinding[],
 ): ProjectionPayloadPlan[] {
   const namespace = packageRevision.package.namespace;
   const packageScope: LogicalScope = {
@@ -267,7 +276,7 @@ export function lowerBaseProjectionPayloads(
     hasMetrics(verificationPackageRevision) ? 4 : 1,
   );
   const operationFloor = hasBookingOperations(verificationPackageRevision)
-    ? BOOKING_OPERATION_READER
+    ? bookingReaderFloor(verificationPackageRevision)
     : formulaRules
       ? requiredFormulaValidationOperationReader(
           formulaRules.bindings.map(({ rule }) => rule),
@@ -388,6 +397,9 @@ export function lowerBaseProjectionPayloads(
         projection.payload = {
           ...(projection.payload as object),
           documentBindings: documents.bindings,
+          ...(documents.templates && {
+            documentTemplatePointers: documents.templates.pointers,
+          }),
         };
       }
       if (projection.familyId === PROJECTION_FAMILY_IDS.surfaceManifest) {
@@ -395,7 +407,9 @@ export function lowerBaseProjectionPayloads(
           ...projection.requiredRuntimeCapability,
           minimumVersion: Math.max(
             projection.requiredRuntimeCapability.minimumVersion,
-            DOCUMENT_FILES_SURFACE_FLOOR,
+            documents.templates
+              ? DOCUMENT_TEMPLATES_SURFACE_FLOOR
+              : DOCUMENT_FILES_SURFACE_FLOOR,
           ),
         };
       }
@@ -432,6 +446,31 @@ export function lowerBaseProjectionPayloads(
       plan(PROJECTION_FAMILY_IDS.connector, namespace, packageScope, address),
     );
   }
+  // ADR-0087: each consumer carries the same bindings and the surface reader
+  // floor rises to the dateTime rung. Omission emits nothing.
+  if (dateTimeBindings?.length) {
+    const consumers = [
+      PROJECTION_FAMILY_IDS.queryCatalog,
+      PROJECTION_FAMILY_IDS.operationCatalog,
+      PROJECTION_FAMILY_IDS.surfaceManifest,
+    ] as string[];
+    for (const projection of plans.filter((p) =>
+      consumers.includes(p.familyId),
+    )) {
+      projection.payload = {
+        ...(projection.payload as object),
+        dateTimeBindings,
+      };
+      if (projection.familyId === PROJECTION_FAMILY_IDS.surfaceManifest)
+        projection.requiredRuntimeCapability = {
+          ...projection.requiredRuntimeCapability,
+          minimumVersion: Math.max(
+            projection.requiredRuntimeCapability.minimumVersion,
+            DATE_TIME_FIELD_READER,
+          ),
+        };
+    }
+  }
   if (
     verificationPackageRevision.languageVersion === 'v6' &&
     verificationPackageRevision.billingPlans
@@ -439,18 +478,21 @@ export function lowerBaseProjectionPayloads(
     const surface = plans.find(
       (p) => p.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
     )!;
+    const billingPlans = verificationPackageRevision.billingPlans;
+    const hasAgreedInterval = billingPlans.some(
+      (p) => p.bindings?.agreedInterval,
+    );
     surface.payload = {
       ...(surface.payload as object),
-      billingPlans: verificationPackageRevision.billingPlans,
+      billingPlans,
+      ...(hasAgreedInterval && {
+        billingCalculationVersion: BILLING_CALCULATION_VERSION,
+      }),
     };
     surface.requiredRuntimeCapability = {
       ...surface.requiredRuntimeCapability,
       minimumVersion: Math.max(
-        verificationPackageRevision.billingPlans.some(
-          (p) => p.bindings?.agreedInterval,
-        )
-          ? BILLING_INTERVAL_READER
-          : BILLING_READER,
+        hasAgreedInterval ? BILLING_ALLOCATION_READER : BILLING_READER,
         surface.requiredRuntimeCapability.minimumVersion,
       ),
     };
@@ -1081,12 +1123,16 @@ function surfaceManifestPayload(
         (column) => column.relation,
       ),
   );
-  const lineCreateValues = original.surfaces.some(
-    (surface) =>
-      'documentEditor' in surface &&
-      (surface.documentEditor as SurfaceDocumentEditor | undefined)
-        ?.lineCreateValues !== undefined,
-  );
+  // Rung 35 reads both the workflow definition and editor line defaults.
+  // Removing an editor must not admit the workflow to a reader without it.
+  const needsStockCountReader =
+    hasStockCountWorkflow(original) ||
+    original.surfaces.some(
+      (surface) =>
+        'documentEditor' in surface &&
+        (surface.documentEditor as SurfaceDocumentEditor | undefined)
+          ?.lineCreateValues !== undefined,
+    );
   const replayedLayout = original.surfaces.some(
     (s) =>
       'layouts' in s &&
@@ -1094,12 +1140,13 @@ function surfaceManifestPayload(
         (layout) => layout.placementRuleVersion === 1,
       ),
   );
-  const surfaceFloor = lineCreateValues
-    ? LINE_CREATE_VALUES_SURFACE_FLOOR
-    : replayedLayout
-      ? REPLAYED_LAYOUT_READER
-      : original.surfaces.some((s) => s.archetype === 'board')
-        ? BOARD_READER
+  // Board v2 is the highest rung: a Board release needs it whatever else it has.
+  const surfaceFloor = original.surfaces.some((s) => s.archetype === 'board')
+    ? BOARD_READER
+    : needsStockCountReader
+      ? LINE_CREATE_VALUES_SURFACE_FLOOR
+      : replayedLayout
+        ? REPLAYED_LAYOUT_READER
         : original.surfaces.some((s) => 'layouts' in s && s.layouts)
           ? LAYOUT_READER
           : extendedEditor || declaredRelationList
@@ -1192,8 +1239,15 @@ function surfaceManifestPayload(
                     ),
                   },
           }),
+          // Labels and roles render from this release, beside the digested member.
           ...(declared && 'board' in declared && declared.board
-            ? { board: declared.board }
+            ? {
+                board: declared.board,
+                boardPresentation: boardPresentation(
+                  original as unknown as BoardSource,
+                  (declared.board as SurfaceBoard).body,
+                ),
+              }
             : {}),
           ...(declared && 'layouts' in declared && declared.layouts
             ? { layouts: declared.layouts }

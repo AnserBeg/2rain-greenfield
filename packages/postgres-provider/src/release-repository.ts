@@ -1,4 +1,6 @@
 import {
+  BILLING_ALLOCATION_READER,
+  BILLING_CALCULATION_VERSION,
   BILLING_READER,
   BILLING_INTERVAL_READER,
 } from '../../canonical-model/src/billing.js';
@@ -8,8 +10,11 @@ import {
   hasBoardDeclaration,
 } from './board-admission.js';
 import {
-  BOOKING_OPERATION_READER,
+  BOOKING_USAGE_QUERY_READER,
+  hasBookingUsage,
+  bookingReaderFloor,
   bookingCatalogTerms,
+  bookingUsageCatalogTerms,
   bookingDeclarationProblem,
   hasBookingOperations,
 } from '@north-star/canonical-model';
@@ -49,6 +54,10 @@ import {
   type ReleaseManifestEnvelope,
 } from '@north-star/compiler';
 import { bindCalculatedDisplayField } from '../../canonical-model/src/calculated-display-bindings.js';
+import {
+  declaresOptionalReadModelDependency,
+  OPTIONAL_DEPENDENCY_QUERY_READER,
+} from '../../canonical-model/src/read-model-dependencies.js';
 import {
   CALCULATED_DISPLAY_QUERY_READER,
   parseCalculatedDisplayProjection,
@@ -599,13 +608,11 @@ function verifyCompiledRelease(
   const billingPlans = isRecord(layoutDefinition)
     ? layoutDefinition.billingPlans
     : undefined;
-  const billingFloor =
+  const hasAgreedBillingInterval =
     Array.isArray(billingPlans) &&
     billingPlans.some(
       (p) => isRecord(p) && isRecord(p.bindings) && p.bindings.agreedInterval,
-    )
-      ? BILLING_INTERVAL_READER
-      : BILLING_READER;
+    );
   if (billingPlans && !surfaceReference)
     throw integrity(
       'BILLING_PLAN_MISMATCH',
@@ -717,10 +724,15 @@ function verifyCompiledRelease(
       projectionPayloadBytes,
     );
     if (
-      reference.familyId === PROJECTION_FAMILY_IDS.operationCatalog &&
+      (reference.familyId === PROJECTION_FAMILY_IDS.operationCatalog ||
+        reference.familyId === PROJECTION_FAMILY_IDS.queryCatalog) &&
       revision.languageVersion === 'v6'
     ) {
-      const terms = bookingCatalogTerms(layoutDefinition);
+      const readTerms =
+        reference.familyId === PROJECTION_FAMILY_IDS.queryCatalog
+          ? bookingUsageCatalogTerms
+          : bookingCatalogTerms;
+      const terms = readTerms(layoutDefinition);
       const catalog = decodeCanonicalObject(
         projectionPayloadBytes[0]!,
         'PROJECTION_CHUNK_NOT_CANONICAL',
@@ -730,7 +742,7 @@ function verifyCompiledRelease(
           bookingDeclarationProblem(
             parseNormalizedApplicationPackageJson(revision.desiredState),
           )) ||
-        canonicalize(terms) !== canonicalize(bookingCatalogTerms(catalog))
+        canonicalize(terms) !== canonicalize(readTerms(catalog))
       ) {
         throw integrity(
           'BOOKING_PROJECTION_CONTRACT_MISMATCH',
@@ -746,15 +758,33 @@ function verifyCompiledRelease(
         projectionPayloadBytes[0]!,
         'PROJECTION_CHUNK_NOT_CANONICAL',
       );
+      const hasBillingCalculation = Object.hasOwn(
+        payload,
+        'billingCalculationVersion',
+      );
+      const surfaceFloor = reference.requiredRuntimeCapability.minimumVersion;
+      const billingFloor = hasBillingCalculation
+        ? BILLING_ALLOCATION_READER
+        : hasAgreedBillingInterval
+          ? BILLING_INTERVAL_READER
+          : BILLING_READER;
       if (
         canonicalize(payload.billingPlans ?? null) !==
           canonicalize(billingPlans ?? null) ||
-        (billingPlans &&
-          reference.requiredRuntimeCapability.minimumVersion < billingFloor) ||
+        (hasBillingCalculation &&
+          (!hasAgreedBillingInterval ||
+            payload.billingCalculationVersion !==
+              BILLING_CALCULATION_VERSION)) ||
+        (hasAgreedBillingInterval &&
+          surfaceFloor >= BILLING_ALLOCATION_READER &&
+          !hasBillingCalculation) ||
+        (billingPlans && surfaceFloor < billingFloor) ||
         (!billingPlans &&
-          [BILLING_READER, BILLING_INTERVAL_READER].includes(
-            reference.requiredRuntimeCapability.minimumVersion,
-          ))
+          [
+            BILLING_READER,
+            BILLING_INTERVAL_READER,
+            BILLING_ALLOCATION_READER,
+          ].includes(surfaceFloor))
       )
         throw integrity(
           'BILLING_PLAN_MISMATCH',
@@ -890,13 +920,20 @@ function verifyFormulaProjectionReference(
   if (
     references.length !== Number(Boolean(declaring)) ||
     (hasBookingOperations(normalized)
-      ? operationFloor !== BOOKING_OPERATION_READER
+      ? operationFloor !== bookingReaderFloor(normalized)
       : rules.length
         ? operationFloor !== requiredFormulaValidationOperationReader(rules)
         : operationFloor >= LITERAL_VALIDATION_OPERATION_READER) ||
-    (displays.length
-      ? queryFloor !== CALCULATED_DISPLAY_QUERY_READER
-      : queryFloor >= CALCULATED_DISPLAY_QUERY_READER) ||
+    // The query floor is the highest catalog feature present.
+    (declaresOptionalReadModelDependency(
+      isRecord(normalized) ? normalized.queries : undefined,
+    )
+      ? queryFloor !== OPTIONAL_DEPENDENCY_QUERY_READER
+      : hasBookingUsage(normalized)
+        ? queryFloor !== BOOKING_USAGE_QUERY_READER
+        : displays.length
+          ? queryFloor !== CALCULATED_DISPLAY_QUERY_READER
+          : queryFloor >= CALCULATED_DISPLAY_QUERY_READER) ||
     (declaring &&
       (reference?.instanceId !==
         `${declaring.package.namespace}:projection.formula-rule` ||

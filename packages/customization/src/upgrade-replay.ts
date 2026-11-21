@@ -12,7 +12,16 @@ import {
   customPermissionBindings,
   type AppliedCustomization,
 } from './apply.js';
-import { currentLayout, type LayoutReplay } from './layout-revision.js';
+import {
+  compatibleFieldType,
+  currentLayout,
+  historicalLayout,
+} from './layout-revision.js';
+import {
+  supersededBoardRevisions,
+  type BoardApplyProblem,
+  type BoardCheck,
+} from './board-revision.js';
 import type { CustomizationPatch, SingleCustomizationPatch } from './patch.js';
 import {
   UPGRADE_PATCH_KINDS,
@@ -20,6 +29,7 @@ import {
   type ReplayConflict,
   type ReplayDiagnostics,
   type ReplayOrigin,
+  type UpgradeFinding,
 } from './upgrade-diagnostics.js';
 
 type Definition = Record<string, unknown>;
@@ -35,6 +45,8 @@ const declarationKeys = {
   permissions: 'permissionId',
   documentFields: 'fieldId',
   documentCategories: 'categoryId',
+  documentTemplatePointers: 'templateId',
+  documentTemplateRevisions: 'revisionId',
   calculatedDisplayFields: 'fieldId',
   formulaRules: 'ruleId',
   workflows: 'workflowId',
@@ -75,7 +87,7 @@ function referencedIds(value: unknown, out = new Set<string>()) {
   return out;
 }
 function bindings(
-  patch: SingleCustomizationPatch,
+  patch: unknown,
   before: Map<string, Member>,
   after: Map<string, Member>,
 ): ReplayConflict[] {
@@ -100,7 +112,11 @@ function bindings(
       'companyOwnership',
       'classification',
     ] as const) {
-      if (canonicalize(old[prop] ?? null) === canonicalize(next[prop] ?? null))
+      if (
+        prop === 'fieldType'
+          ? compatibleFieldType(old[prop], next[prop])
+          : canonicalize(old[prop] ?? null) === canonicalize(next[prop] ?? null)
+      )
         continue;
       conflicts.push({
         code: prop === 'fieldType' ? 'INCOMPATIBLE_TYPE' : 'INCOMPATIBLE_SCOPE',
@@ -113,6 +129,53 @@ function bindings(
   }
   return conflicts;
 }
+/** Final check over the compiled source and candidate, also covering formula
+ * declarations inherited from the platform rather than introduced by a patch. */
+export function finalFormulaConflict(
+  source: VersionedNormalizedApplicationPackage,
+  target: VersionedNormalizedApplicationPackage,
+  inheritedFrom: VersionedNormalizedApplicationPackage | undefined,
+  changes: readonly CustomizationPatch[],
+  origins: readonly { patchId: string }[],
+): UpgradeFinding | undefined {
+  if (source.languageVersion !== 'v6') return;
+  const subject =
+    retypedFormulaRule(source, target, inheritedFrom) ??
+    retypedCalculatedDisplayField(source, target, inheritedFrom);
+  if (!subject) return;
+  const declaration =
+    source.formulaRules?.find((r) => r.ruleId === subject) ??
+    source.calculatedDisplayFields?.find((f) => f.fieldId === subject);
+  const after = declarations(target);
+  const conflict = bindings(
+    declaration,
+    declarations(inheritedFrom ?? source),
+    after,
+  )[0] ?? {
+    code: 'INCOMPATIBLE_TYPE' as const,
+    subject,
+    expected: declaration,
+    observed: after.get(subject) ?? null,
+  };
+  for (const [patchIndex, change] of changes.entries()) {
+    if (
+      (change.kind === 'addValidation' && change.rule.ruleId === subject) ||
+      (change.kind === 'addCalculatedDisplayField' &&
+        change.field.fieldId === subject)
+    ) {
+      return {
+        ...conflict,
+        patchIndex,
+        memberIndex: 0,
+        editIndex: 0,
+        patchKind: change.kind,
+        ...(origins[patchIndex] && { patchId: origins[patchIndex].patchId }),
+      };
+    }
+  }
+  return conflict;
+}
+
 function formulaConflicts(
   patch: SingleCustomizationPatch,
   original: Definition,
@@ -200,7 +263,7 @@ function formulaConflicts(
 function applyRefusal(
   patch: SingleCustomizationPatch,
   target: Definition,
-  reason: string,
+  outcome: NonNullable<ReturnType<typeof applyOne>>,
 ): ReplayConflict {
   const ids = declarations(target);
   if (patch.kind === 'arrangeLayout' && !ids.has(patch.surface))
@@ -216,10 +279,26 @@ function applyRefusal(
     );
     if (module)
       return {
-        code: 'WHOLE_PACKAGE_FAILURE',
+        code: 'ID_COLLISION',
         subject: String(module.moduleId),
         expected: { kind: patch.kind, label: patch.label },
         observed: { moduleId: module.moduleId, label: module.label },
+      };
+  }
+  if (patch.kind === 'addDateTimeField') {
+    const entity = patch.target.recordTypeId;
+    const collision = (target.fields as Member[]).find(
+      (f) =>
+        f.fieldId === patch.fieldId ||
+        ((f.entity as Member)?.targetId === entity &&
+          String(f.label).toLowerCase() === patch.label.toLowerCase()),
+    );
+    if (collision)
+      return {
+        code: 'FIELD_COLLISION',
+        subject: String(collision.fieldId),
+        expected: { fieldId: patch.fieldId, label: patch.label },
+        observed: { fieldId: collision.fieldId, label: collision.label },
       };
   }
   if (patch.kind === 'addField' || patch.kind === 'addAddressField') {
@@ -240,27 +319,24 @@ function applyRefusal(
         observed: { fieldId: collision.fieldId, label: collision.label },
       };
   }
-  const subject =
-    [...referencedIds(patch)][0] ??
-    ('label' in patch ? patch.label : patch.kind);
+  if (patch.kind === 'narrowPermission' || patch.kind === 'unNarrowPermission')
+    return {
+      code:
+        outcome.status === 'refused' &&
+        outcome.code === 'CUSTOMIZE_DUPLICATE_LABEL'
+          ? 'ID_COLLISION'
+          : 'RETIRED_TARGET',
+      subject: patch.target.id,
+      expected: { roleKey: patch.roleKey, operationId: patch.target.id },
+      observed: outcome.message,
+    };
+  const subject = String((target.package as Member).packageId);
   return {
     code: 'WHOLE_PACKAGE_FAILURE',
     subject,
     expected: patch.kind,
-    observed: reason,
+    observed: outcome.message,
   };
-}
-
-export function historicalLayout(
-  parent: Definition,
-  patch: Extract<CustomizationPatch, { kind: 'addLayoutRevision' }>,
-): LayoutReplay | undefined {
-  const def = parent as unknown as LayoutDefinition;
-  const surface = def.surfaces.find((s) => s.surfaceId === patch.surface);
-  const layout = surface && currentLayout(def, surface, patch.mode);
-  return layout
-    ? { source: layout.body, findings: [], blocked: [] }
-    : undefined;
 }
 
 export interface ReplayFailure extends ReplayDiagnostics {
@@ -283,6 +359,7 @@ export function replayCustomizationPatches(
   const failedLayouts = new Map<string, EditLocation>();
   const applied: SingleCustomizationPatch[] = [];
   const historical: SingleCustomizationPatch[] = [];
+  const superseded = supersededBoardRevisions(chain);
   for (const [patchIndex, change] of chain.entries()) {
     const origin = origins[patchIndex];
     if (origin?.parent) original = structuredClone(origin.parent);
@@ -302,7 +379,7 @@ export function replayCustomizationPatches(
           : undefined;
       const layout =
         original && patch.kind === 'addLayoutRevision' && origin?.differentBase
-          ? historicalLayout(original, patch)
+          ? historicalLayout(original as unknown as LayoutDefinition, patch)
           : undefined;
       const admission = [change.kind, patch.kind].find(
         (kind) => !UPGRADE_PATCH_KINDS.has(kind),
@@ -362,7 +439,20 @@ export function replayCustomizationPatches(
             expected: { roleKey: patch.roleKey, active: true },
             observed: null,
           });
-        if (before && !layout)
+        // A Board checks its own bindings by stable ID, and only on the last
+        // revision of each Board surface (ADR-0086 items 4 and 5).
+        const board =
+          patch.kind === 'addBoardViewRevision'
+            ? {
+                check: (superseded.has(patch.revisionId)
+                  ? 'identity'
+                  : origin?.differentBase === false
+                    ? 'authoring'
+                    : 'structural') as BoardCheck,
+                problem: undefined as BoardApplyProblem | undefined,
+              }
+            : undefined;
+        if (before && !layout && !board)
           conflicts.push(...bindings(patch, before, target));
         if (patch.kind === 'addMapPlacement' && !conflicts.length) {
           const surface = target.get(patch.surfaceId);
@@ -394,9 +484,7 @@ export function replayCustomizationPatches(
             )
           )
             conflicts.push({
-              code: id.includes(':field.')
-                ? 'FIELD_COLLISION'
-                : 'WHOLE_PACKAGE_FAILURE',
+              code: id.includes(':field.') ? 'FIELD_COLLISION' : 'ID_COLLISION',
               subject: id,
               expected: declarations(original!).get(id),
               observed: target.get(id),
@@ -404,9 +492,14 @@ export function replayCustomizationPatches(
         }
         if (!conflicts.length) {
           const trial = structuredClone(authored);
-          const outcome = applyOne(trial, patch, applied, layout);
+          const outcome = applyOne(trial, patch, applied, layout, board);
           if (outcome) {
-            if (layout && (layout.findings.length || layout.blocked.length)) {
+            if (board?.problem?.conflicts.length)
+              conflicts.push(...board.problem.conflicts);
+            else if (
+              layout &&
+              (layout.findings.length || layout.blocked.length)
+            ) {
               conflicts.push(...layout.findings);
               report.blocked.push(
                 ...layout.blocked.map((b) => ({
@@ -418,8 +511,7 @@ export function replayCustomizationPatches(
                       : b.blockedBy,
                 })),
               );
-            } else
-              conflicts.push(applyRefusal(patch, authored, outcome.message));
+            } else conflicts.push(applyRefusal(patch, authored, outcome));
           } else {
             if (original)
               conflicts.push(...formulaConflicts(patch, original, trial, base));
@@ -466,16 +558,20 @@ export function replayCustomizationPatches(
               failedIds.set(edit.id, blockedBy || { ...at, editIndex });
           }
         }
-        report.findings.push(...conflicts.map((c) => ({ ...at, ...c })));
+        report.findings.push(
+          ...conflicts.map((c) =>
+            c.code === 'WHOLE_PACKAGE_FAILURE' ? c : { ...at, ...c },
+          ),
+        );
       }
     }
   }
   if (report.findings.length) {
     report.findings.sort(
       (a, b) =>
-        a.patchIndex! - b.patchIndex! ||
-        a.memberIndex! - b.memberIndex! ||
-        a.editIndex! - b.editIndex! ||
+        (a.patchIndex ?? Infinity) - (b.patchIndex ?? Infinity) ||
+        (a.memberIndex ?? Infinity) - (b.memberIndex ?? Infinity) ||
+        (a.editIndex ?? Infinity) - (b.editIndex ?? Infinity) ||
         a.subject.localeCompare(b.subject, 'en'),
     );
     return report;

@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./billing-terms": "./src/billing-terms.ts",
+    "./booking-owner-usage": "./src/booking-owner-usage.ts",
     "./booking-capability-executor": "./src/booking-capability-executor.ts",
     "./composed-application-runtime": "./src/composed-application-runtime.ts",
     "./current-policy": "./src/current-policy.ts",
@@ -18,6 +19,7 @@
     "./payables-capability-executor": "./src/payables-capability-executor.ts",
     "./purchase-order-approval-executor": "./src/purchase-order-approval-executor.ts",
     "./inventory-provider-error-mappings": "./src/inventory-provider-error-mappings.ts",
+    "./personal-inbox": "./src/personal-inbox.ts",
     "./active-release-root": "./src/active-release-root.ts",
     "./readiness": "./src/readiness.ts",
     "./release-activation-service": "./src/release-activation-service.ts",
@@ -37,6 +39,7 @@
     "@north-star/runtime": "workspace:*",
     "jpeg-js": "0.4.4",
     "pdf-lib": "1.17.1",
+    "pdfkit": "0.17.2",
     "pg": "^8.22.0",
     "quickjs-emscripten": "0.32.0",
     "zod": "4.6.6"

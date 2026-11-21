@@ -1,8 +1,13 @@
 import type { ReplayOrigin } from './upgrade-diagnostics.js';
-import { applyBoardRevision } from './board-revision.js';
+import {
+  applyBoardRevision,
+  type BoardApplyProblem,
+  type BoardCheck,
+  supersededBoardRevisions,
+} from './board-revision.js';
 import {
   applyLayoutRevision,
-  currentLayout,
+  historicalLayout,
   type LayoutReplay,
   placeAddedLayoutField,
 } from './layout-revision.js';
@@ -97,6 +102,7 @@ export function applyCustomizationPatches(
 ): CustomizationApplication {
   const authored = structuredClone(base) as Json;
   const previous: SingleCustomizationPatch[] = [];
+  const superseded = supersededBoardRevisions(patches);
   for (const [index, change] of patches.entries()) {
     const members = change.kind === 'changeSet' ? change.patches : [change];
     for (const patch of members) {
@@ -104,20 +110,26 @@ export function applyCustomizationPatches(
       const origin = origins?.[index];
       if (patch.kind === 'addLayoutRevision' && origin?.differentBase) {
         const parent = origin.parent as unknown as LayoutDefinition;
-        const surface = parent?.surfaces.find(
-          (s) => s.surfaceId === patch.surface,
-        );
-        const target = surface && currentLayout(parent, surface, patch.mode);
-        if (!target)
+        layoutReplay = historicalLayout(parent, patch);
+        if (!layoutReplay)
           return {
             status: 'refused',
             code: 'CUSTOMIZE_LAYOUT_CONFLICT',
             message: 'The recorded layout authoring parent is missing.',
             patchIndex: index,
           };
-        layoutReplay = { source: target.body, findings: [], blocked: [] };
       }
-      const outcome = applyOne(authored, patch, previous, layoutReplay);
+      const board =
+        patch.kind === 'addBoardViewRevision'
+          ? {
+              check: superseded.has(patch.revisionId)
+                ? ('identity' as const)
+                : origin?.differentBase
+                  ? ('structural' as const)
+                  : ('authoring' as const),
+            }
+          : undefined;
+      const outcome = applyOne(authored, patch, previous, layoutReplay, board);
       if (outcome) return Object.freeze({ ...outcome, patchIndex: index });
       previous.push(patch);
     }
@@ -201,8 +213,13 @@ export function applyOne(
   patch: SingleCustomizationPatch,
   previous: readonly SingleCustomizationPatch[],
   layoutReplay?: LayoutReplay,
+  board: { check: BoardCheck; problem?: BoardApplyProblem | undefined } = {
+    check: 'authoring',
+  },
 ): Outcome | null {
   switch (patch.kind) {
+    case 'addDateTimeField':
+      return addDateTimeField(authored, patch, previous);
     case 'addAddressField':
       return addField(authored, patch, previous);
     case 'addMapPlacement': {
@@ -247,12 +264,19 @@ export function applyOne(
           p.kind === 'addBoardViewRevision' &&
           p.revisionId === patch.revisionId,
       )
-        ? 'This Board revision ID has already been used.'
+        ? {
+            message: 'This Board revision ID has already been used.',
+            conflicts: [],
+          }
         : applyBoardRevision(
             authored as unknown as BoardSource & { surfaces: Json[] },
             patch,
+            board.check,
           );
-      return problem ? refusal('CUSTOMIZE_BOARD_CONFLICT', problem) : null;
+      if (problem) board.problem = problem;
+      return problem
+        ? refusal('CUSTOMIZE_BOARD_CONFLICT', problem.message)
+        : null;
     }
     case 'addLayoutRevision': {
       if (
@@ -294,6 +318,9 @@ export function applyOne(
       return saveListView(authored, patch);
     case 'addMetricCard':
       return addMetricCard(authored, patch);
+    case 'addDocumentTemplateRevision':
+    case 'retireDocumentTemplate':
+      return applyDocumentTemplate(authored, patch);
     case 'saveWorkflow': {
       const workflows =
         authored.workflows === undefined ? [] : list(authored, 'workflows');
@@ -1585,6 +1612,77 @@ function statePrecondition(fieldId: string, stateId: string): Json {
   };
 }
 
+function applyDocumentTemplate(
+  authored: Json,
+  patch: Extract<
+    SingleCustomizationPatch,
+    { kind: 'addDocumentTemplateRevision' | 'retireDocumentTemplate' }
+  >,
+): Outcome | null {
+  const pointers = authored.documentTemplatePointers
+    ? list(authored, 'documentTemplatePointers')
+    : [];
+  const revisions = authored.documentTemplateRevisions
+    ? list(authored, 'documentTemplateRevisions')
+    : [];
+  const pointer = pointers.find(
+    ({ templateId }) => templateId === patch.templateId,
+  );
+  if (
+    pointer?.activeRevisionId === null ||
+    (pointer?.activeRevisionId ?? null) !== patch.previousRevisionId
+  ) {
+    return refusal(
+      'CUSTOMIZE_TARGET_NOT_FOUND',
+      'Choose the current active template revision.',
+    );
+  }
+
+  if (patch.kind === 'retireDocumentTemplate') {
+    pointer!.activeRevisionId = null;
+    return null;
+  }
+
+  const { templateId, revisionId } = patch;
+  if (
+    ![templateId, revisionId].every(
+      (id) => isTenantId(id) && id.split(':')[0] === namespaceOf(authored),
+    ) ||
+    revisions.some((revision) => revision.revisionId === revisionId)
+  ) {
+    return refusal(
+      'CUSTOMIZE_TARGET_NOT_FOUND',
+      'Use unique stable tenant IDs for the template and revision.',
+    );
+  }
+  authored.documentTemplateRevisions = [
+    ...revisions,
+    {
+      schemaVersion: version,
+      templateId,
+      revisionId,
+      entityId: patch.entityId,
+      label: patch.label,
+      documentKind: patch.documentKind,
+      headerQueryId: patch.headerQueryId,
+      identityFieldId: patch.identityFieldId,
+      currencyFieldId: patch.currencyFieldId,
+      format: patch.format,
+      layout: patch.layout,
+      pageNumbers: patch.pageNumbers,
+    },
+  ];
+  authored.documentTemplatePointers = [
+    ...pointers.filter((pointer) => pointer.templateId !== templateId),
+    {
+      schemaVersion: version,
+      templateId,
+      activeRevisionId: revisionId,
+    },
+  ];
+  return null;
+}
+
 function addDocumentDeclaration(
   authored: Json,
   patch: Extract<
@@ -1624,10 +1722,62 @@ function addDocumentDeclaration(
   return null;
 }
 
+/**
+ * ADR-0087: one logical `dateTime` field on a tenant record type. The field's
+ * declared type is the existing millisecond UTC instant, and the v6
+ * `dateTimeFields` declaration projects it with its private capture. Every ID
+ * derives from the author's stable field ID, never from the label.
+ */
+function addDateTimeField(
+  authored: Json,
+  patch: Extract<CustomizationPatch, { kind: 'addDateTimeField' }>,
+  previous: readonly SingleCustomizationPatch[],
+): Outcome | null {
+  const entityId = patch.target.recordTypeId;
+  const namespace = namespaceOf(authored);
+  if (!isTenantId(entityId))
+    return refusal(
+      'CUSTOMIZE_TARGET_NOT_FOUND',
+      'Date-time fields are available on your own record types; standard records, document headers and lines are not supported yet.',
+    );
+  if (
+    ['fields', 'documentFields', 'calculatedDisplayFields'].some((table) =>
+      ((authored[table] as Json[] | undefined) ?? []).some(
+        (f) => f.fieldId === patch.fieldId,
+      ),
+    )
+  )
+    return refusal(
+      'CUSTOMIZE_DUPLICATE_LABEL',
+      'Choose a unique tenant date-time field ID.',
+    );
+  return addField(
+    authored,
+    {
+      kind: 'addField',
+      entity: entityId,
+      field: { label: patch.label, type: 'text', required: patch.required },
+    },
+    previous,
+    {
+      fieldId: patch.fieldId,
+      declaration: {
+        schemaVersion: version,
+        fieldId: patch.fieldId,
+        entityId,
+        logicalType: 'dateTime',
+        zoneSource: { ...patch.zoneSource },
+      },
+      prefix: `${namespace}:field.custom_`,
+    },
+  );
+}
+
 function addField(
   authored: Json,
   patch: Extract<CustomizationPatch, { kind: 'addField' | 'addAddressField' }>,
   previous: readonly SingleCustomizationPatch[],
+  dateTime?: { fieldId: string; declaration: Json; prefix: string },
 ): Outcome | null {
   const { entity: entityId } = patch;
   const address = patch.kind === 'addAddressField' ? patch : null;
@@ -1648,11 +1798,31 @@ function addField(
   const boundary = tierBoundary(entityId);
   if (boundary) return boundary;
   const entityLocal = localOf(entityId);
-  const fieldLocal = isTenantId(entityId)
-    ? `${entityLocal}_${slug(field.label)}`
-    : `${TENANT_LOCAL_PREFIX}${entityLocal}_${slug(field.label)}`;
+  const fieldLocal = dateTime
+    ? localOf(dateTime.fieldId)
+    : isTenantId(entityId)
+      ? `${entityLocal}_${slug(field.label)}`
+      : `${TENANT_LOCAL_PREFIX}${entityLocal}_${slug(field.label)}`;
   const namespace = namespaceOf(authored);
-  const fieldId = address?.fieldId ?? `${namespace}:field.${fieldLocal}`;
+  const fieldId =
+    dateTime?.fieldId ?? address?.fieldId ?? `${namespace}:field.${fieldLocal}`;
+  if (dateTime && !fieldId.startsWith(dateTime.prefix))
+    return refusal(
+      'CUSTOMIZE_DUPLICATE_LABEL',
+      'A tenant date-time field ID starts with field.custom_.',
+    );
+  if (
+    dateTime &&
+    list(authored, 'relations').some(
+      (r) =>
+        r.ownership === 'parentScopedChild' &&
+        (r.sourceEntity as Json).targetId === entityId,
+    )
+  )
+    return refusal(
+      'CUSTOMIZE_TARGET_IN_TIER_B_DEPENDENCY_SET',
+      'Lines cannot have date-time fields yet.',
+    );
   if (
     address &&
     (!fieldId.startsWith(namespace + ':field.custom_') ||
@@ -1681,6 +1851,7 @@ function addField(
   // on a new revision, retaining its canonical id, column and saved values.
   const prior = previous.findLast(
     (p) =>
+      !dateTime &&
       p.kind === 'addField' &&
       p.entity === entityId &&
       p.field.label === field.label,
@@ -1744,6 +1915,27 @@ function addField(
       },
     ];
   }
+  if (dateTime) {
+    const added = list(authored, 'fields').at(-1)!;
+    const required = field.required === true;
+    Object.assign(added, {
+      collation: 'binary',
+      searchable: false,
+      reportable: false,
+      fieldType: {
+        kind: 'dateTimeFieldType',
+        precision: 'millisecond',
+        schemaVersion: version,
+        timezoneSemantics: 'utcInstant',
+      },
+      presence: required ? 'required' : 'optional',
+      defaultSemantics: required ? 'none' : 'nullable',
+    });
+    authored.dateTimeFields = [
+      ...((authored.dateTimeFields as Json[] | undefined) ?? []),
+      dateTime.declaration,
+    ];
+  }
   // A tenant record type's own list shows the new field as a column.
   if (!bindExisting && (address || isTenantId(entityId))) {
     for (const surface of list(authored, 'surfaces')) {
@@ -1757,7 +1949,7 @@ function addField(
       }
       const columns = declared.columns as Json[];
       columns.push({
-        columnId: `${namespace}:list_column.${entityLocal}_list_${address ? slug(field.label) : fieldLocal.slice(entityLocal.length + 1)}`,
+        columnId: `${namespace}:list_column.${entityLocal}_list_${dateTime ? fieldLocal : address ? slug(field.label) : fieldLocal.slice(entityLocal.length + 1)}`,
         field: fieldId,
         label: field.label.trim(),
         orderKey:

@@ -1,3 +1,7 @@
+import {
+  LEGACY_WORKFLOW_SDK_VERSION,
+  supportsWorkflowSdk,
+} from './workflow-sdk-version.js';
 import { createHash } from 'node:crypto';
 
 import { canonicalize } from '@north-star/canonical-model';
@@ -25,7 +29,12 @@ import {
   MAXIMUM_WORKFLOW_EFFECT_BYTES,
   WorkflowWatchdogExpired,
 } from './workflow-isolate.js';
-import { InMemoryWorkflowRun, WorkflowGuestError } from './workflow-run.js';
+import {
+  InMemoryWorkflowRun,
+  WorkflowGuestError,
+  WorkflowCpuLimit,
+  retryWorkflowStep,
+} from './workflow-run.js';
 import {
   generateWorkflowSdk,
   type WorkflowCall,
@@ -35,7 +44,7 @@ import {
 
 export const WORKFLOW_ENGINE_BUILD = 'quickjs-emscripten@0.32.0';
 export const WORKFLOW_HOST_VERSION = 'northstar.workflow-host/v1';
-export const WORKFLOW_SDK_VERSION = 'northstar.workflow-sdk/v1';
+export { WORKFLOW_SDK_VERSION } from './workflow-sdk-version.js';
 
 type EffectCall = Extract<WorkflowCall, { kind: 'query' | 'operation' }>;
 
@@ -250,6 +259,7 @@ export class PostgresWorkflowExecution {
     const scopedRun = run.receipt_scope && { ...run, ...run.receipt_scope };
     const pending = run.retry_authorized ? pendingDispatch(run, journal) : null;
     const recovered = pending && (await this.#readReceipt(pending));
+    const attempts: string[] = [];
     const decision =
       !run.retry_authorized ||
       journal.invalid ||
@@ -257,7 +267,7 @@ export class PostgresWorkflowExecution {
       !scopedRun ||
       !matchesPin(run, snapshot.pointer)
         ? null
-        : await this.#replay(scopedRun, journal);
+        : await this.#replay(scopedRun, journal, attempts);
     const dispatch = await this.#withCurrent(
       run,
       journal,
@@ -294,6 +304,14 @@ export class PostgresWorkflowExecution {
           return null;
         }
         if (!decision) return null;
+        for (const reason of attempts)
+          await insertJournal(
+            client,
+            current,
+            journal.prefix.length,
+            'CONTROL',
+            { fence: current.execution_fence, reason },
+          );
         if (decision.kind === 'SUSPENDED' || decision.kind === 'QUARANTINED') {
           await setStatus(client, current, decision.kind, decision.reason);
           return null;
@@ -643,7 +661,7 @@ export class PostgresWorkflowExecution {
     );
   }
 
-  async #replay(run: Run & ReceiptScope, journal: Journal) {
+  async #replay(run: Run & ReceiptScope, journal: Journal, attempts: string[]) {
     try {
       if (!run.verified_digest)
         throw new WorkflowEffectRefusal('unverified-definition');
@@ -660,9 +678,14 @@ export class PostgresWorkflowExecution {
       }
       let sdk: ReturnType<typeof generateWorkflowSdk>;
       try {
-        sdk = generateWorkflowSdk(view, run.grants);
-        if (sha256(sdk.declarations) !== run.sdk_digest)
-          sdk = generateWorkflowSdk(view, run.grants, true);
+        if (!supportsWorkflowSdk(run.sdk_version))
+          throw new Error('Unsupported workflow SDK pin');
+        sdk = generateWorkflowSdk(view, run.grants, run.sdk_version);
+        if (
+          run.sdk_version === LEGACY_WORKFLOW_SDK_VERSION &&
+          sha256(sdk.declarations) !== run.sdk_digest
+        )
+          sdk = generateWorkflowSdk(view, run.grants, run.sdk_version, true);
       } catch (cause) {
         throw new WorkflowEffectRefusal('unavailable-sdk-artifact', { cause });
       }
@@ -676,10 +699,14 @@ export class PostgresWorkflowExecution {
       };
       const workflow = { executable: run.executable.toString(), sdk };
       const base = new InMemoryWorkflowRun(workflow, event);
-      const decision = await new InMemoryWorkflowRun(workflow, event, {
-        ...base.snapshot(),
-        prefix: journal.prefix,
-      }).step();
+      const decision = await retryWorkflowStep(
+        () =>
+          new InMemoryWorkflowRun(workflow, event, {
+            ...base.snapshot(),
+            prefix: journal.prefix,
+          }).step(),
+        (reason) => attempts.push(reason),
+      );
       if (
         journal.pending &&
         (decision.kind !== 'call' ||
@@ -701,7 +728,12 @@ export class PostgresWorkflowExecution {
       )
         return {
           kind: 'QUARANTINED' as const,
-          reason: 'permanent-guest-failure',
+          reason:
+            error instanceof WorkflowCpuLimit
+              ? 'cpu-limit-exceeded'
+              : error instanceof WorkflowWatchdogExpired
+                ? 'host-watchdog-expired'
+                : 'permanent-guest-failure',
         };
       throw error;
     }
@@ -1087,7 +1119,7 @@ function runtimeAvailable(run: Run): boolean {
   return (
     run.engine_build === WORKFLOW_ENGINE_BUILD &&
     run.host_version === WORKFLOW_HOST_VERSION &&
-    run.sdk_version === WORKFLOW_SDK_VERSION
+    supportsWorkflowSdk(run.sdk_version)
   );
 }
 
