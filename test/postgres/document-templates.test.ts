@@ -70,6 +70,12 @@ test(
   'approved template revisions publish governed PDFs, refuse hidden sources, and retire',
   { timeout: 600_000 },
   async (t) => {
+    const previousZone = process.env.TZ;
+    process.env.TZ = 'UTC';
+    t.after(() => {
+      if (previousZone === undefined) delete process.env.TZ;
+      else process.env.TZ = previousZone;
+    });
     await withEphemeralPostgres(
       'document-templates',
       async ({ connection, pool }) => {
@@ -458,9 +464,14 @@ test(
             documentPdfText(firstBytes),
             /Service date: Nov 18, 2026/u,
           );
-          assert.match(
-            documentPdfText(firstBytes),
-            /Appointment: November 1, 2026, 01:30 UTC-05:00 America\/Toronto/u,
+          await t.test(
+            'the UTC process prints the captured appointment in the issued PDF',
+            () => {
+              assert.match(
+                documentPdfText(firstBytes),
+                /Appointment: November 1, 2026, 01:30 UTC-05:00 America\/Toronto/u,
+              );
+            },
           );
           assert.deepEqual(await bytes(secondAttachment), firstBytes);
           assert.notDeepEqual(
