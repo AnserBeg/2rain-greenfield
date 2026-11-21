@@ -482,6 +482,29 @@ test(
             [...page.groups, ...next.groups].map((r) => r.partition),
             page.totals.map((r) => r.partition),
           );
+          const url = new URL('/', app.baseUrl);
+          url.searchParams.set(
+            'surface',
+            revision.reportId.replace(
+              ':report.custom_',
+              ':surface.custom_report_',
+            ),
+          );
+          url.searchParams.set(
+            'northstar.app:parameter.customer_invoice_list_legal_entity_scope',
+            north,
+          );
+          url.searchParams.set(id('invoice_date') + '.from', '2026-11-01');
+          url.searchParams.set(id('invoice_date') + '.until', '2026-11-02');
+          const html = await (await fetch(url)).text();
+          for (const text of [
+            'Balance by customer',
+            'No currency',
+            '1 record without Balance',
+            '-0.005000000000000000',
+            'Export CSV',
+          ])
+            assert.ok(html.includes(text), 'missing in report table: ' + text);
           const file = await run({
             export: { resultDigest: page.resultDigest },
           });

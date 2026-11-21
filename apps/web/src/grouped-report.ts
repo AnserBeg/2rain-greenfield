@@ -171,7 +171,9 @@ export function groupedReportHtml(
           m.operator.kind === 'sum'
             ? ' <small>' +
               c.recordsWithoutMeasure +
-              ' records without ' +
+              (c.recordsWithoutMeasure === 1
+                ? ' record without '
+                : ' records without ') +
               h(m.label) +
               '</small>'
             : '';

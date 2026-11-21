@@ -279,7 +279,7 @@ export class PostgresModuleRuntimeInterpreter
       | ((observation: PinnedStorageTargetCacheObservation) => void)
       | undefined = undefined,
     options: {
-      readonly reportLimits?: Partial<ReportLimits>;
+      readonly reportLimits?: Partial<Omit<ReportLimits, 'deadlineMs'>>;
       readonly documentNumbers?: DocumentNumberMode;
       readonly workflowRunId?: string;
       readonly validationReadPolicy?: (
@@ -363,6 +363,10 @@ export class PostgresModuleRuntimeInterpreter
       () =>
         withTrustedRequestRead(this.pool, context, async (client, held) => {
           if (!held) throw new Error('Report snapshot unavailable');
+          await client.query(
+            "SELECT pg_catalog.set_config('statement_timeout',$1,true)",
+            [String(Math.min(limits.statementMs, remaining()))],
+          );
           const storage = await this.#loadPinnedStorageTarget(client, {
             view,
             context,

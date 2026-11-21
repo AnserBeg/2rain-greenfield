@@ -9,9 +9,7 @@
       "original": "{ ...member, companyAccessIndex: COMPANY_ACCESS_INDEX }",
       "replacement": "member",
       "test": {
-        "files": [
-          "test/compiler/report-company-access.test.ts"
-        ],
+        "files": ["test/compiler/report-company-access.test.ts"],
         "namePattern": "recording a company-owned"
       },
       "kills": [
@@ -29,9 +27,7 @@
       "original": "if (patch.companyAccessIndex && patch.companyOwnership !== 'entityOwned')",
       "replacement": "if (false)",
       "test": {
-        "files": [
-          "test/compiler/report-company-access.test.ts"
-        ],
+        "files": ["test/compiler/report-company-access.test.ts"],
         "namePattern": "recording a company-owned"
       },
       "kills": [
@@ -49,9 +45,7 @@
       "original": "(entity) => 'companyAccessIndex' in entity && entity.companyAccessIndex,",
       "replacement": "() => false,",
       "test": {
-        "files": [
-          "test/compiler/report-company-access.test.ts"
-        ],
+        "files": ["test/compiler/report-company-access.test.ts"],
         "namePattern": "the new Inspection"
       },
       "kills": [
@@ -69,9 +63,7 @@
       "original": "if ('companyAccessIndex' in entity && entity.companyAccessIndex)",
       "replacement": "if (entityOwned && entity.entityId.includes(':entity.custom_'))",
       "test": {
-        "files": [
-          "test/compiler/report-company-access.test.ts"
-        ],
+        "files": ["test/compiler/report-company-access.test.ts"],
         "namePattern": "an archived pre-key"
       },
       "kills": [
@@ -89,9 +81,7 @@
       "original": "(indexedType && surfaceFloor < COMPANY_ACCESS_INDEX_READER) ||",
       "replacement": "",
       "test": {
-        "files": [
-          "test/postgres/releases.test.ts"
-        ],
+        "files": ["test/postgres/releases.test.ts"],
         "namePattern": "release admission refuses a company access index"
       },
       "kills": [
@@ -109,9 +99,7 @@
       "original": "const partition = partitionFor(binding, fact);",
       "replacement": "const partition = {kind:'unitless'} as const;",
       "test": {
-        "files": [
-          "test/compiler/report-company-access.test.ts"
-        ],
+        "files": ["test/compiler/report-company-access.test.ts"],
         "namePattern": "Invoice source"
       },
       "kills": [
@@ -129,9 +117,7 @@
       "original": "candidate === fact[binding.fieldId]",
       "replacement": "candidate !== 'EUR' && candidate === fact[binding.fieldId]",
       "test": {
-        "files": [
-          "test/compiler/report-company-access.test.ts"
-        ],
+        "files": ["test/compiler/report-company-access.test.ts"],
         "namePattern": "Invoice source"
       },
       "kills": [
@@ -149,9 +135,7 @@
       "original": "if (value == null) row.cells[i]!.missing++;",
       "replacement": "if (value == null) continue;",
       "test": {
-        "files": [
-          "test/compiler/report-company-access.test.ts"
-        ],
+        "files": ["test/compiler/report-company-access.test.ts"],
         "namePattern": "Invoice source"
       },
       "kills": [
@@ -169,9 +153,7 @@
       "original": "if (amount.scale !== CURRENCY_MINOR_UNITS_V0[currency.currencyCode])",
       "replacement": "if (false)",
       "test": {
-        "files": [
-          "test/compiler/report-company-access.test.ts"
-        ],
+        "files": ["test/compiler/report-company-access.test.ts"],
         "namePattern": "amount operands"
       },
       "kills": [
@@ -189,9 +171,7 @@
       "original": "if (code?.kind !== 'textFieldType' || code.maximumLength !== 3)",
       "replacement": "if (false)",
       "test": {
-        "files": [
-          "test/compiler/report-company-access.test.ts"
-        ],
+        "files": ["test/compiler/report-company-access.test.ts"],
         "namePattern": "amount operands"
       },
       "kills": [
@@ -199,6 +179,96 @@
           "file": "test/compiler/report-company-access.test.ts",
           "name": "amount operands must resolve locally and fixed currencies require the stored scale to equal the minor unit",
           "expected": "Missing expected exception"
+        }
+      ]
+    },
+    {
+      "name": "reports-scoped-limit",
+      "claim": "The SQL candidate probe stops at the reader cap plus one.",
+      "file": "packages/postgres-provider/src/grouped-report.ts",
+      "original": " LIMIT ${param(limits.facts + 1)}",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/report-reader-bounds.test.ts"],
+        "namePattern": "the PostgreSQL Invoice candidate probe"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/report-reader-bounds.test.ts",
+          "name": "the PostgreSQL Invoice candidate probe uses the named date index and stops at cap plus one before any residual, even with hidden facts",
+          "expected": "provider scanned past the fourth scoped candidate"
+        }
+      ]
+    },
+    {
+      "name": "reports-row-policy",
+      "claim": "Row-level narrowing removes hidden facts before aggregating coverage and totals.",
+      "file": "packages/postgres-provider/src/grouped-report.ts",
+      "original": "addRowPolicy(args, predicates);",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/report-reader-bounds.test.ts"],
+        "namePattern": "the PostgreSQL Invoice candidate probe"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/report-reader-bounds.test.ts",
+          "name": "the PostgreSQL Invoice candidate probe uses the named date index and stops at cap plus one before any residual, even with hidden facts",
+          "expected": "Expected values to be strictly equal"
+        }
+      ]
+    },
+    {
+      "name": "reports-group-cap",
+      "claim": "The provider refuses groups over the declared reader budget.",
+      "file": "packages/postgres-provider/src/grouped-report.ts",
+      "original": "if (groups.length > limits.groups) return { kind: 'narrow' };",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/report-reader-bounds.test.ts"],
+        "namePattern": "the PostgreSQL Invoice candidate probe"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/report-reader-bounds.test.ts",
+          "name": "the PostgreSQL Invoice candidate probe uses the named date index and stops at cap plus one before any residual, even with hidden facts",
+          "expected": "Expected values to be strictly deep-equal"
+        }
+      ]
+    },
+    {
+      "name": "reports-candidate-count",
+      "claim": "The provider refuses scoped candidates over budget before applying residuals.",
+      "file": "packages/postgres-provider/src/grouped-report.ts",
+      "original": "if (probe.rows[0]!.n > limits.facts) return { kind: 'narrow' };",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/report-reader-bounds.test.ts"],
+        "namePattern": "the PostgreSQL Invoice candidate probe"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/report-reader-bounds.test.ts",
+          "name": "the PostgreSQL Invoice candidate probe uses the named date index and stops at cap plus one before any residual, even with hidden facts",
+          "expected": "Expected values to be strictly deep-equal"
+        }
+      ]
+    },
+    {
+      "name": "reports-invalid-index",
+      "claim": "The reader refuses an access path that is absent from the PostgreSQL catalog.",
+      "file": "packages/postgres-provider/src/grouped-report.ts",
+      "original": "!(await reportIndexReady(client, table, index, keys))",
+      "replacement": "false",
+      "test": {
+        "files": ["test/postgres/report-reader-bounds.test.ts"],
+        "namePattern": "the PostgreSQL Invoice candidate probe"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/report-reader-bounds.test.ts",
+          "name": "the PostgreSQL Invoice candidate probe uses the named date index and stops at cap plus one before any residual, even with hidden facts",
+          "expected": "Expected values to be strictly deep-equal"
         }
       ]
     }

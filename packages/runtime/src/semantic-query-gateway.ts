@@ -538,78 +538,81 @@ export class SemanticQueryGateway {
     req: ReportRequest,
   ): Promise<ReportResult> {
     assertRequestRuntimeView(view);
-    const deadline = performance.now() + REPORT_READER_POLICY.deadlineMs;
+    const now =
+      this.registeredQueryLatency?.monotonicMilliseconds ??
+      (() => performance.now());
+    const deadline = now() + REPORT_READER_POLICY.deadlineMs;
     const parentDeadline = requestDeadline.getStore();
     const remaining = () => {
-      const ms = Math.min(
-        parentDeadline?.() ?? Infinity,
-        deadline - performance.now(),
-      );
+      const ms = Math.min(parentDeadline?.() ?? Infinity, deadline - now());
       if (ms <= 0) throw new Error('REPORT_DEADLINE');
       return Math.max(1, Math.floor(ms));
     };
-    return requestDeadline.run(remaining, async () => {
-      try {
-        const authorized = await this.authorizeReport(
-          view,
-          req.queryId,
-          req.company,
-          !!req.export,
-        );
-        if (!authorized || !this.executor?.executeGrouped)
-          return { kind: 'unavailable' };
-        const { source, report, scope, args } = authorized;
-        remaining();
-        if (
-          !Number.isSafeInteger(req.pageSize) ||
-          req.pageSize < 1 ||
-          req.pageSize > REPORT_READER_POLICY.page ||
-          !validReportParameters(report, req)
-        )
-          return { kind: 'narrow' };
-        const filterPlans: QueryFilterLoweringPlan[] = [];
-        // Slice 1 accepts a generated Q0 collection only. Its literal row filter
-        // and the provider's live narrowing both apply to the authorized facts.
-        if (
-          source.filter.kind !== 'booleanPredicate' ||
-          source.filter.value !== true
-        )
-          return { kind: 'unavailable' };
-        if (this.policyNarrowing)
-          filterPlans.push(
-            parsePolicyNarrowing(
-              await this.policyNarrowing.narrow({
-                definition: source,
-                view,
-                arguments: args,
-              }),
-              source,
-            ),
+    return requestDeadline.run(
+      () => Math.min(REPORT_READER_POLICY.statementMs, remaining()),
+      async () => {
+        try {
+          const authorized = await this.authorizeReport(
+            view,
+            req.queryId,
+            req.company,
+            !!req.export,
           );
-        return await this.executor.executeGrouped({
-          view,
-          report,
-          input: req,
-          maximumFacts: Math.min(
-            source.maximumResultCount,
-            req.export
-              ? (source.exportMaximumResultCount ?? source.maximumResultCount)
-              : Infinity,
-          ),
-          filterPlans,
-          scope,
-          remaining,
-        });
-      } catch (error) {
-        if (
-          error instanceof Error &&
-          (error.message === 'REPORT_DEADLINE' ||
-            ('code' in error && error.code === '57014'))
-        )
-          return { kind: 'narrow' };
-        return { kind: 'unavailable' };
-      }
-    });
+          if (!authorized || !this.executor?.executeGrouped)
+            return { kind: 'unavailable' };
+          const { source, report, scope, args } = authorized;
+          remaining();
+          if (
+            !Number.isSafeInteger(req.pageSize) ||
+            req.pageSize < 1 ||
+            req.pageSize > REPORT_READER_POLICY.page ||
+            !validReportParameters(report, req)
+          )
+            return { kind: 'narrow' };
+          const filterPlans: QueryFilterLoweringPlan[] = [];
+          // Slice 1 accepts a generated Q0 collection only. Its literal row filter
+          // and the provider's live narrowing both apply to the authorized facts.
+          if (
+            source.filter.kind !== 'booleanPredicate' ||
+            source.filter.value !== true
+          )
+            return { kind: 'unavailable' };
+          if (this.policyNarrowing)
+            filterPlans.push(
+              parsePolicyNarrowing(
+                await this.policyNarrowing.narrow({
+                  definition: source,
+                  view,
+                  arguments: args,
+                }),
+                source,
+              ),
+            );
+          return await this.executor.executeGrouped({
+            view,
+            report,
+            input: req,
+            maximumFacts: Math.min(
+              source.maximumResultCount,
+              req.export
+                ? (source.exportMaximumResultCount ?? source.maximumResultCount)
+                : Infinity,
+            ),
+            filterPlans,
+            scope,
+            remaining,
+          });
+        } catch (error) {
+          if (
+            error instanceof Error &&
+            (error.message === 'REPORT_DEADLINE' ||
+              ('code' in error && error.code === '57014'))
+          )
+            return { kind: 'narrow' };
+          return { kind: 'unavailable' };
+        }
+      },
+    );
   }
 
   async invokeAggregate(
