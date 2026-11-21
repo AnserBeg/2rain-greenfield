@@ -69,7 +69,7 @@ const anthropicPrices = (input: number, output: number) => ({
   input,
   output,
   cacheRead: input * 0.1,
-  cacheWrite: input * 2, // one-hour cache writes
+  cacheWrite: input * 1.25, // five-minute cache writes
 });
 const openAiPrices = (input: number, output: number) => ({
   input,
@@ -195,7 +195,9 @@ function adapter(
       modelId: candidate.modelId,
       ...(candidate.effort ? { effort: candidate.effort as 'medium' } : {}),
       maxTokens: 8_000,
-      cacheTtl: '1h',
+      // Drafts run back to back and repairs are one-off: five minutes covers
+      // both, at the cheaper write.
+      cacheTtl: '5m',
     });
   return openAiModel({
     key: keys.openai!,
@@ -447,6 +449,11 @@ async function main(): Promise<void> {
                 draftedAheadModel(drafted, live.get(candidate.name)!, () => {
                   mismatched.add(c.id);
                   log({ kind: 'prompt-mismatch' });
+                  // Never re-draft live: that would mix drafters and spend
+                  // outside the measured first turn.
+                  throw new Error(
+                    'the in-app request differs from the captured one',
+                  );
                 }),
               meter: scoring,
               sandboxWallClockMilliseconds:
