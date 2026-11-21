@@ -1,11 +1,13 @@
 import { PostgresAddresses } from './address-geocodes.js';
 import { BILLING_QUOTE_CAPABILITY } from '../../canonical-model/src/billing.js';
 import { billingQuoteReadModel } from './billing-quote.js';
+import { LedgerDocumentBrandResolver } from './document-company-brand.js';
 import type { DocumentScanner } from './document-content.js';
 import {
   PostgresDocumentGateway,
   documentPermissionBindings,
 } from './document-attachments.js';
+import type { DocumentFieldAuthority } from './document-template-sources.js';
 import { PostgresDocumentPublication } from './document-publication.js';
 import type pg from 'pg';
 import { parseNormalizedApplicationPackageJson } from '@north-star/canonical-model';
@@ -188,6 +190,28 @@ export function composeServingGateways(
       ),
       policy,
       queryGateway,
+      documentFields: documentOptions
+        ? new Map(
+            parseNormalizedApplicationPackageJson(
+              release.normalizedDefinitionBytes,
+            ).fields.flatMap((field) =>
+              field.lifecycle === 'active'
+                ? [
+                    [
+                      field.fieldId,
+                      {
+                        classification: field.classification,
+                        fieldKind: field.fieldType.kind,
+                        ...(field.fieldType.kind === 'moneyFieldType' && {
+                          currencyCode: field.fieldType.currencyCode,
+                        }),
+                      },
+                    ] as const,
+                  ]
+                : [],
+            ),
+          )
+        : null,
       storage: (() => {
         if (!documentOptions) return null;
         const payload = release.projection(
@@ -234,6 +258,7 @@ export function composeServingGateways(
         documentPublication,
         operationGateway,
         operationMediation,
+        new LedgerDocumentBrandResolver(queryGateway),
       )
     : null;
   return {
@@ -254,6 +279,7 @@ export interface ServingRelease {
 }
 
 interface ReleaseServing {
+  readonly documentFields: ReadonlyMap<string, DocumentFieldAuthority> | null;
   readonly storage: StorageTargetPayloadV1 | null;
   readonly operationGateway: SemanticOperationGateway;
   readonly policy: PostgresCurrentPolicyGateway;

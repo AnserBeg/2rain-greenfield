@@ -65,7 +65,7 @@ test('migrations upgrade accepted G1 and converge with the checked-in snapshot',
     const migrations = await loadMigrations(checkedInMigrations);
     assert.equal(
       migrations.at(-1)?.name,
-      '0058_address_connector_authority.sql',
+      '0059_generated_document_sources.sql',
     );
     const admin = await pool.connect();
     try {
@@ -135,6 +135,7 @@ test('migrations upgrade accepted G1 and converge with the checked-in snapshot',
         '0056_booking_lock_order.sql',
         '0057_billing_publication.sql',
         '0058_address_connector_authority.sql',
+        '0059_generated_document_sources.sql',
       ]);
       assert.equal(upgraded.verified.length, migrations.length);
       await assertSchemaMatchesSnapshot(admin, checkedInSnapshot);

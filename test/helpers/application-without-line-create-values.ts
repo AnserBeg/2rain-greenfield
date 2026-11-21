@@ -18,7 +18,11 @@ import { parseCompiledApplication } from '../../packages/postgres-provider/src/c
 
 let fixture: ReturnType<typeof compileFixture> | undefined;
 
-/** Isolate earlier surface features from the stock count editor's reader requirement. */
+/**
+ * Isolate earlier features from the newest reader requirements: the stock
+ * count editor's line create values (surface rung 35) and the optional PO
+ * approval dependencies (query-catalog rung 5).
+ */
 export function applicationWithoutLineCreateValues() {
   return (fixture ??= compileFixture());
 }
@@ -33,6 +37,14 @@ function compileFixture() {
     documentEditor?: { lineCreateValues?: unknown };
   }[]) {
     if (documentEditor) delete documentEditor.lineCreateValues;
+  }
+  // Preceding readers also stop at query-catalog rung 4, so the optional PO
+  // approval dependencies (rung 5) are made mandatory again here.
+  for (const { readModel } of authored.queries as {
+    readModel?: { queries: Record<string, { required?: boolean }> };
+  }[]) {
+    for (const dependency of Object.values(readModel?.queries ?? {}))
+      delete dependency.required;
   }
   const { bootstrap } = parseCompiledApplication(
     JSON.parse(readFileSync('apps/web/release/app.compiled.json', 'utf8')),

@@ -6,6 +6,8 @@ import {
   renderCustomizeScreen,
   type CustomizeScreenService,
 } from '../../apps/web/src/customize-screen.js';
+import { templatePatchFromForm } from '../../apps/web/src/document-template-form.js';
+import type { DocumentTemplateRevision } from '../../packages/canonical-model/src/document-template-schema.js';
 import { parseCustomizationPatch } from '../../packages/customization/src/index.js';
 
 const patchId = '11111111-1111-4111-8111-111111111111';
@@ -392,4 +394,104 @@ test('both failed activation actions submit the displayed attempt and fence', as
     });
   }
   assert.deepEqual(calls, [`reverify ${patchId} 8`, `revert ${patchId} 8`]);
+});
+
+test('the template form preserves representable labels and refuses layouts it cannot represent', () => {
+  const queryId = 'northstar.app:query.work_get';
+  const childQueryId = 'northstar.app:query.work_lines_list';
+  const parentRelationId = 'northstar.app:relation.work_lines_parent';
+  const fieldId = 'northstar.app:field.work_name';
+  const child = {
+    fieldId: 'northstar.app:field.work_lines_description',
+    label: 'Description',
+    kind: 'textFieldType',
+  };
+  const table = {
+    kind: 'table' as const,
+    queryId: childQueryId,
+    parentRelationId,
+    label: 'Work',
+    currencyFieldId: null,
+    columns: [{ fieldId: child.fieldId, label: 'Instructions' }],
+  };
+  const revision: DocumentTemplateRevision = {
+    schemaVersion: 'v6',
+    entityId: 'northstar.app:entity.work',
+    templateId: 'northstar.app:template.work',
+    revisionId: 'northstar.app:revision.work_first',
+    documentKind: 'workOrder',
+    label: 'Service work order',
+    headerQueryId: queryId,
+    identityFieldId: fieldId,
+    currencyFieldId: null,
+    pageNumbers: true,
+    format: {
+      locale: 'en-CA',
+      timeZone: 'UTC',
+      currency: 'CAD',
+      dateStyle: 'medium',
+      numberGrouping: true,
+      pageSize: 'LETTER',
+    },
+    layout: [
+      { kind: 'heading', text: 'Work order' },
+      { kind: 'text', text: 'First terms' },
+      { kind: 'field', fieldId, label: 'Issued as' },
+      table,
+    ],
+  };
+  const form = {
+    previousRevisionId: revision.revisionId,
+    label: revision.label,
+    identity: queryId + '/' + fieldId,
+    heading: 'Work order',
+    body: 'First terms',
+    field_0: queryId + '/' + fieldId,
+    column_0: [childQueryId, parentRelationId, child.fieldId].join('/'),
+    tableLabel: table.label,
+    locale: 'en-CA',
+    timeZone: 'UTC',
+    currency: 'CAD',
+    dateStyle: 'medium',
+    pageSize: 'A4',
+    pageNumbers: 'on',
+    numberGrouping: 'on',
+  };
+  const target = {
+    entityId: revision.entityId,
+    label: 'Work',
+    queries: [
+      { queryId, fields: [{ fieldId, label: 'Name', kind: 'textFieldType' }] },
+    ],
+    tables: [
+      {
+        queryId: childQueryId,
+        relationId: parentRelationId,
+        label: 'Work',
+        fields: [child],
+      },
+    ],
+    templates: [revision],
+  };
+  const revised = templatePatchFromForm(form, target);
+  assert.equal(revised.format.pageSize, 'A4');
+  assert.deepEqual(revised.layout, revision.layout);
+  for (const layout of [
+    [...revision.layout, table],
+    [
+      revision.layout[0]!,
+      revision.layout[1]!,
+      { kind: 'text' as const, text: 'Second terms' },
+      ...revision.layout.slice(2),
+    ],
+  ]) {
+    assert.throws(
+      () =>
+        templatePatchFromForm(form, {
+          ...target,
+          templates: [{ ...revision, layout }],
+        }),
+      /This template layout cannot be edited in this form/u,
+    );
+  }
 });

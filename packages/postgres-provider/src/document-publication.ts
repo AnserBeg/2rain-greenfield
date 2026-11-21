@@ -3,6 +3,7 @@ import {
   DOCUMENT_ATTACH_CAPABILITY,
   documentAttachOperation,
   documentAttachPermission,
+  documentGenerateOperation,
 } from '../../canonical-model/src/documents.js';
 import {
   DocumentRequestError,
@@ -29,6 +30,7 @@ interface StagedPublication {
   readonly record: SemanticRecordDto;
   readonly query: RegisteredQueryDefinition;
   readonly companyId: string | null;
+  readonly generated?: true;
   readonly uploadId: string;
   readonly commit: () => Promise<DocumentMetadata>;
   receipt?: DocumentMetadata;
@@ -49,7 +51,7 @@ export class PostgresDocumentPublication implements RegisteredCapabilityOperatio
         stage.view,
         {
           schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
-          operationId: documentAttachOperation(stage.record.entityId),
+          operationId: publicationOperation(stage),
           confirmationGrant: null,
           idempotencyKey: stage.uploadId,
           input: {
@@ -77,7 +79,7 @@ export class PostgresDocumentPublication implements RegisteredCapabilityOperatio
     if (
       !stage ||
       stage.view !== view ||
-      operationId !== documentAttachOperation(stage.record.entityId)
+      operationId !== publicationOperation(stage)
     )
       return;
     return {
@@ -159,8 +161,7 @@ export class PostgresDocumentPublication implements RegisteredCapabilityOperatio
     if (
       !stage ||
       stage.view !== request.view ||
-      request.definition.operationId !==
-        documentAttachOperation(stage.record.entityId) ||
+      request.definition.operationId !== publicationOperation(stage) ||
       request.readBackDefinition.queryId !== stage.query.queryId ||
       typeof input !== 'object' ||
       input === null ||
@@ -178,4 +179,10 @@ export class PostgresDocumentPublication implements RegisteredCapabilityOperatio
       );
     return stage;
   }
+}
+
+function publicationOperation(stage: StagedPublication): string {
+  return stage.generated
+    ? documentGenerateOperation(stage.record.entityId)
+    : documentAttachOperation(stage.record.entityId);
 }
