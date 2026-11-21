@@ -4462,21 +4462,22 @@ test('an enum-domain widening plans exactly one widenEnumDomain element, and eve
   );
   assert.deepEqual(transition.tighteningDebt, []);
 
-  // The preserved refusals. `narrowed` removes one option; `rebound` replaces
-  // one option id with another at constant count; `relabelled` changes a label
-  // and no id (equal sets are not a widening); `widenedAndRelabelled` and
-  // `widenedAndReordered` widen AND change an existing option's label or
-  // orderKey; `widenedAndSearchable` widens AND flips search mapping, so
-  // neither additive exception alone matches; `widenedAndRetype` widens AND
-  // retypes an unrelated column.
-  // `widenedAndRelabelled` and `widenedAndReordered` are the round-1 finding:
-  // a strict id superset whose EXISTING option records also moved. They come
-  // before `widenedAndSearchable` so the exactness mutation dies on them.
+  for (const variant of ['relabelled', 'widenedAndRelabelled'] as const) {
+    const relabelled = mustCompile(
+      moduleInput(tierModule(variant), expectedActiveReleaseFrom(previous)),
+    );
+    assert.deepEqual(
+      projectionPayload<StorageTransitionEnvelope>(
+        relabelled,
+        PROJECTION_FAMILY_IDS.storageTransition,
+      ).elements.map((element) => element.kind),
+      variant === 'relabelled' ? [] : ['widenEnumDomain'],
+    );
+  }
+  // The previous IDs, order keys and remaining column properties are pinned.
   for (const variant of [
     'narrowed',
     'rebound',
-    'relabelled',
-    'widenedAndRelabelled',
     'widenedAndReordered',
     'widenedAndSearchable',
   ] as const) {

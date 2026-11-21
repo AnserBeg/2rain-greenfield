@@ -388,18 +388,8 @@ test('proof: a label-only base change to a stage, a fact column or an operation 
       byId(base, 'fields', 'fieldId', expected).label = 'Due';
     });
   const retired = retire(poOffer, poBoard);
-  // A stage label is an option label of the derived state field. Replay and
-  // normalization take it; the storage planner's own retype rule (not the
-  // Board) decides whether that base can ship, so it is checked to replay.
   for (const chain of [[poBoard], [poBoard, retired]]) {
-    const result = replayCustomizationPatches(
-      relabel(true),
-      chain.map(patch),
-      origins(authored, chain.length),
-    );
-    assert.ok(result.status === 'applied', JSON.stringify(result));
-    normalizeApplicationPackage(result.authored);
-    await replaysClean(authored, relabel(false), chain);
+    await replaysClean(authored, relabel(true), chain);
   }
 });
 

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 import {
   CanonicalIdSchema,
+  parseNormalizedApplicationPackageJson,
   ADDRESS_COMPONENTS,
   addressComponents,
   addressColumnId,
@@ -1737,7 +1738,51 @@ export function buildStorageTransitionEnvelope(
   previous: StorageTargetPayloadV1,
   candidate: StorageTargetPayloadV1,
   binding: TransitionBinding,
+  previousDefinitionBytes?: Uint8Array,
 ): StorageTransitionEnvelope | { diagnostic: CompilerDiagnostic } {
+  let previousFields: readonly Field[] | undefined;
+  function enumRelabel(
+    previousColumn: StorageColumnTarget,
+    column: StorageColumnTarget,
+    field: Field,
+  ) {
+    if (
+      !previousDefinitionBytes ||
+      field.fieldType.kind !== 'enumFieldType' ||
+      previousColumn.fieldContract?.fieldKind !== 'enumFieldType'
+    )
+      return false;
+    // Older storage targets hash labels into the column fingerprint. Restore
+    // just those labels from the authenticated predecessor before comparing.
+    previousFields ??= parseNormalizedApplicationPackageJson(
+      previousDefinitionBytes,
+    ).fields as readonly Field[];
+    const old = previousFields.find(
+      (f) => f.fieldId === field.fieldId,
+    )?.fieldType;
+    if (old?.kind !== 'enumFieldType') return false;
+    const labels = new Map(
+      old.options.map((option) => [option.optionId, option.label]),
+    );
+    const common = field.fieldType.options.filter((option) =>
+      labels.has(option.optionId),
+    );
+    if (common.length !== old.options.length) return false;
+    const historical = {
+      ...field,
+      fieldType: {
+        ...field.fieldType,
+        options: common.map((option) => ({
+          ...option,
+          label: labels.get(option.optionId)!,
+        })),
+      },
+    };
+    return (
+      columnShapeFingerprint(historical, column.requiredAfterTightening) ===
+      previousColumn.shapeFingerprint
+    );
+  }
   const sourceFields = new Map<string, Field>(
     packageRevision.fields
       .flatMap(storageFields)
@@ -1918,7 +1963,8 @@ export function buildStorageTransitionEnvelope(
         oldField &&
         oldField.shapeFingerprint !== field.shapeFingerprint &&
         !isAdditiveSearchMappingTransition(oldField, field) &&
-        !isAdditiveEnumDomainTransition(oldField, field, sourceField)
+        !isAdditiveEnumDomainTransition(oldField, field, sourceField) &&
+        !enumRelabel(oldField, field, sourceField)
       ) {
         return failureDiagnostic(
           'COMPILER_STORAGE_RETYPE_UNSUPPORTED',

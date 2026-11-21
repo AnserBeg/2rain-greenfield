@@ -64,7 +64,11 @@ fired:
    missing element was. What remains is a scope limit — the scenario probes one
    witness, the first-declared option — and it is filed, not fixed here.
 
-## Decision
+## UPGRADE-2 amendment (2026-11-20)
+
+An option or lifecycle-stage label is presentation. Compare released enum columns using the previous labels for shared IDs. A pure relabel plans zero elements; a relabel alongside new options plans the same widening. Existing option order, IDs and all other column properties retain the checks below.
+
+## Original decision
 
 **1. A `widenEnumDomain` element exists, and a widening plans as exactly one.**
 When the previous release carries an enum-domain CHECK under the same physical
