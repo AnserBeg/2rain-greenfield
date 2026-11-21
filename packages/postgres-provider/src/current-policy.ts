@@ -65,6 +65,17 @@ export const CURRENT_POLICY_RUNTIME_BINDINGS = Object.freeze([
 ] as const satisfies readonly CurrentPolicyPermissionBinding[]);
 
 /**
+ * CONNECT-1: enabling or configuring a company's address provider. The
+ * settings route and the write check this grant in a membership that covers
+ * the company. The local demo grants it to the manager only.
+ */
+export const ADDRESS_CONNECTOR_CONFIGURE_BINDING = Object.freeze({
+  action: 'configure',
+  permissionId: 'northstar.runtime:permission.connector_configure',
+  resourceId: 'northstar.runtime:connector.address',
+} as const satisfies CurrentPolicyPermissionBinding);
+
+/**
  * Exact evaluator contracts required by the receiving extension. These are
  * independent of its business tables: when the declarations arrive, the
  * compiler verifies these same action/id/resource triples and the live

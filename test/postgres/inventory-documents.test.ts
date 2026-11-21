@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 
-import { workspaceList } from '../../apps/web/src/workspace-entry.js';
+import { SHARED_LIST_QUERY_VERSION } from '../../packages/runtime/src/list-behavior/index.js';
 import {
   SEMANTIC_QUERY_REQUEST_VERSION,
   SemanticQueryPolicyDeniedError,
@@ -146,6 +146,17 @@ test('company-scoped staff see only their companies and can open their own List 
       {},
       false,
     );
+    const third = await fixture.create(
+      'legal_entity',
+      {
+        code: 'THIRD',
+        name: 'Third company',
+        status: `${ns}:option.legal_entity_status_active`,
+        is_default: false,
+      },
+      {},
+      false,
+    );
     const draft = async (companyId: string) => {
       const recordId = randomUUID();
       const now = new Date().toISOString();
@@ -179,7 +190,10 @@ test('company-scoped staff see only their companies and can open their own List 
     const own = await draft(scope);
     const foreign = await draft(other.recordId);
     const headers = { cookie: 'northstar-demo-actor=buyer' };
-    const query = (local: string, args: Record<string, string> = {}) =>
+    const query = (
+      local: string,
+      args: Record<string, ImmutableJsonValue> = {},
+    ) =>
       app.runtime.entry.run({ headers }, (view) =>
         app.runtime.queryGateway.invoke(view, {
           schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
@@ -187,11 +201,31 @@ test('company-scoped staff see only their companies and can open their own List 
           arguments: args,
         }),
       );
-    const companyIds = async () =>
-      (await query('legal_entity_list')).records
-        .map((row) => row.recordId)
-        .sort();
-    assert.deepEqual(await companyIds(), [scope, other.recordId].sort());
+    const companyList = (paged = false) =>
+      query(
+        'legal_entity_list',
+        paged
+          ? {
+              list: {
+                schemaVersion: SHARED_LIST_QUERY_VERSION,
+                cursor: null,
+                matchMode: 'substring',
+                pageSize: 100,
+                search: '',
+                sort: [],
+                relationLabels: [],
+              },
+            }
+          : {},
+      );
+    const companyIds = (result: Awaited<ReturnType<typeof companyList>>) =>
+      result.records.map((row) => row.recordId).sort();
+    const initialCompanies = await companyList();
+    assert.equal(initialCompanies.companyScopeRestricted, undefined);
+    assert.deepEqual(
+      companyIds(initialCompanies),
+      [scope, other.recordId, third.recordId].sort(),
+    );
     const principalId = await app.runtime.entry.run(
       { headers },
       (view) => view.principalId,
@@ -241,24 +275,15 @@ test('company-scoped staff see only their companies and can open their own List 
       async () => {
         // The company switcher also checks each company's business query, so
         // exercise the company list directly to catch a leak it would hide.
-        assert.deepEqual(
-          await companyIds(),
-          [scope],
-          'plain company list rows',
-        );
-        const sharedCompanyIds = await app.runtime.entry.run(
-          { headers },
-          async (view) =>
-            (
-              await workspaceList(
-                view,
-                app.runtime.queryGateway,
-                `${ns}:query.legal_entity_list`,
-                null,
-              )
-            ).map((row) => row.recordId),
-        );
-        assert.deepEqual(sharedCompanyIds, [scope], 'paged company list rows');
+        for (const paged of [false, true]) {
+          const companies = await companyList(paged);
+          assert.equal(companies.companyScopeRestricted, true);
+          assert.deepEqual(
+            companyIds(companies),
+            [scope],
+            paged ? 'paged company list rows' : 'plain company list rows',
+          );
+        }
       },
     );
     await t.test(
@@ -318,6 +343,111 @@ test('company-scoped staff see only their companies and can open their own List 
         );
       }
     });
+
+    const settingsUrl = new URL('/?customize=address', app.baseUrl);
+    const options = {
+      provider: 'fake',
+      account: 'own-maps',
+      calls: 10,
+      budgetMicros: 0,
+      enabled: true,
+      enrichment: false,
+    } as const;
+    const managerHeaders = { cookie: 'northstar-demo-actor=manager' };
+    const addresses = app.runtime.addresses;
+    await app.runtime.entry.run({ headers: managerHeaders }, async (view) => {
+      assert.ok(await addresses.configure(view, scope, options));
+      assert.ok(
+        await addresses.configure(view, other.recordId, {
+          ...options,
+          account: 'other-maps',
+        }),
+      );
+    });
+    await t.test('Address settings require the configure grant', async () => {
+      const manager = await fetch(settingsUrl, { headers: managerHeaders });
+      assert.equal(manager.status, 200);
+      const html = await manager.text();
+      assert.match(html, /own-maps/u);
+      assert.match(html, /other-maps/u);
+
+      const buyer = await fetch(settingsUrl, { headers });
+      assert.equal(
+        buyer.status,
+        403,
+        'settings GET requires connector configure',
+      );
+      const attemptedPause = await fetch(settingsUrl, {
+        method: 'POST',
+        headers: { ...headers, origin: settingsUrl.origin },
+        body: new URLSearchParams({
+          companyId: scope,
+          account: options.account,
+          provider: options.provider,
+          action: 'pause',
+          calls: String(options.calls),
+          budget: '0',
+        }),
+      });
+      assert.equal(attemptedPause.status, 403);
+    });
+    await t.test(
+      'Address installations and writes use the member company',
+      async () => {
+        await app.runtime.entry.run({ headers }, async (view) => {
+          assert.deepEqual(
+            (await addresses.installations(view)).map(
+              (account) => account.companyId,
+            ),
+            [scope],
+            'installation lookup stays within the membership',
+          );
+          await assert.rejects(
+            addresses.configure(view, scope, { ...options, enabled: false }),
+            { reason: 'unconfigured' },
+          );
+        });
+      },
+    );
+
+    await t.test(
+      'two scoped memberships are combined and a tenant-wide grant takes precedence',
+      async () => {
+        const addMembership = async (company: string | null) => {
+          const { tenantId, environmentId } = app.runtime.identity;
+          const added = await pool.query(
+            `INSERT INTO platform.current_policy_memberships
+             (tenant_id, environment_id, membership_id, principal_id, role_id, legal_entity_id)
+           SELECT tenant_id, environment_id, $5, principal_id, role_id, $6
+             FROM platform.current_policy_memberships
+            WHERE tenant_id = $1 AND environment_id = $2 AND principal_id = $3
+              AND legal_entity_id = $4 AND revoked_at IS NULL`,
+            [
+              tenantId,
+              environmentId,
+              principalId,
+              scope,
+              randomUUID(),
+              company,
+            ],
+          );
+          assert.equal(added.rowCount, 1);
+        };
+
+        await addMembership(other.recordId);
+        const scoped = await companyList(true);
+        assert.equal(scoped.companyScopeRestricted, true);
+        assert.deepEqual(companyIds(scoped), [scope, other.recordId].sort());
+
+        await addMembership(null);
+        const mixed = await companyList(true);
+        assert.equal(mixed.companyScopeRestricted, undefined);
+        assert.deepEqual(
+          companyIds(mixed),
+          [scope, other.recordId, third.recordId].sort(),
+        );
+      },
+    );
   });
 });
 

@@ -40,6 +40,7 @@ import {
   type ModuleProviderErrorMapping,
 } from './module-runtime-interpreter.js';
 import {
+  ADDRESS_CONNECTOR_CONFIGURE_BINDING,
   PostgresCurrentPolicyGateway,
   PostgresSemanticQueryDenialRecorder,
   currentPolicyBindingsFromPermissions,
@@ -133,10 +134,13 @@ export function composeServingGateways(
   const policyFor = (release: ServingRelease) =>
     new PostgresCurrentPolicyGateway(
       runtimePool,
-      releasePolicyBindings(
-        release.normalizedDefinitionBytes,
-        documentOptions !== undefined,
-      ),
+      [
+        ...releasePolicyBindings(
+          release.normalizedDefinitionBytes,
+          documentOptions !== undefined,
+        ),
+        ADDRESS_CONNECTOR_CONFIGURE_BINDING,
+      ],
       parsePinnedOperationCatalog(
         release.projection(PROJECTION_FAMILY_IDS.operationCatalog).payload,
       ),

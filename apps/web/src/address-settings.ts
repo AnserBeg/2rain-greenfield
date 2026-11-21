@@ -26,7 +26,7 @@ export async function addressSettings(
       q.queryId.endsWith(':query.legal_entity_list'),
   );
   if (!list) throw Error('Company list unavailable.');
-  const companies = (
+  const activeCompanies = (
     await workspaceList(view, queries, list.queryId, null)
   ).filter(
     (r) =>
@@ -38,6 +38,12 @@ export async function addressSettings(
           !v.endsWith('_active'),
       ),
   );
+  const companies = [];
+  for (const company of activeCompanies) {
+    if (await addresses.canConfigure(view, company.recordId))
+      companies.push(company);
+  }
+  if (companies.length === 0) throw Error('Company settings unavailable.');
   if (form) {
     if (!companies.some((c) => c.recordId === form.companyId))
       throw Error('Choose an available company.');
@@ -50,7 +56,10 @@ export async function addressSettings(
       budgetMicros: Number(form.budget) * 1000000,
     });
   }
-  const accounts = await addresses.installations(view);
+  const companyIds = new Set(companies.map((company) => company.recordId));
+  const accounts = (await addresses.installations(view)).filter((account) =>
+    companyIds.has(account.companyId),
+  );
   const choices = companies.map((c) => {
     const label = Object.entries(c.values).find(
       ([field, value]) => field.endsWith('name') && typeof value === 'string',

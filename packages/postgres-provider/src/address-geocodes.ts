@@ -20,7 +20,6 @@ import type {
 } from '../../runtime/src/request-runtime-view.js';
 import {
   authorizeCurrentPolicy,
-  issueLegalEntityReadScope,
   trustedContextForRequestRuntimeView,
 } from '../../runtime/src/request-runtime-view.js';
 import {
@@ -39,7 +38,10 @@ import {
   type InstallationIdentity,
 } from './address-provider.js';
 import { withTrustedRequestTransaction } from './request-context.js';
-import { currentPolicyVersionOf } from './current-policy.js';
+import {
+  ADDRESS_CONNECTOR_CONFIGURE_BINDING,
+  currentPolicyVersionOf,
+} from './current-policy.js';
 import type { StorageTargetPayloadV1 } from '@north-star/compiler';
 
 type Entity = StorageTargetPayloadV1['entities'][number];
@@ -215,13 +217,40 @@ export class PostgresAddresses implements AddressGateway {
       async (c) =>
         (
           await c.query<AddressInstallation>(
-            `SELECT company_id AS "companyId", installation_id AS "installationId", account,provider,enrichment
-      FROM platform.address_installations WHERE tenant_id=$1 AND environment_id=$2 AND enabled ORDER BY account,company_id`,
-            [view.tenantId, view.environmentId],
+            `SELECT i.company_id AS "companyId", i.installation_id AS "installationId",
+                    i.account, i.provider, i.enrichment
+               FROM platform.address_installations AS i
+              WHERE i.tenant_id = $1 AND i.environment_id = $2 AND i.enabled
+                AND EXISTS (
+                  SELECT 1
+                    FROM platform.current_policy_memberships AS m
+                    JOIN platform.current_policy_roles AS r
+                      USING (tenant_id, environment_id, role_id)
+                   WHERE m.tenant_id = i.tenant_id AND m.environment_id = i.environment_id
+                     AND m.principal_id = $3 AND m.revoked_at IS NULL AND r.revoked_at IS NULL
+                     AND (m.legal_entity_id IS NULL OR m.legal_entity_id = i.company_id)
+                )
+              ORDER BY i.account, i.company_id`,
+            [view.tenantId, view.environmentId, view.principalId],
           )
         ).rows,
     );
   }
+  async canConfigure(view: RequestRuntimeView, company: string) {
+    if (!this.demo || !isUuid(company)) return false;
+    const { policy } = await this.release(view.release.releaseId);
+    const decision = await authorizeCurrentPolicy(
+      policy,
+      view,
+      ADDRESS_CONNECTOR_CONFIGURE_BINDING.permissionId,
+      { legalEntityId: company },
+    );
+    return (
+      decision.decision === 'ALLOW' &&
+      decision.policyVersion === view.entryPolicyVersion
+    );
+  }
+
   async configure(
     view: RequestRuntimeView,
     company: string,
@@ -243,8 +272,7 @@ export class PostgresAddresses implements AddressGateway {
       !Number.isSafeInteger(options.budgetMicros)
     )
       throw denied();
-    const { policy } = await this.release(view.release.releaseId);
-    await issueLegalEntityReadScope(policy, view, [company]);
+    if (!(await this.canConfigure(view, company))) throw denied();
     return this.tx(view, async (c) => {
       await active(c, view);
       const before = await installation(c, view, company);
