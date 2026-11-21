@@ -9,6 +9,7 @@ The scheduler can reconcile a committed staff mention or reply into a durable no
 CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44912366862
 
 [Packet CI 44912316925](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44912316925) promoted `0581e760d` to full. The unit tests passed, but the coverage manifest omitted the deadline test. Commit `938a724d4` registers it and `8388e7eb3` checks the declared arguments against the unit runner. Hosted confirmation on the corrected tree is pending.
+All eight inbox cases passed in 3.3 seconds on [hosted PostgreSQL](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44912366862/job/136870772151). Shard 3 later reached its 30-minute limit during release-persistence tests. The full run failed.
 
 - The branch began on main `d083dd4a`. Merge `38f97a2bd` brought in CONNECT-1’s published thread writer at `ec519295`. It now includes the writer’s reviewed corrections through `f70011747` and main’s WORKFLOW-2 integration at `6787792c4`. The thread and inbox migrations are provisionally 0061 and 0062.
 - The inbox implements the published `DiscussionInboxPort`. A short lease transaction commits before reconciliation. The worker locks the shared thread, resolves current reasons, replaces the recipient set and commits before acknowledging the lease token. Replay keeps the original recipient receipt, read time and archive time.
