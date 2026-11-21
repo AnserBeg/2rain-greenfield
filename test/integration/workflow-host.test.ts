@@ -1,3 +1,4 @@
+import { checkRetainedWorkflowReplay } from '../../packages/postgres-provider/src/release-verification-service.js';
 import type { MintedUuid } from '@north-star/platform-runtime';
 import type { Pool } from 'pg';
 import { WorkflowDefinitionSchema } from '../../packages/canonical-model/src/schemas.js';
@@ -39,6 +40,7 @@ import {
 import { AuthenticatedRequestEntryAdapter } from '../../packages/runtime/src/request-context.js';
 import {
   AuthenticatedRequestRuntimeEntryAdapter,
+  trustedContextForRequestRuntimeView,
   CURRENT_POLICY_DECISION_VERSION,
   type RequestRuntimeView,
 } from '../../packages/runtime/src/request-runtime-view.js';
@@ -862,17 +864,28 @@ test('review uses each of the first five journals in order', async () => {
 
 test('retained workflow replay uses the proposed catalog for the same stored body', async () => {
   const { createHash, randomUUID } = await import('node:crypto');
-  const { checkRetainedWorkflowReplay } =
-    await import('../../packages/postgres-provider/src/release-verification-service.js');
-  const { trustedContextForRequestRuntimeView } =
-    await import('../../packages/runtime/src/request-runtime-view.js');
   const context = trustedContextForRequestRuntimeView(view);
+  const body = "sdk.waitForEvent('goodsReceiptPosted', 1);";
   const bundle = Buffer.from(
     canonicalize({
       authoredBy: context.principalId,
-      body: 'sdk.now();',
-      executable: compileWorkflowBody('sdk.now();', sdk).executable,
-      fixtures: [{ event, effects: [{ call: { kind: 'now' }, result: day }] }],
+      body,
+      executable: compileWorkflowBody(body, sdk).executable,
+      fixtures: [
+        {
+          event,
+          effects: [
+            {
+              call: {
+                kind: 'waitForEvent',
+                eventType: 'goodsReceiptPosted',
+                timeoutMs: 1,
+              },
+              result: null,
+            },
+          ],
+        },
+      ],
     }),
   );
   // Only the unchanged pointer and workflow blob are read from storage.
@@ -907,10 +920,12 @@ test('retained workflow replay uses the proposed catalog for the same stored bod
   });
   const id = randomUUID() as MintedUuid;
   assert.equal(
-    await checkRetainedWorkflowReplay(pool, context, fixtureRelease, id, [
-      binding,
-    ]),
-    null,
+    (
+      await checkRetainedWorkflowReplay(pool, context, fixtureRelease, id, [
+        binding,
+      ])
+    )?.code,
+    'REMOVED_ACTION',
   );
   const missing = await checkRetainedWorkflowReplay(
     pool,
