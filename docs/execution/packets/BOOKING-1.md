@@ -34,8 +34,8 @@ The follow-up checks authorized archive against every active allocation and lock
 Kit-member rescheduling is a slice 2 decision in the pending-items charter. Slice 1b accepts kit holds, confirmation, cancellation and expiry.
 The [mutation manifest](../../../test/evidence/BOOKING-1.expected-red.json) names the guard and the observable change in its regression.
 The preceding production reader answered a baseline item query and refused the released Operation and Query catalog floors independently by name. This slice introduces released bindings. The two Customize members and their drafter evals belong to slice 3.
-The run below passed the PostgreSQL and browser jobs and exposed a stale count of tenant-scoped tables. The packet fixes the count and updates the language-coverage inventory. [Current PR checks](https://github.com/AnserBeg/2rain-greenfield/pull/137/checks)
-CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44869426981
+Slice 1b merged at `d48c870bdf7cae3858a84e1dde6ea8125750e28d` on exact full CI. Migration 0059 and the Operation Catalog (6) and Query Catalog (5) reader floors kept their numbers. The regenerated schema snapshot was byte-identical, and the history scan passed with the two approved Gitleaks fingerprints.
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44879121890
 
 ## Test it yourself
 
