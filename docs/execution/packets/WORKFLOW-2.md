@@ -9,7 +9,7 @@ Slices 1, 3 and 4 on the packet branch. Pre-tenant. No migration or reader rung.
 2. Candidate admission formerly ran the replay on the request side of a database transaction. Both it and drafting now send the body, release declarations and admitted fixture calls to the child. Only the parent reads the database and writes verification evidence.
 3. Customize displays the exact source, at most five ordered sample runs, conditional and loop call sites, inputs, uncovered sites and unused grants. A replay of the recorded prefix maps each call to its exact site. The lint requires direct SDK calls and literal targets.
 4. Workflow approval checks the displayed review at the gesture. The release preparation binds the rendered text, versioned review digest and body digest. The gesture also covers the patch, pointer and fence. No workflow member or normalization step carries a review digest.
-5. SDK v2 drops external event waits and caps sleep at 7,776,000,000 ms. Version and declaration digest select v1 for retained run pins. A retained wait conflicts as REMOVED_ACTION during upgrade.
+5. SDK v2 drops external event waits and caps sleep at 7,776,000,000 ms. Version and declaration digest select v1 for retained run pins. Upgrade replay uses the destination release catalogs. A retained wait conflicts as REMOVED_ACTION.
 6. The live supervisor retries a CPU overrun once with the same pin and journal prefix. Both attempts write CONTROL evidence in the validated transaction. A repeated CPU overrun quarantines as cpu-limit-exceeded. A host watchdog expiry has its own reason.
 
 ## Remaining slices
@@ -20,14 +20,14 @@ Slices 1, 3 and 4 on the packet branch. Pre-tenant. No migration or reader rung.
 
 ## Gates and controls
 
-CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44861447572
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44866001692
 
 The workflow-host tests exercise both fork kinds with credential sentinels, a protected key and a socket observer, the injected deadline, SDK contracts, reviewed bytes and retry outcomes. The PostgreSQL journey checks admission, durable control rows and a suspended v1 event wait. The browser journey refuses an external wait, reopens the pending review and approves the displayed digest. The historical pre-workflow reader answers an item query before its named refusal after activation.
 
 ## Test it yourself
 
 - Slice 1 — `node --import tsx --test --test-name-pattern='both sandbox|unfinished workflow' test/integration/workflow-host.test.ts`. Both forks discard credentials and the parent refuses an expired draft.
-- Slice 3 — `node --import tsx --test --test-name-pattern='review uses each|review lint|gesture binds' test/integration/workflow-host.test.ts`. Five examples, exact site coverage, indirect-call refusal and fenced review.
+- Slice 3 — `node --import tsx --test --test-name-pattern='review uses each|review traces|review lint|gesture binds' test/integration/workflow-host.test.ts`. Five examples, exact site coverage, indirect-call refusal and fenced review.
 - Slice 4 — `node --import tsx --test --test-name-pattern='v2 drops|a CPU overrun' test/integration/workflow-host.test.ts`. Legacy and current contracts are distinct, and the CPU and watchdog attempts are distinguishable.
 
 ```record-claim
@@ -35,7 +35,7 @@ The workflow-host tests exercise both fork kinds with credential sentinels, a pr
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "WORKFLOW-2",
   "base": "0a9f7ca52304969c65092893f50375c90f8c2265",
-  "head": "ea5b0f03abf7a76956d05f2ea48e44fc94b8c780",
+  "head": "a7303fb7fa5aa67e818e24995e371895e00cfeac",
   "changedPaths": [
     "apps/api/scripts/customize-cli.ts",
     "apps/api/src/staff-decisions.ts",
@@ -48,6 +48,7 @@ The workflow-host tests exercise both fork kinds with credential sentinels, a pr
     "packages/customization/src/sandbox.ts",
     "packages/customization/src/workflow-draft.ts",
     "packages/postgres-provider/src/customization-service.ts",
+    "packages/postgres-provider/src/release-verification-service.ts",
     "packages/postgres-provider/src/workflow-bundle.ts",
     "packages/postgres-provider/src/workflow-compile.ts",
     "packages/postgres-provider/src/workflow-draft-worker.ts",
