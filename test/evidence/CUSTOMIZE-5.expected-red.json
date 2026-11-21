@@ -15,7 +15,7 @@
         {
           "file": "test/unit/date-time-field.test.ts",
           "name": "a forged list filter on a dateTime field refuses by logical type",
-          "expected": "AssertionError"
+          "expected": "strictly unequal to"
         }
       ]
     },
