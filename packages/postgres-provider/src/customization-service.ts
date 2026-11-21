@@ -270,6 +270,54 @@ type UpgradeRefusal = Exclude<
   readonly sourceReleaseId: MintedUuid;
   readonly baseReleaseRoot: string;
 };
+type DisclosureField = {
+  fieldId: string;
+  label: string;
+  classification: string;
+};
+
+/** Both sides of a finding, its serialized issue and the summary have the
+ * same disclosure boundary. An unreadable historical definition hides all. */
+export function discloseUpgradeReport(
+  report: UpgradeReport,
+  message: string,
+  code: UpgradeCode,
+  fields: readonly DisclosureField[] | null,
+) {
+  const terms =
+    fields &&
+    new Set(
+      fields
+        .filter(
+          (f) =>
+            f.classification !== 'public' && f.classification !== 'internal',
+        )
+        .flatMap((f) => [f.fieldId, f.label]),
+    );
+  const restricted = (value: unknown) => {
+    if (!terms) return true;
+    const text = JSON.stringify(value);
+    for (const term of terms) if (text.includes(term)) return true;
+    return false;
+  };
+  const findings = report.findings.map((finding) =>
+    restricted(finding)
+      ? {
+          ...finding,
+          subject: 'Restricted field',
+          expected: 'Restricted',
+          observed: 'Restricted',
+        }
+      : finding,
+  );
+  return {
+    report: { ...report, findings },
+    message: restricted(message) ? UPGRADE_CODES_V1[code] : message,
+    issues: [...findings, ...report.blocked].map((issue) =>
+      JSON.stringify(issue),
+    ),
+  };
+}
 /** Only opaque release and change identities leave the tenant review channel. */
 export function upgradeLogFields(upgrade: UpgradePreparation) {
   if (upgrade.status === 'drafted')
@@ -491,33 +539,14 @@ export class PostgresCustomizationService {
             blocked: [],
           }),
         };
-        const protectedTerms = await this.#restrictedUpgradeTerms(
+        const fields = await this.#upgradeDisclosureFields(
           context,
           sourceReleaseId,
         );
-        const restricted = (value: unknown) =>
-          protectedTerms === null ||
-          protectedTerms.some((term) => JSON.stringify(value).includes(term));
-        report.findings = report.findings.map((finding) =>
-          restricted(finding)
-            ? {
-                ...finding,
-                subject: 'Restricted field',
-                expected: 'Restricted',
-                observed: 'Restricted',
-              }
-            : finding,
-        );
         const diagnostic: UpgradeRefusal = {
           ...outcome,
-          ...(restricted(outcome.message) && {
-            message: UPGRADE_CODES_V1[code],
-          }),
           code,
-          report,
-          issues: [...report.findings, ...report.blocked].map((issue) =>
-            JSON.stringify(issue),
-          ),
+          ...discloseUpgradeReport(report, outcome.message, code, fields),
           sourceReleaseId,
           baseReleaseRoot,
         };
@@ -531,10 +560,10 @@ export class PostgresCustomizationService {
   }
 
   /** A reader that cannot interpret one side can still return a scoped, redacted refusal. */
-  async #restrictedUpgradeTerms(
+  async #upgradeDisclosureFields(
     context: TrustedRequestContext,
     sourceReleaseId: MintedUuid,
-  ): Promise<string[] | null> {
+  ): Promise<DisclosureField[] | null> {
     try {
       const source = await this.#identity(context, sourceReleaseId);
       const old = parseNormalizedApplicationPackageJson(
@@ -543,17 +572,7 @@ export class PostgresCustomizationService {
       const next = parseNormalizedApplicationPackageJson(
         this.#tip.normalizedDefinitionBytes,
       );
-      return [
-        ...new Set(
-          [...old.fields, ...next.fields]
-            .filter(
-              (f) =>
-                f.classification !== 'public' &&
-                f.classification !== 'internal',
-            )
-            .flatMap((f) => [f.fieldId, f.label]),
-        ),
-      ];
+      return [...old.fields, ...next.fields];
     } catch (error) {
       if (error instanceof CanonicalModelError) return null;
       throw error;

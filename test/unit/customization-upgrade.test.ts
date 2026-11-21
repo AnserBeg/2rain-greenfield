@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import {
+  discloseUpgradeReport,
+  type UpgradeReport,
+} from '../../packages/postgres-provider/src/customization-service.js';
 import { replayCustomizationPatches } from '../../packages/customization/src/upgrade-replay.js';
 import * as customization from '../../packages/customization/src/index.js';
 import {
@@ -918,5 +922,85 @@ test('an unclassified package refusal carries the package ID and no patch attrib
         undefined,
       ],
     ],
+  );
+});
+
+test('a refused report redacts protected evidence on either side, its issue and summary', () => {
+  const report: UpgradeReport = {
+    version: 'northstar.upgrade-report/v1',
+    upgradeId: 'upgrade',
+    tenantId: 'tenant',
+    environmentId: 'env',
+    sourceReleaseId: 'source',
+    sourceFence: '2',
+    targetPackageId: 'pkg',
+    targetVersion: '3',
+    targetRoot: 'root',
+    approvalMode: 'Manual',
+    blocked: [],
+    findings: [
+      {
+        code: 'INCOMPATIBLE_SCOPE',
+        subject: 'one',
+        expected: { field: 'private-id' },
+        observed: 'public',
+      },
+      {
+        code: 'INCOMPATIBLE_SCOPE',
+        subject: 'two',
+        expected: null,
+        observed: { label: 'Confidential label' },
+      },
+      {
+        code: 'INCOMPATIBLE_SCOPE',
+        subject: 'three',
+        expected: 'internal',
+        observed: 'public',
+      },
+    ],
+  };
+  const fields = [
+    { fieldId: 'private-id', label: 'Private', classification: 'restricted' },
+    {
+      fieldId: 'sensitive-id',
+      label: 'Confidential label',
+      classification: 'confidential',
+    },
+    { fieldId: 'three', label: 'Public label', classification: 'public' },
+  ];
+  const visible = discloseUpgradeReport(
+    report,
+    'Changed private-id',
+    'INCOMPATIBLE_SCOPE',
+    fields,
+  );
+  assert.equal(
+    visible.message,
+    customization.UPGRADE_CODES_V1.INCOMPATIBLE_SCOPE,
+  );
+  assert.deepEqual(
+    visible.report.findings.map((f) => [f.subject, f.expected, f.observed]),
+    [
+      ['Restricted field', 'Restricted', 'Restricted'],
+      ['Restricted field', 'Restricted', 'Restricted'],
+      ['three', 'internal', 'public'],
+    ],
+  );
+  assert.deepEqual(
+    visible.issues.map((i) => JSON.parse(i)),
+    visible.report.findings,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(visible),
+    /private-id|Confidential label/u,
+  );
+  const historical = discloseUpgradeReport(
+    report,
+    'Detailed refusal',
+    'INCOMPATIBLE_SCOPE',
+    null,
+  );
+  assert.ok(
+    historical.report.findings.every((f) => f.subject === 'Restricted field'),
   );
 });
