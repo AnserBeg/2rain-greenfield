@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import test from 'node:test';
+import type { QueryResult } from 'pg';
 import {
   loadMigrations,
   runMigrations,
@@ -471,7 +472,7 @@ test('governed terms and scoped source facts produce a quote through the install
         effectiveFrom: anchor,
         values: { daily: '30', weekly: '100' },
       };
-      const propose = (body: unknown, company = f.scope) =>
+      const propose = (body: unknown, company: string = f.scope) =>
         create(
           { ...version, values: { daily: '1', weekly: '5' } },
           randomUUID(),
@@ -627,7 +628,7 @@ test('governed terms and scoped source facts produce a quote through the install
             },
           ],
         ] as const) {
-          const cloned = await db.query(
+          const cloned: QueryResult = await db.query(
             `INSERT INTO platform.${table}
             SELECT (jsonb_populate_record(NULL::platform.${table}, to_jsonb(s) || $2::jsonb)).*
             FROM platform.${table} s WHERE s.invocation_id=$1`,
