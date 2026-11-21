@@ -1,0 +1,380 @@
+{
+  "version": 1,
+  "packet": "CONNECT-1",
+  "entries": [
+    {
+      "name": "thread-company-fence",
+      "claim": "The acting principal must belong to the requested company before admission.",
+      "file": "db/migrations/0060_communication_threads.sql",
+      "original": "IF NOT north_star_internal.address_member(company) THEN",
+      "replacement": "IF false THEN",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "the scope guard covers a shared record independently of its write grant",
+          "expected": "writer fence admitted a nonmember"
+        }
+      ]
+    },
+    {
+      "name": "thread-stored-owner",
+      "claim": "A linked record in another company is refused even for a principal with access to both.",
+      "file": "db/migrations/0060_communication_threads.sql",
+      "original": "IF owner IS NOT NULL AND owner<>company THEN",
+      "replacement": "IF false THEN",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "each authorization fence refuses independently",
+          "expected": "foreign record entered the thread"
+        }
+      ]
+    },
+    {
+      "name": "thread-contact-owner",
+      "claim": "A contact subject is checked against its stored company.",
+      "file": "db/migrations/0060_communication_threads.sql",
+      "original": "communication_check_records(company,storage,a.links || contacts)",
+      "replacement": "communication_check_records(company,storage,a.links)",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "each authorization fence refuses independently",
+          "expected": "foreign contact entered the thread"
+        }
+      ]
+    },
+    {
+      "name": "thread-staff-scope",
+      "claim": "Every staff participant must have a live role covering the thread company.",
+      "file": "db/migrations/0060_communication_threads.sql",
+      "original": "      AND m.revoked_at IS NULL AND r.revoked_at IS NULL AND (m.legal_entity_id IS NULL OR m.legal_entity_id=company)))",
+      "replacement": "      AND m.revoked_at IS NULL AND r.revoked_at IS NULL))",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "each authorization fence refuses independently",
+          "expected": "foreign staff entered the thread"
+        }
+      ]
+    },
+    {
+      "name": "thread-channel",
+      "claim": "Admission rejects an unsupported channel.",
+      "file": "db/migrations/0060_communication_threads.sql",
+      "original": "via IS NULL OR via NOT IN ('email/v1','staffDiscussion/v1') OR primary_entity",
+      "replacement": "primary_entity",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "each authorization fence refuses independently",
+          "expected": "unknown channel admitted"
+        }
+      ]
+    },
+    {
+      "name": "thread-contact-channel",
+      "claim": "Staff discussion admission refuses outbound contacts.",
+      "file": "db/migrations/0060_communication_threads.sql",
+      "original": "OR (via='staffDiscussion/v1' AND cardinality(contacts)>0)",
+      "replacement": "OR false",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "each authorization fence refuses independently",
+          "expected": "outbound contact admitted to discussion"
+        }
+      ]
+    },
+    {
+      "name": "thread-activation",
+      "claim": "Each admission checks its expected activation fence.",
+      "file": "db/migrations/0060_communication_threads.sql",
+      "original": "(tenant_id,environment_id,release_id,fence)=(t,e,released,expected_fence)",
+      "replacement": "(tenant_id,environment_id,release_id)=(t,e,released)",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "each authorization fence refuses independently",
+          "expected": "stale activation admitted"
+        }
+      ]
+    },
+    {
+      "name": "thread-isolation",
+      "claim": "Snapshot isolation cannot admit work from an obsolete authority snapshot.",
+      "file": "db/migrations/0060_communication_threads.sql",
+      "original": "IF current_setting('transaction_isolation') <> 'read committed' THEN",
+      "replacement": "IF false THEN",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "each authorization fence refuses independently",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    },
+    {
+      "name": "thread-linked-write",
+      "claim": "A discussion write grant must cover the related record as well as the primary.",
+      "file": "db/migrations/0060_communication_threads.sql",
+      "original": "(via='staffDiscussion/v1' OR k.entity_id=primary_entity AND k.record_id=primary_record)",
+      "replacement": "(k.entity_id=primary_entity AND k.record_id=primary_record)",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "each authorization fence refuses independently",
+          "expected": "revoked discussion_post_account admitted"
+        }
+      ]
+    },
+    {
+      "name": "thread-email-write",
+      "claim": "Email preparation requires current prepare authority on the primary record.",
+      "file": "db/migrations/0060_communication_threads.sql",
+      "original": "AND NOT platform.document_granted(company::text,replace(k.entity_id",
+      "replacement": "AND via <> 'email/v1' AND NOT platform.document_granted(company::text,replace(k.entity_id",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "each authorization fence refuses independently",
+          "expected": "revoked prepare_email_visit admitted"
+        }
+      ]
+    },
+    {
+      "name": "thread-immutable-anchor",
+      "claim": "Registering the same primary with a different required link set refuses.",
+      "file": "db/migrations/0060_communication_threads.sql",
+      "original": "  IF NOT EXISTS (SELECT FROM platform.communication_discussion_anchors",
+      "replacement": "  IF false AND NOT EXISTS (SELECT FROM platform.communication_discussion_anchors",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "canonical requirements precede creation",
+          "expected": "saved anchor requirements changed"
+        }
+      ]
+    },
+    {
+      "name": "thread-release-lock",
+      "claim": "Activation cannot move the pointer before a writer commits.",
+      "file": "db/migrations/0060_communication_threads.sql",
+      "original": "expected_fence) FOR SHARE;",
+      "replacement": "expected_fence);",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "release, membership, saved record, thread and participant stay locked until commit",
+          "expected": "release lock released before commit"
+        }
+      ]
+    },
+    {
+      "name": "thread-policy-lock",
+      "claim": "A policy change waits for the writer holding its current epoch.",
+      "file": "db/migrations/0060_communication_threads.sql",
+      "original": "  PERFORM platform.lock_current_policy_epoch(t,e);",
+      "replacement": "  NULL;",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "release, membership, saved record, thread and participant stay locked until commit",
+          "expected": "policy lock released before commit"
+        }
+      ]
+    },
+    {
+      "name": "thread-record-lock",
+      "claim": "Company and related-row changes wait for admitted saved records.",
+      "file": "db/migrations/0060_communication_threads.sql",
+      "original": "archived_at IS NULL FOR SHARE',node.table_name",
+      "replacement": "archived_at IS NULL',node.table_name",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "release, membership, saved record, thread and participant stay locked until commit",
+          "expected": "saved record lock released before commit"
+        }
+      ]
+    },
+    {
+      "name": "thread-row-lock",
+      "claim": "The by-ID path locks the shared thread row.",
+      "file": "db/migrations/0060_communication_threads.sql",
+      "original": "OR (audience='staffDirect' AND a.primary_record IS NULL AND direct_pair=a.staff)) FOR UPDATE;",
+      "replacement": "OR (audience='staffDirect' AND a.primary_record IS NULL AND direct_pair=a.staff));",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "release, membership, saved record, thread and participant stay locked until commit",
+          "expected": "thread lock released before commit"
+        }
+      ]
+    },
+    {
+      "name": "thread-participant-lock",
+      "claim": "An existing participant remains locked before message work.",
+      "file": "db/migrations/0060_communication_threads.sql",
+      "original": "ORDER BY p.participant_kind,p.entity_id,p.subject_id FOR UPDATE;",
+      "replacement": "ORDER BY p.participant_kind,p.entity_id,p.subject_id;",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "release, membership, saved record, thread and participant stay locked until commit",
+          "expected": "existing participant lock released before commit"
+        }
+      ]
+    },
+    {
+      "name": "thread-row-order",
+      "claim": "Existing threads reached through the creation API take the same row order as by-ID writers.",
+      "file": "db/migrations/0060_communication_threads.sql",
+      "original": "WHERE thread_id>communication_lock_thread.id",
+      "replacement": "WHERE false",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "a creation batch also locks existing thread rows in ID order",
+          "expected": "creation batch locked an earlier existing thread row"
+        }
+      ]
+    },
+    {
+      "name": "thread-no-late-fences",
+      "claim": "A resolved thread cannot acquire fresh record or company fences.",
+      "file": "db/migrations/0060_communication_threads.sql",
+      "original": "  PERFORM north_star_internal.communication_before_threads();\n  PERFORM FROM platform.active_release_pointers",
+      "replacement": "  PERFORM FROM platform.active_release_pointers",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "a transaction cannot return to earlier lock classes",
+          "expected": "record fences taken after the thread"
+        }
+      ]
+    },
+    {
+      "name": "thread-no-late-keys",
+      "claim": "A by-ID writer cannot subsequently acquire a fresh creation key.",
+      "file": "db/migrations/0060_communication_threads.sql",
+      "original": "  PERFORM north_star_internal.communication_before_threads();\n  FOR key IN",
+      "replacement": "  FOR key IN",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "a transaction cannot return to earlier lock classes",
+          "expected": "by-ID locker acquired a later creation key"
+        }
+      ]
+    },
+    {
+      "name": "thread-participant-order",
+      "claim": "A by-ID writer cannot lock a thread after writing participants.",
+      "file": "db/migrations/0060_communication_threads.sql",
+      "original": "IF EXISTS (SELECT FROM pg_temp.communication_admissions WHERE participants_locked) THEN RAISE EXCEPTION 'communication.lockOrder'; END IF;\n  -- By-ID",
+      "replacement": "IF false THEN RAISE EXCEPTION 'communication.lockOrder'; END IF;\n  -- By-ID",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "a transaction cannot return to earlier lock classes",
+          "expected": "thread row locked after participant rows"
+        }
+      ]
+    },
+    {
+      "name": "thread-scoped-id",
+      "claim": "A copied ID is scoped to the acting company even with the same shared primary.",
+      "file": "db/migrations/0060_communication_threads.sql",
+      "original": "WHERE (tenant_id,environment_id,company_id,thread_id)=(a.tenant_id,a.environment_id,a.company_id,id)",
+      "replacement": "WHERE (tenant_id,environment_id,thread_id)=(a.tenant_id,a.environment_id,id)",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "a by-ID lock cannot cross an acting company on the same shared record",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    },
+    {
+      "name": "thread-same-creation-key",
+      "claim": "Both channels must take the same primary-record creation key independent of their links.",
+      "file": "db/migrations/0060_communication_threads.sql",
+      "original": "ELSE jsonb_build_array('record',a.primary_entity,a.primary_record) END",
+      "replacement": "ELSE jsonb_build_array('record',a.primary_entity,a.primary_record,a.channel) END",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "first post and email share the primary key and only identical link sets",
+          "expected": "creation did not serialize before thread lookup"
+        }
+      ]
+    }
+  ]
+}
