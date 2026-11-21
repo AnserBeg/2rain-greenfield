@@ -1541,6 +1541,67 @@ test(
           );
 
           await t.test(
+            'two CPU overruns quarantine without an effect, and a v1 event wait still suspends',
+            async () => {
+              const legacy = generateWorkflowSdk(
+                view,
+                grants,
+                LEGACY_WORKFLOW_SDK_VERSION,
+              );
+              await service.rollback();
+              await cloneDefinition(
+                pool,
+                enrolled.releaseId,
+                'over-budget',
+                compileWorkflowBody('while(true) {}', sdk).executable,
+              );
+              await cloneDefinition(
+                pool,
+                enrolled.releaseId,
+                'legacy-wait',
+                compileWorkflowBody(
+                  "sdk.waitForEvent('goodsReceiptPosted',1);",
+                  legacy,
+                ).executable,
+                undefined,
+                legacy,
+              );
+              await verify('over-budget');
+              await verify('legacy-wait');
+              await service.approve(draft.patchId);
+              await service.activate(draft.patchId);
+              await postReceipt(world);
+              const receipt = await latestReceipt(pool, tenantId);
+              await consumer.claim(scope);
+              for (const [id, status, reason] of [
+                ['over-budget', 'QUARANTINED', 'cpu-limit-exceeded'],
+                ['legacy-wait', 'SUSPENDED', 'durable-call-unavailable'],
+              ] as const) {
+                const runId = await runFor(pool, receipt.outbox_id, id);
+                await restarted.step(scope, runId);
+                const run = await pool.query(
+                  'SELECT status,reason FROM platform.workflow_runs WHERE run_id=$1',
+                  [runId],
+                );
+                assert.deepEqual(run.rows[0], { status, reason });
+                assert.equal(await journalCount(pool, runId, 'REQUEST'), 0);
+                if (id === 'over-budget') {
+                  const evidence = await pool.query(
+                    "SELECT convert_from(canonical_bytes,'UTF8')::jsonb->>'reason' AS reason FROM platform.workflow_journal WHERE run_id=$1 AND kind='CONTROL'",
+                    [runId],
+                  );
+                  for (const attempt of [1, 2])
+                    assert.ok(
+                      evidence.rows.some(
+                        (row) => row.reason === `attempt-${attempt}-cpu-limit`,
+                      ),
+                    );
+                }
+              }
+            },
+          );
+
+          await t.test(
             'a restarted worker wakes a durable timer once at its business deadline',
             async () => {
               const workflowId = 'receipt-timer';
@@ -1613,67 +1674,6 @@ test(
               await worker().tick(scope);
               assert.equal(await runStatus(pool, stale), 'SUSPENDED');
               assert.equal(await journalCount(pool, stale, 'RESULT'), 1);
-            },
-          );
-
-          await t.test(
-            'two CPU overruns quarantine without an effect, and a v1 event wait still suspends',
-            async () => {
-              const legacy = generateWorkflowSdk(
-                view,
-                grants,
-                LEGACY_WORKFLOW_SDK_VERSION,
-              );
-              await service.rollback();
-              await cloneDefinition(
-                pool,
-                enrolled.releaseId,
-                'over-budget',
-                compileWorkflowBody('while(true) {}', sdk).executable,
-              );
-              await cloneDefinition(
-                pool,
-                enrolled.releaseId,
-                'legacy-wait',
-                compileWorkflowBody(
-                  "sdk.waitForEvent('goodsReceiptPosted',1);",
-                  legacy,
-                ).executable,
-                undefined,
-                legacy,
-              );
-              await verify('over-budget');
-              await verify('legacy-wait');
-              await service.approve(draft.patchId);
-              await service.activate(draft.patchId);
-              await postReceipt(world);
-              const receipt = await latestReceipt(pool, tenantId);
-              await consumer.claim(scope);
-              for (const [id, status, reason] of [
-                ['over-budget', 'QUARANTINED', 'cpu-limit-exceeded'],
-                ['legacy-wait', 'SUSPENDED', 'durable-call-unavailable'],
-              ] as const) {
-                const runId = await runFor(pool, receipt.outbox_id, id);
-                await restarted.step(scope, runId);
-                const run = await pool.query(
-                  'SELECT status,reason FROM platform.workflow_runs WHERE run_id=$1',
-                  [runId],
-                );
-                assert.deepEqual(run.rows[0], { status, reason });
-                assert.equal(await journalCount(pool, runId, 'REQUEST'), 0);
-                if (id === 'over-budget') {
-                  const evidence = await pool.query(
-                    "SELECT convert_from(canonical_bytes,'UTF8')::jsonb->>'reason' AS reason FROM platform.workflow_journal WHERE run_id=$1 AND kind='CONTROL'",
-                    [runId],
-                  );
-                  for (const attempt of [1, 2])
-                    assert.ok(
-                      evidence.rows.some(
-                        (row) => row.reason === `attempt-${attempt}-cpu-limit`,
-                      ),
-                    );
-                }
-              }
             },
           );
           const fixtureGrants = { queries: [], operations: [] };
