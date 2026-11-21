@@ -1,5 +1,5 @@
 import { checkRetainedWorkflowReplay } from '../../packages/postgres-provider/src/release-verification-service.js';
-import type { MintedUuid } from '@north-star/platform-runtime';
+import type { MintedUuid } from '../../packages/platform-runtime/src/release-records.js';
 import type { Pool } from 'pg';
 import { WorkflowDefinitionSchema } from '../../packages/canonical-model/src/schemas.js';
 import { WorkflowWatchdogExpired } from '../../packages/postgres-provider/src/workflow-isolate.js';
