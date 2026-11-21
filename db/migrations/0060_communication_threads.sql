@@ -163,14 +163,13 @@ DECLARE q jsonb; qid text:=pinned; BEGIN
     WHERE v#>>'{sourceEntity,targetId}'=entity AND (qid IS NULL AND NOT v ? 'readModel' OR v->>'queryId'=qid)
       AND v->>'lifecycle'='active' AND v->>'tier'='q0' AND v->>'queryType'='get' AND v->>'maximumResultCount'='1'
       AND v#>>'{filter,kind}'='booleanPredicate' AND v#>>'{filter,value}'='true'
-      AND (NOT v ? 'readModel' OR (v#>>'{readModel,binding}'='northstar.sales:read_model.commercial_purchase_order'
-        AND v#>>'{readModel,capability,targetId}'='northstar.sales:capability.commercial' AND v ? 'legalEntityScope'));
+      AND (NOT v ? 'readModel' OR (v ? 'legalEntityScope' AND v#>>'{readModel,queries,lines,targetId}' IS NOT NULL));
   RETURN q;
 EXCEPTION WHEN no_data_found OR too_many_rows THEN RAISE EXCEPTION 'communication.unavailable'; END $$;
 
 -- Re-enter the same gateway, query resource and scope as the exact get. The
--- commercial order get also refuses when its lines query is withheld. Its
--- other dependencies supply optional figures and confer no record access.
+-- document get also requires the lines owned by its released Record editor.
+-- Bind the model's lines query to that editor's child entity and read grant.
 CREATE FUNCTION north_star_internal.communication_check_read(company uuid, owner uuid, app jsonb, q jsonb)
 RETURNS void LANGUAGE plpgsql STABLE SET search_path = pg_catalog, pg_temp AS $$
 DECLARE line_query jsonb; required_query jsonb; BEGIN
@@ -184,8 +183,17 @@ DECLARE line_query jsonb; required_query jsonb; BEGIN
       'northstar.runtime:permission.legal-entity-read-scope','northstar.runtime:scope.legal-entity'))
     THEN RAISE EXCEPTION 'communication.unavailable'; END IF;
   IF q ? 'readModel' THEN
-    SELECT v INTO STRICT line_query FROM jsonb_array_elements(app->'queries') v
-      WHERE v->>'queryId'=q#>>'{readModel,queries,lines,targetId}' AND v->>'lifecycle'='active' AND v->>'queryType'='list';
+    SELECT DISTINCT v INTO STRICT line_query FROM jsonb_array_elements(app->'queries') v
+      JOIN jsonb_array_elements(app->'surfaces') s ON s#>>'{dataSource,targetId}'=q->>'queryId'
+      JOIN jsonb_array_elements(app->'queries') editor_lines ON editor_lines->>'queryId'=s#>>'{documentEditor,lineQueryId}'
+      JOIN jsonb_array_elements(app->'relations') parent ON parent->>'relationId'=s#>>'{documentEditor,parentRelationId}'
+      WHERE s->>'lifecycle'='active' AND s->>'surfaceRole'='record' AND s#>>'{documentEditor,recordSurfaceId}'=s->>'surfaceId'
+        AND parent->>'lifecycle'='active' AND parent#>>'{targetEntity,targetId}'=q#>>'{sourceEntity,targetId}'
+        AND parent#>>'{sourceEntity,targetId}'=v#>>'{sourceEntity,targetId}'
+        AND editor_lines->>'lifecycle'='active' AND editor_lines->>'queryType'='list'
+        AND editor_lines->'sourceEntity'=v->'sourceEntity' AND editor_lines->'permission'=v->'permission'
+        AND v->>'queryId'=q#>>'{readModel,queries,lines,targetId}' AND v->>'lifecycle'='active' AND v->>'queryType'='list'
+        AND NOT v ? 'readModel';
   ELSE line_query:=NULL; END IF;
   FOR required_query IN SELECT v FROM (VALUES(q),(line_query)) deps(v) WHERE v IS NOT NULL LOOP
     IF NOT EXISTS (SELECT FROM jsonb_array_elements(app->'permissions') p
