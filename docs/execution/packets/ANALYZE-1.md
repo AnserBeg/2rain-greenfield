@@ -43,6 +43,24 @@ Each new member earns its own persisted absence parity, actual preceding-reader 
 - The WSL gate refused before launch. The CPU, memory, process, time, DNS, socket, kill and scratch checks have no measurements. The hosted spike and full CI dispatch are pending.
 - **Try it yourself** on this WSL host. Run `docker info --format '{{json .SecurityOptions}}'`, then `rootlesskit true`. Before retrying the fixture, the intended user daemon must report `name=rootless` and the mapping probe must exit 0.
 
+## Owner setup
+
+Run these commands as the laptop owner in an interactive WSL systemd login. The current account already has 65,536 subordinate UIDs and GIDs and the Docker rootless setup tool. The existing system daemon can continue serving other projects. [Docker rootless setup](https://docs.docker.com/engine/security/rootless/) · [Controller delegation](https://docs.docker.com/engine/security/rootless/tips/#limiting-resources)
+
+```sh
+sudo apt-get update && sudo apt-get install -y uidmap
+sudo install -d /etc/systemd/system/user@.service.d
+printf '[Service]\nDelegate=cpu cpuset io memory pids\n' | sudo tee /etc/systemd/system/user@.service.d/delegate.conf
+sudo systemctl daemon-reload
+sudo systemctl set-property --runtime "user@$(id -u).service" Delegate="cpu cpuset io memory pids"
+systemctl --user set-property analysis.slice MemorySwapMax=0
+rootlesskit true && dockerd-rootless-setuptool.sh install --force
+systemctl --user enable --now docker
+docker --host "unix:///run/user/$(id -u)/docker.sock" info --format '{{json .SecurityOptions}}'
+```
+
+The user endpoint must report `name=rootless`. The hosted capability gate governs development while laptop setup is pending.
+
 ## Gates
 
 Local docs gate is `scripts/check-records.sh`. This checkpoint changes documentation only. The CI reference is the successful full **base** run at `630e2aa6`, whose executable tree the packet shares.

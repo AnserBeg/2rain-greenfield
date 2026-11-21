@@ -1,0 +1,35 @@
+name: Analysis fixture
+on:
+  push:
+    branches: [packet/ANALYZE-1-s1a, main]
+    paths: ['analysis/**', '.github/workflows/analysis-fixture.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  rootless:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Provision a separate rootless daemon on this ephemeral runner
+        run: |
+          set -euxo pipefail
+          if ! command -v newuidmap || ! command -v dockerd-rootless-setuptool.sh; then
+            sudo apt-get update
+            sudo apt-get install -y uidmap docker-ce-rootless-extras
+          fi
+          sudo loginctl enable-linger "$(id -un)"
+          sudo systemctl start "user@$(id -u).service"
+          sudo systemctl set-property --runtime "user@$(id -u).service" Delegate="cpu cpuset io memory pids"
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+          systemctl --user start analysis.slice
+          systemctl --user set-property --runtime analysis.slice MemorySwapMax=0
+          dockerd-rootless-setuptool.sh install --force
+          systemctl --user start docker
+          python3 analysis/runner/runtime.py
+      - name: Measure limits and run discriminating controls serially
+        run: python3 -u analysis/tests/spike.py
