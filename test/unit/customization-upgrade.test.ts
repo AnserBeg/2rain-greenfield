@@ -9,6 +9,7 @@ import { replayCustomizationPatches } from '../../packages/customization/src/upg
 import * as customization from '../../packages/customization/src/index.js';
 import {
   normalizeApplicationPackage,
+  ReportChoicesSchema,
   type SurfaceLayout,
 } from '../../packages/canonical-model/src/index.js';
 import { VALIDATION_NODE_VERSION } from '../../packages/canonical-model/src/formula-validation.js';
@@ -238,7 +239,7 @@ const equipmentReports = (definition: Base) =>
 const equipmentReport = customization.draftReport(
   equipmentReports(extended),
   'Equipment counts',
-  {
+  ReportChoicesSchema.parse({
     dimensions: [
       { kind: 'direct', fieldId: id('field.custom_equipment_status') },
     ],
@@ -252,7 +253,7 @@ const equipmentReport = customization.draftReport(
     ],
     filters: [],
     outputs: [{ kind: 'table' }],
-  },
+  }),
 );
 const cancel = id('operation.purchase_order_draft_cancel');
 const newOption = id('option.custom_equipment_status_loaned');
