@@ -3285,7 +3285,7 @@ async function readBoardPage(
   if (
     !board ||
     board.revisionId !== window.revisionId ||
-    board.body.listQueryId !== definition.queryId ||
+    board.body.listQuery.queryId !== definition.queryId ||
     board.body.entityId !== entity.entityId
   )
     throw failure('MODULE_LIST_FIELD_INVALID', 'The Board binding changed.');
@@ -3338,7 +3338,7 @@ async function readBoardPage(
   );
   const scopePredicates = [start, ...predicates];
   predicates.length = 0;
-  const stageColumn = columnFor(body.grouping.stateFieldId);
+  const stageColumn = columnFor(body.grouping.state.fieldId);
   predicates.push(
     stageColumn + ' = ANY(' + parameter(values, stages) + '::text[])',
   );

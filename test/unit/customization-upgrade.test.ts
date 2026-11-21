@@ -187,7 +187,7 @@ const withEquipmentLifecycle = applied(extended, [
 ]);
 const equipmentBoard = customization
   .customizationTargets(normalizeApplicationPackage(withEquipmentLifecycle))
-  .boards!.find((target) => target.body.entityId === equipment)!;
+  .boards!.find((target) => target.frame.entityId === equipment)!;
 const appointment = {
   kind: 'addDateTimeField',
   schemaVersion: 'northstar.date-time-field/v1',
@@ -205,7 +205,7 @@ const cases = {
     change: customization.draftBoardRevision(
       equipmentBoard,
       'Equipment inspections',
-      equipmentBoard.body.grouping.stages.map((stage) => stage.stateId),
+      customization.defaultBoardChoices(equipmentBoard),
     ),
     code: 'RETIRED_TARGET',
   },
@@ -378,6 +378,24 @@ for (const [kind, example] of Object.entries(cases)) {
     (compatible.fields as { fieldId: string; label: string }[]).find(
       (f) => f.fieldId === id('field.item_sku'),
     )!.label = 'Stock identifier';
+    if (kind === 'addBoardViewRevision') {
+      // The compatible move relabels what the Board binds: its title field,
+      // that field's List column and the transition its move operates.
+      const name = id('field.custom_equipment_name');
+      (compatible.fields as { fieldId: string; label: string }[]).find(
+        (f) => f.fieldId === name,
+      )!.label = 'Asset name';
+      (
+        (compatible.surfaces as { surfaceId: string; list?: Base }[]).find(
+          (s) => s.surfaceId === id('surface.custom_equipment_list'),
+        )!.list!.columns as { field: string; label: string }[]
+      ).find((c) => c.field === name)!.label = 'Asset';
+      (compatible.stateMachines as { transitions: { label: string }[] }[]).find(
+        (m) =>
+          (m as unknown as { entity: { targetId: string } }).entity.targetId ===
+          equipment,
+      )!.transitions[0]!.label = 'Certify';
+    }
     const result = await customization.compileInSandbox({
       acknowledgement,
       base: compatible,

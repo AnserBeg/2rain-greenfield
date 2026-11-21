@@ -28,7 +28,7 @@ Status: executable; integrates on a full green of the exact integration commit. 
 - Zones: ICU resolution plus a CLDR→IANA rename table (`Asia/Calcutta`→`Asia/Kolkata`); tzdb version is `process.versions.tz`.
 - Company source uses the tenant business calendar (calendar ID = tenant ID, as Booking) and the record's stored company; a company-sourced field on a shared record type refuses entry (no working company reaches the write) — named gap.
 - A required field added to an existing type is refused by the storage planner (`COMPILER_BACKFILL_INADMISSIBLE`), so no appointment is invented.
-- Scope notes: the viewer-zone switch follows slice 1 (packet allows it); rung 37 and migration 0059 were assigned at merge; the drafter's keys come from the member schema (AI-BUILD-1 eval cases are not yet written); upgrade replay is proven by the named case in `customization-upgrade.test.ts`, and a PostgreSQL upgrade that reopens and writes a value is not yet built.
+- Scope notes: the viewer-zone switch follows slice 1 (packet allows it); rung 38 and migration 0059 were assigned at merge; the drafter's keys come from the member schema (AI-BUILD-1 eval cases are not yet written); upgrade replay is proven by the named case in `customization-upgrade.test.ts`, and a PostgreSQL upgrade that reopens and writes a value is not yet built.
 - PDF text not proven: no document generator is on `main` (DOCS-1 slice 2 is unmerged). The no-viewer formatter is proven in UTC processes and at the list/export reader; templates must bind it when they land.
 
 **Test it yourself (slice 1, under ten minutes).** `corepack pnpm dev`, sign in as manager, open **Customize**.

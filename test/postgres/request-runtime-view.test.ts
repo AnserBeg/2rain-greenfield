@@ -10,6 +10,7 @@ import pg from 'pg';
 import { BILLING_INTERVAL_READER } from '../../packages/canonical-model/src/billing.js';
 import { DATE_TIME_FIELD_READER } from '../../packages/canonical-model/src/date-time-field.js';
 import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../packages/canonical-model/src/surface-workspace.js';
+import { BOARD_READER } from '../../packages/canonical-model/src/board.js';
 
 import {
   ADDRESS_MAP_READER,
@@ -178,6 +179,7 @@ test('the capability comparison binds the family to its capability, then compare
     34,
     LINE_CREATE_VALUES_SURFACE_FLOOR,
     BILLING_INTERVAL_READER,
+    BOARD_READER,
     DATE_TIME_FIELD_READER,
   ];
   for (const reader of surfaceFloors) {
