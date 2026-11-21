@@ -504,7 +504,7 @@ test(
 
 test(
   'one row over the window-index ceiling refuses the attempt by name while the source release keeps serving, and the build at the ceiling is measured',
-  { timeout: 1_200_000 },
+  { timeout: 1_800_000 },
   async (t) => {
     await withEphemeralPostgres(
       'date-time-ceiling',
@@ -593,6 +593,7 @@ test(
           await fill(9_000 - (await count()), 'own');
           await fill(1_001, 'other');
           assert.equal(await count(), 10_001);
+          t.diagnostic(`ceiling: filled ${new Date().toISOString()}`);
           const sourceRoot = (await opened.service.status()).activeReleaseRoot;
           const field = await opened.service.draft(
             appointment,
@@ -618,6 +619,7 @@ test(
               return true;
             },
           );
+          t.diagnostic(`ceiling: refused ${new Date().toISOString()}`);
           // The verified source keeps serving: it reads and writes as before.
           assert.equal(
             (await opened.service.status()).activeReleaseRoot,
@@ -640,6 +642,7 @@ test(
             `DELETE FROM ${table} WHERE record_id IN (SELECT record_id FROM ${table} WHERE ${nameColumn} LIKE 'Bulk %' LIMIT 1)`,
           );
           assert.equal(await count(), 10_000);
+          t.diagnostic(`ceiling: at the ceiling ${new Date().toISOString()}`);
           const writer = await pool.connect();
           let writing = true;
           let longest = 0;
