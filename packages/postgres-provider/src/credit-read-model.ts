@@ -40,8 +40,8 @@ function cents(value: ImmutableJsonValue | undefined): bigint | null {
  * dependency queries under current policy (SALES-EXTRAS), in one currency
  * across every company of the tenant -- the same figures the receivables
  * capability checks when an order is confirmed. A restricted company list or a
- * withheld dependency read leaves the credit figures unstated;
- * so does a confirmed order whose total cannot be stated.
+ * withheld dependency read leaves the credit figures unstated. The same
+ * applies when a confirmed order’s total cannot be stated.
  */
 export async function readCreditPosition(input: {
   readonly view: RequestRuntimeView;
@@ -131,7 +131,9 @@ export async function readCreditPosition(input: {
       if (result.companyScopeRestricted) {
         throw new SemanticQueryPolicyDeniedError(query.queryId, view);
       }
-      const page = requireSharedListResult(result);
+      const page: ReturnType<
+        typeof requireSharedListResult<SemanticRecordDto>
+      > = requireSharedListResult(result);
       const coverage = page.listCoverage;
       const scope = list.parentScope ?? list.referenceScope;
       const applied = list.parentScope

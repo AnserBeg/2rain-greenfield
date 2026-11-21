@@ -392,7 +392,7 @@ test('company-scoped staff see only their companies and can open their own List 
       assert.equal(attemptedPause.status, 403);
     });
     await t.test(
-      'Address installations and writes use the member company',
+      'Address installations use the member’s companies',
       async () => {
         await app.runtime.entry.run({ headers }, async (view) => {
           assert.deepEqual(
@@ -402,11 +402,38 @@ test('company-scoped staff see only their companies and can open their own List 
             [scope],
             'installation lookup stays within the membership',
           );
-          await assert.rejects(
-            addresses.configure(view, scope, { ...options, enabled: false }),
-            { reason: 'unconfigured' },
-          );
         });
+      },
+    );
+    await t.test(
+      'a manager loses Address write access when the configure grant is revoked',
+      async () => {
+        const { tenantId, environmentId } = app.runtime.identity;
+        const revoked = await pool.query(
+          `UPDATE platform.current_policy_permission_grants SET revoked_at = CURRENT_TIMESTAMP
+          WHERE tenant_id = $1 AND environment_id = $2 AND permission_id = $3
+            AND revoked_at IS NULL`,
+          [
+            tenantId,
+            environmentId,
+            'northstar.runtime:permission.connector_configure',
+          ],
+        );
+        assert.equal(revoked.rowCount, 1);
+        await app.runtime.entry.run(
+          { headers: managerHeaders },
+          async (view) => {
+            await assert.rejects(
+              addresses.configure(view, scope, { ...options, enabled: false }),
+              { reason: 'unconfigured' },
+            );
+            assert.ok(
+              (await addresses.installations(view)).some(
+                (account) => account.companyId === scope,
+              ),
+            );
+          },
+        );
       },
     );
 
