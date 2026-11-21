@@ -1,13 +1,13 @@
 # PLANNER-1 — map stops and schedule work on a dispatch desk
 
-**Slice 0 · docs only · 2026-11-21.** Fable returned REVISE on `11d0e030`. The single amendment round is ready for the targeted re-check of A1, A2, A3 and A5–A8. The owner receives the provider estimate for morning sign-off. [Amended ADR](../../decisions/ADR-0090-map-resource-assignment-and-planner-workspace.md)
+**Slice 0 · docs only · 2026-11-21.** Fable returned REVISE on `11d0e030`. The orchestrator accepted the amendment at `467535a4` with the clarifications recorded in the ADR. The owner receives the provider estimate for morning sign-off. [Amended ADR](../../decisions/ADR-0090-map-resource-assignment-and-planner-workspace.md)
 
 ## Amendments
 
 | Finding | Design decision |
 | --- | --- |
 | A1 | Map and Planner have closed archetypes, named slots and compact projections. Plan §12.2 includes both and resource timeline. [Grammar](../../decisions/ADR-0090-map-resource-assignment-and-planner-workspace.md#1-draw-the-map-on-the-server) |
-| A2 | Recommend Geoapify API 25 at USD 109/month before tax for 20 users, 3,000 viewport renders and 1,000 address calls/day. One installation provides suggest, geocode and hosted OSM imagery. CONNECT-1 lands the viewport amendment and adapters. Google requires direct browser delivery. [Provider, terms and cost](../../decisions/ADR-0090-map-resource-assignment-and-planner-workspace.md#2-let-connect-1-own-imagery-and-disclosure) |
+| A2 | Recommend Geoapify API 25 at USD 109/month before tax for 20 users, 3,000 viewport renders and 1,000 address calls/day. One installation provides suggest, geocode and hosted OSM imagery. PLANNER-1 owns the viewport contract and fake imagery adapter in the existing connector host while CONNECT-1 is inactive. Google requires direct browser delivery. [Provider, terms and cost](../../decisions/ADR-0090-map-resource-assignment-and-planner-workspace.md#2-let-connect-1-own-imagery-and-disclosure) |
 | A3 | Apply the day, saved filters and route before the 100-stop cap. Pan/zoom queries the visible area. Page by group, stop order and key, with route-local pin numbers and a prompt to narrow. [Map limits](../../decisions/ADR-0090-map-resource-assignment-and-planner-workspace.md#5-bound-the-read-before-drawing) |
 | A4 | Slice 1 ships the §2a amendment for map-region pan/zoom and drag-to-pan, canonical URLs, three size presets, linked overlay pins and script-off navigation back to the map. |
 | A5 | One date drives all panels. The day opens on a 06:00–18:00 axis with 48 quarter-hour starts. Show on map seeks the authorized stop across pages. [Desk](../../decisions/ADR-0090-map-resource-assignment-and-planner-workspace.md#4-compose-the-desk-and-review-one-assignment) |
@@ -26,7 +26,7 @@
 
 ## Slices and acceptance cases
 
-1. **Map.** Consume CONNECT-1 Address and its next viewport slice. In the enabled local demo, save ordinary addresses and see real geocoded pins over an attributed basemap. A fake-only checkpoint stays blocked.
+1. **Map.** Consume CONNECT-1 Address and implement the viewport seam in the ADR-0080 single-writer framework. The checkpoint uses Demo Maps only, without network or credentials. Geoapify is pending owner approval. Sortable-field order ships first.
 2. **Any-resource timeline.** After CALENDAR-1 3a and executable ADR-0087 intervals, bind a truck type and a technician type. Exercise all four forms, race two dispatchers and retry a lost response. Expect one change and receipt. Stop if the writer cannot protect the field pair on every path.
 3. **Planner.** After slices 1–2 and CALENDAR-1 1b, schedule by drop and keyboard on separate fixtures. Verify the route, queue and bar after confirm, then advance the common day. Run compact, company and whole-page budget gates.
 

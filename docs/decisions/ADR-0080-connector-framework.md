@@ -60,6 +60,8 @@ returns its recorded result, subject to data retention. Where the result cannot 
 journaled, exclude the query from the workflow SDK. WORKFLOW-1 keeps its present call set.
 [ADR-0073, external delivery](ADR-0073-workflow-isolate-and-authority.md#timers-signals-and-external-delivery)
 
+**Viewport amendment (2026-11-21).** A human opening or panning a released Map may request one bounded public basemap through the enabled acting-company installation. Recheck the requesting company, viewer, release fence, view and disclosure grant before cache access. Reserve maximum cost and volume on a cold request. Only the normalized viewport reaches the adapter. PLANNER-1 owns this seam under the existing installation writer and scoped key rules. Its initial adapter is network-free Demo Maps. [Map contract](ADR-0090-map-resource-assignment-and-planner-workspace.md#2-let-connect-1-own-imagery-and-disclosure)
+
 ## Who can connect a company
 
 Until sign-in packet item 1 closes, connecting, enabling and rotating providers and **every

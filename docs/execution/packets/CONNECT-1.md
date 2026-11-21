@@ -2,6 +2,8 @@
 
 Slice 0 established [ADR-0080](../../decisions/ADR-0080-connector-framework.md) after Fable’s read. Slice 1 implements Address and Maps. Email remains slice 2. Its first deliverable is the email action patch member (the extended `addDocumentEmailAction`, schemaVersion 2, with its own surface rung, replay test and old-reader refusal), per [ADR-0088 R11](../../decisions/ADR-0088-governed-communications-and-reminders.md#amendments-from-the-2026-11-20-fable-read). CONNECT-1 is the single writer of thread and participant rows and of the canonical message. Consent and suppression rows have COMMS-1 as their single writer. Lock order: reminder occurrence, thread, participant, message, consent, suppression, send intent. Slice 2 is jointly gated on DOCS-1 version handles and SIGNIN-1 slice 2b.
 
+On 2026-11-21 the owner assigned PLANNER-1 the viewport contract and imagery adapter seam inside this framework while CONNECT-1 is inactive. Address configuration and credentials retain their existing writers and scope. The viewport checkpoint uses the deterministic fake only. Geoapify awaits owner approval.
+
 ## Claims and decisions
 
 1. A business user adds one Address field and places its map on an eligible office or tenant-authored record. An address requires surface reader 31 and a separate map placement requires 32.
