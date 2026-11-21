@@ -213,11 +213,14 @@ async function main(): Promise<void> {
       cap: { type: 'string', default: '12' },
       candidates: { type: 'string' },
       cases: { type: 'string', default: SCREEN_CASES.join(',') },
-      concurrency: { type: 'string', default: '1' },
+      concurrency: { type: 'string', default: '2' },
       label: { type: 'string', default: 'screen' },
       out: { type: 'string', default: 'docs/execution/evidence' },
       // Spend already made by earlier phases of the same bake-off.
       spent: { type: 'string', default: '0' },
+      // An earlier build-eval run directory on the same prompt and code.
+      reuse: { type: 'string' },
+      'reuse-as': { type: 'string', default: 'opus-5-5-medium' },
     },
   });
   if (!args.prompts) throw new Error('--prompts is required');
@@ -265,58 +268,118 @@ async function main(): Promise<void> {
   const exhausted = () => spent >= cap;
 
   const all: (CaseResult & { candidate: string; type: RequestType })[] = [];
-  await withAgentWorlds('build-bakeoff', async (worlds) => {
-    for (const candidate of candidates) {
-      if (exhausted()) break;
-      const priced = new SpendMeter(candidate.prices, cap - spent);
-      const live = adapter(candidate, keys);
-      // Phase 2: first drafts back to back.
-      const ahead = new Map<
-        string,
-        { prompt: CapturedPrompt; turn: ModelTurnAhead }
-      >();
-      for (const c of cases) {
-        const prompt = prompts.get(c.id);
-        if (!prompt || priced.exhausted()) continue;
-        const started = performance.now();
-        try {
-          const { turn } = await meteredNext(live, priced, {
-            system: prompt.system,
-            tools: prompt.tools,
-            conversation: prompt.conversation,
-          });
-          ahead.set(c.id, {
-            prompt,
-            turn: {
-              ...turn,
-              recordedLatencyMs: Math.round(performance.now() - started),
-            },
-          });
-          say(
-            `${candidate.name} ${c.id}: drafted ahead in ${((performance.now() - started) / 1000).toFixed(1)} s · cache read ${String(turn.usage.cacheReadTokens)} · candidate $${priced.usd.toFixed(4)}`,
-          );
-        } catch (error) {
-          say(
-            `${candidate.name} ${c.id}: draft failed: ${errorText(error, secrets)}`,
-          );
-        }
+  // A candidate already measured on the same prompt and code (the slice 2
+  // run is opus-5-5-medium): its rows are reused, not re-drafted.
+  const reused = new Set<string>();
+  if (args.reuse) {
+    const earlier = JSON.parse(
+      await readFile(join(resolve(args.reuse), 'results.json'), 'utf8'),
+    ) as { results: CaseResult[] };
+    const name = args['reuse-as'];
+    for (const r of earlier.results) {
+      const c = cases.find((x) => x.id === r.id);
+      if (c && r.status !== 'not-run')
+        all.push({ ...r, candidate: name, type: requestType(c) });
+    }
+    reused.add(name);
+    say(`reused ${name} from ${args.reuse}`);
+  }
+  const running = candidates.filter((c) => !reused.has(c.name));
+  const live = new Map(running.map((c) => [c.name, adapter(c, keys)]));
+  // Phase 2, every candidate: first drafts back to back (warm caches).
+  const ahead = new Map<
+    string,
+    Map<string, { prompt: CapturedPrompt; turn: ModelTurnAhead }>
+  >();
+  const draftSpend = new Map<string, number>();
+  for (const candidate of running) {
+    if (exhausted()) break;
+    const drafts = new Map<
+      string,
+      { prompt: CapturedPrompt; turn: ModelTurnAhead }
+    >();
+    ahead.set(candidate.name, drafts);
+    const priced = new SpendMeter(candidate.prices, cap - spent);
+    for (const c of cases) {
+      const prompt = prompts.get(c.id);
+      if (!prompt || priced.exhausted()) continue;
+      const started = performance.now();
+      try {
+        const { turn } = await meteredNext(live.get(candidate.name)!, priced, {
+          system: prompt.system,
+          tools: prompt.tools,
+          conversation: prompt.conversation,
+        });
+        drafts.set(c.id, {
+          prompt,
+          turn: {
+            ...turn,
+            recordedLatencyMs: Math.round(performance.now() - started),
+          },
+        });
+        say(
+          `${candidate.name} ${c.id}: drafted ahead in ${((performance.now() - started) / 1000).toFixed(1)} s · cache read ${String(turn.usage.cacheReadTokens)} · candidate $${priced.usd.toFixed(4)}`,
+        );
+      } catch (error) {
+        say(
+          `${candidate.name} ${c.id}: draft failed: ${errorText(error, secrets)}`,
+        );
       }
-      const draftSpend = priced.usd;
-      // Phase 3: score each on the in-app path; turn 1 replays, repairs live.
-      // The scoring meter re-charges each replayed first turn, so its cap
-      // carries the draft phase's spend too.
+    }
+    draftSpend.set(candidate.name, priced.usd);
+    spent += priced.usd;
+    say(
+      `${candidate.name}: drafts $${priced.usd.toFixed(4)} · bake-off total $${spent.toFixed(4)}`,
+    );
+  }
+
+  // Phase 3: score on the in-app path; turn 1 replays, repairs go live. A
+  // first draft identical to one already scored without repair has the same
+  // outcome on the same base, so its score is reused (model metrics are the
+  // candidate's own).
+  const scored = new Map<string, CaseResult>();
+  await withAgentWorlds('build-bakeoff', async (worlds) => {
+    for (const candidate of running) {
+      const drafts = ahead.get(candidate.name);
+      if (!drafts?.size) continue;
       const scoring = new SpendMeter(
         candidate.prices,
-        cap - spent + draftSpend,
+        Math.max(0, cap - spent) + (draftSpend.get(candidate.name) ?? 0),
       );
+      const tally = new SpendMeter(candidate.prices, Number.POSITIVE_INFINITY);
       const mismatched = new Set<string>();
-      const queue = [...cases];
+      const queue = cases.filter((c) => drafts.has(c.id));
       const results: (CaseResult & { candidate: string; type: RequestType })[] =
         [];
       const worker = async () => {
         for (let c = queue.shift(); c; c = queue.shift()) {
-          const drafted = ahead.get(c.id);
-          if (!drafted) continue;
+          const drafted = drafts.get(c.id)!;
+          const key = `${c.id}:${JSON.stringify(drafted.turn.toolCalls.map((call) => call.input))}`;
+          const prior = scored.get(key);
+          if (prior && prior.modelCalls === 1) {
+            results.push({
+              ...prior,
+              reasons: [...prior.reasons],
+              modelMs: drafted.turn.recordedLatencyMs,
+              usd: new SpendMeter(
+                candidate.prices,
+                Number.POSITIVE_INFINITY,
+              ).charge(drafted.turn.usage),
+              tokens: {
+                input: drafted.turn.usage.inputTokens,
+                output: drafted.turn.usage.outputTokens,
+                cacheRead: drafted.turn.usage.cacheReadTokens,
+                cacheWrite: drafted.turn.usage.cacheWriteTokens,
+              },
+              candidate: candidate.name,
+              type: requestType(c),
+            });
+            say(
+              `  ${candidate.name} ${c.id}: ${prior.behaviour ? 'PASS' : 'FAIL'} (same draft as one already scored)`,
+            );
+            continue;
+          }
+          if (scoring.exhausted()) continue;
           const record = join(directory, `${candidate.name}-${c.id}.jsonl`);
           let lines = Promise.resolve();
           const log = (entry: Record<string, unknown>) => {
@@ -330,13 +393,15 @@ async function main(): Promise<void> {
           try {
             const result = await runBuildCase(world, c, {
               provider: () =>
-                draftedAheadModel(drafted, live, () => {
+                draftedAheadModel(drafted, live.get(candidate.name)!, () => {
                   mismatched.add(c.id);
                   log({ kind: 'prompt-mismatch' });
                 }),
               meter: scoring,
               log,
             });
+            if (!mismatched.has(c.id)) tally.charge(drafted.turn.usage);
+            if (!scored.has(key)) scored.set(key, result);
             results.push({
               ...result,
               candidate: candidate.name,
@@ -358,23 +423,22 @@ async function main(): Promise<void> {
       await Promise.all(
         Array.from({ length: Math.max(1, Number(args.concurrency)) }, worker),
       );
-      // The scoring meter re-charged the first turns: spend is draft-phase
-      // spend plus scoring spend minus the replayed first turns.
-      const tally = new SpendMeter(candidate.prices, Number.POSITIVE_INFINITY);
-      for (const r of results)
-        if (!mismatched.has(r.id) && ahead.has(r.id))
-          tally.charge(ahead.get(r.id)!.turn.usage);
-      const candidateSpend = draftSpend + scoring.usd - tally.usd;
-      spent += candidateSpend;
+      // Scoring re-charged each replayed first turn; only repairs are new.
+      const repairSpend = scoring.usd - tally.usd;
+      spent += repairSpend;
       all.push(...results);
       say(
-        `${candidate.name}: ${JSON.stringify(summarize(results))} · candidate spend $${candidateSpend.toFixed(4)} · bake-off total $${spent.toFixed(4)}`,
+        `${candidate.name}: ${JSON.stringify(summarize(results))} · repairs $${repairSpend.toFixed(4)} · bake-off total $${spent.toFixed(4)}`,
       );
       await writeFile(
         join(directory, `results-${candidate.name}.json`),
         redactSecrets(
           JSON.stringify(
-            { candidate, spend: candidateSpend, results },
+            {
+              candidate,
+              spend: (draftSpend.get(candidate.name) ?? 0) + repairSpend,
+              results,
+            },
             null,
             2,
           ),

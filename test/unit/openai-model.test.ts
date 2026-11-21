@@ -47,27 +47,20 @@ test('the OpenAI adapter sends tools as functions and reads a tool call', async 
   const server = await standIn(() => ({
     status: 200,
     body: {
-      choices: [
+      status: 'completed',
+      output: [
+        { type: 'reasoning', id: 'rs_1', summary: [] },
         {
-          finish_reason: 'tool_calls',
-          message: {
-            content: null,
-            tool_calls: [
-              {
-                id: 'call_1',
-                function: {
-                  name: 'draft_customization',
-                  arguments: '{"kind":"addField"}',
-                },
-              },
-            ],
-          },
+          type: 'function_call',
+          call_id: 'call_1',
+          name: 'draft_customization',
+          arguments: '{"kind":"addField"}',
         },
       ],
       usage: {
-        prompt_tokens: 1000,
-        completion_tokens: 50,
-        prompt_tokens_details: { cached_tokens: 800 },
+        input_tokens: 1000,
+        output_tokens: 50,
+        input_tokens_details: { cached_tokens: 800 },
       },
     },
   }));
@@ -105,13 +98,13 @@ test('the OpenAI adapter sends tools as functions and reads a tool call', async 
     });
     const sent = server.seen[0]!;
     assert.equal(sent.auth, `Bearer ${KEY}`);
-    assert.equal(sent.body.reasoning_effort, 'medium');
-    assert.deepEqual(
-      (sent.body.messages as { role: string }[]).map((m) => m.role),
-      ['system', 'user'],
-    );
+    assert.deepEqual(sent.body.reasoning, { effort: 'medium' });
+    assert.equal(sent.body.instructions, 'system text');
+    assert.deepEqual(sent.body.input, [
+      { role: 'user', content: 'Add a field' },
+    ]);
     assert.equal(
-      (sent.body.tools as { function: { name: string } }[])[0]!.function.name,
+      (sent.body.tools as { name: string }[])[0]!.name,
       'draft_customization',
     );
   } finally {
