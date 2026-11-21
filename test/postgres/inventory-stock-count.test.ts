@@ -546,6 +546,16 @@ test('stock-count expected: a stale expected is refused and posts nothing, and a
         supersedesStockCountId: null,
         varianceQuantity: '0',
       });
+      await assertCountPostingRejected(
+        () =>
+          service.postStockCount(context, actor, {
+            ...single,
+            lines: [{ ...single.lines[0]!, varianceQuantity: '-0' }],
+          }),
+        'INVENTORY_POSTING_INPUT_INVALID',
+        /line\.varianceQuantity must be a canonical signed decimal/u,
+        'negative zero has no second canonical spelling',
+      );
       const twice = {
         ...single,
         lines: [

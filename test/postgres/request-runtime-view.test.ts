@@ -198,7 +198,7 @@ test(
             const request = {
               databaseUrl,
               queryId: 'northstar.app:query.item_get',
-              args: { recordId: item },
+              args: { includeArchived: false, recordId: item },
             };
             await withArchivedCustomizationRuntime(
               archivedRevision,

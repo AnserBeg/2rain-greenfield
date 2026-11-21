@@ -20,6 +20,7 @@ import {
   registeredQueryFromPinnedView,
 } from '../../packages/runtime/src/semantic-query-gateway.js';
 import {
+  OPERATION_BOUNDARY_PERMISSION_ID,
   SEMANTIC_OPERATION_POLICY_EVALUATOR_VERSION,
   SemanticOperationPolicyDeniedError,
   parsePinnedOperationCatalog,
@@ -27,6 +28,7 @@ import {
 } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import { SHARED_LIST_QUERY_VERSION } from '../../packages/runtime/src/list-behavior/index.js';
 import {
+  LEGAL_ENTITY_READ_SCOPE_PERMISSION_ID,
   trustedContextForRequestRuntimeView,
   type ImmutableJsonValue,
 } from '../../packages/runtime/src/request-runtime-view.js';
@@ -396,6 +398,8 @@ test(
       await buyer.scope(fixture.scope);
       await buyer.only([
         QUERY_BOUNDARY_PERMISSION_ID,
+        OPERATION_BOUNDARY_PERMISSION_ID,
+        LEGAL_ENTITY_READ_SCOPE_PERMISSION_ID,
         ...[
           'stock_count_read',
           'stock_count_line_read',
