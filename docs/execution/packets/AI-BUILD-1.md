@@ -1,7 +1,70 @@
 # AI-BUILD-1 — measure whether the in-app AI builds customized modules from plain English
 
-Status: slice 1 (the eval and its live baseline). Not Critical: test files and evidence only; no product code, migration or reader rung.
-CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44854101419
+Status: slices 1 and 2, merging as one packet (orchestrator ruling, 2026-11-21). Slice 1: the eval and its live baseline (test files and evidence). Slice 2: the drafter generated from the patch schemas, platform rules in the prompt, a two-turn repair loop, address/map/files/board drafting, and the live re-run. Not Critical: no AGENTS.md Critical path, no migration, no reader rung.
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44954610888
+
+## Slice 2 — raise the drafter's success (built 2026-11-21)
+
+Charter: orchestrator missions folder, `charters/AI-BUILD-1-slice2.md`, items 1–7. Not Critical (no AGENTS.md Critical path, no migration, no reader rung). Slice 1 and slice 2 merge as one packet (orchestrator ruling, 2026-11-21).
+
+### What changed
+
+1. **Generated kind descriptions (rule 12).** `packages/customization/src/ai-draft-kinds.ts` holds what the drafter accepts per patch kind: the patch member's own schema where the model can emit it, and a choice-shaped schema (listed IDs, rule 10) for boards, layouts, validations, calculated displays, address, map and files members. The tool's description and its flat input schema are generated from these with `z.toJSONSchema`; each kind adds one guidance sentence. `test/unit/customization-ai-draft-slice2.test.ts` fails closed when a `CUSTOMIZATION_PATCH_KINDS` member is neither drafted nor carries a dated, named exception (none today); the control (drop `addUploadCategory` from the drafter) reds it. Board v2's named drafter exception is closed.
+2. **Platform rules in the prompt.** `authoring-rules.ts` states the rule behind every patch-application refusal code (a `Record` over `CustomizationRefusalCode`, so a new code is a compile error until its rule exists) and the compiler and draft-shape rules a well-formed draft can still meet: distinct state and action labels, lifecycle shape, one line table and one lifecycle per type, address and map placement, and so on. The workflow section is generated from the workflow compiler (`workflowAuthoringRules`): the body is only the statements inside `function run(sdk, event): void`, the banned names, and the `workflowId` pattern from `WorkflowDefinitionSchema`. One rule was added after the dev-only smoke: draft exactly what was asked (M04 had added an unrequested board).
+3. **Repair loop, at most two turns.** `draftPatchFromRequest` takes the caller's check; the Customize service's check verifies a workflow bundle (type-check, lint, replay) and drafts the patch (compile). Schema issues, compiler rejections, patch-application refusals and draft-shape `unsupported` outcomes go back as the tool result, at most 8 diagnostics of 400 characters each. Authority, staleness, lineage and every other `unsupported` are final, so a correct refusal is never argued away. The eval records each turn's feedback, so first draft and after repair are reported separately. This subsumes WORKFLOW-2 item 2 (noted there).
+4. **New members in the drafter.** `addAddressField`, `addMapPlacement`, `addDocumentField` (with its categories) and `addUploadCategory` are drafted from a record type and a label; IDs derive the way the Customize forms derive them (`field-member-draft.ts`). DOCS-1 template kinds are not on main, so none are added.
+5. **A board in the same change as its new record type.** A change-set member may name a record type created earlier in the change; the drafter applies the earlier members to the live definition and builds the board from that offer, so the authoring digest check passes. Rule 10 is proven in the unit test: with the board, adding a field and relabelling a list column still apply.
+6. **Scorer buckets** use word boundaries ("pin" no longer matches "overlapping"); a unit test pins the baseline refusal texts to one bucket each.
+
+Also fixed on the way: slice 1's scorer read `board.body` after Board v2 renamed it `frame` (a type error on the merged branch); a generated-schema key collision (below); and the eval may raise the isolated compile's bound on a loaded host (`openCustomizeService` `sandboxWallClockMilliseconds`; the app keeps its default).
+
+### Live result (2026-11-21, local, one attempt per request)
+
+**38 of 40 behave as asked (95%); 32 of 34 draftable requests verify on the first draft (94%).** Baseline (slice 1): 26/30 behaviour, 19/23 verified. Drafter at `f3f427c2` (harness `ea92d158`), Opus 5.5 at medium effort, 8000 output tokens, the app's own drafting settings. First drafts were made back to back from the captured in-app prompts and saved, then each case was scored on the real in-app path (draft → approve → activate → create, transition, list) one at a time on an idle host, compile bound 120 s. The scoring process stopped once when its database container exited (during T05); the 11 remaining cases resumed from the same saved drafts. [Combined scorecard](../evidence/2026-11-21-build-eval-slice2-combined/combined-summary.md) · [first 29](../evidence/2026-11-21-build-eval-2026-11-21T18-25-05-613Z/) · [last 11](../evidence/2026-11-21-build-eval-2026-11-21T21-01-41-178Z/).
+
+| measure | baseline (30) | slice 2, same 30 | slice 2, 10 new held-out | slice 2, all 40 |
+|---|---|---|---|---|
+| verified first try (draftable) | 19/23 (83%) | 23/25 (92%) | 9/9 | 32/34 (94%) |
+| verified after repair | 19/23 (83%) | 23/25 (92%) | 9/9 | 32/34 (94%) |
+| end to end | 19/23 (83%) | 23/25 (92%) | 9/9 | 32/34 (94%) |
+| behaviour correct | 26/30 (87%) | 28/30 (93%) | 10/10 | 38/40 (95%) |
+| receipt workflows | 0/3 | 1/3 | 1/1 | 2/4 |
+| correct refusals, right capability | 7/7 | 5/5 | 1/1 | 6/6 |
+| false refusals / false accepts | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| hostile probes that changed the calls | 0/3 | 0/3 | 0/1 | 0/4 |
+| over-granted workflows | 0 | 0 | 0 | 0 |
+
+- Two slice 1 expectations changed because the platform can now do the request, and were rewritten before any slice 2 run: U01 (an address field with its map on customers, was "unsupported: address") and M07 (rental contracts with lines, statuses and a board, was "unsupported: board"). Both pass, which moves two cases from the refusal column to the draftable column.
+- Fixed on the way to this result: M04 (one action label on three transitions) now drafts distinct labels; no case needed a repair turn except the two workflow failures.
+- Cost: USD 2.94 for the 44 model calls of the scored cases, 1.67 M cache-read against 0.39 M cache-write tokens. Slice 2's live spend in all was about USD 8.1 with the rescore below (7.0 before it): smoke 0.77 (dev cases, drafter `f5a8f279`, not counted), a first 40-run stopped at 12 cases for the key-collision defect below 2.85 (not counted), one probe 0.20, and this run (drafts 2.09, repairs about 1.1).
+- Median model time per request 3.6 s; median wall time about 150 s on an idle host (the drafted change's compile, approval and activation dominate).
+- Validation rules are not covered by the 40. Three dated follow-up requests (V01 literal, V02 cross-field, V03 through a parent link) are written and committed outside the scored set (`VALIDATION_FOLLOWUP_CASES`).
+
+### Failure causes, ranked
+
+1. **Approval-shaped receipt workflows (W02, T08): 2 of 4 workflows.** The model's approval fixture names the operation `id` where the envelope needs `operationId`; the verifier said only "needs an exact operation and input" or "keys disagree with the pinned contract", so neither repair turn could converge (USD 0.50 each). Fixed after the run (`ce0b8b47`): one table, `WORKFLOW_CALL_ENVELOPES`, is read by both the SDK's call admission and the drafter's workflow rules, and the refusal names the expected, missing and unexpected keys (test, red control). Rescore below.
+2. **A generated-schema key collision (found in the first, stopped 40-run, fixed before this run).** Merging every kind's keys into one tool schema made `field` an object for `addField` and text for `addMapPlacement`; Opus sent `field` as a JSON string three turns running (F01). The keys are now `addressField` and `filesField`, and a schema test fails on any object-or-text collision except `target`.
+3. **Environment, not scored as model failures.** On a loaded host the 90 s compile bound refused base installs and drafted changes; slice 1 saw the same (T08). The eval now raises the bound to the compiler's 120 s cap, waits for an idle host before each case, requeues a compile timeout up to twice and reports a case still timing out as not scored. None was needed in the final run.
+
+### W02 and T08 after the verifier fix (2026-11-21)
+
+- **Same first drafts, live repairs** (`--force-first-turn`; [evidence](../evidence/2026-11-21-build-eval-2026-11-21T21-55-15-295Z/)): both pass after one repair turn. The refusal now reads "expected exactly {kind, summary, operationId, input}; missing "operationId"; unexpected "id"". Two new model calls in all (USD 0.85 for both cases including the replayed first turns).
+- **Fresh first drafts on the fixed drafter** (the envelope generated into the prompt; [evidence](../evidence/2026-11-21-build-eval-2026-11-21T22-09-31-798Z/)): both pass on the first draft, no repair (USD 0.70 for both).
+- With these, receipt workflows are 4/4 on the fixed drafter (W01 and N08 unchanged from the 40-run).
+
+### Gates
+
+- CI tier is full (shared paths). Latest PR #136 runs: see the CI tier line above; the scripted build-eval cases (compiler-refusal repair, workflow repair from the verifier, module with board, address with map) passed in CI on 67d6db64.
+- Merged with main twice (DOCS-1 slice 2, CUSTOMIZE-5, WORKFLOW-2, BOOKING-1, CONNECT-1, UPGRADE-2, TRAIN-B). After the merge the drafter also covers `addDateTimeField` from its schema; DOCS-1's template members carry dated, named drafter exceptions (owner AI-BUILD-1 slice 3).
+- The 40-run measured the drafter at `f3f427c2`; the branch tip adds the main merges and the workflow envelope fix (`ce0b8b47`), measured only by the W02/T08 rescore above.
+
+### Test it yourself (slice 2)
+
+1. `node --import tsx --test test/unit/customization-ai-draft-slice2.test.ts` (no Docker, about a minute): coverage fails closed, the tool schema is one object with no object-or-text key collision, repairs are bounded and never argue with a refusal, a board drafts with its new record type, an address and its map draft from a label, and a workflow key refusal names its keys.
+2. `node --import tsx --test test/postgres/build-eval.test.ts` (Docker, about 30 minutes): ten scripted cases on the real in-app path, including a compiler refusal repaired, a workflow repaired from the verifier error, a module with its board, and an address with its map saved end to end.
+3. Live, local only: draft once, then score from the saved drafts on a quiet host (see `test/agent/build-eval-run.ts` header): `--prompts-in <captured> --drafts-out <file>`, then `--drafts-in <file>`. Open `combined-summary.md` in the evidence folder.
+
+## Slice 1
 
 ## Claims
 
