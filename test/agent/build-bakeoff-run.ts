@@ -223,6 +223,11 @@ async function main(): Promise<void> {
       // An earlier build-eval run directory on the same prompt and code.
       reuse: { type: 'string' },
       'reuse-as': { type: 'string', default: 'opus-5-5-medium' },
+      // Split the phases: `--drafts-out` drafts only (no database, so it can
+      // run beside another eval); `--drafts-in` scores saved drafts. The file
+      // holds provider content for repair turns: scratch only, never committed.
+      'drafts-out': { type: 'string' },
+      'drafts-in': { type: 'string' },
     },
   });
   if (!args.prompts) throw new Error('--prompts is required');
@@ -262,7 +267,7 @@ async function main(): Promise<void> {
     resolve(args.out),
     `${date}-build-bakeoff-${args.label}-${stamp}`,
   );
-  await mkdir(directory, { recursive: true });
+  if (!args['drafts-out']) await mkdir(directory, { recursive: true });
   const say = (line: string) =>
     process.stdout.write(`${redactSecrets(line, secrets)}\n`);
   // One shared spend across every candidate and phase.
@@ -294,7 +299,27 @@ async function main(): Promise<void> {
     Map<string, { prompt: CapturedPrompt; turn: ModelTurnAhead }>
   >();
   const draftSpend = new Map<string, number>();
-  for (const candidate of running) {
+  if (args['drafts-in']) {
+    const saved = JSON.parse(
+      await readFile(resolve(args['drafts-in']), 'utf8'),
+    ) as {
+      spend: Record<string, number>;
+      drafts: Record<
+        string,
+        Record<string, { prompt: CapturedPrompt; turn: ModelTurnAhead }>
+      >;
+    };
+    for (const [name, byCase] of Object.entries(saved.drafts))
+      ahead.set(name, new Map(Object.entries(byCase)));
+    for (const [name, usd] of Object.entries(saved.spend)) {
+      draftSpend.set(name, usd);
+      if (running.some((c) => c.name === name)) spent += usd;
+    }
+    say(
+      `loaded drafts for ${[...ahead.keys()].join(', ')} · bake-off total $${spent.toFixed(4)}`,
+    );
+  }
+  for (const candidate of args['drafts-in'] ? [] : running) {
     if (exhausted()) break;
     const drafts = new Map<
       string,
@@ -333,6 +358,26 @@ async function main(): Promise<void> {
     say(
       `${candidate.name}: drafts $${priced.usd.toFixed(4)} · bake-off total $${spent.toFixed(4)}`,
     );
+  }
+
+  if (args['drafts-out']) {
+    await writeFile(
+      resolve(args['drafts-out']),
+      redactSecrets(
+        JSON.stringify({
+          spend: Object.fromEntries(draftSpend),
+          drafts: Object.fromEntries(
+            [...ahead].map(([name, byCase]) => [
+              name,
+              Object.fromEntries(byCase),
+            ]),
+          ),
+        }),
+        secrets,
+      ),
+    );
+    say(`drafts saved; bake-off total $${spent.toFixed(4)}`);
+    return;
   }
 
   // Phase 3: score on the in-app path; turn 1 replays, repairs go live. A
