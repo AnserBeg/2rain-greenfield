@@ -14,7 +14,7 @@ import {
   CustomizationPatchSchema,
   parseSerializedRelease,
   preparePatchForRecording,
-  serializeRelease,
+  type SerializedRelease,
   storageElements,
 } from '../../packages/customization/src/index.js';
 import { projectionPayload } from './helpers.js';
@@ -140,7 +140,7 @@ test('an archived pre-key company-owned Inspection reproduces every release byte
       chain,
     )) as {
       request: Parameters<typeof compileInSandbox>[0];
-      releases: ReturnType<typeof serializeRelease>[];
+      releases: SerializedRelease[];
     };
     const current = await compileInSandbox(historical.request);
     assert.ok(
