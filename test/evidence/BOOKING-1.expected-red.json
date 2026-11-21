@@ -81,9 +81,9 @@
     {
       "name": "equality",
       "claim": "Expiry wins at the post-lock decision instant.",
-      "file": "db/migrations/0053_booking_authority.sql",
-      "original": "((state='hold' AND deadline<=decision) OR (state='confirmed'",
-      "replacement": "((state='hold' AND deadline<decision) OR (state='confirmed'",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "IF previous.deadline<=decision THEN",
+      "replacement": "IF previous.deadline<decision THEN",
       "test": {
         "files": ["test/postgres/booking-commitments.test.ts"]
       },

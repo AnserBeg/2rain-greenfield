@@ -6,6 +6,7 @@ import test from 'node:test';
 import pg, { type PoolClient } from 'pg';
 import { AuthenticatedRequestEntryAdapter } from '../../packages/runtime/src/request-context.js';
 import { withIdempotentTransaction } from '../../packages/postgres-provider/src/request-context.js';
+import { bookingOwnerCursorFence } from '../../packages/postgres-provider/src/booking-owner-usage.js';
 
 import {
   loadMigrations,
@@ -1826,17 +1827,12 @@ test('booking commitment writer', async (t) => {
           const owners = [
             { queryId: 'example.booking:query.usage', recordId: owner(49) },
           ];
-          const fence = async () =>
-            (
-              await left.query(
-                'SELECT platform.booking_owner_cursor_fence($1,$2,$3) AS result',
-                [release, activeFence, JSON.stringify(owners)],
-              )
-            ).rows[0]!.result;
+          const fence = () =>
+            bookingOwnerCursorFence(left, release, activeFence, owners);
           let first: Result;
           await left.query('BEGIN');
           try {
-            assert.equal((await fence()).owners[0].cursor, '0');
+            assert.equal((await fence()).owners[0]!.cursor, '0');
             const writer = call(
               right,
               'hold',
@@ -1844,7 +1840,7 @@ test('booking commitment writer', async (t) => {
             );
             void writer.catch(() => undefined);
             await waitForRight();
-            assert.equal((await fence()).owners[0].cursor, '0');
+            assert.equal((await fence()).owners[0]!.cursor, '0');
             await left.query('COMMIT');
             first = await writer;
             assert.equal(first.state, 'hold');
@@ -1853,7 +1849,7 @@ test('booking commitment writer', async (t) => {
           }
           await left.query('BEGIN');
           try {
-            assert.equal((await fence()).owners[0].cursor, '1');
+            assert.equal((await fence()).owners[0]!.cursor, '1');
             const writer = call(right, 'cancel', terms(49, first));
             void writer.catch(() => undefined);
             await waitForRight();
@@ -1862,7 +1858,7 @@ test('booking commitment writer', async (t) => {
           } finally {
             await left.query('ROLLBACK');
           }
-          assert.equal((await fence()).owners[0].cursor, '2');
+          assert.equal((await fence()).owners[0]!.cursor, '2');
         },
       );
       await t.test(
