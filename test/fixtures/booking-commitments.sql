@@ -41,7 +41,7 @@ BEGIN
   INSERT INTO platform.current_policy_memberships(tenant_id,environment_id,membership_id,principal_id,role_id) VALUES(t,e,gen_random_uuid(),p,role);
   INSERT INTO platform.inventory_tenant_calendars(tenant_id,time_zone,business_day_boundary) VALUES(t,'America/Denver','08:00');
   INSERT INTO north_star_module.test_booking_owners(tenant_id,environment_id,record_id,legal_entity_id)
-    SELECT t,e,md5('owner'||n)::uuid,md5('company'||(n%2))::uuid FROM generate_series(1,40) n;
+    SELECT t,e,md5('owner'||n)::uuid,md5('company'||(n%2))::uuid FROM generate_series(1,60) n;
   INSERT INTO north_star_module.test_booking_parents
     SELECT tenant_id,environment_id,record_id,legal_entity_id,revision,archived_at FROM north_star_module.test_booking_owners;
   UPDATE north_star_module.test_booking_owners SET parent_id=record_id;
@@ -62,18 +62,18 @@ BEGIN
   INSERT INTO north_star_module.test_booking_resources(tenant_id,environment_id,record_id)
     SELECT t,e,md5('resource'||n)::uuid FROM generate_series(1,24) n;
   FOREACH kind IN ARRAY ARRAY['unit','pool'] LOOP
-    FOREACH verb IN ARRAY ARRAY['hold','confirm','changeInterval','cancel','setCapacity'] LOOP
+    FOREACH verb IN ARRAY ARRAY['hold','holdTracked','confirm','changeInterval','cancel','setCapacity'] LOOP
       IF verb='setCapacity' AND kind='unit' THEN CONTINUE; END IF;
       scope := CASE WHEN verb='setCapacity' THEN target_entity ELSE owner_entity END;
       permission := 'example.booking:permission.'||lower(verb)||'_'||kind;
       INSERT INTO platform.current_policy_permission_grants(tenant_id,environment_id,role_id,permission_id,resource_id)
         VALUES(t,e,role,permission,scope);
       op := jsonb_build_object('operationId','example.booking:operation.'||lower(verb)||'_'||kind,
-        'permissionId',permission,'lifecycle','active','confirmation',CASE WHEN verb='hold' THEN 'none' ELSE 'humanRequired' END,
+        'permissionId',permission,'lifecycle','active','confirmation',CASE WHEN verb IN ('hold','holdTracked') THEN 'none' ELSE 'humanRequired' END,
         'effect',jsonb_build_object('kind','registeredCapabilityEffect','capability',jsonb_build_object('targetId','northstar.booking:capability.commitments')),
         'booking',jsonb_build_object('bindingVersion','booking.commitment/v1','declarationRevision','example.booking:revision.'||kind,
-        'slotRevision',CASE WHEN verb='setCapacity' THEN 'example.booking:revision.capacity' ELSE 'example.booking:revision.slot' END,'slotId','example.booking:slot.visit','kind',kind,'operation',verb,
-        'fulfilmentMode','scheduled','ownerEntity',scope,'resourceEntity',target_entity,
+        'slotRevision',CASE WHEN verb='setCapacity' THEN 'example.booking:revision.capacity' WHEN verb='holdTracked' THEN 'example.booking:revision.tracked' ELSE 'example.booking:revision.slot' END,'slotId','example.booking:slot.visit','kind',kind,'operation',CASE WHEN verb='holdTracked' THEN 'hold' ELSE verb END,
+        'fulfilmentMode',CASE WHEN verb='holdTracked' THEN 'tracked' ELSE 'scheduled' END,'ownerEntity',scope,'resourceEntity',target_entity,
         'ownerReadPermission',CASE WHEN verb='setCapacity' THEN 'example.booking:permission.asset' ELSE 'example.booking:permission.visit' END,
         'resourceReadPermission','example.booking:permission.asset','unit','each','scale',CASE WHEN kind='unit' THEN 0 ELSE 2 END,
         'maxBackdateDays',1,'holdSeconds',900));

@@ -187,7 +187,7 @@ test('booking commitment writer', async (t) => {
         const action =
           'example.booking:operation.' + verb.toLowerCase() + '_' + kind;
         let grantId = approval;
-        if (verb !== 'hold' && approval === undefined) {
+        if (!['hold', 'holdTracked'].includes(verb) && approval === undefined) {
           grantId = randomUUID();
           await grant(grantId, action, key, args, who, activeFence, channel);
         }
@@ -1389,6 +1389,87 @@ test('booking commitment writer', async (t) => {
           );
           const confirmed = await call(right, 'confirm', args, key);
           assert.equal(confirmed.state, 'confirmed');
+        },
+      );
+      await t.test(
+        'scheduled end and tracked no-show use the current revision at the committed due end',
+        async () => {
+          await time('2030-02-11T15:00Z');
+          const interval = window('13:00', '14:00');
+          const scheduled = await call(left, 'hold', hold(41, 22, interval));
+          const tracked = await call(
+            left,
+            'holdTracked',
+            hold(42, 23, interval),
+          );
+          const a = await call(left, 'confirm', terms(41, scheduled));
+          const b = await call(left, 'confirm', terms(42, tracked));
+          assert.equal(a.state, 'confirmed');
+          assert.equal(b.state, 'confirmed');
+          const moved = await call(left, 'changeInterval', {
+            ...terms(41, a),
+            interval: window('14:00', '15:00'),
+          });
+          assert.equal(moved.revision, 3);
+          const evidence = async () =>
+            (
+              await admin.query(
+                `SELECT f.state, f.revision, o.cursor_value AS cursor FROM platform.booking_commitments f
+           JOIN platform.booking_owner_cursors o USING (tenant_id,environment_id,owner_key)
+           WHERE f.booking_id=ANY($1) ORDER BY o.record_id=$2 DESC`,
+                [[a.bookingId, b.bookingId], owner(41)],
+              )
+            ).rows;
+          await time('2030-02-11T21:00Z');
+          assert.deepEqual(await evidence(), [
+            { state: 'confirmed', revision: 3, cursor: '3' },
+            { state: 'confirmed', revision: 2, cursor: '2' },
+          ]);
+          await admin.query('SELECT platform.booking_sweep_due(128)');
+          assert.deepEqual(await evidence(), [
+            { state: 'confirmed', revision: 3, cursor: '3' },
+            { state: 'noShow', revision: 3, cursor: '3' },
+          ]);
+          await time('2030-02-11T22:00Z');
+          await admin.query('SELECT platform.booking_sweep_due(128)');
+          await admin.query('SELECT platform.booking_sweep_due(128)');
+          assert.deepEqual(await evidence(), [
+            { state: 'completed', revision: 4, cursor: '4' },
+            { state: 'noShow', revision: 3, cursor: '3' },
+          ]);
+          assert.equal(
+            (
+              await call(right, 'cancel', {
+                ...terms(41, { ...moved, revision: 4 }),
+                reason: 'too late',
+              })
+            ).refused,
+            'booking.closed',
+          );
+          const receipts = await admin.query(
+            `SELECT h.operation, i.causation_id, b.system_expiry AS system,
+          o.deduplication_key LIKE 'booking/system/%' AS isolated FROM platform.booking_history h
+          JOIN platform.booking_receipts b USING (tenant_id,environment_id,receipt_id)
+          JOIN platform.trust_action_invocations i ON i.invocation_id=b.receipt_id
+          JOIN platform.trust_outbox o ON o.invocation_id=b.receipt_id
+          WHERE b.receipt_id IN (SELECT receipt_id FROM platform.booking_history WHERE booking_id=ANY($1) AND
+            operation IN ('completeScheduled','markNoShow')) ORDER BY h.operation`,
+            [[a.bookingId, b.bookingId]],
+          );
+          assert.deepEqual(receipts.rows, [
+            {
+              operation: 'completeScheduled',
+              causation_id: moved.invocationId,
+              system: true,
+              isolated: true,
+            },
+            {
+              operation: 'markNoShow',
+              causation_id: b.invocationId,
+              system: true,
+              isolated: true,
+            },
+          ]);
         },
       );
     } finally {
