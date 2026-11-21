@@ -54,4 +54,6 @@ export interface AddressGateway {
     queryId: string,
   ): Promise<AddressMap>;
   workOne(view: RequestRuntimeView): Promise<boolean>;
+  /** Scrub expired provider coordinates in the view's environment. */
+  sweep(view: RequestRuntimeView, limit?: number): Promise<number>;
 }

@@ -102,6 +102,7 @@ import {
 } from './request-context.js';
 import {
   CURRENT_POLICY_RUNTIME_BINDINGS,
+  ADDRESS_CONNECTOR_CONFIGURE_BINDING,
   type CurrentPolicyPermissionBinding,
 } from './current-policy.js';
 import { localDemoActor } from '../../runtime/src/local-demo-actor.js';
@@ -1082,12 +1083,14 @@ export async function provisionLocalDemoReleaseAuthorization(
       permissionId: 'northstar.runtime:permission.customize_author',
       resourceId: 'northstar.runtime:customization.application',
     },
+    ADDRESS_CONNECTOR_CONFIGURE_BINDING,
   ];
   await provisionLocalDemoAuthorization(
     adminPool,
     identities.runtime,
     bindings.filter(
       (binding) =>
+        binding !== ADDRESS_CONNECTOR_CONFIGURE_BINDING &&
         !binding.permissionId.endsWith(':permission.purchase_order_approve') &&
         !/:permission\.purchasing_settings_(?:create|update|archive|restore)$/u.test(
           binding.permissionId,

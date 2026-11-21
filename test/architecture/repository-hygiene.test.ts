@@ -190,6 +190,7 @@ const suiteDefinitions = [
       'test/postgres/stock-serializer.test.ts',
     ],
     expectedFiles: [
+      'test/postgres/address-authority.test.ts',
       'test/postgres/address-connector.test.ts',
       'test/postgres/agent-dev-tasks.test.ts',
       'test/postgres/agent-tasks.test.ts',

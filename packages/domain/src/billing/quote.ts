@@ -143,7 +143,10 @@ function calculate(
     e.tables.map((t) => t.version),
     'rate version',
   );
-  const tables = e.tables.map((t) => publishRateTable(plan, t).table);
+  const tables = e.tables.map(({ publishedAt, ...t }) => ({
+    publishedAt,
+    ...publishRateTable(plan, t).table,
+  }));
   distinct(
     e.usage.map((u) => occurrenceId(u.streamId, u.id)),
     'usage event',
@@ -306,7 +309,7 @@ function calculate(
         const period = fee.at === 'serviceStart' ? cycles[0] : cycles.at(-1);
         if (!period || (fee.at === 'serviceEnd' && through !== serviceEnd))
           continue;
-        const t = terms(period.start).table;
+        const t = terms(fee.at === 'serviceEnd' ? through : anchor).table;
         line(
           c,
           occurrenceId(fee.at),
@@ -446,12 +449,16 @@ function calculate(
     },
     terms: [...prices.entries()]
       .sort(([a], [b]) => a - b)
-      .map(([at, s]) => ({
-        opening: iso(at),
-        tableDigest: digest(s.table),
-        version: s.table.version,
-        assignment: s.assignment,
-      })),
+      .map(([at, selection]) => {
+        const { publishedAt, ...table } = selection.table;
+        return {
+          opening: iso(at),
+          publishedAt,
+          tableDigest: digest(table),
+          version: table.version,
+          assignment: selection.assignment,
+        };
+      }),
   };
   return {
     ...result,

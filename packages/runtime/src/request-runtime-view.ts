@@ -1,3 +1,4 @@
+import { BILLING_INTERVAL_READER } from '../../canonical-model/src/billing.js';
 import {
   BOOKING_OPERATION_READER,
   CONNECTOR_FAMILY,
@@ -9,7 +10,6 @@ import {
   type UntrustedRequestInput,
 } from './request-context.js';
 import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents.js';
-import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../canonical-model/src/surface-workspace.js';
 import {
   WORKFLOW_PROJECTION_FAMILY,
   WORKFLOW_RUNTIME_CAPABILITY,
@@ -229,7 +229,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 33 adds Board lifecycle views and form-based moves.
     // 34 reads the versioned placement rule on replayed layouts.
     // 35 adds draft line create values.
-    maximumSupportedVersion: LINE_CREATE_VALUES_SURFACE_FLOOR,
+    // 36 binds agreed billing intervals to selected source fields.
+    maximumSupportedVersion: BILLING_INTERVAL_READER,
   },
 });
 

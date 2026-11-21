@@ -822,3 +822,9 @@ How to apply: Match the role, permission, resource and company of each live gran
 Date: 2026-11-20
 Why: A worker could resume a suspended run by updating its fence and status.
 How to apply: Require a scoped human decision for a fence advance and its replay. Keep the decision record outside worker-writable journal data.
+
+## Fence effective-dated prices by publication time
+
+Date: 2026-11-20
+Why: A backdated successor reduced an eight-day entitlement below the amount already allocated after four days.
+How to apply: At each occurrence opening, select among the terms and assignments published by then. Save the inputs served to the caller and replay them after publishing a successor. [BILLING-1](docs/execution/packets/BILLING-1.md)
