@@ -52,7 +52,7 @@ sudo apt-get update && sudo apt-get install -y uidmap
 sudo install -d /etc/systemd/system/user@.service.d
 printf '[Service]\nDelegate=cpu cpuset io memory pids\n' | sudo tee /etc/systemd/system/user@.service.d/delegate.conf
 sudo systemctl daemon-reload
-sudo systemctl set-property --runtime "user@$(id -u).service" Delegate="cpu cpuset io memory pids"
+# Save work, restart WSL from PowerShell with wsl --shutdown, then reopen this distro and continue.
 systemctl --user start analysis.slice && systemctl --user set-property analysis.slice MemorySwapMax=0
 rootlesskit true && dockerd-rootless-setuptool.sh install --force
 systemctl --user enable --now docker

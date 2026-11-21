@@ -26,8 +26,10 @@ jobs:
             sudo apt-get install -y uidmap docker-ce docker-ce-cli containerd.io docker-ce-rootless-extras
           fi
           sudo loginctl enable-linger "$(id -un)"
-          sudo systemctl start "user@$(id -u).service"
-          sudo systemctl set-property --runtime "user@$(id -u).service" Delegate="cpu cpuset io memory pids"
+          sudo install -d /etc/systemd/system/user@.service.d
+          printf '[Service]\nDelegate=cpu cpuset io memory pids\n' | sudo tee /etc/systemd/system/user@.service.d/delegate.conf
+          sudo systemctl daemon-reload
+          sudo systemctl restart "user@$(id -u).service"
           export XDG_RUNTIME_DIR="/run/user/$(id -u)"
           export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
           systemctl --user start analysis.slice
