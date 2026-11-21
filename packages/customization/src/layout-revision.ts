@@ -2,6 +2,7 @@ import type { EditLocation, ReplayConflict } from './upgrade-diagnostics.js';
 import { randomUUID } from 'node:crypto';
 import {
   baseLayout,
+  canonicalize,
   LayoutModeSchema,
   LayoutTextSchema,
   layoutDigest,
@@ -237,15 +238,71 @@ function applyEdit(b: LayoutBody, e: Edit, verifyDigest = true) {
 export type LayoutReplayFinding = ReplayConflict & { editIndex: number };
 export interface LayoutReplay {
   source: LayoutBody;
+  sourceContracts: Map<string, Record<string, unknown>>;
   findings: LayoutReplayFinding[];
   externalFailures?: ReadonlyMap<string, EditLocation>;
   blocked: { editIndex: number; blockedBy: number | EditLocation }[];
+}
+
+/** Historical field types keep their option IDs and order. New options and
+ * current display labels do not invalidate a binding to that field. */
+export function compatibleFieldType(before: unknown, after: unknown) {
+  const old = before as {
+    kind?: string;
+    options?: Record<string, unknown>[];
+  } | null;
+  const next = after as typeof old;
+  if (
+    old?.kind === 'enumFieldType' &&
+    next?.kind === old.kind &&
+    old.options &&
+    next.options
+  ) {
+    const ids = new Set(old.options.map((entry) => entry.optionId));
+    const withoutLabel = (option: Record<string, unknown>) => ({
+      ...option,
+      label: null,
+    });
+    return (
+      canonicalize({ ...old, options: old.options.map(withoutLabel) }) ===
+      canonicalize({
+        ...next,
+        options: next.options
+          .filter((entry) => ids.has(entry.optionId))
+          .map(withoutLabel),
+      })
+    );
+  }
+  return canonicalize(before ?? null) === canonicalize(after ?? null);
+}
+
+function withoutLabels(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutLabels);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => key !== 'label')
+      .map(([key, child]) => [key, withoutLabels(child)]),
+  );
+}
+
+function compatibleBinding(
+  old: Record<string, unknown> | undefined,
+  next: Record<string, unknown> | undefined,
+) {
+  if (!old || !next || !compatibleFieldType(old.type, next.type)) return false;
+  return (
+    canonicalize(withoutLabels({ ...old, type: null })) ===
+    canonicalize(withoutLabels({ ...next, type: null }))
+  );
 }
 
 function structuralConflict(
   sourceBody: LayoutBody,
   body: LayoutBody,
   edit: Edit,
+  sourceContracts: LayoutReplay['sourceContracts'],
+  contracts: LayoutReplay['sourceContracts'],
 ): ReplayConflict | undefined {
   const destination = edit.kind === 'move' ? edit.destination : edit.parent;
   const anchor =
@@ -257,9 +314,6 @@ function structuralConflict(
   const ids = new Set(
     [edit.id, destination, anchor].filter((id): id is string => !!id),
   );
-  const section =
-    edit.kind === 'move' && sourceBody.sections.find((s) => s.id === edit.id);
-  if (section) for (const field of section.fields) ids.add(field.id);
   for (const id of ids) {
     if (id === body.slotId) continue;
     const before = locate(sourceBody, id);
@@ -277,10 +331,12 @@ function structuralConflict(
       const next = after.item;
       if (
         !('binding' in next) ||
-        old.contractDigest !== next.contractDigest ||
+        (old.contractDigest !== next.contractDigest &&
+          !compatibleBinding(sourceContracts.get(id), contracts.get(id))) ||
+        old.bindingType !== next.bindingType ||
         old.required !== next.required ||
         old.editorInput !== next.editorInput ||
-        old.tier !== next.tier
+        (body.mode !== 'detail' && old.tier !== next.tier)
       )
         return {
           code: 'INCOMPATIBLE_TYPE',
@@ -289,6 +345,7 @@ function structuralConflict(
           observed: next,
         };
     }
+    if (edit.kind !== 'move' || (id !== edit.id && id !== anchor)) continue;
     // Ignore additions and removals elsewhere. A touched member crossing an existing
     // sibling has moved even if its parent ID still matches.
     const peers = before.siblings.filter((peer) =>
@@ -311,6 +368,26 @@ function structuralConflict(
       };
   }
   return;
+}
+
+export function historicalLayout(
+  parent: LayoutDefinition | undefined,
+  patch: LayoutRevision,
+): LayoutReplay | undefined {
+  const surface = parent?.surfaces.find((s) => s.surfaceId === patch.surface);
+  if (!parent || !surface) return;
+  const sourceContracts: LayoutReplay['sourceContracts'] = new Map();
+  const base = baseLayout(parent, surface, patch.mode, sourceContracts);
+  if (!base) return;
+  const saved = (surface.layouts as SurfaceLayout[] | undefined)?.find(
+    (l) => l.body.mode === patch.mode,
+  );
+  return {
+    source: saved?.body ?? base,
+    sourceContracts,
+    findings: [],
+    blocked: [],
+  };
 }
 
 export function draftLayoutRevision(
@@ -362,7 +439,8 @@ export function applyLayoutRevision(
     return 'The predecessor of this layout revision differs.';
   const body = structuredClone(target.body);
   const original = replay && structuredClone(replay.source);
-  const base = baseLayout(def, s, patch.mode)!;
+  const contracts: LayoutReplay['sourceContracts'] = new Map();
+  const base = baseLayout(def, s, patch.mode, replay && contracts)!;
   const setAside = new Set<string>();
   if (original) {
     const known = new Set(
@@ -391,7 +469,13 @@ export function applyLayoutRevision(
         const blockedBy = refs
           .map((id) => failed.get(id))
           .find((index) => index !== undefined);
-        const conflict = structuralConflict(original, body, edit);
+        const conflict = structuralConflict(
+          original,
+          body,
+          edit,
+          replay.sourceContracts,
+          contracts,
+        );
         applyEdit(original, edit, false);
         if (blockedBy !== undefined || conflict) {
           if (blockedBy !== undefined)

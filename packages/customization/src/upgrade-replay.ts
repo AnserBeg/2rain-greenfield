@@ -12,7 +12,11 @@ import {
   customPermissionBindings,
   type AppliedCustomization,
 } from './apply.js';
-import { currentLayout, type LayoutReplay } from './layout-revision.js';
+import {
+  compatibleFieldType,
+  currentLayout,
+  historicalLayout,
+} from './layout-revision.js';
 import {
   supersededBoardRevisions,
   type BoardApplyProblem,
@@ -105,7 +109,11 @@ function bindings(
       'companyOwnership',
       'classification',
     ] as const) {
-      if (canonicalize(old[prop] ?? null) === canonicalize(next[prop] ?? null))
+      if (
+        prop === 'fieldType'
+          ? compatibleFieldType(old[prop], next[prop])
+          : canonicalize(old[prop] ?? null) === canonicalize(next[prop] ?? null)
+      )
         continue;
       conflicts.push({
         code: prop === 'fieldType' ? 'INCOMPATIBLE_TYPE' : 'INCOMPATIBLE_SCOPE',
@@ -262,18 +270,6 @@ function applyRefusal(
   };
 }
 
-export function historicalLayout(
-  parent: Definition,
-  patch: Extract<CustomizationPatch, { kind: 'addLayoutRevision' }>,
-): LayoutReplay | undefined {
-  const def = parent as unknown as LayoutDefinition;
-  const surface = def.surfaces.find((s) => s.surfaceId === patch.surface);
-  const layout = surface && currentLayout(def, surface, patch.mode);
-  return layout
-    ? { source: layout.body, findings: [], blocked: [] }
-    : undefined;
-}
-
 export interface ReplayFailure extends ReplayDiagnostics {
   status: 'replayConflict';
 }
@@ -314,7 +310,7 @@ export function replayCustomizationPatches(
           : undefined;
       const layout =
         original && patch.kind === 'addLayoutRevision' && origin?.differentBase
-          ? historicalLayout(original, patch)
+          ? historicalLayout(original as unknown as LayoutDefinition, patch)
           : undefined;
       const admission = [change.kind, patch.kind].find(
         (kind) => !UPGRADE_PATCH_KINDS.has(kind),
