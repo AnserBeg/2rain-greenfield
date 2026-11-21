@@ -20,7 +20,8 @@ Critical migration and Fable follow-up for Billing slice 1. Exact integration CI
 CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44843557065
 
 - Hosted packet CI found fixture typing errors, corrected in the executable tip. The exact integration branch is `candidate/BILLING-1-fix2`.
-- The pricing controls restored the opening fence and bypassed term pins independently. Both mutations failed their targeted calculator tests.
+- Focused calculator, archived reader, populated upgrade, and transaction wraparound tests passed.
+- Restoring the opening fence, bypassing term pins, and restoring the text cast each failed its targeted test.
 
 ## Test it yourself
 
@@ -31,7 +32,7 @@ Run `node --import tsx --test test/integration/billing-quote.test.ts` and look f
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "BILLING-1-fix2",
   "base": "67e4efce31eb663f12d6f161aa91c0ce1220dffc",
-  "head": "a74ae3bf7e5fceea1774a167e29f9045385e9054",
+  "head": "9fe843626879d5914a03a2ffb38d982730e5ca54",
   "changedPaths": [
     "db/migrations/0058_billing_publication_xid.sql",
     "db/schema.snapshot.json",
