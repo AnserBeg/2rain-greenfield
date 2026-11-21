@@ -120,9 +120,11 @@ test.afterAll(async () => {
   rmSync(fixtureDirectory, { force: true, recursive: true });
 });
 
-// The original grammar fixture predates opt-in Board views. The activated Board
-// exercises full and compact anatomy in customize.composed-application.spec.ts.
-for (const archetype of SURFACE_ARCHETYPES.filter((a) => a !== 'board')) {
+// The opt-in Board and Map run their compact journeys on activated releases in
+// customize.composed-application.spec.ts and planner-map.spec.ts.
+for (const archetype of SURFACE_ARCHETYPES.filter(
+  (a) => a !== 'board' && a !== 'map',
+)) {
   test(`compact ${archetype} journey renders the compiled definition through SurfaceRuntime`, async ({
     page,
   }) => {

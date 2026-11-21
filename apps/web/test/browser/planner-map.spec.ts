@@ -136,10 +136,13 @@ test('dispatchers pan just the map, return with Back and can open each stop with
         await tab.goto(url);
         const list = tab.locator('.map-list'),
           canvas = tab.locator('.map-canvas');
-        if (width === 390)
+        if (width === 390) {
+          for (const slot of ['map-title', 'map-views', 'map-list', 'map-canvas'])
+            await expect(tab.locator('.' + slot)).toBeVisible();
           expect((await list.boundingBox())!.y).toBeLessThan(
             (await canvas.boundingBox())!.y,
           );
+        }
         const route = tab.getByRole('combobox', { name: 'Route' });
         await route.selectOption({ label: 'North' });
         await tab.getByRole('button', { name: 'Apply filters' }).press('Enter');
