@@ -861,3 +861,67 @@ test('the final formula check identifies retired and retyped operands of rules a
     }
   }
 });
+
+test('a removed or reordered choice keeps its field conflict on lists and forms', () => {
+  for (const change of ['remove', 'reorder']) {
+    const target = structuredClone(base);
+    const type = declaration(target, 'fields', 'fieldId', terms).fieldType as {
+      options: Base[];
+    };
+    if (change === 'remove') type.options.pop();
+    else type.options[0]!.orderKey = 5;
+    for (const edit of [
+      {
+        kind: 'arrangeLayout',
+        surface: id('surface.sales_order_list'),
+        order: [terms],
+      },
+      rename(form, terms),
+    ]) {
+      const result = inspectReplay(target, [edit]);
+      assert.equal(result.status, 'replayConflict');
+      assert.deepEqual(
+        result.findings.map((f) => [f.subject, f.code]),
+        [[terms, 'INCOMPATIBLE_TYPE']],
+      );
+    }
+  }
+});
+
+test('an unclassified package refusal carries the package ID and no patch attribution', () => {
+  const target = structuredClone(base);
+  const launcher = declaration(
+    target,
+    'surfaces',
+    'surfaceId',
+    id('surface.inventory_today'),
+  ).launcher as { metrics: Base[] };
+  while (launcher.metrics.length < 8)
+    launcher.metrics.push({
+      label: 'Platform count',
+      surface: itemList,
+      metricId: id('metric.platform_' + launcher.metrics.length),
+    });
+  const result = inspectReplay(target, [
+    { kind: 'addMetricCard', surface: itemList, label: 'Office count' },
+  ]);
+  assert.equal(result.status, 'replayConflict');
+  assert.deepEqual(
+    result.findings.map((f) => [
+      f.code,
+      f.subject,
+      f.patchId,
+      f.patchIndex,
+      f.patchKind,
+    ]),
+    [
+      [
+        'WHOLE_PACKAGE_FAILURE',
+        id('package.application'),
+        undefined,
+        undefined,
+        undefined,
+      ],
+    ],
+  );
+});
