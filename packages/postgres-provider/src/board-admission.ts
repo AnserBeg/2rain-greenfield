@@ -1,6 +1,6 @@
 import {
   BOARD_READER,
-  boardDigest,
+  boardSelfProblem,
   canonicalize,
   SurfaceBoardSchema,
   SURFACE_SLOTS,
@@ -50,7 +50,17 @@ export function boardBindingsProblem(
     const parsed = SurfaceBoardSchema.safeParse(surface.board);
     if (surface.archetype !== 'board' || !parsed.success)
       return 'Malformed Board definition.';
-    const { body, resultDigest } = parsed.data;
+    if (boardSelfProblem(parsed.data)) return 'Malformed Board definition.';
+    const { body } = parsed.data;
+    if (
+      surface.dataSourceQueryId !== body.listQuery.queryId ||
+      rows(surface.slots)
+        .map((s) => s.slot)
+        .join() !== SURFACE_SLOTS.board.join()
+    )
+      return 'The Board record, columns or query bindings differ from the release.';
+    // ADR-0086 item 5: a retired Board is not served and its bindings are not checked.
+    if (surface.lifecycle === 'retired') continue;
     const byId = (id: string) =>
       rows(row(manifest).surfaces).find((s) => s.surfaceId === id);
     const list = byId(body.listSurfaceId),
@@ -59,41 +69,36 @@ export function boardBindingsProblem(
       rows(row(queries).queries).find(
         (q) => q.queryId === id && q.sourceEntityId === body.entityId,
       );
-    const listQuery = query(body.listQueryId),
+    const listQuery = query(body.listQuery.queryId),
       getQuery = query(body.getQueryId);
     const selected = new Set(rows(listQuery?.selections).map((s) => s.fieldId));
     if (
-      boardDigest(body) !== resultDigest ||
-      surface.dataSourceQueryId !== body.listQueryId ||
       list?.archetype !== 'list' ||
-      (list.dataSourceQueryId !== body.listQueryId &&
+      (list.dataSourceQueryId !== body.listQuery.queryId &&
         row(row(list.workspace).entry).authorizationQueryId !==
-          body.listQueryId) ||
+          body.listQuery.queryId) ||
       record?.surfaceRole !== 'record' ||
       record.dataSourceQueryId !== body.getQueryId ||
       listQuery?.queryType !== 'list' ||
       getQuery?.queryType !== 'get' ||
-      rows(surface.slots)
-        .map((s) => s.slot)
-        .join() !== SURFACE_SLOTS.board.join() ||
       ![
-        body.titleFieldId,
-        body.grouping.stateFieldId,
+        body.title.fieldId,
+        body.grouping.state.fieldId,
         ...body.facts.map((f) => f.fieldId),
       ].every((id) => selected.has(id))
     )
       return 'The Board record, columns or query bindings differ from the release.';
-    for (const move of body.moves) {
+    for (const move of body.grouping.moves) {
       const op = rows(row(operations).operations).find(
         (o) => o.operationId === move.operationId,
       );
       const effect = row(op?.effect);
       if (
         op?.lifecycle !== 'active' ||
-        op.tier !== 'o0' ||
-        effect.kind !== 'transitionStateEffect' ||
+        op.tier !== move.tier ||
+        effect.kind !== move.effectKind ||
         row(effect.entity).targetId !== body.entityId ||
-        effect.stateFieldId !== body.grouping.stateFieldId ||
+        effect.stateFieldId !== body.grouping.state.fieldId ||
         row(effect.transition).targetId !== move.transitionId ||
         effect.fromStateId !== move.fromStateId ||
         effect.toStateId !== move.toStateId

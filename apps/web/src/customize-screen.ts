@@ -1,6 +1,7 @@
 import type { AddressInstallation } from '../../../packages/runtime/src/address-gateway.js';
-import { layoutDigest } from '@north-star/canonical-model';
+import { canonicalizeAndHash, layoutDigest } from '@north-star/canonical-model';
 import {
+  defaultBoardChoices,
   draftBoardRevision,
   type BoardTarget,
   layoutCommand,
@@ -263,7 +264,7 @@ export async function renderCustomizeScreen(
       const board = url.searchParams.get('board');
       if (board) {
         const target = (await loadTargets()).boards?.find(
-          (b) => b.body.listSurfaceId === board,
+          (b) => b.frame.listSurfaceId === board,
         );
         if (!target) return failure('Choose a List with a lifecycle.');
         const id = url.searchParams.get('editBoard');
@@ -477,7 +478,7 @@ async function overview(
     documentFieldForm(targets),
     choiceForm(targets),
     targets.boards?.length
-      ? `<form method="get"><fieldset><legend>Add view</legend><input type="hidden" name="customize" value=""><label>Record type <select name="board">${targets.boards.map((t) => `<option value="${escapeHtml(t.body.listSurfaceId)}">${escapeHtml(t.listLabel)}</option>`).join('')}</select></label> <button>Add Board view</button></fieldset></form>`
+      ? `<form method="get"><fieldset><legend>Add view</legend><input type="hidden" name="customize" value=""><label>Record type <select name="board">${targets.boards.map((t) => `<option value="${escapeHtml(t.frame.listSurfaceId)}">${escapeHtml(t.listLabel)}</option>`).join('')}</select></label> <button>Add Board view</button></fieldset></form>`
       : '',
     layoutPicker(targets.layouts ?? []),
     arrangePicker(targets),
@@ -1295,20 +1296,37 @@ function page(
   });
 }
 
+/** The offer's own digest: the builder refuses a form drafted against another offer. */
+function boardOfferDigest(target: BoardTarget) {
+  return canonicalizeAndHash({
+    frame: target.frame,
+    stages: target.stages.map((s) => s.stateId),
+    moves: target.moves.map((m) => m.contractDigest),
+    facts: target.facts.map((f) => [f.fieldId, f.fieldType]),
+  }).contentHash;
+}
 function boardEditor(
   target: BoardTarget,
   previous?: BoardTarget['views'][number],
 ) {
   const h = escapeHtml;
-  const stages = target.body.grouping.stages;
-  const order = previous?.states ?? stages.map((s) => s.stateId);
+  const stages = target.stages;
+  // A new Board starts from the builder's default offer; an edit starts from
+  // the predecessor's recorded choices.
+  const chosen = previous
+    ? {
+        stateIds: previous.body.grouping.stages.map((s) => s.stateId),
+        operationIds: previous.body.grouping.moves.map((m) => m.operationId),
+        factFieldIds: previous.body.facts.map((f) => f.fieldId),
+      }
+    : defaultBoardChoices(target);
   const existing = previous
     ? ''
     : target.views
         .map((v) => {
           const params = new URLSearchParams({
             customize: '',
-            board: target.body.listSurfaceId,
+            board: target.frame.listSurfaceId,
             editBoard: v.surfaceId,
           });
           return `<a href="/?${h(params.toString())}">Edit ${h(v.label)}${v.lifecycle === 'retired' ? ' (retired)' : ''}</a>`;
@@ -1319,26 +1337,48 @@ function boardEditor(
   const source =
     hidden('action', 'draft') +
     hidden('kind', 'addBoardViewRevision') +
-    hidden('list', target.body.listSurfaceId) +
-    hidden('source', layoutDigest(target.body)) +
+    hidden('list', target.frame.listSurfaceId) +
+    hidden('source', boardOfferDigest(target)) +
     (previous
       ? hidden('viewId', previous.surfaceId) +
         hidden('predecessor', previous.revisionId)
       : '');
+  const stageLabel = (id: string) =>
+    stages.find((s) => s.stateId === id)?.label ?? id;
   const positions = stages
     .map((stage) => {
-      const position = order.indexOf(stage.stateId) + 1;
+      const position = chosen.stateIds.indexOf(stage.stateId) + 1;
       return `<label>${h(stage.label)} <input aria-label="${h(stage.label)} position" type="number" min="1" max="64" name="stage:${h(stage.stateId)}" value="${position || ''}"></label>`;
     })
     .join('');
-  return `<h1>${previous ? 'Edit Board' : 'Add Board view'}</h1>${existing ? '<nav aria-label="Existing Boards">' + existing + '</nav>' : ''}<form method="post">${source}<label>View name <input name="label" required maxlength="240" value="${h(previous?.label ?? target.listLabel + ' board')}"></label><fieldset><legend>Stages in display order</legend>${positions}<p>Leave a position empty to omit that stage.</p></fieldset><button name="lifecycle" value="active">Draft Board</button>${previous?.lifecycle === 'active' ? '<button name="lifecycle" value="retired">Draft retirement</button>' : ''}</form>`;
+  const check = (name: string, label: string, on: boolean) =>
+    `<label><input type="checkbox" name="${h(name)}" value="yes"${on ? ' checked' : ''}> ${h(label)}</label>`;
+  const moves = target.moves
+    .map((m) =>
+      check(
+        'move:' + m.operationId,
+        `${m.label}: ${stageLabel(m.fromStateId)} to ${stageLabel(m.toStateId)}`,
+        chosen.operationIds.includes(m.operationId),
+      ),
+    )
+    .join('');
+  const facts = target.facts
+    .map((f) =>
+      check(
+        'fact:' + f.fieldId,
+        f.label,
+        chosen.factFieldIds.includes(f.fieldId),
+      ),
+    )
+    .join('');
+  return `<h1>${previous ? 'Edit Board' : 'Add Board view'}</h1>${existing ? '<nav aria-label="Existing Boards">' + existing + '</nav>' : ''}<form method="post">${source}<label>View name <input name="label" required maxlength="240" value="${h(previous?.label ?? target.listLabel + ' board')}"></label><fieldset><legend>Stages in display order</legend>${positions}<p>Leave a position empty to omit that stage.</p></fieldset><fieldset><legend>Moves people can make</legend>${moves || '<p>This lifecycle has no move a Board can offer.</p>'}<p>A move is offered only between chosen stages.</p></fieldset><fieldset><legend>Card facts (up to three)</legend>${facts || '<p>No other field is available.</p>'}</fieldset>${target.retireOnly ? '<p>This List no longer offers a Board. You can retire this one.</p>' : '<button name="lifecycle" value="active">Draft Board</button>'}${previous?.lifecycle === 'active' ? '<button name="lifecycle" value="retired">Draft retirement</button>' : ''}</form>`;
 }
 function boardSubmission(
   targets: readonly BoardTarget[],
   submission: CustomizeScreenSubmission,
 ) {
-  const target = targets.find((t) => t.body.listSurfaceId === submission.list);
-  if (!target || layoutDigest(target.body) !== submission.source)
+  const target = targets.find((t) => t.frame.listSurfaceId === submission.list);
+  if (!target || boardOfferDigest(target) !== submission.source)
     throw new Error('The collection changed. Choose the Board again.');
   const previous = target.views.find((v) => v.surfaceId === submission.viewId);
   if (
@@ -1346,7 +1386,7 @@ function boardSubmission(
     (previous?.revisionId ?? '') !== (submission.predecessor ?? '')
   )
     throw new Error('This Board revision has changed. Reopen it in Customize.');
-  const positions = target.body.grouping.stages.flatMap((s) => {
+  const positions = target.stages.flatMap((s) => {
     const value = submission['stage:' + s.stateId];
     return value ? [{ state: s.stateId, order: Number(value) }] : [];
   });
@@ -1357,10 +1397,27 @@ function boardSubmission(
     new Set(positions.map((p) => p.order)).size !== positions.length
   )
     throw new Error('Give each stage its own position.');
+  const stateIds = positions
+    .sort((a, b) => a.order - b.order)
+    .map((p) => p.state);
   return draftBoardRevision(
     target,
     submission.label ?? '',
-    positions.sort((a, b) => a.order - b.order).map((p) => p.state),
+    {
+      stateIds,
+      // An unchecked move, or one whose stages were omitted, is not offered.
+      operationIds: target.moves
+        .filter(
+          (m) =>
+            submission['move:' + m.operationId] === 'yes' &&
+            stateIds.includes(m.fromStateId) &&
+            stateIds.includes(m.toStateId),
+        )
+        .map((m) => m.operationId),
+      factFieldIds: target.facts
+        .filter((f) => submission['fact:' + f.fieldId] === 'yes')
+        .map((f) => f.fieldId),
+    },
     previous,
     submission.lifecycle === 'retired' ? 'retired' : 'active',
   );
