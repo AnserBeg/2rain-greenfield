@@ -32,6 +32,8 @@ export const UPGRADE_CODES_V1 = Object.freeze({
   INCOMPATIBLE_SCOPE: 'A subject has a different scope.',
   FIELD_COLLISION:
     'A first-party field occupies the proposed tenant field ID or name.',
+  ID_COLLISION:
+    'A first-party declaration occupies the proposed tenant ID or name.',
   MISSING_BODY: 'A bound artifact body is missing.',
   REMOVED_ACTION: 'A workflow action is absent.',
   CHANGED_ACTION_SIGNATURE: 'A bound workflow action has a different contract.',

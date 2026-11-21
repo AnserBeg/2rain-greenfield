@@ -206,7 +206,7 @@ const cases = {
     change: map,
     code: 'RETIRED_TARGET',
   },
-  addRecordType: occupied(record, 'WHOLE_PACKAGE_FAILURE'),
+  addRecordType: occupied(record, 'ID_COLLISION'),
   addField: retired(field),
   addChoice: retired({
     kind: 'addChoice',
@@ -246,7 +246,7 @@ const cases = {
     sort: [],
     filters: [],
   }),
-  addValidation: occupied(rule, 'WHOLE_PACKAGE_FAILURE'),
+  addValidation: occupied(rule, 'ID_COLLISION'),
   addCalculatedDisplayField: occupied(calculated, 'FIELD_COLLISION'),
   addMetricCard: retired({
     kind: 'addMetricCard',
@@ -278,12 +278,12 @@ const cases = {
       },
     ],
   }),
-  narrowPermission: occupied(limit, 'WHOLE_PACKAGE_FAILURE'),
+  narrowPermission: occupied(limit, 'ID_COLLISION'),
   unNarrowPermission: {
     source: applied(base, [limit]),
     conflict: base,
     change: { ...limit, kind: 'unNarrowPermission' },
-    code: 'WHOLE_PACKAGE_FAILURE',
+    code: 'RETIRED_TARGET',
   },
   saveWorkflow: retired(workflow),
   changeSet: retired({ kind: 'changeSet', patches: [field, files] }),
@@ -320,6 +320,8 @@ test('upgrade diagnostic codes and meanings match v1', () => {
     INCOMPATIBLE_SCOPE: 'A subject has a different scope.',
     FIELD_COLLISION:
       'A first-party field occupies the proposed tenant field ID or name.',
+    ID_COLLISION:
+      'A first-party declaration occupies the proposed tenant ID or name.',
     MISSING_BODY: 'A bound artifact body is missing.',
     REMOVED_ACTION: 'A workflow action is absent.',
     CHANGED_ACTION_SIGNATURE:

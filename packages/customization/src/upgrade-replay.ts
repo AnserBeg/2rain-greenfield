@@ -221,7 +221,7 @@ function applyRefusal(
     );
     if (module)
       return {
-        code: 'WHOLE_PACKAGE_FAILURE',
+        code: 'ID_COLLISION',
         subject: String(module.moduleId),
         expected: { kind: patch.kind, label: patch.label },
         observed: { moduleId: module.moduleId, label: module.label },
@@ -245,9 +245,15 @@ function applyRefusal(
         observed: { fieldId: collision.fieldId, label: collision.label },
       };
   }
-  const subject =
-    [...referencedIds(patch)][0] ??
-    ('label' in patch ? patch.label : patch.kind);
+  if (patch.kind === 'narrowPermission' || patch.kind === 'unNarrowPermission')
+    return {
+      code:
+        patch.kind === 'narrowPermission' ? 'ID_COLLISION' : 'RETIRED_TARGET',
+      subject: patch.target.id,
+      expected: { roleKey: patch.roleKey, operationId: patch.target.id },
+      observed: reason,
+    };
+  const subject = String((target.package as Member).packageId);
   return {
     code: 'WHOLE_PACKAGE_FAILURE',
     subject,
@@ -413,9 +419,7 @@ export function replayCustomizationPatches(
             )
           )
             conflicts.push({
-              code: id.includes(':field.')
-                ? 'FIELD_COLLISION'
-                : 'WHOLE_PACKAGE_FAILURE',
+              code: id.includes(':field.') ? 'FIELD_COLLISION' : 'ID_COLLISION',
               subject: id,
               expected: declarations(original!).get(id),
               observed: target.get(id),
@@ -490,16 +494,20 @@ export function replayCustomizationPatches(
               failedIds.set(edit.id, blockedBy || { ...at, editIndex });
           }
         }
-        report.findings.push(...conflicts.map((c) => ({ ...at, ...c })));
+        report.findings.push(
+          ...conflicts.map((c) =>
+            c.code === 'WHOLE_PACKAGE_FAILURE' ? c : { ...at, ...c },
+          ),
+        );
       }
     }
   }
   if (report.findings.length) {
     report.findings.sort(
       (a, b) =>
-        a.patchIndex! - b.patchIndex! ||
-        a.memberIndex! - b.memberIndex! ||
-        a.editIndex! - b.editIndex! ||
+        (a.patchIndex ?? Infinity) - (b.patchIndex ?? Infinity) ||
+        (a.memberIndex ?? Infinity) - (b.memberIndex ?? Infinity) ||
+        (a.editIndex ?? Infinity) - (b.editIndex ?? Infinity) ||
         a.subject.localeCompare(b.subject, 'en'),
     );
     return report;

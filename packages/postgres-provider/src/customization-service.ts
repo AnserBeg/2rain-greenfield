@@ -5,6 +5,7 @@ import { retypedFormulaRule } from '../../canonical-model/src/formula-validation
 
 import { RECEIPT_POSTED_EVENT } from '../../domain/src/purchasing/receipt-posted-event.js';
 import {
+  CanonicalModelError,
   canonicalAuthoredProjection,
   canonicalize,
   normalizeApplicationPackage,
@@ -30,7 +31,6 @@ import {
   type DraftingModel,
   type CustomizationTargets,
   type CustomizationPatch,
-  SandboxFailure,
   type SandboxRunnerOptions,
   type SandboxStep,
 } from '@north-star/customization';
@@ -367,6 +367,19 @@ export class PostgresCustomizationService {
   /** Boot stages a replay against the new base, under the same scope lock as
    * approval and activation. Serving continues on the recorded live pointer. */
   async prepareUpgrade(): Promise<UpgradePreparation> {
+    try {
+      return await this.#prepareUpgrade();
+    } catch (error) {
+      if (error instanceof CustomizationServiceRefusal) throw error;
+      return {
+        status: 'refused',
+        code: 'UPGRADE_PREPARATION_FAILED',
+        message: 'The upgrade could not be prepared. Try again.',
+      };
+    }
+  }
+
+  async #prepareUpgrade(): Promise<UpgradePreparation> {
     const context = await this.#context();
     return withReleaseScopeLock(
       this.connection.adminPool,
@@ -401,21 +414,18 @@ export class PostgresCustomizationService {
           const known =
             error instanceof CustomizationServiceRefusal ||
             error instanceof CustomizationLineageError ||
-            error instanceof SandboxFailure ||
             error instanceof PersistedReleaseConflict;
+          if (!known) throw error;
           result = {
             status: 'refused',
-            code:
-              known && Object.hasOwn(UPGRADE_CODES_V1, error.code)
-                ? error.code
-                : 'WHOLE_PACKAGE_FAILURE',
+            code: Object.hasOwn(UPGRADE_CODES_V1, error.code)
+              ? error.code
+              : 'WHOLE_PACKAGE_FAILURE',
             ...(error instanceof CustomizationServiceRefusal &&
               error.replayDiagnostics && {
                 replayDiagnostics: error.replayDiagnostics,
               }),
-            message: known
-              ? error.message
-              : 'The platform upgrade could not be prepared.',
+            message: error.message,
           };
         }
         const baseReleaseRoot = this.#tip.compiled.releaseRoot;
@@ -545,8 +555,9 @@ export class PostgresCustomizationService {
             .flatMap((f) => [f.fieldId, f.label]),
         ),
       ];
-    } catch {
-      return null;
+    } catch (error) {
+      if (error instanceof CanonicalModelError) return null;
+      throw error;
     }
   }
 
