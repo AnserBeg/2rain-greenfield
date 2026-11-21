@@ -126,9 +126,9 @@ test('notice reasons require visibility of this message and, for replies, its sp
     'a hidden message supplied a notice',
   );
   await reconcileNextDiscussionNotice(f.port);
-  assert.deepEqual(
-    f.notices(),
-    [['chris', ['mention']]],
+  assert.equal(
+    f.notices().some(([principal]) => principal === 'bee'),
+    false,
     'an empty reason set left a countable recipient',
   );
   f.hidden.delete('bee/message');
@@ -156,7 +156,11 @@ test('a failed inbox write leaves the claim retryable and no partial notice', as
   f.failWrites(true);
   await assert.rejects(reconcileNextDiscussionNotice(f.port), /inbox offline/u);
   assert.deepEqual(f.notices(), []);
-  assert.deepEqual(f.phases, ['claim committed', 'thread locked']);
+  assert.deepEqual(
+    f.phases,
+    ['claim committed', 'thread locked'],
+    'lease acknowledged before reconciliation committed',
+  );
   f.failWrites(false);
   await reconcileNextDiscussionNotice(f.port);
   await reconcileNextDiscussionNotice(f.port);

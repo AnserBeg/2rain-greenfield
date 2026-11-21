@@ -160,7 +160,7 @@
         {
           "file": "test/unit/discussion-inbox.test.ts",
           "name": "a failed inbox write leaves the claim retryable and no partial notice",
-          "expected": "Expected values to be strictly deep-equal"
+          "expected": "lease acknowledged before reconciliation committed"
         }
       ]
     },
