@@ -35,6 +35,16 @@
 - Exercise an ordered create/edit/retire chain, compatible upgrade and a real removed operand or changed scope per new patch kind. Remove its independent allowlist entry and require the vocabulary test to name it. A stale approval after switch-away/switch-back refuses. A conflicting replay keeps the verified source serving.
 - Register the compiler, PostgreSQL, archived-loader, browser and agent witnesses with their CI-2 producers. The hosted run must credit each test file in one attempt. Record the expected-red evidence for silent-harm claims when the corresponding slice exists. [CI-2](CI-2.md)
 
+## Slice 1 drafting evaluation
+
+2026-11-21 · Rule 12 exception, REPORTS-1 BUILD lane. The in-app drafter derives the report member from its schema. Its Invoice case in `test/unit/customization-ai-draft.test.ts` also exercises refusal of an unavailable operand source. The live module-building runner is in AI-BUILD-1 slice 2 and is absent from the current main (`630e2aa6`). At integration with that runner, register these cases under the report member.
+
+| User request | Required grading observation |
+| --- | --- |
+| “Show Invoice balances by customer with a CSV, keeping currencies separate.” | The proposed revision selects the Invoice collection, customer dimension, stored balance sum, table and CSV. Currency comes from the source binding. |
+| “Count Inspections by Outcome. Let me download the table.” | On a created Inspection type with an Outcome choice, the revision selects that tenant's collection and stable Outcome field, counts records and enables CSV. |
+| “Use a hidden Invoice balance for the report.” | A role without Balance receives no report proposal exposing that field. |
+
 ## Design decisions and gate
 
 Use the existing List and Home grammar. A group has typed keys, currency and measures. A report's stable ID survives renaming. The proposed 91+ label puts day 90 in one band. The ADR assigns limits for review and leaves scalar reader and migration numbers to executable merges. No runtime proof is claimed at this checkpoint.
