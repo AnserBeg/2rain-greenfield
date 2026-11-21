@@ -11,12 +11,14 @@ import test from 'node:test';
 import { ModelKey } from '../../packages/operations-agent/src/keys.js';
 import { openAiModel } from '../../packages/operations-agent/src/openai-model.js';
 
-const KEY = `sk-proj-${'k'.repeat(40)}`;
+// Not shaped like a provider key, so the repository secret scan stays clean.
+const KEY = 'local-stand-in-credential-0123456789';
 
 async function standIn(
   reply: (body: Record<string, unknown>) => { status: number; body: unknown },
 ) {
-  const seen: { auth?: string; body: Record<string, unknown> }[] = [];
+  const seen: { auth: string | undefined; body: Record<string, unknown> }[] =
+    [];
   const server = createServer((request, response) => {
     let text = '';
     request.on('data', (chunk: Buffer) => (text += chunk.toString()));
@@ -80,7 +82,7 @@ test('the OpenAI adapter sends tools as functions and reads a tool call', async 
       system: 'system text',
       tools: [
         {
-          name: 'draft_customization',
+          name: 'draft_customization' as never,
           description: 'Draft one change.',
           inputSchema: { type: 'object', properties: {} },
         },
