@@ -85,7 +85,10 @@ async function assertStoredBytes(
     canonical_bytes: Buffer;
   }>(
     `SELECT l.content_hash, b.canonical_bytes FROM platform.tenant_release_artifact_links l
-     JOIN platform.release_artifact_blobs b USING (content_hash) WHERE l.release_id=$1`,
+     JOIN platform.release_artifact_blobs b USING (content_hash) WHERE l.release_id=$1
+     UNION ALL
+     SELECT r.content_hash, b.canonical_bytes FROM platform.tenant_releases r
+     JOIN platform.release_artifact_blobs b USING (content_hash) WHERE r.release_id=$1`,
     [releaseId],
   );
   assert.deepEqual(
