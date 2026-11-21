@@ -114,6 +114,26 @@ try {
   assert.deepEqual(await counters(), [1, 1]);
   await settle(a, 'refused', false);
   assert.deepEqual(await counters(), [0, 0]);
+  assert.deepEqual(
+    await read(
+      'SELECT tenant_id,released_at IS NOT NULL AS released FROM platform.analysis_leases WHERE job=$1',
+      [a],
+    ),
+    [{ tenant_id: scope.tenant, released: true }],
+  );
+  assert.deepEqual(
+    await query("SELECT * FROM platform.analysis_pending('host')"),
+    [],
+  );
+  for (const child of ['analysis_leases', 'analysis_reservations']) {
+    await assert.rejects(
+      owner.query(
+        'UPDATE platform.' + child + ' SET tenant_id=$1 WHERE job=$2',
+        [id(), a],
+      ),
+      { code: '23503' },
+    );
+  }
   assert.equal(await dispatch(), b);
   await Promise.all([
     settle(b, 'hostFailure', true),

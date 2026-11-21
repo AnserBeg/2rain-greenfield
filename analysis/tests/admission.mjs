@@ -51,6 +51,27 @@ export async function checkAdmission(owner, pool, first, image, boot) {
     first.query("SELECT platform.analysis_settle($1,'refused',false,NULL)", [
       job,
     ]);
+  await owner.query(
+    "INSERT INTO platform.current_policy_permission_grants(tenant_id,environment_id,role_id,permission_id,resource_id) SELECT tenant_id,environment_id,role_id,'northstar.runtime:permission.analysis_admin',resource_id FROM platform.current_policy_permission_grants WHERE tenant_id=$1 AND environment_id=$2",
+    [other.scope.tenant, other.scope.environment],
+  );
+  await owner.query(
+    'UPDATE platform.current_policy_memberships SET legal_entity_id=NULL WHERE tenant_id=$1 AND principal_id=$2',
+    [other.scope.tenant, other.scope.person],
+  );
+  await other.query('SELECT platform.analysis_tenant_switch(true)');
+  await assert.rejects(enqueue(other), /analysis.stopped/u);
+  const unaffected = await enqueue(first, 'tenant-switch');
+  await first.cancel(unaffected);
+  assert.deepEqual(
+    (
+      await owner.query(
+        'SELECT tenant_id FROM platform.analysis_run_controls WHERE disabled',
+      )
+    ).rows,
+    [{ tenant_id: other.scope.tenant }],
+  );
+  await other.query('SELECT platform.analysis_tenant_switch(false)');
   const previous = await enqueue(first);
   assert.equal(await dispatch(), previous);
   await finish(previous);
@@ -103,7 +124,7 @@ export async function checkAdmission(owner, pool, first, image, boot) {
     try {
       await client.query('BEGIN');
       await client.query(
-        'UPDATE platform.analysis_budget_counters SET starts=$1 WHERE tenant=$2 AND environment=$3 AND subject=$4',
+        'UPDATE platform.analysis_budget_counters SET starts=$1 WHERE tenant_id=$2 AND environment_id=$3 AND subject=$4',
         [cap, first.scope.tenant, first.scope.environment, subject],
       );
       const sql =

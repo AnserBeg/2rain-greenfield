@@ -1,8 +1,15 @@
 {
   "schemaVersion": "northstar.tenant-completeness-manifest/v1",
   "tenantIndependentDefinition": "A table is tenant-independent only when its rows represent a database-wide kernel mechanism or immutable content deliberately shared across tenants; business records are never tenant-independent, and absence of a tenant column is not evidence.",
-  "expectedTableCount": 109,
+  "expectedTableCount": 115,
   "tables": [
+    {
+      "schema": "north_star_internal",
+      "table": "analysis_operator_controls",
+      "classification": "tenant-independent",
+      "reasonCode": "kernel-integrity-witness",
+      "reason": "Fences analysis execution across the database by operator stop generation for the whole platform or a pinned image. The scope constraint excludes tenant identifiers, jobs and output."
+    },
     {
       "schema": "north_star_internal",
       "table": "module_fold_function_ddl_witnesses",
@@ -93,6 +100,36 @@
     {
       "schema": "north_star_internal",
       "table": "semantic_aggregate_generations",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "analysis_budget_counters",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "analysis_leases",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "analysis_reservations",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "analysis_run_controls",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "analysis_runs",
       "classification": "tenant-scoped",
       "tenantColumn": "tenant_id"
     },
