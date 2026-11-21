@@ -1,4 +1,5 @@
 import {
+  DATE_TIME_FIELD_READER,
   BOOKING_FULFILMENT_READER,
   CONNECTOR_FAMILY,
   OPTIONAL_DEPENDENCY_QUERY_READER,
@@ -9,10 +10,7 @@ import {
   type TrustedRequestContext,
   type UntrustedRequestInput,
 } from './request-context.js';
-import {
-  DOCUMENTS_PROJECTION_FAMILY,
-  DOCUMENT_TEMPLATES_SURFACE_FLOOR,
-} from '../../canonical-model/src/documents.js';
+import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents.js';
 import {
   WORKFLOW_PROJECTION_FAMILY,
   WORKFLOW_RUNTIME_CAPABILITY,
@@ -238,7 +236,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 37 replaces Board v1 with Board v2: chosen stages, moves and facts by
     // stable ID with pinned contracts, labels from the release.
     // 38 adds document templates and governed PDF generation.
-    maximumSupportedVersion: DOCUMENT_TEMPLATES_SURFACE_FLOOR,
+    // 39 reads tenant dateTime fields (ADR-0087).
+    maximumSupportedVersion: DATE_TIME_FIELD_READER,
   },
 });
 

@@ -1,6 +1,8 @@
 import { BoardViewRevisionSchema } from './board-revision.js';
 import { LayoutRevisionSchema } from './layout-revision.js';
 import {
+  DATE_TIME_PATCH_VERSION,
+  DateTimeZoneSourceSchema,
   CalculatedDisplayFieldDefinitionSchema,
   FormulaValidationRuleDefinitionSchema,
   OperationRoleKeySchema,
@@ -192,7 +194,25 @@ const saveListView = z.strictObject({
     .max(3),
 });
 
+// ADR-0087: a versioned add-only member with a discriminated target that a
+// later schema version may widen. Its logical type is `dateTime`.
+export const AddDateTimeFieldSchema = z.strictObject({
+  kind: z.literal('addDateTimeField'),
+  schemaVersion: z.literal(DATE_TIME_PATCH_VERSION),
+  target: z.discriminatedUnion('kind', [
+    z.strictObject({
+      kind: z.literal('tenantRecordType'),
+      recordTypeId: canonicalId,
+    }),
+  ]),
+  fieldId: canonicalId,
+  label,
+  required: z.boolean(),
+  zoneSource: DateTimeZoneSourceSchema,
+});
+
 const ChangeMemberSchema = z.discriminatedUnion('kind', [
+  AddDateTimeFieldSchema,
   z.strictObject({
     kind: z.literal('addAddressField'),
     schemaVersion: z.literal('v6'),
@@ -327,6 +347,7 @@ export type CustomizationPatch =
   SingleCustomizationPatch | z.infer<typeof changeSet>;
 export type CustomizationPatchKind = CustomizationPatch['kind'];
 export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
+  'addDateTimeField',
   'addAddressField',
   'addMapPlacement',
   'addRecordType',

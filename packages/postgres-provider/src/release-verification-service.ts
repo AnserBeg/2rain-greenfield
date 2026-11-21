@@ -5,6 +5,7 @@ import {
   withWorkflowVerifierTransaction,
   type WorkflowBinding,
 } from './workflow-admission.js';
+import { dateTimeCheck, dateTimeChecks } from './date-time-storage.js';
 import {
   readWorkflowBundle,
   verifyRetainedWorkflow,
@@ -2548,7 +2549,11 @@ class SemanticVerificationExecutor {
       writable.map((field) => [
         field.fieldId,
         Object.hasOwn(inputOverrides, field.fieldId)
-          ? inputOverrides[field.fieldId]
+          ? dateTimeFixtureValue(
+              storageEntity,
+              field.fieldId,
+              inputOverrides[field.fieldId],
+            )
           : verificationFieldValue(field, token, storageEntity),
       ]),
     );
@@ -2615,6 +2620,23 @@ class SemanticVerificationExecutor {
       relations[relationInput.relationId] = target.recordId;
     }
     const systemInput = operation.inputContract.systemInput;
+    // ADR-0087 ruling 2026-11-21: on a shared record type a company-sourced
+    // dateTime names the writer's working company; verification works in its
+    // own arranged company, which the gateway then authorizes.
+    if (!systemInput)
+      for (const check of dateTimeChecks(storageEntity)) {
+        const entry = values[check.canonicalFieldId];
+        if (
+          check.zoneSource === 'companyBusinessCalendar' &&
+          entry &&
+          typeof entry === 'object' &&
+          !Array.isArray(entry)
+        )
+          values[check.canonicalFieldId] = {
+            ...entry,
+            companyId: await this.#verificationWorkingCompany(token),
+          };
+      }
     const systemArguments = systemInput
       ? {
           [systemInput.argumentKey]: await this.#systemInputValue(
@@ -2629,6 +2651,30 @@ class SemanticVerificationExecutor {
       relations,
       values,
     };
+  }
+
+  #verificationWorkingCompany(token: string): Promise<string> {
+    const key = 'dateTimeWorkingCompany';
+    const existing = this.#systemInputValues.get(key);
+    if (existing) return existing;
+    const master = this.#storageEntities.find(
+      (candidate) => candidate.legalEntityMaster !== undefined,
+    );
+    if (!master) {
+      throw failure(
+        'VERIFICATION_SYSTEM_INPUT_TARGET_MISSING',
+        'a shared company-sourced dateTime has no constructible working company',
+      );
+    }
+    const created = this.#create(
+      master.entityId,
+      `${token}-working-company`,
+    ).then((record) => {
+      this.#arrangedLegalEntityIds.add(record.recordId);
+      return record.recordId;
+    });
+    this.#systemInputValues.set(key, created);
+    return created;
   }
 
   #systemInputValue(
@@ -3188,11 +3234,34 @@ function compiledProjectionBinding(
   });
 }
 
+/** A formula fixture's civil text becomes a whole typed dateTime entry. */
+function dateTimeFixtureValue(
+  entity: StorageTargetPayloadV1['entities'][number],
+  fieldId: string,
+  value: unknown,
+): unknown {
+  const dateTime = dateTimeCheck(entity, fieldId);
+  if (!dateTime || typeof value !== 'string') return value;
+  return {
+    schemaVersion: 'northstar.date-time-value/v1',
+    civil: value,
+    ...(dateTime.zoneSource === 'perRecordIana' ? { zone: 'Etc/UTC' } : {}),
+  };
+}
+
 function verificationFieldValue(
   field: VerificationFieldContract,
   token: string,
   entity: StorageTargetPayloadV1['entities'][number],
 ): unknown {
+  // ADR-0087: a logical dateTime is written whole, as typed entry.
+  const dateTime = dateTimeCheck(entity, field.fieldId);
+  if (dateTime)
+    return {
+      schemaVersion: 'northstar.date-time-value/v1',
+      civil: '2026-01-01T12:34',
+      ...(dateTime.zoneSource === 'perRecordIana' ? { zone: 'Etc/UTC' } : {}),
+    };
   switch (field.fieldKind) {
     case 'addressFieldType':
       return {
