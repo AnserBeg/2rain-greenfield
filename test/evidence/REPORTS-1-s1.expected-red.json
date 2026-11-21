@@ -9,7 +9,9 @@
       "original": "{ ...member, companyAccessIndex: COMPANY_ACCESS_INDEX }",
       "replacement": "member",
       "test": {
-        "files": ["test/compiler/report-company-access.test.ts"],
+        "files": [
+          "test/compiler/report-company-access.test.ts"
+        ],
         "namePattern": "recording a company-owned"
       },
       "kills": [
@@ -27,7 +29,9 @@
       "original": "if (patch.companyAccessIndex && patch.companyOwnership !== 'entityOwned')",
       "replacement": "if (false)",
       "test": {
-        "files": ["test/compiler/report-company-access.test.ts"],
+        "files": [
+          "test/compiler/report-company-access.test.ts"
+        ],
         "namePattern": "recording a company-owned"
       },
       "kills": [
@@ -45,7 +49,9 @@
       "original": "(entity) => 'companyAccessIndex' in entity && entity.companyAccessIndex,",
       "replacement": "() => false,",
       "test": {
-        "files": ["test/compiler/report-company-access.test.ts"],
+        "files": [
+          "test/compiler/report-company-access.test.ts"
+        ],
         "namePattern": "the new Inspection"
       },
       "kills": [
@@ -63,7 +69,9 @@
       "original": "if ('companyAccessIndex' in entity && entity.companyAccessIndex)",
       "replacement": "if (entityOwned && entity.entityId.includes(':entity.custom_'))",
       "test": {
-        "files": ["test/compiler/report-company-access.test.ts"],
+        "files": [
+          "test/compiler/report-company-access.test.ts"
+        ],
         "namePattern": "an archived pre-key"
       },
       "kills": [
@@ -81,7 +89,9 @@
       "original": "(indexedType && surfaceFloor < COMPANY_ACCESS_INDEX_READER) ||",
       "replacement": "",
       "test": {
-        "files": ["test/postgres/releases.test.ts"],
+        "files": [
+          "test/postgres/releases.test.ts"
+        ],
         "namePattern": "release admission refuses a company access index"
       },
       "kills": [
@@ -89,6 +99,106 @@
           "file": "test/postgres/releases.test.ts",
           "name": "release admission refuses a company access index whose release understates its reader floor",
           "expected": "Understated candidate reached the staging transaction"
+        }
+      ]
+    },
+    {
+      "name": "reports-b1-partition",
+      "claim": "Each stored currency has a distinct amount total.",
+      "file": "packages/canonical-model/src/grouped-aggregate.ts",
+      "original": "const partition = partitionFor(binding, fact);",
+      "replacement": "const partition = {kind:'unitless'} as const;",
+      "test": {
+        "files": [
+          "test/compiler/report-company-access.test.ts"
+        ],
+        "namePattern": "Invoice source"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/report-company-access.test.ts",
+          "name": "Invoice source declares its two civil dates and partitions fractional balances by the stored sales currency",
+          "expected": "Expected values to be strictly deep-equal"
+        }
+      ]
+    },
+    {
+      "name": "reports-b1-eur",
+      "claim": "EUR is a valid Invoice partition.",
+      "file": "packages/canonical-model/src/grouped-aggregate.ts",
+      "original": "candidate === fact[binding.fieldId]",
+      "replacement": "candidate !== 'EUR' && candidate === fact[binding.fieldId]",
+      "test": {
+        "files": [
+          "test/compiler/report-company-access.test.ts"
+        ],
+        "namePattern": "Invoice source"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/report-company-access.test.ts",
+          "name": "Invoice source declares its two civil dates and partitions fractional balances by the stored sales currency",
+          "expected": "Expected values to be strictly deep-equal"
+        }
+      ]
+    },
+    {
+      "name": "reports-b1-coverage",
+      "claim": "A monetary cell counts the admitted facts without an amount.",
+      "file": "packages/canonical-model/src/grouped-aggregate.ts",
+      "original": "if (value == null) row.cells[i]!.missing++;",
+      "replacement": "if (value == null) continue;",
+      "test": {
+        "files": [
+          "test/compiler/report-company-access.test.ts"
+        ],
+        "namePattern": "Invoice source"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/report-company-access.test.ts",
+          "name": "Invoice source declares its two civil dates and partitions fractional balances by the stored sales currency",
+          "expected": "Expected values to be strictly deep-equal"
+        }
+      ]
+    },
+    {
+      "name": "reports-b1-fixed",
+      "claim": "A fixed currency has its canonical scale.",
+      "file": "packages/canonical-model/src/normalize.ts",
+      "original": "if (amount.scale !== CURRENCY_MINOR_UNITS_V0[currency.currencyCode])",
+      "replacement": "if (false)",
+      "test": {
+        "files": [
+          "test/compiler/report-company-access.test.ts"
+        ],
+        "namePattern": "amount operands"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/report-company-access.test.ts",
+          "name": "amount operands must resolve locally and fixed currencies require the stored scale to equal the minor unit",
+          "expected": "Missing expected exception"
+        }
+      ]
+    },
+    {
+      "name": "reports-b1-currency",
+      "claim": "A stored currency resolves to a local three-character operand.",
+      "file": "packages/canonical-model/src/normalize.ts",
+      "original": "if (code?.kind !== 'textFieldType' || code.maximumLength !== 3)",
+      "replacement": "if (false)",
+      "test": {
+        "files": [
+          "test/compiler/report-company-access.test.ts"
+        ],
+        "namePattern": "amount operands"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/report-company-access.test.ts",
+          "name": "amount operands must resolve locally and fixed currencies require the stored scale to equal the minor unit",
+          "expected": "Missing expected exception"
         }
       ]
     }

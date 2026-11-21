@@ -1,3 +1,8 @@
+import {
+  REPORT_EXPORT_PERMISSION,
+  reportColumnPermission,
+  reportQueryId,
+} from '../../canonical-model/src/declared-report.js';
 import { BOOKING_USAGE_CAPABILITY } from '@north-star/canonical-model';
 import { bookingOwnerUsageReadModel } from './booking-owner-usage.js';
 import { PostgresAddresses } from './address-geocodes.js';
@@ -389,6 +394,18 @@ export class ReleaseRoutingQueryGateway extends SemanticQueryGateway {
     return (await this.#gateway(args[0])).invoke(...args);
   }
 
+  override async previewReport(
+    ...args: Parameters<SemanticQueryGateway['previewReport']>
+  ): ReturnType<SemanticQueryGateway['previewReport']> {
+    return (await this.#gateway(args[0])).previewReport(...args);
+  }
+  override async invokeGrouped(
+    ...args: Parameters<SemanticQueryGateway['invokeGrouped']>
+  ): ReturnType<SemanticQueryGateway['invokeGrouped']> {
+    const gateway = await this.#gateway(args[0]);
+    return withoutReadSnapshot(() => gateway.invokeGrouped(...args));
+  }
+
   override async invokeAggregate(
     ...args: Parameters<SemanticQueryGateway['invokeAggregate']>
   ): ReturnType<SemanticQueryGateway['invokeAggregate']> {
@@ -587,6 +604,40 @@ export function releasePolicyBindings(
 ) {
   const definition = parseNormalizedApplicationPackageJson(definitionBytes);
   return [
+    ...(definition.languageVersion === 'v6' &&
+    definition.surfaces.some((s) => s.report && s.lifecycle === 'active')
+      ? [
+          ...definition.surfaces.flatMap((s) =>
+            s.lifecycle === 'active' && s.report
+              ? [
+                  {
+                    action: 'aggregate',
+                    permissionId: reportQueryId(s.report.reportId),
+                    resourceId: s.report.reportId,
+                  },
+                ]
+              : [],
+          ),
+          {
+            action: 'export',
+            permissionId: REPORT_EXPORT_PERMISSION,
+            resourceId: 'northstar.runtime:resource.report_export',
+          },
+          ...[
+            ...new Set(
+              definition.surfaces.flatMap((s) =>
+                s.lifecycle === 'active' && s.report
+                  ? s.report.body.operands.map((o) => o.fieldId)
+                  : [],
+              ),
+            ),
+          ].map((fieldId) => ({
+            action: 'read',
+            permissionId: reportColumnPermission(fieldId),
+            resourceId: fieldId,
+          })),
+        ]
+      : []),
     ...currentPolicyBindingsFromPermissions(definition.permissions),
     ...(documents ? documentPermissionBindings(definition.entities) : []),
   ];

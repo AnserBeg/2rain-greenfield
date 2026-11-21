@@ -56,6 +56,9 @@ export function reportOffer(
     !live(query) ||
     query.tier !== 'q0' ||
     query.queryType !== 'list' ||
+    (query.filter !== undefined &&
+      ((query.filter as Row).kind !== 'booleanPredicate' ||
+        (query.filter as Row).value !== true)) ||
     query.readModel
   )
     return null;

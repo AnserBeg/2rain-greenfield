@@ -12,6 +12,10 @@
  * floor on phone-width targets.
  */
 export const LEDGER_STYLES = `
+.grouped-report-table{width:100%;text-align:start;background:var(--sheet)}
+.grouped-report-table td,.grouped-report-table th{padding:.6rem;border-bottom:1px solid var(--rule);text-align:start;overflow-wrap:anywhere}
+.grouped-report-table small{display:block}.grouped-report-table tfoot{font-weight:600}
+@media(max-width:800px){.grouped-report-table,.grouped-report-table tbody,.grouped-report-table tfoot{display:block}.grouped-report-table thead{position:absolute;clip-path:inset(50%);width:1px;height:1px;overflow:hidden}.grouped-report-table tr{display:block;border:1px solid var(--rule);margin-block:.5rem}.grouped-report-table td{display:grid;grid-template-columns:minmax(5rem,1fr) 2fr;gap:.4rem}.grouped-report-table td::before{content:attr(data-label);font-weight:600}.grouped-report-table small{grid-column:2}}
 .board-columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:1rem}
 .board-column{min-width:0}.board-column ul{list-style:none;padding:0}.board-column li{display:grid;gap:.5rem;padding:.75rem;border:1px solid var(--rule);background:var(--sheet);overflow-wrap:anywhere}
 .board-column dl{margin:0}.board-column dl div{display:flex;gap:.5rem}.board-column dd{margin:0}.board-column button,.board-column a,.board-selector-slot a,.collection-views a,.surface-grid:has(.board-columns-slot) nav a{min-height:44px;display:inline-flex;align-items:center;padding:0 .6rem}

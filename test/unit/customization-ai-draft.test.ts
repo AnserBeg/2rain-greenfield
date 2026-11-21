@@ -544,3 +544,71 @@ test('a scripted request to save a warehouse view uses its declared columns and 
     'applied',
   );
 });
+
+test('the drafter binds a grouped Invoice balance from the generated report schema and refuses an unoffered source', async () => {
+  const application = normalizeApplicationPackage(
+    JSON.parse(readFileSync('apps/web/release/app.authored.json', 'utf8')),
+  );
+  const options = customizationTargets(application);
+  const list = options.reports!.find((r) =>
+    r.source.queryId.endsWith(':query.customer_invoice_list'),
+  )!;
+  const customer = 'northstar.app:field.customer_invoice_customer_party_id';
+  const balance = 'northstar.app:field.customer_invoice_balance';
+  const request =
+    'Make a Balance by customer report for Invoices, with currency totals and CSV.';
+  const report = {
+    listSurfaceId: list.source.listSurfaceId,
+    label: 'Balance by customer',
+    status: 'active',
+    choices: {
+      dimensions: [{ kind: 'direct', fieldId: customer }],
+      filters: [],
+      measures: [
+        {
+          kind: 'inline',
+          measureId: 'northstar.app:measure.custom_balance',
+          label: 'Balance',
+          operator: { kind: 'sum', fieldId: balance },
+        },
+      ],
+      outputs: [{ kind: 'table' }, { kind: 'csv' }],
+    },
+  };
+  const seen: { system: string; toolNames: string[]; turns: number }[] = [];
+  const result = await draftPatchFromRequest(
+    scripted([{ toolInput: { kind: 'addReportRevision', report } }], seen),
+    request,
+    options,
+  );
+  assert.ok(
+    result.status === 'parsed' && result.patch.kind === 'addReportRevision',
+    JSON.stringify(result),
+  );
+  assert.equal(result.patch.body.source.entityId, list.source.entityId);
+  assert.deepEqual(
+    result.patch.body.operands.map((f) => f.fieldId),
+    [balance, 'northstar.app:field.customer_invoice_currency', customer].sort(),
+  );
+  const { ReportDraftSchema } =
+    await import('../../packages/customization/src/report-revision.js');
+  assert.ok(
+    seen[0]!.system.includes(JSON.stringify(ReportDraftSchema.toJSONSchema())),
+  );
+  const invalid = await draftPatchFromRequest(
+    scripted([
+      {
+        toolInput: {
+          kind: 'addReportRevision',
+          report: {
+            ...report,
+            listSurfaceId: 'northstar.app:surface.invented',
+          },
+        },
+      },
+    ]),
+    request,
+    options,
+  );
+  assert.notEqual(invalid.status, 'parsed');
+});

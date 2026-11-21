@@ -261,3 +261,231 @@ test(
     );
   },
 );
+
+test(
+  'Invoice report reads exact company partitions and coverage, filters civil dates, pages complete totals and issues audited bytes',
+  { timeout: 600_000 },
+  async () => {
+    const { randomUUID, createHash } = await import('node:crypto');
+    const { ReportChoicesSchema } =
+      await import('../../packages/canonical-model/src/schemas.js');
+    const { draftReport } =
+      await import('../../packages/customization/src/report-revision.js');
+    const { REPORT_EXPORT_PERMISSION, reportColumnPermission, reportQueryId } =
+      await import('../../packages/canonical-model/src/declared-report.js');
+    const { firstPartyAuthored } =
+      await import('../helpers/customization-fixture.js');
+    const { singleTransitionApplication } =
+      await import('../helpers/application-without-line-create-values.js');
+    const compiledApplication =
+      singleTransitionApplication(firstPartyAuthored).release;
+    const { projectionPayload } = await import('../compiler/helpers.js');
+    const { PROJECTION_FAMILY_IDS } =
+      await import('../../packages/compiler/src/index.js');
+    const { COMPANY, worldOver } = await import('../agent/agent-world.js');
+    await withEphemeralPostgres(
+      'report-invoice',
+      async ({ connection, pool }) => {
+        const options = {
+          databaseUrl: `postgresql://postgres@127.0.0.1:${connection.port}/postgres`,
+          tenantSlug: 'report-invoice',
+          compiledApplication,
+        };
+        const app = await startComposedApplication({ ...options, port: 0 });
+        const opened = await openCustomizeService(options);
+        try {
+          const target = (await opened.service.targets()).reports!.find((t) =>
+            t.source.entityId.endsWith(':entity.customer_invoice'),
+          )!;
+          const id = (suffix: string) =>
+            target.fields.find((f) => f.operand.fieldId.endsWith('_' + suffix))!
+              .operand.fieldId;
+          const revision = draftReport(
+            target,
+            'Balance by customer',
+            ReportChoicesSchema.parse({
+              dimensions: [
+                { kind: 'direct', fieldId: id('customer_party_id') },
+              ],
+              filters: [{ kind: 'dateRange', fieldId: id('invoice_date') }],
+              measures: [
+                {
+                  kind: 'inline',
+                  operator: { kind: 'sum', fieldId: id('balance') },
+                  measureId: 'northstar.app:measure.custom_balance',
+                  label: 'Balance',
+                },
+              ],
+              outputs: [{ kind: 'table' }, { kind: 'csv' }],
+            }),
+          );
+          const draft = await opened.service.draft(revision, 'visualBuilder');
+          assert.ok(draft.status === 'drafted', JSON.stringify(draft));
+          await opened.service.approve(draft.patchId);
+          await opened.service.activate(draft.patchId);
+          const types = projectionPayload<
+            import('../../packages/compiler/src/storage.js').StorageTargetPayloadV1
+          >(
+            parseCompiledApplication(compiledApplication).application.compiled,
+            PROJECTION_FAMILY_IDS.storageTarget,
+          );
+          const entity = types.entities.find(
+            (e) => e.entityId === target.source.entityId,
+          )!;
+          const table = 'north_star_module.' + entity.physicalTableName;
+          const col = (name: string) =>
+            entity.columns.find((c) => c.canonicalFieldId === id(name))!
+              .physicalName;
+          const { tenantId, environmentId, principalId } = app.runtime.identity;
+          const north = COMPANY;
+          const world = worldOver(app.runtime, 'postgres');
+          const south = randomUUID();
+          await world.invoke('legal_entity_create', {
+            recordId: south,
+            values: {
+              'northstar.app:field.legal_entity_code': 'SOUTH',
+              'northstar.app:field.legal_entity_name': 'South',
+              'northstar.app:field.legal_entity_status':
+                'northstar.app:option.legal_entity_status_active',
+              'northstar.app:field.legal_entity_is_default': false,
+            },
+          });
+          const insert = async (
+            company: string,
+            group: string,
+            amount: string | null,
+            currency: string | null,
+            day = '2026-11-01',
+          ) => {
+            const record = randomUUID();
+            await pool.query(
+              `INSERT INTO ${table} (tenant_id,environment_id,legal_entity_id,record_id,revision,${['number', 'state', 'invoice_date', 'customer_party_id', 'balance', 'currency'].map(col).join(',')}) VALUES ($1,$2,$3,$4,1,$5,$6,$7,$8,$9,$10)`,
+              [
+                tenantId,
+                environmentId,
+                company,
+                record,
+                record,
+                'northstar.app:option.customer_invoice_state_open',
+                day + 'T00:00:00Z',
+                group,
+                amount,
+                currency,
+              ],
+            );
+            return record;
+          };
+          const customer = '=Customer';
+          const edit = await insert(north, customer, '10.25', 'CAD');
+          await insert(north, customer, '1.75', 'CAD');
+          await insert(north, customer, '4.00', 'USD');
+          await insert(north, customer, '-0.005', 'EUR');
+          await insert(north, customer, null, 'CAD');
+          await insert(north, customer, '3.00', null);
+          await insert(south, customer, '90.00', 'CAD');
+          await insert(north, customer, '100', 'CAD', '2026-11-02');
+          const membership = await pool.query(
+            'UPDATE platform.current_policy_memberships SET legal_entity_id=$4 WHERE (tenant_id,environment_id,principal_id)=($1,$2,$3) AND legal_entity_id IS NULL',
+            [tenantId, environmentId, principalId, north],
+          );
+          assert.ok(membership.rowCount);
+          const request = {
+            queryId: reportQueryId(revision.reportId),
+            company: north,
+            parameters: {
+              [id('invoice_date')]: { from: '2026-11-01', until: '2026-11-02' },
+            },
+            pageSize: 2,
+          };
+          const run = (
+            overrides: Partial<
+              import('../../packages/runtime/src/declared-report.js').ReportRequest
+            > = {},
+          ) =>
+            app.runtime.entry.run({}, (view) =>
+              app.runtime.queryGateway.invokeGrouped(view, {
+                ...request,
+                ...overrides,
+              }),
+            );
+          const page = await run();
+          assert.ok(page.kind === 'page', JSON.stringify(page));
+          assert.deepEqual(
+            page.totals.map((t) => [
+              t.partition,
+              t.cells[0]!.value,
+              t.cells[0]!.recordsWithoutMeasure,
+            ]),
+            [
+              [{ kind: 'currency', code: 'CAD' }, '12.000000000000000000', 1],
+              [{ kind: 'currency', code: 'EUR' }, '-0.005000000000000000', 0],
+              [{ kind: 'currency', code: 'USD' }, '4.000000000000000000', 0],
+              [{ kind: 'noCurrency' }, '3.000000000000000000', 0],
+            ],
+          );
+          assert.ok(page.next);
+          const next = await run({ cursor: page.next });
+          assert.ok(next.kind === 'page');
+          assert.deepEqual(next.totals, page.totals);
+          assert.deepEqual(
+            [...page.groups, ...next.groups].map((r) => r.partition),
+            page.totals.map((r) => r.partition),
+          );
+          const file = await run({
+            export: { resultDigest: page.resultDigest },
+          });
+          assert.ok(file.kind === 'csv', JSON.stringify(file));
+          assert.match(file.bytes, /"'=Customer"/u);
+          assert.match(file.bytes, /"-0.005000000000000000"/u);
+          assert.match(file.bytes, /"No currency"/u);
+          assert.match(file.bytes, /Records without Balance/u);
+          const receipt = await pool.query(
+            'SELECT metadata,execution_principal_id FROM platform.trust_action_invocations WHERE invocation_id=$1',
+            [file.receiptId],
+          );
+          assert.equal(receipt.rows[0]?.execution_principal_id, principalId);
+          assert.ok(
+            JSON.stringify(receipt.rows[0]?.metadata).includes(
+              createHash('sha256').update(file.bytes).digest('hex'),
+            ),
+          );
+          assert.deepEqual(await run({ company: south }), {
+            kind: 'unavailable',
+          });
+          assert.deepEqual(await run({ pageSize: 51 }), { kind: 'narrow' });
+          await pool.query(
+            `UPDATE ${table} SET ${col('balance')}=11 WHERE record_id=$1`,
+            [edit],
+          );
+          assert.deepEqual(await run({ cursor: page.next }), {
+            kind: 'refresh',
+          });
+          assert.deepEqual(
+            await run({ export: { resultDigest: page.resultDigest } }),
+            { kind: 'refresh' },
+          );
+          const revoke = async (permission: string) => {
+            const revoked = await pool.query(
+              'UPDATE platform.current_policy_permission_grants SET revoked_at=clock_timestamp() WHERE tenant_id=$1 AND environment_id=$2 AND permission_id=$4 AND role_id IN (SELECT role_id FROM platform.current_policy_memberships WHERE principal_id=$3)',
+              [tenantId, environmentId, principalId, permission],
+            );
+            assert.ok(revoked.rowCount);
+          };
+          await revoke(REPORT_EXPORT_PERMISSION);
+          const after = await run();
+          assert.ok(after.kind === 'page');
+          assert.deepEqual(
+            await run({ export: { resultDigest: after.resultDigest } }),
+            { kind: 'unavailable' },
+          );
+          await revoke(reportColumnPermission(id('currency')));
+          assert.deepEqual(await run(), { kind: 'unavailable' });
+        } finally {
+          await opened.close();
+          await app.close();
+        }
+      },
+      LINEAGE_INSTALL_VOLUME,
+    );
+  },
+);

@@ -1,3 +1,6 @@
+import { groupedReportHtml, reportRequest } from './grouped-report.js';
+import { reportQueryId } from '../../../packages/canonical-model/src/declared-report.js';
+import type { RegisteredReport } from '../../../packages/compiler/src/declared-reports.js';
 import {
   AddressProjectionSchema,
   SavedAddressSchema,
@@ -325,13 +328,16 @@ async function renderSurfaceRuntimeWithDataInContext(
     if (selection.statusCode !== 404) return selection;
     const url = new URL(requestUrl, 'http://surface-runtime.local');
     const id = url.searchParams.get('surface');
-    if (!id?.includes(':surface.custom_board_')) return selection;
+    if (!id || !/:surface\.custom_(?:report|board)_/u.test(id))
+      return selection;
     const manifest = readCompiledSurfaceManifest(view);
     const retired = manifest.surfaces.find(
       (surface) => surface.surfaceId === id,
-    )?.board;
+    );
     const ownerId =
-      retired?.body.listSurfaceId ?? url.searchParams.get('collection');
+      retired?.report?.body.source.listSurfaceId ??
+      retired?.board?.body.listSurfaceId ??
+      url.searchParams.get('collection');
     const owner = manifest.surfaces.find(
       (surface) =>
         surface.surfaceId === ownerId &&
@@ -585,6 +591,77 @@ async function renderSurfaceRuntimeWithDataInContext(
         legalEntitySelection,
         workspaceContext,
       ),
+    );
+  }
+  const reportCompany =
+    legalEntitySelection.length === 1
+      ? legalEntitySelection[0]
+      : !binding.query.legalEntityScope
+        ? (url.searchParams.get('collectionCompany') ??
+          entry?.selected ??
+          workspaceContext?.selectedRecordId)
+        : null;
+  if (selection.selected.report) {
+    const report = selection.selected.report;
+    const payload = view.projections.query.payload as unknown as {
+      groupedReports?: RegisteredReport[];
+    };
+    const registered = payload.groupedReports?.find(
+      (r) => r.queryId === reportQueryId(report.reportId),
+    );
+    const unavailable = () => ({
+      statusCode: 404,
+      html: shellDocument(
+        view,
+        selection.surfaces.filter((s) => !s.report),
+        selection.navigation,
+        null,
+        '<section role="alert"><h1>View not available</h1></section>',
+      ),
+    });
+    if (!registered || !reportCompany) return unavailable();
+    // A download is issued once under a fresh fence after the shell releases its page snapshot.
+    await reads?.finishReads();
+    const request = reportRequest(registered, url, reportCompany);
+    const answer = await gateways.queryGateway.invokeGrouped(view, request);
+    if (answer.kind === 'unavailable') return unavailable();
+    if (answer.kind === 'csv')
+      return {
+        statusCode: 200,
+        html: '',
+        download: {
+          body: answer.bytes,
+          contentType: 'text/csv; charset=utf-8',
+          fileName: exportFileName(selection.selected.label, new Date()),
+        },
+      };
+    const canExport = await gateways.queryGateway.previewReport(
+      view,
+      registered.queryId,
+      reportCompany,
+      true,
+    );
+    return renderSelectedSurface(
+      view,
+      selection,
+      {
+        status: 'READY',
+        records: [],
+        reportLinks: [registered.surfaceId],
+        reportCompany,
+        reportHtml: groupedReportHtml(
+          registered,
+          url,
+          reportCompany,
+          answer,
+          canExport,
+        ),
+      },
+      feedback,
+      [],
+      answer.kind === 'refresh' ? 409 : answer.kind === 'narrow' ? 422 : 200,
+      legalEntitySelection,
+      workspaceContext,
     );
   }
   if (selection.selected.board) {
@@ -890,6 +967,22 @@ async function renderSurfaceRuntimeWithDataInContext(
     if (code === 'QUERY_LEGAL_ENTITY_SCOPE_REQUIRED') {
       statusCode = 422;
     }
+  }
+  if (data.status === 'READY' && selection.selected.list && reportCompany) {
+    const reportLinks: string[] = [];
+    for (const s of selection.surfaces) {
+      if (
+        s.lifecycle === 'active' &&
+        s.report?.body.source.listSurfaceId === selection.selected.surfaceId &&
+        (await gateways.queryGateway.previewReport(
+          view,
+          reportQueryId(s.report.reportId),
+          reportCompany,
+        ))
+      )
+        reportLinks.push(s.surfaceId);
+    }
+    if (reportLinks.length) data = { ...data, reportLinks, reportCompany };
   }
   return rendered(() =>
     renderSelectedSurface(

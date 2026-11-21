@@ -34,6 +34,15 @@ function compileFixture() {
   }[]) {
     if (documentEditor) delete documentEditor.lineCreateValues;
   }
+  // Older-reader witnesses must reach the feature they exercise.
+  for (const entity of authored.entities as { reportSource?: unknown }[])
+    delete entity.reportSource;
+  return singleTransitionApplication(authored);
+}
+
+/** Install a test's chosen first-party source directly after the retained bootstrap. */
+export function singleTransitionApplication(authored: Record<string, unknown>) {
+  const authoredPath = resolve('apps/web/release/app.authored.json');
   const { bootstrap } = parseCompiledApplication(
     JSON.parse(readFileSync('apps/web/release/app.compiled.json', 'utf8')),
   );

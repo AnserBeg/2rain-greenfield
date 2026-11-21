@@ -1,3 +1,15 @@
+import {
+  REPORT_EXPORT_PERMISSION,
+  reportColumnPermission,
+} from '../../canonical-model/src/declared-report.js';
+import type { RegisteredReport } from '../../compiler/src/declared-reports.js';
+import {
+  REPORT_READER_POLICY,
+  validReportParameters,
+  type ReportRequest,
+  type ReportResult,
+} from './declared-report.js';
+import { requestDeadline } from './request-deadline.js';
 import { recordCatalogParse } from './catalog-parse-count.js';
 import {
   QueryReadModelSchema,
@@ -247,7 +259,17 @@ export interface QueryPolicyNarrowingGateway {
   narrow(request: QueryPolicyNarrowingRequest): Promise<unknown>;
 }
 
+export interface GroupedExecution {
+  view: IssuedRequestRuntimeView;
+  report: RegisteredReport;
+  input: ReportRequest;
+  maximumFacts: number;
+  filterPlans: readonly QueryFilterLoweringPlan[];
+  scope: LegalEntityReadScope;
+  remaining: () => number;
+}
 export interface SemanticQueryExecutor {
+  executeGrouped?(request: GroupedExecution): Promise<ReportResult>;
   execute(
     request: SemanticQueryExecutionRequest,
   ): Promise<SemanticQueryResultEnvelope>;
@@ -424,6 +446,170 @@ export class SemanticQueryGateway {
     );
     assertRecordResultEnvelope(result);
     return result;
+  }
+
+  private async authorizeReport(
+    view: IssuedRequestRuntimeView,
+    queryId: string,
+    company: string,
+    exporting: boolean,
+  ) {
+    assertRequestRuntimeView(view);
+    const payload = view.projections.query.payload;
+    const terms = isRecord(payload) ? payload.groupedReports : undefined;
+    const report = Array.isArray(terms)
+      ? (terms as unknown as RegisteredReport[]).find(
+          (r) => r.queryId === queryId,
+        )
+      : undefined;
+    if (!report || !this.executor?.executeGrouped) return null;
+    const source = registeredQueryFromPinnedView(
+      view,
+      report.revision.body.source.queryId,
+    );
+    if (
+      !source ||
+      source.queryType !== 'list' ||
+      source.lifecycle !== 'active' ||
+      source.sourceEntityId !== report.revision.body.source.entityId
+    )
+      return null;
+    const args = {
+      legalEntityId: company,
+      ...(source.legalEntityScope && {
+        [source.legalEntityScope.operand.parameterId]: company,
+      }),
+    };
+    const scope = await issueLegalEntityReadScope(this.currentPolicy, view, [
+      company,
+    ]);
+    const permissions = [
+      QUERY_BOUNDARY_PERMISSION_ID,
+      source.permissionId,
+      report.queryId,
+      ...report.columns.map((c) => reportColumnPermission(c.fieldId)),
+      ...(exporting ? [REPORT_EXPORT_PERMISSION] : []),
+    ];
+    if (
+      exporting &&
+      !report.revision.body.outputs.some((o) => o.kind === 'csv')
+    )
+      return null;
+    for (const permissionId of permissions) {
+      const decision = await authorizeCurrentPolicy(
+        this.currentPolicy,
+        view,
+        permissionId,
+        {
+          arguments: args,
+          queryId: report.queryId,
+          kind:
+            permissionId === QUERY_BOUNDARY_PERMISSION_ID
+              ? 'semanticQueryPolicyInput'
+              : 'registeredSemanticQueryPolicyInput',
+          requestId: view.requestId,
+          schemaVersion: QUERY_POLICY_INPUT_VERSION,
+        },
+      );
+      if (
+        decision.decision !== 'ALLOW' ||
+        decision.policyVersion !== view.entryPolicyVersion
+      )
+        return null;
+    }
+    return { report, source, args, scope };
+  }
+
+  async previewReport(
+    view: IssuedRequestRuntimeView,
+    queryId: string,
+    company: string,
+    exporting = false,
+  ): Promise<boolean> {
+    try {
+      return !!(await this.authorizeReport(view, queryId, company, exporting));
+    } catch {
+      return false;
+    }
+  }
+
+  async invokeGrouped(
+    view: IssuedRequestRuntimeView,
+    req: ReportRequest,
+  ): Promise<ReportResult> {
+    assertRequestRuntimeView(view);
+    const deadline = performance.now() + REPORT_READER_POLICY.deadlineMs;
+    const parentDeadline = requestDeadline.getStore();
+    const remaining = () => {
+      const ms = Math.min(
+        parentDeadline?.() ?? Infinity,
+        deadline - performance.now(),
+      );
+      if (ms <= 0) throw new Error('REPORT_DEADLINE');
+      return Math.max(1, Math.floor(ms));
+    };
+    return requestDeadline.run(remaining, async () => {
+      try {
+        const authorized = await this.authorizeReport(
+          view,
+          req.queryId,
+          req.company,
+          !!req.export,
+        );
+        if (!authorized || !this.executor?.executeGrouped)
+          return { kind: 'unavailable' };
+        const { source, report, scope, args } = authorized;
+        remaining();
+        if (
+          !Number.isSafeInteger(req.pageSize) ||
+          req.pageSize < 1 ||
+          req.pageSize > REPORT_READER_POLICY.page ||
+          !validReportParameters(report, req)
+        )
+          return { kind: 'narrow' };
+        const filterPlans: QueryFilterLoweringPlan[] = [];
+        // Slice 1 accepts a generated Q0 collection only. Its literal row filter
+        // and the provider's live narrowing both apply to the authorized facts.
+        if (
+          source.filter.kind !== 'booleanPredicate' ||
+          source.filter.value !== true
+        )
+          return { kind: 'unavailable' };
+        if (this.policyNarrowing)
+          filterPlans.push(
+            parsePolicyNarrowing(
+              await this.policyNarrowing.narrow({
+                definition: source,
+                view,
+                arguments: args,
+              }),
+              source,
+            ),
+          );
+        return await this.executor.executeGrouped({
+          view,
+          report,
+          input: req,
+          maximumFacts: Math.min(
+            source.maximumResultCount,
+            req.export
+              ? (source.exportMaximumResultCount ?? source.maximumResultCount)
+              : Infinity,
+          ),
+          filterPlans,
+          scope,
+          remaining,
+        });
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          (error.message === 'REPORT_DEADLINE' ||
+            ('code' in error && error.code === '57014'))
+        )
+          return { kind: 'narrow' };
+        return { kind: 'unavailable' };
+      }
+    });
   }
 
   async invokeAggregate(

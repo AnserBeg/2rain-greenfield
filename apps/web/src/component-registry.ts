@@ -186,6 +186,9 @@ export type SurfaceDataRenderState =
     }
   | {
       readonly records: readonly SemanticRecordDto[];
+      readonly reportHtml?: string;
+      readonly reportLinks?: readonly string[];
+      readonly reportCompany?: string;
       readonly boardListState?: DeclaredListRenderData['state'];
       readonly boardSlots?: Readonly<Record<string, string>>;
       readonly documentEditorSlots?: Readonly<Record<string, string>>;
@@ -561,9 +564,16 @@ function surfaceSlotClassName(
 
 function collectionSwitcher(context: SurfaceComponentContext) {
   const owner =
-    context.surface.board?.body.listSurfaceId ?? context.surface.surfaceId;
+    context.surface.board?.body.listSurfaceId ??
+    context.surface.report?.body.source.listSurfaceId ??
+    context.surface.surfaceId;
   const boards = (context.surfaces ?? []).filter(
-    (s) => s.lifecycle === 'active' && s.board?.body.listSurfaceId === owner,
+    (s) =>
+      s.lifecycle === 'active' &&
+      (s.board?.body.listSurfaceId === owner ||
+        (s.report?.body.source.listSurfaceId === owner &&
+          context.data?.status === 'READY' &&
+          context.data.reportLinks?.includes(s.surfaceId))),
   );
   const list = context.surfaces?.find((s) => s.surfaceId === owner);
   if (!boards.length || !list) return '';
@@ -580,9 +590,13 @@ function collectionSwitcher(context: SurfaceComponentContext) {
         surfaceHref(s, undefined, false, context),
         'http://surface-runtime.local',
       ).searchParams;
-      if (s.board) {
+      if (s.board || s.report) {
         params.set('collection', owner);
-        const company = context.legalEntitySelection?.[0];
+        const company =
+          context.legalEntitySelection?.[0] ??
+          (context.data?.status === 'READY'
+            ? context.data.reportCompany
+            : undefined);
         if (company) params.set('collectionCompany', company);
       }
       if (state) {
@@ -627,6 +641,15 @@ function renderBoardSlot(context: SurfaceComponentContext) {
   );
 }
 function renderListTitle(context: SurfaceComponentContext): string {
+  if (context.surface.report)
+    return slotPanel(
+      context,
+      '<h1>' +
+        escapeHtml(context.surface.label) +
+        '</h1>' +
+        collectionSwitcher(context),
+      'surface-title-slot',
+    );
   const form = relatedSurface(context, 'form');
   const archiveToggle = renderArchiveToggle(context);
   return slotPanel(
@@ -668,6 +691,8 @@ function renderSavedViews(context: SurfaceComponentContext): string {
 
 function renderDataGrid(context: SurfaceComponentContext): string {
   const data = context.data ?? { status: 'UNBOUND' as const };
+  if (data.status === 'READY' && data.reportHtml !== undefined)
+    return slotPanel(context, data.reportHtml, 'data-grid-slot');
   if (data.status === 'UNBOUND') {
     return slotPanel(context, '', 'data-grid-slot');
   }
@@ -762,6 +787,8 @@ function renderDataGrid(context: SurfaceComponentContext): string {
 }
 
 function renderBulkActions(context: SurfaceComponentContext): string {
+  if (context.surface.report)
+    return slotPanel(context, '', 'bulk-actions-slot');
   const data = context.data ?? { status: 'UNBOUND' as const };
   if (data.status === 'UNBOUND' || data.status === 'DIAGNOSTIC') {
     return slotPanel(context, '', 'bulk-actions-slot');

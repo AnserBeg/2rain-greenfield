@@ -8,12 +8,14 @@ export interface GroupedMeasure {
   readonly operator: 'count' | 'sum';
   readonly fieldId?: string;
   readonly scale: number;
+  readonly unitId?: string;
   readonly currency?: ReportCurrencyBinding;
 }
 
 export interface GroupedCell {
   readonly measureId: string;
   readonly value: string;
+  readonly unitId?: string;
   readonly recordsWithoutMeasure: number;
 }
 
@@ -127,6 +129,7 @@ export function evaluateGroupedFacts(
       cells: cells.map((cell, i) => ({
         measureId: measures[i]!.id,
         value: decimal(cell.sum, measures[i]!.scale),
+        ...(measures[i]!.unitId && { unitId: measures[i]!.unitId }),
         recordsWithoutMeasure: cell.missing,
       })),
     }));
