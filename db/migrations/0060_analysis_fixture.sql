@@ -128,7 +128,7 @@ BEGIN
   SELECT * INTO STRICT r FROM platform.analysis_runs WHERE job=id;
   IF r.status NOT IN ('reserved','stopping') THEN RETURN r.status; END IF;
   IF outcome IS NULL OR launched IS NULL OR outcome NOT IN ('success','scriptFailure','hostFailure','refused','cancelled')
-    OR (outcome IN ('success','scriptFailure') AND NOT launched) OR (outcome='success' AND result IS NULL)
+    OR (outcome='refused' AND launched) OR (outcome IN ('success','scriptFailure') AND NOT launched) OR (outcome='success' AND result IS NULL)
   THEN RAISE EXCEPTION 'analysis.badSettlement'; END IF;
   SELECT generation INTO gen FROM north_star_internal.analysis_controls(r.tenant,r.image);
   SELECT stop_generation INTO STRICT held FROM platform.analysis_leases WHERE job=id;
@@ -179,6 +179,14 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
     AND (r.tenant,r.environment,r.person)=(north_star_internal.trusted_tenant_id(),north_star_internal.trusted_environment_id(),
        nullif(current_setting('north_star.principal_id',true),'')::uuid) AND north_star_internal.analysis_permitted(r.company,'northstar.runtime:permission.analysis_run')
 $$;
+CREATE FUNCTION platform.analysis_cancel(id uuid) RETURNS text
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$ DECLARE s text; BEGIN
+  PERFORM north_star_internal.analysis_lock();
+  IF platform.analysis_result(id) IS NULL THEN RAISE EXCEPTION 'analysis.denied'; END IF;
+  UPDATE platform.analysis_runs SET status=CASE status WHEN 'queued' THEN 'cancelled'
+    WHEN 'reserved' THEN 'stopping' ELSE status END WHERE job=id RETURNING status INTO s;
+  RETURN s;
+END $$;
 CREATE FUNCTION platform.analysis_pending(runner text) RETURNS TABLE(job uuid,status text) LANGUAGE sql STABLE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp AS $$ SELECT l.job,r.status FROM platform.analysis_leases l
   JOIN platform.analysis_runs r USING (job) WHERE l.host=runner ORDER BY l.job $$;
@@ -187,9 +195,9 @@ REVOKE ALL ON FUNCTION north_star_internal.analysis_lock(),north_star_internal.a
   north_star_internal.analysis_controls(uuid,text),north_star_internal.analysis_switch(text,boolean),
   platform.analysis_enqueue(uuid,uuid,text,text,uuid,bigint),platform.analysis_dispatch(text,uuid,bigint,bigint,integer,boolean),
   platform.analysis_settle(uuid,text,boolean,jsonb),platform.analysis_operator_switch(text,boolean),platform.analysis_tenant_switch(boolean),
-  platform.analysis_result(uuid),platform.analysis_pending(text) FROM PUBLIC,north_star_runtime;
+  platform.analysis_result(uuid),platform.analysis_cancel(uuid),platform.analysis_pending(text) FROM PUBLIC,north_star_runtime;
 GRANT USAGE ON SCHEMA platform TO north_star_analysis_controller,north_star_analysis_operator;
 GRANT EXECUTE ON FUNCTION platform.analysis_enqueue(uuid,uuid,text,text,uuid,bigint),platform.analysis_dispatch(text,uuid,bigint,bigint,integer,boolean),
-  platform.analysis_settle(uuid,text,boolean,jsonb),platform.analysis_tenant_switch(boolean),platform.analysis_result(uuid),platform.analysis_pending(text)
+  platform.analysis_settle(uuid,text,boolean,jsonb),platform.analysis_tenant_switch(boolean),platform.analysis_result(uuid),platform.analysis_cancel(uuid),platform.analysis_pending(text)
   TO north_star_analysis_controller;
 GRANT EXECUTE ON FUNCTION platform.analysis_operator_switch(text,boolean) TO north_star_analysis_operator;

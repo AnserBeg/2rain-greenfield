@@ -52,7 +52,7 @@ def host_info(engine):
     engine.preflight()
     fields = Path("/proc/meminfo").read_text().splitlines()
     available = next(int(s.split()[1])*1024 for s in fields if s.startswith("MemAvailable:"))
-    return {"available": available, "boot": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
+    return {"machine": Path("/etc/machine-id").read_text().strip(), "available": available, "boot": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
             "tick": time.monotonic(), "image": json.loads(PIN.read_text())["image"]}
 
 
@@ -72,10 +72,11 @@ def handle(engine, request):
     op = request.get("op")
     if op == "probe" and request.keys() == {"version","op"}:
         return host_info(engine)
-    require(op in ("run", "cancel", "status", "reconcile") and
+    require(op in ("run", "cancel", "status", "reconcile", "ack") and
             request.keys() == {"version","op","job"}, "protocol operation")
     job = str(uuid.UUID(request["job"]))
     require(job == request["job"], "canonical job id")
+    engine.preflight()
     folder = directory()
     path = folder / (job + ".json")
     cancel = folder / (job + ".cancel")
@@ -85,13 +86,17 @@ def handle(engine, request):
         return {"status":"cancelling"}
     if op == "status":
         return parse(path.read_bytes()) if path.exists() else {"status":"absent", "launched":False}
-    engine.preflight()
     with (folder / (job + ".lock")).open("ab") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return {"status":"active"}
         previous = parse(path.read_bytes()) if path.exists() else None
+        if op == "ack":
+            if previous and previous["status"] != "active":
+                write_state(path, {"status":"acknowledged","launched":previous["launched"]})
+                cancel.unlink(missing_ok=True)
+            return {"status":"acknowledged"}
         if previous is not None and previous["status"] != "active":
             return previous
         if op == "reconcile" or previous is not None:
