@@ -163,6 +163,24 @@
           "expected": "the packet should run its selected test"
         }
       ]
+    },
+    {
+      "name": "ci4-reverted-range",
+      "claim": "Executable changes introduced and reverted within a push still require full.",
+      "file": ".github/scripts/ci-selection.mjs",
+      "original": "if ((parent !== base || commit !== tip) && fullDiff(parent, commit))",
+      "replacement": "if (false)",
+      "test": {
+        "files": ["test/architecture/ci-main-push.test.ts"],
+        "namePattern": "a main range that undoes an executable change still runs full"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ci-main-push.test.ts",
+          "name": "a main range that undoes an executable change still runs full",
+          "expected": "an executable change inside the range needs full"
+        }
+      ]
     }
   ]
 }

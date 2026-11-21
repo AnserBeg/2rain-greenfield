@@ -129,8 +129,22 @@ export function docsOnly(base, tip) {
   );
 }
 
-export function requiresFull(base, tip) {
+function fullDiff(base, tip) {
   return !docsOnly(base, tip) || criticalDiff(base, tip);
+}
+
+export function requiresFull(base, tip) {
+  if (fullDiff(base, tip)) return true;
+  // The endpoint diff can be empty after two packets undo each other.
+  // Inspect the first-parent change of each commit introduced by the push.
+  const history = git('rev-list', '--parents', `${base}..${tip}`).trim();
+  for (const line of history.split('\n').filter(Boolean)) {
+    const [commit, parent] = line.split(' ');
+    if (!parent) return true;
+    if ((parent !== base || commit !== tip) && fullDiff(parent, commit))
+      return true;
+  }
+  return false;
 }
 
 function selectMainPush(event, head) {

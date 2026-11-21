@@ -69,6 +69,17 @@ test('a main push containing code followed by a record runs full on the push its
   assert.equal(plan.promote, false);
 });
 
+test('a main range that undoes an executable change still runs full', (t) => {
+  const { commit, git, base, select } = repository(t);
+  commit('temporary.ts', 'export {};');
+  git('revert', '--no-edit', 'HEAD');
+  assert.equal(
+    select({ before: base }).tier,
+    'full',
+    'an executable change inside the range needs full',
+  );
+});
+
 test('a docs-only main range runs quick and retains the affected document reader', (t) => {
   const { commit, base, select } = repository(t);
   commit('docs/decisions/archive.md', 'decision');

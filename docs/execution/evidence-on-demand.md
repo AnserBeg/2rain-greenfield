@@ -95,7 +95,7 @@ standalone line such as `CI tier: full https://github.com/AnserBeg/2rain-greenfi
 A selectable Critical change on a `packet/` ref stays quick. Database migrations
 match the shared `db/` path and promote to full. Quick can run explicitly changed
 or mapped PostgreSQL tests, but a migration alone maps to none. At readiness,
-a migration lane cites a successful full run on its packet tip or dispatches
+a Critical or migration lane cites a successful full run on its packet tip or dispatches
 one with `gh workflow run ci.yml --ref packet/<id> -f tier=full`. Check the
 tested SHA when citing a pull request run, which tests a synthetic merge.
 
