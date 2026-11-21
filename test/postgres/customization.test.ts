@@ -1287,13 +1287,16 @@ test(
                   return Reflect.apply(query, this, args);
                 },
               );
+              // Metered pools bind each client's query method on connection.
+              const disclosure = await openCustomizeService(next);
               try {
-                const transient = await opened.service.prepareUpgrade();
+                const transient = await disclosure.service.prepareUpgrade();
                 assert.equal(disclosureReads, 1);
                 assert.ok(transient.status === 'refused');
                 assert.equal(transient.code, 'UPGRADE_PREPARATION_FAILED');
               } finally {
                 fault.mock.restore();
+                await disclosure.close();
               }
               assert.deepEqual(log.mock.calls.at(-1)?.arguments, [
                 'UPGRADE_PREPARATION_FAILED',
