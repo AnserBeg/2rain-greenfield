@@ -1,5 +1,8 @@
 import type { WorkflowDefinition } from '../../canonical-model/src/schemas.js';
-import { renderWorkflowReview } from './workflow-review.js';
+import {
+  renderWorkflowReview,
+  workflowReviewDecision,
+} from './workflow-review.js';
 import { compileWorkflowUnattendedOperations } from './workflow-verification.js';
 import { verifiedGenerationsSql } from './verified-release-generation.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -1587,7 +1590,13 @@ export class PostgresCustomizationService {
       releaseRoot: candidate.compiled.releaseRoot,
       renderedDigest: rendered.renderedDigest,
       renderedDiff: rendered.renderedText,
-      ...(workflowReview && { workflowReviewDigest: rendered.renderedDigest }),
+      ...(workflowReview && {
+        workflowReviewDigest: workflowReviewDecision(
+          recorded.patchId,
+          rendered.renderedDigest,
+          active.pointer,
+        ),
+      }),
       revisionId: recorded.revisionId,
       reused: recorded.reused,
       status: 'drafted' as const,
@@ -1682,7 +1691,11 @@ export class PostgresCustomizationService {
       status: 'drafted' as const,
       patchId,
       renderedDiff: binding.renderedText,
-      workflowReviewDigest: binding.renderedDigest,
+      workflowReviewDigest: workflowReviewDecision(
+        patchId,
+        binding.renderedDigest,
+        active.pointer,
+      ),
     };
   }
 
@@ -1765,7 +1778,13 @@ export class PostgresCustomizationService {
           ...binding,
           ...withWorkflowReview(binding.renderedText, review),
         };
-        if (binding.renderedDigest !== reviewedDigest)
+        if (
+          workflowReviewDecision(
+            patchId,
+            binding.renderedDigest,
+            active.pointer,
+          ) !== reviewedDigest
+        )
           throw new CustomizationServiceRefusal(
             'CUSTOMIZE_DRAFT_STALE',
             'Review the workflow source and sample runs before approving this change.',

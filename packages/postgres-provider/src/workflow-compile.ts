@@ -86,8 +86,24 @@ export function compileWorkflowBody(body: string, sdk: WorkflowSdk) {
   ) {
     throw new Error('Workflow reference directives are forbidden');
   }
-  if (/\/\/[ 	]*@ts-(?:ignore|nocheck|expect-error)|\/\*+[ 	]*@ts-/u.test(body))
-    throw new Error('Workflow compiler suppression is forbidden');
+  const scanner = ts.createScanner(
+    ts.ScriptTarget.ES2022,
+    false,
+    ts.LanguageVariant.Standard,
+    body,
+  );
+  for (
+    let token = scanner.scan();
+    token !== ts.SyntaxKind.EndOfFileToken;
+    token = scanner.scan()
+  ) {
+    if (
+      (token === ts.SyntaxKind.SingleLineCommentTrivia ||
+        token === ts.SyntaxKind.MultiLineCommentTrivia) &&
+      /@ts-(?:ignore|nocheck|expect-error)\b/u.test(scanner.getTokenText())
+    )
+      throw new Error('Workflow compiler suppression is forbidden');
+  }
   lintWorkflowBody(declaration.body, file);
 
   const host = ts.createCompilerHost(options);

@@ -75,6 +75,7 @@ export function renderWorkflowReview(
     ...[...workflow.grants.operations, ...workflow.grants.queries]
       .filter((id) => !sites.some((site) => site.target === id))
       .map((id) => `${label(id)} — declared but never called`),
+    'Body digest ' + workflow.bodyDigest,
     'Source',
     source,
   ];
@@ -85,4 +86,27 @@ export function renderWorkflowReview(
     )
     .digest('hex');
   return { text, digest };
+}
+
+export function workflowReviewDecision(
+  patchId: string,
+  renderedDigest: string,
+  pointer: {
+    readonly releaseId: string | null;
+    readonly pointerId: string;
+    readonly fence: number;
+  },
+) {
+  return createHash('sha256')
+    .update(
+      canonicalize([
+        'northstar.workflow-review-decision/v1',
+        patchId,
+        renderedDigest,
+        pointer.releaseId,
+        pointer.pointerId,
+        pointer.fence,
+      ]),
+    )
+    .digest('hex');
 }

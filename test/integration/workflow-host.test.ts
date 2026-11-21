@@ -648,6 +648,13 @@ test('v2 drops event waits and caps sleep while a v1 pin retains both contracts'
   const body =
     "if (event.receiptId === event.eventId) sdk.waitForEvent('goodsReceiptPosted', 1);";
   assert.doesNotMatch(current.declarations, /waitForEvent/);
+  assert.doesNotThrow(() =>
+    compileWorkflowBody("const label = '// @ts-ignore';", current),
+  );
+  assert.throws(
+    () => compileWorkflowBody('// @ts-ignore\n' + body, current),
+    /compiler suppression/,
+  );
   assert.match(current.declarations, /90 days/);
   assert.throws(() => compileWorkflowBody(body, current), /waitForEvent/);
   const wait = {
@@ -716,4 +723,17 @@ test('a CPU overrun retries once; a watchdog kill has its own evidence', async (
     'attempt-1-host-watchdog',
     'attempt-2-host-watchdog',
   ]);
+});
+
+test('a workflow review gesture binds the observed release fence, draft and rendered bytes', async () => {
+  const { workflowReviewDecision } =
+    await import('../../packages/postgres-provider/src/workflow-review.js');
+  const pointer = { releaseId: 'release', pointerId: 'pointer', fence: 1 };
+  const shown = workflowReviewDecision('draft', 'digest', pointer);
+  assert.notEqual(
+    shown,
+    workflowReviewDecision('draft', 'digest', { ...pointer, fence: 3 }),
+  );
+  assert.notEqual(shown, workflowReviewDecision('other', 'digest', pointer));
+  assert.notEqual(shown, workflowReviewDecision('draft', 'other', pointer));
 });
