@@ -60,8 +60,8 @@
       "name": "comms-reminder-captured-zone",
       "claim": "A saved anchor needs an explicit time zone.",
       "file": "packages/domain/src/communication/reminder-deadline.ts",
-      "original": "!anchor.zone || !anchor.tzdbVersion",
-      "replacement": "!anchor.tzdbVersion",
+      "original": "if (!anchor.zone)",
+      "replacement": "if (false)",
       "test": {
         "files": ["test/unit/reminder-deadline.test.ts"],
         "namePattern": "refuse a missing capture and invalid leads"
@@ -71,24 +71,6 @@
           "file": "test/unit/reminder-deadline.test.ts",
           "name": "refuse a missing capture and invalid leads",
           "expected": "did not match|Missing expected exception"
-        }
-      ]
-    },
-    {
-      "name": "comms-reminder-captured-tzdb",
-      "claim": "The recorded capture must identify its tzdb version.",
-      "file": "packages/domain/src/communication/reminder-deadline.ts",
-      "original": "!anchor.zone || !anchor.tzdbVersion",
-      "replacement": "!anchor.zone",
-      "test": {
-        "files": ["test/unit/reminder-deadline.test.ts"],
-        "namePattern": "refuse a missing capture and invalid leads"
-      },
-      "kills": [
-        {
-          "file": "test/unit/reminder-deadline.test.ts",
-          "name": "refuse a missing capture and invalid leads",
-          "expected": "Missing expected exception"
         }
       ]
     },

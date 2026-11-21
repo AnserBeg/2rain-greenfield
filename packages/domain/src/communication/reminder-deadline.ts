@@ -1,10 +1,10 @@
-import { BillingCalendar, hourMs, instant, iso } from '../billing/calendar.js';
+import { CivilCalendar, hourMs, instant, iso } from '../billing/calendar.js';
 
 /** The governed anchor query supplies the entered civil value and the capture.
  * For an inclusive date interval, endDate is its last entered date. */
 export type ReminderAnchor = {
   zone: string;
-  tzdbVersion: string;
+  tzdbVersion?: string;
 } & (
   | { kind: 'instant'; instant: string; civil: string }
   | {
@@ -43,8 +43,7 @@ export function resolveReminderDeadline(
     lead.amount > 720
   )
     throw new RangeError('Reminder lead must be between 1 and 720');
-  if (!anchor.zone || !anchor.tzdbVersion)
-    throw new Error('Reminder requires a captured zone and tzdb version');
+  if (!anchor.zone) throw new Error('Reminder requires a captured zone');
 
   const local =
     anchor.kind === 'instant'
@@ -55,16 +54,11 @@ export function resolveReminderDeadline(
           ? '00:00:00.000'
           : anchor.zoneSource.dayBoundary);
   const wall = instant(local + 'Z');
-  // Start the resolver at the saved instant for a timed value. A date-only
-  // capture supplies wall coordinates, so its boundary must be resolved too.
-  const resolver = new BillingCalendar(
-    anchor.kind === 'instant' ? instant(anchor.instant) : wall - 2 * dayMs,
-    anchor.zone,
-  );
+  const resolver = new CivilCalendar(anchor.zone);
   const anchorMs =
     anchor.kind === 'instant'
       ? instant(anchor.instant)
-      : resolver.resolve(wall);
+      : resolver.resolveBoundary(wall);
   let due: number;
   let calendarPin;
   switch (lead.unit) {
@@ -72,7 +66,7 @@ export function resolveReminderDeadline(
       due = anchorMs - lead.amount * hourMs;
       break;
     case 'civilDays':
-      due = resolver.resolve(wall - lead.amount * dayMs);
+      due = resolver.resolveBoundary(wall - lead.amount * dayMs);
       break;
     case 'workingDays': {
       const anchorDate = local.slice(0, 10);
@@ -88,7 +82,7 @@ export function resolveReminderDeadline(
       const date = priorDates.at(-lead.amount);
       if (!date)
         throw new Error('Working calendar does not cover reminder lead');
-      due = resolver.resolve(instant(date + local.slice(10) + 'Z'));
+      due = resolver.resolveBoundary(instant(date + local.slice(10) + 'Z'));
       calendarPin = {
         calendarId: calendar.calendarId,
         revisionId: calendar.revisionId,
@@ -100,7 +94,7 @@ export function resolveReminderDeadline(
     anchorInstant: iso(anchorMs),
     deadline: iso(due),
     zone: anchor.zone,
-    anchorTzdbVersion: anchor.tzdbVersion,
+    ...(anchor.tzdbVersion && { anchorTzdbVersion: anchor.tzdbVersion }),
     tzdbVersion: process.versions.tz,
     boundaryRule: 'ADR-0083/A1' as const,
     ...(calendarPin && { workingCalendar: calendarPin }),

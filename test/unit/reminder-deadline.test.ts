@@ -118,14 +118,34 @@ test('working leads use the entire published horizon including Saturday work and
 
 test('refuse a missing capture and invalid leads', () => {
   const anchor = timed('2026-03-09T08:30:00.000Z', '2026-03-09T02:30:00.000');
-  for (const field of ['zone', 'tzdbVersion'])
-    assert.throws(
-      () => resolveReminderDeadline({ ...anchor, [field]: '' }, lead),
-      /captured zone/u,
-    );
-  for (const amount of [0, -1, 0.5, 721, NaN])
+  assert.throws(
+    () => resolveReminderDeadline({ ...anchor, zone: '' }, lead),
+    /captured zone/u,
+  );
+  const { tzdbVersion: _version, ...legacyCapture } = anchor;
+  assert.equal(
+    resolveReminderDeadline(legacyCapture, lead).tzdbVersion,
+    process.versions.tz,
+  );
+  for (const amount of [0, -1, 1.5, 721, NaN])
     assert.throws(
       () => resolveReminderDeadline(anchor, { ...lead, amount }),
       /between 1 and 720/u,
     );
+});
+
+test('the earlier London overlap applies to a date-only boundary two civil days ahead', () => {
+  const anchor: ReminderAnchor = {
+    kind: 'date',
+    endDate: '2026-10-27',
+    zone: 'Europe/London',
+    zoneSource: {
+      kind: 'companyBusinessCalendar',
+      dayBoundary: '01:30:00.000',
+    },
+  };
+  assert.equal(
+    resolveReminderDeadline(anchor, { amount: 2, unit: 'civilDays' }).deadline,
+    '2026-10-25T00:30:00.000Z',
+  );
 });

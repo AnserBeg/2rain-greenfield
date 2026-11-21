@@ -36,15 +36,10 @@ export interface CalendarPin {
     offsetMilliseconds: number;
   }[];
 }
-export class BillingCalendar {
+/** ADR-0083 A1 maps a derived civil boundary through IANA gaps and folds. */
+export class CivilCalendar {
   private readonly format: Intl.DateTimeFormat;
-  readonly wallAnchor: number;
-  private readonly cache = new Map<number, number>();
-  constructor(
-    readonly start: number,
-    readonly zone: string,
-    private readonly pinned?: CalendarPin,
-  ) {
+  constructor(zone: string) {
     this.format = new Intl.DateTimeFormat('en-GB', {
       timeZone: zone,
       calendar: 'iso8601',
@@ -57,20 +52,6 @@ export class BillingCalendar {
       second: '2-digit',
       hourCycle: 'h23',
     });
-    if (pinned) {
-      if (pinned.zone !== zone || pinned.boundaries.length > 4097)
-        throw new Error('Incompatible pinned calendar');
-      for (const b of pinned.boundaries)
-        this.cache.set(instant(b.local + 'Z'), instant(b.instant));
-      const first = pinned.boundaries.find(
-        (b) =>
-          instant(b.instant) === start &&
-          instant(b.local + 'Z') === start + b.offsetMilliseconds,
-      );
-      if (!first) throw new Error('Billing replay lacks the original anchor');
-      this.wallAnchor = instant(first.local + 'Z');
-    } else this.wallAnchor = this.wallAt(start);
-    this.cache.set(this.wallAnchor, start); // The source gives the first instant explicitly.
   }
   wallAt(ms: number) {
     const parts = Object.fromEntries(
@@ -89,12 +70,7 @@ export class BillingCalendar {
     );
     return date.valueOf();
   }
-  resolve(wall: number): number {
-    const cached = this.cache.get(wall);
-    if (cached !== undefined) return cached;
-    if (this.pinned) throw new Error('Billing replay lacks a pinned boundary');
-    if (this.cache.size > 4096)
-      throw new Error('Billing calendar boundary limit exceeded');
+  resolveBoundary(wall: number): number {
     const before = wall - 2 * dayMs,
       after = wall + 2 * dayMs;
     const firstOffset = this.wallAt(before) - before,
@@ -119,6 +95,41 @@ export class BillingCalendar {
         throw new Error('Unresolvable billing day');
       ms = hi;
     }
+    return ms;
+  }
+}
+
+export class BillingCalendar extends CivilCalendar {
+  readonly wallAnchor: number;
+  private readonly cache = new Map<number, number>();
+  constructor(
+    readonly start: number,
+    readonly zone: string,
+    private readonly pinned?: CalendarPin,
+  ) {
+    super(zone);
+    if (pinned) {
+      if (pinned.zone !== zone || pinned.boundaries.length > 4097)
+        throw new Error('Incompatible pinned calendar');
+      for (const b of pinned.boundaries)
+        this.cache.set(instant(b.local + 'Z'), instant(b.instant));
+      const first = pinned.boundaries.find(
+        (b) =>
+          instant(b.instant) === start &&
+          instant(b.local + 'Z') === start + b.offsetMilliseconds,
+      );
+      if (!first) throw new Error('Billing replay lacks the original anchor');
+      this.wallAnchor = instant(first.local + 'Z');
+    } else this.wallAnchor = this.wallAt(start);
+    this.cache.set(this.wallAnchor, start); // The source gives the first instant explicitly.
+  }
+  resolve(wall: number): number {
+    const cached = this.cache.get(wall);
+    if (cached !== undefined) return cached;
+    if (this.pinned) throw new Error('Billing replay lacks a pinned boundary');
+    if (this.cache.size > 4096)
+      throw new Error('Billing calendar boundary limit exceeded');
+    const ms = this.resolveBoundary(wall);
     this.cache.set(wall, ms);
     return ms;
   }
