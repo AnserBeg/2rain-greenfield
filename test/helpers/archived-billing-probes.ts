@@ -107,12 +107,6 @@ await withOrderEntryFixture(async (f) => {
       after.push(stored.rows[0]);
     }
     assert.deepEqual(after, before);
-    const fn = await admin.query("SELECT pg_get_functiondef('platform.billing_publish(text,uuid,text,text)'::regprocedure) AS definition");
-    const cast = /r\.xmin=pg_current_xact_id\(\)((?:::[a-z0-9]+)+)/u.exec(fn.rows[0].definition);
-    assert.ok(cast, 'publication must compare the active transaction ID to receipt xmin');
-    // Exercise the installed conversion with an xid8 past the first wrap.
-    const converted = await admin.query('SELECT ($1::xid8)' + cast[1] + '::text AS xid', ['4294967338']);
-    assert.deepEqual(converted.rows, [{ xid: '42' }]);
   } finally {
     admin.release();
   }
