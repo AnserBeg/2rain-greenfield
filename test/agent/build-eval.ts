@@ -273,6 +273,20 @@ function valueFor(
         ? text.slice(0, field.bounds.maximumLength)
         : text;
     }
+    case 'timeFieldType':
+      return field.temporal.precision === 'millisecond'
+        ? '17:00:00.000'
+        : '17:00:00';
+    case 'dateTimeFieldType': {
+      const wall =
+        field.temporal.precision === 'millisecond'
+          ? '2026-11-20T17:00:00.000'
+          : '2026-11-20T17:00:00';
+      if (field.temporal.timezoneSemantics === 'utcInstant') return `${wall}Z`;
+      if (field.temporal.timezoneSemantics === 'offsetDateTime')
+        return `${wall}+00:00`;
+      return wall;
+    }
     default:
       throw new Error(`no eval value for ${field.fieldKind}`);
   }
@@ -636,7 +650,16 @@ async function updateExisting(
   const rows = await listRecords(world, local);
   // The demo seed has no record of some first-party types (purchase orders):
   // then one is created, every writable field filled, the new one included.
-  if (!rows.length) return createRecord(world, catalogue, local);
+  if (!rows.length) {
+    const created = await createRecord(world, catalogue, local);
+    // Only the new fields are this change's; the rest are the type's own.
+    return {
+      ...created,
+      values: Object.fromEntries(
+        Object.entries(created.values).filter(([id]) => id in patch),
+      ),
+    };
+  }
   let last: unknown = new Error(`no ${local} record to update`);
   for (const row of rows.slice(0, 8)) {
     try {
