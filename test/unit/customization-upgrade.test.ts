@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { replayCustomizationPatches } from '../../packages/customization/src/upgrade-replay.js';
 import * as customization from '../../packages/customization/src/index.js';
 import { normalizeApplicationPackage } from '../../packages/canonical-model/src/index.js';
 import { VALIDATION_NODE_VERSION } from '../../packages/canonical-model/src/formula-validation.js';
@@ -121,6 +122,7 @@ function declaration(def: Base, table: string, key: string, subject: string) {
   return found;
 }
 interface ReplayCase {
+  prefix?: unknown[];
   conflict: Base;
   change: unknown;
   code: string;
@@ -322,9 +324,10 @@ const cases = {
     ),
   ),
   narrowPermission: retiredAction(limit),
-  unNarrowPermission: retiredAction(
-    changeSet(limit, { ...limit, kind: 'unNarrowPermission' }),
-  ),
+  unNarrowPermission: {
+    ...retiredAction({ ...limit, kind: 'unNarrowPermission' }),
+    prefix: [limit],
+  },
   saveWorkflow: retirement('queries', 'queryId', id('query.item_list'), {
     kind: 'saveWorkflow',
     workflow: {
@@ -389,14 +392,15 @@ test('upgrade diagnostic codes and meanings match v1', () => {
 });
 for (const [kind, example] of Object.entries(cases)) {
   test(`upgrade replay of ${kind} accepts a compatible base and identifies a conflicting base`, async () => {
-    const chain = [patch(example.change)];
-    const origins = [
-      {
-        patchId: '7d2d4a88-f026-4485-b081-3be230bc587f',
-        parent: base,
-        differentBase: true,
-      },
-    ];
+    const chain = [
+      ...('prefix' in example ? example.prefix : []),
+      example.change,
+    ].map(patch);
+    const origins = chain.map((_, index) => ({
+      patchId: String(index + 1),
+      differentBase: true,
+      ...(index === 0 && { parent: base }),
+    }));
     const conflict = customization.compileCustomizationCandidate({
       acknowledgement,
       base: example.conflict,
@@ -412,7 +416,7 @@ for (const [kind, example] of Object.entries(cases)) {
           (kind === 'changeSet' || f.patchKind === kind) &&
           f.subject === example.subject &&
           f.code === example.code &&
-          f.patchId === origins[0]!.patchId,
+          f.patchId === origins.at(-1)!.patchId,
       ),
       JSON.stringify(conflict),
     );
@@ -622,5 +626,205 @@ test('an unrelated layout edit is still checked when its sibling refers to a fai
   assert.deepEqual(
     result.blocked.map((b) => [b.patchId, b.editIndex, b.blockedBy.patchId]),
     [['2', 0, '1']],
+  );
+});
+
+function replayApplied(target: Base, change: unknown) {
+  const result = replayCustomizationPatches(
+    target,
+    [patch(change)],
+    [{ parent: base, differentBase: true, patchId: 'saved' }],
+  );
+  assert.ok(
+    result.status === 'applied',
+    JSON.stringify(result.status === 'applied' ? null : result),
+  );
+  return result.authored;
+}
+function replayedLayout(target: Base, revision: customization.LayoutRevision) {
+  const result = replayApplied(target, revision);
+  const surface = declaration(
+    result,
+    'surfaces',
+    'surfaceId',
+    revision.surface,
+  );
+  return (
+    surface.layouts as import('../../packages/canonical-model/src/index.js').SurfaceLayout[]
+  ).find((l) => l.body.mode === revision.mode)!;
+}
+function salesColumns(target: Base) {
+  const page = declaration(
+    target,
+    'surfaces',
+    'surfaceId',
+    salesPage.body.surfaceId,
+  );
+  return (page.composition as { fields: { field: string; orderKey: number }[] })
+    .fields;
+}
+function rename(target: customization.LayoutTarget, member: string) {
+  return customization.layoutCommand(target, {
+    action: 'rename',
+    member,
+    label: 'Office label',
+  });
+}
+test('an appended choice preserves a list column and a form override', () => {
+  const target = structuredClone(base);
+  appendOption(target, id('option.sales_order_payment_terms_net_90'), 'Net 90');
+  const edited = replayApplied(target, {
+    kind: 'arrangeLayout',
+    surface: id('surface.sales_order_list'),
+    relabel: [{ field: terms, label: 'Due terms' }],
+  });
+  const list = declaration(
+    edited,
+    'surfaces',
+    'surfaceId',
+    id('surface.sales_order_list'),
+  ).list as { columns: Base[] };
+  assert.equal(list.columns.find((c) => c.field === terms)?.label, 'Due terms');
+  const layout = replayedLayout(target, rename(form, terms));
+  assert.equal(
+    layout.body.sections.flatMap((s) => s.fields).find((f) => f.id === terms)!
+      .label.text,
+    'Office label',
+  );
+});
+test('a document header label preserves the tenant override on a different base', () => {
+  const target = structuredClone(base);
+  const customer = id('field.sales_order_customer_party_id');
+  for (const surface of target.surfaces as Base[]) {
+    const editor = surface.documentEditor as
+      { headerFormSurfaceId: string; headerFields: Base[] } | undefined;
+    if (editor?.headerFormSurfaceId === form.body.surfaceId)
+      editor.headerFields.find((f) => f.fieldId === customer)!.label = 'Client';
+  }
+  const layout = replayedLayout(target, rename(form, customer));
+  assert.equal(
+    layout.body.sections.flatMap((s) => s.fields).find((f) => f.id === customer)
+      ?.label.text,
+    'Office label',
+  );
+});
+test('an early optional detail field changes the eighth field tier and goes last when it has no predecessor', () => {
+  const target = applied(base, [
+    {
+      ...field,
+      entity: id('entity.sales_order'),
+      field: { label: 'Dock code', type: 'text' },
+    },
+  ]);
+  const added = id('field.custom_sales_order_dock_code');
+  salesColumns(target).find((c) => c.field === added)!.orderKey = 1;
+  const eighth = salesPage.body.sections[0]!.fields[7]!;
+  assert.equal(eighth.tier, 'always');
+  const layout = replayedLayout(target, rename(salesPage, eighth.id));
+  const fields = layout.body.sections[0]!.fields;
+  assert.equal(fields.find((f) => f.id === eighth.id)!.tier, 'progressive');
+  assert.equal(
+    fields.find((f) => f.id === eighth.id)!.label.text,
+    'Office label',
+  );
+  assert.equal(fields.at(-1)!.id, added);
+  assert.equal(layout.placementRuleVersion, 1);
+});
+test('moving a section does not bind its untouched children', () => {
+  const shipping = salesPage.body.sections.find((s) =>
+    s.fields.some((f) => f.id === city),
+  )!;
+  const layout = replayedLayout(
+    salesDefinition('retired'),
+    customization.layoutCommand(salesPage, {
+      action: 'up',
+      member: shipping.id,
+    }),
+  );
+  assert.ok(
+    !layout.body.sections.flatMap((s) => s.fields).some((f) => f.id === city),
+  );
+  assert.equal(
+    layout.body.order.indexOf(shipping.id),
+    salesPage.body.order.indexOf(shipping.id) - 1,
+  );
+});
+test('a renamed member may cross an untouched sibling on its base', () => {
+  const target = structuredClone(base);
+  const region = id('field.sales_order_ship_to_region');
+  const fields = salesColumns(target);
+  const a = fields.find((c) => c.field === city)!;
+  const b = fields.find((c) => c.field === region)!;
+  [a.orderKey, b.orderKey] = [b.orderKey, a.orderKey];
+  const layout = replayedLayout(target, rename(salesPage, region));
+  const group = layout.body.sections.find((s) =>
+    s.fields.some((f) => f.id === region),
+  )!.fields;
+  assert.ok(
+    group.findIndex((f) => f.id === region) <
+      group.findIndex((f) => f.id === city),
+  );
+  assert.equal(group.find((f) => f.id === region)!.label.text, 'Office label');
+});
+test('a change of scope reports the expected and observed classification', () => {
+  const target = structuredClone(base);
+  declaration(target, 'fields', 'fieldId', price).classification =
+    'confidential';
+  const result = inspectReplay(target, [rule]);
+  assert.equal(result.status, 'replayConflict');
+  assert.deepEqual(
+    result.findings.map((f) => [f.code, f.subject, f.expected, f.observed]),
+    [['INCOMPATIBLE_SCOPE', price, 'internal', 'confidential']],
+  );
+});
+test('a valid historical edit must reproduce on its recorded parent', () => {
+  const revision = rename(form, terms);
+  revision.resultLayoutDigest = '0'.repeat(64);
+  const result = inspectReplay(base, [revision]);
+  assert.equal(result.status, 'replayConflict');
+  assert.deepEqual(
+    result.findings.map((f) => [f.patchId, f.code]),
+    [['1', 'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE']],
+  );
+  assert.match(String(result.findings[0]!.observed), /digest/u);
+});
+test('an ordinary draft needs the authoring parent of each different-base layout', () => {
+  const result = customization.applyCustomizationPatches(
+    base,
+    [rename(form, terms)],
+    [{ patchId: 'saved', differentBase: true }],
+  );
+  assert.equal(result.status, 'refused');
+  assert.match(result.message, /authoring parent is missing/u);
+});
+test('report subjects are sorted inside each edit before moving to the next patch', () => {
+  const target = structuredClone(base);
+  const sku = id('field.item_sku'),
+    name = id('field.item_name');
+  for (const subject of [sku, name])
+    declaration(target, 'fields', 'fieldId', subject).lifecycle = 'retired';
+  const result = inspectReplay(target, [
+    {
+      kind: 'arrangeLayout',
+      surface: itemList,
+      relabel: [
+        { field: sku, label: 'Code' },
+        { field: name, label: 'Title' },
+      ],
+    },
+    {
+      kind: 'arrangeLayout',
+      surface: itemList,
+      relabel: [{ field: name, label: 'Stock' }],
+    },
+  ]);
+  assert.equal(result.status, 'replayConflict');
+  assert.deepEqual(
+    result.findings.map((f) => [f.patchIndex, f.editIndex, f.subject]),
+    [
+      [0, 0, name],
+      [0, 0, sku],
+      [1, 0, name],
+    ],
   );
 });

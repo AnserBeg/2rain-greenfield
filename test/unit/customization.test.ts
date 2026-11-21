@@ -2123,6 +2123,17 @@ test('detail layout moves whole protected blocks, preserves read-only bindings a
     layoutBindingsProblem(unbound, 28, {}, queries) ?? '',
     /bound read/u,
   );
+  layout.placementRuleVersion = 1;
+  assert.equal(layoutDeclarationProblem(applied.authored, manifest, 34), null);
+  assert.equal(layoutBindingsProblem(manifest, 34, {}, queries), null);
+  assert.match(
+    layoutDeclarationProblem(applied.authored, manifest, 33) ?? '',
+    /reader floor/u,
+  );
+  assert.match(
+    layoutBindingsProblem(manifest, 33, {}, queries) ?? '',
+    /reader floor/u,
+  );
   const altered = structuredClone(layout);
   altered.body.sections[0]!.fields[0]!.binding = 'other-column';
   altered.resultLayoutDigest = layoutDigest(altered.body);

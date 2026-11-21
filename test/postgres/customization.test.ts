@@ -1219,6 +1219,48 @@ test(
                 ),
                 report,
               );
+              const target =
+                parseCompiledApplication(compiledApplication).application;
+              const pkg =
+                normalizeApplicationPackage(firstPartyAuthored).package;
+              const identity = {
+                version: 'northstar.upgrade-report/v1',
+                tenantId: boot.identity.tenantId,
+                environmentId: boot.identity.environmentId,
+                sourceReleaseId: source,
+                sourceFence: String(status.activeFence),
+                targetPackageId: pkg.packageId,
+                targetVersion: pkg.version,
+                targetRoot: target.compiled.releaseRoot,
+                approvalMode: 'Manual',
+              };
+              assert.deepEqual(
+                { ...report, findings: [], blocked: [] },
+                {
+                  ...identity,
+                  upgradeId: createHash('sha256')
+                    .update(canonicalize(identity))
+                    .digest('hex'),
+                  findings: [],
+                  blocked: [],
+                },
+              );
+              await pool.query(
+                'ALTER TABLE platform.customization_patches RENAME TO unavailable_patches',
+              );
+              try {
+                const transient = await opened.service.prepareUpgrade();
+                assert.ok(transient.status === 'refused');
+                assert.equal(transient.code, 'UPGRADE_PREPARATION_FAILED');
+              } finally {
+                await pool.query(
+                  'ALTER TABLE platform.unavailable_patches RENAME TO customization_patches',
+                );
+              }
+              assert.deepEqual(
+                (await opened.service.status()).upgradeRefusal,
+                status.upgradeRefusal,
+              );
               assert.equal(report.sourceReleaseId, source);
               assert.equal(report.sourceFence, String(status.activeFence));
               assert.deepEqual(
@@ -1546,6 +1588,27 @@ test(
             (await listEquipment(boot)).records.map((r) => r.recordId),
             [recordId],
           );
+          const later = await newer.service.draft(
+            draftLayoutRevision(layout, [
+              {
+                kind: 'rename',
+                schemaVersion: 'v6',
+                id: delivery,
+                parent: layout.body.slotId,
+                label: { schemaVersion: 'v6', text: 'Receiving dock' },
+              },
+            ]),
+            'declarativeEditor',
+          );
+          assert.ok(later.status === 'drafted', JSON.stringify(later));
+          const withDraft = await patches();
+          assert.deepEqual(
+            withDraft.filter(
+              ({ row }) =>
+                (row as { patch_id: string }).patch_id !== later.patchId,
+            ),
+            before,
+          );
           assert.equal(
             (
               await newer.service.rollback(
@@ -1555,7 +1618,7 @@ test(
             ).releaseId,
             source,
           );
-          assert.deepEqual(await patches(), before);
+          assert.deepEqual(await patches(), withDraft);
         } finally {
           await newer.close();
           await boot.close();
