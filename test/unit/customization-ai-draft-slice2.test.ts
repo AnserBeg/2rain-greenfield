@@ -128,6 +128,26 @@ test('the tool schema is one top-level object a provider accepts', () => {
   const text = JSON.stringify(schema);
   assert.doesNotMatch(text, /\\\\p\{/u, 'no Unicode property escapes');
   assert.doesNotMatch(text, /\$schema/u);
+  // A key that is an object in one kind and text in another invites the
+  // model to send the object as a JSON string (live F01, 2026-11-21). Only
+  // the long-standing `target` (a link's ID, a permission's operation) may.
+  const kinds = (node: unknown): string[] => {
+    const value = node as { type?: string; anyOf?: unknown[] };
+    return value.anyOf ? value.anyOf.flatMap(kinds) : [String(value.type)];
+  };
+  const mixed = (properties: Record<string, unknown>) =>
+    Object.entries(properties)
+      .filter(([, node]) => {
+        const types = new Set(kinds(node));
+        return types.has('object') && types.has('string');
+      })
+      .map(([key]) => key);
+  const top = schema.properties as Record<string, unknown>;
+  const member = (
+    top.patches as { items: { properties: Record<string, unknown> } }
+  ).items.properties;
+  assert.deepEqual(mixed(top), ['target']);
+  assert.deepEqual(mixed(member), []);
 });
 
 test('the platform rules name every patch refusal code, and the distinct-label rule', () => {
@@ -333,7 +353,7 @@ test('an address field and its map draft from a record type and a label', async 
     kind: 'changeSet',
     patches: [
       { kind: 'addAddressField', entity: party, label: 'Delivery address' },
-      { kind: 'addMapPlacement', field: 'Delivery address' },
+      { kind: 'addMapPlacement', addressField: 'Delivery address' },
     ],
   });
   assert.ok(patch.kind === 'changeSet');

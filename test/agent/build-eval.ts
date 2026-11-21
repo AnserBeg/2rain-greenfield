@@ -953,11 +953,13 @@ class PromptCaptured extends Error {}
 export async function capturePrompt(
   world: AgentWorld,
   c: BuildCase,
+  sandboxWallClockMilliseconds?: number,
 ): Promise<CapturedPrompt> {
   let captured: CapturedPrompt | undefined;
   const opened = await openCustomizeService({
     databaseUrl: world.databaseUrl,
     tenantSlug: world.tenantSlug,
+    ...(sandboxWallClockMilliseconds ? { sandboxWallClockMilliseconds } : {}),
     draftingProvider: () =>
       Promise.resolve({
         modelId: 'capture',
@@ -1021,12 +1023,14 @@ export interface CaseOptions {
   readonly log: CaseLog;
   /** The run's spend meter; every drafting call is charged against its cap. */
   readonly meter?: SpendMeter;
+  /** The isolated compile's bound on a loaded host (default: the app's). */
+  readonly sandboxWallClockMilliseconds?: number;
 }
 
 export async function runBuildCase(
   world: AgentWorld,
   c: BuildCase,
-  { provider, log, meter }: CaseOptions,
+  { provider, log, meter, sandboxWallClockMilliseconds }: CaseOptions,
 ): Promise<CaseResult> {
   const calls: ModelCallRecord[] = [];
   const result: CaseResult = {
@@ -1056,6 +1060,7 @@ export async function runBuildCase(
     tenantSlug: world.tenantSlug,
     draftingProvider: () =>
       Promise.resolve(recordingModel(provider(), calls, meter)),
+    ...(sandboxWallClockMilliseconds ? { sandboxWallClockMilliseconds } : {}),
   });
   const started = performance.now();
   try {

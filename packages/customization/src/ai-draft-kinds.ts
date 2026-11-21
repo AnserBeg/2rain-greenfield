@@ -111,7 +111,7 @@ export const DRAFTER_SELECTION_SCHEMAS = {
   }),
   addMapPlacement: z.strictObject({
     kind: z.literal('addMapPlacement'),
-    field: id,
+    addressField: id,
     surface: id.optional(),
     sectionId: z.string().min(1).max(512).optional(),
   }),
@@ -125,7 +125,7 @@ export const DRAFTER_SELECTION_SCHEMAS = {
   }),
   addUploadCategory: z.strictObject({
     kind: z.literal('addUploadCategory'),
-    field: id,
+    filesField: id,
     label: name,
     maxCount: z.number().int().min(1).max(20).optional(),
   }),
@@ -205,7 +205,7 @@ export const DRAFTER_KINDS = {
   addMapPlacement: {
     input: DRAFTER_SELECTION_SCHEMAS.addMapPlacement,
     guidance:
-      "Show an Address field's map on its record page. field is a listed Address field ID or the label of an addAddressField earlier in the change set; surface and sectionId default to the record page section holding the field.",
+      "Show an Address field's map on its record page. addressField is a listed Address field ID or the label of an addAddressField earlier in the change set; surface and sectionId default to the record page section holding the field.",
   },
   addDocumentField: {
     input: DRAFTER_SELECTION_SCHEMAS.addDocumentField,
@@ -214,7 +214,8 @@ export const DRAFTER_KINDS = {
   },
   addUploadCategory: {
     input: DRAFTER_SELECTION_SCHEMAS.addUploadCategory,
-    guidance: 'A new internal upload category on a listed files field.',
+    guidance:
+      'A new internal upload category on a listed files field (filesField: its ID).',
   },
   narrowPermission: {
     input: member('narrowPermission'),

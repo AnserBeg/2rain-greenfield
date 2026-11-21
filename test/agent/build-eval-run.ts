@@ -83,6 +83,9 @@ async function main(): Promise<void> {
       // Where the captured prompts go (scratch, never committed), so a later
       // bake-off sends exactly the in-app requests.
       'prompts-out': { type: 'string' },
+      // The isolated compile's bound for this run: a loaded host must not
+      // score a slow compile as a failed draft. 0 keeps the app's default.
+      'sandbox-ms': { type: 'string', default: '600000' },
     },
   });
   const cap = Number(args.cap);
@@ -134,6 +137,7 @@ async function main(): Promise<void> {
       })
     : undefined;
   const meter = new SpendMeter(prices, cap);
+  const sandboxMs = Number(args['sandbox-ms']) || undefined;
 
   const date = new Date().toISOString().slice(0, 10);
   const stamp = new Date().toISOString().replaceAll(/[:.]/gu, '-');
@@ -157,7 +161,7 @@ async function main(): Promise<void> {
       for (const c of cases) {
         const world = await worlds.fresh(`capture-${c.id}`);
         try {
-          prompts.push(await capturePrompt(world, c));
+          prompts.push(await capturePrompt(world, c, sandboxMs));
           say(`${c.id}: prompt captured`);
         } catch (error) {
           say(`${c.id}: prompt not captured: ${errorText(error, secrets)}`);
@@ -230,6 +234,7 @@ async function main(): Promise<void> {
               : (model ??
                 scriptedModel(recorded!.turns.map((turn) => () => turn))),
           ...(model ? { meter } : {}),
+          ...(sandboxMs ? { sandboxWallClockMilliseconds: sandboxMs } : {}),
           log,
         });
         if (recorded) {

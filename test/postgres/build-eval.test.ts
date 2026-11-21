@@ -414,7 +414,7 @@ test(
                   entity: `${NS}:entity.party`,
                   label: 'Delivery address',
                 },
-                { kind: 'addMapPlacement', field: 'Delivery address' },
+                { kind: 'addMapPlacement', addressField: 'Delivery address' },
               ],
             }),
           ]);

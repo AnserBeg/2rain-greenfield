@@ -454,7 +454,14 @@ export async function openCustomizeService(
   options: Pick<
     ComposedApplicationServerOptions,
     'compiledApplication' | 'databaseUrl' | 'tenantSlug' | 'draftingProvider'
-  >,
+  > & {
+    /**
+     * The isolated compile's wall-clock bound. The live eval raises it on a
+     * loaded host so a slow machine is not scored as a failed draft; the app
+     * keeps the sandbox default.
+     */
+    readonly sandboxWallClockMilliseconds?: number;
+  },
 ) {
   const authoredPath = new URL(
     '../../web/release/app.authored.json',
@@ -476,6 +483,13 @@ export async function openCustomizeService(
       authoredPath,
       String((firstPartyAuthored.package as Record<string, unknown>).packageId),
     ),
+    ...(options.sandboxWallClockMilliseconds
+      ? {
+          sandbox: {
+            wallClockLimitMilliseconds: options.sandboxWallClockMilliseconds,
+          },
+        }
+      : {}),
     capabilityOperationExecutorFactories: CAPABILITY_EXECUTOR_FACTORIES,
     compiledApplication:
       options.compiledApplication ??

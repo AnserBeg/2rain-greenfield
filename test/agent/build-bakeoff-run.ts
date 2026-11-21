@@ -228,6 +228,7 @@ async function main(): Promise<void> {
       // holds provider content for repair turns: scratch only, never committed.
       'drafts-out': { type: 'string' },
       'drafts-in': { type: 'string' },
+      'sandbox-ms': { type: 'string', default: '600000' },
     },
   });
   if (!args.prompts) throw new Error('--prompts is required');
@@ -448,6 +449,8 @@ async function main(): Promise<void> {
                   log({ kind: 'prompt-mismatch' });
                 }),
               meter: scoring,
+              sandboxWallClockMilliseconds:
+                Number(args['sandbox-ms']) || 90_000,
               log,
             });
             if (!mismatched.has(c.id)) tally.charge(drafted.turn.usage);
