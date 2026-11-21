@@ -10,7 +10,7 @@ Preview and activation use CUSTOMIZE-5’s pooled-table probe from migration 006
 
 Grouped table and CSV output, scoped index admission and revision replay serve distribution (Invoices), field service (Inspections) and clinics (visits). Each business selects its record type, operands and labels in the declaration.
 
-CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44962030383
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44963499226
 
 ## Slice plan
 
@@ -64,15 +64,15 @@ Resolved by the design read and orchestrator rulings: a report’s index on an e
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "REPORTS-1",
-  "base": "6a991b21f6faa7df9833a8e27cee5aac5c0d7bf9", "head": "79dc5b0ab8c02829564bc2905983e64546f853ea",
+  "base": "6a991b21f6faa7df9833a8e27cee5aac5c0d7bf9", "head": "9cec1e717ff08b9504da2f0072130e8290715410",
   "changedPaths": [
     "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json", "apps/web/src/component-registry.ts", "apps/web/src/customize-report.ts", "apps/web/src/customize-screen.ts", "apps/web/src/grouped-report.ts", "apps/web/src/ledger-styles.ts", "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts",
     "apps/web/test/browser/customize-inspection.composed-application.spec.ts", "apps/web/test/browser/customize.composed-application.spec.ts", "package.json", "packages/canonical-model/src/constants.ts", "packages/canonical-model/src/declared-report.ts", "packages/canonical-model/src/grouped-aggregate.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/normalize.ts", "packages/canonical-model/src/schemas.ts",
     "packages/compiler/src/declared-reports.ts", "packages/compiler/src/projections.ts", "packages/compiler/src/storage.ts", "packages/customization/src/ai-draft.ts", "packages/customization/src/apply.ts", "packages/customization/src/index.ts", "packages/customization/src/patch.ts", "packages/customization/src/render.ts", "packages/customization/src/report-revision.ts",
     "packages/customization/src/targets.ts", "packages/customization/src/upgrade-diagnostics.ts", "packages/customization/src/upgrade-replay.ts", "packages/domain/src/sales/definition.ts", "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/grouped-report.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/module-storage-materializer.ts", "packages/postgres-provider/src/release-repository.ts",
-    "packages/postgres-provider/src/report-index-build.ts", "packages/postgres-provider/src/serving-gateways.ts", "packages/runtime/src/declared-report.ts", "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-query-gateway.ts", "test/architecture/repository-hygiene.test.ts", "test/compiler/report-company-access.test.ts", "test/evidence/REPORTS-1-s1.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json",
-    "test/helpers/application-before-stock-count-workflow.ts", "test/helpers/archived-runtime-process.ts", "test/helpers/reachability-producers.ts", "test/helpers/reports-preceding-release.ts", "test/postgres/booking-serving.test.ts", "test/postgres/customization-inspection.test.ts", "test/postgres/date-time-field.test.ts", "test/postgres/document-attachments.test.ts", "test/postgres/releases.test.ts",
-    "test/postgres/report-company-reader.test.ts", "test/postgres/report-reader-bounds.test.ts", "test/postgres/request-runtime-view.test.ts", "test/unit/customization-ai-draft.test.ts", "test/unit/customization-board.test.ts", "test/unit/customization-upgrade.test.ts", "test/unit/date-time-field.test.ts"
+    "packages/postgres-provider/src/report-index-build.ts", "packages/postgres-provider/src/serving-gateways.ts", "packages/runtime/src/declared-report.ts", "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-query-gateway.ts", "test/architecture/repository-hygiene.test.ts", "test/architecture/surface-grammar-conformance.test.ts", "test/compiler/report-company-access.test.ts", "test/evidence/REPORTS-1-s1.expected-red.json",
+    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/application-before-stock-count-workflow.ts", "test/helpers/archived-runtime-process.ts", "test/helpers/reachability-producers.ts", "test/helpers/reports-preceding-release.ts", "test/postgres/booking-serving.test.ts", "test/postgres/customization-inspection.test.ts", "test/postgres/date-time-field.test.ts", "test/postgres/document-attachments.test.ts",
+    "test/postgres/releases.test.ts", "test/postgres/report-company-reader.test.ts", "test/postgres/report-reader-bounds.test.ts", "test/postgres/request-runtime-view.test.ts", "test/unit/customization-ai-draft.test.ts", "test/unit/customization-board.test.ts", "test/unit/customization-upgrade.test.ts", "test/unit/date-time-field.test.ts"
   ],
   "symbols": [{"path":"packages/compiler/src/declared-reports.ts","name":"lowerDeclaredReports"},{"path":"packages/postgres-provider/src/grouped-report.ts","name":"readGroupedSnapshot"},{"path":"packages/runtime/src/declared-report.ts","name":"reportCsv"}]
 }
