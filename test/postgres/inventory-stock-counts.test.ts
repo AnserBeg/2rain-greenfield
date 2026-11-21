@@ -342,6 +342,182 @@ async function postAdjustment(
 }
 
 test(
+  'STOCK-COUNTS: a recount retains physical entries and clears the stored review figures',
+  { timeout: 300_000 },
+  async () => {
+    await withOrderEntryFixture(async (fixture) => {
+      const read = await storage(fixture);
+      const count = counts(fixture);
+      const created = await count.create(fixture.location, { mode: 'blind' });
+      const started = await count.command(
+        'start',
+        created.recordId,
+        created.revision,
+      );
+      const line = (await read.lines(created.recordId)).find(
+        (row) => row.item === fixture.item,
+      )!;
+      await count.enter(line, '2');
+      for (const other of await read.lines(created.recordId)) {
+        if (other.item !== fixture.item) await count.enter(other, '0');
+      }
+      const reviewed = await count.command(
+        'review',
+        created.recordId,
+        started.readBack!.revision,
+      );
+      const frozen = (await read.lines(created.recordId)).find(
+        (row) => row.item === fixture.item,
+      )!;
+      assert.notEqual(frozen.expected, '0');
+      assert.equal(frozen.counted, '2');
+      assert.notEqual(frozen.variance, '0');
+
+      const reopened = await count.command(
+        'reopen',
+        created.recordId,
+        reviewed.readBack!.revision,
+      );
+      assert.equal(
+        reopened.readBack?.values[countField('state')],
+        state('counting'),
+      );
+      const recount = (await read.lines(created.recordId)).find(
+        (row) => row.item === fixture.item,
+      )!;
+      assert.deepEqual(
+        [recount.expected, recount.counted, recount.variance],
+        ['0', '0', '0'],
+        'reopen clears every stored review figure',
+      );
+      assert.equal(recount.physical, '2');
+      assert.equal(recount.revision, frozen.revision + 1);
+      await count.enter(recount, '3');
+      await count.command(
+        'review',
+        created.recordId,
+        reopened.readBack!.revision,
+      );
+      const recounted = (await read.lines(created.recordId)).find(
+        (row) => row.item === fixture.item,
+      )!;
+      assert.equal(recounted.counted, '3');
+    });
+  },
+);
+
+test(
+  'STOCK-COUNTS: counting mode is fixed after Start even through a state reset',
+  { timeout: 300_000 },
+  async () => {
+    await withOrderEntryFixture(async (fixture) => {
+      const count = counts(fixture);
+      const created = await count.create(fixture.location);
+      const save = (revision: number, patch: Record<string, string>) =>
+        fixture.invoke('stock_count_update', {
+          recordId: created.recordId,
+          expectedRevision: revision,
+          patch,
+        });
+      const blind = `${ns}:option.stock_count_counting_mode_blind`;
+      const open = `${ns}:option.stock_count_counting_mode_open`;
+      const draft = await save(created.revision, {
+        [countField('counting_mode')]: blind,
+      });
+      assert.equal(draft.readBack?.values[countField('counting_mode')], blind);
+      const started = await count.command(
+        'start',
+        created.recordId,
+        draft.readBack!.revision,
+      );
+      const revision = started.readBack!.revision;
+      await assert.rejects(
+        save(revision, { [countField('counting_mode')]: open }),
+        moduleRefusal('MODULE_OPERATION_PRECONDITION_REFUSED'),
+        'the mode cannot change during counting',
+      );
+      await assert.rejects(
+        save(revision, { [countField('state')]: state('draft') }),
+        moduleRefusal('MODULE_OPERATION_PRECONDITION_REFUSED'),
+        'the header cannot be reset to draft to change the mode',
+      );
+      const saved = await save(revision, {
+        [countField('counting_mode')]: blind,
+        [countField('reason_narrative')]: 'Check the adjacent bay again',
+      });
+      assert.equal(saved.readBack?.values[countField('counting_mode')], blind);
+    });
+  },
+);
+
+for (const [scenario, physical, delta] of [
+  ['posts a fractional downward count', '9.5', '-0.5'],
+  ['reverses a fractional upward count', '10.5', '0.5'],
+] as const) {
+  test(`STOCK-COUNTS: ${scenario}`, { timeout: 300_000 }, async () => {
+    await withOrderEntryFixture(async (fixture) => {
+      const read = await storage(fixture);
+      const count = counts(fixture);
+      const location = VANCOUVER_WAREHOUSE;
+      await postAdjustment(fixture, {
+        location,
+        quantity: '10',
+        effectiveAt: new Date().toISOString(),
+        reason: 'FOUND',
+        narrative: 'Stock in the second warehouse',
+      });
+      const original = await count.create(location);
+      const started = await count.command(
+        'start',
+        original.recordId,
+        original.revision,
+      );
+      const [line] = await read.lines(original.recordId);
+      assert.ok(line);
+      await count.enter(line, physical);
+      const reviewed = await count.command(
+        'review',
+        original.recordId,
+        started.readBack!.revision,
+      );
+      await count.command(
+        'post',
+        original.recordId,
+        reviewed.readBack!.revision,
+      );
+      const [movement] = await read.movements(original.recordId);
+      assert.equal(movement?.delta, delta);
+      assert.equal((await read.onHand(location)).get(fixture.item), physical);
+
+      if (delta === '0.5') {
+        const reversal = await count.create(location, {
+          kind: 'reversal',
+          state: 'counting',
+          supersedes: original.recordId,
+        });
+        const reversed = await count.command(
+          'review',
+          reversal.recordId,
+          reversal.revision,
+        );
+        await count.command(
+          'post',
+          reversal.recordId,
+          reversed.readBack!.revision,
+        );
+        const [inverse] = await read.movements(reversal.recordId);
+        assert.equal(inverse?.delta, '-0.5');
+        assert.equal(
+          (await read.lines(reversal.recordId))[0]?.reversal,
+          movement?.movementId,
+        );
+        assert.equal((await read.onHand(location)).get(fixture.item), '10');
+      }
+    });
+  });
+}
+
+test(
   'STOCK-COUNTS: a count of one location starts from posted stock, takes what was found, reviews against the ledger and posts the difference',
   { timeout: 300_000 },
   async () => {
