@@ -426,11 +426,13 @@ export async function checkReleaseDecisions(
         },
       );
     const {
-      rows: [{ created_by: maker }],
-    } = (await admin.query<{ created_by: string }>(
+      rows: [candidateRow],
+    } = await admin.query<{ created_by: string }>(
       'SELECT created_by FROM platform.tenant_releases WHERE release_id=$1',
       [candidate],
-    )) as { rows: [{ created_by: string }] };
+    );
+    assert.ok(candidateRow);
+    const maker = candidateRow.created_by;
     const asVerifier = <T>(work: (client: pg.PoolClient) => Promise<T>) =>
       withActivationVerifierTransaction(a.verifier, actor, work);
     await test.test('approval binding refuses a missing proof', async () => {
