@@ -50,6 +50,16 @@ function readField(
   if (!Object.hasOwn(values, fieldId)) return unreadable;
   const value = values[fieldId];
   if (value === null) return { status: 'absent' };
+  if (type.kind === 'dateTime') {
+    // Presence on the whole logical value; its capture is never compared.
+    const instant =
+      value && typeof value === 'object' && 'instant' in value
+        ? value.instant
+        : null;
+    return typeof instant === 'string'
+      ? { status: 'present', scalar: { kind: 'text', value: instant } }
+      : malformed;
+  }
   if (type.kind === 'address') {
     const text =
       typeof value === 'string'

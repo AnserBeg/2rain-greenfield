@@ -1,8 +1,8 @@
 # CI-4 — full CI at the merge tip, quick CI on docs-only main pushes
 
-Fable requested one fix at `b0d6b947`. The previous full below covers that reviewed tip. The B1/R1 fix is at `6ca36211`. The pre-CI-4 gate applies to CI-4's own single-packet integration.
+Integrated at `34bb574f405794ba3b824af2ada21a4434159abf` from packet tip `fe4ffadbc3bc68fe1fa14665441c154b4a53a206`. Fable requested one fix at `b0d6b947`, and `6ca36211` closes B1 and adopts R1. The targeted check’s two packet-tier findings were ruled ride-alongs on 2026-11-21.
 
-CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44884133050
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44911908275
 
 ## Claims
 
@@ -13,6 +13,9 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44884133
 
 ## Evidence
 
+- Candidate full run 44911908275 passed on attempt 1 with full reachability for `34bb574f405794ba3b824af2ada21a4434159abf`. The pre-CI-4 merge-window check passed from a clean checkout of main at `6787792c4564dc0757583c043738f8daa59ca76b`.
+- The [packet-tip full run](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44897474713) also passed on attempt 1.
+- `test-results/CI-4/MIGRATION-RULE.patch` passed a dry run against the external `charters/MIGRATION-RULE.md`. The orchestrator owns applying the patch.
 - The 2026-11-21 selectors promoted [UPGRADE-2-fixes](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44880635235/job/136775007517) on `.gitleaksignore` and [CUSTOMIZE-5-slice1](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44881203941/job/136776671897) on `apps/web/src/component-registry.ts`. Both came from the fallback.
 - At the reviewed tip the ten original CI-4 expected-red controls failed as declared and passed after restoring the implementation. The focused CI tests, TypeScript, lint, record validation and test-inventory check passed locally.
 - The broader local hygiene run encountered another lane's PostgreSQL container before the lock fixture's intended refusal. GitHub runs this suite on a fresh runner.
@@ -29,6 +32,11 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44884133
 - R6 (known limit). Main health sees only listed workflow runs. A skipped or not-yet-listed push is invisible to that check.
 - R7 (cost). A single non-Critical executable landing costs two full runs on the same SHA, one on the candidate and one on the main push. Up to three packets share that pair in a train.
 - R8 (known limit). GitHub runs the selector and workflow from the pushed commit. A change to either can alter its own classification.
+
+## Filed for the next CI change
+
+- Packet pushes can select quick for Markdown under `docs/` outside the base allowlist. Read the docs allowlist from the base commit in the packet selector.
+- Packet pushes can select quick for a Markdown mode change from `100644` to `100755`. Apply the non-executable file-mode check in the packet selector.
 
 ## Test it yourself
 

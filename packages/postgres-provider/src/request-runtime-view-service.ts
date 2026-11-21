@@ -1,5 +1,6 @@
 import { popupBindingsProblem } from './popup-admission.js';
 import { boardBindingsProblem } from './board-admission.js';
+import { dateTimeBindingsProblem } from './date-time-admission.js';
 import {
   ADDRESS_FIELD_READER,
   ADDRESS_MAP_READER,
@@ -897,6 +898,11 @@ function definitionFromSnapshotRows(
   });
   if (addressRefusal) throw malformedProjection(addressRefusal);
   if (declared) connector ??= projectionFor(CONNECTOR_FAMILY);
+  const dateTimeProblem = dateTimeBindingsProblem(
+    consumers.map((p) => p.payload),
+    surface.requiredRuntimeCapability?.minimumVersion ?? 0,
+  );
+  if (dateTimeProblem) throw malformedProjection(dateTimeProblem);
   const referencesDocuments = references.some(
     (entry) =>
       isRecord(entry) && entry.familyId === DOCUMENTS_PROJECTION_FAMILY,

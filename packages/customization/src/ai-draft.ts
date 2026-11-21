@@ -1,5 +1,6 @@
 import { popupCommand, popupOptionId } from './popup-revision.js';
 import { defaultBoardChoices, draftBoardRevision } from './board-revision.js';
+import { z } from 'zod';
 import { layoutCommand } from './layout-revision.js';
 import { WorkflowDraftSchema, type WorkflowDraft } from './workflow-draft.js';
 import {
@@ -11,6 +12,7 @@ import {
   CUSTOMIZATION_CHANGE_MEMBER_KINDS,
   CUSTOMIZATION_PATCH_KINDS,
   MAX_CUSTOMIZATION_CHANGE_PATCHES,
+  AddDateTimeFieldSchema,
   parseCustomizationPatch,
   unsupported,
 } from './patch.js';
@@ -79,6 +81,9 @@ export interface DraftingModel {
 }
 
 export const DRAFT_CUSTOMIZATION_TOOL = 'draft_customization' as const;
+export function draftingToolInputSchema(): Readonly<Record<string, unknown>> {
+  return TOOL.inputSchema;
+}
 
 export type DraftedRequest =
   | { readonly patch: CustomizationPatch; readonly status: 'parsed' }
@@ -100,6 +105,28 @@ const fieldSchema = {
   required: ['label', 'type'],
 } as const;
 
+// ADR-0087: the drafter's keys for addDateTimeField are generated from the
+// member's own schema, so the drafter and the parser cannot drift apart. Its
+// object target joins addLink's string target rather than replacing it.
+const {
+  kind: _dateTimeKind,
+  label: _dateTimeLabel,
+  required: _dateTimeRequired,
+  target: dateTimeTarget,
+  ...dateTimeMemberProperties
+} = (
+  z.toJSONSchema(AddDateTimeFieldSchema) as {
+    properties: Record<string, unknown>;
+  }
+).properties;
+void _dateTimeKind;
+void _dateTimeLabel;
+void _dateTimeRequired;
+export const DATE_TIME_DRAFTER_PROPERTIES = Object.freeze({
+  ...dateTimeMemberProperties,
+  target: dateTimeTarget,
+});
+
 const singlePatchSchema = {
   type: 'object',
   properties: {
@@ -110,7 +137,8 @@ const singlePatchSchema = {
     label: { type: 'string' },
     fields: { type: 'array', items: fieldSchema },
     entity: { type: 'string' },
-    target: { type: 'string' },
+    target: { anyOf: [{ type: 'string' }, dateTimeTarget] },
+    ...dateTimeMemberProperties,
     required: { type: 'boolean' },
     companyOwnership: { enum: ['entityOwned', 'tenantShared'] },
     initial: { type: 'string' },

@@ -181,6 +181,7 @@ export type { FormulaValidationRule } from './formula-validation-schema.js';
 export * from './address.js';
 
 export * from './booking.js';
+export * from './date-time-field.js';
 export {
   DocumentTemplatePointerSchema,
   DocumentTemplateRevisionSchema,

@@ -223,6 +223,15 @@ const equipmentPopup = customization
       o.surface === id('surface.custom_equipment_detail') &&
       o.target.kind === 'update',
   )!;
+const appointment = {
+  kind: 'addDateTimeField',
+  schemaVersion: 'northstar.date-time-field/v1',
+  target: { kind: 'tenantRecordType', recordTypeId: equipment },
+  fieldId: id('field.custom_equipment_service_at'),
+  label: 'Service appointment',
+  required: false,
+  zoneSource: { kind: 'perRecordIana', version: 'v1' },
+};
 const cases = {
   addPopupActionRevision: retired(
     popupCommand([equipmentPopup], {
@@ -231,6 +240,7 @@ const cases = {
       inputs: [{ binding: id('field.custom_equipment_name'), source: 'entry' }],
     }),
   ),
+  addDateTimeField: occupied(appointment, 'FIELD_COLLISION', extended),
   addBoardViewRevision: {
     source: withEquipmentLifecycle,
     conflict: extended,

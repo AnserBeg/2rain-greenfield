@@ -1,5 +1,6 @@
 import { availablePopups } from '../../../packages/runtime/src/popup-actions.js';
 import { SavedAddressSchema } from '@north-star/canonical-model';
+import { recordZoneText } from './date-time-field.js';
 import { readCivilDate } from '../../../packages/runtime/src/civil-date.js';
 import { randomUUID } from 'node:crypto';
 import type { SurfaceComposition } from '../../../packages/canonical-model/src/index.js';
@@ -265,6 +266,9 @@ export function displayFieldValue(
   fieldId: string,
   value: ImmutableJsonValue,
 ): string {
+  // A logical dateTime prints its capture in record zone (ADR-0087).
+  const recorded = recordZoneText(value);
+  if (recorded !== null) return recorded;
   const field = presentedField(view, fieldId);
   if (field?.kind === 'addressFieldType')
     return SavedAddressSchema.safeParse(value).data?.text ?? '';

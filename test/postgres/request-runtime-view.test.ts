@@ -10,6 +10,7 @@ import { promisify } from 'node:util';
 
 import pg from 'pg';
 import { BILLING_INTERVAL_READER } from '../../packages/canonical-model/src/billing.js';
+import { DATE_TIME_FIELD_READER } from '../../packages/canonical-model/src/date-time-field.js';
 import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../packages/canonical-model/src/surface-workspace.js';
 import { BOARD_READER } from '../../packages/canonical-model/src/board.js';
 
@@ -182,6 +183,7 @@ test('the capability comparison binds the family to its capability, then compare
     BILLING_INTERVAL_READER,
     BOARD_READER,
     DOCUMENT_TEMPLATES_SURFACE_FLOOR,
+    DATE_TIME_FIELD_READER,
     POPUP_READER,
   ];
   for (const reader of surfaceFloors) {
