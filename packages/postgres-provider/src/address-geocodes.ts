@@ -66,11 +66,6 @@ interface Job extends AddressTarget {
   outbox: string;
   attempts: number;
 }
-const key = (v: RequestRuntimeView, c: string) => [
-  v.tenantId,
-  v.environmentId,
-  c,
-];
 const denied = () => new AddressProviderError('unconfigured');
 const ident = (v: string) => {
   if (!/^[a-z][a-z0-9_]{0,62}$/u.test(v)) throw denied();
@@ -112,35 +107,29 @@ async function installation(
   view: RequestRuntimeView,
   company: string,
 ): Promise<Install | null> {
-  const installed = await client.query<Install>(
-    `SELECT tenant_id AS "tenantId", environment_id AS "environmentId",
-   company_id AS "companyId", installation_id AS "installationId", account, provider,enrichment,period_calls,period_budget_micros
-   FROM platform.address_installations WHERE tenant_id=$1 AND environment_id=$2 AND company_id=$3 AND enabled FOR SHARE`,
-    key(view, company),
+  const installed = await client.query<
+    Omit<Install, 'tenantId' | 'environmentId' | 'companyId'>
+  >(
+    `SELECT installation_id AS "installationId", account, provider, enrichment, period_calls,
+   period_budget_micros::text AS period_budget_micros FROM platform.address_installation($1)`,
+    [company],
   );
-  return installed.rows[0] ?? null;
+  const row = installed.rows[0];
+  return row
+    ? {
+        ...row,
+        tenantId: view.tenantId,
+        environmentId: view.environmentId,
+        companyId: company,
+      }
+    : null;
 }
 async function reserve(client: PoolClient, i: Install) {
-  const cost = i.provider === 'google' ? 100000 : 0;
-  if (cost > Number(i.period_budget_micros))
-    throw new AddressProviderError('quota');
-  const r = await client.query(
-    `INSERT INTO platform.address_quota(tenant_id,environment_id,company_id,installation_id,period,calls,reserved_micros)
-    VALUES($1,$2,$3,$4,date_trunc('month',CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date,1,$5)
-    ON CONFLICT(tenant_id,environment_id,company_id,installation_id,period) DO UPDATE SET calls=address_quota.calls+1,
-    reserved_micros=address_quota.reserved_micros+excluded.reserved_micros
-    WHERE address_quota.calls<$6 AND address_quota.reserved_micros+excluded.reserved_micros<=$7 RETURNING calls`,
-    [
-      i.tenantId,
-      i.environmentId,
-      i.companyId,
-      i.installationId,
-      cost,
-      i.period_calls,
-      i.period_budget_micros,
-    ],
+  const r = await client.query<{ ok: boolean }>(
+    'SELECT platform.address_reserve($1,$2) AS ok',
+    [i.companyId, i.installationId],
   );
-  if (!r.rowCount) throw new AddressProviderError('quota');
+  if (!r.rows[0]?.ok) throw new AddressProviderError('quota');
 }
 // The caller has validated and committed the governed record's new field revision
 // within this same transaction. The deferred FK resolves when trust writes the outbox.
@@ -157,21 +146,18 @@ export async function enqueueAddress(
   sourceDigest: string,
 ) {
   await client.query(
-    `INSERT INTO platform.address_geocodes(tenant_id,environment_id,company_id,installation_id,outbox_id,field_id,entity_id,record_id,address_revision,principal_id,release_id,release_root,fence,source_digest)
-    SELECT tenant_id,environment_id,company_id,installation_id,$4,$5,$6,$7,$8,$9,$10,$11,$12,$14 FROM platform.address_installations
-    WHERE tenant_id=$1 AND environment_id=$2 AND company_id=$3 AND enabled AND enrichment AND installation_id=$13`,
+    'SELECT platform.address_enqueue($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
     [
-      ...key(view, company),
+      company,
+      installationId,
       outbox,
       fieldId,
       entityId,
       recordId,
       revision,
-      view.principalId,
       view.release.releaseId,
       view.release.contentHash,
       view.pointer.fence,
-      installationId,
       sourceDigest,
     ],
   );
@@ -216,8 +202,7 @@ export class PostgresAddresses implements AddressGateway {
         (
           await c.query<AddressInstallation>(
             `SELECT company_id AS "companyId", installation_id AS "installationId", account,provider,enrichment
-      FROM platform.address_installations WHERE tenant_id=$1 AND environment_id=$2 AND enabled ORDER BY account,company_id`,
-            [view.tenantId, view.environmentId],
+      FROM platform.address_installations()`,
           )
         ).rows,
     );
@@ -245,52 +230,28 @@ export class PostgresAddresses implements AddressGateway {
       throw denied();
     const { policy } = await this.release(view.release.releaseId);
     await issueLegalEntityReadScope(policy, view, [company]);
+    // The single entry point for enabling a provider. SIGNIN-1 slice 2b adds
+    // its passkey decision proof to platform.address_configure.
     return this.tx(view, async (c) => {
       await active(c, view);
-      const before = await installation(c, view, company);
-      const same =
-        before?.provider === options.provider &&
-        before.account === options.account;
-      let id = before?.installationId;
-      let change: 'rotated' | 'enabled' | 'paused' = 'paused';
-      if (before && (!same || !options.enabled))
-        await c.query(
-          'UPDATE platform.address_installations SET enabled=false WHERE tenant_id=$1 AND environment_id=$2 AND company_id=$3 AND enabled',
-          key(view, company),
-        );
-      if (options.enabled && same) {
-        await c.query(
-          'UPDATE platform.address_installations SET enrichment=$4,period_calls=$5,period_budget_micros=$6 WHERE tenant_id=$1 AND environment_id=$2 AND company_id=$3 AND enabled',
+      try {
+        const r = await c.query<{ id: string | null }>(
+          'SELECT platform.address_configure($1,$2,$3,$4,$5,$6,$7) AS id',
           [
-            ...key(view, company),
-            options.enrichment,
-            options.calls,
-            options.budgetMicros,
-          ],
-        );
-        change = 'rotated';
-      } else if (options.enabled) {
-        id = randomUUID();
-        await c.query(
-          'INSERT INTO platform.address_installations(tenant_id,environment_id,company_id,installation_id,account,provider,enabled,enrichment,period_calls,period_budget_micros) VALUES($1,$2,$3,$4,$5,$6,true,$7,$8,$9)',
-          [
-            ...key(view, company),
-            id,
-            options.account,
+            company,
             options.provider,
+            options.account,
             options.enrichment,
             options.calls,
             options.budgetMicros,
+            options.enabled,
           ],
         );
-        change = 'enabled';
+        return r.rows[0]?.id ?? undefined;
+      } catch (error) {
+        if ((error as { code?: unknown }).code === '42501') throw denied();
+        throw error;
       }
-      if (id)
-        await c.query(
-          'INSERT INTO platform.address_installation_history(tenant_id,environment_id,company_id,installation_id,principal_id,change) VALUES($1,$2,$3,$4,$5,$6)',
-          [...key(view, company), id, view.principalId, change],
-        );
-      return id;
     });
   }
   private async authorize(
@@ -439,19 +400,19 @@ export class PostgresAddresses implements AddressGateway {
         } as const;
       const i = await installation(c, view, t.companyId);
       if (!i) return { status: 'unavailable' } as const;
-      const r = await c.query(
-        `SELECT state,latitude::text,longitude::text,expires_at>clock_timestamp() AS usable
-        FROM platform.address_geocodes WHERE tenant_id=$1 AND environment_id=$2 AND company_id=$3 AND installation_id=$4 AND record_id=$5 AND field_id=$6 AND address_revision=$7 AND release_id=$8 AND fence=$9`,
-        [
-          ...key(view, t.companyId),
-          i.installationId,
-          t.recordId,
-          t.fieldId,
-          address.revision,
-          view.release.releaseId,
-          view.pointer.fence,
-        ],
-      );
+      const r = await c.query<{
+        state: string;
+        latitude: string | null;
+        longitude: string | null;
+        usable: boolean;
+      }>('SELECT * FROM platform.address_pin($1,$2,$3,$4,$5,$6)', [
+        t.companyId,
+        i.installationId,
+        entity.entityId,
+        t.recordId,
+        t.fieldId,
+        address.revision,
+      ]);
       const row = r.rows[0];
       if (row?.state === 'ready' && row.usable) {
         const pin = CoordinatesSchema.parse({
@@ -478,26 +439,21 @@ export class PostgresAddresses implements AddressGateway {
     const job = await this.tx(view, async (c) => {
       const claim = randomUUID();
       const r = await c.query<Job>(
-        `WITH next AS (SELECT tenant_id,environment_id,company_id,installation_id,outbox_id,field_id FROM platform.address_geocodes
-        WHERE tenant_id=$1 AND environment_id=$2 AND principal_id=$3 AND state IN ('queued','working') AND available_at<=clock_timestamp()
-        ORDER BY available_at,outbox_id FOR UPDATE SKIP LOCKED LIMIT 1)
-        UPDATE platform.address_geocodes g SET state='working',claim_id=$4,available_at=clock_timestamp()+interval '30 seconds'
-        FROM next WHERE (g.tenant_id,g.environment_id,g.company_id,g.installation_id,g.outbox_id,g.field_id)=(next.tenant_id,next.environment_id,next.company_id,next.installation_id,next.outbox_id,next.field_id)
-        RETURNING g.company_id AS "companyId",g.installation_id AS "installationId",g.address_revision AS revision,g.release_id AS "releaseId",g.entity_id AS "entityId",g.release_root AS "releaseRoot",g.source_digest AS "sourceDigest",g.fence,g.record_id AS "recordId",g.field_id AS "fieldId",g.outbox_id AS outbox,g.attempts,g.claim_id AS claim`,
-        [view.tenantId, view.environmentId, view.principalId, claim],
+        `SELECT company_id AS "companyId",installation_id AS "installationId",revision,release_id AS "releaseId",
+        entity_id AS "entityId",release_root AS "releaseRoot",source_digest AS "sourceDigest",fence,record_id AS "recordId",
+        field_id AS "fieldId",outbox,attempts,claim_id AS claim FROM platform.address_claim($1)`,
+        [claim],
       );
       return r.rows[0];
     });
     if (!job) return false;
     const jobKey = [
-      ...key(view, job.companyId),
+      job.companyId,
       job.installationId,
       job.outbox,
       job.fieldId,
       job.claim,
     ];
-    const condition =
-      'tenant_id=$1 AND environment_id=$2 AND company_id=$3 AND installation_id=$4 AND outbox_id=$5 AND field_id=$6 AND claim_id=$7';
     try {
       if (
         view.release.contentHash !== job.releaseRoot ||
@@ -525,13 +481,11 @@ export class PostgresAddresses implements AddressGateway {
       };
       const { i, address } = await this.tx(view, async (c) => {
         const checkedResult = await checked(c);
-        const attempt = await c.query(
-          'UPDATE platform.address_geocodes SET attempts=attempts+1 WHERE ' +
-            condition +
-            ' AND attempts<4 RETURNING attempts',
+        const attempt = await c.query<{ ok: boolean }>(
+          'SELECT platform.address_attempt($1,$2,$3,$4,$5) AS ok',
           jobKey,
         );
-        if (!attempt.rowCount) throw denied();
+        if (!attempt.rows[0]?.ok) throw denied();
         await reserve(c, checkedResult.i);
         return checkedResult;
       });
@@ -547,8 +501,7 @@ export class PostgresAddresses implements AddressGateway {
       await this.tx(view, async (c) => {
         await checked(c);
         await c.query(
-          "UPDATE platform.address_geocodes SET state='ready',claim_id=NULL,reason=NULL,latitude=$8,longitude=$9,precision=$10,expires_at=created_at+interval '30 days' WHERE " +
-            condition,
+          'SELECT platform.address_complete($1,$2,$3,$4,$5,$6,$7,$8)',
           [...jobKey, pin.latitude, pin.longitude, pin.precision],
         );
       });
@@ -559,8 +512,7 @@ export class PostgresAddresses implements AddressGateway {
         ['unavailable', 'quota'].includes(reason) && job.attempts < 3;
       await this.tx(view, (c) =>
         c.query(
-          `UPDATE platform.address_geocodes SET state=$8,reason=$9,claim_id=NULL,attempts=greatest(attempts,$10::smallint),available_at=clock_timestamp()+$11::integer*interval '1 second' WHERE ` +
-            condition,
+          'SELECT platform.address_settle($1,$2,$3,$4,$5,$6,$7,$8::smallint,$9::integer)',
           [
             ...jobKey,
             retry ? 'queued' : reason === 'unconfigured' ? 'held' : 'failed',
@@ -572,5 +524,15 @@ export class PostgresAddresses implements AddressGateway {
       );
     }
     return true;
+  }
+  /** Scrub expired provider coordinates, at most `limit` per call. */
+  async sweep(view: RequestRuntimeView, limit = 100) {
+    return this.tx(view, async (c) => {
+      const r = await c.query<{ swept: number }>(
+        'SELECT platform.address_sweep($1) AS swept',
+        [limit],
+      );
+      return r.rows[0]?.swept ?? 0;
+    });
   }
 }

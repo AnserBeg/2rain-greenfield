@@ -12,6 +12,7 @@ import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../packages/canonical-model
 import { BOARD_READER } from '../../packages/canonical-model/src/board.js';
 
 import {
+  ADDRESS_MAP_READER,
   CANONICALIZATION_PROFILE_VERSION,
   CONTENT_HASH_ALGORITHM,
   canonicalize,
@@ -288,6 +289,19 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
     grouped,
     998,
   );
+  // CONNECT-1: a surface consumer bound to Address with no connector
+  // declaration, and an Address map floor with no Address consumer at all.
+  const addressBoundUndeclared = withSurfaceCapabilityFloor(
+    grouped,
+    22,
+    (payload) => {
+      payload.addressBindings = [];
+    },
+  );
+  const addressFloorUnbound = withSurfaceCapabilityFloor(
+    grouped,
+    ADDRESS_MAP_READER,
+  );
 
   await withEphemeralPostgres(
     'request-runtime-view',
@@ -404,6 +418,8 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
             [groupedBytes, unsupportedCapabilityFloor],
             [groupedBytes, unsupportedCapabilityAndBadPayload],
             [groupedBytes, unsupportedCapabilityForCorruption],
+            [groupedBytes, addressBoundUndeclared],
+            [groupedBytes, addressFloorUnbound],
           ],
         );
         const policy = new VersionedPolicyAdapter();
@@ -950,6 +966,47 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
         // the descriptor and digest checks keeps all four controls green while
         // misreporting both as an under-supported reader. Routed to
         // `runtime-integrity-attribution-untwinned`.
+        // Before the chunk corruption below: the Address map-floor release
+        // shares the grouped surface chunk that subtest corrupts.
+        for (const [index, name, message] of [
+          [
+            6,
+            'a surface bound to Address without a connector declaration',
+            'an Address consumer without a declaration was served',
+          ],
+          [
+            7,
+            'an Address map floor without an Address consumer',
+            'an Address floor without a consumer was served',
+          ],
+        ] as const) {
+          await t.test(`${name} refuses to load`, async () => {
+            await activateRelease(
+              runtimePool,
+              pool,
+              activationService,
+              versionApproverContext,
+              versionContext,
+              versionSystemContext,
+              versionReleases[index]!,
+            );
+            const outcome = await new PostgresRequestRuntimeViewService(
+              runtimePool,
+            )
+              .load(versionContext)
+              .then(
+                () => 'loaded',
+                (error: unknown) =>
+                  `${(error as { code?: string }).code}: ${(error as Error).message}`,
+              );
+            assert.equal(
+              outcome,
+              'MALFORMED_REQUIRED_PROJECTION: Address declarations and consumers disagree.',
+              message,
+            );
+          });
+        }
+
         await t.test(
           'a chunk failing artifact verification reports malformed, not unsupported capability',
           async () => {
