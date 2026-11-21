@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "packet": "company-scoped-membership",
+  "entries": [
+    {
+      "name": "credit-rejects-restricted-company-list",
+      "claim": "A customer’s credit figures are withheld when the principal can read only part of the company list.",
+      "file": "packages/postgres-provider/src/credit-read-model.ts",
+      "original": "      if (result.companyScopeRestricted) {\n        throw new SemanticQueryPolicyDeniedError(query.queryId, view);\n      }\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/customer-credit.test.ts"],
+        "namePattern": "^tenant-wide customer read with a restricted company list withholds credit figures$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/customer-credit.test.ts",
+          "name": "tenant-wide customer read with a restricted company list withholds credit figures",
+          "expected": "customer credit figures"
+        }
+      ]
+    }
+  ]
+}

@@ -20,7 +20,6 @@ import type {
 } from '../../runtime/src/request-runtime-view.js';
 import {
   authorizeCurrentPolicy,
-  issueLegalEntityReadScope,
   trustedContextForRequestRuntimeView,
 } from '../../runtime/src/request-runtime-view.js';
 import {
@@ -39,7 +38,10 @@ import {
   type InstallationIdentity,
 } from './address-provider.js';
 import { withTrustedRequestTransaction } from './request-context.js';
-import { currentPolicyVersionOf } from './current-policy.js';
+import {
+  ADDRESS_CONNECTOR_CONFIGURE_BINDING,
+  currentPolicyVersionOf,
+} from './current-policy.js';
 import type { StorageTargetPayloadV1 } from '@north-star/compiler';
 
 type Entity = StorageTargetPayloadV1['entities'][number];
@@ -210,6 +212,8 @@ export class PostgresAddresses implements AddressGateway {
     );
   }
   async installations(view: RequestRuntimeView) {
+    // The installation read policy filters by the trusted principal's live
+    // company memberships on this connection.
     return this.tx(
       view,
       async (c) =>
@@ -222,6 +226,21 @@ export class PostgresAddresses implements AddressGateway {
         ).rows,
     );
   }
+  async canConfigure(view: RequestRuntimeView, company: string) {
+    if (!this.demo || !isUuid(company)) return false;
+    const { policy } = await this.release(view.release.releaseId);
+    const decision = await authorizeCurrentPolicy(
+      policy,
+      view,
+      ADDRESS_CONNECTOR_CONFIGURE_BINDING.permissionId,
+      { legalEntityId: company },
+    );
+    return (
+      decision.decision === 'ALLOW' &&
+      decision.policyVersion === view.entryPolicyVersion
+    );
+  }
+
   async configure(
     view: RequestRuntimeView,
     company: string,
@@ -243,8 +262,7 @@ export class PostgresAddresses implements AddressGateway {
       !Number.isSafeInteger(options.budgetMicros)
     )
       throw denied();
-    const { policy } = await this.release(view.release.releaseId);
-    await issueLegalEntityReadScope(policy, view, [company]);
+    if (!(await this.canConfigure(view, company))) throw denied();
     return this.tx(view, async (c) => {
       await active(c, view);
       const before = await installation(c, view, company);
