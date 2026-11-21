@@ -138,7 +138,10 @@ export interface SurfaceComponentContext {
   readonly formReferences?: Readonly<
     Record<string, SurfaceFormReferenceChoices>
   >;
-  readonly workingCompany?: string;
+  readonly workingCompany?: {
+    readonly parameterId: string;
+    readonly recordId: string;
+  };
   readonly legalEntitySelection?: readonly string[];
   readonly operations?: readonly CompiledSurfaceOperationBinding[];
   readonly queryParameterValues?: Readonly<Record<string, string>>;
@@ -2181,12 +2184,23 @@ export function surfaceHref(
   surface: CompiledSurfaceDefinition,
   recordId?: string,
   includeArchived = false,
-  linkContext?: Pick<SurfaceComponentContext, 'legalEntitySelection' | 'view'>,
+  linkContext?: Pick<
+    SurfaceComponentContext,
+    'legalEntitySelection' | 'view' | 'workingCompany'
+  >,
 ): string {
   const parameters = new URLSearchParams({ surface: surface.surfaceId });
   if (recordId) parameters.set('record', recordId);
   if (includeArchived) parameters.set('archived', 'yes');
   appendLegalEntitySelection(parameters, surface, linkContext);
+  if (
+    surface.surfaceRole === 'form' &&
+    linkContext?.workingCompany &&
+    !linkContext.legalEntitySelection?.length
+  ) {
+    const { parameterId, recordId: companyId } = linkContext.workingCompany;
+    parameters.set(parameterId, companyId);
+  }
   return `/?${parameters.toString()}`;
 }
 
@@ -2387,7 +2401,7 @@ function renderFormFields(
               invalid.has(fieldId)
                 ? ` aria-invalid="true" aria-describedby="${validationMessageId}"`
                 : '',
-              context.workingCompany,
+              context.workingCompany?.recordId,
             ),
             storedValueUnavailable: false,
           }

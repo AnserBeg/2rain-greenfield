@@ -1850,10 +1850,8 @@ async function submitSurfaceRuntimeIntentInContext(
     record: result.readBack,
     trustLinked: result.trust !== null,
   };
-  const pageRecordId = new URL(
-    requestUrl,
-    'http://surface-runtime.local',
-  ).searchParams.get('record');
+  const request = new URL(requestUrl, 'http://surface-runtime.local');
+  const pageRecordId = request.searchParams.get('record');
   if (boardOperation && selection.selected.board) {
     const url = new URL(requestUrl, 'http://surface-runtime.local');
     const body = selection.selected.board.body;
@@ -1881,15 +1879,15 @@ async function submitSurfaceRuntimeIntentInContext(
     // a record in the URL and archive responses use the operation read-back.
     return renderSurfaceRuntimeWithData(view, requestUrl, gateways, feedback);
 
-  if (
-    selection.selected.surfaceRole === 'form' &&
-    !binding.query.legalEntityScope &&
-    dateTimeBindings(view.projections.surface.payload).size
-  ) {
-    const url = new URL(requestUrl, 'http://surface-runtime.local');
-    url.searchParams.set('record', result.readBack.recordId);
-    return renderSurfaceRuntimeWithData(view, url.href, gateways, feedback);
-  }
+  const companyContext =
+    selection.selected.surfaceRole === 'form' && !binding.query.legalEntityScope
+      ? await landingCompanyContext(
+          view,
+          selection,
+          gateways.queryGateway,
+          request,
+        )
+      : null;
   return renderSelectedSurface(
     view,
     selection,
@@ -1897,11 +1895,8 @@ async function submitSurfaceRuntimeIntentInContext(
     feedback,
     offeredOperations,
     200,
-    legalEntitySelectionForSurface(
-      binding,
-      new URL(requestUrl, 'http://surface-runtime.local'),
-    ),
-    null,
+    legalEntitySelectionForSurface(binding, request),
+    companyContext,
     Object.freeze({}),
     binding.relationInputs,
   );
@@ -1932,7 +1927,12 @@ function renderSelectedSurface(
       feedback,
       ...(formReferences ? { formReferences } : {}),
       ...(workspaceContext?.selectedRecordId
-        ? { workingCompany: workspaceContext.selectedRecordId }
+        ? {
+            workingCompany: {
+              parameterId: workspaceContext.parameterId,
+              recordId: workspaceContext.selectedRecordId,
+            },
+          }
         : {}),
       legalEntitySelection,
       operations,

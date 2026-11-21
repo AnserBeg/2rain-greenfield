@@ -11,6 +11,7 @@ import {
   normalizeApplicationPackage,
   resolveTypedEntry,
 } from '../../packages/canonical-model/src/index.js';
+import type { StorageTargetPayloadV1 } from '../../packages/compiler/src/index.js';
 import { PROJECTION_FAMILY_IDS } from '../../packages/compiler/src/protocol.js';
 import * as customization from '../../packages/customization/src/index.js';
 import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
@@ -709,7 +710,7 @@ test('serving and storage independently refuse a consistent omission of an activ
     );
   const storage = payloads.find(
     (p) => p.kind === 'storageTargetPayload',
-  ) as unknown as import('../../packages/compiler/src/index.js').StorageTargetPayloadV1;
+  ) as unknown as StorageTargetPayloadV1;
   const fields = declaredDateTimeFields(release.normalizedDefinitionBytes);
   assert.deepEqual(
     fields.active.map((b) => b.fieldId),

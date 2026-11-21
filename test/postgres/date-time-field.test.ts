@@ -1003,8 +1003,8 @@ test(
             cookie: 'northstar-demo-actor=manager',
             origin: url.origin,
           };
-          // Submit the form's actual hidden controls and the browser's selected
-          // option (the first option is the HTML default if none is selected).
+          // Submit the rendered inputs, including blank-field intents. HTML
+          // selects default to their first option when none is selected.
           const form = async () => {
             const page = await fetch(url, { headers });
             const html = await page.text();
@@ -1014,17 +1014,19 @@ test(
               );
             assert.ok(match, 'the shared record form was rendered');
             const body = new URLSearchParams();
-            for (const [, name, v] of match[2]!.matchAll(
-              /<input type="hidden" name="([^"]+)" value="([^"]*)"/gu,
-            ))
-              body.set(name!, v!);
-            const select = match[2]!
-              .split(`name="value:${appointment.fieldId}:zone"`)[1]!
-              .split('</select>')[0]!;
-            const chosen =
-              /<option value="([^"]*)" selected>/u.exec(select) ??
-              /<option value="([^"]*)"/u.exec(select);
-            body.set(`value:${appointment.fieldId}:zone`, chosen![1]!);
+            for (const [input] of match[2]!.matchAll(/<input\b[^>]*>/gu)) {
+              const name = /\bname="([^"]+)"/u.exec(input)?.[1];
+              if (name)
+                body.set(name, /\bvalue="([^"]*)"/u.exec(input)?.[1] ?? '');
+            }
+            for (const [, name, options] of match[2]!.matchAll(
+              /<select\b[^>]*\bname="([^"]+)"[^>]*>([\s\S]*?)<\/select>/gu,
+            )) {
+              const chosen =
+                /<option value="([^"]*)" selected>/u.exec(options!) ??
+                /<option value="([^"]*)"/u.exec(options!);
+              if (chosen) body.set(name!, chosen[1]!);
+            }
             return {
               body,
               post: async () => {
@@ -1034,6 +1036,7 @@ test(
                 );
                 const result = await response.text();
                 assert.equal(response.status, 200, result.slice(-1500));
+                return result;
               },
             };
           };
@@ -1051,7 +1054,13 @@ test(
           first.body.set(`value:${due.fieldId}`, '2026-11-02T09:00');
           first.body.set(`value:${appointment.fieldId}`, '2026-11-02T10:00');
           first.body.set(`value:${appointment.fieldId}:zone`, 'UTC');
-          await first.post();
+          const confirmation = await first.post();
+          assert.ok(
+            confirmation.includes(
+              `name="value:${due.fieldId}:company" value="${COMPANY}"`,
+            ),
+            'the saved form keeps the workspace company shown on submit',
+          );
           const recordId = first.body.get('recordId')!;
           const read = () =>
             app.runtime.entry.run(

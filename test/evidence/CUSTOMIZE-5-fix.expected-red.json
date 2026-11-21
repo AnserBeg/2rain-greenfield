@@ -24,7 +24,7 @@
       "name": "date-time-shared-form-company-dropped",
       "claim": "A shared record submits the company displayed when its form opened.",
       "file": "apps/web/src/component-registry.ts",
-      "original": "              context.workingCompany,",
+      "original": "              context.workingCompany?.recordId,",
       "replacement": "              undefined,",
       "test": {
         "files": ["test/postgres/date-time-field.test.ts"],
