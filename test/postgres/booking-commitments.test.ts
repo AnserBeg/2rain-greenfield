@@ -480,7 +480,9 @@ test('booking commitment writer', async (t) => {
             { code: '42501' },
           );
           await assert.rejects(
-            admin.query('TRUNCATE platform.booking_history'),
+            admin.query(
+              'TRUNCATE platform.booking_history, platform.booking_use_revisions',
+            ),
             /booking.historyImmutable/u,
           );
         },
@@ -1470,6 +1472,467 @@ test('booking commitment writer', async (t) => {
               isolated: true,
             },
           ]);
+        },
+      );
+      await t.test(
+        'tracked unit handover keeps both assignments, closes pauses and blocks an overdue second start',
+        async () => {
+          await time('2030-02-11T15:00Z');
+          const first = await call(
+            left,
+            'holdTracked',
+            hold(43, 25, window('10:00', '11:00')),
+          );
+          const later = await call(
+            right,
+            'holdTracked',
+            hold(44, 26, window('11:00', '12:00')),
+          );
+          const c = await call(left, 'confirm', terms(43, first));
+          const l = await call(right, 'confirm', terms(44, later));
+          await time('2030-02-11T17:00Z');
+          const started = await call(left, 'start', terms(43, c));
+          assert.equal(started.state, 'inUse');
+          await time('2030-02-11T17:10Z');
+          const paused = await call(left, 'pause', {
+            ...terms(43, started),
+            pauseReason: 'serviceInterrupted',
+          });
+          assert.equal(paused.revision, 4);
+          await time('2030-02-11T17:20Z');
+          const resumed = await call(left, 'resume', terms(43, paused));
+          assert.equal(resumed.revision, 5);
+          await time('2030-02-11T17:30Z');
+          const swapped = await call(left, 'swap', {
+            ...terms(43, resumed),
+            replacementResourceId: resource(26),
+          });
+          assert.equal(swapped.state, 'inUse');
+          assert.equal(swapped.bookingId, first.bookingId);
+          await time('2030-02-11T18:00Z');
+          assert.equal(
+            (await call(right, 'start', terms(44, l))).refused,
+            'booking.capacityTaken',
+          );
+          const pausedAgain = await call(left, 'pause', {
+            ...terms(43, swapped),
+            pauseReason: 'operatorRequested',
+          });
+          const returned = await call(left, 'return', terms(43, pausedAgain));
+          assert.equal(returned.state, 'returned');
+          assert.equal(
+            (await call(right, 'start', terms(44, l))).state,
+            'inUse',
+          );
+          const legs = await admin.query(
+            `SELECT evidence_kind, d.record_id AS target,
+          effective_start AS start, effective_end AS finish
+          FROM platform.booking_commitments f CROSS JOIN LATERAL north_star_internal.booking_current_evidence(f) u
+          LEFT JOIN platform.booking_resources d ON d.resource_key=u.resource_key
+          WHERE f.booking_id=$1 ORDER BY u.evidence_kind,u.effective_start`,
+            [first.bookingId],
+          );
+          assert.deepEqual(
+            legs.rows.map((row) => [
+              row.evidence_kind,
+              row.target,
+              row.start.toISOString().slice(11, 16),
+              row.finish.toISOString().slice(11, 16),
+            ]),
+            [
+              ['assignment', resource(25), '17:00', '17:30'],
+              ['assignment', resource(26), '17:30', '18:00'],
+              ['pause', null, '17:10', '17:20'],
+              ['pause', null, '18:00', '18:00'],
+              ['use', resource(25), '17:00', '17:30'],
+              ['use', resource(26), '17:30', '18:00'],
+            ],
+          );
+        },
+      );
+      await t.test(
+        'pool quantity and partial return preserve the agreement and release the exact remainder',
+        async () => {
+          await time('2030-02-11T15:00Z');
+          assert.equal(
+            (
+              await call(
+                left,
+                'setCapacity',
+                capacity(27, '8', 0),
+                undefined,
+                'pool',
+              )
+            ).revision,
+            1,
+          );
+          const held = await call(
+            left,
+            'holdTracked',
+            hold(45, 27, window('10:00', '13:00'), '5'),
+            undefined,
+            'pool',
+          );
+          const changed = await call(
+            left,
+            'changeQuantity',
+            { ...terms(45, held), quantity: '7.25' },
+            undefined,
+            'pool',
+          );
+          assert.equal(changed.revision, 2);
+          const confirmed = await call(
+            left,
+            'confirm',
+            terms(45, changed),
+            undefined,
+            'pool',
+          );
+          await time('2030-02-11T17:00Z');
+          const started = await call(
+            left,
+            'start',
+            terms(45, confirmed),
+            undefined,
+            'pool',
+          );
+          assert.equal(started.state, 'inUse');
+          await time('2030-02-11T18:00Z');
+          const part = await call(
+            left,
+            'return',
+            { ...terms(45, started), returnedQuantity: '3.50' },
+            undefined,
+            'pool',
+          );
+          assert.equal(part.state, 'inUse');
+          const claim = await call(
+            right,
+            'hold',
+            hold(46, 27, window('12:00', '13:00'), '4.25'),
+            undefined,
+            'pool',
+          );
+          assert.equal(claim.state, 'hold');
+          assert.equal(
+            (
+              await call(
+                right,
+                'hold',
+                hold(47, 27, window('12:00', '13:00'), '0.01'),
+                undefined,
+                'pool',
+              )
+            ).refused,
+            'booking.noLongerAvailable',
+          );
+          await time('2030-02-11T18:30Z');
+          assert.equal(
+            (await call(left, 'return', terms(45, part), undefined, 'pool'))
+              .state,
+            'returned',
+          );
+          const legs = await admin.query(
+            `SELECT f.quantity::text AS agreed,u.quantity::text AS actual, u.effective_start,u.effective_end
+          FROM platform.booking_commitments f CROSS JOIN LATERAL north_star_internal.booking_current_evidence(f) u
+          WHERE f.booking_id=$1 AND u.evidence_kind='use' ORDER BY u.effective_start`,
+            [held.bookingId],
+          );
+          assert.deepEqual(
+            legs.rows.map((row) => [
+              row.agreed,
+              Number(row.actual),
+              row.effective_start.toISOString().slice(11, 16),
+              row.effective_end.toISOString().slice(11, 16),
+            ]),
+            [
+              ['7.25', 7.25, '17:00', '18:00'],
+              ['7.25', 3.75, '18:00', '18:30'],
+            ],
+          );
+        },
+      );
+      await t.test(
+        'an owner snapshot stays at its committed cursor and a steward correction pages past a billing checkpoint',
+        async () => {
+          const horizon = ['2030-02-11T00:00Z', '2030-02-12T00:00Z'];
+          const read = async (
+            n: number,
+            after: string | null = null,
+            high: string | null = null,
+            page = 32,
+          ) =>
+            (
+              await left.query(
+                'SELECT platform.booking_owner_usage($1,$2,$3,$4,$5,$6,$7,$8,$9) AS usage',
+                [
+                  release,
+                  activeFence,
+                  'example.booking:query.usage',
+                  owner(n),
+                  ...horizon,
+                  after,
+                  high,
+                  page,
+                ],
+              )
+            ).rows[0]!.usage;
+          await time('2030-02-11T15:00Z');
+          const held = await call(
+            left,
+            'holdTracked',
+            hold(48, 30, window('10:00', '11:00')),
+          );
+          const confirmed = await call(left, 'confirm', terms(48, held));
+          await time('2030-02-11T18:00Z');
+          const due = await read(48);
+          assert.equal(due.bookings[0].state, 'confirmed');
+          assert.equal(due.cursor, '2');
+          await admin.query('SELECT platform.booking_sweep_due(128)');
+          const absent = await read(48);
+          assert.equal(absent.cursor, '3');
+          assert.equal(absent.bookings[0].state, 'noShow');
+          assert.deepEqual(
+            (await read(48, null, due.cursor)).bookings,
+            due.bookings,
+          );
+          const late = await call(left, 'start', {
+            ...terms(48, { ...confirmed, revision: 3 }),
+            effectiveAt: '2030-02-11T17:05Z',
+            reason: 'logged on return',
+          });
+          assert.equal(late.state, 'inUse');
+          const pause = await call(left, 'pause', {
+            ...terms(48, late),
+            effectiveAt: '2030-02-11T17:10Z',
+            pauseReason: 'serviceInterrupted',
+            reason: 'service log',
+          });
+          const end = await call(left, 'return', {
+            ...terms(48, pause),
+            effectiveAt: '2030-02-11T17:30Z',
+            reason: 'signed handover',
+          });
+          assert.equal(end.state, 'returned');
+          const checkpoint = await read(48);
+          const evidence = checkpoint.evidence.find(
+            (e: { kind: string }) => e.kind === 'pause',
+          );
+          assert.equal(evidence.revision, 2);
+          await time('2030-03-25T08:00Z');
+          const fix = {
+            ...terms(48, end),
+            evidenceId: evidence.id,
+            evidenceRevision: evidence.revision,
+            start: '2030-02-11T17:11Z',
+            reason: 'supervisor verified the service log',
+          };
+          await left.query(
+            "SELECT set_config('north_star.principal_id',$1,false)",
+            [fixtureId('ordinary')],
+          );
+          try {
+            assert.equal((await read(48)).cursor, checkpoint.cursor);
+            await assert.rejects(
+              call(
+                left,
+                'correctActuals',
+                fix,
+                undefined,
+                'unit',
+                fixtureId('ordinary'),
+              ),
+              /booking.endpointUnavailable/u,
+            );
+          } finally {
+            await left.query(
+              "SELECT set_config('north_star.principal_id',$1,false)",
+              [principal],
+            );
+          }
+          const corrected = await call(left, 'correctActuals', fix);
+          assert.equal(corrected.state, 'returned');
+          const delta = await read(48, checkpoint.cursor);
+          assert.equal(delta.changes.length, 1);
+          const [supersession] = delta.changes[0].evidence;
+          assert.equal(
+            supersession.before.effectiveStart,
+            evidence.effectiveStart,
+          );
+          assert.equal(supersession.after.supersedes, 2);
+          assert.equal(
+            new Date(supersession.after.effectiveStart).toISOString(),
+            '2030-02-11T17:11:00.000Z',
+          );
+          assert.equal(
+            (await read(48, null, checkpoint.cursor)).evidence.find(
+              (e: { kind: string }) => e.kind === 'pause',
+            ).revision,
+            2,
+          );
+          const firstPage = await read(48, '0', checkpoint.cursor, 1);
+          assert.equal(firstPage.cursor, '1');
+          assert.equal(firstPage.highWater, checkpoint.cursor);
+          assert.equal(firstPage.hasMore, true);
+          await time('2030-06-01T15:00Z');
+          assert.equal(
+            (
+              await call(left, 'correctActuals', {
+                ...fix,
+                ...terms(48, corrected),
+                evidenceRevision: 3,
+              })
+            ).refused,
+            'booking.effectiveTimeOutsideBound',
+          );
+          await left.query(
+            "SELECT set_config('north_star.principal_id',$1,false)",
+            [fixtureId('scoped')],
+          );
+          try {
+            await assert.rejects(read(48), /booking.endpointUnavailable/u);
+            await assert.rejects(
+              left.query(
+                'SELECT platform.booking_owner_cursor_fence($1,$2,$3)',
+                [
+                  release,
+                  activeFence,
+                  JSON.stringify([
+                    {
+                      queryId: 'example.booking:query.usage',
+                      recordId: owner(48),
+                    },
+                  ]),
+                ],
+              ),
+              /booking.endpointUnavailable/u,
+            );
+          } finally {
+            await left.query(
+              "SELECT set_config('north_star.principal_id',$1,false)",
+              [principal],
+            );
+          }
+        },
+      );
+      await t.test(
+        'the consuming transaction fences a zero cursor through the first booking commit',
+        async () => {
+          await time('2030-02-11T15:00Z');
+          const owners = [
+            { queryId: 'example.booking:query.usage', recordId: owner(49) },
+          ];
+          const fence = async () =>
+            (
+              await left.query(
+                'SELECT platform.booking_owner_cursor_fence($1,$2,$3) AS result',
+                [release, activeFence, JSON.stringify(owners)],
+              )
+            ).rows[0]!.result;
+          await left.query('BEGIN');
+          try {
+            assert.equal((await fence()).owners[0].cursor, '0');
+            const writer = call(
+              right,
+              'hold',
+              hold(49, 32, window('12:00', '13:00')),
+            );
+            void writer.catch(() => undefined);
+            await waitForRight();
+            assert.equal((await fence()).owners[0].cursor, '0');
+            await left.query('COMMIT');
+            assert.equal((await writer).state, 'hold');
+          } finally {
+            await left.query('ROLLBACK');
+          }
+          assert.equal((await fence()).owners[0].cursor, '1');
+        },
+      );
+      await t.test(
+        'manual no-show requires the scheduled start and releases only unstarted work',
+        async () => {
+          await time('2030-02-11T15:00Z');
+          const h = await call(
+            left,
+            'hold',
+            hold(51, 33, window('12:00', '14:00')),
+          );
+          const c = await call(left, 'confirm', terms(51, h));
+          assert.equal(
+            (await call(left, 'noShow', terms(51, c))).refused,
+            'booking.invalidState',
+          );
+          await time('2030-02-11T19:00Z');
+          assert.equal(
+            (await call(left, 'noShow', terms(51, c))).state,
+            'noShow',
+          );
+          const replacement = await call(
+            right,
+            'hold',
+            hold(52, 33, window('12:30', '13:30')),
+          );
+          assert.equal(replacement.state, 'hold');
+        },
+      );
+      await t.test(
+        'onboarding admits documented overdue possession once under its stable source key',
+        async () => {
+          await time('2030-02-11T20:00Z');
+          const args = {
+            ...hold(54, 35, window('08:00', '09:00')),
+            sourceKey: 'legacy-238',
+            evidence: 'signed equipment register',
+            state: 'inUse',
+            earliestEvidenceAt: '2030-02-11T14:00Z',
+            actuals: [
+              {
+                kind: 'use',
+                start: '2030-02-11T15:00Z',
+                end: null,
+                quantity: '1',
+              },
+            ],
+          };
+          const imported = await call(left, 'recordExisting', args);
+          assert.equal(imported.state, 'inUse');
+          assert.equal(
+            (await call(left, 'recordExisting', args)).invocationId,
+            imported.invocationId,
+          );
+          assert.equal(
+            (
+              await call(left, 'recordExisting', {
+                ...args,
+                evidence: 'different source',
+              })
+            ).refused,
+            'booking.sourceConflict',
+          );
+          assert.equal(
+            (await call(right, 'hold', hold(55, 35, window('14:00', '15:00'))))
+              .refused,
+            'booking.capacityTaken',
+          );
+          const returned = await call(left, 'return', terms(54, imported));
+          assert.equal(returned.state, 'returned');
+          assert.equal(
+            (await call(right, 'hold', hold(55, 35, window('14:00', '15:00'))))
+              .state,
+            'hold',
+          );
+          assert.equal(
+            (
+              await call(left, 'recordExisting', {
+                ...args,
+                recordId: owner(56),
+                resourceId: resource(36),
+                sourceKey: 'before review',
+                earliestEvidenceAt: '2030-02-11T16:00Z',
+              })
+            ).refused,
+            'booking.invalidImport',
+          );
         },
       );
     } finally {

@@ -48,7 +48,9 @@ BEGIN
   INSERT INTO platform.current_policy_roles(tenant_id,environment_id,role_id,role_key)
     VALUES(t,e,md5('shared-reader')::uuid,'shared-reader');
   INSERT INTO platform.current_policy_memberships(tenant_id,environment_id,membership_id,principal_id,role_id,legal_entity_id)
-    VALUES(t,e,gen_random_uuid(),md5('scoped')::uuid,role,md5('company1')::uuid),
+    VALUES(t,e,gen_random_uuid(),md5('ordinary')::uuid,role,md5('company0')::uuid),
+          (t,e,gen_random_uuid(),md5('ordinary')::uuid,md5('shared-reader')::uuid,NULL),
+          (t,e,gen_random_uuid(),md5('scoped')::uuid,role,md5('company1')::uuid),
           (t,e,gen_random_uuid(),md5('scoped')::uuid,md5('shared-reader')::uuid,NULL);
   INSERT INTO platform.current_policy_permission_grants(tenant_id,environment_id,role_id,permission_id,resource_id)
     VALUES(t,e,md5('shared-reader')::uuid,'example.booking:permission.asset',target_entity);
@@ -60,9 +62,9 @@ BEGIN
   INSERT INTO platform.current_policy_permission_grants(tenant_id,environment_id,role_id,permission_id,resource_id)
     VALUES(t,e,md5('visit-archiver')::uuid,'example.booking:permission.archive_visit','example.booking:entity.account');
   INSERT INTO north_star_module.test_booking_resources(tenant_id,environment_id,record_id)
-    SELECT t,e,md5('resource'||n)::uuid FROM generate_series(1,24) n;
+    SELECT t,e,md5('resource'||n)::uuid FROM generate_series(1,48) n;
   FOREACH kind IN ARRAY ARRAY['unit','pool'] LOOP
-    FOREACH verb IN ARRAY ARRAY['hold','holdTracked','confirm','changeInterval','cancel','setCapacity'] LOOP
+    FOREACH verb IN ARRAY ARRAY['hold','holdTracked','confirm','changeInterval','cancel','setCapacity','start','return','swap','pause','resume','noShow','changeQuantity','correctActuals','recordExisting'] LOOP
       IF verb='setCapacity' AND kind='unit' THEN CONTINUE; END IF;
       scope := CASE WHEN verb='setCapacity' THEN target_entity ELSE owner_entity END;
       permission := 'example.booking:permission.'||lower(verb)||'_'||kind;
@@ -73,17 +75,32 @@ BEGIN
         'effect',jsonb_build_object('kind','registeredCapabilityEffect','capability',jsonb_build_object('targetId','northstar.booking:capability.commitments')),
         'booking',jsonb_build_object('bindingVersion','booking.commitment/v1','declarationRevision','example.booking:revision.'||kind,
         'slotRevision',CASE WHEN verb='setCapacity' THEN 'example.booking:revision.capacity' WHEN verb='holdTracked' THEN 'example.booking:revision.tracked' ELSE 'example.booking:revision.slot' END,'slotId','example.booking:slot.visit','kind',kind,'operation',CASE WHEN verb='holdTracked' THEN 'hold' ELSE verb END,
-        'fulfilmentMode',CASE WHEN verb='holdTracked' THEN 'tracked' ELSE 'scheduled' END,'ownerEntity',scope,'resourceEntity',target_entity,
+        'fulfilmentMode',CASE WHEN verb IN ('holdTracked','recordExisting') THEN 'tracked' ELSE 'scheduled' END,'ownerEntity',scope,'resourceEntity',target_entity,
         'ownerReadPermission',CASE WHEN verb='setCapacity' THEN 'example.booking:permission.asset' ELSE 'example.booking:permission.visit' END,
         'resourceReadPermission','example.booking:permission.asset','unit','each','scale',CASE WHEN kind='unit' THEN 0 ELSE 2 END,
         'maxBackdateDays',1,'holdSeconds',900));
+      IF verb IN ('start','return','swap','pause','resume','noShow','changeQuantity','correctActuals','recordExisting') THEN
+        op:=jsonb_set(op,'{booking}',(op->'booking')||jsonb_build_object('bindingVersion','booking.fulfilment/v1',
+          'stewardPermission','example.booking:permission.steward','maxCorrectionAgeDays',90)); END IF;
       ops := ops||jsonb_build_array(op);
     END LOOP;
   END LOOP;
   INSERT INTO platform.current_policy_permission_grants(tenant_id,environment_id,role_id,permission_id,resource_id)
     VALUES(t,e,role,'example.booking:permission.visit',owner_entity),(t,e,role,'example.booking:permission.asset',target_entity);
-  FOREACH family IN ARRAY ARRAY['operation-catalog','storage-target'] LOOP
+  INSERT INTO platform.current_policy_roles(tenant_id,environment_id,role_id,role_key) VALUES(t,e,md5('steward')::uuid,'steward');
+  INSERT INTO platform.current_policy_memberships(tenant_id,environment_id,membership_id,principal_id,role_id)
+    VALUES(t,e,gen_random_uuid(),p,md5('steward')::uuid);
+  INSERT INTO platform.current_policy_permission_grants(tenant_id,environment_id,role_id,permission_id,resource_id)
+    VALUES(t,e,md5('steward')::uuid,'example.booking:permission.steward',owner_entity);
+  INSERT INTO platform.current_policy_permission_grants(tenant_id,environment_id,role_id,permission_id,resource_id)
+    VALUES(t,e,role,'example.booking:permission.usage',owner_entity);
+  FOREACH family IN ARRAY ARRAY['operation-catalog','query-catalog','storage-target'] LOOP
     payload := CASE WHEN family='operation-catalog' THEN jsonb_build_object('kind','operationCatalogPayload','operations',ops)
+      WHEN family='query-catalog' THEN jsonb_build_object('kind','queryCatalogPayload','queries',jsonb_build_array(
+        jsonb_build_object('queryId','example.booking:query.owner','queryType','get','lifecycle','active','permissionId','example.booking:permission.visit','sourceEntityId',owner_entity),
+        jsonb_build_object('queryId','example.booking:query.usage','queryType','get','lifecycle','active','permissionId','example.booking:permission.usage','sourceEntityId',owner_entity,
+          'readModel',jsonb_build_object('capability',jsonb_build_object('targetId','northstar.booking:capability.owner_usage'),
+          'binding','northstar.booking:protocol.owner_usage_v1','queries',jsonb_build_object('owner',jsonb_build_object('targetId','example.booking:query.owner'))))))
       ELSE jsonb_build_object('kind','storageTargetPayload','relations',jsonb_build_array(
         jsonb_build_object('sourceEntityId', owner_entity,'targetEntityId','example.booking:entity.account',
           'ownership','parentScopedChild','relationColumn',jsonb_build_object('physicalName','parent_id'))),

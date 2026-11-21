@@ -4,7 +4,9 @@ import {
 } from '@north-star/canonical-model';
 import { compileAddressBindings } from './address.js';
 import {
-  BOOKING_OPERATION_READER,
+  BOOKING_USAGE_QUERY_READER,
+  hasBookingUsage,
+  bookingReaderFloor,
   bookingDeclarationProblem,
   bookingCatalogTerms,
   hasBookingOperations,
@@ -1606,6 +1608,9 @@ function decorateV3ProjectionPlans(
                 minimumVersion: Math.max(
                   plan.requiredRuntimeCapability.minimumVersion,
                   hasListSums ? 3 : 2,
+                  hasBookingUsage(packageRevision)
+                    ? BOOKING_USAGE_QUERY_READER
+                    : 0,
                 ),
               },
             }
@@ -2299,11 +2304,13 @@ function verifyCompleteness(
     ruleProjection.length !==
       Number(Boolean(declaredRules || declaredDisplays)) ||
     (hasBookingOperations(packageRevision)
-      ? operationFloor !== BOOKING_OPERATION_READER
+      ? operationFloor !== bookingReaderFloor(packageRevision)
       : declaredRules &&
         operationFloor !==
           requiredFormulaValidationOperationReader(declaredRules)) ||
-    (declaredDisplays && queryFloor !== CALCULATED_DISPLAY_QUERY_READER) ||
+    (hasBookingUsage(packageRevision)
+      ? queryFloor !== BOOKING_USAGE_QUERY_READER
+      : declaredDisplays && queryFloor !== CALCULATED_DISPLAY_QUERY_READER) ||
     ((declaredRules || declaredDisplays) &&
       (ruleReference?.instanceId !==
         `${packageRevision.package.namespace}:projection.formula-rule` ||

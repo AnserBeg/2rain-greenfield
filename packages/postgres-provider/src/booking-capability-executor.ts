@@ -27,7 +27,37 @@ import {
 
 const object = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
+const evidenceArgs = ['bookingId', 'bookingRevision', 'effectiveAt', 'reason'];
 const callKeys = {
+  start: evidenceArgs,
+  return: [...evidenceArgs, 'returnedQuantity'],
+  swap: [...evidenceArgs, 'replacementResourceId'],
+  pause: [...evidenceArgs, 'pauseReason'],
+  resume: evidenceArgs,
+  noShow: ['bookingId', 'bookingRevision', 'reason'],
+  changeQuantity: ['bookingId', 'bookingRevision', 'quantity'],
+  correctActuals: [
+    'bookingId',
+    'bookingRevision',
+    'evidenceId',
+    'evidenceRevision',
+    'start',
+    'end',
+    'void',
+    'outcome',
+    'reason',
+  ],
+  recordExisting: [
+    'resourceId',
+    'sourceKey',
+    'evidence',
+    'interval',
+    'quantity',
+    'actuals',
+    'state',
+    'earliestEvidenceAt',
+  ],
+
   hold: ['resourceId', 'quantity', 'interval'],
   confirm: ['bookingId', 'bookingRevision'],
   cancel: ['bookingId', 'bookingRevision', 'reason'],
