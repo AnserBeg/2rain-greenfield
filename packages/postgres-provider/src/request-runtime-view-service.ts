@@ -1,6 +1,10 @@
 import { boardBindingsProblem } from './board-admission.js';
-import { dateTimeBindingsProblem } from './date-time-admission.js';
 import {
+  dateTimeBindingsProblem,
+  declaredDateTimeFields,
+} from './date-time-admission.js';
+import {
+  CONTENT_HASH_DOMAIN,
   ADDRESS_FIELD_READER,
   ADDRESS_MAP_READER,
   AddressProjectionSchema,
@@ -150,6 +154,7 @@ interface PointerAuthority {
 }
 
 interface SnapshotRow {
+  desired_state: Uint8Array | null;
   artifact_canonical_bytes: Uint8Array | null;
   artifact_content_hash: string | null;
   artifact_domain_tag: string | null;
@@ -283,6 +288,7 @@ const authoritativeSnapshotSql = `
          release.output_protocol_version AS release_output_protocol_version,
          admission.release_id AS semantic_admission_release_id,
          intermediate.release_id AS transition_admission_release_id,
+         CASE WHEN artifact.content_hash = release.content_hash THEN revision.desired_state END AS desired_state,
          artifact.artifact_kind,
          artifact.content_hash AS artifact_content_hash,
          artifact.domain_tag AS artifact_domain_tag,
@@ -298,6 +304,9 @@ const authoritativeSnapshotSql = `
       ON release.tenant_id = pointer.tenant_id
      AND release.environment_id = pointer.environment_id
      AND release.release_id = pointer.release_id
+    LEFT JOIN platform.app_package_revisions AS revision
+      ON revision.tenant_id = release.tenant_id
+     AND revision.revision_id = release.app_package_revision_id
     LEFT JOIN platform.tenant_release_admissions AS admission
       ON admission.tenant_id = release.tenant_id
      AND admission.environment_id = release.environment_id
@@ -897,9 +906,25 @@ function definitionFromSnapshotRows(
   });
   if (addressRefusal) throw malformedProjection(addressRefusal);
   if (declared) connector ??= projectionFor(CONNECTOR_FAMILY);
+  const revision = rows.find(
+    (row) => row.desired_state !== null,
+  )?.desired_state;
+  if (
+    !revision ||
+    hashBytes(CONTENT_HASH_DOMAIN, revision) !==
+      releaseManifest.normalizedDefinitionDigest
+  )
+    throw malformedRelease('release definition disagrees with its manifest');
+  let declarations;
+  try {
+    declarations = declaredDateTimeFields(revision);
+  } catch {
+    throw malformedProjection('invalid dateTime field declaration');
+  }
   const dateTimeProblem = dateTimeBindingsProblem(
     consumers.map((p) => p.payload),
     surface.requiredRuntimeCapability?.minimumVersion ?? 0,
+    declarations.active,
   );
   if (dateTimeProblem) throw malformedProjection(dateTimeProblem);
   const referencesDocuments = references.some(
