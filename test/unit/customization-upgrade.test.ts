@@ -892,6 +892,24 @@ test('a removed or reordered choice keeps its field conflict on lists and forms'
   }
 });
 
+test('permission replay distinguishes an occupied restriction from a missing operation or restriction', () => {
+  const retired = structuredClone(base);
+  declaration(retired, 'operations', 'operationId', action.id).lifecycle =
+    'retired';
+  for (const [target, edit, code] of [
+    [applied(base, [limit]), limit, 'ID_COLLISION'],
+    [retired, limit, 'RETIRED_TARGET'],
+    [base, { ...limit, kind: 'unNarrowPermission' }, 'RETIRED_TARGET'],
+  ] as const) {
+    const result = replayCustomizationPatches(target, [patch(edit)]);
+    assert.equal(result.status, 'replayConflict');
+    assert.deepEqual(
+      result.findings.map((f) => [f.code, f.subject]),
+      [[code, action.id]],
+    );
+  }
+});
+
 test('an unclassified package refusal carries the package ID and no patch attribution', () => {
   const target = applied(
     base,

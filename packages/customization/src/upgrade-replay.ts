@@ -261,7 +261,7 @@ function formulaConflicts(
 function applyRefusal(
   patch: SingleCustomizationPatch,
   target: Definition,
-  reason: string,
+  outcome: NonNullable<ReturnType<typeof applyOne>>,
 ): ReplayConflict {
   const ids = declarations(target);
   if (patch.kind === 'arrangeLayout' && !ids.has(patch.surface))
@@ -304,17 +304,20 @@ function applyRefusal(
   if (patch.kind === 'narrowPermission' || patch.kind === 'unNarrowPermission')
     return {
       code:
-        patch.kind === 'narrowPermission' ? 'ID_COLLISION' : 'RETIRED_TARGET',
+        outcome.status === 'refused' &&
+        outcome.code === 'CUSTOMIZE_DUPLICATE_LABEL'
+          ? 'ID_COLLISION'
+          : 'RETIRED_TARGET',
       subject: patch.target.id,
       expected: { roleKey: patch.roleKey, operationId: patch.target.id },
-      observed: reason,
+      observed: outcome.message,
     };
   const subject = String((target.package as Member).packageId);
   return {
     code: 'WHOLE_PACKAGE_FAILURE',
     subject,
     expected: patch.kind,
-    observed: reason,
+    observed: outcome.message,
   };
 }
 
@@ -490,8 +493,7 @@ export function replayCustomizationPatches(
                       : b.blockedBy,
                 })),
               );
-            } else
-              conflicts.push(applyRefusal(patch, authored, outcome.message));
+            } else conflicts.push(applyRefusal(patch, authored, outcome));
           } else {
             if (original)
               conflicts.push(...formulaConflicts(patch, original, trial, base));
