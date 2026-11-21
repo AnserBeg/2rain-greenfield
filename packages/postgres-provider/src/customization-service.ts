@@ -8,11 +8,11 @@ import {
 import { compileWorkflowUnattendedOperations } from './workflow-verification.js';
 import { verifiedGenerationsSql } from './verified-release-generation.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { retypedCalculatedDisplayField } from '../../canonical-model/src/calculated-display-bindings.js';
-import { retypedFormulaRule } from '../../canonical-model/src/formula-validation-bindings.js';
+import { getSystemErrorMap } from 'node:util';
 
 import { RECEIPT_POSTED_EVENT } from '../../domain/src/purchasing/receipt-posted-event.js';
 import {
+  CanonicalModelError,
   canonicalAuthoredProjection,
   canonicalize,
   normalizeApplicationPackage,
@@ -20,6 +20,8 @@ import {
 } from '@north-star/canonical-model';
 import {
   compileInSandbox,
+  SandboxFailure,
+  finalFormulaConflict,
   UPGRADE_CODES_V1,
   unadmittedMembers,
   type UpgradeFinding,
@@ -38,7 +40,6 @@ import {
   type DraftingModel,
   type CustomizationTargets,
   type CustomizationPatch,
-  SandboxFailure,
   type SandboxRunnerOptions,
   type SandboxStep,
 } from '@north-star/customization';
@@ -280,6 +281,78 @@ type UpgradeRefusal = Exclude<
   readonly sourceReleaseId: MintedUuid;
   readonly baseReleaseRoot: string;
 };
+type DisclosureField = {
+  fieldId: string;
+  label: string;
+  classification: string;
+};
+
+/** Both sides of a finding, its serialized issue and the summary have the
+ * same disclosure boundary. An unreadable historical definition hides all. */
+export function discloseUpgradeReport(
+  report: UpgradeReport,
+  message: string,
+  code: UpgradeCode,
+  fields: readonly DisclosureField[] | null,
+) {
+  const terms =
+    fields &&
+    new Set(
+      fields
+        .filter(
+          (f) =>
+            f.classification !== 'public' && f.classification !== 'internal',
+        )
+        .flatMap((f) => [f.fieldId, f.label]),
+    );
+  const restricted = (value: unknown) => {
+    if (!terms) return true;
+    const text = JSON.stringify(value);
+    for (const term of terms) if (text.includes(term)) return true;
+    return false;
+  };
+  const findings = report.findings.map((finding) =>
+    restricted(finding)
+      ? {
+          ...finding,
+          subject: 'Restricted field',
+          expected: 'Restricted',
+          observed: 'Restricted',
+        }
+      : finding,
+  );
+  return {
+    report: { ...report, findings },
+    message: restricted(message) ? UPGRADE_CODES_V1[code] : message,
+    issues: [...findings, ...report.blocked].map((issue) =>
+      JSON.stringify(issue),
+    ),
+  };
+}
+/** Log only classifier metadata. Database details, worker messages and thrown
+ * values can all contain tenant data. */
+function preparationErrorFields(error: unknown) {
+  if (error instanceof SandboxFailure)
+    return { errorClass: 'SandboxFailure', errorCode: error.code };
+  if (error instanceof pg.DatabaseError)
+    return {
+      errorClass: 'DatabaseError',
+      errorCode: /^[0-9A-Z]{5}$/u.test(error.code ?? '')
+        ? error.code
+        : 'UNKNOWN',
+    };
+  const systemCode =
+    error instanceof Error &&
+    'errno' in error &&
+    typeof error.errno === 'number'
+      ? getSystemErrorMap().get(error.errno)?.[0]
+      : undefined;
+  return {
+    errorClass: error instanceof Error ? error.constructor.name : 'Unknown',
+    errorCode: systemCode ?? 'UNKNOWN',
+  };
+}
+
 /** Only opaque release and change identities leave the tenant review channel. */
 export function upgradeLogFields(upgrade: UpgradePreparation) {
   if (upgrade.status === 'drafted')
@@ -376,6 +449,23 @@ export class PostgresCustomizationService {
   /** Boot stages a replay against the new base, under the same scope lock as
    * approval and activation. Serving continues on the recorded live pointer. */
   async prepareUpgrade(): Promise<UpgradePreparation> {
+    try {
+      return await this.#prepareUpgrade();
+    } catch (error) {
+      if (error instanceof CustomizationServiceRefusal) throw error;
+      console.error(
+        'UPGRADE_PREPARATION_FAILED',
+        preparationErrorFields(error),
+      );
+      return {
+        status: 'refused',
+        code: 'UPGRADE_PREPARATION_FAILED',
+        message: 'The upgrade could not be prepared. Try again.',
+      };
+    }
+  }
+
+  async #prepareUpgrade(): Promise<UpgradePreparation> {
     const context = await this.#context();
     return withReleaseScopeLock(
       this.connection.adminPool,
@@ -410,21 +500,18 @@ export class PostgresCustomizationService {
           const known =
             error instanceof CustomizationServiceRefusal ||
             error instanceof CustomizationLineageError ||
-            error instanceof SandboxFailure ||
             error instanceof PersistedReleaseConflict;
+          if (!known) throw error;
           result = {
             status: 'refused',
-            code:
-              known && Object.hasOwn(UPGRADE_CODES_V1, error.code)
-                ? error.code
-                : 'WHOLE_PACKAGE_FAILURE',
+            code: Object.hasOwn(UPGRADE_CODES_V1, error.code)
+              ? error.code
+              : 'WHOLE_PACKAGE_FAILURE',
             ...(error instanceof CustomizationServiceRefusal &&
               error.replayDiagnostics && {
                 replayDiagnostics: error.replayDiagnostics,
               }),
-            message: known
-              ? error.message
-              : 'The platform upgrade could not be prepared.',
+            message: error.message,
           };
         }
         const baseReleaseRoot = this.#tip.compiled.releaseRoot;
@@ -491,33 +578,14 @@ export class PostgresCustomizationService {
             blocked: [],
           }),
         };
-        const protectedTerms = await this.#restrictedUpgradeTerms(
+        const fields = await this.#upgradeDisclosureFields(
           context,
           sourceReleaseId,
         );
-        const restricted = (value: unknown) =>
-          protectedTerms === null ||
-          protectedTerms.some((term) => JSON.stringify(value).includes(term));
-        report.findings = report.findings.map((finding) =>
-          restricted(finding)
-            ? {
-                ...finding,
-                subject: 'Restricted field',
-                expected: 'Restricted',
-                observed: 'Restricted',
-              }
-            : finding,
-        );
         const diagnostic: UpgradeRefusal = {
           ...outcome,
-          ...(restricted(outcome.message) && {
-            message: UPGRADE_CODES_V1[code],
-          }),
           code,
-          report,
-          issues: [...report.findings, ...report.blocked].map((issue) =>
-            JSON.stringify(issue),
-          ),
+          ...discloseUpgradeReport(report, outcome.message, code, fields),
           sourceReleaseId,
           baseReleaseRoot,
         };
@@ -531,10 +599,10 @@ export class PostgresCustomizationService {
   }
 
   /** A reader that cannot interpret one side can still return a scoped, redacted refusal. */
-  async #restrictedUpgradeTerms(
+  async #upgradeDisclosureFields(
     context: TrustedRequestContext,
     sourceReleaseId: MintedUuid,
-  ): Promise<string[] | null> {
+  ): Promise<DisclosureField[] | null> {
     try {
       const source = await this.#identity(context, sourceReleaseId);
       const old = parseNormalizedApplicationPackageJson(
@@ -543,19 +611,10 @@ export class PostgresCustomizationService {
       const next = parseNormalizedApplicationPackageJson(
         this.#tip.normalizedDefinitionBytes,
       );
-      return [
-        ...new Set(
-          [...old.fields, ...next.fields]
-            .filter(
-              (f) =>
-                f.classification !== 'public' &&
-                f.classification !== 'internal',
-            )
-            .flatMap((f) => [f.fieldId, f.label]),
-        ),
-      ];
-    } catch {
-      return null;
+      return [...old.fields, ...next.fields];
+    } catch (error) {
+      if (error instanceof CanonicalModelError) return null;
+      throw error;
     }
   }
 
@@ -624,24 +683,26 @@ export class PostgresCustomizationService {
     const candidateDefinition = parseNormalizedApplicationPackageJson(
       candidate.normalizedDefinitionBytes,
     );
-    const inheritedRule = retypedFormulaRule(
-      sourceDefinition,
-      targetBase,
-      sourceBase,
-    );
-    assertCalculatedDisplayCompatibility(
-      sourceDefinition,
-      targetBase,
-      sourceBase,
-    );
-    const retypedRule =
-      inheritedRule ??
-      retypedFormulaRule(sourceDefinition, candidateDefinition);
-    assertCalculatedDisplayCompatibility(sourceDefinition, candidateDefinition);
-    if (retypedRule)
+    const finding =
+      finalFormulaConflict(
+        sourceDefinition,
+        targetBase,
+        sourceBase,
+        patches,
+        active.chain,
+      ) ??
+      finalFormulaConflict(
+        sourceDefinition,
+        candidateDefinition,
+        undefined,
+        patches,
+        active.chain,
+      );
+    if (finding)
       throw new CustomizationServiceRefusal(
-        'INCOMPATIBLE_TYPE',
-        `The upgrade retires or retypes a target of validation rule ${retypedRule}.`,
+        finding.code,
+        UPGRADE_CODES_V1[finding.code],
+        { findings: [finding], blocked: [] },
       );
     await this.#assertActiveRestrictionRoles(
       admin,
@@ -2953,17 +3014,6 @@ export async function openCustomizationService(
     );
     throw error;
   }
-}
-
-function assertCalculatedDisplayCompatibility(
-  ...comparison: Parameters<typeof retypedCalculatedDisplayField>
-) {
-  const retyped = retypedCalculatedDisplayField(...comparison);
-  if (retyped)
-    throw new CustomizationServiceRefusal(
-      'INCOMPATIBLE_TYPE',
-      `The upgrade retires or retypes a target of calculated display field ${retyped}.`,
-    );
 }
 
 interface PatchRow {

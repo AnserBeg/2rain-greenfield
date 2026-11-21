@@ -92,6 +92,7 @@ export function baseLayout(
   def: LayoutDefinition,
   surface: Row,
   mode: LayoutMode,
+  contracts?: Map<string, Record<string, unknown>>,
 ): LayoutBody | null {
   if (
     def.languageVersion !== 'v6' ||
@@ -169,28 +170,30 @@ export function baseLayout(
     into = members,
     calculation?: CalculatedDisplayField,
   ) {
+    const contract = {
+      owner: entity,
+      operation: operations[0]?.operationId ?? null,
+      query: query!.queryId,
+      mode,
+      field: fieldId,
+      binding,
+      type: definitions.get(fieldId)?.fieldType ?? null,
+      ...(calculation && { calculation }),
+      reference: form?.references?.find((r) => r.field === fieldId) ?? null,
+      editor:
+        [
+          ...(editor?.headerFields ?? []),
+          ...(editor?.headerRelations ?? []),
+        ].find((f) => f.fieldId === fieldId) ?? null,
+      column:
+        c?.fields.find((col) => col.columnId === binding)?.reference ?? null,
+    };
+    contracts?.set(fieldId, contract);
     into.push({
       id: fieldId,
       binding,
       bindingType,
-      contractDigest: layoutDigest({
-        owner: entity,
-        operation: operations[0]?.operationId ?? null,
-        query: query!.queryId,
-        mode,
-        field: fieldId,
-        binding,
-        type: definitions.get(fieldId)?.fieldType ?? null,
-        ...(calculation && { calculation }),
-        reference: form?.references?.find((r) => r.field === fieldId) ?? null,
-        editor:
-          [
-            ...(editor?.headerFields ?? []),
-            ...(editor?.headerRelations ?? []),
-          ].find((f) => f.fieldId === fieldId) ?? null,
-        column:
-          c?.fields.find((col) => col.columnId === binding)?.reference ?? null,
-      }),
+      contractDigest: layoutDigest(contract),
       editorInput:
         !!editor &&
         [

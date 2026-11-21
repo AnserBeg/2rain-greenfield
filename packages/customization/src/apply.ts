@@ -7,7 +7,7 @@ import {
 } from './board-revision.js';
 import {
   applyLayoutRevision,
-  currentLayout,
+  historicalLayout,
   type LayoutReplay,
   placeAddedLayoutField,
 } from './layout-revision.js';
@@ -110,18 +110,14 @@ export function applyCustomizationPatches(
       const origin = origins?.[index];
       if (patch.kind === 'addLayoutRevision' && origin?.differentBase) {
         const parent = origin.parent as unknown as LayoutDefinition;
-        const surface = parent?.surfaces.find(
-          (s) => s.surfaceId === patch.surface,
-        );
-        const target = surface && currentLayout(parent, surface, patch.mode);
-        if (!target)
+        layoutReplay = historicalLayout(parent, patch);
+        if (!layoutReplay)
           return {
             status: 'refused',
             code: 'CUSTOMIZE_LAYOUT_CONFLICT',
             message: 'The recorded layout authoring parent is missing.',
             patchIndex: index,
           };
-        layoutReplay = { source: target.body, findings: [], blocked: [] };
       }
       const board =
         patch.kind === 'addBoardViewRevision'
