@@ -9,9 +9,7 @@
       "original": "{ ...member, companyAccessIndex: COMPANY_ACCESS_INDEX }",
       "replacement": "member",
       "test": {
-        "files": [
-          "test/compiler/report-company-access.test.ts"
-        ],
+        "files": ["test/compiler/report-company-access.test.ts"],
         "namePattern": "recording a company-owned"
       },
       "kills": [
@@ -29,9 +27,7 @@
       "original": "if (patch.companyAccessIndex && patch.companyOwnership !== 'entityOwned')",
       "replacement": "if (false)",
       "test": {
-        "files": [
-          "test/compiler/report-company-access.test.ts"
-        ],
+        "files": ["test/compiler/report-company-access.test.ts"],
         "namePattern": "recording a company-owned"
       },
       "kills": [
@@ -49,9 +45,7 @@
       "original": "(entity) => 'companyAccessIndex' in entity && entity.companyAccessIndex,",
       "replacement": "() => false,",
       "test": {
-        "files": [
-          "test/compiler/report-company-access.test.ts"
-        ],
+        "files": ["test/compiler/report-company-access.test.ts"],
         "namePattern": "the new Inspection"
       },
       "kills": [
@@ -69,9 +63,7 @@
       "original": "if ('companyAccessIndex' in entity && entity.companyAccessIndex)",
       "replacement": "if (entityOwned && entity.entityId.includes(':entity.custom_'))",
       "test": {
-        "files": [
-          "test/compiler/report-company-access.test.ts"
-        ],
+        "files": ["test/compiler/report-company-access.test.ts"],
         "namePattern": "an archived pre-key"
       },
       "kills": [
@@ -89,9 +81,7 @@
       "original": "(indexedType && surfaceFloor < COMPANY_ACCESS_INDEX_READER) ||",
       "replacement": "",
       "test": {
-        "files": [
-          "test/postgres/releases.test.ts"
-        ],
+        "files": ["test/postgres/releases.test.ts"],
         "namePattern": "release admission refuses a company access index"
       },
       "kills": [
@@ -109,9 +99,7 @@
       "original": "const partition = partitionFor(binding, fact);",
       "replacement": "const partition = {kind:'unitless'} as const;",
       "test": {
-        "files": [
-          "test/compiler/report-company-access.test.ts"
-        ],
+        "files": ["test/compiler/report-company-access.test.ts"],
         "namePattern": "Invoice source"
       },
       "kills": [
@@ -129,9 +117,7 @@
       "original": "candidate === fact[binding.fieldId]",
       "replacement": "candidate !== 'EUR' && candidate === fact[binding.fieldId]",
       "test": {
-        "files": [
-          "test/compiler/report-company-access.test.ts"
-        ],
+        "files": ["test/compiler/report-company-access.test.ts"],
         "namePattern": "Invoice source"
       },
       "kills": [
@@ -149,9 +135,7 @@
       "original": "if (value == null) row.cells[i]!.missing++;",
       "replacement": "if (value == null) continue;",
       "test": {
-        "files": [
-          "test/compiler/report-company-access.test.ts"
-        ],
+        "files": ["test/compiler/report-company-access.test.ts"],
         "namePattern": "Invoice source"
       },
       "kills": [
@@ -169,9 +153,7 @@
       "original": "if (amount.scale !== CURRENCY_MINOR_UNITS_V0[currency.currencyCode])",
       "replacement": "if (false)",
       "test": {
-        "files": [
-          "test/compiler/report-company-access.test.ts"
-        ],
+        "files": ["test/compiler/report-company-access.test.ts"],
         "namePattern": "amount operands"
       },
       "kills": [
@@ -189,9 +171,7 @@
       "original": "if (code?.kind !== 'textFieldType' || code.maximumLength !== 3)",
       "replacement": "if (false)",
       "test": {
-        "files": [
-          "test/compiler/report-company-access.test.ts"
-        ],
+        "files": ["test/compiler/report-company-access.test.ts"],
         "namePattern": "amount operands"
       },
       "kills": [
@@ -209,9 +189,7 @@
       "original": " LIMIT ${param(limits.facts + 1)}",
       "replacement": "",
       "test": {
-        "files": [
-          "test/postgres/report-reader-bounds.test.ts"
-        ],
+        "files": ["test/postgres/report-reader-bounds.test.ts"],
         "namePattern": "the PostgreSQL Invoice candidate probe"
       },
       "kills": [
@@ -229,9 +207,7 @@
       "original": "addRowPolicy(args, predicates);",
       "replacement": "",
       "test": {
-        "files": [
-          "test/postgres/report-reader-bounds.test.ts"
-        ],
+        "files": ["test/postgres/report-reader-bounds.test.ts"],
         "namePattern": "the PostgreSQL Invoice candidate probe"
       },
       "kills": [
@@ -249,9 +225,7 @@
       "original": "if (groups.length > limits.groups) return { kind: 'narrow' };",
       "replacement": "",
       "test": {
-        "files": [
-          "test/postgres/report-reader-bounds.test.ts"
-        ],
+        "files": ["test/postgres/report-reader-bounds.test.ts"],
         "namePattern": "the PostgreSQL Invoice candidate probe"
       },
       "kills": [
@@ -269,9 +243,7 @@
       "original": "if (probe.rows[0]!.n > limits.facts) return { kind: 'narrow' };",
       "replacement": "",
       "test": {
-        "files": [
-          "test/postgres/report-reader-bounds.test.ts"
-        ],
+        "files": ["test/postgres/report-reader-bounds.test.ts"],
         "namePattern": "the PostgreSQL Invoice candidate probe"
       },
       "kills": [
@@ -289,9 +261,7 @@
       "original": "!(await reportIndexReady(client, table, index, keys))",
       "replacement": "false",
       "test": {
-        "files": [
-          "test/postgres/report-reader-bounds.test.ts"
-        ],
+        "files": ["test/postgres/report-reader-bounds.test.ts"],
         "namePattern": "the PostgreSQL Invoice candidate probe"
       },
       "kills": [
@@ -309,9 +279,7 @@
       "original": "if (entity.legalEntity)\n    conditions.push(`legal_entity_id=${param(scope.legalEntityIds[0])}::uuid`);",
       "replacement": "",
       "test": {
-        "files": [
-          "test/postgres/report-company-reader.test.ts"
-        ],
+        "files": ["test/postgres/report-company-reader.test.ts"],
         "namePattern": "Invoice report reads"
       },
       "kills": [
@@ -329,9 +297,7 @@
       "original": "? `CASE WHEN ${column(currency.fieldId)}=ANY(${param(currency.codes)}::text[]) THEN ${column(currency.fieldId)} END`",
       "replacement": "? param(currency.codes[0]) + '::text'",
       "test": {
-        "files": [
-          "test/postgres/report-company-reader.test.ts"
-        ],
+        "files": ["test/postgres/report-company-reader.test.ts"],
         "namePattern": "Invoice report reads"
       },
       "kills": [
@@ -349,9 +315,7 @@
       "original": "...report.columns.map((c) => reportColumnPermission(c.fieldId)),",
       "replacement": "",
       "test": {
-        "files": [
-          "test/postgres/report-company-reader.test.ts"
-        ],
+        "files": ["test/postgres/report-company-reader.test.ts"],
         "namePattern": "Invoice report reads"
       },
       "kills": [

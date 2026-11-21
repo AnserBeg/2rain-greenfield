@@ -865,9 +865,13 @@ test('a person groups Inspection outcomes, renames and retires the report, and r
         ).toBeVisible();
         await expect(table.locator('tfoot')).toContainText('3');
         await page.setViewportSize({ width: 390, height: 844 });
-        await expect(
-          table.getByRole('row', { name: 'Pass 2', exact: true }),
-        ).toBeVisible();
+        const mobileRow = page
+          .locator('.grouped-report-table tbody tr')
+          .filter({
+            has: page.getByText('Pass', { exact: true }),
+          });
+        await expect(mobileRow).toBeVisible();
+        await expect(mobileRow.locator('td')).toHaveText(['Pass', '2']);
         await page.goto(editor.href);
         await page
           .getByRole('link', { name: 'Inspections by outcome' })
