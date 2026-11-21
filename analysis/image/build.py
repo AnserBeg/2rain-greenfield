@@ -36,14 +36,15 @@ def build():
                 manifest = oci.extractfile("blobs/sha256/" + manifest_digest[7:]).read()
                 assert sha(manifest) == manifest_digest
                 config = json.loads(manifest)["config"]["digest"]
-            profile = dict(protocol=1, manifest=manifest_digest, image=config,
+            profile = dict(protocol=1, image=manifest_digest, config=config,
                            wheels=sha((HERE / "wheels.lock").read_bytes()))
             print("Measured OCI profile:", json.dumps(profile, sort_keys=True), flush=True)
             if not PIN.exists() or profile != json.loads(PIN.read_text()):
                 raise Refusal("review the measured image digest before admission")
-            engine.command("load", "--input", str(archive), timeout=150)
-            if engine.command("image", "inspect", "--format={{.Id}}", config).decode().strip() != config:
-                raise Refusal("loaded image digest mismatch")
+            print(engine.command("load", "--input", str(archive), timeout=150).decode())
+            print(engine.command("image","ls","--digests","--no-trunc").decode())
+            # The modern containerd store identifies the loaded image by OCI manifest.
+            engine.command("image","inspect","analysis.local/science@" + manifest_digest)
     finally:
         engine.close()
 

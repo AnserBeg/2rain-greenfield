@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
+import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, URL } from 'node:url';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import process from 'node:process';

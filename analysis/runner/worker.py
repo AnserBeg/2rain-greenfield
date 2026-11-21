@@ -52,8 +52,7 @@ def host_info(engine):
     engine.preflight()
     digest = json.loads(PIN.read_text())["image"]
     try:
-        if engine.command("image", "inspect", "--format={{.Id}}", digest).decode().strip() != digest:
-            raise Refusal("admitted scientific image digest")
+        engine.command("image", "inspect", "--format={{.Id}}", "analysis.local/science@" + digest)
     except subprocess.SubprocessError as error:
         raise Refusal("missing admitted scientific image " + digest) from error
     fields = Path("/proc/meminfo").read_text().splitlines()

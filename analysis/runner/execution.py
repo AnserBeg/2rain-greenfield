@@ -102,7 +102,7 @@ def execute(engine, name, script, data, cancelled, on_launch, budget=None, limit
     if cancelled():
         raise Stopped("cancelled")
     group = None
-    container_id = engine.command("create", *options(name), digest, "-c",
+    container_id = engine.command("create", *options(name), "analysis.local/science@" + digest, "-c",
                                   "import time; time.sleep(120)").decode().strip()
     try:
         engine.command("start", name)
