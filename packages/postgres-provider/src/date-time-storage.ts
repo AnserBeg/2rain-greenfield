@@ -191,15 +191,15 @@ export function resolveDateTimePatch(
     const company = check.zoneSource === 'companyBusinessCalendar';
     let zone: string | null;
     if (company) {
-      if (!context.calendar)
-        throw refuse(
-          'DATE_TIME_CALENDAR_REQUIRED',
-          'This field uses the company business calendar, and none is set up.',
-        );
       if (!context.companyId)
         throw refuse(
           'DATE_TIME_COMPANY_REQUIRED',
           'Choose the company whose business calendar this field uses.',
+        );
+      if (!context.calendar)
+        throw refuse(
+          'DATE_TIME_CALENDAR_REQUIRED',
+          'This field uses the company business calendar, and none is set up.',
         );
       zone = context.calendar.zone;
       if (
@@ -304,6 +304,7 @@ export function expandDateTimePatch(
 export function dateTimeStorageDisagreement(
   bindingsPayload: unknown,
   storage: StorageTargetPayloadV1,
+  retired: ReadonlySet<string>,
 ): string | null {
   const bindings =
     bindingsPayload && typeof bindingsPayload === 'object'
@@ -323,7 +324,8 @@ export function dateTimeStorageDisagreement(
     for (const check of dateTimeChecks(entity)) {
       const expected = bound.get(check.canonicalFieldId);
       // A retired field keeps its storage and leaves the bindings.
-      if (expected === undefined) continue;
+      if (expected === undefined && retired.has(check.canonicalFieldId))
+        continue;
       if (expected !== `${entity.entityId}|${check.zoneSource}`)
         return check.canonicalFieldId;
       bound.delete(check.canonicalFieldId);
