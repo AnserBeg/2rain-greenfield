@@ -4,13 +4,13 @@
 
 **Slice 1 · BUILD checkpoint, 2026-11-21.** Invoice reports use the stored sales currency. CAD, USD and EUR have independent partitions. A missing amount contributes to coverage. A present amount without a recognized currency contributes to **No currency**. The canonical money profile is unchanged.
 
-The Invoice date query uses `nsm_i_kyu3zu6vouaduhmjm5lbunvswejls2t4ls5svgycueyib3fqieka`. The provider probe, row policy, group ceiling, unavailable index, and pre-key byte identity have focused PostgreSQL/compiler witnesses. The actual Invoice page and downloaded bytes share the registered query. A failed audit append withholds the download. [Regression controls](../../../test/evidence/REPORTS-1-s1.expected-red.json)
+The Invoice date query uses `nsm_i_kyu3zu6vouaduhmjm5lbunvswejls2t4ls5svgycueyib3fqieka`. The provider probe, row policy, group ceiling, unavailable index, and pre-key byte identity have focused PostgreSQL/compiler witnesses. The published Invoice page and CSV [passed the PostgreSQL case](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44959811505/job/137016081557). The [Inspection browser case](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44959811505/job/137016081496) exercised rename, retirement and rollback. A failed audit append withholds the download. [Regression controls](../../../test/evidence/REPORTS-1-s1.expected-red.json)
 
 Preview and activation use CUSTOMIZE-5’s pooled-table probe from migration 0061. The approved attempt checks the ceiling under the table lock. The predecessor at `6a991b21` supports surface rung 39. The optional company access key requires 40, the Invoice source binding 41 and grouped reports 42. The historical fixtures issue a governed query through that predecessor.
 
 Grouped table and CSV output, scoped index admission and revision replay serve distribution (Invoices), field service (Inspections) and clinics (visits). Each business selects its record type, operands and labels in the declaration.
 
-CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44888115668
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44962030383
 
 ## Slice plan
 
@@ -57,14 +57,14 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44888115
 
 ## Design decisions and gate
 
-Use the existing List and Home grammar. A group has typed keys, currency and measures. A report's stable ID survives renaming. The proposed 91+ label puts day 90 in one band. The ADR assigns limits for review and leaves scalar reader and migration numbers to executable merges. No runtime proof is claimed at this checkpoint.
+Use the existing List and Home grammar. A group has typed keys, currency and measures. A report's stable ID survives renaming. The proposed 91+ label puts day 90 in one band. The reader enforces the ADR’s limits. The slice 1 PostgreSQL and browser cases exercise published reports and their authorized readers.
 
 Resolved by the design read and orchestrator rulings: a report’s index on an existing table uses the ceiling-bounded locking build (ADR-0087 A4, PR-6c path), initially 10,000 rows, and refuses by name above it. Every new company-owned record type declares a same-plan company-leading index (optional key; absent on all earlier types). Amendments B1, B2, R1–R9 and N1–N5 are in [ADR-0089](../../decisions/ADR-0089-declared-reports.md#amendments-from-the-design-read). B1 and B2 were re-read and closed (2026-11-20).
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "REPORTS-1",
-  "base": "af255bf703360090d4dda013c1237234c62996ef", "head": "4740f7cbcd61479e196a456d10257a30e102a05e",
+  "base": "6a991b21f6faa7df9833a8e27cee5aac5c0d7bf9", "head": "79dc5b0ab8c02829564bc2905983e64546f853ea",
   "changedPaths": [
     "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json", "apps/web/src/component-registry.ts", "apps/web/src/customize-report.ts", "apps/web/src/customize-screen.ts", "apps/web/src/grouped-report.ts", "apps/web/src/ledger-styles.ts", "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts",
     "apps/web/test/browser/customize-inspection.composed-application.spec.ts", "apps/web/test/browser/customize.composed-application.spec.ts", "package.json", "packages/canonical-model/src/constants.ts", "packages/canonical-model/src/declared-report.ts", "packages/canonical-model/src/grouped-aggregate.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/normalize.ts", "packages/canonical-model/src/schemas.ts",
