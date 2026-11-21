@@ -350,7 +350,7 @@ test(
     const { firstPartyAuthored } =
       await import('../helpers/customization-fixture.js');
     const { nextPlatformRelease, singleTransitionApplication } =
-      await import('../helpers/application-without-line-create-values.js');
+      await import('../helpers/application-before-stock-count-workflow.js');
     const compiledApplication =
       singleTransitionApplication(firstPartyAuthored).release;
     const { projectionPayload } = await import('../compiler/helpers.js');

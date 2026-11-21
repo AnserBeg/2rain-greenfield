@@ -19,9 +19,7 @@ import { serializeRelease } from '../../packages/customization/src/index.js';
 import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../packages/runtime/src/semantic-query-gateway.js';
 import { compilerInput, normalizedBytes } from '../compiler/helpers.js';
-import {
-  authoredPath,
-} from '../helpers/customization-fixture.js';
+import { authoredPath } from '../helpers/customization-fixture.js';
 import { startComposedApplication } from '../../apps/api/src/composition-root.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 import { withArchivedCustomizationRuntime } from '../helpers/archived-runtime-process.js';
@@ -43,7 +41,7 @@ function bookingRelease(
   ordinaryCorrection = false,
 ) {
   const source = parseAuthoredApplicationPackageJson(
-    JSON.stringify(applicationWithoutLineCreateValues().authored),
+    JSON.stringify(applicationBeforeStockCountWorkflow().authored),
   );
   const detail = source.queries.find((q) => q.queryId === detailQuery)!;
   assert.ok(detail.queryType === 'get');
@@ -142,7 +140,9 @@ function bookingRelease(
       },
     ],
   });
-  const prior = parseCompiledApplication(applicationWithoutLineCreateValues().release);
+  const prior = parseCompiledApplication(
+    applicationBeforeStockCountWorkflow().release,
+  );
   const input = compilerInput(
     bytes,
     expectedActiveReleaseFrom(prior.application.compiled),

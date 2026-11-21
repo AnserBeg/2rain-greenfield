@@ -1383,7 +1383,11 @@ test(
               },
             ],
           };
-          const candidate = await draftBeforeCompanyAccessIndex(options,fileChange, 'visualBuilder');
+          const candidate = await draftBeforeCompanyAccessIndex(
+            options,
+            fileChange,
+            'visualBuilder',
+          );
           assert.equal(candidate.status, 'drafted', JSON.stringify(candidate));
           assert.match(
             candidate.renderedDiff,

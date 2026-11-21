@@ -2,7 +2,7 @@ import { performance } from 'node:perf_hooks';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { require as loadFixture } from 'tsx/cjs/api';
-import type * as ApplicationFixture from '../../../../test/helpers/application-without-line-create-values.js';
+import type * as ApplicationFixture from '../../../../test/helpers/application-before-stock-count-workflow.js';
 
 import { expect, test } from '@playwright/test';
 
@@ -755,7 +755,7 @@ test('a person groups Inspection outcomes, renames and retires the report, and r
   // Publish through the real verifier. Historical first-party releases are exercised separately.
   const { singleTransitionApplication }: typeof ApplicationFixture =
     loadFixture(
-      './test/helpers/application-without-line-create-values.ts',
+      './test/helpers/application-before-stock-count-workflow.ts',
       resolve('package.json'),
     );
   const authored = JSON.parse(
