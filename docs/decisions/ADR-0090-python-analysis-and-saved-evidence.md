@@ -56,6 +56,10 @@ The receipt identifies the exact Python bytes, bound parameters, snapshot digest
 
 Compare digests of canonical tables, decoded chart pixels and finding text, excluding issuance metadata. Display **Matched** or **Different result** only after comparing the actual outputs. Preserve both receipts, the selected run mode and a link to the original.
 
+**Slice 1a runner trust (R4).** The controller accepts the pinned SSH runner's machine ID, receipt and validated output. A compromised runner could claim another runner's machine ID or forge a result. Deploy the runner inside the trusted infrastructure boundary.
+
+**Worker loss (R5).** If the supervisor exits during execution, the cgroup limits continue and the sleeper exits at 120 seconds. The guest could consume up to 120 wall seconds and about 120 CPU-seconds. A stopped container can persist until recovery. A permanently unavailable runner holds the person's cross-host slot because 1a has no operator lease-release operation.
+
 ## 4. Save a version under Documents and recheck every source
 
 The host accepts a closed stream of typed tables, static PNGs and plain UTF-8 findings. Allow up to eight tables (1,000 rows × 32 columns each), four images (at most 2 megapixels each) and 32 KiB of findings, all within the run's aggregate output cap. Slice 1a's collector checks lengths and types. A fresh credential-free sandbox of the runner's isolation class checks PNG dimensions from the header before decoding, bounds allocation and re-encodes clean pixels. Only validated output leaves the collector. Escape all text. For an approved Task binding, also accept one optional set of suggested values keyed by the binding's typed input IDs. Count it within the 4 MiB cap. Refuse malformed results as a unit. The collector reads framed bytes only. Reject a directory of guest-named files, active formats and serialized Python objects because a host reader or a colleague's browser would interpret guest-controlled content.

@@ -9,8 +9,9 @@ import pg from 'pg';
 
 const worker = fileURLToPath(new URL('./runner/worker.py', import.meta.url));
 const responseLimit = 8 * 1024 * 1024;
+export const transportTimeoutMs = 120000;
 
-export async function requestWorker(op, job, remote, image) {
+export async function requestWorker(op, job, remote, image, lease) {
   if (remote && !/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/u.test(remote))
     throw Error('Invalid configured SSH host');
   const command = remote ? 'ssh' : 'python3';
@@ -22,6 +23,8 @@ export async function requestWorker(op, job, remote, image) {
         '-T',
         '-oBatchMode=yes',
         '-oStrictHostKeyChecking=yes',
+        '-oForwardAgent=no',
+        '-oClearAllForwardings=yes',
         '--',
         remote,
         'analysis-worker',
@@ -34,14 +37,14 @@ export async function requestWorker(op, job, remote, image) {
   const child = spawn(command, args, {
     env,
     stdio: ['pipe', 'pipe', 'pipe'],
-    timeout: 120000,
+    timeout: transportTimeoutMs,
   });
   const body = Buffer.from(
     JSON.stringify({
       version: 1,
       op,
       ...(job ? { job } : {}),
-      ...(image ? { image, input: { units: [3, 6, 9] } } : {}),
+      ...(image ? { image, input: { units: [3, 6, 9] }, lease } : {}),
     }),
   );
   const header = Buffer.alloc(4);
@@ -103,8 +106,8 @@ export class FixtureController {
     this.slots = slots;
     this.shared = shared;
   }
-  worker(op, job, image) {
-    return requestWorker(op, job, this.remote, image);
+  worker(op, job, image, lease) {
+    return requestWorker(op, job, this.remote, image, lease);
   }
   async query(sql, args = []) {
     const client = await this.pool.connect();
@@ -176,15 +179,29 @@ export class FixtureController {
       evidence.launched === true,
       receipt,
     ]);
-    await this.worker('ack', job);
+    await this.ack(job);
+  }
+  async ack(job) {
+    if ((await this.worker('ack', job)).status === 'acknowledged')
+      await this.query('SELECT platform.analysis_ack($1)', [job]);
+  }
+  pending(host, includeCleanup = false) {
+    return this.query('SELECT * FROM platform.analysis_pending($1,$2,$3,$4)', [
+      host.machine,
+      host.boot,
+      Math.floor(host.tick * 1000),
+      includeCleanup,
+    ]);
   }
   async recover() {
     const host = await this.probe();
-    const pending = await this.query(
-      'SELECT * FROM platform.analysis_pending($1)',
-      [host.machine],
-    );
-    for (const { job, status } of pending) {
+    for (const { job, status, age_ms } of await this.pending(host, true)) {
+      if (status !== 'reserved' && status !== 'stopping') {
+        await this.ack(job);
+        continue;
+      }
+      // A reboot invalidates the old monotonic deadline immediately.
+      if (age_ms !== null && Number(age_ms) <= transportTimeoutMs) continue;
       if (status === 'stopping') await this.worker('cancel', job);
       await this.settle(job, await this.worker('reconcile', job));
     }
@@ -217,27 +234,28 @@ export class FixtureController {
       while (running) {
         await sleep(200);
         if (!running) return;
-        const leases = await this.query(
-          'SELECT * FROM platform.analysis_pending($1)',
-          [host.machine],
-        );
+        const leases = await this.pending(host);
         if (
           leases.some(
             (lease) => lease.job === row.job && lease.status === 'stopping',
           )
         ) {
           await this.worker('cancel', row.job);
-          return;
         }
       }
     };
-    const lease = (
-      await this.query('SELECT * FROM platform.analysis_pending($1)', [
-        host.machine,
-      ])
-    ).find((l) => l.job === row.job);
+    const lease = (await this.pending(host)).find((l) => l.job === row.job);
     if (!lease) return true;
-    const execution = this.worker('run', row.job, lease.image).finally(() => {
+    const deadline = {
+      boot: host.boot,
+      until: Math.floor(host.tick * 1000) + transportTimeoutMs,
+    };
+    const execution = this.worker(
+      'run',
+      row.job,
+      lease.image,
+      deadline,
+    ).finally(() => {
       running = false;
     });
     const [evidence] = await Promise.all([execution, monitor()]);

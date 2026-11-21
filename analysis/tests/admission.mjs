@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID as id } from 'node:crypto';
-import { FixtureController } from '../controller.mjs';
+import { FixtureController, transportTimeoutMs } from '../controller.mjs';
 
 export async function checkAdmission(owner, pool, first, image, boot) {
   async function actor(tenant = id()) {
@@ -30,6 +30,68 @@ export async function checkAdmission(owner, pool, first, image, boot) {
   }
   const other = await actor();
   const sibling = await actor(first.scope.tenant);
+  // Pause one dispatch after SQL commits the lease and before the worker starts.
+  // The other tenant's controller observes exactly the transport deadline.
+  const host = {
+    machine: 'startup-race',
+    boot,
+    tick: 1,
+    image,
+    available: 8 * 1024 ** 3,
+  };
+  const started = Promise.withResolvers(),
+    resume = Promise.withResolvers();
+  const dispatcher = new FixtureController(pool, first.scope);
+  const recovery = new FixtureController(pool, other.scope);
+  dispatcher.probe = async () => host;
+  dispatcher.worker = async (op) => {
+    if (op === 'ack') return { status: 'unreconciled' }; // retry after SQL settlement
+    assert.equal(op, 'run');
+    started.resolve();
+    await resume.promise;
+    return { status: 'scriptFailure', launched: true };
+  };
+  let age = transportTimeoutMs;
+  recovery.probe = async () => ({ ...host, tick: host.tick + age / 1000 });
+  const calls = [];
+  recovery.worker = async (op, job) => {
+    calls.push([op, job]);
+    return op === 'ack'
+      ? { status: 'acknowledged' }
+      : { status: 'hostFailure', launched: false };
+  };
+  const starting = await dispatcher.enqueue();
+  const running = dispatcher.dispatch();
+  try {
+    await Promise.race([
+      started.promise,
+      running.then(() => {
+        throw Error('dispatch never started');
+      }),
+    ]);
+    await recovery.recover();
+    assert.deepEqual(calls, []);
+    assert.equal((await dispatcher.result(starting)).status, 'reserved');
+  } finally {
+    resume.resolve();
+    await running;
+  }
+  assert.equal((await dispatcher.result(starting)).status, 'scriptFailure');
+  await recovery.recover();
+  assert.deepEqual(calls.splice(0), [['ack', starting]]);
+  const stale = await dispatcher.enqueue();
+  const [reserved] = await dispatcher.query(
+    'SELECT platform.analysis_dispatch($1,$2,1000,$3,1,false) j',
+    [host.machine, boot, host.available],
+  );
+  assert.equal(reserved.j, stale);
+  age += 2;
+  await recovery.recover();
+  assert.deepEqual(calls, [
+    ['reconcile', stale],
+    ['ack', stale],
+  ]);
+  assert.equal((await dispatcher.result(stale)).status, 'hostFailure');
   const enqueue = async (who, host = 'fair') =>
     (
       await who.query('SELECT platform.analysis_enqueue($1,$2,$3,$4,$5,0) j', [

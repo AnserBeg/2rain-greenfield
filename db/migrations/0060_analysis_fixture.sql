@@ -16,7 +16,8 @@ CREATE TABLE platform.analysis_runs (
 CREATE TABLE platform.analysis_leases (
   job uuid PRIMARY KEY, tenant_id uuid NOT NULL, host text NOT NULL,
   memory_bytes bigint NOT NULL CHECK (memory_bytes=2147483648), stop_generation bigint NOT NULL,
-  released_at timestamptz, FOREIGN KEY(tenant_id,job) REFERENCES platform.analysis_runs(tenant_id,job)
+  dispatch_tick bigint NOT NULL, released_at timestamptz, cleanup_pending boolean NOT NULL DEFAULT true,
+  FOREIGN KEY(tenant_id,job) REFERENCES platform.analysis_runs(tenant_id,job)
 );
 CREATE TABLE platform.analysis_budget_counters (
   tenant_id uuid NOT NULL, environment_id uuid NOT NULL, utc_day date NOT NULL, subject text NOT NULL,
@@ -119,7 +120,8 @@ DECLARE candidate platform.analysis_runs; day date := (clock_timestamp() AT TIME
     INSERT INTO platform.analysis_reservations(job,tenant_id,utc_day,disposition) VALUES(candidate.job,candidate.tenant_id,day,'held');
     UPDATE platform.analysis_runs SET status='reserved',dispatched_sequence=(
       SELECT coalesce(max(dispatched_sequence),0)+1 FROM platform.analysis_runs WHERE host=runner) WHERE job=candidate.job;
-    INSERT INTO platform.analysis_leases(job,tenant_id,host,memory_bytes,stop_generation) VALUES(candidate.job,candidate.tenant_id,runner,2147483648,gen);
+    INSERT INTO platform.analysis_leases(job,tenant_id,host,memory_bytes,stop_generation,dispatch_tick)
+      VALUES(candidate.job,candidate.tenant_id,runner,2147483648,gen,tick);
     RETURN candidate.job; END LOOP;
   RETURN NULL; END $$;
 
@@ -192,17 +194,24 @@ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp
   UPDATE platform.analysis_runs SET status=CASE status WHEN 'queued' THEN 'cancelled'
     WHEN 'reserved' THEN 'stopping' ELSE status END WHERE job=id RETURNING status INTO s;
   RETURN s; END $$;
-CREATE FUNCTION platform.analysis_pending(runner text) RETURNS TABLE(job uuid,status text,image text) LANGUAGE sql STABLE SECURITY DEFINER
-SET search_path = pg_catalog, pg_temp AS $$ SELECT l.job,r.status,r.image FROM platform.analysis_leases l
-  JOIN platform.analysis_runs r USING (job) WHERE l.host=runner AND l.released_at IS NULL ORDER BY l.job $$;
+CREATE FUNCTION platform.analysis_pending(runner text,clock_boot uuid,tick bigint,include_cleanup boolean DEFAULT false)
+RETURNS TABLE(job uuid,status text,image text,age_ms bigint) LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp AS $$ SELECT l.job,r.status,r.image,
+  CASE WHEN r.boot=clock_boot THEN greatest(0,tick-l.dispatch_tick) END FROM platform.analysis_leases l
+  JOIN platform.analysis_runs r USING (job) WHERE l.host=runner AND (l.released_at IS NULL OR (include_cleanup AND l.cleanup_pending))
+  ORDER BY l.job $$;
+
+CREATE FUNCTION platform.analysis_ack(id uuid) RETURNS void LANGUAGE sql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp AS $$ UPDATE platform.analysis_leases SET cleanup_pending=false
+  WHERE job=id AND released_at IS NOT NULL AND cleanup_pending $$;
 
 REVOKE ALL ON FUNCTION north_star_internal.analysis_lock(),north_star_internal.analysis_permitted(uuid,text),
   north_star_internal.analysis_controls(uuid,text),north_star_internal.analysis_switch(text,boolean),
   platform.analysis_enqueue(uuid,uuid,text,text,uuid,bigint),platform.analysis_dispatch(text,uuid,bigint,bigint,integer,boolean),
   platform.analysis_settle(uuid,text,boolean,jsonb),platform.analysis_operator_switch(text,boolean),platform.analysis_tenant_switch(boolean),
-  platform.analysis_result(uuid),platform.analysis_cancel(uuid),platform.analysis_pending(text) FROM PUBLIC,north_star_runtime;
+  platform.analysis_result(uuid),platform.analysis_cancel(uuid),platform.analysis_pending(text,uuid,bigint,boolean),platform.analysis_ack(uuid) FROM PUBLIC,north_star_runtime;
 GRANT USAGE ON SCHEMA platform TO north_star_analysis_controller,north_star_analysis_operator;
 GRANT EXECUTE ON FUNCTION platform.analysis_enqueue(uuid,uuid,text,text,uuid,bigint),platform.analysis_dispatch(text,uuid,bigint,bigint,integer,boolean),
-  platform.analysis_settle(uuid,text,boolean,jsonb),platform.analysis_tenant_switch(boolean),platform.analysis_result(uuid),platform.analysis_cancel(uuid),platform.analysis_pending(text)
+  platform.analysis_settle(uuid,text,boolean,jsonb),platform.analysis_tenant_switch(boolean),platform.analysis_result(uuid),platform.analysis_cancel(uuid),platform.analysis_pending(text,uuid,bigint,boolean),platform.analysis_ack(uuid)
   TO north_star_analysis_controller;
 GRANT EXECUTE ON FUNCTION platform.analysis_operator_switch(text,boolean) TO north_star_analysis_operator;

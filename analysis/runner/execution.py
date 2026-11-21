@@ -8,10 +8,11 @@ import subprocess
 import time
 
 from frames import DIAGNOSTICS, LIMIT
-from runtime import Refusal, check_limits, cpu_seconds, group_for, kill, options, stop_reason, teardown
+from runtime import ContainerGone, GUEST, Refusal, TeardownUnconfirmed, check_limits, cpu_seconds, group_for, kill, options, stop_reason, teardown
 
 ROOT = Path(__file__).resolve().parent
 PIN = ROOT.parent / "image/profile.json"
+SLEEPER = "import signal,time; signal.signal(signal.SIGINT,signal.SIG_IGN); time.sleep(120)"
 GUARD = """
 import errno, os, socket
 from pathlib import Path
@@ -42,7 +43,7 @@ class RunBudget:
 
 
 def stream(engine, name, script, data, group, budget, cancelled, on_launch, limit):
-    cli = engine.cli + ["exec", "-i", name, "/usr/local/bin/python", "-B", "-u", "-c", script]
+    cli = engine.cli + ["exec", "--user", GUEST, "-i", name, "/usr/local/bin/python", "-B", "-u", "-c", script]
     child = subprocess.Popen(cli, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                              env={"PATH": os.defpath}, bufsize=0)
     output = bytearray()
@@ -103,21 +104,29 @@ def execute(engine, name, script, data, cancelled, on_launch, budget=None, limit
         raise Stopped("cancelled")
     group = None
     container_id = engine.command("create", *options(name), "analysis.local/science@" + digest, "-c",
-                                  "import time; time.sleep(120)").decode().strip()
+                                  SLEEPER).decode().strip()
     try:
         engine.command("start", name)
         pid = engine.command("inspect", "--format={{.State.Pid}}", name).decode().strip()
         group = group_for(pid, container_id)
         check_limits(group)
         try:
-            engine.command("exec", name, "/usr/local/bin/python", "-c", GUARD)
+            engine.command("exec", "--user", GUEST, name, "/usr/local/bin/python", "-c", GUARD)
         except subprocess.SubprocessError as error:
             raise Refusal("live guest isolation") from error
         return stream(engine, name, script, data, group, budget, cancelled, on_launch, limit)
     finally:
         try:
-            if group is not None and group.exists():
-                budget.cpu += cpu_seconds(group)
+            if group is not None:
+                try:
+                    budget.cpu += cpu_seconds(group)
+                except FileNotFoundError:
+                    if group.exists():
+                        raise Refusal("missing cpu.stat in live cgroup")
+                    raise ContainerGone("cgroup disappeared before supervisor kill")
                 kill(engine, name, group)
         finally:
-            teardown(engine, name, group)
+            try:
+                teardown(engine, name, group)
+            except (Refusal, OSError, subprocess.SubprocessError) as error:
+                raise TeardownUnconfirmed(str(error)) from error

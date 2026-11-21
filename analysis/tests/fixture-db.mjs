@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { randomUUID as id } from 'node:crypto';
 import process from 'node:process';
 import { performance } from 'node:perf_hooks';
@@ -122,7 +123,7 @@ try {
     [{ tenant_id: scope.tenant, released: true }],
   );
   assert.deepEqual(
-    await query("SELECT * FROM platform.analysis_pending('host')"),
+    await query("SELECT * FROM platform.analysis_pending('host',$1,1)", [boot]),
     [],
   );
   for (const child of ['analysis_leases', 'analysis_reservations']) {
@@ -242,6 +243,45 @@ try {
   await owner.query('UPDATE platform.analysis_budget_counters SET starts=0');
   await checkAdmission(owner, hostPool, controller, image, boot);
   if (process.argv.includes('--science')) {
+    const interrupt = new FixtureController(hostPool, scope);
+    const transport = interrupt.worker.bind(interrupt);
+    interrupt.worker = async (op, job, image, lease) => {
+      if (op !== 'run') return transport(op, job, image, lease);
+      const evidence = JSON.parse(
+        execFileSync(
+          'python3',
+          ['-B', 'analysis/tests/science.py', '--interrupt-fixture'],
+          {
+            input: JSON.stringify({
+              version: 1,
+              op,
+              job,
+              image,
+              lease,
+              input: { units: [3, 6, 9] },
+            }),
+          },
+        ),
+      );
+      assert.equal(evidence.reason, 'script exit 42', JSON.stringify(evidence));
+      return evidence;
+    };
+    const signalled = await interrupt.run();
+    assert.equal(signalled.status, 'scriptFailure');
+    assert.deepEqual(
+      await read(
+        'SELECT disposition FROM platform.analysis_reservations WHERE job=$1',
+        [signalled.job],
+      ),
+      [{ disposition: 'charged' }],
+    );
+    assert.equal(
+      (await interrupt.worker('status', signalled.job)).status,
+      'absent',
+    );
+    process.stdout.write(
+      'Hardened PID 1 refused guest SIGINT. Settlement charged the reservation and removed job state.\n',
+    );
     const key = id();
     const first = await controller.run(key);
     assert.equal(first.status, 'success', JSON.stringify(first));

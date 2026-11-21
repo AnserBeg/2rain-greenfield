@@ -9,6 +9,16 @@ import time
 BASE = "python@sha256:0f086103b026048cc50cb5da25ec435c023c5241a83fc44daea593377abc61c4"
 PROFILE = Path(__file__).with_name("seccomp.json")
 CGROUP = Path("/sys/fs/cgroup")
+GUEST = "65534:65534"
+SLEEPER_USER = "65533:65533"
+
+
+class ContainerGone(RuntimeError):
+    """The supervisor never confirmed a kill of this job."""
+
+
+class TeardownUnconfirmed(RuntimeError):
+    """Keep the lease for reconciliation before deciding its disposition."""
 
 
 class Refusal(RuntimeError):
@@ -47,7 +57,7 @@ class Engine:
 
 def options(name):
     return ["--name", name, "--label", "org.2rain.analysis=1", "--pull=never",
-            "--platform=linux/amd64", "--user=65534:65534", "--read-only",
+            "--platform=linux/amd64", f"--user={SLEEPER_USER}", "--read-only",
             "--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=128m,mode=1777",
             "--ipc=none", "--network=none", "--cap-drop=ALL",
             "--security-opt=no-new-privileges", f"--security-opt=seccomp={PROFILE}",
@@ -94,16 +104,32 @@ def stop_reason(start, cpu, cancelled, now=time.monotonic, wall_limit=90, cpu_li
 
 
 def kill(engine, name, group):
-    engine.command("kill", name)
+    try:
+        engine.command("kill", name)
+    except subprocess.CalledProcessError:
+        if not engine.command("ps", "-q", "--filter", f"name=^/{name}$").strip():
+            raise ContainerGone("container exited before supervisor kill")
+        raise
     state = json.loads(engine.command("inspect", "--format={{json .State}}", name))
-    if state["Running"] or state["ExitCode"] != 137:
+    if not state["Running"] and state["ExitCode"] != 137:
+        raise ContainerGone("container exited before supervisor kill")
+    if state["Running"]:
         raise Refusal("container survived kill")
-    if group.exists() and (group / "cgroup.procs").read_text().strip():
+    try:
+        remaining = (group / "cgroup.procs").read_text().strip()
+    except FileNotFoundError:
+        if group.exists():
+            raise Refusal("missing cgroup.procs")
+        return
+    if remaining:
         raise Refusal("tasks survived kill")
 
 
 def teardown(engine, name, group):
-    engine.command("rm", "--force", "--volumes", name)
+    try:
+        engine.command("rm", "--force", "--volumes", name)
+    except subprocess.CalledProcessError:
+        pass  # An already-absent container must still pass both checks below.
     remaining = engine.command("ps", "--all", "--quiet", "--filter", f"name=^/{name}$")
     if remaining.strip() or (group is not None and group.exists()):
         raise Refusal("container or cgroup survived removal")

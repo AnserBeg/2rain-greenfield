@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "runner"))
 import runtime
+from seccomp_decisions import check_compat_decisions
 
 
 def expect(condition, reason):
@@ -72,12 +73,12 @@ print(json.dumps(result))
 """
 
 
-def check_guest(data):
+def check_guest(data, uid=int(runtime.SLEEPER_USER.split(":")[0])):
     expect(data["interfaces"] == ["lo"], "network namespace has an external interface")
     for key in ("AF_INET", "AF_INET6", "AF_UNIX"):
         expect(data[key] == 1, f"{key} socket allowed")
     expect(data["dns"] != 0, "DNS resolved")
-    expect(data["uid"] == 65534, "unexpected guest UID")
+    expect(data["uid"] == uid, "unexpected guest UID")
     expect(data["caps"] == 0, "capability bounding set")
     expect(data["nnp"] == 1, "no-new-privileges missing")
     expect(data["rootfs"] == 30, "writable root filesystem")
@@ -183,7 +184,7 @@ def controls(engine):
     red(lambda: observe_nnp([profile, "--security-opt=no-new-privileges"]), "no-new-privileges missing")
     red(lambda: check("--cgroup-parent=analysis.slice"), "memory.swap.max")
     red(lambda: check("--cap-drop=ALL", True), "capability bounding set")
-    red(lambda: check("--user=65534:65534", True), "unexpected guest UID")
+    red(lambda: check(f"--user={runtime.SLEEPER_USER}", True), "unexpected guest UID")
     red(lambda: check("--read-only", True), "writable root filesystem")
     red(lambda: check("--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=128m,mode=1777", True), "scratch not fresh")
     # Suppress one supervisor decision at a time, preserving all other limits.
@@ -209,6 +210,7 @@ if __name__ == "__main__":
     engine = runtime.Engine()
     try:
         engine.preflight()
+        check_compat_decisions()
         print(engine.command("pull", runtime.BASE, timeout=120).decode())
         limits_under_load(engine)
         controls(engine)

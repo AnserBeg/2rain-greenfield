@@ -38,6 +38,13 @@ class Frames(unittest.TestCase):
             with self.subTest(msg=msg), self.assertRaisesRegex(frames.Invalid, msg):
                 self.decode(data)
 
+    def test_refuses_controls_in_findings_and_cells(self):
+        for control in ('\0', '\x1b', '\n', '\x7f', '\x85', '\u202e', '\u2066'):
+            for kind, body in [(1, frames.encode(TABLE | {'rows': [[control]]})),
+                               (3, ('safe' + control).encode())]:
+                with self.subTest(control=repr(control), kind=kind), self.assertRaisesRegex(frames.Invalid, 'plain text'):
+                    self.decode(frame(kind, body) + END)
+
     def test_dimensions_checked_before_decoder(self):
         for payload in (b'<svg/>', png(0, 1), png(2000001, 1)):
             with self.assertRaises(frames.Invalid):

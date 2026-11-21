@@ -2,14 +2,17 @@
 import json
 import struct
 import sys
+import tempfile
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "runner"))
 from execution import ROOT, RunBudget, Stopped, execute
 from frames import DIAGNOSTICS, LIMIT, dimensions
 from runtime import Engine, options, group_for
 from worker import handle
+from spike import PROBE, check_guest
 
 
 def probe(script, data=b"", budget=None, limit=LIMIT):
@@ -26,11 +29,38 @@ def rejects(script, why, **kwargs):
         raise AssertionError("expected " + why)
 
 
+def interrupt_fixture(engine, request):
+    # Only exercise the signal after observing the hardened sleeper in this
+    # private PID namespace. Distinct exits identify a setup failure or an
+    # unexpected permission separately from the charged guest failure.
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        (root / "guest.py").write_bytes((ROOT / "guest.py").read_bytes())
+        (root / "fixture.py").write_text("""
+import os, signal
+from pathlib import Path
+s = dict(x.split(':',1) for x in Path('/proc/1/status').read_text().splitlines() if ':' in x)
+if int(s['Uid'].split()[0]) != 65533 or os.getuid() != 65534 or not int(s['SigIgn'],16) & 2:
+    raise SystemExit(43)
+try:
+    os.kill(1, signal.SIGINT)
+except PermissionError:
+    raise SystemExit(42)
+raise SystemExit(44)
+""")
+        with patch("worker.ROOT", root):
+            return handle(engine, request)
+
+
 if __name__ == "__main__":
     engine = Engine()
     try:
         engine.preflight()
+        if sys.argv[1:] == ["--interrupt-fixture"]:
+            print(json.dumps(interrupt_fixture(engine, json.load(sys.stdin))))
+            sys.exit(0)
         prefix = "import sys;sys.stdin.buffer.read();"
+        check_guest(json.loads(probe(prefix + PROBE)), uid=65534)
         assert len(probe(prefix+f"sys.stdout.buffer.write(b'x'*{LIMIT})")) == LIMIT
         rejects(prefix+f"sys.stdout.buffer.write(b'x'*{LIMIT+1})","output limit")
         budget = RunBudget()
@@ -70,8 +100,9 @@ print('clean')
             assert reconciled == {"status":"hostFailure","launched":False}
             assert not group.exists()
             assert not engine.command("ps","-aq","--filter",f"name=^/{name}$").strip()
-            late = handle(engine,{"version":1,"op":"run","job":job,"image":digest,"input":{"units":[3,6,9]}})
-            assert late == reconciled
+            late = handle(engine,{"version":1,"op":"run","job":job,"image":digest,"input":{"units":[3,6,9]},
+                                  "lease":{"boot":Path("/proc/sys/kernel/random/boot_id").read_text().strip(),"until":0}})
+            assert late["status"] == "refused" and not late["launched"]
         finally:
             if engine.command("ps","-aq","--filter",f"name=^/{name}$").strip():
                 engine.command("rm","-fv",name)

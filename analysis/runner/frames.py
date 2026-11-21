@@ -5,6 +5,7 @@ import json
 import math
 import re
 import struct
+import unicodedata
 
 LIMIT = 4 * 1024**2
 DIAGNOSTICS = 65536
@@ -36,8 +37,13 @@ def pairs(items):
 
 
 def parse(payload):
-    return json.loads(payload.decode("utf-8"), object_pairs_hook=pairs,
-                      parse_constant=lambda value: require(False, "non-finite number"))
+    try:
+        return json.loads(payload.decode("utf-8"), object_pairs_hook=pairs,
+                          parse_constant=lambda value: require(False, "non-finite number"))
+    except Invalid:
+        raise
+    except (ValueError, RecursionError) as error:
+        raise Invalid("invalid JSON") from error
 
 
 def encode(value):
@@ -46,8 +52,8 @@ def encode(value):
 
 
 def text(value):
-    require(type(value) is str and "\0" not in value, "plain text")
-    value.encode("utf-8", errors="strict")
+    require(type(value) is str and all(unicodedata.category(c) not in {"Cc", "Cf", "Cs"}
+                                       for c in value), "plain text")
     return html.escape(value)
 
 
@@ -78,7 +84,10 @@ def table(payload):
             elif kind == "integer":
                 require(type(cell) is int and abs(cell) <= 2**53-1, "integer cell")
             elif kind == "number":
-                require(type(cell) in (float, int) and math.isfinite(cell), "number cell")
+                try:
+                    require(type(cell) in (float, int) and math.isfinite(cell), "number cell")
+                except OverflowError as error:
+                    raise Invalid("number cell") from error
             else:
                 require(type(cell) is bool, "boolean cell")
     return value
@@ -115,7 +124,10 @@ def collect(stream, clean_png):
         elif kind == 3:
             text_bytes += size
             require(size > 0 and text_bytes <= 32768, "finding bytes")
-            value = text(payload.decode("utf-8"))
+            try:
+                value = text(payload.decode("utf-8"))
+            except UnicodeDecodeError as error:
+                raise Invalid("finding UTF-8") from error
             result["findings"].append(value)
             clean_bytes += len(value.encode())
         else:
