@@ -28,8 +28,10 @@ const companyB = { ...companyA, companyId: 'B', installationId: 'B-install' };
 const stop = { latitude: 53.51, longitude: -113.49 };
 const v = fitMap([stop], 'small');
 test('single-stop fit sends a coarse viewport even at the cell centre', () => {
-  for (const p of [stop, { latitude: 53.51234, longitude: -113.49678 }]) {
-    const view = fitMap([p, p], 'small'),
+  const exactCentre = mapCentre(v);
+  for (const points of [[stop], [exactCentre], [exactCentre, exactCentre]]) {
+    const p = points[0]!;
+    const view = fitMap(points, 'small'),
       centre = mapCentre(view),
       box = mapExtent(view);
     assert.notDeepEqual(centre, p);
