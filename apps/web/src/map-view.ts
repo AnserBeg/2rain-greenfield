@@ -66,7 +66,9 @@ export async function readMapSlots(
   )
     throw new Error('Map collection unavailable.');
   params.set('mapCompany', company);
-  const groupField = record.fields?.find((f) => f.fieldId === b.group?.fieldId);
+  const groupField = surface.fields?.find(
+    (f) => f.fieldId === b.group?.fieldId,
+  );
   const routes = groupField?.kind === 'enumFieldType' ? groupField.options : [];
   const routeName = (group: string | null) =>
     routes.find((option) => option.optionId === group)?.label ??

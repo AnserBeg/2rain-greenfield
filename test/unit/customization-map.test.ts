@@ -3,7 +3,7 @@ import { parseCompiledApplication } from '../../packages/postgres-provider/src/c
 import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
-import { renderMapStopList } from '../../apps/web/src/map-view.js';
+import { readMapSlots, renderMapStopList } from '../../apps/web/src/map-view.js';
 import {
   mapBindingsProblem,
   mapDeclarationProblem,
@@ -168,6 +168,53 @@ test('drafter advertises the Map schema and emits the same selected contracts as
     );
     assert.equal(result.patch.resultDigest, expected.resultDigest);
   }
+});
+
+test('route filter labels come from the Map collection when the Record omits the group', async () => {
+  const { target, choice } = offered();
+  const revision = draftMapRevision(target, choice);
+  const group = revision.body.group!;
+  const surface = {
+    label: 'Dispatch',
+    map: revision,
+    surfaceId: revision.surfaceId,
+    fields: [
+      {
+        kind: 'enumFieldType',
+        fieldId: group.fieldId,
+        options: [{ optionId: 'route-north', label: 'North depot' }],
+      },
+    ],
+  } as unknown as Parameters<typeof readMapSlots>[1];
+  const record = {
+    surfaceId: revision.body.recordSurfaceId,
+    lifecycle: 'active',
+    fields: [],
+  } as unknown as Parameters<typeof readMapSlots>[1];
+  const gateways = {
+    queryGateway: {
+      previewEligibility: async () => 'eligible',
+      invoke: async () => ({
+        outcome: 'exact',
+        records: [],
+        mapCoverage: {
+          revisionId: revision.revisionId,
+          pageSize: 100,
+          stops: [],
+        },
+      }),
+    },
+  } as unknown as Parameters<typeof readMapSlots>[6];
+  const slots = await readMapSlots(
+    {} as Parameters<typeof readMapSlots>[0],
+    surface,
+    [record],
+    new URL('http://localhost/?route=route-north'),
+    {},
+    'company-a',
+    gateways,
+  );
+  assert.match(slots.savedViews, /value="route-north" selected>North depot</u);
 });
 
 test('overflow displays the governed page size', async () => {
