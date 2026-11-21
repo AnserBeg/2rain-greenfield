@@ -45,6 +45,7 @@ export const reachabilityProducers = [
     'test/unit/customization-upgrade.test.ts',
     'test/unit/customization.test.ts',
     'test/unit/customize-screen.test.ts',
+    'test/unit/date-time-field.test.ts',
     'test/unit/dev-environment.test.ts',
     'test/unit/field-validation.test.ts',
     'test/unit/formula-validation.test.ts',
