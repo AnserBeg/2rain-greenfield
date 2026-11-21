@@ -50,6 +50,12 @@ def write_state(path, value):
 
 def host_info(engine):
     engine.preflight()
+    digest = json.loads(PIN.read_text())["image"]
+    try:
+        if engine.command("image", "inspect", "--format={{.Id}}", digest).decode().strip() != digest:
+            raise Refusal("admitted scientific image digest")
+    except subprocess.SubprocessError as error:
+        raise Refusal("missing admitted scientific image " + digest) from error
     fields = Path("/proc/meminfo").read_text().splitlines()
     available = next(int(s.split()[1])*1024 for s in fields if s.startswith("MemAvailable:"))
     return {"machine": Path("/etc/machine-id").read_text().strip(), "available": available, "boot": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
@@ -68,12 +74,15 @@ def reap(engine, name):
 
 
 def handle(engine, request):
-    require(type(request) is dict and request.get("version") == 1, "protocol version")
+    require(type(request) is dict and type(request.get("version")) is int and request["version"] == 1, "protocol version")
     op = request.get("op")
     if op == "probe" and request.keys() == {"version","op"}:
         return host_info(engine)
     require(op in ("run", "cancel", "status", "reconcile", "ack") and
-            request.keys() == {"version","op","job"}, "protocol operation")
+            request.keys() == ({"version","op","job","image"} if op == "run" else {"version","op","job"}), "protocol operation")
+    if op == "run":
+        if request["image"] != json.loads(PIN.read_text())["image"]:
+            return {"status":"refused","launched":False,"reason":"unadmitted image digest"}
     job = str(uuid.UUID(request["job"]))
     require(job == request["job"], "canonical job id")
     engine.preflight()

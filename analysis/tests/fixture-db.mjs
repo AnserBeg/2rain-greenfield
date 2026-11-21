@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { randomUUID as id } from 'node:crypto';
 import process from 'node:process';
+import { performance } from 'node:perf_hooks';
+import { setTimeout } from 'node:timers';
 import pg from 'pg';
 import { FixtureController } from '../controller.mjs';
 import {
@@ -48,7 +50,7 @@ const settle = (j, status, launched) =>
     j,
     status,
     launched,
-    status === 'success' ? {} : null,
+    status === 'success' ? { run: { profile: { image } } } : null,
   ]);
 const counters = async () =>
   (
@@ -158,10 +160,80 @@ try {
   process.stdout.write(
     'Start budget: both caps, refund once, replay, host headroom, company scope, expiry and stop fence passed.\n',
   );
+  // The remaining layers have independent witnesses. Hold the person fixed and
+  // remove only the stored company grant when checking a read.
+  await owner.query(
+    'UPDATE platform.current_policy_memberships SET legal_entity_id=$1 WHERE principal_id=$2',
+    [id(), scope.person],
+  );
+  await assert.rejects(controller.result(a), /analysis.denied/u);
+  await owner.query(
+    'UPDATE platform.current_policy_memberships SET legal_entity_id=$1 WHERE principal_id=$2',
+    [scope.company, scope.person],
+  );
+  const tx = await hostPool.connect();
+  try {
+    await tx.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
+    await assert.rejects(
+      tx.query(
+        "SELECT platform.analysis_dispatch('host',$1,0,8589934592,1,false)",
+        [boot],
+      ),
+      /requiresReadCommitted/u,
+    );
+    await tx.query('ROLLBACK');
+  } finally {
+    tx.release();
+  }
+  const cancellable = await enqueue();
+  assert.equal(await controller.cancel(cancellable), 'cancelled');
+  const eligible = await enqueue();
+  assert.equal(await dispatch(), eligible);
+  await assert.rejects(
+    query('SELECT platform.analysis_settle($1,$2,true,$3)', [
+      eligible,
+      'success',
+      { run: { profile: { image: 'other' } } },
+    ]),
+    /imageMismatch/u,
+  );
+  await settle(eligible, 'success', true);
+  await expectStatus(eligible, 'success');
+  await admin.query('SELECT platform.analysis_operator_switch($1,true)', [
+    'image/' + image,
+  ]);
+  await assert.rejects(enqueue(), /analysis.stopped/u);
+  await admin.query('SELECT platform.analysis_operator_switch($1,false)', [
+    'image/' + image,
+  ]);
+  // Separate scheduled headroom remains reserved even under parallel interactive traffic.
+  await owner.query(
+    'UPDATE platform.analysis_budget_counters SET starts=17 WHERE subject=$1',
+    [scope.person],
+  );
+  const x = await enqueue(),
+    y = await enqueue();
+  const raced = await Promise.all([dispatch(), dispatch()]);
+  assert.deepEqual(raced.filter(Boolean), [x]);
+  await settle(x, 'scriptFailure', true);
+  assert.equal(await dispatch(), null);
+  await expectStatus(y, 'refused');
+  await owner.query('UPDATE platform.analysis_budget_counters SET starts=0');
   if (process.argv.includes('--science')) {
     const key = id();
     const first = await controller.run(key);
     assert.equal(first.status, 'success', JSON.stringify(first));
+    const interrupted = await controller.enqueue();
+    const executing = controller.dispatch();
+    const end = performance.now() + 15000;
+    while (!(await controller.worker('status', interrupted)).launched) {
+      assert.ok(performance.now() < end, 'fixture never launched');
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    await admin.switch('global', true);
+    await executing;
+    await expectStatus(interrupted, 'cancelled');
+    await admin.switch('global', false);
     const second = await controller.run();
     assert.equal(
       second.receipt.run.outputSha256,

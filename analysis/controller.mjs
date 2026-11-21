@@ -9,7 +9,7 @@ import pg from 'pg';
 const worker = fileURLToPath(new URL('./runner/worker.py', import.meta.url));
 const responseLimit = 8 * 1024 * 1024;
 
-export async function requestWorker(op, job, remote) {
+export async function requestWorker(op, job, remote, image) {
   if (remote && !/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/u.test(remote))
     throw Error('Invalid configured SSH host');
   const command = remote ? 'ssh' : 'python3';
@@ -33,7 +33,12 @@ export async function requestWorker(op, job, remote) {
     timeout: 120000,
   });
   const body = Buffer.from(
-    JSON.stringify({ version: 1, op, ...(job ? { job } : {}) }),
+    JSON.stringify({
+      version: 1,
+      op,
+      ...(job ? { job } : {}),
+      ...(image ? { image } : {}),
+    }),
   );
   const header = Buffer.alloc(4);
   header.writeUInt32BE(body.length);
@@ -86,8 +91,8 @@ export class FixtureController {
     this.slots = slots;
     this.shared = shared;
   }
-  worker(op, job) {
-    return requestWorker(op, job, this.remote);
+  worker(op, job, image) {
+    return requestWorker(op, job, this.remote, image);
   }
   async query(sql, args = []) {
     const client = await this.pool.connect();
@@ -214,7 +219,13 @@ export class FixtureController {
         }
       }
     };
-    const execution = this.worker('run', row.job).finally(() => {
+    const lease = (
+      await this.query('SELECT * FROM platform.analysis_pending($1)', [
+        host.machine,
+      ])
+    ).find((l) => l.job === row.job);
+    if (!lease) return true;
+    const execution = this.worker('run', row.job, lease.image).finally(() => {
       running = false;
     });
     const [evidence] = await Promise.all([execution, monitor()]);

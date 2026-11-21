@@ -37,8 +37,7 @@ CREATE FUNCTION north_star_internal.analysis_lock() RETURNS void
 LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp AS $$ BEGIN
   IF current_setting('transaction_isolation') <> 'read committed' THEN
     RAISE EXCEPTION 'analysis.requiresReadCommitted'; END IF;
-  PERFORM pg_advisory_xact_lock(167446105, 1);
-END $$;
+  PERFORM pg_advisory_xact_lock(167446105, 1); END $$;
 
 CREATE FUNCTION north_star_internal.analysis_permitted(company uuid, permission text) RETURNS boolean
 LANGUAGE sql STABLE SET search_path = pg_catalog, pg_temp AS $$
@@ -68,8 +67,7 @@ DECLARE t uuid := north_star_internal.trusted_tenant_id(); e uuid := north_star_
   IF FOUND THEN
     IF (existing.person,existing.company,existing.image,existing.host) IS DISTINCT FROM (p,company_id,digest,runner)
     THEN RAISE EXCEPTION 'analysis.denied'; END IF;
-    RETURN existing.job;
-  END IF;
+    RETURN existing.job; END IF;
   IF (SELECT disabled FROM north_star_internal.analysis_controls(t,digest)) THEN RAISE EXCEPTION 'analysis.stopped'; END IF;
   UPDATE platform.analysis_runs SET status='expired' WHERE host=runner AND status='queued'
     AND (boot<>clock_boot OR tick-queued_tick>=30000);
@@ -78,8 +76,7 @@ DECLARE t uuid := north_star_internal.trusted_tenant_id(); e uuid := north_star_
   THEN RAISE EXCEPTION 'analysis.queueFull'; END IF;
   INSERT INTO platform.analysis_runs(tenant,environment,company,person,request_key,image,host,boot,queued_tick,status)
     VALUES(t,e,company_id,p,key,digest,runner,clock_boot,tick,'queued') RETURNING job INTO id;
-  RETURN id;
-END $$;
+  RETURN id; END $$;
 
 CREATE FUNCTION platform.analysis_dispatch(runner text, clock_boot uuid, tick bigint, available bigint, slots integer, shared boolean)
 RETURNS uuid LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
@@ -106,17 +103,14 @@ DECLARE candidate platform.analysis_runs; day date := (clock_timestamp() AT TIME
       UPDATE platform.analysis_runs SET status='refused' WHERE job=candidate.job; CONTINUE; END IF;
     FOREACH subject_id IN ARRAY ARRAY['tenant',candidate.person::text] LOOP
       INSERT INTO platform.analysis_budget_counters VALUES(candidate.tenant,candidate.environment,day,subject_id,1)
-        ON CONFLICT(tenant,environment,utc_day,subject) DO UPDATE SET starts=platform.analysis_budget_counters.starts+1;
-    END LOOP;
+        ON CONFLICT(tenant,environment,utc_day,subject) DO UPDATE SET starts=platform.analysis_budget_counters.starts+1; END LOOP;
     SELECT generation INTO gen FROM north_star_internal.analysis_controls(candidate.tenant,candidate.image);
     INSERT INTO platform.analysis_reservations VALUES(candidate.job,day,'held');
     UPDATE platform.analysis_runs SET status='reserved',dispatched_sequence=(
       SELECT coalesce(max(dispatched_sequence),0)+1 FROM platform.analysis_runs WHERE host=runner) WHERE job=candidate.job;
     INSERT INTO platform.analysis_leases VALUES(candidate.job,runner,2147483648,gen);
-    RETURN candidate.job;
-  END LOOP;
-  RETURN NULL;
-END $$;
+    RETURN candidate.job; END LOOP;
+  RETURN NULL; END $$;
 
 CREATE FUNCTION platform.analysis_settle(id uuid, outcome text, launched boolean, result jsonb)
 RETURNS text LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
@@ -127,6 +121,8 @@ DECLARE r platform.analysis_runs; d date; gen bigint; held bigint; subject_id te
   IF outcome IS NULL OR launched IS NULL OR outcome NOT IN ('success','scriptFailure','hostFailure','refused','cancelled')
     OR (outcome='refused' AND launched) OR (outcome IN ('success','scriptFailure') AND NOT launched) OR (outcome='success' AND result IS NULL)
   THEN RAISE EXCEPTION 'analysis.badSettlement'; END IF;
+  IF outcome='success' AND result->'run'->'profile'->>'image' IS DISTINCT FROM r.image THEN
+    RAISE EXCEPTION 'analysis.imageMismatch'; END IF;
   SELECT generation INTO gen FROM north_star_internal.analysis_controls(r.tenant,r.image);
   SELECT stop_generation INTO STRICT held FROM platform.analysis_leases WHERE job=id;
   final_status := CASE WHEN r.status='stopping' OR gen<>held THEN 'cancelled' ELSE outcome END;
@@ -135,40 +131,34 @@ DECLARE r platform.analysis_runs; d date; gen bigint; held bigint; subject_id te
     FOREACH subject_id IN ARRAY ARRAY['tenant',r.person::text] LOOP
       UPDATE platform.analysis_budget_counters SET starts=starts-1 WHERE
         (tenant,environment,utc_day,subject)=(r.tenant,r.environment,d,subject_id);
-      IF NOT FOUND THEN RAISE EXCEPTION 'analysis.missingCounter'; END IF;
-    END LOOP;
+      IF NOT FOUND THEN RAISE EXCEPTION 'analysis.missingCounter'; END IF; END LOOP;
     UPDATE platform.analysis_reservations SET disposition='refunded' WHERE job=id;
   ELSE UPDATE platform.analysis_reservations SET disposition='charged' WHERE job=id; END IF;
   UPDATE platform.analysis_runs SET status=final_status,receipt=CASE WHEN final_status='success' THEN result END WHERE job=id;
   DELETE FROM platform.analysis_leases WHERE job=id;
-  RETURN final_status;
-END $$;
+  RETURN final_status; END $$;
 
 CREATE FUNCTION north_star_internal.analysis_switch(target text, stop boolean) RETURNS SETOF uuid
 LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp AS $$ BEGIN
   PERFORM north_star_internal.analysis_lock();
-  INSERT INTO platform.analysis_run_controls VALUES(target,stop,1) ON CONFLICT(scope)
+  INSERT INTO platform.analysis_run_controls SELECT target,stop,1 WHERE stop OR EXISTS(SELECT FROM platform.analysis_run_controls WHERE scope=target) ON CONFLICT(scope)
     DO UPDATE SET disabled=excluded.disabled,generation=platform.analysis_run_controls.generation+1
     WHERE platform.analysis_run_controls.disabled IS DISTINCT FROM excluded.disabled;
   IF stop THEN
     UPDATE platform.analysis_runs SET status='cancelled' WHERE status='queued' AND target IN ('global','tenant/'||tenant,'image/'||image);
     RETURN QUERY UPDATE platform.analysis_runs SET status='stopping' WHERE status IN ('reserved','stopping')
-      AND target IN ('global','tenant/'||tenant,'image/'||image) RETURNING job;
-  END IF;
-END $$;
+      AND target IN ('global','tenant/'||tenant,'image/'||image) RETURNING job; END IF; END $$;
 
 CREATE FUNCTION platform.analysis_operator_switch(target text, stop boolean) RETURNS SETOF uuid
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$ BEGIN
   IF target<>'global' AND target !~ '^image/sha256:[0-9a-f]{64}$' THEN RAISE EXCEPTION 'analysis.badSwitch'; END IF;
-  RETURN QUERY SELECT * FROM north_star_internal.analysis_switch(target,stop);
-END $$;
+  RETURN QUERY SELECT * FROM north_star_internal.analysis_switch(target,stop); END $$;
 
 CREATE FUNCTION platform.analysis_tenant_switch(stop boolean) RETURNS SETOF uuid
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$ BEGIN
   -- A company-limited membership cannot stop a whole tenant.
   IF NOT north_star_internal.analysis_permitted(NULL,'northstar.runtime:permission.analysis_admin') THEN RAISE EXCEPTION 'analysis.denied'; END IF;
-  RETURN QUERY SELECT * FROM north_star_internal.analysis_switch('tenant/'||north_star_internal.trusted_tenant_id(),stop);
-END $$;
+  RETURN QUERY SELECT * FROM north_star_internal.analysis_switch('tenant/'||north_star_internal.trusted_tenant_id(),stop); END $$;
 
 CREATE FUNCTION platform.analysis_result(id uuid) RETURNS jsonb
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
@@ -182,10 +172,9 @@ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp
   IF platform.analysis_result(id) IS NULL THEN RAISE EXCEPTION 'analysis.denied'; END IF;
   UPDATE platform.analysis_runs SET status=CASE status WHEN 'queued' THEN 'cancelled'
     WHEN 'reserved' THEN 'stopping' ELSE status END WHERE job=id RETURNING status INTO s;
-  RETURN s;
-END $$;
-CREATE FUNCTION platform.analysis_pending(runner text) RETURNS TABLE(job uuid,status text) LANGUAGE sql STABLE SECURITY DEFINER
-SET search_path = pg_catalog, pg_temp AS $$ SELECT l.job,r.status FROM platform.analysis_leases l
+  RETURN s; END $$;
+CREATE FUNCTION platform.analysis_pending(runner text) RETURNS TABLE(job uuid,status text,image text) LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp AS $$ SELECT l.job,r.status,r.image FROM platform.analysis_leases l
   JOIN platform.analysis_runs r USING (job) WHERE l.host=runner ORDER BY l.job $$;
 
 REVOKE ALL ON FUNCTION north_star_internal.analysis_lock(),north_star_internal.analysis_permitted(uuid,text),

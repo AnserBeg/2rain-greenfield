@@ -9,7 +9,7 @@ permissions:
 jobs:
   rootless:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -47,6 +47,7 @@ jobs:
         with:
           node-version-file: .node-version
       - run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      - run: python3 -B analysis/tests/science.py
       - name: Run and replay the fixture through the controller
         run: analysis/tests/fixture-db.sh --science
 
