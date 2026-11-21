@@ -145,8 +145,12 @@ test(
               const row = await pool.query(
                 `SELECT r.release_id,p.desired_state FROM platform.tenant_releases r
             JOIN platform.app_package_revisions p ON (r.tenant_id,r.app_package_revision_id)=(p.tenant_id,p.revision_id)
-            WHERE r.content_hash=$1 AND r.tenant_id=$2`,
-                [envelope.releaseRoot, app.runtime.identity.tenantId],
+            WHERE r.content_hash=$1 AND r.tenant_id=$2 AND r.environment_id=$3`,
+                [
+                  envelope.releaseRoot,
+                  app.runtime.identity.tenantId,
+                  app.runtime.identity.environmentId,
+                ],
               );
               assert.equal(row.rowCount, 1, envelope.releaseRoot);
               assert.equal(
@@ -158,18 +162,20 @@ test(
             JOIN platform.release_artifact_blobs b USING(content_hash) WHERE l.release_id=$1`,
                 [row.rows[0].release_id],
               );
-              const bytes = new Map(
-                artifacts.rows.map((r) => [
-                  r.content_hash,
-                  r.canonical_bytes.toString('base64'),
-                ]),
+              const expectedClosure = new Map(
+                envelope.artifacts
+                  .filter((a) => a.contentHash !== envelope.releaseRoot)
+                  .map((a) => [a.contentHash, a.canonicalBytesBase64]),
               );
-              for (const a of envelope.artifacts)
-                assert.equal(
-                  bytes.get(a.contentHash),
-                  a.canonicalBytesBase64,
-                  a.contentHash,
-                );
+              assert.deepEqual(
+                new Map(
+                  artifacts.rows.map((r) => [
+                    r.content_hash,
+                    r.canonical_bytes.toString('base64'),
+                  ]),
+                ),
+                expectedClosure,
+              );
               const manifest = await pool.query(
                 'SELECT canonical_bytes FROM platform.release_artifact_blobs WHERE content_hash=$1',
                 [envelope.releaseRoot],
@@ -354,7 +360,9 @@ test(
           );
           const cursor = first.mapCoverage?.hasNext;
           assert.ok(cursor);
+          await stop(other, 'Private route addition', '47', '3', southRoute);
           const second = await mapRead(COMPANY, { cursor });
+          assert.equal(second.mapCoverage?.restarted, undefined);
           assert.deepEqual(
             second.records.map((r) => r.recordId),
             [tail, south],
@@ -380,6 +388,8 @@ test(
             inArea.mapCoverage?.stops.map((s) => [s.recordId, s.ordinal]),
             [[tail, 101]],
           );
+          await (await serve()).arrayBuffer();
+          await (await serve()).arrayBuffer();
           const timings: number[] = [];
           for (let i = 0; i < 5; i++) {
             const start = performance.now();
