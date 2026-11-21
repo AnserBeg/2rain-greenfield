@@ -2,6 +2,12 @@
 
 **Slice 0 · Design accepted after the 2026-11-20 Fable re-read; slice 1 may start.** The owner chartered the reusable capability and a design read before code. This docs-only packet touches no Critical path. Fable’s read of [ADR-0089](../../decisions/ADR-0089-declared-reports.md) (accept with amendments) is applied; the narrow re-read of B1/B2 closed with the edits applied.
 
+**Slice 1 · BUILD checkpoint, 2026-11-21.** Invoice reports use the stored sales currency. CAD, USD and EUR have independent partitions. A missing amount contributes to coverage. A present amount without a recognized currency contributes to **No currency**. The canonical money profile is unchanged.
+
+The Invoice date query uses `nsm_i_kyu3zu6vouaduhmjm5lbunvswejls2t4ls5svgycueyib3fqieka`. The provider probe, row policy, group ceiling, unavailable index, and pre-key byte identity have focused PostgreSQL/compiler witnesses. The actual Invoice page and downloaded bytes share the registered query. A failed audit append withholds the download. [Regression controls](../../../test/evidence/REPORTS-1-s1.expected-red.json)
+
+The preview and approved locking build both call `north_star_internal.module_table_exceeds(text, integer)`. CUSTOMIZE-5 slice 1 supplies this pooled-table probe. On main `630e2aa6` the probe is absent and a publish requiring that build refuses with the keys. This dependency holds the slice outside the merge line.
+
 ## Slice plan
 
 | Slice | What the business user can do | Gate before claiming the slice |
