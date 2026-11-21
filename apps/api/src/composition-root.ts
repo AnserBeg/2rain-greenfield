@@ -14,6 +14,7 @@ import {
   type ComposedApplicationRuntime,
   type InventoryScopeProvisioning,
 } from '@north-star/postgres-provider/composed-application-runtime';
+import { registerBookingDueWork } from '@north-star/postgres-provider/booking-capability-executor';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '@north-star/postgres-provider/inventory-provider-error-mappings';
 import {
   AGENT_KEY_FILE_VARIABLE,
@@ -242,9 +243,13 @@ export async function startComposedApplication(
           })
         : undefined;
     if (options.workflowScheduler && runtime.identityMode === 'LOCAL_DEMO') {
-      workflows = startWorkflowScheduler(options.workflowScheduler, () => {
-        process.stderr.write('WORKFLOW_SCHEDULER_POLL_FAILED\n');
-      });
+      workflows = startWorkflowScheduler(
+        options.workflowScheduler,
+        () => {
+          process.stderr.write('WORKFLOW_SCHEDULER_POLL_FAILED\n');
+        },
+        [registerBookingDueWork],
+      );
     }
     if (
       runtime.identityMode === 'LOCAL_DEMO' &&

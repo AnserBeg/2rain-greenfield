@@ -1,6 +1,8 @@
 import { checkRetainedWorkflowReplay } from '../../packages/postgres-provider/src/release-verification-service.js';
 import type { MintedUuid } from '../../packages/platform-runtime/src/release-records.js';
-import type { Pool } from 'pg';
+import { Pool } from 'pg';
+import { registerBookingDueWork } from '../../packages/postgres-provider/src/booking-capability-executor.js';
+import { PostgresWorkflowConsumer } from '../../packages/postgres-provider/src/workflow-consumer.js';
 import { WorkflowDefinitionSchema } from '../../packages/canonical-model/src/schemas.js';
 import { WorkflowWatchdogExpired } from '../../packages/postgres-provider/src/workflow-isolate.js';
 import {
@@ -34,6 +36,7 @@ import {
   type WorkflowSdk,
 } from '../../packages/postgres-provider/src/workflow-sdk.js';
 import {
+  startWorkflowScheduler,
   superviseWorkflowPolls,
   workflowSchedulerConfig,
 } from '../../packages/postgres-provider/src/workflow-worker.js';
@@ -444,6 +447,39 @@ test('workflow scheduling is opt-in and a failed pass does not stop polling', as
   }
   assert.equal(failures, 1);
   assert.equal(polls, 2);
+});
+
+test('Booking registers a bounded sweep and a failed job leaves the next worker runnable', async (t) => {
+  const calls: unknown[] = [];
+  t.mock.method(
+    Pool.prototype,
+    'query',
+    async (sql: string, args: unknown[]) => {
+      calls.push([sql, args]);
+      throw new Error('sweep unavailable');
+    },
+  );
+  t.mock.method(PostgresWorkflowConsumer.prototype, 'scopes', async () => {
+    calls.push('workflow');
+    return [];
+  });
+  const scheduler = startWorkflowScheduler(
+    {
+      workerDatabaseUrl:
+        'postgres://north_star_workflow_worker@localhost/postgres',
+      runtimeDatabaseUrl: 'postgres://north_star_runtime@localhost/postgres',
+    },
+    () => {
+      calls.push('reported');
+    },
+    [registerBookingDueWork],
+  );
+  await scheduler.close();
+  assert.deepEqual(calls, [
+    ['SELECT platform.booking_sweep_due($1)', [16]],
+    'reported',
+    'workflow',
+  ]);
 });
 
 test('workflow verification derives the complete Tier B relation and ownership closure', () => {

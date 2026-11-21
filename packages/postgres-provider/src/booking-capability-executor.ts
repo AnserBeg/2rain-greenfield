@@ -1,3 +1,5 @@
+import type { Pool } from 'pg';
+import type { ScheduledWorker } from './worker-scheduler.js';
 import { BOOKING_CAPABILITY } from '@north-star/canonical-model';
 import {
   PROJECTION_FAMILY_IDS,
@@ -300,3 +302,14 @@ export const BOOKING_CAPABILITY_EXECUTOR_FACTORY: PostgresCapabilityOperationExe
     },
     create: (service) => new BookingCapabilityExecutor(service),
   };
+
+export function registerBookingDueWork(
+  pool: Pick<Pool, 'query'>,
+): ScheduledWorker {
+  const batchSize = 16;
+  return {
+    async poll() {
+      await pool.query('SELECT platform.booking_sweep_due($1)', [batchSize]);
+    },
+  };
+}

@@ -1,5 +1,9 @@
 import type { TrustedRequestContext } from '@north-star/runtime';
 import pg, { type Pool } from 'pg';
+import {
+  superviseWorkerPolls,
+  type ScheduledWorker,
+} from './worker-scheduler.js';
 import { withTrustedRequestTransaction } from './request-context.js';
 import {
   PostgresWorkflowConsumer,
@@ -19,7 +23,7 @@ export class PostgresWorkflowWorker {
   readonly #gateway: PostgresWorkflowGateway;
 
   constructor(
-    private readonly workerPool: Pool,
+    workerPool: Pool,
     private readonly runtimePool: Pool,
     businessClock?: WorkflowBusinessClock,
   ) {
@@ -36,11 +40,6 @@ export class PostgresWorkflowWorker {
 
   async poll(): Promise<void> {
     const failures: unknown[] = [];
-    try {
-      await this.workerPool.query('SELECT platform.booking_sweep_due(16)');
-    } catch (error) {
-      failures.push(error);
-    }
     for (const scope of await this.#consumer.scopes()) {
       try {
         await this.#consumer.claim(scope);
@@ -185,6 +184,7 @@ function validateRoleUrl(
 export function startWorkflowScheduler(
   config: WorkflowSchedulerConfig,
   reportFailure: () => void,
+  registrations: readonly ((pool: Pool) => ScheduledWorker)[] = [],
 ) {
   validateRoleUrl(config.workerDatabaseUrl, 'north_star_workflow_worker');
   validateRoleUrl(config.runtimeDatabaseUrl, 'north_star_runtime');
@@ -205,7 +205,10 @@ export function startWorkflowScheduler(
     runtimePool,
     config.businessClock,
   );
-  const stop = superviseWorkflowPolls(worker, reportFailure);
+  const stop = superviseWorkerPolls(
+    [...registrations.map((register) => register(workerPool)), worker],
+    reportFailure,
+  );
   return {
     worker,
     async close() {
@@ -216,28 +219,9 @@ export function startWorkflowScheduler(
 }
 
 export function superviseWorkflowPolls(
-  worker: Pick<PostgresWorkflowWorker, 'poll'>,
+  worker: ScheduledWorker,
   reportFailure: () => void,
-  interval = 1_000,
-): () => Promise<void> {
-  let stopped = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  async function poll(): Promise<void> {
-    try {
-      await worker.poll();
-    } catch {
-      reportFailure();
-    } finally {
-      if (!stopped)
-        timer = setTimeout(() => {
-          active = poll();
-        }, interval).unref();
-    }
-  }
-  let active = poll();
-  return async () => {
-    stopped = true;
-    clearTimeout(timer);
-    await active;
-  };
+  interval?: number,
+) {
+  return superviseWorkerPolls([worker], reportFailure, interval);
 }
