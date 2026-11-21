@@ -506,7 +506,9 @@ export function replayCustomizationPatches(
             reportIdentityOnly,
           );
           if (outcome) {
-            if (patch.kind === 'addReportRevision')
+            if (board?.problem?.conflicts.length)
+              conflicts.push(...board.problem.conflicts);
+            else if (patch.kind === 'addReportRevision')
               conflicts.push({
                 code: target.has(outcome.message)
                   ? 'INCOMPATIBLE_TYPE'
@@ -515,8 +517,6 @@ export function replayCustomizationPatches(
                 expected: patch.reportId,
                 observed: target.get(outcome.message) ?? null,
               });
-            else if (board?.problem?.conflicts.length)
-              conflicts.push(...board.problem.conflicts);
             else if (
               layout &&
               (layout.findings.length || layout.blocked.length)
