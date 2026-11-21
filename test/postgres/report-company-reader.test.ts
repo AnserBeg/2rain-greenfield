@@ -512,6 +512,28 @@ test(
             'Export CSV',
           ])
             assert.ok(html.includes(text), 'missing in report table: ' + text);
+          const link = html.match(/href="([^"]+)">Export CSV<\/a>/u)?.[1];
+          assert.ok(link, 'the grouped table must link to an audited CSV');
+          const download = new URL(link.replaceAll('&amp;', '&'), url);
+          const httpFile = await fetch(download);
+          assert.equal(httpFile.status, 200);
+          assert.match(
+            httpFile.headers.get('content-type') ?? '',
+            /^text\/csv/u,
+          );
+          const emitted = Buffer.from(await httpFile.arrayBuffer());
+          const emittedDigest = createHash('sha256')
+            .update(emitted)
+            .digest('hex');
+          const matched = await pool.query(
+            "SELECT invocation_id FROM platform.trust_action_invocations WHERE tenant_id=$1 AND environment_id=$2 AND execution_principal_id=$3 AND action_id='northstar.runtime:action.issue_report_csv' AND metadata->'outputDigest'->>'value'=$4 AND metadata->'companyId'->>'value'=$5",
+            [tenantId, environmentId, principalId, emittedDigest, north],
+          );
+          assert.equal(
+            matched.rowCount,
+            1,
+            'a receipt must match the actual HTTP payload',
+          );
           const file = await run({
             export: { resultDigest: page.resultDigest },
           });
@@ -596,6 +618,13 @@ test(
           assert.deepEqual(
             await run({ export: { resultDigest: page.resultDigest } }),
             { kind: 'unavailable' },
+          );
+          const unissued = await fetch(download);
+          assert.equal(unissued.status, 404);
+          assert.equal(unissued.headers.get('content-disposition'), null);
+          assert.doesNotMatch(
+            await unissued.text(),
+            /Records without Balance|12\.000000000000000000/u,
           );
           await pool.query(
             'ALTER TABLE platform.trust_action_invocations DROP CONSTRAINT report_audit_unavailable',
