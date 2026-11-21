@@ -627,6 +627,9 @@ function scanForBypass(
     // registry: compositions, and a launcher Task's tiles and scan box.
     paths.surfaceComposition,
     paths.surfaceLauncher,
+    // ADR-0036 permits this static provider document on the dedicated map host.
+    // Its frame receives a public camera and has no SurfaceRuntime authority.
+    'apps/web/src/google-basemap.ts',
     paths.mapView,
     paths.board,
     paths.componentRegistry,

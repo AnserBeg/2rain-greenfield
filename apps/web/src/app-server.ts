@@ -673,11 +673,7 @@ async function handleRequest(
       (demoActors && selectedDemoActor?.(request.headers.cookie)) || 'buyer',
       workflowApprovals && WORKFLOW_APPROVALS_HREF,
     );
-    if (
-      origins &&
-      request.headers.host === origins.app.host &&
-      page.html.includes('data-surface-archetype="map"')
-    ) {
+    if (origins && request.headers.host === origins.app.host && page.mapPage) {
       response.setHeader(
         'content-security-policy',
         response.getHeader('content-security-policy') +

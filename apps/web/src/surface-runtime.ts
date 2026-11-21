@@ -191,6 +191,7 @@ export function withLocalDemoIdentity(
 }
 
 export interface SurfaceRuntimeResponse {
+  readonly mapPage?: true;
   readonly html: string;
   readonly statusCode: number;
   readonly location?: string;
@@ -2083,6 +2084,8 @@ function renderSelectedSurface(
       : null;
 
   return Object.freeze({
+    ...(selected.archetype === 'map' &&
+      data.status === 'READY' && { mapPage: true as const }),
     html: shellDocument(
       view,
       surfaces,

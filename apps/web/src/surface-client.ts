@@ -818,7 +818,8 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
   }
 })();
 (() => {
-  const region = () => document.querySelector('.surface-grid[data-surface-archetype="map"]');
+  const mapRegion = root => root.querySelector('[data-map-state]')?.closest('.surface-grid');
+  const region = () => mapRegion(document);
   const state = root => root?.querySelector('[data-map-state]')?.dataset.mapState;
   if (!state(region()) || typeof fetch !== 'function' || typeof DOMParser !== 'function') return;
   const mountBasemap = async root => {
@@ -870,7 +871,7 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
       if(!response.ok || response.headers.get('x-rain-fragment') !== 'fragment') throw Error();
       const html = new DOMParser().parseFromString(await response.text(),'text/html');
       if (mine !== generation || !origin.isConnected) return;
-      const next = html.querySelector('.surface-grid[data-surface-archetype="map"]');
+      const next = mapRegion(html);
       const canonical = new URL(state(next),location.href);
       if (!next || !state(next) || canonical.origin!==location.origin || canonical.pathname!=='/') throw Error();
       origin.replaceWith(next);
