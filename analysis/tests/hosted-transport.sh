@@ -21,7 +21,7 @@ sudo install -d -m 0755 -o root -g root /run/sshd
 sudo /usr/sbin/sshd -f /dev/null -E "$transport/server.log" -p 22022 \
   -o ListenAddress=127.0.0.1 -o PidFile="$transport/pid" -o HostKey="$transport/server" \
   -o AuthorizedKeysFile="$transport/client.pub" -o AllowUsers="$(id -un)" \
-  -o AuthenticationMethods=publickey -o PasswordAuthentication=no -o PermitTTY=no \
+  -o UsePAM=yes -o AuthenticationMethods=publickey -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o PermitTTY=no \
   -o DisableForwarding=yes -o ForceCommand="$GITHUB_WORKSPACE/analysis/analysis-worker" || {
   sudo cat "$transport/server.log"
   exit 1
