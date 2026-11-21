@@ -3,3 +3,7 @@ a71aa33157ac35f54dd3c9e4f36bd65b5c5e0861:test/postgres/trust-substrate.test.ts:g
 # AGENT eval run record: the model's own erp_execute executionIdempotencyKey (a
 # 25-character label it chose), not a credential; the harness now logs "[given]".
 86d318fac8f10afa860830a6fd691d43215b8ec6:docs/execution/evidence/2026-11-17-agent-eval-runs-2026-11-17T06-22-33-731Z/task-06.jsonl:generic-api-key:69
+
+# BOOKING-1: SQL column-to-column assignments in the writer and its generated schema snapshot.
+42766ca9255b3d041c17af8b250778709f63bbea:db/migrations/0059_booking_fulfilment.sql:generic-api-key:427
+42766ca9255b3d041c17af8b250778709f63bbea:db/schema.snapshot.json:generic-api-key:41530
