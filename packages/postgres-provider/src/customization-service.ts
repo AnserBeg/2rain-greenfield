@@ -1,3 +1,11 @@
+import { AuthenticatedRequestEntryAdapter } from '../../runtime/src/request-context.js';
+import { AuthenticatedRequestRuntimeEntryAdapter } from '../../runtime/src/request-runtime-view.js';
+import { SemanticOperationGateway } from '../../runtime/src/semantic-operation-gateway.js';
+import { PostgresRequestRuntimeViewService } from './request-runtime-view-service.js';
+import {
+  PostgresCurrentPolicyGateway,
+  currentPolicyBindingsFromPermissions,
+} from './current-policy.js';
 import { verifiedGenerationsSql } from './verified-release-generation.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { retypedCalculatedDisplayField } from '../../canonical-model/src/calculated-display-bindings.js';
@@ -1277,20 +1285,71 @@ export class PostgresCustomizationService {
     ) as unknown as Parameters<typeof customizationTargets>[0];
     const roles = await this.#permissionRoles(context);
     const targets = customizationTargets(definition);
+    const options = targets.popupActions ?? [];
+    const permitted =
+      options.length && roles.length
+        ? await this.#popupGrants(context, active.releaseId, [
+            ...new Set(options.map((o) => o.target.operationId)),
+          ])
+        : new Set();
+    const available = {
+      ...targets,
+      popupActions: options.filter((o) => permitted.has(o.target.operationId)),
+    };
     if (!roles.length)
       return {
-        ...targets,
+        ...available,
         permissionActions: [],
         permissionRestrictions: [],
         validationTargets: [],
       };
     return {
-      ...targets,
+      ...available,
       permissionRoleKeys: roles.map(({ role_key }) => role_key),
       permissionRoleLabels: Object.fromEntries(
         roles.map(({ role_key, label }) => [role_key, label]),
       ),
     };
+  }
+
+  async #popupGrants(
+    context: TrustedRequestContext,
+    releaseId: string,
+    ids: string[],
+  ) {
+    const loader = new PostgresRequestRuntimeViewService(
+      this.connection.runtimePool,
+    );
+    const live = await loader.load(context);
+    if (live.release.releaseId !== releaseId) return new Set<string>();
+    const definition = parseNormalizedApplicationPackageJson(
+      await this.#desiredState(
+        context,
+        (await this.#identity(context, releaseId as MintedUuid)).revisionId,
+      ),
+    );
+    const policy = new PostgresCurrentPolicyGateway(
+      this.connection.runtimePool,
+      currentPolicyBindingsFromPermissions(definition.permissions),
+      parsePinnedOperationCatalog(live.projections.operation.payload),
+    );
+    const entry = new AuthenticatedRequestRuntimeEntryAdapter(
+      new AuthenticatedRequestEntryAdapter(async () => context),
+      loader,
+      policy,
+    );
+    const gateway = new SemanticOperationGateway(policy);
+    return entry.run({}, async (view) => {
+      const allowed = new Set<string>();
+      if (view.release.releaseId !== releaseId) return allowed;
+      for (const id of ids)
+        if (
+          (await gateway.previewTaskEligibility(view, [id], null)) ===
+          'eligible'
+        )
+          allowed.add(id);
+      return allowed;
+    });
   }
 
   async #permissionRoles(context: TrustedRequestContext) {
@@ -1365,6 +1424,20 @@ export class PostgresCustomizationService {
     const context = await this.#context(actor);
     const active = await this.#active(context);
     const change = parsed.patch;
+    if (
+      change.kind === 'addPopupActionRevision' &&
+      change.target.kind !== 'workflowStart' &&
+      !(
+        await this.#popupGrants(context, active.releaseId, [
+          change.target.operationId,
+        ])
+      ).has(change.target.operationId)
+    )
+      return {
+        status: 'refused',
+        code: 'CUSTOMIZE_POPUP_OPERATION_DENIED',
+        message: 'Your role cannot bind this operation.',
+      };
     if (change.kind === 'saveWorkflow') {
       try {
         await withTrustedRequestTransaction(
@@ -2808,6 +2881,7 @@ const PATCH_SELECT = `SELECT patch.compiler_acknowledgement, patch.base_release_
    AND release.release_id = patch.resulting_release_id`;
 
 function patchDisplayLabel(patch: CustomizationPatch): string | null {
+  if (patch.kind === 'addPopupActionRevision') return patch.label.text;
   switch (patch.kind) {
     case 'addField':
       return patch.field.label;
