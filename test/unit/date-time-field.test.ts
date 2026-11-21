@@ -68,6 +68,9 @@ function calculatedOnItem() {
   }) as unknown as { field: Record<string, unknown> };
   return draft;
 }
+// A forged definition is edited structurally, as a tampered release would be.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type ForgedDefinition = Record<string, any>;
 const note = {
   kind: 'addField',
   entity: equipment,
@@ -76,7 +79,7 @@ const note = {
 /** Compiles through the isolated sandbox; a forged edit lands on the applied definition. */
 async function compile(
   chain: unknown[],
-  mutate?: (def: Record<string, any>) => void,
+  mutate?: (def: ForgedDefinition) => void,
 ): Promise<customization.SandboxResponse> {
   if (!mutate)
     return customization.compileInSandbox({
@@ -90,7 +93,7 @@ async function compile(
     chain.map(patch),
   );
   assert.ok(applied.status === 'applied', JSON.stringify(applied));
-  const authored = structuredClone(applied.authored) as Record<string, any>;
+  const authored = structuredClone(applied.authored) as ForgedDefinition;
   mutate(authored);
   return customization.compileInSandbox({
     acknowledgement,
@@ -317,7 +320,7 @@ test('first-party records, lines and forged non-instant scalars are named gaps',
 
 // Each consumer v1 does not admit is refused by logical type, naming the field
 // and the consumer, whatever channel put the binding there.
-const consumers: [string, (def: Record<string, any>) => void, RegExp][] = [
+const consumers: [string, (def: ForgedDefinition) => void, RegExp][] = [
   [
     'list filter',
     (def) => {

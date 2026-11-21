@@ -17,8 +17,6 @@ export interface DateTimeRefusal {
   readonly message: string;
 }
 
-type Json = Record<string, unknown>;
-
 function isTenantRecordType(entityId: string): boolean {
   return (entityId.split(':')[1] ?? '').startsWith('entity.custom_');
 }
