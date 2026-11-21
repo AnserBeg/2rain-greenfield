@@ -1,3 +1,8 @@
+import {
+  LEGACY_WORKFLOW_SDK_VERSION,
+  WORKFLOW_SDK_VERSION,
+  RemovedWorkflowAction,
+} from './workflow-sdk-version.js';
 import type {
   ImmutableJsonValue,
   RequestRuntimeView,
@@ -57,12 +62,15 @@ export interface WorkflowSdk {
   readonly release: RequestRuntimeView['release'] &
     Pick<RequestRuntimeView, 'tenantId' | 'environmentId'>;
   readonly declarations: string;
+  readonly version:
+    typeof WORKFLOW_SDK_VERSION | typeof LEGACY_WORKFLOW_SDK_VERSION;
   admitCall(call: unknown): WorkflowCall;
 }
 
 export function generateWorkflowSdk(
   view: RequestRuntimeView,
   grants: WorkflowGrants,
+  version: WorkflowSdk['version'] = WORKFLOW_SDK_VERSION,
   legacyApproval = false,
 ): WorkflowSdk {
   assertRequestRuntimeView(view);
@@ -105,8 +113,7 @@ export function generateWorkflowSdk(
     type RecordResult = Readonly<{ recordId: string; revision: number; values: Readonly<Record<string, Json>> }>;
     interface WorkflowSdk {
       now(): string;
-      sleep(milliseconds: number): void;
-      waitForEvent(type: ReceiptEvent['type'], timeoutMs: number): ReceiptEvent | null;
+      ${version === LEGACY_WORKFLOW_SDK_VERSION ? "sleep(milliseconds: number): void;\n      waitForEvent(type: ReceiptEvent['type'], timeoutMs: number): ReceiptEvent | null;" : '/** Maximum 90 days (7776000000 ms). */\n      sleep(milliseconds: number): void;'}
       ${legacyApproval ? 'requestApproval(summary: string): boolean;\n      ' : ''}${[...queries.values()].map(queryDeclaration).join('\n')}
       ${[...operations.values()].map(operationDeclaration).join('\n')}
     ${approvalMethods ? `${approvalMethods}\n    ` : ''}}
@@ -118,6 +125,7 @@ export function generateWorkflowSdk(
       environmentId: view.environmentId,
     }),
     declarations,
+    version,
     admitCall(value: unknown): WorkflowCall {
       if (!isRecord(value)) throw new Error('Invalid workflow call envelope');
       switch (value.kind) {
@@ -144,11 +152,19 @@ export function generateWorkflowSdk(
         case 'now':
           assertKeys(value, ['kind']);
           return { kind: 'now' };
-        case 'sleep':
+        case 'sleep': {
           assertKeys(value, ['kind', 'milliseconds']);
-          return { kind: 'sleep', milliseconds: duration(value.milliseconds) };
+          const milliseconds = duration(value.milliseconds);
+          if (
+            version !== LEGACY_WORKFLOW_SDK_VERSION &&
+            milliseconds > 7_776_000_000
+          )
+            throw new Error('Workflow sleep exceeds 90 days');
+          return { kind: 'sleep', milliseconds };
+        }
         case 'waitForEvent':
-          assertKeys(value, ['kind', 'eventType', 'timeoutMs']);
+          if (version !== LEGACY_WORKFLOW_SDK_VERSION)
+            throw new RemovedWorkflowAction();
           assertKeys(value, ['kind', 'eventType', 'timeoutMs']);
           if (value.eventType !== 'goodsReceiptPosted')
             throw new Error('Unknown workflow event type');

@@ -6,6 +6,7 @@ import type * as QuickJS from 'quickjs-emscripten';
 const data = workerData as {
   readonly traceMethods?: readonly string[];
   readonly cpuMs: number;
+  readonly legacyWait?: boolean;
   readonly engine: string;
   readonly executable: string;
   readonly input: string;
@@ -156,7 +157,7 @@ try {
       const sdk = {
         now: () => dispatch({ kind: 'now' }),
         sleep: (milliseconds) => dispatch({ kind: 'sleep', milliseconds }),
-        waitForEvent: (eventType, timeoutMs) => dispatch({ kind: 'waitForEvent', eventType, timeoutMs }),
+        ${data.legacyWait ? "waitForEvent: (eventType, timeoutMs) => dispatch({ kind: 'waitForEvent', eventType, timeoutMs })," : ''}
         requestApproval: (summary, ...args) => dispatch(args.length === 0
           ? { kind: 'requestApproval', summary }
           : { kind: 'requestApproval', summary, operationId: args[0], input: args[1] }),

@@ -1,8 +1,10 @@
+import { LEGACY_WORKFLOW_SDK_VERSION } from './workflow-sdk-version.js';
 import { canonicalize, canonicalizeAndHash } from '@north-star/canonical-model';
 import type { ImmutableJsonValue } from '@north-star/runtime/request-runtime-view';
 
 import type { CompiledWorkflow } from './workflow-compile.js';
 import {
+  WorkflowWatchdogExpired,
   decodeWorkflowRequest,
   MAXIMUM_WORKFLOW_EFFECT_BYTES,
   MAXIMUM_WORKFLOW_EFFECTS,
@@ -15,6 +17,32 @@ import type { WorkflowCall, WorkflowEvent } from './workflow-sdk.js';
 
 export class WorkflowGuestError extends Error {
   override readonly name = 'WorkflowGuestError';
+}
+
+export class WorkflowCpuLimit extends WorkflowGuestError {}
+
+export async function retryWorkflowStep<T>(
+  step: () => Promise<T>,
+  record: (reason: string) => void,
+) {
+  for (const attempt of [1, 2]) {
+    try {
+      const result = await step();
+      if (attempt === 2) record('attempt-2-completed');
+      return result;
+    } catch (error) {
+      const cause =
+        error instanceof WorkflowCpuLimit
+          ? 'cpu-limit'
+          : error instanceof WorkflowWatchdogExpired
+            ? 'host-watchdog'
+            : null;
+      if (cause || attempt === 2)
+        record(`attempt-${attempt}-${cause ?? 'failed'}`);
+      if (!cause || attempt === 2) throw error;
+    }
+  }
+  throw new Error('Workflow retry exhausted');
 }
 
 type WorkflowTerminal =
@@ -137,7 +165,10 @@ export class InMemoryWorkflowRun {
     const outcome = await runWorkflowIsolate(
       this.workflow.executable,
       canonicalize({ event: this.#event, prefix: this.#prefix }),
-      this.options,
+      {
+        ...this.options,
+        legacyWait: this.workflow.sdk.version === LEGACY_WORKFLOW_SDK_VERSION,
+      },
     );
     switch (outcome.kind) {
       case 'done':
@@ -164,7 +195,7 @@ export class InMemoryWorkflowRun {
           'Workflow made an invalid or repeated call',
         );
       case 'cpu-limit':
-        throw new WorkflowGuestError('Workflow isolate CPU limit exceeded');
+        throw new WorkflowCpuLimit('Workflow isolate CPU limit exceeded');
       case 'execution-failed':
         throw new WorkflowGuestError('Workflow guest execution failed');
     }
@@ -234,7 +265,10 @@ export async function verifyWorkflowReplay(
     const first = new InMemoryWorkflowRun(workflow, event);
     let cursor = 0;
     for (;;) {
-      const step = await first.step();
+      const step = await retryWorkflowStep(
+        () => first.step(),
+        () => undefined,
+      );
       if (step.kind === 'quarantined')
         throw new Error(`Workflow replay diverged at cursor ${step.cursor}`);
       if (step.kind === 'done') break;

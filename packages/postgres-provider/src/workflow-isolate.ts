@@ -33,6 +33,7 @@ export class WorkflowWatchdogExpired extends Error {
 
 export interface WorkflowIsolateOptions {
   readonly cpuMs?: number;
+  readonly legacyWait?: boolean;
   readonly traceMethods?: readonly string[];
   /** The supervisor arms this timer when the worker is ready to evaluate. */
   readonly startWatchdog?: (expire: () => void) => () => void;
@@ -57,6 +58,7 @@ export async function runWorkflowIsolate(
       execArgv: [],
       resourceLimits: { maxOldGenerationSizeMb: 32, stackSizeMb: 2 },
       workerData: {
+        legacyWait: options.legacyWait,
         traceMethods: options.traceMethods,
         cpuMs: options.cpuMs ?? 100,
         // Compiled workers start independently of the application's resolver.

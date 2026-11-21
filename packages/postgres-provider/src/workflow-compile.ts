@@ -1,3 +1,7 @@
+import {
+  RemovedWorkflowAction,
+  WORKFLOW_SDK_VERSION,
+} from './workflow-sdk-version.js';
 import ts from 'typescript';
 
 import { MAXIMUM_WORKFLOW_SOURCE_BYTES } from './workflow-isolate.js';
@@ -123,6 +127,16 @@ export function compileWorkflowBody(body: string, sdk: WorkflowSdk) {
 
   const program = ts.createProgram([fileName, sdkFileName], options, host);
   const diagnostics = ts.getPreEmitDiagnostics(program);
+  if (
+    sdk.version === WORKFLOW_SDK_VERSION &&
+    diagnostics.some(
+      (d) =>
+        d.code === 2339 &&
+        ts.flattenDiagnosticMessageText(d.messageText, '\n') ===
+          "Property 'waitForEvent' does not exist on type 'WorkflowSdk'.",
+    )
+  )
+    throw new RemovedWorkflowAction();
   if (diagnostics.length) {
     throw new Error(
       ts

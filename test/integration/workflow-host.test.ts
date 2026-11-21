@@ -1,4 +1,9 @@
-import { verifyWorkflowBundle } from '../../packages/postgres-provider/src/workflow-bundle.js';
+import { WorkflowWatchdogExpired } from '../../packages/postgres-provider/src/workflow-isolate.js';
+import { LEGACY_WORKFLOW_SDK_VERSION } from '../../packages/postgres-provider/src/workflow-sdk-version.js';
+import {
+  verifyWorkflowBundle,
+  verifyRetainedWorkflow,
+} from '../../packages/postgres-provider/src/workflow-bundle.js';
 import assert from 'node:assert/strict';
 import test, { before } from 'node:test';
 
@@ -10,6 +15,8 @@ import {
 } from '../../packages/postgres-provider/src/workflow-compile.js';
 import {
   InMemoryWorkflowRun,
+  WorkflowCpuLimit,
+  retryWorkflowStep,
   verifyWorkflowReplay,
   type WorkflowJournalSnapshot,
   type WorkflowVerificationFixture,
@@ -85,10 +92,14 @@ let view: RequestRuntimeView;
 let sdk: WorkflowSdk;
 before(async () => {
   view = await entry.run({}, (issued) => issued);
-  sdk = generateWorkflowSdk(view, {
-    queries: [queryId],
-    operations: [operationId],
-  });
+  sdk = generateWorkflowSdk(
+    view,
+    {
+      queries: [queryId],
+      operations: [operationId],
+    },
+    LEGACY_WORKFLOW_SDK_VERSION,
+  );
 });
 const compile = (body: string) => compileWorkflowBody(body, sdk);
 const raw = (body: string): CompiledWorkflow => ({
@@ -624,4 +635,85 @@ test('workflow review lint requires every SDK access to be a direct call', () =>
   ]) {
     assert.throws(() => compile(body), /forbidden syntax/);
   }
+});
+
+test('v2 drops event waits and caps sleep while a v1 pin retains both contracts', async () => {
+  const grants = { operations: [], queries: [] };
+  const current = generateWorkflowSdk(view, grants);
+  const previous = generateWorkflowSdk(
+    view,
+    grants,
+    LEGACY_WORKFLOW_SDK_VERSION,
+  );
+  const body =
+    "if (event.receiptId === event.eventId) sdk.waitForEvent('goodsReceiptPosted', 1);";
+  assert.doesNotMatch(current.declarations, /waitForEvent/);
+  assert.match(current.declarations, /90 days/);
+  assert.throws(() => compileWorkflowBody(body, current), /waitForEvent/);
+  const wait = {
+    kind: 'waitForEvent',
+    eventType: 'goodsReceiptPosted',
+    timeoutMs: 1,
+  };
+  assert.throws(() => current.admitCall(wait), /external-event waits/);
+  const cap = 90 * 24 * 60 * 60 * 1000;
+  assert.deepEqual(current.admitCall({ kind: 'sleep', milliseconds: cap }), {
+    kind: 'sleep',
+    milliseconds: cap,
+  });
+  assert.throws(
+    () => current.admitCall({ kind: 'sleep', milliseconds: cap + 1 }),
+    /90 days/,
+  );
+  assert.deepEqual(
+    previous.admitCall({ kind: 'sleep', milliseconds: cap + 1 }),
+    { kind: 'sleep', milliseconds: cap + 1 },
+  );
+  assert.deepEqual(previous.admitCall(wait), wait);
+  const result = await verifyRetainedWorkflow(
+    view,
+    { workflowId: 'old-wait', grants },
+    {
+      body,
+      authoredBy: event.eventId,
+      fixtures: [{ event, effects: [] }],
+      executable: compileWorkflowBody(body, previous).executable,
+    },
+  );
+  assert.deepEqual(result, {
+    code: 'REMOVED_ACTION',
+    subject: 'old-wait',
+    expected: 'waitForEvent',
+    observed: null,
+  });
+});
+
+test('a CPU overrun retries once; a watchdog kill has its own evidence', async () => {
+  const controls: string[] = [];
+  let count = 0;
+  assert.equal(
+    await retryWorkflowStep(
+      async () => {
+        if (++count === 1) throw new WorkflowCpuLimit();
+        return 'done';
+      },
+      (s) => controls.push(s),
+    ),
+    'done',
+  );
+  assert.deepEqual(controls, ['attempt-1-cpu-limit', 'attempt-2-completed']);
+  controls.length = 0;
+  await assert.rejects(
+    retryWorkflowStep(
+      async () => {
+        throw new WorkflowWatchdogExpired();
+      },
+      (s) => controls.push(s),
+    ),
+    /watchdog/,
+  );
+  assert.deepEqual(controls, [
+    'attempt-1-host-watchdog',
+    'attempt-2-host-watchdog',
+  ]);
 });

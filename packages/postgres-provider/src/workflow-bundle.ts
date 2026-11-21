@@ -1,3 +1,4 @@
+import { RemovedWorkflowAction } from './workflow-sdk-version.js';
 import { canonicalize } from '@north-star/canonical-model';
 import type { TrustedRequestContext } from '@north-star/runtime';
 import type { RequestRuntimeView } from '@north-star/runtime/request-runtime-view';
@@ -95,6 +96,35 @@ export async function verifyWorkflowBundle(
       return WorkflowVerificationResultSchema.parse(JSON.parse(response));
     },
   );
-  if (result.status === 'refused') throw new Error(result.message);
+  if (result.status === 'refused') {
+    if (result.removedAction) throw new RemovedWorkflowAction();
+    throw new Error(result.message);
+  }
   return { sdk, ...result };
+}
+
+/** Check the effective retained body, including unexercised branches, before an upgrade is staged. */
+export async function verifyRetainedWorkflow(
+  view: RequestRuntimeView,
+  workflow: { workflowId: string; grants: WorkflowGrants },
+  bundle: WorkflowBodyBundle,
+) {
+  try {
+    await verifyWorkflowBundle(view, workflow.grants, bundle);
+    return null;
+  } catch (error) {
+    return error instanceof RemovedWorkflowAction
+      ? {
+          code: 'REMOVED_ACTION' as const,
+          subject: workflow.workflowId,
+          expected: 'waitForEvent',
+          observed: null,
+        }
+      : {
+          code: 'WORKFLOW_FIXTURE_FAILED' as const,
+          subject: workflow.workflowId,
+          expected: 'passing fixtures',
+          observed: error instanceof Error ? error.message : String(error),
+        };
+  }
 }

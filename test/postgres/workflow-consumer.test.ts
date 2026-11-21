@@ -1,3 +1,4 @@
+import { LEGACY_WORKFLOW_SDK_VERSION } from '../../packages/postgres-provider/src/workflow-sdk-version.js';
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
 import { canonicalize } from '@north-star/canonical-model';
@@ -1615,6 +1616,66 @@ test(
             },
           );
 
+          await t.test(
+            'two CPU overruns quarantine without an effect, and a v1 event wait still suspends',
+            async () => {
+              const legacy = generateWorkflowSdk(
+                view,
+                grants,
+                LEGACY_WORKFLOW_SDK_VERSION,
+              );
+              await service.rollback();
+              await cloneDefinition(
+                pool,
+                enrolled.releaseId,
+                'over-budget',
+                compileWorkflowBody('while(true) {}', sdk).executable,
+              );
+              await cloneDefinition(
+                pool,
+                enrolled.releaseId,
+                'legacy-wait',
+                compileWorkflowBody(
+                  "sdk.waitForEvent('goodsReceiptPosted',1);",
+                  legacy,
+                ).executable,
+                undefined,
+                legacy,
+              );
+              await verify('over-budget');
+              await verify('legacy-wait');
+              await service.approve(draft.patchId);
+              await service.activate(draft.patchId);
+              await postReceipt(world);
+              const receipt = await latestReceipt(pool, tenantId);
+              await consumer.claim(scope);
+              for (const [id, status, reason] of [
+                ['over-budget', 'QUARANTINED', 'cpu-limit-exceeded'],
+                ['legacy-wait', 'SUSPENDED', 'durable-call-unavailable'],
+              ] as const) {
+                const runId = await runFor(pool, receipt.outbox_id, id);
+                await restarted.step(scope, runId);
+                const run = await pool.query(
+                  'SELECT status,reason FROM platform.workflow_runs WHERE run_id=$1',
+                  [runId],
+                );
+                assert.deepEqual(run.rows[0], { status, reason });
+                assert.equal(await journalCount(pool, runId, 'REQUEST'), 0);
+                if (id === 'over-budget') {
+                  const evidence = await pool.query(
+                    "SELECT convert_from(canonical_bytes,'UTF8')::jsonb->>'reason' AS reason FROM platform.workflow_journal WHERE run_id=$1 AND kind='CONTROL'",
+                    [runId],
+                  );
+                  for (const attempt of [1, 2])
+                    assert.ok(
+                      evidence.rows.some(
+                        (row) => row.reason === `attempt-${attempt}-cpu-limit`,
+                      ),
+                    );
+                }
+              }
+            },
+          );
           const fixtureGrants = { queries: [], operations: [] };
           const fixtureBody = 'sdk.sleep(10);';
           const fixtureDigest = await withTrustedRequestTransaction(
@@ -2140,12 +2201,13 @@ async function cloneDefinition(
   id: string,
   executable?: string,
   eventType?: string,
+  sdk?: ReturnType<typeof generateWorkflowSdk>,
 ) {
   await pool.query(
     `INSERT INTO platform.workflow_definitions
      SELECT tenant_id, environment_id, release_id, $2, COALESCE($5, event_type), body_digest,
             COALESCE($3, executable), COALESCE($4, executable_digest),
-            sdk_digest, engine_build, host_version, sdk_version,
+            COALESCE($6, sdk_digest), engine_build, host_version, COALESCE($7,sdk_version),
             automation_principal_id, authored_by, grants
        FROM platform.workflow_definitions WHERE release_id = $1 AND workflow_id = 'receipt-review'`,
     [
@@ -2154,6 +2216,8 @@ async function cloneDefinition(
       executable === undefined ? null : Buffer.from(executable),
       executable === undefined ? null : sha256(executable),
       eventType ?? null,
+      sdk ? sha256(sdk.declarations) : null,
+      sdk?.version ?? null,
     ],
   );
 }

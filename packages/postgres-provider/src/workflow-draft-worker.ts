@@ -1,3 +1,7 @@
+import {
+  WORKFLOW_SDK_VERSION,
+  RemovedWorkflowAction,
+} from './workflow-sdk-version.js';
 import { canonicalize } from '@north-star/canonical-model';
 import { SANDBOX_PROTOCOL_VERSION } from '../../customization/src/sandbox.js';
 import { compileWorkflowBody } from './workflow-compile.js';
@@ -37,6 +41,7 @@ process.once(
         ),
       );
       const compiled = compileWorkflowBody(body, {
+        version: WORKFLOW_SDK_VERSION,
         declarations,
         release,
         admitCall(value) {
@@ -65,6 +70,9 @@ process.once(
     } catch (error) {
       response = JSON.stringify({
         status: 'refused',
+        ...(error instanceof RemovedWorkflowAction && {
+          removedAction: 'waitForEvent',
+        }),
         message: String(error instanceof Error ? error.message : error).slice(
           0,
           8192,

@@ -40,7 +40,11 @@ export type WorkflowDraft = z.infer<typeof WorkflowDraftSchema>;
 export type WorkflowBodyBundle = z.infer<typeof WorkflowBodyBundleSchema>;
 
 export const WorkflowVerificationResultSchema = z.discriminatedUnion('status', [
-  z.strictObject({ status: z.literal('refused'), message: z.string() }),
+  z.strictObject({
+    status: z.literal('refused'),
+    message: z.string(),
+    removedAction: z.literal('waitForEvent').optional(),
+  }),
   z.strictObject({
     status: z.literal('passed'),
     sites: z.array(

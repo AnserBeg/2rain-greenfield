@@ -90,6 +90,7 @@ import {
   readWorkflowBundle,
   storeWorkflowBundle,
   verifyWorkflowBundle,
+  verifyRetainedWorkflow,
 } from './workflow-bundle.js';
 
 /**
@@ -619,6 +620,28 @@ export class PostgresCustomizationService {
     const candidateDefinition = parseNormalizedApplicationPackageJson(
       candidate.normalizedDefinitionBytes,
     );
+    if (
+      'workflows' in candidateDefinition &&
+      candidateDefinition.workflows?.length
+    ) {
+      const view = await new PostgresWorkflowGateway(
+        this.connection.runtimePool,
+      ).loadView(context);
+      for (const workflow of candidateDefinition.workflows) {
+        const bundle = await withTrustedRequestTransaction(
+          this.connection.runtimePool,
+          context,
+          (client) => readWorkflowBundle(client, context, workflow.bodyDigest),
+        );
+        const finding = await verifyRetainedWorkflow(view, workflow, bundle);
+        if (finding)
+          throw new CustomizationServiceRefusal(
+            finding.code,
+            `${workflow.workflowId}: ${finding.expected} — ${UPGRADE_CODES_V1[finding.code]}`,
+            { findings: [finding], blocked: [] },
+          );
+      }
+    }
     const inheritedRule = retypedFormulaRule(
       sourceDefinition,
       targetBase,
