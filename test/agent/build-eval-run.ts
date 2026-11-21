@@ -17,7 +17,7 @@
  * Writes `docs/execution/evidence/<date>-build-eval-<stamp>/`: one JSONL
  * transcript per request, `results.json` and `summary.md`.
  */
-import { appendFile, mkdir, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
@@ -26,6 +26,7 @@ import {
   AGENT_KEY_FILE_VARIABLE,
   DEFAULT_ANTHROPIC_MODEL,
   loadModelKey,
+  scriptedModel,
   SpendMeter,
 } from '../../packages/operations-agent/src/index.js';
 
@@ -61,6 +62,9 @@ async function main(): Promise<void> {
       split: { type: 'string', default: 'all' },
       cases: { type: 'string' },
       out: { type: 'string', default: 'docs/execution/evidence' },
+      // Rescore: replay the drafts recorded in an earlier run's transcripts
+      // through a scripted model, so only the scorer runs again. No key.
+      replay: { type: 'string' },
     },
   });
   const cap = Number(args.cap);
@@ -82,24 +86,39 @@ async function main(): Promise<void> {
   );
   if (!cases.length) throw new Error('no cases selected');
 
+  // `--replay A[,B]`: results come from A; a case's draft from the last of
+  // the directories whose transcript recorded a model turn for it.
+  const replays = args.replay?.split(',').map((dir) => resolve(dir));
+  const replay = replays?.[0];
+  if (replay && !wanted) throw new Error('--replay needs --cases');
+  const earlier = replay
+    ? (JSON.parse(await readFile(join(replay, 'results.json'), 'utf8')) as {
+        model: string;
+        results: CaseResult[];
+      })
+    : undefined;
   // Only the file named by the variable: an ambient key does not count.
-  const key = await loadModelKey('anthropic', {
-    [AGENT_KEY_FILE_VARIABLE]: process.env[AGENT_KEY_FILE_VARIABLE],
-  });
-  const secrets = [key.reveal()];
-  const model = anthropicModel({
-    effort: args.effort as 'medium',
-    key,
-    maxTokens: 8_000,
-    modelId: String(args.model),
-  });
+  const key = replay
+    ? undefined
+    : await loadModelKey('anthropic', {
+        [AGENT_KEY_FILE_VARIABLE]: process.env[AGENT_KEY_FILE_VARIABLE],
+      });
+  const secrets = key ? [key.reveal()] : [];
+  const model = key
+    ? anthropicModel({
+        effort: args.effort as 'medium',
+        key,
+        maxTokens: 8_000,
+        modelId: String(args.model),
+      })
+    : undefined;
   const meter = new SpendMeter(prices, cap);
 
   const date = new Date().toISOString().slice(0, 10);
   const stamp = new Date().toISOString().replaceAll(/[:.]/gu, '-');
   const directory = join(
     resolve(String(args.out)),
-    `${date}-build-eval-${stamp}`,
+    `${date}-build-eval-${replay ? 'rescore-' : ''}${stamp}`,
   );
   await mkdir(directory, { recursive: true });
   const say = (line: string) =>
@@ -125,11 +144,20 @@ async function main(): Promise<void> {
       say(`${c.id} (${c.split}, ${c.category}): ${c.request}`);
       const world = await worlds.fresh(`build-${c.id}`);
       try {
+        const recorded = replays
+          ? await recordedTurns(replays, c.id)
+          : undefined;
         const result = await runBuildCase(world, c, {
-          provider: () => model,
-          meter,
+          provider: () =>
+            model ?? scriptedModel(recorded!.turns.map((turn) => () => turn)),
+          ...(model ? { meter } : {}),
           log,
         });
+        if (recorded) {
+          // The model's own cost and time are the recorded run's.
+          Object.assign(result, recorded.model);
+          log({ kind: 'replayed', from: replays, model: recorded.model });
+        }
         results.push(result);
         say(
           `  ${result.behaviour ? 'PASS' : 'FAIL'} ${result.status} · calls ${String(result.modelCalls)} · e2e ${String(result.e2e)} · ${(result.modelMs / 1000).toFixed(1)} s model / ${(result.wallMs / 1000).toFixed(1)} s wall · $${result.usd.toFixed(4)} (total $${meter.usd.toFixed(4)})${result.reasons.length ? ` · ${result.reasons.slice(0, 3).join('; ')}` : ''}`,
@@ -148,14 +176,24 @@ async function main(): Promise<void> {
     }
   });
 
+  if (earlier)
+    results.splice(
+      0,
+      results.length,
+      ...earlier.results.map(
+        (row) => results.find((r) => r.id === row.id) ?? row,
+      ),
+    );
+  const modelId = model?.modelId ?? earlier!.model;
   const summary = summarize(results);
   await writeFile(
     join(directory, 'results.json'),
     redactSecrets(
       JSON.stringify(
         {
-          model: model.modelId,
+          model: modelId,
           effort: args.effort,
+          ...(replay ? { rescoredFrom: replay, rescored: wanted } : {}),
           cap,
           prices,
           summary,
@@ -172,8 +210,9 @@ async function main(): Promise<void> {
     join(directory, 'summary.md'),
     redactSecrets(
       report(results, summary, {
-        model: model.modelId,
+        model: modelId,
         effort: String(args.effort),
+        rescored: replay ? wanted : undefined,
         cap,
         prices,
         source: String(args['price-source']),
@@ -185,6 +224,35 @@ async function main(): Promise<void> {
     { flag: 'wx' },
   );
   say(`\n${JSON.stringify(summary)}\n${directory}`);
+}
+
+/** The tool calls an earlier run's model made for one case, turn by turn. */
+async function recordedTurns(directories: readonly string[], id: string) {
+  let text = '';
+  for (const directory of directories)
+    try {
+      const candidate = await readFile(join(directory, `${id}.jsonl`), 'utf8');
+      if (candidate.includes('"kind":"model"')) text = candidate;
+    } catch {
+      // Not recorded in this directory.
+    }
+  const lines = text
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+  const turns = lines
+    .filter((line) => line.kind === 'model')
+    .map((line) => ({
+      text: String(line.text ?? ''),
+      toolCalls: (line.toolCalls as { name: string; input: unknown }[]).map(
+        ({ name, input }) => ({ name, input }),
+      ),
+    }));
+  const verdict = lines.find((line) => line.kind === 'verdict') as
+    CaseResult | undefined;
+  if (!turns.length || !verdict) throw new Error(`no recorded draft for ${id}`);
+  const { modelCalls, modelMs, usd, tokens } = verdict;
+  return { turns, model: { modelCalls, modelMs, usd, tokens } };
 }
 
 function notRun(c: BuildCase): CaseResult {
@@ -222,6 +290,7 @@ function report(
     source: string;
     priceDate: string;
     date: string;
+    rescored?: readonly string[] | undefined;
   },
 ): string {
   const cell = (text: string) =>
@@ -238,6 +307,12 @@ function report(
   return [
     `# AI-BUILD-1 module-building eval — ${run.date}`,
     '',
+    ...(run.rescored
+      ? [
+          `Rescored ${run.rescored.join(', ')} by replaying the drafts recorded in the live run through a scripted model, after a scorer fix; their model calls, time and spend are the live run's.`,
+          '',
+        ]
+      : []),
     `Model \`${run.model}\`, effort ${run.effort}, 8000 output tokens: the in-app drafting settings. Real in-app path per request on a fresh copy of the distributor demo database: draftFromRequest → approve → activate, then create, transition and list. One attempt per request; indicative only. Workflows are scored on the goods-receipt trigger only (the only trigger today). Prices (USD/MTok) from ${run.source}, ${run.priceDate}: ${Object.entries(
       run.prices,
     )

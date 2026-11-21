@@ -501,6 +501,7 @@ export async function scoreModule(
       if (spec.existing && !spec.existing.startsWith('custom_')) {
         ({ recordId, values, record } = await updateExisting(
           world,
+          after,
           local,
           fresh,
         ));
@@ -627,12 +628,17 @@ export async function scoreModule(
 /** On a first-party type the new field is written onto an existing record. */
 async function updateExisting(
   world: AgentWorld,
+  catalogue: Catalog,
   local: string,
   fresh: NonNullable<RegisteredOperationDefinition['inputContract']>['fields'],
 ): Promise<Created> {
   const patch = Object.fromEntries(fresh.map((f) => [f.fieldId, valueFor(f)]));
+  const rows = await listRecords(world, local);
+  // The demo seed has no record of some first-party types (purchase orders):
+  // then one is created, every writable field filled, the new one included.
+  if (!rows.length) return createRecord(world, catalogue, local);
   let last: unknown = new Error(`no ${local} record to update`);
-  for (const row of (await listRecords(world, local)).slice(0, 8)) {
+  for (const row of rows.slice(0, 8)) {
     try {
       const result = await world.invoke(`${local}_update`, {
         recordId: row.recordId,
