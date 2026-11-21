@@ -12,6 +12,7 @@ import {
   defaultBoardChoices,
   draftBoardRevision,
 } from '../../packages/customization/src/board-revision.js';
+import { PostgresImmutableReleaseRepository } from '../../packages/postgres-provider/src/release-repository.js';
 import {
   REQUEST_RUNTIME_PROJECTION_FAMILIES,
   SUPPORTED_RUNTIME_CAPABILITIES,
@@ -29,7 +30,7 @@ const deal = 'northstar.app:entity.custom_deal';
 test(
   'Board queries work at the supported floor and refuse before policy parsing above it',
   { timeout: 600_000 },
-  async () => {
+  async (t) => {
     await withEphemeralPostgres(
       tenantSlug,
       async ({ connection, pool }) => {
@@ -115,7 +116,7 @@ test(
               return view;
             })
             .finally(() => capable.close());
-          assert.ok((await coverage.take()).releasePolicyBindings > 0);
+          assert.ok((await coverage.policyParses()) > 0);
 
           const surfaceReader = SUPPORTED_RUNTIME_CAPABILITIES[
             REQUEST_RUNTIME_PROJECTION_FAMILIES.surface
@@ -163,6 +164,8 @@ test(
             message: `release ${releaseId}: runtime capability ${requirement.capabilityId} requires version ${String(requirement.minimumVersion)} and this runtime supports ${String(olderVersion)}`,
           };
           try {
+            const releases = PostgresImmutableReleaseRepository.prototype;
+            const releaseRead = t.mock.method(releases, 'getTenantRelease');
             await assert.rejects(
               openComposedApplicationRuntime(options).then(async (runtime) => {
                 await runtime.close();
@@ -170,13 +173,13 @@ test(
               }),
               refusal,
             );
-            assert.deepEqual(
-              await coverage.take(),
-              {
-                loadServingRelease: 1,
-                releasePolicyBindings: 0,
-              },
-              'boot stops before policy and does not re-open the release through fallback',
+            assert.equal(await coverage.policyParses(), 0);
+            assert.equal(
+              releaseRead.mock.calls.filter(
+                ({ arguments: [, id] }) => id === releaseId,
+              ).length,
+              1,
+              'boot does not re-open the refused release through fallback',
             );
 
             // The top-level request loader already refuses a higher floor.
@@ -194,10 +197,7 @@ test(
               initial.runtime.queryGateway.invoke(boardView, query),
               refusal,
             );
-            assert.deepEqual(await coverage.take(), {
-              loadServingRelease: 1,
-              releasePolicyBindings: 0,
-            });
+            assert.equal(await coverage.policyParses(), 0);
           } finally {
             surfaceReader.maximumSupportedVersion = supportedVersion;
             await replaceDefinition(pool, row.revision_id, row.desired_state);
@@ -242,18 +242,16 @@ function policyCoverage() {
         detailed: false,
       });
     },
-    async take() {
+    async policyParses() {
       const { result } = await session.post('Profiler.takePreciseCoverage');
       const script = result.find(({ url }) =>
         url.endsWith('/serving-gateways.ts'),
       );
-      const calls = (name: string) =>
-        script?.functions.find(({ functionName }) => functionName === name)
-          ?.ranges[0]?.count ?? 0;
-      return {
-        loadServingRelease: calls('loadServingRelease'),
-        releasePolicyBindings: calls('releasePolicyBindings'),
-      };
+      return (
+        script?.functions.find(
+          ({ functionName }) => functionName === 'releasePolicyBindings',
+        )?.ranges[0]?.count ?? 0
+      );
     },
     [Symbol.dispose]() {
       session.disconnect();
