@@ -17,15 +17,19 @@ The orchestrator accepted ADR-0079 with Fable’s amendments on 2026-11-19.
 - UPGRADE-2 slice 1 owns addLayoutRevision replay admission and the moved, retired and changed-binding conflicts. UI-COMPOSE-1 slice 1b owns hide, collapse, concealment and reset-to-base after slice 1 merges. Disclosure and assistant discovery also belong to 1b.
 - Record buttons open a Task for an existing operation or field update. Workflow start waits for a released manual-start contract. DOCS-1 issues PDFs with the Ledger defaults and records `platform-default` until this slice supplies approved company revisions through the company-brand resolver.
 
+The slice adds reusable record buttons and Task input bindings, and uses the governed Task flow. Each serves equipment rental, field service and wholesale distribution.
+
 ## Gates and test it yourself
 
 Slice 1a compared full layout-free release envelopes and verified the purchase-order editor, stored field values, protected blocks and Files. [Slice 1a fix CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44703111463)
 
 The pop-up regression uses a running server and HTML form posts. Opening two item Tasks creates no update receipt. Applying one changes the stored description once. Retry preserves the receipt count and the stale Task cannot replace the saved value.
 The purchase-order button inherits the approval gate. Its review shows the fixed supplier reference. Editing invalidates the previous confirmation and the current confirmation invokes Place order.
-Restricting Item update removes the offer from the record and the assistant, blocks a new binding and refuses a submitted action ID. A historical binary loads the original release and refuses the declaring release. The tenant compiler reproduces the complete envelope without the declaration.
+Restricting Item update removes the offer from the record and the assistant, blocks a new binding and refuses a submitted action ID. The tenant compiler reproduces the complete envelope without the declaration.
 The named addPopupActionRevision replay in customization.test.ts accepts a field label change on the new base and refuses a changed target Task contract. Admission also checks the operation binding and the advertised Surface floor.
-Reader 39 serves the original release and refuses declared pop-ups at 40. The tenant Cabinet test reviews a record-sourced value and checks the exact gateway update. The UPGRADE-2 allowlist fixture replays a compatible base and identifies a retired tenant target.
+Reader 39 from `352e43b7` serves an Item query on the original release and refuses declared pop-ups at 40. The tenant Cabinet test reviews a record-sourced value and checks the exact gateway update. The UPGRADE-2 allowlist fixture replays a compatible base and identifies a retired tenant target.
+
+The AI drafter can propose a record button from offered targets. Schema-generated descriptions, the coverage guard and live eval cases remain open with AI-BUILD-1.
 
 **Try it yourself.** In Customize, choose **Add a record button**, select the item update, name it **Edit item note** and set Description to **Ask the person**. Draft, approve and activate it. Open an item, choose **Custom actions → Edit item note**, change the description and save. Refresh the item to see the saved text. The same steps work with JavaScript disabled.
 
@@ -33,8 +37,8 @@ Reader 39 serves the original release and refuses declared pop-ups at 40. The te
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "UI-COMPOSE-1",
-  "base": "f7eae58f9054960313aaf0b276e6eae96a8f507a",
-  "head": "8e3e27746922a6b864dc9fad05a8601c671944af",
+  "base": "352e43b7e428ed1115fd9328db3a6427cf36a58f",
+  "head": "8f0d240f8d4b24f5890929e5e745e3f6ed90b36e",
   "changedPaths": [
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/surface-composition.ts",
     "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts", "packages/canonical-model/src/popup-actions.ts",
