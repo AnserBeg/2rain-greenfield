@@ -12,6 +12,12 @@ import { LINEAGE_INSTALL_VOLUME, withEphemeralPostgres } from './postgres.js';
 export const stopEntity = 'northstar.app:entity.custom_stop';
 export const stopAddress = 'northstar.app:field.custom_stop_address';
 export const stopName = 'northstar.app:field.custom_stop_name';
+export const stopRoute = 'northstar.app:field.custom_stop_route';
+export const stopSequence = 'northstar.app:field.custom_stop_sequence';
+export const stopDay = 'northstar.app:field.custom_stop_day';
+export const northRoute = 'northstar.app:option.custom_stop_route_north';
+export const southRoute = 'northstar.app:option.custom_stop_route_south';
+export const dispatchDay = '2026-11-21';
 export const stopScope =
   'northstar.app:parameter.custom_stop_list_legal_entity_scope';
 export const stopSetup = {
@@ -21,7 +27,12 @@ export const stopSetup = {
       kind: 'addRecordType',
       companyOwnership: 'entityOwned',
       label: 'Stop',
-      fields: [{ type: 'text', label: 'Name', required: true }],
+      fields: [
+        { type: 'text', label: 'Name', required: true },
+        { type: 'choice', label: 'Route', options: ['North', 'South'] },
+        { type: 'number', label: 'Sequence' },
+        { type: 'date', label: 'Day' },
+      ],
     },
     {
       kind: 'addAddressField',
@@ -55,7 +66,10 @@ export async function fixtureMapRevision(
     label: 'Dispatch map',
     surface: target.frame.listSurfaceId,
     addressFieldId: stopAddress,
-    orderFieldId: target.frame.label.fieldId,
+    orderFieldId: stopSequence,
+    groupFieldId: stopRoute,
+    dayFieldId: stopDay,
+    timeZone: 'America/Edmonton',
     direction: 'asc',
   });
 }
@@ -98,6 +112,9 @@ async function serve() {
             recordId: randomUUID(),
             values: {
               [stopName]: label,
+              [stopDay]: dispatchDay,
+              [stopRoute]: northRoute,
+              [stopSequence]: label === 'Warehouse' ? '2' : '10',
               [stopAddress]: {
                 schemaVersion: 'northstar.address-value/v1',
                 text: label,
@@ -110,6 +127,7 @@ async function serve() {
         const url = new URL('/', app.baseUrl);
         url.searchParams.set('surface', map.surfaceId);
         url.searchParams.set(stopScope, COMPANY);
+        url.searchParams.set('day', dispatchDay);
         process.stdout.write('PLANNER_MAP_URL=' + url.href + '\n');
         process.stdin.resume();
         await once(process.stdin, 'end');

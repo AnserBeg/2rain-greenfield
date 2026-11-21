@@ -51,6 +51,57 @@ test('dispatchers pan just the map, return with Back and can open each stop with
     expect(await sidebar?.evaluate((el) => el.isConnected)).toBe(true);
     await page.goBack();
     await expect(heading).toHaveAttribute('data-map-state', origin!);
+    await expect(svg.locator('line.map-route')).toHaveCount(1);
+    await expect(svg.getByRole('link', { name: '1. Warehouse' })).toHaveCount(
+      1,
+    );
+    await expect(svg.getByRole('link', { name: '2. Pickup' })).toHaveCount(1);
+
+    // Release the older reply while the newer navigation is still in flight.
+    // Both requests start on the same connected region.
+    const older = Promise.withResolvers<void>();
+    const newer = Promise.withResolvers<void>();
+    const sent = [Promise.withResolvers<void>(), Promise.withResolvers<void>()];
+    let requests = 0;
+    await page.route('**/*', async (route) => {
+      if (route.request().headers()['x-rain-fragment'] !== 'map')
+        return route.continue();
+      const index = requests++;
+      const reply = await route.fetch();
+      sent[index]!.resolve();
+      await (index === 0 ? older.promise : newer.promise);
+      await route.fulfill({ response: reply });
+    });
+    try {
+      await north.click();
+      await sent[0]!.promise;
+      const south = region.getByRole('link', { name: 'South', exact: true });
+      const latest = await south.getAttribute('href');
+      await south.click();
+      await sent[1]!.promise;
+      const oldReply = page.waitForResponse(
+        (r) => r.request().headers()['x-rain-fragment'] === 'map',
+      );
+      older.resolve();
+      await (await oldReply).finished();
+      await page.evaluate(
+        () =>
+          new Promise<void>((done) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => done())),
+          ),
+      );
+      await expect(heading).toHaveAttribute('data-map-state', origin!);
+      newer.resolve();
+      await expect(heading).toHaveAttribute('data-map-state', latest!);
+      await expect(south).toBeFocused();
+      await page.unrouteAll({ behavior: 'wait' });
+      await page.goBack();
+      await expect(heading).toHaveAttribute('data-map-state', origin!);
+    } finally {
+      older.resolve();
+      newer.resolve();
+      await page.unrouteAll({ behavior: 'wait' });
+    }
     const box = await svg.boundingBox();
     expect(box).toBeTruthy();
     const x = box!.x + 4,
@@ -80,6 +131,20 @@ test('dispatchers pan just the map, return with Back and can open each stop with
           expect((await list.boundingBox())!.y).toBeLessThan(
             (await canvas.boundingBox())!.y,
           );
+        for (const [size, width, height] of [
+          ['small', 320, 240],
+          ['medium', 768, 512],
+          ['large', 1024, 640],
+        ] as const) {
+          await tab.getByLabel('Map size').selectOption(size);
+          await tab
+            .getByRole('button', { name: 'Apply filters' })
+            .press('Enter');
+          await expect(canvas.locator('svg')).toHaveAttribute(
+            'viewBox',
+            `0 0 ${width} ${height}`,
+          );
+        }
         const zoom = canvas.getByRole('link', { name: 'Zoom out' });
         await zoom.focus();
         await tab.keyboard.press('Enter');
@@ -88,6 +153,9 @@ test('dispatchers pan just the map, return with Back and can open each stop with
         await pin.focus();
         await tab.keyboard.press('Enter');
         await expect(tab).toHaveURL(/[?&]record=/u);
+        await expect(
+          tab.locator('[data-surface-archetype="record"]').first(),
+        ).toBeVisible();
       } finally {
         await context.close();
       }

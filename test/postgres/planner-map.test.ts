@@ -9,6 +9,13 @@ import {
   activateMapFixtureChange,
   fixtureMapRevision,
   stopAddress as address,
+  stopDay,
+  stopRoute,
+  stopSequence,
+  stopEntity,
+  northRoute,
+  southRoute,
+  dispatchDay,
   stopName as name,
   stopScope as scope,
   stopSetup as setup,
@@ -16,6 +23,9 @@ import {
 import { MAP_VIEW_READER } from '../../packages/canonical-model/src/map-view.js';
 import { parseServerTiming } from '../../packages/postgres-provider/src/request-work-meter.js';
 import { catalogParseCount } from '../../packages/runtime/src/catalog-parse-count.js';
+import { physicalNameFor } from '../../packages/compiler/src/storage.js';
+import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../packages/runtime/src/semantic-query-gateway.js';
+import { fitMap } from '../../packages/canonical-model/src/map-viewport.js';
 import { COMPANY, worldOver } from '../agent/agent-world.js';
 import {
   withArchivedCustomizationRuntime,
@@ -32,7 +42,7 @@ const predecessor = '8e811d817c0b1d23044e53b832d683eb4bf8b45a';
 test(
   'serve a published Map through the dispatcher’s collection, connector and preceding reader',
   { timeout: 900_000 },
-  async () => {
+  async (t) => {
     await withEphemeralPostgres(
       'planner-map',
       async ({ connection, pool }) => {
@@ -59,6 +69,9 @@ test(
             company: string,
             label: string,
             latitude: string,
+            sequence = '2',
+            route = northRoute,
+            day = dispatchDay,
           ) {
             const recordId = randomUUID(),
               saved = await world.invoke('custom_stop_create', {
@@ -66,6 +79,9 @@ test(
                 legalEntityId: company,
                 values: {
                   [name]: label,
+                  [stopSequence]: sequence,
+                  [stopRoute]: route,
+                  [stopDay]: day,
                   [address]: {
                     schemaVersion: 'northstar.address-value/v1',
                     text: label,
@@ -77,7 +93,13 @@ test(
             return recordId;
           }
           const alpha = await stop(COMPANY, 'North warehouse', '53.52'),
-            beta = await stop(other, 'South private yard', '47.20');
+            beta = await stop(
+              other,
+              'South private yard',
+              '47.20',
+              '1',
+              southRoute,
+            );
           const manager = { cookie: 'northstar-demo-actor=manager' };
           for (const id of [COMPANY, other])
             await app.runtime.entry.run({ headers: manager }, async (view) =>
@@ -195,6 +217,7 @@ test(
           const url = new URL('/', app.baseUrl);
           url.searchParams.set('surface', revision.surfaceId);
           url.searchParams.set(scope, COMPANY);
+          url.searchParams.set('day', dispatchDay);
           const serve = () => fetch(url, { headers: manager });
           await (await serve()).arrayBuffer();
           await (await serve()).arrayBuffer();
@@ -237,17 +260,145 @@ test(
           bUrl.searchParams.set(scope, other);
           const bHtml = await (await fetch(bUrl, { headers: manager })).text();
           assert.ok(bHtml.includes(beta) && !bHtml.includes(alpha));
-          // A viewer with a valid role in A has no query scope in B.
+          const alphaPoint = { latitude: 53.52, longitude: -113.5 };
+          const fitted = fitMap([alphaPoint], 'medium');
+          const canonical = new URL(
+            html
+              .match(/data-map-state="([^"]+)"/u)![1]!
+              .replaceAll('&amp;', '&'),
+            app.baseUrl,
+          );
+          for (const [key, expected] of [
+            ['cx', fitted.x],
+            ['cy', fitted.y],
+            ['zoom', fitted.zoom],
+          ] as const)
+            assert.equal(canonical.searchParams.get(key), String(expected));
+
+          const mapRead = (
+            company: string,
+            cut: Record<string, unknown> = {},
+            headers = manager,
+          ) =>
+            app.runtime.entry.run({ headers }, (view) =>
+              app.runtime.queryGateway.invoke(view, {
+                schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+                queryId: revision.body.listQueryId,
+                arguments: {
+                  [scope]: company,
+                  mapPage: {
+                    surfaceId: revision.surfaceId,
+                    revisionId: revision.revisionId,
+                    companyId: company,
+                    day: dispatchDay,
+                    ...cut,
+                  },
+                },
+              }),
+            );
           const { tenantId, environmentId, principalId } = app.runtime.identity;
           const membership = await pool.query(
             'UPDATE platform.current_policy_memberships SET legal_entity_id=$4 WHERE tenant_id=$1 AND environment_id=$2 AND principal_id=$3 AND revoked_at IS NULL',
             [tenantId, environmentId, principalId, COMPANY],
           );
           assert.ok(membership.rowCount);
-          assert.ok((await (await fetch(url)).text()).includes(alpha));
-          const denied = await (await fetch(bUrl)).text();
-          assert.ok(
-            !denied.includes(beta) && !denied.includes('South private yard'),
+          const buyer = { cookie: 'northstar-demo-actor=buyer' };
+          const permitted = await mapRead(COMPANY, {}, buyer);
+          assert.deepEqual(permitted.mapCoverage?.stops, [
+            {
+              recordId: alpha,
+              group: northRoute,
+              ordinal: 1,
+              point: alphaPoint,
+              source: 'User pin',
+            },
+          ]);
+          await assert.rejects(mapRead(other, {}, buyer));
+          await assert.rejects(mapRead(COMPANY, { companyId: other }, buyer));
+          assert.equal((await fetch(image, { headers: buyer })).status, 404);
+
+          // Use ordinary writes for the contrasting records. Fill the page in one fixture statement.
+          const tail = await stop(COMPANY, 'Last north stop', '60', '1000');
+          const south = await stop(
+            COMPANY,
+            'South route depot',
+            '48',
+            '1',
+            southRoute,
+          );
+          await stop(
+            COMPANY,
+            'Tomorrow only',
+            '61',
+            '1',
+            northRoute,
+            '2026-11-22',
+          );
+          const table = physicalNameFor('table', stopEntity);
+          const column = (field: string) => physicalNameFor('column', field);
+          await pool.query(
+            `INSERT INTO north_star_module."${table}"
+              (tenant_id,environment_id,legal_entity_id,record_id,"${column(name)}","${column(stopSequence)}","${column(stopRoute)}","${column(stopDay)}")
+            SELECT $1,$2,$3,gen_random_uuid(),'Pickup ' || n,n,$4,$5::date FROM generate_series(3,101) n`,
+            [tenantId, environmentId, COMPANY, northRoute, dispatchDay],
+          );
+          const first = await mapRead(COMPANY);
+          assert.equal(first.records.length, 100);
+          assert.deepEqual(
+            first.mapCoverage?.stops.map((s) => s.ordinal),
+            Array.from({ length: 100 }, (_, i) => i + 1),
+          );
+          assert.deepEqual(
+            first.records.map((r) => Number(r.values[stopSequence])),
+            Array.from({ length: 100 }, (_, i) => i + 2),
+          );
+          const cursor = first.mapCoverage?.hasNext;
+          assert.ok(cursor);
+          const second = await mapRead(COMPANY, { cursor });
+          assert.deepEqual(
+            second.records.map((r) => r.recordId),
+            [tail, south],
+          );
+          assert.deepEqual(
+            second.mapCoverage?.stops.map((s) => s.ordinal),
+            [101, 1],
+          );
+          assert.equal(second.mapCoverage?.hasNext, undefined);
+          const onlySouth = await mapRead(COMPANY, {
+            route: southRoute,
+            cursor,
+          });
+          assert.equal(onlySouth.mapCoverage?.restarted, true);
+          assert.deepEqual(
+            onlySouth.records.map((r) => r.recordId),
+            [south],
+          );
+          const inArea = await mapRead(COMPANY, {
+            area: fitMap([{ latitude: 60, longitude: -113.5 }], 'small'),
+          });
+          assert.deepEqual(
+            inArea.mapCoverage?.stops.map((s) => [s.recordId, s.ordinal]),
+            [[tail, 101]],
+          );
+          const timings: number[] = [];
+          for (let i = 0; i < 5; i++) {
+            const start = performance.now();
+            const full = await serve();
+            const body = await full.text();
+            timings.push(performance.now() - start);
+            assert.equal(full.status, 200);
+            assert.match(body, /Showing 100 of this filter’s stops/u);
+            assert.doesNotMatch(
+              body,
+              /South private yard|Tomorrow only|class="map-route group-/u,
+            );
+            assert.deepEqual(
+              parseServerTiming(full.headers.get('server-timing')),
+              counts,
+            );
+          }
+          t.diagnostic(
+            `warm Map sparse/full ${JSON.stringify(counts)}, full p95 ${Math.ceil(timings.sort((a, b) => a - b).at(-1)!)}ms (5 samples)`,
           );
         } finally {
           await customize.close();

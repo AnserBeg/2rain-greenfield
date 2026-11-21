@@ -66,6 +66,12 @@ export async function readMapSlots(
   )
     throw new Error('Map collection unavailable.');
   params.set('mapCompany', company);
+  const groupField = record.fields?.find((f) => f.fieldId === b.group?.fieldId);
+  const routes = groupField?.kind === 'enumFieldType' ? groupField.options : [];
+  const routeName = (group: string | null) =>
+    routes.find((option) => option.optionId === group)?.label ??
+    group ??
+    'Ungrouped';
   const size = MapViewportSchema.shape.size.parse(
     params.get('size') ?? 'medium',
   );
@@ -114,7 +120,10 @@ export async function readMapSlots(
         companyId: company,
         ...(day && { day }),
         ...(params.has('route') &&
-          params.get('route') !== '' && { route: params.get('route')! }),
+          params.get('route') !== '' && {
+            route:
+              params.get('route') === 'ungrouped' ? '' : params.get('route')!,
+          }),
         ...(area && filterViewport && { area: filterViewport }),
         ...(params.get('stops') && { cursor: params.get('stops') }),
       },
@@ -226,7 +235,7 @@ export async function readMapSlots(
         '">' +
         h(text) +
         '</a> ' +
-        h(s.group ?? (b.group ? 'Ungrouped' : '')) +
+        h(b.group ? routeName(s.group) : '') +
         ' · ' +
         h(s.source) +
         (s.ordinal === null ? ' · Order unknown' : '') +
@@ -303,7 +312,7 @@ export async function readMapSlots(
               '<li class="group-' +
               n +
               '">' +
-              h(g ?? 'Ungrouped') +
+              h(routeName(g)) +
               ' · ' +
               ['solid', 'dashed', 'dotted', 'dash-dot'][n] +
               '</li>',
@@ -338,9 +347,20 @@ export async function readMapSlots(
         '"></label>'
       : '') +
     (b.group
-      ? '<label>Route <input name="route" value="' +
-        h(params.get('route') ?? '') +
-        '"></label>'
+      ? '<label>Route <select name="route"><option value="">All routes</option>' +
+        [...routes, { optionId: 'ungrouped', label: 'Ungrouped' }]
+          .map(
+            (option) =>
+              '<option value="' +
+              h(option.optionId) +
+              '"' +
+              (params.get('route') === option.optionId ? ' selected' : '') +
+              '>' +
+              h(option.label) +
+              '</option>',
+          )
+          .join('') +
+        '</select></label>'
       : '') +
     '<label>Map size <select name="size">' +
     Object.entries(MAP_SIZES)

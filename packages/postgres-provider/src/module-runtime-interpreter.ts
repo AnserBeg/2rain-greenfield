@@ -415,13 +415,13 @@ export class PostgresModuleRuntimeInterpreter
         return await withTrustedRequestRead(
           this.pool,
           request.context,
-          async (client) => {
+          async (client, snapshot) => {
             const storage = await this.#loadPinnedStorageTarget(
               client,
               request,
             );
             const candidates = await withModuleRuntimeRole(client, () =>
-              readMapCandidates(client, storage, mapRequest),
+              readMapCandidates(client, storage, mapRequest, snapshot),
             );
             return finishMapPage(client, mapRequest, candidates);
           },
@@ -3122,6 +3122,7 @@ async function readMapCandidates(
   client: PoolClient,
   storage: StorageTargetPayloadV1,
   request: SemanticQueryExecutionRequest,
+  snapshot: ReadSnapshotHandle | null,
 ): Promise<MapCandidate[]> {
   const { map, input } = mapPageBinding(request),
     body = map.body,
@@ -3129,7 +3130,7 @@ async function readMapCandidates(
   const entity = requiredEntity(storage, body.entityId);
   const scope = await verifyLegalEntityReadScope(
     client,
-    null,
+    snapshot,
     storage,
     request.legalEntityReadScope,
     [entity],
