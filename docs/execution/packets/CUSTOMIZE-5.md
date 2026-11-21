@@ -61,7 +61,7 @@ Status: executable; integrates on a full green of the exact integration commit. 
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-5",
   "base": "630e2aa690906af9256c5964c398ba90585515d2",
-  "head": "9bd98427222231bb844c70ac9bd24952467bf189",
+  "head": "0c21763eb72b9bb9837d7219c15d6a38d5c4418b",
   "changedPaths": [
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/date-time-field.ts", "apps/web/src/surface-composition.ts", "apps/web/src/surface-runtime.ts", "db/migrations/0060_date_time_window_probe.sql", "db/schema.snapshot.json", "docs/execution/packets/CUSTOMIZE-5.md",
     "package.json", "packages/canonical-model/src/date-time-field.ts", "packages/canonical-model/src/formula-validation-bindings.ts", "packages/canonical-model/src/formula-validation-projection.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/normalize.ts", "packages/canonical-model/src/schemas.ts", "packages/compiler/src/compiler.ts",
