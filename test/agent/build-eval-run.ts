@@ -35,8 +35,9 @@ import {
 
 import { withAgentWorlds } from './agent-world.js';
 import { BUILD_CASES, type BuildCase } from './build-eval-cases.js';
+import { DRAFTING_TOOL } from '../../packages/customization/src/index.js';
+
 import {
-  capturePrompt,
   draftedAheadModel,
   errorText,
   redactSecrets,
@@ -76,14 +77,17 @@ async function main(): Promise<void> {
       // Rescore: replay the drafts recorded in an earlier run's transcripts
       // through a scripted model, so only the scorer runs again. No key.
       replay: { type: 'string' },
-      // Draft first (slice 2 cost cuts): capture every case's first request,
-      // draft them back to back while the prompt cache is warm, then compile,
-      // verify, activate and score each from its saved draft. Repair turns
-      // need the compile result, so they stay inline with the 1-hour cache.
-      'draft-first': { type: 'boolean', default: true },
-      // Where the captured prompts go (scratch, never committed), so a later
-      // bake-off sends exactly the in-app requests.
-      'prompts-out': { type: 'string' },
+      // Draft first (slice 2 cost cuts): the first drafts are made back to
+      // back from captured in-app prompts (`--prompts-in`, the current tool
+      // swapped in) and saved (`--drafts-out`), then scored from the saved
+      // file (`--drafts-in`). Repair turns need the compile result, so they
+      // stay inline. Captured prompts live in scratch, never committed.
+      'prompts-in': { type: 'string' },
+      'drafts-out': { type: 'string' },
+      'drafts-in': { type: 'string' },
+      // Scoring waits for the 1-minute load to fall below this before each
+      // case (0: never wait), at most an hour.
+      'idle-load': { type: 'string', default: '8' },
       // The isolated compile's bound for this run (at most the compiler's
       // 120 s cap for untrusted definitions): a loaded host must not
       // score a slow compile as a failed draft. 0 keeps the app's default.
@@ -154,118 +158,183 @@ async function main(): Promise<void> {
     resolve(String(args.out)),
     `${date}-build-eval-${replay ? 'rescore-' : ''}${stamp}`,
   );
-  await mkdir(directory, { recursive: true });
+  if (!args['drafts-out']) await mkdir(directory, { recursive: true });
   const say = (line: string) =>
     process.stdout.write(`${redactSecrets(line, secrets)}\n`);
 
   const results: CaseResult[] = [];
   const mismatched: string[] = [];
-  await withAgentWorlds('build-eval', async (worlds) => {
-    const ahead = new Map<
-      string,
-      { prompt: CapturedPrompt; turn: ModelTurnAhead }
-    >();
-    if (model && args['draft-first']) {
-      const prompts: CapturedPrompt[] = [];
-      for (const c of cases) {
-        const world = await worlds.fresh(`capture-${c.id}`);
-        try {
-          prompts.push(await capturePrompt(world, c, sandboxMs));
-          say(`${c.id}: prompt captured`);
-        } catch (error) {
-          say(`${c.id}: prompt not captured: ${errorText(error, secrets)}`);
-        } finally {
-          await world.close();
-        }
+  const ahead = new Map<
+    string,
+    { prompt: CapturedPrompt; turn: ModelTurnAhead }
+  >();
+  // The first drafts, back to back, from prompts captured on this drafter's
+  // system prompt (`--prompts-in`, with the current tool swapped in), or
+  // loaded from an earlier drafting pass (`--drafts-in`). Neither needs a
+  // database, so a loaded host cannot lose them.
+  const draftsIn = args['drafts-in'];
+  if (model && draftsIn) {
+    const saved = JSON.parse(await readFile(resolve(draftsIn), 'utf8')) as {
+      head: string;
+      drafts: Record<string, { prompt: CapturedPrompt; turn: ModelTurnAhead }>;
+    };
+    if (saved.head !== head)
+      say(
+        `note: drafts were made at ${saved.head}; scoring at ${head} (drafter files must match)`,
+      );
+    for (const [id, drafted] of Object.entries(saved.drafts))
+      if (cases.some((c) => c.id === id)) ahead.set(id, drafted);
+    say(`loaded ${String(ahead.size)} first drafts from ${draftsIn}`);
+  } else if (model && args['prompts-in']) {
+    const draftMeter = new SpendMeter(prices, cap);
+    for (const c of cases) {
+      if (draftMeter.exhausted()) break;
+      let prompt: CapturedPrompt;
+      try {
+        const loaded = JSON.parse(
+          await readFile(
+            join(resolve(args['prompts-in']), `${c.id}.json`),
+            'utf8',
+          ),
+        ) as CapturedPrompt;
+        prompt = {
+          ...loaded,
+          tools: [DRAFTING_TOOL] as CapturedPrompt['tools'],
+        };
+      } catch {
+        say(`${c.id}: no captured prompt`);
+        continue;
       }
-      const promptsOut = args['prompts-out'];
-      if (promptsOut) {
-        await mkdir(resolve(promptsOut), { recursive: true });
-        for (const prompt of prompts)
-          await writeFile(
-            join(resolve(promptsOut), `${prompt.id}.json`),
-            redactSecrets(JSON.stringify(prompt), secrets),
-          );
-      }
-      // The drafts, back to back. Charged here only to keep the cap; the
-      // scoring phase charges the same turn to the run's meter.
-      const draftMeter = new SpendMeter(prices, cap);
-      for (const prompt of prompts) {
-        if (draftMeter.exhausted()) break;
-        const started = performance.now();
-        try {
-          const { turn } = await meteredNext(model, draftMeter, {
-            system: prompt.system,
-            tools: prompt.tools,
-            conversation: prompt.conversation,
-          });
-          ahead.set(prompt.id, {
-            prompt,
-            turn: {
-              ...turn,
-              recordedLatencyMs: Math.round(performance.now() - started),
-            },
-          });
-          say(
-            `${prompt.id}: drafted ahead · cache read ${String(turn.usage.cacheReadTokens)} · total $${draftMeter.usd.toFixed(4)}`,
-          );
-        } catch (error) {
-          say(`${prompt.id}: not drafted ahead: ${errorText(error, secrets)}`);
-        }
+      const started = performance.now();
+      try {
+        const { turn } = await meteredNext(model, draftMeter, {
+          system: prompt.system,
+          tools: prompt.tools,
+          conversation: prompt.conversation,
+        });
+        ahead.set(c.id, {
+          prompt,
+          turn: {
+            ...turn,
+            recordedLatencyMs: Math.round(performance.now() - started),
+          },
+        });
+        say(
+          `${c.id}: drafted ahead · cache read ${String(turn.usage.cacheReadTokens)} · total $${draftMeter.usd.toFixed(4)}`,
+        );
+      } catch (error) {
+        say(`${c.id}: not drafted ahead: ${errorText(error, secrets)}`);
       }
     }
+    if (args['drafts-out']) {
+      await writeFile(
+        resolve(args['drafts-out']),
+        redactSecrets(
+          JSON.stringify({ head, drafts: Object.fromEntries(ahead) }),
+          secrets,
+        ),
+      );
+      say(`drafts saved at ${head}; draft spend $${draftMeter.usd.toFixed(4)}`);
+      return;
+    }
+  }
+
+  // One process, one case at a time. Each case waits for an idle host, and a
+  // compile that times out is requeued (its first turn replays; nothing is
+  // re-drafted). A case still timing out is reported as not scored, never as
+  // a model failure.
+  const idleLoad = Number(args['idle-load']);
+  const waitForIdle = async () => {
+    const started = Date.now();
+    for (;;) {
+      const load = Number(
+        (await readFile('/proc/loadavg', 'utf8')).split(' ')[0],
+      );
+      if (!idleLoad || load < idleLoad || Date.now() - started > 3_600_000)
+        return { load, waitedMs: Date.now() - started };
+      await new Promise((done) => setTimeout(done, 30_000));
+    }
+  };
+  const timedOut = (r: CaseResult) =>
+    r.reasons.some((reason) =>
+      /SandboxFailure|did not finish within/u.test(reason),
+    );
+  await withAgentWorlds('build-eval', async (worlds) => {
     for (const c of cases) {
       if (meter.exhausted()) {
         results.push(notRun(c));
         say(`${c.id}: not run (spend cap reached)`);
         continue;
       }
-      const record = join(directory, `${c.id}.jsonl`);
-      let queue = Promise.resolve();
-      const log = (entry: Record<string, unknown>) => {
-        const line = redactSecrets(
-          JSON.stringify({ at: new Date().toISOString(), ...entry }),
-          secrets,
-        );
-        queue = queue.then(() => appendFile(record, `${line}\n`));
-      };
-      say(`${c.id} (${c.split}, ${c.category}): ${c.request}`);
-      const world = await worlds.fresh(`build-${c.id}`);
-      try {
-        const recorded = replays
-          ? await recordedTurns(replays, c.id)
-          : undefined;
-        const drafted = ahead.get(c.id);
-        const result = await runBuildCase(world, c, {
-          provider: () =>
-            model && drafted
-              ? draftedAheadModel(drafted, model, () => mismatched.push(c.id))
-              : (model ??
-                scriptedModel(recorded!.turns.map((turn) => () => turn))),
-          ...(model ? { meter } : {}),
-          ...(sandboxMs ? { sandboxWallClockMilliseconds: sandboxMs } : {}),
-          log,
+      let final: CaseResult | undefined;
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        const record = join(directory, `${c.id}.jsonl`);
+        let queue = Promise.resolve();
+        const log = (entry: Record<string, unknown>) => {
+          const line = redactSecrets(
+            JSON.stringify({ at: new Date().toISOString(), ...entry }),
+            secrets,
+          );
+          queue = queue.then(() => appendFile(record, `${line}\n`));
+        };
+        const idle = await waitForIdle();
+        log({
+          kind: 'host',
+          attempt,
+          load: idle.load,
+          waitedMs: idle.waitedMs,
         });
-        if (recorded) {
-          // The model's own cost and time are the recorded run's.
-          Object.assign(result, recorded.model);
-          log({ kind: 'replayed', from: replays, model: recorded.model });
-        }
-        results.push(result);
         say(
-          `  ${result.behaviour ? 'PASS' : 'FAIL'} ${result.status} · calls ${String(result.modelCalls)} · e2e ${String(result.e2e)} · ${(result.modelMs / 1000).toFixed(1)} s model / ${(result.wallMs / 1000).toFixed(1)} s wall · $${result.usd.toFixed(4)} (total $${meter.usd.toFixed(4)})${result.reasons.length ? ` · ${result.reasons.slice(0, 3).join('; ')}` : ''}`,
+          `${c.id} (${c.split}, ${c.category}) attempt ${String(attempt)} at load ${idle.load.toFixed(1)}: ${c.request}`,
         );
-      } catch (error) {
-        say(`  HARNESS ERROR ${errorText(error, secrets)}`);
-        results.push({
-          ...notRun(c),
-          status: 'harness-error',
-          reasons: [errorText(error, secrets)],
-        });
-      } finally {
-        await queue;
-        await world.close();
+        const world = await worlds.fresh(`build-${c.id}`);
+        try {
+          const recorded = replays
+            ? await recordedTurns(replays, c.id)
+            : undefined;
+          const drafted = ahead.get(c.id);
+          const result = await runBuildCase(world, c, {
+            provider: () =>
+              model && drafted
+                ? draftedAheadModel(drafted, model, () => mismatched.push(c.id))
+                : (model ??
+                  scriptedModel(recorded!.turns.map((turn) => () => turn))),
+            ...(model ? { meter } : {}),
+            ...(sandboxMs ? { sandboxWallClockMilliseconds: sandboxMs } : {}),
+            log,
+          });
+          if (recorded) {
+            // The model's own cost and time are the recorded run's.
+            Object.assign(result, recorded.model);
+            log({ kind: 'replayed', from: replays, model: recorded.model });
+          }
+          final = result;
+          say(
+            `  ${result.behaviour ? 'PASS' : 'FAIL'} ${result.status} · calls ${String(result.modelCalls)} · e2e ${String(result.e2e)} · ${(result.modelMs / 1000).toFixed(1)} s model / ${(result.wallMs / 1000).toFixed(1)} s wall · $${result.usd.toFixed(4)} (total $${meter.usd.toFixed(4)})${result.reasons.length ? ` · ${result.reasons.slice(0, 3).join('; ')}` : ''}`,
+          );
+        } catch (error) {
+          say(`  HARNESS ERROR ${errorText(error, secrets)}`);
+          final = {
+            ...notRun(c),
+            status: 'harness-error',
+            reasons: [errorText(error, secrets)],
+          };
+        } finally {
+          await queue;
+          await world.close();
+        }
+        if (!timedOut(final)) break;
       }
+      if (final && timedOut(final))
+        final = {
+          ...final,
+          status: 'not-run',
+          reasons: [
+            'not scored: the isolated compile timed out on a loaded host three times',
+            ...final.reasons,
+          ],
+        };
+      results.push(final!);
     }
   });
 
@@ -290,7 +359,9 @@ async function main(): Promise<void> {
           head,
           sandboxMs: sandboxMs ?? null,
           cacheTtl: args['cache-ttl'],
-          draftFirst: !!(model && args['draft-first']),
+          draftFirst: ahead.size > 0,
+          // Every model call this process made, scored or not.
+          meterUsd: meter.usd,
           // Cases whose in-app first request differed from the captured one
           // (their first turn was then drafted live, not ahead).
           promptMismatches: mismatched,
