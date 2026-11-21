@@ -534,16 +534,23 @@ test(
             values: { [`${NS}:field.custom_equipment_name`]: 'Seed' },
           });
           assert.equal(seeded.outcome, 'succeeded');
-          const tableRow = await pool.query<{ table: string }>(
+          // The Equipment table is the one module table holding the seed.
+          const candidates = await pool.query<{ table: string }>(
             `SELECT c.relname AS table FROM pg_class AS c
                JOIN pg_namespace AS n ON n.oid = c.relnamespace
               WHERE n.nspname = 'north_star_module' AND c.relkind = 'r'
                 AND EXISTS (SELECT 1 FROM pg_attribute AS a
-                             WHERE a.attrelid = c.oid AND a.attnum > 0
-                               AND format_type(a.atttypid, a.atttypmod) = 'character varying(240)')
-              ORDER BY c.oid DESC LIMIT 1`,
+                             WHERE a.attrelid = c.oid AND a.attname = 'record_id')`,
           );
-          const table = `north_star_module.${tableRow.rows[0]!.table}`;
+          let table = '';
+          for (const { table: name } of candidates.rows) {
+            const hit = await pool.query(
+              `SELECT 1 FROM north_star_module."${name}" WHERE record_id = $1`,
+              [seeded.readBack!.recordId],
+            );
+            if (hit.rowCount) table = `north_star_module.${name}`;
+          }
+          assert.ok(table, 'the Equipment table holds the seeded record');
           const nameColumn = (
             await pool.query<{ attname: string }>(
               `SELECT attname FROM pg_attribute WHERE attrelid = $1::regclass
