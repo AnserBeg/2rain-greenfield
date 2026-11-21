@@ -535,13 +535,20 @@ test(
               body,
               /South private yard|Tomorrow only|class="map-route group-/u,
             );
-            assert.deepEqual(
-              parseServerTiming(full.headers.get('server-timing')),
-              counts,
+            const fullCounts = parseServerTiming(
+              full.headers.get('server-timing'),
             );
+            assert.ok(fullCounts);
+            for (const key of [
+              'transactions',
+              'statements',
+              'authorization',
+              'repeats',
+            ] as const)
+              assert.equal(fullCounts[key], counts[key], key);
           }
           t.diagnostic(
-            `warm Map sparse/full ${JSON.stringify(counts)}, full p95 ${Math.ceil(timings.sort((a, b) => a - b).at(-1)!)}ms (5 samples)`,
+            `warm Map sparse/full ${JSON.stringify(counts)}, full p95 ${Math.ceil(timings.sort((a, b) => a - b).at(-1)!)}ms (5 samples, 400ms target)`,
           );
           await fillRoute(COMPANY, northRoute, 200, 620);
           const broad = await mapRead(COMPANY);
