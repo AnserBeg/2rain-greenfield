@@ -447,7 +447,7 @@ test(
   { timeout: 600_000 },
   async () => {
     await withArchivedCustomizationRuntime(
-      'd48c870bdf7cae3858a84e1dde6ea8125750e28d',
+      '5cffd0994f79f5f6bc6c32ba5e80b56ecdaecf37',
       async (run) => {
         await assertArchivedTenantEnvelope(run);
         await withEphemeralPostgres(
@@ -519,7 +519,7 @@ test(
               assert.equal(refusal.code, 'UNSUPPORTED_RUNTIME_CAPABILITY');
               assert.match(
                 refusal.message ?? '',
-                /surface-manifest requires version 38 and this runtime supports 37/u,
+                /surface-manifest requires version 39 and this runtime supports 38/u,
               );
               const option = (
                 await opened.service.targets()
@@ -811,6 +811,10 @@ test(
         const options = {
           databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
           tenantSlug: 'customize-board-reader',
+          // Query-catalog rung 5 (DOCS-1's optional dependencies) is above
+          // this reader too; the fixture leaves them out so only the Board
+          // rung is measured.
+          compiledApplication: applicationWithoutLineCreateValues().release,
         };
         const app = await startComposedApplication({ ...options, port: 0 });
         const opened = await openCustomizeService(options);

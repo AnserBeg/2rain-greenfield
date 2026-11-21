@@ -1,5 +1,6 @@
 import { availablePopups } from '../../../packages/runtime/src/popup-actions.js';
 import { SavedAddressSchema } from '@north-star/canonical-model';
+import { readCivilDate } from '../../../packages/runtime/src/civil-date.js';
 import { randomUUID } from 'node:crypto';
 import type { SurfaceComposition } from '../../../packages/canonical-model/src/index.js';
 import { calculatedDisplaysForQuery } from '../../../packages/runtime/src/calculated-display.js';
@@ -282,31 +283,12 @@ export function displayFieldValue(
     /^-?\d+\.\d+$/.test(result)
   )
     return result.replace(/(\.\d*?[1-9])0+$|\.0+$/, '$1');
-  // A date reads as its date, whether stored as the day or as that day's
-  // midnight instant (a tenant's date field, LOOK-1 round 2).
-  if (
-    field?.kind === 'dateFieldType' &&
-    /^\d{4}-\d{2}-\d{2}(?:T00:00(?::00(?:\.0+)?)?(?:Z|[+-]00:00)?)?$/.test(
-      result,
-    )
-  )
+  const civil = readCivilDate(field?.kind, result);
+  if (civil)
     return new Intl.DateTimeFormat('en', {
       dateStyle: 'medium',
       timeZone: 'UTC',
-    }).format(new Date(`${result.slice(0, 10)}T00:00:00Z`));
-  // A date-only value -- an instant at midnight UTC, as an order's, expected
-  // or requested date is -- reads as its plain date, from its UTC date
-  // components so nothing shifts (LOOP-1, orchestrator ruling); a real time
-  // of day keeps its time and "UTC".
-  if (
-    field?.kind === 'dateTimeFieldType' &&
-    Number.isFinite(Date.parse(result)) &&
-    new Date(result).getTime() % 86_400_000 === 0
-  )
-    return new Intl.DateTimeFormat('en', {
-      dateStyle: 'medium',
-      timeZone: 'UTC',
-    }).format(new Date(result));
+    }).format(civil);
   if (
     field?.kind === 'dateTimeFieldType' &&
     Number.isFinite(Date.parse(result))

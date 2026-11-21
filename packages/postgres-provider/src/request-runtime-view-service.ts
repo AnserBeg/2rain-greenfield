@@ -18,6 +18,7 @@ import { createHash } from 'node:crypto';
 import { canonicalize } from '@north-star/canonical-model';
 import {
   DOCUMENT_FILES_SURFACE_FLOOR,
+  DOCUMENT_TEMPLATES_SURFACE_FLOOR,
   DOCUMENTS_PAYLOAD_VERSION,
   DOCUMENTS_PROJECTION_FAMILY,
 } from '../../canonical-model/src/documents.js';
@@ -68,6 +69,10 @@ import {
   type RuntimeProjection,
 } from '@north-star/runtime/request-runtime-view';
 import type { Pool, PoolClient } from 'pg';
+import {
+  declaresOptionalReadModelDependency,
+  OPTIONAL_DEPENDENCY_QUERY_READER,
+} from '../../canonical-model/src/read-model-dependencies.js';
 import {
   CALCULATED_DISPLAY_QUERY_READER,
   parseCalculatedDisplayProjection,
@@ -902,7 +907,9 @@ function definitionFromSnapshotRows(
   const catalogs = [agent, operation, query, surface];
   const consumesDocuments = catalogs.some(
     ({ payload }) =>
-      isRecord(payload) && Object.hasOwn(payload, 'documentBindings'),
+      isRecord(payload) &&
+      (Object.hasOwn(payload, 'documentBindings') ||
+        Object.hasOwn(payload, 'documentTemplatePointers')),
   );
   if (
     referencesDocuments !== consumesDocuments ||
@@ -920,13 +927,20 @@ function definitionFromSnapshotRows(
     if (
       !parsed.success ||
       (surface.requiredRuntimeCapability?.minimumVersion ?? 0) <
-        DOCUMENT_FILES_SURFACE_FLOOR ||
+        (parsed.data.templates
+          ? DOCUMENT_TEMPLATES_SURFACE_FLOOR
+          : DOCUMENT_FILES_SURFACE_FLOOR) ||
       !catalogs.every(
         ({ payload }) =>
           isRecord(payload) &&
           Object.hasOwn(payload, 'documentBindings') &&
           canonicalize(payload.documentBindings) ===
-            canonicalize(parsed.data.bindings),
+            canonicalize(parsed.data.bindings) &&
+          (parsed.data.templates
+            ? Object.hasOwn(payload, 'documentTemplatePointers') &&
+              canonicalize(payload.documentTemplatePointers) ===
+                canonicalize(parsed.data.templates.pointers)
+            : !Object.hasOwn(payload, 'documentTemplatePointers')),
       )
     ) {
       throw malformedProjection(
@@ -993,12 +1007,37 @@ function definitionFromSnapshotRows(
   const consumesRules =
     !booking && operationFloor >= LITERAL_VALIDATION_OPERATION_READER;
   const queryFloor = query.requiredRuntimeCapability?.minimumVersion ?? 0;
+  // The query floor is the HIGHEST catalog feature present: optional
+  // read-model dependencies, then booking owner usage, both read from the
+  // catalog itself. Above the display rung the floor no longer says whether
+  // displays are declared, so the formula projection's own declaration does.
   const usage = hasBookingUsage(query.payload);
-  if (usage !== (queryFloor === BOOKING_USAGE_QUERY_READER))
+  const optionalDependencies = declaresOptionalReadModelDependency(
+    isRecord(query.payload) ? query.payload.queries : undefined,
+  );
+  const featureFloor = optionalDependencies
+    ? OPTIONAL_DEPENDENCY_QUERY_READER
+    : usage
+      ? BOOKING_USAGE_QUERY_READER
+      : 0;
+  if (
+    featureFloor
+      ? queryFloor !== featureFloor
+      : queryFloor >= BOOKING_USAGE_QUERY_READER
+  )
     throw malformedProjection(
-      'booking owner usage and the mandatory query reader floor disagree',
+      'query catalog features and the mandatory query reader floor disagree',
     );
-  const consumesDisplays = queryFloor === CALCULATED_DISPLAY_QUERY_READER;
+  const earlyFormula =
+    queryFloor > CALCULATED_DISPLAY_QUERY_READER &&
+    declaresRuleProjection &&
+    hasRuleProjectionLink
+      ? projectionFor(REQUEST_RUNTIME_FORMULA_RULE_FAMILY)
+      : null;
+  const consumesDisplays =
+    queryFloor === CALCULATED_DISPLAY_QUERY_READER ||
+    (isRecord(earlyFormula?.payload) &&
+      Object.hasOwn(earlyFormula.payload, 'calculatedFields'));
 
   const consumesFormula =
     consumesRules ||
@@ -1013,7 +1052,7 @@ function definitionFromSnapshotRows(
     );
   }
   const formulaRule = consumesFormula
-    ? projectionFor(REQUEST_RUNTIME_FORMULA_RULE_FAMILY)
+    ? (earlyFormula ?? projectionFor(REQUEST_RUNTIME_FORMULA_RULE_FAMILY))
     : null;
   if (formulaRule) {
     try {

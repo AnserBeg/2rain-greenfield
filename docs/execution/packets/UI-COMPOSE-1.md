@@ -15,7 +15,7 @@ The orchestrator accepted ADR-0079 with Fable’s amendments on 2026-11-19.
 - [Design with Fable’s amendments](../../decisions/ADR-0079-form-and-record-composition.md).
 - 1a derives slot and field inventories from the active package and stores a layout only when the owner adopts a revision. Layouts require Surface reader 28, above the attachment reader at 27. No database migration.
 - UPGRADE-2 slice 1 owns addLayoutRevision replay admission and the moved, retired and changed-binding conflicts. UI-COMPOSE-1 slice 1b owns hide, collapse, concealment and reset-to-base after slice 1 merges. Disclosure and assistant discovery also belong to 1b.
-- Record buttons open a Task for an existing operation or field update. Workflow start waits for a released manual-start contract. Branding follows the DOCS-1 brand resolver.
+- Record buttons open a Task for an existing operation or field update. Workflow start waits for a released manual-start contract. DOCS-1 issues PDFs with the Ledger defaults and records `platform-default` until this slice supplies approved company revisions through the company-brand resolver.
 
 ## Gates and test it yourself
 

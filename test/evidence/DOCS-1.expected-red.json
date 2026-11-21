@@ -5,7 +5,7 @@
     {
       "name": "documents-download-revocation",
       "claim": "A revoked byte-read grant withholds a previously issued attachment URL.",
-      "file": "db/migrations/0048_document_attachment_authority.sql",
+      "file": "db/migrations/0060_generated_document_sources.sql",
       "original": "    AND platform.document_granted(scope, 'northstar.documents:permission.' || action, 'northstar.documents:resource.attachments')",
       "replacement": "    AND (action = 'download' OR platform.document_granted(scope, 'northstar.documents:permission.' || action, 'northstar.documents:resource.attachments'))",
       "test": {
@@ -15,34 +15,16 @@
       "kills": [
         {
           "file": "test/postgres/document-attachments.test.ts",
-          "name": "internal files use live record authority, scoped dedupe, bounded ingress and immutable audit",
+          "name": "revoked download is refused by the database",
           "expected": "the database returned bytes after download revocation"
-        }
-      ]
-    },
-    {
-      "name": "documents-ownership-dedupe",
-      "claim": "Identical bytes in shared and company ownership consume distinct blobs.",
-      "file": "packages/postgres-provider/src/document-attachments.ts",
-      "original": "      const scope = row.company_id ?? 'shared';\n",
-      "replacement": "      const scope = 'shared';\n",
-      "test": {
-        "files": ["test/postgres/document-attachments.test.ts"],
-        "namePattern": "^internal files use live record authority, scoped dedupe, bounded ingress and immutable audit$"
-      },
-      "kills": [
-        {
-          "file": "test/postgres/document-attachments.test.ts",
-          "name": "internal files use live record authority, scoped dedupe, bounded ingress and immutable audit",
-          "expected": "identical bytes were pooled across ownership scopes"
         }
       ]
     },
     {
       "name": "documents-publication-audit",
       "claim": "Every published version is accounted for by a committed attachment audit row.",
-      "file": "db/migrations/0048_document_attachment_authority.sql",
-      "original": "  INSERT INTO platform.document_attachment_audit (tenant_id,environment_id,link_id,operation_id)\n    VALUES (i.tenant_id,i.environment_id,published.link_id,replace(s.entity_id, ':entity.', ':operation.document_attach_'));\n",
+      "file": "db/migrations/0060_generated_document_sources.sql",
+      "original": "  INSERT INTO platform.document_attachment_audit (tenant_id,environment_id,link_id,operation_id)\n    VALUES (i.tenant_id,i.environment_id,published.link_id,replace(s.entity_id, ':entity.',\n      CASE WHEN s.generated_source IS NULL THEN ':operation.document_attach_' ELSE ':operation.document_generate_' END));\n",
       "replacement": "",
       "test": {
         "files": ["test/postgres/document-attachments.test.ts"],
@@ -59,7 +41,7 @@
     {
       "name": "documents-stored-quota",
       "claim": "Publication refuses even a duplicate when the stored-byte quota is full.",
-      "file": "db/migrations/0048_document_attachment_authority.sql",
+      "file": "db/migrations/0060_generated_document_sources.sql",
       "original": "    + s.byte_length > 104857600 THEN",
       "replacement": "    + s.byte_length > 2147483647 THEN",
       "test": {
@@ -71,6 +53,561 @@
           "file": "test/postgres/document-attachments.test.ts",
           "name": "internal files use live record authority, scoped dedupe, bounded ingress and immutable audit",
           "expected": "the stored-byte quota allowed publication"
+        }
+      ]
+    },
+    {
+      "name": "generated-pdf-source-revocation",
+      "claim": "When a reader loses a bound source, its issued PDF cannot be downloaded.",
+      "file": "db/migrations/0060_generated_document_sources.sql",
+      "original": "    AND platform.document_generated_allowed(v.generated_source,v.release_id,scope,entity,record_key,false) AND (v.owner_scope,v.entity_id,v.record_id,v.link_id,v.version_id) = (scope,entity,record_key,link,version)",
+      "replacement": "    AND (v.owner_scope,v.entity_id,v.record_id,v.link_id,v.version_id) = (scope,entity,record_key,link,version)",
+      "test": {
+        "files": ["test/postgres/document-templates.test.ts"],
+        "namePattern": "^approved template revisions publish governed PDFs, refuse hidden sources, and retire$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-templates.test.ts",
+          "name": "approved template revisions publish governed PDFs, refuse hidden sources, and retire",
+          "expected": "a revoked source query still returned a generated PDF"
+        }
+      ]
+    },
+    {
+      "name": "generated-pdf-company-brand-source-revocation",
+      "claim": "Company-brand source revocation withholds the previously issued PDF.",
+      "file": "db/migrations/0060_generated_document_sources.sql",
+      "original": "    AND platform.document_source_allowed(app, issued_app, storage, brand, 'shared',\n      'northstar.app:entity.legal_entity', scope::uuid, verify_revision)",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/document-templates.test.ts"],
+        "namePattern": "^approved template revisions publish governed PDFs, refuse hidden sources, and retire$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-templates.test.ts",
+          "name": "approved template revisions publish governed PDFs, refuse hidden sources, and retire",
+          "expected": "a revoked company source still returned a generated PDF"
+        }
+      ]
+    },
+    {
+      "name": "documents-parse-time-pdf-bound",
+      "claim": "A shallow PDF page tree cannot bypass the parser nesting bound.",
+      "file": "packages/postgres-provider/src/document-pdf-worker.mjs",
+      "original": "    if (++this.depth > 64 || ++this.nodes > 200000)\n      throw new Error('PDF structural limit');",
+      "replacement": "    this.depth++;\n    this.nodes++;",
+      "test": {
+        "files": ["test/integration/document-http.test.ts"],
+        "namePattern": "^parse-time nesting is checked outside the page tree$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/document-http.test.ts",
+          "name": "parse-time nesting is checked outside the page tree",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    },
+    {
+      "name": "documents-pdf-process-limits",
+      "claim": "The PDF validator process inherits operating-system resource limits.",
+      "file": "packages/postgres-provider/src/document-content.ts",
+      "original": "      '--as=1073741824',\n      '--cpu=4',\n      '--core=0',\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/integration/document-http.test.ts"],
+        "namePattern": "^the PDF subprocess inherits the OS resource limits$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/document-http.test.ts",
+          "name": "the PDF subprocess inherits the OS resource limits",
+          "expected": "Choose a valid PDF, JPEG or PNG file."
+        }
+      ]
+    },
+    {
+      "name": "documents-sql-page-size",
+      "claim": "Node buffers at most the requested attachment page and one lookahead row.",
+      "file": "db/migrations/0060_generated_document_sources.sql",
+      "original": " LIMIT greatest(1, least(page_size, 100))",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/document-attachments.test.ts"],
+        "namePattern": "^internal files use live record authority, scoped dedupe, bounded ingress and immutable audit$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-attachments.test.ts",
+          "name": "the SQL authority bounds Node rows and refuses stale or inaccessible records",
+          "expected": "pg buffered more rows than the SQL page"
+        }
+      ]
+    },
+    {
+      "name": "documents-api-demo-scanner-guard",
+      "claim": "The API refuses demo scanning when an external database URL is supplied.",
+      "file": "apps/api/src/main.ts",
+      "original": "  if (demoScanner && !managesContainer)\n    throw new Error('The demo scanner requires a managed local demo database.');\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/integration/document-http.test.ts"],
+        "namePattern": "^the API entry point refuses the demo scanner with an external database URL$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/document-http.test.ts",
+          "name": "the API entry point refuses the demo scanner with an external database URL",
+          "expected": "The demo scanner requires a managed local demo database"
+        }
+      ]
+    },
+    {
+      "name": "documents-http-commit-outcome",
+      "claim": "An HTTP timer waits for publication when COMMIT is in flight.",
+      "file": "apps/web/src/document-http.ts",
+      "original": "      if (publicationCommitting) return;\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/document-attachments.test.ts"],
+        "namePattern": "^staged attachment verdicts and deadlines govern publication$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-attachments.test.ts",
+          "name": "the HTTP deadline awaits a publication COMMIT already in flight",
+          "expected": "The file response expired."
+        }
+      ]
+    },
+    {
+      "name": "generated-pdf-record-query-grants",
+      "claim": "The governing Record read grants include its declared child-query authority.",
+      "file": "db/migrations/0060_generated_document_sources.sql",
+      "original": "    AND platform.document_record_query_granted(app, q, scope)",
+      "replacement": "    AND platform.document_record_query_granted(app, q - 'readModel', scope)",
+      "test": {
+        "files": ["test/postgres/document-templates.test.ts"],
+        "namePattern": "^approved template revisions publish governed PDFs, refuse hidden sources, and retire$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-templates.test.ts",
+          "name": "SQL attachment reads require the commercial Record child-query grant",
+          "expected": "a file escaped the full Record permission set"
+        }
+      ]
+    },
+    {
+      "name": "documents-optional-dependency-flag",
+      "claim": "A read-model dependency the compiled release declares required: false does not gate attachment reads.",
+      "file": "db/migrations/0060_generated_document_sources.sql",
+      "original": "    WHERE (reference.value->'required' = 'false'::jsonb) IS NOT TRUE",
+      "replacement": "    WHERE true",
+      "test": {
+        "files": ["test/postgres/document-templates.test.ts"],
+        "namePattern": "^approved template revisions publish governed PDFs, refuse hidden sources, and retire$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-templates.test.ts",
+          "name": "PO attachments stay visible when purchasing settings are withheld",
+          "expected": "an optional settings dependency hid the PO attachment"
+        },
+        {
+          "file": "test/postgres/document-templates.test.ts",
+          "name": "PO attachments stay visible when approval requests are withheld",
+          "expected": "an optional approvals dependency hid the PO attachment"
+        },
+        {
+          "file": "test/postgres/document-templates.test.ts",
+          "name": "a read-model dependency without required: false stays mandatory",
+          "expected": "the declared optional dependency was treated as mandatory"
+        }
+      ]
+    },
+    {
+      "name": "documents-absent-flag-stays-mandatory",
+      "claim": "A read-model dependency without the required flag still gates attachment reads; dropping the mandatory default lets the file escape.",
+      "file": "db/migrations/0060_generated_document_sources.sql",
+      "original": "    WHERE (reference.value->'required' = 'false'::jsonb) IS NOT TRUE",
+      "replacement": "    WHERE reference.value->'required' = 'true'::jsonb",
+      "test": {
+        "files": ["test/postgres/document-templates.test.ts"],
+        "namePattern": "^approved template revisions publish governed PDFs, refuse hidden sources, and retire$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-templates.test.ts",
+          "name": "SQL attachment reads require the commercial Record child-query grant",
+          "expected": "a file escaped the full Record permission set"
+        },
+        {
+          "file": "test/postgres/document-templates.test.ts",
+          "name": "a read-model dependency without required: false stays mandatory",
+          "expected": "a dependency without the flag was treated as optional"
+        }
+      ]
+    },
+    {
+      "name": "generated-pdf-child-set-completeness",
+      "claim": "Publication verifies the live child set even when the render captured no rows.",
+      "file": "db/migrations/0060_generated_document_sources.sql",
+      "original": "  IF verify_revision AND relation IS NOT NULL THEN",
+      "replacement": "  IF false THEN",
+      "test": {
+        "files": ["test/postgres/document-templates.test.ts"],
+        "namePattern": "^approved template revisions publish governed PDFs, refuse hidden sources, and retire$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-templates.test.ts",
+          "name": "publication refuses when new children arrive after staging even from an empty table",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    },
+    {
+      "name": "generated-pdf-retained-field-classification",
+      "claim": "A selected same-record confidential field is denied by SQL.",
+      "file": "db/migrations/0060_generated_document_sources.sql",
+      "original": "        AND f->>'classification' IN ('public','internal')\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/document-templates.test.ts"],
+        "namePattern": "^approved template revisions publish governed PDFs, refuse hidden sources, and retire$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-templates.test.ts",
+          "name": "the SQL source gate rejects a selected hidden field on the same entity",
+          "expected": "Expected values to be strictly deep-equal"
+        }
+      ]
+    },
+    {
+      "name": "generated-pdf-staging-stored-source",
+      "claim": "Replay authorizes the stored source and withholds metadata when it is revoked.",
+      "file": "db/migrations/0060_generated_document_sources.sql",
+      "original": "        AND platform.document_generated_allowed(v.generated_source,v.release_id,scope,entity,record_key,false)\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/document-templates.test.ts"],
+        "namePattern": "^approved template revisions publish governed PDFs, refuse hidden sources, and retire$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-templates.test.ts",
+          "name": "staging replay checks the stored source after a source grant is revoked",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    },
+    {
+      "name": "generated-pdf-committed-retry",
+      "claim": "A retired template can still replay an authorized committed receipt.",
+      "file": "packages/postgres-provider/src/document-attachments.ts",
+      "original": "    if (receipt) return receipt;\n    if (!this.scanner || !this.scannerPool)",
+      "replacement": "    if (!this.scanner || !this.scannerPool)",
+      "test": {
+        "files": ["test/postgres/document-templates.test.ts"],
+        "namePattern": "^approved template revisions publish governed PDFs, refuse hidden sources, and retire$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-templates.test.ts",
+          "name": "approved template revisions publish governed PDFs, refuse hidden sources, and retire",
+          "expected": "retired template retry lost its committed receipt"
+        }
+      ]
+    },
+    {
+      "name": "generated-pdf-source-sql-deadline",
+      "claim": "A blocked template source snapshot observes the same SQL deadline as its request.",
+      "file": "packages/postgres-provider/src/document-attachments.ts",
+      "original": "      { retry: false, deadline },",
+      "replacement": "      { retry: false },",
+      "test": {
+        "files": ["test/postgres/document-templates.test.ts"],
+        "namePattern": "^approved template revisions publish governed PDFs, refuse hidden sources, and retire$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-templates.test.ts",
+          "name": "blocked source reads obey SQL deadlines and disconnects free HTTP transfer slots",
+          "expected": "The SQL snapshot outlived its deadline"
+        }
+      ]
+    },
+    {
+      "name": "generated-pdf-digest-covers-render-input",
+      "claim": "The source digest authenticates the exact rendering input.",
+      "file": "packages/postgres-provider/src/document-attachments.ts",
+      "original": "      inputDigest: documentDigest(",
+      "replacement": "      inputDigest: ((_input: Buffer) => \"0\".repeat(64))(",
+      "test": {
+        "files": ["test/postgres/document-templates.test.ts"],
+        "namePattern": "^approved template revisions publish governed PDFs, refuse hidden sources, and retire$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-templates.test.ts",
+          "name": "approved template revisions publish governed PDFs, refuse hidden sources, and retire",
+          "expected": "persisted input digest did not cover the actual render input and authorities"
+        }
+      ]
+    },
+    {
+      "name": "documents-company-gateway-memberships",
+      "claim": "A company employee uses the query and operation gateway grants through company membership.",
+      "file": "db/migrations/0060_generated_document_sources.sql",
+      "original": "      AND g.permission_id = permission AND g.resource_id = resource",
+      "replacement": "      AND m.legal_entity_id IS NULL AND g.permission_id = permission AND g.resource_id = resource",
+      "test": {
+        "files": ["test/postgres/document-attachments.test.ts"],
+        "namePattern": "^internal files use live record authority, scoped dedupe, bounded ingress and immutable audit$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-attachments.test.ts",
+          "name": "a company membership authorizes both boundaries in its own company only",
+          "expected": "the company-scoped principal lost its own attachment query grant"
+        }
+      ]
+    },
+    {
+      "name": "documents-rejected-scan-cannot-publish",
+      "claim": "Matching policy and digest still require a clean verdict.",
+      "file": "db/migrations/0060_generated_document_sources.sql",
+      "original": " OR s.scan_clean IS DISTINCT FROM true",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/document-attachments.test.ts"],
+        "namePattern": "^staged attachment verdicts and deadlines govern publication$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-attachments.test.ts",
+          "name": "rejected digest-bound scans survive retries",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    },
+    {
+      "name": "documents-stage-authority-revocation",
+      "claim": "A staged clean verdict cannot survive revocation and regrant of uploader authority.",
+      "file": "db/migrations/0060_generated_document_sources.sql",
+      "original": "  IF file_policy IS NULL OR\n     (s.authority_fence,s.authority_policy_version) IS DISTINCT FROM (fence_now,policy_now) THEN",
+      "replacement": "  IF file_policy IS NULL THEN",
+      "test": {
+        "files": ["test/postgres/document-attachments.test.ts"],
+        "namePattern": "^staged attachment verdicts and deadlines govern publication$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-attachments.test.ts",
+          "name": "a committed uploader revocation makes staged authority unusable after regrant",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    },
+    {
+      "name": "documents-commit-elapsed-check",
+      "claim": "A committed version is acknowledged even when the response budget elapsed before COMMIT returned.",
+      "file": "apps/web/src/document-http.ts",
+      "original": "            if (!publicationCommitting) remainingMilliseconds();\n            return json(response, 201, metadata);\n          }\n          if (list)",
+      "replacement": "            remainingMilliseconds();\n            return json(response, 201, metadata);\n          }\n          if (list)",
+      "test": {
+        "files": ["test/postgres/document-attachments.test.ts"],
+        "namePattern": "^staged attachment verdicts and deadlines govern publication$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-attachments.test.ts",
+          "name": "the HTTP deadline awaits a publication COMMIT already in flight",
+          "expected": "The file response expired."
+        }
+      ]
+    },
+    {
+      "name": "documents-date-iso-midnight",
+      "claim": "Date fields preserve the business day when the provider gives an ISO midnight.",
+      "file": "packages/runtime/src/civil-date.ts",
+      "original": "  if (kind === 'dateFieldType') {",
+      "replacement": "  if (kind === 'dateFieldType') {\n    if (value.includes('T')) return null;",
+      "test": {
+        "files": ["test/integration/document-pdf.test.ts"],
+        "namePattern": "^civil dates accept date fields serialized at ISO midnight$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/document-pdf.test.ts",
+          "name": "civil dates accept date fields serialized at ISO midnight",
+          "expected": "2026-11-18T00:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "documents-currency-text-override",
+      "claim": "A selected text field cannot replace the currency declared by Money.",
+      "file": "packages/compiler/src/document-templates.ts",
+      "original": "      currencyFieldId === null &&",
+      "replacement": "      true &&",
+      "test": {
+        "files": ["test/integration/document-pdf.test.ts"],
+        "namePattern": "^template money uses its declared currency and rejects a text override$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/document-pdf.test.ts",
+          "name": "template money uses its declared currency and rejects a text override",
+          "expected": "currency declared by the field type"
+        }
+      ]
+    },
+    {
+      "name": "documents-template-shape",
+      "claim": "Customize refuses layouts with content its revision form cannot represent.",
+      "file": "apps/web/src/document-template-form.ts",
+      "original": "  if (previous && !canReviseTemplateInForm(previous, target))\n    throw new Error(unsupportedTemplateLayout);\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/unit/customize-screen.test.ts"],
+        "namePattern": "^the template form preserves representable labels and refuses layouts it cannot represent$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/customize-screen.test.ts",
+          "name": "the template form preserves representable labels and refuses layouts it cannot represent",
+          "expected": "Missing expected exception"
+        }
+      ]
+    },
+    {
+      "name": "documents-renderer-line-content",
+      "claim": "The saved line text is rendered as PDF content.",
+      "file": "packages/postgres-provider/src/document-pdf-worker.ts",
+      "original": "if (block.kind === 'table') table(block);",
+      "replacement": "if (block.kind === 'table') {}",
+      "test": {
+        "files": ["test/integration/document-pdf.test.ts"],
+        "namePattern": "^PDFKit emits deterministic admissible PDF bytes inside the document isolate$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/document-pdf.test.ts",
+          "name": "PDFKit emits deterministic admissible PDF bytes inside the document isolate",
+          "expected": "saved PDF lost its line cell"
+        }
+      ]
+    },
+    {
+      "name": "documents-renderer-page-bound",
+      "claim": "The real renderer refuses before publishing a twenty-first page.",
+      "file": "packages/postgres-provider/src/document-pdf-worker.ts",
+      "original": "if (++pages > 20) throw new Error('PDF page limit');",
+      "replacement": "++pages;",
+      "test": {
+        "files": ["test/integration/document-pdf.test.ts"],
+        "namePattern": "^the renderer refuses the twenty-first PDF page$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/document-pdf.test.ts",
+          "name": "the renderer refuses the twenty-first PDF page",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    },
+    {
+      "name": "generated-pdf-file-category-list",
+      "claim": "Attachment listing keeps the exact issued category restriction.",
+      "file": "db/migrations/0060_generated_document_sources.sql",
+      "original": "    AND EXISTS (SELECT FROM platform.document_file_policy(fields,v.field_id,v.category_id,\n        b.content_type,b.byte_length) policy\n      WHERE policy IS NOT NULL AND (policy->>'retention') IS NOT DISTINCT FROM v.retention_class)\n    AND (after_link",
+      "replacement": "    AND (v.field_id IS NULL OR fields->'fields' @> jsonb_build_array(jsonb_build_object('fieldId',v.field_id)))\n    AND (after_link",
+      "test": {
+        "files": ["test/postgres/document-attachments.test.ts"],
+        "namePattern": "^live Customize adds file fields with category and count contracts to tenant and first-party records$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-attachments.test.ts",
+          "name": "reactivating the same file field without its category keeps the old version hidden",
+          "expected": "Expected values to be strictly deep-equal"
+        }
+      ]
+    },
+    {
+      "name": "generated-pdf-file-category-read",
+      "claim": "Attachment downloads keep the exact issued category restriction.",
+      "file": "db/migrations/0060_generated_document_sources.sql",
+      "original": "    AND EXISTS (SELECT FROM platform.document_file_policy(fields,v.field_id,v.category_id,\n        b.content_type,b.byte_length) policy\n      WHERE policy IS NOT NULL AND (policy->>'retention') IS NOT DISTINCT FROM v.retention_class)\n$$;",
+      "replacement": "    AND (v.field_id IS NULL OR fields->'fields' @> jsonb_build_array(jsonb_build_object('fieldId',v.field_id)))\n$$;",
+      "test": {
+        "files": ["test/postgres/document-attachments.test.ts"],
+        "namePattern": "^live Customize adds file fields with category and count contracts to tenant and first-party records$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-attachments.test.ts",
+          "name": "reactivating the same file field without its category keeps the old version hidden",
+          "expected": "200 !== 404"
+        }
+      ]
+    },
+    {
+      "name": "generated-pdf-file-category-count",
+      "claim": "Publication uses the verified category count instead of the supplied limit.",
+      "file": "db/migrations/0060_generated_document_sources.sql",
+      "original": "(file_policy->>'categoryLimit')::integer",
+      "replacement": "category_limit",
+      "test": {
+        "files": ["test/postgres/document-attachments.test.ts"],
+        "namePattern": "^live Customize adds file fields with category and count contracts to tenant and first-party records$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-attachments.test.ts",
+          "name": "the SQL boundary applies the compiled category count and retention",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    },
+    {
+      "name": "generated-pdf-file-category-retention",
+      "claim": "Publication uses the verified retention class even when a caller supplies another.",
+      "file": "db/migrations/0060_generated_document_sources.sql",
+      "original": "s.category_id,file_policy->>'retention',s.file_name",
+      "replacement": "s.category_id,retention,s.file_name",
+      "test": {
+        "files": ["test/postgres/document-attachments.test.ts"],
+        "namePattern": "^live Customize adds file fields with category and count contracts to tenant and first-party records$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-attachments.test.ts",
+          "name": "the SQL boundary applies the compiled category count and retention",
+          "expected": "retention.forged"
+        }
+      ]
+    },
+    {
+      "name": "generated-pdf-file-only-projection-parity",
+      "claim": "A file-only release keeps its original Documents projection bytes.",
+      "file": "packages/compiler/src/documents.ts",
+      "original": "...(activeTemplateEntities.has(entityId) && {",
+      "replacement": "...((activeTemplateEntities.has(entityId) || fileEntityIds.has(entityId)) && {",
+      "test": {
+        "files": ["test/postgres/document-attachments.test.ts"],
+        "namePattern": "^live Customize adds file fields with category and count contracts to tenant and first-party records$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-attachments.test.ts",
+          "name": "live Customize adds file fields with category and count contracts to tenant and first-party records",
+          "expected": "both tenant runners reproduce the entire v6 envelope"
         }
       ]
     }

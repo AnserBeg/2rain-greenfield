@@ -1,8 +1,8 @@
 import { POPUP_READER } from '../../canonical-model/src/popup-actions.js';
 import {
   BOOKING_FULFILMENT_READER,
-  BOOKING_USAGE_QUERY_READER,
   CONNECTOR_FAMILY,
+  OPTIONAL_DEPENDENCY_QUERY_READER,
 } from '@north-star/canonical-model';
 import {
   assertTrustedRequestContext,
@@ -194,7 +194,9 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.query]: {
     capabilityId: 'northstar.runtime:capability.query-catalog',
-    maximumSupportedVersion: BOOKING_USAGE_QUERY_READER,
+    // 2 read models, 3 list sums, 4 calculated displays, 5 booking owner
+    // usage, 6 optional read-model dependencies.
+    maximumSupportedVersion: OPTIONAL_DEPENDENCY_QUERY_READER,
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.surface]: {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
@@ -233,7 +235,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 36 binds agreed billing intervals to selected source fields.
     // 37 replaces Board v1 with Board v2: chosen stages, moves and facts by
     // stable ID with pinned contracts, labels from the release.
-    // 38 adds custom buttons that open a record Task.
+    // 38 adds document templates and governed PDF generation.
+    // 39 adds custom buttons that open a record Task.
     maximumSupportedVersion: POPUP_READER,
   },
 });

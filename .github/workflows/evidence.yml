@@ -84,7 +84,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: ${{ (matrix.control == 'validation-refusal-does-not-veto' || matrix.control == 'validation-related-row-read-ignored' || matrix.control == 'late-address-response' || matrix.control == 'shared-record-company-pin' || matrix.control == 'address-map-placement-reader-floor') && '0' || '1' }}
+          fetch-depth: ${{ (matrix.control == 'validation-refusal-does-not-veto' || matrix.control == 'validation-related-row-read-ignored' || matrix.control == 'late-address-response' || matrix.control == 'shared-record-company-pin' || matrix.control == 'address-map-placement-reader-floor' || startsWith(matrix.control, 'generated-pdf-') || startsWith(matrix.control, 'documents-')) && '0' || '1' }}
           persist-credentials: false
       - name: Set up pinned Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -94,6 +94,12 @@ jobs:
         run: corepack enable
       - name: Install frozen dependencies
         run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      # The document-template suite includes the compiled production launcher
+      # case, which is skipped without dist/ and so would leave the restored
+      # suite short of wholly green.
+      - name: Build the compiled application for document controls
+        if: startsWith(matrix.control, 'generated-pdf-') || startsWith(matrix.control, 'documents-')
+        run: corepack pnpm build
       # The runner's own rules apply unchanged: mutation first, the declared
       # kills with their declared reasons, then the restored suite wholly green.
       # The step bound leaves the job's last minutes for the report below.

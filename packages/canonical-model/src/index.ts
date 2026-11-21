@@ -1,5 +1,6 @@
 export * from './board.js';
 export * from './layout.js';
+export * from './read-model-dependencies.js';
 export {
   ADOPTED_LANGUAGE_VERSION,
   ADOPTED_NORMALIZATION_PROFILE_VERSION,
@@ -180,3 +181,9 @@ export type { FormulaValidationRule } from './formula-validation-schema.js';
 export * from './address.js';
 
 export * from './booking.js';
+export {
+  DocumentTemplatePointerSchema,
+  DocumentTemplateRevisionSchema,
+  type DocumentTemplatePointer,
+  type DocumentTemplateRevision,
+} from './document-template-schema.js';
