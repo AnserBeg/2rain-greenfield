@@ -1,17 +1,19 @@
 # COMMS-1 · Configure email, personal notifications and reminders
 
-**Slice 0 · Accepted design, 2026-11-20 (Fable read, amendments R1–R12 incorporated).** An owner can declare who receives a reminder, when it appears, and which email a person may approve. The [communications ADR](../../decisions/ADR-0088-governed-communications-and-reminders.md) defines the contract. The Fable read is complete. This checkpoint changes documentation only.
+**Slice 0 · Accepted design, 2026-11-20 (Fable read, amendments R1–R12 incorporated).** An owner can declare who receives a reminder, when it appears, and which email a person may approve. The [communications ADR](../../decisions/ADR-0088-governed-communications-and-reminders.md) defines the contract. The Fable read is complete. Slice 0 changed documentation only.
 
-## Slice 1 · Notifications and the personal inbox
+## Slice 1 · Discussion notices in the personal inbox
 
-The 2026-11-21 build instruction moves in-app notifications and reminders ahead of email templates and outbound delivery.
+The scheduler can reconcile a committed staff mention or reply into a durable notice and the recipient can read or archive it through the PostgreSQL inbox API. The browser List and COMMS-2's production message store are pending.
 
-- The branch starts at main `d083dd4a` and merges CONNECT-1's published thread writer at `ec519295` in `38f97a2bd`. DOCS-1 had already used migration 0060. The thread writer is provisionally 0061 on this branch. PostgreSQL 16 applied all 61 migrations and regenerated the identical schema snapshot.
-- `resolveReminderDeadline` applies ADR-0083 A1 to each derived civil deadline, including company day boundaries and per-record local midnight. Elapsed hours use the stored instant. Working-day leads require a versioned calendar covering the requested horizon. The supported lead is 1–720 units.
-- **Identity decision open.** ADR-0088 specifies the record owner as a recipient. Booking’s stored owner links a booking to its owning business record and company. Its audit also identifies the actor. An explicit staff assignment and the creating actor can designate different people. The build lane recommends a governed staff assignment on the source record.
-- Remaining slice work includes delivery by role, ownership and mention, the personal inbox and thread queries, the COMMS-2 port, company-isolation controls, the declared reminder member and its scheduler journal, Customize and drafter/eval admission, persisted parity, replay and preceding-reader proof. No packet CI run or merge-line claim.
-- Focused verification covers five deadline cases and 17 billing regressions. The guard controls are in `test/evidence/COMMS-1-deadlines.expected-red.json`.
-- **Try it yourself.** Run `node --import tsx --test test/unit/reminder-deadline.test.ts`. Expect five passing tests, including March 8 at 03:00 MDT for the Edmonton gap and 00:30Z for the earlier London overlap.
+- The branch began on main `d083dd4a`. Merge `38f97a2bd` brought in CONNECT-1’s published thread writer at `ec519295`. It now includes the writer’s reviewed corrections through `f70011747` and main’s WORKFLOW-2 integration at `6787792c4`. The thread and inbox migrations are provisionally 0061 and 0062.
+- The inbox implements the published `DiscussionInboxPort`. A short lease transaction commits before reconciliation. The worker locks the shared thread, resolves current reasons, replaces the recipient set and commits before acknowledging the lease token. Replay keeps the original recipient receipt, read time and archive time.
+- Reads use fixed text and an exact staff-discussion link. The current revision, reply parent, active staff account, company membership and channel govern the page, count, preview, copied ID and cursor. The source admits ten distinct mentions and a reply author. Pages contain up to 25 notices and unread displays at most 99+.
+- COMMS-2 publishes `platform.enqueue_discussion_notice` in its message transaction. Its database channel supplies `discussion_notice_source_v1` for the current revision and parent, `discussion_can_read_message_v1` for exact live visibility, and `discussion_notice_fence_v1` for saved-record, release and membership locks before the shared thread. Their parameter contracts and scoped fixture are in [the integration fixture](../../../test/fixtures/discussion-inbox-channel.sql). An absent binding withholds reads and leaves the occurrence retryable. COMMS-2 remains the message-store writer.
+- **Owner ruling, 2026-11-21.** A record type may declare one stable staff-reference field as its owner in Customize. Rules naming `recordOwner` require that field at compile time. Booking resolves the staff assignment through its owning business record. Without it, booking offers role delivery only. Audit authorship supplies no recipient.
+- `resolveReminderDeadline` applies ADR-0083 A1 to each derived civil deadline. Elapsed leads use the stored instant and working-day leads need a versioned calendar covering the horizon. The supported lead is 1–720 units.
+- Remaining work includes the browser List, shared thread history, reusable record notifications, role and assigned-owner delivery, `saveReminderRule` registrations and exactly-once scheduler effects. The owner and reminder Customize members still need drafter/evals, merge-time reader rungs, archived query/refusal, persisted byte parity and upgrade replay.
+- **Try it yourself.** Run `node --import tsx --test --test-concurrency=1 test/postgres/personal-inbox.test.ts test/unit/reminder-deadline.test.ts` with Docker available. The channel fixture lets you observe a withdrawn mention, a replayed reply, a copied cursor and an independently revoked company membership. Fourteen controls remove individual database checks and roll back each change.
 
 ## Slice plan
 
@@ -47,21 +49,23 @@ Run `scripts/check-records.sh` at the repository root and expect exit zero. Exec
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "COMMS-1",
-  "base": "38f97a2bd3847ff3b02666c08e6094f1655fb538",
-  "head": "0c5af0172b7ae62113a2f8a0a865023f9a822779",
+  "base": "6787792c4564dc0757583c043738f8daa59ca76b",
+  "head": "750544571a4b66ae827bdd9432c186d533266cde",
   "changedPaths": [
-    "package.json",
-    "packages/domain/src/billing/calendar.ts",
-    "packages/domain/src/communication/reminder-deadline.ts",
-    "test/architecture/repository-hygiene.test.ts",
-    "test/evidence/COMMS-1-deadlines.expected-red.json",
-    "test/unit/reminder-deadline.test.ts"
+    "db/migrations/0061_communication_threads.sql", "db/migrations/0062_personal_inbox.sql", "db/schema.snapshot.json",
+    "package.json", "packages/domain/src/billing/calendar.ts", "packages/domain/src/communication/reminder-deadline.ts",
+    "packages/postgres-provider/package.json", "packages/postgres-provider/src/personal-inbox.ts", "packages/postgres-provider/src/workflow-worker.ts",
+    "packages/runtime/src/discussion-inbox.ts", "test/architecture/release-persistence-boundary.test.ts", "test/architecture/repository-hygiene.test.ts",
+    "test/architecture/tenant-completeness.manifest.json", "test/architecture/tenant-completeness.test.ts", "test/evidence/COMMS-1-deadlines.expected-red.json",
+    "test/evidence/CONNECT-1-threads.expected-red.json", "test/fixtures/booking-commitments.sql", "test/fixtures/communication-threads.sql",
+    "test/fixtures/discussion-inbox-channel.sql", "test/helpers/personal-inbox-controls.ts", "test/postgres/communication-threads.test.ts",
+    "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts",
+    "test/postgres/personal-inbox.test.ts", "test/postgres/trust-substrate.test.ts", "test/unit/reminder-deadline.test.ts"
   ],
   "symbols": [
-    {
-      "path": "packages/domain/src/communication/reminder-deadline.ts",
-      "name": "resolveReminderDeadline"
-    }
+    {"path": "packages/postgres-provider/src/personal-inbox.ts", "name": "PostgresPersonalInbox"},
+    {"path": "packages/postgres-provider/src/personal-inbox.ts", "name": "discussionInboxPort"},
+    {"path": "packages/domain/src/communication/reminder-deadline.ts", "name": "resolveReminderDeadline"}
   ]
 }
 ```
