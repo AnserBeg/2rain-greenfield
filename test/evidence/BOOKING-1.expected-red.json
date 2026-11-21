@@ -514,6 +514,23 @@
       ]
     },
     {
+      "name": "recovery-snapshot-window",
+      "claim": "Retracted attendance cannot select a booking whose agreement, occupation and use ended before the snapshot window.",
+      "file": "db/migrations/0060_booking_recovery.sql",
+      "original": "UNION SELECT booking_id FROM visible_evidence",
+      "replacement": "UNION SELECT booking_id FROM evidence",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "an owner snapshot stays at its committed cursor and a steward correction pages past a billing checkpoint",
+          "expected": "retracted no-show selected a rental outside the snapshot window"
+        }
+      ]
+    },
+    {
       "name": "usage-owner-permission",
       "claim": "The owner usage read and fence require the owner permission in the stored owner company.",
       "file": "db/migrations/0059_booking_fulfilment.sql",

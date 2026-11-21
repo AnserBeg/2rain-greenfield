@@ -207,16 +207,16 @@ DECLARE
     evidence AS MATERIALIZED (SELECT DISTINCT ON (ev.booking_id,ev.evidence_id) ev.* FROM platform.booking_use_revisions ev
       JOIN history h ON (h.tenant_id,h.environment_id,h.booking_id,h.revision)=(ev.tenant_id,ev.environment_id,ev.booking_id,ev.booking_revision)
       ORDER BY ev.booking_id,ev.evidence_id,ev.revision DESC),
+    visible_evidence AS (SELECT * FROM evidence WHERE evidence_kind<>'attendance' OR NOT voided),
     relevant AS (SELECT booking_id FROM history WHERE (after_fact->>'agreed_interval')::tstzrange && horizon OR
-      (after_fact->>'occupied_interval')::tstzrange && horizon UNION SELECT booking_id FROM evidence
+      (after_fact->>'occupied_interval')::tstzrange && horizon UNION SELECT booking_id FROM visible_evidence
       WHERE tstzrange(effective_start,effective_end,'[)') && horizon OR horizon @> effective_start),
     latest AS (SELECT DISTINCT ON (h.booking_id) h.* FROM history h JOIN relevant USING (booking_id) ORDER BY h.booking_id,h.revision DESC)
     SELECT (SELECT coalesce(jsonb_agg(north_star_internal.booking_usage_terms(l.after_fact)||jsonb_build_object('terms',(
       SELECT jsonb_agg(jsonb_build_object('terms',north_star_internal.booking_usage_terms(h.after_fact),'effectiveAt',h.effective_at,
         'recordedAt',h.recorded_at) ORDER BY h.revision) FROM history h WHERE h.booking_id=l.booking_id)) ORDER BY l.booking_id),'[]'::jsonb) FROM latest l),
       (SELECT coalesce(jsonb_agg(north_star_internal.booking_usage_evidence(ev) ORDER BY ev.booking_id,ev.evidence_id),'[]'::jsonb)
-       FROM evidence ev JOIN relevant USING (booking_id)
-       WHERE ev.evidence_kind<>'attendance' OR NOT ev.voided) INTO bookings,use_rows;
+       FROM visible_evidence ev JOIN relevant USING (booking_id)) INTO bookings,use_rows;
     changes:='[]'; END IF;
   IF octet_length((coalesce(bookings,'[]')||coalesce(use_rows,'[]')||changes)::text)>1048576 OR jsonb_array_length(coalesce(bookings,'[]'))>512
     THEN RAISE EXCEPTION 'booking.usageLimit'; END IF;

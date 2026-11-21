@@ -232,12 +232,12 @@ test('booking commitment writer', async (t) => {
         admin.query('UPDATE public.booking_test_clock SET instant=$1', [
           instant,
         ]);
-      const horizon = ['2030-02-11T00:00Z', '2030-02-12T00:00Z'];
       const read = async (
         n: number,
         after: string | null = null,
         high: string | null = null,
         page = 32,
+        from = '2030-02-11T00:00Z',
       ) =>
         (
           await left.query(
@@ -247,7 +247,8 @@ test('booking commitment writer', async (t) => {
               activeFence,
               'example.booking:query.usage',
               owner(n),
-              ...horizon,
+              from,
+              '2030-02-12T00:00Z',
               after,
               high,
               page,
@@ -1711,12 +1712,17 @@ test('booking commitment writer', async (t) => {
             hold(48, 30, window('10:00', '11:00')),
           );
           const confirmed = await call(left, 'confirm', terms(48, held));
-          await time('2030-02-11T18:00Z');
+          const agreedEnd = '2030-02-11T18:00Z';
+          const readFromEnd = (
+            after: string | null = null,
+            high: string | null = null,
+          ) => read(48, after, high, 32, agreedEnd);
+          await time(agreedEnd);
           const due = await read(48);
           assert.equal(due.bookings[0].state, 'confirmed');
           assert.equal(due.cursor, '2');
           await admin.query('SELECT platform.booking_sweep_due(128)');
-          const absent = await read(48);
+          const absent = await readFromEnd();
           assert.equal(absent.cursor, '3');
           assert.equal(absent.bookings[0].state, 'noShow');
           assert.deepEqual(
@@ -1725,7 +1731,7 @@ test('booking commitment writer', async (t) => {
           );
           const late = await call(left, 'start', {
             ...terms(48, { ...confirmed, revision: 3 }),
-            effectiveAt: '2030-02-11T17:05Z',
+            effectiveAt: '2030-02-11T17:15Z',
             reason: 'logged on return',
           });
           assert.equal(late.state, 'inUse');
@@ -1741,7 +1747,10 @@ test('booking commitment writer', async (t) => {
             !kinds.includes('attendance'),
             'recovered usage still contains attendance',
           );
-          const deltaAtStart = await read(48, absent.cursor, recovered.cursor);
+          const deltaAtStart = await readFromEnd(
+            absent.cursor,
+            recovered.cursor,
+          );
           assert.equal(deltaAtStart.changes.length, 1);
           const retraction = deltaAtStart.changes[0].evidence.find(
             (change: { after: { kind: string } }) =>
@@ -1757,21 +1766,32 @@ test('booking commitment writer', async (t) => {
             [absence.id, absence.revision, true],
           );
           assert.deepEqual(
-            (await read(48, null, absent.cursor)).evidence,
+            (await readFromEnd(null, absent.cursor)).evidence,
             absent.evidence,
           );
           const pause = await call(left, 'pause', {
             ...terms(48, late),
-            effectiveAt: '2030-02-11T17:10Z',
+            effectiveAt: '2030-02-11T17:20Z',
             pauseReason: 'serviceInterrupted',
             reason: 'service log',
           });
           const end = await call(left, 'return', {
             ...terms(48, pause),
-            effectiveAt: '2030-02-11T17:30Z',
+            effectiveAt: '2030-02-11T17:45Z',
             reason: 'signed handover',
           });
           assert.equal(end.state, 'returned');
+          const afterReturn = await readFromEnd();
+          assert.deepEqual(
+            [afterReturn.bookings, afterReturn.evidence],
+            [[], []],
+            'retracted no-show selected a rental outside the snapshot window',
+          );
+          const deltaAtReturn = await readFromEnd(
+            recovered.cursor,
+            afterReturn.cursor,
+          );
+          assert.equal(deltaAtReturn.changes.at(-1).after.state, 'returned');
           const checkpoint = await read(48);
           const evidence = checkpoint.evidence.find(
             (e: { kind: string }) => e.kind === 'pause',
@@ -1782,7 +1802,7 @@ test('booking commitment writer', async (t) => {
             ...terms(48, end),
             evidenceId: evidence.id,
             evidenceRevision: evidence.revision,
-            start: '2030-02-11T17:11Z',
+            start: '2030-02-11T17:21Z',
             reason: 'supervisor verified the service log',
           };
           await left.query(
@@ -1820,7 +1840,7 @@ test('booking commitment writer', async (t) => {
           assert.equal(supersession.after.supersedes, 2);
           assert.equal(
             new Date(supersession.after.effectiveStart).toISOString(),
-            '2030-02-11T17:11:00.000Z',
+            '2030-02-11T17:21:00.000Z',
           );
           assert.equal(
             (await read(48, null, checkpoint.cursor)).evidence.find(
