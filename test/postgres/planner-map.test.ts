@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
+import pg, { type Client, type QueryResult } from 'pg';
 import {
   startComposedApplication,
   openCustomizeService,
@@ -43,6 +44,22 @@ test(
   'serve a published Map through the dispatcher’s collection, connector and preceding reader',
   { timeout: 900_000 },
   async (t) => {
+    // Count rows returned by PostgreSQL, before the application applies its work ceiling.
+    const query = pg.Client.prototype.query;
+    const candidateReads: number[] = [];
+    t.mock.method(
+      pg.Client.prototype,
+      'query',
+      function (this: Client, ...args: unknown[]) {
+        const response = Reflect.apply(query, this, args);
+        if (typeof args[0] !== 'string' || !args[0].includes('AS map_ordinal'))
+          return response;
+        return (response as Promise<QueryResult>).then((result) => {
+          candidateReads.push(result.rows.length);
+          return result;
+        });
+      },
+    );
     await withEphemeralPostgres(
       'planner-map',
       async ({ connection, pool }) => {
@@ -342,12 +359,29 @@ test(
           );
           const table = physicalNameFor('table', stopEntity);
           const column = (field: string) => physicalNameFor('column', field);
-          await pool.query(
-            `INSERT INTO north_star_module."${table}"
+          const fillRoute = (
+            company: string,
+            route: string,
+            from: number,
+            through: number,
+          ) =>
+            pool.query(
+              `INSERT INTO north_star_module."${table}"
               (tenant_id,environment_id,legal_entity_id,record_id,"${column(name)}","${column(stopSequence)}","${column(stopRoute)}","${column(stopDay)}")
-            SELECT $1,$2,$3,gen_random_uuid(),'Pickup ' || n,n,$4,$5::date FROM generate_series(3,101) n`,
-            [tenantId, environmentId, COMPANY, northRoute, dispatchDay],
-          );
+            SELECT $1,$2,$3,gen_random_uuid(),'Pickup ' || n,n,$4,$5::date FROM generate_series($6::integer,$7::integer) n`,
+              [
+                tenantId,
+                environmentId,
+                company,
+                route,
+                dispatchDay,
+                from,
+                through,
+              ],
+            );
+          await fillRoute(COMPANY, northRoute, 3, 101);
+          // Even a private route larger than the work ceiling cannot crowd out company A.
+          await fillRoute(other, southRoute, 1, 520);
           const first = await mapRead(COMPANY);
           assert.equal(first.records.length, 100);
           assert.deepEqual(
@@ -410,6 +444,17 @@ test(
           t.diagnostic(
             `warm Map sparse/full ${JSON.stringify(counts)}, full p95 ${Math.ceil(timings.sort((a, b) => a - b).at(-1)!)}ms (5 samples)`,
           );
+          await fillRoute(COMPANY, northRoute, 200, 620);
+          const broad = await mapRead(COMPANY);
+          assert.equal(candidateReads.at(-1), 513);
+          assert.equal(broad.mapCoverage?.partial, true);
+          assert.equal(broad.records.length, 0);
+          const narrowed = await mapRead(COMPANY, { route: southRoute });
+          assert.deepEqual(
+            narrowed.records.map((r) => r.recordId),
+            [south],
+          );
+          assert.equal(candidateReads.at(-1), 1);
         } finally {
           await customize.close();
           await app.close();
