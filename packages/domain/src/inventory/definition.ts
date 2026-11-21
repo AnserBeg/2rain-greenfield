@@ -1152,24 +1152,24 @@ function standardOperationPreconditions(
       },
     },
   });
-  const stockCountMutable = (): Record<string, unknown> =>
-    documentEntry
-      ? {
-          kind: 'allPredicate',
-          schemaVersion: version,
-          terms: [
-            notInState('reviewed'),
-            notInState('posted'),
-            notInState('cancelled'),
-          ],
-        }
-      : notInState('posted');
+  const stockCountMutable = (): Record<string, unknown> => ({
+    kind: 'allPredicate',
+    schemaVersion: version,
+    terms: [
+      notInState('reviewed'),
+      notInState('posted'),
+      notInState('cancelled'),
+    ],
+  });
   if (local === 'stock_count') {
+    const mutable = documentEntry
+      ? stockCountMutable
+      : () => notInState('posted');
     return {
-      archive: stockCountMutable(),
-      create: stockCountMutable(),
-      restore: stockCountMutable(),
-      update: stockCountMutable(),
+      archive: mutable(),
+      create: mutable(),
+      restore: mutable(),
+      update: mutable(),
     };
   }
   if (local !== 'inventory_transaction') return undefined;
