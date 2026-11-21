@@ -128,6 +128,8 @@ export interface SemanticQueryResultEnvelope {
     readonly scanLimitReached: boolean;
   };
   readonly listCoverage?: SharedListCoverage;
+  /** The company list was limited by the principal’s company grants. */
+  readonly companyScopeRestricted?: true;
   readonly unsupportedReason: string | null;
 }
 
@@ -793,6 +795,12 @@ export class SemanticQueryGateway {
       assertRecordResultEnvelope(result);
     } else {
       assertAggregateResultEnvelope(result);
+    }
+    if (
+      result.kind === 'semanticQueryResult' &&
+      queryDecision.companyListLegalEntityIds !== undefined
+    ) {
+      return Object.freeze({ ...result, companyScopeRestricted: true });
     }
     return result;
   }

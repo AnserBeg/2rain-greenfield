@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 
+import {
+  fulfillmentColumn,
+  fulfillmentTable,
+} from '../../packages/postgres-provider/src/fulfillment.js';
 import { InventoryPostingError } from '../../packages/postgres-provider/src/inventory-posting-error.js';
 import {
   registeredSemanticQueryFromPinnedView,
@@ -9,6 +13,7 @@ import {
   type SemanticRecordDto,
 } from '../../packages/runtime/src/semantic-query-gateway.js';
 import type { ImmutableJsonValue } from '../../packages/runtime/src/request-runtime-view.js';
+import { governedStorageTarget } from '../helpers/governed-storage-target.js';
 import { withOrderEntryFixture } from '../helpers/order-entry-fixture.js';
 
 const ns = 'northstar.app';
@@ -36,7 +41,10 @@ function refusedWith(code: string, message?: RegExp) {
 type Fixture = Parameters<Parameters<typeof withOrderEntryFixture>[0]>[0];
 
 /** Orders, their flow and the credit figures their pages read, over one fixture. */
-function creditKit(fixture: Fixture) {
+function creditKit(
+  fixture: Fixture,
+  headers: Readonly<Record<string, string>> = {},
+) {
   const operate = async (
     operation: string,
     record: { recordId: string; revision: number },
@@ -100,29 +108,26 @@ function creditKit(fixture: Fixture) {
     recordId: string,
     scoped = true,
   ): Promise<SemanticRecordDto> {
-    const result = await fixture.app.runtime.entry.run(
-      { headers: {} },
-      (view) => {
-        const definition = registeredSemanticQueryFromPinnedView(
-          view,
-          `${ns}:query.${local}_get`,
-        )!;
-        return fixture.app.runtime.queryGateway.invoke(view, {
-          schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
-          queryId: definition.queryId,
-          arguments: {
-            recordId,
-            includeArchived: false,
-            ...(scoped
-              ? {
-                  [definition.legalEntityScope!.operand.parameterId]:
-                    fixture.scope,
-                }
-              : {}),
-          },
-        });
-      },
-    );
+    const result = await fixture.app.runtime.entry.run({ headers }, (view) => {
+      const definition = registeredSemanticQueryFromPinnedView(
+        view,
+        `${ns}:query.${local}_get`,
+      )!;
+      return fixture.app.runtime.queryGateway.invoke(view, {
+        schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+        queryId: definition.queryId,
+        arguments: {
+          recordId,
+          includeArchived: false,
+          ...(scoped
+            ? {
+                [definition.legalEntityScope!.operand.parameterId]:
+                  fixture.scope,
+              }
+            : {}),
+        },
+      });
+    });
     assert.equal(result.outcome, 'exact', `${local} ${recordId}`);
     return result.records[0]!;
   }
@@ -371,3 +376,157 @@ test(
     });
   },
 );
+
+test('tenant-wide customer read with a restricted company list withholds credit figures', async () => {
+  await withOrderEntryFixture(async (fixture) => {
+    const { app, pool, scope, customer } = fixture;
+    const headers = { cookie: 'northstar-demo-actor=buyer' };
+    const kit = creditKit(fixture, headers);
+    const { tenantId, environmentId } = app.runtime.identity;
+    const other = await fixture.create(
+      'legal_entity',
+      {
+        code: 'OTHER',
+        name: 'Other company',
+        status: `${ns}:option.legal_entity_status_active`,
+        is_default: false,
+      },
+      {},
+      false,
+    );
+    const target = await governedStorageTarget();
+    const invoice = target.entities.find(
+      (entity) => entity.entityId === `${ns}:entity.customer_invoice`,
+    )!;
+    const column = (name: string) =>
+      fulfillmentColumn(invoice, `customer_invoice_${name}`);
+    const now = new Date().toISOString();
+    const create = async (
+      entity: string,
+      company: string,
+      values: Record<string, ImmutableJsonValue>,
+      relations: Record<string, string> = {},
+    ) => {
+      const result = await fixture.invoke(`${entity}_create`, {
+        recordId: randomUUID(),
+        legalEntityId: company,
+        values: Object.fromEntries(
+          Object.entries(values).map(([key, value]) => [
+            `${ns}:field.${entity}_${key}`,
+            value,
+          ]),
+        ),
+        relations,
+      });
+      assert.equal(result.outcome, 'succeeded', entity);
+      assert.ok(result.readBack);
+      return result.readBack.recordId;
+    };
+    const seedOpenInvoice = async (company: string, balance: string) => {
+      const order = await create('sales_order', company, {
+        customer_party_id: customer,
+        order_date: now,
+        currency: 'CAD',
+        ...shipTo,
+      });
+      const id = await create(
+        'customer_invoice',
+        company,
+        {
+          state: `${ns}:option.customer_invoice_state_draft`,
+          invoice_date: now,
+        },
+        { [`${ns}:relation.customer_invoice_order`]: order },
+      );
+      // Seed the stored posted figures. This proof exercises the credit read,
+      // so it needs no shipment, stock reservation, or invoice posting.
+      const seeded = await pool.query(
+        `UPDATE ${fulfillmentTable(invoice)}
+            SET ${column('state')} = $5, ${column('customer_party_id')} = $6,
+                ${column('currency')} = 'CAD', ${column('total')} = $7,
+                ${column('balance')} = $7
+          WHERE tenant_id = $1 AND environment_id = $2
+            AND ${invoice.legalEntity!.column} = $3
+            AND ${invoice.recordIdentity.column} = $4`,
+        [
+          tenantId,
+          environmentId,
+          company,
+          id,
+          `${ns}:option.customer_invoice_state_open`,
+          customer,
+          balance,
+        ],
+      );
+      assert.equal(seeded.rowCount, 1);
+      return order;
+    };
+    const ownOrder = await seedOpenInvoice(scope, '5000');
+    await seedOpenInvoice(other.recordId, '80000');
+    await kit.setCredit({ credit_limit: '50000' });
+    const full = {
+      credit_limit: '50000.00',
+      open_balance: '85000.00',
+      on_order: '0.00',
+      available_credit: '-35000.00',
+      credit_status: 'Over limit',
+    };
+    assert.deepEqual(await kit.customerCredit(), full);
+    assert.deepEqual(await kit.orderCredit(ownOrder), full);
+
+    const principalId = await app.runtime.entry.run(
+      { headers },
+      (view) => view.principalId,
+    );
+    const scoped = await pool.query(
+      `UPDATE platform.current_policy_memberships SET legal_entity_id = $4
+        WHERE tenant_id = $1 AND environment_id = $2 AND principal_id = $3
+          AND revoked_at IS NULL`,
+      [tenantId, environmentId, principalId, scope],
+    );
+    assert.ok(scoped.rowCount);
+    const role = randomUUID();
+    await pool.query(
+      `INSERT INTO platform.current_policy_roles
+         (tenant_id, environment_id, role_id, role_key)
+       VALUES ($1, $2, $3, 'credit-customer-reader')`,
+      [tenantId, environmentId, role],
+    );
+    await pool.query(
+      `INSERT INTO platform.current_policy_permission_grants
+         (tenant_id, environment_id, role_id, permission_id, resource_id)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [
+        tenantId,
+        environmentId,
+        role,
+        `${ns}:permission.party_read`,
+        `${ns}:entity.party`,
+      ],
+    );
+    await pool.query(
+      `INSERT INTO platform.current_policy_memberships
+         (tenant_id, environment_id, membership_id, principal_id, role_id)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [tenantId, environmentId, randomUUID(), principalId, role],
+    );
+
+    const withheld = {
+      credit_limit: null,
+      open_balance: null,
+      on_order: null,
+      available_credit: null,
+      credit_status: null,
+    };
+    assert.deepEqual(
+      await kit.customerCredit(),
+      withheld,
+      'customer credit figures',
+    );
+    assert.deepEqual(
+      await kit.orderCredit(ownOrder),
+      withheld,
+      'order credit figures',
+    );
+  });
+});
