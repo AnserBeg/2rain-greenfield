@@ -18,9 +18,10 @@ def expect(condition, reason):
 
 
 @contextlib.contextmanager
-def container(engine, omit=None, suffix=()):
+def container(engine, omit=(), suffix=()):
     name = "analysis-probe-" + uuid.uuid4().hex
-    flags = [flag for flag in runtime.options(name) if flag != omit]
+    omitted = {omit} if isinstance(omit, str) else set(omit)
+    flags = [flag for flag in runtime.options(name) if flag not in omitted]
     container_id = engine.command("create", *flags, *suffix, runtime.BASE, "python", "-c",
                                   "import time; time.sleep(240)").decode().strip()
     group = None
@@ -171,7 +172,15 @@ def controls(engine):
         red(lambda: check(omit), reason)
     red(lambda: check("--network=none", True), "external interface")
     red(lambda: check(f"--security-opt=seccomp={runtime.PROFILE}", True), "AF_INET socket allowed")
-    red(lambda: check("--security-opt=no-new-privileges", True), "no-new-privileges missing")
+    # runc installs seccomp before setting the UID when NNP is absent. Use the
+    # same built-in Docker profile on both sides to isolate the kernel NNP bit.
+    def observe_nnp(omit):
+        with container(engine, omit) as (name, _):
+            nnp = guest(engine, name, "from pathlib import Path; print(dict(row.split(':',1) for row in Path('/proc/self/status').read_text().splitlines() if ':' in row)['NoNewPrivs'].strip())")
+            expect(nnp == "1", "no-new-privileges missing")
+    profile = f"--security-opt=seccomp={runtime.PROFILE}"
+    observe_nnp([profile])
+    red(lambda: observe_nnp([profile, "--security-opt=no-new-privileges"]), "no-new-privileges missing")
     red(lambda: check("--cgroup-parent=analysis.slice"), "memory.swap.max")
     red(lambda: check("--cap-drop=ALL", True), "capability bounding set")
     red(lambda: check("--user=65534:65534", True), "unexpected guest UID")
@@ -202,10 +211,10 @@ if __name__ == "__main__":
         engine.preflight()
         print(engine.command("pull", runtime.BASE, timeout=120).decode())
         limits_under_load(engine)
+        controls(engine)
         timed_stop(engine, "cpu", 60)
         timed_stop(engine, "deadline", 90)
         timed_stop(engine, "cancelled", 1)
-        controls(engine)
         print("Rootless capability gate passed with no retained job.")
     except subprocess.CalledProcessError as error:
         raise SystemExit(error.stderr.decode() or str(error))
