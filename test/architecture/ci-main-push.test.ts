@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
+  copyFileSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,6 +16,7 @@ import test, { type TestContext } from 'node:test';
 const selector = resolve('.github/scripts/ci-selection.mjs');
 const windowGate = resolve('scripts/check-merge-window.mjs');
 const doctrine = readFileSync('AGENTS.md', 'utf8');
+const policy = 'scripts/non-executable-pathspec.json';
 
 function repository(t: TestContext) {
   const dir = mkdtempSync(join(tmpdir(), 'ci-4-'));
@@ -32,12 +35,18 @@ function repository(t: TestContext) {
   git('init', '-qb', 'main');
   git('config', 'user.name', 'Fixture');
   git('config', 'user.email', 'fixture@example.invalid');
+  const fixtureSelector = join(repo, '.github/scripts/ci-selection.mjs');
+  mkdirSync(dirname(fixtureSelector), { recursive: true });
+  copyFileSync(selector, fixtureSelector);
+  mkdirSync(join(repo, 'scripts'));
+  copyFileSync(policy, join(repo, policy));
+  git('add', '--', '.github/scripts/ci-selection.mjs', policy);
   const base = commit('AGENTS.md', doctrine);
   git('update-ref', 'refs/remotes/origin/main', base);
   const select = (event: object, ref = 'main', name = 'push') => {
     const eventFile = join(dir, 'event.json');
     writeFileSync(eventFile, JSON.stringify(event));
-    const result = execFileSync(process.execPath, [selector], {
+    const result = execFileSync(process.execPath, [fixtureSelector], {
       cwd: repo,
       encoding: 'utf8',
       env: {
@@ -57,8 +66,85 @@ function repository(t: TestContext) {
       files?: string[];
     };
   };
-  return { dir, repo, git, commit, base, select };
+  const requiresFull = (before: string, tip: string) =>
+    JSON.parse(
+      execFileSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '-e',
+          "import { requiresFull } from './.github/scripts/ci-selection.mjs'; console.log(requiresFull(process.argv[1], process.argv[2]));",
+          before,
+          tip,
+        ],
+        { cwd: repo, encoding: 'utf8' },
+      ),
+    ) as boolean;
+  return { dir, repo, git, commit, base, select, requiresFull };
 }
+
+test('a change to the docs pathspec cannot exempt its own push or merge window', (t) => {
+  const { repo, git, commit, base, select, requiresFull } = repository(t);
+  const paths: string[] = JSON.parse(readFileSync(join(repo, policy), 'utf8'));
+  writeFileSync(
+    join(repo, policy),
+    JSON.stringify([...paths, ':!scripts', ':!packages']),
+  );
+  git('add', '--', policy);
+  const tip = commit('packages/x.ts', 'export {};');
+  assert.deepEqual(
+    [select({ before: base }).tier, requiresFull(base, tip)],
+    ['full', true],
+    'changing the docs pathspec must require full in both gates',
+  );
+});
+
+test('both gates use the docs pathspec committed at the range base', (t) => {
+  const { repo, commit, base, select, requiresFull } = repository(t);
+  const tip = commit('docs/record.md', 'record');
+  writeFileSync(join(repo, policy), '[]');
+  assert.deepEqual(
+    [select({ before: base }).tier, requiresFull(base, tip)],
+    ['quick', false],
+  );
+});
+
+for (const path of [
+  'docs/run.ts',
+  '.agents/skills/s/tool.sh',
+  'docs/contracts/fixture.json',
+]) {
+  test(`both gates require full for ${path}`, (t) => {
+    const { commit, base, select, requiresFull } = repository(t);
+    const tip = commit(path, 'fixture');
+    assert.deepEqual(
+      [select({ before: base }).tier, requiresFull(base, tip)],
+      ['full', true],
+    );
+  });
+}
+
+test('both gates require full for a Markdown symlink on either side of the change', (t) => {
+  const { repo, git, base, select, requiresFull } = repository(t);
+  mkdirSync(join(repo, 'docs'));
+  symlinkSync(
+    '../.github/scripts/ci-selection.mjs',
+    join(repo, 'docs/reader.md'),
+  );
+  git('add', '--', 'docs/reader.md');
+  git('commit', '-qm', 'link');
+  const linked = git('rev-parse', 'HEAD');
+  assert.deepEqual(
+    [select({ before: base }).tier, requiresFull(base, linked)],
+    ['full', true],
+  );
+  git('rm', '--', 'docs/reader.md');
+  git('commit', '-qm', 'remove link');
+  assert.deepEqual(
+    [select({ before: linked }).tier, requiresFull(linked, 'HEAD')],
+    ['full', true],
+  );
+});
 
 test('a main push containing code followed by a record runs full on the push itself', (t) => {
   const { commit, base, select } = repository(t);

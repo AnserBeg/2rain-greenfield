@@ -106,9 +106,11 @@ UPGRADE-2-fixes reported `.gitleaksignore` and CUSTOMIZE-5-slice1 reported
 and [CUSTOMIZE-5 log](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44881203941/job/136776671897).
 
 On main, the push itself runs the selected tier in a per-SHA concurrency group.
-Quick applies only if the entire `before..sha` diff passes the merge window's
-non-executable path test and has no Critical change. Editing the Critical
-pathspec block requires full. A new branch or missing, zero or unavailable
+Quick applies only to regular, non-executable Markdown at paths exempted by
+the base commit, including packet records and evidence under `docs/` and the
+named root documents. Both gates require full for symlinks, any change to
+`scripts/non-executable-pathspec.json`, or any Critical change anywhere in
+the push, including an edit to the Critical pathspec block. A new branch or missing, zero or unavailable
 push base requires full. The reachability job names the tier and exact SHA.
 
 Only the head of the merge line builds a candidate. Reserve the merge window
@@ -123,7 +125,9 @@ main, run `node scripts/check-merge-window.mjs <owner> <40-character-tip-SHA>`.
 An executable or Critical range requires a successful full reachability job on
 that exact tip. A docs-only range can use the exemption when main is healthy.
 The newest completed full main push must be green, with no newer failed or
-cancelled push. Pending full or unclassified runs require exact full candidate
+cancelled push. After a red quick on main, each docs-only merge needs an exact
+full on its candidate until a subsequent full main push goes green or the
+failed quick passes on rerun. Pending full or unclassified runs require exact full candidate
 evidence too. If main advances, rebuild on current main. If the train is red,
 identify the packet that owns the failing job, drop it and rebuild the rest
 from current main with a fresh full run. Watch the main push through completion.

@@ -270,7 +270,10 @@ test('the token command requires exact full evidence for executable work and doc
     git('config', 'user.name', 'Fixture');
     git('config', 'user.email', 'fixture@example.invalid');
     writeFileSync(join(repo, 'AGENTS.md'), readFileSync('AGENTS.md'));
-    git('add', 'AGENTS.md');
+    const policy = 'scripts/non-executable-pathspec.json';
+    mkdirSync(join(repo, 'scripts'));
+    writeFileSync(join(repo, policy), readFileSync(policy));
+    git('add', 'AGENTS.md', policy);
     git('commit', '-qm', 'main');
     const docsBase = git('rev-parse', 'HEAD');
     for (const path of [
@@ -279,7 +282,7 @@ test('the token command requires exact full evidence for executable work and doc
       'learnings.md',
       'README.md',
       '.agents/skills/test/SKILL.md',
-      'docs/contracts/fixture.json',
+      'docs/execution/packets/fixture.md',
     ]) {
       mkdirSync(join(repo, path, '..'), { recursive: true });
       writeFileSync(

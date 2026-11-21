@@ -3,7 +3,6 @@ import { appendFileSync, lstatSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 import console from 'node:console';
-import nonExecutablePaths from '../../scripts/non-executable-pathspec.json' with { type: 'json' };
 
 // Audited leaf-to-test map. Every unlisted source, including new siblings,
 // selects full until its coverage has been reviewed.
@@ -115,6 +114,24 @@ export function criticalDiff(base, tip) {
 }
 
 export function docsOnly(base, tip) {
+  const policy = 'scripts/non-executable-pathspec.json';
+  if (git('diff', '--no-renames', '--name-only', base, tip, '--', policy))
+    return false;
+  if (!git('ls-tree', base, '--', policy)) return false;
+  const nonExecutablePaths = JSON.parse(git('show', `${base}:${policy}`));
+
+  // The record pathspec includes whole directories. Only regular Markdown
+  // qualifies for quick CI there. Inspect both modes, including on deletion.
+  const fields = git('diff', '--raw', '--no-renames', '-z', base, tip).split(
+    '\0',
+  );
+  for (let i = 0; i < fields.length - 1; i += 2) {
+    if (
+      !fields[i + 1].endsWith('.md') ||
+      !/^:(?:000000|100644) (?:000000|100644) /u.test(fields[i])
+    )
+      return false;
+  }
   return !git(
     'diff',
     '--no-renames',

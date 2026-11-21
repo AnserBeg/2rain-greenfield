@@ -3,6 +3,24 @@
   "packet": "CI-4",
   "entries": [
     {
+      "name": "ci4-docs-policy-self-exemption",
+      "claim": "A change to the docs pathspec requires full even when the candidate policy excludes all changed paths.",
+      "file": ".github/scripts/ci-selection.mjs",
+      "original": "if (git('diff', '--no-renames', '--name-only', base, tip, '--', policy))\n    return false;",
+      "replacement": "if (git('diff', '--no-renames', '--name-only', base, tip, '--', policy))\n    return !git('diff', '--no-renames', '--name-only', base, tip, '--', '.', ...JSON.parse(git('show', `${tip}:${policy}`)), ':!README.md');",
+      "test": {
+        "files": ["test/architecture/ci-main-push.test.ts"],
+        "namePattern": "a change to the docs pathspec cannot exempt its own push or merge window"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ci-main-push.test.ts",
+          "name": "a change to the docs pathspec cannot exempt its own push or merge window",
+          "expected": "changing the docs pathspec must require full in both gates"
+        }
+      ]
+    },
+    {
       "name": "ci4-plain-in-train",
       "claim": "Every first-parent commit in the train has two parents.",
       "file": "scripts/check-merge-window.mjs",
