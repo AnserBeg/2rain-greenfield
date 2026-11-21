@@ -253,6 +253,42 @@ test('the PostgreSQL Invoice candidate probe uses the named date index and stops
       );
       assert.deepEqual(await run(3, 2, true), { kind: 'unavailable' });
       await client.query('ROLLBACK');
+      // Exercise the provider's use of the released collation on both sides of equality
+      // and on the group key. The module storage suite owns the versioned Unicode fold ABI.
+      await client.query(
+        'CREATE FUNCTION north_star_module.nsm_unicode_case_fold_v1(text) RETURNS text LANGUAGE SQL IMMUTABLE STRICT AS $$ SELECT lower($1) $$',
+      );
+      await insert(tenantId, 'a', '2', 'CAD');
+      const folded = {
+        ...report,
+        columns: report.columns.map((c) =>
+          c.fieldId === customer
+            ? { ...c, collation: 'unicodeCaseInsensitive' as const }
+            : c,
+        ),
+      };
+      const combined = await readGroupedSnapshot(
+        client,
+        entity,
+        {
+          view,
+          scope,
+          input: {
+            ...input,
+            parameters: { ...input.parameters, [customer]: 'a' },
+          },
+          report: folded,
+          remaining: () => 5000,
+        },
+        horizon,
+        (_, predicates) => predicates.push('visible'),
+        REPORT_READER_POLICY,
+      );
+      assert.ok(!('kind' in combined));
+      assert.deepEqual(
+        combined.groups.map((r) => [r.keys, r.cells[0]?.value]),
+        [[['a'], '14.000000000000000000']],
+      );
     } finally {
       client.release();
     }

@@ -97,6 +97,14 @@ export async function readGroupedSnapshot(
     if (!c) throw new Error('Unknown report operand');
     return ident(c.columnName);
   };
+  const comparable = (id: string, expression: string) => {
+    const field = report.columns.find((c) => c.fieldId === id)!;
+    if (field.collation === 'unicodeCaseInsensitive')
+      return `north_star_module.nsm_unicode_case_fold_v1(${expression}::text) COLLATE "C"`;
+    if (field.type === 'text' || field.type === 'choice')
+      return `${expression}::text COLLATE "C"`;
+    return expression;
+  };
   const conditions = [
     `tenant_id=${param(view.tenantId)}`,
     `environment_id=${param(view.environmentId)}`,
@@ -139,13 +147,20 @@ export async function readGroupedSnapshot(
     if (value === undefined || f.kind === 'dateRange') continue;
     if (f.kind === 'membership')
       predicates.push(`${column(f.fieldId)}=ANY(${param(value)}::text[])`);
-    else predicates.push(`${column(f.fieldId)}=${param(value)}`);
+    else
+      predicates.push(
+        `${comparable(f.fieldId, column(f.fieldId))} = ${comparable(f.fieldId, param(value))}`,
+      );
   }
   const dims = body.dimensions.map((dim, i) => {
     const field = report.columns.find((c) => c.fieldId === dim.fieldId)!;
+    const raw = column(dim.fieldId);
     const expression =
-      column(dim.fieldId) +
-      (['text', 'choice'].includes(field.type) ? ' COLLATE "C"' : '');
+      field.type === 'date'
+        ? `to_char(${raw}, 'YYYY-MM-DD')`
+        : field.type === 'instant' && field.basis === 'civilDate'
+          ? `to_char(${raw} AT TIME ZONE 'UTC', 'YYYY-MM-DD')`
+          : comparable(dim.fieldId, raw);
     return expression + ' AS d' + i;
   });
   const names = dims.map((_, i) => 'd' + i);
