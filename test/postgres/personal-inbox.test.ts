@@ -464,18 +464,24 @@ test('personal inbox on committed discussion occurrences', async (t) => {
               "UPDATE public.fixture_discussion_messages SET mentions='{}' WHERE message_id=$1",
               [message],
             );
-            await admin.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
-            try {
-              await assert.rejects(
-                admin.query(
-                  "SELECT platform.personal_inbox_mark($1,$2,gen_random_uuid(),'archive')",
-                  [west, DISCUSSION_INBOX_CHANNEL],
-                ),
-                /inbox.requiresReadCommitted/,
-                'archive accepted a stale snapshot',
-              );
-            } finally {
-              await admin.query('ROLLBACK');
+            for (const stmt of [
+              "SELECT platform.personal_inbox_mark(NULL,NULL,NULL,'archive')",
+              'SELECT platform.enqueue_discussion_notice(NULL,NULL,NULL,NULL)',
+              'SELECT platform.claim_discussion_notice()',
+              'SELECT platform.acknowledge_discussion_notice(NULL,NULL,NULL,NULL)',
+              'SELECT platform.lock_discussion_notice(NULL,NULL,NULL)',
+              "SELECT platform.reconcile_discussion_notice(NULL,NULL,NULL,'{}')",
+            ]) {
+              await admin.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
+              try {
+                await assert.rejects(
+                  admin.query(stmt),
+                  /inbox.requiresReadCommitted/,
+                  stmt + ' accepted a stale snapshot',
+                );
+              } finally {
+                await admin.query('ROLLBACK');
+              }
             }
             await assert.rejects(
               admin.query(
@@ -489,6 +495,41 @@ test('personal inbox on committed discussion occurrences', async (t) => {
         await t.test(
           'runtime cannot publish or inspect either private relation',
           async () => {
+            const policies =
+              await admin.query(`SELECT relname,relrowsecurity,relforcerowsecurity FROM pg_class WHERE
+              oid IN ('platform.personal_inbox'::regclass,'platform.discussion_notice_occurrences'::regclass) ORDER BY relname`);
+            assert.equal(policies.rowCount, 2);
+            for (const table of policies.rows) {
+              assert.equal(
+                table.relrowsecurity,
+                true,
+                table.relname + ' lacks RLS',
+              );
+              assert.equal(
+                table.relforcerowsecurity,
+                true,
+                table.relname + ' lacks forced RLS',
+              );
+              const grants = await admin.query(
+                `SELECT role FROM unnest(ARRAY['north_star_runtime','north_star_workflow_worker','north_star_communication_operation']) role
+                WHERE has_any_column_privilege(role,$1,'SELECT,INSERT,UPDATE,REFERENCES') OR has_table_privilege(role,$1,'DELETE,TRUNCATE,TRIGGER')`,
+                ['platform.' + String(table.relname)],
+              );
+              assert.deepEqual(
+                grants.rows,
+                [],
+                'private inbox table has direct grants',
+              );
+            }
+            assert.equal(
+              (
+                await admin.query(
+                  'SELECT count(*)::integer AS n FROM platform.trust_outbox',
+                )
+              ).rows[0]!.n,
+              0,
+              'internal notice created an outward intent',
+            );
             for (const query of [
               'SELECT * FROM platform.personal_inbox',
               'SELECT * FROM platform.discussion_notice_occurrences',
