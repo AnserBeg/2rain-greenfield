@@ -6,7 +6,9 @@
 
 The Invoice date query uses `nsm_i_kyu3zu6vouaduhmjm5lbunvswejls2t4ls5svgycueyib3fqieka`. The provider probe, row policy, group ceiling, unavailable index, and pre-key byte identity have focused PostgreSQL/compiler witnesses. The actual Invoice page and downloaded bytes share the registered query. A failed audit append withholds the download. [Regression controls](../../../test/evidence/REPORTS-1-s1.expected-red.json)
 
-The preview and approved locking build both call `north_star_internal.module_table_exceeds(text, integer)`. CUSTOMIZE-5 slice 1 supplies this pooled-table probe. On main `630e2aa6` the probe is absent and a publish requiring that build refuses with the keys. This dependency holds the slice outside the merge line.
+The preview and approved locking build both call `north_star_internal.module_table_exceeds(text, integer)`. CUSTOMIZE-5 slice 1 supplies this pooled-table probe. On main `630e2aa6` the probe is absent and a publish requiring that build refuses with the keys. The hosted run passed the archived production query, persisted pre-key replay, historical Invoice source upgrade and PostgreSQL candidate-bound proof. It refused the Invoice report at preview with REPORT_INDEX_UNAVAILABLE. CUSTOMIZE-5 must land before REPORTS-1 enters the merge line.
+
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44888115668
 
 ## Slice plan
 
