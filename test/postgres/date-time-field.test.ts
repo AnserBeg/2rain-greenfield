@@ -588,6 +588,19 @@ test(
                 )
               ).rows[0]!.n,
             );
+          // Approval runs release verification, which may add rows of its
+          // own; this sets the physical count exactly by adding or removing
+          // this tenant's bulk rows.
+          const settle = async (target: number) => {
+            const delta = target - (await count());
+            if (delta > 0) await fill(delta, 'own');
+            if (delta < 0)
+              await pool.query(
+                `DELETE FROM ${table} WHERE record_id IN (SELECT record_id FROM ${table} WHERE ${nameColumn} LIKE 'Bulk %' AND tenant_id = (SELECT tenant_id FROM ${table} WHERE record_id = $1) LIMIT $2)`,
+                [seeded.readBack!.recordId, -delta],
+              );
+            assert.equal(await count(), target);
+          };
           // Release verification may leave rows of its own; fill up to 9,000
           // this tenant can see, then 1,001 of another tenant's.
           await fill(9_000 - (await count()), 'own');
@@ -601,6 +614,7 @@ test(
           );
           assert.ok(field.status === 'drafted', JSON.stringify(field));
           await opened.service.approve(field.patchId);
+          await settle(10_001);
           await assert.rejects(
             opened.service.activate(field.patchId),
             (error) => {
@@ -638,10 +652,7 @@ test(
           assert.equal(updated.outcome, 'succeeded');
           // At exactly the ceiling the attempt resumes and builds the index.
           // A concurrent writer measures how long the build blocks writes.
-          await pool.query(
-            `DELETE FROM ${table} WHERE record_id IN (SELECT record_id FROM ${table} WHERE ${nameColumn} LIKE 'Bulk %' LIMIT 1)`,
-          );
-          assert.equal(await count(), 10_000);
+          await settle(10_000);
           t.diagnostic(`ceiling: at the ceiling ${new Date().toISOString()}`);
           const writer = await pool.connect();
           let writing = true;
