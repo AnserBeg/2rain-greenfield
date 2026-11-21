@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 
+import { rolePool } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import {
   fulfillmentColumn,
   fulfillmentTable,
@@ -562,81 +563,92 @@ test(
       const runtime = fixture.app.runtime;
       const binding = stockCountBinding(await governedStorageTarget());
       assert.ok(binding);
-      await runtime.entry.run({ headers: {} }, async (view) => {
-        const context = trustedContextForRequestRuntimeView(view);
-        const input = {
-          expectedRevision: foreign.revision,
-          recordId: foreign.recordId,
-        };
-        const definition = parsePinnedOperationCatalog(
-          view.projections.operation.payload,
-        ).find(
-          (operation) =>
-            operation.operationId === `${ns}:operation.stock_count_start`,
-        );
-        assert.equal(definition?.effect.kind, 'registeredCapabilityEffect');
-        const readBackDefinition = registeredQueryFromPinnedView(
-          view,
-          `${ns}:query.stock_count_get`,
-        );
-        assert.ok(readBackDefinition);
-        const actorIssuer = new TrustedActorEnvelopeIssuer({
-          async resolve() {
-            return {
-              approvingHumanId: null,
-              delegation: null,
-              executionPrincipal: {
-                kind: 'HUMAN',
-                principalId: context.principalId,
-              },
-              initiatingHumanId: context.principalId,
-              subject: null,
-            };
-          },
-        });
-        await assert.rejects(
-          executeStockCountChange(
-            {
-              actorIssuer,
-              currentInstant: () => new Date().toISOString(),
-              pool: fixture.pool,
-              projection: () => {
-                throw new Error('Start uses the resolved storage binding');
-              },
-              queryGateway: runtime.queryGateway,
-              releaseId: view.release.releaseId,
-              releaseContentHash: view.release.contentHash,
+      const { user, host, port, database } = fixture.pool.options;
+      const runtimePool = rolePool(
+        `postgresql://${String(user)}@${String(host)}:${String(port)}/${String(database)}`,
+        'north_star_runtime',
+        1,
+      );
+      try {
+        await runtime.entry.run({ headers: {} }, async (view) => {
+          const context = trustedContextForRequestRuntimeView(view);
+          const input = {
+            expectedRevision: foreign.revision,
+            recordId: foreign.recordId,
+          };
+          const definition = parsePinnedOperationCatalog(
+            view.projections.operation.payload,
+          ).find(
+            (operation) =>
+              operation.operationId === `${ns}:operation.stock_count_start`,
+          );
+          assert.equal(definition?.effect.kind, 'registeredCapabilityEffect');
+          const readBackDefinition = registeredQueryFromPinnedView(
+            view,
+            `${ns}:query.stock_count_get`,
+          );
+          assert.ok(readBackDefinition);
+          const actorIssuer = new TrustedActorEnvelopeIssuer({
+            async resolve() {
+              return {
+                approvingHumanId: null,
+                delegation: null,
+                executionPrincipal: {
+                  kind: 'HUMAN',
+                  principalId: context.principalId,
+                },
+                initiatingHumanId: context.principalId,
+                subject: null,
+              };
             },
-            binding,
-            {
-              authorization: {
-                decisionInput: { legalEntityId: fixture.scope },
-                legalEntityReadScopeIds: [fixture.scope],
-                readBackArguments: { recordId: input.recordId },
+          });
+          await assert.rejects(
+            executeStockCountChange(
+              {
+                actorIssuer,
+                currentInstant: () => new Date().toISOString(),
+                pool: runtimePool,
+                projection: () => {
+                  throw new Error('Start uses the resolved storage binding');
+                },
+                queryGateway: runtime.queryGateway,
+                releaseId: view.release.releaseId,
+                releaseContentHash: view.release.contentHash,
               },
-              channel: 'UI',
-              context,
-              definition: definition as RegisteredCapabilityOperationDefinition,
-              idempotencyKey: randomUUID(),
+              binding,
+              {
+                authorization: {
+                  decisionInput: { legalEntityId: fixture.scope },
+                  legalEntityReadScopeIds: [fixture.scope],
+                  readBackArguments: { recordId: input.recordId },
+                },
+                channel: 'UI',
+                context,
+                definition:
+                  definition as RegisteredCapabilityOperationDefinition,
+                idempotencyKey: randomUUID(),
+                input,
+                inputDigest: 'a'.repeat(64),
+                policyVersion: view.entryPolicyVersion,
+                policyEvaluatorVersion:
+                  SEMANTIC_OPERATION_POLICY_EVALUATOR_VERSION,
+                readBackDefinition,
+                view,
+              },
+              'start',
               input,
-              inputDigest: 'a'.repeat(64),
-              policyVersion: view.entryPolicyVersion,
-              policyEvaluatorVersion:
-                SEMANTIC_OPERATION_POLICY_EVALUATOR_VERSION,
-              readBackDefinition,
-              view,
-            },
-            'start',
-            input,
-            fixture.scope,
-          ),
-          refusal(
-            'INVENTORY_POSTING_INPUT_INVALID',
-            /the count scope changed after authorization/u,
-          ),
-          'the route must recheck the company under the row lock',
-        );
-      });
+              fixture.scope,
+            ),
+            refusal(
+              'INVENTORY_POSTING_INPUT_INVALID',
+              /the count scope changed after authorization/u,
+            ),
+            'the route must recheck the company under the row lock',
+          );
+        });
+      } finally {
+        await runtimePool.end();
+      }
       assert.deepEqual(await readForeign.stored(foreign.recordId), before);
     });
   },
