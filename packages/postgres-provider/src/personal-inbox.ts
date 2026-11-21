@@ -119,12 +119,46 @@ export function discussionInboxPort(
   };
 }
 
-export interface PersonalInboxEntry {
+interface InboxRow {
   entry_id: string;
   thread_id: string;
   message_id: string;
   reasons: DiscussionNoticeReason[];
   unread: boolean;
+}
+
+export interface PersonalInboxEntry {
+  readonly id: string;
+  readonly preview: string;
+  readonly reasons: readonly DiscussionNoticeReason[];
+  readonly unread: boolean;
+  readonly link: DiscussionMessageRef;
+}
+
+function displayNotice(
+  row: InboxRow,
+  person: TrustedRequestContext,
+  companyId: string,
+): PersonalInboxEntry {
+  const preview = row.reasons.includes('mention')
+    ? row.reasons.includes('reply')
+      ? 'You were mentioned in a reply to your message.'
+      : 'You were mentioned in a discussion.'
+    : 'Someone replied to your message.';
+  return {
+    id: row.entry_id,
+    preview,
+    reasons: row.reasons,
+    unread: row.unread,
+    link: {
+      channel: DISCUSSION_INBOX_CHANNEL,
+      tenantId: person.tenantId,
+      environmentId: person.environmentId,
+      companyId,
+      threadId: row.thread_id,
+      messageId: row.message_id,
+    },
+  };
 }
 
 /** Read and receipt operations always enter with the authenticated person.
@@ -137,31 +171,26 @@ export class PostgresPersonalInbox {
     companyId: string,
     before: string | null = null,
   ) {
-    return withTrustedRequestTransaction(
-      this.pool,
-      person,
-      async (client) =>
-        (
-          await client.query<PersonalInboxEntry>(
-            'SELECT * FROM platform.personal_inbox_page($1,$2,$3)',
-            [companyId, DISCUSSION_INBOX_CHANNEL, before],
-          )
-        ).rows,
+    return withTrustedRequestTransaction(this.pool, person, async (client) =>
+      (
+        await client.query<InboxRow>(
+          'SELECT * FROM platform.personal_inbox_page($1,$2,$3)',
+          [companyId, DISCUSSION_INBOX_CHANNEL, before],
+        )
+      ).rows.map((row) => displayNotice(row, person, companyId)),
     );
   }
 
   entry(person: TrustedRequestContext, companyId: string, entryId: string) {
-    return withTrustedRequestTransaction(
-      this.pool,
-      person,
-      async (client) =>
-        (
-          await client.query<PersonalInboxEntry>(
-            'SELECT * FROM platform.personal_inbox_entry($1,$2,$3)',
-            [companyId, DISCUSSION_INBOX_CHANNEL, entryId],
-          )
-        ).rows[0] ?? null,
-    );
+    return withTrustedRequestTransaction(this.pool, person, async (client) => {
+      const {
+        rows: [row],
+      } = await client.query<InboxRow>(
+        'SELECT * FROM platform.personal_inbox_entry($1,$2,$3)',
+        [companyId, DISCUSSION_INBOX_CHANNEL, entryId],
+      );
+      return row ? displayNotice(row, person, companyId) : null;
+    });
   }
 
   unread(person: TrustedRequestContext, companyId: string) {

@@ -150,6 +150,22 @@ test('personal inbox on committed discussion occurrences', async (t) => {
             });
             const [notice] = await inbox.page(reader, west);
             assert.deepEqual(notice?.reasons, ['mention']);
+            assert.equal(
+              notice?.preview,
+              'You were mentioned in a discussion.',
+            );
+            assert.deepEqual(notice?.link, {
+              tenantId: tId,
+              environmentId: env,
+              companyId: west,
+              threadId: thread,
+              messageId: message,
+              channel: DISCUSSION_INBOX_CHANNEL,
+            });
+            assert.equal(
+              (await inbox.page(parentReader, west))[0]?.preview,
+              'You were mentioned in a reply to your message.',
+            );
             assert.deepEqual(
               (await inbox.page(parentReader, west))[0]?.reasons,
               ['mention', 'reply'],
@@ -157,7 +173,7 @@ test('personal inbox on committed discussion occurrences', async (t) => {
             assert.deepEqual(await inbox.page(await person(author), west), []);
             assert.equal(await inbox.unread(reader, west), '1');
             assert.equal(
-              await inbox.mark(reader, west, notice!.entry_id, 'read'),
+              await inbox.mark(reader, west, notice!.id, 'read'),
               true,
             );
             await expire();
@@ -187,7 +203,7 @@ test('personal inbox on committed discussion occurrences', async (t) => {
             );
             assert.equal(await inbox.unread(reader, west), '0');
             assert.equal(
-              (await inbox.entry(reader, west, notice!.entry_id))?.unread,
+              (await inbox.entry(reader, west, notice!.id))?.unread,
               false,
             );
             await assert.rejects(
@@ -201,11 +217,11 @@ test('personal inbox on committed discussion occurrences', async (t) => {
           async () => {
             const [entry] = await inbox.page(reader, west);
             assert.equal(
-              await inbox.entry(parentReader, west, entry!.entry_id),
+              await inbox.entry(parentReader, west, entry!.id),
               null,
             );
             assert.equal(
-              await inbox.mark(parentReader, west, entry!.entry_id, 'archive'),
+              await inbox.mark(parentReader, west, entry!.id, 'archive'),
               false,
             );
             assert.deepEqual(await inbox.page(reader, east), []);
@@ -214,12 +230,9 @@ test('personal inbox on committed discussion occurrences', async (t) => {
               'UPDATE platform.current_policy_memberships SET legal_entity_id=$1 WHERE principal_id=$2',
               [east, mentioned],
             );
+            assert.equal(await inbox.entry(reader, west, entry!.id), null);
             assert.equal(
-              await inbox.entry(reader, west, entry!.entry_id),
-              null,
-            );
-            assert.equal(
-              await inbox.mark(reader, west, entry!.entry_id, 'archive'),
+              await inbox.mark(reader, west, entry!.id, 'archive'),
               false,
             );
             await admin.query(
@@ -244,7 +257,7 @@ test('personal inbox on committed discussion occurrences', async (t) => {
                 (
                   await admin.query(
                     'SELECT * FROM platform.personal_inbox_entry($1,$2,$3)',
-                    [west, channel, entry!.entry_id],
+                    [west, channel, entry!.id],
                   )
                 ).rowCount,
                 0,
@@ -264,10 +277,7 @@ test('personal inbox on committed discussion occurrences', async (t) => {
               [message],
             );
             assert.deepEqual(await inbox.page(reader, west), []);
-            assert.equal(
-              await inbox.entry(reader, west, entry!.entry_id),
-              null,
-            );
+            assert.equal(await inbox.entry(reader, west, entry!.id), null);
             assert.equal(await inbox.unread(parentReader, west), '1');
             await reconcileNextDiscussionNotice({
               ...port,
@@ -306,7 +316,7 @@ test('personal inbox on committed discussion occurrences', async (t) => {
             );
             const [reply] = await inbox.page(parentReader, west);
             assert.equal(
-              await inbox.mark(parentReader, west, reply!.entry_id, 'archive'),
+              await inbox.mark(parentReader, west, reply!.id, 'archive'),
               true,
             );
             await publish(randomUUID());
@@ -342,11 +352,7 @@ test('personal inbox on committed discussion occurrences', async (t) => {
             );
             const first = await inbox.page(reader, west);
             assert.equal(first.length, 25, 'SQL page exceeded its fixed size');
-            const second = await inbox.page(
-              reader,
-              west,
-              first.at(-1)!.entry_id,
-            );
+            const second = await inbox.page(reader, west, first.at(-1)!.id);
             assert.equal(second.length, 25);
             const ordered = await admin.query<{ entry_id: string }>(
               `SELECT entry_id FROM platform.personal_inbox WHERE recipient_id=$1
@@ -354,7 +360,7 @@ test('personal inbox on committed discussion occurrences', async (t) => {
               [mentioned],
             );
             assert.deepEqual(
-              [...first, ...second].map((row) => row.entry_id),
+              [...first, ...second].map((row) => row.id),
               ordered.rows.map((row) => row.entry_id),
               'keyset repeated or reordered entries',
             );
@@ -370,10 +376,10 @@ test('personal inbox on committed discussion occurrences', async (t) => {
             const cursor = first.at(-1)!;
             await admin.query(
               "UPDATE public.fixture_discussion_messages SET mentions='{}' WHERE message_id=$1",
-              [cursor.message_id],
+              [cursor.link.messageId],
             );
             assert.deepEqual(
-              await inbox.page(reader, west, cursor.entry_id),
+              await inbox.page(reader, west, cursor.id),
               [],
               'a withdrawn notice positioned the inbox',
             );
