@@ -284,7 +284,7 @@ test('inventory migration owns exactly two platform relations and no managed-mod
         const migrations = await loadMigrations(checkedInMigrations);
         assert.equal(
           migrations.at(-1)?.name,
-          '0064_staff_decision_corrections.sql',
+          '0065_billing_publication_xid.sql',
         );
         const inventoryMigrationIndex = migrations.findIndex(
           (migration) =>

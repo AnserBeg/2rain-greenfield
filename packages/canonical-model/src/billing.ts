@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const BILLING_CALCULATION_VERSION = 'northstar.billing-calculation/v1';
+export const BILLING_CALCULATION_VERSION = 'northstar.billing-calculation/v2';
 export const BILLING_READER = 30;
 export const BILLING_INTERVAL_READER = 36;
 export const BILLING_QUOTE_CAPABILITY = 'northstar.billing:capability.quote';
