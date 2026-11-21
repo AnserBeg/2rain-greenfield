@@ -1,0 +1,2 @@
+{"at":"2026-11-21T19:24:23.137Z","kind":"host","attempt":1,"load":1.73,"waitedMs":1}
+{"at":"2026-11-21T19:24:26.561Z","kind":"case","id":"M01","split":"dev","category":"module","request":"Add a Service job record with a job name, customer site, scheduled date, estimated hours and whether it's billable.","base":[]}
