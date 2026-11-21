@@ -46,10 +46,14 @@ CREATE TYPE platform.discussion_notice_source AS (
   author_id uuid, mentioned_ids uuid[], parent_id uuid, parent_author_id uuid
 );
 CREATE FUNCTION north_star_internal.inbox_source(c uuid, th uuid, msg uuid)
-RETURNS platform.discussion_notice_source LANGUAGE plpgsql STABLE SET search_path = pg_catalog, pg_temp AS $$ BEGIN
+RETURNS platform.discussion_notice_source LANGUAGE plpgsql STABLE SET search_path = pg_catalog, pg_temp AS $$
+DECLARE source platform.discussion_notice_source; BEGIN
   IF to_regprocedure('north_star_internal.discussion_notice_source_v1(uuid,uuid,uuid,uuid,uuid)') IS NULL THEN RETURN NULL; END IF;
-  RETURN north_star_internal.discussion_notice_source_v1(north_star_internal.trusted_tenant_id(),
-    north_star_internal.trusted_environment_id(),c,th,msg); END $$;
+  source:=north_star_internal.discussion_notice_source_v1(north_star_internal.trusted_tenant_id(),
+    north_star_internal.trusted_environment_id(),c,th,msg);
+  IF (SELECT count(DISTINCT person) FROM unnest(source.mentioned_ids) person)>10 THEN
+    RAISE EXCEPTION 'inbox.recipientLimit'; END IF;
+  RETURN source; END $$;
 CREATE FUNCTION north_star_internal.inbox_member(c uuid, person uuid) RETURNS boolean
 LANGUAGE sql STABLE SET search_path = pg_catalog, pg_temp AS $$
   SELECT EXISTS (SELECT FROM platform.staff_accounts s
@@ -148,7 +152,6 @@ DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_inte
   PERFORM platform.lock_discussion_notice(c,th,msg);
   s:=north_star_internal.inbox_source(c,th,msg);
   candidates:=ARRAY(SELECT DISTINCT p FROM unnest(array_append(s.mentioned_ids,s.parent_author_id)) p WHERE p IS NOT NULL ORDER BY p);
-  IF cardinality(candidates)>11 THEN RAISE EXCEPTION 'inbox.recipientLimit'; END IF;
   decision:='{}';
   FOREACH person IN ARRAY candidates LOOP
     reasons:=north_star_internal.inbox_reasons(c,th,msg,person);
@@ -168,14 +171,19 @@ DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_inte
 CREATE FUNCTION north_star_internal.personal_inbox_rows(c uuid, via text, before_id uuid, exact_id uuid, unread_only boolean, row_limit integer)
 RETURNS TABLE(entry_id uuid,thread_id uuid,message_id uuid,reasons text[],unread boolean)
 LANGUAGE sql STABLE SET search_path = pg_catalog, pg_temp AS $$
+  WITH cursor_entry AS MATERIALIZED (
+    SELECT b.entry_number FROM platform.personal_inbox b
+    WHERE (b.tenant_id,b.environment_id,b.company_id,b.recipient_id,b.channel,b.entry_id)=
+      (north_star_internal.trusted_tenant_id(),north_star_internal.trusted_environment_id(),c,north_star_internal.address_principal(),via,before_id)
+      AND b.archived_at IS NULL AND cardinality(b.reasons)>0
+      AND cardinality(north_star_internal.inbox_reasons(c,b.thread_id,b.message_id,b.recipient_id))>0
+  )
   SELECT n.entry_id,n.thread_id,n.message_id,r.reasons,n.read_at IS NULL
   FROM platform.personal_inbox n
   CROSS JOIN LATERAL (SELECT north_star_internal.inbox_reasons(c,n.thread_id,n.message_id,n.recipient_id) AS reasons OFFSET 0) r
   WHERE (n.tenant_id,n.environment_id,n.company_id,n.recipient_id,n.channel)=(north_star_internal.trusted_tenant_id(),
     north_star_internal.trusted_environment_id(),c,north_star_internal.address_principal(),via)
-    AND (before_id IS NULL OR n.entry_number<(SELECT b.entry_number FROM platform.personal_inbox b
-      WHERE (b.tenant_id,b.environment_id,b.company_id,b.recipient_id,b.channel,b.entry_id)=
-        (n.tenant_id,n.environment_id,n.company_id,n.recipient_id,n.channel,before_id))) AND (exact_id IS NULL OR n.entry_id=exact_id)
+    AND (before_id IS NULL OR n.entry_number<(SELECT entry_number FROM cursor_entry)) AND (exact_id IS NULL OR n.entry_id=exact_id)
     AND (NOT unread_only OR n.read_at IS NULL)
     AND via='staffDiscussion/v1' AND n.archived_at IS NULL AND cardinality(n.reasons)>0 AND cardinality(r.reasons)>0
   ORDER BY n.entry_number DESC LIMIT row_limit

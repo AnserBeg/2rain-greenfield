@@ -366,6 +366,16 @@ test('personal inbox on committed discussion occurrences', async (t) => {
               [],
               'a copied cursor positioned a different inbox',
             );
+            const cursor = first.at(-1)!;
+            await admin.query(
+              "UPDATE public.fixture_discussion_messages SET mentions='{}' WHERE message_id=$1",
+              [cursor.message_id],
+            );
+            assert.deepEqual(
+              await inbox.page(reader, west, cursor.entry_id),
+              [],
+              'a withdrawn notice positioned the inbox',
+            );
             assert.equal(
               (
                 await admin.query(
