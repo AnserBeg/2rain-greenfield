@@ -488,7 +488,7 @@ export class PostgresModuleRuntimeInterpreter
           revision: 1,
           changes: [
             {
-              fieldId: 'northstar.runtime:field.issued_digest',
+              fieldId: 'outputDigest',
               classification: 'INTERNAL',
               oldState: { state: 'ABSENT' },
               newState: { state: 'VALUE', value: digest },

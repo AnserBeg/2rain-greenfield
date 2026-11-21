@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Pool } from 'pg';
+import type { StorageTargetPayloadV1 } from '../../packages/compiler/src/storage.js';
+import type { ReportRequest } from '../../packages/runtime/src/declared-report.js';
 import {
   openCustomizeService,
   startComposedApplication,
@@ -351,9 +353,7 @@ test(
               await import('../../packages/canonical-model/src/declared-report.js')
             ).DECLARED_REPORT_READER,
           );
-          const types = projectionPayload<
-            import('../../packages/compiler/src/storage.js').StorageTargetPayloadV1
-          >(
+          const types = projectionPayload<StorageTargetPayloadV1>(
             parseCompiledApplication(compiledApplication).application.compiled,
             PROJECTION_FAMILY_IDS.storageTarget,
           );
@@ -448,11 +448,7 @@ test(
             },
             pageSize: 2,
           };
-          const run = (
-            overrides: Partial<
-              import('../../packages/runtime/src/declared-report.js').ReportRequest
-            > = {},
-          ) =>
+          const run = (overrides: Partial<ReportRequest> = {}) =>
             app.runtime.entry.run({}, (view) =>
               app.runtime.queryGateway.invokeGrouped(view, {
                 ...request,
@@ -518,11 +514,38 @@ test(
             [file.receiptId],
           );
           assert.equal(receipt.rows[0]?.execution_principal_id, principalId);
-          assert.ok(
-            JSON.stringify(receipt.rows[0]?.metadata).includes(
-              createHash('sha256').update(file.bytes).digest('hex'),
-            ),
+          const evidence = receipt.rows[0]!.metadata;
+          assert.equal(
+            evidence.outputDigest.value,
+            createHash('sha256').update(file.bytes).digest('hex'),
           );
+          assert.equal(evidence.byteCount.value, Buffer.byteLength(file.bytes));
+          assert.equal(evidence.companyId.value, north);
+          assert.equal(evidence.reportId.value, revision.reportId);
+          assert.equal(evidence.revisionId.value, revision.revisionId);
+          assert.deepEqual(
+            [
+              evidence.facts.value,
+              evidence.groups.value,
+              evidence.totals.value,
+            ],
+            [6, 4, 4],
+          );
+          const blocker = await pool.connect();
+          try {
+            await blocker.query('BEGIN');
+            await blocker.query(
+              'LOCK TABLE ' + table + ' IN ACCESS EXCLUSIVE MODE',
+            );
+            assert.deepEqual(
+              await run(),
+              { kind: 'narrow' },
+              'a PostgreSQL statement timeout must ask for a narrower filter',
+            );
+          } finally {
+            await blocker.query('ROLLBACK');
+            blocker.release();
+          }
           // Refuse this scoped issuance at the real append. The transport must receive no file.
           await pool.query(
             "ALTER TABLE platform.trust_action_invocations ADD CONSTRAINT report_audit_unavailable CHECK (action_id <> 'northstar.runtime:action.issue_report_csv') NOT VALID",

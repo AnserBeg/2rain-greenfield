@@ -7,12 +7,18 @@ import {
   parseAuthoredApplicationPackageJson,
   ReportChoicesSchema,
 } from '../../packages/canonical-model/src/index.js';
-import { applyCustomizationPatches } from '../../packages/customization/src/index.js';
+import {
+  applyCustomizationPatches,
+  parseSerializedRelease,
+} from '../../packages/customization/src/index.js';
 import {
   draftReport,
   reportTargets,
 } from '../../packages/customization/src/report-revision.js';
-import { lowerStorageTargetV1 } from '../../packages/compiler/src/storage.js';
+import type { StorageTargetPayloadV1 } from '../../packages/compiler/src/storage.js';
+import { PROJECTION_FAMILY_IDS } from '../../packages/compiler/src/index.js';
+import { singleTransitionApplication } from '../helpers/application-without-line-create-values.js';
+import { projectionPayload } from '../compiler/helpers.js';
 import { lowerDeclaredReports } from '../../packages/compiler/src/declared-reports.js';
 import { readGroupedSnapshot } from '../../packages/postgres-provider/src/grouped-report.js';
 import { REPORT_READER_POLICY } from '../../packages/runtime/src/declared-report.js';
@@ -58,7 +64,11 @@ test('the PostgreSQL Invoice candidate probe uses the named date index and stops
   const applied = applyCustomizationPatches(firstPartyAuthored, [patch]);
   assert.ok(applied.status === 'applied');
   const definition = normalize(applied.authored);
-  const storage = lowerStorageTargetV1(definition);
+  const candidate = singleTransitionApplication(applied.authored);
+  const storage = projectionPayload<StorageTargetPayloadV1>(
+    parseSerializedRelease(candidate.release.application).compiled,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
   const entity = storage.entities.find(
     (e) => e.entityId === target.source.entityId,
   )!;
