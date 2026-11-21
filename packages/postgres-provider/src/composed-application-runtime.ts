@@ -1,3 +1,11 @@
+import {
+  releaseDiffBinding,
+  type ReleaseDiffBinding,
+} from './release-diff-binding.js';
+export {
+  releaseDiffBinding,
+  type ReleaseDiffBinding,
+} from './release-diff-binding.js';
 import type { AddressGateway } from '../../runtime/src/address-gateway.js';
 import type { DocumentGateway } from '../../runtime/src/document-gateway.js';
 import {
@@ -38,12 +46,8 @@ import type {
 import {
   PROJECTION_FAMILY_IDS,
   STORAGE_TRANSITION_ENVELOPE_VERSION,
-  diffCompiledReleases,
 } from '@north-star/compiler';
-import {
-  renderCompiledDiff,
-  type AcknowledgementInput,
-} from '@north-star/customization';
+import { type AcknowledgementInput } from '@north-star/customization';
 import {
   CustomizationLineageError,
   readCustomizationLineage,
@@ -2282,36 +2286,6 @@ async function persistFreshTenantInstallEvidence(
   });
 }
 
-/**
- * What the approver of one release edge is shown and what the approval binds:
- * the compiler's canonical diff digest and the digest of the plain-language
- * rendering of it (CUSTOMIZE). A reverse edge -- a rollback -- binds the
- * forward diff it undoes, read backwards.
- */
-export interface ReleaseDiffBinding {
-  readonly canonicalDiffDigest: string;
-  readonly renderedDigest: string;
-  readonly renderedText: string;
-  readonly transitionPlanDigest: string | null;
-}
-
-export function releaseDiffBinding(
-  source: ParsedRelease,
-  target: ParsedRelease,
-  direction: 'forward' | 'reverse' = 'forward',
-): ReleaseDiffBinding {
-  const [from, to] =
-    direction === 'forward' ? [source, target] : [target, source];
-  const diff = diffCompiledReleases(from.compiled, to.compiled);
-  const rendered = renderCompiledDiff(from, to, diff, direction);
-  return Object.freeze({
-    canonicalDiffDigest: diff.canonicalDiffDigest,
-    renderedDigest: rendered.renderedDigest,
-    renderedText: rendered.text,
-    transitionPlanDigest: diff.transitionPlanDigest,
-  });
-}
-
 async function approveInitialRelease(
   pool: pg.Pool,
   context: TrustedRequestContext,
@@ -2483,6 +2457,38 @@ export async function approveReleaseWithoutStorageTransition(
   freshTenantBinding?: FreshTenantPreparationBinding,
   customizationUpgradeId?: MintedUuid,
 ): Promise<MintedUuid> {
+  const preparationId = await prepareReleaseWithoutStorageTransition(
+    pool,
+    context,
+    pointer,
+    sourceReleaseRoot,
+    target,
+    compiled,
+    diffBinding,
+    reverseAuthorization,
+    freshTenantBinding,
+  );
+  return createApproval(
+    pool,
+    context,
+    approverContext,
+    preparationId,
+    target.releaseId,
+    customizationUpgradeId,
+    reverseAuthorization?.recoveryOfAttemptId,
+  );
+}
+export async function prepareReleaseWithoutStorageTransition(
+  pool: pg.Pool,
+  context: TrustedRequestContext,
+  pointer: PointerState,
+  sourceReleaseRoot: string,
+  target: PersistedReleaseIdentity,
+  compiled: CompileSuccess,
+  diffBinding: ReleaseDiffBinding,
+  reverseAuthorization?: ReleaseReverseTransitionAuthorization,
+  freshTenantBinding?: FreshTenantPreparationBinding,
+): Promise<MintedUuid> {
   if (pointer.releaseId === null) {
     throw new Error('release advancement requires an active source release');
   }
@@ -2567,15 +2573,7 @@ export async function approveReleaseWithoutStorageTransition(
       transitionPlanDigest: null,
     });
   });
-  return createApproval(
-    pool,
-    context,
-    approverContext,
-    preparationId,
-    target.releaseId,
-    customizationUpgradeId,
-    reverseAuthorization?.recoveryOfAttemptId,
-  );
+  return preparationId;
 }
 
 async function insertReleasePreparation(

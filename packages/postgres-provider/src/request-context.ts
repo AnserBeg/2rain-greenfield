@@ -1,3 +1,4 @@
+import type { MintedUuid } from '@north-star/platform-runtime';
 import { requestDeadline } from '../../runtime/src/request-deadline.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
@@ -706,6 +707,24 @@ export function staffRequestEntry(
       return context;
     }
   })();
+}
+
+/**
+ * Pass the private session binding directly to the database authoring boundary.
+ * A null result identifies a context issued outside staff request entry.
+ */
+export async function recordStaffCustomizationProposal(
+  client: PoolClient,
+  context: TrustedRequestContext,
+  proposal: Readonly<Record<string, unknown>>,
+): Promise<MintedUuid | null> {
+  const session = staffSessions.get(context);
+  if (!session) return null;
+  const { rows } = await client.query<{ patch_id: MintedUuid }>(
+    'SELECT platform.staff_propose_customization($1,$2,$3,$4) AS patch_id',
+    [context.tenantId, context.environmentId, session.digest, proposal],
+  );
+  return rows[0]!.patch_id;
 }
 
 export async function setTrustedIdentity(

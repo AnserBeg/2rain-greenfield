@@ -5,6 +5,11 @@ import test from 'node:test';
 
 import pg from 'pg';
 import { checkReleaseDecisions } from '../helpers/staff-decision-checks.js';
+import { PostgresReleaseActivationService } from '../../packages/postgres-provider/src/release-activation-service.js';
+import {
+  prepareReleaseWithoutStorageTransition,
+  releaseDiffBinding,
+} from '../../packages/postgres-provider/src/composed-application-runtime.js';
 
 import {
   CANONICALIZATION_PROFILE_VERSION,
@@ -1215,8 +1220,25 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
             const scope = await new AuthenticatedRequestEntryAdapter(async () =>
               identity(tenantA, environmentANew, makerA),
             ).enter({});
-            const candidate = minted(randomUUID()),
-              initial = minted(randomUUID());
+            const human = await new AuthenticatedRequestEntryAdapter(async () =>
+              identity(tenantA, environmentANew, approverA),
+            ).enter({});
+            const executor = await new AuthenticatedRequestEntryAdapter(
+              async () =>
+                identity(
+                  tenantA,
+                  environmentANew,
+                  SYSTEM_EXECUTION_PRINCIPAL.principalId,
+                ),
+            ).enter({});
+            const source = minted(randomUUID());
+            const candidate = minted(randomUUID());
+            const initial = minted(randomUUID());
+            const sourceEvidence = verificationEvidenceIdForCandidate(
+              scope,
+              source,
+              bootstrap.releaseRoot,
+            );
             const evidence = verificationEvidenceIdForCandidate(
               scope,
               candidate,
@@ -1226,17 +1248,80 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
               runtimePool,
               repository,
               scope,
+              releaseCommand(
+                scope,
+                source,
+                revisionOne,
+                sourceEvidence,
+                bootstrap,
+              ),
+            );
+            await admitEmptyPlanRelease(
+              runtimePool,
+              repository,
+              scope,
               releaseCommand(scope, candidate, revisionTwo, evidence, vertical),
             );
             await insertInitialPreparation(runtimePool, scope, {
-              compiled: vertical,
-              evidenceId: evidence,
+              compiled: bootstrap,
+              evidenceId: sourceEvidence,
               pointer: await visiblePointer(runtimePool, scope),
               preparationId: initial,
               receiptId: minted(randomUUID()),
-              releaseId: candidate,
+              releaseId: source,
+              bindVerification: true,
               targetRootOverride: null,
             });
+            const { attempt } = await new PostgresReleaseApprovalService(
+              runtimePool,
+            ).createApproval(human, {
+              approvalId: minted(randomUUID()),
+              activationAttemptId: minted(randomUUID()),
+              approvingHumanId: approverA,
+              issuingActorId: approverA,
+              initiatingHumanId: makerA,
+              preparationId: initial,
+              targetReleaseId: source,
+            });
+            await pool.query(
+              'SELECT platform.set_release_executor_authority($1,$2,true,$3,$4)',
+              [
+                tenantA,
+                SYSTEM_EXECUTION_PRINCIPAL.principalId,
+                authorityOperator,
+                randomUUID(),
+              ],
+            );
+            await withTemporaryPointerUpdateGrant(pool, async () => {
+              const result = await new PostgresReleaseActivationService(
+                runtimePool,
+              ).activate(executor, {
+                activationAttemptId: attempt.activationAttemptId,
+              });
+              assert.equal(result.status, 'SWAPPED_VERIFIED');
+            });
+            const pointer = await visiblePointer(runtimePool, scope);
+            const binding = releaseDiffBinding(
+              {
+                compiled: bootstrap,
+                normalizedDefinitionBytes: bootstrapBytes,
+              },
+              { compiled: vertical, normalizedDefinitionBytes: verticalBytes },
+            );
+            const prepare = (diff = binding) =>
+              prepareReleaseWithoutStorageTransition(
+                runtimePool,
+                scope,
+                pointer,
+                bootstrap.releaseRoot,
+                {
+                  releaseId: candidate,
+                  revisionId: revisionTwo,
+                  evidenceId: evidence,
+                },
+                vertical,
+                diff,
+              );
             await checkReleaseDecisions(
               pool,
               connection,
@@ -1246,8 +1331,9 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
                 principal: approverA,
                 company: null,
               },
-              initial,
-              releaseOne,
+              prepare,
+              binding,
+              source,
               candidate,
             );
           },
@@ -1438,6 +1524,7 @@ async function visiblePointer(
 }
 
 interface InitialPreparationFixture {
+  bindVerification?: boolean;
   compiled: CompileSuccess;
   evidenceId: MintedUuid;
   pointer: PointerFixture;
@@ -1511,6 +1598,15 @@ async function insertInitialPreparation(
         digest('executor-not-required-evidence'),
       ],
     );
+    const verificationDigest = fixture.bindVerification
+      ? (
+          await client.query<{ digest: Buffer }>(
+            `SELECT decode(result_set_digest,'hex') AS digest FROM platform.release_verification_evidence
+          WHERE (tenant_id,environment_id,verification_evidence_id)=($1,$2,$3)`,
+            [context.tenantId, context.environmentId, fixture.evidenceId],
+          )
+        ).rows[0]!.digest
+      : digest('verification-evidence');
     await client.query(
       `INSERT INTO platform.release_activation_preparations (
          tenant_id,
@@ -1574,7 +1670,7 @@ async function insertInitialPreparation(
         fixture.compiled.bundle.releaseManifest.compilerSemanticProfileVersion,
         fixture.compiled.bundle.releaseManifest.outputProtocolVersion,
         fixture.evidenceId,
-        digest('verification-evidence'),
+        verificationDigest,
         digest('capability-supported'),
         digest('rendered-diff-evidence'),
         fixture.receiptId,

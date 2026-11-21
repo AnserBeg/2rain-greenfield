@@ -192,6 +192,13 @@ under current authority returns its receipt. A different action cannot reuse it.
 digest from the facts used by the writer. A caller-supplied digest or assertion of freshness cannot
 satisfy this check.
 
+Workflow Cancel uses the existing authorized remedy without a decision proof. It stops work without
+advancing the run fence or authorizing dispatch.
+
+Release and Customize approval creation independently renders the diff from the recorded source
+and candidate releases. The verifier compares the rendered text and both diff digests before it
+records the approval.
+
 Remove the runtime's direct decision writes and access to the old workflow decision function.
 Replace the release-approval insert and workflow decision grant with narrow operations that enforce
 the proof at the database boundary. Apply that same boundary to provider enablement and send
