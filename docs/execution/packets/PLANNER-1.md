@@ -46,28 +46,28 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44880757
 
 ## Slice 1 build checkpoint · 2026-11-21
 
-The many-record Map renders server-side Demo Maps imagery, linked SVG pins and a numbered list. PLANNER-1 owns the viewport contract and fake adapter in the ADR-0080 connector host while CONNECT-1 is inactive. Geoapify sign-off is pending. Reader rungs 40 (viewport) and 41 (Map and Customize) are provisional against main at `af255bf7`. The design moves to ADR-0092 after BOOT-CHECK and ANALYZE-1.
+The many-record Map renders server-side Demo Maps imagery, linked SVG pins and a numbered list. PLANNER-1 owns the viewport contract and fake adapter in the ADR-0080 connector host while CONNECT-1 is inactive. Geoapify sign-off is pending. Reader rungs 40 (viewport) and 41 (Map and Customize) are provisional against main at `af255bf7`. The design moves to ADR-0092 after BOOT-CHECK and ANALYZE-1. The collection Map, ordered overlay and public viewport adapter serve rental deliveries, field service visits and distribution pickups.
 
 | Gate | Evidence at this checkpoint |
 | --- | --- |
-| Paging and order | The actual 7-row limit, global 100 cap and partial-page prompt passed. The PostgreSQL test covers saved view, day and route before the cap, SQL read ceiling, area, cursor and numeric order. Database run pending. |
-| §2a | Chromium with injected rows passed linked pins, map-only navigation, focus, Back, 390 px list-first Tab order and script-off zoom. The database-backed browser test includes drag, cancellation, newest reply and Record navigation. |
-| Company and image | Same-scope changes to each image handle field refuse. Two authorized companies share one raster and quota debit. Removing the company check, putting company in the cache key, or centring on the single stop each failed its test. PostgreSQL company isolation awaits CI. |
+| Paging and order | Seven-row and 100-row page limits and the visible overflow count pass. The PostgreSQL gate covers numeric route order, day, separate companies, area rank, cursor restart, candidate ceiling and a published sales currency filter. |
+| §2a | Chromium with injected rows passed linked pins, a route leg, fragment pan, shell identity, focus, Back, 390 px list-first Tab order and script-off zoom. The database-backed tests cover actual gateway calls, cancelled drag, newest reply, sizes and pin-to-Record navigation. |
+| Company and image | Eight imagery tests passed. Isolated removals of the company binding, public cache sharing, single-stop coarsening, single-call rule and seven raster/deadline checks each failed their test. The served test checks prefetch, company swap and cache reuse against quota rows. |
 | Dispatcher message | Hardcoding 100 made the seven-row overflow assertion fail. The checked-in renderer uses the visible count. |
-| Compatibility and SPEED-1 | The PostgreSQL gate compares definition, manifest and closure bytes, exercises a real query with the archived reader, and meters statements, raw candidate rows and repeated parsing. Database and budget results are pending. |
-| Customize, replay and drafter | Map admission, deterministic replay, the exhaustive replay inventory and both drafter order directions passed. The isolated label-only upgrade compile hit its 90-second production deadline locally. |
+| Compatibility and SPEED-1 | The archived and current compilers reproduced the pre-Map Stop release, root `d9b8ff30` and 23 artifacts. The archived query, stored bytes and warm sparse/full SQL counts and p95 await CI. Other lanes were using Docker. |
+| Customize, replay and drafter | Seven focused Map tests passed, including label-only upgrade for active and retired revisions and both schema-generated draft order directions. The exhaustive replay inventory and its conflicting/compatible Map case also passed. |
 | Rule 12 | 2026-11-21 exception for live eval registration of `addMapViewRevision`. AI-BUILD-1 owns the inventory and registry in PR #136 until merge. |
-| A1 and CI | The active grammar pin reports `UX003_VOCABULARY_DRIFT`. The session mounts the authorized UX skill read-only. The four-file A1 patch passes apply-check and its proposed pin passed the architecture fixture. Slice CI awaits the grammar commit. |
+| A1 and CI | The mounted UX skill is read-only. The actual pin fails `UX003_VOCABULARY_DRIFT`. The four-file patch in `/tmp/PLANNER-1-A1.patch` passes apply-check. The packet full is reserved for the completed grammar commit. |
 
-**Try it yourself** · Run `node --import tsx --test --test-concurrency=1 test/unit/map-imagery.test.ts` for the network-free provider, coarse fit, company authorization, cache reuse and keyboard pan.
+**Try it yourself** · `node --import tsx --test --test-concurrency=1 test/unit/map-imagery.test.ts test/unit/customization-map.test.ts` exercises the fake raster, scope checks, page sizes, route filters, Customize and replay.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "PLANNER-1",
-  "base": "8e811d817c0b1d23044e53b832d683eb4bf8b45a", "head": "ea0fc04345593f4382e41d2486aa8c1447e9f1d0",
+  "base": "af255bf703360090d4dda013c1237234c62996ef", "head": "7bb739e2bb9af4df5d322749249ac4ce1791363b",
   "changedPaths": [
     "apps/web/src/app-server.ts", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/ledger-styles.ts", "apps/web/src/map-view.ts", "apps/web/src/surface-client.ts", "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts",
-    "apps/web/src/workspace-entry.ts", "apps/web/test/browser/planner-map.spec.ts", "docs/decisions/ADR-0036-minimum-client-capability.md", "docs/decisions/ADR-0080-connector-framework.md", "docs/decisions/ADR-0090-map-resource-assignment-and-planner-workspace.md", "docs/execution/ledger.md", "docs/execution/packets/CONNECT-1.md", "docs/execution/packets/PLANNER-1.md",
+    "apps/web/src/workspace-entry.ts", "apps/web/test/browser/planner-map.spec.ts", "docs/decisions/ADR-0036-minimum-client-capability.md", "docs/decisions/ADR-0080-connector-framework.md", "docs/decisions/ADR-0092-map-resource-assignment-and-planner-workspace.md", "docs/execution/ledger.md", "docs/execution/packets/CONNECT-1.md", "docs/execution/packets/PLANNER-1.md",
     "docs/greenfield-north-star-erp-platform-plan.md", "package.json", "packages/canonical-model/src/address.ts", "packages/canonical-model/src/constants.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/map-view.ts", "packages/canonical-model/src/map-viewport.ts", "packages/canonical-model/src/schemas.ts",
     "packages/canonical-model/src/surface-workspace.ts", "packages/compiler/src/address.ts", "packages/compiler/src/projections.ts", "packages/customization/src/ai-draft.ts", "packages/customization/src/apply.ts", "packages/customization/src/board-revision.ts", "packages/customization/src/index.ts", "packages/customization/src/map-revision.ts",
     "packages/customization/src/patch.ts", "packages/customization/src/targets.ts", "packages/customization/src/upgrade-diagnostics.ts", "packages/customization/src/upgrade-replay.ts", "packages/dev-tooling/src/surface-runtime-seam.ts", "packages/postgres-provider/src/address-geocodes.ts", "packages/postgres-provider/src/current-policy.ts", "packages/postgres-provider/src/map-admission.ts",
