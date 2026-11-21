@@ -10,6 +10,7 @@ import { WORKFLOW_PAYLOAD_VERSION } from './workflows.js';
 import {
   CANONICALIZATION_PROFILE_VERSION,
   CONTENT_HASH_ALGORITHM,
+  COMPANY_ACCESS_INDEX,
   CURRENCY_MINOR_UNITS_V0,
   DISCLOSURE_TIERS,
   PROMOTE_STORAGE_CLASS_CAPABILITY_ID,
@@ -2726,14 +2727,31 @@ const authoredV6FieldDefinition = authoredV3FieldDefinition.extend({
   numbering: FieldNumberingSchema.optional(),
 });
 const companyOwnership = z.enum(['entityOwned', 'tenantShared']).optional();
-const normalizedV6EntityDefinition = normalizedEntityDefinition.extend({
+const entityAccess = {
   ...assistantConfirmation,
   companyOwnership,
-});
-const authoredV6EntityDefinition = authoredEntityDefinition.extend({
-  ...assistantConfirmation,
-  companyOwnership,
-});
+  companyAccessIndex: z.literal(COMPANY_ACCESS_INDEX).optional(),
+};
+function validCompanyAccess(entity: {
+  companyOwnership?: string | undefined;
+  companyAccessIndex?: string | undefined;
+}) {
+  return (
+    !entity.companyAccessIndex || entity.companyOwnership === 'entityOwned'
+  );
+}
+const normalizedV6EntityDefinition = normalizedEntityDefinition
+  .extend(entityAccess)
+  .refine(
+    validCompanyAccess,
+    'A company access index requires company ownership.',
+  );
+const authoredV6EntityDefinition = authoredEntityDefinition
+  .extend(entityAccess)
+  .refine(
+    validCompanyAccess,
+    'A company access index requires company ownership.',
+  );
 // A list query may declare the most rows one export statement returns. It is a
 // query property, not a screen one, because the agent path reads the query.
 const exportMaximumResultCount = z.int().min(1).max(10_000).optional();

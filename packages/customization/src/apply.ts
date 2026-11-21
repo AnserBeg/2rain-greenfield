@@ -1009,6 +1009,9 @@ function addRecordType(
   });
   push(authored, 'entities', {
     ...(companyOwnership === undefined ? {} : { companyOwnership }),
+    ...(patch.companyAccessIndex && {
+      companyAccessIndex: patch.companyAccessIndex,
+    }),
     entityId,
     kind: 'entityDefinition',
     label: label.trim(),

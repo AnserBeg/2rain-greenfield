@@ -20,6 +20,7 @@ import {
   type UpgradeCode,
   CUSTOMIZATION_PATCH_VERSION,
   parseCustomizationPatch,
+  preparePatchForRecording,
   parseSerializedRelease,
   serializeRelease,
   renderedDiffDigest,
@@ -2854,22 +2855,6 @@ function patchRecord(row: PatchRow): PatchRecord {
     resultingReleaseRoot: row.resulting_release_root,
     resultingRevisionId: row.resulting_revision_id,
   });
-}
-
-function preparePatchForRecording(
-  patch: CustomizationPatch,
-): CustomizationPatch {
-  const bindFieldScreens = <
-    T extends Exclude<CustomizationPatch, { kind: 'changeSet' }>,
-  >(
-    member: T,
-  ): T =>
-    member.kind === 'addField'
-      ? { ...member, screens: 'record' as const }
-      : member;
-  return patch.kind === 'changeSet'
-    ? { ...patch, patches: patch.patches.map(bindFieldScreens) }
-    : bindFieldScreens(patch);
 }
 
 interface UpgradeRow {

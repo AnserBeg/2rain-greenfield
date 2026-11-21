@@ -218,6 +218,10 @@ export const CURRENCY_MINOR_UNITS_V0 = Object.freeze({
   USD: 2,
 } as const);
 
+// ADR-0089 B2. Older v6 readers strict-parse the stored entity definition.
+export const COMPANY_ACCESS_INDEX_READER = 38;
+export const COMPANY_ACCESS_INDEX = 'scopeRecordId/v1' as const;
+
 export const IMMUTABLE_DEFAULTS_V0 = Object.freeze({
   lifecycle: 'active' as const,
   presence: 'optional' as const,

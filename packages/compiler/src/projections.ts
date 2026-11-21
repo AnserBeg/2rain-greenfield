@@ -8,6 +8,7 @@ import {
   CONNECTOR_PAYLOAD,
   type AddressProjection,
   BOARD_READER,
+  COMPANY_ACCESS_INDEX_READER,
   boardPresentation,
   type BoardSource,
   type SurfaceBoard,
@@ -1097,26 +1098,29 @@ function surfaceManifestPayload(
         (layout) => layout.placementRuleVersion === 1,
       ),
   );
-  // Board v2 is the highest rung: a Board release needs it whatever else it has.
-  const surfaceFloor = original.surfaces.some((s) => s.archetype === 'board')
-    ? BOARD_READER
-    : lineCreateValues
-      ? LINE_CREATE_VALUES_SURFACE_FLOOR
-      : replayedLayout
-        ? REPLAYED_LAYOUT_READER
-        : original.surfaces.some((s) => 'layouts' in s && s.layouts)
-          ? LAYOUT_READER
-          : extendedEditor || declaredRelationList
-            ? 26
-            : hasMetrics(original)
-              ? 25
-              : hasSavedListLayouts(original)
-                ? 24
-                : recordFieldPresentation
-                  ? 23
-                  : rankedDefaultsOrChainedTasks
-                    ? 22
-                    : null;
+  const surfaceFloor = original.entities.some(
+    (entity) => 'companyAccessIndex' in entity && entity.companyAccessIndex,
+  )
+    ? COMPANY_ACCESS_INDEX_READER
+    : original.surfaces.some((s) => s.archetype === 'board')
+      ? BOARD_READER
+      : lineCreateValues
+        ? LINE_CREATE_VALUES_SURFACE_FLOOR
+        : replayedLayout
+          ? REPLAYED_LAYOUT_READER
+          : original.surfaces.some((s) => 'layouts' in s && s.layouts)
+            ? LAYOUT_READER
+            : extendedEditor || declaredRelationList
+              ? 26
+              : hasMetrics(original)
+                ? 25
+                : hasSavedListLayouts(original)
+                  ? 24
+                  : recordFieldPresentation
+                    ? 23
+                    : rankedDefaultsOrChainedTasks
+                      ? 22
+                      : null;
   const payloadSchemaVersion = composed
     ? COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION
     : navigation

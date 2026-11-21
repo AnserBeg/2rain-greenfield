@@ -22,6 +22,7 @@ import { createHash } from 'node:crypto';
 
 import {
   CANONICALIZATION_PROFILE_VERSION,
+  COMPANY_ACCESS_INDEX_READER,
   CONTENT_HASH_ALGORITHM,
   CONTENT_HASH_DOMAIN,
   canonicalize,
@@ -596,6 +597,23 @@ function verifyCompiledRelease(
   const surfaceReference = manifest.projections.find(
     (ref) => ref.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
   );
+  const indexedType =
+    isRecord(layoutDefinition) &&
+    Array.isArray(layoutDefinition.entities) &&
+    layoutDefinition.entities.find(
+      (entity: unknown) => isRecord(entity) && entity.companyAccessIndex,
+    );
+  const surfaceFloor =
+    surfaceReference?.requiredRuntimeCapability.minimumVersion ?? 0;
+  if (
+    (indexedType && surfaceFloor < COMPANY_ACCESS_INDEX_READER) ||
+    (!indexedType && surfaceFloor === COMPANY_ACCESS_INDEX_READER)
+  ) {
+    throw integrity(
+      'REPORT_INDEX_READER_MISMATCH',
+      'The company access index declaration and surface reader floor disagree.',
+    );
+  }
   const billingPlans = isRecord(layoutDefinition)
     ? layoutDefinition.billingPlans
     : undefined;

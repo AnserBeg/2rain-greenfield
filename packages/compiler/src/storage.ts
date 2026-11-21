@@ -514,6 +514,7 @@ export interface StorageIndexTarget {
     | 'legalEntityDefaultUnique'
     | 'periodLockScopeUnique'
     | 'relation'
+    | 'reportAccess'
     | 'resolveAccess'
     | 'stockHorizon';
   physicalName: string;
@@ -830,6 +831,21 @@ export function lowerStorageTargetV1(
             .sort((left, right) => compare(left.fieldId, right.fieldId));
       const uniqueKeys: StorageUniqueKeyTarget[] = [];
       const indexes: StorageIndexTarget[] = [];
+      // The author's optional key is the only trigger. Recompiling an earlier
+      // company-owned type must reproduce its original storage target exactly.
+      if ('companyAccessIndex' in entity && entity.companyAccessIndex) {
+        const columnNames = [...businessKeyScopeColumns, 'record_id'];
+        const identity =
+          entity.entityId + '/report-access/' + columnNames.join('/');
+        const index: StorageIndexTarget = {
+          columnNames,
+          indexKind: 'reportAccess',
+          physicalName: physicalNameFor('index', identity),
+          predicate: null,
+        };
+        indexes.push(index);
+        addMapping(mappings, 'index', identity, index.physicalName, index);
+      }
       const archiveExcludingPredicate = 'archived_at IS NULL';
       for (const column of columns) {
         const field = (fieldsByEntity.get(entity.entityId) ?? []).find(
