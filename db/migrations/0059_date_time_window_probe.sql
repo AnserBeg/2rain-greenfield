@@ -7,7 +7,10 @@
 -- SHARE lock the build takes.
 CREATE FUNCTION north_star_internal.module_table_exceeds(table_name text, ceiling integer)
 RETURNS boolean LANGUAGE plpgsql STABLE SECURITY DEFINER
-SET search_path = pg_catalog, pg_temp AS $$
+SET search_path = pg_catalog, pg_temp
+-- An owner that row security would filter errors here rather than counting
+-- only one tenant, so the probe cannot pass a pooled table by undercounting.
+SET row_security = off AS $$
 DECLARE exceeds boolean; BEGIN
   IF ceiling IS NULL OR ceiling < 0 OR ceiling > 10000 THEN
     RAISE EXCEPTION 'module.invalidCeiling'; END IF;

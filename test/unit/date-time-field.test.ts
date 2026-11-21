@@ -590,4 +590,97 @@ test('the in-app drafter can emit addDateTimeField with keys generated from the 
     Object.keys(customization.DATE_TIME_DRAFTER_PROPERTIES).sort(),
     ['fieldId', 'schemaVersion', 'target', 'zoneSource'],
   );
+  // addLink's string target and the member's tenantRecordType target coexist.
+  const target = JSON.stringify(schema.properties.target);
+  assert.match(target, /"type":"string"/u);
+  assert.match(target, /tenantRecordType/u);
+  assert.match(target, /operation/u);
+});
+
+test('the web control preserves typed entry, leaves an untouched capture alone and prints record zone', async () => {
+  const web = await import('../../apps/web/src/date-time-field.js');
+  const binding = {
+    schemaVersion: 'v6' as const,
+    fieldId,
+    entityId: equipment,
+    logicalType: 'dateTime' as const,
+    zoneSource: { kind: 'perRecordIana' as const, version: 'v1' as const },
+  };
+  const saved = {
+    schemaVersion: 'northstar.date-time-value/v1',
+    instant: '2026-11-01T06:30:15.250Z',
+    civil: '2026-11-01T01:30:15.250',
+    offsetSeconds: -18000,
+    zone: 'America/Toronto',
+    tzdbVersion: '2025c',
+    zoneSource: { kind: 'perRecordIana' },
+  };
+  const edit = web.renderDateTimeEntry(binding, 'value:f', saved, '');
+  assert.match(edit, /type="datetime-local" step="60"/u);
+  assert.match(edit, /value="2026-11-01T01:30"/u);
+  assert.match(edit, /<option value="America\/Toronto" selected>/u);
+  assert.match(
+    edit,
+    /Recorded November 1, 2026, 01:30:15\.250 UTC\u221205:00 America\/Toronto/u,
+  );
+  // Re-sending the shown minute with the recorded zone is untouched, so the
+  // sub-minute capture survives; any change submits a whole typed entry.
+  const recorded = /name="value:f:recorded" value="([^"]+)"/u.exec(edit)![1]!;
+  assert.deepEqual(
+    web.dateTimeFromForm('value:f', {
+      'value:f': '2026-11-01T01:30',
+      'value:f:zone': 'America/Toronto',
+      'value:f:recorded': recorded,
+    }),
+    { kind: 'nothing' },
+  );
+  assert.deepEqual(
+    web.dateTimeFromForm('value:f', {
+      'value:f': '2026-11-01T01:30',
+      'value:f:zone': 'America/Toronto',
+      'value:f:offset': '-14400',
+      'value:f:recorded': recorded,
+    }),
+    {
+      kind: 'set',
+      value: {
+        schemaVersion: 'northstar.date-time-value/v1',
+        civil: '2026-11-01T01:30',
+        zone: 'America/Toronto',
+        offsetSeconds: -14400,
+      },
+    },
+  );
+  // A refused repeated hour comes back with the typed entry and both offsets.
+  const ambiguous = web.renderDateTimeEntry(
+    binding,
+    'value:f',
+    {
+      civil: '2026-11-01T01:30',
+      zone: 'America/Toronto',
+      offsets: [-14400, -18000],
+    },
+    '',
+  );
+  assert.match(ambiguous, /value="2026-11-01T01:30"/u);
+  assert.match(ambiguous, /name="value:f:offset" required/u);
+  assert.match(
+    ambiguous,
+    /<option value="-14400">UTC\u221204:00<\/option><option value="-18000">UTC\u221205:00<\/option>/u,
+  );
+  const company = web.renderDateTimeEntry(
+    {
+      ...binding,
+      zoneSource: { kind: 'companyBusinessCalendar', version: 'v1' },
+    },
+    'value:f',
+    undefined,
+    '',
+  );
+  assert.doesNotMatch(company, /:zone/u);
+  assert.equal(
+    web.recordZoneText(saved),
+    'November 1, 2026, 01:30:15.250 UTC\u221205:00 America/Toronto',
+  );
+  assert.equal(web.recordZoneText('2026-11-01T06:30:00.000Z'), null);
 });

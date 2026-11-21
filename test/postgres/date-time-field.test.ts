@@ -256,11 +256,10 @@ test(
             (record) =>
               record.values[`${NS}:field.custom_equipment_name`] === 'Later',
           ) as unknown as { displayValues?: Record<string, string> };
-          if (display.displayValues)
-            assert.equal(
-              display.displayValues[appointment.fieldId],
-              'November 1, 2026, 01:30 UTC−05:00 America/Toronto',
-            );
+          assert.equal(
+            display.displayValues?.[appointment.fieldId],
+            'November 1, 2026, 01:30 UTC−05:00 America/Toronto',
+          );
 
           // Untouched keeps the capture; a changed civil time recaptures.
           const id = later.readBack!.recordId;
@@ -340,7 +339,8 @@ test(
           await pool.query(
             `UPDATE platform.inventory_tenant_calendars SET time_zone = 'America/Toronto'`,
           );
-          await opened.service.activate(await ship(due));
+          const duePatch = await ship(due);
+          await opened.service.activate(duePatch);
           console.error(
             `[date-time] company field active ${new Date().toISOString()}`,
           );
@@ -379,6 +379,106 @@ test(
             company.readBack!.recordId,
           );
           assert.deepEqual(reread.values[due.fieldId], capture);
+
+          // Pointer rollback hides the field and keeps the stored capture;
+          // re-activating the same release reads the original value again.
+          const companyId = company.readBack!.recordId;
+          await opened.service.rollback();
+          const hidden = await world.read('custom_equipment', companyId);
+          assert.equal(due.fieldId in hidden.values, false);
+          assert.ok(appointment.fieldId in hidden.values);
+          await opened.service.approve(duePatch);
+          await opened.service.activate(duePatch);
+          assert.deepEqual(
+            (await world.read('custom_equipment', companyId)).values[
+              due.fieldId
+            ],
+            capture,
+          );
+
+          // Presence is admitted at run time: a job named for an appointment
+          // refuses without one, on create and on an update that leaves the
+          // field out of its patch, and saves with one.
+          const schemaVersion = 'v6';
+          const nameField = `${NS}:field.custom_equipment_name`;
+          await opened.service.activate(
+            await ship({
+              kind: 'addValidation',
+              rule: {
+                kind: 'validationRule',
+                schemaVersion,
+                ruleId: `${NS}:rule.custom_equipment_needs_appointment`,
+                targetId: equipment,
+                boundOperationIds: [
+                  `${NS}:operation.custom_equipment_create`,
+                  `${NS}:operation.custom_equipment_update`,
+                ],
+                trigger: {
+                  schemaVersion,
+                  kind: 'afterDefaultsOrChangedFields',
+                },
+                absence: { schemaVersion, kind: 'validationThreeValued' },
+                effect: 'refuse',
+                existingRecords: 'grandfather',
+                message: 'This job needs an appointment.',
+                fieldAnchors: [appointment.fieldId],
+                predicate: {
+                  schemaVersion,
+                  kind: 'any',
+                  terms: [
+                    {
+                      schemaVersion,
+                      kind: 'not',
+                      term: {
+                        schemaVersion,
+                        kind: 'comparison',
+                        operator: 'equal',
+                        left: {
+                          schemaVersion,
+                          kind: 'field',
+                          fieldId: nameField,
+                          select: 'value',
+                        },
+                        right: {
+                          schemaVersion,
+                          kind: 'literal',
+                          scalar: { kind: 'text', value: 'Needs appointment' },
+                        },
+                      },
+                    },
+                    {
+                      schemaVersion,
+                      kind: 'required',
+                      operand: {
+                        schemaVersion,
+                        kind: 'field',
+                        fieldId: appointment.fieldId,
+                        select: 'value',
+                      },
+                    },
+                  ],
+                },
+              },
+            }),
+          );
+          await assert.rejects(create('Needs appointment'), {
+            code: 'MODULE_VALIDATION_REFUSED',
+          });
+          const booked = await create('Needs appointment', {
+            [appointment.fieldId]: value('2026-11-03T08:00', {
+              zone: 'America/Toronto',
+            }),
+          });
+          assert.equal(booked.outcome, 'succeeded');
+          const unbooked = await world.read('custom_equipment', companyId);
+          await assert.rejects(
+            world.invoke('custom_equipment_update', {
+              recordId: companyId,
+              expectedRevision: unbooked.revision,
+              patch: { [nameField]: 'Needs appointment' },
+            }),
+            { code: 'MODULE_VALIDATION_REFUSED' },
+          );
         } finally {
           await opened.close();
           await app.close();

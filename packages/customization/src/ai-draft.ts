@@ -104,6 +104,28 @@ const fieldSchema = {
   required: ['label', 'type'],
 } as const;
 
+// ADR-0087: the drafter's keys for addDateTimeField are generated from the
+// member's own schema, so the drafter and the parser cannot drift apart. Its
+// object target joins addLink's string target rather than replacing it.
+const {
+  kind: _dateTimeKind,
+  label: _dateTimeLabel,
+  required: _dateTimeRequired,
+  target: dateTimeTarget,
+  ...dateTimeMemberProperties
+} = (
+  z.toJSONSchema(AddDateTimeFieldSchema) as {
+    properties: Record<string, unknown>;
+  }
+).properties;
+void _dateTimeKind;
+void _dateTimeLabel;
+void _dateTimeRequired;
+export const DATE_TIME_DRAFTER_PROPERTIES = Object.freeze({
+  ...dateTimeMemberProperties,
+  target: dateTimeTarget,
+});
+
 const singlePatchSchema = {
   type: 'object',
   properties: {
@@ -114,7 +136,8 @@ const singlePatchSchema = {
     label: { type: 'string' },
     fields: { type: 'array', items: fieldSchema },
     entity: { type: 'string' },
-    target: { type: 'string' },
+    target: { anyOf: [{ type: 'string' }, dateTimeTarget] },
+    ...dateTimeMemberProperties,
     required: { type: 'boolean' },
     companyOwnership: { enum: ['entityOwned', 'tenantShared'] },
     initial: { type: 'string' },
@@ -182,30 +205,10 @@ const singlePatchSchema = {
   required: ['kind'],
 } as const;
 
-// ADR-0087: the drafter's keys for addDateTimeField are generated from the
-// member's own schema, so the drafter and the parser cannot drift apart.
-const {
-  kind: _dateTimeKind,
-  label: _dateTimeLabel,
-  required: _dateTimeRequired,
-  ...dateTimeMemberProperties
-} = (
-  z.toJSONSchema(AddDateTimeFieldSchema) as {
-    properties: Record<string, unknown>;
-  }
-).properties;
-void _dateTimeKind;
-void _dateTimeLabel;
-void _dateTimeRequired;
-export const DATE_TIME_DRAFTER_PROPERTIES = Object.freeze(
-  dateTimeMemberProperties,
-);
-
 const toolSchema = {
   ...singlePatchSchema,
   properties: {
     ...singlePatchSchema.properties,
-    ...dateTimeMemberProperties,
     kind: {
       type: 'string',
       enum: [...CUSTOMIZATION_PATCH_KINDS, 'unsupported'],
