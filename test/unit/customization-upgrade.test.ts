@@ -41,7 +41,7 @@ const record = {
     { label: 'Status', type: 'choice', options: ['Ready', 'Held'] },
   ],
 };
-const extended = applied(base, [record]);
+
 const field = {
   kind: 'addField',
   entity: equipment,
@@ -115,49 +115,60 @@ const calculated = customization.calculatedDisplayDraft(
     listSurfaceId: id('surface.item_list'),
   },
 );
-const layout = customization
-  .customizationTargets(normalizeApplicationPackage(extended))
-  .layouts!.find(
-    (l) =>
-      l.body.surfaceId === id('surface.custom_equipment_form') &&
-      l.body.mode === 'create',
-  )!;
-const revision = customization.layoutCommand(layout, {
-  action: 'create',
-  label: 'Delivery',
-});
-const workflow = {
-  kind: 'saveWorkflow',
-  workflow: {
-    workflowId: 'after-receiving',
-    schemaVersion: 'v6',
-    trigger: 'goodsReceiptPosted',
-    bodyDigest: 'a'.repeat(64),
-    grants: { queries: [id('query.custom_equipment_list')], operations: [] },
-  },
-};
+function declaration(def: Base, table: string, key: string, subject: string) {
+  const found = (def[table] as Base[]).find((row) => row[key] === subject);
+  assert.ok(found, subject);
+  return found;
+}
 interface ReplayCase {
-  source: Base;
   conflict: Base;
   change: unknown;
   code: string;
+  subject: string;
 }
-const retired = (change: unknown): ReplayCase => ({
-  source: extended,
-  conflict: base,
-  change,
-  code: 'RETIRED_TARGET',
-});
-const occupied = (
+function retirement(
+  table: string,
+  key: string,
+  subject: string,
   change: unknown,
-  code: string,
-  source = base,
-): ReplayCase => ({
-  source,
-  conflict: applied(source, [change]),
-  change,
-  code,
-});
+): ReplayCase {
+  const conflict = structuredClone(base);
+  declaration(conflict, table, key, subject).lifecycle = 'retired';
+  return { conflict, change, subject, code: 'RETIRED_TARGET' };
+}
+function collision(
+  change: unknown,
+  subject: string,
+  mutate: (target: Base) => void,
+  code = 'ID_COLLISION',
+): ReplayCase {
+  const conflict = structuredClone(base);
+  mutate(conflict);
+  return { conflict, change, subject, code };
+}
+const changeSet = (...patches: unknown[]) => ({ kind: 'changeSet', patches });
+const item = id('entity.item');
+const itemList = id('surface.item_list');
+const itemSku = id('field.item_sku');
+const itemFiles = {
+  ...files,
+  entityId: item,
+  fieldId: id('field.custom_item_photos'),
+};
+const itemRetired = (change: unknown) =>
+  retirement('entities', 'entityId', item, change);
+const listRetired = (change: unknown) =>
+  retirement('surfaces', 'surfaceId', itemList, change);
+const retiredAction = (change: unknown) =>
+  retirement('operations', 'operationId', action.id, change);
+const board = targets.boards!.find(
+  (t) => t.frame.listSurfaceId === id('surface.purchase_order_list'),
+)!;
+const form = targets.layouts!.find(
+  (l) =>
+    l.body.surfaceId === id('surface.sales_order_form') &&
+    l.body.mode === 'create',
+)!;
 const address = {
   kind: 'addAddressField',
   schemaVersion: 'v6',
@@ -176,93 +187,125 @@ const map = {
   sectionId:
     mapSurface + '/detail/northstar.app:slot.item_detail_sections/details',
 };
-const withEquipmentLifecycle = applied(extended, [
-  {
-    kind: 'declareLifecycle',
-    entity: equipment,
-    initial: 'Pending',
-    states: [{ label: 'Pending' }, { label: 'Passed' }],
-    transitions: [{ from: 'Pending', to: 'Passed', label: 'Pass' }],
-  },
-]);
-const equipmentBoard = customization
-  .customizationTargets(normalizeApplicationPackage(withEquipmentLifecycle))
-  .boards!.find((target) => target.frame.entityId === equipment)!;
+const cancel = id('operation.purchase_order_draft_cancel');
+const newOption = id('option.custom_equipment_status_loaned');
+const terms = id('field.sales_order_payment_terms');
+function appendOption(target: Base, optionId: string, label: string) {
+  const type = declaration(target, 'fields', 'fieldId', terms).fieldType as {
+    options: Base[];
+  };
+  type.options.push({ ...type.options[0], optionId, label, orderKey: 90 });
+}
 const cases = {
-  addBoardViewRevision: {
-    source: withEquipmentLifecycle,
-    conflict: extended,
-    change: customization.draftBoardRevision(
-      equipmentBoard,
-      'Equipment inspections',
-      customization.defaultBoardChoices(equipmentBoard),
+  addBoardViewRevision: retirement(
+    'operations',
+    'operationId',
+    cancel,
+    customization.draftBoardRevision(
+      board,
+      'Purchasing stages',
+      customization.defaultBoardChoices(board),
     ),
-    code: 'RETIRED_TARGET',
-  },
-  addAddressField: occupied(address, 'FIELD_COLLISION'),
-  addMapPlacement: {
-    source: applied(base, [address]),
-    conflict: base,
-    change: map,
-    code: 'RETIRED_TARGET',
-  },
-  addRecordType: occupied(record, 'ID_COLLISION'),
-  addField: retired(field),
-  addChoice: retired({
-    kind: 'addChoice',
-    enumField: id('field.custom_equipment_status'),
-    option: 'Loaned',
-  }),
-  addLink: retired({
-    kind: 'addLink',
-    entity: equipment,
-    target: id('entity.item'),
-    label: 'Product',
-  }),
-  addLineTable: retired({
-    kind: 'addLineTable',
-    entity: equipment,
-    label: 'Parts',
-    fields: [{ label: 'Part', type: 'text' }],
-  }),
-  declareLifecycle: retired({
-    kind: 'declareLifecycle',
-    entity: equipment,
-    initial: 'Pending',
-    states: [{ label: 'Pending' }, { label: 'Passed' }],
-    transitions: [{ from: 'Pending', to: 'Passed', label: 'Pass' }],
-  }),
-  arrangeLayout: retired({
+  ),
+  addAddressField: itemRetired(address),
+  addMapPlacement: retirement(
+    'surfaces',
+    'surfaceId',
+    mapSurface,
+    changeSet(address, map),
+  ),
+  addRecordType: collision(
+    record,
+    String((base.modules as Base[])[0]!.moduleId),
+    (target) => {
+      (target.modules as Base[])[0]!.label = 'Equipment';
+    },
+  ),
+  addField: itemRetired({ ...field, entity: item }),
+  addChoice: collision(
+    changeSet(record, {
+      kind: 'addChoice',
+      enumField: id('field.custom_equipment_status'),
+      option: 'Loaned',
+    }),
+    newOption,
+    (target) => appendOption(target, newOption, 'Loan terms'),
+  ),
+  addLink: itemRetired(
+    changeSet(record, {
+      kind: 'addLink',
+      entity: equipment,
+      target: item,
+      label: 'Product',
+    }),
+  ),
+  addLineTable: collision(
+    changeSet(record, {
+      kind: 'addLineTable',
+      entity: equipment,
+      label: 'Parts',
+      fields: [{ label: 'Part', type: 'text' }],
+    }),
+    id('entity.custom_equipment_lines'),
+    (target) => {
+      (target.entities as Base[]).push({
+        ...(target.entities as Base[])[0],
+        entityId: id('entity.custom_equipment_lines'),
+        label: 'Equipment lines',
+      });
+    },
+  ),
+  declareLifecycle: collision(
+    changeSet(record, {
+      kind: 'declareLifecycle',
+      entity: equipment,
+      initial: 'Pending',
+      states: [{ label: 'Pending' }, { label: 'Passed' }],
+      transitions: [{ from: 'Pending', to: 'Passed', label: 'Pass' }],
+    }),
+    id('permission.custom_equipment_action_pass'),
+    (target) => {
+      (target.permissions as Base[]).push({
+        ...(target.permissions as Base[])[0],
+        permissionId: id('permission.custom_equipment_action_pass'),
+      });
+    },
+  ),
+  arrangeLayout: listRetired({
     kind: 'arrangeLayout',
-    surface: id('surface.custom_equipment_list'),
-    relabel: [{ field: id('field.custom_equipment_name'), label: 'Tool' }],
+    surface: itemList,
+    relabel: [{ field: itemSku, label: 'Code' }],
   }),
-  addLayoutRevision: retired(revision),
-  saveListView: retired({
+  addLayoutRevision: retirement(
+    'surfaces',
+    'surfaceId',
+    form.body.surfaceId,
+    customization.layoutCommand(form, { action: 'create', label: 'Delivery' }),
+  ),
+  saveListView: listRetired({
     kind: 'saveListView',
-    surface: id('surface.custom_equipment_list'),
-    label: 'All tools',
-    columns: [id('list_column.custom_equipment_list_name')],
+    surface: itemList,
+    label: 'Stock codes',
+    columns: [id('list_column.item_list_sku')],
     sort: [],
     filters: [],
   }),
-  addValidation: occupied(rule, 'ID_COLLISION'),
-  addCalculatedDisplayField: occupied(calculated, 'FIELD_COLLISION'),
-  addMetricCard: retired({
+  addValidation: retirement('fields', 'fieldId', price, rule),
+  addCalculatedDisplayField: retirement('fields', 'fieldId', price, calculated),
+  addMetricCard: listRetired({
     kind: 'addMetricCard',
-    surface: id('surface.custom_equipment_list'),
-    label: 'Equipment count',
+    surface: itemList,
+    label: 'Stock count',
   }),
-  addDocumentField: retired(files),
-  addUploadCategory: retired({
-    kind: 'changeSet',
-    patches: [
+  addDocumentField: itemRetired(itemFiles),
+  addUploadCategory: itemRetired(
+    changeSet(
       {
         kind: 'addUploadCategory',
         schemaVersion: 'northstar.document-category/v1',
-        entityId: equipment,
-        fieldId: files.fieldId,
-        categoryId: id('category.custom_equipment_evidence'),
+        entityId: item,
+        fieldId: itemFiles.fieldId,
+        categoryId: id('category.custom_item_evidence'),
         label: 'Evidence',
         contentTypes: ['image/png'],
         maxBytes: 1024,
@@ -273,20 +316,26 @@ const cases = {
         documentExpiryDate: null,
       },
       {
-        ...files,
-        allowedCategoryIds: [id('category.custom_equipment_evidence')],
+        ...itemFiles,
+        allowedCategoryIds: [id('category.custom_item_evidence')],
       },
-    ],
+    ),
+  ),
+  narrowPermission: retiredAction(limit),
+  unNarrowPermission: retiredAction(
+    changeSet(limit, { ...limit, kind: 'unNarrowPermission' }),
+  ),
+  saveWorkflow: retirement('queries', 'queryId', id('query.item_list'), {
+    kind: 'saveWorkflow',
+    workflow: {
+      workflowId: 'after-receiving',
+      schemaVersion: 'v6',
+      trigger: 'goodsReceiptPosted',
+      bodyDigest: 'a'.repeat(64),
+      grants: { queries: [id('query.item_list')], operations: [] },
+    },
   }),
-  narrowPermission: occupied(limit, 'ID_COLLISION'),
-  unNarrowPermission: {
-    source: applied(base, [limit]),
-    conflict: base,
-    change: { ...limit, kind: 'unNarrowPermission' },
-    code: 'RETIRED_TARGET',
-  },
-  saveWorkflow: retired(workflow),
-  changeSet: retired({ kind: 'changeSet', patches: [field, files] }),
+  changeSet: itemRetired(changeSet({ ...field, entity: item }, itemFiles)),
 } satisfies Record<customization.CustomizationPatchKind, ReplayCase>;
 
 test('upgrade replay admission and its named cases cover the independently parsed vocabulary', () => {
@@ -344,7 +393,7 @@ for (const [kind, example] of Object.entries(cases)) {
     const origins = [
       {
         patchId: '7d2d4a88-f026-4485-b081-3be230bc587f',
-        parent: example.source,
+        parent: base,
         differentBase: true,
       },
     ];
@@ -361,33 +410,15 @@ for (const [kind, example] of Object.entries(cases)) {
       conflict.findings.some(
         (f) =>
           (kind === 'changeSet' || f.patchKind === kind) &&
+          f.subject === example.subject &&
           f.code === example.code &&
           f.patchId === origins[0]!.patchId,
       ),
       JSON.stringify(conflict),
     );
-    const compatible = structuredClone(example.source);
-    (compatible.fields as { fieldId: string; label: string }[]).find(
-      (f) => f.fieldId === id('field.item_sku'),
-    )!.label = 'Stock identifier';
-    if (kind === 'addBoardViewRevision') {
-      // The compatible move relabels what the Board binds: its title field,
-      // that field's List column and the transition its move operates.
-      const name = id('field.custom_equipment_name');
-      (compatible.fields as { fieldId: string; label: string }[]).find(
-        (f) => f.fieldId === name,
-      )!.label = 'Asset name';
-      (
-        (compatible.surfaces as { surfaceId: string; list?: Base }[]).find(
-          (s) => s.surfaceId === id('surface.custom_equipment_list'),
-        )!.list!.columns as { field: string; label: string }[]
-      ).find((c) => c.field === name)!.label = 'Asset';
-      (compatible.stateMachines as { transitions: { label: string }[] }[]).find(
-        (m) =>
-          (m as unknown as { entity: { targetId: string } }).entity.targetId ===
-          equipment,
-      )!.transitions[0]!.label = 'Certify';
-    }
+    const compatible = structuredClone(base);
+    declaration(compatible, 'fields', 'fieldId', itemSku).label =
+      'Stock identifier';
     const result = await customization.compileInSandbox({
       acknowledgement,
       base: compatible,
