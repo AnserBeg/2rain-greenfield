@@ -20,9 +20,9 @@ Slices 1, 3 and 4 on the packet branch. Pre-tenant. No migration or reader rung.
 
 ## Gates and controls
 
-CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44860980457
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44861447572
 
-The workflow-host tests exercise both fork kinds with credential sentinels, a protected key and a socket observer, the injected deadline, SDK contracts, reviewed bytes and retry outcomes. The PostgreSQL journey checks admission, durable control rows and a suspended v1 event wait. The browser journey reopens the pending review and approves the displayed digest.
+The workflow-host tests exercise both fork kinds with credential sentinels, a protected key and a socket observer, the injected deadline, SDK contracts, reviewed bytes and retry outcomes. The PostgreSQL journey checks admission, durable control rows and a suspended v1 event wait. The browser journey refuses an external wait, reopens the pending review and approves the displayed digest. The historical pre-workflow reader answers an item query before its named refusal after activation.
 
 ## Test it yourself
 
@@ -35,7 +35,7 @@ The workflow-host tests exercise both fork kinds with credential sentinels, a pr
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "WORKFLOW-2",
   "base": "0a9f7ca52304969c65092893f50375c90f8c2265",
-  "head": "3b13e686ec6d9b101a987e68ac092ddeee7d193b",
+  "head": "ea5b0f03abf7a76956d05f2ea48e44fc94b8c780",
   "changedPaths": [
     "apps/api/scripts/customize-cli.ts",
     "apps/api/src/staff-decisions.ts",
