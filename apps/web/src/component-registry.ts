@@ -632,9 +632,8 @@ function collectionSwitcher(context: SurfaceComponentContext) {
 function renderMapSlot(context: SurfaceComponentContext) {
   const slot = context.slot.slot;
   const content =
-    context.data?.status === 'READY'
-      ? (context.data.mapSlots?.[slot] ?? '')
-      : '';
+    context.data?.status === 'READY' ? context.data.mapSlots?.[slot] : '';
+  if (content === undefined) throw new TypeError('Missing Map slot ' + slot);
   return slotPanel(
     context,
     (slot === 'savedViews' ? collectionSwitcher(context) : '') + content,

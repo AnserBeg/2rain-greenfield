@@ -99,6 +99,23 @@ test('an induced plan status-vocabulary mismatch fails with UX002', () => {
   }
 });
 
+test('removing the stop list from the Map pin reports slot drift', () => {
+  const files = contractFixture();
+  const path = '.agents/skills/ux-grammar/SKILL.md';
+  files[path] = files[path].replace('"mapCanvas", "stopList"', '"mapCanvas"');
+  const root = createArchitectureFixture(files);
+  try {
+    assert.ok(
+      checkUxGrammarPin(root).violations.some(
+        (v) =>
+          v.ruleId === 'UX003_VOCABULARY_DRIFT' && v.message.includes('slots'),
+      ),
+    );
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
 test('an induced List-only plan slot mismatch fails with UX002', () => {
   const files = contractFixture();
   const planPath = 'docs/greenfield-north-star-erp-platform-plan.md';

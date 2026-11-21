@@ -1705,7 +1705,7 @@ including ones that do not exist yet.
 | List | title, saved-view tabs, spreadsheet-grade grid (sort, filter, all-visible-value search, paging), bulk bar |
 | Record | breadcrumb; title + status chip; command bar (primary action first, destructive behind overflow); key facts; sections and child tables; activity rail |
 | Board | title, saved-view tabs, stage selector, named stage columns with record cards and Move card |
-| Map | title, saved-view tabs, map canvas with linked pins, numbered stop list. At 390 px the list precedes the map disclosure. |
+| Map | title, saved-view tabs, map canvas with linked pins, controls and attribution, numbered stop list with the same Record links. At 390 px, stop cards precede the labelled map disclosure. |
 | Task | one decision per screen, scan-first input, large touch targets; receiving, picking, shipping, counting |
 
 Task presentation may retain its originating Record context using the bounded
