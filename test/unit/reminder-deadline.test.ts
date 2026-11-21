@@ -94,6 +94,19 @@ test('working leads use the entire published horizon including Saturday work and
       }),
     /calendar.*lead/iu,
   );
+  assert.throws(
+    () =>
+      resolveReminderDeadline(anchor, working, {
+        ...calendar,
+        from: '2026-03-11',
+      }),
+    /calendar.*anchor/iu,
+  );
+  assert.equal(
+    resolveReminderDeadline(anchor, { ...working, amount: 2 }, calendar)
+      .deadline,
+    '2026-03-04T13:00:00.000Z',
+  );
   assert.equal(
     resolveReminderDeadline(
       { ...anchor, zoneSource: { kind: 'perRecordIana' } },

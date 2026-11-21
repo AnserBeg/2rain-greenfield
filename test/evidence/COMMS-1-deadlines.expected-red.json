@@ -1,0 +1,204 @@
+{
+  "version": 1,
+  "packet": "COMMS-1",
+  "entries": [
+    {
+      "name": "comms-reminder-positive-lead",
+      "claim": "Positive lead.",
+      "file": "packages/domain/src/communication/reminder-deadline.ts",
+      "original": "lead.amount < 1",
+      "replacement": "false",
+      "test": {
+        "files": ["test/unit/reminder-deadline.test.ts"],
+        "namePattern": "refuse a missing capture and invalid leads"
+      },
+      "kills": [
+        {
+          "file": "test/unit/reminder-deadline.test.ts",
+          "name": "refuse a missing capture and invalid leads",
+          "expected": "exception|captured zone"
+        }
+      ]
+    },
+    {
+      "name": "comms-reminder-bounded-lead",
+      "claim": "Bounded lead.",
+      "file": "packages/domain/src/communication/reminder-deadline.ts",
+      "original": "lead.amount > 720",
+      "replacement": "false",
+      "test": {
+        "files": ["test/unit/reminder-deadline.test.ts"],
+        "namePattern": "refuse a missing capture and invalid leads"
+      },
+      "kills": [
+        {
+          "file": "test/unit/reminder-deadline.test.ts",
+          "name": "refuse a missing capture and invalid leads",
+          "expected": "exception|captured zone"
+        }
+      ]
+    },
+    {
+      "name": "comms-reminder-integer-lead",
+      "claim": "Integer lead.",
+      "file": "packages/domain/src/communication/reminder-deadline.ts",
+      "original": "!Number.isSafeInteger(lead.amount)",
+      "replacement": "false",
+      "test": {
+        "files": ["test/unit/reminder-deadline.test.ts"],
+        "namePattern": "refuse a missing capture and invalid leads"
+      },
+      "kills": [
+        {
+          "file": "test/unit/reminder-deadline.test.ts",
+          "name": "refuse a missing capture and invalid leads",
+          "expected": "exception|captured zone"
+        }
+      ]
+    },
+    {
+      "name": "comms-reminder-captured-zone",
+      "claim": "Captured zone.",
+      "file": "packages/domain/src/communication/reminder-deadline.ts",
+      "original": "!anchor.zone || !anchor.tzdbVersion",
+      "replacement": "!anchor.tzdbVersion",
+      "test": {
+        "files": ["test/unit/reminder-deadline.test.ts"],
+        "namePattern": "refuse a missing capture and invalid leads"
+      },
+      "kills": [
+        {
+          "file": "test/unit/reminder-deadline.test.ts",
+          "name": "refuse a missing capture and invalid leads",
+          "expected": "exception|captured zone"
+        }
+      ]
+    },
+    {
+      "name": "comms-reminder-captured-tzdb",
+      "claim": "Captured tzdb.",
+      "file": "packages/domain/src/communication/reminder-deadline.ts",
+      "original": "!anchor.zone || !anchor.tzdbVersion",
+      "replacement": "!anchor.zone",
+      "test": {
+        "files": ["test/unit/reminder-deadline.test.ts"],
+        "namePattern": "refuse a missing capture and invalid leads"
+      },
+      "kills": [
+        {
+          "file": "test/unit/reminder-deadline.test.ts",
+          "name": "refuse a missing capture and invalid leads",
+          "expected": "exception|captured zone"
+        }
+      ]
+    },
+    {
+      "name": "comms-reminder-working-calendar-required",
+      "claim": "Working calendar required.",
+      "file": "packages/domain/src/communication/reminder-deadline.ts",
+      "original": "!calendar ||",
+      "replacement": "false ||",
+      "test": {
+        "files": ["test/unit/reminder-deadline.test.ts"],
+        "namePattern": "working leads use the entire published horizon including Saturday work and a Monday holiday"
+      },
+      "kills": [
+        {
+          "file": "test/unit/reminder-deadline.test.ts",
+          "name": "working leads use the entire published horizon including Saturday work and a Monday holiday",
+          "expected": "exception|calendar|instant"
+        }
+      ]
+    },
+    {
+      "name": "comms-reminder-working-calendar-upper-bound",
+      "claim": "Working calendar upper bound.",
+      "file": "packages/domain/src/communication/reminder-deadline.ts",
+      "original": "anchorDate > calendar.through",
+      "replacement": "false",
+      "test": {
+        "files": ["test/unit/reminder-deadline.test.ts"],
+        "namePattern": "working leads use the entire published horizon including Saturday work and a Monday holiday"
+      },
+      "kills": [
+        {
+          "file": "test/unit/reminder-deadline.test.ts",
+          "name": "working leads use the entire published horizon including Saturday work and a Monday holiday",
+          "expected": "exception|calendar|instant"
+        }
+      ]
+    },
+    {
+      "name": "comms-reminder-working-calendar-lower-bound",
+      "claim": "Working calendar lower bound.",
+      "file": "packages/domain/src/communication/reminder-deadline.ts",
+      "original": "anchorDate < calendar.from",
+      "replacement": "false",
+      "test": {
+        "files": ["test/unit/reminder-deadline.test.ts"],
+        "namePattern": "working leads use the entire published horizon including Saturday work and a Monday holiday"
+      },
+      "kills": [
+        {
+          "file": "test/unit/reminder-deadline.test.ts",
+          "name": "working leads use the entire published horizon including Saturday work and a Monday holiday",
+          "expected": "exception|calendar|instant"
+        }
+      ]
+    },
+    {
+      "name": "comms-reminder-covered-working-date",
+      "claim": "Covered working date.",
+      "file": "packages/domain/src/communication/reminder-deadline.ts",
+      "original": "date >= calendar.from && date < anchorDate",
+      "replacement": "date < anchorDate",
+      "test": {
+        "files": ["test/unit/reminder-deadline.test.ts"],
+        "namePattern": "working leads use the entire published horizon including Saturday work and a Monday holiday"
+      },
+      "kills": [
+        {
+          "file": "test/unit/reminder-deadline.test.ts",
+          "name": "working leads use the entire published horizon including Saturday work and a Monday holiday",
+          "expected": "exception|calendar|instant"
+        }
+      ]
+    },
+    {
+      "name": "comms-reminder-prior-working-date",
+      "claim": "Prior working date.",
+      "file": "packages/domain/src/communication/reminder-deadline.ts",
+      "original": "date >= calendar.from && date < anchorDate",
+      "replacement": "date >= calendar.from && date <= anchorDate",
+      "test": {
+        "files": ["test/unit/reminder-deadline.test.ts"],
+        "namePattern": "working leads use the entire published horizon including Saturday work and a Monday holiday"
+      },
+      "kills": [
+        {
+          "file": "test/unit/reminder-deadline.test.ts",
+          "name": "working leads use the entire published horizon including Saturday work and a Monday holiday",
+          "expected": "exception|calendar|instant"
+        }
+      ]
+    },
+    {
+      "name": "comms-reminder-enough-working-dates",
+      "claim": "Enough working dates.",
+      "file": "packages/domain/src/communication/reminder-deadline.ts",
+      "original": "if (!date)",
+      "replacement": "if (false)",
+      "test": {
+        "files": ["test/unit/reminder-deadline.test.ts"],
+        "namePattern": "working leads use the entire published horizon including Saturday work and a Monday holiday"
+      },
+      "kills": [
+        {
+          "file": "test/unit/reminder-deadline.test.ts",
+          "name": "working leads use the entire published horizon including Saturday work and a Monday holiday",
+          "expected": "exception|calendar|instant"
+        }
+      ]
+    }
+  ]
+}
