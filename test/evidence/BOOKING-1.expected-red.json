@@ -509,7 +509,7 @@
         {
           "file": "test/postgres/booking-commitments.test.ts",
           "name": "an owner snapshot stays at its committed cursor and a steward correction pages past a billing checkpoint",
-          "expected": "'attendance'"
+          "expected": "recovered usage still contains attendance"
         }
       ]
     },

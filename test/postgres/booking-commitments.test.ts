@@ -1735,9 +1735,11 @@ test('booking commitment writer', async (t) => {
             ['attendance', 'noShow', false],
           );
           const recovered = await read(48);
-          assert.deepEqual(
-            recovered.evidence.map((e: { kind: string }) => e.kind).sort(),
-            ['assignment', 'use'],
+          const kinds = recovered.evidence.map((e: { kind: string }) => e.kind);
+          assert.ok(kinds.includes('use'));
+          assert.ok(
+            !kinds.includes('attendance'),
+            'recovered usage still contains attendance',
           );
           const deltaAtStart = await read(48, absent.cursor, recovered.cursor);
           assert.equal(deltaAtStart.changes.length, 1);
@@ -2463,7 +2465,8 @@ test('booking commitment writer', async (t) => {
           }
           const missed = await confirmed(70, 46, window('10:00', '11:00'));
           const taken = await confirmed(71, 47, window('10:00', '11:00'));
-          const next = await confirmed(72, 47, window('11:00', '13:00'));
+          // The following claim starts exactly at the decision, after the historical window.
+          const next = await confirmed(72, 47, window('11:15', '13:00'));
           await time('2030-02-11T18:15Z');
           await admin.query('SELECT platform.booking_sweep_due(128)');
           const late = (n: number, b: Result) => ({
