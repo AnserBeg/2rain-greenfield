@@ -17,6 +17,7 @@ carries the detail. No packet is chartered from this table without a user ruling
 
 | packet | date | finding (one sentence) | record |
 |---|---|---|---|
+| BOOKING-1 | 2026-11-20 | P3: Generic writers may share-lock non-owning relation targets in a different order from booking endpoint locks, so an idempotent request retries a deadlock once. | [ADR-0082](../decisions/ADR-0082-booking-over-time.md#how-postgresql-prevents-double-booking) |
 | CALENDAR-1 | 2026-11-20 | Timed intervals on customer-authored types require a separately queued tenant date-time/interval field capability with its own patch member and reader rung. | [ADR-0086](../decisions/ADR-0086-board-calendar-and-resource-timeline.md) |
 | CONNECT-1 | 2026-11-19 | **Filed under sign-in packet item 1.** The runtime can fabricate who connected, enabled or rotated an account and who confirmed an external disclosure. Real authority stays confined to the explicitly enabled local demo. | [ADR-0080](../decisions/ADR-0080-connector-framework.md#who-can-connect-a-company) |
 | AGENT-SPEED-1 | 2026-11-19 | Atomic creation with lines needs CUSTOMIZE-4 Option A. Recipes depend on WORKFLOW-1 bodies. Habit shortcuts need a durable run record. | [Packet](packets/AGENT-SPEED-1.md) |

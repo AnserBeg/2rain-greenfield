@@ -3,7 +3,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
 import test from 'node:test';
-import type { PoolClient } from 'pg';
+import pg, { type PoolClient } from 'pg';
+import { AuthenticatedRequestEntryAdapter } from '../../packages/runtime/src/request-context.js';
+import { withIdempotentTransaction } from '../../packages/postgres-provider/src/request-context.js';
 
 import {
   loadMigrations,
@@ -50,6 +52,65 @@ interface Result {
   domainEventId: string;
   deadline: string;
 }
+
+test('idempotent request reopens the transaction once for a booking or mapped module deadlock', async () => {
+  await withEphemeralPostgres(
+    'booking-request-retry',
+    async ({ pool, connection }) => {
+      const admin = await pool.connect();
+      try {
+        await runMigrations(admin, await loadMigrations('db/migrations'));
+      } finally {
+        admin.release();
+      }
+      const runtime = new pg.Pool({
+        ...connection,
+        user: 'north_star_runtime',
+        max: 1,
+      });
+      const context = await new AuthenticatedRequestEntryAdapter(async () => ({
+        tenantId: randomUUID(),
+        environmentId: randomUUID(),
+        principalId: randomUUID(),
+      })).enter({});
+      try {
+        for (const mapped of [false, true]) {
+          const transactions: string[] = [];
+          await withIdempotentTransaction(runtime, context, async (client) => {
+            const { rows } = await client.query<{ id: string }>(
+              'SELECT pg_current_xact_id()::text AS id',
+            );
+            transactions.push(rows[0]!.id);
+            if (transactions.length === 1) {
+              if (mapped)
+                throw Object.assign(new Error('module provider failure'), {
+                  providerMetadata: { sqlstate: '40P01' },
+                });
+              await client.query('DO $$ BEGIN RAISE deadlock_detected; END $$');
+            }
+          });
+          assert.equal(new Set(transactions).size, 2);
+        }
+        for (const [code, expected] of [
+          ['40P01', 2],
+          ['40001', 1],
+        ] as const) {
+          let attempts = 0;
+          await assert.rejects(
+            withIdempotentTransaction(runtime, context, async () => {
+              attempts++;
+              throw Object.assign(new Error('transaction aborted'), { code });
+            }),
+            { code },
+          );
+          assert.equal(attempts, expected);
+        }
+      } finally {
+        await runtime.end();
+      }
+    },
+  );
+});
 
 test('booking commitment writer', async (t) => {
   await withEphemeralPostgres('booking-commitments', async ({ pool }) => {

@@ -20,7 +20,10 @@ import type {
   PostgresCapabilityOperationExecutorFactory,
 } from './capability-operation-executor-factory.js';
 import { withModuleRuntimeRole } from './module-runtime-interpreter.js';
-import { withTrustedRequestTransaction } from './request-context.js';
+import {
+  withIdempotentTransaction,
+  withTrustedRequestTransaction,
+} from './request-context.js';
 
 const object = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -170,7 +173,7 @@ class BookingCapabilityExecutor implements RegisteredCapabilityOperationExecutor
         ],
       );
     }
-    const result = await withTrustedRequestTransaction(
+    const result = await withIdempotentTransaction(
       this.service.pool,
       request.context,
       async (client) => {
