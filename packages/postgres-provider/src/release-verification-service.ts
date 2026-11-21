@@ -5,7 +5,7 @@ import {
   withWorkflowVerifierTransaction,
   type WorkflowBinding,
 } from './workflow-admission.js';
-import { dateTimeCheck } from './date-time-storage.js';
+import { dateTimeCheck, dateTimeChecks } from './date-time-storage.js';
 import { WorkflowProjectionSchema } from '../../canonical-model/src/schemas.js';
 import { WORKFLOW_SURFACE_FLOOR } from '../../canonical-model/src/workflows.js';
 import { workflowSdkBindingDigest } from '@north-star/compiler';
@@ -2572,6 +2572,23 @@ class SemanticVerificationExecutor {
       relations[relationInput.relationId] = target.recordId;
     }
     const systemInput = operation.inputContract.systemInput;
+    // ADR-0087 ruling 2026-11-21: on a shared record type a company-sourced
+    // dateTime names the writer's working company; verification works in its
+    // own arranged company, which the gateway then authorizes.
+    if (!systemInput)
+      for (const check of dateTimeChecks(storageEntity)) {
+        const entry = values[check.canonicalFieldId];
+        if (
+          check.zoneSource === 'companyBusinessCalendar' &&
+          entry &&
+          typeof entry === 'object' &&
+          !Array.isArray(entry)
+        )
+          values[check.canonicalFieldId] = {
+            ...entry,
+            companyId: await this.#verificationWorkingCompany(token),
+          };
+      }
     const systemArguments = systemInput
       ? {
           [systemInput.argumentKey]: await this.#systemInputValue(
@@ -2586,6 +2603,30 @@ class SemanticVerificationExecutor {
       relations,
       values,
     };
+  }
+
+  #verificationWorkingCompany(token: string): Promise<string> {
+    const key = 'dateTimeWorkingCompany';
+    const existing = this.#systemInputValues.get(key);
+    if (existing) return existing;
+    const master = this.#storageEntities.find(
+      (candidate) => candidate.legalEntityMaster !== undefined,
+    );
+    if (!master) {
+      throw failure(
+        'VERIFICATION_SYSTEM_INPUT_TARGET_MISSING',
+        'a shared company-sourced dateTime has no constructible working company',
+      );
+    }
+    const created = this.#create(
+      master.entityId,
+      `${token}-working-company`,
+    ).then((record) => {
+      this.#arrangedLegalEntityIds.add(record.recordId);
+      return record.recordId;
+    });
+    this.#systemInputValues.set(key, created);
+    return created;
   }
 
   #systemInputValue(
