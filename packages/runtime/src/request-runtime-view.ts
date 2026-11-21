@@ -1,4 +1,3 @@
-import { BILLING_INTERVAL_READER } from '../../canonical-model/src/billing.js';
 import {
   BOOKING_OPERATION_READER,
   CONNECTOR_FAMILY,
