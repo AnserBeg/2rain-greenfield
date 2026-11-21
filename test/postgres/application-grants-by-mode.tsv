@@ -1,0 +1,51 @@
+mode	action	role	relation	privilege	columns	reason
+demo	add	north_star_runtime	platform.address_installation_history	INSERT	*	Demo installer maintains provider setup
+demo	add	north_star_runtime	platform.address_installations	INSERT	*	Demo installer maintains provider setup
+demo	add	north_star_runtime	platform.address_installations	UPDATE	enabled,enrichment,period_budget_micros,period_calls	Demo installer maintains provider setup
+pilot	add	north_star_activation_verifier	north_star_internal.module_storage_catalog_receipts	SELECT	*	Verifier reads the scoped release kernel and immutable evidence
+pilot	add	north_star_activation_verifier	north_star_internal.module_storage_generations	SELECT	*	Verifier reads the scoped release kernel and immutable evidence
+pilot	add	north_star_activation_verifier	platform.active_release_pointers	SELECT	*	Verifier reads the scoped release kernel and immutable evidence
+pilot	add	north_star_activation_verifier	platform.active_release_pointers	UPDATE	fence,release_id	Pilot decision writes belong to the verifier
+pilot	add	north_star_activation_verifier	platform.app_package_revisions	SELECT	*	Verifier reads the scoped release kernel and immutable evidence
+pilot	add	north_star_activation_verifier	platform.fresh_tenant_install_evidence	SELECT	*	Verifier reads the scoped release kernel and immutable evidence
+pilot	add	north_star_activation_verifier	platform.fresh_tenant_intermediate_release_admissions	SELECT	*	Verifier reads the scoped release kernel and immutable evidence
+pilot	add	north_star_activation_verifier	platform.release_activation_attempt_outcomes	INSERT	*	Pilot decision writes belong to the verifier
+pilot	add	north_star_activation_verifier	platform.release_activation_attempt_outcomes	SELECT	*	Verifier reads the scoped release kernel and immutable evidence
+pilot	add	north_star_activation_verifier	platform.release_activation_attempts	INSERT	*	Pilot decision writes belong to the verifier
+pilot	add	north_star_activation_verifier	platform.release_activation_attempts	SELECT	*	Verifier reads the scoped release kernel and immutable evidence
+pilot	add	north_star_activation_verifier	platform.release_activation_authority_epochs	SELECT	*	Verifier reads the scoped release kernel and immutable evidence
+pilot	add	north_star_activation_verifier	platform.release_activation_control_events	SELECT	*	Verifier reads the scoped release kernel and immutable evidence
+pilot	add	north_star_activation_verifier	platform.release_activation_history	INSERT	*	Pilot decision writes belong to the verifier
+pilot	add	north_star_activation_verifier	platform.release_activation_history	SELECT	*	Verifier reads the scoped release kernel and immutable evidence
+pilot	add	north_star_activation_verifier	platform.release_activation_outbox	INSERT	*	Pilot decision writes belong to the verifier
+pilot	add	north_star_activation_verifier	platform.release_activation_outbox	SELECT	*	Verifier reads the scoped release kernel and immutable evidence
+pilot	add	north_star_activation_verifier	platform.release_activation_phase_receipts	INSERT	*	Pilot decision writes belong to the verifier
+pilot	add	north_star_activation_verifier	platform.release_activation_phase_receipts	SELECT	*	Verifier reads the scoped release kernel and immutable evidence
+pilot	add	north_star_activation_verifier	platform.release_activation_preparations	SELECT	*	Verifier reads the scoped release kernel and immutable evidence
+pilot	add	north_star_activation_verifier	platform.release_activation_reconciliation_alarms	INSERT	*	Pilot decision writes belong to the verifier
+pilot	add	north_star_activation_verifier	platform.release_activation_reconciliation_alarms	SELECT	*	Verifier reads the scoped release kernel and immutable evidence
+pilot	add	north_star_activation_verifier	platform.release_activation_reconciliation_starts	INSERT	*	Pilot decision writes belong to the verifier
+pilot	add	north_star_activation_verifier	platform.release_activation_reconciliation_starts	SELECT	*	Verifier reads the scoped release kernel and immutable evidence
+pilot	add	north_star_activation_verifier	platform.release_activation_swap_receipts	INSERT	*	Pilot decision writes belong to the verifier
+pilot	add	north_star_activation_verifier	platform.release_activation_swap_receipts	SELECT	*	Verifier reads the scoped release kernel and immutable evidence
+pilot	add	north_star_activation_verifier	platform.release_activation_verification_receipts	INSERT	*	Pilot decision writes belong to the verifier
+pilot	add	north_star_activation_verifier	platform.release_activation_verification_receipts	SELECT	*	Verifier reads the scoped release kernel and immutable evidence
+pilot	add	north_star_activation_verifier	platform.release_approvals	INSERT	*	Pilot decision writes belong to the verifier
+pilot	add	north_star_activation_verifier	platform.release_approvals	SELECT	*	Verifier reads the scoped release kernel and immutable evidence
+pilot	add	north_star_activation_verifier	platform.release_approver_eligibility_events	SELECT	*	Verifier reads the scoped release kernel and immutable evidence
+pilot	add	north_star_activation_verifier	platform.release_executor_authority_events	SELECT	*	Verifier reads the scoped release kernel and immutable evidence
+pilot	add	north_star_activation_verifier	platform.tenant_release_admissions	SELECT	*	Verifier reads the scoped release kernel and immutable evidence
+pilot	add	north_star_activation_verifier	platform.tenant_releases	SELECT	*	Verifier reads the scoped release kernel and immutable evidence
+pilot	add	north_star_activation_verifier	platform.transition_preparation_receipts	SELECT	*	Verifier reads the scoped release kernel and immutable evidence
+pilot	remove	north_star_runtime	platform.active_release_pointers	UPDATE	*	Pilot decision writes belong to the verifier
+pilot	remove	north_star_runtime	platform.customization_patches	INSERT	*	Pilot authoring uses staff_propose_customization
+pilot	remove	north_star_runtime	platform.release_activation_attempt_outcomes	INSERT	*	Pilot decision writes belong to the verifier
+pilot	remove	north_star_runtime	platform.release_activation_attempts	INSERT	*	Pilot decision writes belong to the verifier
+pilot	remove	north_star_runtime	platform.release_activation_history	INSERT	*	Pilot decision writes belong to the verifier
+pilot	remove	north_star_runtime	platform.release_activation_outbox	INSERT	*	Pilot decision writes belong to the verifier
+pilot	remove	north_star_runtime	platform.release_activation_phase_receipts	INSERT	*	Pilot decision writes belong to the verifier
+pilot	remove	north_star_runtime	platform.release_activation_reconciliation_alarms	INSERT	*	Pilot decision writes belong to the verifier
+pilot	remove	north_star_runtime	platform.release_activation_reconciliation_starts	INSERT	*	Pilot decision writes belong to the verifier
+pilot	remove	north_star_runtime	platform.release_activation_swap_receipts	INSERT	*	Pilot decision writes belong to the verifier
+pilot	remove	north_star_runtime	platform.release_activation_verification_receipts	INSERT	*	Pilot decision writes belong to the verifier
+pilot	remove	north_star_runtime	platform.release_approvals	INSERT	*	Pilot decision writes belong to the verifier

@@ -79,7 +79,10 @@ import {
   authorizeReverseTransitionIfApplicable,
   ReleaseReverseTransitionRefusal,
 } from './release-reverse-transition-policy.js';
-import { withTrustedRequestTransaction } from './request-context.js';
+import {
+  recordStaffCustomizationProposal,
+  withTrustedRequestTransaction,
+} from './request-context.js';
 import { parsePinnedOperationCatalog } from '../../runtime/src/semantic-operation-gateway.js';
 import { PostgresWorkflowGateway } from './workflow-gateway.js';
 import { generateWorkflowSdk } from './workflow-sdk.js';
@@ -1501,46 +1504,66 @@ export class PostgresCustomizationService {
         }
         throw error;
       }
-      const patchId = randomUUID() as MintedUuid;
-      await withTrustedRequestTransaction(
+      const patchId = await withTrustedRequestTransaction(
         this.connection.runtimePool,
         context,
         async (client) => {
           signal?.throwIfAborted();
+          const proposal = {
+            patch_version: CUSTOMIZATION_PATCH_VERSION,
+            patch_kind: parsed.patch.kind,
+            payload: '\\x' + Buffer.from(payload).toString('hex'),
+            payload_digest: payloadDigest,
+            channel,
+            base_package_id: firstParty.package.packageId,
+            base_package_version: firstParty.package.version,
+            base_revision_id: baseRevisionId,
+            base_release_root: this.#tip.compiled.releaseRoot,
+            parent_revision_id: active.revisionId,
+            resulting_revision_id: identity.revisionId,
+            resulting_release_id: identity.releaseId,
+            language_version: normalized.languageVersion,
+            normalization_profile_version:
+              normalized.normalizationProfileVersion,
+            display_label: patchDisplayLabel(patch),
+            compiler_acknowledgement: this.options.acknowledgement,
+          };
+          const staffPatch = await recordStaffCustomizationProposal(
+            client,
+            context,
+            proposal,
+          );
+          if (staffPatch) {
+            signal?.throwIfAborted();
+            return staffPatch;
+          }
+          const demoPatch = randomUUID() as MintedUuid;
           await client.query(
             `INSERT INTO platform.customization_patches (
-             tenant_id, environment_id, patch_id, patch_version, patch_kind,
-             payload, payload_digest, channel, authored_by, base_package_id,
-             base_package_version, base_revision_id, base_release_root,
-             parent_revision_id, resulting_revision_id, resulting_release_id,
-             language_version, normalization_profile_version, display_label, compiler_acknowledgement
-           ) VALUES (
-             $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20
-           )`,
+               tenant_id, environment_id, patch_id, patch_version, patch_kind,
+               payload, payload_digest, channel, authored_by, base_package_id,
+               base_package_version, base_revision_id, base_release_root, parent_revision_id,
+               resulting_revision_id, resulting_release_id, language_version,
+               normalization_profile_version, display_label, compiler_acknowledgement
+             )
+             SELECT tenant_id, environment_id, patch_id, patch_version, patch_kind,
+                    payload, payload_digest, channel, authored_by, base_package_id,
+                    base_package_version, base_revision_id, base_release_root, parent_revision_id,
+                    resulting_revision_id, resulting_release_id, language_version,
+                    normalization_profile_version, display_label, compiler_acknowledgement
+             FROM jsonb_populate_record(NULL::platform.customization_patches, $1::jsonb)`,
             [
-              context.tenantId,
-              context.environmentId,
-              patchId,
-              CUSTOMIZATION_PATCH_VERSION,
-              parsed.patch.kind,
-              Buffer.from(payload),
-              payloadDigest,
-              channel,
-              context.principalId,
-              firstParty.package.packageId,
-              firstParty.package.version,
-              baseRevisionId,
-              this.#tip.compiled.releaseRoot,
-              active.revisionId,
-              identity.revisionId,
-              identity.releaseId,
-              normalized.languageVersion,
-              normalized.normalizationProfileVersion,
-              patchDisplayLabel(patch),
-              this.options.acknowledgement,
+              {
+                ...proposal,
+                tenant_id: context.tenantId,
+                environment_id: context.environmentId,
+                authored_by: context.principalId,
+                patch_id: demoPatch,
+              },
             ],
           );
           signal?.throwIfAborted();
+          return demoPatch;
         },
       );
       return {

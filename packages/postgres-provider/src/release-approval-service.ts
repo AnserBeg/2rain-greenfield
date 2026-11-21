@@ -1,4 +1,8 @@
 import {
+  loadPersistedDiffRelease,
+  releaseDiffBinding,
+} from './release-diff-binding.js';
+import {
   ACTIVATION_ATTEMPT_CONTRACT_VERSION,
   APPROVAL_CONTRACT_VERSION,
   APPROVAL_DEFAULT_EXPIRY_MILLISECONDS,
@@ -85,6 +89,7 @@ interface PreparationRow {
   release_diff_algorithm_version: string | null;
   release_diff_version: string | null;
   rendered_diff_evidence_digest: Uint8Array;
+  reviewed_diff: string | null;
   renderer_version: string;
   source_manifest_root: Uint8Array | null;
   target_manifest_root: Uint8Array;
@@ -241,7 +246,7 @@ export class PostgresReleaseApprovalService {
     );
 
     assertCurrentApprover(authority, release, command);
-    await assertCanonicalBinding(
+    const direction = await assertCanonicalBinding(
       client,
       context,
       pointer,
@@ -249,6 +254,41 @@ export class PostgresReleaseApprovalService {
       preparation,
       command.recoveryOfAttemptId ?? null,
     );
+
+    if (command.staffProofId) {
+      if (pointer.release_id === null || preparation.reviewed_diff === null)
+        fail(
+          'REVIEWED_DIFF_MISMATCH',
+          'staff approval requires a reviewed release diff',
+        );
+      const source = await loadPersistedDiffRelease(
+        client,
+        context,
+        pointer.release_id,
+      );
+      const candidate = await loadPersistedDiffRelease(
+        client,
+        context,
+        release.release_id,
+      );
+      const diff = releaseDiffBinding(source, candidate, direction);
+      if (
+        diff.renderedText !== preparation.reviewed_diff ||
+        !equalBytes(
+          digestBytes(diff.renderedDigest),
+          preparation.rendered_diff_evidence_digest,
+        ) ||
+        !equalBytes(
+          digestBytes(diff.canonicalDiffDigest),
+          preparation.canonical_diff_digest,
+        )
+      ) {
+        fail(
+          'REVIEWED_DIFF_MISMATCH',
+          'reviewed text differs from the release diff rendered by the verifier',
+        );
+      }
+    }
 
     const approvalResult = await client.query<ApprovalRow>(
       `INSERT INTO platform.release_approvals (
@@ -650,7 +690,7 @@ async function assertCanonicalBinding(
   release: ReleaseRow,
   preparation: PreparationRow,
   recoveryOfAttemptId: MintedUuid | null,
-): Promise<void> {
+): Promise<'forward' | 'reverse'> {
   const expectedFence = safeBigIntNumber(
     preparation.expected_fence,
     'expected fence',
@@ -732,15 +772,16 @@ async function assertCanonicalBinding(
       'transition receipt is not the exact pointer-to-target pair',
     );
   }
-  if (pointer.release_id !== null) {
-    await authorizeReverseTransitionIfApplicable(client, context, {
-      recoveryOfAttemptId,
-      expectedPointerId: pointer.pointer_id,
-      expectedFence: pointerFence,
-      sourceReleaseId: pointer.release_id,
-      targetReleaseId: release.release_id,
-    });
-  }
+  const reverseAuthorization =
+    pointer.release_id === null
+      ? null
+      : await authorizeReverseTransitionIfApplicable(client, context, {
+          recoveryOfAttemptId,
+          expectedPointerId: pointer.pointer_id,
+          expectedFence: pointerFence,
+          sourceReleaseId: pointer.release_id,
+          targetReleaseId: release.release_id,
+        });
 
   const compatibility =
     preparation.receipt_version === TRANSITION_PREPARATION_RECEIPT_V2_VERSION
@@ -761,6 +802,7 @@ async function assertCanonicalBinding(
           targetManifestRoot: preparation.target_manifest_root,
         });
   assertStoredCompatibility(compatibility, preparation);
+  return reverseAuthorization ? 'reverse' : 'forward';
 }
 
 function evaluateV2Compatibility(
