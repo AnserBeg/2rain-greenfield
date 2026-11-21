@@ -16,6 +16,7 @@ import {
   discussionInboxPort,
   PostgresPersonalInbox,
 } from '../../packages/postgres-provider/src/personal-inbox.js';
+import { checkInboxGuards } from '../helpers/personal-inbox-controls.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 
 test('personal inbox on committed discussion occurrences', async (t) => {
@@ -491,6 +492,22 @@ test('personal inbox on committed discussion occurrences', async (t) => {
             ])
               await assert.rejects(runtime.query(query), { code: '42501' });
           },
+        );
+        await t.test(
+          'each live inbox visibility and fan-out guard changes its own database decision',
+          () =>
+            checkInboxGuards(admin, {
+              tenant: tId,
+              environment: env,
+              company: west,
+              otherCompany: east,
+              person: mentioned,
+              author,
+              parentAuthor,
+              thread,
+              message,
+              parent,
+            }),
         );
       } finally {
         admin.release();

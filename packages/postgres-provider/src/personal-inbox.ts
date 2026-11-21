@@ -172,7 +172,7 @@ export class PostgresPersonalInbox {
         'SELECT platform.personal_inbox_unread($1,$2) AS count',
         [companyId, DISCUSSION_INBOX_CHANNEL],
       );
-      return count!.count === 100 ? '99+' : String(count!.count);
+      return count!.count >= 100 ? '99+' : String(count!.count);
     });
   }
 
