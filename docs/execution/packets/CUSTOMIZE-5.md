@@ -62,3 +62,37 @@ Status: executable, merged on CI green. Critical paths touched: `db/migrations/0
 - Check the database constraints against partial captures, civil/offset/instant disagreement and, for intervals, empty, reversed, non-finite or inconsistent ranges. Verify the scoped window index at activation. The new database checks reach an existing table as `NOT VALID` constraints that bind new writes; old writers are unaffected because they leave every new column null, and slice 1 must prove the catalog verifier accepts these multi-column checks. Commit before removing each independent guard and require its own regression proof to fail.
 - Recompile a first-party release and a real customized release omitting both declarations against identical parents and provenance. Compare normalized bytes, entire envelopes, roots and floors read back from persisted release rows. Exercise the archived production loader immediately preceding each rung on a declaring release. After slice 2 cover date-time alone, interval alone and both together against their required floors. Missing bindings and understated floors refuse before serving.
 - Reproduce the original roots, upgrade across an unrelated base addition, reopen a pre-upgrade value and write a second. Exercise a real ID collision for each kind and observe the named patch, `FIELD_COLLISION`, and continued verified source reads. Remove each allowlist entry in turn and require the vocabulary check to name it. Include ordered change-set replay. Roll back and re-activate a compatible release to read the original value again.
+
+```record-claim
+{
+  "schemaVersion": "northstar.record-claim/v1",
+  "packet": "CUSTOMIZE-5",
+  "base": "67e4efce31eb663f12d6f161aa91c0ce1220dffc",
+  "head": "b81d2f32951930a913dd0101d1a207bb219775ea",
+  "changedPaths": [
+    "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/date-time-field.ts",
+    "apps/web/src/surface-composition.ts", "apps/web/src/surface-runtime.ts", "db/migrations/0058_date_time_window_probe.sql",
+    "db/schema.snapshot.json", "docs/execution/packets/CUSTOMIZE-5.md", "package.json",
+    "packages/canonical-model/src/date-time-field.ts", "packages/canonical-model/src/formula-validation-bindings.ts", "packages/canonical-model/src/index.ts",
+    "packages/canonical-model/src/normalize.ts", "packages/canonical-model/src/schemas.ts", "packages/compiler/src/compiler.ts",
+    "packages/compiler/src/date-time.ts", "packages/compiler/src/formula-validation-examples.ts", "packages/compiler/src/projections.ts",
+    "packages/compiler/src/storage.ts", "packages/customization/src/ai-draft.ts", "packages/customization/src/apply.ts",
+    "packages/customization/src/patch.ts", "packages/customization/src/upgrade-diagnostics.ts", "packages/customization/src/upgrade-replay.ts",
+    "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/date-time-admission.ts", "packages/postgres-provider/src/date-time-storage.ts",
+    "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/module-storage-materializer.ts", "packages/postgres-provider/src/release-verification-service.ts",
+    "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/runtime/src/formula-validation.ts", "packages/runtime/src/request-runtime-view.ts",
+    "packages/runtime/src/semantic-operation-gateway.ts", "packages/runtime/src/semantic-query-gateway.ts", "test/evidence/CUSTOMIZE-5.expected-red.json",
+    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/archived-customization-runtime.ts", "test/postgres/date-time-field.test.ts",
+    "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts",
+    "test/postgres/request-runtime-view.test.ts", "test/postgres/trust-substrate.test.ts", "test/unit/customization-upgrade.test.ts",
+    "test/unit/date-time-field.test.ts"
+  ],
+  "symbols": [
+    {"path": "packages/canonical-model/src/date-time-field.ts", "name": "resolveTypedEntry"},
+    {"path": "packages/canonical-model/src/date-time-field.ts", "name": "dateTimeConsumerRefusal"},
+    {"path": "packages/compiler/src/date-time.ts", "name": "compileDateTimeFields"},
+    {"path": "packages/postgres-provider/src/date-time-storage.ts", "name": "resolveDateTimePatch"},
+    {"path": "packages/postgres-provider/src/date-time-admission.ts", "name": "dateTimeBindingsProblem"}
+  ]
+}
+```
