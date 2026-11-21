@@ -247,6 +247,11 @@ test('the PostgreSQL Invoice candidate probe uses the named date index and stops
         'a missing, unplanned index must be refused by key',
       );
       assert.deepEqual(await run(3, 2, true), { kind: 'unavailable' });
+      // An INCLUDE column can be returned from the index but cannot order the candidate range.
+      await client.query(
+        `CREATE INDEX ${index} ON ${relation} (${keys.slice(0, -1).join(',')}) INCLUDE (${keys.at(-1)})`,
+      );
+      assert.deepEqual(await run(3, 2, true), { kind: 'unavailable' });
       await client.query('ROLLBACK');
     } finally {
       client.release();

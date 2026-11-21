@@ -58,6 +58,7 @@ export async function reportIndexReady(
     JOIN pg_catalog.pg_am am ON am.oid=x.relam
     WHERE n.nspname='north_star_module' AND t.relname=$1 AND x.relname=$2
       AND i.indisready AND i.indisvalid AND am.amname='btree' AND i.indpred IS NULL AND i.indexprs IS NULL
+      AND i.indnkeyatts=i.indnatts AND NOT EXISTS(SELECT FROM unnest(i.indoption) flags WHERE flags <> 0)
       AND ARRAY(SELECT a.attname::text FROM unnest(i.indkey) WITH ORDINALITY k(num,ord)
         JOIN pg_catalog.pg_attribute a ON a.attrelid=t.oid AND a.attnum=k.num ORDER BY k.ord)=$3::text[]`,
     [table, index, keys],
