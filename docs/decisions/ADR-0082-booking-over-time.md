@@ -39,7 +39,9 @@ Shared owners can use shared resources. The writer verifies both persisted endpo
 parent in the transaction. Typed references retain referential and archive protection across release
 changes. An active allocation prevents archiving either endpoint. Closed bookings retain their links.
 The archive guard is integrity, not disclosure: it refuses whatever the archiving caller can see,
-because that caller is already authorized for the record.
+because that caller is already authorized for the record. Direct invocation of
+`require_record_archivable` by the module runtime role reveals one bit within its tenant and
+environment: whether an active allocation protects the named record.
 [ADR-0015](ADR-0015-legal-entity-business-dimension.md) · [ADR-0072](ADR-0072-tenant-document-editing-and-links.md)
 
 The pack publishes its typed configuration and exhaustive input/output dependency set. Mode and
@@ -198,9 +200,10 @@ may still be out at 10:05. Its finite planned interval cannot protect the next p
    (`SELECT ... FOR UPDATE`). One persistent row already identifies each diary and stores its
    time floor. Using it avoids a second advisory-key identity. Resolve all affected resources
    (including swap, group and due members), lock in ascending durable key order, then lock the
-   request identity and affected endpoint/owner records in one global order: descendants before
+   request identity, then endpoint records and their ownership paths in this order: descendants before
    ancestors (longest ownership path to a root, descending), then entity and record ID. The generic
-   module writer locks a child before its parent, so both writers share this order. Recheck the discovered
+   module writer also locks a child before its parent. Its reads of non-ownership relation targets
+   can take share locks in a different order. An idempotent request retries SQLSTATE 40P01 once. Recheck the discovered
    set, liveness, scope and revisions. Restart discovery if another resource lock would be
    needed. Owner-row locking also serializes a first booking with archive of an untouched owner.
    The database routine checks `current_setting('transaction_isolation') = 'read committed'`

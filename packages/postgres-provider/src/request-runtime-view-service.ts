@@ -7,7 +7,9 @@ import {
   CONNECTOR_FAMILY,
   CONNECTOR_PAYLOAD,
   BOOKING_OPERATION_READER,
-  hasBookingOperations,
+  BOOKING_USAGE_QUERY_READER,
+  hasBookingUsage,
+  bookingReaderFloor,
 } from '@north-star/canonical-model';
 import { layoutBindingsProblem } from './layout-admission.js';
 import { servingPointersSql } from './verified-release-generation.js';
@@ -983,17 +985,30 @@ function definitionFromSnapshotRows(
   );
   const operationFloor =
     operation.requiredRuntimeCapability?.minimumVersion ?? 0;
-  const booking = hasBookingOperations(operation.payload);
-  if (booking !== (operationFloor === BOOKING_OPERATION_READER))
+  const expectedBookingFloor = bookingReaderFloor(operation.payload);
+  const booking = expectedBookingFloor > 0;
+  if (
+    booking
+      ? operationFloor !== expectedBookingFloor
+      : operationFloor >= BOOKING_OPERATION_READER
+  )
     throw malformedProjection(
       'booking operations and the mandatory reader floor disagree',
     );
   const consumesRules =
     !booking && operationFloor >= LITERAL_VALIDATION_OPERATION_READER;
   const queryFloor = query.requiredRuntimeCapability?.minimumVersion ?? 0;
+  const usage = hasBookingUsage(query.payload);
+  if (usage !== (queryFloor === BOOKING_USAGE_QUERY_READER))
+    throw malformedProjection(
+      'booking owner usage and the mandatory query reader floor disagree',
+    );
   const consumesDisplays = queryFloor === CALCULATED_DISPLAY_QUERY_READER;
+
   const consumesFormula =
-    consumesRules || consumesDisplays || (booking && declaresRuleProjection);
+    consumesRules ||
+    consumesDisplays ||
+    ((booking || usage) && declaresRuleProjection);
   if (
     declaresRuleProjection !== consumesFormula ||
     hasRuleProjectionLink !== consumesFormula
@@ -1016,7 +1031,12 @@ function definitionFromSnapshotRows(
           operationFloor !== requiredFormulaValidationOperationReader(rules))
       )
         throw new Error('operation floor does not match bound operands');
-      if (consumesDisplays)
+      if (
+        consumesDisplays ||
+        (usage &&
+          isRecord(formulaRule.payload) &&
+          Object.hasOwn(formulaRule.payload, 'calculatedFields'))
+      )
         parseCalculatedDisplayProjection(formulaRule.payload);
       else if (
         isRecord(formulaRule.payload) &&

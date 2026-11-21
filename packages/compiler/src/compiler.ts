@@ -7,9 +7,12 @@ import {
 import { compileAddressBindings } from './address.js';
 import { compileDateTimeFields } from './date-time.js';
 import {
-  BOOKING_OPERATION_READER,
+  BOOKING_USAGE_QUERY_READER,
+  hasBookingUsage,
+  bookingReaderFloor,
   bookingDeclarationProblem,
   bookingCatalogTerms,
+  bookingUsageCatalogTerms,
   hasBookingOperations,
 } from '@north-star/canonical-model';
 import { CALCULATED_DISPLAY_QUERY_READER } from '../../canonical-model/src/calculated-display-projection.js';
@@ -1559,11 +1562,17 @@ function projectionDispatchRevision(
         // read a member no v2 reader knows.
         const v2 = Object.fromEntries(
           Object.entries(query).filter(
-            ([key]) => key !== 'legalEntityScope' && key !== 'parameters',
+            ([key]) =>
+              key !== 'legalEntityScope' &&
+              key !== 'parameters' &&
+              (query.tier !== 'q2' || key !== 'readModel'),
           ),
         ) as typeof query;
         return {
           ...v2,
+          // Decode the owner row with the v2 get. The released catalog adds
+          // the Q2 tier and the protocol from the original declaration.
+          tier: query.tier === 'q2' ? 'q0' : query.tier,
           filter: {
             kind: 'booleanPredicate' as const,
             schemaVersion: LANGUAGE_VERSION,
@@ -1627,6 +1636,9 @@ function decorateV3ProjectionPlans(
                 minimumVersion: Math.max(
                   plan.requiredRuntimeCapability.minimumVersion,
                   hasListSums ? 3 : 2,
+                  hasBookingUsage(packageRevision)
+                    ? BOOKING_USAGE_QUERY_READER
+                    : 0,
                 ),
               },
             }
@@ -2320,11 +2332,13 @@ function verifyCompleteness(
     ruleProjection.length !==
       Number(Boolean(declaredRules || declaredDisplays)) ||
     (hasBookingOperations(packageRevision)
-      ? operationFloor !== BOOKING_OPERATION_READER
+      ? operationFloor !== bookingReaderFloor(packageRevision)
       : declaredRules &&
         operationFloor !==
           requiredFormulaValidationOperationReader(declaredRules)) ||
-    (declaredDisplays && queryFloor !== CALCULATED_DISPLAY_QUERY_READER) ||
+    (hasBookingUsage(packageRevision)
+      ? queryFloor !== BOOKING_USAGE_QUERY_READER
+      : declaredDisplays && queryFloor !== CALCULATED_DISPLAY_QUERY_READER) ||
     ((declaredRules || declaredDisplays) &&
       (ruleReference?.instanceId !==
         `${packageRevision.package.namespace}:projection.formula-rule` ||
@@ -2348,6 +2362,12 @@ function verifyCompleteness(
   const bookingProblem = bookingDeclarationProblem(packageRevision);
   if (
     bookingProblem ||
+    canonicalize(bookingUsageCatalogTerms(packageRevision)) !==
+      canonicalize(
+        bookingUsageCatalogTerms(
+          byFamily.get(PROJECTION_FAMILY_IDS.queryCatalog),
+        ),
+      ) ||
     canonicalize(bookingCatalogTerms(packageRevision)) !==
       canonicalize(
         bookingCatalogTerms(
