@@ -73,6 +73,97 @@ const wrongLeave = {
   fields: leaveFields.filter((field) => field.label !== 'End date'),
 };
 
+const opportunity = (lostLabels: readonly string[]) => {
+  const entity = `${NS}:entity.custom_opportunity`;
+  return {
+    kind: 'changeSet',
+    patches: [
+      {
+        kind: 'addRecordType',
+        label: 'Opportunity',
+        companyOwnership: 'entityOwned',
+        fields: [
+          { label: 'Name', type: 'text' },
+          { label: 'Estimated value', type: 'number' },
+          { label: 'Expected close date', type: 'date' },
+        ],
+      },
+      {
+        kind: 'addLink',
+        entity,
+        label: 'Customer',
+        target: `${NS}:entity.party`,
+      },
+      {
+        kind: 'declareLifecycle',
+        entity,
+        initial: 'Lead',
+        states: [
+          { label: 'Lead', role: 'inProgress' },
+          { label: 'Qualified', role: 'inProgress' },
+          { label: 'Proposal', role: 'inProgress' },
+          { label: 'Won', role: 'success' },
+          { label: 'Lost', role: 'blocked' },
+        ],
+        transitions: [
+          { from: 'Lead', to: 'Qualified', label: 'Qualify' },
+          { from: 'Qualified', to: 'Proposal', label: 'Send proposal' },
+          { from: 'Proposal', to: 'Won', label: 'Mark won' },
+          ...['Lead', 'Qualified', 'Proposal'].map((from, index) => ({
+            from,
+            to: 'Lost',
+            label: lostLabels[index]!,
+          })),
+        ],
+      },
+    ],
+  };
+};
+
+const rentalEntity = `${NS}:entity.custom_rental_contract`;
+const rentalWithBoard = {
+  kind: 'changeSet',
+  patches: [
+    {
+      kind: 'addRecordType',
+      label: 'Rental contract',
+      companyOwnership: 'entityOwned',
+      fields: [
+        { label: 'Contract number', type: 'text' },
+        { label: 'Start date', type: 'date' },
+      ],
+    },
+    {
+      kind: 'addLineTable',
+      entity: rentalEntity,
+      label: 'Contract lines',
+      fields: [
+        { label: 'Equipment', type: 'text' },
+        { label: 'Daily rate', type: 'number' },
+      ],
+    },
+    {
+      kind: 'declareLifecycle',
+      entity: rentalEntity,
+      initial: 'Quote',
+      states: [
+        { label: 'Quote', role: 'inProgress' },
+        { label: 'On rent', role: 'inProgress' },
+        { label: 'Closed', role: 'success' },
+      ],
+      transitions: [
+        { from: 'Quote', to: 'On rent', label: 'Start rental' },
+        { from: 'On rent', to: 'Closed', label: 'Close' },
+      ],
+    },
+    {
+      kind: 'addBoardViewRevision',
+      entity: rentalEntity,
+      label: 'Contracts board',
+    },
+  ],
+};
+
 const createCheck = `${NS}:operation.custom_receipt_check_create`;
 function receiptWorkflow() {
   const event = {
@@ -135,12 +226,14 @@ test(
   async (t) => {
     await withAgentWorlds('build-eval', async (worlds) => {
       const results: CaseResult[] = [];
+      let lastLog: Record<string, unknown>[] = [];
       const run = async (
         id: string,
         steps: Parameters<typeof scriptedModel>[0],
       ) => {
         const world = await worlds.fresh(`build-${id}`);
         const log: Record<string, unknown>[] = [];
+        lastLog = log;
         try {
           const result = await runBuildCase(world, byId(id), {
             provider: () => scriptedModel(steps),
@@ -254,8 +347,86 @@ test(
         },
       );
 
+      await t.test(
+        'a draft the compiler refuses is repaired with its diagnostics and counts after repair',
+        async () => {
+          const result = await run('M04', [
+            draft(opportunity(['Mark lost', 'Mark lost', 'Mark lost'])),
+            draft(
+              opportunity([
+                'Lose from lead',
+                'Lose from qualified',
+                'Lose from proposal',
+              ]),
+            ),
+          ]);
+          assert.deepEqual(result.reasons, []);
+          assert.equal(result.modelCalls, 2);
+          assert.equal(result.firstTry, false);
+          assert.equal(result.afterRepair, true);
+          assert.equal(result.repairTurns, 1);
+          assert.equal(result.behaviour, true);
+          assert.match(
+            JSON.stringify(lastLog),
+            /CUSTOMIZE_DUPLICATE_LABEL: Use distinct names for the states and for the actions/u,
+          );
+        },
+      );
+
+      await t.test(
+        'a workflow that fails verification is repaired from the verifier error',
+        async () => {
+          const good = receiptWorkflow();
+          const wrapped = {
+            ...good,
+            body: `export default function run(sdk: WorkflowSdk, event: ReceiptEvent): void {\n${good.body}\n}`,
+          };
+          const result = await run('W01', [draft(wrapped), draft(good)]);
+          assert.deepEqual(result.reasons, []);
+          assert.equal(result.repairTurns, 1);
+          assert.equal(result.behaviour, true);
+          assert.match(
+            JSON.stringify(lastLog),
+            /workflow verification: Workflow uses forbidden syntax: export/u,
+          );
+        },
+      );
+
+      await t.test(
+        'a module drafts with lines, statuses and its board in one change',
+        async () => {
+          const result = await run('M07', [draft(rentalWithBoard)]);
+          assert.deepEqual(result.reasons, []);
+          assert.equal(result.firstTry, true);
+          assert.equal(result.behaviour, true);
+        },
+      );
+
+      await t.test(
+        'an address field and its map draft on customers and save end to end',
+        async () => {
+          const result = await run('U01', [
+            draft({
+              kind: 'changeSet',
+              patches: [
+                {
+                  kind: 'addAddressField',
+                  entity: `${NS}:entity.party`,
+                  label: 'Delivery address',
+                },
+                { kind: 'addMapPlacement', field: 'Delivery address' },
+              ],
+            }),
+          ]);
+          assert.deepEqual(result.reasons, []);
+          assert.equal(result.e2e, true);
+          assert.equal(result.behaviour, true);
+        },
+      );
+
       const summary = summarize(results);
-      assert.equal(summary.ran, 6);
+      assert.equal(summary.ran, 10);
+      assert.equal(summary.repairedAfterOne, 3);
       // M01's scripted refusal, and the parser's refusal of H01's grouped
       // permission change: both refuse a request the platform can draft.
       assert.equal(summary.falseRefusals, 2);
