@@ -109,11 +109,10 @@ The owner binding declares one of two fulfilment modes and each booking pins it 
   fulfilment is blocked. Count each quantity once across planned and physical occupation.
 - **Elapses on schedule.** A confirmed appointment ends in `completed` at the agreed end.
   Confirmation authorizes that exact system transition through the same locked, idempotent
-  mechanism as expiry. Completion states that the scheduled time elapsed. It creates no
-  evidence of attendance or possession. An authorized No-show records absence and releases
+  mechanism as expiry. The attendance outcome records that the scheduled time elapsed. Evidence of physical presence or possession requires a separate observation. An authorized No-show records absence and releases
   remaining occupation. A tracked confirmation still unstarted at its end becomes `noShow`
   under the end condition accepted at confirmation. A late Start reopens that tracked booking
-  under the normal locks and capacity check. Refuse with the stable diagnostic
+  under the normal locks and capacity check. Recovery checks historical occupation after the occupied end through the decision and voids the timed absence in the same transaction as the new use. Refuse with the stable diagnostic
   `booking.capacityTaken` if its capacity was taken meanwhile. For both modes, system work matches the
   current revision, mode and due end. A rescheduled booking cannot close on its old timer.
 
@@ -300,6 +299,7 @@ when its transition commits and advances the cursor. The same cursor always name
 | Actual-use legs | Leg ID and revision, booking ID, target, effective start and optional end, exact quantity and unit, recorded time and superseded revision. A partial return splits the legs so each quantity applies to a known interval. A scheduled completion has no possession leg. |
 | Unit-assignment legs | Stable leg ID and revision, booking ID, assigned unit key and effective bounds. A swap ends one assignment and starts the next at the same instant. |
 | Pauses | First-class, booking-scoped rows with pause ID, revision, booking ID, effective start and nullable end, typed neutral reason (v1 `operatorRequested` or `serviceInterrupted`), effective-at and recorded-at instants. Resume closes the open pause. Correct-actuals supersedes or voids an identified pause revision with an audit reason. Preserve each previous version. |
+| Attendance outcomes (`attendance`) | Stable evidence ID and revision, booking ID, outcome in `reason` (`completed` or `noShow`), effective and recorded times, superseded revision and `voided`. A steward corrects an outcome by its evidence ID. Recovering a timed absence removes it from the current snapshot and delivers its voided revision with the new use on the same incremental cursor. |
 
 The projection returns complete evidence for the requested owner and horizon, or a typed
 refusal for insufficient permission or size. An open end is explicit. Billing may clip at
@@ -311,7 +311,7 @@ its bookings or child evidence. A group transaction advances each affected owner
 all its changes. A rolled-back writer cannot publish a cursor. A late correction therefore appears
 after the consumer’s checkpoint even when both effective dates precede it. The published dependency set includes the pack routine `booking.ownerCursorFence/v1`.
 Through the generated facade it locks the listed owners in stable owner order, returns their
-current cursors and holds the locks to commit. Billing compares each cursor before consuming its snapshot. A mismatch needs a
+current cursors and holds the locks to commit. Pass every owner needed by the transaction in one fence call. Acquire any owner or resource record locks before calling the fence. Billing compares each cursor before consuming its snapshot. A mismatch needs a
 fresh read. Booking gives pauses, quantities and intervals no money meaning. BILLING-1 owns the
 choice of basis, rates, accrual and financial corrections. [BILLING-1 source contract](ADR-0083-period-and-usage-billing.md#which-service-is-billable)
 
