@@ -828,3 +828,9 @@ How to apply: Require a scoped human decision for a fence advance and its replay
 Date: 2026-11-20
 Why: A backdated successor reduced an eight-day entitlement below the amount already allocated after four days.
 How to apply: At each occurrence opening, select among the terms and assignments published by then. Save the inputs served to the caller and replay them after publishing a successor. [BILLING-1](docs/execution/packets/BILLING-1.md)
+
+## Check privileges after deployment mode is claimed
+
+Date: 2026-11-20
+Why: Grants assigned while claiming pilot or demo were invisible to checks on a freshly migrated store.
+How to apply: Claim each supported mode and compare its effective privileges against reviewed rows. Keep the unclaimed assertion for the migration baseline. [SIGNIN-1 slice 2a fixes](docs/execution/packets/SIGNIN-1-2a-fixes.md)
