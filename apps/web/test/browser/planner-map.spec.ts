@@ -1,6 +1,13 @@
 import { test, expect } from '@playwright/test';
 import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import {
+  SURFACE_CLIENT_CSP_HASH,
+  SURFACE_CLIENT_SCRIPT,
+} from '../../src/surface-client.js';
+import {
+  ASSISTANT_PANEL_CSP_HASH,
+  ASSISTANT_PANEL_SCRIPT,
+} from '../../src/assistant-panel.js';
 import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
 
@@ -35,11 +42,11 @@ test('dispatchers pan just the map, return with Back and can open each stop with
     const region = page.locator('[data-surface-archetype="map"]'),
       svg = region.locator('[data-map-drag]');
     await expect(svg.locator('a')).toHaveCount(2);
-    const script = await page.locator('script').allTextContents();
-    expect(script).toHaveLength(1);
-    expect(response?.headers()['content-security-policy']).toContain(
-      'sha256-' + createHash('sha256').update(script[0]!).digest('base64'),
-    );
+    const scripts = await page.locator('script').allTextContents();
+    expect(scripts).toEqual([SURFACE_CLIENT_SCRIPT, ASSISTANT_PANEL_SCRIPT]);
+    const csp = response?.headers()['content-security-policy'];
+    for (const hash of [SURFACE_CLIENT_CSP_HASH, ASSISTANT_PANEL_CSP_HASH])
+      expect(csp).toContain(hash);
     const sidebar = await page.locator('aside,nav').first().elementHandle();
     const heading = region.locator('h1'),
       origin = await heading.getAttribute('data-map-state');
@@ -212,7 +219,6 @@ test('the isolated Google loader uses the public camera and an origin referrer',
 }) => {
   const { basemapCsp, googleBasemapDocument } =
     await import('../../src/google-basemap.js');
-  const { SURFACE_CLIENT_SCRIPT } = await import('../../src/surface-client.js');
   const { mapCentre } =
     await import('../../../../packages/canonical-model/src/map-viewport.js');
   const viewport = { x: 3324, y: 7175, zoom: 8, size: 'small' } as const;
