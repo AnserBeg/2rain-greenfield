@@ -50,7 +50,8 @@ Slice 1b merged at `d48c870bdf7cae3858a84e1dde6ea8125750e28d` on [exact full CI 
 - **R11.** Slice 1b’s last executable commit was `30a0c46e`. Fable read packet tip `89e39a42` on [green tip CI 44871414335](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44871414335).
 
 The first seven fix-round mutations failed at their named assertions on PostgreSQL 16 and the restored writer tests passed. The follow-up control `recovery-snapshot-window` restores selection by hidden evidence. [Expected-red manifest](../../../test/evidence/BOOKING-1.expected-red.json) · [Full packet CI for the SQL at `a9c50c69`](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44883389027). TRAIN-A assigned migration `0062_booking_recovery.sql`.
-CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44883389027
+**B1 hard gate closed.** The targeted sol check passed after R1. TRAIN-A merged the fix at `de966a715bac96ec52778cee58bbef5309ec65c8`. [Exact full CI 44928895793](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44928895793).
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44928895793
 
 ## Test it yourself
 
