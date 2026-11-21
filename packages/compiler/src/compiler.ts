@@ -1541,11 +1541,17 @@ function projectionDispatchRevision(
         // read a member no v2 reader knows.
         const v2 = Object.fromEntries(
           Object.entries(query).filter(
-            ([key]) => key !== 'legalEntityScope' && key !== 'parameters',
+            ([key]) =>
+              key !== 'legalEntityScope' &&
+              key !== 'parameters' &&
+              (query.tier !== 'q2' || key !== 'readModel'),
           ),
         ) as typeof query;
         return {
           ...v2,
+          // Decode the owner row with the v2 get. The released catalog adds
+          // the Q2 tier and the protocol from the original declaration.
+          tier: query.tier === 'q2' ? 'q0' : query.tier,
           filter: {
             kind: 'booleanPredicate' as const,
             schemaVersion: LANGUAGE_VERSION,
