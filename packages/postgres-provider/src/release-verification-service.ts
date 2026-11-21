@@ -5,7 +5,14 @@ import {
   withWorkflowVerifierTransaction,
   type WorkflowBinding,
 } from './workflow-admission.js';
-import { WorkflowProjectionSchema } from '../../canonical-model/src/schemas.js';
+import {
+  readWorkflowBundle,
+  verifyRetainedWorkflow,
+} from './workflow-bundle.js';
+import {
+  WorkflowProjectionSchema,
+  type WorkflowDefinition,
+} from '../../canonical-model/src/schemas.js';
 import { WORKFLOW_SURFACE_FLOOR } from '../../canonical-model/src/workflows.js';
 import { workflowSdkBindingDigest } from '@north-star/compiler';
 import { createHash, randomUUID } from 'node:crypto';
@@ -523,17 +530,11 @@ export class PostgresReleaseVerificationService {
       undefined,
       capabilityExecutors,
     );
-    const entry = new AuthenticatedRequestRuntimeEntryAdapter(
-      new AuthenticatedRequestEntryAdapter(async () => ({
-        environmentId: context.environmentId,
-        principalId: context.principalId,
-        tenantId: context.tenantId,
-      })),
-      new CandidateDefinitionLoader(
-        this.pool,
-        command.compiledRelease,
-        command.releaseId,
-      ),
+    const entry = candidateEntry(
+      this.pool,
+      context,
+      command.compiledRelease,
+      command.releaseId,
       policy,
     );
     return entry.run({}, (view) => {
@@ -1304,6 +1305,53 @@ interface VerificationRecord {
   readonly recordId: string;
   readonly relations: Readonly<Record<string, string>>;
   readonly values: Readonly<Record<string, unknown>>;
+}
+
+function candidateEntry(
+  pool: Pool,
+  context: TrustedRequestContext,
+  compiled: CompileSuccess,
+  releaseId: MintedUuid,
+  policy: CurrentPolicyGateway,
+) {
+  return new AuthenticatedRequestRuntimeEntryAdapter(
+    new AuthenticatedRequestEntryAdapter(async () => ({
+      environmentId: context.environmentId,
+      principalId: context.principalId,
+      tenantId: context.tenantId,
+    })),
+    new CandidateDefinitionLoader(pool, compiled, releaseId),
+    policy,
+  );
+}
+
+/** Replays mocked effects against the destination catalogs before offering an upgrade. */
+export async function checkRetainedWorkflowReplay(
+  pool: Pool,
+  context: TrustedRequestContext,
+  compiled: CompileSuccess,
+  releaseId: MintedUuid,
+  workflows: readonly WorkflowDefinition[],
+) {
+  const entry = candidateEntry(
+    pool,
+    context,
+    compiled,
+    releaseId,
+    new VerificationAllowPolicy(),
+  );
+  return entry.run({}, async (view) => {
+    for (const workflow of workflows) {
+      const bundle = await withTrustedRequestTransaction(
+        pool,
+        context,
+        (client) => readWorkflowBundle(client, context, workflow.bodyDigest),
+      );
+      const finding = await verifyRetainedWorkflow(view, workflow, bundle);
+      if (finding) return finding;
+    }
+    return null;
+  });
 }
 
 class CandidateDefinitionLoader implements RequestRuntimeDefinitionLoader {

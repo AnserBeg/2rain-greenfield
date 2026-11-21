@@ -1,3 +1,16 @@
+import { checkRetainedWorkflowReplay } from '../../packages/postgres-provider/src/release-verification-service.js';
+import type { MintedUuid } from '../../packages/platform-runtime/src/release-records.js';
+import type { Pool } from 'pg';
+import { WorkflowDefinitionSchema } from '../../packages/canonical-model/src/schemas.js';
+import { WorkflowWatchdogExpired } from '../../packages/postgres-provider/src/workflow-isolate.js';
+import {
+  LEGACY_WORKFLOW_SDK_VERSION,
+  RemovedWorkflowAction,
+} from '../../packages/postgres-provider/src/workflow-sdk-version.js';
+import {
+  verifyWorkflowBundle,
+  verifyRetainedWorkflow,
+} from '../../packages/postgres-provider/src/workflow-bundle.js';
 import assert from 'node:assert/strict';
 import test, { before } from 'node:test';
 
@@ -9,6 +22,8 @@ import {
 } from '../../packages/postgres-provider/src/workflow-compile.js';
 import {
   InMemoryWorkflowRun,
+  WorkflowCpuLimit,
+  retryWorkflowStep,
   verifyWorkflowReplay,
   type WorkflowJournalSnapshot,
   type WorkflowVerificationFixture,
@@ -25,11 +40,13 @@ import {
 import { AuthenticatedRequestEntryAdapter } from '../../packages/runtime/src/request-context.js';
 import {
   AuthenticatedRequestRuntimeEntryAdapter,
+  trustedContextForRequestRuntimeView,
   CURRENT_POLICY_DECISION_VERSION,
   type RequestRuntimeView,
 } from '../../packages/runtime/src/request-runtime-view.js';
 import {
   compilePartyFixture,
+  partyDefinitionBytes,
   partyRuntimeProjections,
 } from '../fixtures/g2/party/compiler.js';
 import { PARTY_IDS } from '../fixtures/g2/party/definition.js';
@@ -83,10 +100,14 @@ let view: RequestRuntimeView;
 let sdk: WorkflowSdk;
 before(async () => {
   view = await entry.run({}, (issued) => issued);
-  sdk = generateWorkflowSdk(view, {
-    queries: [queryId],
-    operations: [operationId],
-  });
+  sdk = generateWorkflowSdk(
+    view,
+    {
+      queries: [queryId],
+      operations: [operationId],
+    },
+    LEGACY_WORKFLOW_SDK_VERSION,
+  );
 });
 const compile = (body: string) => compileWorkflowBody(body, sdk);
 const raw = (body: string): CompiledWorkflow => ({
@@ -468,5 +489,454 @@ test('workflow verification derives the complete Tier B relation and ownership c
   assert.deepEqual(
     [...dependencies].sort(),
     [receipt, child, indirect, capabilityTarget].sort(),
+  );
+});
+
+test('both sandbox requests discard serving credentials and cannot open the connector key', async (t) => {
+  const { fork } = await import('node:child_process');
+  const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { compileInSandbox } =
+    await import('../../packages/customization/src/sandbox.js');
+  const directory = await mkdtemp(join(tmpdir(), 'workflow-test-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const key = join(directory, 'connector');
+  await writeFile(key, 'fixture');
+  const keys = [
+    'DATABASE_URL',
+    'PGPASSWORD',
+    'NORTH_STAR_AGENT_KEY_FILE',
+    'NORTH_STAR_CONNECTOR_KEY_FILE',
+    'PROVIDER_TOKEN',
+    'NODE_OPTIONS',
+  ];
+  for (const name of keys) {
+    const previous = process.env[name];
+    process.env[name] = key;
+    t.after(() => {
+      if (previous === undefined) delete process.env[name];
+      else process.env[name] = previous;
+    });
+  }
+  const probe = `import assert from 'node:assert/strict';
+  import {readFileSync} from 'node:fs';
+  import {subscribe} from 'node:diagnostics_channel';
+  for (const key of ${JSON.stringify(keys)}) assert.equal(process.env[key], undefined);
+  assert.throws(() => readFileSync(${JSON.stringify(key)}), {code: 'ERR_ACCESS_DENIED'});
+  subscribe('net.client.socket', () => process.exit(79));`;
+  let launches = 0;
+  const options = {
+    launch(path: string, argv: readonly string[], env: NodeJS.ProcessEnv) {
+      launches++;
+      return fork(path, [], {
+        execArgv: [
+          ...argv,
+          '--import',
+          `data:text/javascript,${encodeURIComponent(probe)}`,
+        ],
+        env,
+        serialization: 'advanced',
+        stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
+      });
+    },
+  };
+  const result = await verifyWorkflowBundle(
+    view,
+    { queries: [], operations: [] },
+    {
+      body: 'sdk.now();',
+      fixtures: [{ event, effects: [{ call: { kind: 'now' }, result: day }] }],
+    },
+    options,
+  );
+  assert.deepEqual(result.journals, [
+    [{ request: '{"kind":"now"}', result: JSON.stringify(day) }],
+  ]);
+  const { serializeRelease } =
+    await import('../../packages/customization/src/release-envelope.js');
+  const compiled = await compileInSandbox(
+    {
+      chain: [],
+      base: {},
+      acknowledgement: { packageId: 'party', entries: [] },
+      tip: serializeRelease({
+        compiled: fixtureRelease,
+        normalizedDefinitionBytes: partyDefinitionBytes(
+          compilePartyFixture().definition,
+        ),
+      }),
+    },
+    options,
+  );
+  assert.equal(compiled.status, 'compiled');
+  assert.equal(launches, 2);
+});
+
+test('the parent kills an unfinished workflow draft at its verification deadline', async () => {
+  const { fork } = await import('node:child_process');
+  let exitSignal: Promise<NodeJS.Signals | null> | undefined;
+  let limit;
+  await assert.rejects(
+    verifyWorkflowBundle(
+      view,
+      { queries: [], operations: [] },
+      { body: 'for (;;) {}', fixtures: [{ event, effects: [] }] },
+      {
+        launch(path, argv, env) {
+          const child = fork(path, [], {
+            env,
+            execArgv: [...argv],
+            serialization: 'advanced',
+            stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+          });
+          exitSignal = new Promise((resolve) =>
+            child.once('exit', (_code, signal) => resolve(signal)),
+          );
+          return child;
+        },
+        startTimer(milliseconds, expire) {
+          limit = milliseconds;
+          queueMicrotask(expire);
+          return () => undefined;
+        },
+      },
+    ),
+    {
+      code: 'SANDBOX_TIMED_OUT',
+      message: 'The workflow draft took too long to verify.',
+    },
+  );
+  assert.equal(await exitSignal, 'SIGKILL');
+  assert.equal(limit, 30_000);
+});
+
+test('workflow review traces the exact site even when both branches call the same method', async () => {
+  const body =
+    'if (event.receiptId === event.eventId) { sdk.now(); } else { for (let i=0;i<1;i++) sdk.now(); }';
+  const mocked = { call: { kind: 'now' }, result: day };
+  const grants = { queries: [queryId], operations: [] };
+  const verified = await verifyWorkflowBundle(view, grants, {
+    body,
+    fixtures: [{ event, effects: [mocked] }],
+  });
+  const { renderWorkflowReview } =
+    await import('../../packages/postgres-provider/src/workflow-review.js');
+  const workflow = WorkflowDefinitionSchema.parse({
+    schemaVersion: 'v6',
+    workflowId: 'review',
+    trigger: 'goodsReceiptPosted' as const,
+    bodyDigest: '1'.repeat(64),
+    grants,
+  });
+  const render = (source: string) =>
+    renderWorkflowReview(
+      workflow,
+      source,
+      verified,
+      new Map([[queryId, 'Party search']]),
+      new Set(),
+    );
+  const review = render(body);
+  assert.deepEqual(verified.coverage, [[1]]);
+  assert.equal(
+    review.text.match(/Reads the current time without asking/g)?.length,
+    1,
+  );
+  assert.match(review.text, /now \(conditional\) · not shown in any test/);
+  assert.match(review.text, /now \(conditional\) \(in a loop\)\n/);
+  assert.match(review.text, /Party search — declared but never called/);
+  assert.ok(review.text.endsWith(body));
+  assert.deepEqual(render(body), review);
+  assert.notEqual(render(body + '\n').digest, review.digest);
+});
+
+test('workflow review lint requires every SDK access to be a direct call', () => {
+  for (const body of [
+    'const alias=sdk; alias.now();',
+    'const f=sdk.now; f();',
+    'const {now}=sdk; now();',
+    "sdk['now']();",
+    'sdk.now.call(null);',
+  ]) {
+    assert.throws(() => compile(body), /forbidden syntax/);
+  }
+});
+
+test('v2 drops event waits and caps sleep while a v1 pin retains both contracts', async () => {
+  const grants = { operations: [], queries: [] };
+  const current = generateWorkflowSdk(view, grants);
+  const previous = generateWorkflowSdk(
+    view,
+    grants,
+    LEGACY_WORKFLOW_SDK_VERSION,
+  );
+  const { createHash } = await import('node:crypto');
+  // Both v1 declaration pins with empty grants, as emitted at 0a9f7ca5.
+  assert.equal(
+    createHash('sha256').update(previous.declarations).digest('hex'),
+    '833fdd0dfe7dc1c1a9327d812d79ae5837a8a0b3cd45cbf282e7cc7cb83d6a60',
+  );
+  assert.equal(
+    createHash('sha256')
+      .update(
+        generateWorkflowSdk(view, grants, LEGACY_WORKFLOW_SDK_VERSION, true)
+          .declarations,
+      )
+      .digest('hex'),
+    '63b619366345e2031f95cf98c509bc18761d28c03729e08637cb23f85dce26c0',
+  );
+  const body =
+    "if (event.receiptId === event.eventId) sdk.waitForEvent('goodsReceiptPosted', 1);";
+  assert.doesNotMatch(current.declarations, /waitForEvent/);
+  assert.doesNotThrow(() =>
+    compileWorkflowBody("const label = '// @ts-ignore';", current),
+  );
+  assert.throws(
+    () => compileWorkflowBody('// @ts-ignore\n' + body, current),
+    /compiler suppression/,
+  );
+  assert.match(current.declarations, /90 days/);
+  assert.throws(() => compileWorkflowBody(body, current), /waitForEvent/);
+  assert.throws(
+    () =>
+      compileWorkflowBody(
+        "const wait = sdk.waitForEvent; wait('goodsReceiptPosted', 1);",
+        current,
+      ),
+    RemovedWorkflowAction,
+  );
+  const wait = {
+    kind: 'waitForEvent',
+    eventType: 'goodsReceiptPosted',
+    timeoutMs: 1,
+  };
+  assert.throws(() => current.admitCall(wait), /external-event waits/);
+  const cap = 90 * 24 * 60 * 60 * 1000;
+  assert.deepEqual(current.admitCall({ kind: 'sleep', milliseconds: cap }), {
+    kind: 'sleep',
+    milliseconds: cap,
+  });
+  assert.throws(
+    () => current.admitCall({ kind: 'sleep', milliseconds: cap + 1 }),
+    /90 days/,
+  );
+  assert.deepEqual(
+    previous.admitCall({ kind: 'sleep', milliseconds: cap + 1 }),
+    { kind: 'sleep', milliseconds: cap + 1 },
+  );
+  assert.deepEqual(previous.admitCall(wait), wait);
+  const result = await verifyRetainedWorkflow(
+    view,
+    { workflowId: 'old-wait', grants },
+    {
+      body,
+      authoredBy: event.eventId,
+      fixtures: [{ event, effects: [] }],
+      executable: compileWorkflowBody(body, previous).executable,
+    },
+  );
+  assert.deepEqual(result, {
+    code: 'REMOVED_ACTION',
+    subject: 'old-wait',
+    expected: 'waitForEvent',
+    observed: null,
+  });
+});
+
+test('a CPU overrun retries once; a watchdog kill has its own evidence', async () => {
+  const controls: string[] = [];
+  let count = 0;
+  assert.equal(
+    await retryWorkflowStep(
+      async () => {
+        if (++count === 1) throw new WorkflowCpuLimit();
+        return 'done';
+      },
+      (s) => controls.push(s),
+    ),
+    'done',
+  );
+  assert.deepEqual(controls, ['attempt-1-cpu-limit', 'attempt-2-completed']);
+  controls.length = 0;
+  await assert.rejects(
+    retryWorkflowStep(
+      async () => {
+        throw new WorkflowWatchdogExpired();
+      },
+      (s) => controls.push(s),
+    ),
+    /watchdog/,
+  );
+  assert.deepEqual(controls, [
+    'attempt-1-host-watchdog',
+    'attempt-2-host-watchdog',
+  ]);
+});
+
+test('a workflow review gesture binds the observed release fence, draft and rendered bytes', async () => {
+  const { workflowReviewDecision } =
+    await import('../../packages/postgres-provider/src/workflow-review.js');
+  const pointer = { releaseId: 'release', pointerId: 'pointer', fence: 1 };
+  const shown = workflowReviewDecision('draft', 'digest', pointer);
+  assert.notEqual(
+    shown,
+    workflowReviewDecision('draft', 'digest', { ...pointer, fence: 3 }),
+  );
+  assert.notEqual(shown, workflowReviewDecision('other', 'digest', pointer));
+  assert.notEqual(shown, workflowReviewDecision('draft', 'other', pointer));
+});
+
+test('the parent refuses a passed verification response missing the requested journal', async () => {
+  const { fork } = await import('node:child_process');
+  await assert.rejects(
+    verifyWorkflowBundle(
+      view,
+      { operations: [], queries: [] },
+      {
+        body: 'sdk.now();',
+        fixtures: [
+          { event, effects: [{ call: { kind: 'now' }, result: day }] },
+        ],
+      },
+      {
+        launch: (_path, _argv, env) =>
+          fork('unused', [], {
+            env,
+            execArgv: [
+              '-e',
+              `process.on('message',({protocol}) => process.send({protocol,response:JSON.stringify({status:'passed',executable:'function run(){}',journals:[],coverage:[],sites:[]})}));`,
+            ],
+            stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
+          }),
+      },
+    ),
+    /mismatched fixture journal/,
+  );
+});
+
+test('review uses each of the first five journals in order', async () => {
+  const { renderWorkflowReview } =
+    await import('../../packages/postgres-provider/src/workflow-review.js');
+  const sites = [
+    {
+      method: 'sleep' as const,
+      target: null,
+      line: 1,
+      fields: [],
+      branch: false,
+      loop: false,
+    },
+  ];
+  const days = [1, 2, 3, 4, 5, 6];
+  const model = {
+    sites,
+    coverage: days.map(() => [0]),
+    journals: days.map((d) => [
+      {
+        request: canonicalize({ kind: 'sleep', milliseconds: d * 86400000 }),
+        result: 'null',
+      },
+    ]),
+  };
+  const workflow = {
+    schemaVersion: 'v6' as const,
+    workflowId: 'delay',
+    trigger: 'goodsReceiptPosted' as const,
+    bodyDigest: '1'.repeat(64),
+    grants: { queries: [], operations: [] },
+  };
+  const review = renderWorkflowReview(
+    workflow,
+    'sdk.sleep(1);',
+    model,
+    new Map(),
+    new Set(),
+  );
+  assert.deepEqual(
+    review.text.split('\n').filter((line) => line.startsWith('Waits ')),
+    [
+      'Waits 1 day without asking.',
+      ...days.slice(1, 5).map((d) => `Waits ${d} days without asking.`),
+    ],
+  );
+});
+
+test('retained workflow replay uses the proposed catalog for the same stored body', async () => {
+  const { createHash, randomUUID } = await import('node:crypto');
+  const context = trustedContextForRequestRuntimeView(view);
+  const body = "sdk.waitForEvent('goodsReceiptPosted', 1);";
+  const bundle = Buffer.from(
+    canonicalize({
+      authoredBy: context.principalId,
+      body,
+      executable: compileWorkflowBody(body, sdk).executable,
+      fixtures: [
+        {
+          event,
+          effects: [
+            {
+              call: {
+                kind: 'waitForEvent',
+                eventType: 'goodsReceiptPosted',
+                timeoutMs: 1,
+              },
+              result: null,
+            },
+          ],
+        },
+      ],
+    }),
+  );
+  // Only the unchanged pointer and workflow blob are read from storage.
+  // The proposed release supplies the query contract on this read-only path.
+  const client = {
+    async query(sql: string) {
+      if (sql.includes('FROM pg_catalog.pg_roles'))
+        return {
+          rows: [
+            {
+              role: 'north_star_runtime',
+              session_role: 'north_star_runtime',
+              can_login: true,
+            },
+          ],
+        };
+      if (sql.includes('FROM platform.active_release_pointers'))
+        return { rows: [{ pointer_id: view.pointer.pointerId, fence: '1' }] };
+      if (sql.includes('FROM platform.workflow_body_blobs'))
+        return { rows: [{ bundle }] };
+      return { rows: [] };
+    },
+    release() {},
+  };
+  const pool = { connect: async () => client } as unknown as Pool;
+  const binding = WorkflowDefinitionSchema.parse({
+    schemaVersion: 'v6',
+    workflowId: 'inspect-party',
+    trigger: 'goodsReceiptPosted',
+    bodyDigest: createHash('sha256').update(bundle).digest('hex'),
+    grants: { queries: [queryId], operations: [] },
+  });
+  const id = randomUUID() as MintedUuid;
+  assert.equal(
+    (
+      await checkRetainedWorkflowReplay(pool, context, fixtureRelease, id, [
+        binding,
+      ])
+    )?.code,
+    'REMOVED_ACTION',
+  );
+  const missing = await checkRetainedWorkflowReplay(
+    pool,
+    context,
+    compilePartyFixture().empty,
+    id,
+    [binding],
+  );
+  assert.equal(missing?.code, 'WORKFLOW_FIXTURE_FAILED');
+  assert.equal(
+    missing?.observed,
+    'Workflow query grant does not resolve: ' + queryId,
   );
 });
