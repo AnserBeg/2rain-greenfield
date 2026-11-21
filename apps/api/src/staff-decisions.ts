@@ -1,3 +1,4 @@
+import { supportsWorkflowSdk } from '../../../packages/postgres-provider/src/workflow-sdk-version.js';
 import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import {
@@ -10,7 +11,6 @@ import { withActivationVerifierTransaction } from '@north-star/postgres-provider
 import {
   WORKFLOW_ENGINE_BUILD,
   WORKFLOW_HOST_VERSION,
-  WORKFLOW_SDK_VERSION,
 } from '../../../packages/postgres-provider/src/workflow-execution.js';
 import { AuthenticatedRequestEntryAdapter } from '../../../packages/runtime/src/request-context.js';
 import {
@@ -79,7 +79,7 @@ export async function applyStaffDecision(
           (target) =>
             target.engine === WORKFLOW_ENGINE_BUILD &&
             target.host === WORKFLOW_HOST_VERSION &&
-            target.sdkVersion === WORKFLOW_SDK_VERSION,
+            supportsWorkflowSdk(target.sdkVersion),
         ),
       );
       return [];

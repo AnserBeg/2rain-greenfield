@@ -1,3 +1,11 @@
+import { checkRetainedWorkflowReplay } from './release-verification-service.js';
+import { RemovedWorkflowAction } from './workflow-sdk-version.js';
+import type { WorkflowDefinition } from '../../canonical-model/src/schemas.js';
+import {
+  renderWorkflowReview,
+  workflowReviewDecision,
+} from './workflow-review.js';
+import { compileWorkflowUnattendedOperations } from './workflow-verification.js';
 import { verifiedGenerationsSql } from './verified-release-generation.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { retypedCalculatedDisplayField } from '../../canonical-model/src/calculated-display-bindings.js';
@@ -198,6 +206,7 @@ export type DraftOutcome =
       readonly releaseId: MintedUuid;
       readonly releaseRoot: string;
       readonly renderedDigest: string;
+      readonly workflowReviewDigest?: string;
       readonly renderedDiff: string;
       readonly revisionId: MintedUuid;
       readonly reused: boolean;
@@ -644,16 +653,47 @@ export class PostgresCustomizationService {
         record.sourceReleaseId === active.releaseId &&
         record.baseReleaseId === baseReleaseId,
     );
-    if (existing) {
-      if (
-        (await this.#root(context, existing.candidateReleaseId)) !==
-        candidate.compiled.releaseRoot
-      ) {
-        throw new CustomizationServiceRefusal(
-          'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
-          'the recorded upgrade no longer reproduces',
+    const identity = existing
+      ? {
+          releaseId: existing.candidateReleaseId,
+          revisionId: existing.candidateRevisionId,
+        }
+      : await ensurePersistedRelease(
+          this.connection.runtimePool,
+          context,
+          candidate,
+          active.revisionId,
+          'tenantAuthored',
         );
-      }
+    if (
+      existing &&
+      (await this.#root(context, identity.releaseId)) !==
+        candidate.compiled.releaseRoot
+    ) {
+      throw new CustomizationServiceRefusal(
+        'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
+        'the recorded upgrade no longer reproduces',
+      );
+    }
+    if (
+      'workflows' in candidateDefinition &&
+      candidateDefinition.workflows?.length
+    ) {
+      const finding = await checkRetainedWorkflowReplay(
+        this.connection.runtimePool,
+        context,
+        candidate.compiled,
+        identity.releaseId,
+        candidateDefinition.workflows,
+      );
+      if (finding)
+        throw new CustomizationServiceRefusal(
+          finding.code,
+          `${finding.subject}: ${finding.expected} — ${UPGRADE_CODES_V1[finding.code]}`,
+          { findings: [finding], blocked: [] },
+        );
+    }
+    if (existing) {
       return {
         status: 'drafted' as const,
         upgradeId: existing.upgradeId,
@@ -661,13 +701,6 @@ export class PostgresCustomizationService {
         releaseRoot: candidate.compiled.releaseRoot,
       };
     }
-    const identity = await ensurePersistedRelease(
-      this.connection.runtimePool,
-      context,
-      candidate,
-      active.revisionId,
-      'tenantAuthored',
-    );
     const upgradeId = randomUUID() as MintedUuid;
     const payload = Buffer.from(
       canonicalize({
@@ -1172,6 +1205,12 @@ export class PostgresCustomizationService {
             storeWorkflowBundle(client, context, { ...bundle, executable }),
         );
       } catch (error) {
+        if (error instanceof RemovedWorkflowAction)
+          return {
+            status: 'unsupported',
+            missingCapability: 'durable external-event waits',
+            message: error.message,
+          };
         return {
           status: 'invalid',
           message: 'The workflow draft did not pass verification.',
@@ -1365,18 +1404,24 @@ export class PostgresCustomizationService {
     const context = await this.#context(actor);
     const active = await this.#active(context);
     const change = parsed.patch;
+    let workflowReview;
     if (change.kind === 'saveWorkflow') {
       try {
-        await withTrustedRequestTransaction(
-          this.connection.runtimePool,
+        workflowReview = await this.#workflowReview(
           context,
-          (client) =>
-            readWorkflowBundle(client, context, change.workflow.bodyDigest),
+          active.releaseId,
+          change.workflow,
         );
       } catch (error) {
+        if (error instanceof RemovedWorkflowAction)
+          return {
+            status: 'unsupported',
+            missingCapability: 'durable external-event waits',
+            message: error.message,
+          };
         return {
           status: 'invalid',
-          message: 'The workflow body could not be loaded.',
+          message: 'The workflow draft did not pass verification.',
           issues: [error instanceof Error ? error.message : String(error)],
         };
       }
@@ -1552,17 +1597,121 @@ export class PostgresCustomizationService {
       };
     });
     if (recorded.status === 'refused') return recorded;
+    const rendered = withWorkflowReview(step.rendered.text, workflowReview);
     return Object.freeze({
       canonicalDiffDigest: step.diff.canonicalDiffDigest,
       patchId: recorded.patchId,
       releaseId: recorded.releaseId,
       releaseRoot: candidate.compiled.releaseRoot,
-      renderedDigest: step.rendered.renderedDigest,
-      renderedDiff: step.rendered.text,
+      renderedDigest: rendered.renderedDigest,
+      renderedDiff: rendered.renderedText,
+      ...(workflowReview && {
+        workflowReviewDigest: workflowReviewDecision(
+          recorded.patchId,
+          rendered.renderedDigest,
+          active.pointer,
+        ),
+      }),
       revisionId: recorded.revisionId,
       reused: recorded.reused,
       status: 'drafted' as const,
     });
+  }
+
+  async #workflowReview(
+    context: TrustedRequestContext,
+    releaseId: MintedUuid,
+    workflow: WorkflowDefinition,
+  ) {
+    const base = await this.#loadRelease(context, releaseId);
+    const view = await new PostgresWorkflowGateway(
+      this.connection.runtimePool,
+    ).loadView(context);
+    if (
+      view.release.releaseId !== releaseId ||
+      view.release.contentHash !== base.compiled.releaseRoot
+    )
+      throw new CustomizationServiceRefusal(
+        'CUSTOMIZE_DRAFT_STALE',
+        'The release changed. Review this workflow again.',
+      );
+    const bundle = await withTrustedRequestTransaction(
+      this.connection.runtimePool,
+      context,
+      (client) => readWorkflowBundle(client, context, workflow.bodyDigest),
+    );
+    const verified = await verifyWorkflowBundle(view, workflow.grants, bundle);
+    if (verified.executable !== bundle.executable)
+      throw new Error('Workflow executable does not match the pinned bundle');
+    const definition = parseNormalizedApplicationPackageJson(
+      base.normalizedDefinitionBytes,
+    );
+    const labels = new Map<string, string>(
+      definition.fields.map((f) => [f.fieldId, f.label]),
+    );
+    for (const operation of parsePinnedOperationCatalog(
+      view.projections.operation.payload,
+    ))
+      if (operation.label) labels.set(operation.operationId, operation.label);
+    for (const query of definition.queries) {
+      const entity = definition.entities.find(
+        (e) => e.entityId === query.sourceEntity.targetId,
+      );
+      if (entity)
+        labels.set(query.queryId, entity.label + ' (' + query.queryType + ')');
+    }
+    const unattended = compileWorkflowUnattendedOperations(
+      {
+        release: { contentHash: base.compiled.releaseRoot },
+        artifacts: base.compiled.bundle.artifacts,
+      },
+      workflow.grants,
+    );
+    return renderWorkflowReview(
+      workflow,
+      bundle.body,
+      verified,
+      labels,
+      new Set(Object.keys(unattended)),
+    );
+  }
+
+  async reviewWorkflow(patchId: string, actor?: TrustedRequestContext) {
+    const context = await this.#context(actor);
+    const active = await this.#active(context);
+    const record = await this.#patch(context, patchId);
+    if (record.parentRevisionId !== active.revisionId)
+      throw new CustomizationServiceRefusal(
+        'CUSTOMIZE_DRAFT_STALE',
+        'The workflow draft is out of date.',
+      );
+    const [patch] = await this.#readPatches(context, [record]);
+    if (patch?.kind !== 'saveWorkflow')
+      throw new Error('This change is not a workflow draft');
+    const { parent, candidate } = await this.#reproduce(
+      context,
+      active,
+      record,
+    );
+    const review = await this.#workflowReview(
+      context,
+      active.releaseId,
+      patch.workflow,
+    );
+    const binding = withWorkflowReview(
+      releaseDiffBinding(parent, candidate).renderedText,
+      review,
+    );
+    return {
+      status: 'drafted' as const,
+      patchId,
+      renderedDiff: binding.renderedText,
+      workflowReviewDigest: workflowReviewDecision(
+        patchId,
+        binding.renderedDigest,
+        active.pointer,
+      ),
+    };
   }
 
   /**
@@ -1571,7 +1720,10 @@ export class PostgresCustomizationService {
    * plain-language text returned here (the approver's view); for a storage
    * change the prepared plan must be the plan that diff names.
    */
-  async approve(patchId: string): Promise<ApprovalOutcome> {
+  async approve(
+    patchId: string,
+    reviewedDigest?: string,
+  ): Promise<ApprovalOutcome> {
     return this.#locked(async (admin, context, active) => {
       const upgrade = (await this.#upgrades(context)).find(
         (entry) => entry.upgradeId === patchId,
@@ -1627,7 +1779,32 @@ export class PostgresCustomizationService {
           this.options.capabilityOperationExecutorFactories ?? [],
           this.connection.adminPool,
         );
-      const binding = releaseDiffBinding(parent, candidate);
+      let binding = releaseDiffBinding(parent, candidate);
+      if ('kind' in record && record.kind === 'saveWorkflow') {
+        const [patch] = await this.#readPatches(context, [record]);
+        if (patch?.kind !== 'saveWorkflow')
+          throw new Error('Workflow patch is missing');
+        const review = await this.#workflowReview(
+          context,
+          active.releaseId,
+          patch.workflow,
+        );
+        binding = {
+          ...binding,
+          ...withWorkflowReview(binding.renderedText, review),
+        };
+        if (
+          workflowReviewDecision(
+            patchId,
+            binding.renderedDigest,
+            active.pointer,
+          ) !== reviewedDigest
+        )
+          throw new CustomizationServiceRefusal(
+            'CUSTOMIZE_DRAFT_STALE',
+            'Review the workflow source and sample runs before approving this change.',
+          );
+      }
       const approver = await trustedContext(
         this.connection.identities.approver,
       );
@@ -2933,4 +3110,14 @@ function parseUpgradeRecord(row: UpgradeRow): UpgradeRecord | null {
     candidateRevisionId: row.candidate_revision_id,
     patchIds: patchIds as MintedUuid[],
   };
+}
+
+function withWorkflowReview(
+  diff: string,
+  review?: ReturnType<typeof renderWorkflowReview>,
+) {
+  const renderedText = review
+    ? [diff, 'Workflow review ' + review.digest, review.text].join('\n\n')
+    : diff;
+  return { renderedText, renderedDigest: renderedDiffDigest(renderedText) };
 }

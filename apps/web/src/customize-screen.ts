@@ -150,6 +150,7 @@ type DraftOutcome =
   | {
       readonly patchId: string;
       readonly renderedDiff: string;
+      readonly workflowReviewDigest?: string;
       readonly status: 'drafted';
     }
   | {
@@ -201,7 +202,11 @@ type LoadTargets = () => Promise<CustomizationTargets>;
  */
 export interface CustomizeScreenService {
   activate(patchId: string): Promise<ActivationOutcome>;
-  approve(patchId: string): Promise<ApprovalOutcome>;
+  reviewWorkflow?(
+    patchId: string,
+    actor?: TrustedRequestContext,
+  ): Promise<DraftOutcome>;
+  approve(patchId: string, reviewedDigest?: string): Promise<ApprovalOutcome>;
   draft(
     input: unknown,
     channel: 'visualBuilder' | 'conversationalAi',
@@ -369,8 +374,17 @@ export async function renderCustomizeScreen(
             actor,
           ),
         );
+      case 'reviewWorkflow':
+        if (!service.reviewWorkflow)
+          return failure('Workflow review is unavailable.');
+        return drafted(
+          await service.reviewWorkflow(String(submission.patchId), actor),
+        );
       case 'approve': {
-        const approved = await service.approve(String(submission.patchId));
+        const approved = await service.approve(
+          String(submission.patchId),
+          submission.reviewedDigest,
+        );
         return page(
           'Approved',
           `<p class="eyebrow">Approved — not live yet</p><h1>Approved</h1>${diffBlock(approved.renderedDiff)}${button('activate', 'Activate now', { patchId: String(submission.patchId) })}${backLink()}`,
@@ -466,7 +480,11 @@ async function overview(
     .map((patch) => {
       const action =
         patch.state === 'drafted'
-          ? button('approve', 'Approve', { patchId: patch.patchId })
+          ? patch.kind === 'saveWorkflow'
+            ? button('reviewWorkflow', 'Review workflow', {
+                patchId: patch.patchId,
+              })
+            : button('approve', 'Approve', { patchId: patch.patchId })
           : patch.state === 'approved'
             ? button('activate', 'Activate', { patchId: patch.patchId })
             : '';
@@ -1190,7 +1208,7 @@ function drafted(outcome: DraftOutcome): CustomizeScreenResponse {
   }
   return page(
     'Review the change',
-    `<p class="eyebrow">Drafted — nothing is live yet</p><h1>Review the change</h1>${diffBlock(outcome.renderedDiff)}${button('approve', 'Approve', { patchId: outcome.patchId })}${backLink()}`,
+    `<p class="eyebrow">Drafted — nothing is live yet</p><h1>Review the change</h1>${diffBlock(outcome.renderedDiff)}${button('approve', 'Approve', { patchId: outcome.patchId, ...(outcome.workflowReviewDigest && { reviewedDigest: outcome.workflowReviewDigest }) })}${backLink()}`,
     `data-customize-result="drafted" data-patch-id="${escapeHtml(outcome.patchId)}"`,
   );
 }

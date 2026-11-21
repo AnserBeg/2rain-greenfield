@@ -38,3 +38,40 @@ export const WorkflowBodyBundleSchema = z.strictObject({
 
 export type WorkflowDraft = z.infer<typeof WorkflowDraftSchema>;
 export type WorkflowBodyBundle = z.infer<typeof WorkflowBodyBundleSchema>;
+
+export const WorkflowVerificationResultSchema = z.discriminatedUnion('status', [
+  z.strictObject({
+    status: z.literal('refused'),
+    message: z.string(),
+    removedAction: z.literal('waitForEvent').optional(),
+  }),
+  z.strictObject({
+    status: z.literal('passed'),
+    sites: z.array(
+      z.strictObject({
+        method: z.enum([
+          'now',
+          'query',
+          'operation',
+          'requestApproval',
+          'waitForEvent',
+          'sleep',
+        ]),
+        target: z.string().nullable(),
+        line: z.int().positive(),
+        fields: z.array(z.string()),
+        branch: z.boolean(),
+        loop: z.boolean(),
+      }),
+    ),
+    coverage: z.array(z.array(z.int().nonnegative()).max(64)).max(16),
+    executable: z.string().min(1),
+    journals: z
+      .array(
+        z
+          .array(z.strictObject({ request: z.string(), result: z.string() }))
+          .max(64),
+      )
+      .max(16),
+  }),
+]);
