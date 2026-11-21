@@ -109,6 +109,7 @@ const TOOL = Object.freeze({
     '- Action permission patches need their own draft. If a request combines one with any other patch, report missingCapability "action permission changes in a grouped draft".',
     `- For links on an existing record type, report missingCapability "${ADD_LINK_LATER_CAPABILITY}".`,
     '- If any requested part needs an unsupported capability, call the tool with {kind: "unsupported", missingCapability: "<name the exact missing capability>"}. Never omit or approximate part of a request.',
+    '- Draft exactly what the person asked for: add no board, view, card, field, link or lifecycle they did not ask for.',
     '- Write labels the way the person would read them, with an initial capital.',
   ].join('\n'),
   inputSchema: drafterToolSchema(),
