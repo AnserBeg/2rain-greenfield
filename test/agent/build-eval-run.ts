@@ -88,6 +88,9 @@ async function main(): Promise<void> {
       // Scoring waits for the 1-minute load to fall below this before each
       // case (0: never wait), at most an hour.
       'idle-load': { type: 'string', default: '8' },
+      // Rescoring after a verifier fix: replay each saved first draft even
+      // though the prompt changed since it was made; repairs go live.
+      'force-first-turn': { type: 'boolean', default: false },
       // The isolated compile's bound for this run (at most the compiler's
       // 120 s cap for untrusted definitions): a loaded host must not
       // score a slow compile as a failed draft. 0 keeps the app's default.
@@ -297,7 +300,12 @@ async function main(): Promise<void> {
           const result = await runBuildCase(world, c, {
             provider: () =>
               model && drafted
-                ? draftedAheadModel(drafted, model, () => mismatched.push(c.id))
+                ? draftedAheadModel(
+                    drafted,
+                    model,
+                    () => mismatched.push(c.id),
+                    !!args['force-first-turn'],
+                  )
                 : (model ??
                   scriptedModel(recorded!.turns.map((turn) => () => turn))),
             ...(model ? { meter } : {}),

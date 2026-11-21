@@ -995,18 +995,23 @@ export function draftedAheadModel(
   ahead: { readonly prompt: CapturedPrompt; readonly turn: ModelTurnAhead },
   live: ModelAdapter,
   onMismatch: () => void,
+  /**
+   * Replay the recorded first turn even when the request changed (a fix to
+   * the verifier is measured on the same first draft; repairs go live).
+   */
+  force = false,
 ): ModelAdapter {
   let first = true;
   return {
     modelId: live.modelId,
     next(request) {
-      const replay =
-        first &&
+      const same =
         request.system === ahead.prompt.system &&
         JSON.stringify(request.tools) === JSON.stringify(ahead.prompt.tools) &&
         JSON.stringify(request.conversation) ===
           JSON.stringify(ahead.prompt.conversation);
-      if (first && !replay) onMismatch();
+      if (first && !same) onMismatch();
+      const replay = first && (same || force);
       first = false;
       return replay ? Promise.resolve(ahead.turn) : live.next(request);
     },
