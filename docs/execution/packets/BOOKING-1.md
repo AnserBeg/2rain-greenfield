@@ -31,9 +31,11 @@ The follow-up checks authorized archive against every active allocation and lock
 
 ## Controls and gate
 
+Kit-member rescheduling is a slice 2 decision in the pending-items charter. Slice 1b accepts kit holds, confirmation, cancellation and expiry.
 The [mutation manifest](../../../test/evidence/BOOKING-1.expected-red.json) names the guard and the observable change in its regression.
 The preceding production reader must answer an item query on the baseline and refuse the new Operation and Query catalog floors by name. This slice introduces released bindings. The two Customize members and their drafter evals belong to slice 3.
-CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44863817410
+The run below found a Q2 type mismatch in the compiler’s v2 adapter. The packet branch carries the fix. [Current PR checks](https://github.com/AnserBeg/2rain-greenfield/pull/137/checks)
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44866880059
 
 ## Test it yourself
 
@@ -42,18 +44,16 @@ Run `node --import tsx --test test/postgres/booking-commitments.test.ts` with Do
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "BOOKING-1",
-  "base": "0a9f7ca52304969c65092893f50375c90f8c2265", "head": "ac8649ebd7258587f3ed499f3bd0cc16030e1699",
+  "base": "0a9f7ca52304969c65092893f50375c90f8c2265", "head": "ea139b150904aed65be2e2d19cba80fa58ba92b5",
   "changedPaths": [
-    ".gitleaksignore", "db/migrations/0059_booking_fulfilment.sql", "db/schema.snapshot.json",
-    "packages/canonical-model/src/booking.ts", "packages/canonical-model/src/schemas.ts", "packages/compiler/src/compiler.ts",
-    "packages/compiler/src/projections.ts", "packages/postgres-provider/package.json", "packages/postgres-provider/src/booking-capability-executor.ts",
-    "packages/postgres-provider/src/booking-owner-usage.ts", "packages/postgres-provider/src/release-repository.ts", "packages/postgres-provider/src/release-verification-service.ts",
-    "packages/postgres-provider/src/request-context.ts", "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/postgres-provider/src/serving-gateways.ts",
-    "packages/postgres-provider/src/trust/postgres-trust-service.ts", "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-query-gateway.ts",
-    "test/architecture/release-persistence-boundary.test.ts", "test/architecture/repository-hygiene.test.ts", "test/architecture/tenant-completeness.manifest.json",
-    "test/architecture/tenant-completeness.test.ts", "test/evidence/BOOKING-1.expected-red.json", "test/fixtures/booking-commitments.sql",
-    "test/postgres/booking-commitments.test.ts", "test/postgres/booking-serving.test.ts", "test/postgres/inventory-storage.test.ts",
-    "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts", "test/postgres/trust-substrate.test.ts"
+    ".gitleaksignore", "db/migrations/0059_booking_fulfilment.sql", "db/schema.snapshot.json", "packages/canonical-model/src/booking.ts",
+    "packages/canonical-model/src/schemas.ts", "packages/compiler/src/compiler.ts", "packages/compiler/src/projections.ts", "packages/postgres-provider/package.json",
+    "packages/postgres-provider/src/booking-capability-executor.ts", "packages/postgres-provider/src/booking-owner-usage.ts", "packages/postgres-provider/src/release-repository.ts", "packages/postgres-provider/src/release-verification-service.ts",
+    "packages/postgres-provider/src/request-context.ts", "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/postgres-provider/src/serving-gateways.ts", "packages/postgres-provider/src/trust/postgres-trust-service.ts",
+    "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-query-gateway.ts", "test/architecture/release-persistence-boundary.test.ts", "test/architecture/repository-hygiene.test.ts",
+    "test/architecture/tenant-completeness.manifest.json", "test/architecture/tenant-completeness.test.ts", "test/evidence/BOOKING-1.expected-red.json", "test/fixtures/booking-commitments.sql",
+    "test/postgres/booking-commitments.test.ts", "test/postgres/booking-serving.test.ts", "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts",
+    "test/postgres/module-storage-transition.test.ts", "test/postgres/trust-substrate.test.ts"
   ],
   "symbols": [{"path":"packages/canonical-model/src/booking.ts","name":"bookingDeclarationProblem"},{"path":"packages/postgres-provider/src/booking-owner-usage.ts","name":"bookingOwnerCursorFence"}]
 }
