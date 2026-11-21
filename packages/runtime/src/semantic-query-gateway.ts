@@ -479,7 +479,7 @@ export class SemanticQueryGateway {
     return result;
   }
 
-  private async authorizeReport(
+  async #authorizeReport(
     view: IssuedRequestRuntimeView,
     queryId: string,
     company: string,
@@ -558,7 +558,7 @@ export class SemanticQueryGateway {
     exporting = false,
   ): Promise<boolean> {
     try {
-      return !!(await this.authorizeReport(view, queryId, company, exporting));
+      return !!(await this.#authorizeReport(view, queryId, company, exporting));
     } catch {
       return false;
     }
@@ -583,7 +583,7 @@ export class SemanticQueryGateway {
       () => Math.min(REPORT_READER_POLICY.statementMs, remaining()),
       async () => {
         try {
-          const authorized = await this.authorizeReport(
+          const authorized = await this.#authorizeReport(
             view,
             req.queryId,
             req.company,
