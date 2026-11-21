@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import type { PoolClient } from 'pg';
-import { normalizeApplicationPackage } from '../../packages/canonical-model/src/index.js';
+import {
+  normalizeApplicationPackage,
+  parseAuthoredApplicationPackageJson,
+  ReportChoicesSchema,
+} from '../../packages/canonical-model/src/index.js';
 import { applyCustomizationPatches } from '../../packages/customization/src/index.js';
 import {
   draftReport,
@@ -16,8 +20,12 @@ import { firstPartyAuthored } from '../helpers/customization-fixture.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 
 test('the PostgreSQL Invoice candidate probe uses the named date index and stops at cap plus one before any residual, even with hidden facts', async () => {
-  const base = normalizeApplicationPackage(firstPartyAuthored);
-  assert.ok(base.languageVersion === 'v6');
+  const normalize = (value: unknown) => {
+    const parsed = parseAuthoredApplicationPackageJson(JSON.stringify(value));
+    assert.ok(parsed.languageVersion === 'v6');
+    return normalizeApplicationPackage(parsed);
+  };
+  const base = normalize(firstPartyAuthored);
   const target = reportTargets(base).find((t) =>
     t.source.entityId.endsWith('entity.customer_invoice'),
   )!;
@@ -27,26 +35,29 @@ test('the PostgreSQL Invoice candidate probe uses the named date index and stops
   const customer = field('customer_party_id'),
     date = field('invoice_date'),
     balance = field('balance');
-  const patch = draftReport(target, 'Customer balances', {
-    dimensions: [{ kind: 'direct', fieldId: customer }],
-    filters: [
-      { kind: 'dateRange', fieldId: date },
-      { kind: 'equals', fieldId: customer },
-    ],
-    measures: [
-      {
-        kind: 'inline',
-        measureId: 'northstar.app:measure.custom_balance',
-        operator: { kind: 'sum', fieldId: balance },
-        label: 'Balance',
-      },
-    ],
-    outputs: [{ kind: 'table' }, { kind: 'csv' }],
-  });
+  const patch = draftReport(
+    target,
+    'Customer balances',
+    ReportChoicesSchema.parse({
+      dimensions: [{ kind: 'direct', fieldId: customer }],
+      filters: [
+        { kind: 'dateRange', fieldId: date },
+        { kind: 'equals', fieldId: customer },
+      ],
+      measures: [
+        {
+          kind: 'inline',
+          measureId: 'northstar.app:measure.custom_balance',
+          operator: { kind: 'sum', fieldId: balance },
+          label: 'Balance',
+        },
+      ],
+      outputs: [{ kind: 'table' }, { kind: 'csv' }],
+    }),
+  );
   const applied = applyCustomizationPatches(firstPartyAuthored, [patch]);
   assert.ok(applied.status === 'applied');
-  const definition = normalizeApplicationPackage(applied.authored);
-  assert.ok(definition.languageVersion === 'v6');
+  const definition = normalize(applied.authored);
   const storage = lowerStorageTargetV1(definition);
   const entity = storage.entities.find(
     (e) => e.entityId === target.source.entityId,

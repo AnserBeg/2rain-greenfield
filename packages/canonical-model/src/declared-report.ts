@@ -198,7 +198,11 @@ export function resolveReportChoices(
 export function reportDigest(body: ReportBody) {
   return canonicalizeAndHash({
     ...body,
-    measures: body.measures.map(({ label: _, ...choice }) => choice),
+    measures: body.measures.map(({ kind, measureId, operator }) => ({
+      kind,
+      measureId,
+      operator,
+    })),
   }).contentHash;
 }
 

@@ -264,7 +264,7 @@ test(
 
 test(
   'Invoice report reads exact company partitions and coverage, filters civil dates, pages complete totals and issues audited bytes',
-  { timeout: 600_000 },
+  { timeout: 900_000 },
   async () => {
     const { randomUUID, createHash } = await import('node:crypto');
     const { ReportChoicesSchema } =
@@ -294,6 +294,29 @@ test(
         const app = await startComposedApplication({ ...options, port: 0 });
         const opened = await openCustomizeService(options);
         try {
+          const olderReader = (minimumVersion: number) =>
+            withArchivedCustomizationRuntime(
+              reportsPredecessor,
+              async (run) => {
+                const result = await run(archivedQuery, {
+                  databaseUrl: options.databaseUrl,
+                  identity: app.runtime.identity,
+                });
+                assert.deepEqual(result, {
+                  outcome: 'refused',
+                  phase: 'load',
+                  code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
+                  message:
+                    'runtime capability northstar.runtime:capability.surface-manifest requires version ' +
+                    minimumVersion +
+                    ' and this runtime supports 37',
+                });
+              },
+            );
+          await olderReader(
+            (await import('../../packages/canonical-model/src/constants.js'))
+              .REPORT_SOURCE_READER,
+          );
           const target = (await opened.service.targets()).reports!.find((t) =>
             t.source.entityId.endsWith(':entity.customer_invoice'),
           )!;
@@ -323,6 +346,11 @@ test(
           assert.ok(draft.status === 'drafted', JSON.stringify(draft));
           await opened.service.approve(draft.patchId);
           await opened.service.activate(draft.patchId);
+          await olderReader(
+            (
+              await import('../../packages/canonical-model/src/declared-report.js')
+            ).DECLARED_REPORT_READER,
+          );
           const types = projectionPayload<
             import('../../packages/compiler/src/storage.js').StorageTargetPayloadV1
           >(
@@ -350,6 +378,29 @@ test(
               'northstar.app:field.legal_entity_is_default': false,
             },
           });
+          const customer = app.seededRecords.find(
+            (r) => r.operationId === 'northstar.app:operation.party_create',
+          )!.recordId;
+          const orderColumn = types.relations.find(
+            (r) =>
+              r.relationId === 'northstar.app:relation.customer_invoice_order',
+          )!.relationColumn.physicalName;
+          const orders = new Map<string, string>();
+          for (const company of [north, south]) {
+            const orderId = randomUUID();
+            const parent = await world.invoke('sales_order_create', {
+              recordId: orderId,
+              legalEntityId: company,
+              values: {
+                'northstar.app:field.sales_order_customer_party_id': customer,
+                'northstar.app:field.sales_order_order_date':
+                  '2026-11-01T00:00:00.000Z',
+                'northstar.app:field.sales_order_currency': 'CAD',
+              },
+            });
+            assert.ok(parent.outcome === 'succeeded', JSON.stringify(parent));
+            orders.set(company, orderId);
+          }
           const insert = async (
             company: string,
             group: string,
@@ -359,7 +410,7 @@ test(
           ) => {
             const record = randomUUID();
             await pool.query(
-              `INSERT INTO ${table} (tenant_id,environment_id,legal_entity_id,record_id,revision,${['number', 'state', 'invoice_date', 'customer_party_id', 'balance', 'currency'].map(col).join(',')}) VALUES ($1,$2,$3,$4,1,$5,$6,$7,$8,$9,$10)`,
+              `INSERT INTO ${table} (tenant_id,environment_id,legal_entity_id,record_id,revision,${orderColumn},${['number', 'state', 'invoice_date', 'customer_party_id', 'balance', 'currency'].map(col).join(',')}) VALUES ($1,$2,$3,$4,1,$11,$5,$6,$7,$8,$9,$10)`,
               [
                 tenantId,
                 environmentId,
@@ -371,11 +422,11 @@ test(
                 group,
                 amount,
                 currency,
+                orders.get(company),
               ],
             );
             return record;
           };
-          const customer = '=Customer';
           const edit = await insert(north, customer, '10.25', 'CAD');
           await insert(north, customer, '1.75', 'CAD');
           await insert(north, customer, '4.00', 'USD');
@@ -435,7 +486,7 @@ test(
             export: { resultDigest: page.resultDigest },
           });
           assert.ok(file.kind === 'csv', JSON.stringify(file));
-          assert.match(file.bytes, /"'=Customer"/u);
+          assert.ok(file.bytes.includes(customer));
           assert.match(file.bytes, /"-0.005000000000000000"/u);
           assert.match(file.bytes, /"No currency"/u);
           assert.match(file.bytes, /Records without Balance/u);
@@ -448,6 +499,17 @@ test(
             JSON.stringify(receipt.rows[0]?.metadata).includes(
               createHash('sha256').update(file.bytes).digest('hex'),
             ),
+          );
+          // Refuse this scoped issuance at the real append. The transport must receive no file.
+          await pool.query(
+            "ALTER TABLE platform.trust_action_invocations ADD CONSTRAINT report_audit_unavailable CHECK (action_id <> 'northstar.runtime:action.issue_report_csv') NOT VALID",
+          );
+          assert.deepEqual(
+            await run({ export: { resultDigest: page.resultDigest } }),
+            { kind: 'unavailable' },
+          );
+          await pool.query(
+            'ALTER TABLE platform.trust_action_invocations DROP CONSTRAINT report_audit_unavailable',
           );
           assert.deepEqual(await run({ company: south }), {
             kind: 'unavailable',

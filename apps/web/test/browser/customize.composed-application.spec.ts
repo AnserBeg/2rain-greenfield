@@ -11,6 +11,7 @@ import {
 } from '../../../../packages/runtime/src/semantic-operation-gateway.js';
 import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../../../packages/runtime/src/semantic-query-gateway.js';
 import {
+  COMPOSED_APPLICATION_INVENTORY_SCOPE,
   openCustomizeService,
   startComposedApplication,
 } from '../../../api/src/composition-root.js';
@@ -746,20 +747,13 @@ test('a person groups Inspection outcomes, renames and retires the report, and r
   page,
 }) => {
   test.setTimeout(900_000);
-  const { firstPartyAuthored } =
-    await import('../../../../test/helpers/customization-fixture.js');
-  const { singleTransitionApplication } =
-    await import('../../../../test/helpers/application-without-line-create-values.js');
-  const { worldOver, COMPANY } =
-    await import('../../../../test/agent/agent-world.js');
+  const COMPANY = COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId;
   await withEphemeralPostgres(
     'report-inspection-browser',
     async ({ connection }) => {
       const options = {
         tenantSlug: 'inspection-reports',
         databaseUrl: `postgresql://postgres@127.0.0.1:${connection.port}/postgres`,
-        compiledApplication:
-          singleTransitionApplication(firstPartyAuthored).release,
       };
       const app = await startComposedApplication({ ...options, port: 0 });
       const opened = await openCustomizeService(options);
@@ -779,16 +773,35 @@ test('a person groups Inspection outcomes, renames and retires the report, and r
         if (type.status !== 'drafted') throw Error(JSON.stringify(type));
         await opened.service.approve(type.patchId);
         await opened.service.activate(type.patchId);
-        const world = worldOver(app.runtime, 'postgres');
         const listId = 'northstar.app:surface.custom_inspection_list';
         const target = (await opened.service.targets()).reports!.find(
           (t) => t.source.listSurfaceId === listId,
         )!;
         const outcome = target.fields.find((f) => f.label === 'Outcome')!;
         for (const [i, value] of ['Pass', 'Fail', 'Pass'].entries())
-          await world.create('custom_inspection', {
-            name: 'Inspection ' + i,
-            outcome: outcome.options!.find((o) => o.label === value)!.id,
+          await app.runtime.entry.run({}, async (view) => {
+            const created = await app.runtime.operationGateway.invoke(
+              view,
+              {
+                schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+                operationId: 'northstar.app:operation.custom_inspection_create',
+                idempotencyKey: randomUUID(),
+                confirmationGrant: null,
+                input: {
+                  recordId: randomUUID(),
+                  legalEntityId: COMPANY,
+                  values: {
+                    'northstar.app:field.custom_inspection_name':
+                      'Inspection ' + i,
+                    [outcome.operand.fieldId]: outcome.options!.find(
+                      (o) => o.label === value,
+                    )!.id,
+                  },
+                },
+              },
+              app.runtime.operationMediation.issueInvocation(view, 'UI'),
+            );
+            expect(created.outcome).toBe('succeeded');
           });
         const publish = async () => {
           await page

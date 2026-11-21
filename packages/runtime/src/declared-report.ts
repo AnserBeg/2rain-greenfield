@@ -106,7 +106,9 @@ export function displayGroupKey(
 }
 function csvCell(value: string, numeric = false) {
   const text =
-    !numeric && /^[\s\u0000-\u001f]*[=+@-]|^[\t\r\n]/u.test(value)
+    !numeric &&
+    (/^[=+@-]/u.test(value.trimStart()) ||
+      (value.length > 0 && value.charCodeAt(0) < 32))
       ? "'" + value
       : value;
   return '"' + text.replaceAll('"', '""') + '"';

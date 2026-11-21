@@ -620,6 +620,12 @@ async function renderSurfaceRuntimeWithDataInContext(
       ),
     });
     if (!registered || !reportCompany) return unavailable();
+    const canExport = await gateways.queryGateway.previewReport(
+      view,
+      registered.queryId,
+      reportCompany,
+      true,
+    );
     // A download is issued once under a fresh fence after the shell releases its page snapshot.
     await reads?.finishReads();
     const request = reportRequest(registered, url, reportCompany);
@@ -635,12 +641,6 @@ async function renderSurfaceRuntimeWithDataInContext(
           fileName: exportFileName(selection.selected.label, new Date()),
         },
       };
-    const canExport = await gateways.queryGateway.previewReport(
-      view,
-      registered.queryId,
-      reportCompany,
-      true,
-    );
     return renderSelectedSurface(
       view,
       selection,
