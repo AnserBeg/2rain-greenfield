@@ -1,3 +1,4 @@
+import { type PopupRevision } from '../../canonical-model/src/popup-actions.js';
 import type { ReplayOrigin } from './upgrade-diagnostics.js';
 import { applyBoardRevision } from './board-revision.js';
 import {
@@ -13,6 +14,9 @@ import type {
 import {
   CUSTOMIZABLE_FIRST_PARTY_ENTITY_LOCALS,
   isNarrowableOperationId,
+  canonicalize,
+  normalizeApplicationPackage,
+  CanonicalModelError,
 } from '@north-star/canonical-model';
 import type {
   CustomField,
@@ -61,7 +65,8 @@ export type CustomizationRefusalCode =
   | 'CUSTOMIZE_LIST_VIEW_INVALID'
   | 'CUSTOMIZE_FIELD_NOT_ON_LIST'
   | 'CUSTOMIZE_BOARD_CONFLICT'
-  | 'CUSTOMIZE_LAYOUT_CONFLICT';
+  | 'CUSTOMIZE_LAYOUT_CONFLICT'
+  | 'CUSTOMIZE_POPUP_CONFLICT';
 
 export interface CustomizationRefusal {
   readonly code: CustomizationRefusalCode;
@@ -241,6 +246,61 @@ export function applyOne(
       return addLineTable(authored, patch);
     case 'declareLifecycle':
       return declareLifecycle(authored, patch);
+    case 'addPopupActionRevision': {
+      if (patch.target.kind === 'workflowStart')
+        return unsupported(
+          'manually startable workflow',
+          'This release does not provide a manually startable workflow operation.',
+        );
+      const surface = list(authored, 'surfaces').find(
+        (s) => s.surfaceId === patch.surface,
+      );
+      const fail = (message: string) =>
+        refusal('CUSTOMIZE_POPUP_CONFLICT', message);
+      if (!surface) return fail('The record page is unavailable.');
+      const { kind, ...revision } = patch;
+      const revisions = (surface.popupActions ?? []) as PopupRevision[];
+      const prior = revisions.find((r) => r.actionId === patch.actionId);
+      if (
+        (prior?.revisionId ?? null) !== patch.predecessor ||
+        prior?.status === 'retired' ||
+        (!prior && patch.status === 'retired') ||
+        previous.some(
+          (p) =>
+            p.kind === kind &&
+            (p.revisionId === patch.revisionId ||
+              (p.actionId === patch.actionId && p.surface !== patch.surface)),
+        )
+      )
+        return fail(
+          'The button revision is stale or its ID is already in use.',
+        );
+      if (
+        patch.status === 'retired' &&
+        prior &&
+        canonicalize({
+          ...prior,
+          predecessor: patch.predecessor,
+          revisionId: patch.revisionId,
+          status: 'retired',
+        }) !== canonicalize(revision)
+      )
+        return fail('Retire the current version of the button.');
+      surface.popupActions = [
+        ...revisions.filter((r) => r.actionId !== patch.actionId),
+        revision,
+      ];
+      try {
+        normalizeApplicationPackage(authored);
+      } catch (error) {
+        return fail(
+          error instanceof CanonicalModelError
+            ? error.diagnostics.map((d) => d.rule).join('. ')
+            : String(error),
+        );
+      }
+      return null;
+    }
     case 'addBoardViewRevision': {
       const problem = previous.some(
         (p) =>

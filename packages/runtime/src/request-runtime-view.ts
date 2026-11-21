@@ -1,4 +1,4 @@
-import { BILLING_INTERVAL_READER } from '../../canonical-model/src/billing.js';
+import { POPUP_READER } from '../../canonical-model/src/popup-actions.js';
 import {
   BOOKING_OPERATION_READER,
   CONNECTOR_FAMILY,
@@ -230,7 +230,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 34 reads the versioned placement rule on replayed layouts.
     // 35 adds draft line create values.
     // 36 binds agreed billing intervals to selected source fields.
-    maximumSupportedVersion: BILLING_INTERVAL_READER,
+    // 37 adds custom buttons that open a record Task.
+    maximumSupportedVersion: POPUP_READER,
   },
 });
 
