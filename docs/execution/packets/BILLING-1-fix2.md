@@ -1,47 +1,49 @@
 # BILLING-1-fix2 — pin billing terms at first allocation
 
-Critical migration and Fable follow-up for Billing slice 1. Exact integration CI and a reserved merge window gate the main push.
+Critical migration and Fable follow-up for Billing slice 1. The next train owns integration.
 
 ## Claims
 
-1. The archived reader at `67e4efce^1` answers a stored item query and refuses the bound interval release with `UNSUPPORTED_RUNTIME_CAPABILITY` naming floor 36.
-2. Effective dates are evaluated at opening. First allocation keeps the selected table and assignment. The saved selection protects later allocations from backdated successors.
-3. Publication compares receipt xmin with the native xid cast. The upgrade preserves rate and assignment bodies and recovers publication timestamps and invocation IDs from the original audit.
+1. The preceding serving binary at `352e43b7` answers a stored item query on its own release and refuses first-allocation billing by name at surface-manifest floor 40. The declaration proof checks the same behavior at floor 30 on its historical base. Both check persisted release bytes.
+2. Effective dates are evaluated at opening. First allocation pins the table and assignment, so backdated successors cannot change later allocations.
+3. The archived writer compiles its own authored base and publishes real rates and assignments. The upgrade preserves the bodies and recovers publication timestamps and invocation IDs from the original audit. Migration 0067 compares receipt xmin with the native xid cast.
 4. Direct SQL refuses publication in a second company with a valid same-transaction receipt. Giving the same principal the company grant admits the identical SQL.
-5. The proposal fixture requires a dedicated text field for the body. Notes can hold conflicting prices without supplying terms.
+5. Publication requires a dedicated proposal field. Notes can hold conflicting prices without supplying terms.
 
 ## Decisions
 
-- Calculation v2 consumes exact allocation pins. Saved calculation v1 quotes replay with their original publication fence.
-- The fixture uses the existing terms field binding and reader floor 36.
+- Newly compiled bound plans carry the calculation v2 marker and reader floor 40. Historical interval releases retain floor 36, and saved v1 quotes replay with their original publication fence.
+- Period billing and versioned rate selection apply to equipment hire, subscriptions, and field service contracts.
 
 ## Gates
 
 CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44843557065
 
-- Hosted packet CI found fixture typing errors, corrected in the executable tip. The exact integration branch is `candidate/BILLING-1-fix2`.
-- Focused calculator, archived reader, populated upgrade, and transaction wraparound tests passed.
-- Restoring the opening fence, bypassing term pins, and restoring the text cast each failed its targeted test.
+- The tier line records the prior packet run. TRAIN-C exposed the stale archive inputs. The refreshed tip requires its own full dispatch.
+- Restoring the opening fence, bypassing term pins, and restoring the text cast each failed its targeted control in the original fix.
 
 ## Test it yourself
 
-Run `node --import tsx --test test/integration/billing-quote.test.ts` and look for the opening, same-day override and first-allocation tests. Run `node --import tsx --test test/postgres/billing-terms.test.ts` for the database proofs.
+Run `node --import tsx --test test/integration/billing-quote.test.ts` for opening, same-day override, and first-allocation cases. Run `node --import tsx --test test/postgres/billing-terms.test.ts` for the archived query refusals and populated upgrade.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "BILLING-1-fix2",
-  "base": "67e4efce31eb663f12d6f161aa91c0ce1220dffc",
-  "head": "9fe843626879d5914a03a2ffb38d982730e5ca54",
+  "base": "352e43b7e428ed1115fd9328db3a6427cf36a58f",
+  "head": "6019f28f818bfbaca92391a586a9d44e2531f191",
   "changedPaths": [
-    "db/migrations/0058_billing_publication_xid.sql",
+    "db/migrations/0067_billing_publication_xid.sql",
     "db/schema.snapshot.json",
     "docs/decisions/ADR-0083-period-and-usage-billing.md",
     "learnings.md",
     "packages/canonical-model/src/billing-evidence.ts",
     "packages/canonical-model/src/billing.ts",
+    "packages/compiler/src/projections.ts",
     "packages/domain/src/billing/quote.ts",
     "packages/domain/src/billing/terms.ts",
+    "packages/postgres-provider/src/release-repository.ts",
+    "packages/runtime/src/request-runtime-view.ts",
     "test/architecture/release-persistence-boundary.test.ts",
     "test/evidence/BILLING-1.expected-red.json",
     "test/helpers/archived-billing-probes.ts",
@@ -50,6 +52,7 @@ Run `node --import tsx --test test/integration/billing-quote.test.ts` and look f
     "test/postgres/inventory-storage.test.ts",
     "test/postgres/migrations.test.ts",
     "test/postgres/module-storage-transition.test.ts",
+    "test/postgres/request-runtime-view.test.ts",
     "test/postgres/trust-substrate.test.ts"
   ],
   "symbols": [
