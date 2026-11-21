@@ -1,8 +1,8 @@
+import { dateTimeZones } from './date-time-zones.js';
 import { addressEditor } from './address-context.js';
 import { dateTimeBindings } from './date-time-field.js';
 import {
   SavedDateTimeSchema,
-  canonicalZone,
   formatRecordZone,
   offsetLabel,
   type DateTimeBinding,
@@ -138,6 +138,7 @@ export interface SurfaceComponentContext {
   readonly formReferences?: Readonly<
     Record<string, SurfaceFormReferenceChoices>
   >;
+  readonly workingCompany?: string;
   readonly legalEntitySelection?: readonly string[];
   readonly operations?: readonly CompiledSurfaceOperationBinding[];
   readonly queryParameterValues?: Readonly<Record<string, string>>;
@@ -2386,6 +2387,7 @@ function renderFormFields(
               invalid.has(fieldId)
                 ? ` aria-invalid="true" aria-describedby="${validationMessageId}"`
                 : '',
+              context.workingCompany,
             ),
             storedValueUnavailable: false,
           }
@@ -3397,19 +3399,6 @@ function renderAddressField(name: string, value: unknown, attributes: string) {
   );
 }
 
-let zones: readonly string[] | null = null;
-function zoneOptions(): readonly string[] {
-  zones ??= [
-    ...new Set(
-      Intl.supportedValuesOf('timeZone').flatMap((name) => {
-        const canonical = canonicalZone(name);
-        return canonical ? [canonical] : [];
-      }),
-    ),
-  ].sort();
-  return zones;
-}
-
 interface ProposedEntry {
   readonly civil?: string;
   readonly zone?: string;
@@ -3427,6 +3416,7 @@ export function renderDateTimeEntry(
   name: string,
   value: unknown,
   attributes: string,
+  workingCompany?: string,
 ): string {
   const saved = SavedDateTimeSchema.safeParse(value).data;
   const proposed = (saved ? null : (value as ProposedEntry | null)) ?? null;
@@ -3443,7 +3433,12 @@ export function renderDateTimeEntry(
     );
   }
   if (binding.zoneSource.kind === 'perRecordIana') {
-    const options = zoneOptions()
+    // Keep historical zone names selectable across tzdb revisions.
+    const choices =
+      zone && !dateTimeZones.includes(zone)
+        ? [zone, ...dateTimeZones]
+        : dateTimeZones;
+    const options = choices
       .map(
         (option) =>
           `<option value="${escapeHtml(option)}"${option === zone ? ' selected' : ''}>${escapeHtml(option)}</option>`,
@@ -3451,6 +3446,10 @@ export function renderDateTimeEntry(
       .join('');
     parts.push(
       `<select name="${name}:zone" aria-label="Time zone"><option value="">Company calendar zone</option>${options}</select>`,
+    );
+  } else if (workingCompany) {
+    parts.push(
+      `<input type="hidden" name="${name}:company" value="${escapeHtml(workingCompany)}">`,
     );
   }
   if (proposed?.offsets?.length) {

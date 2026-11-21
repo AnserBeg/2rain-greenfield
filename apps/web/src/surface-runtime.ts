@@ -1881,6 +1881,15 @@ async function submitSurfaceRuntimeIntentInContext(
     // a record in the URL and archive responses use the operation read-back.
     return renderSurfaceRuntimeWithData(view, requestUrl, gateways, feedback);
 
+  if (
+    selection.selected.surfaceRole === 'form' &&
+    !binding.query.legalEntityScope &&
+    dateTimeBindings(view.projections.surface.payload).size
+  ) {
+    const url = new URL(requestUrl, 'http://surface-runtime.local');
+    url.searchParams.set('record', result.readBack.recordId);
+    return renderSurfaceRuntimeWithData(view, url.href, gateways, feedback);
+  }
   return renderSelectedSurface(
     view,
     selection,
@@ -1922,6 +1931,9 @@ function renderSelectedSurface(
       data,
       feedback,
       ...(formReferences ? { formReferences } : {}),
+      ...(workspaceContext?.selectedRecordId
+        ? { workingCompany: workspaceContext.selectedRecordId }
+        : {}),
       legalEntitySelection,
       operations,
       queryParameterValues,
@@ -2677,14 +2689,16 @@ function fieldInput(
       const entered = dateTimeFromForm(`value:${fieldId}`, submission);
       const binding = dateTime.get(fieldId) as
         { zoneSource?: { kind?: string } } | undefined;
-      if (entered.kind === 'set')
+      if (entered.kind === 'set') {
+        const company =
+          workingCompany ?? submission[`value:${fieldId}:company`];
         entries.push([
           fieldId,
-          binding?.zoneSource?.kind === 'companyBusinessCalendar' &&
-          workingCompany
-            ? { ...entered.value, companyId: workingCompany }
+          binding?.zoneSource?.kind === 'companyBusinessCalendar' && company
+            ? { ...entered.value, companyId: company }
             : entered.value,
         ]);
+      }
       continue;
     }
     if (field?.kind === 'addressFieldType' && mutation.kind === 'set') {

@@ -435,6 +435,8 @@ type Json = Record<string, unknown>;
 const ADMITTED = new Set([
   'fields.fieldId',
   'dateTimeFields.fieldId',
+  'documentTemplateRevisions.layout.fieldId',
+  'documentTemplateRevisions.layout.columns.fieldId',
   'queries.selections.field.targetId',
   'surfaces.form.fields.fieldId',
   'surfaces.documentEditor.headerFields.fieldId',
