@@ -834,3 +834,9 @@ How to apply: At each occurrence opening, select among the terms and assignments
 Date: 2026-11-20
 Why: A tenant-wide customer reader with a company-scoped List could see partial receivables exposure as the full balance.
 How to apply: Carry the policy restriction on the list result, and leave totals unstated when the calculation needs every company. Exercise the mixed-grant principal with a balance in a company it cannot enumerate.
+
+## Check privileges after deployment mode is claimed
+
+Date: 2026-11-20
+Why: Grants assigned while claiming pilot or demo were invisible to checks on a freshly migrated store.
+How to apply: Claim each supported mode and compare its effective privileges against reviewed rows. Keep the unclaimed assertion for the migration baseline. [SIGNIN-1 slice 2a fixes](docs/execution/packets/SIGNIN-1-2a-fixes.md)
