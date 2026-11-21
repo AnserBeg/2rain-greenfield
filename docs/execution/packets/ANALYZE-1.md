@@ -36,6 +36,13 @@
 
 Each new member earns its own persisted absence parity, actual preceding-reader refusal, replay, rollback and schema-generated drafter evals. The DOCS-1 stored type independently owes actual preceding-reader refusal by name.
 
+## Slice 1a · Stopped at the WSL capability spike, 2026-11-21
+
+- On kernel `6.6.87.2-microsoft-standard-WSL2`, the native Docker endpoint reported `systemd`, cgroup v2 and security options `name=seccomp,profile=builtin` and `name=cgroupns`. It did not report `name=rootless`.
+- The user endpoint `/run/user/1000/docker.sock` was absent. `rootlesskit true` exited 1 during UID/GID mapping because `newuidmap` was missing. Both `/usr/bin/newuidmap` and `/usr/bin/newgidmap` were absent.
+- The WSL gate refused before launch. The CPU, memory, process, time, DNS, socket, kill and scratch checks have no measurements. The hosted spike and full CI dispatch are pending.
+- **Try it yourself** on this WSL host. Run `docker info --format '{{json .SecurityOptions}}'`, then `rootlesskit true`. Before retrying the fixture, the intended user daemon must report `name=rootless` and the mapping probe must exit 0.
+
 ## Gates
 
 Local docs gate is `scripts/check-records.sh`. This checkpoint changes documentation only. The CI reference is the successful full **base** run at `630e2aa6`, whose executable tree the packet shares.
