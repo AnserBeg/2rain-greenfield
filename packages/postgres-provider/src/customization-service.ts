@@ -26,7 +26,11 @@ import {
   storageElements,
   customizationTargets,
   draftPatchFromRequest,
+  DRAFT_SHAPE_CAPABILITIES,
   type AcknowledgementInput,
+  type CheckableDraft,
+  type CustomizationRefusalCode as PatchRefusalCode,
+  type DraftCheckResult,
   type DraftingModel,
   type CustomizationTargets,
   type CustomizationPatch,
@@ -83,6 +87,7 @@ import { withTrustedRequestTransaction } from './request-context.js';
 import { parsePinnedOperationCatalog } from '../../runtime/src/semantic-operation-gateway.js';
 import { PostgresWorkflowGateway } from './workflow-gateway.js';
 import { generateWorkflowSdk } from './workflow-sdk.js';
+import { workflowAuthoringRules } from './workflow-compile.js';
 import {
   readWorkflowBundle,
   storeWorkflowBundle,
@@ -1144,51 +1149,92 @@ export class PostgresCustomizationService {
           !query.readModel,
       )
       .map(({ queryId }) => queryId);
-    const targets = await this.targets(actor);
-    const drafted = await draftPatchFromRequest(model, request, {
-      ...targets,
-      ...(operations.length
-        ? {
-            workflowSdk: generateWorkflowSdk(view, { queries, operations })
-              .declarations,
-          }
-        : {}),
-    });
-    if (drafted.status === 'workflowDraft') {
+    const { targets, definition } = await this.#targetsAndDefinition(actor);
+    // The draft, its compile and its verification are one loop: a draft the
+    // compiler or the workflow verifier refuses goes back to the model with
+    // the diagnostics for at most two repair turns (AI-BUILD-1 slice 2,
+    // subsuming WORKFLOW-2 item 2). Authority, staleness and `unsupported`
+    // outcomes are never repaired.
+    const check = async (
+      drafted: CheckableDraft,
+    ): Promise<DraftCheckResult<DraftOutcome>> => {
       signal?.throwIfAborted();
-      const { workflow, body, fixtures } = drafted.draft;
-      const bundle = { body, fixtures, authoredBy: context.principalId };
-      let digest: string;
-      try {
-        const { executable } = await verifyWorkflowBundle(
-          view,
-          workflow.grants,
-          bundle,
-        );
-        digest = await withTrustedRequestTransaction(
-          this.connection.runtimePool,
-          context,
-          (client) =>
-            storeWorkflowBundle(client, context, { ...bundle, executable }),
-        );
-      } catch (error) {
-        return {
-          status: 'invalid',
-          message: 'The workflow draft did not pass verification.',
-          issues: [error instanceof Error ? error.message : String(error)],
+      let outcome: DraftOutcome;
+      if (drafted.status === 'workflowDraft') {
+        const { workflow, body, fixtures } = drafted.draft;
+        const bundle = {
+          body,
+          fixtures,
+          authoredBy: context.principalId,
         };
+        let digest: string;
+        try {
+          const { executable } = await verifyWorkflowBundle(
+            view,
+            workflow.grants,
+            bundle,
+          );
+          digest = await withTrustedRequestTransaction(
+            this.connection.runtimePool,
+            context,
+            (client) =>
+              storeWorkflowBundle(client, context, { ...bundle, executable }),
+          );
+        } catch (error) {
+          const issues = [
+            error instanceof Error ? error.message : String(error),
+          ];
+          return {
+            status: 'repair',
+            diagnostics: issues.map(
+              (issue) => `workflow verification: ${issue}`,
+            ),
+            value: {
+              status: 'invalid',
+              message: 'The workflow draft did not pass verification.',
+              issues,
+            },
+          };
+        }
+        outcome = await this.draft(
+          {
+            kind: 'saveWorkflow',
+            workflow: { ...workflow, bodyDigest: digest },
+          },
+          'conversationalAi',
+          signal,
+          actor,
+        );
+      } else {
+        outcome = await this.draft(
+          drafted.patch,
+          'conversationalAi',
+          signal,
+          actor,
+        );
       }
-      return this.draft(
-        { kind: 'saveWorkflow', workflow: { ...workflow, bodyDigest: digest } },
-        'conversationalAi',
-        signal,
-        actor,
-      );
-    }
-    if (drafted.status === 'parsed') {
-      signal?.throwIfAborted();
-      return this.draft(drafted.patch, 'conversationalAi', signal, actor);
-    }
+      return classifyDraftOutcome(outcome);
+    };
+    const drafted = await draftPatchFromRequest(
+      model,
+      request,
+      {
+        ...targets,
+        ...(operations.length
+          ? {
+              workflowSdk: generateWorkflowSdk(view, { queries, operations })
+                .declarations,
+            }
+          : {}),
+      },
+      {
+        check,
+        definition,
+        workflowRules: workflowAuthoringRules(),
+        ...(signal ? { signal } : {}),
+      },
+    );
+    if (drafted.status === 'checked') return drafted.value;
     if (drafted.status === 'unsupported') {
       return Object.freeze({
         message: drafted.message,
@@ -1196,11 +1242,14 @@ export class PostgresCustomizationService {
         status: 'unsupported' as const,
       });
     }
-    return Object.freeze({
-      issues: drafted.issues,
-      message: 'the model did not produce a well-formed change',
-      status: 'invalid' as const,
-    });
+    if (drafted.status === 'invalid')
+      return Object.freeze({
+        issues: drafted.issues,
+        message: 'the model did not produce a well-formed change',
+        status: 'invalid' as const,
+      });
+    // Unreachable: with a check every well-formed draft is checked.
+    throw new Error('a well-formed draft was not checked');
   }
 
   async workflows(actor?: TrustedRequestContext) {
@@ -1269,6 +1318,13 @@ export class PostgresCustomizationService {
 
   /** What a change may target on the live release (plan §10.6 rules). */
   async targets(actor?: TrustedRequestContext): Promise<CustomizationTargets> {
+    return (await this.#targetsAndDefinition(actor)).targets;
+  }
+
+  async #targetsAndDefinition(actor?: TrustedRequestContext): Promise<{
+    targets: CustomizationTargets;
+    definition: Record<string, unknown>;
+  }> {
     const context = await this.#context(actor);
     const pointer = await this.#livePointer(context);
     const active = await this.#identity(context, pointer.releaseId);
@@ -1277,19 +1333,26 @@ export class PostgresCustomizationService {
     ) as unknown as Parameters<typeof customizationTargets>[0];
     const roles = await this.#permissionRoles(context);
     const targets = customizationTargets(definition);
+    const base = definition as unknown as Record<string, unknown>;
     if (!roles.length)
       return {
-        ...targets,
-        permissionActions: [],
-        permissionRestrictions: [],
-        validationTargets: [],
+        definition: base,
+        targets: {
+          ...targets,
+          permissionActions: [],
+          permissionRestrictions: [],
+          validationTargets: [],
+        },
       };
     return {
-      ...targets,
-      permissionRoleKeys: roles.map(({ role_key }) => role_key),
-      permissionRoleLabels: Object.fromEntries(
-        roles.map(({ role_key, label }) => [role_key, label]),
-      ),
+      definition: base,
+      targets: {
+        ...targets,
+        permissionRoleKeys: roles.map(({ role_key }) => role_key),
+        permissionRoleLabels: Object.fromEntries(
+          roles.map(({ role_key, label }) => [role_key, label]),
+        ),
+      },
     };
   }
 
@@ -2932,4 +2995,48 @@ function parseUpgradeRecord(row: UpgradeRow): UpgradeRecord | null {
     candidateRevisionId: row.candidate_revision_id,
     patchIds: patchIds as MintedUuid[],
   };
+}
+
+/**
+ * Which draft outcomes go back to the model (AI-BUILD-1 slice 2). Only the
+ * draft's own mistakes are repaired: a schema issue, a compiler rejection, a
+ * patch-application refusal, and a draft-shape `unsupported`. Authority,
+ * staleness, lineage and every other `unsupported` are final, so a correct
+ * refusal is never argued away.
+ */
+const REPAIRABLE_REFUSAL_CODES: ReadonlySet<string> = new Set([
+  'CUSTOMIZE_CHOICE_PLATFORM_OWNED',
+  'CUSTOMIZE_DUPLICATE_LABEL',
+  'CUSTOMIZE_RECORD_TYPE_EXISTS',
+  'CUSTOMIZE_TARGET_IN_TIER_B_DEPENDENCY_SET',
+  'CUSTOMIZE_TARGET_NOT_CHOICE',
+  'CUSTOMIZE_TARGET_NOT_FOUND',
+  'CUSTOMIZE_LIST_VIEW_INVALID',
+  'CUSTOMIZE_FIELD_NOT_ON_LIST',
+  'CUSTOMIZE_BOARD_CONFLICT',
+  'CUSTOMIZE_LAYOUT_CONFLICT',
+] satisfies readonly PatchRefusalCode[]);
+
+export function classifyDraftOutcome(
+  outcome: DraftOutcome,
+): DraftCheckResult<DraftOutcome> {
+  if (outcome.status === 'drafted')
+    return { status: 'accepted', value: outcome };
+  const diagnostics = [
+    ...(outcome.code
+      ? [`${outcome.code}: ${outcome.message}`]
+      : [outcome.message]),
+    ...(outcome.issues ?? []),
+  ];
+  const repairable =
+    outcome.status === 'invalid' ||
+    (outcome.status === 'rejected' && !outcome.replayDiagnostics) ||
+    (outcome.status === 'refused' &&
+      !!outcome.code &&
+      REPAIRABLE_REFUSAL_CODES.has(outcome.code)) ||
+    (outcome.status === 'unsupported' &&
+      DRAFT_SHAPE_CAPABILITIES.includes(outcome.missingCapability ?? ''));
+  return repairable
+    ? { status: 'repair', diagnostics, value: outcome }
+    : { status: 'final', value: outcome };
 }

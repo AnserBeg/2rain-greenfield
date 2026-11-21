@@ -54,6 +54,12 @@ export interface AnthropicModelOptions {
   readonly timeoutMs?: number;
   /** Tests point the client at a local stand-in; production never sets it. */
   readonly baseURL?: string;
+  /**
+   * Cache lifetime. The app keeps the default five minutes; the live eval
+   * passes '1h' so the shared prefix survives its slow compiles (AI-BUILD-1
+   * slice 2 cost cuts).
+   */
+  readonly cacheTtl?: '5m' | '1h';
 }
 
 export function anthropicModel(options: AnthropicModelOptions): ModelAdapter {
@@ -64,6 +70,10 @@ export function anthropicModel(options: AnthropicModelOptions): ModelAdapter {
     ...(options.baseURL ? { baseURL: options.baseURL, maxRetries: 0 } : {}),
   });
   const modelId = options.modelId ?? DEFAULT_ANTHROPIC_MODEL;
+  const cacheControl = {
+    type: 'ephemeral' as const,
+    ...(options.cacheTtl ? { ttl: options.cacheTtl } : {}),
+  };
   return {
     modelId,
     async next({
@@ -83,7 +93,7 @@ export function anthropicModel(options: AnthropicModelOptions): ModelAdapter {
               options.maxTokens ?? 16_000,
               maxOutputTokens ?? Number.POSITIVE_INFINITY,
             ),
-            cache_control: { type: 'ephemeral' },
+            cache_control: cacheControl,
             output_config: { effort: options.effort ?? 'high' },
             // An explicit breakpoint on the system prompt (with the business
             // map) gives every conversation of the same person and release a
@@ -92,13 +102,19 @@ export function anthropicModel(options: AnthropicModelOptions): ModelAdapter {
               {
                 type: 'text',
                 text: system,
-                cache_control: { type: 'ephemeral' },
+                cache_control: cacheControl,
               },
             ],
-            tools: tools.map((tool) => ({
+            // A breakpoint after the tools too: the tool list is the same
+            // for every person and release, so it is read from the cache
+            // even when the system prompt (live targets) differs.
+            tools: tools.map((tool, index) => ({
               name: tool.name,
               description: tool.description,
               input_schema: tool.inputSchema as Anthropic.Tool.InputSchema,
+              ...(index === tools.length - 1
+                ? { cache_control: cacheControl }
+                : {}),
             })),
             messages: toMessages(conversation),
           },

@@ -34,7 +34,11 @@ Fable or Codex sol, never from the writer's model.
    process boundary. Tests: the child sees no database variable and opens no
    connection; an infinite loop in a draft is killed at the bound; each check
    fails when removed. Not Critical.
-2. **Repair loop (A2).** Diagnostics feed, turn counter, cost cap, evidence.
+2. **Repair loop (A2).** Subsumed by AI-BUILD-1 slice 2 (2026-11-21): the Customize
+   drafter's generic repair loop feeds type-check, lint, replay, compile and verification
+   errors back for at most two turns, bounded (8 diagnostics, 400 characters each), with
+   per-turn evidence; authority, staleness and `unsupported` refusals are never repaired.
+   The original scope follows for the record. Diagnostics feed, turn counter, cost cap, evidence.
    Tests: a seeded type error, a lint error and a replay divergence are each
    repaired in at most two turns; a third failure reaches the user with the
    diagnostics; authority and unsupported refusals are not repaired.
