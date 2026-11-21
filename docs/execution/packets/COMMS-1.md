@@ -6,6 +6,10 @@
 
 The scheduler can reconcile a committed staff mention or reply into a durable notice and the recipient can read or archive it through the PostgreSQL inbox API. The browser List and COMMS-2's production message store are pending.
 
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44912366862
+
+[Packet CI 44912316925](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44912316925) promoted the checkpoint at `0581e760d5f4bbb90cadcf3c081d72b5655e1547` to full.
+
 - The branch began on main `d083dd4a`. Merge `38f97a2bd` brought in CONNECT-1’s published thread writer at `ec519295`. It now includes the writer’s reviewed corrections through `f70011747` and main’s WORKFLOW-2 integration at `6787792c4`. The thread and inbox migrations are provisionally 0061 and 0062.
 - The inbox implements the published `DiscussionInboxPort`. A short lease transaction commits before reconciliation. The worker locks the shared thread, resolves current reasons, replaces the recipient set and commits before acknowledging the lease token. Replay keeps the original recipient receipt, read time and archive time.
 - Reads use fixed text and an exact staff-discussion link. The current revision, reply parent, active staff account, company membership and channel govern the page, count, preview, copied ID and cursor. The source admits ten distinct mentions and a reply author. Pages contain up to 25 notices and unread displays at most 99+.
