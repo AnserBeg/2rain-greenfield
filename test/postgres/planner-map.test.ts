@@ -80,6 +80,9 @@ test(
             values: {
               'northstar.app:field.legal_entity_code': 'MAP-B',
               'northstar.app:field.legal_entity_name': 'Map company B',
+              'northstar.app:field.legal_entity_is_default': false,
+              'northstar.app:field.legal_entity_status':
+                'northstar.app:option.legal_entity_status_active',
             },
           });
           assert.equal(created.outcome, 'succeeded');
