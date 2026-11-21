@@ -18,6 +18,7 @@
  * transcript per request, `results.json` and `summary.md`.
  */
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { parseArgs } from 'node:util';
@@ -113,6 +114,13 @@ async function main(): Promise<void> {
   // the directories whose transcript recorded a model turn for it.
   const replays = args.replay?.split(',').map((dir) => resolve(dir));
   const replay = replays?.[0];
+  // The drafter under test is a committed tree: a dirty packages/ would make
+  // the results unattributable to a SHA.
+  const git = (command: string[]) =>
+    execFileSync('git', command, { encoding: 'utf8' }).trim();
+  const head = git(['rev-parse', 'HEAD']);
+  if (!replay && git(['status', '--porcelain', '--', 'packages', 'apps']))
+    throw new Error('packages/ or apps/ has uncommitted changes; commit first');
   if (replay && !wanted) throw new Error('--replay needs --cases');
   const earlier = replay
     ? (JSON.parse(await readFile(join(replay, 'results.json'), 'utf8')) as {
@@ -278,6 +286,9 @@ async function main(): Promise<void> {
           model: modelId,
           effort: args.effort,
           ...(replay ? { rescoredFrom: replay, rescored: wanted } : {}),
+          head,
+          sandboxMs: sandboxMs ?? null,
+          cacheTtl: args['cache-ttl'],
           draftFirst: !!(model && args['draft-first']),
           // Cases whose in-app first request differed from the captured one
           // (their first turn was then drafted live, not ahead).
@@ -298,6 +309,9 @@ async function main(): Promise<void> {
     join(directory, 'summary.md'),
     redactSecrets(
       report(results, summary, {
+        head,
+        sandboxMs: sandboxMs ?? null,
+        cacheTtl: String(args['cache-ttl']),
         model: modelId,
         effort: String(args.effort),
         rescored: replay ? wanted : undefined,
@@ -372,6 +386,9 @@ function report(
   results: readonly CaseResult[],
   summary: ReturnType<typeof summarize>,
   run: {
+    head: string;
+    sandboxMs: number | null;
+    cacheTtl: string;
     model: string;
     effort: string;
     cap: number;
@@ -407,6 +424,8 @@ function report(
           '',
         ]
       : []),
+    `Drafter at \`${run.head}\`. Isolated compile bound ${run.sandboxMs ? `${String(run.sandboxMs / 1000)} s (raised for a loaded host)` : 'the app default'}; prompt cache TTL ${run.cacheTtl}.`,
+    '',
     `Model \`${run.model}\`, effort ${run.effort}, 8000 output tokens: the in-app drafting settings. Real in-app path per request on a fresh copy of the distributor demo database: draftFromRequest → approve → activate, then create, transition and list. One attempt per request; indicative only. Workflows are scored on the goods-receipt trigger only (the only trigger today). Prices (USD/MTok) from ${run.source}, ${run.priceDate}: ${Object.entries(
       run.prices,
     )
