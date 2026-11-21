@@ -246,16 +246,18 @@ DECLARE a platform.communication_admission:=north_star_internal.communication_ad
   IF EXISTS (SELECT FROM pg_temp.communication_admissions WHERE participants_locked) THEN RAISE EXCEPTION 'communication.lockOrder'; END IF;
   IF a.primary_record IS NULL THEN
     SELECT thread_id INTO id_value FROM platform.communication_threads
-      WHERE (tenant_id,environment_id,company_id,direct_pair)=(a.tenant_id,a.environment_id,a.company_id,a.staff) FOR UPDATE;
-    IF NOT FOUND THEN
-      INSERT INTO platform.communication_threads (tenant_id,environment_id,company_id,audience,direct_pair)
-        VALUES (a.tenant_id,a.environment_id,a.company_id,'staffDirect',a.staff) RETURNING thread_id INTO id_value; END IF;
-    UPDATE pg_temp.communication_admissions SET thread_id=id_value WHERE communication_admissions.id=ticket;
+      WHERE (tenant_id,environment_id,company_id,direct_pair)=(a.tenant_id,a.environment_id,a.company_id,a.staff);
+  ELSE
+    SELECT thread_id INTO id_value FROM platform.communication_threads
+      WHERE (tenant_id,environment_id,company_id,primary_entity,primary_record,linked_records)=
+            (a.tenant_id,a.environment_id,a.company_id,a.primary_entity,a.primary_record,a.links); END IF;
+  IF FOUND THEN
+    PERFORM platform.communication_lock_thread(ticket,id_value);
     RETURN id_value; END IF;
-  SELECT thread_id INTO id_value FROM platform.communication_threads
-    WHERE (tenant_id,environment_id,company_id,primary_entity,primary_record,linked_records)=
-          (a.tenant_id,a.environment_id,a.company_id,a.primary_entity,a.primary_record,a.links) FOR UPDATE;
-  IF NOT FOUND THEN
+  IF a.primary_record IS NULL THEN
+    INSERT INTO platform.communication_threads (tenant_id,environment_id,company_id,audience,direct_pair)
+      VALUES (a.tenant_id,a.environment_id,a.company_id,'staffDirect',a.staff) RETURNING thread_id INTO id_value;
+  ELSE
     INSERT INTO platform.communication_threads (tenant_id,environment_id,company_id,audience,primary_entity,primary_record,linked_records)
       VALUES (a.tenant_id,a.environment_id,a.company_id,'record',a.primary_entity,a.primary_record,a.links) RETURNING thread_id INTO id_value;
     INSERT INTO platform.communication_record_links

@@ -440,6 +440,38 @@ test('shared communication writer', async (t) => {
           },
         );
         await t.test(
+          'a creation batch also locks existing thread rows in ID order',
+          async () => {
+            await begin(left);
+            const different = await resolveThread(
+              left,
+              await admit(left, email, { bindings: [] }),
+            );
+            await left.query('COMMIT');
+            await begin(left);
+            const linked = await admit(left, email),
+              primaryOnly = await admit(left, email, { bindings: [] });
+            const [low, high] =
+              shared < different
+                ? [linked, primaryOnly]
+                : [primaryOnly, linked];
+            await left.query(
+              'SELECT platform.communication_lock_creations($1)',
+              [[high, low]],
+            );
+            await left.query('SAVEPOINT ordered');
+            await resolveThread(left, high);
+            await assert.rejects(
+              resolveThread(left, low),
+              /communication.lockOrder/,
+              'creation batch locked an earlier existing thread row',
+            );
+            await left.query('ROLLBACK TO ordered');
+            await resolveThread(left, low);
+            await resolveThread(left, high);
+          },
+        );
+        await t.test(
           'a transaction cannot return to earlier lock classes',
           async () => {
             await begin(left);
