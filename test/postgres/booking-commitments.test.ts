@@ -188,7 +188,10 @@ test('booking commitment writer', async (t) => {
         const action =
           'example.booking:operation.' + verb.toLowerCase() + '_' + kind;
         let grantId = approval;
-        if (!['hold', 'holdTracked', 'kitHold'].includes(verb) && approval === undefined) {
+        if (
+          !['hold', 'holdTracked', 'kitHold'].includes(verb) &&
+          approval === undefined
+        ) {
           grantId = randomUUID();
           await grant(grantId, action, key, args, who, activeFence, channel);
         }
@@ -1830,7 +1833,7 @@ test('booking commitment writer', async (t) => {
                 [release, activeFence, JSON.stringify(owners)],
               )
             ).rows[0]!.result;
-          let first:Result;
+          let first: Result;
           await left.query('BEGIN');
           try {
             assert.equal((await fence()).owners[0].cursor, '0');
@@ -1843,7 +1846,7 @@ test('booking commitment writer', async (t) => {
             await waitForRight();
             assert.equal((await fence()).owners[0].cursor, '0');
             await left.query('COMMIT');
-            first=await writer;
+            first = await writer;
             assert.equal(first.state, 'hold');
           } finally {
             await left.query('ROLLBACK');
@@ -1851,12 +1854,14 @@ test('booking commitment writer', async (t) => {
           await left.query('BEGIN');
           try {
             assert.equal((await fence()).owners[0].cursor, '1');
-            const writer=call(right,'cancel',terms(49,first));
-            void writer.catch(()=>undefined);
+            const writer = call(right, 'cancel', terms(49, first));
+            void writer.catch(() => undefined);
             await waitForRight();
             await left.query('COMMIT');
-            assert.equal((await writer).state,'cancelled');
-          } finally {await left.query('ROLLBACK');}
+            assert.equal((await writer).state, 'cancelled');
+          } finally {
+            await left.query('ROLLBACK');
+          }
           assert.equal((await fence()).owners[0].cursor, '2');
         },
       );
@@ -1947,41 +1952,229 @@ test('booking commitment writer', async (t) => {
           );
         },
       );
-      await t.test('kit hold, confirm, cancel and expiry change every member and advance both owners once', async () => {
-        await time('2030-02-11T14:00Z');
-        const action=(v:string)=>'example.booking:operation.'+v+'_unit';
-        const member=(n:number,asset:number)=>({...hold(n,asset,window('12:00','14:00')),operationId:action('hold')});
-        const args={recordId:owner(61),expectedOwnerRevision:1,members:[member(61,41),member(63,42)]};
-        const key=randomUUID();
-        const first=await call(left,'kitHold',args,key);
-        assert.equal(first.state,'hold',JSON.stringify(first));
-        const facts=async(group:string)=>(await admin.query<{booking_id:string,record_id:string,state:string,revision:number,cursor_value:string,deadline:Date}>(
-          'SELECT booking_id,record_id,state,revision,cursor_value,deadline FROM platform.booking_commitments JOIN platform.booking_owner_cursors USING(owner_key) WHERE group_id=$1 ORDER BY record_id',[group])).rows;
-        const held=await facts(first.groupId);
-        assert.equal(held.length,2);
-        assert.equal(held[0]!.deadline.getTime(),held[1]!.deadline.getTime());
-        assert.deepEqual(held.map(f=>[f.state,f.revision,f.cursor_value]),[['hold',1,'1'],['hold',1,'1']]);
-        const change=(v:string,rev:number)=>({recordId:owner(61),expectedOwnerRevision:1,groupId:first.groupId,
-          members:held.map(f=>({operationId:action(v),recordId:f.record_id,expectedOwnerRevision:1,bookingId:f.booking_id,bookingRevision:rev}))});
-        const stale=change('confirm',1);
-        stale.members[1]!.bookingRevision=7;
-        assert.equal((await call(left,'kitConfirm',stale)).refused,'booking.staleRevision');
-        assert.deepEqual(await facts(first.groupId),held);
-        const confirmed=await call(right,'kitConfirm',change('confirm',1));
-        assert.equal(confirmed.state,'confirmed');
-        assert.deepEqual((await facts(first.groupId)).map(f=>[f.revision,f.cursor_value]),[[2,'2'],[2,'2']]);
-        assert.deepEqual(await call(left,'kitHold',args,key),first);
-        assert.equal((await call(left,'kitCancel',change('cancel',2))).state,'cancelled');
-        const groupChanges=await admin.query<{receipt_id:string,owners:number}>(
-          "SELECT receipt_id,count(DISTINCT owner_key)::integer AS owners FROM platform.booking_history WHERE after_fact->>'group_id'=$1 GROUP BY receipt_id",[first.groupId]);
-        assert.deepEqual(groupChanges.rows.map(x=>x.owners),[2,2,2]);
-        const expired=await call(left,'kitHold',args);
-        assert.equal(expired.state,'hold');
-        await time(expired.deadline);
-        await admin.query('SELECT platform.booking_sweep_due(100)');
-        assert.deepEqual((await facts(expired.groupId)).map(f=>[f.state,f.revision,f.cursor_value]),[['cancelled',2,'5'],['cancelled',2,'5']]);
-        await assert.rejects(call(left,'kitHold',{...args,members:[member(61,41),member(64,42)]}),/booking.endpointUnavailable/u);
-      });
+      await t.test(
+        'kit hold, confirm, cancel and expiry change every member and advance both owners once',
+        async () => {
+          await time('2030-02-11T14:00Z');
+          const action = (v: string) =>
+            'example.booking:operation.' + v + '_unit';
+          const member = (n: number, asset: number) => ({
+            ...hold(n, asset, window('12:00', '14:00')),
+            operationId: action('hold'),
+          });
+          const args = {
+            recordId: owner(61),
+            expectedOwnerRevision: 1,
+            members: [member(61, 41), member(63, 42)],
+          };
+          const key = randomUUID();
+          const first = await call(left, 'kitHold', args, key);
+          assert.equal(first.state, 'hold', JSON.stringify(first));
+          const facts = async (group: string) =>
+            (
+              await admin.query<{
+                booking_id: string;
+                record_id: string;
+                state: string;
+                revision: number;
+                cursor_value: string;
+                deadline: Date;
+              }>(
+                'SELECT booking_id,record_id,state,revision,cursor_value,deadline FROM platform.booking_commitments JOIN platform.booking_owner_cursors USING(owner_key) WHERE group_id=$1 ORDER BY record_id',
+                [group],
+              )
+            ).rows;
+          const held = await facts(first.groupId);
+          assert.equal(held.length, 2);
+          assert.equal(
+            held[0]!.deadline.getTime(),
+            held[1]!.deadline.getTime(),
+          );
+          assert.deepEqual(
+            held.map((f) => [f.state, f.revision, f.cursor_value]),
+            [
+              ['hold', 1, '1'],
+              ['hold', 1, '1'],
+            ],
+          );
+          const change = (v: string, rev: number) => ({
+            recordId: owner(61),
+            expectedOwnerRevision: 1,
+            groupId: first.groupId,
+            members: held.map((f) => ({
+              operationId: action(v),
+              recordId: f.record_id,
+              expectedOwnerRevision: 1,
+              bookingId: f.booking_id,
+              bookingRevision: rev,
+            })),
+          });
+          const stale = change('confirm', 1);
+          stale.members[1]!.bookingRevision = 7;
+          assert.equal(
+            (await call(left, 'kitConfirm', stale)).refused,
+            'booking.staleRevision',
+          );
+          assert.deepEqual(await facts(first.groupId), held);
+          const confirmed = await call(
+            right,
+            'kitConfirm',
+            change('confirm', 1),
+          );
+          assert.equal(confirmed.state, 'confirmed');
+          assert.deepEqual(
+            (await facts(first.groupId)).map((f) => [
+              f.revision,
+              f.cursor_value,
+            ]),
+            [
+              [2, '2'],
+              [2, '2'],
+            ],
+          );
+          assert.deepEqual(await call(left, 'kitHold', args, key), first);
+          assert.equal(
+            (await call(left, 'kitCancel', change('cancel', 2))).state,
+            'cancelled',
+          );
+          const groupChanges = await admin.query<{
+            receipt_id: string;
+            owners: number;
+          }>(
+            "SELECT receipt_id,count(DISTINCT owner_key)::integer AS owners FROM platform.booking_history WHERE after_fact->>'group_id'=$1 GROUP BY receipt_id",
+            [first.groupId],
+          );
+          assert.deepEqual(
+            groupChanges.rows.map((x) => x.owners),
+            [2, 2, 2],
+          );
+          const expired = await call(left, 'kitHold', args);
+          assert.equal(expired.state, 'hold');
+          await time(expired.deadline);
+          await admin.query('SELECT platform.booking_sweep_due(100)');
+          assert.deepEqual(
+            (await facts(expired.groupId)).map((f) => [
+              f.state,
+              f.revision,
+              f.cursor_value,
+            ]),
+            [
+              ['cancelled', 2, '5'],
+              ['cancelled', 2, '5'],
+            ],
+          );
+          await assert.rejects(
+            call(left, 'kitHold', {
+              ...args,
+              members: [member(61, 41), member(64, 42)],
+            }),
+            /booking.endpointUnavailable/u,
+          );
+        },
+      );
+      await t.test(
+        'opposing swaps and return versus reschedule serialize on the actual diaries',
+        async () => {
+          await time('2030-02-11T14:00Z');
+          const book = async (
+            n: number,
+            asset: number,
+            start: string,
+            end: string,
+          ) => {
+            const h = await call(
+              left,
+              'holdTracked',
+              hold(n, asset, window(start, end)),
+            );
+            return call(left, 'confirm', terms(n, h));
+          };
+          const a = await book(65, 43, '10:00', '12:00');
+          const b = await book(66, 44, '13:00', '15:00');
+          const [x, y] = await race(
+            () =>
+              call(left, 'swap', {
+                ...terms(65, a),
+                replacementResourceId: resource(44),
+              }),
+            () =>
+              call(right, 'swap', {
+                ...terms(66, b),
+                replacementResourceId: resource(43),
+              }),
+          );
+          assert.deepEqual(
+            [x.bookingId, x.revision, y.bookingId, y.revision],
+            [a.bookingId, 3, b.bookingId, 3],
+          );
+          const latter = await book(67, 44, '13:00', '15:00');
+          await time('2030-02-11T17:00Z');
+          const started = await call(left, 'start', terms(65, x));
+          await time('2030-02-11T17:30Z');
+          const [returned, moved] = await race(
+            () => call(left, 'return', terms(65, started)),
+            () =>
+              call(right, 'changeInterval', {
+                ...terms(67, latter),
+                interval: window('10:45', '13:00'),
+              }),
+          );
+          assert.deepEqual(
+            [returned.state, moved.state],
+            ['returned', 'confirmed'],
+          );
+          const spans = await admin.query(
+            'SELECT lower(occupied_interval) AS start,upper(occupied_interval) AS finish,upper(agreed_interval) AS agreed FROM platform.booking_commitments WHERE booking_id=$1',
+            [x.bookingId],
+          );
+          assert.deepEqual(
+            [
+              spans.rows[0]!.finish.toISOString(),
+              spans.rows[0]!.agreed.toISOString(),
+            ],
+            ['2030-02-11T17:30:00.000Z', '2030-02-11T19:00:00.000Z'],
+          );
+        },
+      );
+      await t.test(
+        'a backdated start checks historical scheduled occupation from before its own live claim',
+        async () => {
+          await time('2030-02-11T14:00Z');
+          const appointment = await call(
+            left,
+            'hold',
+            hold(68, 45, window('09:00', '10:00')),
+          );
+          const confirmed = await call(left, 'confirm', terms(68, appointment));
+          assert.equal(confirmed.state, 'confirmed');
+          await time('2030-02-11T18:00Z');
+          const today = {
+            kind: 'date',
+            start: '2030-02-11',
+            end: '2030-02-12',
+          };
+          const h = await call(left, 'holdTracked', hold(69, 45, today));
+          const tracked = await call(left, 'confirm', terms(69, h));
+          const backdate = {
+            ...terms(69, tracked),
+            effectiveAt: '2030-02-11T16:30:00Z',
+            reason: 'handover reported later',
+          };
+          assert.equal(
+            (await call(right, 'start', backdate)).refused,
+            'booking.historicalOverlap',
+          );
+          assert.equal(
+            (
+              await call(right, 'start', {
+                ...backdate,
+                effectiveAt: '2030-02-11T17:00:00Z',
+              })
+            ).state,
+            'inUse',
+          );
+        },
+      );
     } finally {
       issuer.release();
       left.release();

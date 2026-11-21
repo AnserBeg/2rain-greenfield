@@ -1676,7 +1676,8 @@ function parseQueryDefinition(
       value.queryType !== 'resolve' &&
       value.queryType !== 'search') ||
     (value.tier !== 'q0' && value.tier !== 'q1' && value.tier !== 'q2') ||
-    (value.tier === 'q2' && (value.queryType !== 'get' || value.readModel === undefined)) ||
+    (value.tier === 'q2' &&
+      (value.queryType !== 'get' || value.readModel === undefined)) ||
     !Number.isSafeInteger(value.maximumResultCount) ||
     Number(value.maximumResultCount) < 1 ||
     !isRecord(value.filter) ||

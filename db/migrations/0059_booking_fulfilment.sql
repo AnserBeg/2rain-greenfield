@@ -526,8 +526,9 @@ DECLARE
       (SELECT range_agg(tstzrange(u.effective_start,u.effective_end,'[)')) @> tstzrange(p.effective_start,p.effective_end,'[)')
        FROM evidence u WHERE u.evidence_kind='use'),false))
     THEN RAISE EXCEPTION 'booking.inconsistentTimeline'; END IF;
-  UPDATE platform.booking_commitments SET state=f.state,revision=f.revision,quantity=f.quantity,out_quantity=f.out_quantity,
-    resource_key=f.resource_key,requested_resource_key=f.requested_resource_key,assigned_unit_key=f.assigned_unit_key,occupied_interval=f.occupied_interval
+  UPDATE platform.booking_commitments SET
+    (state,revision,quantity,out_quantity,resource_key,requested_resource_key,assigned_unit_key,occupied_interval)=
+    (f.state,f.revision,f.quantity,f.out_quantity,f.resource_key,f.requested_resource_key,f.assigned_unit_key,f.occupied_interval)
     WHERE (tenant_id,environment_id,booking_id)=(f.tenant_id,f.environment_id,f.booking_id);
   IF NOT EXISTS (SELECT FROM platform.booking_commitments saved WHERE saved IS NOT DISTINCT FROM f)
     THEN RAISE EXCEPTION 'booking.evidenceMismatch'; END IF;
@@ -712,7 +713,7 @@ DECLARE
   root_found boolean:=false; target_id uuid; owner_id uuid; owner_revision bigint; owner_table text;
   previous_receipt platform.booking_receipts; approval platform.booking_approval_grants;
   policy_version text; decision timestamptz; kit_deadline timestamptz; term record; qty numeric; calendar jsonb;
-  member_count integer; n integer; BEGIN
+  member_count integer; n integer; expected jsonb; inserted platform.booking_commitments; BEGIN
   PERFORM north_star_internal.booking_require_isolation();
   IF jsonb_typeof(input->'members') IS DISTINCT FROM 'array' THEN RAISE EXCEPTION 'booking.invalidGroup'; END IF;
   member_count:=jsonb_array_length(input->'members');
@@ -802,16 +803,31 @@ DECLARE
         INSERT INTO platform.booking_commitments(tenant_id,environment_id,owner_key,slot_id,resource_key,kind,assigned_unit_key,
           group_id,group_kind,fulfilment_mode,binding,calendar,entered_interval,agreed_interval,occupied_interval,quantity,unit,state,deadline,revision)
         VALUES(t,e,(plan->>'ownerKey')::uuid,slot->>'slotId',d.resource_key,d.kind,CASE WHEN d.kind='unit' THEN d.resource_key END,
-          group_id_arg,'kit',slot->>'fulfilmentMode',slot,calendar,m->'interval',term.agreed,term.occupied,qty,d.unit,'hold',kit_deadline,1);
+          group_id_arg,'kit',slot->>'fulfilmentMode',slot,calendar,m->'interval',term.agreed,term.occupied,qty,d.unit,'hold',kit_deadline,1)
+          RETURNING * INTO STRICT inserted;
+        IF (inserted.tenant_id,inserted.environment_id,inserted.owner_key,inserted.slot_id,inserted.resource_key,inserted.kind,
+          inserted.group_id,inserted.group_kind,inserted.fulfilment_mode,inserted.binding,inserted.calendar,inserted.entered_interval,
+          inserted.agreed_interval,inserted.occupied_interval,inserted.quantity,inserted.unit,inserted.state,inserted.deadline,inserted.revision)
+          IS DISTINCT FROM (t,e,(plan->>'ownerKey')::uuid,slot->>'slotId',d.resource_key,d.kind,group_id_arg,'kit'::text,
+          slot->>'fulfilmentMode',slot,calendar,m->'interval',term.agreed,term.occupied,qty,d.unit,'hold'::text,kit_deadline,1)
+          OR inserted.assigned_unit_key IS DISTINCT FROM (CASE WHEN d.kind='unit' THEN d.resource_key END)
+          THEN RAISE EXCEPTION 'booking.evidenceMismatch'; END IF;
       ELSE
+        SELECT h.after_fact||jsonb_build_object('revision',h.revision+1,'state',CASE command WHEN 'confirm' THEN 'confirmed' ELSE 'cancelled' END)
+          INTO expected FROM platform.booking_history h WHERE (h.tenant_id,h.environment_id,h.booking_id,h.revision)=
+            (t,e,(m->>'bookingId')::uuid,(m->>'bookingRevision')::integer);
         UPDATE platform.booking_commitments c SET state=CASE command WHEN 'confirm' THEN 'confirmed' ELSE 'cancelled' END,revision=c.revision+1
           WHERE (c.tenant_id,c.environment_id,c.group_id,c.booking_id,c.owner_key,c.resource_key,c.revision)=
             (t,e,group_id_arg,(m->>'bookingId')::uuid,(plan->>'ownerKey')::uuid,(plan->>'diary')::uuid,(m->>'bookingRevision')::integer)
-            AND (c.state='hold' OR (command='cancel' AND c.state='confirmed'));
-        IF NOT FOUND THEN RAISE EXCEPTION 'booking.staleRevision'; END IF; END IF; END LOOP;
+            AND (c.state='hold' OR (command='cancel' AND c.state='confirmed')) RETURNING * INTO inserted;
+        IF NOT FOUND THEN RAISE EXCEPTION 'booking.staleRevision'; END IF;
+        IF to_jsonb(inserted) IS DISTINCT FROM expected THEN RAISE EXCEPTION 'booking.evidenceMismatch'; END IF; END IF; END LOOP;
     IF command='hold' THEN
       UPDATE platform.booking_commitments c SET deadline=kit_deadline WHERE (c.tenant_id,c.environment_id,c.group_id)=(t,e,group_id_arg);
-      GET DIAGNOSTICS n=ROW_COUNT; IF n<>member_count THEN RAISE EXCEPTION 'booking.evidenceMismatch'; END IF;
+      GET DIAGNOSTICS n=ROW_COUNT;
+      IF n<>member_count OR EXISTS(SELECT FROM platform.booking_commitments c WHERE
+        (c.tenant_id,c.environment_id,c.group_id)=(t,e,group_id_arg) AND c.deadline IS DISTINCT FROM kit_deadline)
+        THEN RAISE EXCEPTION 'booking.evidenceMismatch'; END IF;
       FOR f IN SELECT * FROM platform.booking_commitments c WHERE (c.tenant_id,c.environment_id,c.group_id)=(t,e,group_id_arg) LOOP
         SELECT * INTO STRICT d FROM platform.booking_resources WHERE resource_key=f.resource_key;
         IF d.kind='pool' THEN PERFORM north_star_internal.booking_check_capacity(d.resource_key); END IF;
@@ -1027,11 +1043,11 @@ DECLARE
     WHERE (c.tenant_id,c.environment_id,c.release_id)=(t,e,r) AND p.projection_family_id='northstar.compiler:projection-family.query-catalog'
       AND convert_from(b.canonical_bytes,'UTF8')::jsonb->>'kind'='queryCatalogPayload';
   SELECT value INTO STRICT usage_query FROM jsonb_array_elements(catalog->'queries') WHERE value->>'queryId'=qid AND value->>'lifecycle'='active'
-    AND value->>'queryType'='get' AND value->'readModel'->'capability'->>'targetId'='northstar.booking:capability.owner_usage'
+    AND value->>'queryType'='get' AND value->>'tier'='q2' AND value->'readModel'->'capability'->>'targetId'='northstar.booking:capability.owner_usage'
     AND value->'readModel'->>'binding'='northstar.booking:protocol.owner_usage_v1';
   SELECT value INTO STRICT owner_query FROM jsonb_array_elements(catalog->'queries') WHERE
     value->>'queryId'=usage_query#>>'{readModel,queries,owner,targetId}' AND value->>'lifecycle'='active' AND value->>'queryType'='get'
-    AND value->>'sourceEntityId'=usage_query->>'sourceEntityId' AND NOT (value ? 'readModel')
+    AND value->>'tier'='q0' AND value->>'sourceEntityId'=usage_query->>'sourceEntityId' AND NOT (value ? 'readModel')
     AND value->>'permissionId'<>usage_query->>'permissionId';
   company:=north_star_internal.booking_endpoint(t,e,north_star_internal.booking_projection(t,e,r,'storageTargetPayload'),owner_query->>'sourceEntityId',id,false);
   PERFORM north_star_internal.booking_require_permission(t,e,principal,company,owner_query->>'permissionId',owner_query->>'sourceEntityId');

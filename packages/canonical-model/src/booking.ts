@@ -59,7 +59,7 @@ const fulfilment = commitment.extend({
 });
 const kit = commitment.extend({
   bindingVersion: z.literal('booking.kit/v1'),
-  operation: z.enum(['hold','confirm','cancel']),
+  operation: z.enum(['hold', 'confirm', 'cancel']),
   memberOperations: z.array(id).min(1).max(20),
 });
 export const BookingOperationBinding = z
@@ -81,7 +81,9 @@ export function bookingReaderFloor(value: unknown): number {
       typeof binding === 'object' &&
       binding !== null &&
       'bindingVersion' in binding &&
-      ['booking.fulfilment/v1','booking.kit/v1'].includes(String(binding.bindingVersion)),
+      ['booking.fulfilment/v1', 'booking.kit/v1'].includes(
+        String(binding.bindingVersion),
+      ),
   )
     ? BOOKING_FULFILMENT_READER
     : BOOKING_OPERATION_READER;
@@ -134,7 +136,12 @@ export function bookingDeclarationProblem(
 ): string | undefined {
   const configs = new Map<string, string>();
   for (const query of pkg.queries) {
-    if (query.tier === 'q2' && (!('readModel' in query) || query.readModel?.capability.targetId !== BOOKING_USAGE_CAPABILITY)) return query.queryId;
+    if (
+      query.tier === 'q2' &&
+      (!('readModel' in query) ||
+        query.readModel?.capability.targetId !== BOOKING_USAGE_CAPABILITY)
+    )
+      return query.queryId;
     if (
       !('readModel' in query) ||
       query.readModel?.capability.targetId !== BOOKING_USAGE_CAPABILITY
@@ -217,11 +224,21 @@ export function bookingDeclarationProblem(
     )
       return operation.operationId;
     if (b.bindingVersion === 'booking.kit/v1') {
-      if (new Set(b.memberOperations).size !== b.memberOperations.length || b.memberOperations.some(id=>{
-        const member=pkg.operations.find(o=>o.operationId===id);
-        return !member || member.lifecycle !== 'active' || !('booking' in member) || !member.booking ||
-          member.booking.bindingVersion !== 'booking.commitment/v1' || member.booking.operation !== b.operation;
-      })) return operation.operationId;
+      if (
+        new Set(b.memberOperations).size !== b.memberOperations.length ||
+        b.memberOperations.some((id) => {
+          const member = pkg.operations.find((o) => o.operationId === id);
+          return (
+            !member ||
+            member.lifecycle !== 'active' ||
+            !('booking' in member) ||
+            !member.booking ||
+            member.booking.bindingVersion !== 'booking.commitment/v1' ||
+            member.booking.operation !== b.operation
+          );
+        })
+      )
+        return operation.operationId;
     }
     if (b.bindingVersion === 'booking.fulfilment/v1') {
       const steward = pkg.permissions.find(

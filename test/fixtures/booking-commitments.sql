@@ -104,8 +104,8 @@ BEGIN
   FOREACH family IN ARRAY ARRAY['operation-catalog','query-catalog','storage-target'] LOOP
     payload := CASE WHEN family='operation-catalog' THEN jsonb_build_object('kind','operationCatalogPayload','operations',ops)
       WHEN family='query-catalog' THEN jsonb_build_object('kind','queryCatalogPayload','queries',jsonb_build_array(
-        jsonb_build_object('queryId','example.booking:query.owner','queryType','get','lifecycle','active','permissionId','example.booking:permission.visit','sourceEntityId',owner_entity),
-        jsonb_build_object('queryId','example.booking:query.usage','queryType','get','lifecycle','active','permissionId','example.booking:permission.usage','sourceEntityId',owner_entity,
+        jsonb_build_object('queryId','example.booking:query.owner','tier','q0','queryType','get','lifecycle','active','permissionId','example.booking:permission.visit','sourceEntityId',owner_entity),
+        jsonb_build_object('queryId','example.booking:query.usage','tier','q2','queryType','get','lifecycle','active','permissionId','example.booking:permission.usage','sourceEntityId',owner_entity,
           'readModel',jsonb_build_object('capability',jsonb_build_object('targetId','northstar.booking:capability.owner_usage'),
           'binding','northstar.booking:protocol.owner_usage_v1','queries',jsonb_build_object('owner',jsonb_build_object('targetId','example.booking:query.owner'))))))
       ELSE jsonb_build_object('kind','storageTargetPayload','relations',jsonb_build_array(

@@ -24,7 +24,8 @@ import {
   compiledApplication,
   firstPartyAuthored,
 } from '../helpers/customization-fixture.js';
-import { withOrderEntryFixture } from '../helpers/order-entry-fixture.js';
+import { startComposedApplication } from '../../apps/api/src/composition-root.js';
+import { withEphemeralPostgres } from '../helpers/postgres.js';
 import { withArchivedCustomizationRuntime } from '../helpers/archived-runtime-process.js';
 
 const item = 'northstar.app:entity.item';
@@ -207,6 +208,32 @@ test('the compiler requires a distinct steward write for a correction and admits
   bookingRelease('operation');
 });
 
+// The demo seed already has a saved item. No Sales workflows are needed to serve it.
+const demoItem = '71000000-0000-4000-8000-000000000011';
+async function withBookingApplication(
+  envelope: unknown,
+  run: (fixture: {
+    app: Awaited<ReturnType<typeof startComposedApplication>>;
+    databaseUrl: string;
+  }) => Promise<void>,
+) {
+  await withEphemeralPostgres('booking-serving', async ({ connection }) => {
+    const databaseUrl = `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`;
+    const app = await startComposedApplication({
+      databaseUrl,
+      port: 0,
+      seedProfile: 'demo',
+      tenantSlug: 'booking-serving',
+      ...(envelope === undefined ? {} : { compiledApplication: envelope }),
+    });
+    try {
+      await run({ app, databaseUrl });
+    } finally {
+      await app.close();
+    }
+  });
+}
+
 const archivedQuery = `
 import { readFile } from 'node:fs/promises';
 import { ObservabilityMetrics } from '@north-star/observability';
@@ -237,13 +264,13 @@ test(
       '0a9f7ca52304969c65092893f50375c90f8c2265',
       async (run) => {
         for (const mode of ['baseline', 'operation', 'query'] as const) {
-          await withOrderEntryFixture(
+          await withBookingApplication(
+            mode === 'baseline' ? undefined : bookingRelease(mode),
             async (f) => {
-              const { host, port, database, user } = f.pool.options;
               const probe = (await run(archivedQuery, {
-                databaseUrl: `postgresql://${user}@${host}:${port}/${database}`,
+                databaseUrl: f.databaseUrl,
                 identity: f.app.runtime.identity,
-                recordId: f.item,
+                recordId: demoItem,
               })) as {
                 outcome: string;
                 code?: string;
@@ -251,7 +278,7 @@ test(
                 id?: string;
               };
               if (mode === 'baseline')
-                assert.deepEqual(probe, { outcome: 'exact', id: f.item });
+                assert.deepEqual(probe, { outcome: 'exact', id: demoItem });
               else {
                 assert.equal(
                   probe.code,
@@ -266,10 +293,6 @@ test(
                 );
               }
             },
-            'demo',
-            0,
-            0,
-            mode === 'baseline' ? undefined : bookingRelease(mode),
           );
         }
       },
@@ -278,37 +301,32 @@ test(
 );
 
 test('the serving booking query reads a saved owner at cursor zero through its released evidence permission', async () => {
-  await withOrderEntryFixture(
-    async (f) => {
-      const result = await f.app.runtime.entry.run(
-        { headers: { cookie: 'northstar-demo-actor=buyer' } },
-        (view) =>
-          f.app.runtime.queryGateway.invoke(view, {
-            schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
-            queryId: usageQuery,
-            arguments: {
-              recordId: f.item,
-              usage: {
-                from: '2030-02-10T00:00:00Z',
-                until: '2030-02-20T00:00:00Z',
-              },
+  await withBookingApplication(bookingRelease('query'), async (f) => {
+    const result = await f.app.runtime.entry.run(
+      { headers: { cookie: 'northstar-demo-actor=buyer' } },
+      (view) =>
+        f.app.runtime.queryGateway.invoke(view, {
+          schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+          queryId: usageQuery,
+          arguments: {
+            recordId: demoItem,
+            usage: {
+              from: '2030-02-10T00:00:00Z',
+              until: '2030-02-20T00:00:00Z',
             },
-          }),
-      );
-      assert.equal(result.outcome, 'exact');
-      assert.deepEqual(
-        (
-          result.records[0]!.values[usageField] as {
-            cursor: string;
-            bookings: unknown[];
-          }
-        ).cursor,
-        '0',
-      );
-    },
-    'demo',
-    0,
-    0,
-    bookingRelease('query'),
-  );
+          },
+        }),
+    );
+    assert.equal(result.kind, 'semanticQueryResult');
+    assert.equal(result.outcome, 'exact');
+    assert.deepEqual(
+      (
+        result.records[0]!.values[usageField] as {
+          cursor: string;
+          bookings: unknown[];
+        }
+      ).cursor,
+      '0',
+    );
+  });
 });
