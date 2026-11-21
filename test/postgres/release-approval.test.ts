@@ -1402,6 +1402,8 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
                 identities: {
                   runtime: scope,
                   approver: human,
+                  manager: human,
+                  system: executor,
                   authorityOperatorId: authorityOperator,
                 },
               },
