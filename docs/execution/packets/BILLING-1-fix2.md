@@ -13,13 +13,13 @@ Critical migration and Fable follow-up for Billing slice 1. Exact integration CI
 ## Decisions
 
 - Calculation v2 consumes exact allocation pins. Saved calculation v1 quotes replay with their original publication fence.
-- The fixture uses the existing terms field binding. No compiled schema key was added.
+- The fixture uses the existing terms field binding and reader floor 36.
 
 ## Gates
 
 CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44843557065
 
-- The packet run precedes the exact integration run. The integration branch is `candidate/BILLING-1-fix2`.
+- Hosted packet CI found fixture typing errors, corrected in the executable tip. The exact integration branch is `candidate/BILLING-1-fix2`.
 - The pricing controls restored the opening fence and bypassed term pins independently. Both mutations failed their targeted calculator tests.
 
 ## Test it yourself
@@ -31,7 +31,7 @@ Run `node --import tsx --test test/integration/billing-quote.test.ts` and look f
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "BILLING-1-fix2",
   "base": "67e4efce31eb663f12d6f161aa91c0ce1220dffc",
-  "head": "55e5522184c3e6c5dd1d0ac51137fcdd8f2ed9a2",
+  "head": "a74ae3bf7e5fceea1774a167e29f9045385e9054",
   "changedPaths": [
     "db/migrations/0058_billing_publication_xid.sql",
     "db/schema.snapshot.json",
