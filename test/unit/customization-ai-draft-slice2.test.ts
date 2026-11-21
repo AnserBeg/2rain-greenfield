@@ -426,3 +426,44 @@ test('capability buckets match whole words (the baseline refusal texts)', () => 
     ['board'],
   );
 });
+
+// ---------------------------------------------------------------- workflows
+
+test('a workflow call envelope refusal names the missing and unexpected keys', async () => {
+  const { workflowKeyProblem, WORKFLOW_CALL_ENVELOPES } =
+    await import('../../packages/postgres-provider/src/workflow-sdk.js');
+  // Live W02: the approval fixture sent `id` where the envelope needs
+  // `operationId`; the old message named neither.
+  const problem = workflowKeyProblem(
+    { kind: 'requestApproval', summary: 'Done?', id: 'x', input: {} },
+    WORKFLOW_CALL_ENVELOPES.requestApproval,
+  );
+  assert.match(problem ?? '', /missing "operationId"/u);
+  assert.match(problem ?? '', /unexpected "id"/u);
+  assert.match(
+    problem ?? '',
+    /expected exactly \{kind, summary, operationId, input\}/u,
+  );
+  assert.equal(
+    workflowKeyProblem(
+      { kind: 'sleep', milliseconds: 1 },
+      WORKFLOW_CALL_ENVELOPES.sleep,
+    ),
+    null,
+  );
+});
+
+test('the drafter states every workflow call envelope, generated from the admission table', async () => {
+  const { workflowAuthoringRules } =
+    await import('../../packages/postgres-provider/src/workflow-compile.js');
+  const { WORKFLOW_CALL_ENVELOPES } =
+    await import('../../packages/postgres-provider/src/workflow-sdk.js');
+  const rules = workflowAuthoringRules().join('\n');
+  for (const [kind, keys] of Object.entries(WORKFLOW_CALL_ENVELOPES))
+    assert.ok(
+      rules.includes(
+        `${kind} {${keys.map((key) => (key === 'kind' ? `kind: "${kind}"` : key)).join(', ')}}`,
+      ),
+      kind,
+    );
+});

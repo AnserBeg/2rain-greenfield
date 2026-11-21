@@ -11,7 +11,8 @@
  * Names are matched loosely (see `nameMatches` in build-eval.ts): an alias
  * matches a generated id when their slugs are equal or one contains the other.
  */
-import { NS } from './agent-world.js';
+// Kept free of the database world so unit tests can read the cases.
+const NS = 'northstar.app';
 
 export type FieldType =
   'text' | 'number' | 'date' | 'yesNo' | 'choice' | 'address';

@@ -1103,7 +1103,12 @@ export async function runBuildCase(
     if (drafted.status === 'drafted') {
       result.drafted = true;
       try {
-        await opened.service.approve(drafted.patchId);
+        // A workflow's approval binds the reviewed source and sample runs
+        // (WORKFLOW-2): the eval stands in for the reviewer who read them.
+        await opened.service.approve(
+          drafted.patchId,
+          (drafted as { workflowReviewDigest?: string }).workflowReviewDigest,
+        );
         result.approved = true;
         result.firstTry = calls.length === 1;
         result.afterRepair = true;

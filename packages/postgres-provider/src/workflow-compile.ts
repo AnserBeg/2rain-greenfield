@@ -5,7 +5,7 @@ import {
 import ts from 'typescript';
 
 import { MAXIMUM_WORKFLOW_SOURCE_BYTES } from './workflow-isolate.js';
-import type { WorkflowSdk } from './workflow-sdk.js';
+import { WORKFLOW_CALL_ENVELOPES, type WorkflowSdk } from './workflow-sdk.js';
 
 export interface CompiledWorkflow {
   readonly executable: string;
@@ -61,6 +61,16 @@ export function workflowAuthoringRules(): readonly string[] {
     `body is ONLY the statements inside \`${WORKFLOW_BODY_SIGNATURE} { ... }\`: no function wrapper, no export or import, no async or await, and no return value (it returns void). Use sdk and event directly.`,
     `The body must not use these names: ${[...forbiddenNames].join(', ')}. Use sdk.now() for the time.`,
     'The body type-checks under strict TypeScript against the SDK declarations below; fixtures replay the body twice and must list exactly the calls it makes, in order, with exactly the inputs it passes.',
+    `Each fixture effect's call has exactly these keys: ${Object.entries(
+      WORKFLOW_CALL_ENVELOPES,
+    )
+      .map(
+        ([kind, keys]) =>
+          `${kind} {${keys.map((key) => (key === 'kind' ? `kind: "${kind}"` : key)).join(', ')}}`,
+      )
+      .join(
+        '; ',
+      )}. A requestApproval call's operationId and input are exactly the operation ID and input the body passes to sdk.requestApproval (never id); once approved, the body calls that operation itself with the same input, listed as its own operation call.`,
   ];
 }
 
