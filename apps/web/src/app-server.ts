@@ -43,6 +43,7 @@ import {
   withLocalDemoIdentity,
   withStaffSession,
   renderSurfaceRuntimeWithData,
+  mapFragment,
   submitSurfaceRuntimeFragment,
   submitSurfaceRuntimeIntent,
   SURFACE_STYLESHEET,
@@ -188,7 +189,7 @@ async function handleRequest(
     'content-security-policy',
     // `connect-src 'self'` admits only the owned script's same-origin fragment
     // POSTs (ADR-0036 behaviour 7); script, style and form rules are unchanged.
-    `default-src 'none'; script-src '${SURFACE_CLIENT_CSP_HASH}'${assistant ? ` '${ASSISTANT_PANEL_CSP_HASH}'` : ''}; style-src 'self'; font-src 'self'; img-src data:; connect-src ${gateways ? "'self'" : "'none'"}; base-uri 'none'; form-action ${gateways ? "'self'" : "'none'"}; frame-ancestors 'none'`,
+    `default-src 'none'; script-src '${SURFACE_CLIENT_CSP_HASH}'${assistant ? ` '${ASSISTANT_PANEL_CSP_HASH}'` : ''}; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src ${gateways ? "'self'" : "'none'"}; base-uri 'none'; form-action ${gateways ? "'self'" : "'none'"}; frame-ancestors 'none'`,
   );
   response.setHeader('x-content-type-options', 'nosniff');
 
@@ -228,6 +229,39 @@ async function handleRequest(
     } catch {
       response.writeHead(403);
       response.end('Company settings unavailable for this account.');
+    }
+    return;
+  }
+  if (url.pathname === '/map/image') {
+    if (
+      request.method !== 'GET' ||
+      !gateways?.addresses?.viewportImage ||
+      ['prefetch', 'prerender'].some((v) =>
+        String(
+          request.headers['sec-purpose'] ?? request.headers.purpose,
+        ).includes(v),
+      )
+    ) {
+      response.writeHead(403);
+      response.end();
+      return;
+    }
+    try {
+      const image = await entry.run({ headers: request.headers }, (view) =>
+        gateways.addresses!.viewportImage!(
+          view,
+          url.searchParams.get('image') ?? '',
+          url.searchParams.get('company') ?? '',
+        ),
+      );
+      response.writeHead(200, {
+        'content-type': 'image/png',
+        'cache-control': 'private, no-store',
+      });
+      response.end(image);
+    } catch {
+      response.writeHead(404);
+      response.end();
     }
     return;
   }
@@ -344,10 +378,11 @@ async function handleRequest(
   // Origin naming this server. Anything else is an ordinary request.
   const fragmentRequest = request.headers[FRAGMENT_REQUEST_HEADER];
   const taskFragment = fragmentRequest === 'task';
+  const mapRequest = fragmentRequest === 'map';
   const fragment =
     request.method === 'POST' &&
     gateways !== undefined &&
-    (fragmentRequest === '1' || taskFragment);
+    (fragmentRequest === '1' || taskFragment || mapRequest);
   if (fragment) {
     const site = request.headers['sec-fetch-site'];
     response.setHeader(FRAGMENT_REQUEST_HEADER, 'fragment');
@@ -370,6 +405,17 @@ async function handleRequest(
     }
     try {
       const submission = await readFormSubmission(request);
+      if (mapRequest) {
+        const render = () =>
+          entry.run({ headers: request.headers }, (view) =>
+            mapFragment(view, url.href, gateways),
+          );
+        const result = readSnapshot
+          ? await readSnapshot(render)
+          : await render();
+        writeHtml(response, result);
+        return;
+      }
       if (taskFragment) {
         if (!taskStep(submission)) {
           fallback();

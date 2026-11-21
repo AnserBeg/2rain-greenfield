@@ -816,6 +816,7 @@ function surfaceAcceptsQuery(
   surface: CompiledSurfaceDefinition,
   queryType: RegisteredSemanticQueryDefinition['queryType'],
 ): boolean {
+  if (surface.archetype === 'map') return !!surface.map && queryType === 'list';
   if (surface.archetype === 'board')
     return !!surface.board && queryType === 'list';
   return surface.archetype === 'task' && surface.surfaceRole === null

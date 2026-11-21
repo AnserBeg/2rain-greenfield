@@ -179,7 +179,9 @@ export async function resolveWorkspaceEntry(
     mayDefault:
       shared ||
       surface.launcher !== undefined ||
-      ((surface.surfaceRole === 'list' || surface.archetype === 'board') &&
+      ((surface.surfaceRole === 'list' ||
+        surface.archetype === 'board' ||
+        surface.archetype === 'map') &&
         !url.searchParams.has('record')),
   });
   if (explicit.length) {

@@ -187,6 +187,7 @@ export type SurfaceDataRenderState =
   | {
       readonly records: readonly SemanticRecordDto[];
       readonly boardListState?: DeclaredListRenderData['state'];
+      readonly mapSlots?: Readonly<Record<string, string>>;
       readonly boardSlots?: Readonly<Record<string, string>>;
       readonly documentEditorSlots?: Readonly<Record<string, string>>;
       readonly addressLayout?: LayoutBody;
@@ -292,6 +293,14 @@ const componentRegistry: Readonly<Record<string, SurfaceComponentRenderer>> =
 
 const surfaceSlotRegistry: Readonly<Record<string, SurfaceSlotRegistration>> =
   Object.freeze({
+    'map:title': { className: 'map-title', renderer: renderMapSlot },
+    'map:savedViews': { className: 'map-views', renderer: renderMapSlot },
+    'map:mapCanvas': { className: 'map-canvas', renderer: renderMapSlot },
+    'map:stopList': {
+      className: 'map-list',
+      renderer: renderMapSlot,
+      ownsDataResolution: true,
+    },
     'board:title': {
       className: 'surface-title-slot',
       renderer: renderBoardSlot,
@@ -561,9 +570,14 @@ function surfaceSlotClassName(
 
 function collectionSwitcher(context: SurfaceComponentContext) {
   const owner =
-    context.surface.board?.body.listSurfaceId ?? context.surface.surfaceId;
+    context.surface.map?.body.listSurfaceId ??
+    context.surface.board?.body.listSurfaceId ??
+    context.surface.surfaceId;
   const boards = (context.surfaces ?? []).filter(
-    (s) => s.lifecycle === 'active' && s.board?.body.listSurfaceId === owner,
+    (s) =>
+      s.lifecycle === 'active' &&
+      (s.board?.body.listSurfaceId === owner ||
+        s.map?.body.listSurfaceId === owner),
   );
   const list = context.surfaces?.find((s) => s.surfaceId === owner);
   if (!boards.length || !list) return '';
@@ -580,7 +594,7 @@ function collectionSwitcher(context: SurfaceComponentContext) {
         surfaceHref(s, undefined, false, context),
         'http://surface-runtime.local',
       ).searchParams;
-      if (s.board) {
+      if (s.board || s.map) {
         params.set('collection', owner);
         const company = context.legalEntitySelection?.[0];
         if (company) params.set('collectionCompany', company);
@@ -606,6 +620,18 @@ function collectionSwitcher(context: SurfaceComponentContext) {
       return `<a href="${escapeHtml(href)}"${context.surface.surfaceId === s.surfaceId ? ' aria-current="page"' : ''}>${escapeHtml(s === list ? 'List' : s.label)}</a>`;
     })
     .join(' ')}</nav>`;
+}
+function renderMapSlot(context: SurfaceComponentContext) {
+  const slot = context.slot.slot;
+  const content =
+    context.data?.status === 'READY'
+      ? (context.data.mapSlots?.[slot] ?? '')
+      : '';
+  return slotPanel(
+    context,
+    (slot === 'savedViews' ? collectionSwitcher(context) : '') + content,
+    surfaceSlotRegistry['map:' + slot]!.className,
+  );
 }
 function renderBoardSlot(context: SurfaceComponentContext) {
   const content =

@@ -12,6 +12,14 @@
  * floor on phone-width targets.
  */
 export const LEDGER_STYLES = `
+.surface-grid[data-surface-archetype="map"]{display:flex;flex-direction:column;gap:1rem}
+.map-canvas svg{display:block;width:100%;max-width:1024px;background:var(--sheet);touch-action:none}
+.map-canvas nav a,.map-list a,.map-canvas summary,.map-views button{display:inline-flex;align-items:center;min-height:44px;padding:0 .65rem}
+.map-hit{fill:transparent}.map-pin{fill:var(--ink)}.map-canvas svg text{fill:var(--sheet);pointer-events:none}
+.map-route{stroke:var(--ink);stroke-width:2;fill:none}.map-route.group-1{stroke-dasharray:8 3}.map-route.group-2{stroke-dasharray:2 4}.map-route.group-3{stroke-dasharray:8 3 2 3}
+.map-pin.group-1,.map-pin.group-3{fill:var(--accent)}.map-route.group-1,.map-route.group-3{stroke:var(--accent)}
+.map-stops{padding:0;list-style:none}.map-stops li{border-bottom:1px solid var(--rule)}
+@media(max-width:800px){.map-title{order:0}.map-views{order:1}.map-list{order:2}.map-canvas{order:3}.map-stops li{padding:.4rem;border:1px solid var(--rule)}}
 .board-columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:1rem}
 .board-column{min-width:0}.board-column ul{list-style:none;padding:0}.board-column li{display:grid;gap:.5rem;padding:.75rem;border:1px solid var(--rule);background:var(--sheet);overflow-wrap:anywhere}
 .board-column dl{margin:0}.board-column dl div{display:flex;gap:.5rem}.board-column dd{margin:0}.board-column button,.board-column a,.board-selector-slot a,.collection-views a,.surface-grid:has(.board-columns-slot) nav a{min-height:44px;display:inline-flex;align-items:center;padding:0 .6rem}

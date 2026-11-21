@@ -1,3 +1,4 @@
+import { readMapSlots } from './map-view.js';
 import {
   AddressProjectionSchema,
   SavedAddressSchema,
@@ -586,6 +587,40 @@ async function renderSurfaceRuntimeWithDataInContext(
         workspaceContext,
       ),
     );
+  }
+  if (selection.selected.map) {
+    try {
+      const company =
+        compositionScope ??
+        url.searchParams.get('mapCompany') ??
+        workspaceContext?.selectedRecordId ??
+        null;
+      const slots = await readMapSlots(
+        view,
+        selection.selected,
+        selection.surfaces,
+        url,
+        legalEntityScopeArguments(binding, url),
+        company,
+        gateways,
+      );
+      return rendered(() =>
+        renderSelectedSurface(
+          view,
+          selection,
+          { status: 'READY', records: [], mapSlots: slots },
+          feedback,
+          offeredOperations,
+          200,
+          legalEntitySelection,
+          workspaceContext,
+        ),
+      );
+    } catch (error) {
+      return renderApplicationDiagnostic(422, {
+        code: queryMessageCode(error),
+      });
+    }
   }
   if (selection.selected.board) {
     try {
@@ -1886,6 +1921,54 @@ async function submitSurfaceRuntimeIntentInContext(
   );
 }
 
+/** Behaviour seven: authorize and read this Map alone, without the workspace shell. */
+export async function mapFragment(
+  view: RuntimeViewContract.RequestRuntimeView,
+  requestUrl: string,
+  gateways: SurfaceRuntimeGateways,
+) {
+  const selection = selectSurface(view, requestUrl);
+  if ('statusCode' in selection || !selection.selected.map)
+    return { statusCode: 404, html: '' };
+  const { selected, surfaces } = selection;
+  const url = new URL(requestUrl, 'http://surface-runtime.local'),
+    binding = readCompiledSurfaceDataBinding(view, selected);
+  const legalEntitySelection = legalEntitySelectionForSurface(binding, url);
+  const company = legalEntitySelection[0] ?? url.searchParams.get('mapCompany');
+  const mapSlots = await readMapSlots(
+    view,
+    selected,
+    surfaces,
+    url,
+    legalEntityScopeArguments(binding, url),
+    company,
+    gateways,
+  );
+  const content = selected.slots
+    .map(
+      (slot) =>
+        renderRegisteredSurfaceComponent({
+          data: { status: 'READY', records: [], mapSlots },
+          feedback: null,
+          legalEntitySelection,
+          operations: [],
+          queryParameterValues: {},
+          slot,
+          surface: selected,
+          surfaces,
+          view,
+        }).html,
+    )
+    .join('');
+  return {
+    statusCode: 200,
+    html:
+      '<div class="surface-grid" data-surface-archetype="map">' +
+      content +
+      '</div>',
+  };
+}
+
 function renderSelectedSurface(
   view: RuntimeViewContract.RequestRuntimeView,
   { navigation, selected, surfaces }: SelectedSurface,
@@ -1922,6 +2005,7 @@ function renderSelectedSurface(
     }),
   );
   const pageHeading =
+    selected.archetype === 'map' ||
     selected.archetype === 'board' ||
     selected.archetype === 'list' ||
     selected.archetype === 'record'
@@ -1961,7 +2045,7 @@ function renderSelectedSurface(
     /<[a-z]+\s[^>]*\bdata-(?:reference-control|editor-create|documents|address-editor)\b/u.test(
       body,
     ) ||
-    (data.status === 'READY' && nativeTask);
+    (data.status === 'READY' && (nativeTask || selected.archetype === 'map'));
 
   // The launcher page already read its tiles' counts; the sidebar's queues
   // show them rather than asking again.

@@ -787,6 +787,75 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
       });
     }
   }
+})();
+(() => {
+  const region = () => document.querySelector('.surface-grid[data-surface-archetype="map"]');
+  const state = root => root?.querySelector('[data-map-state]')?.dataset.mapState;
+  if (!state(region()) || typeof fetch !== 'function' || typeof DOMParser !== 'function') return;
+  let generation = 0;
+  let drag = null;
+  history.replaceState(history.state, '', state(region()));
+  const navigate = async (target, push) => {
+    const mine = ++generation;
+    const origin = region();
+    const x = window.scrollX, y = window.scrollY;
+    const focused = origin.contains(document.activeElement) ? document.activeElement : null;
+    const focusName = focused?.getAttribute('name');
+    const focusText = focused?.matches('[data-pan-link]') ? focused.textContent : null;
+    try {
+      const url = new URL(target, location.href);
+      if (url.origin !== location.origin || url.pathname !== '/') throw Error();
+      const csrf = document.querySelector('meta[name=erp-csrf]')?.content;
+      const response = await fetch(url, {method:'POST',credentials:'same-origin',redirect:'error',
+        headers:{'x-rain-fragment':'map',...(csrf?{'x-erp-csrf':csrf}:{})},body:new URLSearchParams()});
+      if(!response.ok || response.headers.get('x-rain-fragment') !== 'fragment') throw Error();
+      const html = new DOMParser().parseFromString(await response.text(),'text/html');
+      if (mine !== generation || !origin.isConnected) return;
+      const next = html.querySelector('.surface-grid[data-surface-archetype="map"]');
+      const canonical = new URL(state(next),location.href);
+      if (!next || !state(next) || canonical.origin!==location.origin || canonical.pathname!=='/') throw Error();
+      origin.replaceWith(next);
+      if(push) history.pushState(null,'',canonical.href);
+      else history.replaceState(history.state,'',canonical.href);
+      const focus = Array.from(next.querySelectorAll('a,button,select,input')).find(el=>
+        (focusName && el.name===focusName) || (focusText && el.textContent===focusText));
+      if(focused) (focus??next.querySelector('#map'))?.focus({preventScroll:true});
+      window.scrollTo(x,y);
+    } catch {
+      if(mine===generation) location.assign(target);
+    }
+  };
+  document.addEventListener('click', event=>{
+    const a=event.target.closest?.('[data-pan-link]');
+    if(!a || !region()?.contains(a) || event.button!==0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    event.preventDefault(); navigate(a.href,true);
+  });
+  document.addEventListener('submit', event=>{
+    const form=event.target;
+    if(!form.matches('[data-map-form]') || !region()?.contains(form)) return;
+    event.preventDefault();
+    const url=new URL(form.action);url.search=new URLSearchParams(new FormData(form));navigate(url.href,true);
+  });
+  document.addEventListener('pointerdown',event=>{
+    const svg=event.target.closest?.('svg[data-map-drag]');
+    if(!svg || !region()?.contains(svg) || !event.isPrimary || event.button!==0 || event.target.closest('a')) return;
+    svg.setPointerCapture(event.pointerId);
+    drag={svg,x:event.clientX,y:event.clientY,id:event.pointerId};
+  });
+  document.addEventListener('pointerup',event=>{
+    if(!drag || drag.id!==event.pointerId) return;
+    const {svg,x,y}=drag;drag=null;
+    if(!svg.isConnected || Math.hypot(x-event.clientX,y-event.clientY)<6) return;
+    const bounds=svg.getBoundingClientRect(), box=svg.viewBox.baseVal;
+    const url=new URL(state(region()),location.href);
+    const bounded=(delta,pixels,display)=>Math.max(-pixels,Math.min(pixels,Math.round(delta*pixels/display)));
+    url.searchParams.set('panX',String(bounded(x-event.clientX,box.width,bounds.width)));
+    url.searchParams.set('panY',String(bounded(y-event.clientY,box.height,bounds.height)));
+    navigate(url.href,true);
+  });
+  document.addEventListener('pointercancel',()=>{drag=null;});
+  document.addEventListener('keydown',event=>{if(event.key==='Escape') drag=null;});
+  window.addEventListener('popstate',()=>navigate(location.href,false));
 })();`;
 
 export const SURFACE_CLIENT_CSP_HASH = `sha256-${createHash('sha256').update(SURFACE_CLIENT_SCRIPT).digest('base64')}`;

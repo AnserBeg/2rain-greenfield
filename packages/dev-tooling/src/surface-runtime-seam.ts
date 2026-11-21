@@ -35,6 +35,7 @@ const paths = Object.freeze({
   canonicalConstants: 'packages/canonical-model/src/constants.ts',
   componentRegistry: 'apps/web/src/component-registry.ts',
   board: 'apps/web/src/board.ts',
+  mapView: 'apps/web/src/map-view.ts',
   controlSemantics: 'apps/web/src/control-semantics.ts',
   documentEditor: 'apps/web/src/document-editor.ts',
   editorControls: 'apps/web/src/editor-controls.ts',
@@ -60,6 +61,8 @@ const planSlotAnchors = Object.freeze({
   breadcrumb: 'breadcrumb',
   bulkActions: 'bulk bar',
   stageSelector: 'stage selector',
+  mapCanvas: 'map canvas',
+  stopList: 'stop list',
   columns: 'stage columns',
   childTables: 'child tables',
   commandBar: 'command bar',
@@ -624,6 +627,7 @@ function scanForBypass(
     // registry: compositions, and a launcher Task's tiles and scan box.
     paths.surfaceComposition,
     paths.surfaceLauncher,
+    paths.mapView,
     paths.board,
     paths.componentRegistry,
     paths.documentEditor,
@@ -650,6 +654,7 @@ function scanForBypass(
     paths.controlSemantics,
     paths.surfaceComposition,
     paths.surfaceLauncher,
+    paths.mapView,
     paths.board,
     paths.componentRegistry,
     paths.documentEditor,
@@ -661,6 +666,7 @@ function scanForBypass(
     // The generic editor imports only SurfaceRuntime's gateway/submission
     // types; SurfaceRuntime remains its sole production caller.
     paths.documentEditor,
+    paths.mapView,
     paths.board,
   ]);
   const structuralMarkup =
@@ -703,13 +709,13 @@ function scanForBypass(
       );
     if (
       repoPath !== paths.surfaceRuntime &&
-      /from ['"][^'"]*\/board\.js['"]/u.test(source)
+      /from ['"][^'"]*\/(?:board|map-view)\.js['"]/u.test(source)
     )
       add(
         violations,
         repoPath,
         'SURF001_RUNTIME_BYPASS',
-        'only SurfaceRuntime may delegate to the Board interpreter',
+        'only SurfaceRuntime may delegate to the Board or Map interpreter',
       );
     // The editor's controls are part of the generic editor delegate, not a
     // second surface authority: nothing but that editor may render them.
