@@ -3000,6 +3000,12 @@ export function renderWorkflowApprovals(
 ): SurfaceRuntimeResponse {
   assertRequestRuntimeView(view);
   const plans = worklist.approvals.map(renderApprovalPlan).join('');
+  const waiting = (worklist.waitingStarts ?? [])
+    .map(
+      ({ instanceId, workflowId, disposition, notBefore }) =>
+        `<li>${escapeHtml(workflowId)} · <code>${escapeHtml(instanceId)}</code> · ${disposition === 'rate-limit-overflow' ? 'Queue full. A platform operator must release or dismiss this start.' : `Waiting for capacity. Eligible from ${escapeHtml(notBefore.toISOString())}.`}</li>`,
+    )
+    .join('');
   const runs = worklist.suspended
     .map(
       ({ runId, workflowId, reason }) =>
@@ -3021,6 +3027,7 @@ export function renderWorkflowApprovals(
     <section class="panel"><h2>Pending plans</h2>
       ${plans || workflowWorklistEmpty('WORKFLOW_APPROVALS_EMPTY')}
     </section>
+    ${waiting ? `<section class="panel"><h2>Waiting workflow starts</h2><ul>${waiting}</ul></section>` : ''}
     <section class="panel"><h2>Suspended runs</h2>
       ${
         runs

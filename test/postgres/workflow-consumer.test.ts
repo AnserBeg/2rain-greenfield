@@ -55,6 +55,7 @@ import {
   scriptedModel,
   SpendMeter,
 } from '../../packages/operations-agent/src/index.js';
+import { checkWorkflowStartLimits } from '../helpers/workflow-start-limits.js';
 import { checkRetryDecision } from '../helpers/staff-decision-checks.js';
 import { COMPANY, worldOver, type AgentWorld } from '../agent/agent-world.js';
 import { referenceScript } from '../agent/reference-scripts.js';
@@ -949,7 +950,34 @@ test(
             ).rowCount,
             1,
           );
+          await pool.query(
+            'UPDATE north_star_internal.workflow_start_limits SET starts_per_hour=1',
+          );
+          await postReceipt(world);
+          assert.equal(await consumer.claim(scope), 0);
+          const queuedBeforeRollback = await withWorkflowTransaction(
+            workerPool,
+            scope,
+            (client) =>
+              client.query<{ instance_id: string }>(
+                'SELECT instance_id FROM platform.workflow_waiting_starts()',
+              ),
+          );
+          assert.equal(queuedBeforeRollback.rows.length, 1);
           await service.rollback();
+          await pool.query(
+            'UPDATE north_star_internal.workflow_start_limits SET starts_per_hour=600',
+          );
+          assert.equal(await consumer.claim(scope), 0);
+          const discarded = await pool.query(
+            `SELECT q.disposition,q.discarded_at_fence=p.fence AS at_activation
+            FROM platform.workflow_deferred_starts q JOIN platform.active_release_pointers p USING (tenant_id,environment_id,pointer_id)
+            WHERE q.instance_id=$1`,
+            [queuedBeforeRollback.rows[0]!.instance_id],
+          );
+          assert.deepEqual(discarded.rows, [
+            { disposition: 'activation-discarded', at_activation: true },
+          ]);
           await withWorkflowTransaction(workerPool, scope, async (client) => {
             const { rows } = await client.query<{ count: number }>(
               'SELECT count(*)::int AS count FROM platform.trust_outbox WHERE event_type = $1',
@@ -976,7 +1004,53 @@ test(
 
           await postReceipt(world);
           const batchReceipt = await latestReceipt(pool, tenantId);
-          assert.equal(await consumer.claim(scope), 2);
+          // The first workflow still has capacity on this event. The other
+          // exhausted its rolling allowance in the earlier receipt journey.
+          await pool.query(
+            'UPDATE north_star_internal.workflow_start_limits SET workflow_per_hour=1',
+          );
+          assert.equal(await consumer.claim(scope), 1);
+          const waiting = await withWorkflowTransaction(
+            workerPool,
+            scope,
+            (client) =>
+              client.query<{
+                instance_id: string;
+                workflow_id: string;
+                disposition: string;
+              }>('SELECT * FROM platform.workflow_waiting_starts()'),
+          );
+          assert.equal(waiting.rows.length, 1);
+          assert.equal(waiting.rows[0]!.workflow_id, 'receipt-review');
+          assert.equal(waiting.rows[0]!.disposition, 'deferred');
+          await pool.query(
+            'UPDATE north_star_internal.workflow_start_limits SET workflow_per_hour=120',
+          );
+          assert.equal(
+            (
+              await pool.query(
+                'SELECT north_star_internal.workflow_manage_start($1,$2,$3,$4) ok',
+                [
+                  tenantId,
+                  environmentId,
+                  waiting.rows[0]!.instance_id,
+                  'release',
+                ],
+              )
+            ).rows[0].ok,
+            true,
+          );
+          const freshConsumer = new PostgresWorkflowConsumer(workerPool);
+          assert.equal(
+            await freshConsumer.claim(scope),
+            1,
+            'a restart admits the waiting pair once',
+          );
+          assert.equal(await freshConsumer.claim(scope), 0);
+          await t.test(
+            'a 5000-event import, sleeping runs and rolling-hour admission',
+            () => checkWorkflowStartLimits(pool, scope, batchReceipt.outbox_id),
+          );
           const batch = await pool.query<{
             run_id: string;
             workflow_id: string;

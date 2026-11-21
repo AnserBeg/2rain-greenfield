@@ -161,6 +161,7 @@ type DraftOutcome =
       readonly status: 'invalid' | 'refused' | 'rejected' | 'unsupported';
     };
 interface ApprovalOutcome {
+  readonly deferredStartsToDiscard?: number;
   readonly renderedDiff: string;
 }
 interface ActivationOutcome {
@@ -387,7 +388,7 @@ export async function renderCustomizeScreen(
         );
         return page(
           'Approved',
-          `<p class="eyebrow">Approved — not live yet</p><h1>Approved</h1>${diffBlock(approved.renderedDiff)}${button('activate', 'Activate now', { patchId: String(submission.patchId) })}${backLink()}`,
+          `<p class="eyebrow">Approved — not live yet</p><h1>Approved</h1>${diffBlock(approved.renderedDiff)}${approved.deferredStartsToDiscard ? `<p role="status">Activation would discard ${approved.deferredStartsToDiscard} waiting workflow ${approved.deferredStartsToDiscard === 1 ? 'start' : 'starts'} at the current count.</p>` : ''}${button('activate', 'Activate now', { patchId: String(submission.patchId) })}${backLink()}`,
         );
       }
       case 'activate': {

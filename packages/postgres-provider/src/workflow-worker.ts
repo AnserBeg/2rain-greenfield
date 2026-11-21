@@ -86,7 +86,7 @@ export class PostgresWorkflowWorker {
           )
         ).rows,
     );
-    const suspended = await this.#gateway
+    const capacity = await this.#gateway
       .withRemedyAuthority(operator, () =>
         withWorkflowTransaction(
           this.workerPool,
@@ -94,8 +94,8 @@ export class PostgresWorkflowWorker {
             tenant_id: operator.tenantId,
             environment_id: operator.environmentId,
           },
-          async (client) =>
-            (
+          async (client) => ({
+            suspended: (
               await client.query<{
                 runId: string;
                 workflowId: string;
@@ -108,13 +108,24 @@ export class PostgresWorkflowWorker {
                 [operator.tenantId, operator.environmentId],
               )
             ).rows,
+            waitingStarts: (
+              await client.query<{
+                instanceId: string;
+                workflowId: string;
+                disposition: string;
+                notBefore: Date;
+              }>(`SELECT instance_id AS "instanceId",workflow_id AS "workflowId",disposition,not_before AS "notBefore"
+                   FROM platform.workflow_waiting_starts()`)
+            ).rows,
+          }),
         ),
       )
       .catch((error: unknown) => {
-        if (error instanceof WorkflowRemedyRefused) return [];
+        if (error instanceof WorkflowRemedyRefused)
+          return { suspended: [], waitingStarts: [] };
         throw error;
       });
-    return { approvals, suspended };
+    return { approvals, ...capacity };
   }
 
   decide(

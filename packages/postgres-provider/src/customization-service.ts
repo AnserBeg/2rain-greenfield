@@ -192,6 +192,7 @@ export interface CustomizationConnection {
 }
 
 export interface ApprovalOutcome {
+  readonly deferredStartsToDiscard: number;
   readonly activationAttemptId: MintedUuid;
   readonly renderedDiff: string;
   readonly status: 'approved';
@@ -1937,8 +1938,20 @@ export class PostgresCustomizationService {
           upgrade?.upgradeId,
         );
       }
+      const impact = await admin.query<{ count: number }>(
+        `SELECT count(*)::integer AS count FROM platform.workflow_deferred_starts
+          WHERE tenant_id=$1 AND environment_id=$2 AND pointer_id=$3 AND fence=$4
+            AND disposition IN ('deferred','rate-limit-overflow')`,
+        [
+          context.tenantId,
+          context.environmentId,
+          active.pointer.pointerId,
+          active.pointer.fence,
+        ],
+      );
       return Object.freeze({
         activationAttemptId,
+        deferredStartsToDiscard: impact.rows[0]!.count,
         renderedDiff: binding.renderedText,
         status: 'approved' as const,
       });
