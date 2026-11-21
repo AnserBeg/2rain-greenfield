@@ -1,4 +1,9 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import type { PoolClient } from 'pg';
+import { renderMapStopList } from '../../apps/web/src/map-view.js';
+import { finishMapPage } from '../../packages/postgres-provider/src/map-page.js';
+import type { SemanticQueryExecutionRequest } from '../../packages/runtime/src/semantic-query-gateway.js';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
@@ -152,5 +157,81 @@ test('drafter advertises the Map schema and emits the same selected contracts as
       JSON.stringify(result),
     );
     assert.equal(result.patch.resultDigest, expected.resultDigest);
+  }
+});
+
+test('overflow displays the governed page size', async () => {
+  const { target, choice } = offered();
+  const revision = draftMapRevision(target, choice);
+  const companyId = randomUUID();
+  const candidates = Array.from({ length: 101 }, (_, i) => ({
+    record: {
+      recordId: randomUUID(),
+      entityId: entity,
+      archived: false,
+      revision: 1,
+      values: {},
+    },
+    group: 'North',
+    ordered: true,
+    ordinal: i + 1,
+  }));
+  const client = { query: async () => ({ rows: [] }) } as unknown as PoolClient;
+  const surface = {
+    archetype: 'map',
+    lifecycle: 'active',
+    surfaceId: revision.surfaceId,
+    map: {
+      revisionId: revision.revisionId,
+      predecessor: revision.predecessor,
+      body: revision.body,
+      resultDigest: revision.resultDigest,
+    },
+  };
+  const view = {
+    projections: { surface: { payload: { surfaces: [surface] } } },
+    pointer: { fence: 1 },
+    release: { contentHash: 'test' },
+  };
+  for (const [queryLimit, expected] of [
+    [7, 7],
+    [120, 100],
+  ] as const) {
+    const request = {
+      view,
+      definition: {
+        queryId: revision.body.listQueryId,
+        sourceEntityId: entity,
+        maximumResultCount: queryLimit,
+      },
+      legalEntityReadScope: { legalEntityIds: [companyId] },
+      arguments: {
+        mapPage: {
+          surfaceId: revision.surfaceId,
+          revisionId: revision.revisionId,
+          companyId,
+        },
+      },
+    } as unknown as SemanticQueryExecutionRequest;
+    const page = await finishMapPage(client, request, candidates);
+    assert.equal(page.records.length, expected);
+    const coverage = page.mapCoverage!;
+    assert.ok(coverage.hasNext);
+    const html = renderMapStopList(
+      page.records.map(() => '<li>Stop</li>'),
+      coverage,
+      '/?stops=' + coverage.hasNext,
+    );
+    assert.ok(html.includes('Showing ' + expected + ' of this filter’s stops'));
+    const last = await finishMapPage(
+      client,
+      request,
+      candidates.slice(0, expected),
+    );
+    assert.equal(last.mapCoverage!.hasNext, undefined);
+    assert.doesNotMatch(
+      renderMapStopList([], last.mapCoverage!, null),
+      /Showing|Next/u,
+    );
   }
 });

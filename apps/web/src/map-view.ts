@@ -376,20 +376,6 @@ export async function readMapSlots(
       )
       .join('') +
     '</select></label><button>Apply filters</button></form>';
-  const stopList =
-    (page.partial ? '<p role="status">Narrow the search</p>' : '') +
-    (page.restarted
-      ? '<p role="status">This page changed. Showing the first stops.</p>'
-      : '') +
-    (items.length
-      ? '<ol class="map-stops">' + items.join('') + '</ol>'
-      : '<p>No stops in this filter.</p>') +
-    (page.hasNext
-      ? '<p role="status">Showing ' +
-        items.length +
-        ' of this filter’s stops — choose a route or day</p>' +
-        link('Next', localUrl(next))
-      : '');
   return {
     title:
       '<h1 id="map" tabindex="-1" data-map-state="' +
@@ -399,6 +385,34 @@ export async function readMapSlots(
       '</h1>',
     savedViews: controls,
     mapCanvas: canvas,
-    stopList,
+    stopList: renderMapStopList(
+      items,
+      page,
+      page.hasNext ? localUrl(next) : null,
+    ),
   };
+}
+
+export function renderMapStopList(
+  items: readonly string[],
+  page: { readonly partial: boolean; readonly restarted?: boolean },
+  nextUrl: string | null,
+) {
+  return (
+    (page.partial ? '<p role="status">Narrow the search</p>' : '') +
+    (page.restarted
+      ? '<p role="status">This page changed. Showing the first stops.</p>'
+      : '') +
+    (items.length
+      ? '<ol class="map-stops">' + items.join('') + '</ol>'
+      : '<p>No stops in this filter.</p>') +
+    (nextUrl
+      ? '<p role="status">Showing ' +
+        items.length +
+        ' of this filter’s stops — choose a route or day</p>' +
+        '<a data-pan-link href="' +
+        h(nextUrl) +
+        '">Next</a>'
+      : '')
+  );
 }
