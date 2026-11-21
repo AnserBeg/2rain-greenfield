@@ -10,3 +10,6 @@ export * from './sandbox.js';
 export * from './targets.js';
 export * from './calculated-display-draft.js';
 export * from './ai-draft.js';
+export * from './ai-draft-kinds.js';
+export * from './authoring-rules.js';
+export * from './field-member-draft.js';

@@ -263,6 +263,21 @@ const singlePatchKinds = [
   }),
 ] as const;
 
+/**
+ * The schema of each change member and single patch, by kind. The AI drafter
+ * generates its description of a kind from these (MIGRATION-RULE rule 12);
+ * parsing still goes through `parseCustomizationPatch` only.
+ */
+export const CUSTOMIZATION_MEMBER_SCHEMAS: Readonly<Record<string, z.ZodType>> =
+  Object.freeze(
+    Object.fromEntries(
+      [...singlePatchKinds, ...ChangeMemberSchema.options].map((schema) => [
+        schema.shape.kind.value,
+        schema as z.ZodType,
+      ]),
+    ),
+  );
+
 const validationPatch: z.ZodObject<
   {
     kind: z.ZodLiteral<'addValidation'>;

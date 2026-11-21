@@ -43,6 +43,22 @@ const forbiddenNames = new Set([
   'random',
 ]);
 
+/** The function a workflow body is the inside of. */
+export const WORKFLOW_BODY_SIGNATURE =
+  'function run(sdk: WorkflowSdk, event: ReceiptEvent): void' as const;
+
+/**
+ * The rules this compiler and its lint enforce, stated to the AI drafter
+ * (AI-BUILD-1 slice 2), generated from the same signature and ban list.
+ */
+export function workflowAuthoringRules(): readonly string[] {
+  return [
+    `body is ONLY the statements inside \`${WORKFLOW_BODY_SIGNATURE} { ... }\`: no function wrapper, no export or import, no async or await, and no return value (it returns void). Use sdk and event directly.`,
+    `The body must not use these names: ${[...forbiddenNames].join(', ')}. Use sdk.now() for the time.`,
+    'The body type-checks under strict TypeScript against the SDK declarations below; fixtures replay the body twice and must list exactly the calls it makes, in order, with exactly the inputs it passes.',
+  ];
+}
+
 export function compileWorkflowBody(
   body: string,
   sdk: WorkflowSdk,
@@ -52,8 +68,7 @@ export function compileWorkflowBody(
   }
   const fileName = '/workflow.ts';
   const sdkFileName = '/workflow-sdk.d.ts';
-  const prefix =
-    'function run(sdk: WorkflowSdk, event: ReceiptEvent): void {\n';
+  const prefix = `${WORKFLOW_BODY_SIGNATURE} {\n`;
   const source = `${prefix}${body}\n}`;
   const options: ts.CompilerOptions = {
     target: ts.ScriptTarget.ES2022,
