@@ -108,11 +108,12 @@ async function main(): Promise<void> {
   if (Object.values(prices).some((p) => !Number.isFinite(p) || p < 0))
     throw new Error('prices must be non-negative numbers');
   const wanted = args.cases?.split(',').map((id) => id.trim());
+  // In the order given by --cases, so a stratified subset can finish first.
   const cases = BUILD_CASES.filter(
     (c) =>
       (args.split === 'all' || c.split === args.split) &&
       (!wanted || wanted.includes(c.id)),
-  );
+  ).sort((a, b) => (wanted ? wanted.indexOf(a.id) - wanted.indexOf(b.id) : 0));
   if (!cases.length) throw new Error('no cases selected');
 
   // `--replay A[,B]`: results come from A; a case's draft from the last of
@@ -335,6 +336,18 @@ async function main(): Promise<void> {
           ],
         };
       results.push(final!);
+      // Interim evidence after every case; the final files are written at the end.
+      await writeFile(
+        join(directory, 'results.partial.json'),
+        redactSecrets(
+          JSON.stringify(
+            { head, summary: summarize(results), results },
+            null,
+            2,
+          ),
+          secrets,
+        ) + '\n',
+      );
     }
   });
 
