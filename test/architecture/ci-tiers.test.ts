@@ -133,15 +133,50 @@ test('merge window requires a successful full reachability job on the candidate 
     );
   }
 });
-test('new queued main pushes and retries keep the preceding red visible', () => {
+test('pending main pushes and retries keep the merge window conservative', () => {
   for (const attempt of [1, 2])
     assert.equal(
       probe(
         windowGate,
-        `m.lastMainConclusion([{status:'queued',run_attempt:${attempt}},{status:'completed',conclusion:'${attempt === 1 ? 'failure' : 'success'}'}],()=>({conclusion:'failure'})).conclusion`,
+        `m.lastMainConclusion([{status:'queued',run_attempt:${attempt}},{status:'completed',conclusion:'${attempt === 1 ? 'failure' : 'success'}'}],()=>({conclusion:'failure'}),()=>[]).conclusion ?? 'pending'`,
       ),
-      'failure',
+      attempt === 1 ? 'pending' : 'failure',
     );
+});
+
+test('a quick green on a newer record cannot hide a red full on its merge', () => {
+  for (const [tier, result, older, expected] of [
+    ['quick', 'success', 'failure', 'failure'],
+    ['quick', 'success', 'in_progress', 'in_progress'],
+    ['quick', 'success', 'success', 'success'],
+    ['quick', 'cancelled', 'success', 'cancelled'],
+    ['quick', 'failure', 'success', 'failure'],
+    ['full', 'success', 'failure', 'success'],
+  ]) {
+    const runs = [
+      { head_sha: 'record', status: 'completed', conclusion: result, tier },
+      {
+        head_sha: 'merge',
+        status: older === 'in_progress' ? older : 'completed',
+        conclusion: older === 'in_progress' ? null : older,
+        tier: 'full',
+      },
+    ];
+    assert.equal(
+      probe(
+        windowGate,
+        `(() => {
+        const latest = m.lastMainConclusion(${JSON.stringify(runs)}, undefined, run => [{
+          name: 'Executed-file reachability (' + run.tier + ' ' + run.head_sha + ')',
+          conclusion: run.conclusion
+        }]);
+        return latest.conclusion ?? latest.status;
+      })()`,
+      ),
+      expected,
+      'main health must follow the latest full and every newer failure',
+    );
+  }
 });
 
 test('the merge gate follows the accepted Critical definition and detects changes to embedded SQL on either side', () => {
@@ -224,7 +259,7 @@ test('check-records rejects a new packet missing the tier attached to its CI run
   }
 });
 
-test('the token command requires exact full evidence on red main or a Critical integration', () => {
+test('the token command requires exact full evidence for executable work and docs on red main', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ci-3-window-'));
   const repo = join(dir, 'repo');
   const git = (...args: string[]) =>
@@ -284,7 +319,15 @@ test('the token command requires exact full evidence on red main or a Critical i
       probe(windowGate, `m.docsOnly('${docsBase}', 'HEAD')`, repo),
       false,
     );
-    // A non-Critical integration on the same origin/main isolates the red-main term.
+    // A docs-only merge isolates main health from the executable-range check.
+    git('switch', '-q', '--detach', docsHead);
+    writeFileSync(join(repo, 'README.md'), 'record update');
+    git('add', 'README.md');
+    git('commit', '-qm', 'packet record');
+    const recordTip = git('rev-parse', 'HEAD');
+    git('switch', '-q', '--detach', docsHead);
+    git('merge', '--quiet', '--no-ff', recordTip, '-m', 'docs');
+    const docs = git('rev-parse', 'HEAD');
     git('switch', '-q', '--detach', docsHead);
     git('switch', '-qc', 'packet/ordinary');
     writeFileSync(join(repo, 'ordinary.ts'), 'export const ordinary = 1;\n');
@@ -302,9 +345,10 @@ test('the token command requires exact full evidence on red main or a Critical i
       join(dir, 'gh'),
       `#!/bin/sh
 case "$2" in
-  *branch=main*) printf '{"workflow_runs":[{"status":"completed","conclusion":"%s","html_url":"main-fixture"}]}' "$MAIN_RESULT" ;;
+  *branch=main*) printf '{"workflow_runs":[{"id":8,"run_attempt":1,"head_sha":"base","status":"completed","conclusion":"%s","html_url":"main-fixture"}]}' "$MAIN_RESULT" ;;
   *head_sha="$FULL_FOR&"*) printf '{"workflow_runs":[{"id":7,"run_attempt":1,"event":"workflow_dispatch","head_sha":"%s","status":"completed","conclusion":"success","html_url":"full-fixture"}]}' "$FULL_FOR" ;;
   *head_sha=*) echo '{"workflow_runs":[]}' ;;
+  */runs/8/attempts/1/jobs*) echo '{"jobs":[{"name":"Executed-file reachability (full base)","conclusion":"success"}]}' ;;
   */runs/7/attempts/1/jobs*) printf '{"jobs":[{"name":"Executed-file reachability (full %s)","conclusion":"success"}]}' "$FULL_FOR" ;;
   *) exit 2 ;;
 esac
@@ -313,29 +357,24 @@ esac
     );
     for (const [main, sha, full, status, reason] of [
       // Red or cancelled main demands the exact full green instead of refusing outright.
-      [
-        'failure',
-        ordinary,
-        'none',
-        1,
-        /Missing green full CI.*\(main CI failure/u,
-      ],
+      ['failure', docs, 'none', 1, /Missing green full CI.*\(main CI failure/u],
       [
         'cancelled',
-        ordinary,
+        docs,
         'none',
         1,
         /Missing green full CI.*\(main CI cancelled/u,
       ],
       [
         'failure',
-        ordinary,
-        ordinary,
+        docs,
+        docs,
         0,
         /Full CI: full-fixture[\s\S]*Merge window open/u,
       ],
-      ['failure', ordinary, candidate, 1, /Missing green full CI/u],
-      ['success', ordinary, 'none', 0, /Merge window open/u],
+      ['failure', docs, candidate, 1, /Missing green full CI/u],
+      ['success', docs, 'none', 0, /Merge window open/u],
+      ['success', ordinary, 'none', 1, /Missing green full CI/u],
       // Critical needs the exact full whatever main says.
       [
         'success',

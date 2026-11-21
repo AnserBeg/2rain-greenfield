@@ -98,10 +98,8 @@ continues. Mechanics: `mission-cadence`.
 
 ## 5. Gates
 
-- [Tiered CI](docs/execution/evidence-on-demand.md#packet-and-main-ci) selects packet coverage and runs full on every main push, in parallel. Before pushing main run `node scripts/check-merge-window.mjs <id> <integration-SHA>`. Run focused tests locally. CI owns the heavy suites.
-- Integration is a `--no-ff` merge of the packet into `main`; the packet tip is
-  the second parent (`check-review-record.sh` reads it). Every merge records one
-  review-log row: `merged — no Critical path` or `merged — unread`.
+- [Tiered CI](docs/execution/evidence-on-demand.md#packet-and-main-ci) runs quick on docs-only main ranges and full on executable, Critical or unbound ranges. Before pushing, run `node scripts/check-merge-window.mjs <owner> <tip>`. Executable or Critical integrations need an exact full green on that tip.
+- Integrate up to three consecutive `--no-ff` merges on current main. Record each second parent in its own review-log row as `merged — no Critical path` or `merged — unread`.
 - **Evidence depth is proportionate.** One discriminating red per claim that a
   silent harm cannot happen. Elsewhere: tests. Nothing else is owed.
 - Docs-only commits re-run `scripts/check-records.sh` only; CI covers the rest

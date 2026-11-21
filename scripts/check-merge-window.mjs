@@ -5,8 +5,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 import console from 'node:console';
-import { criticalDiff, git } from '../.github/scripts/ci-selection.mjs';
-import nonExecutablePaths from './non-executable-pathspec.json' with { type: 'json' };
+import { git, requiresFull } from '../.github/scripts/ci-selection.mjs';
+export { docsOnly } from '../.github/scripts/ci-selection.mjs';
 
 const api = (path) =>
   JSON.parse(execFileSync('gh', ['api', path], { encoding: 'utf8' }));
@@ -19,41 +19,77 @@ function* workflowRuns(query) {
     if (runs.length < 50) return;
   }
 }
-export function lastMainConclusion(runs, previousAttempt) {
-  for (const run of runs) {
-    if (run.status === 'completed') return run;
-    // An in-progress rerun of red main must keep the window closed.
-    if (run.run_attempt > 1) return previousAttempt(run);
-  }
-  throw new Error('No completed main CI run');
+const attemptJobs = (run) =>
+  api(
+    `repos/{owner}/{repo}/actions/runs/${run.id}/attempts/${run.run_attempt}/jobs?per_page=100`,
+  ).jobs;
+
+function reached(run, jobs, tier) {
+  return jobs.some(
+    (job) =>
+      job.name === `Executed-file reachability (${tier} ${run.head_sha})` &&
+      job.conclusion === 'success',
+  );
 }
+
+export function lastMainConclusion(
+  runs,
+  previousAttempt,
+  jobsFor = attemptJobs,
+) {
+  // The API yields main pushes newest first. A quick green can establish
+  // neither recovery from an older red nor completion of a pending full.
+  for (const run of runs) {
+    if (run.status !== 'completed') {
+      if (run.run_attempt > 1) {
+        const prior = previousAttempt(run);
+        if (prior.conclusion !== 'success') return prior;
+      }
+      if (
+        jobsFor(run).some(
+          (job) =>
+            job.name === `Executed-file reachability (quick ${run.head_sha})`,
+        )
+      )
+        continue;
+      return run; // Pending full, or too early to identify the tier.
+    }
+    if (run.conclusion !== 'success') return run;
+    const jobs = jobsFor(run);
+    if (reached(run, jobs, 'full')) return run;
+    if (!reached(run, jobs, 'quick'))
+      return { ...run, conclusion: 'missing reachability' };
+  }
+  return { conclusion: 'no completed full main run' };
+}
+
 export function exactFull(run, candidate, jobs) {
   return (
     run.event === 'workflow_dispatch' &&
     run.head_sha === candidate &&
     run.status === 'completed' &&
     run.conclusion === 'success' &&
-    jobs.some(
-      (job) =>
-        job.name === `Executed-file reachability (full ${candidate})` &&
-        job.conclusion === 'success',
-    )
+    reached(run, jobs, 'full')
   );
 }
 
-export function docsOnly(base, candidate) {
-  return !git(
-    'diff',
-    '--no-renames',
-    '--name-only',
-    '-z',
-    base,
-    candidate,
-    '--',
-    '.',
-    ...nonExecutablePaths,
-    ':!README.md',
-  );
+function checkTrain(base, candidate) {
+  const chain = git(
+    'rev-list',
+    '--first-parent',
+    '--parents',
+    '--max-count=4',
+    `${base}..${candidate}`,
+  )
+    .trim()
+    .split('\n')
+    .map((line) => line.split(' '));
+  if (chain.length > 3)
+    throw new Error('A train may contain at most three merges');
+  if (chain.some((commit) => commit.length !== 3))
+    throw new Error('Every train commit must be a two-parent merge');
+  if (chain.at(-1)[1] !== base)
+    throw new Error('Train first-parent chain must end at current origin/main');
 }
 
 function checkWindow(packet, candidate) {
@@ -61,13 +97,10 @@ function checkWindow(packet, candidate) {
     throw new Error(
       'Usage: node scripts/check-merge-window.mjs PACKET EXACT_INTEGRATION_SHA',
     );
+  process.chdir(git('rev-parse', '--show-toplevel').trim());
   git('fetch', 'origin', 'main');
   const base = git('rev-parse', 'origin/main').trim();
-  const parents = git('show', '-s', '--format=%P', candidate).trim().split(' ');
-  if (parents.length !== 2 || parents[0] !== base)
-    throw new Error(
-      'Candidate must be a two-parent integration commit on current origin/main',
-    );
+  checkTrain(base, candidate);
   const latest = lastMainConclusion(
     workflowRuns('branch=main&event=push'),
     (run) =>
@@ -78,20 +111,18 @@ function checkWindow(packet, candidate) {
   // A red or cancelled main must not deadlock its own fix or revert. It
   // raises the bar instead: the exact candidate needs a full green.
   const redMain = latest.conclusion !== 'success';
+  const fullRange = requiresFull(base, candidate);
   if (redMain)
     console.log(
-      `Main CI is not green: ${latest.html_url} (${latest.conclusion}); exact full CI required`,
+      `Main CI is not green: ${latest.html_url} (${latest.conclusion ?? latest.status}); exact full CI required`,
     );
-  if (redMain || criticalDiff(base, candidate)) {
+  if (redMain || fullRange) {
     const runs = workflowRuns(
       `head_sha=${candidate}&event=workflow_dispatch&status=success`,
     );
     let green = false;
     for (const run of runs) {
-      const { jobs } = api(
-        `repos/{owner}/{repo}/actions/runs/${run.id}/attempts/${run.run_attempt}/jobs?per_page=100`,
-      );
-      if (exactFull(run, candidate, jobs)) {
+      if (exactFull(run, candidate, attemptJobs(run))) {
         console.log(`Full CI: ${run.html_url} (attempt ${run.run_attempt})`);
         green = true;
         break;
@@ -99,7 +130,7 @@ function checkWindow(packet, candidate) {
     }
     if (!green)
       throw new Error(
-        `Missing green full CI on exact integration commit ${candidate}${redMain ? ` (main CI ${latest.conclusion}: ${latest.html_url})` : ''}`,
+        `Missing green full CI on exact integration commit ${candidate}${redMain ? ` (main CI ${latest.conclusion ?? latest.status}: ${latest.html_url})` : ''}`,
       );
   }
   const owner = readFileSync(
@@ -107,12 +138,7 @@ function checkWindow(packet, candidate) {
       '/home/rvham/2rain-missions/merge-window.txt',
     'utf8',
   ).trim();
-  if (
-    owner &&
-    owner !== packet &&
-    owner !== `packet/${packet}` &&
-    !docsOnly(base, candidate)
-  )
+  if (owner && owner !== packet && owner !== `packet/${packet}` && fullRange)
     throw new Error(`Merge window belongs to ${owner}`);
   if (
     git('ls-remote', '--exit-code', 'origin', 'refs/heads/main').split(

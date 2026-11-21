@@ -1,0 +1,168 @@
+{
+  "version": 1,
+  "packet": "CI-4",
+  "entries": [
+    {
+      "name": "ci4-plain-in-train",
+      "claim": "Every first-parent commit in the train has two parents.",
+      "file": "scripts/check-merge-window.mjs",
+      "original": "if (chain.some((commit) => commit.length !== 3))",
+      "replacement": "if (false)",
+      "test": {
+        "files": ["test/architecture/ci-main-push.test.ts"],
+        "namePattern": "a train refuses a plain commit between merges"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ci-main-push.test.ts",
+          "name": "a train refuses a plain commit between merges",
+          "expected": "plain commit admitted"
+        }
+      ]
+    },
+    {
+      "name": "ci4-stale-train",
+      "claim": "The oldest merge has the fetched main SHA as its first parent.",
+      "file": "scripts/check-merge-window.mjs",
+      "original": "if (chain.at(-1)[1] !== base)",
+      "replacement": "if (false)",
+      "test": {
+        "files": ["test/architecture/ci-main-push.test.ts"],
+        "namePattern": "a train refuses a stale first parent even with current main as second parent"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ci-main-push.test.ts",
+          "name": "a train refuses a stale first parent even with current main as second parent",
+          "expected": "stale first parent admitted"
+        }
+      ]
+    },
+    {
+      "name": "ci4-train-cap",
+      "claim": "The merge window admits at most three packet merges.",
+      "file": "scripts/check-merge-window.mjs",
+      "original": "if (chain.length > 3)",
+      "replacement": "if (false)",
+      "test": {
+        "files": ["test/architecture/ci-main-push.test.ts"],
+        "namePattern": "a train refuses a fourth merge"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ci-main-push.test.ts",
+          "name": "a train refuses a fourth merge",
+          "expected": "fourth merge admitted"
+        }
+      ]
+    },
+    {
+      "name": "ci4-quick-masks-red",
+      "claim": "A completed quick green cannot stand in for full main health.",
+      "file": "scripts/check-merge-window.mjs",
+      "original": "if (reached(run, jobs, 'full')) return run;",
+      "replacement": "return run;",
+      "test": {
+        "files": ["test/architecture/ci-tiers.test.ts"],
+        "namePattern": "a quick green on a newer record cannot hide a red full on its merge"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ci-tiers.test.ts",
+          "name": "a quick green on a newer record cannot hide a red full on its merge",
+          "expected": "main health must follow the latest full and every newer failure"
+        }
+      ]
+    },
+    {
+      "name": "ci4-whole-push",
+      "claim": "A trailing record commit cannot hide executable files earlier in the same main push.",
+      "file": ".github/scripts/ci-selection.mjs",
+      "original": "if (requiresFull(before, head))",
+      "replacement": "if (requiresFull(`${head}^1`, head))",
+      "test": {
+        "files": ["test/architecture/ci-main-push.test.ts"],
+        "namePattern": "a main push containing code followed by a record runs full on the push itself"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ci-main-push.test.ts",
+          "name": "a main push containing code followed by a record runs full on the push itself",
+          "expected": "code earlier in the push needs full"
+        }
+      ]
+    },
+    {
+      "name": "ci4-main-docs",
+      "claim": "An ordinary documentation push runs the quick tier.",
+      "file": ".github/scripts/ci-selection.mjs",
+      "original": "const mainPush = main && process.env.GITHUB_EVENT_NAME === 'push';",
+      "replacement": "const mainPush = false;",
+      "test": {
+        "files": ["test/architecture/ci-main-push.test.ts"],
+        "namePattern": "a docs-only main range runs quick and retains the affected document reader"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ci-main-push.test.ts",
+          "name": "a docs-only main range runs quick and retains the affected document reader",
+          "expected": "ordinary documentation should run quick"
+        }
+      ]
+    },
+    {
+      "name": "ci4-critical-doctrine",
+      "claim": "Editing the Critical definition itself requires a full run.",
+      "file": ".github/scripts/ci-selection.mjs",
+      "original": "  if (\n    !git('ls-tree', tip, '--', 'AGENTS.md') ||\n    git('show', `${tip}:AGENTS.md`).match(definition)?.[1] !== rules\n  )\n    return true;",
+      "replacement": "  // Critical definition check removed.",
+      "test": {
+        "files": ["test/architecture/ci-main-push.test.ts"],
+        "namePattern": "a docs-only edit to the Critical definition runs full"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ci-main-push.test.ts",
+          "name": "a docs-only edit to the Critical definition runs full",
+          "expected": "changing the Critical block needs full"
+        }
+      ]
+    },
+    {
+      "name": "ci4-missing-base",
+      "claim": "A push without a usable previous SHA cannot claim the docs exemption.",
+      "file": ".github/scripts/ci-selection.mjs",
+      "original": "return { tier: 'full', reason: 'No usable push base' };",
+      "replacement": "return { tier: 'quick', files: [] };",
+      "test": {
+        "files": ["test/architecture/ci-main-push.test.ts"],
+        "namePattern": "a main push with a missing, zero or unavailable before runs full"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ci-main-push.test.ts",
+          "name": "a main push with a missing, zero or unavailable before runs full",
+          "expected": "an unbound range needs full"
+        }
+      ]
+    },
+    {
+      "name": "ci4-critical-packet",
+      "claim": "A selectable Critical packet change still runs its covered tests on quick.",
+      "file": ".github/scripts/ci-selection.mjs",
+      "original": "if (!packetRef && plan.tier === 'quick' && criticalDiff(base, tip))",
+      "replacement": "if (plan.tier === 'quick' && criticalDiff(base, tip))",
+      "test": {
+        "files": ["test/architecture/ci-main-push.test.ts"],
+        "namePattern": "a Critical packet change with selectable tests stays quick"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ci-main-push.test.ts",
+          "name": "a Critical packet change with selectable tests stays quick",
+          "expected": "the packet should run its selected test"
+        }
+      ]
+    }
+  ]
+}
