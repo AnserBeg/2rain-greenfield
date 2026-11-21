@@ -1,4 +1,5 @@
 """Exercise the admitted scientific image and the host's real stream boundaries."""
+import json
 import struct
 import sys
 import uuid
@@ -7,7 +8,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "runner"))
 from execution import ROOT, RunBudget, Stopped, execute
 from frames import DIAGNOSTICS, LIMIT, dimensions
-from runtime import Engine
+from runtime import Engine, options, group_for
+from worker import handle
 
 
 def probe(script, data=b"", budget=None, limit=LIMIT):
@@ -55,6 +57,24 @@ assert not any(k.startswith(('PG','GITHUB','AWS','DOCKER')) for k in os.environ)
 print('clean')
 """)
         assert environment == b'clean\n'
+        job = str(uuid.uuid4())
+        name = "analysis-job-" + job
+        digest = json.loads((ROOT.parent/"image/profile.json").read_text())["image"]
+        ident = engine.command("create", *options(name), "analysis.local/science@"+digest,
+                               "-c", "import time; time.sleep(60)").decode().strip()
+        try:
+            engine.command("start",name)
+            pid = engine.command("inspect","--format={{.State.Pid}}",name).decode().strip()
+            group = group_for(pid,ident)
+            reconciled = handle(engine,{"version":1,"op":"reconcile","job":job})
+            assert reconciled == {"status":"hostFailure","launched":False}
+            assert not group.exists()
+            assert not engine.command("ps","-aq","--filter",f"name=^/{name}$").strip()
+            late = handle(engine,{"version":1,"op":"run","job":job,"image":digest,"input":{"units":[3,6,9]}})
+            assert late == reconciled
+        finally:
+            if engine.command("ps","-aq","--filter",f"name=^/{name}$").strip():
+                engine.command("rm","-fv",name)
         print("Stream boundaries, diagnostic and CPU carry-over, clean pixels, header refusal and guest environment passed.")
     finally:
         engine.close()
