@@ -24,24 +24,15 @@
 - **1b/2 · Capture and purge (§4).** Serialize sealing and purge in tenant/environment scope. Check current contributor tombstones under the lock. Pause a capture after its read, commit purge, then resume and verify zero retained payload bytes and no usable handle. Reverse the order and verify purge erases the sealed copy. Cover trials in 1b and saved versions in 2.
 - **3 · Profile disclosure (§5).** On the first profile-only model call, before any sample or output, assert exactly draft code, run on this same sealed snapshot and finish. Dispatch a share request from that context and verify refusal with no share.
 
-## Build checkpoints after the targeted check
+## Slice 1a · Run and cancel the fixed forecast
 
-| Slice | Members and rungs | Stores, budgets and Test it yourself |
-| --- | --- | --- |
-| 1a · Fixture runner | No member or rung | Runs, leases, controls, counters and reservations. On both hosts run the fixed fixture and inspect a collected table and PNG. Exercise the start budget, kill switch and teardown. |
-| 1b · Governed trials | First-party Run analysis Task rung, no member | Snapshots and lineage. Run one company's forecast, change a receipt, then repeat and refresh. Observe staging limits, input digests and current authority. |
-| 2 · Save and share | Recipe and report-binding members and rungs, plus the evidence content-type rung | Reports, version/source links, version grants and DOCS-1 stores. Share one saved chart, remove a contributing field grant and try its direct document link. Test access at cap and cap+1, source purge and idempotent save. |
-| 3 · AI authoring | Analysis profile, no new member or rung | Sessions, calls and the model-dollar budget. Approve a forecast, inspect two iterations and their digests, try an injected instruction and race the last reservation. |
-| 4 · Schedules | Schedule member and rung | Consents and existing workflow timer/journal. Restart after Monday's save, check one scheduled charge and version, revoke the sponsor and verify the next wake refuses. After five publications open the oldest result and inspect its expired repeat choice. |
+1. The dedicated user socket must report rootless Docker and delegated cgroup v2. WSL kernel `6.6.87.2-microsoft-standard-WSL2` reported a rootful system daemon, no user socket and missing `newuidmap`/`newgidmap`. Local starts return `ANALYSIS_RUNTIME_UNAVAILABLE` before launch. Laptop measurements await owner setup.
+2. On GitHub, the one-CPU cgroup throttled competing workers. The supervisor killed at 60.065 aggregate CPU-seconds and 90.037 wall seconds. The 1 GiB limit produced one OOM kill with zero swap, and a child hit EAGAIN at the 32-task ceiling. Only loopback was visible. DNS failed and Unix, IPv4 and IPv6 socket creation returned EPERM. Cancel killed the job, removed its cgroup and left the next scratch mount empty. [Measured limits](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44896600860) · [Initial capability gate](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44888493877)
+3. The image profile pins the OCI manifest, interpreter base, image config and wheel lock. A fresh sandbox decodes and re-encodes each PNG after checking its header. The collector caps incoming bytes, validates typed cells and escapes text. The fixture produced 12 units in period 4 and a 240 × 160 PNG with matching pixels on repeat. The OCI manifest is `sha256:66b1239f293e2904a5132e7fcb56f37e5d788d15408a68035222dc22556601f0`.
+4. PostgreSQL admits the fixed fixture under stored company membership and a run grant. Leases reserve worker and collector memory, enforce person and tenant slots, alternate eligible tenants, expire queued jobs and hold ambiguous starts for reconciliation. Released leases retain their tenant and release time. Five tenant stores use required tenant IDs. The internal operator switch table accepts only global and image scopes. Both interactive day counters reserve atomically. Prelaunch refusals are free, launched script failures count and host failures refund once.
+5. Global, tenant and image stops fence dispatch and publication. Cancellation terminates the active guest before the slot returns. The v1 protocol passed over stdin/stdout and host-key-pinned SSH. The hosted SSH proof uses two processes on one VM. A dedicated runner can expose `analysis/analysis-worker` as an SSH forced command and configure `ANALYSIS_RUNNER_HOST` on the controller.
 
-Each new member earns its own persisted absence parity, actual preceding-reader refusal, replay, rollback and schema-generated drafter evals. The DOCS-1 stored type independently owes actual preceding-reader refusal by name.
-
-## Slice 1a · Stopped at the WSL capability spike, 2026-11-21
-
-- On kernel `6.6.87.2-microsoft-standard-WSL2`, the native Docker endpoint reported `systemd`, cgroup v2 and security options `name=seccomp,profile=builtin` and `name=cgroupns`. It did not report `name=rootless`.
-- The user endpoint `/run/user/1000/docker.sock` was absent. `rootlesskit true` exited 1 during UID/GID mapping because `newuidmap` was missing. Both `/usr/bin/newuidmap` and `/usr/bin/newgidmap` were absent.
-- The WSL gate refused before launch. The CPU, memory, process, time, DNS, socket, kill and scratch checks have no measurements. The hosted spike and full CI dispatch are pending.
-- **Try it yourself** on this WSL host. Run `docker info --format '{{json .SecurityOptions}}'`, then `rootlesskit true`. Before retrying the fixture, the intended user daemon must report `name=rootless` and the mapping probe must exit 0.
+**Controls.** Each OCI flag removal runs only a fixed probe. Removing `--network=none` exposes another interface, removing `--memory=1g` exposes an unlimited memory cgroup. Dropping supervisor decisions leaves the job alive. The fixture tests also exercise malformed and excess output, charged and refunded retries, cap+1, company scope, kill/publication and both independent SQL budget mutations. [Hosted fixture run](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44896600860)
 
 ## Owner setup
 
@@ -61,14 +52,16 @@ docker --host "unix:///run/user/$(id -u)/docker.sock" info --format '{{json .Sec
 
 The user endpoint must report `name=rootless`. The hosted capability gate governs development while laptop setup is pending.
 
-## Gates
+## Gates and Test it yourself
 
-Local docs gate is `scripts/check-records.sh`. This checkpoint changes documentation only. The CI reference is the successful full **base** run at `630e2aa6`, whose executable tree the packet shares.
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44893791677
 
-CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44880757599
+Tenant scope, retained leases, schema replay and the rootless SSH fixture passed in [targeted CI 44896600860](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44896600860). The one authorized full run failed on the previous executable `34573444` at the architecture checks. A full run of the corrected executable is pending.
 
-## Test it yourself · design read (under five minutes)
+- On this laptop run `python3 -B analysis/runner/runtime.py` for the named refusal. Inspect the completed run with `gh run view 44896600860 --log | rg 'Isolation:|Expected red:|Rootless capability gate|projects 12'`.
+- On a configured rootless host run `python3 analysis/image/build.py && analysis/tests/fixture-db.sh --science`. The fixture driver uses a disposable host PostgreSQL cluster. It checks the period-4 table, chart pixels, replay and cancellation.
+- Slice 1a adds migration 0060 provisionally. Recheck the number against main at integration. The owner’s WSL setup and the 1b/2 and 3 entry conditions above carry forward. Slice 1a stays on its packet branch for review.
 
-1. Run `git diff --name-only 6b62b00f...HEAD` on the packet branch. Expect the ADR, this record and the ledger.
-2. In §§2 and 4, follow a colleague opening Tuesday's saved forecast after losing access to one contributing row. Both the direct chart link and an original-input repeat withhold it. Follow a fifth scheduled publication instead and an authorized reader can still open the oldest result.
-3. In §5 follow a sample cell that asks the assistant to share the report. Inspect the three available tools, the session limits and the human's separate exact-code review before Share. In §7 a retried schedule wake supplies one version without a model call.
+```record-claim
+{"schemaVersion":"northstar.record-claim/v1","packet":"ANALYZE-1","base":"644a9a3998cf1196852ab30c8ccca4dda6bea226","head":"9fc7e6da37a1de3f6c19c25b8fc13787f57aa478","changedPaths":[".github/workflows/analysis-fixture.yml","analysis/analysis-worker","analysis/controller.mjs","analysis/image/.dockerignore","analysis/image/Dockerfile","analysis/image/build.py","analysis/image/profile.json","analysis/image/wheels.lock","analysis/runner/clean_png.py","analysis/runner/execution.py","analysis/runner/fixture.py","analysis/runner/frames.py","analysis/runner/guest.py","analysis/runner/runtime.py","analysis/runner/seccomp.json","analysis/runner/worker.py","analysis/tests/admission.mjs","analysis/tests/fixture-db.mjs","analysis/tests/fixture-db.sh","analysis/tests/hosted-transport.sh","analysis/tests/science.py","analysis/tests/spike.py","analysis/tests/test_frames.py","analysis/tests/test_protocol.py","analysis/tests/test_runtime.py","db/migrations/0060_analysis_fixture.sql","db/schema.snapshot.json","packages/dev-tooling/src/tenant-completeness.ts","test/architecture/release-persistence-boundary.test.ts","test/architecture/tenant-completeness.manifest.json","test/architecture/tenant-completeness.test.ts","test/postgres/inventory-storage.test.ts","test/postgres/migrations.test.ts","test/postgres/module-storage-transition.test.ts","test/postgres/trust-substrate.test.ts"],"symbols":[{"path":"analysis/controller.mjs","name":"FixtureController"}]}
+```
