@@ -4380,7 +4380,7 @@ test('an enum-domain CHECK replacement is one statement under ACCESS EXCLUSIVE a
   );
 });
 
-test('an enum-domain widening plans exactly one widenEnumDomain element, and every adjacent option-list change stays refused', () => {
+test('an enum-domain widening plans exactly one widenEnumDomain element and a label change has no storage effect', () => {
   // Group 1 of the ENUM-WIDEN charter, without a database. `PUR-2c` measured
   // that ANY option-list change presented to the planner as a retype, because
   // `lowerColumn` fingerprints `fieldType` wholesale and an enum's `fieldType`

@@ -889,19 +889,14 @@ test('a removed or reordered choice keeps its field conflict on lists and forms'
 });
 
 test('an unclassified package refusal carries the package ID and no patch attribution', () => {
-  const target = structuredClone(base);
-  const launcher = declaration(
-    target,
-    'surfaces',
-    'surfaceId',
-    id('surface.inventory_today'),
-  ).launcher as { metrics: Base[] };
-  while (launcher.metrics.length < 8)
-    launcher.metrics.push({
-      label: 'Platform count',
+  const target = applied(
+    base,
+    Array.from({ length: 8 }, (_, i) => ({
+      kind: 'addMetricCard',
+      label: 'Platform count ' + i,
       surface: itemList,
-      metricId: id('metric.platform_' + launcher.metrics.length),
-    });
+    })),
+  );
   const result = inspectReplay(target, [
     { kind: 'addMetricCard', surface: itemList, label: 'Office count' },
   ]);

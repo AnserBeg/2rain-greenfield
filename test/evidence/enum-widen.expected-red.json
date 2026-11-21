@@ -15,7 +15,7 @@
       "kills": [
         {
           "file": "test/postgres/module-storage-transition.test.ts",
-          "name": "an enum-domain widening plans exactly one widenEnumDomain element, and every adjacent option-list change stays refused",
+          "name": "an enum-domain widening plans exactly one widenEnumDomain element and a label change has no storage effect",
           "expected": "COMPILER_STORAGE_RETYPE_UNSUPPORTED"
         }
       ]
@@ -33,7 +33,7 @@
       "kills": [
         {
           "file": "test/postgres/module-storage-transition.test.ts",
-          "name": "an enum-domain widening plans exactly one widenEnumDomain element, and every adjacent option-list change stays refused",
+          "name": "an enum-domain widening plans exactly one widenEnumDomain element and a label change has no storage effect",
           "expected": "widenedAndReordered"
         }
       ]
@@ -51,7 +51,7 @@
       "kills": [
         {
           "file": "test/postgres/module-storage-transition.test.ts",
-          "name": "an enum-domain widening plans exactly one widenEnumDomain element, and every adjacent option-list change stays refused",
+          "name": "an enum-domain widening plans exactly one widenEnumDomain element and a label change has no storage effect",
           "expected": "the widening plans one element and nothing else"
         }
       ]
@@ -69,7 +69,7 @@
       "kills": [
         {
           "file": "test/postgres/module-storage-transition.test.ts",
-          "name": "an enum-domain widening plans exactly one widenEnumDomain element, and every adjacent option-list change stays refused",
+          "name": "an enum-domain widening plans exactly one widenEnumDomain element and a label change has no storage effect",
           "expected": "the widening plans one element and nothing else"
         }
       ]
