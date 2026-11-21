@@ -116,7 +116,7 @@ type Json = Record<string, unknown>;
 
 export function customizationTargets(definition: {
   readonly calculatedDisplayFields?: LayoutDefinition['calculatedDisplayFields'];
-  readonly documentFields?: readonly Json[];
+  readonly documentFields?: readonly Json[] | undefined;
   readonly entities: readonly Json[];
   readonly fields: readonly Json[];
   readonly languageVersion?: string;
