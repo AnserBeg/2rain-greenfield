@@ -39,7 +39,7 @@ Slice 1b merged at `d48c870bdf7cae3858a84e1dde6ea8125750e28d` on [exact full CI 
 ## Slice 1b fix round · 2026-11-21
 
 - **B1 reproduced** on merged 0059. The timer closed rental A at 11:00. Appointment B was booked at 11:05 and completed at 12:00. At 12:15 the unfixed writer admitted A’s 10:30 Start as `inUse`, revision 4. The fix returns `booking.capacityTaken`; A stays `noShow`, revision 3.
-- **R1.** A successful recovery appends a void revision of the attendance outcome and opens use at one owner cursor. The old snapshot retains the absence; the next incremental page retracts it. Active attendance IDs remain available for outcome corrections.
+- **R1.** A successful recovery retracts attendance and opens use at one owner cursor. Snapshot selection and output use the same visible evidence. The pre-recovery snapshot retains the absence, and incremental reads deliver its retraction even beyond the backdated Return. Active attendance IDs remain available for outcome corrections.
 - **R12.** Independent controls remove each company-scoped read permission, the swap destination company check, the stored correction-age check and the kit member company check. The age test voids an old closed pause without proposing new dates.
 - **R3.** Historical occupation uses a resource index and the next booking revision, including a swap away. Kit expiry finds the original receipt through member booking IDs.
 - **R4.** Kit expiry uses the caller’s decision and the highest locked member floor. Sweeping preserves any higher floor set while expiring the kit.
@@ -49,17 +49,17 @@ Slice 1b merged at `d48c870bdf7cae3858a84e1dde6ea8125750e28d` on [exact full CI 
 - **R9.** The first sweep or diary touch after 0059 closes overdue slice 1a confirmations under `acceptedBookingEnd`. Those confirmations predate that authority field. No production tenant existed at migration.
 - **R11.** Slice 1b’s last executable commit was `30a0c46e`. Fable read packet tip `89e39a42` on [green tip CI 44871414335](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44871414335).
 
-All seven new mutations failed at their named assertions on PostgreSQL 16; the restored writer tests passed. [Expected-red manifest](../../../test/evidence/BOOKING-1.expected-red.json) · [Full packet CI for the SQL at `a9c50c69`](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44883389027). Migration 0060 is provisional until the merge line assigns the number.
+The first seven fix-round mutations failed at their named assertions on PostgreSQL 16 and the restored writer tests passed. The follow-up control `recovery-snapshot-window` restores selection by hidden evidence. [Expected-red manifest](../../../test/evidence/BOOKING-1.expected-red.json) · [Full packet CI for the SQL at `a9c50c69`](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44883389027). Migration 0060 is provisional until the merge line assigns the number.
 CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44883389027
 
 ## Test it yourself
 
-With Docker running, execute `node --import tsx --test test/postgres/booking-commitments.test.ts`. The late Start in the gap must refuse; the owner snapshot and incremental page must agree on the recovered absence.
+With Docker running, execute `node --import tsx --test test/postgres/booking-commitments.test.ts`. The late Start across occupied time must refuse. After a recovered 10:15 Start and 10:45 Return, the 11:00 snapshot must be empty and the incremental read must deliver the retraction and Return.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "BOOKING-1",
-  "base": "630e2aa690906af9256c5964c398ba90585515d2", "head": "1953e6cab60a7595e24c3d4a7ff4b7f5be26e70e",
+  "base": "630e2aa690906af9256c5964c398ba90585515d2", "head": "69338c3b33fc84661c1d8c0d96cf75d5bd1516f6",
   "changedPaths": [
     "db/migrations/0060_booking_recovery.sql", "db/schema.snapshot.json",
     "test/architecture/release-persistence-boundary.test.ts", "test/evidence/BOOKING-1.expected-red.json",
