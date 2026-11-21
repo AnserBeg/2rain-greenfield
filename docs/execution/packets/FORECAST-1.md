@@ -1,6 +1,6 @@
 # FORECAST-1 — Switch on a forecast or bring a custom model
 
-**Slice 0, proposed 2026-11-21.** N5 design · Docs only · Critical paths untouched · Stop at the pushed design for the orchestrator’s independent Fable read. [Proposed ADR](../../decisions/ADR-XXXX-forecasting.md)
+**Slice 0, amended 2026-11-21.** N5 design · Docs only · Critical paths untouched. The independent read of `8a10ecff` returned **ACCEPT WITH AMENDMENTS**. This is the one amendment round. The checkpoint ends at the pushed design. [Proposed ADR](../../decisions/ADR-XXXX-forecasting.md)
 
 ANALYZE-1 received ACCEPT WITH AMENDMENTS. The design uses A5, A6 and A8 and depends on the amended runner, evidence and Task contracts for slice 5. Approved source contracts are separate prerequisites for the standard methods, especially reconciled cash and rental capacity.
 
@@ -19,28 +19,41 @@ ANALYZE-1 received ACCEPT WITH AMENDMENTS. The design uses A5, A6 and A8 and dep
 - Backtest by forecast origin and lead time against paired actuals and a simple baseline. [ADR §5](../../decisions/ADR-XXXX-forecasting.md#5-backtest-against-what-people-could-have-known)
 - Reuse Analyze for custom recipes, repeat and saved evidence. Permit a prefilled Task as the only handoff towards action. [ADR §6](../../decisions/ADR-XXXX-forecasting.md#6-a-custom-model-runs-in-analyze)
 - Prove a reader rung per capability, persisted absence parity, compatible and conflicting replay, and schema-generated drafter coverage at introduction. [ADR §7](../../decisions/ADR-XXXX-forecasting.md#7-admit-each-capability-at-its-merge)
+- The four owner rulings adopted 2026-11-21 cover reconciled opening cash, private what-ifs and reviewed protected defaults, company-owned serialized rentals with overdue exposure, and Model-reported custom scores in Analyze. [Owner rulings](../../decisions/ADR-XXXX-forecasting.md#owner-rulings-adopted-2026-11-21)
+
+## Review amendments
+
+- **A1** proves full population authority from scope and grants before examining rows, including on saved-evidence reads. [ADR §3](../../decisions/ADR-XXXX-forecasting.md#3-capture-once-publish-once-reauthorize-each-read)
+- **A2** reconciles movements and residuals at the cash cut and covers same-cut unapplied deposits. [ADR §1](../../decisions/ADR-XXXX-forecasting.md#1-register-three-standard-calculations)
+- **A3** gates slice 4 on frozen holdout selection, per-origin learning and the late fifth settlement test. [ADR §5](../../decisions/ADR-XXXX-forecasting.md#5-backtest-against-what-people-could-have-known)
+- **A4** gates rental on unioning all claims by physical unit and exposing conflict and unknown return. [ADR §1](../../decisions/ADR-XXXX-forecasting.md#1-register-three-standard-calculations)
+- **A5** gates standard execution and scoring on gateway purpose and direct and nested evidence refusals. [ADR entry conditions](../../decisions/ADR-XXXX-forecasting.md#entry-conditions-from-the-independent-read)
+- **A6** gates assumption surfaces on company/field and private trial checks and comparable captures. [ADR §2](../../decisions/ADR-XXXX-forecasting.md#2-give-each-set-of-assumptions-a-version-people-can-compare)
+- **A7** assigns live and backtest contracts to slices and packs, requires three equipped first-party packages, and assigns Q2 family admission to slice 1. [ADR source dependencies](../../decisions/ADR-XXXX-forecasting.md#source-dependencies-and-first-party-switch-on-packages)
+- **A8** gates each slice on its reader inventory, archived loader, persisted parity, replay and live variant-specific draft/preview/replay. [ADR entry conditions](../../decisions/ADR-XXXX-forecasting.md#entry-conditions-from-the-independent-read)
+- The result Record explains its first exception using authorized facts. [ADR §4](../../decisions/ADR-XXXX-forecasting.md#4-a-forecast-uses-the-existing-screen-grammar)
 
 ## Slices
 
 | Slice | Test it yourself at its checkpoint |
 | --- | --- |
 | 0 · Design | Follow the examples in [the walkthrough below](#test-it-yourself). |
-| 1 · Cash | Switch on Cash. Run the 13-week projection, move payroll by a week and save a new estimate. Change the source cut and see the forecast withheld. |
-| 2 · Demand and stock-out | Select one yard and part. Run Demand, move a confirmed delivery date and see the at-risk date change without double-counting the order. |
-| 3 · Rental utilisation | Switch on Rental. Mark one fleet unit down, change the expected return of a rented unit and compare occupied hours and capacity. |
-| 4 · Backtest | Score a closed holdout against the baseline, then use a date with missing historical source coverage. See the missing origin and the paired sample count. |
+| 1 · Cash | Switch on Cash. Run the 13-week projection, compare payroll dates on the same facts and save a new estimate. Check a mismatched cut and a same-cut deposit with an unresolved application. Both withhold the balance. |
+| 2 · Demand and stock-out | Select one yard and part. Move a confirmed delivery date and read the first shortfall explanation. Compare discovery and run under the same limited grant before and after the hidden team places an order. |
+| 3 · Rental utilisation | Switch on Rental. On one unit, overlap maintenance, overdue possession and the next customer’s booking. Compare served and unserved hours and see the unknown return. |
+| 4 · Backtest | Score a frozen holdout against the baseline, including a missing origin. Apply a later assumption revision to those facts and see **Retrospective scenario**. |
 | 5 · Custom models | Publish a recipe binding and run it from Forecasts. Open its suggested purchasing review Task and observe that opening it leaves the order unchanged. Revoke one source field and reopen the evidence link. |
 
 ## Controls for the executable slices
 
-- Put a receipt in opening cash and leave its invoice open at an incompatible cut. Check for refusal. On a day with baseline demand of six and eight units already committed, check that only eight are deducted.
-- Overlap a maintenance block, a booking and possession for the same unit. Observe one occupied interval, one exclusion and visible conflict pressure.
+- Reconcile a mismatched cut and a same-cut unapplied deposit through the named cash controls. On a day with baseline demand of six and eight units already committed, check that only eight are deducted.
+- Overlap maintenance with possession and a different customer’s booking for the same unit. Observe the served union, one maintenance exclusion and visible unserved pressure.
 - Use two companies in one tenant and a now-hidden input field. Mutate the company, field, fence and audit checks separately and observe that an estimate or an unaudited version would otherwise escape. Retry the same save and prove one version and one receipt.
-- Add a correction recorded after the forecast origin and a guest result suggesting a protected field. Prove the correction is absent from the forecast input and the suggestion cannot prepare a write. Probe each preceding reader’s own refusal path.
+- Record the fifth settlement after the forecast origin and check that the historical run still uses its four-sample fallback. Refuse a forecast-as-actuals binding and a guest suggestion for a protected Task field. Probe each preceding reader’s own refusal path.
 
 ## Gates
 
-Local design gate is `scripts/check-records.sh`. The CI citation is the successful base run at `630e2aa6`, whose executable tree this design keeps. The Fable read is pending. This narrative checkpoint declares no executable claims and carries no record-claim block.
+Local design gate is `scripts/check-records.sh`. The citation below is inherited full CI at base `630e2aa6`. The reviewed design SHA is `8a10ecff`. This amendment push has its own CI result once available. This narrative checkpoint declares no executable claims and carries no record-claim block.
 
 CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44880757599
 
@@ -48,6 +61,6 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44880757
 
 ## Test it yourself
 
-1. From `packet/FORECAST-1` run `git diff --name-only 630e2aa6...HEAD`. Expect the proposed ADR, this packet record and the ledger.
-2. Read ADR §1 and follow the cash example. The four amounts close at $34,000. Then assume the opening already includes the $12,000 receipt. The residual contributes zero. Follow the stock example to closing balances of 10 and 11 and the rental example to 50%.
-3. Read §§3, 5 and 6. Follow a manager who loses an input field, a backtest with a correction recorded after the origin, and a buyer who opens a suggested Task. Expect evidence withheld, the correction excluded from the forecast input, and no business write on open. This walkthrough takes under ten minutes.
+1. From `packet/FORECAST-1` run `git diff --name-only 630e2aa6...HEAD`. Expect the proposed ADR, this packet record, the ledger and `learnings.md`.
+2. Read ADR §1 and follow the cash example. Both reconciled variants close at $34,000. With the deposit already in opening cash and its relationship to the outstanding invoice unresolved, the projection is withheld. Follow the stock example to closing balances of 10 and 11 and the rental example to 50%.
+3. Read §§3, 5 and 6. Follow a restricted buyer before and after a hidden order is placed, a backtest whose fifth settlement was recorded after the origin, and a buyer who opens a suggested Task. Expect the same generic denial, a four-sample fallback and an unchanged order. This walkthrough takes under ten minutes.

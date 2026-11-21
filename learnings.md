@@ -828,3 +828,15 @@ How to apply: Require a scoped human decision for a fence advance and its replay
 Date: 2026-11-20
 Why: A backdated successor reduced an eight-day entitlement below the amount already allocated after four days.
 How to apply: At each occurrence opening, select among the terms and assignments published by then. Save the inputs served to the caller and replay them after publishing a successor. [BILLING-1](docs/execution/packets/BILLING-1.md)
+
+## Prove authority over an aggregate population before reading its rows
+
+Date: 2026-11-21
+Why: Denying a previously available forecast when the first hidden order arrives reveals its existence.
+How to apply: Prove full population access from scope and live grants before collection. Compare empty and populated hidden subsets through discovery, run and saved evidence. [FORECAST-1](docs/execution/packets/FORECAST-1.md#review-amendments)
+
+## Reconcile cash movements even when sources share a cut
+
+Date: 2026-11-21
+Why: A deposit can increase book cash while its application to an open invoice is still pending.
+How to apply: Reconcile opening movements and obligation allocations by stable ID and amount. Test the same-cut unapplied deposit with and without a proven association. [FORECAST-1](docs/execution/packets/FORECAST-1.md#review-amendments)
