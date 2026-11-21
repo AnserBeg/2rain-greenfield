@@ -1,3 +1,4 @@
+import type * as SandboxModule from '../../packages/customization/src/sandbox.js';
 import assert from 'node:assert/strict';
 import { resolve as resolvePath } from 'node:path';
 import test from 'node:test';
@@ -96,7 +97,7 @@ test('the compiled sandbox launcher resolves its fork and loader from the worksp
   );
   const compiled = (await import(
     pathToFileURL(join(out, 'sandbox.js')).href
-  )) as typeof import('../../packages/customization/src/sandbox.js');
+  )) as typeof SandboxModule;
   for (const kind of ['verifyWorkflowDraft', 'compile'] as const) {
     const marker = new Error('observed launch');
     assert.throws(
