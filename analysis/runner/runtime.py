@@ -59,7 +59,7 @@ def group_for(pid, container_id):
     for line in Path(f"/proc/{pid}/cgroup").read_text().splitlines():
         if line.startswith("0::"):
             path = CGROUP / line[3:].lstrip("/")
-            if path.name == f"docker-{container_id}.scope" and "analysis.slice" in path.parts:
+            if path.name == f"docker-{container_id}.scope" and ".." not in path.parts:
                 return path
     raise Refusal("private analysis cgroup")
 
@@ -93,11 +93,20 @@ def stop_reason(start, cpu, cancelled, now=time.monotonic, wall_limit=90, cpu_li
     return None
 
 
+def kill(engine, name, group):
+    engine.command("kill", name)
+    state = json.loads(engine.command("inspect", "--format={{json .State}}", name))
+    if state["Running"] or state["ExitCode"] != 137:
+        raise Refusal("container survived kill")
+    if group.exists() and (group / "cgroup.procs").read_text().strip():
+        raise Refusal("tasks survived kill")
+
+
 def teardown(engine, name, group):
     engine.command("rm", "--force", "--volumes", name)
     remaining = engine.command("ps", "--all", "--quiet", "--filter", f"name=^/{name}$")
     if remaining.strip() or (group is not None and group.exists()):
-        raise Refusal("container or scratch cgroup still present after removal")
+        raise Refusal("container or cgroup survived removal")
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ import subprocess
 import sys
 import time
 import uuid
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "runner"))
 import runtime
@@ -57,14 +58,15 @@ except socket.gaierror as err:
 else:
     result["dns"] = 0
 status = dict(row.split(":", 1) for row in Path('/proc/self/status').read_text().splitlines() if ":" in row)
-result.update(caps=int(status['CapEff'], 16), nnp=int(status['NoNewPrivs']))
+result.update(caps=int(status['CapBnd'], 16), nnp=int(status['NoNewPrivs']))
 try:
     Path("/rootfs-probe").touch()
 except OSError as err:
     result["rootfs"] = err.errno
 result["scratch"] = os.statvfs('/tmp').f_blocks * os.statvfs('/tmp').f_frsize
 result["fresh"] = not Path('/tmp/probe-marker').exists()
-Path('/tmp/probe-marker').write_text('private scratch')
+if result['scratch'] == 128 * 1024**2:
+    Path('/tmp/probe-marker').write_text('private scratch')
 print(json.dumps(result))
 """
 
@@ -75,7 +77,7 @@ def check_guest(data):
         expect(data[key] == 1, f"{key} socket allowed")
     expect(data["dns"] != 0, "DNS resolved")
     expect(data["uid"] == 65534, "unexpected guest UID")
-    expect(data["caps"] == 0, "effective capabilities")
+    expect(data["caps"] == 0, "capability bounding set")
     expect(data["nnp"] == 1, "no-new-privileges missing")
     expect(data["rootfs"] == 30, "writable root filesystem")
     expect(data["fresh"] and data["scratch"] == 128 * 1024**2, "scratch not fresh and bounded")
@@ -83,13 +85,6 @@ def check_guest(data):
 
 def state(engine, name):
     return json.loads(engine.command("inspect", "--format={{json .State}}", name))
-
-
-def killed(engine, name, group):
-    engine.command("kill", name)
-    observed = state(engine, name)
-    expect(not observed["Running"] and observed["ExitCode"] == 137, "container survived kill")
-    expect(not group.exists() or not (group / "cgroup.procs").read_text().strip(), "tasks survived kill")
 
 
 def limits_under_load(engine):
@@ -127,7 +122,7 @@ print(len(children))
             expect(state(engine, name)["OOMKilled"], "memory limit produced no OOM kill")
 
 
-def timed_stop(engine, expected, limit, exercise=True):
+def timed_stop(engine, expected, limit):
     with container(engine) as (name, group):
         runtime.check_limits(group)
         started = time.monotonic()
@@ -141,12 +136,12 @@ def timed_stop(engine, expected, limit, exercise=True):
             seconds = runtime.cpu_seconds(group)
             reason = runtime.stop_reason(started, seconds, expected == "cancelled",
                                          wall_limit=limit if expected == "deadline" else 90,
-                                         cpu_limit=limit if expected == "cpu" else 60) if exercise else None
+                                         cpu_limit=limit if expected == "cpu" else 60)
             if reason == expected:
                 if expected == "cpu":
                     stats = dict(row.split() for row in (group / "cpu.stat").read_text().splitlines())
                     expect(int(stats["nr_throttled"]) > 0, "CPU quota did not throttle")
-                killed(engine, name, group)
+                runtime.kill(engine, name, group)
                 print(f"{reason}: killed at wall={elapsed:.3f}s aggregateCPU={seconds:.3f}s")
                 return
             expect(elapsed < limit + 5, f"{expected} termination missing")
@@ -177,15 +172,28 @@ def controls(engine):
     red(lambda: check("--network=none", True), "external interface")
     red(lambda: check(f"--security-opt=seccomp={runtime.PROFILE}", True), "AF_INET socket allowed")
     red(lambda: check("--security-opt=no-new-privileges", True), "no-new-privileges missing")
-    # A missing cancellation/deadline/aggregate-CPU branch must leave the live job running.
+    red(lambda: check("--cgroup-parent=analysis.slice"), "memory.swap.max")
+    red(lambda: check("--cap-drop=ALL", True), "capability bounding set")
+    red(lambda: check("--user=65534:65534", True), "unexpected guest UID")
+    red(lambda: check("--read-only", True), "writable root filesystem")
+    red(lambda: check("--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=128m,mode=1777", True), "scratch not fresh")
+    # Suppress one supervisor decision at a time, preserving all other limits.
+    production_decision = runtime.stop_reason
     for reason in ["cancelled", "deadline", "cpu"]:
-        red(lambda: timed_stop(engine, reason, 1, exercise=False), f"{reason} termination missing")
+        def omit_reason(*args, **kwargs):
+            actual = production_decision(*args, **kwargs)
+            return None if actual == reason else actual
+        with patch.object(runtime, "stop_reason", omit_reason):
+            red(lambda: timed_stop(engine, reason, 1), f"{reason} termination missing")
     with container(engine) as (name, group):
-        # Observe that skipping either kill or removal leaves the respective postcondition false.
-        red(lambda: expect(not state(engine, name)["Running"], "container survived kill"), "survived kill")
-        killed(engine, name, group)
-        red(lambda: expect(not engine.command("ps", "-aq", "--filter", f"name=^/{name}$").strip(),
-                           "container survived removal"), "survived removal")
+        production_command = engine.command
+        def skip(command):
+            return lambda verb, *args: b"" if verb == command else production_command(verb, *args)
+        with patch.object(engine, "command", skip("kill")):
+            red(lambda: runtime.kill(engine, name, group), "container survived kill")
+        runtime.kill(engine, name, group)
+        with patch.object(engine, "command", skip("rm")):
+            red(lambda: runtime.teardown(engine, name, group), "survived removal")
 
 
 if __name__ == "__main__":
