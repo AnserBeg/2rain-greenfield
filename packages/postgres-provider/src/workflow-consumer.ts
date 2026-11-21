@@ -78,21 +78,27 @@ export const WORKFLOW_RECEIPT_PAGE_SQL = `
    WHERE o.event_type = $8
    ORDER BY o.outbox_id`;
 
+export async function workerScopes(
+  pool: Pool,
+): Promise<readonly WorkflowScope[]> {
+  const client = await pool.connect();
+  try {
+    await assertWorkerRole(client);
+    return (
+      await client.query<WorkflowScope>(
+        'SELECT * FROM platform.workflow_environment_ids()',
+      )
+    ).rows;
+  } finally {
+    client.release();
+  }
+}
+
 export class PostgresWorkflowConsumer {
   constructor(private readonly pool: Pool) {}
 
-  async scopes(): Promise<readonly WorkflowScope[]> {
-    const client = await this.pool.connect();
-    try {
-      await assertWorkerRole(client);
-      return (
-        await client.query<WorkflowScope>(
-          'SELECT * FROM platform.workflow_environment_ids()',
-        )
-      ).rows;
-    } finally {
-      client.release();
-    }
+  scopes() {
+    return workerScopes(this.pool);
   }
 
   async claim(scope: WorkflowScope): Promise<number> {
