@@ -9,6 +9,7 @@ export interface CompiledWorkflow {
 }
 
 const forbiddenNames = new Set([
+  'arguments',
   'Date',
   'Temporal',
   'performance',
@@ -43,10 +44,7 @@ const forbiddenNames = new Set([
   'random',
 ]);
 
-export function compileWorkflowBody(
-  body: string,
-  sdk: WorkflowSdk,
-): CompiledWorkflow {
+export function compileWorkflowBody(body: string, sdk: WorkflowSdk) {
   if (Buffer.byteLength(body) > MAXIMUM_WORKFLOW_SOURCE_BYTES) {
     throw new Error('Workflow source exceeds the bundle limit');
   }
@@ -84,6 +82,8 @@ export function compileWorkflowBody(
   ) {
     throw new Error('Workflow reference directives are forbidden');
   }
+  if (/\/\/[ 	]*@ts-(?:ignore|nocheck|expect-error)|\/\*+[ 	]*@ts-/u.test(body))
+    throw new Error('Workflow compiler suppression is forbidden');
   lintWorkflowBody(declaration.body, file);
 
   const host = ts.createCompilerHost(options);
@@ -146,11 +146,130 @@ export function compileWorkflowBody(
       'Workflow emitted no executable or exceeded the executable limit',
     );
   }
-  return Object.freeze({ executable, sdk });
+  const sites = workflowSites(file, declaration.body, program.getTypeChecker());
+  const emitted = ts.createSourceFile(
+    '/workflow.js',
+    executable,
+    ts.ScriptTarget.ES2022,
+    true,
+    ts.ScriptKind.JS,
+  );
+  const accesses: ts.PropertyAccessExpression[] = [];
+  const collect = (node: ts.Node) => {
+    if (ts.isCallExpression(node) && isSdkAccess(node.expression))
+      accesses.push(node.expression);
+    ts.forEachChild(node, collect);
+  };
+  collect(emitted);
+  if (sites.length !== accesses.length)
+    throw new Error('Unable to account for every emitted SDK call');
+  let traced = executable;
+  for (let i = accesses.length - 1; i >= 0; --i) {
+    const name = accesses[i]!.name;
+    traced =
+      traced.slice(0, name.getStart(emitted)) +
+      'site' +
+      i +
+      traced.slice(name.end);
+  }
+  return Object.freeze({ executable, sdk, sites, traced });
+}
+
+function isSdkAccess(node: ts.Node): node is ts.PropertyAccessExpression {
+  return (
+    ts.isPropertyAccessExpression(node) &&
+    ts.isIdentifier(node.expression) &&
+    node.expression.text === 'sdk'
+  );
+}
+
+function workflowSites(
+  file: ts.SourceFile,
+  body: ts.Block,
+  checker: ts.TypeChecker,
+) {
+  const sites: {
+    method: string;
+    target: string | null;
+    fields: string[];
+    branch: boolean;
+    loop: boolean;
+    line: number;
+  }[] = [];
+  function visit(node: ts.Node, branch: boolean, loop: boolean) {
+    if (ts.isCallExpression(node) && isSdkAccess(node.expression)) {
+      const method = node.expression.name.text;
+      const targeted = ['query', 'operation', 'requestApproval'].includes(
+        method,
+      );
+      const argument = node.arguments[method === 'requestApproval' ? 1 : 0];
+      if (targeted && argument && !ts.isStringLiteralLike(argument))
+        throw new Error('Workflow review requires a literal SDK target');
+      const input =
+        targeted && node.arguments[method === 'requestApproval' ? 2 : 1];
+      const fields: string[] = [];
+      if (input) {
+        const inputType = checker.getTypeAtLocation(input);
+        for (const property of inputType.getProperties()) {
+          fields.push(property.name);
+          if (['values', 'patch', 'relations'].includes(property.name)) {
+            const type = checker.getTypeOfSymbolAtLocation(property, input);
+            fields.push(...type.getProperties().map((field) => field.name));
+          }
+        }
+      }
+      sites.push({
+        method,
+        target:
+          targeted && argument && ts.isStringLiteralLike(argument)
+            ? argument.text
+            : null,
+        fields: fields.sort(),
+        branch,
+        loop,
+        line: file.getLineAndCharacterOfPosition(node.getStart(file)).line,
+      });
+    }
+    ts.forEachChild(node, (child) =>
+      visit(
+        child,
+        branch ||
+          (ts.isIfStatement(node) && child !== node.expression) ||
+          (ts.isConditionalExpression(node) && child !== node.condition) ||
+          ts.isCaseOrDefaultClause(node) ||
+          (ts.isBinaryExpression(node) &&
+            child === node.right &&
+            [
+              ts.SyntaxKind.AmpersandAmpersandToken,
+              ts.SyntaxKind.BarBarToken,
+              ts.SyntaxKind.QuestionQuestionToken,
+            ].includes(node.operatorToken.kind)),
+        loop || ts.isIterationStatement(node, false),
+      ),
+    );
+  }
+  visit(body, false, false);
+  return sites;
 }
 
 function lintWorkflowBody(node: ts.Node, file: ts.SourceFile): void {
   if (
+    (ts.isIdentifier(node) &&
+      node.text === 'sdk' &&
+      !(
+        isSdkAccess(node.parent) &&
+        node.parent.expression === node &&
+        ts.isCallExpression(node.parent.parent) &&
+        node.parent.parent.expression === node.parent &&
+        [
+          'now',
+          'sleep',
+          'query',
+          'operation',
+          'requestApproval',
+          'waitForEvent',
+        ].includes(node.parent.name.text)
+      )) ||
     node.kind === ts.SyntaxKind.ImportKeyword ||
     node.kind === ts.SyntaxKind.ExportKeyword ||
     node.kind === ts.SyntaxKind.AsyncKeyword ||

@@ -16,8 +16,9 @@ export interface WorkflowReplayEntry {
 
 export type WorkflowIsolateOutcome =
   | {
-      readonly kind: 'done' | 'execution-failed' | 'invalid-call' | 'cpu-limit';
+      readonly kind: 'execution-failed' | 'invalid-call' | 'cpu-limit';
     }
+  | { readonly kind: 'done'; readonly sites?: readonly number[] }
   | { readonly kind: 'call'; readonly request: string }
   | {
       readonly kind: 'changed-request' | 'unconsumed-prefix';
@@ -32,6 +33,7 @@ export class WorkflowWatchdogExpired extends Error {
 
 export interface WorkflowIsolateOptions {
   readonly cpuMs?: number;
+  readonly traceMethods?: readonly string[];
   /** The supervisor arms this timer when the worker is ready to evaluate. */
   readonly startWatchdog?: (expire: () => void) => () => void;
 }
@@ -55,6 +57,7 @@ export async function runWorkflowIsolate(
       execArgv: [],
       resourceLimits: { maxOldGenerationSizeMb: 32, stackSizeMb: 2 },
       workerData: {
+        traceMethods: options.traceMethods,
         cpuMs: options.cpuMs ?? 100,
         // Compiled workers start independently of the application's resolver.
         engine:

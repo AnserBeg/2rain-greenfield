@@ -39,7 +39,7 @@ import {
 } from '../../packages/postgres-provider/src/workflow-execution.js';
 import { PostgresWorkflowGateway } from '../../packages/postgres-provider/src/workflow-gateway.js';
 import { storeWorkflowBundle } from '../../packages/postgres-provider/src/workflow-bundle.js';
-import { InMemoryWorkflowRun } from '../../packages/postgres-provider/src/workflow-run.js';
+import { verifyWorkflowDefinitions } from '../../packages/postgres-provider/src/workflow-admission.js';
 import { generateWorkflowSdk } from '../../packages/postgres-provider/src/workflow-sdk.js';
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
 import { PostgresImmutableReleaseRepository } from '../../packages/postgres-provider/src/release-repository.js';
@@ -1657,41 +1657,50 @@ test(
             },
           });
           await t.test(
-            'candidate admission refuses post-fixture replay divergence',
+            'candidate admission independently refuses a stored body that diverges from its fixture',
             async () => {
-              const candidate = await service.draft(
-                workflowPatch('divergent-replay'),
-                'conversationalAi',
+              const body = 'sdk.sleep(11);';
+              const digest = await withTrustedRequestTransaction(
+                runtimePool,
+                operator,
+                (client) =>
+                  storeWorkflowBundle(client, operator, {
+                    body,
+                    authoredBy: operator.principalId,
+                    executable: compileWorkflowBody(
+                      body,
+                      generateWorkflowSdk(view, fixtureGrants),
+                    ).executable,
+                    fixtures: [
+                      {
+                        event: {
+                          type: 'goodsReceiptPosted',
+                          eventId: randomUUID(),
+                          receiptId: randomUUID(),
+                          legalEntityId: COMPANY,
+                        },
+                        effects: [
+                          {
+                            call: { kind: 'sleep', milliseconds: 10 },
+                            result: null,
+                          },
+                        ],
+                      },
+                    ],
+                  }),
               );
-              assert.ok(
-                candidate.status === 'drafted',
-                JSON.stringify(candidate),
+              await assert.rejects(
+                withTrustedRequestTransaction(runtimePool, operator, (client) =>
+                  verifyWorkflowDefinitions(client, operator, view, [
+                    {
+                      ...workflowPatch('divergent-replay').workflow,
+                      bodyDigest: digest,
+                      sdkDigest: sha256(sdk.declarations),
+                    },
+                  ]),
+                ),
+                /unmocked call/u,
               );
-              const step = InMemoryWorkflowRun.prototype.step;
-              const firstPass = new WeakSet<InMemoryWorkflowRun>();
-              const divergence = t.mock.method(
-                InMemoryWorkflowRun.prototype,
-                'step',
-                async function (this: InMemoryWorkflowRun) {
-                  if (!firstPass.has(this) && this.snapshot().prefix.length > 0)
-                    return {
-                      kind: 'quarantined',
-                      cursor: 0,
-                      reason: 'changed-request',
-                    } as const;
-                  firstPass.add(this);
-                  return step.call(this);
-                },
-              );
-              try {
-                await assert.rejects(
-                  service.approve(candidate.patchId),
-                  /Workflow replay failed at cursor 0 \(quarantined\)/u,
-                  'candidate was admitted without running the recorded fixture again',
-                );
-              } finally {
-                divergence.mock.restore();
-              }
             },
           );
 
@@ -1706,7 +1715,14 @@ test(
                 complete.status === 'drafted',
                 JSON.stringify(complete),
               );
-              await service.approve(complete.patchId);
+              await assert.rejects(
+                service.approve(complete.patchId, '0'.repeat(64)),
+                /Review the workflow source/,
+              );
+              await service.approve(
+                complete.patchId,
+                complete.workflowReviewDigest,
+              );
               await service.activate(complete.patchId);
               const candidate = await service.draft(
                 workflowPatch('missing-evidence'),
@@ -1730,7 +1746,10 @@ test(
             `);
               try {
                 await assert.rejects(
-                  service.approve(candidate.patchId),
+                  service.approve(
+                    candidate.patchId,
+                    candidate.workflowReviewDigest,
+                  ),
                   /Workflow verification evidence is incomplete or does not match the candidate/u,
                   'candidate was admitted with one declared workflow missing evidence',
                 );

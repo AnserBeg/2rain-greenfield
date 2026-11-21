@@ -96,5 +96,5 @@ export async function verifyWorkflowBundle(
     },
   );
   if (result.status === 'refused') throw new Error(result.message);
-  return { sdk, executable: result.executable, journals: result.journals };
+  return { sdk, ...result };
 }

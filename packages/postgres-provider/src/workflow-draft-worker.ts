@@ -45,11 +45,20 @@ process.once(
           return call;
         },
       });
-      const journals = await verifyWorkflowReplay(compiled, fixtures);
+      const { journals, coverage } = await verifyWorkflowReplay(
+        compiled,
+        fixtures,
+        {
+          executable: compiled.traced,
+          methods: compiled.sites.map((site) => site.method),
+        },
+      );
       response = JSON.stringify({
         status: 'passed',
         executable: compiled.executable,
         journals,
+        sites: compiled.sites,
+        coverage,
       });
       if (Buffer.byteLength(response) > 1024 * 1024)
         throw new Error('Workflow verification output exceeds 1 MiB');

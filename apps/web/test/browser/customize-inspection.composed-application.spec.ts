@@ -596,6 +596,18 @@ process.stdout.write(JSON.stringify(applicationWithoutLineCreateValues().release
             workflowId,
             { timeout: 180_000 },
           );
+          const review = page.locator('[data-customize-diff]');
+          await expect(review).toContainText(modelDraft.body);
+          await expect(review).toContainText('Waits 2 days without asking.');
+          await expect(review).toContainText('Calls in the script');
+          const digest = await page
+            .locator('input[name="reviewedDigest"]')
+            .inputValue();
+          await page.goto(`${app.baseUrl}/?customize`);
+          await page.getByRole('button', { name: 'Review workflow' }).click();
+          await expect(
+            page.locator('input[name="reviewedDigest"]'),
+          ).toHaveValue(digest);
           await expect(
             page.locator('[data-customize-result="activated"]'),
           ).toHaveCount(0);

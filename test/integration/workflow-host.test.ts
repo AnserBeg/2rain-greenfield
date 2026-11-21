@@ -555,6 +555,7 @@ test('both sandbox requests discard serving credentials and cannot open the conn
 });
 
 test('the parent kills an unfinished workflow draft at its verification deadline', async () => {
+  let limit;
   await assert.rejects(
     verifyWorkflowBundle(
       view,
@@ -562,7 +563,7 @@ test('the parent kills an unfinished workflow draft at its verification deadline
       { body: 'for (;;) {}', fixtures: [{ event, effects: [] }] },
       {
         startTimer(milliseconds, expire) {
-          assert.equal(milliseconds, 30_000);
+          limit = milliseconds;
           queueMicrotask(expire);
           return () => undefined;
         },
@@ -570,4 +571,57 @@ test('the parent kills an unfinished workflow draft at its verification deadline
     ),
     { code: 'SANDBOX_TIMED_OUT' },
   );
+  assert.equal(limit, 30_000);
+});
+
+test('review uses each of the first five journals and marks the exact unvisited call site', async () => {
+  const body =
+    'if (event.receiptId === event.eventId) { sdk.now(); } else { for (let i=0;i<1;i++) sdk.now(); }';
+  const mocked = { call: { kind: 'now' }, result: day };
+  const grants = { queries: [queryId], operations: [] };
+  const verified = await verifyWorkflowBundle(view, grants, {
+    body,
+    fixtures: Array.from({ length: 6 }, () => ({ event, effects: [mocked] })),
+  });
+  const { renderWorkflowReview } =
+    await import('../../packages/postgres-provider/src/workflow-review.js');
+  const workflow = {
+    schemaVersion: 'v6' as const,
+    workflowId: 'review',
+    trigger: 'goodsReceiptPosted' as const,
+    bodyDigest: '1'.repeat(64),
+    grants,
+  };
+  const render = (source: string) =>
+    renderWorkflowReview(
+      workflow,
+      source,
+      verified,
+      new Map([[queryId, 'Party search']]),
+      new Set(),
+    );
+  const review = render(body);
+  assert.deepEqual(verified.coverage, [[1], [1], [1], [1], [1], [1]]);
+  assert.equal(
+    review.text.match(/Reads the current time without asking/g)?.length,
+    5,
+  );
+  assert.match(review.text, /now \(conditional\) · not shown in any test/);
+  assert.match(review.text, /now \(conditional\) \(in a loop\)\n/);
+  assert.match(review.text, /Party search — declared but never called/);
+  assert.ok(review.text.endsWith(body));
+  assert.deepEqual(render(body), review);
+  assert.notEqual(render(body + '\n').digest, review.digest);
+});
+
+test('workflow review lint requires every SDK access to be a direct call', () => {
+  for (const body of [
+    'const alias=sdk; alias.now();',
+    'const f=sdk.now; f();',
+    'const {now}=sdk; now();',
+    "sdk['now']();",
+    'sdk.now.call(null);',
+  ]) {
+    assert.throws(() => compile(body), /forbidden syntax/);
+  }
 });
