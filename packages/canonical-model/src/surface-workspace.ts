@@ -1,5 +1,5 @@
 import { compiledPopups } from './popup-actions.js';
-import { boardDigest, boardForList, boardWithStages } from './board.js';
+import { boardBindingConflicts, boardSelfProblem } from './board.js';
 import { SURFACE_SLOTS } from './constants.js';
 import { baseLayout, layoutProblem } from './layout.js';
 import type { VersionedNormalizedApplicationPackage } from './schemas.js';
@@ -50,23 +50,16 @@ export function validateSurfaceWorkspaces(
           surface.surfaceId,
           'A v6 Board must declare its view binding.',
         );
+      // ADR-0086 item 4: no authoring base here. Check the recorded digest,
+      // then each referenced ID structurally. A retired Board is not validated.
       const { body } = board;
-      const source = boardForList(model, body.listSurfaceId);
-      const expected =
-        source &&
-        boardWithStages(
-          source,
-          body.grouping.stages.map((s) => s.stateId),
-        );
       const slots = [...surface.slots]
         .sort((a, b) => a.orderKey - b.orderKey)
         .map((s) => s.slot);
+      const self = boardSelfProblem(board);
+      if (self) fail(surface.surfaceId, self);
       if (
-        !expected ||
-        boardDigest(expected) !== board.resultDigest ||
-        boardDigest(body) !== board.resultDigest ||
-        body.listQueryId !== surface.dataSource.targetId ||
-        board.predecessor === board.revisionId ||
+        body.listQuery.queryId !== surface.dataSource.targetId ||
         surface.surfaceRole !== undefined ||
         slots.join() !== SURFACE_SLOTS.board.join() ||
         !('workspace' in surface) ||
@@ -75,8 +68,16 @@ export function validateSurfaceWorkspaces(
       )
         fail(
           surface.surfaceId,
-          'Board stages, moves, owner, slots or authorized read bindings have changed.',
+          'The Board owner, slots or read binding differ.',
         );
+      if (surface.lifecycle !== 'retired') {
+        const conflict = boardBindingConflicts(model, body)[0];
+        if (conflict)
+          fail(
+            surface.surfaceId,
+            `Board binding ${conflict.subject} is ${conflict.code === 'RETIRED_TARGET' ? 'absent or retired' : 'changed'} (${conflict.code}).`,
+          );
+      }
     }
     if ('layouts' in surface && surface.layouts) {
       const modes = new Set<string>();

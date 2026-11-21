@@ -438,12 +438,16 @@ test(
   },
 );
 
+// The actual preceding serving reader: main at rung 36 with the withdrawn v1
+// Board parser. It must refuse a Board v2 release on its capability rung,
+// before parsing any Board (CALENDAR-1 Board v2 fix, reader proof).
+const PRECEDING_SERVING_READER = '67e4efce31eb663f12d6f161aa91c0ce1220dffc';
 test(
   'a released record button opens a no-script Task, checks grants and revisions, and commits once through its declared gateway operation',
   { timeout: 600_000 },
   async () => {
     await withArchivedCustomizationRuntime(
-      '1fb2f63494b6f7718de2358c7b057e4f293c2b31',
+      'f3d0dcd4cc7889be390e8a7fc4dafb1cbf5616a5',
       async (run) => {
         await assertArchivedTenantEnvelope(run);
         await withEphemeralPostgres(
@@ -515,7 +519,7 @@ test(
               assert.equal(refusal.code, 'UNSUPPORTED_RUNTIME_CAPABILITY');
               assert.match(
                 refusal.message ?? '',
-                /surface-manifest requires version 37 and this runtime supports 36/u,
+                /surface-manifest requires version 38 and this runtime supports 37/u,
               );
               const option = (
                 await opened.service.targets()
@@ -807,29 +811,28 @@ test(
         const options = {
           databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
           tenantSlug: 'customize-board-reader',
-          compiledApplication: applicationWithoutLineCreateValues().release,
         };
         const app = await startComposedApplication({ ...options, port: 0 });
         const opened = await openCustomizeService(options);
         try {
-          const { draftBoardRevision } =
+          const { defaultBoardChoices, draftBoardRevision } =
             await import('../../packages/customization/src/board-revision.js');
           const { BOARD_READER } =
             await import('../../packages/canonical-model/src/board.js');
           const target = (await opened.service.targets()).boards?.find(
-            (t) => t.body.entityId === 'northstar.app:entity.purchase_order',
+            (t) => t.frame.entityId === 'northstar.app:entity.purchase_order',
           );
           assert.ok(target);
           const revision = draftBoardRevision(
             target,
             'Purchase order board',
-            target.body.grouping.stages.map((s) => s.stateId),
+            defaultBoardChoices(target),
           );
           const draft = await opened.service.draft(revision, 'visualBuilder');
           assert.ok(draft.status === 'drafted', JSON.stringify(draft));
           await opened.service.approve(draft.patchId);
           await withArchivedCustomizationRuntime(
-            '032b87c00df3ee22184685050b9cecc01c62cc59',
+            PRECEDING_SERVING_READER,
             async (run) => {
               await assertArchivedTenantEnvelope(run);
               const read = () =>

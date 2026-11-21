@@ -12,6 +12,9 @@ import {
   CONNECTOR_PAYLOAD,
   type AddressProjection,
   BOARD_READER,
+  boardPresentation,
+  type BoardSource,
+  type SurfaceBoard,
   BOOKING_OPERATION_READER,
   LAYOUT_READER,
   REPLAYED_LAYOUT_READER,
@@ -1102,12 +1105,12 @@ function surfaceManifestPayload(
     (s) => 'popupActions' in s && s.popupActions,
   )
     ? POPUP_READER
-    : lineCreateValues
-      ? LINE_CREATE_VALUES_SURFACE_FLOOR
-      : replayedLayout
-        ? REPLAYED_LAYOUT_READER
-        : original.surfaces.some((s) => s.archetype === 'board')
-          ? BOARD_READER
+    : original.surfaces.some((s) => s.archetype === 'board')
+      ? BOARD_READER
+      : lineCreateValues
+        ? LINE_CREATE_VALUES_SURFACE_FLOOR
+        : replayedLayout
+          ? REPLAYED_LAYOUT_READER
           : original.surfaces.some((s) => 'layouts' in s && s.layouts)
             ? LAYOUT_READER
             : extendedEditor || declaredRelationList
@@ -1203,8 +1206,15 @@ function surfaceManifestPayload(
           ...(declared && 'popupActions' in declared && declared.popupActions
             ? { popupActions: compiledPopups(original, declared) }
             : {}),
+          // Labels and roles render from this release, beside the digested member.
           ...(declared && 'board' in declared && declared.board
-            ? { board: declared.board }
+            ? {
+                board: declared.board,
+                boardPresentation: boardPresentation(
+                  original as unknown as BoardSource,
+                  (declared.board as SurfaceBoard).body,
+                ),
+              }
             : {}),
           ...(declared && 'layouts' in declared && declared.layouts
             ? { layouts: declared.layouts }

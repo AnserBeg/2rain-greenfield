@@ -6,7 +6,9 @@ import {
 } from '../../../packages/canonical-model/src/layout.js';
 import { recordCatalogParse } from '../../../packages/runtime/src/catalog-parse-count.js';
 import {
+  BoardPresentationSchema,
   SurfaceBoardSchema,
+  type BoardPresentation,
   type SurfaceBoard,
   canonicalize,
   SurfaceCompositionSchema,
@@ -314,6 +316,8 @@ export function formFieldIds(
 export interface CompiledSurfaceDefinition {
   readonly popupActions?: readonly CompiledPopup[];
   readonly board?: SurfaceBoard;
+  /** The Board's labels and roles, compiled from this release beside `board`. */
+  readonly boardPresentation?: BoardPresentation;
   readonly layouts?: readonly SurfaceLayout[];
   readonly list?: SurfaceList;
   /**
@@ -1139,7 +1143,12 @@ function parseSurface(
 
   return Object.freeze({
     ...(archetype === 'board'
-      ? { board: SurfaceBoardSchema.parse(value.board) }
+      ? {
+          board: SurfaceBoardSchema.parse(value.board),
+          boardPresentation: BoardPresentationSchema.parse(
+            value.boardPresentation,
+          ),
+        }
       : {}),
     ...(value.composition === undefined
       ? {}

@@ -17,6 +17,11 @@ import {
   type AppliedCustomization,
 } from './apply.js';
 import { currentLayout, type LayoutReplay } from './layout-revision.js';
+import {
+  supersededBoardRevisions,
+  type BoardApplyProblem,
+  type BoardCheck,
+} from './board-revision.js';
 import type { CustomizationPatch, SingleCustomizationPatch } from './patch.js';
 import {
   UPGRADE_PATCH_KINDS,
@@ -309,6 +314,7 @@ export function replayCustomizationPatches(
   const failedLayouts = new Map<string, EditLocation>();
   const applied: SingleCustomizationPatch[] = [];
   const historical: SingleCustomizationPatch[] = [];
+  const superseded = supersededBoardRevisions(chain);
   for (const [patchIndex, change] of chain.entries()) {
     const origin = origins[patchIndex];
     if (origin?.parent) original = structuredClone(origin.parent);
@@ -388,7 +394,20 @@ export function replayCustomizationPatches(
             expected: { roleKey: patch.roleKey, active: true },
             observed: null,
           });
-        if (before && !layout)
+        // A Board checks its own bindings by stable ID, and only on the last
+        // revision of each Board surface (ADR-0086 items 4 and 5).
+        const board =
+          patch.kind === 'addBoardViewRevision'
+            ? {
+                check: (superseded.has(patch.revisionId)
+                  ? 'identity'
+                  : origin?.differentBase === false
+                    ? 'authoring'
+                    : 'structural') as BoardCheck,
+                problem: undefined as BoardApplyProblem | undefined,
+              }
+            : undefined;
+        if (before && !layout && !board)
           conflicts.push(...bindings(patch, before, target));
         if (patch.kind === 'addMapPlacement' && !conflicts.length) {
           const surface = target.get(patch.surfaceId);
@@ -430,9 +449,14 @@ export function replayCustomizationPatches(
         }
         if (!conflicts.length) {
           const trial = structuredClone(authored);
-          const outcome = applyOne(trial, patch, applied, layout);
+          const outcome = applyOne(trial, patch, applied, layout, board);
           if (outcome) {
-            if (layout && (layout.findings.length || layout.blocked.length)) {
+            if (board?.problem?.conflicts.length)
+              conflicts.push(...board.problem.conflicts);
+            else if (
+              layout &&
+              (layout.findings.length || layout.blocked.length)
+            ) {
               conflicts.push(...layout.findings);
               report.blocked.push(
                 ...layout.blocked.map((b) => ({
