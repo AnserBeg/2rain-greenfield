@@ -277,12 +277,24 @@ async function exerciseProof(
     ).rowCount,
     0,
   );
-  const attempts = await apply();
-  assert.deepEqual(await apply(), attempts);
+  const [attempts, repeatedAttempts] = await Promise.all([apply(), apply()]);
+  assert.deepEqual(repeatedAttempts, attempts);
   const receipt = (await a.identity.receipt(proof, a.handle)) as {
     attempts: string[];
     decidedAt: string;
+    request: string;
   };
+  const replay = await scoped(a.verifier, a.realm, (client) =>
+    consume(client, f, kind, proof),
+  );
+  assert.deepEqual(replay.rows[0]?.facts, {
+    receipt: {
+      reference: proof,
+      request: receipt.request,
+      decidedAt: receipt.decidedAt,
+      attempts,
+    },
+  });
   assert.deepEqual(receipt.attempts, attempts);
   assert.ok(receipt.decidedAt);
   const audit = await admin.query(

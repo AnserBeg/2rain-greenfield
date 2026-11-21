@@ -3,7 +3,7 @@ RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg
 DECLARE proof platform.staff_decision_proofs; s platform.staff_sessions; identity_key bytea; facts jsonb; observed timestamptz; target jsonb; journal_count integer; receipt jsonb; BEGIN
   IF current_setting('transaction_isolation') <> 'read committed' THEN
     RAISE EXCEPTION 'staff decision consumption requires READ COMMITTED'; END IF;
-  SELECT * INTO STRICT proof FROM platform.staff_decision_proofs WHERE proof_id=evidence FOR UPDATE;
+  SELECT * INTO STRICT proof FROM platform.staff_decision_proofs WHERE proof_id=evidence;
   IF (proof.tenant_id,proof.environment_id,proof.company_id,proof.decision_kind) IS DISTINCT FROM (t,e,company,kind)
     OR t IS DISTINCT FROM nullif(current_setting('north_star.tenant_id',true),'')::uuid
     OR e IS DISTINCT FROM nullif(current_setting('north_star.environment_id',true),'')::uuid
@@ -12,8 +12,8 @@ DECLARE proof platform.staff_decision_proofs; s platform.staff_sessions; identit
   s := north_star_internal.staff_decision_session(t,e,identity_key);
   IF s.principal_id IS DISTINCT FROM proof.principal_id OR sha256(s.identity_digest) IS DISTINCT FROM proof.session_generation
     THEN RAISE EXCEPTION 'decision session changed'; END IF;
-  -- Serialize consumers on the immutable proof. A committed decision is a read
-  -- of its original receipt, even after the reviewed target ceases to be pending.
+  -- The session row lock serializes consumers and revocation. A committed
+  -- decision can return its receipt after the target ceases to be pending.
   SELECT jsonb_build_object('receipt',jsonb_build_object(
     'reference',d.proof_id,'request',d.request_id,'decidedAt',d.decided_at,'attempts',coalesce((
       SELECT jsonb_agg(a.activation_attempt_id ORDER BY array_position(proof.target_ids,a.preparation_id))
