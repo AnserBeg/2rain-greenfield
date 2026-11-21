@@ -580,6 +580,51 @@ test('shared communication writer', async (t) => {
         );
 
         await t.test(
+          'the shipped physical Party Role link requires the Party exact read',
+          async () => {
+            const options = {
+              record: 'supplier-role',
+              entity: 'northstar.app:entity.party_role',
+              bindings: ['northstar.app:relation.party_role_party'],
+            };
+            await begin(left);
+            const ticket = await admit(left, discussion, options);
+            await left.query(
+              'SELECT platform.communication_register_discussion($1)',
+              [ticket],
+            );
+            const thread = await resolveThread(left, ticket);
+            await left.query('COMMIT');
+            const { rows } = await admin.query(
+              "SELECT entity_id FROM platform.communication_record_links WHERE thread_id=$1 AND record_id=md5('supplier')::uuid",
+              [thread],
+            );
+            assert.deepEqual(rows, [
+              { entity_id: 'northstar.app:entity.party' },
+            ]);
+
+            const partyRead = 'northstar.app:permission.party_read';
+            await admin.query(
+              'UPDATE platform.current_policy_permission_grants SET revoked_at=now() WHERE permission_id=$1',
+              [partyRead],
+            );
+            try {
+              await begin(left);
+              await assert.rejects(
+                admit(left, discussion, options),
+                { code: 'P0001', message: 'communication.unavailable' },
+                'unreadable physical Party link admitted',
+              );
+            } finally {
+              await left.query('ROLLBACK');
+              await admin.query(
+                'UPDATE platform.current_policy_permission_grants SET revoked_at=NULL WHERE permission_id=$1',
+                [partyRead],
+              );
+            }
+          },
+        );
+        await t.test(
           'the scope guard covers a shared record independently of its write grant',
           async () => {
             await begin(admin, 'west');
@@ -1047,6 +1092,65 @@ test('shared communication writer', async (t) => {
             );
             assert.equal((await participants(left, ticket, id)).length, 2);
             await left.query('ROLLBACK');
+          },
+        );
+        await t.test(
+          'staff deactivation serializes with admission under the policy epoch',
+          async () => {
+            await admin.query(`
+              INSERT INTO platform.current_policy_roles(tenant_id,environment_id,role_id,role_key)
+                VALUES(md5('tenant')::uuid,md5('env')::uuid,md5('staff-owner')::uuid,'staff-owner');
+              INSERT INTO platform.current_policy_memberships(tenant_id,environment_id,membership_id,principal_id,role_id)
+                VALUES(md5('tenant')::uuid,md5('env')::uuid,gen_random_uuid(),md5('staff')::uuid,md5('staff-owner')::uuid);
+            `);
+            await begin(left);
+            await admit(left, email, { staff: [] }); // First admission holds the epoch for the batch.
+            await begin(right);
+            await right.query('SET LOCAL ROLE north_star_identity');
+            await right.query(
+              "SELECT FROM platform.staff_accounts WHERE principal_id=md5('west')::uuid FOR UPDATE",
+            );
+            const revocation = right.query(
+              "SELECT platform.staff_disable_memberships(md5('tenant')::uuid,md5('env')::uuid,md5('west')::uuid,md5('staff')::uuid)",
+            );
+            void revocation.catch(() => {});
+            try {
+              const start = performance.now();
+              while (
+                (await scalar(
+                  admin,
+                  'SELECT ($1=ANY(pg_blocking_pids($2)))::text AS value',
+                  [leftPid, rightPid],
+                )) !== 'true'
+              ) {
+                assert.ok(
+                  performance.now() - start < 30000,
+                  'deactivation did not wait for admission',
+                );
+                await pause(10);
+              }
+              const ticket = await direct(left, 'west');
+              const thread = await resolveThread(left, ticket);
+              assert.equal(
+                (await participants(left, ticket, thread)).length,
+                2,
+              );
+              await left.query('COMMIT');
+              await revocation;
+              await right.query(
+                "UPDATE platform.staff_accounts SET status='inactive' WHERE principal_id=md5('west')::uuid",
+              );
+              await right.query('COMMIT');
+            } finally {
+              await left.query('ROLLBACK');
+              await revocation.catch(() => {});
+              await right.query('ROLLBACK');
+            }
+            await begin(left);
+            await assert.rejects(direct(left, 'west'), {
+              code: 'P0001',
+              message: 'communication.unavailable',
+            });
           },
         );
       } finally {

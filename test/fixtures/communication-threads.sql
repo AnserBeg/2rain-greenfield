@@ -1,22 +1,24 @@
--- Extend the booking fixture with the shipped PO Record, supplier picker and Party
--- get from the compiled first-party release. Use their actual storage mappings.
+-- Use the shipped PO supplier picker and Party Role relation with their actual storage mappings.
 DO $fixture$
 DECLARE
   t uuid:=md5('tenant')::uuid; e uuid:=md5('env')::uuid; r uuid:=md5('thread-release')::uuid;
   rev uuid:=md5('thread-package')::uuid; actor uuid:=md5('staff')::uuid; role uuid:=md5('role')::uuid;
   app jsonb; storage jsonb; shipped jsonb; spec jsonb; supplier_col text; query jsonb; h text; manifest text;
-  source text; perm text;
+  source text; perm text; party_relation jsonb;
 BEGIN
   SELECT definition,mapping INTO STRICT app,shipped FROM pg_temp.communication_release_fixture;
   storage:=north_star_internal.booking_projection(t,e,md5('release')::uuid,'storageTargetPayload');
+  SELECT v INTO STRICT party_relation FROM jsonb_array_elements(shipped->'relations') v
+    WHERE v->>'relationId'='northstar.app:relation.party_role_party';
+  storage:=jsonb_set(storage,'{relations}',(storage->'relations')||jsonb_build_array(party_relation));
   -- Keep every competing Record/get for these entities while bounding fixture work.
   app:=jsonb_build_object('permissions',app->'permissions','queries',(SELECT jsonb_agg(q) FROM jsonb_array_elements(app->'queries') q
-      WHERE q#>>'{sourceEntity,targetId}' IN ('northstar.app:entity.purchase_order','northstar.app:entity.party') OR q->>'queryId' IN ('northstar.app:query.commercial_purchase_lines','northstar.app:query.purchase_order_line_list')),
+      WHERE q#>>'{sourceEntity,targetId}' IN ('northstar.app:entity.purchase_order','northstar.app:entity.party','northstar.app:entity.party_role') OR q->>'queryId' IN ('northstar.app:query.commercial_purchase_lines','northstar.app:query.purchase_order_line_list')),
     'surfaces',(SELECT jsonb_agg(s) FROM jsonb_array_elements(app->'surfaces') s WHERE s->>'surfaceRole'='record'
       AND s#>>'{dataSource,targetId}' IN (SELECT q->>'queryId' FROM jsonb_array_elements(app->'queries') q
-        WHERE q#>>'{sourceEntity,targetId}' IN ('northstar.app:entity.purchase_order','northstar.app:entity.party'))),
+        WHERE q#>>'{sourceEntity,targetId}' IN ('northstar.app:entity.purchase_order','northstar.app:entity.party','northstar.app:entity.party_role'))),
     'relations',(SELECT jsonb_agg(v) FROM jsonb_array_elements(app->'relations') v
-      WHERE v#>>'{targetEntity,targetId}'='northstar.app:entity.purchase_order')||jsonb_build_array(jsonb_build_object('relationId','example.booking:relation.account','lifecycle','active','joinEligibility','query',
+      WHERE v#>>'{targetEntity,targetId}'='northstar.app:entity.purchase_order' OR v->>'relationId'=party_relation->>'relationId')||jsonb_build_array(jsonb_build_object('relationId','example.booking:relation.account','lifecycle','active','joinEligibility','query',
       'sourceEntity',jsonb_build_object('targetId','example.booking:entity.visit'),'targetEntity',jsonb_build_object('targetId','example.booking:entity.account'))));
   FOR source,perm IN VALUES ('visit','visit'),('account','account_detail'),('asset','asset') LOOP
     query:=jsonb_build_object('queryId','example.booking:query.'||source,'tier','q0','lifecycle','active','queryType','get',
@@ -28,7 +30,7 @@ BEGIN
     app:=jsonb_set(app,'{queries}',(app->'queries')||jsonb_build_array(query));
   END LOOP;
   FOR spec IN SELECT value FROM jsonb_array_elements(shipped->'entities') WHERE value->>'entityId' IN
-    ('northstar.app:entity.purchase_order','northstar.app:entity.party') LOOP
+    ('northstar.app:entity.purchase_order','northstar.app:entity.party','northstar.app:entity.party_role') LOOP
     storage:=jsonb_set(storage,'{entities}',(storage->'entities')||jsonb_build_array(spec));
     IF spec->>'entityId'='northstar.app:entity.purchase_order' THEN
       SELECT c->>'physicalName' INTO STRICT supplier_col FROM jsonb_array_elements(spec->'columns') c
@@ -37,6 +39,10 @@ BEGIN
       EXECUTE format('INSERT INTO north_star_module.%I VALUES ($1,$2,md5(''order'')::uuid,NULL,md5(''company0'')::uuid,$3),
         ($1,$2,md5(''bad-order'')::uuid,NULL,md5(''company0'')::uuid,''not a record'')',spec->>'physicalTableName')
         USING t,e,md5('supplier')::uuid::text;
+    ELSIF spec->>'entityId'='northstar.app:entity.party_role' THEN
+      EXECUTE format('CREATE TABLE north_star_module.%I(tenant_id uuid,environment_id uuid,record_id uuid,archived_at timestamptz,%I uuid)',
+        spec->>'physicalTableName',party_relation#>>'{relationColumn,physicalName}');
+      EXECUTE format('INSERT INTO north_star_module.%I VALUES ($1,$2,md5(''supplier-role'')::uuid,NULL,md5(''supplier'')::uuid)',spec->>'physicalTableName') USING t,e;
     ELSE
       EXECUTE format('CREATE TABLE north_star_module.%I(tenant_id uuid,environment_id uuid,record_id uuid,archived_at timestamptz)',spec->>'physicalTableName');
       EXECUTE format('INSERT INTO north_star_module.%I VALUES ($1,$2,md5(''supplier'')::uuid,NULL)',spec->>'physicalTableName') USING t,e;
@@ -71,6 +77,9 @@ BEGIN
       ('northstar.app:permission.purchase_order_line_read','northstar.app:entity.purchase_order_line'),
       ('northstar.app:permission.purchase_order_read','northstar.app:entity.purchase_order'),
       ('northstar.app:permission.party_read','northstar.app:entity.party'),
+      ('northstar.app:permission.party_role_read','northstar.app:entity.party_role'),
+      ('northstar.app:permission.discussion_post_party_role','northstar.app:entity.party_role'),
+      ('northstar.app:permission.read_relation_party_role_party','northstar.app:relation.party_role_party'),
       ('northstar.app:permission.discussion_post_purchase_order','northstar.app:entity.purchase_order'),
       ('northstar.app:permission.discussion_post_party','northstar.app:entity.party')) g;
 END $fixture$;

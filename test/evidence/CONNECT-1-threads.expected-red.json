@@ -490,6 +490,11 @@
           "file": "test/postgres/communication-threads.test.ts",
           "name": "the shipped Purchase Order supplier resolves through its Party get",
           "expected": "northstar.app:permission.party_read"
+        },
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "the shipped physical Party Role link requires the Party exact read",
+          "expected": "unreadable physical Party link admitted"
         }
       ]
     },
@@ -536,8 +541,8 @@
       "name": "thread-live-staff",
       "claim": "A current role cannot admit an inactive staff account.",
       "file": "db/migrations/0060_communication_threads.sql",
-      "original": " AND status='active' FOR SHARE;",
-      "replacement": " FOR SHARE;",
+      "original": " AND a.status='active'",
+      "replacement": " AND true",
       "test": {
         "files": ["test/postgres/communication-threads.test.ts"]
       },

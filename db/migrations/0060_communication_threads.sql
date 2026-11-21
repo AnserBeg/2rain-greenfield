@@ -137,35 +137,36 @@ DECLARE a platform.communication_admission; BEGIN
     THEN RAISE EXCEPTION 'communication.unavailable'; END IF;
   RETURN a; END $$;
 CREATE FUNCTION north_star_internal.communication_check_staff(company uuid, staff uuid[]) RETURNS void
-LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp AS $$
-DECLARE person uuid; BEGIN
-  FOR person IN SELECT DISTINCT s FROM unnest(staff) s ORDER BY s LOOP
-    PERFORM FROM platform.staff_accounts WHERE (tenant_id,environment_id,principal_id)=
-      (north_star_internal.trusted_tenant_id(),north_star_internal.trusted_environment_id(),person)
-      AND status='active' FOR SHARE;
-    IF NOT FOUND THEN RAISE EXCEPTION 'communication.unavailable'; END IF; END LOOP;
+LANGUAGE plpgsql STABLE SET search_path = pg_catalog, pg_temp AS $$ BEGIN
+  -- Deactivation locks the account before revoking membership under the epoch.
+  -- Admission already holds that epoch, so read both facts in one snapshot.
   IF EXISTS (SELECT FROM unnest(staff) s WHERE NOT EXISTS (
     SELECT FROM platform.current_policy_memberships m JOIN platform.current_policy_roles r USING (tenant_id,environment_id,role_id)
+    JOIN platform.staff_accounts a USING (tenant_id,environment_id,principal_id)
     WHERE (m.tenant_id,m.environment_id,m.principal_id)=(north_star_internal.trusted_tenant_id(),north_star_internal.trusted_environment_id(),s)
+      AND a.status='active'
       AND m.revoked_at IS NULL AND r.revoked_at IS NULL AND (m.legal_entity_id IS NULL OR m.legal_entity_id=company)))
     THEN RAISE EXCEPTION 'communication.unavailable'; END IF; END $$;
--- A record surface pins the governing get. A target without a surface can use
--- its unique ordinary exact get, or the exact get pinned by a reference picker.
-CREATE FUNCTION north_star_internal.communication_exact_query(app jsonb, entity text, pinned text DEFAULT NULL)
+-- A picker or Record pins its get. For a physical link, a Record model without
+-- a company operand resolves through the unique ordinary get with the same permission.
+CREATE FUNCTION north_star_internal.communication_exact_query(app jsonb, entity text, pinned text DEFAULT NULL, physical_relation boolean DEFAULT false)
 RETURNS jsonb LANGUAGE plpgsql IMMUTABLE SET search_path = pg_catalog, pg_temp AS $$
-DECLARE q jsonb; qid text:=pinned; BEGIN
+DECLARE q jsonb; qid text:=pinned; surface_query jsonb; BEGIN
   IF qid IS NULL THEN
-    SELECT min(v->>'queryId') INTO STRICT qid FROM jsonb_array_elements(app->'queries') v
-      JOIN jsonb_array_elements(app->'surfaces') s ON s#>>'{dataSource,targetId}'=v->>'queryId'
-      WHERE v#>>'{sourceEntity,targetId}'=entity AND s->>'surfaceRole'='record' AND s->>'lifecycle'='active'
-      HAVING count(DISTINCT v->>'queryId')<=1; END IF;
+    surface_query:=(SELECT v FROM jsonb_array_elements(app->'queries') v WHERE v#>>'{sourceEntity,targetId}'=entity
+      AND EXISTS (SELECT FROM jsonb_array_elements(app->'surfaces') s WHERE s#>>'{dataSource,targetId}'=v->>'queryId'
+        AND s->>'surfaceRole'='record' AND s->>'lifecycle'='active'));
+    qid:=surface_query->>'queryId';
+    IF physical_relation AND surface_query ? 'readModel' AND NOT surface_query ? 'legalEntityScope'
+      AND surface_query->>'lifecycle'='active' AND surface_query->>'queryType'='get' THEN qid:=NULL; END IF; END IF;
   SELECT v INTO STRICT q FROM jsonb_array_elements(app->'queries') v
     WHERE v#>>'{sourceEntity,targetId}'=entity AND (qid IS NULL AND NOT v ? 'readModel' OR v->>'queryId'=qid)
+      AND (surface_query IS NULL OR (v->'permission',v->'filter')=(surface_query->'permission',surface_query->'filter'))
       AND v->>'lifecycle'='active' AND v->>'tier'='q0' AND v->>'queryType'='get' AND v->>'maximumResultCount'='1'
       AND v#>>'{filter,kind}'='booleanPredicate' AND v#>>'{filter,value}'='true'
       AND (NOT v ? 'readModel' OR (v ? 'legalEntityScope' AND v#>>'{readModel,queries,lines,targetId}' IS NOT NULL));
   RETURN q;
-EXCEPTION WHEN no_data_found OR too_many_rows THEN RAISE EXCEPTION 'communication.unavailable'; END $$;
+EXCEPTION WHEN no_data_found OR too_many_rows OR cardinality_violation THEN RAISE EXCEPTION 'communication.unavailable'; END $$;
 
 -- Re-enter the same gateway, query resource and scope as the exact get. The
 -- document get also requires the lines owned by its released Record editor.
@@ -234,7 +235,7 @@ DECLARE spec jsonb; binding text; edge jsonb; target_entity text; pinned text; c
       col,spec->>'physicalTableName') INTO target USING north_star_internal.trusted_tenant_id(),north_star_internal.trusted_environment_id(),id;
     IF target IS NULL THEN RAISE EXCEPTION 'communication.unavailable'; END IF;
     result:=result || jsonb_build_object(binding,jsonb_build_object('entityId',target_entity,'recordId',target,'queryId',
-      north_star_internal.communication_exact_query(app,target_entity,pinned)->>'queryId')); END LOOP;
+      north_star_internal.communication_exact_query(app,target_entity,pinned,edge IS NOT NULL)->>'queryId')); END LOOP;
   RETURN result;
 EXCEPTION WHEN no_data_found OR too_many_rows OR invalid_text_representation THEN RAISE EXCEPTION 'communication.unavailable'; END $$;
 
@@ -419,7 +420,7 @@ DECLARE a platform.communication_admission:=north_star_internal.communication_ad
   UPDATE pg_temp.communication_admissions t SET thread_id=communication_lock_thread.id WHERE t.id=ticket; END $$;
 REVOKE ALL ON FUNCTION north_star_internal.communication_before_threads(),north_star_internal.communication_admission_table(),
   north_star_internal.communication_related(jsonb,jsonb,jsonb,text,uuid,text[]),
-  north_star_internal.communication_exact_query(jsonb,text,text),north_star_internal.communication_check_read(uuid,uuid,jsonb,jsonb),
+  north_star_internal.communication_exact_query(jsonb,text,text,boolean),north_star_internal.communication_check_read(uuid,uuid,jsonb,jsonb),
   north_star_internal.communication_require_anchor(platform.communication_admission),
   north_star_internal.communication_ticket(platform.communication_admission),
   north_star_internal.communication_admitted(uuid),north_star_internal.communication_check_staff(uuid,uuid[]),
