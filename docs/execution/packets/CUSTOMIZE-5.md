@@ -64,17 +64,18 @@ Status: executable; integrates on a full green of the exact integration commit. 
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-5",
-  "base": "af102f7a79f8e97a469a7ca48ec0e10fb2d04a54",
-  "head": "c863d87677a79d498088f503384243eef1f2efb5",
+  "base": "0a9f7ca52304969c65092893f50375c90f8c2265",
+  "head": "933edd4c4181488d5fbb094706391b1d70d2e5b3",
   "changedPaths": [
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/date-time-field.ts", "apps/web/src/surface-composition.ts", "apps/web/src/surface-runtime.ts", "db/migrations/0059_date_time_window_probe.sql",
-    "db/schema.snapshot.json", "docs/execution/packets/CUSTOMIZE-5.md", "package.json", "packages/canonical-model/src/date-time-field.ts", "packages/canonical-model/src/formula-validation-bindings.ts", "packages/canonical-model/src/index.ts",
-    "packages/canonical-model/src/normalize.ts", "packages/canonical-model/src/schemas.ts", "packages/compiler/src/compiler.ts", "packages/compiler/src/date-time.ts", "packages/compiler/src/formula-validation-examples.ts", "packages/compiler/src/projections.ts",
-    "packages/compiler/src/storage.ts", "packages/customization/src/ai-draft.ts", "packages/customization/src/apply.ts", "packages/customization/src/patch.ts", "packages/customization/src/upgrade-diagnostics.ts", "packages/customization/src/upgrade-replay.ts",
-    "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/date-time-admission.ts", "packages/postgres-provider/src/date-time-storage.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/module-storage-materializer.ts", "packages/postgres-provider/src/release-verification-service.ts",
-    "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/runtime/src/formula-validation.ts", "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-operation-gateway.ts", "packages/runtime/src/semantic-query-gateway.ts", "test/evidence/CUSTOMIZE-5.expected-red.json",
-    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/archived-customization-runtime.ts", "test/postgres/date-time-field.test.ts", "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts",
-    "test/postgres/request-runtime-view.test.ts", "test/postgres/trust-substrate.test.ts", "test/unit/customization-upgrade.test.ts", "test/unit/date-time-field.test.ts"
+    "db/schema.snapshot.json", "docs/execution/packets/CUSTOMIZE-5.md", "package.json", "packages/canonical-model/src/date-time-field.ts", "packages/canonical-model/src/formula-validation-bindings.ts", "packages/canonical-model/src/formula-validation-projection.ts",
+    "packages/canonical-model/src/index.ts", "packages/canonical-model/src/normalize.ts", "packages/canonical-model/src/schemas.ts", "packages/compiler/src/compiler.ts", "packages/compiler/src/date-time.ts", "packages/compiler/src/formula-validation-examples.ts",
+    "packages/compiler/src/projections.ts", "packages/compiler/src/storage.ts", "packages/customization/src/ai-draft.ts", "packages/customization/src/apply.ts", "packages/customization/src/patch.ts", "packages/customization/src/upgrade-diagnostics.ts",
+    "packages/customization/src/upgrade-replay.ts", "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/date-time-admission.ts", "packages/postgres-provider/src/date-time-storage.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/module-storage-materializer.ts",
+    "packages/postgres-provider/src/release-verification-service.ts", "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/runtime/src/formula-validation.ts", "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-operation-gateway.ts", "packages/runtime/src/semantic-query-gateway.ts",
+    "test/architecture/release-persistence-boundary.test.ts", "test/architecture/repository-hygiene.test.ts", "test/evidence/CUSTOMIZE-5.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/archived-customization-runtime.ts", "test/postgres/date-time-field.test.ts",
+    "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts", "test/postgres/request-runtime-view.test.ts", "test/postgres/trust-substrate.test.ts", "test/unit/customization-upgrade.test.ts",
+    "test/unit/date-time-field.test.ts"
   ],
   "symbols": [
     {"path": "packages/canonical-model/src/date-time-field.ts", "name": "resolveTypedEntry"},
