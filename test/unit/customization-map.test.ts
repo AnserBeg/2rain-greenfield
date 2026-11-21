@@ -3,7 +3,10 @@ import { parseCompiledApplication } from '../../packages/postgres-provider/src/c
 import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
-import { readMapSlots, renderMapStopList } from '../../apps/web/src/map-view.js';
+import {
+  readMapSlots,
+  renderMapStopList,
+} from '../../apps/web/src/map-view.js';
 import {
   mapBindingsProblem,
   mapDeclarationProblem,
