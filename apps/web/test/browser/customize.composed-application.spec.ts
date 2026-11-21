@@ -1,4 +1,8 @@
 import { performance } from 'node:perf_hooks';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { require as loadFixture } from 'tsx/cjs/api';
+import type * as ApplicationFixture from '../../../../test/helpers/application-without-line-create-values.js';
 
 import { expect, test } from '@playwright/test';
 
@@ -748,11 +752,22 @@ test('a person groups Inspection outcomes, renames and retires the report, and r
 }) => {
   test.setTimeout(900_000);
   const COMPANY = COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId;
+  // Publish through the real verifier. Historical first-party releases are exercised separately.
+  const { singleTransitionApplication }: typeof ApplicationFixture =
+    loadFixture(
+      './test/helpers/application-without-line-create-values.ts',
+      resolve('package.json'),
+    );
+  const authored = JSON.parse(
+    readFileSync(resolve('apps/web/release/app.authored.json'), 'utf8'),
+  );
+  const compiledApplication = singleTransitionApplication(authored).release;
   await withEphemeralPostgres(
     'report-inspection-browser',
     async ({ connection }) => {
       const options = {
         tenantSlug: 'inspection-reports',
+        compiledApplication,
         databaseUrl: `postgresql://postgres@127.0.0.1:${connection.port}/postgres`,
       };
       const app = await startComposedApplication({ ...options, port: 0 });
@@ -806,10 +821,13 @@ test('a person groups Inspection outcomes, renames and retires the report, and r
         const publish = async () => {
           await page
             .getByRole('button', { name: 'Approve', exact: true })
-            .click({ timeout: 180_000 });
+            .click({ noWaitAfter: true });
+          await expect(
+            page.getByRole('heading', { name: 'Approved', exact: true }),
+          ).toBeVisible({ timeout: 180_000 });
           await page
             .getByRole('button', { name: 'Activate now' })
-            .click({ timeout: 180_000 });
+            .click({ noWaitAfter: true });
           await expect(
             page.locator('[data-customize-result="activated"]'),
           ).toBeVisible({ timeout: 180_000 });
