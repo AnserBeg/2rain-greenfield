@@ -4,7 +4,7 @@
 set -euo pipefail
 [[ ${GITHUB_ACTIONS:-} == true ]]
 umask 077
-transport=$(mktemp -d "$RUNNER_TEMP/analysis-ssh-XXXXXX")
+transport=$(mktemp -d "$HOME/analysis-ssh-XXXXXX")
 ssh-keygen -q -t ed25519 -N '' -f "$transport/server"
 ssh-keygen -q -t ed25519 -N '' -f "$transport/client"
 echo "[127.0.0.1]:22022 $(cat "$transport/server.pub")" >"$transport/known_hosts"
@@ -17,12 +17,17 @@ Host analysis-fixture
   IdentitiesOnly yes
   UserKnownHostsFile $transport/known_hosts
 EOF
+sudo install -d -m 0755 -o root -g root /run/sshd
 sudo /usr/sbin/sshd -f /dev/null -E "$transport/server.log" -p 22022 \
   -o ListenAddress=127.0.0.1 -o PidFile="$transport/pid" -o HostKey="$transport/server" \
   -o AuthorizedKeysFile="$transport/client.pub" -o AllowUsers="$(id -un)" \
   -o AuthenticationMethods=publickey -o PasswordAuthentication=no -o PermitTTY=no \
-  -o DisableForwarding=yes -o ForceCommand="$GITHUB_WORKSPACE/analysis/analysis-worker"
+  -o DisableForwarding=yes -o ForceCommand="$GITHUB_WORKSPACE/analysis/analysis-worker" || {
+  sudo cat "$transport/server.log"
+  exit 1
+}
 cleanup() {
+  if [[ $? != 0 ]]; then sudo cat "$transport/server.log"; fi
   sudo kill "$(cat "$transport/pid")"
   rm -rf "$transport"
 }
