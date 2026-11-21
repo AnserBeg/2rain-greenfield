@@ -6,7 +6,9 @@
 
 The Invoice date query uses `nsm_i_kyu3zu6vouaduhmjm5lbunvswejls2t4ls5svgycueyib3fqieka`. The provider probe, row policy, group ceiling, unavailable index, and pre-key byte identity have focused PostgreSQL/compiler witnesses. The actual Invoice page and downloaded bytes share the registered query. A failed audit append withholds the download. [Regression controls](../../../test/evidence/REPORTS-1-s1.expected-red.json)
 
-The preview and approved locking build both call `north_star_internal.module_table_exceeds(text, integer)`. CUSTOMIZE-5 slice 1 supplies this pooled-table probe. On main `630e2aa6` the probe is absent and a publish requiring that build refuses with the keys. The hosted run passed the archived production query, persisted pre-key replay, historical Invoice source upgrade and PostgreSQL candidate-bound proof. It refused the Invoice report at preview with REPORT_INDEX_UNAVAILABLE. CUSTOMIZE-5 must land before REPORTS-1 enters the merge line.
+Preview and activation use CUSTOMIZE-5’s pooled-table probe from migration 0061. The approved attempt checks the ceiling under the table lock. The predecessor at `af255bf7` supports surface rung 39. The optional company access key requires 40, the Invoice source binding 41 and grouped reports 42. The historical fixtures issue a governed query through that predecessor.
+
+Grouped table and CSV output, scoped index admission and revision replay serve distribution (Invoices), field service (Inspections) and clinics (visits). Each business selects its record type, operands and labels in the declaration.
 
 CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44888115668
 
@@ -21,7 +23,7 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44888115
 
 ## Test it yourself
 
-**Today · five-minute design check.** Open the ADR alongside this table. Use the example facts and expected results below to check each decision. The executable walkthroughs become available with their respective slices.
+**Slice 1 · Try it in Customize.** Open Add report from the source list, choose a group and measure, enable CSV, then approve and activate. Use the two fixtures below to check the result.
 
 | Slice | Try it after the slice ships | Expected observation |
 | --- | --- | --- |
@@ -45,7 +47,7 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44888115
 
 ## Slice 1 drafting evaluation
 
-2026-11-21 · Rule 12 exception, REPORTS-1 BUILD lane. The in-app drafter derives the report member from its schema. Its Invoice case in `test/unit/customization-ai-draft.test.ts` also exercises refusal of an unavailable operand source. The live module-building runner is in AI-BUILD-1 slice 2 and is absent from the current main (`630e2aa6`). At integration with that runner, register these cases under the report member.
+2026-11-21 · Rule 12 exception, REPORTS-1 BUILD lane. The in-app drafter derives the report member from its schema. Its Invoice case in `test/unit/customization-ai-draft.test.ts` also exercises refusal of an unavailable operand source. The live module-building runner is in AI-BUILD-1 slice 2 and is absent from the fetched main (`af255bf7`). At integration with that runner, register these cases under the report member.
 
 | User request | Required grading observation |
 | --- | --- |

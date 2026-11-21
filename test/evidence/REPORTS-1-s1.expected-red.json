@@ -42,8 +42,8 @@
       "name": "reports-company-index-floor",
       "claim": "A release that introduces the optional entity key requires the new surface reader.",
       "file": "packages/compiler/src/projections.ts",
-      "original": "(entity) => 'companyAccessIndex' in entity && entity.companyAccessIndex,",
-      "replacement": "() => false,",
+      "original": "'companyAccessIndex' in entity && entity.companyAccessIndex,",
+      "replacement": "false,",
       "test": {
         "files": ["test/compiler/report-company-access.test.ts"],
         "namePattern": "the new Inspection"
