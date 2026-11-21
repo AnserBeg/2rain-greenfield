@@ -94,6 +94,12 @@ jobs:
         run: corepack enable
       - name: Install frozen dependencies
         run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      # The document-template suite includes the compiled production launcher
+      # case, which is skipped without dist/ and so would leave the restored
+      # suite short of wholly green.
+      - name: Build the compiled application for document controls
+        if: startsWith(matrix.control, 'generated-pdf-') || startsWith(matrix.control, 'documents-')
+        run: corepack pnpm build
       # The runner's own rules apply unchanged: mutation first, the declared
       # kills with their declared reasons, then the restored suite wholly green.
       # The step bound leaves the job's last minutes for the report below.
