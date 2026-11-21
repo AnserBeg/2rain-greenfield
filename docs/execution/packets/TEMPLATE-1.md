@@ -1,6 +1,6 @@
 # TEMPLATE-1 — Start a record from an assigned template revision
 
-Slice 0 · Proposed design, 2026-11-21 · Documentation only · Stop for the requested design read. The ADR number is assigned at merge.
+Slice 0 · Documentation only · Amended once after the independent read on 2026-11-21. The ADR number is assigned at merge. [Design](../../decisions/ADR-XXXX-record-templates.md)
 
 ## Claims for the read
 
@@ -14,47 +14,47 @@ Slice 0 · Proposed design, 2026-11-21 · Documentation only · Stop for the req
 | --- | --- | --- | --- |
 | Add immutable content revisions and context assignments | Checklist for a lift class | Grid for booklet jobs | Contact roles for primary enrolments |
 | Add atomic application with a revision receipt and individually owned answers | Inspection results | Quantities and steps on a job ticket | People selected for one pupil |
-| Reuse typed fields, declared links, owned lines, record composition and scoped operations | Result and note per question | Named columns over editable lines | Named sections with authorized contact links |
+| Extend the declared editor and detail slots to present pinned groups and columns over owned lines | Typed result and note per question | Selected columns over editable steps | Empty or populated role sections with a Person picker |
+| Reuse scoped operations and in-app drafting for bindings and business content | Draft questions and start a check | Draft a grid and start a ticket | Draft roles and start an enrolment |
 
 The audit identifies 12 survey rows, A16, A18, A24, A27, B3, C6, C8, C9, F2, F4, F6 and F9. A kit contributes suggested members and a standard job contributes instructions. Stock issue, scheduling and safety release each retain their own operation. [Generality audit, Part B](/home/rvham/2rain-missions/generality-audit.astra.result.md) · [Survey](/home/rvham/2rain-missions/rain-survey/inventory.md)
 
-## Decisions proposed in the ADR
+## Launch decisions
 
-1. Release a typed binding and publish business content as data. A schema release for each wording change would burden the author.
-2. Resolve one explicit assignment per company, type, binding and context. Choosing the latest revision would silently change tomorrow’s records.
-3. Keep an immutable source revision and fresh owned rows. A live template could rewrite the past, while a detached copy loses provenance.
-4. Grant publishing, assigning, applying and answering separately. Inheriting an author’s rights would widen the worker’s access.
-5. Create the parent, application, rows, audit and receipt in one transaction. A sequence of client saves could leave a half-filled checklist.
-6. The consuming lifecycle owns its release guard. A shared inspection rule would impose a safety policy on printers and schools.
-7. Replay binding choices by stable IDs and check reader compatibility. Rebuilding revisions from current labels would break unrelated edits.
+1. The owner chose one library per company. Publication uses the library’s stored company. Assignment verifies ownership of the context and revision.
+2. Workers must use the exact required assignment. Attempt a different readable revision and an empty required context. Both refuse. After the assigner repairs the missing assignment, a fresh worker preview succeeds.
 
 ## Slices and acceptance
 
 | Slice | What a worker can do | Evidence at that checkpoint |
 | --- | --- | --- |
-| 0 · Design read | Trace the three records on paper. | Use the walkthrough below and review the two owner choices. |
-| 1 · Publish and assign | Create a binding in Customize, publish a template and assign it to a class. | Show the plain-English and visual paths, preview/diff, permission refusals, competing revisions and compatibility gates in decision 7. |
-| 2 · Equipment safety | Create and answer the two inspections across a change. | Read back I-17 and I-18 through the normal form and governed query. Exercise a retry, a partial-write failure and a denied apply. Confirm the release boundary in decision 6. |
-| 3 · Print and school | Create two tickets and two enrolments across different revisions. | Read back both generations in each business after retirement. Run each proof through the same declared bindings and operations, using distinct business IDs. |
+| 0 · Design amendment | Trace the three records on paper. | Use the five-minute walkthrough below. |
+| 1 · Publish and assign | Create a binding in Customize, publish a template and assign it to a class. | Compare visual and plain-English drafts, race two publications of one predecessor, check source/audience, company scope, assignment locks and the declaring merge gates. |
+| 2 · Equipment safety | Create and answer the two inspections across a change. | Exercise atomic creation, assistant confirmation, retries, Release refusal and historical reads. |
+| 3 · Print and school | Create two tickets and two enrolments across different revisions. | Read back both generations in each business after retirement using the same declared slots and operations with distinct business IDs. |
 
-## Controls for executable slices
+## Amendment rules and executable acceptance tests
 
-- Reassign after a lost create response. With authorized retry, assert one header, one application, one set of children and one creation receipt/audit event. Change an answer before retry and verify it survives. Inject a failure on the last seed and assert zero committed creation facts.
-- Use two companies in one tenant/environment, the correct stored owner and a principal limited to the other company. Exercise create, direct apply, preview and retry. Independently remove the company check and the apply-grant check against fixtures that isolate each refusal.
-- After publishing revision 2, compare each old record’s member keys, authored captions, order, original revision and edited values. Substitute the active revision in the reader and require the old-record assertion to fail.
+- **A1 · Editor and detail.** Run all three ADR walkthroughs through the generated views. Compare the pinned field/relation IDs, captions, group keys/order, distinct child IDs and edited values. Exercise explicit source column/row selection, changed column order and a picker in each empty role section. Verify Legal guardian retains Guardian’s key. Substituting the current assignment for the pin must fail the old-record assertions.
+- **A2 · Release.** Validate supplied choices on write and permit incomplete drafts. With the guard absent, submit a complete passing quarantined inspection through the UI, assistant and direct CUSTOMIZE-4 Release operation. All refuse with a capability gap and retain Quarantined. Enabling Release requires the decision 6 matrix for missing rows/answers, illegal N/A, missing notes, blocking Fail with a note and one valid release. Race answer edits in both orders and try reclassification before and after Release.
+- **A3 · Source and worker authority.** At publish, separately deny a source read, mark a selected field ineligible for copying, and restrict a selected value from the audience. Expect no published revision. In one company give the worker revision/context read, apply and parent create. Withhold only one seed-field write, then only one referenced-record read. In each case deny preview and direct create (using a preview issued before revocation), with no protected default in responses and zero committed creation facts.
+- **A3 · Stored owners and current reads.** Use two companies in one tenant/environment. A dual-company assigner pairing A’s stored context with B’s revision refuses. An A-only worker listing libraries or supplying known B IDs to assignment, revision or instance history, preview, create and retry gets no B data or changes. Use correct stored IDs. Revoke access to Jo after S-9 commits and inspect detail, history and retry for disclosure of Jo’s label or ID. Restore access and recover S-9. Removing the scope and apply checks independently must fail their respective tests.
+- **A4 · Atomic create and retry.** Use the editor, import, assistant and direct create, including a header-only request without the required preview. Inject a last-seed failure and require zero header, application, rows, success audit and receipt. Submit identical requests concurrently, lose the winning response, edit an answer, reassign, retire and switch to a compatible release. Retry at each step and assert one original header, application, row set, creation audit and receipt with the edit preserved. A changed payload under the key refuses. Withhold read-back, retry twice and restore grants. The receipt still identifies that one record.
+- **A4 · Races.** Pause first assignment at an unused context against simultaneous template retirement. Make each writer win the company library lock in turn. Retirement first must refuse the assignment, assignment first must leave the retired revision closed to fresh creation. Race two first assignments on one empty key and expect one winner. With an uncommitted preview, reassign or move the release pointer away and back. The old preview refuses, writes nothing and requires fresh review.
+- **A5 · History and rollback.** Use the scoped Record application query on an applied inspection and retry its committed receipt after binding retirement and again after compatible rollback. Check the applied context, typed choice meaning, failure rule, edited answer, guard and receipt identity. Independently remove the historical decoder or restore the source-state-only Release path in a rollback target. Both targets must refuse and the verified source must serve the original record.
+- **A6 · Live in-app AI.** In AI-BUILD-1 run ADR decision 8 end to end. An owner approves and activates the proposed binding, an author edits a plain-English content draft before publishing, and an assigner chooses Lift. The assistant uses the mechanic’s grants and confirmation policy to create from the server-selected revision. Verify the wording and receipt. Deny apply, then change the assignment after preview. Both refuse without a record and the latter requires fresh review.
+- **A7 · Replay and admission.** Removing the binding patch from replay or drafter coverage must fail CI. Reproduce the authoring root, run the active/retired compatible changes and named Copies type conflict, and compare persisted feature-absent bytes as specified in decision 7. At executable merge allocate floors and run the actual preceding binary through production admission. Require a real compatible query result, named pre-parse refusal at cold boot and after a pointer move, and deployment refusal below the retained high-water mark after rollback.
 
 ## Test it yourself
 
-**Five-minute design read.** Open the [three walkthroughs](../../decisions/ADR-XXXX-record-templates.md#three-acceptance-walkthroughs). Cover the last column. After assigning revision 2, predict what the first and second records show and what a retry returns. Check these three results.
+**Five-minute design read.** Follow both records in each walkthrough. After assigning revision 2, predict their editor and detail views and what retrying the first creation returns. [Three walkthroughs](../../decisions/ADR-XXXX-record-templates.md#three-acceptance-walkthroughs)
 
-- **Safety:** I-17 still says “Does the brake hold?”, Fail, “Slips under load” and cab light N/A. I-18 adds the guard question. Retrying I-17 returns the original inspection.
-- **Print:** P-41 still has Proof 1 and Run 750 under Copies. P-42 has Run 250 under Impressions and a Trim row. Retrying P-41 adds no row.
-- **School:** S-9 still has Guardian Jo and Emergency contact Sam. S-10 adds Pickup delegate and starts with empty contacts. Retrying S-9 returns the same enrolment under current access.
+- **Safety.** I-17 shows “Does the brake hold?”, Fail, “Slips under load” and cab light N/A. I-18 adds the guard question with Pass and keeps its own brake answer blank. Retrying I-17 returns the original inspection.
+- **Print.** P-41 has Step / Copies with Proof 1 and Run 750. P-42 has Impressions / Step with 250 Run, 1 Proof and 1 Trim. Retrying P-41 adds no row.
+- **School.** S-9 shows Guardian Jo and Emergency contact Sam. S-10 starts with three empty sections, Pickup delegate, Legal guardian and Emergency contact. Retrying S-9 returns the original enrolment under current access.
 
 ## Design gate
 
-Quick CI covers the ADR at `33c665d62214545c5fa01146c956e57ac817ae42`. The packet and ledger are checked locally with `bash scripts/check-records.sh`. The executable proofs belong to slices 1–3.
+The quick run below covers the original ADR at `33c665d62214545c5fa01146c956e57ac817ae42`. The amendment gate is `bash scripts/check-records.sh`. A1–A7 specify tests for future executable slices. [Independent read](/home/rvham/2rain-missions/template1-adr.sol.result.txt)
 
 CI tier: quick https://github.com/AnserBeg/2rain-greenfield/actions/runs/44956138996
-
-Owner recommendations for the read are a library per company and exact matching for required templates, with a fresh preview after an assigning lead resolves a missing assignment. [Questions and reasons](../../decisions/ADR-XXXX-record-templates.md#owner-questions-for-the-design-read)
