@@ -134,3 +134,81 @@ test('keyboard pan reaches the next coarse cell on every size at maximum zoom', 
     assert.deepEqual(panMap({ ...view, y: 8999 }, 0, -1), { ...view, y: 8999 });
   }
 });
+
+test('a timed-out adapter is cancelled and an issued navigation reserves at most once', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const started = Promise.withResolvers<AbortSignal>();
+  const fake = new FakeMapImageryProvider();
+  let reserves = 0;
+  const service = new MapImagery(
+    {
+      contract: fake.contract,
+      raster(_view, signal) {
+        started.resolve(signal);
+        return new Promise<Buffer>(() => {});
+      },
+    },
+    () => 0,
+  );
+  const handle = service.issue(companyA, v);
+  const reserve = async () => {
+    reserves++;
+  };
+  const refused = assert.rejects(
+    service.image(handle, companyA, reserve),
+    /unavailable/,
+  );
+  const signal = await started.promise;
+  assert.equal(signal.aborted, false);
+  t.mock.timers.tick(fake.contract.deadlineMs);
+  await refused;
+  assert.equal(signal.aborted, true);
+  await assert.rejects(service.image(handle, companyA, reserve), /unavailable/);
+  assert.equal(reserves, 1);
+});
+
+test('late, oversized and mismatched rasters never populate the public cache', async () => {
+  const fake = new FakeMapImageryProvider();
+  const valid = await fake.raster(v);
+  const changed = (offset: number) => {
+    const bytes = Buffer.from(valid);
+    bytes[offset] = bytes[offset]! ^ 1;
+    return bytes;
+  };
+  for (const invalid of [
+    valid.subarray(0, 32),
+    Buffer.concat([valid, Buffer.alloc(fake.contract.maxBytes)]),
+    changed(0),
+    changed(12),
+    changed(19),
+    changed(23),
+    valid,
+  ]) {
+    let clock = 0;
+    let calls = 0;
+    const service = new MapImagery(
+      {
+        contract: fake.contract,
+        async raster() {
+          if (++calls === 1) {
+            if (invalid === valid) clock += fake.contract.deadlineMs + 1;
+            return invalid;
+          }
+          return valid;
+        },
+      },
+      () => clock,
+    );
+    const first = service.issue(companyA, v);
+    await assert.rejects(
+      service.image(first, companyA, async () => {}),
+      /unavailable/,
+    );
+    const second = service.issue(companyB, v);
+    assert.deepEqual(
+      await service.image(second, companyB, async () => {}),
+      valid,
+    );
+    assert.equal(calls, 2);
+  }
+});

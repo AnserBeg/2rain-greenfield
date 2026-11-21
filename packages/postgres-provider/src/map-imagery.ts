@@ -18,7 +18,7 @@ const contract = Object.freeze({
 });
 export interface MapImageryProvider {
   readonly contract: typeof contract;
-  raster(viewport: MapViewport): Promise<Buffer>;
+  raster(viewport: MapViewport, signal: AbortSignal): Promise<Buffer>;
 }
 function chunk(kind: string, data: Buffer) {
   const bytes = Buffer.alloc(12 + data.length);
@@ -90,12 +90,13 @@ function trim<K, V>(map: Map<K, V>, limit: number) {
 export class MapImagery {
   private readonly requests = new Map<
     string,
-    MapImageRequest & { expires: number }
+    MapImageRequest & { expires: number; called: boolean }
   >();
   private readonly publicBytes = new Map<
     string,
-    { expires: number; bytes: Promise<Buffer> }
+    { expires: number; bytes: Buffer }
   >();
+  private readonly pending = new Map<string, Promise<Buffer>>();
   constructor(
     private readonly provider: MapImageryProvider = new FakeMapImageryProvider(),
     private readonly now = () => performance.now(),
@@ -105,6 +106,7 @@ export class MapImagery {
     trim(this.requests, 2048);
     this.requests.set(handle, {
       scope: { ...scope },
+      called: false,
       viewport: MapViewportSchema.parse(viewport),
       expires: this.now() + lifetime,
     });
@@ -146,31 +148,54 @@ export class MapImagery {
     ]);
     const hit = this.publicBytes.get(key);
     if (hit && hit.expires > this.now()) return hit.bytes;
-    const bytes = (async () => {
+    const inFlight = this.pending.get(key);
+    if (inFlight) return inFlight;
+    if (req.called || this.pending.size >= 64)
+      throw new Error('Map image unavailable.');
+    const fetchRaster = async () => {
       await reserve();
-      const start = this.now(),
-        data = await this.provider.raster(v);
-      const [width, height] = MAP_SIZES[v.size];
-      if (
-        this.now() - start > c.deadlineMs ||
-        data.length < 33 ||
-        data.length > c.maxBytes ||
-        !signature.equals(data.subarray(0, 8)) ||
-        data.toString('ascii', 12, 16) !== 'IHDR' ||
-        data.readUInt32BE(16) !== width ||
-        data.readUInt32BE(20) !== height
-      )
-        throw new Error('Map image unavailable.');
-      return data;
-    })();
-    trim(this.publicBytes, 64);
-    this.publicBytes.set(key, { bytes, expires: this.now() + publicLifetime });
+      req.called = true;
+      const start = this.now();
+      const controller = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new Error('Map image unavailable.'));
+        }, c.deadlineMs);
+      });
+      try {
+        const data = await Promise.race([
+          this.provider.raster(v, controller.signal),
+          deadline,
+        ]);
+        const [width, height] = MAP_SIZES[v.size];
+        if (
+          this.now() - start > c.deadlineMs ||
+          data.length < 33 ||
+          data.length > c.maxBytes ||
+          !signature.equals(data.subarray(0, 8)) ||
+          data.toString('ascii', 12, 16) !== 'IHDR' ||
+          data.readUInt32BE(16) !== width ||
+          data.readUInt32BE(20) !== height
+        )
+          throw new Error('Map image unavailable.');
+        trim(this.publicBytes, 64);
+        this.publicBytes.set(key, {
+          bytes: data,
+          expires: this.now() + publicLifetime,
+        });
+        return data;
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+    const bytes = fetchRaster();
+    this.pending.set(key, bytes);
     try {
       return await bytes;
-    } catch (error) {
-      if (this.publicBytes.get(key)?.bytes === bytes)
-        this.publicBytes.delete(key);
-      throw error;
+    } finally {
+      this.pending.delete(key);
     }
   }
 }
