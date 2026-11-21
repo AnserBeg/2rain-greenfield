@@ -64,7 +64,7 @@ Resolved by the design read and orchestrator rulings: a report’s index on an e
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "REPORTS-1",
-  "base": "af255bf703360090d4dda013c1237234c62996ef", "head": "5f630374a28b987a810813da3ceb6794407ad959",
+  "base": "af255bf703360090d4dda013c1237234c62996ef", "head": "4740f7cbcd61479e196a456d10257a30e102a05e",
   "changedPaths": [
     "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json", "apps/web/src/component-registry.ts", "apps/web/src/customize-report.ts", "apps/web/src/customize-screen.ts", "apps/web/src/grouped-report.ts", "apps/web/src/ledger-styles.ts", "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts",
     "apps/web/test/browser/customize-inspection.composed-application.spec.ts", "apps/web/test/browser/customize.composed-application.spec.ts", "package.json", "packages/canonical-model/src/constants.ts", "packages/canonical-model/src/declared-report.ts", "packages/canonical-model/src/grouped-aggregate.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/normalize.ts", "packages/canonical-model/src/schemas.ts",
@@ -72,7 +72,7 @@ Resolved by the design read and orchestrator rulings: a report’s index on an e
     "packages/customization/src/targets.ts", "packages/customization/src/upgrade-diagnostics.ts", "packages/customization/src/upgrade-replay.ts", "packages/domain/src/sales/definition.ts", "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/grouped-report.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/module-storage-materializer.ts", "packages/postgres-provider/src/release-repository.ts",
     "packages/postgres-provider/src/report-index-build.ts", "packages/postgres-provider/src/serving-gateways.ts", "packages/runtime/src/declared-report.ts", "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-query-gateway.ts", "test/architecture/repository-hygiene.test.ts", "test/compiler/report-company-access.test.ts", "test/evidence/REPORTS-1-s1.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json",
     "test/helpers/application-before-stock-count-workflow.ts", "test/helpers/archived-runtime-process.ts", "test/helpers/reachability-producers.ts", "test/helpers/reports-preceding-release.ts", "test/postgres/booking-serving.test.ts", "test/postgres/customization-inspection.test.ts", "test/postgres/date-time-field.test.ts", "test/postgres/document-attachments.test.ts", "test/postgres/releases.test.ts",
-    "test/postgres/report-company-reader.test.ts", "test/postgres/report-reader-bounds.test.ts", "test/postgres/request-runtime-view.test.ts", "test/unit/customization-ai-draft.test.ts", "test/unit/customization-upgrade.test.ts", "test/unit/date-time-field.test.ts"
+    "test/postgres/report-company-reader.test.ts", "test/postgres/report-reader-bounds.test.ts", "test/postgres/request-runtime-view.test.ts", "test/unit/customization-ai-draft.test.ts", "test/unit/customization-board.test.ts", "test/unit/customization-upgrade.test.ts", "test/unit/date-time-field.test.ts"
   ],
   "symbols": [{"path":"packages/compiler/src/declared-reports.ts","name":"lowerDeclaredReports"},{"path":"packages/postgres-provider/src/grouped-report.ts","name":"readGroupedSnapshot"},{"path":"packages/runtime/src/declared-report.ts","name":"reportCsv"}]
 }
