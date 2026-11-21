@@ -102,7 +102,7 @@ test('an induced plan status-vocabulary mismatch fails with UX002', () => {
 test('removing the stop list from the Map pin reports slot drift', () => {
   const files = contractFixture();
   const path = '.agents/skills/ux-grammar/SKILL.md';
-  files[path] = files[path].replace('"mapCanvas", "stopList"', '"mapCanvas"');
+  files[path] = files[path]!.replace('"mapCanvas", "stopList"', '"mapCanvas"');
   const root = createArchitectureFixture(files);
   try {
     assert.ok(

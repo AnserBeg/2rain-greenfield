@@ -1,66 +1,90 @@
 import { createHash } from 'node:crypto';
-import { mapCentre } from '@north-star/canonical-model';
-import type { BrowserBasemap } from '../../../packages/runtime/src/address-gateway.js';
 import { escapeHtml } from './html.js';
 
-// Only the sandboxed basemap document loads provider code. Its input is the
-// public camera. Record links, coordinates and session state live in the parent.
 const version = '3.66';
-const bootstrap = `window.gm_authFailure = () => parent.postMessage('basemap-unavailable', '*');
-window.initBasemap = () => {
-  const el = document.getElementById('map');
-  if (!google.maps.version.startsWith('${version}.')) return;
-  const center = {lat:Number(el.dataset.lat), lng:Number(el.dataset.lng)};
-  const zoom = Number(el.dataset.zoom);
-  const map = new google.maps.Map(el, {center, zoom, renderingType:'RASTER',
-    mapTypeId:'roadmap', tilt:0, heading:0, disableDefaultUI:true,
-    gestureHandling:'none', keyboardShortcuts:false, clickableIcons:false});
-  map.addListener('tilesloaded', () => {
-    const actual = map.getCenter();
-    const aligned = actual && Math.abs(actual.lat()-center.lat)<1e-6 &&
-      Math.abs(actual.lng()-center.lng)<1e-6 && map.getZoom()===zoom;
-    parent.postMessage(aligned ? 'basemap-ready' : 'basemap-unavailable', '*');
-  });
-};`;
-const hash = createHash('sha256').update(bootstrap).digest('base64');
-export const basemapCsp = [
-  "default-src 'none'",
-  'sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox',
-  "frame-ancestors 'self'",
-  "base-uri 'none'",
-  "form-action 'none'",
-  "script-src 'sha256-" +
-    hash +
-    "' https://maps.googleapis.com https://maps.gstatic.com",
-  "style-src 'unsafe-inline' https://fonts.googleapis.com",
-  'font-src https://fonts.gstatic.com',
-  'img-src data: blob: https://*.googleapis.com https://*.gstatic.com https://*.google.com https://*.googleusercontent.com',
-  'connect-src https://maps.googleapis.com https://maps.gstatic.com https://*.googleapis.com https://*.google.com',
-  'worker-src blob:',
-].join('; ');
 
-export function googleBasemapDocument(display: BrowserBasemap) {
-  const centre = mapCentre(display.viewport);
-  const loader = new URL('https://maps.googleapis.com/maps/api/js');
-  loader.search = new URLSearchParams({
-    key: display.browserKey,
-    v: version,
-    loading: 'async',
-    callback: 'initBasemap',
-    auth_referrer_policy: 'origin',
-  }).toString();
+// A sandbox with an opaque origin drops HTTP referrers. A dedicated host
+// gives Google the restricted display origin and isolates the ERP document.
+export function mapDisplayOrigins(
+  app: string | undefined,
+  maps: string | undefined,
+) {
+  if (!app && !maps) return;
+  if (!app || !maps)
+    throw new Error('Configure both the application and map display origins.');
+  const a = new URL(app),
+    m = new URL(maps);
+  if (
+    (a.protocol !== 'https:' &&
+      !(
+        a.protocol === 'http:' &&
+        ['localhost', '127.0.0.1', '[::1]'].includes(a.hostname)
+      )) ||
+    m.protocol !== 'https:' ||
+    a.hostname === m.hostname ||
+    [a, m].some((url) => url.href !== url.origin + '/')
+  ) {
+    throw new Error(
+      'Configure separate application and HTTPS map display origins.',
+    );
+  }
+  return { app: a, maps: m };
+}
+
+const bootstrap = `const app = document.documentElement.dataset.app;
+function receive(event) {
+  if (event.source !== parent || event.origin !== app) return;
+  window.removeEventListener('message',receive);
+  const {key, center, zoom} = event.data;
+  const signal = state => parent.postMessage(state, app);
+  window.gm_authFailure = () => signal('basemap-unavailable');
+  window.initBasemap = () => {
+    if (!google.maps.version.startsWith('${version}.')) return;
+    const map = new google.maps.Map(document.getElementById('map'), {
+      center, zoom, renderingType:'RASTER', mapTypeId:'roadmap', tilt:0, heading:0,
+      disableDefaultUI:true, gestureHandling:'none', keyboardShortcuts:false, clickableIcons:false
+    });
+    map.addListener('tilesloaded', () => {
+      const actual = map.getCenter();
+      const aligned = actual && Math.abs(actual.lat()-center.lat)<1e-6 &&
+        Math.abs(actual.lng()-center.lng)<1e-6 && map.getZoom()===zoom;
+      signal(aligned ? 'basemap-ready' : 'basemap-unavailable');
+    });
+  };
+  const url = new URL('https://maps.googleapis.com/maps/api/js');
+  url.search = new URLSearchParams({key, v:'${version}', loading:'async',
+    callback:'initBasemap', auth_referrer_policy:'origin'});
+  const loader = document.createElement('script');
+  loader.referrerPolicy = 'origin';
+  loader.src = url;
+  document.head.append(loader);
+}
+window.addEventListener('message',receive);`;
+const hash = createHash('sha256').update(bootstrap).digest('base64');
+export function basemapCsp(app: URL) {
+  return [
+    "default-src 'none'",
+    'sandbox allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox',
+    'frame-ancestors ' + app.origin,
+    "base-uri 'none'",
+    "form-action 'none'",
+    "script-src 'sha256-" +
+      hash +
+      "' https://maps.googleapis.com https://maps.gstatic.com",
+    "style-src 'unsafe-inline' https://fonts.googleapis.com",
+    'font-src https://fonts.gstatic.com',
+    'img-src data: blob: https://*.googleapis.com https://*.gstatic.com https://*.google.com https://*.googleusercontent.com',
+    'connect-src https://maps.googleapis.com https://maps.gstatic.com https://*.googleapis.com https://*.google.com',
+    'worker-src blob:',
+  ].join('; ');
+}
+export function googleBasemapDocument(app: URL) {
   return (
-    '<!doctype html><html lang="en"><meta charset="utf-8"><title>Google Maps</title>' +
-    '<style>html,body,#map{margin:0;height:100%}</style><body><div id="map" data-lat="' +
-    centre.latitude +
-    '" data-lng="' +
-    centre.longitude +
-    '" data-zoom="' +
-    display.viewport.zoom +
-    '"></div><script>' +
+    '<!doctype html><html lang="en" data-app="' +
+    escapeHtml(app.origin) +
+    '"><meta charset="utf-8"><title>Google Maps</title><style>html,body,#map{margin:0;height:100%}</style>' +
+    '<body><div id="map"></div><script>' +
     bootstrap +
-    '</script><script async referrerpolicy="origin" src="' +
-    escapeHtml(loader.href) +
-    '"></script></body></html>'
+    '</script></body></html>'
   );
 }

@@ -1,4 +1,9 @@
-import { basemapCsp, googleBasemapDocument } from './google-basemap.js';
+import { mapCentre } from '@north-star/canonical-model';
+import {
+  basemapCsp,
+  googleBasemapDocument,
+  mapDisplayOrigins,
+} from './google-basemap.js';
 import { addressSettings } from './address-settings.js';
 import { offerPlaces } from './address-context.js';
 import { createServer } from 'node:http';
@@ -103,7 +108,30 @@ export function createSurfaceRuntimeServer(
 ): Server {
   const documents =
     options.documents && mountDocumentHttp(entry, options.documents);
+  const origins = mapDisplayOrigins(
+    process.env.NORTH_STAR_MAP_APP_ORIGIN,
+    process.env.NORTH_STAR_MAP_DISPLAY_ORIGIN,
+  );
   return createServer((request, response) => {
+    if (origins && request.headers.host === origins.maps.host) {
+      if (
+        request.method === 'GET' &&
+        request.url === '/basemap' &&
+        request.headers['sec-fetch-dest'] === 'iframe'
+      ) {
+        response.writeHead(200, {
+          'content-type': 'text/html; charset=utf-8',
+          'cache-control': 'no-store',
+          'referrer-policy': 'origin',
+          'content-security-policy': basemapCsp(origins.app),
+        });
+        response.end(googleBasemapDocument(origins.app));
+      } else {
+        response.writeHead(404);
+        response.end();
+      }
+      return;
+    }
     htmlEncodings.set(response, acceptedEncoding(request));
     const handle = async () => {
       if (options.staffTransport) {
@@ -160,6 +188,7 @@ export function createSurfaceRuntimeServer(
         documents,
         options.workflowApprovals,
         options.selectedDemoActor,
+        origins,
       );
     };
     const probe = options.requestWork;
@@ -184,6 +213,7 @@ async function handleRequest(
   documents?: ReturnType<typeof mountDocumentHttp>,
   workflowApprovals?: WorkflowApprovalsService,
   selectedDemoActor?: (cookie: string | undefined) => 'buyer' | 'manager',
+  origins?: ReturnType<typeof mapDisplayOrigins>,
 ): Promise<void> {
   response.setHeader('cache-control', 'no-store');
   response.setHeader(
@@ -241,8 +271,11 @@ async function handleRequest(
     try {
       if (
         speculative ||
-        request.method !== 'GET' ||
-        request.headers['sec-fetch-dest'] !== 'iframe' ||
+        request.method !== 'POST' ||
+        !origins ||
+        request.headers.host !== origins.app.host ||
+        request.headers.origin !== origins.app.origin ||
+        !sameOriginRequest(request) ||
         !gateways?.addresses?.viewportDisplay
       )
         throw Error();
@@ -252,12 +285,18 @@ async function handleRequest(
           url.searchParams.get('image') ?? '',
         ),
       );
-      response.writeHead(200, {
-        'content-type': 'text/html; charset=utf-8',
-        'referrer-policy': 'origin',
-        'content-security-policy': basemapCsp,
-      });
-      response.end(googleBasemapDocument(display));
+      const centre = mapCentre(display.viewport);
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(
+        JSON.stringify({
+          frame: new URL('/basemap', origins.maps).href,
+          camera: {
+            key: display.browserKey,
+            center: { lat: centre.latitude, lng: centre.longitude },
+            zoom: display.viewport.zoom,
+          },
+        }),
+      );
     } catch {
       response.writeHead(404);
       response.end();
@@ -634,10 +673,16 @@ async function handleRequest(
       (demoActors && selectedDemoActor?.(request.headers.cookie)) || 'buyer',
       workflowApprovals && WORKFLOW_APPROVALS_HREF,
     );
-    if (page.html.includes('data-surface-archetype="map"')) {
+    if (
+      origins &&
+      request.headers.host === origins.app.host &&
+      page.html.includes('data-surface-archetype="map"')
+    ) {
       response.setHeader(
         'content-security-policy',
-        response.getHeader('content-security-policy') + "; frame-src 'self'",
+        response.getHeader('content-security-policy') +
+          '; frame-src ' +
+          origins.maps.origin,
       );
     }
     writeHtml(

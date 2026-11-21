@@ -821,20 +821,30 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
   const region = () => document.querySelector('.surface-grid[data-surface-archetype="map"]');
   const state = root => root?.querySelector('[data-map-state]')?.dataset.mapState;
   if (!state(region()) || typeof fetch !== 'function' || typeof DOMParser !== 'function') return;
-  const mountBasemap = root => {
+  const mountBasemap = async root => {
     const slot = root.querySelector('[data-map-frame]');
     if (!slot) return;
-    const frame = document.createElement('iframe');
-    frame.setAttribute('sandbox','allow-scripts allow-popups allow-popups-to-escape-sandbox');
-    frame.referrerPolicy = 'origin';
-    frame.title = 'Google Maps';
-    frame.src = slot.dataset.mapFrame;
-    slot.replaceChildren(frame);
+    try {
+      const csrf = document.querySelector('meta[name=erp-csrf]')?.content;
+      const response = await fetch(slot.dataset.mapFrame, {method:'POST',credentials:'same-origin',
+        redirect:'error', headers:csrf?{'x-erp-csrf':csrf}:{}, body:new URLSearchParams()});
+      if (!response.ok || !slot.isConnected) return;
+      const display = await response.json();
+      const url = new URL(display.frame);
+      if (!slot.isConnected || url.protocol!=='https:' || url.hostname===location.hostname) return;
+      const frame = document.createElement('iframe');
+      frame.setAttribute('sandbox','allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox');
+      frame.referrerPolicy = 'origin';
+      frame.title = 'Google Maps';
+      frame.addEventListener('load', () => frame.contentWindow?.postMessage(display.camera, url.origin), {once:true});
+      frame.src = url.href;
+      slot.replaceChildren(frame);
+    } catch { /* The stop list and background status stay visible. */ }
   };
   window.addEventListener('message', event => {
     const root = region();
     const frame = root?.querySelector('[data-map-frame] iframe');
-    if (!frame || event.source !== frame.contentWindow || event.origin !== 'null') return;
+    if (!frame || event.source !== frame.contentWindow || event.origin !== new URL(frame.src).origin) return;
     if (event.data !== 'basemap-ready' && event.data !== 'basemap-unavailable') return;
     const ready = event.data === 'basemap-ready';
     root.querySelector('[data-map-overlay]').setAttribute('visibility', ready ? 'visible' : 'hidden');

@@ -41,7 +41,7 @@ The legend reads **Order of the stops you can see · straight lines, not roads**
 
 The host sends the browser a coarse public camera. Server-rendered record links and route lines use the same Web Mercator projection as the basemap. The isolated Google Maps JS frame receives no record data. Google geocodes appear only after its matching tiles load. The list and filter controls remain available during outages and without scripts. The network-free fake can reuse public raster bytes across independently authorized installations. Google serves its display resources directly and owns their caching.
 
-The owner provisions a new app-specific browser key restricted to the app domains and Maps JavaScript API. A live load requires the existing supported-region demo opt-in and a reserved call within the company's budget. Google Cloud quotas also bound use of the public key. CI uses no live key or outbound provider traffic. [Client amendment](ADR-0036-minimum-client-capability.md) · [Installation and credentials](ADR-0080-connector-framework.md) · [Google key restrictions](https://developers.google.com/maps/api-security-best-practices)
+The owner provisions a new app-specific browser key restricted to the dedicated display origin and Maps JavaScript API. A live load requires the existing supported-region demo opt-in and a reserved call within the company's budget. Google Cloud quotas also bound use of the public key. CI uses no live key or outbound provider traffic. [Client amendment](ADR-0036-minimum-client-capability.md) · [Installation and credentials](ADR-0080-connector-framework.md) · [Google key restrictions](https://developers.google.com/maps/api-security-best-practices)
 
 ## 3. Bind a timeline to the resource the company uses
 

@@ -218,6 +218,7 @@ test('the isolated Google loader uses the public camera and an origin referrer',
   const viewport = { x: 3324, y: 7175, zoom: 8, size: 'small' } as const;
   const centre = mapCentre(viewport);
   const app = 'https://map-test.invalid';
+  const display = 'https://display-test.invalid';
   const requests: string[] = [];
   let referrer: string | undefined;
   await page.route('**/*', async (route) => {
@@ -231,18 +232,29 @@ test('the isolated Google loader uses the public camera and an origin referrer',
           SURFACE_CLIENT_SCRIPT +
           '</script>',
       });
-    if (url.origin === app && url.pathname === '/map/display')
+    if (
+      url.origin === app &&
+      url.pathname === '/map/display' &&
+      route.request().method() === 'POST'
+    )
+      return route.fulfill({
+        json: {
+          frame: display + '/basemap',
+          camera: {
+            key: 'fixture-browser-key',
+            center: { lat: centre.latitude, lng: centre.longitude },
+            zoom: viewport.zoom,
+          },
+        },
+      });
+    if (url.origin === display && url.pathname === '/basemap')
       return route.fulfill({
         headers: {
           'content-type': 'text/html',
-          'content-security-policy': basemapCsp,
+          'content-security-policy': basemapCsp(new URL(app)),
           'referrer-policy': 'origin',
         },
-        body: googleBasemapDocument({
-          provider: 'google',
-          browserKey: 'fixture-browser-key',
-          viewport,
-        }),
+        body: googleBasemapDocument(new URL(app)),
       });
     if (
       url.origin === 'https://maps.googleapis.com' &&
@@ -268,8 +280,10 @@ test('the isolated Google loader uses the public camera and an origin referrer',
     'visibility',
     'visible',
   );
-  expect(referrer).toBe(app + '/');
-  const urls = requests.filter((href) => new URL(href).origin !== app);
+  expect(referrer).toBe(display + '/');
+  const urls = requests.filter(
+    (href) => ![app, display].includes(new URL(href).origin),
+  );
   expect(urls).toHaveLength(1);
   expect(Object.fromEntries(new URL(urls[0]!).searchParams)).toEqual({
     key: 'fixture-browser-key',
@@ -280,7 +294,7 @@ test('the isolated Google loader uses the public camera and an origin referrer',
   });
   const child = page
     .frames()
-    .find((frame) => frame.url().includes('/map/display'))!;
+    .find((frame) => frame.url() === display + '/basemap')!;
   expect(
     await child.evaluate(() => Reflect.get(window, 'camera').center),
   ).toEqual({ lat: centre.latitude, lng: centre.longitude });
