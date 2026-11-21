@@ -1,3 +1,4 @@
+import type { MapViewport } from '../../canonical-model/src/map-viewport.js';
 import type { Coordinates } from '@north-star/canonical-model';
 import type { RequestRuntimeView } from './request-runtime-view.js';
 
@@ -30,6 +31,18 @@ export interface AddressSettings {
   enabled: boolean;
 }
 export interface AddressGateway {
+  issueViewport?(
+    view: RequestRuntimeView,
+    surfaceId: string,
+    companyId: string,
+    installationId: string,
+    viewport: MapViewport,
+  ): string;
+  viewportImage?(
+    view: RequestRuntimeView,
+    handle: string,
+    companyId: string,
+  ): Promise<Uint8Array>;
   installations(
     view: RequestRuntimeView,
   ): Promise<readonly AddressInstallation[]>;

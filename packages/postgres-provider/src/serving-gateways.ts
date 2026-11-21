@@ -1,3 +1,4 @@
+import { MAP_VIEWPORT_READ_BINDING } from './current-policy.js';
 import { BOOKING_USAGE_CAPABILITY } from '@north-star/canonical-model';
 import { bookingOwnerUsageReadModel } from './booking-owner-usage.js';
 import { PostgresAddresses } from './address-geocodes.js';
@@ -588,6 +589,11 @@ export function releasePolicyBindings(
   const definition = parseNormalizedApplicationPackageJson(definitionBytes);
   return [
     ...currentPolicyBindingsFromPermissions(definition.permissions),
+    ...(definition.surfaces.some(
+      (s) => s.archetype === 'map' && s.lifecycle === 'active',
+    )
+      ? [MAP_VIEWPORT_READ_BINDING]
+      : []),
     ...(documents ? documentPermissionBindings(definition.entities) : []),
   ];
 }

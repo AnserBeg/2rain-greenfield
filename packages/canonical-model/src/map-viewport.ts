@@ -14,9 +14,11 @@ export const MapViewportSchema = z.strictObject({
 });
 export type MapViewport = z.infer<typeof MapViewportSchema>;
 export type MapPoint = { latitude: number; longitude: number };
+// One third into a fixed cell: even a manually panned centre cannot equal an
+// eight-decimal stored Address (the reduced denominator retains a factor of 3).
 export const mapCentre = (v: MapViewport): MapPoint => ({
-  latitude: (2 * v.y + 1 - 9000) / 100,
-  longitude: (2 * v.x + 1 - 18000) / 100,
+  latitude: (6 * v.y + 2 - 27000) / 300,
+  longitude: (6 * v.x + 2 - 54000) / 300,
 });
 const clamp = (n: number, max: number) => Math.max(0, Math.min(n, max));
 function cell(p: MapPoint) {

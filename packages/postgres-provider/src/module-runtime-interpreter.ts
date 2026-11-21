@@ -1,4 +1,9 @@
 import {
+  mapPageBinding,
+  finishMapPage,
+  type MapCandidate,
+} from './map-page.js';
+import {
   addressColumns,
   addressScalars,
   hasAddress,
@@ -396,6 +401,32 @@ export class PostgresModuleRuntimeInterpreter
             );
           },
         );
+      if (
+        (request.arguments as Record<string, unknown> | null)?.mapPage !==
+        undefined
+      ) {
+        if (
+          request.definition.queryType !== 'list' ||
+          request.definition.readModel ||
+          request.list
+        )
+          throw failure('MODULE_LIST_FIELD_INVALID', 'Invalid Map collection.');
+        const mapRequest = request as SemanticQueryExecutionRequest;
+        return await withTrustedRequestRead(
+          this.pool,
+          request.context,
+          async (client) => {
+            const storage = await this.#loadPinnedStorageTarget(
+              client,
+              request,
+            );
+            const candidates = await withModuleRuntimeRole(client, () =>
+              readMapCandidates(client, storage, mapRequest),
+            );
+            return finishMapPage(client, mapRequest, candidates);
+          },
+        );
+      }
       // The pinned storage target is read as the runtime login role (release
       // artifacts); alone, the read then switches to the module role itself.
       const loaded = await withTrustedRequestRead(
@@ -3085,6 +3116,96 @@ async function listRecords(
     values,
   );
   return rows.rows.map((row) => rawRecord(entity, row));
+}
+
+async function readMapCandidates(
+  client: PoolClient,
+  storage: StorageTargetPayloadV1,
+  request: SemanticQueryExecutionRequest,
+): Promise<MapCandidate[]> {
+  const { map, input } = mapPageBinding(request),
+    body = map.body,
+    def = request.definition;
+  const entity = requiredEntity(storage, body.entityId);
+  const scope = await verifyLegalEntityReadScope(
+    client,
+    null,
+    storage,
+    request.legalEntityReadScope,
+    [entity],
+  );
+  const values: unknown[] = [],
+    predicates = archivePredicate(entity, false);
+  appendLegalEntityReadScopePredicate(entity, scope, values, predicates);
+  appendQueryFilterPredicates(
+    entity,
+    request.filterPlans,
+    values,
+    predicates,
+    undefined,
+    request.parameterValues,
+  );
+  const column = (id: string) => {
+    const c = entity.columns.find((c) => c.canonicalFieldId === id);
+    if (!c || !def.selections.some((f) => f.fieldId === id))
+      throw failure('MODULE_LIST_FIELD_INVALID', 'Unavailable Map field.');
+    return quoted(c.physicalName);
+  };
+  if (input.day && body.defaultScope.kind === 'day')
+    predicates.push(
+      column(body.defaultScope.fieldId) +
+        ' = ' +
+        parameter(values, input.day) +
+        '::date',
+    );
+  const group = body.group ? column(body.group.fieldId) : 'NULL::text',
+    order = column(body.order.field.fieldId);
+  if (input.route !== undefined)
+    predicates.push(
+      group + ' IS NOT DISTINCT FROM ' + parameter(values, input.route || null),
+    );
+  if (body.savedViewId) {
+    const payload = request.view.projections.surface.payload as {
+      surfaces: readonly Record<string, unknown>[];
+    };
+    const list = payload.surfaces.find(
+      (s) => s.surfaceId === body.listSurfaceId,
+    )?.list as
+      | {
+          views: readonly {
+            viewId: string;
+            filters?: readonly { field: string; value: string }[];
+          }[];
+        }
+      | undefined;
+    const saved = list?.views.find((v) => v.viewId === body.savedViewId);
+    if (!saved)
+      throw failure(
+        'MODULE_LIST_FIELD_INVALID',
+        'Saved Map filter is unavailable.',
+      );
+    for (const filter of saved.filters ?? [])
+      predicates.push(
+        column(filter.field) + '::text = ' + parameter(values, filter.value),
+      );
+  }
+  const id = quoted(entity.recordIdentity.column);
+  const direction = body.order.direction === 'asc' ? 'ASC' : 'DESC';
+  const result = await client.query(
+    `WITH candidates AS MATERIALIZED (
+    SELECT * FROM north_star_module.${quoted(entity.physicalTableName)} WHERE ${predicates.join(' AND ')}
+    ORDER BY ${id} LIMIT 513
+  ) SELECT candidates.*, ${group}::text AS map_group, ${order} IS NOT NULL AS map_ordered,
+    row_number() OVER (PARTITION BY ${group} ORDER BY ${order} ${direction} NULLS LAST,${id}) AS map_ordinal
+    FROM candidates ORDER BY map_group NULLS LAST,map_ordinal`,
+    values,
+  );
+  return result.rows.map((r) => ({
+    record: toDto(entity, rawRecord(entity, r), def.selections),
+    group: r.map_group as string | null,
+    ordinal: Number(r.map_ordinal),
+    ordered: r.map_ordered === true,
+  }));
 }
 
 // The immutable surface projection is shared by warm views of the same release.

@@ -42,14 +42,15 @@ export class FakeMapImageryProvider implements MapImageryProvider {
     const step = 2 ** Math.ceil(Math.log2(box.scale * 60));
     const grid = (deg: number) =>
       Math.abs(deg / step - Math.round(deg / step)) < box.scale / step;
-    const meridians = Array.from({ length: width }, (_, x) =>
-      grid(box.west + x * box.scale),
+    const meridians = Buffer.from(
+      Array.from({ length: width }, (_, x) =>
+        Number(grid(box.west + x * box.scale)),
+      ),
     );
     for (let y = 0; y < height; y++) {
-      const lat = box.north - y * box.scale;
-      const parallel = grid(lat);
-      for (let x = 0; x < width; x++)
-        rows[y * (width + 1) + 1 + x] = parallel || meridians[x] ? 1 : 0;
+      const start = y * (width + 1) + 1;
+      if (grid(box.north - y * box.scale)) rows.fill(1, start, start + width);
+      else meridians.copy(rows, start);
     }
     const header = Buffer.alloc(13);
     header.writeUInt32BE(width);

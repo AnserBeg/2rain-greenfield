@@ -103,6 +103,21 @@ export interface SemanticQueryResultEnvelope {
   readonly queryId: string;
   readonly records: readonly SemanticRecordDto[];
   readonly schemaVersion: typeof SEMANTIC_QUERY_RESULT_VERSION;
+  readonly mapCoverage?: {
+    readonly revisionId: string;
+    readonly pageSize: number;
+    readonly partial: boolean;
+    readonly restarted?: boolean;
+    readonly installationId?: string;
+    readonly hasNext?: string;
+    readonly stops: readonly {
+      recordId: string;
+      group: string | null;
+      ordinal: number | null;
+      point: { latitude: number; longitude: number } | null;
+      source: string;
+    }[];
+  };
   readonly boardCoverage?: {
     readonly revisionId: string;
     readonly scanLimitReached: boolean;
@@ -564,13 +579,26 @@ export class SemanticQueryGateway {
         'query declares a legal-entity operand and cannot also take an issued scope',
       );
     }
+    const mapWindow = (request.arguments as Record<string, unknown> | null)
+      ?.mapPage;
+    const mapCompany = (mapWindow as { companyId?: unknown } | undefined)
+      ?.companyId;
+    if (
+      mapWindow !== undefined &&
+      (typeof mapCompany !== 'string' || executionContext.legalEntityReadScope)
+    )
+      throw new MalformedSemanticQueryRequestError(
+        'Map requires one acting company.',
+      );
     const scopeSelection = declaredScope
       ? acceptedLegalEntityScopeSelection(
           definition,
           declaredScope,
           request.arguments,
         )
-      : null;
+      : typeof mapCompany === 'string'
+        ? [mapCompany]
+        : null;
     assertRelationTargetsArgument(definition, request.arguments);
     if (definition.lifecycle !== 'active') {
       if (definition.queryType === 'aggregate') {
