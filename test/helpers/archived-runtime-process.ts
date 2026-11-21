@@ -87,3 +87,40 @@ try {
   await pool.end();
 }
 `;
+
+/** Exercise lazy query catalogs as the archived binary's authenticated caller. */
+export const archivedItemQuery = `
+import { readFile } from 'node:fs/promises';
+import { ObservabilityMetrics } from './packages/observability/src/index.ts';
+import { AuthenticatedRequestEntryAdapter } from './packages/runtime/src/request-context.ts';
+import { AuthenticatedRequestRuntimeEntryAdapter } from './packages/runtime/src/request-runtime-view.ts';
+import { SEMANTIC_QUERY_REQUEST_VERSION } from './packages/runtime/src/semantic-query-gateway.ts';
+import { rolePool, trustedContext } from './packages/postgres-provider/src/composed-application-runtime.ts';
+import { composeServingGateways, loadServingRelease } from './packages/postgres-provider/src/serving-gateways.ts';
+import { PostgresRequestRuntimeViewService } from './packages/postgres-provider/src/request-runtime-view-service.ts';
+
+const { databaseUrl, identity, recordId } = JSON.parse(await readFile(process.argv[2], 'utf8'));
+const pool = rolePool(databaseUrl, 'north_star_runtime', 2);
+try {
+  const context = await trustedContext(identity);
+  const loader = new PostgresRequestRuntimeViewService(pool);
+  const definition = await loader.load(context);
+  const serving = await loadServingRelease(pool, context, definition.release.releaseId);
+  const { policy, queryGateway } = composeServingGateways(
+    pool, pool, context, serving, new ObservabilityMetrics(), { providerErrorMappings: [] },
+  );
+  const entry = new AuthenticatedRequestRuntimeEntryAdapter(
+    new AuthenticatedRequestEntryAdapter(async () => identity), loader, policy,
+  );
+  const result = await entry.run({}, view => queryGateway.invoke(view, {
+    schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+    queryId: 'northstar.app:query.item_get',
+    arguments: { recordId },
+  }));
+  console.log(JSON.stringify({ root: definition.release.contentHash, outcome: result.outcome, id: result.records[0]?.recordId }));
+} catch (error) {
+  console.log(JSON.stringify({ outcome: 'refused', code: error.code, message: error.message }));
+} finally {
+  await pool.end();
+}
+`;

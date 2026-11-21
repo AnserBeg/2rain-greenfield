@@ -26,7 +26,10 @@ import {
 } from '../helpers/customization-fixture.js';
 import { startComposedApplication } from '../../apps/api/src/composition-root.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
-import { withArchivedCustomizationRuntime } from '../helpers/archived-runtime-process.js';
+import {
+  archivedItemQuery,
+  withArchivedCustomizationRuntime,
+} from '../helpers/archived-runtime-process.js';
 
 const item = 'northstar.app:entity.item';
 const detailQuery = 'northstar.app:query.item_get';
@@ -234,28 +237,6 @@ async function withBookingApplication(
   });
 }
 
-const archivedQuery = `
-import { readFile } from 'node:fs/promises';
-import { ObservabilityMetrics } from './packages/observability/src/index.ts';
-import { AuthenticatedRequestEntryAdapter } from './packages/runtime/src/request-context.ts';
-import { AuthenticatedRequestRuntimeEntryAdapter } from './packages/runtime/src/request-runtime-view.ts';
-import { SEMANTIC_QUERY_REQUEST_VERSION } from './packages/runtime/src/semantic-query-gateway.ts';
-import { rolePool, trustedContext } from './packages/postgres-provider/src/composed-application-runtime.ts';
-import { composeServingGateways, loadServingRelease } from './packages/postgres-provider/src/serving-gateways.ts';
-import { PostgresRequestRuntimeViewService } from './packages/postgres-provider/src/request-runtime-view-service.ts';
-const {databaseUrl,identity,recordId}=JSON.parse(await readFile(process.argv[2],'utf8'));
-const pool=rolePool(databaseUrl,'north_star_runtime',2);
-try {
-  const loader=new PostgresRequestRuntimeViewService(pool), context=await trustedContext(identity);
-  const definition=await loader.load(context);
-  const serving=await loadServingRelease(pool,context,definition.release.releaseId);
-  const {policy,queryGateway}=composeServingGateways(pool,pool,context,serving,new ObservabilityMetrics(),{providerErrorMappings:[]});
-  const entry=new AuthenticatedRequestRuntimeEntryAdapter(new AuthenticatedRequestEntryAdapter(async()=>identity),loader,policy);
-  const dto=await entry.run({},view=>queryGateway.invoke(view,{schemaVersion:SEMANTIC_QUERY_REQUEST_VERSION,queryId:'northstar.app:query.item_get',arguments:{recordId}}));
-  console.log(JSON.stringify({outcome:dto.outcome,id:dto.records[0]?.recordId}));
-} catch(error){console.log(JSON.stringify({outcome:'refused',code:error.code,message:error.message}));}
-finally {await pool.end();}
-`;
 test(
   'the preceding serving binary answers an item query and refuses each new booking protocol by reader name',
   { skip: !process.env.CI },
@@ -267,7 +248,7 @@ test(
           await withBookingApplication(
             mode === 'baseline' ? undefined : bookingRelease(mode),
             async (f) => {
-              const probe = (await run(archivedQuery, {
+              const probe = (await run(archivedItemQuery, {
                 databaseUrl: f.databaseUrl,
                 identity: f.app.runtime.identity,
                 recordId: demoItem,
@@ -278,7 +259,11 @@ test(
                 id?: string;
               };
               if (mode === 'baseline')
-                assert.deepEqual(probe, { outcome: 'exact', id: demoItem });
+                assert.deepEqual(probe, {
+                  outcome: 'exact',
+                  id: demoItem,
+                  root: f.app.runtime.releaseRoot,
+                });
               else {
                 assert.equal(
                   probe.code,
