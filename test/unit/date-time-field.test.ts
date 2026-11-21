@@ -598,7 +598,10 @@ test('the in-app drafter can emit addDateTimeField with keys generated from the 
 });
 
 test('the web control preserves typed entry, leaves an untouched capture alone and prints record zone', async () => {
-  const web = await import('../../apps/web/src/date-time-field.js');
+  const web = {
+    ...(await import('../../apps/web/src/date-time-field.js')),
+    ...(await import('../../apps/web/src/component-registry.js')),
+  };
   const binding = {
     schemaVersion: 'v6' as const,
     fieldId,

@@ -1,5 +1,12 @@
 import { addressEditor } from './address-context.js';
-import { dateTimeBindings, renderDateTimeEntry } from './date-time-field.js';
+import { dateTimeBindings } from './date-time-field.js';
+import {
+  SavedDateTimeSchema,
+  canonicalZone,
+  formatRecordZone,
+  offsetLabel,
+  type DateTimeBinding,
+} from '@north-star/canonical-model';
 import {
   AddressInputSchema,
   SavedAddressSchema,
@@ -3361,4 +3368,73 @@ function renderAddressField(name: string, value: unknown, attributes: string) {
     component('longitude', 'Your pin longitude', current?.pin?.longitude, 14) +
     '</details>'
   );
+}
+
+let zones: readonly string[] | null = null;
+function zoneOptions(): readonly string[] {
+  zones ??= [
+    ...new Set(
+      Intl.supportedValuesOf('timeZone').flatMap((name) => {
+        const canonical = canonicalZone(name);
+        return canonical ? [canonical] : [];
+      }),
+    ),
+  ].sort();
+  return zones;
+}
+
+interface ProposedEntry {
+  readonly civil?: string;
+  readonly zone?: string;
+  readonly offsetSeconds?: number;
+  readonly offsets?: readonly number[];
+}
+
+/**
+ * ADR-0087: a logical dateTime entry -- a civil date and time in one-minute
+ * steps, a zone for a per-record field, the recorded capture kept for the
+ * untouched rule, and both offsets after a refused repeated hour.
+ */
+export function renderDateTimeEntry(
+  binding: DateTimeBinding,
+  name: string,
+  value: unknown,
+  attributes: string,
+): string {
+  const saved = SavedDateTimeSchema.safeParse(value).data;
+  const proposed = (saved ? null : (value as ProposedEntry | null)) ?? null;
+  const civil = (saved?.civil ?? proposed?.civil ?? '').slice(0, 16);
+  const zone = saved?.zone ?? proposed?.zone ?? '';
+  const parts = [
+    `<input type="datetime-local" step="60"${attributes} data-date-time-field="${escapeHtml(binding.zoneSource.kind)}" name="${name}" value="${escapeHtml(civil)}" autocomplete="off">`,
+  ];
+  if (saved) {
+    // The recorded capture: re-sending it unchanged leaves it untouched.
+    parts.push(
+      `<input type="hidden" name="${name}:recorded" value="${escapeHtml(`${saved.civil}|${saved.zone}|${String(saved.offsetSeconds)}`)}">`,
+      `<small class="form-hint">Recorded ${escapeHtml(formatRecordZone(saved))}</small>`,
+    );
+  }
+  if (binding.zoneSource.kind === 'perRecordIana') {
+    const options = zoneOptions()
+      .map(
+        (option) =>
+          `<option value="${escapeHtml(option)}"${option === zone ? ' selected' : ''}>${escapeHtml(option)}</option>`,
+      )
+      .join('');
+    parts.push(
+      `<select name="${name}:zone" aria-label="Time zone"><option value="">Company calendar zone</option>${options}</select>`,
+    );
+  }
+  if (proposed?.offsets?.length) {
+    parts.push(
+      `<select name="${name}:offset" required aria-label="Which ${escapeHtml(civil.slice(11))}"><option value="">Choose the offset</option>${proposed.offsets
+        .map(
+          (offset) =>
+            `<option value="${String(offset)}">${escapeHtml(offsetLabel(offset))}</option>`,
+        )
+        .join('')}</select>`,
+    );
+  }
+  return `<span class="date-time-entry">${parts.join('')}</span>`;
 }

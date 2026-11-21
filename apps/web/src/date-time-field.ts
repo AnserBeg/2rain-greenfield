@@ -1,12 +1,9 @@
 import {
   DateTimeBindingSchema,
   SavedDateTimeSchema,
-  canonicalZone,
   formatRecordZone,
-  offsetLabel,
   type DateTimeBinding,
 } from '@north-star/canonical-model';
-import { escapeHtml } from './html.js';
 
 /**
  * ADR-0087 on the web: a logical dateTime field is entered as a civil date and
@@ -35,70 +32,6 @@ export function dateTimeBindings(
 export function recordZoneText(value: unknown): string | null {
   const saved = SavedDateTimeSchema.safeParse(value);
   return saved.success ? formatRecordZone(saved.data) : null;
-}
-
-let zones: readonly string[] | null = null;
-function zoneOptions(): readonly string[] {
-  zones ??= [
-    ...new Set(
-      Intl.supportedValuesOf('timeZone').flatMap((name) => {
-        const canonical = canonicalZone(name);
-        return canonical ? [canonical] : [];
-      }),
-    ),
-  ].sort();
-  return zones;
-}
-
-interface ProposedEntry {
-  readonly civil?: string;
-  readonly zone?: string;
-  readonly offsetSeconds?: number;
-  readonly offsets?: readonly number[];
-}
-
-export function renderDateTimeEntry(
-  binding: DateTimeBinding,
-  name: string,
-  value: unknown,
-  attributes: string,
-): string {
-  const saved = SavedDateTimeSchema.safeParse(value).data;
-  const proposed = (saved ? null : (value as ProposedEntry | null)) ?? null;
-  const civil = (saved?.civil ?? proposed?.civil ?? '').slice(0, 16);
-  const zone = saved?.zone ?? proposed?.zone ?? '';
-  const parts = [
-    `<input type="datetime-local" step="60"${attributes} data-date-time-field="${escapeHtml(binding.zoneSource.kind)}" name="${name}" value="${escapeHtml(civil)}" autocomplete="off">`,
-  ];
-  if (saved) {
-    // The recorded capture: re-sending it unchanged leaves it untouched.
-    parts.push(
-      `<input type="hidden" name="${name}:recorded" value="${escapeHtml(`${saved.civil}|${saved.zone}|${String(saved.offsetSeconds)}`)}">`,
-      `<small class="form-hint">Recorded ${escapeHtml(formatRecordZone(saved))}</small>`,
-    );
-  }
-  if (binding.zoneSource.kind === 'perRecordIana') {
-    const options = zoneOptions()
-      .map(
-        (option) =>
-          `<option value="${escapeHtml(option)}"${option === zone ? ' selected' : ''}>${escapeHtml(option)}</option>`,
-      )
-      .join('');
-    parts.push(
-      `<select name="${name}:zone" aria-label="Time zone"><option value="">Company calendar zone</option>${options}</select>`,
-    );
-  }
-  if (proposed?.offsets?.length) {
-    parts.push(
-      `<select name="${name}:offset" required aria-label="Which ${escapeHtml(civil.slice(11))}"><option value="">Choose the offset</option>${proposed.offsets
-        .map(
-          (offset) =>
-            `<option value="${String(offset)}">${escapeHtml(offsetLabel(offset))}</option>`,
-        )
-        .join('')}</select>`,
-    );
-  }
-  return `<span class="date-time-entry">${parts.join('')}</span>`;
 }
 
 /**
