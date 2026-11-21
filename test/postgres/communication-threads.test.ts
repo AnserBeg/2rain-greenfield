@@ -47,12 +47,12 @@ function admit(
 ) {
   return scalar(
     c,
-    `SELECT platform.communication_admit_record(md5($1)::uuid,md5('release')::uuid,$2,$3,$4,md5($5)::uuid,$6,
+    `SELECT platform.communication_admit_record(md5($1)::uuid,md5('thread-release')::uuid,$2,$3,$4,md5($5)::uuid,$6,
        ARRAY(SELECT ROW('example.booking:entity.account',md5(s)::uuid)::platform.communication_record FROM unnest($7::text[]) s),
        ARRAY(SELECT md5(s)::uuid FROM unnest($8::text[]) s)) AS value`,
     [
       options.company ?? 'company0',
-      options.fence ?? 1,
+      options.fence ?? 2,
       channel,
       options.entity ?? visit,
       options.record ?? 'owner2',
@@ -76,7 +76,7 @@ const participants = async (c: PoolClient, ticket: string, id: string) =>
 const direct = (c: PoolClient, peer: string) =>
   scalar(
     c,
-    "SELECT platform.communication_admit_direct(md5('company0')::uuid,md5('release')::uuid,1,md5($1)::uuid) AS value",
+    "SELECT platform.communication_admit_direct(md5('company0')::uuid,md5('thread-release')::uuid,2,md5($1)::uuid) AS value",
     [peer],
   );
 
@@ -96,6 +96,42 @@ test('shared communication writer', async (t) => {
         await runMigrations(admin, await loadMigrations('db/migrations'));
         await admin.query(
           await readFile('test/fixtures/booking-commitments.sql', 'utf8'),
+        );
+        const release = JSON.parse(
+          await readFile('apps/web/release/app.compiled.json', 'utf8'),
+        ).applications.at(-1) as {
+          normalizedDefinitionBytesBase64: string;
+          artifacts: {
+            artifactKind: string;
+            domainTag: string;
+            canonicalBytesBase64: string;
+          }[];
+        };
+        const storage = release.artifacts
+          .filter((a) => a.artifactKind === 'projectionChunk')
+          .map(
+            (a) =>
+              JSON.parse(
+                Buffer.from(a.canonicalBytesBase64, 'base64').toString(),
+              ) as { kind: string },
+          )
+          .find((a) => a.kind === 'storageTargetPayload');
+        assert.ok(storage);
+        await admin.query(
+          'CREATE TEMP TABLE communication_release_fixture(definition jsonb, mapping jsonb)',
+        );
+        await admin.query(
+          'INSERT INTO communication_release_fixture VALUES ($1,$2)',
+          [
+            Buffer.from(
+              release.normalizedDefinitionBytesBase64,
+              'base64',
+            ).toString(),
+            storage,
+          ],
+        );
+        await admin.query(
+          await readFile('test/fixtures/communication-threads.sql', 'utf8'),
         );
         await admin.query(`
         INSERT INTO platform.current_policy_permission_grants(tenant_id,environment_id,role_id,permission_id,resource_id)
@@ -357,13 +393,200 @@ test('shared communication writer', async (t) => {
         );
 
         await t.test(
+          'authority is required before first setup or participant writes',
+          async () => {
+            const fresh = 'owner18';
+            const setup = async (record: string) => {
+              const ticket = await admit(left, discussion, { record });
+              await left.query(
+                'SELECT platform.communication_register_discussion($1)',
+                [ticket],
+              );
+            };
+            const unavailable = {
+              code: 'P0001',
+              message: 'communication.unavailable',
+            };
+            const refuse = async (
+              call: () => Promise<unknown>,
+              reason: string,
+            ) => {
+              await begin(left);
+              try {
+                await assert.rejects(call, unavailable, reason);
+              } finally {
+                await left.query('ROLLBACK');
+              }
+            };
+            await refuse(
+              () => setup('absent owner'),
+              'missing record disclosed',
+            );
+            for (const [permission, call, reason] of [
+              [
+                'example.booking:permission.visit',
+                () => setup(fresh),
+                'primary read bypassed',
+              ],
+              [
+                'example.booking:permission.account_detail',
+                () => setup(fresh),
+                'linked read bypassed',
+              ],
+              [
+                'example.booking:permission.read_relation_account',
+                () => setup(fresh),
+                'hidden relationship disclosed',
+              ],
+              [
+                'northstar.runtime:permission.legal-entity-read-scope',
+                () => setup(fresh),
+                'company read scope bypassed',
+              ],
+              [
+                'northstar.runtime:permission.semantic-query-boundary',
+                () => setup(fresh),
+                'query boundary bypassed',
+              ],
+              [
+                'example.booking:permission.disclose_contact_account',
+                () => admit(left, email, { contacts: ['owner2'] }),
+                'contact disclosure bypassed',
+              ],
+            ] as const) {
+              await admin.query(
+                'UPDATE platform.current_policy_permission_grants SET revoked_at=now() WHERE permission_id=$1',
+                [permission],
+              );
+              try {
+                await refuse(call, reason);
+                if (
+                  permission === 'example.booking:permission.account_detail'
+                ) {
+                  await refuse(
+                    () => setup('owner2'),
+                    'existing anchor disclosed',
+                  );
+                  await refuse(
+                    () => admit(left, email),
+                    'email admitted an unreadable link',
+                  );
+                }
+              } finally {
+                await admin.query(
+                  'UPDATE platform.current_policy_permission_grants SET revoked_at=NULL WHERE permission_id=$1',
+                  [permission],
+                );
+              }
+            }
+            await refuse(
+              () => admit(left, email, { contacts: ['owner4'] }),
+              'unrelated contact admitted',
+            );
+            await admin.query(
+              "UPDATE platform.current_policy_memberships SET revoked_at=now() WHERE principal_id=md5('west')::uuid",
+            );
+            try {
+              await refuse(
+                () => admit(left, email, { staff: ['west'] }),
+                'revoked staff membership admitted',
+              );
+            } finally {
+              await admin.query(
+                "UPDATE platform.current_policy_memberships SET revoked_at=NULL WHERE principal_id=md5('west')::uuid",
+              );
+            }
+            await admin.query(
+              "UPDATE platform.staff_accounts SET status='inactive' WHERE principal_id=md5('west')::uuid",
+            );
+            try {
+              await refuse(
+                () => admit(left, email, { staff: ['west'] }),
+                'inactive staff admitted',
+              );
+            } finally {
+              await admin.query(
+                "UPDATE platform.staff_accounts SET status='active' WHERE principal_id=md5('west')::uuid",
+              );
+            }
+            assert.equal(
+              await scalar(
+                admin,
+                'SELECT count(*)::text AS value FROM platform.communication_discussion_anchors WHERE primary_record=md5($1)::uuid',
+                [fresh],
+              ),
+              '0',
+            );
+          },
+        );
+
+        await t.test(
+          'the shipped Purchase Order supplier resolves through its Party get',
+          async () => {
+            const options = {
+              record: 'order',
+              entity: 'northstar.app:entity.purchase_order',
+              bindings: [
+                'northstar.app:field.purchase_order_supplier_party_id',
+              ],
+            };
+            for (const [record, permission] of [
+              ['bad-order', null],
+              ['order', 'northstar.app:permission.party_read'],
+              ['order', 'northstar.app:permission.purchase_order_line_read'],
+              [
+                'order',
+                'northstar.app:permission.read_reference_purchase_order_supplier_party_id',
+              ],
+            ] as const) {
+              if (permission)
+                await admin.query(
+                  'UPDATE platform.current_policy_permission_grants SET revoked_at=now() WHERE permission_id=$1',
+                  [permission],
+                );
+              try {
+                await begin(left);
+                await assert.rejects(
+                  admit(left, discussion, { ...options, record }),
+                  { code: 'P0001', message: 'communication.unavailable' },
+                  permission ?? 'malformed supplier reference',
+                );
+              } finally {
+                await left.query('ROLLBACK');
+                if (permission)
+                  await admin.query(
+                    'UPDATE platform.current_policy_permission_grants SET revoked_at=NULL WHERE permission_id=$1',
+                    [permission],
+                  );
+              }
+            }
+            await begin(left);
+            const ticket = await admit(left, discussion, options);
+            await left.query(
+              'SELECT platform.communication_register_discussion($1)',
+              [ticket],
+            );
+            const thread = await resolveThread(left, ticket);
+            await left.query('COMMIT');
+            const { rows } = await admin.query(
+              "SELECT entity_id, record_id=md5(CASE WHEN entity_id=$2 THEN 'order' ELSE 'supplier' END)::uuid AS exact FROM platform.communication_record_links WHERE thread_id=$1 ORDER BY entity_id",
+              [thread, options.entity],
+            );
+            assert.deepEqual(rows, [
+              { entity_id: 'northstar.app:entity.party', exact: true },
+              { entity_id: options.entity, exact: true },
+            ]);
+          },
+        );
+
+        await t.test(
           'the scope guard covers a shared record independently of its write grant',
           async () => {
             await begin(admin, 'west');
             try {
               await assert.rejects(
                 admin.query(
-                  "SELECT platform.communication_fence(md5('company1')::uuid,md5('release')::uuid,1)",
+                  "SELECT platform.communication_fence(md5('company1')::uuid,md5('thread-release')::uuid,2)",
                 ),
                 /communication.unavailable/,
                 'writer fence admitted a nonmember',
@@ -424,6 +647,75 @@ test('shared communication writer', async (t) => {
         const rightPid = await scalar(
           right,
           'SELECT pg_backend_pid()::text AS value',
+        );
+        await t.test(
+          'opposite setup batches register both fresh anchors in key order',
+          async () => {
+            const { rows: records } = await admin.query<{ name: string }>(
+              "SELECT name FROM unnest(ARRAY['owner12','owner14']) name ORDER BY md5(name)::uuid",
+            );
+            const [lo, hi] = records.map((r) => r.name) as [string, string];
+            const register = (c: PoolClient, ticket: string) =>
+              c.query('SELECT platform.communication_register_discussion($1)', [
+                ticket,
+              ]);
+            await begin(left);
+            const low = await admit(left, discussion, { record: lo }),
+              high = await admit(left, discussion, { record: hi });
+            await left.query('SAVEPOINT order_probe');
+            await register(left, high);
+            await assert.rejects(
+              register(left, low),
+              /communication.lockOrder/,
+              'backward anchor acquisition accepted',
+            );
+            await left.query('ROLLBACK TO order_probe');
+            await register(left, low);
+            await begin(right);
+            const rightHigh = await admit(right, discussion, { record: hi }),
+              rightLow = await admit(right, discussion, { record: lo });
+            let settled = false;
+            const competing = right
+              .query('SELECT platform.communication_register_discussions($1)', [
+                [rightHigh, rightLow],
+              ])
+              .finally(() => {
+                settled = true;
+              });
+            void competing.catch(() => {});
+            try {
+              const start = performance.now();
+              while (true) {
+                const blocked = await scalar(
+                  admin,
+                  'SELECT ($1=ANY(pg_blocking_pids($2)))::text AS value',
+                  [leftPid, rightPid],
+                );
+                if (blocked === 'true') break;
+                assert.ok(
+                  !settled && performance.now() - start < 30000,
+                  'opposite batch did not wait on the first anchor',
+                );
+                await pause(10);
+              }
+              await register(left, high);
+              await left.query('COMMIT');
+              await competing;
+              await right.query('COMMIT');
+            } finally {
+              await left.query('ROLLBACK');
+              await competing.catch(() => {});
+              await right.query('ROLLBACK');
+            }
+            assert.equal(
+              await scalar(
+                admin,
+                'SELECT count(*)::text AS value FROM platform.communication_discussion_anchors WHERE primary_record IN (md5($1)::uuid,md5($2)::uuid)',
+                [lo, hi],
+              ),
+              '2',
+            );
+          },
         );
         await begin(left);
         const sharedTicket = await admit(left, email, { contacts: ['owner2'] });
@@ -573,6 +865,43 @@ test('shared communication writer', async (t) => {
             await left.query('ROLLBACK TO ordered');
             await resolveThread(left, low);
             await resolveThread(left, high);
+          },
+        );
+        await t.test(
+          'private creates do not advance the existing thread lock order',
+          async () => {
+            const low = '00000000-0000-0000-0000-000000000001';
+            await admin.query(
+              `WITH seeded AS (INSERT INTO platform.communication_threads
+            (tenant_id,environment_id,company_id,thread_id,audience,primary_entity,primary_record,linked_records)
+            VALUES (md5('tenant')::uuid,md5('env')::uuid,md5('company0')::uuid,$1,'record',$2,md5('owner20')::uuid,
+              ARRAY[ROW($2,md5('owner20')::uuid)::platform.communication_record])
+            RETURNING tenant_id,environment_id,company_id,thread_id,primary_entity,primary_record)
+            INSERT INTO platform.communication_record_links SELECT * FROM seeded`,
+              [low, visit],
+            );
+            await begin(left);
+            const fresh = await admit(left, email, {
+              record: 'owner22',
+              bindings: [],
+            });
+            const alias = await admit(left, email, {
+              record: 'owner22',
+              bindings: [],
+            });
+            const existing = await admit(left, email, {
+              record: 'owner20',
+              bindings: [],
+            });
+            await left.query(
+              'SELECT platform.communication_lock_creations($1)',
+              [[fresh, alias, existing]],
+            );
+            const created = await resolveThread(left, fresh);
+            assert.ok(created > low);
+            assert.equal(await resolveThread(left, alias), created);
+            assert.equal(await resolveThread(left, existing), low);
+            assert.equal((await participants(left, alias, created)).length, 1);
           },
         );
         await t.test(

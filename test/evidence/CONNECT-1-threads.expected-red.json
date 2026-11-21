@@ -37,15 +37,20 @@
       ]
     },
     {
-      "name": "thread-contact-owner",
-      "claim": "A contact subject is checked against its stored company.",
+      "name": "thread-contact-link",
+      "claim": "The disclosed contact must be a saved participant source on this record.",
       "file": "db/migrations/0061_communication_threads.sql",
-      "original": "communication_check_records(company,storage,a.links || contacts)",
-      "replacement": "communication_check_records(company,storage,a.links)",
+      "original": "(c=ANY(a.links)) IS NOT TRUE OR NOT",
+      "replacement": "false OR NOT",
       "test": {
         "files": ["test/postgres/communication-threads.test.ts"]
       },
       "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "authority is required before first setup or participant writes",
+          "expected": "unrelated contact admitted"
+        },
         {
           "file": "test/postgres/communication-threads.test.ts",
           "name": "each authorization fence refuses independently",
@@ -278,8 +283,8 @@
       "name": "thread-row-order",
       "claim": "Existing threads reached through the creation API take the same row order as by-ID writers.",
       "file": "db/migrations/0061_communication_threads.sql",
-      "original": "WHERE thread_id>communication_lock_thread.id",
-      "replacement": "WHERE false",
+      "original": "t.thread_id>communication_lock_thread.id",
+      "replacement": "false",
       "test": {
         "files": ["test/postgres/communication-threads.test.ts"]
       },
@@ -441,6 +446,225 @@
           "file": "test/postgres/communication-threads.test.ts",
           "name": "each authorization fence refuses independently",
           "expected": "direct write grant revoked"
+        }
+      ]
+    },
+    {
+      "name": "thread-primary-exact-read",
+      "claim": "A post grant cannot register an unreadable primary record.",
+      "file": "db/migrations/0061_communication_threads.sql",
+      "original": "PERFORM north_star_internal.communication_check_read(company,owner,app,primary_query);",
+      "replacement": "NULL;",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "authority is required before first setup or participant writes",
+          "expected": "primary read bypassed"
+        },
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "the shipped Purchase Order supplier resolves through its Party get",
+          "expected": "northstar.app:permission.purchase_order_line_read"
+        }
+      ]
+    },
+    {
+      "name": "thread-linked-exact-read",
+      "claim": "Reading the primary and holding both post grants cannot register an unreadable target.",
+      "file": "db/migrations/0061_communication_threads.sql",
+      "original": "PERFORM north_star_internal.communication_check_read(company,owner,app,north_star_internal.communication_exact_query(app,edge.entity,edge.query_id));",
+      "replacement": "NULL;",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "authority is required before first setup or participant writes",
+          "expected": "linked read bypassed"
+        },
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "the shipped Purchase Order supplier resolves through its Party get",
+          "expected": "northstar.app:permission.party_read"
+        }
+      ]
+    },
+    {
+      "name": "thread-binding-disclosure",
+      "claim": "Reading both records is insufficient when the relationship itself is hidden.",
+      "file": "db/migrations/0061_communication_threads.sql",
+      "original": "IF NOT platform.document_granted(company::text,replace(replace(edge.key",
+      "replacement": "IF false AND NOT platform.document_granted(company::text,replace(replace(edge.key",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "authority is required before first setup or participant writes",
+          "expected": "hidden relationship disclosed"
+        },
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "the shipped Purchase Order supplier resolves through its Party get",
+          "expected": "northstar.app:permission.read_reference_purchase_order_supplier_party_id"
+        }
+      ]
+    },
+    {
+      "name": "thread-contact-disclosure",
+      "claim": "A linked contact still requires disclosure authority.",
+      "file": "db/migrations/0061_communication_threads.sql",
+      "original": "OR NOT\n    platform.document_granted(company::text,replace(c.entity_id",
+      "replacement": "OR false AND NOT\n    platform.document_granted(company::text,replace(c.entity_id",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "authority is required before first setup or participant writes",
+          "expected": "contact disclosure bypassed"
+        }
+      ]
+    },
+    {
+      "name": "thread-live-staff",
+      "claim": "A current role cannot admit an inactive staff account.",
+      "file": "db/migrations/0061_communication_threads.sql",
+      "original": " AND status='active' FOR SHARE;",
+      "replacement": " FOR SHARE;",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "authority is required before first setup or participant writes",
+          "expected": "inactive staff admitted"
+        }
+      ]
+    },
+    {
+      "name": "thread-exact-company-read",
+      "claim": "A company-owned record requires the legal-entity read-scope grant.",
+      "file": "db/migrations/0061_communication_threads.sql",
+      "original": "OR (owner IS NOT NULL AND NOT platform.document_granted(company::text,",
+      "replacement": "OR (false AND NOT platform.document_granted(company::text,",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "authority is required before first setup or participant writes",
+          "expected": "company read scope bypassed"
+        }
+      ]
+    },
+    {
+      "name": "thread-query-boundary",
+      "claim": "Exact reads require live entry to the semantic query gateway.",
+      "file": "db/migrations/0061_communication_threads.sql",
+      "original": "IF NOT EXISTS (SELECT FROM platform.document_identity() i",
+      "replacement": "IF false AND NOT EXISTS (SELECT FROM platform.document_identity() i",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "authority is required before first setup or participant writes",
+          "expected": "query boundary bypassed"
+        }
+      ]
+    },
+    {
+      "name": "thread-private-row-order",
+      "claim": "A private thread does not advance the existing-row order.",
+      "file": "db/migrations/0061_communication_threads.sql",
+      "original": "AND NOT EXISTS (SELECT FROM pg_temp.communication_admissions n WHERE n.created_thread=t.thread_id)",
+      "replacement": "AND true",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "private creates do not advance the existing thread lock order",
+          "expected": "communication.lockOrder"
+        }
+      ]
+    },
+    {
+      "name": "thread-anchor-order",
+      "claim": "Separate calls cannot take overlapping unique keys backwards.",
+      "file": "db/migrations/0061_communication_threads.sql",
+      "original": "WHERE p.anchor_registered AND",
+      "replacement": "WHERE false AND",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "opposite setup batches register both fresh anchors in key order",
+          "expected": "backward anchor acquisition accepted"
+        }
+      ]
+    },
+    {
+      "name": "thread-anchor-batch-order",
+      "claim": "A reversed input batch waits on the lowest anchor before acquiring another.",
+      "file": "db/migrations/0061_communication_threads.sql",
+      "original": "ORDER BY a.tenant_id,a.environment_id,a.company_id,a.primary_entity COLLATE \"C\",a.primary_record LOOP",
+      "replacement": "ORDER BY a.tenant_id,a.environment_id,a.company_id,a.primary_entity COLLATE \"C\",a.primary_record DESC LOOP",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "opposite setup batches register both fresh anchors in key order",
+          "expected": "opposite batch did not wait on the first anchor"
+        }
+      ]
+    },
+    {
+      "name": "thread-purchase-order-exact-lines",
+      "claim": "The commercial Purchase Order exact get requires its document lines.",
+      "file": "db/migrations/0061_communication_threads.sql",
+      "original": "(VALUES(q),(line_query))",
+      "replacement": "(VALUES(q))",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "the shipped Purchase Order supplier resolves through its Party get",
+          "expected": "northstar.app:permission.purchase_order_line_read"
+        }
+      ]
+    },
+    {
+      "name": "thread-staff-current-membership",
+      "claim": "Active staff cannot participate on a revoked company membership.",
+      "file": "db/migrations/0061_communication_threads.sql",
+      "original": "AND m.revoked_at IS NULL AND r.revoked_at IS NULL AND (m.legal_entity_id IS NULL OR m.legal_entity_id=company)))",
+      "replacement": "AND r.revoked_at IS NULL AND (m.legal_entity_id IS NULL OR m.legal_entity_id=company)))",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "authority is required before first setup or participant writes",
+          "expected": "revoked staff membership admitted"
         }
       ]
     }
