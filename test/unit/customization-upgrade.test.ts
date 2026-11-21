@@ -3,7 +3,10 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { replayCustomizationPatches } from '../../packages/customization/src/upgrade-replay.js';
 import * as customization from '../../packages/customization/src/index.js';
-import { normalizeApplicationPackage } from '../../packages/canonical-model/src/index.js';
+import {
+  normalizeApplicationPackage,
+  type SurfaceLayout,
+} from '../../packages/canonical-model/src/index.js';
 import { VALIDATION_NODE_VERSION } from '../../packages/canonical-model/src/formula-validation.js';
 import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
@@ -649,9 +652,9 @@ function replayedLayout(target: Base, revision: customization.LayoutRevision) {
     'surfaceId',
     revision.surface,
   );
-  return (
-    surface.layouts as import('../../packages/canonical-model/src/index.js').SurfaceLayout[]
-  ).find((l) => l.body.mode === revision.mode)!;
+  return (surface.layouts as SurfaceLayout[]).find(
+    (l) => l.body.mode === revision.mode,
+  )!;
 }
 function salesColumns(target: Base) {
   const page = declaration(

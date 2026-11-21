@@ -331,8 +331,7 @@ function structuralConflict(
       const next = after.item;
       if (
         !('binding' in next) ||
-        (old.contractDigest !== next.contractDigest &&
-          !compatibleBinding(sourceContracts.get(id), contracts.get(id))) ||
+        !compatibleBinding(sourceContracts.get(id), contracts.get(id)) ||
         old.bindingType !== next.bindingType ||
         old.required !== next.required ||
         old.editorInput !== next.editorInput ||

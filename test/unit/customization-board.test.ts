@@ -377,7 +377,10 @@ test('proof: a label-only base change to a stage, a fact column or an operation 
   const relabel = (stage: boolean) =>
     changed((base) => {
       const machine = poMachine(base);
-      if (stage) (machine.states as Json[])[0]!.label = 'Being drafted';
+      if (stage) {
+        (machine.states as Json[])[0]!.label = 'Being drafted';
+        return;
+      }
       (machine.transitions as Json[]).find(
         (t) => t.transitionId === id('transition.purchase_order_draft_cancel'),
       )!.label = 'Withdraw order';
@@ -390,6 +393,7 @@ test('proof: a label-only base change to a stage, a fact column or an operation 
   const retired = retire(poOffer, poBoard);
   for (const chain of [[poBoard], [poBoard, retired]]) {
     await replaysClean(authored, relabel(true), chain);
+    await replaysClean(authored, relabel(false), chain);
   }
 });
 

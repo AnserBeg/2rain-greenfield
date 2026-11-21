@@ -4462,6 +4462,19 @@ test('an enum-domain widening plans exactly one widenEnumDomain element, and eve
   );
   assert.deepEqual(transition.tighteningDebt, []);
 
+  const foreignDefinition = compileApplication(
+    moduleInput(tierModule('relabelled'), {
+      ...expectedActiveReleaseFrom(previous),
+      normalizedDefinitionBytes: moduleInput(tierModule('relabelled'))
+        .normalizedDefinitionBytes,
+    }),
+  );
+  assert.equal(foreignDefinition.status, 'failed');
+  assert.ok(
+    foreignDefinition.diagnostics.some(
+      (d) => d.code === 'COMPILER_TRANSITION_BASE_INVALID',
+    ),
+  );
   for (const variant of ['relabelled', 'widenedAndRelabelled'] as const) {
     const relabelled = mustCompile(
       moduleInput(tierModule(variant), expectedActiveReleaseFrom(previous)),
