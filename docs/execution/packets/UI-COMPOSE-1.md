@@ -33,8 +33,8 @@ Reader 38 serves the original release and refuses declared pop-ups at 39. The te
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "UI-COMPOSE-1",
-  "base": "5cffd0994f79f5f6bc6c32ba5e80b56ecdaecf37",
-  "head": "932c44f7e13319aa8768fb36c9018fbe408391b0",
+  "base": "aecd42967bf7524ae4f3c4f54eaca2350e3dc8fa",
+  "head": "cbe2d833209d7e3d838cafecd6e7ba277f7f05db",
   "changedPaths": [
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/surface-composition.ts",
     "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts", "packages/canonical-model/src/popup-actions.ts",
