@@ -78,8 +78,9 @@ def handle(engine, request):
     if op == "probe" and request.keys() == {"version","op"}:
         return host_info(engine)
     require(op in ("run", "cancel", "status", "reconcile", "ack") and
-            request.keys() == ({"version","op","job","image"} if op == "run" else {"version","op","job"}), "protocol operation")
+            request.keys() == ({"version","op","job","image","input"} if op == "run" else {"version","op","job"}), "protocol operation")
     if op == "run":
+        require(encode(request.get("input")) == b'{"units":[3,6,9]}', "fixed fixture input")
         if request["image"] != json.loads(PIN.read_text())["image"]:
             return {"status":"refused","launched":False,"reason":"unadmitted image digest"}
     job = str(uuid.UUID(request["job"]))
@@ -122,7 +123,9 @@ def handle(engine, request):
             write_state(path, state)
         budget = RunBudget()
         try:
-            raw = execute(engine,name,(ROOT/"guest.py").read_text(),code,cancel.exists,launched,budget)
+            input_bytes = encode(request["input"])
+            guest_input = struct.pack(">I",len(input_bytes)) + input_bytes + code
+            raw = execute(engine,name,(ROOT/"guest.py").read_text(),guest_input,cancel.exists,launched,budget)
             def clean(data):
                 out = execute(engine,name+"-png",(ROOT/"clean_png.py").read_text(),data,cancel.exists,
                               lambda: None,budget,limit=4*1024**2+32)
@@ -135,7 +138,7 @@ def handle(engine, request):
             features = next(row.split(":",1)[1].strip() for row in cpu if row.startswith("flags"))
             receipt = {"code":code.decode(), "codeSha256":hashlib.sha256(code).hexdigest(),
                        "profile":profile, "cpuClass":hashlib.sha256(features.encode()).hexdigest(),
-                       "parameters":{}, "input":"fixed fixture [3,6,9]", "modelCallDisclosureDigests":[],
+                       "parameters":{}, "inputSha256":hashlib.sha256(input_bytes).hexdigest(), "modelCallDisclosureDigests":[],
                        "seed":1, "threads":1, "timezone":"UTC","locale":"C.UTF-8","solver":"optimal",
                        "outputSha256":hashlib.sha256(encode([output["tables"], output["findings"],
                                       [c["pixelSha256"] for c in output["charts"]]])).hexdigest()}
@@ -153,12 +156,18 @@ def handle(engine, request):
 
 if __name__ == "__main__":
     engine = Engine()
+    request = {}
     try:
-        response = handle(engine,read_packet(sys.stdin.buffer,MAX_REQUEST))
+        request = read_packet(sys.stdin.buffer,MAX_REQUEST)
+        response = handle(engine,request)
         wire = packet(response)
         require(len(wire) <= MAX_RESPONSE+4, "response bytes")
         sys.stdout.buffer.write(wire)
-    except (Invalid, Refusal, OSError, ValueError, KeyError, TypeError) as error:
-        sys.stdout.buffer.write(packet({"status":"refused","reason":str(error)[:200]}))
+    except (Refusal, OSError, subprocess.SubprocessError) as error:
+        # A lost daemon or unverifiable teardown cannot release an active lease.
+        uncertain = isinstance(request, dict) and request.get("op") in ("run","reconcile","ack")
+        sys.stdout.buffer.write(packet({"status":"unreconciled" if uncertain else "refused","reason":str(error)[:200]}))
+    except (Invalid, ValueError, KeyError, TypeError) as error:
+        sys.stdout.buffer.write(packet({"status":"invalidRequest","reason":str(error)[:200]}))
     finally:
         engine.close()

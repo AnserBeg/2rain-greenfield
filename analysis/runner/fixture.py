@@ -10,7 +10,7 @@ from matplotlib import pyplot as plt
 
 random.seed(1)
 np.random.seed(1)
-demand = pd.Series([3, 6, 9], name="units")
+demand = pd.Series(fixture["units"], name="units")
 period = np.arange(1, 4)
 model = LinearRegression().fit(period.reshape(-1, 1), demand)
 assert abs(OLS(demand, period).fit().params.iloc[0] - 3) < 1e-9

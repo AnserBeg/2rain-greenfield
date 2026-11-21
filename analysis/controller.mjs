@@ -16,6 +16,7 @@ export async function requestWorker(op, job, remote, image) {
   const command = remote ? 'ssh' : 'python3';
   const args = remote
     ? [
+        ...(process.env.ANALYSIS_SSH_CONFIG ? ['-F',process.env.ANALYSIS_SSH_CONFIG] : []),
         '-T',
         '-oBatchMode=yes',
         '-oStrictHostKeyChecking=yes',
@@ -38,7 +39,7 @@ export async function requestWorker(op, job, remote, image) {
       version: 1,
       op,
       ...(job ? { job } : {}),
-      ...(image ? { image } : {}),
+      ...(image ? { image, input: { units: [3, 6, 9] } } : {}),
     }),
   );
   const header = Buffer.alloc(4);
@@ -85,7 +86,7 @@ export async function requestWorker(op, job, remote, image) {
 }
 
 export class FixtureController {
-  constructor(pool, scope, { remote, slots = 1, shared = false } = {}) {
+  constructor(pool, scope, { remote = process.env.ANALYSIS_RUNNER_HOST, slots = 1, shared = false } = {}) {
     this.pool = pool;
     this.scope = scope;
     this.remote = remote;
@@ -230,6 +231,8 @@ export class FixtureController {
       running = false;
     });
     const [evidence] = await Promise.all([execution, monitor()]);
+    if (evidence.status === 'unreconciled')
+      throw Error('analysis.reconciliationRequired');
     await this.settle(row.job, evidence);
     return true;
   }
@@ -240,7 +243,7 @@ export class FixtureController {
       const current = await this.result(job);
       if (!['queued', 'reserved', 'stopping'].includes(current.status))
         return { job, ...current };
-      await this.dispatch();
+      if (!(await this.dispatch())) await this.recover();
       await sleep(50);
     }
   }

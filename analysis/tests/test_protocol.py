@@ -26,5 +26,5 @@ class Protocol(unittest.TestCase):
             with self.assertRaises(Invalid):
                 worker.handle(engine,request)
         engine.preflight.assert_not_called()
-        result=worker.handle(engine,{"version":1,"op":"run","job":"abc","image":"mutable:tag"})
+        result=worker.handle(engine,{"version":1,"op":"run","job":"abc","image":"mutable:tag","input":{"units":[3,6,9]}})
         self.assertEqual(result["status"],"refused")

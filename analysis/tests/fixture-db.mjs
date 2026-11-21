@@ -4,6 +4,7 @@ import process from 'node:process';
 import { performance } from 'node:perf_hooks';
 import { setTimeout } from 'node:timers';
 import pg from 'pg';
+import { checkAdmission } from './admission.mjs';
 import { FixtureController } from '../controller.mjs';
 import {
   loadMigrations,
@@ -219,6 +220,7 @@ try {
   assert.equal(await dispatch(), null);
   await expectStatus(y, 'refused');
   await owner.query('UPDATE platform.analysis_budget_counters SET starts=0');
+  await checkAdmission(owner, hostPool, controller, image, boot);
   if (process.argv.includes('--science')) {
     const key = id();
     const first = await controller.run(key);
