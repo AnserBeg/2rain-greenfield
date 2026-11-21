@@ -80,10 +80,11 @@ const openAiPrices = (input: number, output: number) => ({
 
 export const CANDIDATES: readonly Candidate[] = [
   {
-    name: 'haiku-5-5',
+    name: 'opus-5-5-low',
     provider: 'anthropic',
-    modelId: 'claude-haiku-5-5',
-    prices: anthropicPrices(0.1, 0.5),
+    modelId: 'claude-opus-5-5',
+    effort: 'low',
+    prices: anthropicPrices(4, 20),
   },
   {
     name: 'sonnet-5-5',
@@ -93,32 +94,11 @@ export const CANDIDATES: readonly Candidate[] = [
     prices: anthropicPrices(2, 10),
   },
   {
-    name: 'opus-5-5-low',
+    name: 'haiku-5-5',
     provider: 'anthropic',
-    modelId: 'claude-opus-5-5',
-    effort: 'low',
-    prices: anthropicPrices(4, 20),
-  },
-  {
-    name: 'opus-5-5-medium',
-    provider: 'anthropic',
-    modelId: 'claude-opus-5-5',
+    modelId: 'claude-haiku-5-5',
     effort: 'medium',
-    prices: anthropicPrices(4, 20),
-  },
-  {
-    name: 'opus-5-5-high',
-    provider: 'anthropic',
-    modelId: 'claude-opus-5-5',
-    effort: 'high',
-    prices: anthropicPrices(4, 20),
-  },
-  {
-    name: 'fable-5-2',
-    provider: 'anthropic',
-    modelId: 'claude-fable-5-2',
-    effort: 'medium',
-    prices: anthropicPrices(8, 40),
+    prices: anthropicPrices(0.1, 0.5),
   },
   {
     name: 'gpt-6.2-sol',
@@ -126,13 +106,6 @@ export const CANDIDATES: readonly Candidate[] = [
     modelId: 'gpt-6.2-sol',
     effort: 'medium',
     prices: openAiPrices(2, 10),
-  },
-  {
-    name: 'gpt-6.2-astra',
-    provider: 'openai',
-    modelId: 'gpt-6.2-astra',
-    effort: 'medium',
-    prices: openAiPrices(8, 40),
   },
   {
     name: 'gpt-6.1-terra',
@@ -145,7 +118,36 @@ export const CANDIDATES: readonly Candidate[] = [
     name: 'gpt-6-luna',
     provider: 'openai',
     modelId: 'gpt-6-luna',
+    effort: 'medium',
     prices: openAiPrices(0.1, 0.5),
+  },
+  {
+    name: 'fable-5-2',
+    provider: 'anthropic',
+    modelId: 'claude-fable-5-2',
+    effort: 'medium',
+    prices: anthropicPrices(8, 40),
+  },
+  {
+    name: 'opus-5-5-high',
+    provider: 'anthropic',
+    modelId: 'claude-opus-5-5',
+    effort: 'high',
+    prices: anthropicPrices(4, 20),
+  },
+  {
+    name: 'gpt-6.2-astra',
+    provider: 'openai',
+    modelId: 'gpt-6.2-astra',
+    effort: 'medium',
+    prices: openAiPrices(8, 40),
+  },
+  {
+    name: 'opus-5-5-medium',
+    provider: 'anthropic',
+    modelId: 'claude-opus-5-5',
+    effort: 'medium',
+    prices: anthropicPrices(4, 20),
   },
 ];
 
