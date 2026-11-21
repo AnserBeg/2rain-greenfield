@@ -24,17 +24,17 @@
       "name": "date-time-shared-form-company-dropped",
       "claim": "A shared record submits the company displayed when its form opened.",
       "file": "apps/web/src/component-registry.ts",
-      "original": "              context.workingCompany?.recordId,",
-      "replacement": "              undefined,",
+      "original": "} else if (workingCompany) {",
+      "replacement": "} else if (false) {",
       "test": {
-        "files": ["test/postgres/date-time-field.test.ts"],
-        "namePattern": "a shared appointment form saves the displayed company and reopens its own zone"
+        "files": ["test/unit/date-time-field.test.ts"],
+        "namePattern": "the web control preserves typed entry, leaves an untouched capture alone and prints record zone"
       },
       "kills": [
         {
-          "file": "test/postgres/date-time-field.test.ts",
-          "name": "a shared appointment form saves the displayed company and reopens its own zone",
-          "expected": "the shared form pins the displayed workspace company"
+          "file": "test/unit/date-time-field.test.ts",
+          "name": "the web control preserves typed entry, leaves an untouched capture alone and prints record zone",
+          "expected": "the company-calendar control submits the displayed company"
         }
       ]
     },
@@ -45,14 +45,14 @@
       "original": "option === zone ? ' selected' : ''",
       "replacement": "option === zone && zone !== 'Etc/UTC' ? ' selected' : ''",
       "test": {
-        "files": ["test/postgres/date-time-field.test.ts"],
-        "namePattern": "a shared appointment form saves the displayed company and reopens its own zone"
+        "files": ["test/unit/date-time-field.test.ts"],
+        "namePattern": "dateTime entry offers both UTC spellings on the pinned tzdb and retains historical zone choices"
       },
       "kills": [
         {
-          "file": "test/postgres/date-time-field.test.ts",
-          "name": "a shared appointment form saves the displayed company and reopens its own zone",
-          "expected": "editing the reopened UTC value keeps noon UTC"
+          "file": "test/unit/date-time-field.test.ts",
+          "name": "dateTime entry offers both UTC spellings on the pinned tzdb and retains historical zone choices",
+          "expected": "the reopened picker must select the recorded zone Etc/UTC"
         }
       ]
     },

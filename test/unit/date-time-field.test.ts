@@ -684,8 +684,14 @@ test('the web control preserves typed entry, leaves an untouched capture alone a
     'value:f',
     undefined,
     '',
+    '74000000-0000-4000-8000-000000000001',
   );
   assert.doesNotMatch(company, /:zone/u);
+  assert.match(
+    company,
+    /name="value:f:company" value="74000000-0000-4000-8000-000000000001"/u,
+    'the company-calendar control submits the displayed company',
+  );
   assert.equal(
     web.recordZoneText(saved),
     'November 1, 2026, 01:30:15.250 UTC\u221205:00 America/Toronto',
@@ -782,19 +788,24 @@ test('dateTime entry offers both UTC spellings on the pinned tzdb and retains hi
       empty.includes(`<option value="${zone}">`),
       `picker is missing ${zone}`,
     );
-  const historic = renderDateTimeEntry(
-    binding,
-    'visit',
-    {
-      schemaVersion: 'northstar.date-time-value/v1',
-      instant: '2026-11-02T12:00:00.000Z',
-      civil: '2026-11-02T12:00:00.000',
-      offsetSeconds: 0,
-      zone: 'Etc/UCT',
-      tzdbVersion: '2025c',
-      zoneSource: { kind: 'perRecordIana' },
-    },
-    '',
-  );
-  assert.match(historic, /<option value="Etc\/UCT" selected>/u);
+  for (const zone of ['Etc/UTC', 'Etc/UCT']) {
+    const reopened = renderDateTimeEntry(
+      binding,
+      'visit',
+      {
+        schemaVersion: 'northstar.date-time-value/v1',
+        instant: '2026-11-02T12:00:00.000Z',
+        civil: '2026-11-02T12:00:00.000',
+        offsetSeconds: 0,
+        zone,
+        tzdbVersion: '2025c',
+        zoneSource: { kind: 'perRecordIana' },
+      },
+      '',
+    );
+    assert.ok(
+      reopened.includes(`<option value="${zone}" selected>`),
+      `the reopened picker must select the recorded zone ${zone}`,
+    );
+  }
 });
