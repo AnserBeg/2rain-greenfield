@@ -10,7 +10,7 @@ CREATE TABLE north_star_module.test_booking_owners (
 );
 CREATE TABLE north_star_module.test_booking_resources (
   tenant_id uuid NOT NULL, environment_id uuid NOT NULL, record_id uuid PRIMARY KEY,
-  revision bigint NOT NULL DEFAULT 1, archived_at timestamptz
+  revision bigint NOT NULL DEFAULT 1, archived_at timestamptz, legal_entity_id uuid
 );
 ALTER TABLE north_star_module.test_booking_owners ADD COLUMN parent_id uuid;
 GRANT SELECT, UPDATE ON north_star_module.test_booking_owners TO north_star_module_runtime;
@@ -63,6 +63,18 @@ BEGIN
     VALUES(t,e,md5('visit-archiver')::uuid,'example.booking:permission.archive_visit','example.booking:entity.account');
   INSERT INTO north_star_module.test_booking_resources(tenant_id,environment_id,record_id)
     SELECT t,e,md5('resource'||n)::uuid FROM generate_series(1,75) n;
+  UPDATE north_star_module.test_booking_resources SET legal_entity_id=md5('company1')::uuid
+    WHERE record_id=md5('resource52')::uuid;
+  -- Each principal has both reads in company1 and only one of them in company0.
+  FOREACH permission IN ARRAY ARRAY['visit','usage'] LOOP
+    INSERT INTO platform.current_policy_roles(tenant_id,environment_id,role_id,role_key)
+      VALUES(t,e,md5(permission||'-only')::uuid,permission||'-only');
+    INSERT INTO platform.current_policy_memberships(tenant_id,environment_id,membership_id,principal_id,role_id,legal_entity_id)
+      VALUES(t,e,gen_random_uuid(),md5(permission||'-only')::uuid,md5(permission||'-only')::uuid,md5('company0')::uuid),
+            (t,e,gen_random_uuid(),md5(permission||'-only')::uuid,role,md5('company1')::uuid);
+    INSERT INTO platform.current_policy_permission_grants(tenant_id,environment_id,role_id,permission_id,resource_id)
+      VALUES(t,e,md5(permission||'-only')::uuid,'example.booking:permission.'||permission,owner_entity);
+  END LOOP;
   FOREACH kind IN ARRAY ARRAY['unit','pool'] LOOP
     FOREACH verb IN ARRAY ARRAY['hold','holdTracked','confirm','changeInterval','cancel','setCapacity','start','return','swap','pause','resume','noShow','changeQuantity','correctActuals','recordExisting'] LOOP
       IF verb='setCapacity' AND kind='unit' THEN CONTINUE; END IF;
@@ -117,7 +129,7 @@ BEGIN
       'entities',jsonb_build_array(
         jsonb_build_object('entityId','example.booking:entity.account','lifecycle','active','legalEntity',jsonb_build_object('column','legal_entity_id'),'physicalTableName','test_booking_parents'),
         jsonb_build_object('entityId',owner_entity,'lifecycle','active','legalEntity',jsonb_build_object('column','legal_entity_id'),'physicalTableName','test_booking_owners'),
-        jsonb_build_object('entityId',target_entity,'lifecycle','active','physicalTableName','test_booking_resources'))) END;
+        jsonb_build_object('entityId',target_entity,'lifecycle','active','legalEntity',jsonb_build_object('column','legal_entity_id'),'physicalTableName','test_booking_resources'))) END;
     IF family='query-catalog' THEN
       payload:=jsonb_set(payload,'{queries}',(payload->'queries')||jsonb_build_array(
         (payload#>'{queries,0}')||jsonb_build_object('queryId','example.booking:query.account_detail',

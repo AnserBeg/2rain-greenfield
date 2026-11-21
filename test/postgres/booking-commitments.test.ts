@@ -232,6 +232,28 @@ test('booking commitment writer', async (t) => {
         admin.query('UPDATE public.booking_test_clock SET instant=$1', [
           instant,
         ]);
+      const horizon = ['2030-02-11T00:00Z', '2030-02-12T00:00Z'];
+      const read = async (
+        n: number,
+        after: string | null = null,
+        high: string | null = null,
+        page = 32,
+      ) =>
+        (
+          await left.query(
+            'SELECT platform.booking_owner_usage($1,$2,$3,$4,$5,$6,$7,$8,$9) AS usage',
+            [
+              release,
+              activeFence,
+              'example.booking:query.usage',
+              owner(n),
+              ...horizon,
+              after,
+              high,
+              page,
+            ],
+          )
+        ).rows[0]!.usage;
       const rightPid = Number(
         (await right.query('SELECT pg_backend_pid() AS pid')).rows[0]!.pid,
       );
@@ -1453,6 +1475,28 @@ test('booking commitment writer', async (t) => {
             ).refused,
             'booking.closed',
           );
+          const {
+            evidence: [outcome],
+          } = await read(41);
+          assert.equal(outcome.kind, 'attendance');
+          assert.equal(outcome.reason, 'completed');
+          assert.equal(outcome.voided, false);
+          const revised = await call(left, 'correctActuals', {
+            ...terms(41, moved),
+            expectedRevision: 4,
+            evidenceId: outcome.id,
+            evidenceRevision: outcome.revision,
+            outcome: 'noShow',
+            reason: 'dispatcher confirmed absence',
+          });
+          assert.equal(revised.state, 'noShow');
+          const {
+            evidence: [correction],
+          } = await read(41);
+          assert.deepEqual(
+            [correction.id, correction.reason, correction.supersedes],
+            [outcome.id, 'noShow', outcome.revision],
+          );
           const receipts = await admin.query(
             `SELECT h.operation, i.causation_id, b.system_expiry AS system,
           o.deduplication_key LIKE 'booking/system/%' AS isolated FROM platform.booking_history h
@@ -1660,28 +1704,6 @@ test('booking commitment writer', async (t) => {
       await t.test(
         'an owner snapshot stays at its committed cursor and a steward correction pages past a billing checkpoint',
         async () => {
-          const horizon = ['2030-02-11T00:00Z', '2030-02-12T00:00Z'];
-          const read = async (
-            n: number,
-            after: string | null = null,
-            high: string | null = null,
-            page = 32,
-          ) =>
-            (
-              await left.query(
-                'SELECT platform.booking_owner_usage($1,$2,$3,$4,$5,$6,$7,$8,$9) AS usage',
-                [
-                  release,
-                  activeFence,
-                  'example.booking:query.usage',
-                  owner(n),
-                  ...horizon,
-                  after,
-                  high,
-                  page,
-                ],
-              )
-            ).rows[0]!.usage;
           await time('2030-02-11T15:00Z');
           const held = await call(
             left,
@@ -1707,6 +1729,35 @@ test('booking commitment writer', async (t) => {
             reason: 'logged on return',
           });
           assert.equal(late.state, 'inUse');
+          const [absence] = absent.evidence;
+          assert.deepEqual(
+            [absence.kind, absence.reason, absence.voided],
+            ['attendance', 'noShow', false],
+          );
+          const recovered = await read(48);
+          assert.deepEqual(
+            recovered.evidence.map((e: { kind: string }) => e.kind).sort(),
+            ['assignment', 'use'],
+          );
+          const deltaAtStart = await read(48, absent.cursor, recovered.cursor);
+          assert.equal(deltaAtStart.changes.length, 1);
+          const retraction = deltaAtStart.changes[0].evidence.find(
+            (change: { after: { kind: string } }) =>
+              change.after.kind === 'attendance',
+          );
+          assert.deepEqual(retraction.before, absence);
+          assert.deepEqual(
+            [
+              retraction.after.id,
+              retraction.after.supersedes,
+              retraction.after.voided,
+            ],
+            [absence.id, absence.revision, true],
+          );
+          assert.deepEqual(
+            (await read(48, null, absent.cursor)).evidence,
+            absent.evidence,
+          );
           const pause = await call(left, 'pause', {
             ...terms(48, late),
             effectiveAt: '2030-02-11T17:10Z',
@@ -1783,9 +1834,11 @@ test('booking commitment writer', async (t) => {
           assert.equal(
             (
               await call(left, 'correctActuals', {
-                ...fix,
                 ...terms(48, corrected),
+                evidenceId: evidence.id,
                 evidenceRevision: 3,
+                void: true,
+                reason: 'supervisor retracts the pause',
               })
             ).refused,
             'booking.effectiveTimeOutsideBound',
@@ -1812,6 +1865,90 @@ test('booking commitment writer', async (t) => {
               ),
               /booking.endpointUnavailable/u,
             );
+          } finally {
+            await left.query(
+              "SELECT set_config('north_star.principal_id',$1,false)",
+              [principal],
+            );
+          }
+        },
+      );
+      await t.test(
+        'usage and fence require each read permission in the stored owner company',
+        async () => {
+          for (const granted of ['visit', 'usage']) {
+            await left.query(
+              "SELECT set_config('north_star.principal_id',$1,false)",
+              [fixtureId(granted + '-only')],
+            );
+            try {
+              const checks = await Promise.allSettled([
+                read(80),
+                bookingOwnerCursorFence(left, release, activeFence, [
+                  {
+                    queryId: 'example.booking:query.usage',
+                    recordId: owner(80),
+                  },
+                ]),
+              ]);
+              assert.deepEqual(
+                checks.map((check) =>
+                  check.status === 'rejected'
+                    ? (check.reason as Error).message
+                    : 'admitted',
+                ),
+                ['booking.endpointUnavailable', 'booking.endpointUnavailable'],
+                'usage and fence admitted a single company-scoped permission: ' +
+                  granted,
+              );
+            } finally {
+              await left.query(
+                "SELECT set_config('north_star.principal_id',$1,false)",
+                [principal],
+              );
+            }
+          }
+        },
+      );
+      await t.test(
+        'a swap refuses a replacement from another company in the same tenant',
+        async () => {
+          await time('2030-02-11T15:00Z');
+          const held = await call(
+            left,
+            'holdTracked',
+            hold(78, 51, window('10:00', '11:00')),
+          );
+          const confirmed = await call(left, 'confirm', terms(78, held));
+          await time('2030-02-11T17:00Z');
+          const started = await call(left, 'start', terms(78, confirmed));
+          assert.equal(started.state, 'inUse');
+          await left.query(
+            "SELECT set_config('north_star.principal_id',$1,false)",
+            [fixtureId('ordinary')],
+          );
+          try {
+            await assert.rejects(
+              call(
+                left,
+                'swap',
+                { ...terms(78, started), replacementResourceId: resource(52) },
+                undefined,
+                'unit',
+                fixtureId('ordinary'),
+              ),
+              /booking.endpointUnavailable/u,
+              'cross-company replacement was admitted',
+            );
+            const allowed = await call(
+              left,
+              'swap',
+              { ...terms(78, started), replacementResourceId: resource(53) },
+              undefined,
+              'unit',
+              fixtureId('ordinary'),
+            );
+            assert.equal(allowed.state, 'inUse');
           } finally {
             await left.query(
               "SELECT set_config('north_star.principal_id',$1,false)",
@@ -2074,6 +2211,21 @@ test('booking commitment writer', async (t) => {
           const expired = await call(left, 'kitHold', args);
           assert.equal(expired.state, 'hold');
           await time(expired.deadline);
+          await admin.query(
+            "SELECT north_star_internal.booking_expire_kit($1,$2,$3,$4::timestamptz - interval '1 second')",
+            [tenant, environment, expired.groupId, expired.deadline],
+          );
+          assert.deepEqual(
+            (await facts(expired.groupId)).map((f) => f.state),
+            ['hold', 'hold'],
+          );
+          // The first diary swept has an earlier floor than the other member.
+          const laterFloor = new Date(Date.parse(expired.deadline) + 1000);
+          await admin.query(
+            `UPDATE platform.booking_resources SET decision_floor=$2 WHERE resource_key=(
+            SELECT resource_key FROM platform.booking_commitments WHERE group_id=$1 ORDER BY resource_key DESC LIMIT 1)`,
+            [expired.groupId, laterFloor],
+          );
           await admin.query('SELECT platform.booking_sweep_due(100)');
           assert.deepEqual(
             (await facts(expired.groupId)).map((f) => [
@@ -2085,6 +2237,15 @@ test('booking commitment writer', async (t) => {
               ['cancelled', 2, '5'],
               ['cancelled', 2, '5'],
             ],
+          );
+          const floors = await admin.query(
+            `SELECT decision_floor FROM platform.booking_resources
+            JOIN platform.booking_commitments USING(resource_key) WHERE group_id=$1`,
+            [expired.groupId],
+          );
+          assert.deepEqual(
+            floors.rows.map((row) => row.decision_floor),
+            [laterFloor, laterFloor],
           );
           await assert.rejects(
             call(left, 'kitHold', {
@@ -2227,10 +2388,10 @@ test('booking commitment writer', async (t) => {
           const visit = await call(
             left,
             'hold',
-            hold(76, 50, window('11:30', '12:00')),
+            hold(77, 50, window('11:30', '12:00')),
           );
           assert.equal(
-            (await call(left, 'confirm', terms(76, visit))).state,
+            (await call(left, 'confirm', terms(77, visit))).state,
             'confirmed',
           );
           await time('2030-02-11T19:00Z');
@@ -2256,6 +2417,40 @@ test('booking commitment writer', async (t) => {
             state: 'noShow',
             revision: 3,
           });
+        },
+      );
+      await t.test(
+        'only an endpoint change maps to a try-again refusal and the request can be replayed',
+        async () => {
+          await time('2030-02-11T15:00Z');
+          const input = hold(84, 54, window('14:00', '15:00'));
+          const key = randomUUID();
+          await admin.query(`CREATE FUNCTION public.interrupt_booking_registration() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN RAISE EXCEPTION '%', TG_ARGV[0] USING ERRCODE='40001'; END $$`);
+          for (const message of [
+            'booking.endpointChanged',
+            'unrelated serialization failure',
+          ]) {
+            await admin.query(`CREATE TRIGGER interrupt_registration AFTER INSERT ON platform.booking_resources
+              FOR EACH ROW EXECUTE FUNCTION public.interrupt_booking_registration('${message}')`);
+            try {
+              if (message === 'booking.endpointChanged') {
+                assert.deepEqual(await call(left, 'hold', input, key), {
+                  refused: 'booking.tryAgain',
+                });
+              } else {
+                await assert.rejects(call(left, 'hold', input, key), {
+                  code: '40001',
+                  message,
+                });
+              }
+            } finally {
+              await admin.query(
+                'DROP TRIGGER interrupt_registration ON platform.booking_resources',
+              );
+            }
+          }
+          assert.equal((await call(left, 'hold', input, key)).state, 'hold');
         },
       );
       await t.test(
@@ -2295,9 +2490,9 @@ test('booking commitment writer', async (t) => {
         'fencing fresh owners acquires their identity rows in the same entity and record order as kit writers',
         async () => {
           await admin.query(`
-          CREATE TABLE public.booking_observed_owner_order (sequence bigint GENERATED ALWAYS AS IDENTITY,entity_id text);
+          CREATE TABLE public.booking_observed_owner_order (sequence bigint GENERATED ALWAYS AS IDENTITY,entity_id text,record_id uuid);
           CREATE FUNCTION public.observe_booking_owner_order() RETURNS trigger LANGUAGE plpgsql AS $$
-          BEGIN INSERT INTO public.booking_observed_owner_order(entity_id) VALUES(NEW.entity_id); RETURN NEW; END $$;
+          BEGIN INSERT INTO public.booking_observed_owner_order(entity_id,record_id) VALUES(NEW.entity_id,NEW.record_id); RETURN NEW; END $$;
           CREATE TRIGGER observe_identity AFTER INSERT ON platform.booking_owner_cursors FOR EACH ROW EXECUTE FUNCTION public.observe_booking_owner_order()`);
           const [first, last] = [owner(74), owner(76)].sort();
           const result = await bookingOwnerCursorFence(
@@ -2322,6 +2517,30 @@ test('booking commitment writer', async (t) => {
           assert.deepEqual(
             order.rows.map((row) => row.entity_id),
             ['example.booking:entity.account', 'example.booking:entity.visit'],
+          );
+          await time('2030-02-11T15:00Z');
+          const members = [85, 89].map((n, i) => ({
+            ...hold(n, 55 + i, window('13:00', '14:00')),
+            recordId: i === 0 ? owner(n) : owner(n).toUpperCase(),
+            operationId: 'example.booking:operation.hold_unit',
+          }));
+          assert.equal(
+            (
+              await call(left, 'kitHold', {
+                recordId: owner(85),
+                expectedOwnerRevision: 1,
+                members,
+              })
+            ).state,
+            'hold',
+          );
+          const kitOrder = await admin.query(
+            'SELECT record_id FROM public.booking_observed_owner_order WHERE record_id=ANY($1) ORDER BY sequence',
+            [[owner(85), owner(89)]],
+          );
+          assert.deepEqual(
+            kitOrder.rows.map((row) => row.record_id),
+            [owner(85), owner(89)],
           );
         },
       );

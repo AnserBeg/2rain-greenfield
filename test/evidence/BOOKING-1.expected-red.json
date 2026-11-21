@@ -193,7 +193,7 @@
     {
       "name": "swap-resource",
       "claim": "A swap moves physical possession to the replacement diary.",
-      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "file": "db/migrations/0060_booking_recovery.sql",
       "original": "f.resource_key:=dest.resource_key; f.assigned_unit_key:=dest.resource_key;",
       "replacement": "f.resource_key:=d.resource_key; f.assigned_unit_key:=d.resource_key;",
       "test": {
@@ -210,7 +210,7 @@
     {
       "name": "pause-resume",
       "claim": "Pauses preserve their effective end at resume.",
-      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "file": "db/migrations/0060_booking_recovery.sql",
       "original": "ev.effective_end:=effective; END IF;\n    PERFORM",
       "replacement": "ev.effective_end:=ev.effective_start; END IF;\n    PERFORM",
       "test": {
@@ -227,7 +227,7 @@
     {
       "name": "partial-quantity",
       "claim": "A partial return admits exactly the remaining quantity.",
-      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "file": "db/migrations/0060_booking_recovery.sql",
       "original": "f.out_quantity:=f.out_quantity-amount;",
       "replacement": "f.out_quantity:=amount;",
       "test": {
@@ -244,7 +244,7 @@
     {
       "name": "change-quantity",
       "claim": "A pool quantity change consumes its new demand.",
-      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "file": "db/migrations/0060_booking_recovery.sql",
       "original": "f.quantity:=amount;",
       "replacement": "NULL;",
       "test": {
@@ -261,7 +261,7 @@
     {
       "name": "manual-noshow",
       "claim": "A dispatcher can report absence only from the scheduled start.",
-      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "file": "db/migrations/0060_booking_recovery.sql",
       "original": "f.state<>'confirmed' OR decision<lower(f.agreed_interval)",
       "replacement": "f.state<>'confirmed'",
       "test": {
@@ -295,7 +295,7 @@
     {
       "name": "correction-age",
       "claim": "The separate steward correction horizon admits old evidence.",
-      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "file": "db/migrations/0060_booking_recovery.sql",
       "original": "actual_day_limit integer:=(binding->>'maxCorrectionAgeDays')::integer",
       "replacement": "actual_day_limit integer:=(f.binding->>'maxBackdateDays')::integer",
       "test": {
@@ -312,7 +312,7 @@
     {
       "name": "pinned-report",
       "claim": "A historical owner cursor reconstructs its original evidence.",
-      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "file": "db/migrations/0060_booking_recovery.sql",
       "original": "MATERIALIZED (SELECT h.* FROM platform.booking_history h WHERE h.owner_key=own.owner_key AND h.cursor_value<=pinned)",
       "replacement": "MATERIALIZED (SELECT h.* FROM platform.booking_history h WHERE h.owner_key=own.owner_key)",
       "test": {
@@ -329,7 +329,7 @@
     {
       "name": "incremental-page",
       "claim": "Incremental delivery cannot advance past the last delivered cursor.",
-      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "file": "db/migrations/0060_booking_recovery.sql",
       "original": "ORDER BY h.cursor_value LIMIT page_size)",
       "replacement": "ORDER BY h.cursor_value)",
       "test": {
@@ -380,7 +380,7 @@
     {
       "name": "kit-member-revision",
       "claim": "A stale final kit member leaves all original revisions and cursors intact.",
-      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "file": "db/migrations/0060_booking_recovery.sql",
       "original": "(m->>'bookingRevision')::integer)\n            AND (c.state",
       "replacement": "c.revision)\n            AND (c.state",
       "test": {
@@ -431,9 +431,9 @@
     {
       "name": "planned-history",
       "claim": "Backdated handover charges historical occupation even without a possession leg.",
-      "file": "db/migrations/0059_booking_fulfilment.sql",
-      "original": "h.after_fact->>'resource_key'=d.resource_key::text AND from_time<lower(f.occupied_interval)",
-      "replacement": "false AND from_time<lower(f.occupied_interval)",
+      "file": "db/migrations/0060_booking_recovery.sql",
+      "original": "WHERE from_time<lower(f.occupied_interval)",
+      "replacement": "WHERE false AND from_time<lower(f.occupied_interval)",
       "test": {
         "files": ["test/postgres/booking-commitments.test.ts"]
       },
@@ -476,6 +476,125 @@
           "file": "test/postgres/booking-serving.test.ts",
           "name": "the compiler requires a distinct steward write for a correction and admits its separate 90-day age",
           "expected": "'compiled'"
+        }
+      ]
+    },
+    {
+      "name": "recovery-gap",
+      "claim": "A recovered Start charges a completed appointment after the original occupied end.",
+      "file": "db/migrations/0060_booking_recovery.sql",
+      "original": "WHERE f.state='noShow' AND upper(f.occupied_interval)<until_time",
+      "replacement": "WHERE false AND upper(f.occupied_interval)<until_time",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "a late start refuses a completed scheduled appointment in the gap after a timed no-show",
+          "expected": "booking.capacityTaken"
+        }
+      ]
+    },
+    {
+      "name": "recovery-attendance",
+      "claim": "Recovery supersedes the absence at the same owner cursor as the new use.",
+      "file": "db/migrations/0060_booking_recovery.sql",
+      "original": "ev.voided:=true;\n      PERFORM north_star_internal.booking_write_evidence(f,ev,decision);",
+      "replacement": "NULL;",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "an owner snapshot stays at its committed cursor and a steward correction pages past a billing checkpoint",
+          "expected": "'attendance'"
+        }
+      ]
+    },
+    {
+      "name": "usage-owner-permission",
+      "claim": "The owner usage read and fence require the owner permission in the stored owner company.",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "PERFORM north_star_internal.booking_require_permission(t,e,principal,company,owner_query->>'permissionId',owner_query->>'sourceEntityId');",
+      "replacement": "NULL;",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "usage and fence require each read permission in the stored owner company",
+          "expected": "usage and fence admitted a single company-scoped permission: usage"
+        }
+      ]
+    },
+    {
+      "name": "usage-usage-permission",
+      "claim": "The owner usage read and fence require the usage permission in the stored owner company.",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "PERFORM north_star_internal.booking_require_permission(t,e,principal,company,usage_query->>'permissionId',owner_query->>'sourceEntityId');",
+      "replacement": "NULL;",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "usage and fence require each read permission in the stored owner company",
+          "expected": "usage and fence admitted a single company-scoped permission: visit"
+        }
+      ]
+    },
+    {
+      "name": "swap-target-company",
+      "claim": "A readable replacement unit must belong to the booking company or be shared.",
+      "file": "db/migrations/0059_booking_fulfilment.sql",
+      "original": "OR target_company IS DISTINCT FROM locked_diary.company_id OR (target_company IS NOT NULL AND target_company IS DISTINCT FROM owner_company)",
+      "replacement": "OR target_company IS DISTINCT FROM locked_diary.company_id",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "a swap refuses a replacement from another company in the same tenant",
+          "expected": "cross-company replacement was admitted"
+        }
+      ]
+    },
+    {
+      "name": "correction-stored-age",
+      "claim": "An out-of-age stored pause cannot be voided, even without proposed boundaries.",
+      "file": "db/migrations/0060_booking_recovery.sql",
+      "original": "(ev.effective_start AT TIME ZONE zone_name)::date>actual_day_limit",
+      "replacement": "(ev.effective_start AT TIME ZONE zone_name)::date>actual_day_limit AND false",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "an owner snapshot stays at its committed cursor and a steward correction pages past a billing checkpoint",
+          "expected": "booking.effectiveTimeOutsideBound"
+        }
+      ]
+    },
+    {
+      "name": "kit-company",
+      "claim": "Every member of a kit must resolve to the same company.",
+      "file": "db/migrations/0060_booking_recovery.sql",
+      "original": "IF (company_set AND company IS DISTINCT FROM group_company) OR (d.company_id",
+      "replacement": "IF (d.company_id",
+      "test": {
+        "files": ["test/postgres/booking-commitments.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/booking-commitments.test.ts",
+          "name": "kit hold, confirm, cancel and expiry change every member and advance both owners once",
+          "expected": "Missing expected rejection"
         }
       ]
     }
