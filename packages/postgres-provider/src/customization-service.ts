@@ -1539,11 +1539,19 @@ export class PostgresCustomizationService {
           }
           const demoPatch = randomUUID() as MintedUuid;
           await client.query(
-            `INSERT INTO platform.customization_patches
-             SELECT patch.* FROM jsonb_populate_record(
-               NULL::platform.customization_patches,
-               $1::jsonb || jsonb_build_object('created_at', transaction_timestamp())
-             ) AS patch`,
+            `INSERT INTO platform.customization_patches (
+               tenant_id, environment_id, patch_id, patch_version, patch_kind,
+               payload, payload_digest, channel, authored_by, base_package_id,
+               base_package_version, base_revision_id, base_release_root, parent_revision_id,
+               resulting_revision_id, resulting_release_id, language_version,
+               normalization_profile_version, display_label, compiler_acknowledgement
+             )
+             SELECT tenant_id, environment_id, patch_id, patch_version, patch_kind,
+                    payload, payload_digest, channel, authored_by, base_package_id,
+                    base_package_version, base_revision_id, base_release_root, parent_revision_id,
+                    resulting_revision_id, resulting_release_id, language_version,
+                    normalization_profile_version, display_label, compiler_acknowledgement
+             FROM jsonb_populate_record(NULL::platform.customization_patches, $1::jsonb)`,
             [
               {
                 ...proposal,
