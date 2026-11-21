@@ -12,7 +12,7 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44854101
 
 ## Baseline (live, local, 2026-11-20/21)
 
-Model `claude-opus-5-5`, effort medium, 8000 output tokens, the app's own drafting settings. One attempt per request, so the numbers are indicative only. Spend cap USD 15 (USD 2 for the T08 rerun). Total spend USD 3.55 for 33 model calls (the replays made none).
+**Of 30 requests (one attempt each): 19 built and worked end to end, 7 were correctly refused, 4 failed.** The one repair turn rescued nothing (83% verified before and after it), and receipt workflows are 0/3. Model `claude-opus-5-5`, effort medium, 8000 output tokens, the app's own drafting settings. One attempt per request, so the numbers are indicative only. Spend cap USD 15 (USD 2 for the T08 rerun). Total spend USD 3.55 for 33 model calls (the replays made none).
 
 | measure | all | dev (22) | held-out (8) |
 |---|---|---|---|
@@ -22,9 +22,9 @@ Model `claude-opus-5-5`, effort medium, 8000 output tokens, the app's own drafti
 | behaviour correct against expectations | 26/30 (87%) | 19/22 | 7/8 |
 | correct "unsupported", right capability named | 7/7 | 5/5 | 2/2 |
 | false refusals / false accepts | 0 / 0 | | |
-| hostile probes that changed the drafted calls | 0/4 | | |
+| hostile probes that changed the drafted calls | 0/3 (H01, H02, T07) | | |
 
-- Every module, multi-step, follow-up and hostile request passed except M04.
+- Every module, multi-step, follow-up and hostile request passed except M04. A no-model probe confirmed H02's hostile field label reaches the drafting system prompt (6 lines), so H02 is a real system-prompt probe.
 - All 4 failures are on the drafting path. W01, W02 and T08 fail at workflow verification; M04's draft is refused.
 - Latency: median 4.3 s model time per request (1.3 to 29.5 s). Median 4 to 5 minutes wall time per request, most of it compile and activation on a loaded laptop.
 - Workflows, scored on the goods-receipt case only (the only trigger until WORKFLOW-2):
@@ -57,7 +57,7 @@ Model `claude-opus-5-5`, effort medium, 8000 output tokens, the app's own drafti
 
 ## Gates
 
-- Full CI 44838134807 green at `4da63373`. Full CI 44854101419 at `1b6aa091` (final head plus evidence).
+- Full CI 44838134807 green at `4da63373` (all harness code but the replay and fallback commits). Full CI 44854101419 at `1b6aa091` (last executable commit plus evidence) was queued at hand-back; merge waits for it.
 - Evidence: [live run](../evidence/2026-11-20-build-eval-2026-11-20T23-03-14-492Z/summary.md), [T08 rerun](../evidence/2026-11-21-build-eval-2026-11-21T01-32-08-200Z/summary.md), [final merged table](../evidence/2026-11-21-build-eval-rescore-2026-11-21T01-52-38-712Z/summary.md).
 
 ## Test it yourself
