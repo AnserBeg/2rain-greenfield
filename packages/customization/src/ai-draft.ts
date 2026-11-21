@@ -562,16 +562,13 @@ function convertMember(
     case 'addUploadCategory': {
       const field =
         base.documentFields?.find(
-          (f) =>
-            f.fieldId === req.filesField || sameLabel(f.label, req.filesField),
+          (f) => f.fieldId === req.field || sameLabel(f.label, req.field),
         ) ??
         prior
           .filter((m) => kindOf(m) === 'addDocumentField')
           .map((m) => m as { fieldId: string; entityId: string; label: string })
           .find(
-            (f) =>
-              f.fieldId === req.filesField ||
-              sameLabel(f.label, req.filesField),
+            (f) => f.fieldId === req.field || sameLabel(f.label, req.field),
           );
       if (!field || typeof req.label !== 'string')
         throw new Error('Choose a listed files field and name the category.');
@@ -648,10 +645,9 @@ function mapMember(
   const added = prior
     .filter((m) => kindOf(m) === 'addAddressField')
     .map((m) => m as { fieldId: string; label: string })
-    .find((m) => sameLabel(m.label, req.addressField));
+    .find((m) => sameLabel(m.label, req.field));
   const fieldId =
-    added?.fieldId ??
-    (typeof req.addressField === 'string' ? req.addressField : '');
+    added?.fieldId ?? (typeof req.field === 'string' ? req.field : '');
   const holds = (sections: readonly { fields: readonly { id: string }[] }[]) =>
     sections.some((s) => s.fields.some((f) => f.id === fieldId));
   const layouts = (targets.layouts ?? []).filter(
