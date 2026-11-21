@@ -91,6 +91,18 @@ export type Expectation =
       readonly calls: readonly WorkflowCallSpec[];
     }
   | {
+      /** A validation rule (dated follow-up set, 2026-11-21). */
+      readonly outcome: 'validation';
+      readonly entity: string;
+      /** Field local the rule guards. */
+      readonly field: string;
+      /** Accepted checks (the drafter's `check` values). */
+      readonly checks: readonly string[];
+      /** For compareFields: the other field local, and the relation if any. */
+      readonly otherField?: string;
+      readonly relation?: string;
+    }
+  | {
       readonly outcome: 'board';
       /** The list surface local the board is on starts with this. */
       readonly list: string;
@@ -1027,6 +1039,56 @@ export const BUILD_CASES: readonly BuildCase[] = [
           fields: [text('crew notes', 'crew')],
         },
       ],
+    },
+  },
+];
+
+/**
+ * Dated follow-up (2026-11-21, orchestrator): three validation-rule requests,
+ * one literal, one cross-field and one through a parent link. NEW, written
+ * before any run, and NOT part of the 40 scored in AI-BUILD-1 slice 2; run
+ * them with `--cases V01,V02,V03` once added to BUILD_CASES by a later slice.
+ */
+export const VALIDATION_FOLLOWUP_CASES: readonly BuildCase[] = [
+  {
+    id: 'V01',
+    split: 'test',
+    category: 'follow-up',
+    request: "An item's standard cost in CAD can't be negative.",
+    expect: {
+      outcome: 'validation',
+      entity: 'item',
+      field: 'item_standard_cost_cad',
+      checks: ['minimum'],
+    },
+  },
+  {
+    id: 'V02',
+    split: 'test',
+    category: 'follow-up',
+    request:
+      "An item's reorder up-to level must be at least its reorder point.",
+    expect: {
+      outcome: 'validation',
+      entity: 'item',
+      field: 'item_reorder_up_to',
+      checks: ['compareFields'],
+      otherField: 'item_reorder_point',
+    },
+  },
+  {
+    id: 'V03',
+    split: 'test',
+    category: 'follow-up',
+    request:
+      "A location's name must be different from its parent location's name.",
+    expect: {
+      outcome: 'validation',
+      entity: 'location',
+      field: 'location_name',
+      checks: ['compareFields'],
+      otherField: 'location_name',
+      relation: 'location_parent',
     },
   },
 ];

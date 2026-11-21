@@ -1212,6 +1212,39 @@ export async function runBuildCase(
         );
       }
     }
+    if (expect.outcome === 'validation') {
+      // Scored on the drafted selection: the rule guards the expected field
+      // with an accepted check (and, across records, the expected other
+      // field and relation), and it activated.
+      const v =
+        (calls
+          .flatMap((call) => call.toolCalls.map(({ input }) => input))
+          .at(-1) as {
+          kind?: string;
+          entity?: string;
+          validation?: {
+            fieldId?: string;
+            check?: string;
+            otherFieldId?: string;
+            relationId?: string;
+          };
+        }) ?? {};
+      const local = (id?: string) => (id ? localOf(id) : '');
+      const ok =
+        result.activated &&
+        v.kind === 'addValidation' &&
+        local(v.entity) === expect.entity &&
+        local(v.validation?.fieldId) === expect.field &&
+        expect.checks.includes(v.validation?.check ?? '') &&
+        (!expect.otherField ||
+          local(v.validation?.otherFieldId) === expect.otherField) &&
+        (!expect.relation ||
+          local(v.validation?.relationId) === expect.relation);
+      result.e2e = result.activated;
+      result.behaviour = ok;
+      if (!ok)
+        result.reasons.push('the validation rule is not the requested one');
+    }
     if (expect.outcome === 'board') {
       if (result.activated) {
         const after = await opened.service.targets();
