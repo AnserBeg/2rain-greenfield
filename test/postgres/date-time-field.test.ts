@@ -580,8 +580,6 @@ test(
           };
           // 9,000 rows this tenant can see plus 1,001 another tenant's: the
           // tenant-scoped view is under the ceiling, the physical table over it.
-          await fill(8_999, 'own');
-          await fill(1_001, 'other');
           const count = async () =>
             Number(
               (
@@ -590,6 +588,10 @@ test(
                 )
               ).rows[0]!.n,
             );
+          // Release verification may leave rows of its own; fill up to 9,000
+          // this tenant can see, then 1,001 of another tenant's.
+          await fill(9_000 - (await count()), 'own');
+          await fill(1_001, 'other');
           assert.equal(await count(), 10_001);
           const sourceRoot = (await opened.service.status()).activeReleaseRoot;
           const field = await opened.service.draft(
