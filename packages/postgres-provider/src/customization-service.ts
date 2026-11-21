@@ -1,7 +1,5 @@
 import { verifiedGenerationsSql } from './verified-release-generation.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { retypedCalculatedDisplayField } from '../../canonical-model/src/calculated-display-bindings.js';
-import { retypedFormulaRule } from '../../canonical-model/src/formula-validation-bindings.js';
 
 import { RECEIPT_POSTED_EVENT } from '../../domain/src/purchasing/receipt-posted-event.js';
 import {
@@ -13,6 +11,7 @@ import {
 } from '@north-star/canonical-model';
 import {
   compileInSandbox,
+  finalFormulaConflict,
   UPGRADE_CODES_V1,
   unadmittedMembers,
   type UpgradeFinding,
@@ -626,24 +625,26 @@ export class PostgresCustomizationService {
     const candidateDefinition = parseNormalizedApplicationPackageJson(
       candidate.normalizedDefinitionBytes,
     );
-    const inheritedRule = retypedFormulaRule(
-      sourceDefinition,
-      targetBase,
-      sourceBase,
-    );
-    assertCalculatedDisplayCompatibility(
-      sourceDefinition,
-      targetBase,
-      sourceBase,
-    );
-    const retypedRule =
-      inheritedRule ??
-      retypedFormulaRule(sourceDefinition, candidateDefinition);
-    assertCalculatedDisplayCompatibility(sourceDefinition, candidateDefinition);
-    if (retypedRule)
+    const finding =
+      finalFormulaConflict(
+        sourceDefinition,
+        targetBase,
+        sourceBase,
+        patches,
+        active.chain,
+      ) ??
+      finalFormulaConflict(
+        sourceDefinition,
+        candidateDefinition,
+        undefined,
+        patches,
+        active.chain,
+      );
+    if (finding)
       throw new CustomizationServiceRefusal(
-        'INCOMPATIBLE_TYPE',
-        `The upgrade retires or retypes a target of validation rule ${retypedRule}.`,
+        finding.code,
+        UPGRADE_CODES_V1[finding.code],
+        { findings: [finding], blocked: [] },
       );
     await this.#assertActiveRestrictionRoles(
       admin,
@@ -2780,17 +2781,6 @@ export async function openCustomizationService(
     );
     throw error;
   }
-}
-
-function assertCalculatedDisplayCompatibility(
-  ...comparison: Parameters<typeof retypedCalculatedDisplayField>
-) {
-  const retyped = retypedCalculatedDisplayField(...comparison);
-  if (retyped)
-    throw new CustomizationServiceRefusal(
-      'INCOMPATIBLE_TYPE',
-      `The upgrade retires or retypes a target of calculated display field ${retyped}.`,
-    );
 }
 
 interface PatchRow {

@@ -29,6 +29,7 @@ import {
   type ReplayConflict,
   type ReplayDiagnostics,
   type ReplayOrigin,
+  type UpgradeFinding,
 } from './upgrade-diagnostics.js';
 
 type Definition = Record<string, unknown>;
@@ -84,7 +85,7 @@ function referencedIds(value: unknown, out = new Set<string>()) {
   return out;
 }
 function bindings(
-  patch: SingleCustomizationPatch,
+  patch: unknown,
   before: Map<string, Member>,
   after: Map<string, Member>,
 ): ReplayConflict[] {
@@ -126,6 +127,53 @@ function bindings(
   }
   return conflicts;
 }
+/** Final check over the compiled source and candidate, also covering formula
+ * declarations inherited from the platform rather than introduced by a patch. */
+export function finalFormulaConflict(
+  source: VersionedNormalizedApplicationPackage,
+  target: VersionedNormalizedApplicationPackage,
+  inheritedFrom: VersionedNormalizedApplicationPackage | undefined,
+  changes: readonly CustomizationPatch[],
+  origins: readonly { patchId: string }[],
+): UpgradeFinding | undefined {
+  if (source.languageVersion !== 'v6') return;
+  const subject =
+    retypedFormulaRule(source, target, inheritedFrom) ??
+    retypedCalculatedDisplayField(source, target, inheritedFrom);
+  if (!subject) return;
+  const declaration =
+    source.formulaRules?.find((r) => r.ruleId === subject) ??
+    source.calculatedDisplayFields?.find((f) => f.fieldId === subject);
+  const after = declarations(target);
+  const conflict = bindings(
+    declaration,
+    declarations(inheritedFrom ?? source),
+    after,
+  )[0] ?? {
+    code: 'INCOMPATIBLE_TYPE' as const,
+    subject,
+    expected: declaration,
+    observed: after.get(subject) ?? null,
+  };
+  for (const [patchIndex, change] of changes.entries()) {
+    if (
+      (change.kind === 'addValidation' && change.rule.ruleId === subject) ||
+      (change.kind === 'addCalculatedDisplayField' &&
+        change.field.fieldId === subject)
+    ) {
+      return {
+        ...conflict,
+        patchIndex,
+        memberIndex: 0,
+        editIndex: 0,
+        patchKind: change.kind,
+        ...(origins[patchIndex] && { patchId: origins[patchIndex].patchId }),
+      };
+    }
+  }
+  return conflict;
+}
+
 function formulaConflicts(
   patch: SingleCustomizationPatch,
   original: Definition,

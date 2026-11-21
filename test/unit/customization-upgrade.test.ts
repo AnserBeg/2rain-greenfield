@@ -676,6 +676,7 @@ test('an appended choice preserves a list column and a form override', () => {
   const edited = replayApplied(target, {
     kind: 'arrangeLayout',
     surface: id('surface.sales_order_list'),
+    order: [terms],
     relabel: [{ field: terms, label: 'Due terms' }],
   });
   const list = declaration(
@@ -827,4 +828,33 @@ test('report subjects are sorted inside each edit before moving to the next patc
       [1, 0, name],
     ],
   );
+});
+
+test('the final formula check identifies retired and retyped operands of rules and calculations', () => {
+  const original = normalizeApplicationPackage(base);
+  for (const change of [rule, calculated]) {
+    const source = normalizeApplicationPackage(applied(base, [change]));
+    for (const retired of [true, false]) {
+      const destination = structuredClone(original);
+      const operand = destination.fields.find((f) => f.fieldId === price)!;
+      if (retired) operand.lifecycle = 'retired';
+      else
+        operand.fieldType = {
+          ...operand.fieldType,
+          kind: 'textFieldType',
+          maximumLength: 64,
+        } as typeof operand.fieldType;
+      const finding = customization.finalFormulaConflict(
+        source,
+        destination,
+        original,
+        [patch(change)],
+        [{ patchId: 'formula' }],
+      );
+      assert.deepEqual(
+        [finding?.patchId, finding?.subject, finding?.code],
+        ['formula', price, retired ? 'RETIRED_TARGET' : 'INCOMPATIBLE_TYPE'],
+      );
+    }
+  }
 });
