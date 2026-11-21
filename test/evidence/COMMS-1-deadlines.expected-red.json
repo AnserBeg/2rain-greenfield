@@ -4,7 +4,7 @@
   "entries": [
     {
       "name": "comms-reminder-positive-lead",
-      "claim": "Positive lead.",
+      "claim": "Arming requires a strictly positive lead.",
       "file": "packages/domain/src/communication/reminder-deadline.ts",
       "original": "lead.amount < 1",
       "replacement": "false",
@@ -16,13 +16,13 @@
         {
           "file": "test/unit/reminder-deadline.test.ts",
           "name": "refuse a missing capture and invalid leads",
-          "expected": "exception|captured zone"
+          "expected": "Missing expected exception"
         }
       ]
     },
     {
       "name": "comms-reminder-bounded-lead",
-      "claim": "Bounded lead.",
+      "claim": "A lead above the published maximum is refused.",
       "file": "packages/domain/src/communication/reminder-deadline.ts",
       "original": "lead.amount > 720",
       "replacement": "false",
@@ -34,13 +34,13 @@
         {
           "file": "test/unit/reminder-deadline.test.ts",
           "name": "refuse a missing capture and invalid leads",
-          "expected": "exception|captured zone"
+          "expected": "Missing expected exception"
         }
       ]
     },
     {
       "name": "comms-reminder-integer-lead",
-      "claim": "Integer lead.",
+      "claim": "Arming refuses fractional and non-finite leads.",
       "file": "packages/domain/src/communication/reminder-deadline.ts",
       "original": "!Number.isSafeInteger(lead.amount)",
       "replacement": "false",
@@ -52,13 +52,13 @@
         {
           "file": "test/unit/reminder-deadline.test.ts",
           "name": "refuse a missing capture and invalid leads",
-          "expected": "exception|captured zone"
+          "expected": "Missing expected exception"
         }
       ]
     },
     {
       "name": "comms-reminder-captured-zone",
-      "claim": "Captured zone.",
+      "claim": "A saved anchor needs an explicit time zone.",
       "file": "packages/domain/src/communication/reminder-deadline.ts",
       "original": "!anchor.zone || !anchor.tzdbVersion",
       "replacement": "!anchor.tzdbVersion",
@@ -70,13 +70,13 @@
         {
           "file": "test/unit/reminder-deadline.test.ts",
           "name": "refuse a missing capture and invalid leads",
-          "expected": "exception|captured zone"
+          "expected": "did not match|Missing expected exception"
         }
       ]
     },
     {
       "name": "comms-reminder-captured-tzdb",
-      "claim": "Captured tzdb.",
+      "claim": "The recorded capture must identify its tzdb version.",
       "file": "packages/domain/src/communication/reminder-deadline.ts",
       "original": "!anchor.zone || !anchor.tzdbVersion",
       "replacement": "!anchor.zone",
@@ -88,13 +88,13 @@
         {
           "file": "test/unit/reminder-deadline.test.ts",
           "name": "refuse a missing capture and invalid leads",
-          "expected": "exception|captured zone"
+          "expected": "Missing expected exception"
         }
       ]
     },
     {
       "name": "comms-reminder-working-calendar-required",
-      "claim": "Working calendar required.",
+      "claim": "A working-day lead requires a published calendar.",
       "file": "packages/domain/src/communication/reminder-deadline.ts",
       "original": "!calendar ||",
       "replacement": "false ||",
@@ -106,13 +106,13 @@
         {
           "file": "test/unit/reminder-deadline.test.ts",
           "name": "working leads use the entire published horizon including Saturday work and a Monday holiday",
-          "expected": "exception|calendar|instant"
+          "expected": "did not match"
         }
       ]
     },
     {
       "name": "comms-reminder-working-calendar-upper-bound",
-      "claim": "Working calendar upper bound.",
+      "claim": "The calendar must cover the anchor through its upper bound.",
       "file": "packages/domain/src/communication/reminder-deadline.ts",
       "original": "anchorDate > calendar.through",
       "replacement": "false",
@@ -124,13 +124,13 @@
         {
           "file": "test/unit/reminder-deadline.test.ts",
           "name": "working leads use the entire published horizon including Saturday work and a Monday holiday",
-          "expected": "exception|calendar|instant"
+          "expected": "Missing expected exception"
         }
       ]
     },
     {
       "name": "comms-reminder-working-calendar-lower-bound",
-      "claim": "Working calendar lower bound.",
+      "claim": "The calendar must cover the anchor from its lower bound.",
       "file": "packages/domain/src/communication/reminder-deadline.ts",
       "original": "anchorDate < calendar.from",
       "replacement": "false",
@@ -142,13 +142,13 @@
         {
           "file": "test/unit/reminder-deadline.test.ts",
           "name": "working leads use the entire published horizon including Saturday work and a Monday holiday",
-          "expected": "exception|calendar|instant"
+          "expected": "did not match"
         }
       ]
     },
     {
       "name": "comms-reminder-covered-working-date",
-      "claim": "Covered working date.",
+      "claim": "Working dates outside the published horizon cannot contribute to a lead.",
       "file": "packages/domain/src/communication/reminder-deadline.ts",
       "original": "date >= calendar.from && date < anchorDate",
       "replacement": "date < anchorDate",
@@ -160,13 +160,13 @@
         {
           "file": "test/unit/reminder-deadline.test.ts",
           "name": "working leads use the entire published horizon including Saturday work and a Monday holiday",
-          "expected": "exception|calendar|instant"
+          "expected": "Missing expected exception"
         }
       ]
     },
     {
       "name": "comms-reminder-prior-working-date",
-      "claim": "Prior working date.",
+      "claim": "The anchor date itself does not count toward the advance notice.",
       "file": "packages/domain/src/communication/reminder-deadline.ts",
       "original": "date >= calendar.from && date < anchorDate",
       "replacement": "date >= calendar.from && date <= anchorDate",
@@ -178,13 +178,13 @@
         {
           "file": "test/unit/reminder-deadline.test.ts",
           "name": "working leads use the entire published horizon including Saturday work and a Monday holiday",
-          "expected": "exception|calendar|instant"
+          "expected": "2026-03-07T13"
         }
       ]
     },
     {
       "name": "comms-reminder-enough-working-dates",
-      "claim": "Enough working dates.",
+      "claim": "A lead needs enough declared working dates inside the horizon.",
       "file": "packages/domain/src/communication/reminder-deadline.ts",
       "original": "if (!date)",
       "replacement": "if (false)",
@@ -196,7 +196,7 @@
         {
           "file": "test/unit/reminder-deadline.test.ts",
           "name": "working leads use the entire published horizon including Saturday work and a Monday holiday",
-          "expected": "exception|calendar|instant"
+          "expected": "did not match"
         }
       ]
     }
