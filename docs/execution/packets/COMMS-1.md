@@ -8,7 +8,7 @@ The scheduler can reconcile a committed staff mention or reply into a durable no
 
 CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44912366862
 
-[Packet CI 44912316925](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44912316925) promoted the checkpoint at `0581e760d5f4bbb90cadcf3c081d72b5655e1547` to full.
+[Packet CI 44912316925](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44912316925) promoted `0581e760d` to full. The unit tests passed, but the coverage manifest omitted the deadline test. Commit `938a724d4` registers the observed test argument. Hosted confirmation on the corrected tree is pending.
 
 - The branch began on main `d083dd4a`. Merge `38f97a2bd` brought in CONNECT-1’s published thread writer at `ec519295`. It now includes the writer’s reviewed corrections through `f70011747` and main’s WORKFLOW-2 integration at `6787792c4`. The thread and inbox migrations are provisionally 0061 and 0062.
 - The inbox implements the published `DiscussionInboxPort`. A short lease transaction commits before reconciliation. The worker locks the shared thread, resolves current reasons, replaces the recipient set and commits before acknowledging the lease token. Replay keeps the original recipient receipt, read time and archive time.
@@ -54,7 +54,7 @@ Run `scripts/check-records.sh` at the repository root and expect exit zero. Exec
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "COMMS-1",
   "base": "6787792c4564dc0757583c043738f8daa59ca76b",
-  "head": "750544571a4b66ae827bdd9432c186d533266cde",
+  "head": "938a724d4815814cac52e5d7360723b618bb382f",
   "changedPaths": [
     "db/migrations/0061_communication_threads.sql", "db/migrations/0062_personal_inbox.sql", "db/schema.snapshot.json",
     "package.json", "packages/domain/src/billing/calendar.ts", "packages/domain/src/communication/reminder-deadline.ts",
@@ -62,7 +62,7 @@ Run `scripts/check-records.sh` at the repository root and expect exit zero. Exec
     "packages/runtime/src/discussion-inbox.ts", "test/architecture/release-persistence-boundary.test.ts", "test/architecture/repository-hygiene.test.ts",
     "test/architecture/tenant-completeness.manifest.json", "test/architecture/tenant-completeness.test.ts", "test/evidence/COMMS-1-deadlines.expected-red.json",
     "test/evidence/CONNECT-1-threads.expected-red.json", "test/fixtures/booking-commitments.sql", "test/fixtures/communication-threads.sql",
-    "test/fixtures/discussion-inbox-channel.sql", "test/helpers/personal-inbox-controls.ts", "test/postgres/communication-threads.test.ts",
+    "test/fixtures/discussion-inbox-channel.sql", "test/helpers/personal-inbox-controls.ts", "test/helpers/reachability-producers.ts", "test/postgres/communication-threads.test.ts",
     "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts",
     "test/postgres/personal-inbox.test.ts", "test/postgres/trust-substrate.test.ts", "test/unit/reminder-deadline.test.ts"
   ],
