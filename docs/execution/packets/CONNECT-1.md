@@ -27,6 +27,7 @@ Migration `0058_address_connector_authority.sql` revokes every runtime grant on 
 - One installation per company and provider account: pausing, re-enabling and switching back keep its quota and key-file identity. Configure takes the company's advisory lock, then its rows `FOR UPDATE`; a replaced installation is recorded `paused`.
 - `platform.address_sweep` scrubs expired provider coordinates (30 days) in batches, `SKIP LOCKED`, under a READ COMMITTED guard; the demo worker runs it each tick.
 - Reader 32 refuses through this tree's production loader capped at 31 (`withArchivedCustomizationRuntime` prepare hook); the loader's Address agreement is `addressProjectionRefusal`, one comparator per line.
+- CI: the Customization browser runner's bound rises from 20 to 30 minutes. Main's last five greens took 12.2–12.6 minutes; the candidate's full run hit 20 twice on a slow runner with the packet adding no browser test (the same six tests took 16.5 minutes against 11.7 on main, Chromium deps 3.1 against 0.6). This packet's earlier full run on the same code took 12.9.
 - Controls: 29 entries in `test/evidence/CONNECT-1.expected-red.json`, one per guard, mostly in `test/postgres/address-authority.test.ts` (one subtest each).
 
 ## Test it yourself
