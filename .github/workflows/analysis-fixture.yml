@@ -40,3 +40,24 @@ jobs:
       - run: python3 -B -m unittest discover -s analysis/tests
       - name: Measure limits and run discriminating controls serially
         run: python3 -u analysis/tests/spike.py
+      - name: Rebuild and verify the scientific image
+        run: python3 -u analysis/image/build.py
+
+  catalog:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+      - run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      - run: node --import tsx test/helpers/regenerate-schema-snapshot.ts
+      - run: node --import tsx test/helpers/generate-fresh-tenant-full-replay-schema.ts
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fixture-schemas
+          path: |
+            db/schema.snapshot.json
+            test/postgres/fresh-tenant-full-replay-schema.snapshot.json
