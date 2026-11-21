@@ -1,4 +1,5 @@
 """Bounded duplex I/O to a disposable worker or PNG decoder."""
+from dataclasses import dataclass, field
 import json
 import os
 from pathlib import Path
@@ -33,11 +34,19 @@ class Stopped(RuntimeError):
     pass
 
 
-def stream(engine, name, script, data, group, start, cancelled, on_launch, limit):
+@dataclass
+class RunBudget:
+    start: float = field(default_factory=time.monotonic)
+    cpu: float = 0
+    diagnostic_bytes: int = 0
+
+
+def stream(engine, name, script, data, group, budget, cancelled, on_launch, limit):
     cli = engine.cli + ["exec", "-i", name, "/usr/local/bin/python", "-B", "-u", "-c", script]
     child = subprocess.Popen(cli, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                              env={"PATH": os.defpath}, bufsize=0)
     output = bytearray()
+    diagnostic_limit = DIAGNOSTICS - budget.diagnostic_bytes
     diagnostics = bytearray()
     pos = 0
     try:
@@ -47,7 +56,7 @@ def stream(engine, name, script, data, group, start, cancelled, on_launch, limit
                 os.set_blocking(pipe.fileno(), False)
                 selector.register(pipe, mask)
             while True:
-                reason = stop_reason(start, cpu_seconds(group), cancelled())
+                reason = stop_reason(budget.start, budget.cpu + cpu_seconds(group), cancelled())
                 if reason:
                     raise Stopped(reason)
                 if not selector.get_map() and child.poll() is not None:
@@ -63,7 +72,7 @@ def stream(engine, name, script, data, group, start, cancelled, on_launch, limit
                             selector.unregister(pipe)
                             pipe.close()
                     else:
-                        dest, cap = (output, limit) if pipe is child.stdout else (diagnostics, DIAGNOSTICS)
+                        dest, cap = (output, limit) if pipe is child.stdout else (diagnostics, diagnostic_limit)
                         chunk = os.read(pipe.fileno(), min(65536, cap - len(dest) + 1))
                         if not chunk:
                             selector.unregister(pipe)
@@ -79,14 +88,15 @@ def stream(engine, name, script, data, group, start, cancelled, on_launch, limit
             raise Stopped(f"script exit {child.returncode}")
         return bytes(output)
     finally:
+        budget.diagnostic_bytes += len(diagnostics)
         for pipe in (child.stdin, child.stdout, child.stderr):
             pipe.close()
         child.kill()
         child.wait(timeout=5)
 
 
-def execute(engine, name, script, data, cancelled, on_launch, start=None, limit=LIMIT):
-    start = time.monotonic() if start is None else start
+def execute(engine, name, script, data, cancelled, on_launch, budget=None, limit=LIMIT):
+    budget = budget or RunBudget()
     digest = json.loads(PIN.read_text())["image"]
     engine.preflight()
     if cancelled():
@@ -103,10 +113,11 @@ def execute(engine, name, script, data, cancelled, on_launch, start=None, limit=
             engine.command("exec", name, "/usr/local/bin/python", "-c", GUARD)
         except subprocess.SubprocessError as error:
             raise Refusal("live guest isolation") from error
-        return stream(engine, name, script, data, group, start, cancelled, on_launch, limit)
+        return stream(engine, name, script, data, group, budget, cancelled, on_launch, limit)
     finally:
         try:
             if group is not None and group.exists():
+                budget.cpu += cpu_seconds(group)
                 kill(engine, name, group)
         finally:
             teardown(engine, name, group)

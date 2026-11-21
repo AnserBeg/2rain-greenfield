@@ -61,8 +61,7 @@ $$;
 CREATE FUNCTION platform.analysis_enqueue(company_id uuid, key uuid, digest text, runner text, clock_boot uuid, tick bigint)
 RETURNS uuid LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE t uuid := north_star_internal.trusted_tenant_id(); e uuid := north_star_internal.trusted_environment_id();
-  p uuid := nullif(current_setting('north_star.principal_id',true),'')::uuid; existing platform.analysis_runs; id uuid;
-BEGIN
+  p uuid := nullif(current_setting('north_star.principal_id',true),'')::uuid; existing platform.analysis_runs; id uuid; BEGIN
   PERFORM north_star_internal.analysis_lock();
   IF NOT north_star_internal.analysis_permitted(company_id,'northstar.runtime:permission.analysis_run') THEN RAISE EXCEPTION 'analysis.denied'; END IF;
   SELECT * INTO existing FROM platform.analysis_runs WHERE (tenant,environment,request_key)=(t,e,key);
@@ -85,8 +84,7 @@ END $$;
 CREATE FUNCTION platform.analysis_dispatch(runner text, clock_boot uuid, tick bigint, available bigint, slots integer, shared boolean)
 RETURNS uuid LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE candidate platform.analysis_runs; day date := (clock_timestamp() AT TIME ZONE 'UTC')::date;
-  gen bigint; consumption bigint; subject_id text;
-BEGIN
+  gen bigint; consumption bigint; subject_id text; BEGIN
   PERFORM north_star_internal.analysis_lock();
   IF slots IS NULL OR shared IS NULL OR (shared AND slots<2) OR (NOT shared AND slots<>1)
     OR available IS NULL OR clock_boot IS NULL OR tick IS NULL THEN RAISE EXCEPTION 'analysis.hostConfiguration'; END IF;
@@ -122,8 +120,7 @@ END $$;
 
 CREATE FUNCTION platform.analysis_settle(id uuid, outcome text, launched boolean, result jsonb)
 RETURNS text LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
-DECLARE r platform.analysis_runs; d date; gen bigint; held bigint; subject_id text; final_status text;
-BEGIN
+DECLARE r platform.analysis_runs; d date; gen bigint; held bigint; subject_id text; final_status text; BEGIN
   PERFORM north_star_internal.analysis_lock();
   SELECT * INTO STRICT r FROM platform.analysis_runs WHERE job=id;
   IF r.status NOT IN ('reserved','stopping') THEN RETURN r.status; END IF;

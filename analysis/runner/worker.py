@@ -10,7 +10,7 @@ import sys
 import time
 import uuid
 
-from execution import ROOT, PIN, execute, Stopped
+from execution import ROOT, PIN, execute, Stopped, RunBudget
 from frames import CODE_LIMIT, Invalid, collect, encode, parse, require
 from runtime import Engine, Refusal, group_for, teardown
 
@@ -112,12 +112,12 @@ def handle(engine, request):
         def launched():
             state["launched"] = True
             write_state(path, state)
-        start = time.monotonic()
+        budget = RunBudget()
         try:
-            raw = execute(engine,name,(ROOT/"guest.py").read_text(),code,cancel.exists,launched,start)
+            raw = execute(engine,name,(ROOT/"guest.py").read_text(),code,cancel.exists,launched,budget)
             def clean(data):
                 out = execute(engine,name+"-png",(ROOT/"clean_png.py").read_text(),data,cancel.exists,
-                              lambda: None,start,limit=4*1024**2+32)
+                              lambda: None,budget,limit=4*1024**2+32)
                 return out[32:], out[:32].hex()
             output = collect(raw,clean)
             if cancel.exists():
