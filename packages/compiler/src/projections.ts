@@ -3,6 +3,10 @@ import {
   BILLING_INTERVAL_READER,
 } from '../../canonical-model/src/billing.js';
 import {
+  POPUP_READER,
+  compiledPopups,
+} from '../../canonical-model/src/popup-actions.js';
+import {
   ADDRESS_FIELD_READER,
   ADDRESS_MAP_READER,
   CONNECTOR_PAYLOAD,
@@ -1103,26 +1107,29 @@ function surfaceManifestPayload(
         (layout) => layout.placementRuleVersion === 1,
       ),
   );
-  // Board v2 is the highest rung: a Board release needs it whatever else it has.
-  const surfaceFloor = original.surfaces.some((s) => s.archetype === 'board')
-    ? BOARD_READER
-    : lineCreateValues
-      ? LINE_CREATE_VALUES_SURFACE_FLOOR
-      : replayedLayout
-        ? REPLAYED_LAYOUT_READER
-        : original.surfaces.some((s) => 'layouts' in s && s.layouts)
-          ? LAYOUT_READER
-          : extendedEditor || declaredRelationList
-            ? 26
-            : hasMetrics(original)
-              ? 25
-              : hasSavedListLayouts(original)
-                ? 24
-                : recordFieldPresentation
-                  ? 23
-                  : rankedDefaultsOrChainedTasks
-                    ? 22
-                    : null;
+  const surfaceFloor = original.surfaces.some(
+    (s) => 'popupActions' in s && s.popupActions,
+  )
+    ? POPUP_READER
+    : original.surfaces.some((s) => s.archetype === 'board')
+      ? BOARD_READER
+      : lineCreateValues
+        ? LINE_CREATE_VALUES_SURFACE_FLOOR
+        : replayedLayout
+          ? REPLAYED_LAYOUT_READER
+          : original.surfaces.some((s) => 'layouts' in s && s.layouts)
+            ? LAYOUT_READER
+            : extendedEditor || declaredRelationList
+              ? 26
+              : hasMetrics(original)
+                ? 25
+                : hasSavedListLayouts(original)
+                  ? 24
+                  : recordFieldPresentation
+                    ? 23
+                    : rankedDefaultsOrChainedTasks
+                      ? 22
+                      : null;
   const payloadSchemaVersion = composed
     ? COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION
     : navigation
@@ -1202,6 +1209,9 @@ function surfaceManifestPayload(
                     ),
                   },
           }),
+          ...(declared && 'popupActions' in declared && declared.popupActions
+            ? { popupActions: compiledPopups(original, declared) }
+            : {}),
           // Labels and roles render from this release, beside the digested member.
           ...(declared && 'board' in declared && declared.board
             ? {
