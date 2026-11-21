@@ -92,12 +92,42 @@ the original synthetic merge. The dispatcher uses the parent carrying that exact
 workflow version and the child verifies the parent SHA. Cite the run that executed the tests. New packet records carry a
 standalone line such as `CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/12345`.
 
-For the final full run, push the proposed integration commit to a candidate ref
-and run `gh workflow run ci.yml --ref <candidate-ref> -f tier=full`. Before
-pushing that commit to main, run `node scripts/check-merge-window.mjs <packet> <40-character-integration-SHA>`.
-The gate reads main CI and the lane token, checks the first parent against
-origin/main, and requires successful full reachability on that exact SHA for a
-Critical change, including migrations. While the latest completed main run is
-red or cancelled, every candidate needs that exact full green, so a fix or
-revert can still land. Every main push runs full in its own concurrency group:
-main runs proceed in parallel and none is cancelled or held behind another.
+A selectable Critical change on a `packet/` ref stays quick. Database migrations
+match the shared `db/` path and promote to full. Quick can run explicitly changed
+or mapped PostgreSQL tests, but a migration alone maps to none. At readiness,
+a Critical or migration lane cites a successful full run on its packet tip or dispatches
+one with `gh workflow run ci.yml --ref packet/<id> -f tier=full`. Check the
+tested SHA when citing a pull request run, which tests a synthetic merge.
+
+The 2026-11-21 packet selector logs both reported the shared/unknown fallback.
+UPGRADE-2-fixes reported `.gitleaksignore` and CUSTOMIZE-5-slice1 reported
+`apps/web/src/component-registry.ts`. Both paths continue to select full.
+[UPGRADE-2 log](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44880635235/job/136775007517)
+and [CUSTOMIZE-5 log](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44881203941/job/136776671897).
+
+On main, the push itself runs the selected tier in a per-SHA concurrency group.
+Quick applies only to regular, non-executable Markdown at paths exempted by
+the base commit, including packet records and evidence under `docs/` and the
+named root documents. Both gates require full for symlinks, any change to
+`scripts/non-executable-pathspec.json`, or any Critical change anywhere in
+the push, including an edit to the Critical pathspec block. A new branch or missing, zero or unavailable
+push base requires full. The reachability job names the tier and exact SHA.
+
+Only the head of the merge line builds a candidate. Reserve the merge window
+under the packet or train name. From current origin/main, merge one to three
+packet tips in order with `--no-ff`. Resolve numbering and regenerate artifacts
+inside each merge resolution. Each merge keeps the packet tip as its second
+parent and gets its own review-log row keyed by that SHA.
+
+Push the final commit to `candidate/<owner>` and dispatch
+`gh workflow run ci.yml --ref candidate/<owner> -f tier=full`. Before pushing
+main, run `node scripts/check-merge-window.mjs <owner> <40-character-tip-SHA>`.
+An executable or Critical range requires a successful full reachability job on
+that exact tip. A docs-only range can use the exemption when main is healthy.
+The newest completed full main push must be green, with no newer failed or
+cancelled push. After a red quick on main, each docs-only merge needs an exact
+full on its candidate until a subsequent full main push goes green or the
+failed quick passes on rerun. Pending full or unclassified runs require exact full candidate
+evidence too. If main advances, rebuild on current main. If the train is red,
+identify the packet that owns the failing job, drop it and rebuild the rest
+from current main with a fresh full run. Watch the main push through completion.

@@ -52,7 +52,7 @@
         {
           "file": "test/compiler/report-company-access.test.ts",
           "name": "the new Inspection declares one named, same-plan secondary index and its own reader floor",
-          "expected": "35 !== 38"
+          "expected": "35 !== 40"
         }
       ]
     },

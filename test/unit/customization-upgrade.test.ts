@@ -136,6 +136,30 @@ const workflow = {
     grants: { queries: [id('query.custom_equipment_list')], operations: [] },
   },
 };
+const template = {
+  kind: 'addDocumentTemplateRevision',
+  schemaVersion: 'northstar.document-template-revision/v1',
+  templateId: id('template.custom_equipment_sheet'),
+  revisionId: id('revision.custom_equipment_sheet_1'),
+  previousRevisionId: null,
+  entityId: equipment,
+  label: 'Equipment sheet',
+  documentKind: 'workOrder',
+  headerQueryId: id('query.custom_equipment_get'),
+  identityFieldId: id('field.custom_equipment_name'),
+  currencyFieldId: null,
+  format: {
+    locale: 'en-CA',
+    timeZone: 'America/Edmonton',
+    currency: 'CAD',
+    dateStyle: 'medium',
+    numberGrouping: true,
+    pageSize: 'LETTER',
+  },
+  layout: [{ kind: 'heading', text: 'Equipment sheet' }],
+  pageNumbers: true,
+};
+const templated = applied(extended, [template]);
 interface ReplayCase {
   source: Base;
   conflict: Base;
@@ -188,7 +212,31 @@ const withEquipmentLifecycle = applied(extended, [
 const equipmentBoard = customization
   .customizationTargets(normalizeApplicationPackage(withEquipmentLifecycle))
   .boards!.find((target) => target.frame.entityId === equipment)!;
+const appointment = {
+  kind: 'addDateTimeField',
+  schemaVersion: 'northstar.date-time-field/v1',
+  target: { kind: 'tenantRecordType', recordTypeId: equipment },
+  fieldId: id('field.custom_equipment_service_at'),
+  label: 'Service appointment',
+  required: false,
+  zoneSource: { kind: 'perRecordIana', version: 'v1' },
+};
+const equipmentReports = (definition: Base) =>
+  customization.customizationTargets(normalizeApplicationPackage(definition))
+    .reports!.find((target) => target.source.entityId === equipment)!;
+const equipmentReport = customization.draftReport(
+  equipmentReports(extended),
+  'Equipment counts',
+  {
+    dimensions: [{ kind: 'direct', fieldId: id('field.custom_equipment_status') }],
+    measures: [{ kind: 'inline', measureId: id('measure.custom_count'), label: 'Count', operator: { kind: 'count' } }],
+    filters: [],
+    outputs: [{ kind: 'table' }],
+  },
+);
 const cases = {
+  addReportRevision: retired(equipmentReport),
+  addDateTimeField: occupied(appointment, 'FIELD_COLLISION', extended),
   addBoardViewRevision: {
     source: withEquipmentLifecycle,
     conflict: extended,
@@ -278,6 +326,18 @@ const cases = {
       },
     ],
   }),
+  addDocumentTemplateRevision: retired(template),
+  retireDocumentTemplate: {
+    source: templated,
+    conflict: extended,
+    change: {
+      kind: 'retireDocumentTemplate',
+      schemaVersion: 'northstar.document-template-retire/v1',
+      templateId: template.templateId,
+      previousRevisionId: template.revisionId,
+    },
+    code: 'RETIRED_TARGET',
+  },
   narrowPermission: occupied(limit, 'WHOLE_PACKAGE_FAILURE'),
   unNarrowPermission: {
     source: applied(base, [limit]),
@@ -289,6 +349,55 @@ const cases = {
   changeSet: retired({ kind: 'changeSet', patches: [field, files] }),
 } satisfies Record<customization.CustomizationPatchKind, ReplayCase>;
 
+test('active and retired reports allow further fields and list layout edits on their source', async () => {
+  const retire = customization.draftReport(
+    equipmentReports(applied(extended, [equipmentReport])),
+    equipmentReport.label,
+    undefined,
+    equipmentReport.reportId,
+    'retired',
+  );
+  for (const reports of [[equipmentReport], [equipmentReport, retire]]) {
+    const result = await customization.compileInSandbox({
+      acknowledgement,
+      base: extended,
+      chain: [...reports, field, cases.arrangeLayout.change].map(patch),
+      tip: customization.serializeRelease(tip),
+    });
+    assert.ok(result.status === 'compiled', JSON.stringify(result.status === 'compiled' ? null : result));
+  }
+});
+
+test('an active or retired template never blocks editing its record type', async () => {
+  const retire = {
+    kind: 'retireDocumentTemplate',
+    schemaVersion: 'northstar.document-template-retire/v1',
+    templateId: template.templateId,
+    previousRevisionId: template.revisionId,
+  };
+  const arrange = {
+    kind: 'arrangeLayout',
+    surface: id('surface.custom_equipment_list'),
+    relabel: [{ field: id('field.custom_equipment_name'), label: 'Tool' }],
+  };
+  for (const state of [[template], [template, retire]])
+    for (const edit of [field, arrange]) {
+      const result = await customization.compileInSandbox({
+        acknowledgement,
+        base: extended,
+        chain: [...state, edit].map(patch),
+        tip: customization.serializeRelease(tip),
+      });
+      assert.equal(
+        result.status,
+        'compiled',
+        `${state.length === 1 ? 'active' : 'retired'} template, ${edit.kind}: ${JSON.stringify(result)}`.slice(
+          0,
+          2000,
+        ),
+      );
+    }
+});
 test('upgrade replay admission and its named cases cover the independently parsed vocabulary', () => {
   const admitted = [...customization.UPGRADE_PATCH_KINDS].sort();
   assert.deepEqual(
@@ -368,6 +477,11 @@ for (const [kind, example] of Object.entries(cases)) {
     (compatible.fields as { fieldId: string; label: string }[]).find(
       (f) => f.fieldId === id('field.item_sku'),
     )!.label = 'Stock identifier';
+    if (kind === 'addReportRevision') {
+      (compatible.fields as { fieldId: string; label: string }[]).find(
+        (f) => f.fieldId === id('field.custom_equipment_status'),
+      )!.label = 'Equipment condition';
+    }
     if (kind === 'addBoardViewRevision') {
       // The compatible move relabels what the Board binds: its title field,
       // that field's List column and the transition its move operates.

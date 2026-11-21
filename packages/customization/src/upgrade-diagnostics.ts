@@ -2,6 +2,7 @@ import type { CustomizationPatchKind } from './patch.js';
 
 /** Admission changes independently of the parser. Each entry has a replay fixture. */
 export const UPGRADE_PATCH_KINDS: ReadonlySet<string> = new Set([
+  'addDateTimeField',
   'addAddressField',
   'addMapPlacement',
   'addBoardViewRevision',
@@ -20,6 +21,8 @@ export const UPGRADE_PATCH_KINDS: ReadonlySet<string> = new Set([
   'addMetricCard',
   'addDocumentField',
   'addUploadCategory',
+  'addDocumentTemplateRevision',
+  'retireDocumentTemplate',
   'narrowPermission',
   'unNarrowPermission',
   'saveWorkflow',

@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
-import { readReportsPredecessor } from '../helpers/reports-preceding-release.js';
 import { applicationWithoutLineCreateValues } from '../helpers/application-without-line-create-values.js';
 
 import {
@@ -453,9 +452,10 @@ test(
         const options = {
           databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
           tenantSlug: 'customize-board-reader',
-          compiledApplication: readReportsPredecessor(
-            'apps/web/release/app.compiled.json',
-          ),
+          // Query-catalog rung 5 (DOCS-1's optional dependencies) is above
+          // this reader too; the fixture leaves them out so only the Board
+          // rung is measured.
+          compiledApplication: applicationWithoutLineCreateValues().release,
         };
         const app = await startComposedApplication({ ...options, port: 0 });
         const opened = await openCustomizeService(options);

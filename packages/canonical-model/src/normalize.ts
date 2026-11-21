@@ -1,5 +1,6 @@
 import { reportBindingProblem } from './declared-report.js';
 import { normalizeBillingPlan } from './billing-normalization.js';
+import { dateTimeConsumerRefusal } from './date-time-field.js';
 import {
   validateSurfaceCompositions,
   normalizeSurfaceComposition,
@@ -198,6 +199,34 @@ export function normalizeApplicationPackage(
   }
   enforceFamilyBounds(authored);
   validateAuthoredDerivedStateFields(authored);
+  // ADR-0087: an unadmitted consumer of a logical dateTime field refuses by
+  // logical type before any scalar-level rule sees its backing instant.
+  if (authored.languageVersion === 'v6' && authored.dateTimeFields) {
+    const declared = new Set(authored.dateTimeFields.map((d) => d.fieldId));
+    const active = new Set(
+      authored.fields
+        .filter(
+          (field) =>
+            declared.has(field.fieldId) &&
+            (field.lifecycle ?? 'active') === 'active',
+        )
+        .map((field) => field.fieldId),
+    );
+    const refusal = dateTimeConsumerRefusal(
+      authored as unknown as Record<string, unknown>,
+      active,
+    );
+    if (refusal)
+      throw new CanonicalModelError([
+        diagnostic(
+          'CANON_DATE_TIME_CONSUMER_UNSUPPORTED',
+          refusal.path,
+          refusal.message,
+          'display, sort, enter or require the dateTime field; other uses are capability gaps',
+          refusal.subjectId,
+        ),
+      ]);
+  }
   const fieldTypes = new Map(
     authored.fields.map((field) => [field.fieldId, field.fieldType] as const),
   );
@@ -211,6 +240,12 @@ export function normalizeApplicationPackage(
     ...(authored.languageVersion === 'v6' &&
       authored.connectorBindings && {
         connectorBindings: [...authored.connectorBindings].sort((a, b) =>
+          compareCodeUnits(a.fieldId, b.fieldId),
+        ),
+      }),
+    ...(authored.languageVersion === 'v6' &&
+      authored.dateTimeFields && {
+        dateTimeFields: [...authored.dateTimeFields].sort((a, b) =>
           compareCodeUnits(a.fieldId, b.fieldId),
         ),
       }),
@@ -270,6 +305,18 @@ export function normalizeApplicationPackage(
           .sort((left, right) =>
             compareCodeUnits(left.categoryId, right.categoryId),
           ),
+      }),
+    ...(authored.languageVersion === 'v6' &&
+      authored.documentTemplateRevisions && {
+        documentTemplateRevisions: [...authored.documentTemplateRevisions].sort(
+          (left, right) => compareCodeUnits(left.revisionId, right.revisionId),
+        ),
+      }),
+    ...(authored.languageVersion === 'v6' &&
+      authored.documentTemplatePointers && {
+        documentTemplatePointers: [...authored.documentTemplatePointers].sort(
+          (left, right) => compareCodeUnits(left.templateId, right.templateId),
+        ),
       }),
     ...(authored.languageVersion === 'v6' &&
       authored.formulaRules && {

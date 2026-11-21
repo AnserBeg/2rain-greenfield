@@ -1,5 +1,6 @@
 export * from './board.js';
 export * from './layout.js';
+export * from './read-model-dependencies.js';
 export {
   ADOPTED_LANGUAGE_VERSION,
   ADOPTED_NORMALIZATION_PROFILE_VERSION,
@@ -194,3 +195,10 @@ export {
   type ReportCurrencyBinding,
 } from './schemas.js';
 export * from './grouped-aggregate.js';
+export * from './date-time-field.js';
+export {
+  DocumentTemplatePointerSchema,
+  DocumentTemplateRevisionSchema,
+  type DocumentTemplatePointer,
+  type DocumentTemplateRevision,
+} from './document-template-schema.js';

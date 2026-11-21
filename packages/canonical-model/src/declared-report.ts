@@ -229,7 +229,7 @@ export function reportBindingProblem(
   );
 }
 
-export const DECLARED_REPORT_READER = 40;
+export const DECLARED_REPORT_READER = 42;
 export function reportQueryId(reportId: string) {
   return reportId.replace(':report.custom_', ':query.custom_report_');
 }

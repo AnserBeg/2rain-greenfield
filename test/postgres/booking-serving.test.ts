@@ -21,13 +21,11 @@ import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../packages/runtime/src/seman
 import { compilerInput, normalizedBytes } from '../compiler/helpers.js';
 import {
   authoredPath,
-  compiledApplication,
-  firstPartyAuthored,
 } from '../helpers/customization-fixture.js';
 import { startComposedApplication } from '../../apps/api/src/composition-root.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
-import { readReportsPredecessor } from '../helpers/reports-preceding-release.js';
 import { withArchivedCustomizationRuntime } from '../helpers/archived-runtime-process.js';
+import { applicationWithoutLineCreateValues } from '../helpers/application-without-line-create-values.js';
 
 const item = 'northstar.app:entity.item';
 const detailQuery = 'northstar.app:query.item_get';
@@ -43,10 +41,9 @@ const ref = (kind: string, targetId: string) => ({
 function bookingRelease(
   mode: 'operation' | 'query',
   ordinaryCorrection = false,
-  base = { authored: firstPartyAuthored, envelope: compiledApplication },
 ) {
   const source = parseAuthoredApplicationPackageJson(
-    JSON.stringify(base.authored),
+    JSON.stringify(applicationWithoutLineCreateValues().authored),
   );
   const detail = source.queries.find((q) => q.queryId === detailQuery)!;
   assert.ok(detail.queryType === 'get');
@@ -145,7 +142,7 @@ function bookingRelease(
       },
     ],
   });
-  const prior = parseCompiledApplication(base.envelope);
+  const prior = parseCompiledApplication(applicationWithoutLineCreateValues().release);
   const input = compilerInput(
     bytes,
     expectedActiveReleaseFrom(prior.application.compiled),
@@ -265,19 +262,11 @@ test(
     await withArchivedCustomizationRuntime(
       '0a9f7ca52304969c65092893f50375c90f8c2265',
       async (run) => {
-        const base = {
-          authored: readReportsPredecessor(
-            'apps/web/release/app.authored.json',
-          ),
-          envelope: readReportsPredecessor(
-            'apps/web/release/app.compiled.json',
-          ),
-        };
         for (const mode of ['baseline', 'operation', 'query'] as const) {
           await withBookingApplication(
             mode === 'baseline'
-              ? base.envelope
-              : bookingRelease(mode, false, base),
+              ? applicationWithoutLineCreateValues().release
+              : bookingRelease(mode),
             async (f) => {
               const probe = (await run(archivedQuery, {
                 databaseUrl: f.databaseUrl,

@@ -1,10 +1,15 @@
 import { AddressBindingSchema, MapPlacementSchema } from './address.js';
+import { DateTimeFieldDeclarationSchema } from './date-time-field.js';
 import { BillingPlansSchema } from './billing.js';
 import { SurfaceBoardSchema } from './board.js';
 import { BookingOperationBinding } from './booking.js';
 import { SurfaceLayoutSchema } from './layout.js';
 import { z } from 'zod';
 import { DOCUMENTS_PAYLOAD_VERSION } from './documents.js';
+import {
+  DocumentTemplatePointerSchema,
+  DocumentTemplateRevisionSchema,
+} from './document-template-schema.js';
 import { WORKFLOW_PAYLOAD_VERSION } from './workflows.js';
 
 import {
@@ -2790,10 +2795,21 @@ const v5NormalizedShape = {
   languageVersion: v5NodeVersion,
 } as const;
 
+/**
+ * A query a read model reads through. Absent `required` means the read model
+ * cannot answer without it, so every existing declaration stays mandatory.
+ * `required: false` declares that the provider still answers, with the
+ * dependent results left empty, when the reader may not run that query.
+ * `true` is never spelled, so a mandatory dependency keeps exactly one
+ * encoding. Optional v6 key (ADR-0047 §7).
+ */
+export const QueryReadModelDependencySchema = compositionReference(
+  'queryReference',
+).extend({ required: z.literal(false).optional() });
 export const QueryReadModelSchema = z.strictObject({
   capability: compositionReference('capabilityReference'),
   binding: CanonicalIdSchema,
-  queries: z.record(z.string().min(1), compositionReference('queryReference')),
+  queries: z.record(z.string().min(1), QueryReadModelDependencySchema),
   resultFields: z.record(z.string().min(1), CanonicalIdSchema),
 });
 export type QueryReadModel = z.infer<typeof QueryReadModelSchema>;
@@ -3021,24 +3037,46 @@ const documentCategories = z
   .max(128)
   .optional();
 
-export const DocumentsProjectionSchema = z.strictObject({
-  kind: z.literal('documentsPayload'),
-  schemaVersion: z.literal(DOCUMENTS_PAYLOAD_VERSION),
-  fields: z.array(DocumentFieldDefinitionSchema).min(1).max(128),
-  categories: z.array(DocumentCategoryDefinitionSchema).max(128),
-  bindings: z
-    .array(
-      z.strictObject({
-        entityId: CanonicalIdSchema,
-        queryId: CanonicalIdSchema,
-        attachPermissionId: CanonicalIdSchema,
-        attachOperationId: CanonicalIdSchema,
-        surfaceIds: z.array(CanonicalIdSchema).min(1),
-      }),
-    )
-    .min(1)
-    .max(128),
-});
+const documentTemplateRevisions = z
+  .array(DocumentTemplateRevisionSchema)
+  .min(1)
+  .max(128)
+  .optional();
+const documentTemplatePointers = z
+  .array(DocumentTemplatePointerSchema)
+  .min(1)
+  .max(128)
+  .optional();
+
+export const DocumentsProjectionSchema = z
+  .strictObject({
+    kind: z.literal('documentsPayload'),
+    schemaVersion: z.literal(DOCUMENTS_PAYLOAD_VERSION),
+    fields: z.array(DocumentFieldDefinitionSchema).max(128),
+    templates: z
+      .strictObject({
+        revisions: z.array(DocumentTemplateRevisionSchema).min(1).max(128),
+        pointers: z.array(DocumentTemplatePointerSchema).min(1).max(128),
+      })
+      .optional(),
+    categories: z.array(DocumentCategoryDefinitionSchema).max(128),
+    bindings: z
+      .array(
+        z.strictObject({
+          entityId: CanonicalIdSchema,
+          queryId: CanonicalIdSchema,
+          attachPermissionId: CanonicalIdSchema,
+          attachOperationId: CanonicalIdSchema,
+          generateOperationId: CanonicalIdSchema.optional(),
+          surfaceIds: z.array(CanonicalIdSchema).min(1),
+        }),
+      )
+      .max(128),
+  })
+  .refine(
+    (value) =>
+      value.templates || (value.fields.length > 0 && value.bindings.length > 0),
+  );
 
 const workflowDigest = z.string().regex(/^[a-f0-9]{64}$/u);
 const workflowGrantIds = z
@@ -3088,9 +3126,16 @@ const v6NormalizedShape = {
   operations: z.array(normalizedV6OperationDefinition),
   connectorBindings: z.array(AddressBindingSchema).min(1).max(128).optional(),
   mapPlacements: z.array(MapPlacementSchema).min(1).max(128).optional(),
+  dateTimeFields: z
+    .array(DateTimeFieldDeclarationSchema)
+    .min(1)
+    .max(128)
+    .optional(),
   billingPlans: BillingPlansSchema.optional(),
   documentFields,
   documentCategories,
+  documentTemplateRevisions,
+  documentTemplatePointers,
   workflows,
   formulaRules,
   calculatedDisplayFields,
@@ -3225,9 +3270,16 @@ const v6AuthoredShape = {
   operations: z.array(authoredV6OperationDefinition),
   connectorBindings: z.array(AddressBindingSchema).min(1).max(128).optional(),
   mapPlacements: z.array(MapPlacementSchema).min(1).max(128).optional(),
+  dateTimeFields: z
+    .array(DateTimeFieldDeclarationSchema)
+    .min(1)
+    .max(128)
+    .optional(),
   billingPlans: BillingPlansSchema.optional(),
   documentFields,
   documentCategories,
+  documentTemplateRevisions,
+  documentTemplatePointers,
   workflows,
   formulaRules,
   calculatedDisplayFields,

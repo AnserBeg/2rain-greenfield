@@ -3,6 +3,8 @@ import { BoardViewRevisionSchema } from './board-revision.js';
 import { LayoutRevisionSchema } from './layout-revision.js';
 import {
   COMPANY_ACCESS_INDEX,
+  DATE_TIME_PATCH_VERSION,
+  DateTimeZoneSourceSchema,
   CalculatedDisplayFieldDefinitionSchema,
   FormulaValidationRuleDefinitionSchema,
   OperationRoleKeySchema,
@@ -10,6 +12,7 @@ import {
   type FormulaValidationRule,
 } from '@north-star/canonical-model';
 import { z } from 'zod';
+import { DocumentTemplateRevisionSchema } from '../../canonical-model/src/document-template-schema.js';
 import {
   DocumentCategoryDefinitionSchema,
   DocumentFieldDefinitionSchema,
@@ -201,7 +204,25 @@ const saveListView = z.strictObject({
     .max(3),
 });
 
+// ADR-0087: a versioned add-only member with a discriminated target that a
+// later schema version may widen. Its logical type is `dateTime`.
+export const AddDateTimeFieldSchema = z.strictObject({
+  kind: z.literal('addDateTimeField'),
+  schemaVersion: z.literal(DATE_TIME_PATCH_VERSION),
+  target: z.discriminatedUnion('kind', [
+    z.strictObject({
+      kind: z.literal('tenantRecordType'),
+      recordTypeId: canonicalId,
+    }),
+  ]),
+  fieldId: canonicalId,
+  label,
+  required: z.boolean(),
+  zoneSource: DateTimeZoneSourceSchema,
+});
+
 const ChangeMemberSchema = z.discriminatedUnion('kind', [
+  AddDateTimeFieldSchema,
   z.strictObject({
     kind: z.literal('addAddressField'),
     schemaVersion: z.literal('v6'),
@@ -228,6 +249,17 @@ const ChangeMemberSchema = z.discriminatedUnion('kind', [
   declareLifecycle,
   arrangeLayout,
   saveListView,
+  DocumentTemplateRevisionSchema.extend({
+    kind: z.literal('addDocumentTemplateRevision'),
+    schemaVersion: z.literal('northstar.document-template-revision/v1'),
+    previousRevisionId: canonicalId.nullable(),
+  }),
+  z.strictObject({
+    kind: z.literal('retireDocumentTemplate'),
+    schemaVersion: z.literal('northstar.document-template-retire/v1'),
+    templateId: canonicalId,
+    previousRevisionId: canonicalId,
+  }),
   DocumentFieldDefinitionSchema.extend({
     kind: z.literal('addDocumentField'),
     schemaVersion: z.literal('northstar.document-field/v1'),
@@ -326,6 +358,7 @@ export type CustomizationPatch =
   SingleCustomizationPatch | z.infer<typeof changeSet>;
 export type CustomizationPatchKind = CustomizationPatch['kind'];
 export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
+  'addDateTimeField',
   'addAddressField',
   'addMapPlacement',
   'addRecordType',
@@ -344,6 +377,8 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'addMetricCard',
   'addDocumentField',
   'addUploadCategory',
+  'addDocumentTemplateRevision',
+  'retireDocumentTemplate',
   'narrowPermission',
   'unNarrowPermission',
   'saveWorkflow',

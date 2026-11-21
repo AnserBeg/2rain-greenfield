@@ -101,7 +101,7 @@ export async function draftBeforeCompanyAccessIndex(
   request?: string,
 ): Promise<DraftOutcome> {
   return withArchivedCustomizationRuntime(
-    '630e2aa690906af9256c5964c398ba90585515d2',
+    '9cd8d75eccdfae1cd3813f276eea9656ff15a41f',
     async (run) =>
       (await run(
         `
@@ -129,3 +129,28 @@ export async function draftBeforeCompanyAccessIndex(
       )) as DraftOutcome,
   );
 }
+/**
+ * The previous serving binary's request path with one query issued: it loads
+ * the request view (where capability refusals happen), then resolves a query
+ * from the pinned catalog, which parses that whole catalog. "loaded" alone is
+ * not proof that a reader can serve a release, because catalogs parse lazily.
+ */
+export const archivedServingQuery = `
+import { readFile } from 'node:fs/promises';
+import { rolePool, trustedContext } from './packages/postgres-provider/src/composed-application-runtime.ts';
+import { PostgresRequestRuntimeViewService } from './packages/postgres-provider/src/request-runtime-view-service.ts';
+import { registeredSemanticQueryFromPinnedView } from './packages/runtime/src/semantic-query-gateway.ts';
+const { databaseUrl, identity, queryId } = JSON.parse(await readFile(process.argv[2], 'utf8'));
+const pool = rolePool(databaseUrl, 'north_star_runtime', 1);
+let stage = 'load';
+try {
+  const view = await new PostgresRequestRuntimeViewService(pool).load(await trustedContext(identity));
+  stage = 'query';
+  const query = registeredSemanticQueryFromPinnedView(view, queryId);
+  console.log(JSON.stringify({ outcome: 'served', root: view.release.contentHash, queryId: query.queryId }));
+} catch (error) {
+  console.log(JSON.stringify({ outcome: 'refused', stage, code: error.code ?? error.name, message: error.message }));
+} finally {
+  await pool.end();
+}
+`;

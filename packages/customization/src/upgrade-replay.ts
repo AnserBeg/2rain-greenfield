@@ -41,6 +41,8 @@ const declarationKeys = {
   permissions: 'permissionId',
   documentFields: 'fieldId',
   documentCategories: 'categoryId',
+  documentTemplatePointers: 'templateId',
+  documentTemplateRevisions: 'revisionId',
   calculatedDisplayFields: 'fieldId',
   formulaRules: 'ruleId',
   workflows: 'workflowId',
@@ -226,6 +228,22 @@ function applyRefusal(
         subject: String(module.moduleId),
         expected: { kind: patch.kind, label: patch.label },
         observed: { moduleId: module.moduleId, label: module.label },
+      };
+  }
+  if (patch.kind === 'addDateTimeField') {
+    const entity = patch.target.recordTypeId;
+    const collision = (target.fields as Member[]).find(
+      (f) =>
+        f.fieldId === patch.fieldId ||
+        ((f.entity as Member)?.targetId === entity &&
+          String(f.label).toLowerCase() === patch.label.toLowerCase()),
+    );
+    if (collision)
+      return {
+        code: 'FIELD_COLLISION',
+        subject: String(collision.fieldId),
+        expected: { fieldId: patch.fieldId, label: patch.label },
+        observed: { fieldId: collision.fieldId, label: collision.label },
       };
   }
   if (patch.kind === 'addField' || patch.kind === 'addAddressField') {

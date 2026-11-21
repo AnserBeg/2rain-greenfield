@@ -1,6 +1,6 @@
-import { z } from 'zod';
 import { ReportDraftSchema, draftReport } from './report-revision.js';
 import { defaultBoardChoices, draftBoardRevision } from './board-revision.js';
+import { z } from 'zod';
 import { layoutCommand } from './layout-revision.js';
 import { WorkflowDraftSchema, type WorkflowDraft } from './workflow-draft.js';
 import {
@@ -12,6 +12,7 @@ import {
   CUSTOMIZATION_CHANGE_MEMBER_KINDS,
   CUSTOMIZATION_PATCH_KINDS,
   MAX_CUSTOMIZATION_CHANGE_PATCHES,
+  AddDateTimeFieldSchema,
   parseCustomizationPatch,
   unsupported,
 } from './patch.js';
@@ -80,6 +81,9 @@ export interface DraftingModel {
 }
 
 export const DRAFT_CUSTOMIZATION_TOOL = 'draft_customization' as const;
+export function draftingToolInputSchema(): Readonly<Record<string, unknown>> {
+  return TOOL.inputSchema;
+}
 
 export type DraftedRequest =
   | { readonly patch: CustomizationPatch; readonly status: 'parsed' }
@@ -102,6 +106,28 @@ const fieldSchema = {
 } as const;
 
 const reportDraftToolSchema = z.toJSONSchema(ReportDraftSchema);
+// ADR-0087: the drafter's keys for addDateTimeField are generated from the
+// member's own schema, so the drafter and the parser cannot drift apart. Its
+// object target joins addLink's string target rather than replacing it.
+const {
+  kind: _dateTimeKind,
+  label: _dateTimeLabel,
+  required: _dateTimeRequired,
+  target: dateTimeTarget,
+  ...dateTimeMemberProperties
+} = (
+  z.toJSONSchema(AddDateTimeFieldSchema) as {
+    properties: Record<string, unknown>;
+  }
+).properties;
+void _dateTimeKind;
+void _dateTimeLabel;
+void _dateTimeRequired;
+export const DATE_TIME_DRAFTER_PROPERTIES = Object.freeze({
+  ...dateTimeMemberProperties,
+  target: dateTimeTarget,
+});
+
 const singlePatchSchema = {
   type: 'object',
   properties: {
@@ -113,7 +139,8 @@ const singlePatchSchema = {
     report: reportDraftToolSchema,
     fields: { type: 'array', items: fieldSchema },
     entity: { type: 'string' },
-    target: { type: 'string' },
+    target: { anyOf: [{ type: 'string' }, dateTimeTarget] },
+    ...dateTimeMemberProperties,
     required: { type: 'boolean' },
     companyOwnership: { enum: ['entityOwned', 'tenantShared'] },
     initial: { type: 'string' },
@@ -488,7 +515,7 @@ export async function draftPatchFromRequest(
   const system =
     draftingSystemPrompt(targets) +
     (targets.workflowSdk
-      ? `\nFor a receipt workflow use saveWorkflow with workflow {schemaVersion:"v6", workflowId, trigger:"goodsReceiptPosted", grants:{operations,queries}}, a TypeScript body and fixtures. Each fixture has an event {type:"goodsReceiptPosted", eventId, receiptId, legalEntityId} and effects in execution order {call, result}. Use the exact canonical IDs in these SDK declarations and declare only the calls the body makes. Sleep uses milliseconds and yields null. requestApproval yields a boolean. Never call operations or read live records to test a draft.\n${targets.workflowSdk}`
+      ? `\nFor a receipt workflow use saveWorkflow with workflow {schemaVersion:"v6", workflowId, trigger:"goodsReceiptPosted", grants:{operations,queries}}, a TypeScript body and fixtures. Each fixture has an event {type:"goodsReceiptPosted", eventId, receiptId, legalEntityId} and effects in execution order {call, result}. Use the exact canonical IDs in these SDK declarations and declare only the calls the body makes. Sleep uses milliseconds (up to 90 days) and yields null. For requests to wait for an external event, return unsupported with missingCapability "durable external-event waits (named gap)". requestApproval yields a boolean. Never call operations or read live records to test a draft.\n${targets.workflowSdk}`
       : '');
   const conversation: DraftingConversationEntry[] = [{ role: 'user', text }];
   let issues: readonly string[] = ['the model proposed no change'];

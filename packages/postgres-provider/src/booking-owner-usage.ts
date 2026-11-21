@@ -33,7 +33,8 @@ export function bookingOwnerUsageReadModel(
       binding?.binding !== BOOKING_USAGE_BINDING ||
       !binding.resultFields.usage ||
       definition.queryType !== 'get' ||
-      view.projections.query.requiredRuntimeCapability?.minimumVersion !==
+      // The floor is the highest catalog feature, so it may sit above usage.
+      (view.projections.query.requiredRuntimeCapability?.minimumVersion ?? 0) <
         BOOKING_USAGE_QUERY_READER ||
       !args ||
       Array.isArray(args) ||

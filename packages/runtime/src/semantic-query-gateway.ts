@@ -1741,8 +1741,14 @@ export function registeredSemanticQueryFromPinnedView(
       'schemaVersion',
       ...(Object.hasOwn(payload, 'groupedReports') ? ['groupedReports'] : []),
       ...(Object.hasOwn(payload, 'addressBindings') ? ['addressBindings'] : []),
+      ...(Object.hasOwn(payload, 'dateTimeBindings')
+        ? ['dateTimeBindings']
+        : []),
       ...(Object.hasOwn(payload, 'documentBindings')
         ? ['documentBindings']
+        : []),
+      ...(Object.hasOwn(payload, 'documentTemplatePointers')
+        ? ['documentTemplatePointers']
         : []),
     ],
     (message) => new MalformedPinnedQueryCatalogError(message),

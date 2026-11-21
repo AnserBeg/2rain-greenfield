@@ -1,8 +1,11 @@
 import {
+  DATE_TIME_COMPONENTS,
+  dateTimeComponentId,
   addressColumnId,
   addressComponents,
 } from '@north-star/canonical-model';
 import { compileAddressBindings } from './address.js';
+import { compileDateTimeFields } from './date-time.js';
 import {
   BOOKING_USAGE_QUERY_READER,
   hasBookingUsage,
@@ -13,6 +16,10 @@ import {
   hasBookingOperations,
 } from '@north-star/canonical-model';
 import { CALCULATED_DISPLAY_QUERY_READER } from '../../canonical-model/src/calculated-display-projection.js';
+import {
+  declaresOptionalReadModelDependency,
+  OPTIONAL_DEPENDENCY_QUERY_READER,
+} from '../../canonical-model/src/read-model-dependencies.js';
 import {
   CANONICALIZATION_PROFILE_VERSION,
   LANGUAGE_VERSION,
@@ -440,6 +447,23 @@ function compileApplicationInternal(
       maximumDiagnostics,
     );
   }
+  const dateTime = compileDateTimeFields(packageRevision);
+  if (dateTime && 'message' in dateTime) {
+    return failure(
+      [
+        {
+          ...compilerDiagnostic(
+            'COMPILER_TYPE_INVALID',
+            'typeCheck',
+            dateTime.path,
+            dateTime.subjectId,
+          ),
+          rule: dateTime.message,
+        },
+      ],
+      maximumDiagnostics,
+    );
+  }
   const billingProblem = billingBindingProblem(packageRevision);
   if (billingProblem)
     return failure(
@@ -457,7 +481,7 @@ function compileApplicationInternal(
       maximumDiagnostics,
     );
   const documents = compileDocuments(packageRevision);
-  if (documents?.message) {
+  if (documents && 'message' in documents) {
     return failure(
       [
         {
@@ -543,6 +567,7 @@ function compileApplicationInternal(
       displays.fields,
       documents?.payload,
       address?.payload,
+      dateTime?.payload,
     ),
     packageRevision,
   );
@@ -1601,6 +1626,9 @@ function decorateV3ProjectionPlans(
       const hasReadModels = packageRevision.queries.some(
         (query) => 'readModel' in query && query.readModel,
       );
+      const hasOptionalDependencies = declaresOptionalReadModelDependency(
+        packageRevision.queries,
+      );
       const payload = plan.payload as {
         kind: string;
         queries: Array<Record<string, unknown>>;
@@ -1617,6 +1645,9 @@ function decorateV3ProjectionPlans(
                   hasListSums ? 3 : 2,
                   hasBookingUsage(packageRevision)
                     ? BOOKING_USAGE_QUERY_READER
+                    : 0,
+                  hasOptionalDependencies
+                    ? OPTIONAL_DEPENDENCY_QUERY_READER
                     : 0,
                 ),
               },
@@ -2315,8 +2346,14 @@ function verifyCompleteness(
       : declaredRules &&
         operationFloor !==
           requiredFormulaValidationOperationReader(declaredRules)) ||
-    (hasBookingUsage(packageRevision)
-      ? queryFloor !== BOOKING_USAGE_QUERY_READER
+    // The query floor is the highest catalog feature present, so a lower
+    // feature's floor is exact only when no higher feature rides the catalog.
+    (hasBookingUsage(packageRevision) ||
+    declaresOptionalReadModelDependency(packageRevision.queries)
+      ? queryFloor !==
+        (declaresOptionalReadModelDependency(packageRevision.queries)
+          ? OPTIONAL_DEPENDENCY_QUERY_READER
+          : BOOKING_USAGE_QUERY_READER)
       : declaredDisplays && queryFloor !== CALCULATED_DISPLAY_QUERY_READER) ||
     ((declaredRules || declaredDisplays) &&
       (ruleReference?.instanceId !==
@@ -2371,13 +2408,26 @@ function verifyCompleteness(
         entity.columns.map((field) => field.canonicalFieldId),
       )
     : [...collectStorageFields(emittedStorage).keys()];
+  const dateTimeFieldIds = new Set(
+    (packageRevision.languageVersion === 'v6'
+      ? (packageRevision.dateTimeFields ?? [])
+      : []
+    ).map((declaration) => declaration.fieldId),
+  );
   const expectedFields = new Set(
     packageRevision.fields.flatMap((field) =>
       field.fieldType.kind === 'addressFieldType'
         ? addressComponents.map((component) =>
             addressColumnId(field.fieldId, component),
           )
-        : [field.fieldId],
+        : dateTimeFieldIds.has(field.fieldId)
+          ? [
+              field.fieldId,
+              ...DATE_TIME_COMPONENTS.map((component) =>
+                dateTimeComponentId(field.fieldId, component),
+              ),
+            ]
+          : [field.fieldId],
     ),
   );
   if (!setsEqual(new Set(storageFieldIds), expectedFields)) {

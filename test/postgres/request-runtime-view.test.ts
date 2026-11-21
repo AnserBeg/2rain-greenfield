@@ -1,3 +1,4 @@
+import { DOCUMENT_TEMPLATES_SURFACE_FLOOR } from '../../packages/canonical-model/src/documents.js';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
@@ -8,6 +9,7 @@ import { promisify } from 'node:util';
 
 import pg from 'pg';
 import { BILLING_INTERVAL_READER } from '../../packages/canonical-model/src/billing.js';
+import { DATE_TIME_FIELD_READER } from '../../packages/canonical-model/src/date-time-field.js';
 import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../packages/canonical-model/src/surface-workspace.js';
 import { DECLARED_REPORT_READER } from '../../packages/canonical-model/src/declared-report.js';
 import {
@@ -184,6 +186,8 @@ test('the capability comparison binds the family to its capability, then compare
     LINE_CREATE_VALUES_SURFACE_FLOOR,
     BILLING_INTERVAL_READER,
     BOARD_READER,
+    DOCUMENT_TEMPLATES_SURFACE_FLOOR,
+    DATE_TIME_FIELD_READER,
     COMPANY_ACCESS_INDEX_READER,
     REPORT_SOURCE_READER,
     DECLARED_REPORT_READER,

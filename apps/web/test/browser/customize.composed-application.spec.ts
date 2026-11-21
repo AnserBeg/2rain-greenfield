@@ -828,11 +828,9 @@ test('a person groups Inspection outcomes, renames and retires the report, and r
             page.getByRole('heading', { name: 'Approved', exact: true }),
           ).toBeVisible({ timeout: 180_000 });
           if (beforeActivation) {
-            const form = page
-              .locator('form')
-              .filter({
-                has: page.getByRole('button', { name: 'Activate now' }),
-              });
+            const form = page.locator('form').filter({
+              has: page.getByRole('button', { name: 'Activate now' }),
+            });
             await beforeActivation(
               await form.locator('input[name="patchId"]').inputValue(),
             );

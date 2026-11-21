@@ -6,7 +6,7 @@ import {
   AuthenticatedRequestEntryAdapter,
   assertTrustedRequestContext,
 } from '@north-star/runtime';
-import type { Pool, PoolClient } from 'pg';
+import { Client, type Pool, type PoolClient } from 'pg';
 
 import type { TrustedRequestContext } from '@north-star/runtime';
 
@@ -44,6 +44,7 @@ export async function withTrustedRequestTransaction<T>(
   context: TrustedRequestContext,
   run: (client: PoolClient) => Promise<T>,
   remainingMilliseconds?: () => number,
+  onCommitStart?: () => void,
 ): Promise<T> {
   assertTrustedRequestContext(context);
   // A transaction of its own never runs beside a held read snapshot on the
@@ -52,9 +53,21 @@ export async function withTrustedRequestTransaction<T>(
   const snapshot = currentReadSnapshot(pool);
   if (snapshot)
     return snapshot.runOutside(() =>
-      runTrustedTransaction(pool, context, run, remainingMilliseconds),
+      runTrustedTransaction(
+        pool,
+        context,
+        run,
+        remainingMilliseconds,
+        onCommitStart,
+      ),
     );
-  return runTrustedTransaction(pool, context, run, remainingMilliseconds);
+  return runTrustedTransaction(
+    pool,
+    context,
+    run,
+    remainingMilliseconds,
+    onCommitStart,
+  );
 }
 
 /** A booking and an ordinary record write may lock non-owning relation targets
@@ -91,6 +104,7 @@ export async function withActivationVerifierTransaction<T>(
     pool,
     context,
     run,
+    undefined,
     undefined,
     'north_star_activation_verifier',
   );
@@ -144,6 +158,7 @@ async function runTrustedTransaction<T>(
   context: TrustedRequestContext,
   run: (client: PoolClient) => Promise<T>,
   remainingMilliseconds = requestDeadline.getStore(),
+  onCommitStart?: () => void,
   role = 'north_star_runtime',
 ): Promise<T> {
   const client = await pool.connect();
@@ -161,6 +176,7 @@ async function runTrustedTransaction<T>(
     await setTrustedIdentity(client, context);
     result = await run(client);
     remainingMilliseconds?.();
+    onCommitStart?.();
     await client.query('COMMIT');
     transactionOpen = false;
   } catch (error) {
@@ -237,11 +253,17 @@ export async function withReadSnapshot<T>(
    * `false` for work that is not safe to run twice (a task step's POST):
    * a policy change then refuses the request at once.
    */
-  options: { readonly retry?: boolean } = {},
+  options: {
+    readonly retry?: boolean;
+    readonly deadline?: {
+      readonly signal: AbortSignal;
+      readonly remainingMilliseconds: () => number;
+    };
+  } = {},
 ): Promise<T> {
   const attempts = options.retry === false ? 1 : 2;
   for (let attempt = 1; ; attempt += 1) {
-    const snapshot = new ReadSnapshot(pool);
+    const snapshot = new ReadSnapshot(pool, options.deadline);
     try {
       const result = await requestEvidence.run(snapshot, () =>
         heldSnapshots.run(snapshot, () => work(() => snapshot.finish())),
@@ -311,7 +333,7 @@ const SNAPSHOT_POLICY_VERSION_SQL = `SELECT COALESCE(
               FROM platform.current_policy_epochs
              WHERE tenant_id = $1 AND environment_id = $2),
            '0'
-         ) AS policy_version`;
+         ) AS policy_version, pg_backend_pid() AS backend_pid`;
 
 const LIVE_POLICY_VERSION_SQL = `SELECT COALESCE(
            (SELECT policy_version::text
@@ -337,7 +359,15 @@ class ReadSnapshot {
   /** The tenant and environment this page's snapshots belong to. */
   #scope: string | null = null;
 
-  constructor(readonly pool: Pool) {}
+  #stopWatching: (() => Promise<void>) | undefined;
+
+  constructor(
+    readonly pool: Pool,
+    private readonly deadline?: {
+      readonly signal: AbortSignal;
+      readonly remainingMilliseconds: () => number;
+    },
+  ) {}
 
   /**
    * End the open snapshot and run `work` outside it, holding the page's turn
@@ -352,6 +382,47 @@ class ReadSnapshot {
       await this.#end();
       return heldSnapshots.exit(work);
     });
+  }
+
+  #watchAbort(backendPid: number): void {
+    const signal = this.deadline?.signal;
+    if (!signal) return;
+    signal.throwIfAborted();
+    let cancelling: Promise<void> | undefined;
+    const abort = () => {
+      cancelling = this.#cancelRead(backendPid);
+    };
+    signal.addEventListener('abort', abort, { once: true });
+    this.#stopWatching = async () => {
+      signal.removeEventListener('abort', abort);
+      await cancelling;
+    };
+  }
+
+  async #cancelRead(backendPid: number): Promise<void> {
+    // This connection cannot wait for a slot held by the query it cancels.
+    // Hold the snapshot connection until the cancellation attempt has finished.
+    const config = this.pool.options;
+    const cancel = new Client({
+      ...config,
+      password: config.password,
+      connectionTimeoutMillis: 1_000,
+      query_timeout: 1_000,
+    });
+    try {
+      await cancel.connect();
+      await cancel.query('SELECT pg_cancel_backend($1)', [backendPid]);
+    } catch {
+      // PostgreSQL's statement timeout remains in force if cancellation fails.
+    } finally {
+      await cancel.end().catch(() => undefined);
+    }
+  }
+
+  async #finishWatching(): Promise<void> {
+    const stop = this.#stopWatching;
+    this.#stopWatching = undefined;
+    await stop?.();
   }
 
   #assertScope(context: TrustedRequestContext): void {
@@ -398,6 +469,11 @@ class ReadSnapshot {
       if (!this.#client || !this.#identity) await this.#open(context);
       const client = this.#client!;
       try {
+        if (this.deadline)
+          await setTransactionDeadline(
+            client,
+            this.deadline.remainingMilliseconds,
+          );
         return await joinedReads.run(this, () =>
           run(this.#roleBound(client, role), this.#held),
         );
@@ -485,12 +561,18 @@ class ReadSnapshot {
     let failure: unknown;
     let open = true;
     try {
+      this.deadline?.signal.throwIfAborted();
       await client.query('COMMIT');
       open = false;
       await client.query(
         staffSessions.has(identity) ? 'BEGIN' : 'BEGIN READ ONLY',
       );
       open = true;
+      if (this.deadline)
+        await setTransactionDeadline(
+          client,
+          this.deadline.remainingMilliseconds,
+        );
       await setTrustedIdentity(client, identity);
       live =
         (
@@ -505,6 +587,7 @@ class ReadSnapshot {
       failure = error;
       if (open) await client.query('ROLLBACK').catch(() => undefined);
     }
+    await this.#finishWatching();
     const cleanupError = await releaseConnection(client, failure);
     if (failure !== undefined) throw failure;
     if (cleanupError) throw cleanupError;
@@ -536,16 +619,25 @@ class ReadSnapshot {
           ? 'BEGIN ISOLATION LEVEL REPEATABLE READ'
           : 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY',
       );
+      if (this.deadline)
+        await setTransactionDeadline(
+          client,
+          this.deadline.remainingMilliseconds,
+        );
       await assertRuntimeLoginRole(client);
       await setTrustedIdentity(client, context, 'read');
       // Session verification publishes a database clock observation. Seal the
       // snapshot read-only before handing this client to any application read.
       if (staffSessions.has(context))
         await client.query('SET TRANSACTION READ ONLY');
-      const result = await client.query<{ policy_version: string }>(
-        SNAPSHOT_POLICY_VERSION_SQL,
-        [context.tenantId, context.environmentId],
-      );
+      const result = await client.query<{
+        policy_version: string;
+        backend_pid: number;
+      }>(SNAPSHOT_POLICY_VERSION_SQL, [
+        context.tenantId,
+        context.environmentId,
+      ]);
+      this.#watchAbort(result.rows[0]!.backend_pid);
       const version = result.rows[0]?.policy_version ?? '0';
       this.#held = snapshotHandle(version);
       if (this.#policyVersion === null) this.#policyVersion = version;
@@ -574,6 +666,7 @@ class ReadSnapshot {
     } catch (error) {
       commitError = error;
     }
+    await this.#finishWatching();
     const cleanupError = await releaseConnection(client, commitError);
     if (commitError !== undefined) throw commitError;
     if (cleanupError) throw cleanupError;
@@ -588,6 +681,7 @@ class ReadSnapshot {
     this.#role = null;
     this.#assumed = new Set();
     this.#restored = new Set();
+    await this.#finishWatching();
     let rollbackError: unknown;
     try {
       await client.query('ROLLBACK');
