@@ -259,6 +259,11 @@ export async function startComposedApplication(
               (view) => runtime.addresses.workOne(view),
             );
           }
+          // ADR-0080: provider coordinates are removed once they expire.
+          await runtime.entry.run(
+            { headers: { cookie: 'northstar-demo-actor=manager' } },
+            (view) => runtime.addresses.sweep(view),
+          );
         })()
           .catch(() => {
             process.stderr.write('ADDRESS_WORKER_UNAVAILABLE\n');
