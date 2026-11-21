@@ -502,6 +502,7 @@ process.stdout.write(JSON.stringify(applicationWithoutLineCreateValues().release
           },
         ],
       };
+      let waitRequest = true;
       const app = await startComposedApplication({
         ...options,
         draftingProvider: () =>
@@ -509,7 +510,15 @@ process.stdout.write(JSON.stringify(applicationWithoutLineCreateValues().release
             scriptedModel([
               () => ({
                 toolCalls: [
-                  { name: DRAFT_CUSTOMIZATION_TOOL, input: modelDraft },
+                  {
+                    name: DRAFT_CUSTOMIZATION_TOOL,
+                    input: waitRequest
+                      ? {
+                          ...modelDraft,
+                          body: "sdk.waitForEvent('goodsReceiptPosted', 1);",
+                        }
+                      : modelDraft,
+                  },
                 ],
               }),
             ]),
@@ -580,6 +589,17 @@ process.stdout.write(JSON.stringify(applicationWithoutLineCreateValues().release
           const ask = page.locator('[data-customize-form="ask"]');
           await ask
             .locator('textarea')
+            .fill('Wait for the next receipt event.');
+          await ask.getByRole('button', { name: 'Draft it' }).click();
+          await expect(
+            page.locator(
+              '[data-customize-refusal="durable external-event waits"]',
+            ),
+          ).toContainText('unsupported', { timeout: 180_000 });
+          waitRequest = false;
+          await page.goto(`${app.baseUrl}/?customize`);
+          await ask
+            .locator('textarea')
             .fill(
               'When Field notebooks arrive, create a linked inspection and ask to escalate if it is pending after two days.',
             );
@@ -637,7 +657,13 @@ process.stdout.write(JSON.stringify(applicationWithoutLineCreateValues().release
                     databaseUrl,
                     identity: app.runtime.identity,
                   });
-                expect((await read()).outcome).toBe('loaded');
+                expect(
+                  await run(archivedItemQuery, {
+                    databaseUrl,
+                    identity: app.runtime.identity,
+                    item,
+                  }),
+                ).toEqual([item]);
                 await activate();
                 expect(await read()).toEqual({
                   outcome: 'refused',
@@ -863,3 +889,27 @@ process.stdout.write(JSON.stringify(applicationWithoutLineCreateValues().release
     LINEAGE_INSTALL_VOLUME,
   );
 });
+
+// Exercise the previous serving binary's lazy query catalog before observing
+// its named refusal when the workflow is activated.
+const archivedItemQuery = `
+import {readFile} from 'node:fs/promises';
+import {rolePool,trustedContext} from './packages/postgres-provider/src/composed-application-runtime.ts';
+import {loadServingRelease,readVerifiedServing,composeServingGateways} from './packages/postgres-provider/src/serving-gateways.ts';
+import {PostgresRequestRuntimeViewService} from './packages/postgres-provider/src/request-runtime-view-service.ts';
+import {AuthenticatedRequestEntryAdapter} from './packages/runtime/src/request-context.ts';
+import {AuthenticatedRequestRuntimeEntryAdapter} from './packages/runtime/src/request-runtime-view.ts';
+import {SEMANTIC_QUERY_REQUEST_VERSION} from './packages/runtime/src/semantic-query-gateway.ts';
+import {ObservabilityMetrics} from './packages/observability/src/index.ts';
+const {databaseUrl,identity,item} = JSON.parse(await readFile(process.argv[2],'utf8'));
+const pool = rolePool(databaseUrl,'north_star_runtime',2);
+try {
+  const context = await trustedContext(identity);
+  const pointer = await readVerifiedServing(pool,context);
+  const release = await loadServingRelease(pool,context,pointer.releaseId);
+  const {queryGateway,policy} = composeServingGateways(pool,pool,context,release,new ObservabilityMetrics(),{providerErrorMappings:[]});
+  const entry = new AuthenticatedRequestRuntimeEntryAdapter(new AuthenticatedRequestEntryAdapter(async()=>identity),new PostgresRequestRuntimeViewService(pool),policy);
+  const result = await entry.run({},v=>queryGateway.invoke(v,{schemaVersion:SEMANTIC_QUERY_REQUEST_VERSION,queryId:'northstar.app:query.item_get',arguments:{recordId:item}}));
+  console.log(JSON.stringify(result.records.map(r=>r.recordId)));
+} finally {await pool.end();}
+`;

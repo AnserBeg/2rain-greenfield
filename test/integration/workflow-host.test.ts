@@ -645,6 +645,21 @@ test('v2 drops event waits and caps sleep while a v1 pin retains both contracts'
     grants,
     LEGACY_WORKFLOW_SDK_VERSION,
   );
+  const { createHash } = await import('node:crypto');
+  // Both v1 declaration pins with empty grants, as emitted at 0a9f7ca5.
+  assert.equal(
+    createHash('sha256').update(previous.declarations).digest('hex'),
+    '833fdd0dfe7dc1c1a9327d812d79ae5837a8a0b3cd45cbf282e7cc7cb83d6a60',
+  );
+  assert.equal(
+    createHash('sha256')
+      .update(
+        generateWorkflowSdk(view, grants, LEGACY_WORKFLOW_SDK_VERSION, true)
+          .declarations,
+      )
+      .digest('hex'),
+    '63b619366345e2031f95cf98c509bc18761d28c03729e08637cb23f85dce26c0',
+  );
   const body =
     "if (event.receiptId === event.eventId) sdk.waitForEvent('goodsReceiptPosted', 1);";
   assert.doesNotMatch(current.declarations, /waitForEvent/);

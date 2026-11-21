@@ -1,3 +1,4 @@
+import { RemovedWorkflowAction } from './workflow-sdk-version.js';
 import type { WorkflowDefinition } from '../../canonical-model/src/schemas.js';
 import {
   renderWorkflowReview,
@@ -1202,6 +1203,12 @@ export class PostgresCustomizationService {
             storeWorkflowBundle(client, context, { ...bundle, executable }),
         );
       } catch (error) {
+        if (error instanceof RemovedWorkflowAction)
+          return {
+            status: 'unsupported',
+            missingCapability: 'durable external-event waits',
+            message: error.message,
+          };
         return {
           status: 'invalid',
           message: 'The workflow draft did not pass verification.',
@@ -1404,6 +1411,12 @@ export class PostgresCustomizationService {
           change.workflow,
         );
       } catch (error) {
+        if (error instanceof RemovedWorkflowAction)
+          return {
+            status: 'unsupported',
+            missingCapability: 'durable external-event waits',
+            message: error.message,
+          };
         return {
           status: 'invalid',
           message: 'The workflow draft did not pass verification.',
