@@ -20,9 +20,11 @@ Slices 1, 3 and 4 on the packet branch. Pre-tenant. No migration or reader rung.
 
 ## Gates and controls
 
-CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44868120892
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44872291907
 
 The workflow-host tests exercise both fork kinds with credential sentinels, a protected key and a socket observer, the injected deadline, SDK contracts, reviewed bytes and retry outcomes. The PostgreSQL journey checks admission, durable control rows and a suspended v1 event wait. The browser journey refuses an external wait, reopens the pending review and approves the displayed digest. The historical pre-workflow reader answers an item query before its named refusal after activation.
+
+The history scan matched a SQL column assignment in BOOKING-1 commit `42766ca9` and its schema snapshot. The two fingerprints from booking commit `b95235bb` identify those exact lines. CI still checks that the scanner detects a synthetic secret.
 
 ## Test it yourself
 
@@ -35,8 +37,9 @@ The workflow-host tests exercise both fork kinds with credential sentinels, a pr
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "WORKFLOW-2",
   "base": "0a9f7ca52304969c65092893f50375c90f8c2265",
-  "head": "87accc9aa51bd74b4da86769923b84635ddb35a8",
+  "head": "cbee3d2fd21037f9e6ae60d6d4169650a280d283",
   "changedPaths": [
+    ".gitleaksignore",
     "apps/api/scripts/customize-cli.ts",
     "apps/api/src/staff-decisions.ts",
     "apps/web/src/customize-screen.ts",
