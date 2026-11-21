@@ -46,10 +46,11 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44880757
 
 ## Slice 1 build checkpoint
 
-The packet branch contains the sortable-field Map, public Demo Maps imagery, the Customize member, and draft database and browser proofs. Reader values 38 and 39 are provisional. Neither rung has been taken on main.
+The packet branch contains the sortable-field Map, public Demo Maps imagery, the Customize member, and draft database and browser proofs. Viewport reader 39 and Map reader 40 are provisional against main at `8e811d81`. Neither rung has been taken on main.
 
 The seven imagery and customization tests and the suite-inventory check passed. Three isolated mutations made the matching tests fail: omitting the requesting-company check, adding company to the public cache key, and allowing an exact stop at the viewport centre. PostgreSQL, browser, older-reader and SPEED-1 gates are outstanding.
 
-The grammar pin fails with `UX003_VOCABULARY_DRIFT`. The Map needs the archetype and its four slots in the protected UX skill. The live drafter inventory and eval registry are still on the active AI-BUILD-1 slice 2 branch. The orchestrator must resolve these dependencies before review. Slice 1 has no CI receipt.
+- 2026-11-21 · Rule 12 exception for `addMapViewRevision`. AI-BUILD-1 owns the live inventory and eval registry in PR #136. Register the Map cases after that PR lands on main. The current schema-generated drafter and its deterministic cases ship on this branch.
+- The orchestrator authorized the Map grammar changes under A1 at `467535a4`. The lane's mounted UX skill is read-only. The grammar gate currently reports `UX003_VOCABULARY_DRIFT`. Slice 1 awaits its exact-tip CI receipt.
 
 Try the fake provider and Customize from the packet checkout with `node --import tsx --test --test-concurrency=1 test/unit/map-imagery.test.ts test/unit/customization-map.test.ts`.
