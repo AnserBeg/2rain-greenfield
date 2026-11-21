@@ -45,9 +45,11 @@ test('dispatchers pan just the map, return with Back and can open each stop with
       origin = await heading.getAttribute('data-map-state');
     const north = region.getByRole('link', { name: 'North', exact: true });
     await north.focus();
+    const scroll = await page.evaluate(() => window.scrollY);
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(/area=1/u);
     await expect(north).toBeFocused();
+    expect(await page.evaluate(() => window.scrollY)).toBe(scroll);
     expect(await sidebar?.evaluate((el) => el.isConnected)).toBe(true);
     await page.goBack();
     await expect(heading).toHaveAttribute('data-map-state', origin!);
@@ -102,6 +104,7 @@ test('dispatchers pan just the map, return with Back and can open each stop with
       newer.resolve();
       await page.unrouteAll({ behavior: 'wait' });
     }
+    await svg.scrollIntoViewIfNeeded();
     const box = await svg.boundingBox();
     expect(box).toBeTruthy();
     const x = box!.x + 4,
@@ -110,6 +113,12 @@ test('dispatchers pan just the map, return with Back and can open each stop with
     await page.mouse.down();
     await page.mouse.move(x + 50, y + 25);
     await page.keyboard.press('Escape');
+    await page.mouse.up();
+    await expect(heading).toHaveAttribute('data-map-state', origin!);
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await svg.dispatchEvent('pointercancel');
+    await page.mouse.move(x + 50, y + 25);
     await page.mouse.up();
     await expect(heading).toHaveAttribute('data-map-state', origin!);
     await page.mouse.move(x, y);

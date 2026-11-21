@@ -24,6 +24,7 @@ import {
 import { MAP_VIEW_READER } from '../../packages/canonical-model/src/map-view.js';
 import { parseServerTiming } from '../../packages/postgres-provider/src/request-work-meter.js';
 import { catalogParseCount } from '../../packages/runtime/src/catalog-parse-count.js';
+import { readCompiledSurfaceManifest } from '../../apps/web/src/surface-contract.js';
 import { physicalNameFor } from '../../packages/compiler/src/storage.js';
 import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../packages/runtime/src/semantic-query-gateway.js';
 import { fitMap } from '../../packages/canonical-model/src/map-viewport.js';
@@ -271,6 +272,12 @@ test(
             'surfaceManifest',
           ] as const)
             assert.equal(after[key], before[key], key);
+          const surfaceCount = await app.runtime.entry.run(
+            { headers: manager },
+            (view) => readCompiledSurfaceManifest(view).surfaces.length,
+          );
+          const sparseBindings = after.surfaceBinding - before.surfaceBinding;
+          assert.ok(sparseBindings <= surfaceCount);
           const src = html
             .match(/href="(\/map\/image\?[^"]+)"/u)?.[1]
             ?.replaceAll('&amp;', '&');
@@ -426,10 +433,22 @@ test(
           await (await serve()).arrayBuffer();
           const timings: number[] = [];
           for (let i = 0; i < 5; i++) {
+            const parsesBefore = catalogParseCount();
             const start = performance.now();
             const full = await serve();
             const body = await full.text();
             timings.push(performance.now() - start);
+            const parsesAfter = catalogParseCount();
+            for (const key of [
+              'operationCatalog',
+              'queryCatalog',
+              'surfaceManifest',
+            ] as const)
+              assert.equal(parsesAfter[key], parsesBefore[key], key);
+            assert.equal(
+              parsesAfter.surfaceBinding - parsesBefore.surfaceBinding,
+              sparseBindings,
+            );
             assert.equal(full.status, 200);
             assert.match(body, /Showing 100 of this filter’s stops/u);
             assert.doesNotMatch(
