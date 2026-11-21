@@ -84,9 +84,10 @@ async function main(): Promise<void> {
       // Where the captured prompts go (scratch, never committed), so a later
       // bake-off sends exactly the in-app requests.
       'prompts-out': { type: 'string' },
-      // The isolated compile's bound for this run: a loaded host must not
+      // The isolated compile's bound for this run (at most the compiler's
+      // 120 s cap for untrusted definitions): a loaded host must not
       // score a slow compile as a failed draft. 0 keeps the app's default.
-      'sandbox-ms': { type: 'string', default: '600000' },
+      'sandbox-ms': { type: 'string', default: '120000' },
     },
   });
   const cap = Number(args.cap);

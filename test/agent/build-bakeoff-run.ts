@@ -230,7 +230,7 @@ async function main(): Promise<void> {
       // holds provider content for repair turns: scratch only, never committed.
       'drafts-out': { type: 'string' },
       'drafts-in': { type: 'string' },
-      'sandbox-ms': { type: 'string', default: '600000' },
+      'sandbox-ms': { type: 'string', default: '120000' },
     },
   });
   if (!args.prompts) throw new Error('--prompts is required');
