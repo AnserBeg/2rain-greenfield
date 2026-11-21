@@ -1,8 +1,8 @@
 # DOCS-1 — governed files and generated PDFs
 
-Slice 2 implements document templates and PDF generation from [ADR-0078](../../decisions/ADR-0078-governed-documents-files-templates-and-signatures.md). Slice 1a attached internal files to first-party and tenant records. Fable closed the design read before implementation. Integrated over main `630e2aa6` with migration 0060, Surface reader 38 and query-catalog reader 6 (booking took query-catalog 5 for owner usage; main supports 5). The preceding-reader test pins `630e2aa6` as the preceding serving binary. The record claim and CI tier line are rebound to the integration range and its full run after merge.
+Slice 2 implements document templates and PDF generation from [ADR-0078](../../decisions/ADR-0078-governed-documents-files-templates-and-signatures.md). Slice 1a attached internal files to first-party and tenant records. Fable closed the design read before implementation. Merged at `5cffd099` over main `630e2aa6` on exact full CI, with migration 0060, Surface reader 38 and query-catalog reader 6 (booking took query-catalog 5 for owner usage; main supports 5). The preceding-reader test pins `630e2aa6` as the preceding serving binary. The record claim and CI tier line are rebound to the integration range and its full run after merge.
 
-CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44819597278
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44896611494
 
 ## Claims
 
@@ -41,24 +41,26 @@ Hosted CI exercises the compiled app, SQL authority, the preceding reader and pe
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "DOCS-1",
-  "base": "fff2166fa326f871c11a34d4da623707878e7636", "head": "daef377d2ab0ea5a22e351bc7fba3870b494cf57",
+  "base": "630e2aa690906af9256c5964c398ba90585515d2", "head": "5cffd0994f79f5f6bc6c32ba5e80b56ecdaecf37",
   "changedPaths": [
     ".github/workflows/ci.yml", ".github/workflows/evidence.yml", "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json",
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/document-http.ts", "apps/web/src/document-template-form.ts",
-    "apps/web/src/surface-client.ts", "apps/web/src/surface-composition.ts", "db/migrations/0056_generated_document_sources.sql", "db/schema.snapshot.json",
+    "apps/web/src/surface-client.ts", "apps/web/src/surface-composition.ts", "db/migrations/0060_generated_document_sources.sql", "db/schema.snapshot.json",
     "packages/canonical-model/src/document-template-schema.ts", "packages/canonical-model/src/documents.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/normalize.ts",
-    "packages/canonical-model/src/schemas.ts", "packages/compiler/src/compiler.ts", "packages/compiler/src/document-templates.ts", "packages/compiler/src/documents.ts",
-    "packages/compiler/src/projections.ts", "packages/customization/src/apply.ts", "packages/customization/src/patch.ts", "packages/customization/src/render.ts",
-    "packages/customization/src/targets.ts", "packages/customization/src/upgrade-diagnostics.ts", "packages/customization/src/upgrade-replay.ts", "packages/domain/src/purchasing/approval-workspace.ts",
-    "packages/postgres-provider/package.json", "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/document-attachments.ts", "packages/postgres-provider/src/document-company-brand.ts",
-    "packages/postgres-provider/src/document-content.ts", "packages/postgres-provider/src/document-pdf-worker.ts", "packages/postgres-provider/src/document-pdf.ts", "packages/postgres-provider/src/document-publication.ts",
-    "packages/postgres-provider/src/document-template-sources.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/request-context.ts", "packages/postgres-provider/src/request-runtime-view-service.ts",
-    "packages/postgres-provider/src/serving-gateways.ts", "packages/runtime/src/civil-date.ts", "packages/runtime/src/document-gateway.ts", "packages/runtime/src/request-runtime-view.ts",
-    "packages/runtime/src/semantic-operation-gateway.ts", "packages/runtime/src/semantic-query-gateway.ts", "pnpm-lock.yaml", "test/architecture/release-persistence-boundary.test.ts",
-    "test/architecture/repository-hygiene.test.ts", "test/evidence/DOCS-1.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/archived-customization-runtime.ts",
-    "test/helpers/document-pdf-text.ts", "test/integration/document-http.test.ts", "test/integration/document-pdf.test.ts", "test/postgres/document-attachments.test.ts",
-    "test/postgres/document-templates.test.ts", "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts",
-    "test/postgres/request-runtime-view.test.ts", "test/postgres/trust-substrate.test.ts", "test/unit/customization-upgrade.test.ts", "test/unit/customize-screen.test.ts"
+    "packages/canonical-model/src/read-model-dependencies.ts", "packages/canonical-model/src/schemas.ts", "packages/compiler/src/compiler.ts", "packages/compiler/src/document-templates.ts",
+    "packages/compiler/src/documents.ts", "packages/compiler/src/projections.ts", "packages/customization/src/apply.ts", "packages/customization/src/patch.ts",
+    "packages/customization/src/render.ts", "packages/customization/src/targets.ts", "packages/customization/src/upgrade-diagnostics.ts", "packages/customization/src/upgrade-replay.ts",
+    "packages/domain/src/purchasing/approval-workspace.ts", "packages/postgres-provider/package.json", "packages/postgres-provider/src/booking-owner-usage.ts", "packages/postgres-provider/src/customization-service.ts",
+    "packages/postgres-provider/src/document-attachments.ts", "packages/postgres-provider/src/document-company-brand.ts", "packages/postgres-provider/src/document-content.ts", "packages/postgres-provider/src/document-pdf-worker.ts",
+    "packages/postgres-provider/src/document-pdf.ts", "packages/postgres-provider/src/document-publication.ts", "packages/postgres-provider/src/document-template-sources.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts",
+    "packages/postgres-provider/src/release-repository.ts", "packages/postgres-provider/src/request-context.ts", "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/postgres-provider/src/serving-gateways.ts",
+    "packages/runtime/src/civil-date.ts", "packages/runtime/src/document-gateway.ts", "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-operation-gateway.ts",
+    "packages/runtime/src/semantic-query-gateway.ts", "pnpm-lock.yaml", "test/architecture/release-persistence-boundary.test.ts", "test/architecture/repository-hygiene.test.ts",
+    "test/evidence/DOCS-1.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/application-without-line-create-values.ts", "test/helpers/archived-customization-runtime.ts",
+    "test/helpers/archived-runtime-process.ts", "test/helpers/document-pdf-text.ts", "test/integration/document-http.test.ts", "test/integration/document-pdf.test.ts",
+    "test/postgres/booking-serving.test.ts", "test/postgres/customization-validation.test.ts", "test/postgres/document-attachments.test.ts", "test/postgres/document-templates.test.ts",
+    "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts", "test/postgres/request-runtime-view.test.ts",
+    "test/postgres/trust-substrate.test.ts", "test/unit/calculated-display.test.ts", "test/unit/customization-upgrade.test.ts", "test/unit/customize-screen.test.ts"
   ],
   "symbols": [
     {"path": "packages/compiler/src/document-templates.ts", "name": "compileDocumentTemplates"},
