@@ -108,6 +108,26 @@ export async function checkWorkflowStartLimits(
       ),
       1,
     );
+    const access = await client.query(`SELECT
+      has_function_privilege('north_star_runtime','north_star_internal.workflow_manage_start(uuid,uuid,uuid,text)','EXECUTE') AS can_manage,
+      has_table_privilege('north_star_runtime','north_star_internal.workflow_start_limits','UPDATE') AS can_set_limits`);
+    assert.deepEqual(access.rows, [
+      { can_manage: false, can_set_limits: false },
+    ]);
+    await client.query(
+      "SELECT set_config('north_star.environment_id', gen_random_uuid()::text, true)",
+    );
+    assert.equal(
+      await count(
+        'SELECT count(*)::int n FROM platform.workflow_waiting_starts()',
+      ),
+      0,
+      'another environment cannot see the queue',
+    );
+    await client.query(
+      "SELECT set_config('north_star.environment_id', $1, true)",
+      [scope.environment_id],
+    );
     await client.query('SAVEPOINT overflow_case');
     await client.query(
       'UPDATE north_star_internal.workflow_start_limits SET deferred=1',
