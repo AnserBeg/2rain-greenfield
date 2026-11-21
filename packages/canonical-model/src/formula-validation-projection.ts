@@ -9,6 +9,8 @@ import { FormulaValidationRuleDefinitionSchema } from './schemas.js';
 
 const watchedField = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.enum(['text', 'boolean', 'integer', 'date']) }),
+  // ADR-0087: presence on a whole logical dateTime value.
+  z.strictObject({ kind: z.literal('dateTime') }),
   z
     .strictObject({
       kind: z.literal('decimal'),
