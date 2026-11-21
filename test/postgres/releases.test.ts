@@ -2067,15 +2067,18 @@ test('release admission refuses a company access index whose release understates
         fields: [{ label: 'Name', type: 'text' }],
       },
     ]);
-  const surface = candidate.bundle.releaseManifest.projections.find(
-    (p) => p.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
+  const understated = rewriteProjectionPayload(
+    candidate,
+    PROJECTION_FAMILY_IDS.surfaceManifest,
+    () => {},
+    COMPANY_ACCESS_INDEX_READER - 1,
   );
-  assert.ok(surface);
-  surface.requiredRuntimeCapability.minimumVersion =
-    COMPANY_ACCESS_INDEX_READER - 1;
   const context = await contextFor(requestEntry(), 'session-a');
   const pool = new pg.Pool();
   t.after(() => pool.end());
+  t.mock.method(pool, 'connect', () => {
+    throw new Error('Understated candidate reached the staging transaction');
+  });
   const repository = new PostgresImmutableReleaseRepository(pool);
   t.mock.method(repository, 'getAppPackageRevision', async () => ({
     ...revisionCommand(context, revisionA, bytes),
@@ -2084,7 +2087,7 @@ test('release admission refuses a company access index whose release understates
   await assert.rejects(
     repository.stageTenantReleaseCandidate(context, {
       appPackageRevisionId: revisionA,
-      compiledRelease: rebuildReleaseRoot(candidate),
+      compiledRelease: understated,
       createdBy: context.principalId,
       environmentId: context.environmentId,
       releaseId: releaseA,
@@ -2438,6 +2441,7 @@ function rewriteProjectionPayload(
   compiled: CompileSuccess,
   familyId: string,
   mutate: (payload: Record<string, unknown>) => void,
+  minimumVersion?: number,
 ): CompileSuccess {
   const clone = structuredClone(compiled);
   const reference = clone.bundle.releaseManifest.projections.find(
@@ -2452,6 +2456,10 @@ function rewriteProjectionPayload(
   const manifest = JSON.parse(
     new TextDecoder().decode(manifestArtifact.canonicalBytes),
   ) as ProjectionManifestEnvelope;
+  if (minimumVersion !== undefined) {
+    reference.requiredRuntimeCapability.minimumVersion = minimumVersion;
+    manifest.requiredRuntimeCapability.minimumVersion = minimumVersion;
+  }
   const descriptor = manifest.chunks[0];
   assert.ok(descriptor);
   const priorChunkRoot = descriptor.contentHash;

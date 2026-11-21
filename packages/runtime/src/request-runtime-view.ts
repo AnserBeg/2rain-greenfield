@@ -232,6 +232,7 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 36 binds agreed billing intervals to selected source fields.
     // 37 replaces Board v1 with Board v2: chosen stages, moves and facts by
     // stable ID with pinned contracts, labels from the release.
+    // 38 admits the optional company access index on new record types.
     maximumSupportedVersion: COMPANY_ACCESS_INDEX_READER,
   },
 });
