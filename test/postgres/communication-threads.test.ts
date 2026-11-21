@@ -187,6 +187,48 @@ test('shared communication writer', async (t) => {
           );
         });
         await t.test(
+          'tickets belong to a trusted session identity and setup uses the discussion channel',
+          async () => {
+            await begin(left);
+            const ticket = await admit(left, email);
+            await left.query('SAVEPOINT scope');
+            await assert.rejects(
+              left.query(
+                'SELECT platform.communication_register_discussion($1)',
+                [ticket],
+              ),
+              /communication.invalidScope/,
+              'email registered discussion requirements',
+            );
+            for (const setting of [
+              'tenant_id',
+              'environment_id',
+              'principal_id',
+            ]) {
+              await left.query('ROLLBACK TO scope');
+              await left.query(
+                "SELECT set_config($1,md5('different')::uuid::text,true)",
+                ['north_star.' + setting],
+              );
+              await assert.rejects(
+                resolveThread(left, ticket),
+                /communication.unavailable/,
+                'ticket survived changed ' + setting,
+              );
+            }
+            await left.query('ROLLBACK');
+            await begin(left);
+            await left.query(
+              'CREATE TEMP TABLE communication_admissions (label text) ON COMMIT DROP',
+            );
+            await assert.rejects(
+              admit(left, email),
+              /communication.unavailable/,
+              'writer accepted a caller-owned temporary table',
+            );
+          },
+        );
+        await t.test(
           'each authorization fence refuses independently',
           async () => {
             const denied = async (
@@ -247,6 +289,39 @@ test('shared communication writer', async (t) => {
             await denied('foreign direct peer admitted', 'staff', () =>
               direct(left, 'east'),
             );
+            for (const [reason, options] of [
+              [
+                'binding bound exceeded',
+                { bindings: Array<string>(8).fill(relation) },
+              ],
+              [
+                'contact bound exceeded',
+                { contacts: Array<string>(33).fill('owner2') },
+              ],
+              [
+                'staff bound exceeded',
+                { staff: Array<string>(33).fill('staff') },
+              ],
+            ] as const) {
+              await denied(
+                reason,
+                'staff',
+                () => admit(left, email, options),
+                /communication.invalidScope/,
+              );
+            }
+            await admin.query(
+              "UPDATE platform.current_policy_permission_grants SET revoked_at=now() WHERE permission_id='northstar.communication:permission.staff_chat_post'",
+            );
+            try {
+              await denied('direct write grant revoked', 'staff', () =>
+                direct(left, 'west'),
+              );
+            } finally {
+              await admin.query(
+                "UPDATE platform.current_policy_permission_grants SET revoked_at=NULL WHERE permission_id='northstar.communication:permission.staff_chat_post'",
+              );
+            }
             await begin(left, 'staff', true);
             try {
               await assert.rejects(

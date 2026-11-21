@@ -375,6 +375,74 @@
           "expected": "creation did not serialize before thread lookup"
         }
       ]
+    },
+    {
+      "name": "thread-bindings-bound",
+      "claim": "The writer refuses an oversized bindings selection before resolving its members.",
+      "file": "db/migrations/0060_communication_threads.sql",
+      "original": "cardinality(bindings)>7",
+      "replacement": "false",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "each authorization fence refuses independently",
+          "expected": "binding bound exceeded"
+        }
+      ]
+    },
+    {
+      "name": "thread-contacts-bound",
+      "claim": "The writer refuses an oversized contacts selection before resolving its members.",
+      "file": "db/migrations/0060_communication_threads.sql",
+      "original": "cardinality(contacts)>32",
+      "replacement": "false",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "each authorization fence refuses independently",
+          "expected": "contact bound exceeded"
+        }
+      ]
+    },
+    {
+      "name": "thread-staff-bound",
+      "claim": "The writer refuses an oversized staff selection before resolving its members.",
+      "file": "db/migrations/0060_communication_threads.sql",
+      "original": "cardinality(staff)>32",
+      "replacement": "false",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "each authorization fence refuses independently",
+          "expected": "staff bound exceeded"
+        }
+      ]
+    },
+    {
+      "name": "thread-direct-write",
+      "claim": "A live company member still needs a chat write grant.",
+      "file": "db/migrations/0060_communication_threads.sql",
+      "original": "IF NOT platform.document_granted(company::text,'northstar.communication:permission.staff_chat_post','northstar.communication:resource.staff_chat')",
+      "replacement": "IF false",
+      "test": {
+        "files": ["test/postgres/communication-threads.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/communication-threads.test.ts",
+          "name": "each authorization fence refuses independently",
+          "expected": "direct write grant revoked"
+        }
+      ]
     }
   ]
 }
