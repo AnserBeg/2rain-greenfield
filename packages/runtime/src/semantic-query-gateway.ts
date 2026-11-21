@@ -168,7 +168,7 @@ interface RegisteredQueryDefinitionBase {
   readonly permissionId: string;
   readonly queryId: string;
   readonly sourceEntityId: string;
-  readonly tier: 'q0' | 'q1';
+  readonly tier: 'q0' | 'q1' | 'q2';
 }
 
 export interface RegisteredQueryDefinition extends RegisteredQueryDefinitionBase {
@@ -581,7 +581,7 @@ export class SemanticQueryGateway {
       return unsupportedQueryResult(request.queryId, 'query-tier-unsupported');
     }
     const filterPlans: QueryFilterLoweringPlan[] = [];
-    if (definition.tier === 'q0') {
+    if (definition.tier !== 'q1') {
       const predicateReceipt = inspectPredicateForExecution(definition.filter);
       observePredicateReceiptSafely(
         this.observePredicateReceipt,
@@ -1675,7 +1675,9 @@ function parseQueryDefinition(
       value.queryType !== 'list' &&
       value.queryType !== 'resolve' &&
       value.queryType !== 'search') ||
-    (value.tier !== 'q0' && value.tier !== 'q1') ||
+    (value.tier !== 'q0' && value.tier !== 'q1' && value.tier !== 'q2') ||
+    (value.tier === 'q2' &&
+      (value.queryType !== 'get' || value.readModel === undefined)) ||
     !Number.isSafeInteger(value.maximumResultCount) ||
     Number(value.maximumResultCount) < 1 ||
     !isRecord(value.filter) ||

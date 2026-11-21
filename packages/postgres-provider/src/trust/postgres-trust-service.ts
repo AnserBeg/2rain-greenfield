@@ -26,7 +26,10 @@ import {
   type ResolvedActorAttribution,
   type TrustedActorEnvelope,
 } from '../../../platform-runtime/src/trust/contracts.js';
-import { withTrustedRequestTransaction } from '../request-context.js';
+import {
+  withIdempotentTransaction,
+  withTrustedRequestTransaction,
+} from '../request-context.js';
 import { assertTrustedActorEnvelope } from './trusted-actor-envelope.js';
 
 export interface AcceptedMutationReceipt<TMutationResult> {
@@ -172,7 +175,7 @@ export class PostgresTrustService {
   ): Promise<AcceptedMutationReceipt<TMutationResult>> {
     assertExecutionAuthority(context, actorEnvelope);
     validateIdempotencyBinding(binding);
-    return withTrustedRequestTransaction(this.pool, context, async (client) => {
+    return withIdempotentTransaction(this.pool, context, async (client) => {
       // Stock-affecting domain capabilities must establish the canonical stock
       // serializer before any request-key or row lock. Ordinary trust callers
       // omit this hook and retain the existing transaction order.

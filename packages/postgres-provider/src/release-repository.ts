@@ -8,8 +8,11 @@ import {
   hasBoardDeclaration,
 } from './board-admission.js';
 import {
-  BOOKING_OPERATION_READER,
+  BOOKING_USAGE_QUERY_READER,
+  hasBookingUsage,
+  bookingReaderFloor,
   bookingCatalogTerms,
+  bookingUsageCatalogTerms,
   bookingDeclarationProblem,
   hasBookingOperations,
 } from '@north-star/canonical-model';
@@ -735,10 +738,15 @@ function verifyCompiledRelease(
       projectionPayloadBytes,
     );
     if (
-      reference.familyId === PROJECTION_FAMILY_IDS.operationCatalog &&
+      (reference.familyId === PROJECTION_FAMILY_IDS.operationCatalog ||
+        reference.familyId === PROJECTION_FAMILY_IDS.queryCatalog) &&
       revision.languageVersion === 'v6'
     ) {
-      const terms = bookingCatalogTerms(layoutDefinition);
+      const readTerms =
+        reference.familyId === PROJECTION_FAMILY_IDS.queryCatalog
+          ? bookingUsageCatalogTerms
+          : bookingCatalogTerms;
+      const terms = readTerms(layoutDefinition);
       const catalog = decodeCanonicalObject(
         projectionPayloadBytes[0]!,
         'PROJECTION_CHUNK_NOT_CANONICAL',
@@ -748,7 +756,7 @@ function verifyCompiledRelease(
           bookingDeclarationProblem(
             parseNormalizedApplicationPackageJson(revision.desiredState),
           )) ||
-        canonicalize(terms) !== canonicalize(bookingCatalogTerms(catalog))
+        canonicalize(terms) !== canonicalize(readTerms(catalog))
       ) {
         throw integrity(
           'BOOKING_PROJECTION_CONTRACT_MISMATCH',
@@ -908,13 +916,15 @@ function verifyFormulaProjectionReference(
   if (
     references.length !== Number(Boolean(declaring)) ||
     (hasBookingOperations(normalized)
-      ? operationFloor !== BOOKING_OPERATION_READER
+      ? operationFloor !== bookingReaderFloor(normalized)
       : rules.length
         ? operationFloor !== requiredFormulaValidationOperationReader(rules)
         : operationFloor >= LITERAL_VALIDATION_OPERATION_READER) ||
-    (displays.length
-      ? queryFloor !== CALCULATED_DISPLAY_QUERY_READER
-      : queryFloor >= CALCULATED_DISPLAY_QUERY_READER) ||
+    (hasBookingUsage(normalized)
+      ? queryFloor !== BOOKING_USAGE_QUERY_READER
+      : displays.length
+        ? queryFloor !== CALCULATED_DISPLAY_QUERY_READER
+        : queryFloor >= CALCULATED_DISPLAY_QUERY_READER) ||
     (declaring &&
       (reference?.instanceId !==
         `${declaring.package.namespace}:projection.formula-rule` ||
