@@ -535,7 +535,7 @@ test(
 );
 
 // The preceding production tree: re-pinned to main's tip at merge time.
-const previousReader = '0a9f7ca5';
+const previousReader = '630e2aa6';
 
 test(
   'releases without the field keep their persisted bytes, the prior parser refuses the member and the prior loader refuses a declaring release',
