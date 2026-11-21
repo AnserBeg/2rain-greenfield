@@ -1,7 +1,15 @@
+import { CURRENCY_MINOR_UNITS_V0 } from '../../packages/canonical-model/src/constants.js';
+import { evaluateGroupedFacts } from '../../packages/canonical-model/src/grouped-aggregate.js';
+import {
+  salesModuleDefinition,
+  SALES_IDS,
+} from '../../packages/domain/src/sales/index.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   COMPANY_ACCESS_INDEX,
+  normalizeApplicationPackage,
+  parseAuthoredApplicationPackageJson,
   COMPANY_ACCESS_INDEX_READER,
 } from '../../packages/canonical-model/src/index.js';
 import {
@@ -181,4 +189,88 @@ test('an archived pre-key company-owned Inspection reproduces every release byte
       [],
     );
   });
+});
+
+test('Invoice source declares its two civil dates and partitions fractional balances by the stored sales currency', () => {
+  const authored = parseAuthoredApplicationPackageJson(
+    JSON.stringify(salesModuleDefinition()),
+  );
+  assert.ok(authored.languageVersion === 'v6');
+  const revision = normalizeApplicationPackage(authored);
+  const invoice = revision.entities.find(
+    (entity) => entity.entityId === SALES_IDS.entityIds.customerInvoice,
+  )!;
+  const source = invoice.reportSource!;
+  assert.deepEqual(
+    source.dates?.map(({ fieldId, basis }) => [fieldId, basis]),
+    ['invoice_date', 'due_date'].map((name) => [
+      `${SALES_IDS.namespace}:field.customer_invoice_${name}`,
+      'civilDate',
+    ]),
+  );
+  const amount = source.amounts!.find((a) => a.fieldId.endsWith('_balance'))!;
+  const currency = amount.currency;
+  assert.ok(currency.kind === 'stored');
+  const measure = {
+    id: 'balance',
+    operator: 'sum' as const,
+    fieldId: amount.fieldId,
+    currency,
+    scale: 18,
+  };
+  const fact = (code: string | null, balance: string | null) => ({
+    customer: 'Rain',
+    [currency.fieldId]: code,
+    [amount.fieldId]: balance,
+  });
+  const actual = evaluateGroupedFacts(
+    ['customer'],
+    [measure],
+    [
+      fact('CAD', '10.25'),
+      fact('CAD', '1.75'),
+      fact('USD', '4.00'),
+      fact('EUR', '-0.125'),
+      fact('EUR', null),
+      fact(null, '0.987'),
+      fact('ZZZ', '1.0'),
+    ],
+  );
+  const rows = actual.groups.map(({ partition, cells }) => [
+    partition,
+    cells[0]!.value,
+    cells[0]!.recordsWithoutMeasure,
+  ]);
+  assert.deepEqual(rows, [
+    [{ kind: 'currency', code: 'CAD' }, '12.000000000000000000', 0],
+    [{ kind: 'currency', code: 'USD' }, '4.000000000000000000', 0],
+    [{ kind: 'currency', code: 'EUR' }, '-0.125000000000000000', 1],
+    [{ kind: 'noCurrency' }, '1.987000000000000000', 0],
+  ]);
+  assert.deepEqual(
+    actual.totals,
+    actual.groups.map((r) => ({ ...r, keys: [] })),
+  );
+  assert.deepEqual(evaluateGroupedFacts([], [measure], []).totals, []);
+  assert.deepEqual(CURRENCY_MINOR_UNITS_V0, { CAD: 2, USD: 2 });
+});
+
+test('amount operands must resolve locally and fixed currencies require the stored scale to equal the minor unit', () => {
+  const make = (currency: unknown) => {
+    const def = salesModuleDefinition();
+    const entities = def.entities as {
+      reportSource?: { amounts: { currency: unknown }[] };
+    }[];
+    entities.find((e) => e.reportSource)!.reportSource!.amounts[0]!.currency =
+      currency;
+    return () => normalizeApplicationPackage(def);
+  };
+  assert.throws(
+    make({ kind: 'fixed', currencyCode: 'CAD' }),
+    /CANON_REPORT_SOURCE_INVALID/u,
+  );
+  assert.throws(
+    make({ kind: 'stored', fieldId: SALES_IDS.stateFieldId, codes: ['EUR'] }),
+    /CANON_REPORT_SOURCE_INVALID/u,
+  );
 });

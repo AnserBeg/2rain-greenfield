@@ -26,6 +26,7 @@ import { createHash } from 'node:crypto';
 import {
   CANONICALIZATION_PROFILE_VERSION,
   COMPANY_ACCESS_INDEX_READER,
+  REPORT_SOURCE_READER,
   CONTENT_HASH_ALGORITHM,
   CONTENT_HASH_DOMAIN,
   canonicalize,
@@ -617,6 +618,35 @@ function verifyCompiledRelease(
       'The company access index declaration and surface reader floor disagree.',
     );
   }
+  const sourceTerms = (value: unknown, activeOnly: boolean) => {
+    if (!isRecord(value) || !Array.isArray(value.entities)) return [];
+    return value.entities.flatMap((e: unknown) =>
+      isRecord(e) &&
+      e.reportSource &&
+      (!activeOnly || e.lifecycle !== 'retired')
+        ? [{ entityId: e.entityId, reportSource: e.reportSource }]
+        : [],
+    );
+  };
+  const hasSource = sourceTerms(layoutDefinition, false).length > 0;
+  if (
+    (hasSource && surfaceFloor < REPORT_SOURCE_READER) ||
+    (!hasSource && surfaceFloor === REPORT_SOURCE_READER)
+  )
+    throw integrity(
+      'REPORT_SOURCE_READER_MISMATCH',
+      'The report source and surface reader floor disagree.',
+    );
+  if (
+    hasSource &&
+    !manifest.projections.some(
+      (p) => p.familyId === PROJECTION_FAMILY_IDS.reporting,
+    )
+  )
+    throw integrity(
+      'REPORT_SOURCE_BINDING_MISMATCH',
+      'A declared report source requires its reporting projection.',
+    );
   const billingPlans = isRecord(layoutDefinition)
     ? layoutDefinition.billingPlans
     : undefined;
@@ -737,6 +767,23 @@ function verifyCompiledRelease(
       projectionManifest,
       projectionPayloadBytes,
     );
+    if (
+      reference.familyId === PROJECTION_FAMILY_IDS.reporting &&
+      revision.languageVersion === 'v6'
+    ) {
+      const reporting = decodeCanonicalObject(
+        projectionPayloadBytes[0]!,
+        'PROJECTION_CHUNK_NOT_CANONICAL',
+      );
+      if (
+        canonicalize(sourceTerms(reporting, false)) !==
+        canonicalize(sourceTerms(layoutDefinition, true))
+      )
+        throw integrity(
+          'REPORT_SOURCE_BINDING_MISMATCH',
+          'The reporting projection disagrees with the declared source.',
+        );
+    }
     if (
       (reference.familyId === PROJECTION_FAMILY_IDS.operationCatalog ||
         reference.familyId === PROJECTION_FAMILY_IDS.queryCatalog) &&

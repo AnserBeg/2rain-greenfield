@@ -9,6 +9,7 @@ import {
   type AddressProjection,
   BOARD_READER,
   COMPANY_ACCESS_INDEX_READER,
+  REPORT_SOURCE_READER,
   boardPresentation,
   type BoardSource,
   type SurfaceBoard,
@@ -366,7 +367,7 @@ export function lowerBaseProjectionPayloads(
         PROJECTION_FAMILY_IDS.reporting,
         namespace,
         packageScope,
-        reportingPayload(packageRevision),
+        reportingPayload(verificationPackageRevision),
       ),
     );
   }
@@ -1099,28 +1100,33 @@ function surfaceManifestPayload(
       ),
   );
   const surfaceFloor = original.entities.some(
-    (entity) => 'companyAccessIndex' in entity && entity.companyAccessIndex,
+    (e) => 'reportSource' in e && e.reportSource,
   )
-    ? COMPANY_ACCESS_INDEX_READER
-    : original.surfaces.some((s) => s.archetype === 'board')
-      ? BOARD_READER
-      : lineCreateValues
-        ? LINE_CREATE_VALUES_SURFACE_FLOOR
-        : replayedLayout
-          ? REPLAYED_LAYOUT_READER
-          : original.surfaces.some((s) => 'layouts' in s && s.layouts)
-            ? LAYOUT_READER
-            : extendedEditor || declaredRelationList
-              ? 26
-              : hasMetrics(original)
-                ? 25
-                : hasSavedListLayouts(original)
-                  ? 24
-                  : recordFieldPresentation
-                    ? 23
-                    : rankedDefaultsOrChainedTasks
-                      ? 22
-                      : null;
+    ? REPORT_SOURCE_READER
+    : original.entities.some(
+          (entity) =>
+            'companyAccessIndex' in entity && entity.companyAccessIndex,
+        )
+      ? COMPANY_ACCESS_INDEX_READER
+      : original.surfaces.some((s) => s.archetype === 'board')
+        ? BOARD_READER
+        : lineCreateValues
+          ? LINE_CREATE_VALUES_SURFACE_FLOOR
+          : replayedLayout
+            ? REPLAYED_LAYOUT_READER
+            : original.surfaces.some((s) => 'layouts' in s && s.layouts)
+              ? LAYOUT_READER
+              : extendedEditor || declaredRelationList
+                ? 26
+                : hasMetrics(original)
+                  ? 25
+                  : hasSavedListLayouts(original)
+                    ? 24
+                    : recordFieldPresentation
+                      ? 23
+                      : rankedDefaultsOrChainedTasks
+                        ? 22
+                        : null;
   const payloadSchemaVersion = composed
     ? COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION
     : navigation
@@ -1725,19 +1731,22 @@ function isNavigationSurface(
 }
 
 function reportingPayload(
-  packageRevision: NormalizedApplicationPackage,
+  packageRevision: VersionedNormalizedApplicationPackage,
 ): unknown {
-  const fieldsByEntity = new Map<string, typeof packageRevision.fields>();
-  for (const field of packageRevision.fields) {
-    const fields = fieldsByEntity.get(field.entity.targetId) ?? [];
-    fields.push(field);
-    fieldsByEntity.set(field.entity.targetId, fields);
-  }
+  const fieldsByEntity = groupBy(
+    packageRevision.fields as ReadonlyArray<
+      (typeof packageRevision.fields)[number]
+    >,
+    (f) => f.entity.targetId,
+  );
   return {
     entities: packageRevision.entities
       .filter((entity) => entity.lifecycle === 'active')
       .map((entity) => ({
         entityId: entity.entityId,
+        ...('reportSource' in entity && entity.reportSource
+          ? { reportSource: entity.reportSource }
+          : {}),
         fields: (fieldsByEntity.get(entity.entityId) ?? []).map((field) => ({
           fieldId: field.fieldId,
           lineage: {

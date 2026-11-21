@@ -1461,6 +1461,31 @@ function entity(
   return {
     entityId,
     kind: 'entityDefinition',
+    ...(local === 'customer_invoice' && {
+      reportSource: {
+        version: 'report-source/v1',
+        amounts: [
+          'subtotal',
+          'charges',
+          'tax',
+          'total',
+          'paid_amount',
+          'credited_amount',
+          'balance',
+        ].map((name) => ({
+          fieldId: `${ids.namespace}:field.customer_invoice_${name}`,
+          currency: {
+            kind: 'stored',
+            fieldId: `${ids.namespace}:field.customer_invoice_currency`,
+            codes: ['CAD', 'USD', 'EUR'],
+          },
+        })),
+        dates: ['invoice_date', 'due_date'].map((name) => ({
+          fieldId: `${ids.namespace}:field.customer_invoice_${name}`,
+          basis: 'civilDate',
+        })),
+      },
+    }),
     label,
     module: reference('moduleReference', ids.moduleId),
     orderKey,

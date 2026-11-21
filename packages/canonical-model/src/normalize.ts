@@ -14,6 +14,7 @@ import {
   CANONICALIZATION_PROFILE_VERSION,
   CONTENT_HASH_ALGORITHM,
   IMMUTABLE_DEFAULTS_V0,
+  CURRENCY_MINOR_UNITS_V0,
   LATEST_LANGUAGE_VERSION,
   LEGACY_LANGUAGE_VERSION,
   LANGUAGE_VERSION,
@@ -1269,10 +1270,76 @@ function validateSemantics(
   const index = referenceIndex(packageRevision);
   validateOwnedReferences(packageRevision, index, namespace, diagnostics);
   validateReferenceLocality(packageRevision, diagnostics);
+  if (packageRevision.languageVersion === 'v6')
+    validateReportSources(packageRevision, diagnostics);
   validateSurfaceVocabulary(packageRevision, diagnostics);
   validateSetCollections(packageRevision, diagnostics);
   validateOrderKeys(packageRevision, diagnostics);
   if (diagnostics.length > 0) throw new CanonicalModelError(diagnostics);
+}
+
+function validateReportSources(
+  revision: V6NormalizedApplicationPackage,
+  diagnostics: CanonicalDiagnostic[],
+): void {
+  const fields = new Map(revision.fields.map((f) => [f.fieldId, f]));
+  for (const entity of revision.entities) {
+    const source = entity.reportSource;
+    if (!source || entity.lifecycle === 'retired') continue;
+    const seen = new Set<string>();
+    const local = (id: typeof entity.entityId) => {
+      const f = fields.get(id);
+      return f?.entity.targetId === entity.entityId &&
+        f.lifecycle === 'active' &&
+        f.reportable
+        ? f
+        : undefined;
+    };
+    const invalid = (id: string, reason: string) =>
+      diagnostics.push(
+        diagnostic(
+          'CANON_REPORT_SOURCE_INVALID',
+          '$.entities.reportSource',
+          reason,
+          'Bind each source operand once to a reportable stored field of the same type.',
+          id,
+        ),
+      );
+    for (const { fieldId, currency } of source.amounts ?? []) {
+      const amount = local(fieldId)?.fieldType;
+      if (seen.has(fieldId) || amount?.kind !== 'exactDecimalFieldType') {
+        invalid(
+          fieldId,
+          'An amount requires a unique exact decimal on this record type.',
+        );
+      } else if (currency.kind === 'fixed') {
+        if (amount.scale !== CURRENCY_MINOR_UNITS_V0[currency.currencyCode])
+          invalid(
+            fieldId,
+            'A fixed currency amount needs its currency minor-unit scale.',
+          );
+      } else {
+        const code = local(currency.fieldId)?.fieldType;
+        if (code?.kind !== 'textFieldType' || code.maximumLength !== 3)
+          invalid(
+            currency.fieldId,
+            'A stored currency needs a three-character currency field on the amount record.',
+          );
+      }
+      seen.add(fieldId);
+    }
+    for (const { fieldId } of source.dates ?? []) {
+      if (
+        seen.has(fieldId) ||
+        local(fieldId)?.fieldType.kind !== 'dateTimeFieldType'
+      )
+        invalid(
+          fieldId,
+          'A temporal basis requires a unique stored date-time field.',
+        );
+      seen.add(fieldId);
+    }
+  }
 }
 
 function validateOwnedReferences(

@@ -2727,7 +2727,52 @@ const authoredV6FieldDefinition = authoredV3FieldDefinition.extend({
   numbering: FieldNumberingSchema.optional(),
 });
 const companyOwnership = z.enum(['entityOwned', 'tenantShared']).optional();
+export const ReportCurrencyBindingSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('fixed'),
+    currencyCode: CurrencyCodeSchema,
+  }),
+  z.strictObject({
+    kind: z.literal('stored'),
+    fieldId: CanonicalIdSchema,
+    // Sales accepts EUR as well as the two currencies of the frozen scalar
+    // profile. This list belongs to the source declaration on this release.
+    codes: z
+      .array(z.enum(['CAD', 'USD', 'EUR']))
+      .min(1)
+      .max(3)
+      .refine((codes) => new Set(codes).size === codes.length),
+  }),
+]);
+export type ReportCurrencyBinding = z.infer<typeof ReportCurrencyBindingSchema>;
+const reportSource = z
+  .strictObject({
+    version: z.literal('report-source/v1'),
+    amounts: z
+      .array(
+        z.strictObject({
+          fieldId: CanonicalIdSchema,
+          currency: ReportCurrencyBindingSchema,
+        }),
+      )
+      .min(1)
+      .optional(),
+    dates: z
+      .array(
+        z.strictObject({
+          fieldId: CanonicalIdSchema,
+          basis: z.enum(['civilDate', 'instant']),
+        }),
+      )
+      .min(1)
+      .optional(),
+  })
+  .refine(
+    (source) => source.amounts !== undefined || source.dates !== undefined,
+  );
+export type ReportSource = z.infer<typeof reportSource>;
 const entityAccess = {
+  reportSource: reportSource.optional(),
   ...assistantConfirmation,
   companyOwnership,
   companyAccessIndex: z.literal(COMPANY_ACCESS_INDEX).optional(),
