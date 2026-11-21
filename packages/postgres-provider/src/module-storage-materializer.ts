@@ -98,6 +98,7 @@ export class ModuleStorageMaterializationError extends Error {
   constructor(
     readonly code: string,
     message: string,
+    readonly reportIndex?: string,
   ) {
     super(message);
   }
@@ -1404,7 +1405,12 @@ async function applyDdlElement(
           reportIndex,
           located.entity.entityId,
         );
-        if (problem) throw failure('REPORT_INDEX_UNAVAILABLE', problem);
+        if (problem)
+          throw new ModuleStorageMaterializationError(
+            'REPORT_INDEX_UNAVAILABLE',
+            problem,
+            reportIndex.index,
+          );
       }
       const columns = indexColumnExpressions(located.entity, located.index);
       const predicate = indexPredicateSql(located.entity, located.index);
@@ -1422,11 +1428,12 @@ async function applyDdlElement(
           reportIndex.keys,
         ))
       )
-        throw failure(
+        throw new ModuleStorageMaterializationError(
           'REPORT_INDEX_UNAVAILABLE',
           located.entity.entityId +
             ' needs a ready index on ' +
             reportIndex.keys.join(', '),
+          reportIndex.index,
         );
       return;
     }

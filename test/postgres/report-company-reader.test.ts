@@ -783,6 +783,7 @@ test(
             const failure = await outcome;
             assert.ok(
               failure instanceof Error &&
+                failure.message.includes(second.label) &&
                 failure.message.includes(col('due_date')) &&
                 /ceiling/u.test(failure.message),
               String(failure),

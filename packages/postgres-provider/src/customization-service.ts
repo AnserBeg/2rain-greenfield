@@ -79,7 +79,10 @@ import {
   readCustomizationLineage,
 } from './customization-lineage.js';
 import type { ModuleProviderErrorMapping } from './module-runtime-interpreter.js';
-import { PostgresModuleStorageMaterializer } from './module-storage-materializer.js';
+import {
+  ModuleStorageMaterializationError,
+  PostgresModuleStorageMaterializer,
+} from './module-storage-materializer.js';
 import { PostgresReleaseActivationService } from './release-activation-service.js';
 import {
   authorizeReverseTransitionIfApplicable,
@@ -1796,9 +1799,11 @@ export class PostgresCustomizationService {
       }
       await this.#assertUpgradeBase(context, upgrade);
       // The persisted candidate may have been approved by a previous host.
-      assertAgentOperationsPlannable(
-        await this.#loadRelease(context, record.resultingReleaseId),
+      const candidate = await this.#loadRelease(
+        context,
+        record.resultingReleaseId,
       );
+      assertAgentOperationsPlannable(candidate);
       if (approved.transition_plan_digest !== null) {
         const generation = await admin.query<{
           generation_id: string;
@@ -1815,12 +1820,36 @@ export class PostgresCustomizationService {
             'the approved storage change has no prepared plan; approve it again',
           );
         }
-        const executed = await this.#materializer().executeApprovedAttempt({
-          activationAttemptId: approved.activation_attempt_id,
-          context,
-          coordinatorId: randomUUID() as MintedUuid,
-          generationId,
-        });
+        const executed = await this.#materializer()
+          .executeApprovedAttempt({
+            activationAttemptId: approved.activation_attempt_id,
+            context,
+            coordinatorId: randomUUID() as MintedUuid,
+            generationId,
+          })
+          .catch((error: unknown) => {
+            if (
+              error instanceof ModuleStorageMaterializationError &&
+              error.reportIndex
+            ) {
+              const catalog = projectionBinding(
+                candidate.compiled,
+                PROJECTION_FAMILY_IDS.queryCatalog,
+              ).payload as { groupedReports?: RegisteredReport[] };
+              const labels = catalog.groupedReports
+                ?.filter(
+                  (report) => report.accessPath.index === error.reportIndex,
+                )
+                .map((report) => report.label);
+              if (labels?.length)
+                throw new ModuleStorageMaterializationError(
+                  error.code,
+                  labels.join(', ') + ': ' + error.message,
+                  error.reportIndex,
+                );
+            }
+            throw error;
+          });
         if (executed.disposition !== 'READY_TO_SWAP') {
           throw new CustomizationServiceRefusal(
             'CUSTOMIZE_ACTIVATION_FAILED',
