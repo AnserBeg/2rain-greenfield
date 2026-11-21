@@ -827,7 +827,8 @@ test(
           });
           try {
             const refusal = conflict.customizationUpgrade;
-            assert.ok(refusal?.status === 'refused', JSON.stringify(refusal));
+            assert.ok(refusal?.status === 'rejected', JSON.stringify(refusal));
+            assert.equal(refusal.code, 'INCOMPATIBLE_TYPE');
             assert.ok(
               refusal.report?.findings.some(
                 (finding) => finding.subject === balance,
