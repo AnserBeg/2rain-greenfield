@@ -55,6 +55,7 @@ This closed table is a public contract once shipped. Pin its exact codes and mea
 | `INCOMPATIBLE_TYPE` | Conflict. Show expected and observed types of the bound subject. |
 | `INCOMPATIBLE_SCOPE` | Conflict. Show the subject's expected and observed scope. |
 | `FIELD_COLLISION` | Conflict. Identify the proposed tenant field and the colliding first-party field, including an occupied ID. |
+| `ID_COLLISION` | Conflict. Identify the non-field declaration a tenant edit would create and the destination declaration occupying its ID or unique name. |
 | `MISSING_BODY` | Conflict. Name the bound artifact and missing body digest. |
 | `REMOVED_ACTION` | Conflict. Name the workflow binding and absent action. |
 | `CHANGED_ACTION_SIGNATURE` | Conflict. Show the bound and observed action contracts, including a new required input. |
@@ -64,6 +65,8 @@ This closed table is a public contract once shipped. Pin its exact codes and mea
 | `KIND_NOT_ADMITTED` | Platform defect. Name the vocabulary kind missing from replay admission. |
 | `CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE` | Historical refusal. Identify the first divergent source edge, root or missing historical input. |
 | `WHOLE_PACKAGE_FAILURE` | Package refusal. Identify the package and compiler subject when the failure cannot be attributed to an edit. |
+
+A database or infrastructure error during preparation returns the transient `UPGRADE_PREPARATION_FAILED`. The transaction rolls back and the latest stored verdict stays intact. This operational error is outside the diagnostic code table.
 
 Persist a versioned report bound to scope, upgrade, verified source release/fence and target package version/root. Each attributable finding carries its code, subject, patch ID/kind, edit position, expected source target/contract and observed destination target/contract, including absence. Replay collects **all independent conflicts in one attempt**. An edit is dependent when it references an ID a failed edit creates or places, or is a later layout revision on the same surface and mode. Mark it blocked by the originating finding and continue replaying all independent edits. Slice 1 stores the latest report per scoped (source, target) pair inside the existing platform.customization_upgrade_refusals diagnostic jsonb, including the upgrade identity and verified source fence. Per-attempt history is deferred to slice 2 (waves). Test two independent conflicts and one dependent edit in the same report, ordered by patch, edit and subject. Attribute a failed validation witness to the rule and base constraint. Customize and CLI return the same report after restart, applying field and company disclosure to both sides. Boot logs carry codes and opaque IDs.
 
