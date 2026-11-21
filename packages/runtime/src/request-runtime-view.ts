@@ -1,3 +1,4 @@
+import { POPUP_READER } from '../../canonical-model/src/popup-actions.js';
 import {
   BOOKING_OPERATION_READER,
   CONNECTOR_FAMILY,
@@ -9,7 +10,6 @@ import {
   type UntrustedRequestInput,
 } from './request-context.js';
 import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents.js';
-import { BOARD_READER } from '../../canonical-model/src/board.js';
 import {
   WORKFLOW_PROJECTION_FAMILY,
   WORKFLOW_RUNTIME_CAPABILITY,
@@ -232,7 +232,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 36 binds agreed billing intervals to selected source fields.
     // 37 replaces Board v1 with Board v2: chosen stages, moves and facts by
     // stable ID with pinned contracts, labels from the release.
-    maximumSupportedVersion: BOARD_READER,
+    // 38 adds custom buttons that open a record Task.
+    maximumSupportedVersion: POPUP_READER,
   },
 });
 

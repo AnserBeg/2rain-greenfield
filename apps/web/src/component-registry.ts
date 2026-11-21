@@ -195,6 +195,7 @@ export type SurfaceDataRenderState =
       readonly receiving?: ReceivingSection;
       readonly receivingNavigation?: ReceivingNavigation;
       readonly composition?: CompositionData;
+      readonly popupButtons?: string;
       readonly compositionTask?: string;
       readonly salesOrder?: SalesOrderSection;
       readonly packingDocument?: ShipmentPackingDocument;
@@ -1204,6 +1205,7 @@ function renderCommandBar(context: SurfaceComponentContext): string {
         (state) => record.values[editor.stateFieldId!] === state,
       ));
   const actions = [
+    context.data?.status === 'READY' ? (context.data.popupButtons ?? '') : '',
     record &&
     form &&
     update &&
