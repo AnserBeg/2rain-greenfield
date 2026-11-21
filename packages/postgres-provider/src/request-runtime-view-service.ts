@@ -875,44 +875,24 @@ function definitionFromSnapshotRows(
   const agent = projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.agent);
   const surface = projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.surface);
   const consumers = [operation, query, surface];
-  const linked = projectionLinks.some((p) => p.familyId === CONNECTOR_FAMILY);
   const declared = references.some(
     (p) => isRecord(p) && p.familyId === CONNECTOR_FAMILY,
   );
-  const bound = consumers.some(
-    (p) => isRecord(p.payload) && Object.hasOwn(p.payload, 'addressBindings'),
-  );
-  const floor = surface.requiredRuntimeCapability?.minimumVersion ?? 0;
-  if (
-    linked !== declared ||
-    declared !== bound ||
-    (!bound && [ADDRESS_FIELD_READER, ADDRESS_MAP_READER].includes(floor))
-  )
-    throw malformedProjection('Address declarations and consumers disagree.');
-  const connector = declared ? projectionFor(CONNECTOR_FAMILY) : null;
-  if (connector) {
-    const parsed = AddressProjectionSchema.safeParse(connector.payload);
-    if (
-      !parsed.success ||
-      floor <
-        (parsed.data.placements.length
-          ? ADDRESS_MAP_READER
-          : ADDRESS_FIELD_READER) ||
-      !consumers.every(
-        (p) =>
-          isRecord(p.payload) &&
-          Object.hasOwn(p.payload, 'addressBindings') &&
-          canonicalize(p.payload.addressBindings) ===
-            canonicalize(parsed.data.bindings),
-      )
-    )
-      throw malformedProjection(
-        'Address bindings or surface floor are invalid.',
-      );
-  }
+  let connector: ReturnType<
+    typeof projectionFor<typeof CONNECTOR_FAMILY>
+  > | null = null;
+  const addressRefusal = addressProjectionRefusal({
+    linked: projectionLinks.some((p) => p.familyId === CONNECTOR_FAMILY),
+    declared,
+    consumerPayloads: consumers.map((p) => p.payload),
+    surfaceFloor: surface.requiredRuntimeCapability?.minimumVersion ?? 0,
+    connector: () => (connector ??= projectionFor(CONNECTOR_FAMILY)).payload,
+  });
+  if (addressRefusal) throw malformedProjection(addressRefusal);
+  if (declared) connector ??= projectionFor(CONNECTOR_FAMILY);
   const dateTimeProblem = dateTimeBindingsProblem(
     consumers.map((p) => p.payload),
-    floor,
+    surface.requiredRuntimeCapability?.minimumVersion ?? 0,
   );
   if (dateTimeProblem) throw malformedProjection(dateTimeProblem);
   const referencesDocuments = references.some(
@@ -1427,6 +1407,49 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function malformedRelease(message: string): RequestRuntimeViewLoadError {
   return loadError('MALFORMED_RELEASE', message);
+}
+
+/**
+ * The loader's Address agreement (ADR-0080): the connector declaration, its
+ * link and the bound consumers agree; the surface floor covers an Address and
+ * any map placement; every consumer pins the connector's exact bindings.
+ * Null when the release may serve. Each check stands on its own line.
+ */
+export function addressProjectionRefusal(release: {
+  readonly linked: boolean;
+  readonly declared: boolean;
+  readonly consumerPayloads: readonly unknown[];
+  readonly surfaceFloor: number;
+  readonly connector: () => unknown;
+}): string | null {
+  const disagree = 'Address declarations and consumers disagree.';
+  const invalid = 'Address bindings or surface floor are invalid.';
+  const floor = release.surfaceFloor;
+  const bound = release.consumerPayloads.some(
+    (payload) => isRecord(payload) && Object.hasOwn(payload, 'addressBindings'),
+  );
+  if (release.linked !== release.declared) return disagree;
+  if (release.declared !== bound) return disagree;
+  if (!bound && [ADDRESS_FIELD_READER, ADDRESS_MAP_READER].includes(floor))
+    return disagree;
+  if (!release.declared) return null;
+  const parsed = AddressProjectionSchema.safeParse(release.connector());
+  if (!parsed.success) return invalid;
+  const required = parsed.data.placements.length
+    ? ADDRESS_MAP_READER
+    : ADDRESS_FIELD_READER;
+  if (floor < required) return invalid;
+  const pinned = canonicalize(parsed.data.bindings);
+  if (
+    !release.consumerPayloads.every(
+      (payload) =>
+        isRecord(payload) &&
+        Object.hasOwn(payload, 'addressBindings') &&
+        canonicalize(payload.addressBindings) === pinned,
+    )
+  )
+    return invalid;
+  return null;
 }
 
 function malformedProjection(message: string): RequestRuntimeViewLoadError {

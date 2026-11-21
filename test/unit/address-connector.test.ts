@@ -15,6 +15,7 @@ import {
 import { lowerStorageTargetV1 } from '../../packages/compiler/src/storage.js';
 import { compileAddressBindings } from '../../packages/compiler/src/address.js';
 import { addressProvider } from '../../packages/postgres-provider/src/address-provider.js';
+import { addressProjectionRefusal } from '../../packages/postgres-provider/src/request-runtime-view-service.js';
 
 const base = JSON.parse(
   readFileSync('apps/web/release/app.authored.json', 'utf8'),
@@ -161,5 +162,93 @@ test('retiring a logical Address withdraws its binding and map while retaining e
   assert.deepEqual(
     columns(lowerStorageTargetV1(retired, activeStorage)),
     columns(activeStorage),
+  );
+});
+
+// The loader's Address agreement, one comparator per test. The PostgreSQL
+// request-runtime-view suite proves load() applies it to a persisted release.
+const binding = {
+  schemaVersion: 'v6',
+  fieldId: 'northstar.app:field.custom_item_site',
+  entityId: 'northstar.app:entity.item',
+  contractVersion: 'northstar.address/v1',
+  mappingVersion: 'v1',
+  recordQueryId: 'northstar.app:query.item_get',
+  editOperationIds: ['northstar.app:operation.item_update'],
+  suggestQueryId: 'northstar.app:query.item_address_suggest',
+  geocodeOperationId: 'northstar.app:operation.item_address_geocode',
+  mapQueryId: 'northstar.app:query.item_address_map',
+} as const;
+const placement = {
+  schemaVersion: 'v6',
+  placementId: 'northstar.app:placement.custom_item_map',
+  fieldId: binding.fieldId,
+  surfaceId: 'northstar.app:surface.item_detail',
+  sectionId: 'northstar.app:surface.item_detail/detail/sections/details',
+} as const;
+const consistent = (placements: readonly object[] = []) => ({
+  linked: true,
+  declared: true,
+  consumerPayloads: [0, 1, 2].map(() => ({ addressBindings: [binding] })),
+  surfaceFloor: placements.length ? 32 : 31,
+  connector: () => ({
+    kind: 'connectorPayload',
+    schemaVersion: 'northstar.connector-payload/v1',
+    bindings: [binding],
+    placements,
+    layouts: [],
+  }),
+});
+test('the loader serves a consistent Address release with and without a map placement', () => {
+  assert.equal(addressProjectionRefusal(consistent()), null);
+  assert.equal(addressProjectionRefusal(consistent([placement])), null);
+  assert.equal(
+    addressProjectionRefusal({
+      linked: false,
+      declared: false,
+      consumerPayloads: [{}, {}, {}],
+      surfaceFloor: 30,
+      connector: () => assert.fail('an undeclared connector was read'),
+    }),
+    null,
+  );
+});
+test('the loader refuses a connector link without its declaration', () => {
+  // Nothing else is wrong: no consumer is bound and the floor is below Address.
+  assert.equal(
+    addressProjectionRefusal({
+      linked: true,
+      declared: false,
+      consumerPayloads: [{}, {}, {}],
+      surfaceFloor: 30,
+      connector: () => assert.fail('an undeclared connector was read'),
+    }),
+    'Address declarations and consumers disagree.',
+    'a linked but undeclared connector was served',
+  );
+});
+test('the loader refuses a map placement below the map reader floor', () => {
+  assert.equal(
+    addressProjectionRefusal({ ...consistent([placement]), surfaceFloor: 31 }),
+    'Address bindings or surface floor are invalid.',
+    'a map placement was served at the Address field floor',
+  );
+});
+test('the loader refuses a consumer that pins different Address bindings', () => {
+  const release = consistent();
+  assert.equal(
+    addressProjectionRefusal({
+      ...release,
+      consumerPayloads: [
+        ...release.consumerPayloads.slice(0, 2),
+        {
+          addressBindings: [
+            { ...binding, mapQueryId: 'northstar.app:query.item_other_map' },
+          ],
+        },
+      ],
+    }),
+    'Address bindings or surface floor are invalid.',
+    'a consumer with different Address bindings was served',
   );
 });
