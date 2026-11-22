@@ -13,6 +13,7 @@ import { RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres
 import { PAYABLES_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/payables-capability-executor.js';
 import { PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/purchase-order-approval-executor.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
+import { INVENTORY_WRITE_INVARIANTS } from '../../packages/postgres-provider/src/inventory-write-invariants.js';
 import { captureSchemaSnapshot } from '../../packages/postgres-provider/src/migrations.js';
 import { LINEAGE_INSTALL_VOLUME, withEphemeralPostgres } from './postgres.js';
 
@@ -64,6 +65,7 @@ async function main(): Promise<void> {
           localDemoIdentity: true,
           migrationsDirectory,
           providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
+          writeInvariants: INVENTORY_WRITE_INVARIANTS,
           tenantSlug: 'fresh-tenant-full-replay',
         });
         await runtime.close();

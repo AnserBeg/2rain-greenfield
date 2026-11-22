@@ -21,6 +21,7 @@ import {
 import { openCustomizationService } from '../../packages/postgres-provider/src/customization-service.js';
 import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/inventory-posting-capability-executor.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
+import { INVENTORY_WRITE_INVARIANTS } from '../../packages/postgres-provider/src/inventory-write-invariants.js';
 import { PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/purchase-order-approval-executor.js';
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receiving-capability-executor.js';
 import { PostgresModuleRuntimeInterpreter } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
@@ -69,10 +70,12 @@ test(
           localDemoIdentity: true,
           migrationsDirectory,
           providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
+          writeInvariants: INVENTORY_WRITE_INVARIANTS,
           tenantSlug,
         });
         try {
           const opened = await openCustomizationService({
+            writeInvariants: INVENTORY_WRITE_INVARIANTS,
             acknowledgement: readUnboundPermissionAcknowledgementFor(
               authoredPath,
               'northstar.app:package.application',
@@ -438,6 +441,7 @@ test(
           localDemoIdentity: true,
           migrationsDirectory,
           providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
+          writeInvariants: INVENTORY_WRITE_INVARIANTS,
           tenantSlug: liveTenant,
         });
         try {

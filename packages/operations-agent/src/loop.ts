@@ -181,6 +181,8 @@ export interface AgentRunResult {
   readonly usage: ModelUsage;
   readonly usd: number;
   readonly conversation: readonly ConversationEntry[];
+  /** The system prompt `conversation` was produced under (`historySystem`). */
+  readonly system: string;
   /** Wall time of the run on a monotonic clock, in seconds. */
   readonly seconds: number;
   readonly error?: string;
@@ -207,6 +209,12 @@ export interface AgentRunOptions {
   readonly preamble?: AgentPreamble;
   /** Earlier turns of the same conversation, replayed unchanged. */
   readonly history?: readonly ConversationEntry[];
+  /**
+   * The system prompt `history` was produced under (the previous result's
+   * `system`). When it differs from this turn's, or is absent, the history
+   * is replayed without its reasoning blocks.
+   */
+  readonly historySystem?: string;
   /** The person's Stop: no model or tool call starts after it fires. */
   readonly signal?: AbortSignal;
 }
@@ -229,6 +237,35 @@ export async function agentPreamble(
     session.turnContext(screen),
   ]);
   return { businessMap, turnContext };
+}
+
+/**
+ * The history with the provider's reasoning blocks removed (Anthropic
+ * `thinking` and `redacted_thinking`); text and tool calls are kept. Used
+ * whenever the replayed prefix is no longer the one the reasoning followed.
+ */
+export function withoutReasoning(
+  entries: readonly ConversationEntry[],
+): ConversationEntry[] {
+  return entries.map((entry) => {
+    if (entry.role !== 'assistant' || !Array.isArray(entry.providerContent))
+      return entry;
+    const content = (entry.providerContent as unknown[]).filter(
+      (block) =>
+        !(
+          isRecord(block) &&
+          (block.type === 'thinking' || block.type === 'redacted_thinking')
+        ),
+    );
+    if (content.length === entry.providerContent.length) return entry;
+    return content.length > 0
+      ? { ...entry, providerContent: content }
+      : {
+          role: 'assistant',
+          text: entry.text || '(no reply)',
+          toolCalls: entry.toolCalls,
+        };
+  });
 }
 
 /** The system prompt the model is given, with the map when there is one. */
@@ -263,15 +300,6 @@ export type AgentEvent =
 export async function runOperationsAgent(
   options: AgentRunOptions,
 ): Promise<AgentRunResult> {
-  const conversation: ConversationEntry[] = [
-    ...(options.history ?? []),
-    {
-      role: 'user',
-      text: options.preamble?.turnContext
-        ? `${options.request}\n\n${options.preamble.turnContext}`
-        : options.request,
-    },
-  ];
   const system = [
     systemPrompt(options.preamble),
     ...(options.executeAfterApproval
@@ -280,10 +308,26 @@ export async function runOperationsAgent(
         ]
       : []),
   ].join('\n');
+  // A replayed reasoning block is bound to the exact system prompt and
+  // history it was produced after (AI-RELY-1 task 0: the provider then
+  // serves it stale, or rejects the request where the check is enforced).
+  // A rebuilt prompt (a release or permission change) replays the history
+  // without its reasoning.
+  const history = options.history ?? [];
+  const conversation: ConversationEntry[] = [
+    ...(options.historySystem === system ? history : withoutReasoning(history)),
+    {
+      role: 'user',
+      text: options.preamble?.turnContext
+        ? `${options.request}\n\n${options.preamble.turnContext}`
+        : options.request,
+    },
+  ];
   // The person's own words: currencies they name are theirs to use.
   if (typeof options.session.noteRequest === 'function')
     options.session.noteRequest(options.request);
   // Remove complete old exchanges if their replay would crowd out this request.
+  let trimmed = false;
   while (
     conversation.length > 1 &&
     options.meter.outputBudget(
@@ -299,7 +343,15 @@ export async function runOperationsAgent(
     );
     if (next < 0) break;
     conversation.splice(0, next);
+    trimmed = true;
   }
+  // What is kept was reasoned about after what was cut: drop that reasoning.
+  if (trimmed)
+    conversation.splice(
+      0,
+      conversation.length,
+      ...withoutReasoning(conversation),
+    );
   const historyLength = conversation.length - 1;
   const started = performance.now();
   const usage = {
@@ -324,6 +376,7 @@ export async function runOperationsAgent(
       usage: { ...usage },
       usd: options.meter.usd - startUsd,
       conversation,
+      system,
       seconds: (performance.now() - started) / 1000,
       ...(error ? { error } : {}),
     };

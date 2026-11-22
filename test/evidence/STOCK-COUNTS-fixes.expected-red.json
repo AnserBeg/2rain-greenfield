@@ -46,9 +46,9 @@
     {
       "name": "stock-count-mode-still-editable",
       "claim": "Generic edit cannot change a started count’s mode.",
-      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
-      "original": "  if (Object.hasOwn(patch, mode) && patch[mode] !== prior[mode]) {",
-      "replacement": "  if (false && Object.hasOwn(patch, mode) && patch[mode] !== prior[mode]) {",
+      "file": "packages/postgres-provider/src/inventory-write-invariants.ts",
+      "original": "                fieldId: mode,\n                refusal: 'counting mode is fixed after Start counting',",
+      "replacement": "                fieldId: `${namespace}:field.unrelated`,\n                refusal: 'counting mode is fixed after Start counting',",
       "test": {
         "files": ["test/postgres/inventory-stock-counts.test.ts"],
         "namePattern": "STOCK-COUNTS: counting mode is fixed after Start even through a state reset"
@@ -64,9 +64,9 @@
     {
       "name": "stock-count-can-reset-to-draft",
       "claim": "Generic edit cannot reset a started count to draft to bypass the mode freeze.",
-      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
-      "original": "  if (Object.hasOwn(patch, state) && patch[state] !== prior[state]) {",
-      "replacement": "  if (false && Object.hasOwn(patch, state) && patch[state] !== prior[state]) {",
+      "file": "packages/postgres-provider/src/inventory-write-invariants.ts",
+      "original": "                fieldId: state,\n                refusal: 'use a stock count command to leave counting',",
+      "replacement": "                fieldId: `${namespace}:field.unrelated`,\n                refusal: 'use a stock count command to leave counting',",
       "test": {
         "files": ["test/postgres/inventory-stock-counts.test.ts"],
         "namePattern": "STOCK-COUNTS: counting mode is fixed after Start even through a state reset"

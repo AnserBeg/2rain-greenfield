@@ -35,6 +35,7 @@ import {
 import { upgradeLogFields } from '../../packages/postgres-provider/src/customization-service.js';
 import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/inventory-posting-capability-executor.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
+import { INVENTORY_WRITE_INVARIANTS } from '../../packages/postgres-provider/src/inventory-write-invariants.js';
 import { PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/purchase-order-approval-executor.js';
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receiving-capability-executor.js';
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
@@ -635,6 +636,7 @@ test(
             localDemoIdentity: true,
             migrationsDirectory,
             providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
+            writeInvariants: INVENTORY_WRITE_INVARIANTS,
             capabilityOperationExecutorFactories: [
               INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
               RECEIVING_CAPABILITY_EXECUTOR_FACTORY,

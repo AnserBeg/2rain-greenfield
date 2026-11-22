@@ -56,6 +56,7 @@ import {
   PostgresModuleRuntimeInterpreter,
   type ModuleProviderErrorMapping,
 } from './module-runtime-interpreter.js';
+import type { ModuleWriteInvariantProvider } from './module-write-invariants.js';
 import {
   ADDRESS_CONNECTOR_CONFIGURE_BINDING,
   PostgresCurrentPolicyGateway,
@@ -93,6 +94,7 @@ export function composeServingGateways(
   metrics: ObservabilityMetrics,
   options: {
     readonly providerErrorMappings: readonly ModuleProviderErrorMapping[];
+    readonly writeInvariants: readonly ModuleWriteInvariantProvider[];
     readonly capabilityOperationExecutorFactories?: readonly PostgresCapabilityOperationExecutorFactory[];
     readonly approvalPool?: pg.Pool;
     readonly localDemoIdentity?: true;
@@ -116,6 +118,7 @@ export function composeServingGateways(
         ...(options.reportLimits && { reportLimits: options.reportLimits }),
         validationReadPolicy: async (releaseId) =>
           (await servingFor(releaseId)).policy,
+        writeInvariants: options.writeInvariants,
       },
     );
   const operationMediation = capabilityMediationAuthority(
