@@ -58,6 +58,12 @@ export interface CustomizationTargets {
     readonly entityId: string;
     readonly label: string;
   }[];
+  /** Live files fields, which can gain an internal upload category. */
+  readonly documentFields?: readonly {
+    readonly entityId: string;
+    readonly fieldId: string;
+    readonly label: string;
+  }[];
   readonly calculatedDisplayTargets?: readonly CalculatedDisplayTarget[];
   readonly validationTargets?: readonly LiteralValidationTarget[];
   readonly workflowSdk?: string;
@@ -141,6 +147,7 @@ export function customizationTargets(definition: {
   readonly documentTemplateRevisions?:
     readonly DocumentTemplateRevision[] | undefined;
   readonly calculatedDisplayFields?: LayoutDefinition['calculatedDisplayFields'];
+  readonly documentFields?: readonly Json[] | undefined;
   readonly entities: readonly Json[];
   readonly fields: readonly Json[];
   readonly languageVersion?: string;
@@ -199,6 +206,13 @@ export function customizationTargets(definition: {
       label: String(entity.label),
     }))
     .sort((left, right) => left.label.localeCompare(right.label));
+  const documentFields = (definition.documentFields ?? [])
+    .filter((field) => field.lifecycle !== 'retired')
+    .map((field) => ({
+      entityId: String(field.entityId),
+      fieldId: String(field.fieldId),
+      label: String(field.label),
+    }));
   const queryChoices = (query: Json) => ({
     queryId: String(query.queryId),
     fields: ((query.selections ?? []) as Json[]).flatMap(({ field }) => {
@@ -695,6 +709,7 @@ export function customizationTargets(definition: {
     lists,
     recordTypes,
     ...(documentTargets.length > 0 ? { documentTargets } : {}),
+    ...(documentFields.length > 0 ? { documentFields } : {}),
     ...(documentTemplateTargets.length > 0 ? { documentTemplateTargets } : {}),
     ...(metricLists.length ? { metricLists } : {}),
   });

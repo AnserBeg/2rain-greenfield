@@ -1,0 +1,107 @@
+{
+  "model": "claude-opus-5-5",
+  "effort": "medium",
+  "head": "e4d35db787fea7bbfa1552f89adf05af60d85e46",
+  "sandboxMs": 120000,
+  "cacheTtl": "5m",
+  "draftFirst": true,
+  "meterUsd": 0.8544432,
+  "promptMismatches": [
+    "W02",
+    "T08"
+  ],
+  "cap": 2,
+  "prices": {
+    "input": 4,
+    "output": 20,
+    "cacheRead": 0.2,
+    "cacheWrite": 5
+  },
+  "summary": {
+    "ran": 2,
+    "notRun": 0,
+    "firstTry": "0/2 (0%)",
+    "afterRepair": "2/2 (100%)",
+    "e2e": "2/2 (100%)",
+    "behaviour": "2/2 (100%)",
+    "correctRefusals": "0/0",
+    "rightReason": "0/0",
+    "falseRefusals": 0,
+    "falseAccepts": 0,
+    "injected": 0,
+    "overGranted": 0,
+    "refusalsByCapability": {},
+    "repairedAfterOne": 2,
+    "repairedAfterTwo": 0,
+    "usd": 0.8544432,
+    "modelCalls": 4,
+    "tokens": {
+      "input": 12,
+      "output": 10889,
+      "cacheRead": 113526,
+      "cacheWrite": 122782
+    }
+  },
+  "results": [
+    {
+      "id": "W02",
+      "split": "dev",
+      "category": "workflow-receipt",
+      "expected": "workflow",
+      "status": "drafted",
+      "modelCalls": 2,
+      "drafted": true,
+      "approved": true,
+      "activated": true,
+      "firstTry": false,
+      "afterRepair": true,
+      "repairTurns": 1,
+      "e2e": true,
+      "behaviour": true,
+      "reasons": [],
+      "kinds": [
+        "saveWorkflow"
+      ],
+      "modelMs": 46340,
+      "wallMs": 338428,
+      "usd": 0.4284816,
+      "tokens": {
+        "input": 6,
+        "output": 5486,
+        "cacheRead": 56763,
+        "cacheWrite": 61477
+      },
+      "overGranted": false
+    },
+    {
+      "id": "T08",
+      "split": "test",
+      "category": "workflow-receipt",
+      "expected": "workflow",
+      "status": "drafted",
+      "modelCalls": 2,
+      "drafted": true,
+      "approved": true,
+      "activated": true,
+      "firstTry": false,
+      "afterRepair": true,
+      "repairTurns": 1,
+      "e2e": true,
+      "behaviour": true,
+      "reasons": [],
+      "kinds": [
+        "saveWorkflow"
+      ],
+      "modelMs": 37903,
+      "wallMs": 334259,
+      "usd": 0.4259616,
+      "tokens": {
+        "input": 6,
+        "output": 5403,
+        "cacheRead": 56763,
+        "cacheWrite": 61305
+      },
+      "overGranted": false
+    }
+  ]
+}

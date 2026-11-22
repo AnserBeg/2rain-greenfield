@@ -132,7 +132,7 @@ export function generateWorkflowSdk(
         case 'query':
         case 'operation': {
           const { kind, id, input } = value;
-          assertKeys(value, ['kind', 'id', 'input']);
+          assertKeys(value, WORKFLOW_CALL_ENVELOPES[kind]);
           if (typeof id !== 'string' || !isRecord(input))
             throw new Error('Invalid workflow call input');
           // The worker wire decoder has already admitted canonical JSON.
@@ -150,10 +150,10 @@ export function generateWorkflowSdk(
           return { kind, id, input: argumentsValue };
         }
         case 'now':
-          assertKeys(value, ['kind']);
+          assertKeys(value, WORKFLOW_CALL_ENVELOPES.now);
           return { kind: 'now' };
         case 'sleep': {
-          assertKeys(value, ['kind', 'milliseconds']);
+          assertKeys(value, WORKFLOW_CALL_ENVELOPES.sleep);
           const milliseconds = duration(value.milliseconds);
           if (
             version !== LEGACY_WORKFLOW_SDK_VERSION &&
@@ -184,7 +184,7 @@ export function generateWorkflowSdk(
               'Workflow approval summary must be a single line without control characters',
             );
           if (!legacyApproval && Object.hasOwn(value, 'operationId')) {
-            assertKeys(value, ['kind', 'summary', 'operationId', 'input']);
+            assertKeys(value, WORKFLOW_CALL_ENVELOPES.requestApproval);
             const operation =
               typeof value.operationId === 'string'
                 ? operations.get(value.operationId)
@@ -202,7 +202,12 @@ export function generateWorkflowSdk(
           }
           if (!legacyApproval)
             throw new Error(
-              'Workflow approval needs an exact operation and input',
+              `Workflow approval needs an exact operation and input: ${
+                workflowKeyProblem(
+                  value,
+                  WORKFLOW_CALL_ENVELOPES.requestApproval,
+                ) ?? ''
+              }`,
             );
           assertKeys(value, ['kind', 'summary']);
           return { kind: 'requestApproval', summary: value.summary };
@@ -328,14 +333,48 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+/**
+ * The exact keys of each call envelope a fixture lists (current SDK). The
+ * admission below and the drafter's prompt both read this table, so the
+ * stated shape and the checked shape cannot drift apart (AI-BUILD-1 slice 2).
+ */
+export const WORKFLOW_CALL_ENVELOPES = Object.freeze({
+  operation: ['kind', 'id', 'input'],
+  query: ['kind', 'id', 'input'],
+  now: ['kind'],
+  sleep: ['kind', 'milliseconds'],
+  requestApproval: ['kind', 'summary', 'operationId', 'input'],
+} as const);
+
+/**
+ * Why a value's keys differ from the contract's, naming each missing and
+ * unexpected key (bounded), or null when they agree. A repair turn can only
+ * converge on a message that says which key is wrong.
+ */
+export function workflowKeyProblem(
+  value: Record<string, unknown>,
+  keys: readonly string[],
+): string | null {
+  const missing = keys.filter((key) => !Object.hasOwn(value, key));
+  const unexpected = Object.keys(value).filter((key) => !keys.includes(key));
+  if (!missing.length && !unexpected.length) return null;
+  const list = (names: readonly string[]) =>
+    names
+      .slice(0, 12)
+      .map((name) => JSON.stringify(name.slice(0, 120)))
+      .join(', ');
+  return [
+    'Workflow input keys disagree with the pinned contract',
+    `expected exactly {${keys.join(', ')}}`,
+    ...(missing.length ? [`missing ${list(missing)}`] : []),
+    ...(unexpected.length ? [`unexpected ${list(unexpected)}`] : []),
+  ].join('; ');
+}
+
 function assertKeys(
   value: Record<string, unknown>,
   keys: readonly string[],
 ): void {
-  if (
-    Object.keys(value).length !== keys.length ||
-    !keys.every((key) => Object.hasOwn(value, key))
-  ) {
-    throw new Error('Workflow input keys disagree with the pinned contract');
-  }
+  const problem = workflowKeyProblem(value, keys);
+  if (problem) throw new Error(problem);
 }
