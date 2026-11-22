@@ -57,17 +57,20 @@ LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp AS $$
 DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_internal.trusted_environment_id();
   app jsonb; binding jsonb; master jsonb; stored uuid; BEGIN
   IF writing AND current_setting('transaction_isolation')<>'read committed' THEN RAISE EXCEPTION 'template.requiresReadCommitted'; END IF;
-  PERFORM FROM platform.active_release_pointers WHERE (tenant_id,environment_id,release_id,fence)=(t,e,released,expected_fence) FOR SHARE;
+  IF writing THEN
+    PERFORM FROM platform.active_release_pointers WHERE (tenant_id,environment_id,release_id,fence)=(t,e,released,expected_fence) FOR SHARE;
+  ELSE
+    PERFORM FROM platform.active_release_pointers WHERE (tenant_id,environment_id,release_id,fence)=(t,e,released,expected_fence); END IF;
   IF NOT FOUND THEN RAISE EXCEPTION 'template.staleRelease'; END IF;
-  PERFORM platform.lock_current_policy_epoch(t,e);
+  IF writing THEN PERFORM platform.lock_current_policy_epoch(t,e); END IF;
   IF NOT north_star_internal.address_member(company)
     OR NOT platform.document_granted(company::text,replace(form,':surface.',':permission.template_'||privilege||'_'),form)
     THEN RAISE EXCEPTION 'template.unavailable'; END IF;
   IF writing THEN
     PERFORM pg_advisory_xact_lock(hashtextextended('record-template-library/'||t::text||'/'||e::text||'/'||company::text,0)); END IF;
   SELECT v INTO STRICT master FROM jsonb_array_elements(platform.document_storage(t,e)->'entities') v WHERE v ? 'legalEntityMaster';
-  EXECUTE format('SELECT record_id FROM north_star_module.%I WHERE tenant_id=$1 AND environment_id=$2 AND record_id=$3 AND archived_at IS NULL AND %I=$4 FOR SHARE',
-    master->>'physicalTableName',master#>>'{legalEntityMaster,fieldColumns,status}') INTO stored USING t,e,company,master#>>'{legalEntityMaster,activeStatusValue}';
+  EXECUTE format('SELECT record_id FROM north_star_module.%I WHERE tenant_id=$1 AND environment_id=$2 AND record_id=$3 AND archived_at IS NULL AND %I=$4 %s',
+    master->>'physicalTableName',master#>>'{legalEntityMaster,fieldColumns,status}',CASE WHEN writing THEN 'FOR SHARE' ELSE '' END) INTO stored USING t,e,company,master#>>'{legalEntityMaster,activeStatusValue}';
   IF stored IS NULL THEN RAISE EXCEPTION 'template.unavailable'; END IF;
   app:=platform.document_app(t,e,released);
   SELECT s->'recordTemplateBinding' INTO binding FROM jsonb_array_elements(app->'surfaces') s
@@ -95,6 +98,8 @@ DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_inte
     OR EXISTS(SELECT FROM jsonb_array_elements(content->'columns') c GROUP BY c->>'fieldId' HAVING count(*)>1)
     OR EXISTS(SELECT FROM jsonb_array_elements(content->'members') m GROUP BY m->>'key' HAVING count(*)>1)
     THEN RAISE EXCEPTION 'template.invalidSelection'; END IF;
+  IF EXISTS(SELECT FROM jsonb_array_elements(body->'columns') b WHERE b->'required'='true' AND NOT EXISTS(
+    SELECT FROM jsonb_array_elements(content->'columns') c WHERE c->>'fieldId'=b->>'fieldId')) THEN RAISE EXCEPTION 'template.requiredColumn'; END IF;
   SELECT v INTO STRICT line_spec FROM jsonb_array_elements(storage->'entities') v WHERE v->>'entityId'=body->>'lineEntityId';
   SELECT array_agg(DISTINCT ROW(x.entity,x.id)::platform.communication_record) INTO refs
     FROM jsonb_array_elements(content->'members') m CROSS JOIN LATERAL
@@ -106,10 +111,37 @@ DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_inte
     PERFORM north_star_internal.communication_check_read(company,company,app,source_query);
     PERFORM north_star_internal.communication_check_read(company,company,app,north_star_internal.communication_exact_query(app,body->>'entityId')); END IF;
   FOR member IN SELECT value FROM jsonb_array_elements(content->'members') LOOP
-    IF (member-'key'-'kind'-'caption'-'cells'-'source'='{}' AND jsonb_typeof(member->'key')='string'
+    IF (member-'key'-'kind'-'caption'-'cells'-'source'-'answer'-'help'='{}' AND jsonb_typeof(member->'key')='string'
       AND member->>'key' ~ '^[a-z][a-z0-9_-]{0,63}$' AND member->>'kind' IN ('question','row','section','instruction','member')
       AND jsonb_typeof(member->'caption')='string' AND length(trim(member->>'caption')) BETWEEN 1 AND 500
       AND jsonb_typeof(member->'cells')='object') IS NOT TRUE THEN RAISE EXCEPTION 'template.invalidMember'; END IF;
+    IF member ? 'help' AND (jsonb_typeof(member->'help')<>'string' OR length(trim(member->>'help')) NOT BETWEEN 1 AND 1000)
+      THEN RAISE EXCEPTION 'template.invalidHelp'; END IF;
+    IF (member->>'kind'='question') IS DISTINCT FROM (member ? 'answer') THEN RAISE EXCEPTION 'template.answerRequired'; END IF;
+    IF member ? 'answer' THEN
+      SELECT b INTO col FROM jsonb_array_elements(body->'columns') b WHERE b->>'fieldId'=member#>>'{answer,fieldId}';
+      IF (col IS NOT NULL AND (member->'answer')-'fieldId'-'required'-'choices'-'noteFieldId'='{}'
+        AND jsonb_typeof(member#>'{answer,required}')='boolean'
+        AND jsonb_typeof(member#>'{answer,choices}')='array'
+        AND jsonb_array_length(member#>'{answer,choices}')<=64
+        AND (col->>'fieldType'='enumFieldType')=(jsonb_array_length(member#>'{answer,choices}')>0)
+        AND EXISTS(SELECT FROM jsonb_array_elements(content->'columns') c WHERE c->>'fieldId'=col->>'fieldId')
+        AND NOT ((member->'cells') ? (col->>'fieldId'))) IS NOT TRUE THEN RAISE EXCEPTION 'template.invalidAnswer'; END IF;
+      IF member->'answer' ? 'noteFieldId' AND NOT EXISTS(
+        SELECT FROM jsonb_array_elements(body->'columns') b JOIN jsonb_array_elements(content->'columns') c
+          ON b->>'fieldId'=c->>'fieldId' WHERE b->>'fieldId'=member#>>'{answer,noteFieldId}' AND b->>'fieldType'='textFieldType'
+          AND b->>'fieldId'<>member#>>'{answer,fieldId}' AND NOT ((member->'cells') ? (b->>'fieldId')))
+        THEN RAISE EXCEPTION 'template.invalidNote'; END IF;
+      IF EXISTS(SELECT FROM jsonb_array_elements(member#>'{answer,choices}') opt WHERE (
+          opt-'id'-'meaning'-'requiresNote'-'blocksTransition'='{}' AND jsonb_typeof(opt->'meaning')='string'
+          AND length(trim(opt->>'meaning')) BETWEEN 1 AND 180 AND jsonb_typeof(opt->'requiresNote')='boolean'
+          AND jsonb_typeof(opt->'blocksTransition')='boolean' AND (opt->'requiresNote'='false' OR member->'answer' ? 'noteFieldId')
+          AND EXISTS(SELECT FROM jsonb_array_elements(app->'fields') f CROSS JOIN LATERAL jsonb_array_elements(f#>'{fieldType,options}') o
+            WHERE f->>'fieldId'=col->>'fieldId' AND o->>'optionId'=opt->>'id')) IS NOT TRUE)
+        OR EXISTS(SELECT FROM jsonb_array_elements(member#>'{answer,choices}') opt GROUP BY opt->>'id' HAVING count(*)>1)
+        THEN RAISE EXCEPTION 'template.invalidChoice'; END IF; END IF;
+    IF member->>'kind' IN ('row','member') AND EXISTS(SELECT FROM jsonb_array_elements(body->'columns') c
+      WHERE c->'required'='true' AND NOT ((member->'cells') ? (c->>'fieldId'))) THEN RAISE EXCEPTION 'template.requiredDefault'; END IF;
     IF member ? 'source' AND ((member->'source')-'rowId'-'parentId'<>'{}' OR
       platform.document_record_revision(t,e,storage,body->>'lineEntityId',company::text,(member#>>'{source,rowId}')::uuid,
       body->>'parentRelationId',(member#>>'{source,parentId}')::uuid) IS NULL) THEN RAISE EXCEPTION 'template.sourceUnavailable'; END IF;
@@ -127,7 +159,7 @@ DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_inte
         WHEN 'dateFieldType' THEN jsonb_typeof(item.value)='string' AND typed ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' AND pg_input_is_valid(typed,'date')
         WHEN 'enumFieldType' THEN jsonb_typeof(item.value)='string' AND EXISTS (SELECT FROM jsonb_array_elements(field#>'{fieldType,options}') v WHERE v->>'optionId'=typed)
         ELSE false END) IS NOT TRUE THEN RAISE EXCEPTION 'template.invalidDefault'; END IF;
-      IF NOT platform.document_granted(company::text,replace(item.key,':field.',':permission.template_disclose_'),item.key)
+      IF (col ? 'audienceValues' AND NOT ((col->'audienceValues') ? typed)) OR NOT platform.document_granted(company::text,replace(item.key,':field.',':permission.template_disclose_'),item.key)
         THEN RAISE EXCEPTION 'template.audienceDenied'; END IF;
       IF member ? 'source' THEN
         IF NOT EXISTS(SELECT FROM jsonb_array_elements(source_query->'selections') s WHERE s#>>'{field,targetId}'=item.key)
@@ -188,17 +220,11 @@ DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_inte
     VALUES(t,e,r.library_id,r.principal_id,r.release_id,r.fence,'publish',jsonb_build_object('revisionId',revision,'digest',r.digest));
   RETURN jsonb_build_object('revisionId',revision,'templateId',r.template_id,'number',r.predecessor+1); END $$;
 
-CREATE FUNCTION platform.assign_record_template(company uuid,released uuid,expected_fence bigint,form text,
-  ctx text, expected_version integer,revision uuid) RETURNS integer
-LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+CREATE FUNCTION north_star_internal.template_context(company uuid,released uuid,selector jsonb,ctx text)
+RETURNS text LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp AS $$
 DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_internal.trusted_environment_id();
-  b jsonb; selector jsonb; lib uuid; version_now integer; app jsonb; storage jsonb; owner uuid; BEGIN
-  b:=north_star_internal.template_access(company,released,expected_fence,form,'assign',true);
-  SELECT l.library_id INTO lib FROM platform.record_template_revisions v JOIN platform.record_templates x USING(tenant_id,environment_id,template_id)
-    JOIN platform.record_template_libraries l USING(tenant_id,environment_id,library_id) JOIN platform.record_template_reviews r USING(tenant_id,environment_id,review_id)
-    WHERE (v.tenant_id,v.environment_id,v.revision_id,l.company_id,x.form_id,r.binding_revision)=(t,e,revision,company,form,(b->>'revisionId')::uuid) AND NOT x.retired;
-  IF lib IS NULL THEN RAISE EXCEPTION 'template.revisionUnavailable'; END IF;
-  selector:=b#>'{body,context}'; app:=platform.document_app(t,e,released);
+  app jsonb; storage jsonb; owner uuid; BEGIN
+  app:=platform.document_app(t,e,released);
   CASE selector->>'kind'
   WHEN 'wholeType' THEN IF ctx IS DISTINCT FROM 'wholeType' THEN RAISE EXCEPTION 'template.invalidContext'; END IF;
   WHEN 'choice' THEN
@@ -211,6 +237,31 @@ DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_inte
     PERFORM north_star_internal.communication_check_read(company,owner,app,north_star_internal.communication_exact_query(app,selector->>'entityId',selector->>'getQueryId'));
     ctx:=(ctx::uuid)::text;
   ELSE RAISE EXCEPTION 'template.invalidContext'; END CASE;
+  RETURN ctx; END $$;
+REVOKE ALL ON FUNCTION north_star_internal.template_context(uuid,uuid,jsonb,text) FROM PUBLIC;
+
+CREATE FUNCTION platform.record_template_assignment_version(company uuid,released uuid,expected_fence bigint,form text,ctx text)
+RETURNS integer LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_internal.trusted_environment_id(); b jsonb; current_version integer; BEGIN
+  b:=north_star_internal.template_access(company,released,expected_fence,form,'assign',false);
+  ctx:=north_star_internal.template_context(company,released,b#>'{body,context}',ctx);
+  SELECT coalesce(max(a.version),0) INTO current_version FROM platform.record_template_assignments a JOIN platform.record_template_libraries l
+    USING(tenant_id,environment_id,library_id) WHERE (a.tenant_id,a.environment_id,l.company_id,a.form_id,a.context_key)=(t,e,company,form,ctx);
+  RETURN current_version; END $$;
+REVOKE ALL ON FUNCTION platform.record_template_assignment_version(uuid,uuid,bigint,text,text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION platform.record_template_assignment_version(uuid,uuid,bigint,text,text) TO north_star_runtime;
+
+CREATE FUNCTION platform.assign_record_template(company uuid,released uuid,expected_fence bigint,form text,
+  ctx text, expected_version integer,revision uuid) RETURNS integer
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_internal.trusted_environment_id();
+  b jsonb; lib uuid; version_now integer; BEGIN
+  b:=north_star_internal.template_access(company,released,expected_fence,form,'assign',true);
+  SELECT l.library_id INTO lib FROM platform.record_template_revisions v JOIN platform.record_templates x USING(tenant_id,environment_id,template_id)
+    JOIN platform.record_template_libraries l USING(tenant_id,environment_id,library_id) JOIN platform.record_template_reviews r USING(tenant_id,environment_id,review_id)
+    WHERE (v.tenant_id,v.environment_id,v.revision_id,l.company_id,x.form_id,r.binding_revision)=(t,e,revision,company,form,(b->>'revisionId')::uuid) AND NOT x.retired;
+  IF lib IS NULL THEN RAISE EXCEPTION 'template.revisionUnavailable'; END IF;
+  ctx:=north_star_internal.template_context(company,released,b#>'{body,context}',ctx);
   SELECT coalesce(max(version),0) INTO version_now FROM platform.record_template_assignments
     WHERE (tenant_id,environment_id,library_id,form_id,context_key)=(t,e,lib,form,ctx);
   IF version_now IS DISTINCT FROM expected_version THEN RAISE EXCEPTION 'template.assignmentChanged'; END IF;

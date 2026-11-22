@@ -5,6 +5,8 @@ import {
   openCustomizeService,
   startComposedApplication,
 } from '../../apps/api/src/composition-root.js';
+import { draftPatchFromRequest } from '../../packages/customization/src/ai-draft.js';
+import { draftRecordTemplateContent } from '../../packages/customization/src/record-template-content-draft.js';
 import { draftTemplateBinding } from '../../packages/customization/src/record-template-binding.js';
 import type { RecordTemplateContent } from '../../packages/canonical-model/src/record-template-content.js';
 import type { RequestRuntimeView } from '../../packages/runtime/src/request-runtime-view.js';
@@ -84,6 +86,15 @@ export async function exerciseTemplateLibrary(
             fields: [
               { label: 'Caption', type: 'text' },
               { label: 'Copies', type: 'number' },
+              ...(kind === 'question'
+                ? [
+                    {
+                      label: 'Result',
+                      type: 'choice',
+                      options: ['Pass', 'Fail', 'N/A'],
+                    },
+                  ]
+                : []),
             ],
           },
         ],
@@ -99,16 +110,63 @@ export async function exerciseTemplateLibrary(
         '_' +
         context.toLowerCase().replaceAll(' ', '_');
       const contextId = cls.replace(':field.', ':option.') + '_standard';
-      const patch = draftTemplateBinding(offers, {
+      const choices = {
         formId: form,
         contextId: cls,
         required: true,
-        lifecycle: 'active',
+        lifecycle: 'active' as const,
         fields: offer.columns.map((c) => ({
           fieldId: c.fieldId,
-          copyEligible: true,
+          copyEligible: c.label !== 'Result' && c.label !== 'Caption',
+          ...(c.label === 'Copies' && { audienceValues: ['1', '250', '750'] }),
         })),
-      });
+      };
+      const patch = draftTemplateBinding(offers, choices);
+      const drafted = await draftPatchFromRequest(
+        {
+          modelId: 'template-binding-proof',
+          next: async ({ tools }) => {
+            const schema = tools[0]!.inputSchema as {
+              properties: {
+                kind: { enum: string[] };
+                templateBinding: { properties: { fields: unknown } };
+              };
+            };
+            assert.ok(schema.properties.kind.enum.includes(patch.kind));
+            assert.ok(schema.properties.templateBinding.properties.fields);
+            return {
+              text: '',
+              toolCalls: [
+                {
+                  id: 'binding',
+                  name: tools[0]!.name,
+                  input: { kind: patch.kind, templateBinding: choices },
+                },
+              ],
+            };
+          },
+        },
+        'Enable a template for ' + line,
+        await opened.service.targets(),
+      );
+      assert.ok(
+        drafted.status === 'parsed' && drafted.patch.kind === patch.kind,
+      );
+      assert.deepEqual(drafted.patch.body, patch.body);
+      const caption = offer.columns.find((c) => c.label === 'Caption')!.fieldId;
+      const copies = offer.columns.find((c) => c.label === 'Copies')!.fieldId;
+      const answer = offer.columns.find((c) => c.label === 'Result')?.fieldId;
+      const source =
+        kind === 'row'
+          ? await world.create(local, { name: 'Original print job' })
+          : undefined;
+      const sourceLine = source
+        ? await world.create(
+            local + '_lines',
+            { line_number: '1', copies: '750', caption: 'Private original' },
+            { parent: source.recordId },
+          )
+        : undefined;
       if (kind === 'question') {
         const before = await world.create(local, {
           name: 'Compatible inspection',
@@ -143,21 +201,164 @@ export async function exerciseTemplateLibrary(
           fieldId: c.fieldId,
           caption: c.label,
         })),
-        members: [{ key: 'first', kind, caption: label, cells: {} }],
+        members: [
+          {
+            key: 'first',
+            kind,
+            caption: label,
+            cells: kind === 'row' ? { [copies]: '750' } : {},
+            ...(answer && {
+              answer: {
+                fieldId: answer,
+                required: true,
+                noteFieldId: caption,
+                choices: ['pass', 'fail'].map((v) => ({
+                  id: answer.replace(':field.', ':option.') + '_' + v,
+                  meaning: v === 'pass' ? 'Pass' : 'Fail',
+                  requiresNote: v === 'fail',
+                  blocksTransition: v === 'fail',
+                })),
+              },
+            }),
+            ...(source &&
+              sourceLine && {
+                source: {
+                  parentId: source.recordId,
+                  rowId: sourceLine.recordId,
+                },
+              }),
+          },
+        ],
       };
+      const spoken = await draftRecordTemplateContent(
+        {
+          modelId: 'template-content-proof',
+          next: async ({ tools }) => ({
+            text: '',
+            toolCalls: [
+              {
+                id: 'content',
+                name: tools[0]!.name,
+                input: {
+                  ...content,
+                  members: content.members.map(({ source: _source, ...m }) => ({
+                    ...m,
+                    caption: 'Suggested ' + label,
+                  })),
+                },
+              },
+            ],
+          }),
+        },
+        patch,
+        'Draft ' + line,
+      );
+      assert.equal(spoken.members[0]!.caption, 'Suggested ' + label);
+      // Source rows are kept for the narrow publish check and excluded from history.
+      const readable = {
+        ...content,
+        members: content.members.map(({ source: _source, ...m }) => m),
+      };
+      if (kind === 'row') {
+        const revised = (cells: Record<string, string>) => ({
+          ...content,
+          members: content.members.map((m) => ({ ...m, cells })),
+        });
+        await assert.rejects(
+          run((v) =>
+            library.review(
+              v,
+              target,
+              null,
+              0,
+              revised({ [caption]: 'Private original' }),
+            ),
+          ),
+          /template.copyIneligible/u,
+        );
+        await assert.rejects(
+          run((v) =>
+            library.review(v, target, null, 0, revised({ [copies]: '999' })),
+          ),
+          /template.audienceDenied/u,
+        );
+        await assert.rejects(
+          run((v) =>
+            library.review(v, target, null, 0, revised({ [copies]: '250' })),
+          ),
+          /template.sourceChanged/u,
+        );
+      }
+      if (answer) {
+        const m = content.members[0]!,
+          a = m.answer!;
+        await assert.rejects(
+          run((v) =>
+            library.review(v, target, null, 0, {
+              ...content,
+              members: [{ ...m, cells: { [answer]: a.choices[0]!.id } }],
+            }),
+          ),
+          /template.invalidAnswer/u,
+        );
+        await assert.rejects(
+          run((v) =>
+            library.review(v, target, null, 0, {
+              ...content,
+              members: [
+                {
+                  ...m,
+                  answer: {
+                    ...a,
+                    choices: [{ ...a.choices[0]!, id: 'unknown' }],
+                  },
+                },
+              ],
+            }),
+          ),
+          /template.invalidChoice/u,
+        );
+      }
       const review = await run((v) =>
         library.review(v, target, null, 0, content),
       );
       await assert.rejects(
         run((v) => library.publish(v, review.reviewId, '0'.repeat(64))),
       );
+      if (sourceLine) {
+        const grantId = ns + 'query.' + local + '_lines_get';
+        const scoped = await pool.query<{ role_id: string }>(
+          'UPDATE platform.current_policy_permission_grants SET revoked_at=clock_timestamp() WHERE tenant_id=$1 AND environment_id=$2 AND resource_id=$3 AND revoked_at IS NULL RETURNING role_id',
+          [runtime.identity.tenantId, runtime.identity.environmentId, grantId],
+        );
+        assert.ok(
+          scoped.rowCount,
+          'revoke the source read while retaining publish',
+        );
+        try {
+          await assert.rejects(
+            run((v) => library.publish(v, review.reviewId, review.digest)),
+          );
+        } finally {
+          await pool.query(
+            'UPDATE platform.current_policy_permission_grants SET revoked_at=NULL WHERE (tenant_id,environment_id,resource_id)=($1,$2,$3) AND role_id=ANY($4::uuid[])',
+            [
+              runtime.identity.tenantId,
+              runtime.identity.environmentId,
+              grantId,
+              scoped.rows.map((r) => r.role_id),
+            ],
+          );
+        }
+        assert.equal((await run((v) => library.history(v, target))).length, 0);
+      }
       const published = await run((v) =>
         library.publish(v, review.reviewId, review.digest),
       );
       assert.equal(published.number, 1);
       const copy = await run((v) =>
         library.review(v, other, null, 0, {
-          ...content,
+          ...readable,
           label: 'Private ' + label,
         }),
       );
@@ -203,7 +404,7 @@ export async function exerciseTemplateLibrary(
         history.map((r) => r.number),
         [2, 1],
       );
-      assert.deepEqual(history[1]!.content, content);
+      assert.deepEqual(history[1]!.content, readable);
       await run((v) => library.retire(v, published.templateId, 2));
       await assert.rejects(
         run((v) =>

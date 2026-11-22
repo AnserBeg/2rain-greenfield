@@ -1412,7 +1412,7 @@ function bindingForm(offer: RecordTemplateOffer) {
   return `<form method="post"><fieldset><legend>Record templates for ${h(offer.label)}</legend><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="addRecordTemplateBindingRevision"><input type="hidden" name="formId" value="${h(offer.frame.formId)}"><input type="hidden" name="source" value="${canonicalizeAndHash(offer).contentHash}"><label>Assign by <select name="contextId">${offer.contexts.map((c) => `<option value="${h(contextId(c.selector))}"${prior && contextId(prior.context) === contextId(c.selector) ? ' selected' : ''}>${h(c.label)}</option>`).join('')}</select></label><label><input type="checkbox" name="required"${prior?.required ? ' checked' : ''}>Require an assignment</label>${offer.columns
     .map((c) => {
       const pinned = prior?.columns.find((p) => p.fieldId === c.fieldId);
-      return `<label>${h(c.label)} <select name="field:${h(c.fieldId)}"><option value="">Exclude</option><option value="answer"${pinned && !pinned.copyEligible ? ' selected' : ''}>Answer only</option><option value="copy"${pinned?.copyEligible ? ' selected' : ''}>Allow reviewed defaults</option></select></label>`;
+      return `<label>${h(c.label)} <select name="field:${h(c.fieldId)}"><option value="">Exclude</option><option value="answer"${pinned && !pinned.copyEligible ? ' selected' : ''}>Answer only</option><option value="copy"${pinned?.copyEligible ? ' selected' : ''}>Allow reviewed defaults</option></select></label><label>Allowed defaults for ${h(c.label)} (one per line, leave empty for all eligible values)<textarea name="values:${h(c.fieldId)}">${h(pinned?.audienceValues?.join('\n') ?? '')}</textarea></label>`;
     })
     .join(
       '',
@@ -1428,7 +1428,18 @@ function bindingFromForm(
   const fields = offer.columns.flatMap((c) => {
     const selected = form['field:' + c.fieldId];
     return selected === 'answer' || selected === 'copy'
-      ? [{ fieldId: c.fieldId, copyEligible: selected === 'copy' }]
+      ? [
+          {
+            fieldId: c.fieldId,
+            copyEligible: selected === 'copy',
+            ...(selected === 'copy' &&
+              form['values:' + c.fieldId]?.trim() && {
+                audienceValues: form['values:' + c.fieldId]!.trim()
+                  .split(/\r?\n/u)
+                  .map((v) => v.trim()),
+              }),
+          },
+        ]
       : [];
   });
   return draftTemplateBinding(offers, {

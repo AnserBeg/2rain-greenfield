@@ -32,6 +32,11 @@ const column = z.strictObject({
   contract: digest,
   required: z.boolean(),
   copyEligible: z.boolean(),
+  audienceValues: z
+    .array(z.string().min(1).max(2000))
+    .min(1)
+    .max(64)
+    .optional(),
 });
 const context = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('wholeType') }),
@@ -254,6 +259,10 @@ export function templateBindingConflict(
     observed,
   });
   if (!offer) return problem(body.formId, body.formId, null);
+  for (const required of offer.columns.filter((c) => c.required)) {
+    if (!body.columns.some((c) => c.fieldId === required.fieldId))
+      return problem(required.fieldId, required.fieldType, null);
+  }
   for (const [key, value] of Object.entries(offer.frame)) {
     const expected = body[key as keyof RecordTemplateOffer['frame']];
     if (value !== expected) return problem(expected, expected, value);

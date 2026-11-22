@@ -1,3 +1,4 @@
+import { TemplateBindingChoicesSchema } from '../../packages/customization/src/record-template-binding.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
@@ -475,6 +476,86 @@ test('an active or retired template never blocks editing its record type', async
         ),
       );
     }
+});
+test('record template bindings reproduce their authoring root and survive independent edits in both states', async () => {
+  const active = cases.addRecordTemplateBindingRevision.change;
+  const retired = customization.draftTemplateBinding(
+    [{ ...collection, previous: active }],
+    {
+      formId: collection.frame.formId,
+      contextId: null,
+      required: true,
+      lifecycle: 'retired',
+      fields: active.body.columns.map(({ fieldId, copyEligible }) => ({
+        fieldId,
+        copyEligible,
+      })),
+    },
+  );
+  const arrange = {
+    kind: 'arrangeLayout',
+    surface: id('surface.custom_equipment_list'),
+    relabel: [{ field: id('field.custom_equipment_name'), label: 'Tool' }],
+  };
+  const rebased = structuredClone(collectionBase);
+  declaration(rebased, 'fields', 'fieldId', copies).label = 'Number of copies';
+  for (const state of [[active], [active, retired]]) {
+    const chain = [...state, field, arrange].map(patch);
+    const build = (base: Base, upgrade: boolean) =>
+      customization.compileInSandbox({
+        acknowledgement,
+        base,
+        chain,
+        tip: customization.serializeRelease(tip),
+        ...(upgrade && {
+          upgradeBaseRoot: tip.compiled.releaseRoot,
+          origins: chain.map((_, i) => ({
+            patchId: String(i + 1),
+            differentBase: base !== collectionBase,
+            ...(i === 0 && { parent: collectionBase }),
+          })),
+        }),
+      });
+    const authored = await build(collectionBase, false),
+      reproduced = await build(collectionBase, true);
+    assert.ok(
+      authored.status === 'compiled' && reproduced.status === 'compiled',
+      JSON.stringify([
+        authored.status === 'compiled' ? null : authored,
+        reproduced.status === 'compiled' ? null : reproduced,
+      ]).slice(0, 2500),
+    );
+    assert.equal(
+      authored.steps.at(-1)!.release.releaseRoot,
+      reproduced.steps.at(-1)!.release.releaseRoot,
+    );
+    const moved = await build(rebased, true);
+    assert.ok(
+      moved.status === 'compiled',
+      JSON.stringify(moved.status === 'compiled' ? null : moved),
+    );
+  }
+});
+test('the Customize tool admits the parsed vocabulary and declares template selections from their schema', () => {
+  const schema = customization.draftingToolInputSchema() as {
+    properties: {
+      kind: { enum: string[] };
+      patches: { items: { properties: { kind: { enum: string[] } } } };
+      templateBinding: unknown;
+    };
+  };
+  assert.deepEqual(
+    schema.properties.kind.enum.filter((k) => k !== 'unsupported').sort(),
+    [...customization.CUSTOMIZATION_PATCH_KINDS].sort(),
+  );
+  assert.deepEqual(
+    [...schema.properties.patches.items.properties.kind.enum].sort(),
+    [...customization.CUSTOMIZATION_CHANGE_MEMBER_KINDS].sort(),
+  );
+  assert.deepEqual(
+    schema.properties.templateBinding,
+    TemplateBindingChoicesSchema.toJSONSchema(),
+  );
 });
 test('upgrade replay admission and its named cases cover the independently parsed vocabulary', () => {
   const admitted = [...customization.UPGRADE_PATCH_KINDS].sort();

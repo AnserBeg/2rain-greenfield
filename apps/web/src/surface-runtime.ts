@@ -1976,6 +1976,16 @@ async function renderRecordTemplates(
       { form: binding.body.formId, company },
       binding,
       labels,
+      new Map(
+        [
+          ...(selection.selected.documentEditor?.headerFields ?? []),
+          ...(selection.selected.documentEditor?.lineFields ?? []),
+        ].flatMap((f) =>
+          f.presentation?.kind === 'choice'
+            ? [[f.fieldId, f.presentation.options] as const]
+            : [],
+        ),
+      ),
       form,
       gateways.draftRecordTemplate,
     );

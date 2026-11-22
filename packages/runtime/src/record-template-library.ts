@@ -43,6 +43,11 @@ export interface RecordTemplateLibrary {
   ): Promise<
     Pick<RecordTemplateRevision, 'revisionId' | 'templateId' | 'number'>
   >;
+  assignmentVersion(
+    view: RequestRuntimeView,
+    target: TemplateLibraryTarget,
+    context: string,
+  ): Promise<number>;
   assign(
     view: RequestRuntimeView,
     target: TemplateLibraryTarget,

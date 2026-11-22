@@ -21,7 +21,16 @@ export const TemplateBindingChoicesSchema = z.strictObject({
     ),
   required: z.boolean(),
   fields: z
-    .array(z.strictObject({ fieldId: z.string(), copyEligible: z.boolean() }))
+    .array(
+      z.strictObject({
+        fieldId: z.string(),
+        copyEligible: z.boolean(),
+        audienceValues:
+          RecordTemplateBindingSchema.shape.body.shape.columns.element.shape.audienceValues.describe(
+            'Only these literal values may be disclosed to the company reader audience',
+          ),
+      }),
+    )
     .min(1)
     .max(24),
   lifecycle: RecordTemplateBindingSchema.shape.status,
@@ -45,16 +54,35 @@ export function draftTemplateBinding(
   if (!selector) throw new Error('Choose a declared context selector.');
   if (choices.lifecycle === 'retired' && offer.previous?.status !== 'active')
     throw new Error('Choose an active template binding to retire.');
-  const selected = choices.fields.map(({ fieldId, copyEligible }) => {
-    const field = offer.columns.find((c) => c.fieldId === fieldId);
-    if (!field)
-      throw new Error('Choose a declared column for this collection.');
-    const { label, ...column } = field;
-    void label;
-    return { ...column, copyEligible };
-  });
+  const selected = choices.fields.map(
+    ({ fieldId, copyEligible, audienceValues }) => {
+      const field = offer.columns.find((c) => c.fieldId === fieldId);
+      if (!field)
+        throw new Error('Choose a declared column for this collection.');
+      const { label, ...column } = field;
+      void label;
+      if (audienceValues && !copyEligible)
+        throw new Error(
+          'Audience values require a column that allows defaults.',
+        );
+      return {
+        ...column,
+        copyEligible,
+        ...(audienceValues && {
+          audienceValues: [...new Set(audienceValues)].sort(),
+        }),
+      };
+    },
+  );
   if (new Set(selected.map((c) => c.fieldId)).size !== selected.length)
     throw new Error('Each column may appear once.');
+  if (
+    choices.lifecycle === 'active' &&
+    offer.columns.some(
+      (c) => c.required && !selected.some((v) => v.fieldId === c.fieldId),
+    )
+  )
+    throw new Error('Include each required input in the binding.');
   const body =
     choices.lifecycle === 'retired'
       ? offer.previous!.body

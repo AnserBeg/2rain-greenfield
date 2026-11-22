@@ -116,6 +116,25 @@ export class PostgresRecordTemplateLibrary implements RecordTemplateLibrary {
       ])
     )[0]!;
   }
+  async assignmentVersion(
+    view: RequestRuntimeView,
+    target: TemplateLibraryTarget,
+    context: string,
+  ) {
+    return (
+      await this.call<number>(
+        view,
+        'SELECT platform.record_template_assignment_version($1,$2,$3,$4,$5) AS result',
+        [
+          target.company,
+          view.release.releaseId,
+          view.pointer.fence,
+          target.form,
+          context,
+        ],
+      )
+    )[0]!;
+  }
   async assign(
     view: RequestRuntimeView,
     target: TemplateLibraryTarget,
