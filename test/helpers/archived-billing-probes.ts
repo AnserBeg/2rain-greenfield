@@ -111,7 +111,7 @@ await withOrderEntryFixture(async (f) => {
     const migrations = await loadMigrations(migrationDirectory);
     const result = await runMigrations(admin, migrations);
     assert.ok(result.applied.includes('0057_billing_publication.sql'));
-    assert.ok(result.applied.includes('0067_billing_publication_xid.sql'));
+    assert.ok(result.applied.includes('0068_billing_publication_xid.sql'));
     const after = [];
     for (const [table] of tables) {
       const stored = await admin.query("SELECT to_jsonb(b) - ARRAY['invocation_id','published_at'] AS row, invocation_id, published_at FROM platform." + table + ' b');

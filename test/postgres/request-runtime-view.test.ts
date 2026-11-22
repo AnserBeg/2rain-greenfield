@@ -1,3 +1,4 @@
+import { POPUP_READER } from '../../packages/canonical-model/src/popup-actions.js';
 import { DOCUMENT_TEMPLATES_SURFACE_FLOOR } from '../../packages/canonical-model/src/documents.js';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
@@ -350,6 +351,7 @@ test('the capability comparison binds the family to its capability, then compare
     BOARD_READER,
     DOCUMENT_TEMPLATES_SURFACE_FLOOR,
     DATE_TIME_FIELD_READER,
+    POPUP_READER,
     BILLING_ALLOCATION_READER,
   ];
   for (const reader of surfaceFloors) {

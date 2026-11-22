@@ -65,7 +65,7 @@ const quoteId = id('query.billable_quote'),
   proposalField = id('field.sales_order_billing_proposal');
 const precedingDeclarationReader = 'f25df5af44df132045c67ba29eb9aebe1084dcc7';
 const precedingPublicationWriter = 'f1829ea9ce70a886a050e043dce23cb12267335d';
-const precedingAllocationReader = '352e43b7e428ed1115fd9328db3a6427cf36a58f';
+const precedingAllocationReader = '7046abc74feacc8943874f1ced6d4674ddcb7548';
 const readPermission = id('permission.billing_quote'),
   publishPermission = id('permission.billing_publish_terms');
 const plan = BillingPlanSchema.parse({
@@ -452,7 +452,7 @@ test('the preceding serving reader answers a stored query and refuses first-allo
           assert.deepEqual(await probeArchivedBilling(run, f), {
             outcome: 'refused',
             code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
-            message: `runtime capability northstar.runtime:capability.surface-manifest requires version ${BILLING_ALLOCATION_READER} and this runtime supports 39`,
+            message: `runtime capability northstar.runtime:capability.surface-manifest requires version ${BILLING_ALLOCATION_READER} and this runtime supports 40`,
           });
         },
         'demo',

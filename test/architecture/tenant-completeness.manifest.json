@@ -1,7 +1,7 @@
 {
   "schemaVersion": "northstar.tenant-completeness-manifest/v1",
   "tenantIndependentDefinition": "A table is tenant-independent only when its rows represent a database-wide kernel mechanism or immutable content deliberately shared across tenants; business records are never tenant-independent, and absence of a tenant column is not evidence.",
-  "expectedTableCount": 122,
+  "expectedTableCount": 124,
   "tables": [
     {
       "schema": "north_star_internal",
@@ -9,6 +9,13 @@
       "classification": "tenant-independent",
       "reasonCode": "kernel-integrity-witness",
       "reason": "Fences analysis execution across the database by operator stop generation for the whole platform or a pinned image. The scope constraint excludes tenant identifiers, jobs and output."
+    },
+    {
+      "schema": "north_star_internal",
+      "table": "workflow_start_limits",
+      "classification": "tenant-independent",
+      "reasonCode": "kernel-integrity-witness",
+      "reason": "Holds one database-wide operator policy for workflow admission. The singleton contains only numerical limits."
     },
     {
       "schema": "north_star_internal",
@@ -476,6 +483,12 @@
     {
       "schema": "platform",
       "table": "workflow_body_blobs",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "workflow_deferred_starts",
       "classification": "tenant-scoped",
       "tenantColumn": "tenant_id"
     },
