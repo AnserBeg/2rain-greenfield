@@ -291,7 +291,11 @@ jobs:
         # CI-5: run 44940449059 timed out on shard 3 and shard 5 took 29m 28s.
         # Shard 8 takes timed files out of shard 3. Shard 9 isolates date-time-field
         # (17m 32s on its own in that run's second attempt).
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9]
+        # CI-6: on main run 44982854424 shard 3 took 22m 51s (build-eval 7m 53s),
+        # shard 7 21m 20s and shard 6 19m 06s; REPORTS run 44986880683 put shard
+        # 3 at 29m 01s and shard 8 at 26m 41s. Shard 10 takes build-eval,
+        # agent-dev-tasks and address-authority; see docs/execution/packets/CI-6.md.
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -343,6 +347,9 @@ jobs:
       - name: Run PostgreSQL shard 9
         if: matrix.shard == 9
         run: corepack pnpm test:postgres:9
+      - name: Run PostgreSQL shard 10
+        if: matrix.shard == 10
+        run: corepack pnpm test:postgres:10
       - name: Run non-C locale determinism probe
         if: matrix.shard == 1
         run: corepack pnpm test:locale

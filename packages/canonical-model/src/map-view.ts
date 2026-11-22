@@ -10,7 +10,7 @@ import { canonicalizeAndHash } from './canonicalize.js';
 // One rung for the Map member and its viewport binding: a viewport exists
 // only with an active Map, so an older reader refuses both by one name.
 // Provisional against main; the integrator assigns it again at merge.
-export const MAP_VIEW_READER = 43;
+export const MAP_VIEW_READER = 46;
 export const VIEWPORT_CONTRACT = 'map.viewport/v1' as const;
 const id = z.string().min(5).max(180);
 const field = z.strictObject({ fieldId: id, fieldType: z.string().min(1) });

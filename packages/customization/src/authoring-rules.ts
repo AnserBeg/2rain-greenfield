@@ -43,6 +43,9 @@ export const AUTHORING_RULES: Readonly<
   CUSTOMIZE_MAP_CONFLICT: [
     'A map view names a listed map collection, one of its direct Address fields and one of its listed route-order fields; a route group, day field or saved view must be one listed for that collection. Editing or retiring a map view requires its current revision.',
   ],
+  CUSTOMIZE_REPORT_CONFLICT: [
+    'Use the field IDs and measures offered for the selected report source. Edit or retire only a listed active report, on its original source.',
+  ],
   CUSTOMIZE_POPUP_CONFLICT: [
     'Bind a button to an offered Task using its listed inputs. Editing or retiring a button requires its current revision.',
   ],

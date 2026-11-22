@@ -22,6 +22,10 @@ export const LEDGER_STYLES = `
 .map-pin.group-1,.map-pin.group-3{fill:var(--accent)}.map-route.group-1,.map-route.group-3{stroke:var(--accent)}
 .map-stops{padding:0;list-style:none}.map-stops li{border-bottom:1px solid var(--rule)}
 @media(max-width:800px){.map-title{order:0}.map-views{order:1}.map-list{order:2}.map-canvas{order:3}.map-stops li{padding:.4rem;border:1px solid var(--rule)}}
+.grouped-report-table{width:100%;text-align:start;background:var(--sheet)}
+.grouped-report-table td,.grouped-report-table th{padding:.6rem;border-bottom:1px solid var(--rule);text-align:start;overflow-wrap:anywhere}
+.grouped-report-table small{display:block}.grouped-report-table tfoot{font-weight:600}
+@media(max-width:800px){.grouped-report-table,.grouped-report-table tbody,.grouped-report-table tfoot{display:block}.grouped-report-table thead{position:absolute;clip-path:inset(50%);width:1px;height:1px;overflow:hidden}.grouped-report-table tr{display:block;border:1px solid var(--rule);margin-block:.5rem}.grouped-report-table td{display:grid;grid-template-columns:minmax(5rem,1fr) 2fr;gap:.4rem}.grouped-report-table td::before{content:attr(data-label);font-weight:600}.grouped-report-table small{grid-column:2}}
 .board-columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:1rem}
 .board-column{min-width:0}.board-column ul{list-style:none;padding:0}.board-column li{display:grid;gap:.5rem;padding:.75rem;border:1px solid var(--rule);background:var(--sheet);overflow-wrap:anywhere}
 .board-column dl{margin:0}.board-column dl div{display:flex;gap:.5rem}.board-column dd{margin:0}.board-column button,.board-column a,.board-selector-slot a,.collection-views a,.surface-grid:has(.board-columns-slot) nav a{min-height:44px;display:inline-flex;align-items:center;padding:0 .6rem}

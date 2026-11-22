@@ -1,3 +1,5 @@
+import { lowerDeclaredReports } from './declared-reports.js';
+import { DECLARED_REPORT_READER } from '../../canonical-model/src/declared-report.js';
 import {
   BILLING_READER,
   BILLING_ALLOCATION_READER,
@@ -16,6 +18,8 @@ import {
   type AddressProjection,
   MAP_VIEW_READER,
   BOARD_READER,
+  COMPANY_ACCESS_INDEX_READER,
+  REPORT_SOURCE_READER,
   boardPresentation,
   type BoardSource,
   type SurfaceBoard,
@@ -376,7 +380,7 @@ export function lowerBaseProjectionPayloads(
         PROJECTION_FAMILY_IDS.reporting,
         namespace,
         packageScope,
-        reportingPayload(packageRevision),
+        reportingPayload(verificationPackageRevision),
       ),
     );
   }
@@ -389,6 +393,50 @@ export function lowerBaseProjectionPayloads(
         ...(calculatedFields.length > 0 ? { calculatedFields } : {}),
       }),
     );
+  }
+  if (
+    verificationPackageRevision.languageVersion === 'v6' &&
+    currentStorageTarget &&
+    verificationPackageRevision.surfaces.some((s) => s.report)
+  ) {
+    const registrations = lowerDeclaredReports(
+      verificationPackageRevision,
+      currentStorageTarget,
+    );
+    for (const projection of plans) {
+      if (projection.familyId === PROJECTION_FAMILY_IDS.surfaceManifest) {
+        projection.requiredRuntimeCapability = {
+          ...projection.requiredRuntimeCapability,
+          minimumVersion: Math.max(
+            DECLARED_REPORT_READER,
+            projection.requiredRuntimeCapability.minimumVersion,
+          ),
+        };
+      }
+      if (!registrations.length) continue;
+      if (projection.familyId === PROJECTION_FAMILY_IDS.queryCatalog)
+        projection.payload = {
+          ...(projection.payload as object),
+          groupedReports: registrations,
+        };
+      else if (
+        [
+          PROJECTION_FAMILY_IDS.reporting,
+          PROJECTION_FAMILY_IDS.verificationPlan,
+          PROJECTION_FAMILY_IDS.agentDiscovery,
+          PROJECTION_FAMILY_IDS.policyReferences,
+        ].some((f) => f === projection.familyId)
+      )
+        projection.payload = {
+          ...(projection.payload as object),
+          groupedReports: registrations.map((r) => ({
+            reportId: r.revision.reportId,
+            revisionId: r.revision.revisionId,
+            queryId: r.queryId,
+            surfaceId: r.surfaceId,
+          })),
+        };
+    }
   }
   if (documents) {
     const catalogs = new Set<ProjectionFamilyId>([
@@ -1147,31 +1195,43 @@ function surfaceManifestPayload(
         (layout) => layout.placementRuleVersion === 1,
       ),
   );
-  // Map is the highest rung, then the popup buttons: each release needs its
-  // renderer whatever else it has.
-  const surfaceFloor = original.surfaces.some((s) => s.archetype === 'map')
-    ? MAP_VIEW_READER
-    : original.surfaces.some((s) => 'popupActions' in s && s.popupActions)
+  const surfaceFloor = Math.max(
+    original.surfaces.some((s) => s.archetype === 'map') ? MAP_VIEW_READER : 0,
+    original.entities.some(
+      (entity) => 'reportSource' in entity && entity.reportSource,
+    )
+      ? REPORT_SOURCE_READER
+      : 0,
+    original.entities.some(
+      (entity) => 'companyAccessIndex' in entity && entity.companyAccessIndex,
+    )
+      ? COMPANY_ACCESS_INDEX_READER
+      : 0,
+    original.surfaces.some(
+      (surface) => 'popupActions' in surface && surface.popupActions,
+    )
       ? POPUP_READER
-      : original.surfaces.some((s) => s.archetype === 'board')
-        ? BOARD_READER
-        : needsStockCountReader
-          ? LINE_CREATE_VALUES_SURFACE_FLOOR
-          : replayedLayout
-            ? REPLAYED_LAYOUT_READER
-            : original.surfaces.some((s) => 'layouts' in s && s.layouts)
-              ? LAYOUT_READER
-              : extendedEditor || declaredRelationList
-                ? 26
-                : hasMetrics(original)
-                  ? 25
-                  : hasSavedListLayouts(original)
-                    ? 24
-                    : recordFieldPresentation
-                      ? 23
-                      : rankedDefaultsOrChainedTasks
-                        ? 22
-                        : null;
+      : 0,
+    original.surfaces.some((s) => s.archetype === 'board')
+      ? BOARD_READER
+      : needsStockCountReader
+        ? LINE_CREATE_VALUES_SURFACE_FLOOR
+        : replayedLayout
+          ? REPLAYED_LAYOUT_READER
+          : original.surfaces.some((s) => 'layouts' in s && s.layouts)
+            ? LAYOUT_READER
+            : extendedEditor || declaredRelationList
+              ? 26
+              : hasMetrics(original)
+                ? 25
+                : hasSavedListLayouts(original)
+                  ? 24
+                  : recordFieldPresentation
+                    ? 23
+                    : rankedDefaultsOrChainedTasks
+                      ? 22
+                      : 0,
+  );
   const payloadSchemaVersion = composed
     ? COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION
     : navigation
@@ -1257,6 +1317,9 @@ function surfaceManifestPayload(
           // Labels and roles render from this release, beside the digested member.
           ...(declared && 'map' in declared && declared.map
             ? { map: declared.map }
+            : {}),
+          ...(declared && 'report' in declared && declared.report
+            ? { report: declared.report }
             : {}),
           ...(declared && 'board' in declared && declared.board
             ? {
@@ -1782,19 +1845,22 @@ function isNavigationSurface(
 }
 
 function reportingPayload(
-  packageRevision: NormalizedApplicationPackage,
+  packageRevision: VersionedNormalizedApplicationPackage,
 ): unknown {
-  const fieldsByEntity = new Map<string, typeof packageRevision.fields>();
-  for (const field of packageRevision.fields) {
-    const fields = fieldsByEntity.get(field.entity.targetId) ?? [];
-    fields.push(field);
-    fieldsByEntity.set(field.entity.targetId, fields);
-  }
+  const fieldsByEntity = groupBy(
+    packageRevision.fields as ReadonlyArray<
+      (typeof packageRevision.fields)[number]
+    >,
+    (f) => f.entity.targetId,
+  );
   return {
     entities: packageRevision.entities
       .filter((entity) => entity.lifecycle === 'active')
       .map((entity) => ({
         entityId: entity.entityId,
+        ...('reportSource' in entity && entity.reportSource
+          ? { reportSource: entity.reportSource }
+          : {}),
         fields: (fieldsByEntity.get(entity.entityId) ?? []).map((field) => ({
           fieldId: field.fieldId,
           lineage: {

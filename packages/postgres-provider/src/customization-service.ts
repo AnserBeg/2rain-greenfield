@@ -1,3 +1,6 @@
+import type { RegisteredReport } from '../../canonical-model/src/declared-report.js';
+import { previewReportIndexes } from './report-index-build.js';
+import { projectionBinding } from './serving-gateways.js';
 import { AuthenticatedRequestEntryAdapter } from '../../runtime/src/request-context.js';
 import { AuthenticatedRequestRuntimeEntryAdapter } from '../../runtime/src/request-runtime-view.js';
 import { SemanticOperationGateway } from '../../runtime/src/semantic-operation-gateway.js';
@@ -38,6 +41,7 @@ import {
   type UpgradeCode,
   CUSTOMIZATION_PATCH_VERSION,
   parseCustomizationPatch,
+  preparePatchForRecording,
   parseSerializedRelease,
   serializeRelease,
   renderedDiffDigest,
@@ -56,6 +60,8 @@ import {
   type SandboxStep,
 } from '@north-star/customization';
 import {
+  PROJECTION_FAMILY_IDS,
+  type StorageTransitionEnvelope,
   compilerAttestationFromManifest,
   type ReleaseManifestEnvelope,
   type ContentAddressedArtifact,
@@ -94,7 +100,10 @@ import {
   readCustomizationLineage,
 } from './customization-lineage.js';
 import type { ModuleProviderErrorMapping } from './module-runtime-interpreter.js';
-import { PostgresModuleStorageMaterializer } from './module-storage-materializer.js';
+import {
+  ModuleStorageMaterializationError,
+  PostgresModuleStorageMaterializer,
+} from './module-storage-materializer.js';
 import { PostgresReleaseActivationService } from './release-activation-service.js';
 import {
   authorizeReverseTransitionIfApplicable,
@@ -143,6 +152,7 @@ export type CustomizationRefusalCode =
   | 'CUSTOMIZE_CHANGE_NOT_FOUND'
   | 'CUSTOMIZE_DRAFT_STALE'
   | 'CUSTOMIZE_NOT_APPROVED'
+  | 'REPORT_INDEX_UNAVAILABLE'
   | 'CUSTOMIZE_ALREADY_ACTIVE'
   | 'CUSTOMIZE_NOTHING_TO_ROLL_BACK'
   | 'CUSTOMIZE_ACTIVATION_FAILED'
@@ -239,6 +249,25 @@ export type DraftOutcome =
       readonly missingCapability?: string;
       readonly status: 'invalid' | 'refused' | 'rejected' | 'unsupported';
     };
+
+function publishedReports(candidate: ParsedRelease, patch: CustomizationPatch) {
+  const members = patch.kind === 'changeSet' ? patch.patches : [patch];
+  const ids = new Set(
+    members.flatMap((member) =>
+      member.kind === 'addReportRevision' && member.status === 'active'
+        ? [member.reportId]
+        : [],
+    ),
+  );
+  if (!ids.size) return [];
+  const catalog = projectionBinding(
+    candidate.compiled,
+    PROJECTION_FAMILY_IDS.queryCatalog,
+  ).payload as { groupedReports?: RegisteredReport[] };
+  return (catalog.groupedReports ?? []).filter((report) =>
+    ids.has(report.revision.reportId),
+  );
+}
 
 export interface PatchRecord {
   readonly compilerAcknowledgement?: AcknowledgementInput | null;
@@ -1674,6 +1703,29 @@ export class PostgresCustomizationService {
     const { steps } = compiled;
     const step = steps.at(-1)!;
     const candidate = parseSerializedRelease(step.release);
+    const reports = publishedReports(candidate, patch);
+    if (reports.length) {
+      const transition = projectionBinding(
+        candidate.compiled,
+        PROJECTION_FAMILY_IDS.storageTransition,
+      ).payload as StorageTransitionEnvelope;
+      const client = await this.connection.materializerPool.connect();
+      try {
+        const problem = await previewReportIndexes(
+          client,
+          reports,
+          transition.elements,
+        );
+        if (problem)
+          return {
+            status: 'refused',
+            code: 'REPORT_INDEX_UNAVAILABLE',
+            message: problem,
+          };
+      } finally {
+        client.release();
+      }
+    }
     const payload = new TextEncoder().encode(canonicalize(patch));
     const payloadDigest = createHash('sha256').update(payload).digest('hex');
     const normalized = parseNormalizedApplicationPackageJson(
@@ -2168,9 +2220,11 @@ export class PostgresCustomizationService {
       }
       await this.#assertUpgradeBase(context, upgrade);
       // The persisted candidate may have been approved by a previous host.
-      assertAgentOperationsPlannable(
-        await this.#loadRelease(context, record.resultingReleaseId),
+      const candidate = await this.#loadRelease(
+        context,
+        record.resultingReleaseId,
       );
+      assertAgentOperationsPlannable(candidate);
       if (approved.transition_plan_digest !== null) {
         const generation = await admin.query<{
           generation_id: string;
@@ -2187,18 +2241,60 @@ export class PostgresCustomizationService {
             'the approved storage change has no prepared plan; approve it again',
           );
         }
-        const executed = await this.#materializer().executeApprovedAttempt({
-          activationAttemptId: approved.activation_attempt_id,
-          context,
-          coordinatorId: randomUUID() as MintedUuid,
-          generationId,
-        });
+        const executed = await this.#materializer()
+          .executeApprovedAttempt({
+            activationAttemptId: approved.activation_attempt_id,
+            context,
+            coordinatorId: randomUUID() as MintedUuid,
+            generationId,
+          })
+          .catch((error: unknown) => {
+            if (
+              error instanceof ModuleStorageMaterializationError &&
+              error.reportIndex
+            ) {
+              const catalog = projectionBinding(
+                candidate.compiled,
+                PROJECTION_FAMILY_IDS.queryCatalog,
+              ).payload as { groupedReports?: RegisteredReport[] };
+              const labels = catalog.groupedReports
+                ?.filter(
+                  (report) => report.accessPath.index === error.reportIndex,
+                )
+                .map((report) => report.label);
+              if (labels?.length)
+                throw new ModuleStorageMaterializationError(
+                  error.code,
+                  labels.join(', ') + ': ' + error.message,
+                  error.reportIndex,
+                );
+            }
+            throw error;
+          });
         if (executed.disposition !== 'READY_TO_SWAP') {
           throw new CustomizationServiceRefusal(
             'CUSTOMIZE_ACTIVATION_FAILED',
             `the storage change did not become ready: ${executed.disposition}`,
           );
         }
+      }
+      // A report may reuse an index without any DDL in this attempt. Verify its
+      // actual keys and readiness again after approval, before switching releases.
+      if (
+        'kind' in record &&
+        (record.kind === 'addReportRevision' || record.kind === 'changeSet')
+      ) {
+        const [patch] = await this.#readPatches(context, [record]);
+        const problem = await previewReportIndexes(
+          admin,
+          publishedReports(candidate, patch!),
+          [],
+        );
+        if (problem)
+          throw new CustomizationServiceRefusal(
+            'REPORT_INDEX_UNAVAILABLE',
+            problem,
+          );
       }
       const desiredState = await this.#desiredState(
         context,
@@ -3266,22 +3362,6 @@ function patchRecord(row: PatchRow): PatchRecord {
     resultingReleaseRoot: row.resulting_release_root,
     resultingRevisionId: row.resulting_revision_id,
   });
-}
-
-function preparePatchForRecording(
-  patch: CustomizationPatch,
-): CustomizationPatch {
-  const bindFieldScreens = <
-    T extends Exclude<CustomizationPatch, { kind: 'changeSet' }>,
-  >(
-    member: T,
-  ): T =>
-    member.kind === 'addField'
-      ? { ...member, screens: 'record' as const }
-      : member;
-  return patch.kind === 'changeSet'
-    ? { ...patch, patches: patch.patches.map(bindFieldScreens) }
-    : bindFieldScreens(patch);
 }
 
 interface UpgradeRow {

@@ -1,3 +1,16 @@
+import {
+  REPORT_EXPORT_PERMISSION,
+  reportColumnPermission,
+  type RegisteredReport,
+} from '../../canonical-model/src/declared-report.js';
+import {
+  REPORT_READER_POLICY,
+  registeredReportFromPinnedView,
+  validReportParameters,
+  type ReportRequest,
+  type ReportResult,
+} from './declared-report.js';
+import { requestDeadline } from './request-deadline.js';
 import { recordCatalogParse } from './catalog-parse-count.js';
 import {
   QueryReadModelSchema,
@@ -292,7 +305,17 @@ export interface QueryPolicyNarrowingGateway {
   narrow(request: QueryPolicyNarrowingRequest): Promise<unknown>;
 }
 
+export interface GroupedExecution {
+  view: IssuedRequestRuntimeView;
+  report: RegisteredReport;
+  input: ReportRequest;
+  maximumFacts: number;
+  filterPlans: readonly QueryFilterLoweringPlan[];
+  scope: LegalEntityReadScope;
+  remaining: () => number;
+}
 export interface SemanticQueryExecutor {
+  executeGrouped?(request: GroupedExecution): Promise<ReportResult>;
   execute(
     request: SemanticQueryExecutionRequest,
   ): Promise<SemanticQueryResultEnvelope>;
@@ -474,6 +497,162 @@ export class SemanticQueryGateway {
     );
     assertRecordResultEnvelope(result);
     return result;
+  }
+
+  async #authorizeReport(
+    view: IssuedRequestRuntimeView,
+    queryId: string,
+    company: string,
+    exporting: boolean,
+  ) {
+    assertRequestRuntimeView(view);
+    const registration = registeredReportFromPinnedView(view, queryId);
+    if (!registration || !this.executor?.executeGrouped) return null;
+    const { report, collection } = registration;
+    const list = registeredQueryFromPinnedView(view, collection.queryId);
+    if (
+      !list ||
+      list.queryType !== 'list' ||
+      list.lifecycle !== 'active' ||
+      list.sourceEntityId !== collection.entityId
+    )
+      return null;
+    const args = {
+      legalEntityId: company,
+      ...(list.legalEntityScope && {
+        [list.legalEntityScope.operand.parameterId]: company,
+      }),
+    };
+    const scope = await issueLegalEntityReadScope(this.currentPolicy, view, [
+      company,
+    ]);
+    const permissions = [
+      QUERY_BOUNDARY_PERMISSION_ID,
+      list.permissionId,
+      report.queryId,
+      ...report.columns.map((c) => reportColumnPermission(c.fieldId)),
+      ...(exporting ? [REPORT_EXPORT_PERMISSION] : []),
+    ];
+    if (
+      exporting &&
+      !report.revision.body.outputs.some((o) => o.kind === 'csv')
+    )
+      return null;
+    for (const permissionId of permissions) {
+      const decision = await authorizeCurrentPolicy(
+        this.currentPolicy,
+        view,
+        permissionId,
+        {
+          arguments: args,
+          queryId: report.queryId,
+          kind:
+            permissionId === QUERY_BOUNDARY_PERMISSION_ID
+              ? 'semanticQueryPolicyInput'
+              : 'registeredSemanticQueryPolicyInput',
+          requestId: view.requestId,
+          schemaVersion: QUERY_POLICY_INPUT_VERSION,
+        },
+      );
+      if (
+        decision.decision !== 'ALLOW' ||
+        decision.policyVersion !== view.entryPolicyVersion
+      )
+        return null;
+    }
+    return { report, list, args, scope };
+  }
+
+  async previewReport(
+    view: IssuedRequestRuntimeView,
+    queryId: string,
+    company: string,
+    exporting = false,
+  ): Promise<boolean> {
+    try {
+      return !!(await this.#authorizeReport(view, queryId, company, exporting));
+    } catch {
+      return false;
+    }
+  }
+
+  async invokeGrouped(
+    view: IssuedRequestRuntimeView,
+    req: ReportRequest,
+  ): Promise<ReportResult> {
+    assertRequestRuntimeView(view);
+    const now =
+      this.registeredQueryLatency?.monotonicMilliseconds ??
+      (() => performance.now());
+    const deadline = now() + REPORT_READER_POLICY.deadlineMs;
+    const parentDeadline = requestDeadline.getStore();
+    const remaining = () => {
+      const ms = Math.min(parentDeadline?.() ?? Infinity, deadline - now());
+      if (ms <= 0) throw new Error('REPORT_DEADLINE');
+      return Math.max(1, Math.floor(ms));
+    };
+    return requestDeadline.run(
+      () => Math.min(REPORT_READER_POLICY.statementMs, remaining()),
+      async () => {
+        try {
+          const authorized = await this.#authorizeReport(
+            view,
+            req.queryId,
+            req.company,
+            !!req.export,
+          );
+          if (!authorized || !this.executor?.executeGrouped)
+            return { kind: 'unavailable' };
+          const { list, report, scope, args } = authorized;
+          remaining();
+          if (
+            !Number.isSafeInteger(req.pageSize) ||
+            req.pageSize < 1 ||
+            req.pageSize > REPORT_READER_POLICY.page ||
+            !validReportParameters(report, req)
+          )
+            return { kind: 'narrow' };
+          const filterPlans: QueryFilterLoweringPlan[] = [];
+          // Slice 1 accepts a generated Q0 collection only. Its literal row filter
+          // and the provider's live narrowing both apply to the authorized facts.
+          if (inspectPredicateForExecution(list.filter).outcome !== 'accepted')
+            return { kind: 'unavailable' };
+          if (this.policyNarrowing)
+            filterPlans.push(
+              parsePolicyNarrowing(
+                await this.policyNarrowing.narrow({
+                  definition: list,
+                  view,
+                  arguments: args,
+                }),
+                list,
+              ),
+            );
+          return await this.executor.executeGrouped({
+            view,
+            report,
+            input: req,
+            maximumFacts: Math.min(
+              list.maximumResultCount,
+              req.export
+                ? (list.exportMaximumResultCount ?? list.maximumResultCount)
+                : Infinity,
+            ),
+            filterPlans,
+            scope,
+            remaining,
+          });
+        } catch (error) {
+          if (
+            error instanceof Error &&
+            (error.message === 'REPORT_DEADLINE' ||
+              ('code' in error && error.code === '57014'))
+          )
+            return { kind: 'narrow' };
+          return { kind: 'unavailable' };
+        }
+      },
+    );
   }
 
   async invokeAggregate(
@@ -1629,6 +1808,7 @@ export function registeredSemanticQueryFromPinnedView(
       'kind',
       'queries',
       'schemaVersion',
+      ...(Object.hasOwn(payload, 'groupedReports') ? ['groupedReports'] : []),
       ...(Object.hasOwn(payload, 'addressBindings') ? ['addressBindings'] : []),
       ...(Object.hasOwn(payload, 'dateTimeBindings')
         ? ['dateTimeBindings']

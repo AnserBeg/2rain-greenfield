@@ -1,4 +1,5 @@
 import { mapTargets, type MapTarget } from './map-revision.js';
+import { reportTargets, type ReportTarget } from './report-revision.js';
 import {
   popupOptions,
   type PopupOption,
@@ -57,6 +58,7 @@ export interface DocumentTemplateTarget {
 
 export interface CustomizationTargets {
   readonly maps?: readonly MapTarget[];
+  readonly reports?: readonly ReportTarget[];
   readonly popupActions?: readonly PopupOption[];
   readonly documentTemplateTargets?: readonly DocumentTemplateTarget[];
   readonly boards?: readonly BoardTarget[];
@@ -708,6 +710,7 @@ export function customizationTargets(definition: {
       popupOptions(definition, s),
     ),
     boards: boardTargets(definition),
+    reports: reportTargets(definition),
     layouts: definition.surfaces.flatMap((s) =>
       (['create', 'edit', 'detail'] as const).flatMap((mode) => {
         const target = currentLayout(definition, s, mode);

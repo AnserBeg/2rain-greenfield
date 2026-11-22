@@ -10,6 +10,8 @@ import {
   SurfaceBoardSchema,
   SurfaceMapSchema,
   type SurfaceMap,
+  ReportRevisionSchema,
+  type ReportRevision,
   type BoardPresentation,
   type SurfaceBoard,
   canonicalize,
@@ -319,6 +321,7 @@ export function formFieldIds(
 
 export interface CompiledSurfaceDefinition {
   readonly map?: SurfaceMap;
+  readonly report?: ReportRevision;
   readonly popupActions?: readonly CompiledPopup[];
   readonly board?: SurfaceBoard;
   /** The Board's labels and roles, compiled from this release beside `board`. */
@@ -820,6 +823,11 @@ function surfaceAcceptsQuery(
   queryType: RegisteredSemanticQueryDefinition['queryType'],
 ): boolean {
   if (surface.archetype === 'map') return !!surface.map && queryType === 'list';
+  if (surface.archetype === 'list' && surface.report)
+    return (
+      queryType === 'list' &&
+      surface.dataSourceQueryId === surface.report.body.source.queryId
+    );
   if (surface.archetype === 'board')
     return !!surface.board && queryType === 'list';
   return surface.archetype === 'task' && surface.surfaceRole === null
@@ -1149,6 +1157,9 @@ function parseSurface(
 
   return Object.freeze({
     ...(archetype === 'map' ? { map: SurfaceMapSchema.parse(value.map) } : {}),
+    ...(value.report
+      ? { report: ReportRevisionSchema.parse(value.report) }
+      : {}),
     ...(archetype === 'board'
       ? {
           board: SurfaceBoardSchema.parse(value.board),
