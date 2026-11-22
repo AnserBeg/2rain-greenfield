@@ -61,7 +61,7 @@ CI tier: quick https://github.com/AnserBeg/2rain-greenfield/actions/runs/4495613
 
 ## Slice 1 build checkpoint · 2026-11-22
 
-The build branch is `packet/TEMPLATE-1-s1`, merged with main at `37bfd473`. The provisional allocations are migration 0069, Surface reader 47 (45 and 46 are planned for BILLING and PLANNER) and operation reader 7. The PostgreSQL proof runs alone in shard 11 because each activation runs full release verification. The train pins its immediate predecessor.
+The build branch is `packet/TEMPLATE-1-s1`, merged with main at `37bfd473`. The provisional allocations are migration 0069, Surface reader 47 (45 and 46 are planned for BILLING and PLANNER) and operation reader 7. The PostgreSQL proof runs in shard 5. The train pins its immediate predecessor.
 
 | General block | Equipment safety | Print production | School administration |
 | --- | --- | --- | --- |

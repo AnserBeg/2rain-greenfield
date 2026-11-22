@@ -16,6 +16,66 @@ import {
 // Update to the actual immediately preceding serving tip when the train is integrated.
 const preceding = '37bfd47311c58060000cebca49d5f55174e3874a';
 
+// Names what differs when a persisted release root disagrees with the
+// archived compile: the normalized-definition paths and the artifacts held by
+// only one side, so a CI red says which bytes changed.
+function releaseDifference(
+  row: { definition: Buffer; artifacts: Record<string, string> },
+  archived: SerializedRelease,
+): string {
+  const parse = (bytes: Buffer): unknown => {
+    try {
+      return JSON.parse(bytes.toString('utf8')) as unknown;
+    } catch {
+      return bytes.toString('base64');
+    }
+  };
+  const paths: string[] = [];
+  const walk = (left: unknown, right: unknown, at: string) => {
+    if (paths.length >= 25) return;
+    if (JSON.stringify(left) === JSON.stringify(right)) return;
+    if (
+      left &&
+      right &&
+      typeof left === 'object' &&
+      typeof right === 'object'
+    ) {
+      const l = left as Record<string, unknown>,
+        r = right as Record<string, unknown>;
+      for (const key of new Set([...Object.keys(l), ...Object.keys(r)]))
+        walk(l[key], r[key], at + '/' + key);
+      return;
+    }
+    paths.push(
+      at +
+        ': ' +
+        JSON.stringify(left)?.slice(0, 160) +
+        ' != ' +
+        JSON.stringify(right)?.slice(0, 160),
+    );
+  };
+  walk(
+    parse(row.definition),
+    parse(Buffer.from(archived.normalizedDefinitionBytesBase64, 'base64')),
+    '',
+  );
+  const persisted = new Set(Object.keys(row.artifacts));
+  const expected = new Set(
+    archived.artifacts.map((a) => String(a.contentHash)),
+  );
+  const only = (a: Set<string>, b: Set<string>) =>
+    [...a].filter((h) => !b.has(h)).length;
+  return JSON.stringify({
+    definitionPaths: paths,
+    artifactsOnlyPersisted: only(persisted, expected),
+    artifactsOnlyArchived: only(expected, persisted),
+    archivedKinds: archived.artifacts
+      .filter((a) => !persisted.has(String(a.contentHash)))
+      .map((a) => String((a as { artifactKind?: unknown }).artifactKind))
+      .slice(0, 10),
+  });
+}
+
 async function assertPersisted(
   pool: pg.Pool,
   releaseId: string,
@@ -40,7 +100,11 @@ async function assertPersisted(
     [releaseId],
   );
   assert.ok(row);
-  assert.equal(row.root, archived.releaseRoot);
+  assert.equal(
+    row.root,
+    archived.releaseRoot,
+    row.root === archived.releaseRoot ? '' : releaseDifference(row, archived),
+  );
   assert.equal(
     row.definition.toString('base64'),
     archived.normalizedDefinitionBytesBase64,
