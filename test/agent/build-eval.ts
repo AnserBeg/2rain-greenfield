@@ -12,6 +12,7 @@
  * it. Behaviour is scored separately against the case's hand-written
  * expectation (`build-eval-cases.ts`), never against the model's own words.
  */
+import { billingPlansIn } from '../../packages/postgres-provider/src/billing-quote.js';
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 
@@ -1249,6 +1250,52 @@ export async function runBuildCase(
       result.behaviour = ok;
       if (!ok)
         result.reasons.push('the validation rule is not the requested one');
+    }
+    if (expect.outcome === 'ratePlan' && result.activated) {
+      const plans = await world.runtime.entry.run(MANAGER, (view) =>
+        Promise.resolve(billingPlansIn(view.projections.surface.payload)),
+      );
+      const matches = plans.filter((p) => {
+        const component = p.components[0];
+        if (
+          p.bindings ||
+          p.currency !== 'CAD' ||
+          p.components.length !== 1 ||
+          component?.taxClassification !== 'untaxed' ||
+          component.kind !== expect.kind
+        )
+          return false;
+        if (component.kind === 'time')
+          return (
+            p.schedule.kind === 'calendarMonth' &&
+            p.schedule.boundaryMinutes === 0 &&
+            p.pricingWindow === 'fourWeek' &&
+            !!component.cap &&
+            Object.keys(component.rates).sort().join(',') === 'day,month,week'
+          );
+        if (p.schedule.kind !== 'anniversary' || p.schedule.months !== 1)
+          return false;
+        if (component.kind === 'meter')
+          return (
+            /^cop(?:y|ies)$/iu.test(component.unit) &&
+            component.allowanceBasis.kind === 'perCycle'
+          );
+        return (
+          component.occurrence.kind === 'recurring' &&
+          component.occurrence.cadence.kind === 'anniversary' &&
+          component.occurrence.cadence.months === 1 &&
+          component.occurrence.feeProration === 'activeCoverage'
+        );
+      });
+      result.e2e = matches.length === 1;
+      result.behaviour =
+        result.e2e &&
+        result.kinds.length === 1 &&
+        result.kinds[0] === 'addRatePlanVersion';
+      if (!result.behaviour)
+        result.reasons.push(
+          'The activated rate structure does not match the requested service.',
+        );
     }
     if (expect.outcome === 'board') {
       if (result.activated) {

@@ -1,3 +1,7 @@
+import type {
+  BillingPlan,
+  BillingSchedule,
+} from '../../canonical-model/src/billing.js';
 import type { PopupRevision } from '../../canonical-model/src/popup-actions.js';
 import {
   baseLayout,
@@ -49,6 +53,7 @@ export interface DiffDefinition extends LayoutDefinition {
     readonly categoryId: string;
     readonly label: string;
   }[];
+  readonly billingPlans?: readonly BillingPlan[];
   readonly entities: readonly Json[];
   readonly fields: readonly Json[];
   readonly operations?: readonly Json[];
@@ -107,6 +112,58 @@ export function renderReleaseDiff(input: {
         ?.label ?? entityId,
     );
   const lines: string[] = [];
+  const sameVersion = (a: BillingPlan, b: BillingPlan) =>
+    a.id === b.id && a.version === b.version;
+  for (const plan of to.billingPlans ?? []) {
+    if (from.billingPlans?.some((p) => sameVersion(p, plan))) continue;
+    lines.push(
+      `Adds rate plan “${plan.id}” version ${plan.version}, in ${plan.currency} per ${plan.serviceUnit}. Reviews arrears ${billingScheduleText(plan.schedule)}.`,
+    );
+    for (const c of plan.components) {
+      let terms: string;
+      if (c.kind === 'time') {
+        const offers = Object.entries(c.rates)
+          .map(([period, slot]) => `${period} at “${slot}”`)
+          .join(', ');
+        terms =
+          `Best price across ${offers} in each ${plan.pricingWindow} window. Tail policy ${c.partialTime}.` +
+          (c.cap ? ` Cap at “${c.cap}”.` : '') +
+          (c.minimumMoney
+            ? ` Minimum “${c.minimumMoney}” ${c.minimumScope}.`
+            : '') +
+          (c.minimumDuration
+            ? ` Minimum duration ${c.minimumDuration.count} ${c.minimumDuration.period} ${c.minimumScope}.`
+            : '');
+      } else if (c.kind === 'fixed') {
+        const fee = c.occurrence;
+        terms =
+          fee.kind === 'oneOff'
+            ? `One charge from “${c.amount}” at ${fee.at}.`
+            : `Charge “${c.amount}” ${billingScheduleText(fee.cadence)}. Proration ${fee.feeProration}, pause policy ${fee.fixedFeeDuringPause}.`;
+      } else {
+        const basis = c.allowanceBasis;
+        const allowance =
+          basis.kind === 'perBilledPeriod'
+            ? Object.entries(basis.quantities)
+                .map(([period, slot]) => `${period} uses “${slot}”`)
+                .join(', ') + ` for ${basis.timeComponent}`
+            : basis.quantity;
+        terms = `Stream “${c.streamId}” in ${c.unit} with allowance “${allowance}” ${basis.kind} and overage rate “${c.overageRate}”. Allowance proration ${c.allowanceProration}.`;
+      }
+      lines.push(
+        `Component “${c.id}”. ${terms} Tax classification “${c.taxClassification}”.`,
+      );
+    }
+    for (const slot of plan.slots)
+      lines.push(
+        `Publish “${slot.id}” in ${slot.kind === 'money' ? slot.currency : slot.unit} with up to ${slot.scale} decimal places.`,
+      );
+  }
+  for (const plan of from.billingPlans ?? [])
+    if (!to.billingPlans?.some((p) => sameVersion(p, plan)))
+      lines.push(
+        `Removes rate plan “${plan.id}” version ${plan.version} from this release.`,
+      );
   const activeTemplates = (definition: DiffDefinition) =>
     new Map(
       (definition.documentTemplatePointers ?? []).flatMap(
@@ -691,4 +748,17 @@ function humanKind(kind: string): string {
   return kind
     .replace(/Definition$/u, '')
     .replace(/[A-Z]/gu, (c) => ` ${c.toLowerCase()}`);
+}
+
+function billingScheduleText(schedule: BillingSchedule): string {
+  switch (schedule.kind) {
+    case 'onServiceEnd':
+      return 'at service end';
+    case 'anniversary':
+      return `every ${schedule.months} month(s) from the original anniversary`;
+    case 'fixedDays':
+      return `every ${schedule.days} local day(s)`;
+    case 'calendarMonth':
+      return `at ${String(Math.floor(schedule.boundaryMinutes / 60)).padStart(2, '0')}:${String(schedule.boundaryMinutes % 60).padStart(2, '0')} on the first local day of the month`;
+  }
 }

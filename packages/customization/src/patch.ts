@@ -1,3 +1,4 @@
+import { BillingPlanSchema } from '../../canonical-model/src/billing.js';
 import { PopupRevisionSchema } from '../../canonical-model/src/popup-actions.js';
 import { BoardViewRevisionSchema } from './board-revision.js';
 import { LayoutRevisionSchema } from './layout-revision.js';
@@ -212,7 +213,17 @@ export const AddDateTimeFieldSchema = z.strictObject({
   zoneSource: DateTimeZoneSourceSchema,
 });
 
+// Price publication and source attachment have separate authority. This
+// authored member carries structural choices only.
+const { bindings: _sourceBindings, ...rateStructure } = BillingPlanSchema.shape;
+const addRatePlanVersion = z.strictObject({
+  kind: z.literal('addRatePlanVersion'),
+  schemaVersion: z.literal('v6'),
+  ratePlan: z.strictObject(rateStructure).pipe(BillingPlanSchema),
+});
+
 const ChangeMemberSchema = z.discriminatedUnion('kind', [
+  addRatePlanVersion,
   AddDateTimeFieldSchema,
   z.strictObject({
     kind: z.literal('addAddressField'),
@@ -364,6 +375,7 @@ export type CustomizationPatch =
   SingleCustomizationPatch | z.infer<typeof changeSet>;
 export type CustomizationPatchKind = CustomizationPatch['kind'];
 export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
+  'addRatePlanVersion',
   'addDateTimeField',
   'addAddressField',
   'addMapPlacement',

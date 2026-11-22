@@ -3219,6 +3219,8 @@ const PATCH_SELECT = `SELECT patch.compiler_acknowledgement, patch.base_release_
 
 function patchDisplayLabel(patch: CustomizationPatch): string | null {
   if (patch.kind === 'addPopupActionRevision') return patch.label.text;
+  if (patch.kind === 'addRatePlanVersion')
+    return `${patch.ratePlan.id} (${patch.ratePlan.version})`;
   switch (patch.kind) {
     case 'addField':
       return patch.field.label;

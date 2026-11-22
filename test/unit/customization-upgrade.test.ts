@@ -189,6 +189,33 @@ const changeSet = (...patches: unknown[]) => ({ kind: 'changeSet', patches });
 const item = id('entity.item');
 const itemList = id('surface.item_list');
 const itemSku = id('field.item_sku');
+const feePlan = {
+  kind: 'addRatePlanVersion',
+  schemaVersion: 'v6',
+  ratePlan: {
+    schemaVersion: 'v6',
+    id: 'service-fee',
+    version: '1',
+    currency: 'CAD',
+    serviceUnit: 'service',
+    schedule: { kind: 'anniversary', months: 1 },
+    slots: [{ id: 'fee', kind: 'money', currency: 'CAD', scale: 2 }],
+    components: [
+      {
+        kind: 'fixed',
+        id: 'retainer',
+        base: 'enrollment',
+        stage: 'afterCapBeforeTax',
+        amount: 'fee',
+        taxClassification: 'untaxed',
+        occurrence: {
+          kind: 'recurring',
+          cadence: { kind: 'anniversary', months: 1 },
+        },
+      },
+    ],
+  },
+};
 const itemFiles = {
   ...files,
   entityId: item,
@@ -294,6 +321,9 @@ const cases = {
       (target.modules as Base[])[0]!.label = 'Equipment';
     },
   ),
+  addRatePlanVersion: collision(feePlan, feePlan.ratePlan.id, (target) => {
+    target.billingPlans = [{ ...feePlan.ratePlan, serviceUnit: 'different' }];
+  }),
   addField: itemRetired({ ...field, entity: item }),
   addChoice: collision(
     changeSet(record, {

@@ -251,6 +251,20 @@ export function applyOne(
       ];
       return null;
     }
+    case 'addRatePlanVersion': {
+      const plans =
+        authored.billingPlans === undefined
+          ? []
+          : list(authored, 'billingPlans');
+      const plan = patch.ratePlan;
+      if (plans.some((p) => p.id === plan.id && p.version === plan.version))
+        return refusal(
+          'CUSTOMIZE_DUPLICATE_LABEL',
+          `Rate plan ${plan.id} version ${plan.version} already exists.`,
+        );
+      authored.billingPlans = [...plans, plan];
+      return null;
+    }
     case 'addRecordType':
       return addRecordType(authored, patch);
     case 'addField':

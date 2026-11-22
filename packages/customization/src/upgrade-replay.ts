@@ -270,6 +270,13 @@ function applyRefusal(
   outcome: NonNullable<ReturnType<typeof applyOne>>,
 ): ReplayConflict {
   const ids = declarations(target);
+  if (patch.kind === 'addRatePlanVersion')
+    return {
+      code: 'ID_COLLISION',
+      subject: patch.ratePlan.id,
+      expected: { id: patch.ratePlan.id, version: patch.ratePlan.version },
+      observed: outcome.message,
+    };
   if (patch.kind === 'arrangeLayout' && !ids.has(patch.surface))
     return {
       code: 'RETIRED_TARGET',
