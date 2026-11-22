@@ -38,15 +38,22 @@ At `eda6d12f`, the regression tests caught direct grants, the notes binding, the
 - A reader compares every Booking owner and cursor in one fence call. Pending meter readings identify the missing fields. A company-scoped buyer can review its own record. A correct record and company ID from a different company are refused.
 - Customize can draft a structural rate-plan version and replay it on upgrade. The schema-generated drafter registry and its equipment, subscription and contract eval cases keep prices and live bindings under the existing governed operations.
 - General blocks are civil-time schedules, interval and meter evidence, scoped release queries, exact-fraction rating and versioned plan declarations. Equipment hire, copy subscriptions and recurring service contracts exercise them.
-- The unchanged bound release has identical serialized bytes at reader 41. Its archived serving process answers an item query and refuses the new binding at provisional surface rung 42. The stored release rows and artifact bytes survive both probes.
+- The unchanged bound release has identical serialized bytes at reader 41. Its archived serving process answers an item query and refuses the new binding at surface rung 45 (first recorded as 42; renumbered after REPORTS-1 took 42-44). The stored release rows and artifact bytes survive both probes.
 - Negative controls caught early cycles, excess coverage, foreign owners, cursor drift, mixed quantities, dropped pauses, a decreasing meter, mismatched units and duplicate owners.
 - The first slice 2 packet run failed declaration emit at the exported arrears result. Billing now exports its quote-line type.
-- The next run failed the language coverage check. The optional `arrearsSource` binding adds five ledger obligations: its presence, its absence and the `agreedInterval`, `periodMeter` and `bookingActuals` kinds. No first-party coverage package declares a billing plan, so all five are recorded under the unused-shape exemption. The two observed-set decisions are re-recorded unchanged against the new ledger. A new billing-terms test compiles each kind at reader 42 with calculation v3 and keeps an unsourced plan at reader 41 with v2. It also refuses a meter on an agreed-interval source and an unknown kind such as advance. Before this test, `agreedInterval` had no test.
+- The next run failed the language coverage check. The optional `arrearsSource` binding adds five ledger obligations: its presence, its absence and the `agreedInterval`, `periodMeter` and `bookingActuals` kinds. No first-party coverage package declares a billing plan, so all five are recorded under the unused-shape exemption. The two observed-set decisions are re-recorded unchanged against the new ledger. A new billing-terms test compiles each kind at the arrears reader (now 45) with calculation v3 and keeps an unsourced plan at reader 41 with v2. It also refuses a meter on an agreed-interval source and an unknown kind such as advance. Before this test, `agreedInterval` had no test.
 - This review creates no invoice, allocation or accounting entry. Enrollment, cutover carry, archive protection for unbilled use, quote-digest allocation, human issue and void/reissue belong to the atomic Receivables v2 writer. Advance awaits an admitted credit or refund path.
 
 ## Slice 2 checkpoint · fix round (Fable review REVISE, 2026-11-22)
 
-- **Merged main 5710c05a.** The four conflicts, in canonical-model `billing.ts`, `release-repository.ts`, `request-runtime-view.ts` and its test, repeated main's 72e4988d. The packet side contains main's version plus rung 42 in each, so it was kept. Rung 42 stays provisional for the integrator.
+- **Merged main 5710c05a.** The four conflicts, in canonical-model `billing.ts`, `release-repository.ts`, `request-runtime-view.ts` and its test, repeated main's 72e4988d. The packet side contains main's version plus rung 42 in each, so it was kept.
+- **Merged main 37bfd473 (TRAIN-H).**
+  - REPORTS-1 holds surface rungs 42 to 44, so the arrears reader is now 45.
+  - The runtime ceiling and the capability comparison test list main's three floors, then 45.
+  - `patch.ts` and `render.ts` keep both the Billing and the Report imports.
+  - The coverage decisions start from main's records and add the arrears-source note against the merged ledger.
+  - The older-reader proofs now pin the preceding serving binary to main 37bfd473. It answers an item query on the unchanged bound release, and refuses the arrears release by name: "requires version 45 and this runtime supports 44".
+  - After CI-6, shard 8 runs agent-tasks, billing-terms and board-policy, so billing-terms stays there.
 - **Finding 1, Booking precision.** Booking stamps its clock in microseconds. The adapter now truncates every Booking instant to the millisecond instead of refusing it. Truncation preserves order, and a sub-millisecond span becomes empty and is accepted. ADR-0083 states the rule under calculation v3.
 - **Finding 2, possession past the agreed end (owner ruling).** Under `bookingActuals`, billing follows actual possession. Possession is read through the review instant. A live leg keeps the service open, and the final cycle ends at the recorded return. An agreed five-day hire returned on day nine at CAD 30 a day reviews CAD 270.00. Before this fix it reviewed CAD 150.00.
 - **Rule 16.** The compiler no longer requires the customer and currency field IDs to end in `_customer_party_id` and `_currency`. Each role the plan declares must be a required text field selected on the billed entity. The two roles need different fields, and the currency field holds exactly three characters. A second business with differently named fields binds. Optional notes still cannot carry either role.
@@ -64,10 +71,11 @@ At `eda6d12f`, the regression tests caught direct grants, the notes binding, the
   - `billing-role-currency-code`
   - `billing-role-distinct`
 - **New refusal.** Reading possession through the review instant can return a second booking for the same owner in the slot. That review is refused, since it needs exactly one tracked booking.
-- **Open for the owner.** The ruling does not cover an early return. A return before the agreed end keeps the agreed end, as before.
+- **Early return.** A return before the agreed end keeps the agreed end, as before. The orchestrator ruled on 2026-11-22 that this is a general plan choice, not one fixed rule. It is next-slice task 1.
 
 ### First tasks of the next billing slice (ride-alongs from the fix round)
 
+1. Early return as a declared plan option. Each plan chooses "bill to agreed end" or "bill to actual return", with an optional minimum term, because rentals, storage and subscriptions differ. Today every plan bills to the agreed end.
 1. Finding 3: give each of these 17 checks a test that fails without it.
    - `packages/customization/src/patch.ts`: bindings are kept out of the tenant member. Use a negative with a fully valid bindings object.
    - `packages/compiler/src/billing.ts`, six checks:
@@ -95,6 +103,7 @@ At `eda6d12f`, the regression tests caught direct grants, the notes binding, the
    - Record live results for B01 to B03.
    - Make the B-case meter eval use the reading field's canonical unit ID instead of the free-text unit "copy".
 3. Rule 16 follow-up seen in this round: the quote query's permission must still be named `<namespace>:permission.billing_quote` (`packages/compiler/src/billing.ts`). Replace the name with a declared binding.
+4. A second booking for the same owner in the slot inside the review window refuses the review. Decide how several bookings in one slot are billed: in turn, or as separate services.
 
 ## Test it yourself
 
@@ -107,8 +116,8 @@ Run `node --import tsx --test --test-name-pattern='agreed-interval contract revi
 {
   "schemaVersion":"northstar.record-claim/v1",
   "packet":"BILLING-1",
-  "base":"5710c05ae2529b742bf15f8f484c75c0b3930180",
-  "head":"cdfbcb6c74edd916527e4e0753abb82e4fc64731",
+  "base":"37bfd47311c58060000cebca49d5f55174e3874a",
+  "head":"9376d8f117c53bc1ac2328670d915632107444ba",
   "changedPaths":["docs/decisions/ADR-0083-period-and-usage-billing.md","docs/execution/packets/BILLING-1.md","packages/canonical-model/src/billing-evidence.ts","packages/canonical-model/src/billing.ts","packages/compiler/src/billing.ts","packages/compiler/src/projections.ts","packages/customization/src/ai-draft-kinds.ts","packages/customization/src/apply.ts","packages/customization/src/patch.ts","packages/customization/src/render.ts","packages/customization/src/upgrade-diagnostics.ts","packages/customization/src/upgrade-replay.ts","packages/domain/src/billing/arrears.ts","packages/domain/src/billing/quote.ts","packages/postgres-provider/src/billing-booking-usage.ts","packages/postgres-provider/src/billing-quote.ts","packages/postgres-provider/src/customization-service.ts","packages/postgres-provider/src/release-repository.ts","packages/runtime/src/request-runtime-view.ts","test/agent/build-bakeoff-run.ts","test/agent/build-eval-cases.ts","test/agent/build-eval.ts","test/architecture/repository-hygiene.test.ts","test/evidence/BILLING-1.expected-red.json","test/fixtures/g2/language-conformance/coverage-decisions.json","test/helpers/archived-billing-probes.ts","test/integration/billing-booking-possession.test.ts","test/integration/billing-quote.test.ts","test/postgres/billing-terms.test.ts","test/postgres/booking-commitments.test.ts","test/postgres/request-runtime-view.test.ts","test/unit/customization-ai-draft-slice2.test.ts","test/unit/customization-upgrade.test.ts"],
   "symbols":[{"path":"packages/domain/src/billing/arrears.ts","name":"reviewArrearsCharges"},{"path":"packages/postgres-provider/src/billing-booking-usage.ts","name":"fenceBillingBookingOwners"},{"path":"packages/postgres-provider/src/billing-booking-usage.ts","name":"bookingPossessionServiceEnd"},{"path":"packages/postgres-provider/src/billing-booking-usage.ts","name":"truncateBookingInstant"},{"path":"packages/postgres-provider/src/billing-quote.ts","name":"billingQuoteReadModel"}]
 }
