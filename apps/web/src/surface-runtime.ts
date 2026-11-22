@@ -1,3 +1,5 @@
+import { templateLibraryPanel } from './record-template-library.js';
+import type { RecordTemplateLibrary } from '../../../packages/runtime/src/record-template-library.js';
 import {
   AddressProjectionSchema,
   SavedAddressSchema,
@@ -203,6 +205,13 @@ export interface SurfaceRuntimeResponse {
 
 export interface SurfaceRuntimeGateways {
   readonly applicationExtension?: SurfaceRuntimeApplicationExtension;
+  readonly draftRecordTemplate?: (
+    binding: import('@north-star/canonical-model').RecordTemplateBinding,
+    request: string,
+  ) => Promise<
+    import('../../../packages/canonical-model/src/record-template-content.js').RecordTemplateContent
+  >;
+  readonly recordTemplates?: RecordTemplateLibrary;
   readonly addresses?: AddressGateway;
   readonly documents?: DocumentGateway;
   /**
@@ -469,6 +478,19 @@ async function renderSurfaceRuntimeWithDataInContext(
     );
   }
   if (
+    url.searchParams.has('templates') &&
+    selection.selected.recordTemplateBinding &&
+    legalEntitySelection.length === 1
+  ) {
+    return renderRecordTemplates(
+      view,
+      selection,
+      gateways,
+      legalEntitySelection[0]!,
+      workspaceContext,
+    );
+  }
+  if (
     selection.selected.documentEditor &&
     selection.selected.surfaceRole === 'form' &&
     legalEntitySelection.length ===
@@ -493,7 +515,19 @@ async function renderSurfaceRuntimeWithDataInContext(
     // then is the page's to retry or refuse, never an editor diagnostic
     // (SPEED-1 S7).
     if (editor) {
-      const slots = editor.slots;
+      const libraryUrl = new URL(url);
+      libraryUrl.searchParams.set('templates', '');
+      const slots =
+        editor.slots && selection.selected.recordTemplateBinding
+          ? {
+              ...editor.slots,
+              commandBar:
+                editor.slots.commandBar +
+                '<a href="' +
+                escapeHtml(libraryUrl.pathname + libraryUrl.search) +
+                '">Templates</a>',
+            }
+          : editor.slots;
       const record = editor.record;
       const statusCode = editor.statusCode;
       return slots
@@ -1506,6 +1540,22 @@ async function submitSurfaceRuntimeIntentInContext(
       new URL(requestUrl, 'http://surface-runtime.local'),
     ),
   );
+  if (submission.templateAction) {
+    const scope = legalEntitySelectionForSurface(
+      binding,
+      new URL(requestUrl, 'http://surface-runtime.local'),
+    );
+    if (scope.length !== 1 || !selection.selected.recordTemplateBinding)
+      return operationDiagnostic('OPERATION_UNSUPPORTED', 422);
+    return renderRecordTemplates(
+      view,
+      selection,
+      gateways,
+      scope[0]!,
+      null,
+      submission,
+    );
+  }
   if (selection.selected.composition && submission.compositionAction) {
     const workspaceContext = await loadWorkspaceContextBar(
       view,
@@ -1902,6 +1952,47 @@ async function submitSurfaceRuntimeIntentInContext(
   );
 }
 
+async function renderRecordTemplates(
+  view: RuntimeViewContract.RequestRuntimeView,
+  selection: SelectedSurface,
+  gateways: SurfaceRuntimeGateways,
+  company: string,
+  context: WorkspaceContextBar | null,
+  form?: SurfaceRuntimeSubmission,
+): Promise<SurfaceRuntimeResponse> {
+  const binding = selection.selected.recordTemplateBinding;
+  if (!binding || !gateways.recordTemplates)
+    return operationDiagnostic('OPERATION_UNSUPPORTED', 422);
+  try {
+    const labels = new Map(
+      selection.selected.documentEditor?.lineFields.map((f) => [
+        f.fieldId,
+        f.label,
+      ]),
+    );
+    const sections = await templateLibraryPanel(
+      view,
+      gateways.recordTemplates,
+      { form: binding.body.formId, company },
+      binding,
+      labels,
+      form,
+      gateways.draftRecordTemplate,
+    );
+    return renderSelectedSurface(
+      view,
+      selection,
+      { status: 'READY', records: [], documentEditorSlots: { sections } },
+      null,
+      [],
+      200,
+      [company],
+      context,
+    );
+  } catch {
+    return operationDiagnostic('OPERATION_INPUT_INVALID', 422);
+  }
+}
 function renderSelectedSurface(
   view: RuntimeViewContract.RequestRuntimeView,
   { navigation, selected, surfaces }: SelectedSurface,

@@ -1,3 +1,7 @@
+import {
+  PostgresRecordTemplateLibrary,
+  templatePermissionBindings,
+} from './record-template-library.js';
 import { BOOKING_USAGE_CAPABILITY } from '@north-star/canonical-model';
 import { bookingOwnerUsageReadModel } from './booking-owner-usage.js';
 import { PostgresAddresses } from './address-geocodes.js';
@@ -280,6 +284,7 @@ export function composeServingGateways(
     queryGateway,
     operationMediation,
     addresses,
+    recordTemplates: new PostgresRecordTemplateLibrary(runtimePool),
     documents,
   };
 }
@@ -680,6 +685,7 @@ export function releasePolicyBindings(
   const definition = parseNormalizedApplicationPackageJson(definitionBytes);
   return [
     ...currentPolicyBindingsFromPermissions(definition.permissions),
+    ...templatePermissionBindings(definition.surfaces),
     ...(documents ? documentPermissionBindings(definition.entities) : []),
   ];
 }

@@ -1,4 +1,8 @@
 import {
+  RecordTemplateBindingSchema,
+  type RecordTemplateBinding,
+} from '@north-star/canonical-model';
+import {
   SurfaceLayoutSchema,
   type SurfaceLayout,
 } from '../../../packages/canonical-model/src/layout.js';
@@ -312,6 +316,7 @@ export function formFieldIds(
 }
 
 export interface CompiledSurfaceDefinition {
+  readonly recordTemplateBinding?: RecordTemplateBinding;
   readonly board?: SurfaceBoard;
   /** The Board's labels and roles, compiled from this release beside `board`. */
   readonly boardPresentation?: BoardPresentation;
@@ -1139,6 +1144,13 @@ function parseSurface(
   const fields = parseSurfaceFields(value, index);
 
   return Object.freeze({
+    ...(value.recordTemplateBinding === undefined
+      ? {}
+      : {
+          recordTemplateBinding: RecordTemplateBindingSchema.parse(
+            value.recordTemplateBinding,
+          ),
+        }),
     ...(archetype === 'board'
       ? {
           board: SurfaceBoardSchema.parse(value.board),

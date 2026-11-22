@@ -526,6 +526,28 @@ export class PostgresModuleRuntimeInterpreter
           currentEntity,
           parsedInput,
         );
+        const manifest = request.view.projections.surface.payload as {
+          surfaces?: readonly {
+            recordTemplateBinding?: {
+              status: string;
+              body: { entityId: string };
+            };
+          }[];
+        };
+        if (
+          request.definition.effect.kind === 'createRecordEffect' &&
+          manifest.surfaces?.some(
+            (s) =>
+              s.recordTemplateBinding?.status === 'active' &&
+              s.recordTemplateBinding.body.entityId === currentEntity.entityId,
+          )
+        ) {
+          throw failure(
+            'MODULE_SEMANTIC_CONTRACT_UNSUPPORTED',
+            'Creation from this record template requires atomic application.',
+            request.definition.operationId,
+          );
+        }
         const disagreement = dateTimeStorageDisagreement(
           request.view.projections.operation.payload,
           currentStorage,
