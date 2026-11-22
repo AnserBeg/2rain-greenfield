@@ -12,7 +12,11 @@ import {
   readUnboundPermissionAcknowledgementFor,
   type UnboundPermissionAcknowledgementInput,
 } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
-import { parseAuthoredApplicationPackageJson } from '../../packages/canonical-model/src/index.js';
+import {
+  parseAuthoredApplicationPackageJson,
+  parseNormalizedApplicationPackageJson,
+} from '../../packages/canonical-model/src/index.js';
+import { billingBindingProblem } from '../../packages/compiler/src/billing.js';
 import {
   BillingPlanSchema,
   BILLING_ALLOCATION_READER,
@@ -486,6 +490,33 @@ function release(mode: FixtureMode = 'bound', base?: BillingFixtureBase) {
     ],
   };
 }
+test('period meter bindings require distinct selected boundaries, canonical units and a single stream', () => {
+  const { bytes } = billingFixture('arrears');
+  const pkg = parseNormalizedApplicationPackageJson(bytes);
+  assert.ok(pkg.languageVersion === 'v6');
+  const rate = pkg.billingPlans![0]!;
+  const bindings = rate.bindings!;
+  const meter = bindings.arrearsSource;
+  assert.ok(meter?.kind === 'periodMeter');
+  assert.equal(billingBindingProblem(pkg), undefined);
+  for (const wrong of [
+    { openingReadingFieldId: meter.closingReadingFieldId },
+    { closingReadingFieldId: notesField },
+    { closingInstantFieldId: proposalField },
+    { unit: 'other' },
+    { streamId: 'other' },
+  ]) {
+    const declared = {
+      ...rate,
+      bindings: { ...bindings, arrearsSource: { ...meter, ...wrong } },
+    };
+    assert.equal(
+      billingBindingProblem({ ...pkg, billingPlans: [declared] }),
+      'BILLING_METER_SOURCE_REQUIRED',
+    );
+  }
+});
+
 test('a released tracked slot and its scoped usage query must agree with the billing plan', () => {
   assert.ok(release('booking'));
   release('wrongSlot');
