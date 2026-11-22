@@ -59,9 +59,9 @@ The quick run below covers the original ADR at `33c665d62214545c5fa01146c956e57a
 
 CI tier: quick https://github.com/AnserBeg/2rain-greenfield/actions/runs/44956138996
 
-## Slice 1 build checkpoint · 2026-11-21
+## Slice 1 build checkpoint · 2026-11-22
 
-The build branch is `packet/TEMPLATE-1-s1`. The provisional allocations against main at `352e43b7e` are migration 0067, Surface reader 40 and operation reader 7. The train must check these allocations and pin its immediate predecessor.
+The build branch is `packet/TEMPLATE-1-s1`, merged with main at `5710c05a`. The provisional allocations are migration 0069, Surface reader 42 and operation reader 7. The train renumbers them past REPORTS and pins its immediate predecessor.
 
 | General block | Equipment safety | Print production | School administration |
 | --- | --- | --- | --- |
@@ -71,8 +71,8 @@ The build branch is `packet/TEMPLATE-1-s1`. The provisional allocations against 
 
 The PostgreSQL test exercises all three definitions in one tenant and uses two companies. It includes source-read revocation, field and value restrictions, competing publications, an existing revision in the other company, first assignment and retirement in each lock order. On an isolated fixture with a declaring release already selected, the stored functions passed the source and audience checks, known-ID company denials, competing publications and both lock orders. Removing the audience check, exact source-cell comparison, released choice-meaning check or either stored-company filter failed its corresponding assertion. All three businesses published and assigned revisions through Customize and the library on a disposable build with the create guard disabled.
 
-The preceding binary reproduced the persisted normalized definitions, artifact bytes and roots for the first-party and tenant-authored releases and returned the known inspection from the compatible get query. On a disposable declaring release the same binary refused cold boot and a query after the pointer move before parsing any stored definition or projection payload. Removing the create guard in that fixture failed the unprepared-create assertion. Original-tree activation stopped during semantic verification. Its fixture needs to create a header, and the candidate’s atomic-application guard refuses an unprepared create. A7’s fleet-wide deployment check after rollback depends on ADR-0085 and UPGRADE-2 slice 5. Packet full pending.
+The preceding binary `5710c05a` must reproduce the persisted normalized definitions, artifact bytes and roots and return the known inspection from the compatible get query. On a declaring release it must refuse cold boot and a query after the pointer move by name before parsing any payload. Creation is atomic in this slice: an active binding refuses an unprepared create, and release verification creates its sample through the independent verifier probe. An A-only worker reads the first company’s application but is refused the second company’s application and preview for the same parent. UPGRADE-2 slice 5 owns the fleet deployment check after rollback.
 
-**Rule 12 exception · 2026-11-21 · TEMPLATE-1 / AI-BUILD-1.** The frozen main snapshot predates the AI-BUILD-1 eval registry. Its live binding/content case remains with AI-BUILD-1. This branch supplies schema-generated in-app drafting, a scripted comparison with the visual binding and an editable content proposal.
+**Rule 12.** The drafter covers `addRecordTemplateBindingRevision` from its schema. Dated AI-BUILD-1 cases R01–R03 (inspection checklist, print job grid, enrolment contact roles) live in `test/agent/build-eval-cases.ts`. Their scorer accepts a scripted correct draft and refuses a wrong requirement or context.
 
-**Test it yourself** (about two minutes on a prepared checkout). Run `node --import tsx --test --test-name-pattern='record template bindings reproduce|Customize tool admits|upgrade replay admission|upgrade replay of addRecordTemplateBindingRevision' test/unit/customization-upgrade.test.ts`. Expect four passing tests. Removing the binding replay entry or its generated drafter schema fails the corresponding inventory test.
+**Test it yourself** (about two minutes on a prepared checkout). Run `node --import tsx --test --test-name-pattern='record template bindings reproduce|Customize tool admits|upgrade replay admission|upgrade replay of addRecordTemplateBindingRevision|record template eval cases' test/unit/customization-upgrade.test.ts`. Expect five passing tests. Removing the binding replay entry or its generated drafter schema fails the corresponding inventory test.
