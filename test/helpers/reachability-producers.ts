@@ -135,6 +135,7 @@ export const reachabilityProducers = [
   ]),
   nodeProducer('postgres-6', 'postgres', 'test:postgres:6', [
     'test/postgres/customization-governed-reads.test.ts',
+    'test/postgres/declared-list.test.ts',
     'test/postgres/document-attachments.test.ts',
   ]),
   nodeProducer('postgres-7', 'postgres', 'test:postgres:7', [
@@ -148,7 +149,6 @@ export const reachabilityProducers = [
   ]),
   nodeProducer('postgres-9', 'postgres', 'test:postgres:9', [
     'test/postgres/date-time-field.test.ts',
-    'test/postgres/declared-list.test.ts',
   ]),
   nodeProducer('postgres-10', 'postgres', 'test:postgres:10', [
     'test/postgres/address-authority.test.ts',
