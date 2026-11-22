@@ -60,6 +60,7 @@ export async function exerciseTemplateLibrary(
       },
     });
     assert.equal(created.outcome, 'succeeded', JSON.stringify(created));
+    let heldReview: { reviewId: string; digest: string } | undefined;
     for (const [type, context, line, label, kind] of [
       ['Inspection', 'Class', 'Results', 'Brake holds', 'question'],
       ['Job ticket', 'Job class', 'Steps', 'Run', 'row'],
@@ -121,6 +122,13 @@ export async function exerciseTemplateLibrary(
         ],
       };
       const compatibleId = await activate(structure);
+      if (heldReview) {
+        const stale = heldReview;
+        await assert.rejects(
+          run((v) => library.publish(v, stale.reviewId, stale.digest)),
+          /template.staleRelease/u,
+        );
+      }
       const offers = (await opened.service.targets()).templateBindings!;
       const offer = offers.find((o) => o.frame.formId === form)!;
       assert.ok(offer);
@@ -367,6 +375,21 @@ export async function exerciseTemplateLibrary(
           /template.invalidChoice/u,
         );
       }
+      for (const invalid of [
+        { ...content, members: [content.members[0]!, content.members[0]!] },
+        { ...content, columns: [content.columns[0]!, content.columns[0]!] },
+        {
+          ...content,
+          columns: [
+            { fieldId: 'northstar.app:field.outside', caption: 'Outside' },
+          ],
+        },
+      ]) {
+        await assert.rejects(
+          run((v) => library.review(v, target, null, 0, invalid)),
+          /template.invalidSelection/u,
+        );
+      }
       const review = await run((v) =>
         library.review(v, target, null, 0, content),
       );
@@ -418,6 +441,51 @@ export async function exerciseTemplateLibrary(
         library.publish(v, review.reviewId, review.digest),
       );
       assert.equal(published.number, 1);
+      if (kind === 'section') {
+        const member = readable.members[0]!;
+        const first = await run((v) =>
+          library.review(v, target, null, 0, {
+            ...readable,
+            members: [member, { ...member, key: 'spare' }],
+          }),
+        );
+        const created = await run((v) =>
+          library.publish(v, first.reviewId, first.digest),
+        );
+        const drop = await run((v) =>
+          library.review(v, target, created.templateId, 1, readable),
+        );
+        await run((v) => library.publish(v, drop.reviewId, drop.digest));
+        for (const members of [
+          [member, { ...member, key: 'spare' }],
+          [{ ...member, kind: 'instruction' as const }],
+        ]) {
+          const invalid = await run((v) =>
+            library.review(v, target, created.templateId, 2, {
+              ...readable,
+              members,
+            }),
+          );
+          await assert.rejects(
+            run((v) => library.publish(v, invalid.reviewId, invalid.digest)),
+            /template.memberKeyReused/u,
+          );
+        }
+        assert.equal(
+          (await run((v) => library.history(v, target))).filter(
+            (r) => r.templateId === created.templateId,
+          ).length,
+          2,
+        );
+        await run((v) => library.retire(v, created.templateId, 2));
+      } else {
+        await assert.rejects(
+          run((v) =>
+            library.assign(v, target, 'undeclared', 0, published.revisionId),
+          ),
+          /template.invalidContext/u,
+        );
+      }
       if (selector)
         await assert.rejects(
           run((v) =>
@@ -451,6 +519,9 @@ export async function exerciseTemplateLibrary(
           );
         }
       }
+      heldReview = await run((v) =>
+        library.review(v, target, null, 0, readable),
+      );
       const copy = await run((v) =>
         library.review(v, other, null, 0, {
           ...readable,

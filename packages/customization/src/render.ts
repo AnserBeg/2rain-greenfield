@@ -153,7 +153,11 @@ export function renderReleaseDiff(input: {
               .map(
                 (c) =>
                   label(c.fieldId) +
-                  (c.copyEligible ? ' (copy permitted)' : ' (answer only)'),
+                  (c.audienceValues
+                    ? ' (allowed defaults: ' + c.audienceValues.join(', ') + ')'
+                    : c.copyEligible
+                      ? ' (copy permitted)'
+                      : ' (answer only)'),
               )
               .join(', ') +
             '.',

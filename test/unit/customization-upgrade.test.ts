@@ -530,6 +530,53 @@ test('record template bindings reproduce their authoring root and survive indepe
         reproduced.status === 'compiled' ? null : reproduced,
       ]).slice(0, 2500),
     );
+    if (state.length === 1) {
+      const proposal = await customization.draftPatchFromRequest(
+        {
+          modelId: 'template-builder-parity',
+          next: async ({ tools }) => ({
+            text: '',
+            toolCalls: [
+              {
+                id: 'binding',
+                name: tools[0]!.name,
+                input: {
+                  kind: active.kind,
+                  templateBinding: {
+                    formId: active.body.formId,
+                    contextId: null,
+                    required: true,
+                    lifecycle: 'active',
+                    fields: active.body.columns.map(
+                      ({ fieldId, copyEligible }) => ({
+                        fieldId,
+                        copyEligible,
+                      }),
+                    ),
+                  },
+                },
+              },
+            ],
+          }),
+        },
+        'Use reviewed templates for the steps in this collection.',
+        customization.customizationTargets(
+          normalizeApplicationPackage(collectionBase),
+        ),
+      );
+      assert.ok(proposal.status === 'parsed');
+      const english = await customization.compileInSandbox({
+        acknowledgement,
+        base: collectionBase,
+        chain: [proposal.patch],
+        tip: customization.serializeRelease(tip),
+      });
+      assert.ok(english.status === 'compiled');
+      assert.equal(
+        english.steps[0]!.rendered.text,
+        authored.steps[0]!.rendered.text,
+      );
+    }
     assert.equal(
       authored.steps.at(-1)!.release.releaseRoot,
       reproduced.steps.at(-1)!.release.releaseRoot,
