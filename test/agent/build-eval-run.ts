@@ -34,7 +34,11 @@ import {
 } from '../../packages/operations-agent/src/index.js';
 
 import { withAgentWorlds } from './agent-world.js';
-import { BUILD_CASES, type BuildCase } from './build-eval-cases.js';
+import {
+  BUILD_CASES,
+  RECORD_TEMPLATE_CASES,
+  type BuildCase,
+} from './build-eval-cases.js';
 import { DRAFTING_TOOL } from '../../packages/customization/src/index.js';
 
 import {
@@ -112,11 +116,14 @@ async function main(): Promise<void> {
     throw new Error('prices must be non-negative numbers');
   const wanted = args.cases?.split(',').map((id) => id.trim());
   // In the order given by --cases, so a stratified subset can finish first.
-  const cases = BUILD_CASES.filter(
-    (c) =>
-      (args.split === 'all' || c.split === args.split) &&
-      (!wanted || wanted.includes(c.id)),
-  ).sort((a, b) => (wanted ? wanted.indexOf(a.id) - wanted.indexOf(b.id) : 0));
+  // Dated sets outside the 40 run only when named by --cases.
+  const cases = [...BUILD_CASES, ...(wanted ? RECORD_TEMPLATE_CASES : [])]
+    .filter(
+      (c) =>
+        (args.split === 'all' || c.split === args.split) &&
+        (!wanted || wanted.includes(c.id)),
+    )
+    .sort((a, b) => (wanted ? wanted.indexOf(a.id) - wanted.indexOf(b.id) : 0));
   if (!cases.length) throw new Error('no cases selected');
 
   // `--replay A[,B]`: results come from A; a case's draft from the last of

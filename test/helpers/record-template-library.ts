@@ -789,6 +789,34 @@ export async function exerciseTemplateLibrary(
         run((v) => library.history(v, other, elsewhere.revisionId), 'buyer'),
         /template.unavailable/u,
       );
+      // Same principal and the known parent ID: only the stored company
+      // differs, so the company check alone refuses the second company's
+      // application, preview and create.
+      assert.equal(
+        (
+          await run(
+            (v) => library.application(v, target, header.recordId),
+            'buyer',
+          )
+        )?.assignment?.revision_id,
+        published.revisionId,
+      );
+      await assert.rejects(
+        run((v) => library.application(v, other, header.recordId), 'buyer'),
+        /template.unavailable/u,
+      );
+      const crossed = {
+        ...header,
+        recordId: randomUUID(),
+        legalEntityId: otherCompany,
+      };
+      await assert.rejects(
+        run(
+          (v) => library.prepareCreate(v, form, randomUUID(), crossed),
+          'buyer',
+        ),
+        /template\.(unavailable|applyDenied)/u,
+      );
       if (kind === 'row') {
         const updated = draftTemplateBinding(
           (await opened.service.targets()).templateBindings!,

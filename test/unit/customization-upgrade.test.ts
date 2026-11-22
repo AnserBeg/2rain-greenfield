@@ -1,4 +1,8 @@
 import { DRAFTER_EXCEPTIONS } from '../../packages/customization/src/ai-draft-kinds.js';
+import {
+  RECORD_TEMPLATE_CASES,
+  templateBindingMisses,
+} from '../agent/build-eval-cases.js';
 import { TemplateBindingChoicesSchema } from '../../packages/customization/src/record-template-binding.js';
 import {
   popupCommand,
@@ -1371,4 +1375,86 @@ test('a refused report redacts protected evidence on either side, its issue and 
   assert.ok(
     historical.report.findings.every((f) => f.subject === 'Restricted field'),
   );
+});
+
+test('the record template eval cases score a drafted binding in three businesses and fail a wrong one', async () => {
+  assert.deepEqual(
+    RECORD_TEMPLATE_CASES.map((c) => c.id),
+    ['R01', 'R02', 'R03'],
+  );
+  const local = (v: string) => v.slice(v.indexOf('.', v.indexOf(':')) + 1);
+  for (const c of RECORD_TEMPLATE_CASES) {
+    const expect = c.expect;
+    assert.ok(expect.outcome === 'templateBinding');
+    const source = applied(base, [...(c.base ?? [])]);
+    const before = customization.customizationTargets(
+      normalizeApplicationPackage(source),
+    );
+    const offer = before.templateBindings!.find((o) =>
+      local(o.frame.formId).startsWith(expect.form),
+    );
+    assert.ok(offer, c.id + ' offers its collection');
+    const selector = offer.contexts.find(
+      ({ selector: s }) =>
+        (s.kind === 'choice'
+          ? local(s.fieldId)
+          : s.kind === 'link'
+            ? local(s.relationId)
+            : null) === expect.context,
+    )?.selector;
+    assert.ok(selector, c.id + ' offers its context');
+    const choices = (required: boolean, contextId: string | null) => ({
+      formId: offer.frame.formId,
+      contextId,
+      required,
+      lifecycle: 'active' as const,
+      fields: offer.columns.map((col) => ({
+        fieldId: col.fieldId,
+        copyEligible: true,
+      })),
+    });
+    const score = async (input: ReturnType<typeof choices>) => {
+      const drafted = await customization.draftPatchFromRequest(
+        {
+          modelId: 'template-eval-scripted',
+          next: async ({ tools }) => ({
+            text: '',
+            toolCalls: [
+              {
+                id: 'binding',
+                name: tools[0]!.name,
+                input: {
+                  kind: 'addRecordTemplateBindingRevision',
+                  templateBinding: input,
+                },
+              },
+            ],
+          }),
+        },
+        c.request,
+        before,
+      );
+      assert.ok(drafted.status === 'parsed', JSON.stringify(drafted));
+      const after = customization.customizationTargets(
+        normalizeApplicationPackage(applied(source, [drafted.patch])),
+      );
+      return templateBindingMisses(expect, before, after);
+    };
+    const contextId =
+      selector.kind === 'choice'
+        ? selector.fieldId
+        : selector.kind === 'link'
+          ? selector.relationId
+          : null;
+    assert.deepEqual(await score(choices(expect.required, contextId)), []);
+    assert.deepEqual(await score(choices(!expect.required, contextId)), [
+      expect.required ? 'binding is optional' : 'binding is required',
+    ]);
+    assert.deepEqual(await score(choices(expect.required, null)), [
+      `assigned by null, expected ${String(expect.context)}`,
+    ]);
+    assert.deepEqual(templateBindingMisses(expect, before, before), [
+      'no active template binding on the form',
+    ]);
+  }
 });
