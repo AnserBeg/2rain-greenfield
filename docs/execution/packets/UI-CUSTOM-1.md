@@ -51,7 +51,7 @@ Charter: `/home/rvham/2rain-missions/charters/UI-CUSTOM-1-charter.md` (slice 1 p
   - two companies in one tenant;
   - the cell and row tones follow on hand below reorder point and clear when stock rises;
   - South's low row never appears for North;
-  - the archived `37bfd473` serving binary answers a query, then refuses rung 49 by capability name.
+  - the archived `1092e14d` (preceding main) serving binary answers a query, then refuses rung 49 by capability name.
 - **Drafter** (rule 12): `DRAFTER_KINDS.addPresentationRevision` is generated from `PresentationDraftSchema`, and the coverage guard includes it. AI-BUILD-1 cases P01-P05 (list cell, list row, sizing, and unsupported "flash" and "today") are added. Live grading is pending with AI-BUILD-1.
 
 **Try it yourself.** Add a record type **Stock item** with On hand and Reorder point. Ask the assistant: "make items with on-hand below reorder point red". Approve and activate. Open the list: a row with 2 on hand and reorder point 5 shows a red **Low stock** pill. Change on hand to 12 and the pill is gone.

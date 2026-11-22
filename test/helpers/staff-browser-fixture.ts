@@ -29,6 +29,7 @@ import {
   CURRENT_POLICY_RUNTIME_BINDINGS,
 } from '../../packages/postgres-provider/src/current-policy.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
+import { INVENTORY_WRITE_INVARIANTS } from '../../packages/postgres-provider/src/inventory-write-invariants.js';
 import { parseNormalizedApplicationPackageJson } from '../../packages/canonical-model/src/index.js';
 import { withEphemeralPostgres, LINEAGE_INSTALL_VOLUME } from './postgres.js';
 
@@ -114,6 +115,7 @@ export async function withStaffBrowser<T>(
         tenantSlug: 'staff-browser',
         migrationsDirectory: 'db/migrations',
         providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
+        writeInvariants: INVENTORY_WRITE_INVARIANTS,
         inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
         capabilityOperationExecutorFactories: CAPABILITY_EXECUTOR_FACTORIES,
       });

@@ -22,7 +22,7 @@ import {
 
 const ns = 'northstar.app';
 /** origin/main at the branch point: the preceding serving binary, reader 44. */
-const preceding = '37bfd47311c58060000cebca49d5f55174e3874a';
+const preceding = '1092e14d22890d172ac8e68099fdd78093898339';
 const field = (local: string) => `${ns}:field.custom_stock_item_${local}`;
 const list = `${ns}:surface.custom_stock_item_list`;
 

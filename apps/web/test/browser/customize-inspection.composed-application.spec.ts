@@ -909,7 +909,7 @@ try {
   const context = await trustedContext(identity);
   const pointer = await readVerifiedServing(pool,context);
   const release = await loadServingRelease(pool,context,pointer.releaseId);
-  const {queryGateway,policy} = composeServingGateways(pool,pool,context,release,new ObservabilityMetrics(),{providerErrorMappings:[]});
+  const {queryGateway,policy} = composeServingGateways(pool,pool,context,release,new ObservabilityMetrics(),{providerErrorMappings:[],writeInvariants:[]});
   const entry = new AuthenticatedRequestRuntimeEntryAdapter(new AuthenticatedRequestEntryAdapter(async()=>identity),new PostgresRequestRuntimeViewService(pool),policy);
   const result = await entry.run({},v=>queryGateway.invoke(v,{schemaVersion:SEMANTIC_QUERY_REQUEST_VERSION,queryId:'northstar.app:query.item_get',arguments:{recordId:item}}));
   console.log(JSON.stringify(result.records.map(r=>r.recordId)));

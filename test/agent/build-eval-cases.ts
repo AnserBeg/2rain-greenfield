@@ -1086,56 +1086,6 @@ export const BUILD_CASES: readonly BuildCase[] = [
       ],
     },
   },
-];
-
-/**
- * Dated follow-up (2026-11-21, orchestrator): three validation-rule requests,
- * one literal, one cross-field and one through a parent link. NEW, written
- * before any run, and NOT part of the 40 scored in AI-BUILD-1 slice 2; run
- * them with `--cases V01,V02,V03` once added to BUILD_CASES by a later slice.
- */
-export const VALIDATION_FOLLOWUP_CASES: readonly BuildCase[] = [
-  {
-    id: 'V01',
-    split: 'test',
-    category: 'follow-up',
-    request: "An item's standard cost in CAD can't be negative.",
-    expect: {
-      outcome: 'validation',
-      entity: 'item',
-      field: 'item_standard_cost_cad',
-      checks: ['minimum'],
-    },
-  },
-  {
-    id: 'V02',
-    split: 'test',
-    category: 'follow-up',
-    request:
-      "An item's reorder up-to level must be at least its reorder point.",
-    expect: {
-      outcome: 'validation',
-      entity: 'item',
-      field: 'item_reorder_up_to',
-      checks: ['compareFields'],
-      otherField: 'item_reorder_point',
-    },
-  },
-  {
-    id: 'V03',
-    split: 'test',
-    category: 'follow-up',
-    request:
-      "A location's name must be different from its parent location's name.",
-    expect: {
-      outcome: 'validation',
-      entity: 'location',
-      field: 'location_name',
-      checks: ['compareFields'],
-      otherField: 'location_name',
-      relation: 'location_parent',
-    },
-  },
   // UI-CUSTOM-1 slice 1 (rule 12): list cell, list row and list sizing, each
   // with an unsupported request naming what is missing.
   {
@@ -1210,3 +1160,126 @@ export const VALIDATION_FOLLOWUP_CASES: readonly BuildCase[] = [
     expect: { outcome: 'unsupported', capabilities: ['today'] },
   },
 ];
+
+/**
+ * Dated follow-up (2026-11-21, orchestrator): three validation-rule requests,
+ * one literal, one cross-field and one through a parent link. NEW, written
+ * before any run, and NOT part of the 40 scored in AI-BUILD-1 slice 2; run
+ * them with `--cases V01,V02,V03` once added to BUILD_CASES by a later slice.
+ */
+export const VALIDATION_FOLLOWUP_CASES: readonly BuildCase[] = [
+  {
+    id: 'V01',
+    split: 'test',
+    category: 'follow-up',
+    request: "An item's standard cost in CAD can't be negative.",
+    expect: {
+      outcome: 'validation',
+      entity: 'item',
+      field: 'item_standard_cost_cad',
+      checks: ['minimum'],
+    },
+  },
+  {
+    id: 'V02',
+    split: 'test',
+    category: 'follow-up',
+    request:
+      "An item's reorder up-to level must be at least its reorder point.",
+    expect: {
+      outcome: 'validation',
+      entity: 'item',
+      field: 'item_reorder_up_to',
+      checks: ['compareFields'],
+      otherField: 'item_reorder_point',
+    },
+  },
+  {
+    id: 'V03',
+    split: 'test',
+    category: 'follow-up',
+    request:
+      "A location's name must be different from its parent location's name.",
+    expect: {
+      outcome: 'validation',
+      entity: 'location',
+      field: 'location_name',
+      checks: ['compareFields'],
+      otherField: 'location_name',
+      relation: 'location_parent',
+    },
+  },
+];
+
+/**
+ * AI-RELY-1 slice 1, gate (a): the patch kinds a case's scorer checks,
+ * read from its hand-written expectation (never from a model's output).
+ * A module case scores its required kinds and what `scoreModule` checks of
+ * each type: a new type, its lifecycle, lines, links, files and board, and
+ * fields added to an existing type; several of those in one case is a change
+ * set. A workflow case scores `saveWorkflow`, a board case
+ * `addBoardViewRevision`, a validation case `addValidation`.
+ */
+export function scoredKinds(c: BuildCase): readonly string[] {
+  const e = c.expect;
+  if (e.outcome === 'workflow') return ['saveWorkflow'];
+  if (e.outcome === 'board') return ['addBoardViewRevision'];
+  if (e.outcome === 'validation') return ['addValidation'];
+  if (e.outcome === 'presentation') return ['addPresentationRevision'];
+  if (e.outcome !== 'module') return [];
+  const kinds = new Set<string>(e.requiredKinds ?? []);
+  for (const type of e.types) {
+    if (!type.existing) kinds.add('addRecordType');
+    else if (type.fields.length > 0) kinds.add('addField');
+    if (type.lifecycle) kinds.add('declareLifecycle');
+    if (type.lines) kinds.add('addLineTable');
+    if (type.links?.length) kinds.add('addLink');
+    if (type.files?.length) kinds.add('addDocumentField');
+    if (type.board) kinds.add('addBoardViewRevision');
+  }
+  if (kinds.size > 1 && e.allowedKinds.includes('changeSet'))
+    kinds.add('changeSet');
+  return [...kinds].filter((kind) => e.allowedKinds.includes(kind));
+}
+
+export interface EvalCaseException {
+  readonly since: string;
+  readonly owner: string;
+  readonly reason: string;
+}
+
+/**
+ * Drafted kinds with no scored case in BUILD_CASES, each dated and named
+ * (AI-REVIEW R2: 12 of the 23 drafted kinds). A case added for a kind must
+ * remove its exception: the gate refuses an exception for a scored kind.
+ */
+const SLICE3 = 'AI-RELY-1 slice 3 (wider sets)';
+const noCase = (reason: string): EvalCaseException => ({
+  since: '2026-11-22',
+  owner: SLICE3,
+  reason,
+});
+export const EVAL_CASE_EXCEPTIONS: Readonly<Record<string, EvalCaseException>> =
+  Object.freeze({
+    addChoice: noCase('No request adds an option to an existing choice field.'),
+    arrangeLayout: noCase('No request orders, hides or relabels list columns.'),
+    saveListView: noCase('No request saves a filtered or sorted list view.'),
+    addMetricCard: noCase('No request adds a metric card to Today.'),
+    addValidation: noCase(
+      'V01-V03 are written (VALIDATION_FOLLOWUP_CASES) but not yet in BUILD_CASES.',
+    ),
+    addCalculatedDisplayField: noCase('No request adds a calculated field.'),
+    addPopupActionRevision: noCase('No request adds a record-page button.'),
+    addLayoutRevision: noCase('No request edits a record-page layout.'),
+    addDateTimeField: noCase('No request asks for a date-and-time field.'),
+    addUploadCategory: noCase(
+      'N05 allows an upload category but scores only the document field.',
+    ),
+    narrowPermission: noCase(
+      'Only the hostile probe H01 names it, as a kind that must not be drafted.',
+    ),
+    unNarrowPermission: noCase('No request removes an action restriction.'),
+    addReportRevision: noCase(
+      'REPORTS merged drafter support on 2026-11-22 without a BUILD_CASES case (rule 12 owed).',
+    ),
+  });

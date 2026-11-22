@@ -40,6 +40,7 @@ export const reachabilityProducers = [
     'test/unit/catalog-definition.test.ts',
     'test/unit/catalog-extras.test.ts',
     'test/unit/commercial-amounts.test.ts',
+    'test/unit/customization-ai-draft-gates.test.ts',
     'test/unit/customization-ai-draft-slice2.test.ts',
     'test/unit/customization-ai-draft.test.ts',
     'test/unit/customization-board.test.ts',
@@ -68,6 +69,7 @@ export const reachabilityProducers = [
     'test/unit/workspace-contract.test.ts',
     'test/unit/address-connector.test.ts',
     'test/unit/reminder-deadline.test.ts',
+    'test/unit/surface-presentation.test.ts',
   ]),
   nodeProducer('compiler', 'quality', 'test:compiler', [
     'test/compiler/adopted-language-shape.test.ts',
@@ -95,6 +97,7 @@ export const reachabilityProducers = [
   nodeProducer('agent', 'quality', 'test:agent', [
     'test/agent/assistant-endpoint.test.ts',
     'test/agent/business-map.test.ts',
+    'test/agent/capability-coverage.test.ts',
     'test/agent/catalog-discovery.test.ts',
     'test/agent/location-discovery.test.ts',
     'test/agent/operations-agent.test.ts',

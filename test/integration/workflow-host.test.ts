@@ -473,6 +473,7 @@ test('Booking registers a bounded sweep and a failed job leaves the next worker 
       calls.push('reported');
     },
     [registerBookingDueWork],
+    [],
   );
   await scheduler.close();
   assert.deepEqual(calls, [

@@ -17,6 +17,7 @@ import {
 import { registerDiscussionInboxWork } from '@north-star/postgres-provider/personal-inbox';
 import { registerBookingDueWork } from '@north-star/postgres-provider/booking-capability-executor';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '@north-star/postgres-provider/inventory-provider-error-mappings';
+import { INVENTORY_WRITE_INVARIANTS } from '@north-star/postgres-provider/inventory-write-invariants';
 import {
   AGENT_KEY_FILE_VARIABLE,
   anthropicModel,
@@ -250,6 +251,7 @@ export async function startComposedApplication(
           process.stderr.write('WORKFLOW_SCHEDULER_POLL_FAILED\n');
         },
         [registerBookingDueWork, registerDiscussionInboxWork],
+        INVENTORY_WRITE_INVARIANTS,
       );
     }
     if (
@@ -443,6 +445,7 @@ export async function openComposedApplicationRuntime(
     migrationsDirectory: new URL('../../../db/migrations/', import.meta.url)
       .pathname,
     providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
+    writeInvariants: INVENTORY_WRITE_INVARIANTS,
     ...(options.rollbackReleaseRoot !== undefined
       ? {
           releaseSelection: {
@@ -524,6 +527,7 @@ export async function openCustomizeService(
     migrationsDirectory: new URL('../../../db/migrations/', import.meta.url)
       .pathname,
     providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
+    writeInvariants: INVENTORY_WRITE_INVARIANTS,
     tenantSlug: options.tenantSlug ?? 'local-composed-application',
   });
 }

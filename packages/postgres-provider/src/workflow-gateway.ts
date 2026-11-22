@@ -41,6 +41,7 @@ import {
   ModuleRuntimeInterpreterError,
   PostgresModuleRuntimeInterpreter,
 } from './module-runtime-interpreter.js';
+import type { ModuleWriteInvariantProvider } from './module-write-invariants.js';
 import { withTrustedRequestTransaction } from './request-context.js';
 import { PostgresRequestRuntimeViewService } from './request-runtime-view-service.js';
 import { TrustedActorEnvelopeIssuer } from './trust/trusted-actor-envelope.js';
@@ -59,7 +60,11 @@ export class PostgresWorkflowGateway implements WorkflowGateway {
   readonly #loader: PostgresRequestRuntimeViewService;
   readonly #entryPolicy: PostgresCurrentPolicyGateway;
 
-  constructor(private readonly pool: Pool) {
+  constructor(
+    private readonly pool: Pool,
+    /** The same capability-declared write invariants a request's writer gets. */
+    private readonly writeInvariants: readonly ModuleWriteInvariantProvider[],
+  ) {
     this.#loader = new PostgresRequestRuntimeViewService(pool);
     this.#entryPolicy = new PostgresCurrentPolicyGateway(pool, []);
   }
@@ -213,6 +218,7 @@ export class PostgresWorkflowGateway implements WorkflowGateway {
       undefined,
       {
         workflowRunId: run.run_id,
+        writeInvariants: this.writeInvariants,
         validationReadPolicy: async (releaseId) => {
           if (releaseId !== run.release_id)
             throw new WorkflowEffectRefusal('stale-release-pin');
