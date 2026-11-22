@@ -615,8 +615,13 @@ test('each arrears source kind compiles at the arrears reader with the cycle cal
       ).billingCalculationVersion,
     };
   };
+  // The first-party base carries its own surface floor (main's company access
+  // and report readers). An unsourced plan raises it to no more than the
+  // allocation reader; every arrears source raises it to the arrears reader.
+  const baseFloor = surface('declaration').reader;
+  assert.ok(baseFloor < BILLING_ARREARS_READER);
   assert.deepEqual(surface('bound'), {
-    reader: BILLING_ALLOCATION_READER,
+    reader: Math.max(BILLING_ALLOCATION_READER, baseFloor),
     calculation: BILLING_CALCULATION_VERSION,
   });
   for (const mode of ['interval', 'arrears', 'booking'] as const) {
