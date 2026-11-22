@@ -61,7 +61,7 @@ CI tier: quick https://github.com/AnserBeg/2rain-greenfield/actions/runs/4495613
 
 ## Slice 1 build checkpoint · 2026-11-22
 
-The build branch is `packet/TEMPLATE-1-s1`, merged with main at `5710c05a`. The provisional allocations are migration 0069, Surface reader 42 and operation reader 7. The train renumbers them past REPORTS and pins its immediate predecessor.
+The build branch is `packet/TEMPLATE-1-s1`, merged with main at `37bfd473`. The provisional allocations are migration 0069, Surface reader 47 (45 and 46 are planned for BILLING and PLANNER) and operation reader 7. The PostgreSQL proof runs alone in shard 11 because each activation runs full release verification. The train pins its immediate predecessor.
 
 | General block | Equipment safety | Print production | School administration |
 | --- | --- | --- | --- |
@@ -71,7 +71,7 @@ The build branch is `packet/TEMPLATE-1-s1`, merged with main at `5710c05a`. The 
 
 The PostgreSQL test exercises all three definitions in one tenant and uses two companies. It includes source-read revocation, field and value restrictions, competing publications, an existing revision in the other company, first assignment and retirement in each lock order. On an isolated fixture with a declaring release already selected, the stored functions passed the source and audience checks, known-ID company denials, competing publications and both lock orders. Removing the audience check, exact source-cell comparison, released choice-meaning check or either stored-company filter failed its corresponding assertion. All three businesses published and assigned revisions through Customize and the library on a disposable build with the create guard disabled.
 
-The preceding binary `5710c05a` must reproduce the persisted normalized definitions, artifact bytes and roots and return the known inspection from the compatible get query. On a declaring release it must refuse cold boot and a query after the pointer move by name before parsing any payload. Creation is atomic in this slice: an active binding refuses an unprepared create, and release verification creates its sample through the independent verifier probe. An A-only worker reads the first company’s application but is refused the second company’s application and preview for the same parent. UPGRADE-2 slice 5 owns the fleet deployment check after rollback.
+The preceding binary `37bfd473` must reproduce the persisted normalized definitions, artifact bytes and roots and return the known inspection from the compatible get query. On a declaring release it must refuse cold boot and a query after the pointer move by name before parsing any payload. Creation is atomic in this slice: an active binding refuses an unprepared create, and release verification creates its sample through the independent verifier probe. An A-only worker reads the first company’s application but is refused the second company’s application and preview for the same parent. UPGRADE-2 slice 5 owns the fleet deployment check after rollback.
 
 **Rule 12.** The drafter covers `addRecordTemplateBindingRevision` from its schema. Dated AI-BUILD-1 cases R01–R03 (inspection checklist, print job grid, enrolment contact roles) live in `test/agent/build-eval-cases.ts`. Their scorer accepts a scripted correct draft and refuses a wrong requirement or context.
 

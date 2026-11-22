@@ -240,7 +240,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 40 adds custom buttons that open a record Task.
     // 41 pins the terms and assignment at first billing allocation.
     // 42 adds company access indexes, 43 report sources and 44 grouped reports.
-    // 45 applies versioned record templates at create (provisional).
+    // 47 applies versioned record templates at create (provisional; 45 and 46
+    // are planned for BILLING and PLANNER).
     maximumSupportedVersion: RECORD_TEMPLATE_READER,
   },
 });

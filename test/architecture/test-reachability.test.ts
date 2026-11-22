@@ -482,6 +482,7 @@ test('every file selected by the former general PostgreSQL glob belongs to exact
     'postgres-8',
     'postgres-9',
     'postgres-10',
+    'postgres-11',
   ].map(getReachabilityProducer);
   const files = globSync(oldGeneralGlob);
   assert.ok(files.length > 0);
