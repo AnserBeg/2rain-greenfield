@@ -24,7 +24,10 @@ import {
 } from '../../packages/canonical-model/src/constants.js';
 import { BOARD_READER } from '../../packages/canonical-model/src/board.js';
 import { startComposedApplication } from '../../apps/api/src/composition-root.js';
-import { STOCK_COUNT_PRECEDING_READER } from '../helpers/application-before-stock-count-workflow.js';
+import {
+  nextPlatformRelease,
+  STOCK_COUNT_PRECEDING_READER,
+} from '../helpers/application-before-stock-count-workflow.js';
 import {
   archivedStockCountQuery,
   withArchivedCustomizationRuntime,
@@ -124,7 +127,14 @@ test(
       ).stdout,
     );
     const prior = old.application ?? old.applications.at(-1);
-    const shipped = JSON.parse(await readFile(releasePath, 'utf8'));
+    // ADR-0066: the checked-in lineage is re-baselined to one entry, so it no
+    // longer retains the archived reader's head. The shipped count release is
+    // therefore staged as the direct successor of that head, compiled from
+    // today's authored source; the older reader must still refuse it by name.
+    const shipped = nextPlatformRelease(
+      old,
+      JSON.parse(await readFile('apps/web/release/app.authored.json', 'utf8')),
+    );
     const priorIndex = shipped.applications.findIndex(
       (release: { releaseRoot: string }) =>
         release.releaseRoot === prior.releaseRoot,
@@ -245,10 +255,43 @@ test(
                   'UNSUPPORTED_RUNTIME_CAPABILITY',
                   JSON.stringify(refused),
                 );
-                assert.match(
-                  refused.message ?? '',
-                  /northstar\.runtime:capability\.surface-manifest.*requires version 35 and this runtime supports 34/u,
+                // The archived reader must refuse by name a capability the
+                // staged successor really demands above what it supports. The
+                // demand is read from the successor's own manifest, so a later
+                // rung or re-baseline does not re-pin a literal. Today's head
+                // demands query-catalog 6 (reader supports 4) and
+                // surface-manifest above 34; the reader names the first.
+                const demands = new Map(
+                  (
+                    shipped.applications.at(-1) as {
+                      releaseManifest: {
+                        projections: {
+                          requiredRuntimeCapability: {
+                            capabilityId: string;
+                            minimumVersion: number;
+                          };
+                        }[];
+                      };
+                    }
+                  ).releaseManifest.projections.map(
+                    ({ requiredRuntimeCapability: required }) => [
+                      required.capabilityId,
+                      required.minimumVersion,
+                    ],
+                  ),
                 );
+                assert.ok(
+                  (demands.get(
+                    'northstar.runtime:capability.surface-manifest',
+                  ) ?? 0) > 34,
+                );
+                const named =
+                  /runtime capability (northstar\.runtime:capability\.[a-z-]+) requires version (\d+) and this runtime supports (\d+)/u.exec(
+                    refused.message ?? '',
+                  );
+                assert.ok(named, refused.message);
+                assert.equal(Number(named[2]), demands.get(named[1]!));
+                assert.ok(Number(named[2]) > Number(named[3]));
               },
             );
           } finally {
