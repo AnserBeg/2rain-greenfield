@@ -26,6 +26,9 @@ const owner = {
   companyId: 'company-a',
 };
 const slotId = 'example:slot.equipment';
+// The agreed end is the billed record's dateTime field, a millisecond UTC instant.
+const agreed = (days: number) =>
+  new Date(Date.parse(anchor) + day * days).toISOString();
 
 function snapshot(
   legs: readonly (readonly [string, string | null])[],
@@ -189,7 +192,7 @@ test('Booking microsecond instants truncate toward the past to the Billing milli
 
 test('a pause shorter than a millisecond collapses to an empty span and the hire still reviews', () => {
   const pause = [at(2, '482913'), at(2, '482999')] as const;
-  const collapsed = review(snapshot([[at(0), at(9)]], [pause]), at(5));
+  const collapsed = review(snapshot([[at(0), at(9)]], [pause]), agreed(5));
   assert.equal(collapsed.status, 'due');
   assert.deepEqual(
     collapsed.evidence.pauses.map((p) => p.end === p.start),
@@ -197,25 +200,30 @@ test('a pause shorter than a millisecond collapses to an empty span and the hire
   );
   assert.equal(
     collapsed.cents,
-    review(snapshot([[at(0), at(9)]]), at(5)).cents,
+    review(snapshot([[at(0), at(9)]]), agreed(5)).cents,
   );
 });
 
 test('possession past the agreed end bills through the recorded return', () => {
   // Agreed five days, returned on day nine, CAD 30 a day.
-  const overrun = review(snapshot([[at(0), at(9)]]), at(5));
+  const overrun = review(snapshot([[at(0), at(9)]]), agreed(5));
   assert.equal(overrun.status, 'due');
-  assert.deepEqual(overrun.cycle, {
-    start: anchor,
-    end: truncateBookingInstant(at(9)),
-  });
-  assert.equal(overrun.cents, 27_000n);
+  assert.deepEqual(
+    overrun.cycle,
+    { start: anchor, end: truncateBookingInstant(at(9)) },
+    'the final cycle ends at the recorded return',
+  );
+  assert.equal(overrun.cents, 27_000n, 'CAD 270.00 for nine days held');
 });
 
 test('a live use leg past the agreed end keeps earning completed cycles', () => {
-  const live = review(snapshot([[at(0), null]]), at(5));
+  const live = review(snapshot([[at(0), null]]), agreed(5));
   assert.equal(live.status, 'due');
-  assert.equal(live.evidence.serviceEnd, null);
+  assert.equal(
+    live.evidence.serviceEnd,
+    null,
+    'a live use leg keeps the service open',
+  );
   assert.deepEqual(live.cycle, {
     start: anchor,
     end: new Date(Date.parse(anchor) + day * 10).toISOString(),
@@ -226,16 +234,19 @@ test('a live use leg past the agreed end keeps earning completed cycles', () => 
 
 test('an early return keeps the agreed end and a hire without use falls back to it', () => {
   assert.equal(
-    bookingPossessionServiceEnd(snapshot([[at(0), at(3)]]), slotId, at(5)),
-    truncateBookingInstant(at(5)),
+    bookingPossessionServiceEnd(snapshot([[at(0), at(3)]]), slotId, agreed(5)),
+    agreed(5),
   );
-  const early = review(snapshot([[at(0), at(3)]]), at(5));
+  const early = review(snapshot([[at(0), at(3)]]), agreed(5));
   assert.equal(early.status, 'due');
   assert.equal(early.cents, 9_000n);
-  assert.equal(bookingPossessionServiceEnd(snapshot([]), slotId, at(5)), at(5));
   assert.equal(
-    bookingPossessionServiceEnd(snapshot([[at(0), at(9)]]), 'other', at(5)),
-    at(5),
+    bookingPossessionServiceEnd(snapshot([]), slotId, agreed(5)),
+    agreed(5),
+  );
+  assert.equal(
+    bookingPossessionServiceEnd(snapshot([[at(0), at(9)]]), 'other', agreed(5)),
+    agreed(5),
   );
   assert.equal(
     bookingPossessionServiceEnd(snapshot([[at(0), at(9)]]), slotId, null),

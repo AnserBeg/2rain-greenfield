@@ -683,17 +683,19 @@ test('the plan binds its customer and currency by declared role, not by field na
     });
   // Optional free text cannot carry either role, a currency holds one ISO
   // code, and one field cannot carry both roles.
-  for (const roles of [
-    { customerFieldId: notesField },
-    { currencyFieldId: notesField },
-    { currencyFieldId: holder },
-    { customerFieldId: billed, currencyFieldId: billed },
-  ])
-    assert.equal(
-      bind(roles),
-      'BILLING_SOURCE_FIELDS_REQUIRED',
-      JSON.stringify(roles),
-    );
+  for (const [reason, roles] of [
+    ['optional notes cannot be the customer', { customerFieldId: notesField }],
+    ['optional notes cannot be the currency', { currencyFieldId: notesField }],
+    [
+      'a currency holds one three-letter code',
+      { customerFieldId: billed, currencyFieldId: holder },
+    ],
+    [
+      'one field cannot carry both roles',
+      { customerFieldId: billed, currencyFieldId: billed },
+    ],
+  ] as const)
+    assert.equal(bind(roles), 'BILLING_SOURCE_FIELDS_REQUIRED', reason);
   // The refusal of notes is its optional declaration: the same selected field
   // declared required would carry the customer role.
   const declaredRequired = {

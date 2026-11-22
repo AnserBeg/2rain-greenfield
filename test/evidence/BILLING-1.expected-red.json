@@ -70,7 +70,7 @@
         {
           "file": "test/integration/billing-booking-possession.test.ts",
           "name": "a live use leg past the agreed end keeps earning completed cycles",
-          "expected": "TODO"
+          "expected": "a live use leg keeps the service open"
         }
       ]
     },
@@ -88,7 +88,7 @@
         {
           "file": "test/integration/billing-booking-possession.test.ts",
           "name": "possession past the agreed end bills through the recorded return",
-          "expected": "TODO"
+          "expected": "the final cycle ends at the recorded return"
         }
       ]
     },
@@ -106,7 +106,7 @@
         {
           "file": "test/postgres/billing-terms.test.ts",
           "name": "the plan binds its customer and currency by declared role, not by field name",
-          "expected": "TODO"
+          "expected": "optional notes cannot be the customer"
         }
       ]
     },
@@ -124,7 +124,7 @@
         {
           "file": "test/postgres/billing-terms.test.ts",
           "name": "the plan binds its customer and currency by declared role, not by field name",
-          "expected": "TODO"
+          "expected": "a currency holds one three-letter code"
         }
       ]
     },
@@ -142,7 +142,7 @@
         {
           "file": "test/postgres/billing-terms.test.ts",
           "name": "the plan binds its customer and currency by declared role, not by field name",
-          "expected": "TODO"
+          "expected": "one field cannot carry both roles"
         }
       ]
     }
