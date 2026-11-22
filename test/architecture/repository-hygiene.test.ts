@@ -242,6 +242,7 @@ const suiteDefinitions = [
       'test/postgres/personal-inbox.test.ts',
       'test/postgres/predicate-absent-semantics.test.ts',
       'test/postgres/predicate-parity-corpus.test.ts',
+      'test/postgres/presentation-list.test.ts',
       'test/postgres/query-aggregate-semantics.test.ts',
       'test/postgres/query-filter-lowering.test.ts',
       'test/postgres/read-snapshot.test.ts',
