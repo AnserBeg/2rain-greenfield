@@ -148,13 +148,15 @@ export function renderReleaseDiff(input: {
             entityLabel(to, body.entityId) +
             ' by ' +
             selector +
-            '. Columns: ' +
+            '. Uses ' +
             body.columns
               .map(
                 (c) =>
                   label(c.fieldId) +
                   (c.audienceValues
-                    ? ' (allowed defaults: ' + c.audienceValues.join(', ') + ')'
+                    ? ' (defaults limited to ' +
+                      c.audienceValues.join(', ') +
+                      ')'
                     : c.copyEligible
                       ? ' (copy permitted)'
                       : ' (answer only)'),
