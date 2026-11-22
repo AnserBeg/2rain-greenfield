@@ -31,6 +31,10 @@ import { fitMap } from '../../packages/canonical-model/src/map-viewport.js';
 import { COMPANY, seededId, worldOver } from '../agent/agent-world.js';
 import { draftMapRevision } from '../../packages/customization/src/map-revision.js';
 import {
+  CustomizationPatchSchema,
+  preparePatchForRecording,
+} from '../../packages/customization/src/index.js';
+import {
   archivedStockCountQuery,
   withArchivedCustomizationRuntime,
 } from '../helpers/archived-runtime-process.js';
@@ -151,7 +155,10 @@ test(
           if(out.status!=='compiled') throw Error(JSON.stringify(out));
           console.log(JSON.stringify([tip,out.steps[0].release]));
         `,
-              setup,
+              // The service records a change after preparePatchForRecording,
+              // which binds a new company-owned type to the company access
+              // index, so the archived compiler gets the change as recorded.
+              preparePatchForRecording(CustomizationPatchSchema.parse(setup)),
             )) as {
               releaseRoot: string;
               normalizedDefinitionBytesBase64: string;
