@@ -21,6 +21,7 @@ import {
 } from '@north-star/operations-agent';
 
 import { posixQuoted } from './posix-quote.js';
+import { firstPartyImmediateEdits } from '../../../packages/domain/src/app/immediate-edits.js';
 
 import {
   checkTerminalRelease,
@@ -97,6 +98,7 @@ try {
     companyId: COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId,
     businessCalendar: COMPOSED_APPLICATION_INVENTORY_SCOPE,
     approve: approveAtTerminal,
+    immediateEdits: firstPartyImmediateEdits(),
   });
   const model = anthropicModel({
     key,

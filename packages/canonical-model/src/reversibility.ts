@@ -50,6 +50,7 @@ export type ReversibilityReason =
   | 'confirmationRequired'
   | 'declaredConfirmation'
   | 'readAsGate'
+  | 'readByConsumer'
   | 'confirmedWriter'
   | 'numbered'
   | 'oldValueRedacted'
@@ -110,6 +111,7 @@ const reason = z.enum([
   'confirmationRequired',
   'declaredConfirmation',
   'readAsGate',
+  'readByConsumer',
   'confirmedWriter',
   'numbered',
   'oldValueRedacted',
@@ -188,3 +190,34 @@ export const UNDECLARED_REVERSIBILITY: ReversibilityClass = Object.freeze({
   basis: 'derived',
   because: Object.freeze([]) as readonly ReversibilityReason[],
 });
+
+/**
+ * What a capability says about the record types it owns (AI-UNDO-1, owner
+ * ruling 2026-11-22). Putting a value back undoes the value, not what code
+ * did after reading it, so a field acts at once only when it has a value
+ * inverse AND no consumer the release cannot see. A capability's own code is
+ * such a consumer of its record types, so every field of a type it owns is
+ * treated as read (it asks) unless the capability declares it safe here.
+ *
+ * Supplied by each capability at product assembly (the composition root),
+ * like GENERALIZE-1's write invariants, so generic code names no record type.
+ */
+export interface ImmediateEditDeclaration {
+  /** The capability or module that owns the record types, for audit. */
+  readonly owner: string;
+  /** Record types this owner's code reads: their fields ask unless listed. */
+  readonly ownedEntityIds: readonly string[];
+  /** Fields whose previous value puts the change fully back. */
+  readonly immediateFields: readonly ImmediateField[];
+}
+
+export interface ImmediateField {
+  readonly fieldId: string;
+  /** Undo holds only while the record (or a parent) is in these states. */
+  readonly holdsWhile?: HoldsWhile;
+}
+
+export interface HoldsWhile {
+  readonly state?: LifecycleCondition;
+  readonly parents?: readonly ParentLifecycleCondition[];
+}

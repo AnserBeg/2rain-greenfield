@@ -1,3 +1,4 @@
+import { firstPartyImmediateEdits } from '../../packages/domain/src/app/immediate-edits.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { chmod, rm, writeFile } from 'node:fs/promises';
@@ -1117,6 +1118,7 @@ test(
                 assert.equal(map.status, 'ready', JSON.stringify(map));
                 assert.ok(map.status === 'ready' && map.image === null);
                 const session = new OperationsAgentSession({
+                  immediateEdits: firstPartyImmediateEdits(),
                   runtime: app.runtime,
                   companyId: COMPANY,
                   personHeaders: { cookie: 'northstar-demo-actor=manager' },

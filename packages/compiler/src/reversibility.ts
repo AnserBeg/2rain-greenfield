@@ -42,6 +42,15 @@ interface CatalogOperation {
 
 /** The parts of the normalized release the derivation reads. */
 export interface ReversibilitySource {
+  /**
+   * Declared consumers that can act on a value after reading it: workflows
+   * (triggers and steps), validation rules and calculated fields. Restoring a
+   * value does not undo what a consumer did, so a field any of them reads
+   * asks (owner ruling, 2026-11-22).
+   */
+  readonly workflows?: unknown;
+  readonly formulaRules?: unknown;
+  readonly calculatedDisplayFields?: unknown;
   readonly fields: readonly {
     readonly fieldId: string;
     readonly entity: { readonly targetId: string };
@@ -124,6 +133,21 @@ export function deriveReversibility(
   const gates = new Set<string>();
   for (const operation of catalogOperations)
     fieldsRead(operation.precondition, gates);
+  // A consumer may name a field as a reference node or as a plain id (a
+  // workflow's bindings), so any string equal to a field id counts.
+  const consumed = new Set<string>();
+  const collect = (tree: unknown): void => {
+    if (typeof tree === 'string') {
+      if (fields.has(tree)) consumed.add(tree);
+    } else if (Array.isArray(tree)) for (const item of tree) collect(item);
+    else if (tree && typeof tree === 'object')
+      for (const value of Object.values(tree)) collect(value);
+  };
+  collect([
+    release.workflows,
+    release.formulaRules,
+    release.calculatedDisplayFields,
+  ]);
 
   // A field another operation of the record type writes only with a yes (or
   // at a higher tier) is guarded: changing it, or putting it back, needs that
@@ -302,6 +326,10 @@ export function deriveReversibility(
               if (gates.has(fieldId)) {
                 reach = reach === 'outward' ? reach : 'internal';
                 because.push('readAsGate');
+              }
+              if (consumed.has(fieldId)) {
+                reach = reach === 'outward' ? reach : 'internal';
+                because.push('readByConsumer');
               }
               if (
                 entity &&

@@ -1,3 +1,4 @@
+import { firstPartyImmediateEdits } from '../../packages/domain/src/app/immediate-edits.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
@@ -123,6 +124,7 @@ test(
           );
 
           const agent = new OperationsAgentSession({
+            immediateEdits: firstPartyImmediateEdits(),
             runtime: app.runtime,
             companyId: COMPANY,
             personHeaders: { cookie: 'northstar-demo-actor=manager' },
@@ -367,6 +369,7 @@ test(
             'the exact sum covers the matching rows beyond the first page',
           );
           const agent = new OperationsAgentSession({
+            immediateEdits: firstPartyImmediateEdits(),
             runtime: app.runtime,
             companyId: COMPANY,
             personHeaders: actor,

@@ -1,3 +1,5 @@
+import { firstPartyImmediateEdits } from '../../packages/domain/src/app/immediate-edits.js';
+import type { ImmediateEditDeclaration } from '../../packages/canonical-model/src/reversibility.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -143,6 +145,7 @@ function personSession(
 ) {
   const view = compiledAppView(person);
   return new OperationsAgentSession({
+    immediateEdits: firstPartyImmediateEdits(),
     runtime: {
       entry: {
         run: (_request: unknown, work: (v: unknown) => unknown) => work(view),
@@ -223,7 +226,7 @@ test('a short name stands for exactly one id or for none', () => {
 test('the risk class comes from contract facts: only eligible O0 updates are reversible, everything else needs a yes', () => {
   const catalog = pinnedCatalog(compiledAppView());
   const risk = (local: string, fields: readonly string[] = []) =>
-    operationRisk(catalog, catalog.operation(local)!, fields);
+    operationRisk(catalog, catalog.operation(local)!, fields, FIRST);
   assert.equal(risk('party_create').riskClass, 'needsYes');
   assert.equal(risk('party_create').inverse, undefined);
   assert.deepEqual(
@@ -250,7 +253,10 @@ test('the risk class comes from contract facts: only eligible O0 updates are rev
     ...catalog.operation('party_create')!,
     tier: 'o9',
   } as never;
-  assert.equal(operationRisk(catalog, strange).riskClass, 'needsYes');
+  assert.equal(
+    operationRisk(catalog, strange, [], FIRST).riskClass,
+    'needsYes',
+  );
 });
 
 test('the compiled catalog auto-run snapshot covers every O0 update field', () => {
@@ -271,7 +277,10 @@ test('the compiled catalog auto-run snapshot covers every O0 update field', () =
       ...contract.fields.filter((f) => f.writable).map((f) => f.fieldId),
     ]);
     for (const field of fields) {
-      if (operationRisk(catalog, operation, [field]).riskClass === 'reversible')
+      if (
+        operationRisk(catalog, operation, [field], FIRST).riskClass ===
+        'reversible'
+      )
         eligible.push(`${operation.operationId} -> ${field}`);
     }
   }
@@ -308,7 +317,7 @@ test('a new field, record type or risk tier needs confirmation even with a revis
   };
   for (const fields of [[], [field], [name, field]])
     assert.equal(
-      operationRisk(catalog, extended, fields).riskClass,
+      operationRisk(catalog, extended, fields, FIRST).riskClass,
       'needsYes',
     );
   const custom = {
@@ -322,11 +331,21 @@ test('a new field, record type or risk tier needs confirmation even with a revis
     },
     operationId: `${NS}:operation.custom_equipment_update`,
   };
-  assert.equal(operationRisk(catalog, custom, [field]).riskClass, 'needsYes');
-  assert.equal(operationRisk(catalog, custom, [name]).riskClass, 'needsYes');
   assert.equal(
-    operationRisk(catalog, { ...party, tier: 'unknown' } as never, [name])
-      .riskClass,
+    operationRisk(catalog, custom, [field], FIRST).riskClass,
+    'needsYes',
+  );
+  assert.equal(
+    operationRisk(catalog, custom, [name], FIRST).riskClass,
+    'needsYes',
+  );
+  assert.equal(
+    operationRisk(
+      catalog,
+      { ...party, tier: 'unknown' } as never,
+      [name],
+      FIRST,
+    ).riskClass,
     'needsYes',
   );
 });
@@ -334,6 +353,7 @@ test('a new field, record type or risk tier needs confirmation even with a revis
 // ------------------------------------------------ plan guards (audit A1, A2)
 
 const PARTY = '0d9c6f2e-3a1b-4c5d-8e7f-001122334455';
+const FIRST = firstPartyImmediateEdits();
 
 /** A session over the compiled release whose release and record a test moves. */
 function guardedSession(
@@ -342,8 +362,12 @@ function guardedSession(
   roles: readonly string[] = [],
   approve: (plan: PlanForApproval) => Promise<boolean> = () =>
     Promise.resolve(true),
+  application: {
+    readonly view?: RequestRuntimeView;
+    readonly immediateEdits?: readonly ImmediateEditDeclaration[];
+  } = {},
 ) {
-  const base = compiledAppView('manager');
+  const base = application.view ?? compiledAppView('manager');
   const state = {
     company: 'c',
     release: { ...base.release },
@@ -382,6 +406,7 @@ function guardedSession(
     onView: () => {},
   };
   const session = new OperationsAgentSession({
+    immediateEdits: application.immediateEdits ?? firstPartyImmediateEdits(),
     runtime: {
       entry: {
         run: (_request: unknown, work: (v: unknown) => unknown) => {
@@ -871,7 +896,7 @@ test('AI-UNDO-1: the release declares the credit hold as needing the assistant t
   assert.ok(catalog.confirmationRequiredFor.has(hold));
   const party = catalog.operation('party_update')!;
   for (const written of [[hold], [`${NS}:field.party_name`, hold]]) {
-    const risk = operationRisk(catalog, party, written);
+    const risk = operationRisk(catalog, party, written, FIRST);
     assert.equal(risk.riskClass, 'needsYes');
     assert.equal(risk.reason, 'This changes a setting, so it needs your OK.');
     assert.equal(risk.inverse, undefined);
@@ -945,6 +970,7 @@ function storeSession(
     onGet: (() => undefined) as (id: string) => void,
   };
   const session = new OperationsAgentSession({
+    immediateEdits: firstPartyImmediateEdits(),
     runtime: {
       entry: {
         run: (_r: unknown, work: (v: unknown) => unknown) =>
@@ -1626,8 +1652,12 @@ test('AGENT-5 7: the pinned release guards policy fields and every settings edit
     },
   });
   assert.equal(
-    operationRisk(amended, amended.operation('tax_code_update')!, [field])
-      .riskClass,
+    operationRisk(
+      amended,
+      amended.operation('tax_code_update')!,
+      [field],
+      FIRST,
+    ).riskClass,
     'needsYes',
   );
   for (const [entity, patch, expected] of [
@@ -2060,5 +2090,169 @@ test('AI-UNDO-1: a release without the credit-hold declaration still asks (an ol
       older,
     ),
     { asked: 1, invoked: [] },
+  );
+});
+
+// ------------------------ AI-UNDO-1 slice 2: a second application, other names
+
+/**
+ * The compiled release under other names and IDs: a clinic whose patients
+ * and visit checks are the first-party parties and stock counts renamed. Its
+ * act-or-ask outcome comes from its own capability's declaration alone.
+ */
+function clinicView(): RequestRuntimeView {
+  const view = compiledAppView('manager');
+  const renamed = JSON.parse(
+    JSON.stringify(view.projections)
+      .replaceAll('northstar.app:', 'clinic.care:')
+      .replaceAll('stock_count', 'visit_check')
+      .replaceAll('party', 'patient'),
+  ) as RequestRuntimeView['projections'];
+  return { ...view, projections: renamed };
+}
+
+const CLINIC = 'clinic.care';
+const CLINIC_EDITS: readonly ImmediateEditDeclaration[] = [
+  {
+    owner: `${CLINIC}:module.patients`,
+    ownedEntityIds: [
+      `${CLINIC}:entity.patient`,
+      `${CLINIC}:entity.visit_check`,
+      `${CLINIC}:entity.visit_check_line`,
+    ],
+    immediateFields: [
+      { fieldId: `${CLINIC}:field.patient_contact_summary` },
+      {
+        fieldId: `${CLINIC}:field.visit_check_line_counted_quantity`,
+        holdsWhile: {
+          parents: [
+            {
+              relationId: `${CLINIC}:relation.visit_check_line_session`,
+              queryId: `${CLINIC}:query.visit_check_get`,
+              stateFieldId: `${CLINIC}:field.visit_check_state`,
+              stateIds: [`${CLINIC}:option.visit_check_state_draft`],
+              stateLabels: ['open'],
+            },
+          ],
+        },
+      },
+    ],
+  },
+];
+
+async function clinicClass(
+  immediateEdits: readonly ImmediateEditDeclaration[],
+  operationId: string,
+  patch: Record<string, string>,
+  values: Record<string, string> = {},
+  parent?: string,
+): Promise<string> {
+  const view = clinicView();
+  const { session, state } = guardedSession(
+    new Set(),
+    [],
+    () => Promise.resolve(true),
+    { view, immediateEdits },
+  );
+  state.record.values = { ...values };
+  if (parent)
+    Object.assign(state.record, {
+      relationLabels: { [parent]: { recordId: PARTY } },
+    });
+  const catalog = pinnedCatalog(view);
+  await session.call('erp_query', {
+    queryId: catalog.operation(operationId)!.readBackQueryId,
+    arguments: { recordId: PARTY },
+  });
+  const planned = await session.call('erp_plan', {
+    intents: [{ operationId, target: PARTY, patch }],
+  });
+  assert.equal(planned.isError, false, JSON.stringify(planned.content));
+  return String(session.approvals.at(-1)?.riskClass);
+}
+
+test('AI-UNDO-1 second application: a clinic acts at once only on what its own capability declares', async () => {
+  const contact = { [`${CLINIC}:field.patient_contact_summary`]: 'Old' };
+  const name = { [`${CLINIC}:field.patient_name`]: 'Old' };
+  assert.equal(
+    await clinicClass(
+      CLINIC_EDITS,
+      'patient_update',
+      { contact_summary: 'Ann' },
+      contact,
+    ),
+    'reversible',
+  );
+  // Declared nowhere in the clinic, though first-party declares its name.
+  assert.equal(
+    await clinicClass(CLINIC_EDITS, 'patient_update', { name: 'Bo' }, name),
+    'needsYes',
+  );
+  // The first-party declarations name nothing in the clinic.
+  assert.equal(
+    await clinicClass(
+      firstPartyImmediateEdits(),
+      'patient_update',
+      { contact_summary: 'Ann' },
+      contact,
+    ),
+    'needsYes',
+  );
+});
+
+test('AI-UNDO-1 second application: a line acts at once only while its declared parent is in the declared state', async () => {
+  const line = `${CLINIC}:field.visit_check_line_counted_quantity`;
+  const parent = `${CLINIC}:relation.visit_check_line_session`;
+  for (const [stateOption, expected] of [
+    ['draft', 'reversible'],
+    ['reviewed', 'needsYes'],
+  ] as const)
+    assert.equal(
+      await clinicClass(
+        CLINIC_EDITS,
+        'visit_check_line_update',
+        { counted_quantity: '12' },
+        {
+          [line]: '10',
+          [`${CLINIC}:field.visit_check_state`]: `${CLINIC}:option.visit_check_state_${stateOption}`,
+        },
+        parent,
+      ),
+      expected,
+      stateOption,
+    );
+  // Without the declared condition, the same line edit acts in any state:
+  // the parent rule comes from the declaration, not from the record names.
+  const unconditional: readonly ImmediateEditDeclaration[] = [
+    {
+      ...CLINIC_EDITS[0]!,
+      immediateFields: [{ fieldId: line }],
+    },
+  ];
+  assert.equal(
+    await clinicClass(
+      unconditional,
+      'visit_check_line_update',
+      { counted_quantity: '12' },
+      {
+        [line]: '10',
+        [`${CLINIC}:field.visit_check_state`]: `${CLINIC}:option.visit_check_state_reviewed`,
+      },
+      parent,
+    ),
+    'reversible',
+  );
+});
+
+test('AI-UNDO-1 second application: a record type no capability owns asks until its release declares it', async () => {
+  // The clinic's item type is owned by no declaration here.
+  assert.equal(
+    await clinicClass(
+      CLINIC_EDITS,
+      'item_update',
+      { name: 'Gauze' },
+      { [`${CLINIC}:field.item_name`]: 'Old' },
+    ),
+    'needsYes',
   );
 });

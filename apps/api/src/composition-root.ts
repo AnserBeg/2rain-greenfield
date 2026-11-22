@@ -53,6 +53,7 @@ import {
   DISTRIBUTOR_COMPANY_NAME,
   type ComposedApplicationSeedProfile,
 } from '../../../packages/domain/src/app/seed.js';
+import { firstPartyImmediateEdits } from '../../../packages/domain/src/app/immediate-edits.js';
 import { readUnboundPermissionAcknowledgementFor } from '../../web/scripts/unbound-permission-acknowledgement.js';
 
 export interface ComposedApplicationServerOptions {
@@ -208,6 +209,7 @@ export async function startComposedApplication(
     assistant =
       runtime.identityMode === 'LOCAL_DEMO'
         ? createAssistantEndpoint({
+            immediateEdits: firstPartyImmediateEdits(),
             runtime,
             // The page's company, proved through the person's workspace
             // entry as the page proves it (end review X9).

@@ -20,11 +20,14 @@ import { compiledAppView } from '../agent/compiled-view.js';
 
 const NS = 'northstar.app';
 
-function firstPartyDeclaration() {
+function firstPartyDeclaration(extra: Record<string, unknown> = {}) {
   const view = compiledAppView();
-  const release = normalizeApplicationPackage(
-    JSON.parse(readFileSync('apps/web/release/app.authored.json', 'utf8')),
-  );
+  const release = {
+    ...normalizeApplicationPackage(
+      JSON.parse(readFileSync('apps/web/release/app.authored.json', 'utf8')),
+    ),
+    ...extra,
+  };
   const agent = view.projections.agent.payload as {
     confirmationRequiredFor?: string[];
   };
@@ -103,6 +106,39 @@ test('the lifecycle an edit depends on comes from the release, not from a name',
   assert.equal(state('party_update'), '');
 });
 
+test('a field a workflow, rule or calculated field reads is consumed, so it is not record-only', () => {
+  const name = `${NS}:field.party_name`;
+  const summary = `${NS}:field.party_contact_summary`;
+  const classOf = (
+    declaration: ReturnType<typeof firstPartyDeclaration>,
+    id: string,
+  ) =>
+    declaration.operations
+      .find((entry) => entry.operationId === `${NS}:operation.party_update`)!
+      .fields!.find((field) => field.fieldId === id)!;
+  assert.equal(classOf(firstPartyDeclaration(), name).reach, 'record');
+  for (const extra of [
+    // A workflow names the field as a plain id in its bindings.
+    { workflows: [{ trigger: { watch: [name] } }] },
+    // A rule or calculated field names it as a reference.
+    { formulaRules: [{ reads: { kind: 'fieldReference', targetId: name } }] },
+    {
+      calculatedDisplayFields: [
+        { operand: { kind: 'fieldReference', targetId: name } },
+      ],
+    },
+  ]) {
+    const declaration = firstPartyDeclaration(extra);
+    assert.equal(classOf(declaration, name).reach, 'internal');
+    assert.ok(classOf(declaration, name).because.includes('readByConsumer'));
+    assert.equal(classOf(declaration, summary).reach, 'record');
+  }
+});
+
+// For record types no capability owns (tenant-built), the derivation decides.
+// First-party types are capability-owned, so their fields ask unless the
+// owner declares them (packages/domain/src/app/immediate-edits.ts); this
+// census measures what the derivation alone would allow, for the record.
 test('census: the plain edits the derivation alone would let act at once, per operation', () => {
   const declaration = firstPartyDeclaration();
   const act = new Map<string, string[]>();

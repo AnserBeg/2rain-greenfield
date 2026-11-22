@@ -13,6 +13,7 @@
  * Spend is capped per conversation at USD 1.50 (AGENT-3 decision), priced at
  * the model's list prices; a run never starts a model call past the cap.
  */
+import type { ImmediateEditDeclaration } from '../../../packages/canonical-model/src/reversibility.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
@@ -62,6 +63,11 @@ export const ASSISTANT_CONVERSATION_LIMITS = Object.freeze({
 });
 
 export interface AssistantEndpointOptions {
+  /**
+   * Each capability's immediate-edit declaration (AI-UNDO-1), supplied by
+   * product assembly: the only fields the panel changes at once with Undo.
+   */
+  readonly immediateEdits: readonly ImmediateEditDeclaration[];
   readonly runtime: Pick<
     ComposedApplicationRuntime,
     'entry' | 'operationGateway' | 'operationMediation' | 'queryGateway'
@@ -247,6 +253,7 @@ export function createAssistantEndpoint(
         approve: (plan) => askThePerson(conversation, plan),
         // The panel offers Undo, so a reversible change runs at once here.
         autoApproveReversible: true,
+        immediateEdits: options.immediateEdits,
       }),
     };
     conversations.set(conversation.id, conversation);

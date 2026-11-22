@@ -1,3 +1,4 @@
+import { firstPartyImmediateEdits } from '../../packages/domain/src/app/immediate-edits.js';
 import assert from 'node:assert/strict';
 import {
   FakeAddressProvider,
@@ -114,6 +115,7 @@ test(
             '15 Jasper Street',
           );
           const session = new OperationsAgentSession({
+            immediateEdits: firstPartyImmediateEdits(),
             runtime: app.runtime,
             companyId: COMPANY,
             personHeaders: headers,

@@ -1,5 +1,14 @@
-/** Only a revision-checked O0 patch can run before confirmation. */
+/**
+ * Only a revision-checked O0 patch can run before confirmation, and only for
+ * fields whose owner declares them safe to change at once (AI-UNDO-1). The
+ * policy names no record type or field: the owning capability supplies the
+ * declaration at product assembly, and a field nobody declares asks.
+ */
 import type { RegisteredOperationDefinition } from '../../runtime/src/semantic-operation-gateway.js';
+import type {
+  HoldsWhile,
+  ImmediateEditDeclaration,
+} from '../../canonical-model/src/reversibility.js';
 
 import { effectKind, type PinnedCatalog } from './catalog.js';
 
@@ -17,37 +26,19 @@ export interface OperationRisk {
     readonly kind: 'restorePriorValues';
     readonly operationId: string;
   };
+  /**
+   * For a reversible update: the lifecycle states the record (or a parent)
+   * must be in for Undo to hold, from the owner's declaration. The session
+   * checks them against what it read.
+   */
+  readonly holdsWhile?: readonly HoldsWhile[];
 }
-
-// Field identities are scoped to the reviewed first-party record and update.
-// A newly compiled patch contract alone supplies no evidence for auto-approval.
-const reversibleUpdates = new Map(
-  Object.entries({
-    item: ['description', 'name'],
-    legal_entity: ['name'],
-    location: ['name'],
-    // Not credit_hold: a gate on order confirmation, so it always asks, even
-    // on a release compiled before it was declared (AI-UNDO-1).
-    party: ['contact_summary', 'name', 'payment_terms'],
-    purchase_order: ['notes'],
-    sales_order: ['notes'],
-    stock_count_line: ['counted_quantity'],
-    tax_code: ['name'],
-  }).map(([entity, fields]) => [
-    `northstar.app:operation.${entity}_update`,
-    {
-      entity: `northstar.app:entity.${entity}`,
-      fields: new Set(
-        fields.map((field) => `northstar.app:field.${entity}_${field}`),
-      ),
-    },
-  ]),
-);
 
 export function operationRisk(
   catalog: PinnedCatalog,
   operation: RegisteredOperationDefinition,
-  writtenFieldIds: readonly string[] = [],
+  writtenFieldIds: readonly string[],
+  immediateEdits: readonly ImmediateEditDeclaration[],
 ): OperationRisk {
   const kind = effectKind(operation);
   const tier = (operation as { tier?: unknown }).tier;
@@ -98,15 +89,25 @@ export function operationRisk(
         riskClass: 'needsYes',
         reason: 'This changes something that always needs your OK.',
       };
-    const reviewed = reversibleUpdates.get(operation.operationId);
+    // The owner of the record type decides which of its fields may change at
+    // once; a type no capability owns has no such declaration yet (the
+    // release's own derivation is not emitted), so it asks.
+    const owner = immediateEdits.find((declaration) =>
+      declaration.ownedEntityIds.includes(entity),
+    );
+    const declared = new Map(
+      (owner?.immediateFields ?? []).map((field) => [field.fieldId, field]),
+    );
+    const holdsWhile = writtenFieldIds.flatMap((field) => {
+      const condition = declared.get(field)?.holdsWhile;
+      return condition ? [condition] : [];
+    });
     return keys.includes('patch') &&
       keys.includes('expectedRevision') &&
       operation.infrastructure?.optimisticRevision === 'compareAndIncrement' &&
-      reviewed?.entity === entity &&
+      owner !== undefined &&
       writtenFieldIds.length > 0 &&
-      writtenFieldIds.every(
-        (field) => reviewed.fields.has(field) && fields.has(field),
-      )
+      writtenFieldIds.every((field) => declared.has(field) && fields.has(field))
       ? {
           riskClass: 'reversible',
           reason: 'Undo puts the old values back.',
@@ -114,6 +115,7 @@ export function operationRisk(
             kind: 'restorePriorValues',
             operationId: operation.operationId,
           },
+          ...(holdsWhile.length > 0 ? { holdsWhile } : {}),
         }
       : {
           riskClass: 'needsYes',
