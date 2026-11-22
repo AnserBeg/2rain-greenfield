@@ -12,6 +12,8 @@ import { recordCatalogParse } from '../../../packages/runtime/src/catalog-parse-
 import {
   BoardPresentationSchema,
   SurfaceBoardSchema,
+  ReportRevisionSchema,
+  type ReportRevision,
   type BoardPresentation,
   type SurfaceBoard,
   canonicalize,
@@ -319,6 +321,7 @@ export function formFieldIds(
 
 export interface CompiledSurfaceDefinition {
   readonly recordTemplateBinding?: RecordTemplateBinding;
+  readonly report?: ReportRevision;
   readonly popupActions?: readonly CompiledPopup[];
   readonly board?: SurfaceBoard;
   /** The Board's labels and roles, compiled from this release beside `board`. */
@@ -819,6 +822,11 @@ function surfaceAcceptsQuery(
   surface: CompiledSurfaceDefinition,
   queryType: RegisteredSemanticQueryDefinition['queryType'],
 ): boolean {
+  if (surface.archetype === 'list' && surface.report)
+    return (
+      queryType === 'list' &&
+      surface.dataSourceQueryId === surface.report.body.source.queryId
+    );
   if (surface.archetype === 'board')
     return !!surface.board && queryType === 'list';
   return surface.archetype === 'task' && surface.surfaceRole === null
@@ -1154,6 +1162,9 @@ function parseSurface(
             value.recordTemplateBinding,
           ),
         }),
+    ...(value.report
+      ? { report: ReportRevisionSchema.parse(value.report) }
+      : {}),
     ...(archetype === 'board'
       ? {
           board: SurfaceBoardSchema.parse(value.board),

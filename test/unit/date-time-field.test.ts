@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readReportsPredecessor } from '../helpers/reports-preceding-release.js';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
@@ -17,14 +17,11 @@ import * as customization from '../../packages/customization/src/index.js';
 import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 
 const authoredPath = resolve('apps/web/release/app.authored.json');
-const base = JSON.parse(readFileSync(authoredPath, 'utf8')) as Record<
-  string,
-  unknown
->;
+const base = readReportsPredecessor(
+  'apps/web/release/app.authored.json',
+) as Record<string, unknown>;
 const tip = parseCompiledApplication(
-  JSON.parse(
-    readFileSync(resolve('apps/web/release/app.compiled.json'), 'utf8'),
-  ) as unknown,
+  readReportsPredecessor('apps/web/release/app.compiled.json'),
 ).application;
 const acknowledgement = readUnboundPermissionAcknowledgementFor(
   authoredPath,

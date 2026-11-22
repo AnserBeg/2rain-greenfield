@@ -1,8 +1,10 @@
 import { TemplateBindingPatchSchema } from './record-template-binding.js';
+import { AddReportRevisionSchema } from './report-revision.js';
 import { PopupRevisionSchema } from '../../canonical-model/src/popup-actions.js';
 import { BoardViewRevisionSchema } from './board-revision.js';
 import { LayoutRevisionSchema } from './layout-revision.js';
 import {
+  COMPANY_ACCESS_INDEX,
   DATE_TIME_PATCH_VERSION,
   DateTimeZoneSourceSchema,
   CalculatedDisplayFieldDefinitionSchema,
@@ -85,8 +87,16 @@ const addRecordType = z
     label,
     fields: z.array(CustomFieldSchema).min(1).max(24),
     companyOwnership: z.enum(['entityOwned', 'tenantShared']).optional(),
+    companyAccessIndex: z.literal(COMPANY_ACCESS_INDEX).optional(),
   })
   .superRefine((patch, context) => {
+    if (patch.companyAccessIndex && patch.companyOwnership !== 'entityOwned') {
+      context.addIssue({
+        code: 'custom',
+        path: ['companyAccessIndex'],
+        message: 'A company access index requires company ownership.',
+      });
+    }
     if (patch.fields[0]?.type !== 'text') {
       context.addIssue({
         code: 'custom',
@@ -233,6 +243,7 @@ const ChangeMemberSchema = z.discriminatedUnion('kind', [
   }),
   BoardViewRevisionSchema,
   TemplateBindingPatchSchema,
+  AddReportRevisionSchema,
   addRecordType,
   addField,
   addChoice,
@@ -380,6 +391,7 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'addPopupActionRevision',
   'addBoardViewRevision',
   'addRecordTemplateBindingRevision',
+  'addReportRevision',
   'saveListView',
   'addValidation',
   'addCalculatedDisplayField',
@@ -494,4 +506,24 @@ export function unsupported(
     missingCapability,
     status: 'unsupported' as const,
   });
+}
+
+/** Bind new authoring choices once, before persistence. Replay parses the stored member verbatim. */
+export function preparePatchForRecording(
+  patch: CustomizationPatch,
+): CustomizationPatch {
+  const bindNewMember = <
+    T extends Exclude<CustomizationPatch, { kind: 'changeSet' }>,
+  >(
+    member: T,
+  ): T =>
+    member.kind === 'addField'
+      ? { ...member, screens: 'record' as const }
+      : member.kind === 'addRecordType' &&
+          member.companyOwnership === 'entityOwned'
+        ? { ...member, companyAccessIndex: COMPANY_ACCESS_INDEX }
+        : member;
+  return patch.kind === 'changeSet'
+    ? { ...patch, patches: patch.patches.map(bindNewMember) }
+    : bindNewMember(patch);
 }

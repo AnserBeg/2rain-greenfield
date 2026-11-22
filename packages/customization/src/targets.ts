@@ -1,3 +1,4 @@
+import { reportTargets, type ReportTarget } from './report-revision.js';
 import {
   recordTemplateOffers,
   type RecordTemplateOffer,
@@ -59,6 +60,7 @@ export interface DocumentTemplateTarget {
 }
 
 export interface CustomizationTargets {
+  readonly reports?: readonly ReportTarget[];
   readonly popupActions?: readonly PopupOption[];
   readonly documentTemplateTargets?: readonly DocumentTemplateTarget[];
   readonly templateBindings?: readonly RecordTemplateOffer[];
@@ -711,6 +713,7 @@ export function customizationTargets(definition: {
       popupOptions(definition, s),
     ),
     boards: boardTargets(definition),
+    reports: reportTargets(definition),
     layouts: definition.surfaces.flatMap((s) =>
       (['create', 'edit', 'detail'] as const).flatMap((mode) => {
         const target = currentLayout(definition, s, mode);

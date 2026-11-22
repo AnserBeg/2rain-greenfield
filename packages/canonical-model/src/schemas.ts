@@ -17,6 +17,7 @@ import { WORKFLOW_PAYLOAD_VERSION } from './workflows.js';
 import {
   CANONICALIZATION_PROFILE_VERSION,
   CONTENT_HASH_ALGORITHM,
+  COMPANY_ACCESS_INDEX,
   CURRENCY_MINOR_UNITS_V0,
   DISCLOSURE_TIERS,
   PROMOTE_STORAGE_CLASS_CAPABILITY_ID,
@@ -2219,7 +2220,122 @@ export const SurfaceLauncherSchema = z.strictObject({
     .optional(),
 });
 export type SurfaceLauncher = z.infer<typeof SurfaceLauncherSchema>;
+export const ReportCurrencyBindingSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('fixed'),
+    currencyCode: CurrencyCodeSchema,
+  }),
+  z.strictObject({
+    kind: z.literal('stored'),
+    fieldId: CanonicalIdSchema,
+    // Sales accepts EUR as well as the two currencies of the frozen scalar
+    // profile. This list belongs to the source declaration on this release.
+    codes: z
+      .array(z.enum(['CAD', 'USD', 'EUR']))
+      .min(1)
+      .max(3)
+      .refine((codes) => new Set(codes).size === codes.length),
+  }),
+]);
+export type ReportCurrencyBinding = z.infer<typeof ReportCurrencyBindingSchema>;
+const reportField = z.strictObject({
+  fieldId: CanonicalIdSchema,
+  type: z.enum([
+    'text',
+    'choice',
+    'boolean',
+    'integer',
+    'decimal',
+    'date',
+    'instant',
+    'quantity',
+  ]),
+  precision: z.int().min(1).max(38).optional(),
+  scale: z.int().min(0).max(18).optional(),
+  maximumLength: z.int().min(1).max(4000).optional(),
+  unitId: CanonicalIdSchema.optional(),
+  currency: ReportCurrencyBindingSchema.optional(),
+  basis: z.enum(['civilDate', 'instant']).optional(),
+  collation: z.enum(['binary', 'unicodeCaseInsensitive']).optional(),
+  presence: z.enum(['required', 'optional']),
+  classification: z.enum(['internal', 'public']),
+});
+export const ReportFilterSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('equals'), fieldId: CanonicalIdSchema }),
+  z.strictObject({ kind: z.literal('membership'), fieldId: CanonicalIdSchema }),
+  z.strictObject({ kind: z.literal('dateRange'), fieldId: CanonicalIdSchema }),
+]);
+const reportOperator = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('count') }),
+  z.strictObject({ kind: z.literal('sum'), fieldId: CanonicalIdSchema }),
+]);
+export const ReportChoicesSchema = z.strictObject({
+  dimensions: z
+    .array(
+      z.discriminatedUnion('kind', [
+        z.strictObject({
+          kind: z.literal('direct'),
+          fieldId: CanonicalIdSchema,
+        }),
+      ]),
+    )
+    .min(1)
+    .max(4),
+  filters: z.array(ReportFilterSchema).max(16),
+  measures: z
+    .array(
+      z.discriminatedUnion('kind', [
+        z.strictObject({
+          kind: z.literal('inline'),
+          measureId: CanonicalIdSchema,
+          label: LabelSchema,
+          operator: reportOperator,
+        }),
+      ]),
+    )
+    .min(1)
+    .max(8),
+  outputs: z
+    .array(
+      z.discriminatedUnion('kind', [
+        z.strictObject({ kind: z.literal('table') }),
+        z.strictObject({ kind: z.literal('csv') }),
+      ]),
+    )
+    .min(1)
+    .max(2),
+});
+export const ReportBodySchema = ReportChoicesSchema.extend({
+  version: z.literal('grouped-report/v1'),
+  source: z.discriminatedUnion('kind', [
+    z.strictObject({
+      kind: z.literal('generatedCollection'),
+      grain: z.literal('record'),
+      listSurfaceId: CanonicalIdSchema,
+      queryId: CanonicalIdSchema,
+      entityId: CanonicalIdSchema,
+      readPermissionId: CanonicalIdSchema,
+      scope: z.enum(['company', 'tenant']),
+    }),
+  ]),
+  operands: z.array(reportField).max(64),
+});
+export const ReportRevisionSchema = z.strictObject({
+  reportId: CanonicalIdSchema,
+  revisionId: z.uuid(),
+  predecessorDigest: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/u)
+    .nullable(),
+  contractDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+  body: ReportBodySchema,
+});
+export type ReportBody = z.infer<typeof ReportBodySchema>;
+export type ReportChoices = z.infer<typeof ReportChoicesSchema>;
+export type ReportRevision = z.infer<typeof ReportRevisionSchema>;
+
 const normalizedV6SurfaceDefinition = normalizedSurfaceDefinition.extend({
+  report: ReportRevisionSchema.optional(),
   popupActions: z.array(PopupRevisionSchema).min(1).optional(),
   board: SurfaceBoardSchema.optional(),
   recordTemplateBinding: RecordTemplateBindingSchema.optional(),
@@ -2750,14 +2866,58 @@ const authoredV6FieldDefinition = authoredV3FieldDefinition.extend({
   numbering: FieldNumberingSchema.optional(),
 });
 const companyOwnership = z.enum(['entityOwned', 'tenantShared']).optional();
-const normalizedV6EntityDefinition = normalizedEntityDefinition.extend({
+const reportSource = z
+  .strictObject({
+    version: z.literal('report-source/v1'),
+    amounts: z
+      .array(
+        z.strictObject({
+          fieldId: CanonicalIdSchema,
+          currency: ReportCurrencyBindingSchema,
+        }),
+      )
+      .min(1)
+      .optional(),
+    dates: z
+      .array(
+        z.strictObject({
+          fieldId: CanonicalIdSchema,
+          basis: z.enum(['civilDate', 'instant']),
+        }),
+      )
+      .min(1)
+      .optional(),
+  })
+  .refine(
+    (source) => source.amounts !== undefined || source.dates !== undefined,
+  );
+export type ReportSource = z.infer<typeof reportSource>;
+const entityAccess = {
+  reportSource: reportSource.optional(),
   ...assistantConfirmation,
   companyOwnership,
-});
-const authoredV6EntityDefinition = authoredEntityDefinition.extend({
-  ...assistantConfirmation,
-  companyOwnership,
-});
+  companyAccessIndex: z.literal(COMPANY_ACCESS_INDEX).optional(),
+};
+function validCompanyAccess(entity: {
+  companyOwnership?: string | undefined;
+  companyAccessIndex?: string | undefined;
+}) {
+  return (
+    !entity.companyAccessIndex || entity.companyOwnership === 'entityOwned'
+  );
+}
+const normalizedV6EntityDefinition = normalizedEntityDefinition
+  .extend(entityAccess)
+  .refine(
+    validCompanyAccess,
+    'A company access index requires company ownership.',
+  );
+const authoredV6EntityDefinition = authoredEntityDefinition
+  .extend(entityAccess)
+  .refine(
+    validCompanyAccess,
+    'A company access index requires company ownership.',
+  );
 // A list query may declare the most rows one export statement returns. It is a
 // query property, not a screen one, because the agent path reads the query.
 const exportMaximumResultCount = z.int().min(1).max(10_000).optional();

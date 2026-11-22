@@ -7,6 +7,9 @@ export {
   ADOPTED_NORMALIZATION_PROFILE_VERSION,
   CANONICALIZATION_PROFILE_VERSION,
   CANONICAL_LANGUAGE_PROFILES,
+  COMPANY_ACCESS_INDEX,
+  COMPANY_ACCESS_INDEX_READER,
+  REPORT_SOURCE_READER,
   CONTENT_HASH_ALGORITHM,
   CONTENT_HASH_DOMAIN,
   DEFAULT_DISCLOSURE_TIER,
@@ -182,6 +185,17 @@ export type { FormulaValidationRule } from './formula-validation-schema.js';
 export * from './address.js';
 
 export * from './booking.js';
+export {
+  ReportBodySchema,
+  ReportChoicesSchema,
+  ReportRevisionSchema,
+  type ReportBody,
+  type ReportChoices,
+  type ReportRevision,
+  type ReportSource,
+  type ReportCurrencyBinding,
+} from './schemas.js';
+export * from './grouped-aggregate.js';
 export * from './date-time-field.js';
 export {
   DocumentTemplatePointerSchema,

@@ -1,3 +1,4 @@
+import { supersededReports } from './report-revision.js';
 import {
   boundPopupOption,
   popupOptions,
@@ -391,6 +392,7 @@ export function replayCustomizationPatches(
       'addRecordTemplateBindingRevision',
     ),
   };
+  const pastReports = supersededReports(chain);
   for (const [patchIndex, change] of chain.entries()) {
     const origin = origins[patchIndex];
     if (origin?.parent) original = structuredClone(origin.parent);
@@ -484,7 +486,10 @@ export function replayCustomizationPatches(
                 problem: undefined as BoardApplyProblem | undefined,
               }
             : undefined;
-        if (before && !layout && !board)
+        const reportIdentityOnly =
+          patch.kind === 'addReportRevision' &&
+          pastReports.has(patch.revisionId);
+        if (before && !layout && !board && patch.kind !== 'addReportRevision')
           conflicts.push(...bindings(patch, before, target));
         if (patch.kind === 'addMapPlacement' && !conflicts.length) {
           const surface = target.get(patch.surfaceId);
@@ -524,10 +529,26 @@ export function replayCustomizationPatches(
         }
         if (!conflicts.length) {
           const trial = structuredClone(authored);
-          const outcome = applyOne(trial, patch, applied, layout, board);
+          const outcome = applyOne(
+            trial,
+            patch,
+            applied,
+            layout,
+            board,
+            reportIdentityOnly,
+          );
           if (outcome) {
             if (board?.problem?.conflicts.length)
               conflicts.push(...board.problem.conflicts);
+            else if (patch.kind === 'addReportRevision')
+              conflicts.push({
+                code: target.has(outcome.message)
+                  ? 'INCOMPATIBLE_TYPE'
+                  : 'RETIRED_TARGET',
+                subject: outcome.message,
+                expected: patch.reportId,
+                observed: target.get(outcome.message) ?? null,
+              });
             else if (
               layout &&
               (layout.findings.length || layout.blocked.length)

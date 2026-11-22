@@ -10,6 +10,7 @@ import {
   type CustomizationPatchKind,
 } from './patch.js';
 import { PopupCommandSchema } from './popup-revision.js';
+import { ReportDraftSchema } from './report-revision.js';
 import { VALIDATION_COMPARISONS } from './validation-draft.js';
 import { WorkflowDraftSchema } from './workflow-draft.js';
 
@@ -52,6 +53,10 @@ const member = (kind: string): z.ZodType => {
 
 /** Drafted as choices; the drafter turns each into its patch member. */
 export const DRAFTER_SELECTION_SCHEMAS = {
+  addReportRevision: z.strictObject({
+    kind: z.literal('addReportRevision'),
+    report: ReportDraftSchema,
+  }),
   addValidation: z.strictObject({
     kind: z.literal('addValidation'),
     entity: id,
@@ -136,6 +141,7 @@ export const DRAFTER_SELECTION_SCHEMAS = {
 export const DRAFTER_KINDS = {
   addRecordType: {
     input: member('addRecordType'),
+    hidden: ['companyAccessIndex'],
     guidance:
       'A new kind of record with its own list, page and form. The first field is its name and must be type "text". number is a whole number; a choice field lists its options. Use companyOwnership "entityOwned" for company-scoped documents or for links to a company-owned target. A later member of the same change set refers to it as northstar.app:entity.custom_<label in lowercase, punctuation and spaces replaced by underscores>.',
   },
@@ -196,6 +202,11 @@ export const DRAFTER_KINDS = {
     }),
     guidance:
       'Choose a listed company-owned collection, its context and fields for a versioned record template.',
+  },
+  addReportRevision: {
+    input: DRAFTER_SELECTION_SCHEMAS.addReportRevision,
+    guidance:
+      'Group a listed report source by its offered field IDs and count records or sum an offered measure. Enable CSV only when requested. Use a listed active report ID when editing or retiring it.',
   },
   addPopupActionRevision: {
     input: z.strictObject({

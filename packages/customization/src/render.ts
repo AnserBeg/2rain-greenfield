@@ -1,4 +1,5 @@
 import type { RecordTemplateBinding } from '@north-star/canonical-model';
+import type { ReportRevision } from '@north-star/canonical-model';
 import type { PopupRevision } from '../../canonical-model/src/popup-actions.js';
 import {
   baseLayout,
@@ -241,6 +242,22 @@ export function renderReleaseDiff(input: {
       );
   }
   for (const s of to.surfaces) {
+    const report = s.report as ReportRevision | undefined;
+    if (
+      report &&
+      (
+        from.surfaces.find((old) => old.surfaceId === s.surfaceId)?.report as
+          ReportRevision | undefined
+      )?.revisionId !== report.revisionId
+    ) {
+      const { body } = report;
+      lines.push(
+        `${s.lifecycle === 'retired' ? 'Retires' : 'Publishes'} report “${String(s.label)}”. One row per ${entityLabel(to, body.source.entityId)}. Groups: ${body.dimensions.map((d) => d.fieldId).join(', ')}. Measures: ${body.measures.map((m) => m.label + ' (' + m.operator.kind + ')').join(', ')}. Filters: ${body.filters.map((f) => f.fieldId).join(', ') || 'none'}. Outputs: ${body.outputs.map((o) => o.kind).join(', ')}. Requires the source read and read access to each selected operand. CSV requires export authority. Access path: tenant, environment, ${body.source.scope === 'company' ? 'company, ' : ''}${body.filters
+          .filter((f) => f.kind === 'dateRange')
+          .map((f) => f.fieldId + ', ')
+          .join('')}record ID.`,
+      );
+    }
     const board = s.board as SurfaceBoard | undefined;
     if (
       !board ||

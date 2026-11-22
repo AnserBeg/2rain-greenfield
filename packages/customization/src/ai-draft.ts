@@ -1,8 +1,13 @@
 import { draftTemplateBinding } from './record-template-binding.js';
+import { draftReport } from './report-revision.js';
 import { z } from 'zod';
 
 import { WorkflowDefinitionSchema } from '../../canonical-model/src/schemas.js';
-import { drafterKindLines, drafterToolSchema } from './ai-draft-kinds.js';
+import {
+  DRAFTER_SELECTION_SCHEMAS,
+  drafterKindLines,
+  drafterToolSchema,
+} from './ai-draft-kinds.js';
 import {
   ADD_LINK_LATER_CAPABILITY,
   addLinkLaterRefusal,
@@ -245,6 +250,23 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
             required,
           })),
         }),
+    ),
+    'Report sources (collection, eligible fields, and active reports):',
+    ...(targets.reports ?? []).map((target) =>
+      JSON.stringify({
+        source: target.source.listSurfaceId,
+        label: target.label,
+        reportFields: target.fields.map((f) => ({
+          fieldId: f.operand.fieldId,
+          label: f.label,
+          type: f.operand.type,
+          sum: !!(f.operand.currency || f.operand.unitId),
+          dateRange: !!f.operand.basis,
+        })),
+        existing: target.reports
+          .filter((r) => r.lifecycle === 'active')
+          .map((r) => ({ id: r.revision.reportId, label: r.label })),
+      }),
     ),
     ...(targets.popupActions?.length
       ? [
@@ -610,6 +632,23 @@ function convertMember(
           req.templateBinding,
         ),
       ];
+    case 'addReportRevision': {
+      const { report } =
+        DRAFTER_SELECTION_SCHEMAS.addReportRevision.parse(input);
+      const target = local().reports?.find(
+        (candidate) => candidate.source.listSurfaceId === report.listSurfaceId,
+      );
+      if (!target) throw new Error('Choose an available report source.');
+      return [
+        draftReport(
+          target,
+          report.label,
+          report.choices,
+          report.reportId,
+          report.status,
+        ),
+      ];
+    }
     case 'addPopupActionRevision':
       return [popupCommand(base.popupActions ?? [], req.button)];
     case 'addBoardViewRevision':

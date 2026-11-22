@@ -2,6 +2,17 @@
 
 **Slice 0 · Design accepted after the 2026-11-20 Fable re-read; slice 1 may start.** The owner chartered the reusable capability and a design read before code. This docs-only packet touches no Critical path. Fable’s read of [ADR-0089](../../decisions/ADR-0089-declared-reports.md) (accept with amendments) is applied; the narrow re-read of B1/B2 closed with the edits applied.
 
+**Slice 1 · BUILD checkpoint, 2026-11-21.** Invoice reports use the stored sales currency. CAD, USD and EUR have independent partitions. A missing amount contributes to coverage. A present amount without a recognized currency contributes to **No currency**. The canonical money profile is unchanged.
+
+The Invoice date query uses `nsm_i_kyu3zu6vouaduhmjm5lbunvswejls2t4ls5svgycueyib3fqieka`. The provider probe, row policy, group ceiling, unavailable index, and pre-key byte identity have focused PostgreSQL/compiler witnesses. The published Invoice page and CSV [passed the PostgreSQL case](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44959811505/job/137016081557). The [Inspection browser case](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44959811505/job/137016081496) exercised rename, retirement and rollback. A failed audit append withholds the download. [Regression controls](../../../test/evidence/REPORTS-1-s1.expected-red.json)
+Preview and activation use CUSTOMIZE-5’s pooled-table probe from migration 0061. The approved attempt checks the ceiling under the table lock. After TRAIN-G, the archived predecessor at `5710c05ae` includes migration 0068 and BILLING’s surface rung 41. It answers a governed query on compatible persisted releases, including a pop-up action, and refuses the higher floors by capability name. REPORTS-1 uses 42 for the company access key, 43 for the Invoice source binding and 44 for grouped reports.
+
+Grouped table and CSV output, scoped index admission and revision replay serve distribution (Invoices), field service (Inspections) and clinics (visits). Each business selects its record type, operands and labels in the declaration.
+
+The linked full run is historical slice evidence. The TRAIN-G refresh gets a new run on its packet tip.
+
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44965531770
+
 ## Slice plan
 
 | Slice | What the business user can do | Gate before claiming the slice |
@@ -13,7 +24,7 @@
 
 ## Test it yourself
 
-**Today · five-minute design check.** Open the ADR alongside this table. Use the example facts and expected results below to check each decision. The executable walkthroughs become available with their respective slices.
+**Slice 1 · Try it in Customize.** Open Add report from the source list, choose a group and measure, enable CSV, then approve and activate. Use the two fixtures below to check the result.
 
 | Slice | Try it after the slice ships | Expected observation |
 | --- | --- | --- |
@@ -35,10 +46,35 @@
 - Exercise an ordered create/edit/retire chain, compatible upgrade and a real removed operand or changed scope per new patch kind. Remove its independent allowlist entry and require the vocabulary test to name it. A stale approval after switch-away/switch-back refuses. A conflicting replay keeps the verified source serving.
 - Register the compiler, PostgreSQL, archived-loader, browser and agent witnesses with their CI-2 producers. The hosted run must credit each test file in one attempt. Record the expected-red evidence for silent-harm claims when the corresponding slice exists. [CI-2](CI-2.md)
 
+## Slice 1 drafting evaluation
+
+2026-11-21 · Rule 12, REPORTS-1 BUILD lane. AI-BUILD-1’s registry derives the report member from its schema. The scripted Invoice case in `test/unit/customization-ai-draft.test.ts` also exercises refusal of an unavailable source. The live grading cases below remain pending.
+
+| User request | Required grading observation |
+| --- | --- |
+| “Show Invoice balances by customer with a CSV, keeping currencies separate.” | The proposed revision selects the Invoice collection, customer dimension, stored balance sum, table and CSV. Currency comes from the source binding. |
+| “Count Inspections by Outcome. Let me download the table.” | On a created Inspection type with an Outcome choice, the revision selects that tenant's collection and stable Outcome field, counts records and enables CSV. |
+| “Use a hidden Invoice balance for the report.” | A role without Balance receives no report proposal exposing that field. |
+
 ## Design decisions and gate
 
-Use the existing List and Home grammar. A group has typed keys, currency and measures. A report's stable ID survives renaming. The proposed 91+ label puts day 90 in one band. The ADR assigns limits for review and leaves scalar reader and migration numbers to executable merges. No runtime proof is claimed at this checkpoint.
+Use the existing List and Home grammar. A group has typed keys, currency and measures. A report's stable ID survives renaming. The proposed 91+ label puts day 90 in one band. The reader enforces the ADR’s limits. The slice 1 PostgreSQL and browser cases exercise published reports and their authorized readers.
 
 Resolved by the design read and orchestrator rulings: a report’s index on an existing table uses the ceiling-bounded locking build (ADR-0087 A4, PR-6c path), initially 10,000 rows, and refuses by name above it. Every new company-owned record type declares a same-plan company-leading index (optional key; absent on all earlier types). Amendments B1, B2, R1–R9 and N1–N5 are in [ADR-0089](../../decisions/ADR-0089-declared-reports.md#amendments-from-the-design-read). B1 and B2 were re-read and closed (2026-11-20).
 
-The local record check passed. All 24 jobs passed at `385e2f77`. The docs-only synchronization took ADR-0089 after COMMS-1 landed. [Packet CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44768627224)
+```record-claim
+{
+  "schemaVersion": "northstar.record-claim/v1", "packet": "REPORTS-1",
+  "base": "5710c05ae2529b742bf15f8f484c75c0b3930180", "head": "ea0977b972a7e09c98ab07515ca8b6d8a50a462e",
+  "changedPaths": [
+    "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json", "apps/web/src/component-registry.ts", "apps/web/src/customize-report.ts", "apps/web/src/customize-screen.ts", "apps/web/src/grouped-report.ts", "apps/web/src/ledger-styles.ts", "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts",
+    "apps/web/test/browser/customize-inspection.composed-application.spec.ts", "apps/web/test/browser/customize.composed-application.spec.ts", "package.json", "packages/canonical-model/src/constants.ts", "packages/canonical-model/src/declared-report.ts", "packages/canonical-model/src/grouped-aggregate.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/normalize.ts", "packages/canonical-model/src/schemas.ts",
+    "packages/compiler/src/declared-reports.ts", "packages/compiler/src/projections.ts", "packages/compiler/src/storage.ts", "packages/customization/src/ai-draft-kinds.ts", "packages/customization/src/ai-draft.ts", "packages/customization/src/apply.ts", "packages/customization/src/authoring-rules.ts", "packages/customization/src/index.ts", "packages/customization/src/patch.ts", "packages/customization/src/render.ts", "packages/customization/src/report-revision.ts",
+    "packages/customization/src/targets.ts", "packages/customization/src/upgrade-diagnostics.ts", "packages/customization/src/upgrade-replay.ts", "packages/domain/src/sales/definition.ts", "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/grouped-report.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/module-storage-materializer.ts", "packages/postgres-provider/src/release-repository.ts",
+    "packages/postgres-provider/src/report-index-build.ts", "packages/postgres-provider/src/serving-gateways.ts", "packages/runtime/src/declared-report.ts", "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-query-gateway.ts", "test/architecture/repository-hygiene.test.ts", "test/architecture/surface-grammar-conformance.test.ts", "test/compiler/report-company-access.test.ts", "test/evidence/REPORTS-1-s1.expected-red.json",
+    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/application-before-stock-count-workflow.ts", "test/helpers/archived-runtime-process.ts", "test/helpers/reachability-producers.ts", "test/helpers/reports-preceding-release.ts", "test/postgres/booking-serving.test.ts", "test/postgres/customization-inspection.test.ts", "test/postgres/customization-validation.test.ts", "test/postgres/date-time-field.test.ts", "test/postgres/document-attachments.test.ts",
+    "test/postgres/releases.test.ts", "test/postgres/report-company-reader.test.ts", "test/postgres/report-reader-bounds.test.ts", "test/postgres/request-runtime-view.test.ts", "test/unit/customization-ai-draft.test.ts", "test/unit/customization-board.test.ts", "test/unit/customization-upgrade.test.ts", "test/unit/customization.test.ts", "test/unit/date-time-field.test.ts"
+  ],
+  "symbols": [{"path":"packages/compiler/src/declared-reports.ts","name":"lowerDeclaredReports"},{"path":"packages/postgres-provider/src/grouped-report.ts","name":"readGroupedSnapshot"},{"path":"packages/runtime/src/declared-report.ts","name":"reportCsv"}]
+}
+```
