@@ -22,6 +22,8 @@ import {
   BillingPlanSchema,
   BILLING_ALLOCATION_READER,
   BILLING_ARREARS_READER,
+  BILLING_CALCULATION_VERSION,
+  BILLING_CYCLE_CALCULATION,
   BILLING_TERMS_CAPABILITY,
   BILLING_QUOTE_CAPABILITY,
 } from '../../packages/canonical-model/src/billing.js';
@@ -46,12 +48,17 @@ import { compileRatePlan } from '../../packages/domain/src/billing/terms.js';
 import {
   compileApplicationRelease,
   MODULE_COMPILER_PROFILE,
+  PROJECTION_FAMILY_IDS,
   expectedActiveReleaseFrom,
 } from '../../packages/compiler/src/index.js';
 import { serializeRelease } from '../../packages/customization/src/index.js';
 import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../packages/runtime/src/semantic-query-gateway.js';
-import { compilerInput, normalizedBytes } from '../compiler/helpers.js';
+import {
+  compilerInput,
+  normalizedBytes,
+  projectionPayload,
+} from '../compiler/helpers.js';
 import {
   authoredPath,
   firstPartyAuthored,
@@ -179,7 +186,13 @@ const meterPlan = BillingPlanSchema.parse({
 const usageQuery = id('query.billing_usage');
 const trackedSlot = id('slot.service_equipment');
 type FixtureMode =
-  'bound' | 'legacy' | 'declaration' | 'arrears' | 'booking' | 'wrongSlot';
+  | 'bound'
+  | 'legacy'
+  | 'declaration'
+  | 'arrears'
+  | 'interval'
+  | 'booking'
+  | 'wrongSlot';
 function billingFixture(
   mode: FixtureMode,
   base: BillingFixtureBase = currentBase,
@@ -301,19 +314,25 @@ function billingFixture(
     billingPlans: [
       mode === 'arrears'
         ? meterPlan
-        : booking
+        : mode === 'interval'
           ? {
               ...plan,
-              bindings: {
-                ...b,
-                arrearsSource: {
-                  kind: 'bookingActuals',
-                  queryId: usageQuery,
-                  slotId: mode === 'wrongSlot' ? id('slot.other') : trackedSlot,
-                },
-              },
+              bindings: { ...b, arrearsSource: { kind: 'agreedInterval' } },
             }
-          : plan,
+          : booking
+            ? {
+                ...plan,
+                bindings: {
+                  ...b,
+                  arrearsSource: {
+                    kind: 'bookingActuals',
+                    queryId: usageQuery,
+                    slotId:
+                      mode === 'wrongSlot' ? id('slot.other') : trackedSlot,
+                  },
+                },
+              }
+            : plan,
     ],
     fields: [
       ...p.fields,
@@ -428,7 +447,7 @@ function billingFixture(
   };
 }
 
-function release(mode: FixtureMode = 'bound', base?: BillingFixtureBase) {
+function compileBillingFixture(mode: FixtureMode, base?: BillingFixtureBase) {
   const { bytes, old, permissions, ack, languageVersion } = billingFixture(
     mode,
     base,
@@ -458,6 +477,11 @@ function release(mode: FixtureMode = 'bound', base?: BillingFixtureBase) {
       ],
     },
   );
+  return { compiled, bytes, old };
+}
+
+function release(mode: FixtureMode = 'bound', base?: BillingFixtureBase) {
+  const { compiled, bytes, old } = compileBillingFixture(mode, base);
   if (mode === 'wrongSlot') {
     assert.ok(
       compiled.status !== 'compiled' &&
@@ -540,6 +564,82 @@ test('period meter bindings require distinct selected boundaries, canonical unit
     assert.equal(
       billingBindingProblem({ ...pkg, billingPlans: [declared] }),
       'BILLING_METER_SOURCE_REQUIRED',
+    );
+  }
+});
+
+test('each arrears source kind compiles at the arrears reader with the cycle calculation, and absence keeps the allocation reader', () => {
+  const family = PROJECTION_FAMILY_IDS.surfaceManifest;
+  const surface = (mode: FixtureMode) => {
+    const { compiled } = compileBillingFixture(mode);
+    assert.ok(
+      compiled.status === 'compiled',
+      JSON.stringify(compiled.diagnostics),
+    );
+    return {
+      reader: compiled.bundle.releaseManifest.projections.find(
+        (p) => p.familyId === family,
+      )!.requiredRuntimeCapability.minimumVersion,
+      calculation: projectionPayload<{ billingCalculationVersion?: string }>(
+        compiled,
+        family,
+      ).billingCalculationVersion,
+    };
+  };
+  assert.deepEqual(surface('bound'), {
+    reader: BILLING_ALLOCATION_READER,
+    calculation: BILLING_CALCULATION_VERSION,
+  });
+  for (const mode of ['interval', 'arrears', 'booking'] as const) {
+    assert.deepEqual(
+      surface(mode),
+      {
+        reader: BILLING_ARREARS_READER,
+        calculation: BILLING_CYCLE_CALCULATION,
+      },
+      mode,
+    );
+  }
+  const pkg = parseNormalizedApplicationPackageJson(
+    billingFixture('interval').bytes,
+  );
+  assert.ok(pkg.languageVersion === 'v6');
+  const rate = pkg.billingPlans![0]!;
+  assert.deepEqual(rate.bindings!.arrearsSource, { kind: 'agreedInterval' });
+  assert.equal(billingBindingProblem(pkg), undefined);
+  const metered: typeof rate = {
+    ...rate,
+    components: [
+      ...rate.components,
+      {
+        id: 'overage',
+        kind: 'meter',
+        stage: 'afterCapBeforeTax',
+        taxClassification: 'untaxed',
+        streamId: 'copies',
+        unit: 'copy',
+        overageRate: 'daily',
+        allowanceProration: 'none',
+        allowanceBasis: { kind: 'perCycle', quantity: 'daily' },
+      },
+    ],
+  };
+  assert.equal(
+    billingBindingProblem({ ...pkg, billingPlans: [metered] }),
+    'BILLING_SOURCE_FIELDS_REQUIRED',
+  );
+  assert.ok(BillingPlanSchema.safeParse(plan).success);
+  for (const arrearsSource of [
+    { kind: 'advance' },
+    { kind: 'agreedInterval', queryId: usageQuery },
+  ]) {
+    assert.equal(
+      BillingPlanSchema.safeParse({
+        ...plan,
+        bindings: { ...plan.bindings, arrearsSource },
+      }).success,
+      false,
+      JSON.stringify(arrearsSource),
     );
   }
 });
