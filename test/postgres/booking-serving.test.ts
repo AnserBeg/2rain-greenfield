@@ -259,7 +259,7 @@ try {
   const loader=new PostgresRequestRuntimeViewService(pool), context=await trustedContext(identity);
   const definition=await loader.load(context);
   const serving=await loadServingRelease(pool,context,definition.release.releaseId);
-  const {policy,queryGateway}=composeServingGateways(pool,pool,context,serving,new ObservabilityMetrics(),{providerErrorMappings:[]});
+  const {policy,queryGateway}=composeServingGateways(pool,pool,context,serving,new ObservabilityMetrics(),{providerErrorMappings:[],writeInvariants:[]});
   const entry=new AuthenticatedRequestRuntimeEntryAdapter(new AuthenticatedRequestEntryAdapter(async()=>identity),loader,policy);
   const dto=await entry.run({},view=>queryGateway.invoke(view,{schemaVersion:SEMANTIC_QUERY_REQUEST_VERSION,queryId:'northstar.app:query.item_get',arguments:{recordId}}));
   console.log(JSON.stringify({outcome:dto.outcome,id:dto.records[0]?.recordId}));

@@ -28,7 +28,7 @@ try {
   const definitions = await loader.load(context);
   const serving = await loadServingRelease(pool, context, definitions.release.releaseId);
   const { policy, queryGateway } = composeServingGateways(pool, pool, context, serving,
-    new ObservabilityMetrics(), { providerErrorMappings: [] });
+    new ObservabilityMetrics(), { providerErrorMappings: [], writeInvariants: [] });
   const entry = new AuthenticatedRequestRuntimeEntryAdapter(new AuthenticatedRequestEntryAdapter(async () => identity), loader, policy);
   const result = await entry.run({}, (view) => queryGateway.invoke(view, {
     schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,

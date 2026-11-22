@@ -28,6 +28,7 @@ import { openCustomizationService } from '../../packages/postgres-provider/src/c
 import { FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/fulfillment-capability-executor.js';
 import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/inventory-posting-capability-executor.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
+import { INVENTORY_WRITE_INVARIANTS } from '../../packages/postgres-provider/src/inventory-write-invariants.js';
 import { PAYABLES_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/payables-capability-executor.js';
 import { PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/purchase-order-approval-executor.js';
 import { RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receivables-capability-executor.js';
@@ -113,6 +114,7 @@ test(
           localDemoIdentity: true as const,
           migrationsDirectory: resolve('db/migrations'),
           providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
+          writeInvariants: INVENTORY_WRITE_INVARIANTS,
           tenantSlug,
         };
         const opened = await openCustomizationService(serviceOptions);

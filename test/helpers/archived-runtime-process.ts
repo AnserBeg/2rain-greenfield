@@ -133,6 +133,7 @@ try {
   const serving = await loadServingRelease(pool, context, active.release.releaseId);
   const gates = composeServingGateways(pool, pool, context, serving, new ObservabilityMetrics(), {
     providerErrorMappings: [],
+    writeInvariants: [],
   });
   const entry = new AuthenticatedRequestRuntimeEntryAdapter(
     new AuthenticatedRequestEntryAdapter(async () => identity),

@@ -1,5 +1,6 @@
 import { CAPABILITY_EXECUTOR_FACTORIES } from '../../apps/api/src/erp-capabilities.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
+import { INVENTORY_WRITE_INVARIANTS } from '../../packages/postgres-provider/src/inventory-write-invariants.js';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import test from 'node:test';
@@ -860,6 +861,7 @@ test(
           compiledApplication: await readCompiledApplication(),
           migrationsDirectory: 'db/migrations',
           providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
+          writeInvariants: INVENTORY_WRITE_INVARIANTS,
           capabilityOperationExecutorFactories: CAPABILITY_EXECUTOR_FACTORIES,
           inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
           documents: {
