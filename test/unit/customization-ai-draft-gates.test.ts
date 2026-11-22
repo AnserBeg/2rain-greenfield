@@ -84,6 +84,7 @@ const EXPECTED_REPAIRABLE: Readonly<
   CUSTOMIZE_FIELD_NOT_ON_LIST: true,
   CUSTOMIZE_BOARD_CONFLICT: true,
   CUSTOMIZE_LAYOUT_CONFLICT: true,
+  CUSTOMIZE_PRESENTATION_CONFLICT: true,
   // A button bound to a Task the person may not run: final (filed).
   CUSTOMIZE_POPUP_CONFLICT: false,
   // REPORTS (merged 2026-11-22): final on main, not in the allowlist (filed).

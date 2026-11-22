@@ -3453,6 +3453,8 @@ export const REPAIRABLE_REFUSAL_CODES: ReadonlySet<string> = new Set([
   'CUSTOMIZE_FIELD_NOT_ON_LIST',
   'CUSTOMIZE_BOARD_CONFLICT',
   'CUSTOMIZE_LAYOUT_CONFLICT',
+  // UI-CUSTOM-1: a colour rule naming a value or column the list lacks.
+  'CUSTOMIZE_PRESENTATION_CONFLICT',
 ] satisfies readonly PatchRefusalCode[]);
 
 export function classifyDraftOutcome(
