@@ -295,10 +295,7 @@ jobs:
         # shard 7 21m 20s and shard 6 19m 06s; REPORTS run 44986880683 put shard
         # 3 at 29m 01s and shard 8 at 26m 41s. Shard 10 takes build-eval,
         # agent-dev-tasks and address-authority; see docs/execution/packets/CI-6.md.
-        # TEMPLATE-1: shard 11 isolates record-template-library, which runs four
-        # full release verifications (run 44999990716 cancelled shard 9 with it
-        # still running after date-time-field).
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -353,9 +350,6 @@ jobs:
       - name: Run PostgreSQL shard 10
         if: matrix.shard == 10
         run: corepack pnpm test:postgres:10
-      - name: Run PostgreSQL shard 11
-        if: matrix.shard == 11
-        run: corepack pnpm test:postgres:11
       - name: Run non-C locale determinism probe
         if: matrix.shard == 1
         run: corepack pnpm test:locale

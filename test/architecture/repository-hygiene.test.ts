@@ -268,7 +268,6 @@ const suiteDefinitions = [
       'test:postgres:8',
       'test:postgres:9',
       'test:postgres:10',
-      'test:postgres:11',
     ],
   },
   {
@@ -832,7 +831,6 @@ test('CI runs every scaffold gate from a frozen install', () => {
     'corepack pnpm test:postgres:8',
     'corepack pnpm test:postgres:9',
     'corepack pnpm test:postgres:10',
-    'corepack pnpm test:postgres:11',
     'corepack pnpm test:postgres:composed',
     'corepack pnpm test:postgres:commercial',
     'corepack pnpm test:postgres:sales',

@@ -133,6 +133,7 @@ export const reachabilityProducers = [
   nodeProducer('postgres-5', 'postgres', 'test:postgres:5', [
     'test/postgres/customization-world.test.ts',
     'test/postgres/locations.test.ts',
+    'test/postgres/record-template-library.test.ts',
   ]),
   nodeProducer('postgres-6', 'postgres', 'test:postgres:6', [
     'test/postgres/customization-governed-reads.test.ts',
@@ -155,9 +156,6 @@ export const reachabilityProducers = [
     'test/postgres/address-authority.test.ts',
     'test/postgres/agent-dev-tasks.test.ts',
     'test/postgres/build-eval.test.ts',
-  ]),
-  nodeProducer('postgres-11', 'postgres', 'test:postgres:11', [
-    'test/postgres/record-template-library.test.ts',
   ]),
   nodeProducer(
     'postgres-composed',
