@@ -108,6 +108,12 @@ export type Expectation =
       /** The list surface local the board is on starts with this. */
       readonly list: string;
       readonly label: readonly string[];
+    }
+  | {
+      readonly outcome: 'map';
+      /** The list surface local the map view is on starts with this. */
+      readonly list: string;
+      readonly label: readonly string[];
     };
 
 export type Category =
@@ -176,6 +182,22 @@ export const serviceJobLifecycleBase = {
     { label: 'Done', role: 'success' },
   ],
   transitions: [{ from: 'Scheduled', to: 'Done', label: 'Complete' }],
+} as const;
+
+/** Service jobs whose list carries a direct Address (PLANNER-1 Map cases). */
+export const serviceJobAddressBase = {
+  kind: 'changeSet',
+  patches: [
+    serviceJobBase,
+    {
+      kind: 'addAddressField',
+      schemaVersion: 'v6',
+      entity: entity('custom_service_job'),
+      fieldId: `${NS}:field.custom_custom_service_job_site_address`,
+      label: 'Site address',
+      required: false,
+    },
+  ],
 } as const;
 
 export const receiptCheckBase = {
@@ -1120,6 +1142,40 @@ export const VALIDATION_FOLLOWUP_CASES: readonly BuildCase[] = [
 ];
 
 /**
+ * Dated follow-up (2026-11-21, PLANNER-1 slice 1, MIGRATION-RULE rule 12):
+ * the Map view member, one development and one held-out request. NEW, written
+ * before any run, and NOT part of the 40 scored in AI-BUILD-1 slice 2; run
+ * them with `--cases P01,P02` once added to BUILD_CASES by a later slice.
+ */
+export const MAP_FOLLOWUP_CASES: readonly BuildCase[] = [
+  {
+    id: 'P01',
+    split: 'dev',
+    category: 'follow-up',
+    base: [serviceJobAddressBase],
+    request: 'Show service jobs on a map, in scheduled date order.',
+    expect: {
+      outcome: 'map',
+      list: 'custom_service_job',
+      label: ['map', 'service job', 'jobs', 'route'],
+    },
+  },
+  {
+    id: 'P02',
+    split: 'test',
+    category: 'follow-up',
+    base: [serviceJobAddressBase],
+    request:
+      'Where are the crews going? Plot each service job at its site address, earliest scheduled first.',
+    expect: {
+      outcome: 'map',
+      list: 'custom_service_job',
+      label: ['map', 'service job', 'jobs', 'route', 'crew', 'site'],
+    },
+  },
+];
+
+/**
  * AI-RELY-1 slice 1, gate (a): the patch kinds a case's scorer checks,
  * read from its hand-written expectation (never from a model's output).
  * A module case scores its required kinds and what `scoreModule` checks of
@@ -1132,6 +1188,7 @@ export function scoredKinds(c: BuildCase): readonly string[] {
   const e = c.expect;
   if (e.outcome === 'workflow') return ['saveWorkflow'];
   if (e.outcome === 'board') return ['addBoardViewRevision'];
+  if (e.outcome === 'map') return ['addMapViewRevision'];
   if (e.outcome === 'validation') return ['addValidation'];
   // B01-B03 score one activated rate-plan structure (build-eval: kinds[0]).
   if (e.outcome === 'ratePlan') return ['addRatePlanVersion'];
@@ -1191,4 +1248,10 @@ export const EVAL_CASE_EXCEPTIONS: Readonly<Record<string, EvalCaseException>> =
     addReportRevision: noCase(
       'REPORTS merged drafter support on 2026-11-22 without a BUILD_CASES case (rule 12 owed).',
     ),
+    addMapViewRevision: {
+      since: '2026-11-22',
+      owner: 'PLANNER-1 slice 2',
+      reason:
+        'P01-P02 are written (MAP_FOLLOWUP_CASES) but not yet in BUILD_CASES.',
+    },
   });

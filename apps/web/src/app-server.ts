@@ -1,3 +1,10 @@
+import { mapCentre } from '@north-star/canonical-model';
+import {
+  type MapFrameDocument,
+  type mapDisplayOrigins,
+} from './map-display-origins.js';
+export { mapDisplayOrigins } from './map-display-origins.js';
+export type { MapFrameDocument } from './map-display-origins.js';
 import { addressSettings } from './address-settings.js';
 import { offerPlaces } from './address-context.js';
 import { createServer } from 'node:http';
@@ -43,6 +50,7 @@ import {
   withLocalDemoIdentity,
   withStaffSession,
   renderSurfaceRuntimeWithData,
+  mapFragment,
   submitSurfaceRuntimeFragment,
   submitSurfaceRuntimeIntent,
   SURFACE_STYLESHEET,
@@ -63,6 +71,9 @@ export interface RequestWorkProbe {
 }
 
 export interface SurfaceRuntimeServerOptions {
+  readonly mapDisplay?: ReturnType<typeof mapDisplayOrigins>;
+  /** Browser map frame documents by the name a provider descriptor declares. */
+  readonly mapFrames?: Readonly<Record<string, MapFrameDocument>>;
   /**
    * SPEED-1: a page read (a GET, or a task's step) runs all its reads in one
    * read snapshot, ended by `finishReads` or when the page is assembled; a
@@ -101,7 +112,32 @@ export function createSurfaceRuntimeServer(
 ): Server {
   const documents =
     options.documents && mountDocumentHttp(entry, options.documents);
+  const origins = options.mapDisplay;
+  const frames = options.mapFrames ?? {};
   return createServer((request, response) => {
+    if (origins && request.headers.host === origins.maps.host) {
+      const name = /^\/basemap\/([a-z0-9-]{1,64})$/u.exec(
+        request.url ?? '',
+      )?.[1];
+      const frame = name && Object.hasOwn(frames, name) && frames[name];
+      if (
+        frame &&
+        request.method === 'GET' &&
+        request.headers['sec-fetch-dest'] === 'iframe'
+      ) {
+        response.writeHead(200, {
+          'content-type': 'text/html; charset=utf-8',
+          'cache-control': 'no-store',
+          'referrer-policy': 'origin',
+          'content-security-policy': frame.csp(origins.app),
+        });
+        response.end(frame.document(origins.app));
+      } else {
+        response.writeHead(404);
+        response.end();
+      }
+      return;
+    }
     htmlEncodings.set(response, acceptedEncoding(request));
     const handle = async () => {
       if (options.staffTransport) {
@@ -158,6 +194,8 @@ export function createSurfaceRuntimeServer(
         documents,
         options.workflowApprovals,
         options.selectedDemoActor,
+        origins,
+        frames,
       );
     };
     const probe = options.requestWork;
@@ -182,13 +220,15 @@ async function handleRequest(
   documents?: ReturnType<typeof mountDocumentHttp>,
   workflowApprovals?: WorkflowApprovalsService,
   selectedDemoActor?: (cookie: string | undefined) => 'buyer' | 'manager',
+  origins?: ReturnType<typeof mapDisplayOrigins>,
+  frames: Readonly<Record<string, MapFrameDocument>> = {},
 ): Promise<void> {
   response.setHeader('cache-control', 'no-store');
   response.setHeader(
     'content-security-policy',
     // `connect-src 'self'` admits only the owned script's same-origin fragment
     // POSTs (ADR-0036 behaviour 7); script, style and form rules are unchanged.
-    `default-src 'none'; script-src '${SURFACE_CLIENT_CSP_HASH}'${assistant ? ` '${ASSISTANT_PANEL_CSP_HASH}'` : ''}; style-src 'self'; font-src 'self'; img-src data:; connect-src ${gateways ? "'self'" : "'none'"}; base-uri 'none'; form-action ${gateways ? "'self'" : "'none'"}; frame-ancestors 'none'`,
+    `default-src 'none'; script-src '${SURFACE_CLIENT_CSP_HASH}'${assistant ? ` '${ASSISTANT_PANEL_CSP_HASH}'` : ''}; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src ${gateways ? "'self'" : "'none'"}; base-uri 'none'; form-action ${gateways ? "'self'" : "'none'"}; frame-ancestors 'none'`,
   );
   response.setHeader('x-content-type-options', 'nosniff');
 
@@ -228,6 +268,79 @@ async function handleRequest(
     } catch {
       response.writeHead(403);
       response.end('Company settings unavailable for this account.');
+    }
+    return;
+  }
+  const speculative = [
+    request.headers['sec-purpose'],
+    request.headers.purpose,
+  ].some((purpose) => /prefetch|prerender/iu.test(String(purpose)));
+  if (url.pathname === '/map/display') {
+    try {
+      if (
+        speculative ||
+        request.method !== 'POST' ||
+        !origins ||
+        request.headers.host !== origins.app.host ||
+        request.headers.origin !== origins.app.origin ||
+        !sameOriginRequest(request) ||
+        !gateways?.addresses?.viewportDisplay
+      )
+        throw Error();
+      const display = await entry.run({ headers: request.headers }, (view) =>
+        gateways.addresses!.viewportDisplay!(
+          view,
+          url.searchParams.get('image') ?? '',
+        ),
+      );
+      // The installed provider's descriptor names the frame document.
+      if (!Object.hasOwn(frames, display.frame.document)) throw Error();
+      const centre = mapCentre(display.viewport);
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(
+        JSON.stringify({
+          frame: new URL('/basemap/' + display.frame.document, origins.maps)
+            .href,
+          title: display.frame.title,
+          camera: {
+            key: display.browserKey,
+            center: { lat: centre.latitude, lng: centre.longitude },
+            zoom: display.viewport.zoom,
+          },
+        }),
+      );
+    } catch {
+      response.writeHead(404);
+      response.end();
+    }
+    return;
+  }
+  if (url.pathname === '/map/image') {
+    if (
+      request.method !== 'GET' ||
+      !gateways?.addresses?.viewportImage ||
+      speculative
+    ) {
+      response.writeHead(403);
+      response.end();
+      return;
+    }
+    try {
+      const image = await entry.run({ headers: request.headers }, (view) =>
+        gateways.addresses!.viewportImage!(
+          view,
+          url.searchParams.get('image') ?? '',
+          url.searchParams.get('company') ?? '',
+        ),
+      );
+      response.writeHead(200, {
+        'content-type': 'image/png',
+        'cache-control': 'private, no-store',
+      });
+      response.end(image);
+    } catch {
+      response.writeHead(404);
+      response.end();
     }
     return;
   }
@@ -344,10 +457,11 @@ async function handleRequest(
   // Origin naming this server. Anything else is an ordinary request.
   const fragmentRequest = request.headers[FRAGMENT_REQUEST_HEADER];
   const taskFragment = fragmentRequest === 'task';
+  const mapRequest = fragmentRequest === 'map';
   const fragment =
     request.method === 'POST' &&
     gateways !== undefined &&
-    (fragmentRequest === '1' || taskFragment);
+    (fragmentRequest === '1' || taskFragment || mapRequest);
   if (fragment) {
     const site = request.headers['sec-fetch-site'];
     response.setHeader(FRAGMENT_REQUEST_HEADER, 'fragment');
@@ -370,6 +484,20 @@ async function handleRequest(
     }
     try {
       const submission = await readFormSubmission(request);
+      if (mapRequest) {
+        const render = () =>
+          entry.run({ headers: request.headers }, (view) =>
+            mapFragment(view, url.href, {
+              ...gateways,
+              viewportNavigation: !speculative,
+            }),
+          );
+        const result = readSnapshot
+          ? await readSnapshot(render)
+          : await render();
+        writeHtml(response, result);
+        return;
+      }
       if (taskFragment) {
         if (!taskStep(submission)) {
           fallback();
@@ -509,23 +637,44 @@ async function handleRequest(
       });
       return;
     }
-    const result = gateways
+    // Only a user-activated document navigation or the owned same-origin Map
+    // form can issue a handle. Programmatic reads still get the linked stops.
+    const pageGateways = gateways && {
+      ...gateways,
+      viewportNavigation:
+        request.method === 'GET' &&
+        !speculative &&
+        request.headers['sec-fetch-user'] === '?1' &&
+        request.headers['sec-fetch-dest'] === 'document',
+    };
+    const result = pageGateways
       ? submission
         ? taskStep(submission)
           ? await submitTask(submission, false)
           : await entry.run({ headers: request.headers }, (view) =>
-              submitSurfaceRuntimeIntent(view, url.href, submission, gateways),
+              submitSurfaceRuntimeIntent(
+                view,
+                url.href,
+                submission,
+                pageGateways,
+              ),
             )
         : readSnapshot
           ? await readSnapshot((finishReads) =>
               entry.run({ headers: request.headers }, (view) =>
-                renderSurfaceRuntimeWithData(view, url.href, gateways, null, {
-                  finishReads,
-                }),
+                renderSurfaceRuntimeWithData(
+                  view,
+                  url.href,
+                  pageGateways,
+                  null,
+                  {
+                    finishReads,
+                  },
+                ),
               ),
             )
           : await entry.run({ headers: request.headers }, (view) =>
-              renderSurfaceRuntimeWithData(view, url.href, gateways),
+              renderSurfaceRuntimeWithData(view, url.href, pageGateways),
             )
       : await entry.run({ headers: request.headers }, (view) =>
           renderSurfaceRuntime(view, url.href),
@@ -536,6 +685,14 @@ async function handleRequest(
       (demoActors && selectedDemoActor?.(request.headers.cookie)) || 'buyer',
       workflowApprovals && WORKFLOW_APPROVALS_HREF,
     );
+    if (origins && request.headers.host === origins.app.host && page.mapPage) {
+      response.setHeader(
+        'content-security-policy',
+        response.getHeader('content-security-policy') +
+          '; frame-src ' +
+          origins.maps.origin,
+      );
+    }
     writeHtml(
       response,
       assistant

@@ -69,6 +69,13 @@ export const CURRENT_POLICY_RUNTIME_BINDINGS = Object.freeze([
  * settings route and platform.address_configure check this grant live in a
  * membership that covers the company. The local demo grants it to the manager.
  */
+export const MAP_VIEWPORT_READ_BINDING = Object.freeze({
+  action: 'read',
+  permissionId: 'northstar.runtime:permission.map_viewport_read',
+  resourceId: 'northstar.runtime:connector.map_viewport',
+  scopeMode: 'resource',
+} as const satisfies CurrentPolicyPermissionBinding);
+
 export const ADDRESS_CONNECTOR_CONFIGURE_BINDING = Object.freeze({
   action: 'configure',
   permissionId: 'northstar.runtime:permission.connector_configure',

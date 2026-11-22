@@ -397,8 +397,8 @@
       "name": "address-map-placement-reader-floor",
       "claim": "A map placement raises the surface floor to 32, so a reader 31 build refuses it.",
       "file": "packages/compiler/src/projections.ts",
-      "original": "            address.placements.length\n              ? ADDRESS_MAP_READER\n              : ADDRESS_FIELD_READER,",
-      "replacement": "            ADDRESS_FIELD_READER,",
+      "original": "              : address.placements.length\n                ? ADDRESS_MAP_READER\n                : ADDRESS_FIELD_READER,",
+      "replacement": "              : ADDRESS_FIELD_READER,",
       "test": {
         "files": ["test/postgres/address-connector.test.ts"]
       },

@@ -1,3 +1,4 @@
+import { mapTargets, type MapTarget } from './map-revision.js';
 import { reportTargets, type ReportTarget } from './report-revision.js';
 import {
   popupOptions,
@@ -56,6 +57,7 @@ export interface DocumentTemplateTarget {
 }
 
 export interface CustomizationTargets {
+  readonly maps?: readonly MapTarget[];
   readonly reports?: readonly ReportTarget[];
   readonly popupActions?: readonly PopupOption[];
   readonly documentTemplateTargets?: readonly DocumentTemplateTarget[];
@@ -703,6 +705,7 @@ export function customizationTargets(definition: {
         }))
         .sort((left, right) => left.label.localeCompare(right.label)),
     }),
+    maps: mapTargets(definition),
     popupActions: definition.surfaces.flatMap((s) =>
       popupOptions(definition, s),
     ),

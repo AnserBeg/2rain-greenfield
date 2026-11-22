@@ -8,6 +8,7 @@ import {
   MAX_CUSTOMIZATION_CHANGE_PATCHES,
   type CustomizationPatchKind,
 } from './patch.js';
+import { MAP_VIEW_DRAFTER_GUIDANCE, MapDraftSchema } from './map-revision.js';
 import { PopupCommandSchema } from './popup-revision.js';
 import { ReportDraftSchema } from './report-revision.js';
 import { VALIDATION_COMPARISONS } from './validation-draft.js';
@@ -121,6 +122,7 @@ export const DRAFTER_SELECTION_SCHEMAS = {
     surface: id.optional(),
     sectionId: z.string().min(1).max(512).optional(),
   }),
+  addMapViewRevision: MapDraftSchema,
   addDocumentField: z.strictObject({
     kind: z.literal('addDocumentField'),
     entity: id,
@@ -236,6 +238,10 @@ export const DRAFTER_KINDS = {
     input: DRAFTER_SELECTION_SCHEMAS.addMapPlacement,
     guidance:
       "Show an Address field's map on its record page. addressField is a listed Address field ID or the label of an addAddressField earlier in the change set; surface and sectionId default to the record page section holding the field.",
+  },
+  addMapViewRevision: {
+    input: DRAFTER_SELECTION_SCHEMAS.addMapViewRevision,
+    guidance: MAP_VIEW_DRAFTER_GUIDANCE,
   },
   addDocumentField: {
     input: DRAFTER_SELECTION_SCHEMAS.addDocumentField,

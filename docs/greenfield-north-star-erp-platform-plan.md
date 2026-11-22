@@ -1696,7 +1696,7 @@ silently degrading.
 One doctrine governs every screen: users customize content, never grammar.
 The platform owns a closed set of screen archetypes; every module —
 first-party, generated, or tenant-authored — renders as content inside them.
-A user who learns the six shapes once has learned every future module,
+A user who learns these shapes once has learned every future module,
 including ones that do not exist yet.
 
 | Archetype | Fixed anatomy |
@@ -1705,6 +1705,7 @@ including ones that do not exist yet.
 | List | title, saved-view tabs, spreadsheet-grade grid (sort, filter, all-visible-value search, paging), bulk bar |
 | Record | breadcrumb; title + status chip; command bar (primary action first, destructive behind overflow); key facts; sections and child tables; activity rail |
 | Board | title, saved-view tabs, stage selector, named stage columns with record cards and Move card |
+| Map | title, saved-view tabs, map canvas with linked pins, controls and attribution, numbered stop list with the same Record links. At 390 px, stop cards precede the labelled map disclosure. |
 | Task | one decision per screen, scan-first input, large touch targets; receiving, picking, shipping, counting |
 
 Task presentation may retain its originating Record context using the bounded
@@ -3115,7 +3116,7 @@ end-to-end support, not merely a DSL keyword.
 | Event and effect      | typed domain events, transactional outbox, idempotent consumers, retries, dead-letter/reconciliation, subscriptions                            |
 | Workflow              | trigger, steps, branching, wait, timer, approval, human task, service task, compensation, versioned instance semantics; authored as sandboxed TypeScript bodies (section 12.5) |
 | Schedule              | one-time/recurring schedules, tenant timezone, catch-up policy, concurrency, cancellation, observability                                       |
-| Surface               | navigation, list, detail, form, table, child collection, board, calendar, dashboard, document, mobile workflow, accessible component registry  |
+| Surface               | navigation, list, detail, form, table, child collection, board, calendar, resource timeline, map, planner, dashboard, document, mobile workflow, accessible component registry  |
 | Search and reporting  | registered search projections, dimensions/measures, aggregates, drill-through, exports, governed ad hoc analysis                               |
 | Documents             | templates, generated documents, attachments, versions, signatures, retention, business-object linking                                          |
 | Communication         | threads, participants, messages, templates, channel policy, consent, provider delivery, inbound correlation, attachments, retention            |

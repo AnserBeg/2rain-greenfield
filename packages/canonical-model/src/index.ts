@@ -196,6 +196,8 @@ export {
 } from './schemas.js';
 export * from './grouped-aggregate.js';
 export * from './date-time-field.js';
+export * from './map-view.js';
+export * from './map-viewport.js';
 export {
   DocumentTemplatePointerSchema,
   DocumentTemplateRevisionSchema,

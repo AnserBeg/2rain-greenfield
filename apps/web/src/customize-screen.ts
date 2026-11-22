@@ -8,6 +8,9 @@ import type { PopupOption } from '../../../packages/canonical-model/src/popup-ac
 import type { AddressInstallation } from '../../../packages/runtime/src/address-gateway.js';
 import { canonicalizeAndHash, layoutDigest } from '@north-star/canonical-model';
 import {
+  draftMapRevision,
+  MapDraftSchema,
+  type MapTarget,
   defaultBoardChoices,
   draftBoardRevision,
   type BoardTarget,
@@ -75,6 +78,7 @@ interface CustomizationStatus {
   readonly patches: readonly ScreenPatch[];
 }
 interface CustomizationTargets {
+  readonly maps?: readonly MapTarget[];
   readonly reports?: readonly ReportTarget[];
   readonly popupActions?: readonly PopupOption[];
   readonly documentTemplateTargets?: readonly DocumentTemplateTarget[];
@@ -303,6 +307,21 @@ export async function renderCustomizeScreen(
           ? page('Arrange page', layoutEditor(target) + backLink())
           : failure('Choose an available page.');
       }
+      const map = url.searchParams.get('map');
+      if (map) {
+        const t = (await loadTargets()).maps?.find(
+          (t) => t.frame.listSurfaceId === map,
+        );
+        if (!t) return failure('This Map collection is unavailable.');
+        const id = url.searchParams.get('editMap'),
+          previous = t.views.find((v) => v.surfaceId === id);
+        if (id && !previous)
+          return failure('This Map revision is unavailable.');
+        return page(
+          previous ? 'Edit Map' : 'Add Map view',
+          mapEditor(t, previous) + backLink(),
+        );
+      }
       const report = url.searchParams.get('report');
       if (report) {
         const target = (await loadTargets()).reports?.find(
@@ -360,50 +379,52 @@ export async function renderCustomizeScreen(
       case 'draft':
         return drafted(
           await service.draft(
-            submission.kind === 'addReportRevision'
-              ? reportSubmission(
-                  (await loadTargets()).reports ?? [],
-                  submission,
-                )
-              : submission.kind === 'addPopupActionRevision'
-                ? popupSubmission(
-                    (await loadTargets()).popupActions ?? [],
+            submission.kind === 'addMapViewRevision'
+              ? mapSubmission((await loadTargets()).maps ?? [], submission)
+              : submission.kind === 'addReportRevision'
+                ? reportSubmission(
+                    (await loadTargets()).reports ?? [],
                     submission,
                   )
-                : submission.kind === 'addDocumentTemplateRevision'
-                  ? templatePatchFromForm(
+                : submission.kind === 'addPopupActionRevision'
+                  ? popupSubmission(
+                      (await loadTargets()).popupActions ?? [],
                       submission,
-                      (await loadTargets()).documentTemplateTargets?.find(
-                        ({ entityId }) => entityId === submission.entity,
-                      ),
                     )
-                  : submission.kind === 'addBoardViewRevision'
-                    ? boardSubmission(
-                        (await loadTargets()).boards ?? [],
+                  : submission.kind === 'addDocumentTemplateRevision'
+                    ? templatePatchFromForm(
                         submission,
+                        (await loadTargets()).documentTemplateTargets?.find(
+                          ({ entityId }) => entityId === submission.entity,
+                        ),
                       )
-                    : submission.kind === 'addLayoutRevision'
-                      ? layoutSubmission(
-                          (await loadTargets()).layouts ?? [],
+                    : submission.kind === 'addBoardViewRevision'
+                      ? boardSubmission(
+                          (await loadTargets()).boards ?? [],
                           submission,
                         )
-                      : patchFromForm(
-                          submission,
-                          submission.kind === 'addValidation'
-                            ? (await loadTargets()).validationTargets?.find(
-                                ({ entityId }) =>
-                                  entityId === submission.entity,
-                              )
-                            : undefined,
-                          submission.kind === 'addCalculatedDisplayField'
-                            ? (
-                                await loadTargets()
-                              ).calculatedDisplayTargets?.find(
-                                ({ recordSurfaceId }) =>
-                                  recordSurfaceId === submission.surface,
-                              )
-                            : undefined,
-                        ),
+                      : submission.kind === 'addLayoutRevision'
+                        ? layoutSubmission(
+                            (await loadTargets()).layouts ?? [],
+                            submission,
+                          )
+                        : patchFromForm(
+                            submission,
+                            submission.kind === 'addValidation'
+                              ? (await loadTargets()).validationTargets?.find(
+                                  ({ entityId }) =>
+                                    entityId === submission.entity,
+                                )
+                              : undefined,
+                            submission.kind === 'addCalculatedDisplayField'
+                              ? (
+                                  await loadTargets()
+                                ).calculatedDisplayTargets?.find(
+                                  ({ recordSurfaceId }) =>
+                                    recordSurfaceId === submission.surface,
+                                )
+                              : undefined,
+                          ),
             'visualBuilder',
             undefined,
             actor,
@@ -569,6 +590,14 @@ async function overview(
     documentFieldForm(targets),
     documentTemplateSelector(targets.documentTemplateTargets ?? []),
     choiceForm(targets),
+    ...(targets.maps ?? []).map(
+      (t) =>
+        '<p><a href="/?customize=&amp;map=' +
+        encodeURIComponent(t.frame.listSurfaceId) +
+        '">Add Map view · ' +
+        escapeHtml(t.listLabel) +
+        '</a></p>',
+    ),
     targets.reports?.length
       ? `<form method="get"><fieldset><legend>Reports</legend><input type="hidden" name="customize" value=""><label>Record type <select name="report">${targets.reports.map((t) => `<option value="${escapeHtml(t.source.listSurfaceId)}">${escapeHtml(t.label)}</option>`).join('')}</select></label> <button>Add report</button></fieldset></form>`
       : '',
@@ -1336,6 +1365,8 @@ function describe(patch: PatchSummary): string {
       return `New line table "${label}"`;
     case 'declareLifecycle':
       return 'New states and actions';
+    case 'addMapViewRevision':
+      return 'Map view revision';
     case 'addPopupActionRevision':
       return `Record button “${label}”`;
     case 'addBoardViewRevision':
@@ -1939,6 +1970,124 @@ export function renderCompanyAddressSettings(
       '<label>Monthly spend limit (USD)<input name="budget" type="number" min="0" max="1000" step="0.01" value="0" required></label>' +
       '<label><input name="enrichment" type="checkbox" checked> Locate saved addresses</label><button name="action" value="enable">Enable for this company</button><button name="action" value="pause">Pause</button></form>',
   ).html;
+}
+
+function mapEditor(t: MapTarget, prior?: MapTarget['views'][number]) {
+  const h = escapeHtml,
+    b = prior?.body;
+  const field = (
+    label: string,
+    name: string,
+    choices: readonly { fieldId: string; label: string }[],
+    value: string | undefined,
+    optional = false,
+  ) =>
+    '<label>' +
+    label +
+    ' <select name="' +
+    name +
+    '">' +
+    (optional ? '<option value="">None</option>' : '') +
+    choices
+      .map(
+        (c) =>
+          '<option value="' +
+          h(c.fieldId) +
+          '"' +
+          (c.fieldId === value ? ' selected' : '') +
+          '>' +
+          h(c.label) +
+          '</option>',
+      )
+      .join('') +
+    '</select></label>';
+  const hidden = (k: string, v: string) =>
+    '<input type="hidden" name="' + k + '" value="' + h(v) + '">';
+  return (
+    '<h1>' +
+    h(prior ? 'Edit Map' : 'Add Map view') +
+    '</h1>' +
+    t.views
+      .map(
+        (v) =>
+          '<a href="/?customize=&amp;map=' +
+          encodeURIComponent(t.frame.listSurfaceId) +
+          '&amp;editMap=' +
+          encodeURIComponent(v.surfaceId) +
+          '">Edit ' +
+          h(v.label) +
+          '</a>',
+      )
+      .join(' ') +
+    '<form method="post">' +
+    hidden('action', 'draft') +
+    hidden('kind', 'addMapViewRevision') +
+    hidden('surface', t.frame.listSurfaceId) +
+    (prior
+      ? hidden('viewId', prior.surfaceId) +
+        hidden('predecessor', prior.revisionId)
+      : '') +
+    '<label>View name <input required maxlength="80" name="label" value="' +
+    h(prior?.label ?? t.listLabel + ' map') +
+    '"></label>' +
+    field('Address', 'addressFieldId', t.addresses, b?.addressFieldId) +
+    field('Group by', 'groupFieldId', t.groups, b?.group?.fieldId, true) +
+    field('Route order', 'orderFieldId', t.orders, b?.order.field.fieldId) +
+    '<label>Direction <select name="direction"><option value="asc">Ascending</option><option value="desc"' +
+    (b?.order.direction === 'desc' ? ' selected' : '') +
+    '>Descending</option></select></label>' +
+    field(
+      'Day field',
+      'dayFieldId',
+      t.dates,
+      b?.defaultScope.kind === 'day' ? b.defaultScope.fieldId : undefined,
+      true,
+    ) +
+    '<label>Day time zone <input name="timeZone" value="' +
+    h(b?.defaultScope.kind === 'day' ? b.defaultScope.timeZone : 'UTC') +
+    '"></label>' +
+    field(
+      'Saved filter',
+      'savedViewId',
+      t.savedViews.map((id) => ({ fieldId: id, label: id })),
+      b?.savedViewId,
+      true,
+    ) +
+    '<button name="lifecycle" value="active">Draft Map</button>' +
+    (prior?.lifecycle === 'active'
+      ? '<button name="lifecycle" value="retired">Draft retirement</button>'
+      : '') +
+    '</form>'
+  );
+}
+function mapSubmission(
+  targets: readonly MapTarget[],
+  s: CustomizeScreenSubmission,
+) {
+  const t = targets.find((t) => t.frame.listSurfaceId === s.surface),
+    prior = t?.views.find((v) => v.surfaceId === s.viewId);
+  if (
+    !t ||
+    (s.viewId && !prior) ||
+    (prior?.revisionId ?? '') !== (s.predecessor ?? '')
+  )
+    throw new Error('Reopen the current Map revision.');
+  return draftMapRevision(
+    t,
+    MapDraftSchema.parse({
+      kind: s.kind,
+      surface: s.surface,
+      label: s.label,
+      addressFieldId: s.addressFieldId,
+      orderFieldId: s.orderFieldId,
+      direction: s.direction,
+      ...(s.groupFieldId && { groupFieldId: s.groupFieldId }),
+      ...(s.savedViewId && { savedViewId: s.savedViewId }),
+      ...(s.dayFieldId && { dayFieldId: s.dayFieldId, timeZone: s.timeZone }),
+    }),
+    prior,
+    s.lifecycle === 'retired',
+  );
 }
 
 const hidden = (name: string, value: string) =>

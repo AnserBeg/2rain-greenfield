@@ -1,3 +1,4 @@
+import { MAP_VIEWPORT_READ_BINDING } from './current-policy.js';
 import type { ReportLimits } from '../../runtime/src/declared-report.js';
 import {
   REPORT_EXPORT_PERMISSION,
@@ -737,6 +738,11 @@ export function releasePolicyBindings(
         ]
       : []),
     ...currentPolicyBindingsFromPermissions(definition.permissions),
+    ...(definition.surfaces.some(
+      (s) => s.archetype === 'map' && s.lifecycle === 'active',
+    )
+      ? [MAP_VIEWPORT_READ_BINDING]
+      : []),
     ...(documents ? documentPermissionBindings(definition.entities) : []),
   ];
 }

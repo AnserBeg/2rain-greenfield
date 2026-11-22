@@ -12,6 +12,16 @@
  * floor on phone-width targets.
  */
 export const LEDGER_STYLES = `
+.surface-grid:has(> .map-canvas){display:flex;flex-direction:column;reading-flow:flex-visual;gap:1rem}
+.surface-grid:has(> .map-canvas)>.surface-slot{display:block}
+.map-canvas svg{display:block;width:100%;max-width:1024px;background:var(--sheet);touch-action:none}
+.map-canvas nav a,.map-list a,.map-canvas summary,.map-views button{display:inline-flex;align-items:center;min-height:44px;padding:0 .65rem}
+.map-canvas [data-map-frame],.map-canvas iframe{width:100%;height:100%;border:0;display:block}
+.map-hit{fill:transparent;stroke:transparent;stroke-width:44px;vector-effect:non-scaling-stroke;pointer-events:all}.map-pin{fill:var(--ink)}.map-canvas svg text{fill:var(--sheet);pointer-events:none}
+.map-route{stroke:var(--ink);stroke-width:2;fill:none}.map-route.group-1{stroke-dasharray:8 3}.map-route.group-2{stroke-dasharray:2 4}.map-route.group-3{stroke-dasharray:8 3 2 3}
+.map-pin.group-1,.map-pin.group-3{fill:var(--accent)}.map-route.group-1,.map-route.group-3{stroke:var(--accent)}
+.map-stops{padding:0;list-style:none}.map-stops li{border-bottom:1px solid var(--rule)}
+@media(max-width:800px){.map-title{order:0}.map-views{order:1}.map-list{order:2}.map-canvas{order:3}.map-stops li{padding:.4rem;border:1px solid var(--rule)}}
 .grouped-report-table{width:100%;text-align:start;background:var(--sheet)}
 .grouped-report-table td,.grouped-report-table th{padding:.6rem;border-bottom:1px solid var(--rule);text-align:start;overflow-wrap:anywhere}
 .grouped-report-table small{display:block}.grouped-report-table tfoot{font-weight:600}

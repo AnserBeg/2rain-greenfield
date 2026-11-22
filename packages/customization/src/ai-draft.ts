@@ -23,6 +23,7 @@ import {
   uploadCategoryMember,
 } from './field-member-draft.js';
 import { layoutCommand } from './layout-revision.js';
+import { draftMapRevision } from './map-revision.js';
 import {
   AddDateTimeFieldSchema,
   parseCustomizationPatch,
@@ -276,6 +277,18 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
           ),
         ]
       : []),
+    'Map collections (list surface, collection, direct Address fields, route-order fields, group fields, day fields, saved views):',
+    ...(targets.maps ?? []).map((t) =>
+      JSON.stringify({
+        surface: t.frame.listSurfaceId,
+        collection: t.listLabel,
+        addresses: t.addresses,
+        order: t.orders,
+        groups: t.groups,
+        dates: t.dates,
+        savedViews: t.savedViews,
+      }),
+    ),
     'Board collections (list surface, stages, moves by operation ID, facts by field ID):',
     ...(targets.boards ?? []).map(
       (t) =>
@@ -639,6 +652,8 @@ function convertMember(
     }
     case 'addMapPlacement':
       return [mapMember(req, local(), prior)];
+    case 'addMapViewRevision':
+      return [mapViewMember(req, base)];
     case 'addDocumentField': {
       if (typeof req.entity !== 'string' || typeof req.label !== 'string')
         throw new Error('A files field names a record type and a label.');
@@ -729,6 +744,21 @@ function boardMember(
       ? req.factFieldIds
       : offered.factFieldIds,
   });
+}
+
+function mapViewMember(
+  req: Record<string, unknown>,
+  targets: CustomizationTargets,
+) {
+  const target = targets.maps?.find(
+    (t) => t.frame.listSurfaceId === req.surface,
+  );
+  if (!target)
+    throw new Error('Choose a listed map collection with a direct Address.');
+  return draftMapRevision(
+    target,
+    req as Parameters<typeof draftMapRevision>[1],
+  );
 }
 
 function mapMember(

@@ -1,3 +1,4 @@
+import { mapBindingsProblem } from './map-admission.js';
 import { popupBindingsProblem } from './popup-admission.js';
 import { boardBindingsProblem } from './board-admission.js';
 import {
@@ -8,6 +9,7 @@ import {
   CONTENT_HASH_DOMAIN,
   ADDRESS_FIELD_READER,
   ADDRESS_MAP_READER,
+  MAP_VIEW_READER,
   AddressProjectionSchema,
   CONNECTOR_FAMILY,
   CONNECTOR_PAYLOAD,
@@ -1120,6 +1122,12 @@ function definitionFromSnapshotRows(
   );
   if (popupProblem) throw malformedProjection(popupProblem);
   const problem =
+    mapBindingsProblem(
+      surface.payload,
+      surface.requiredRuntimeCapability?.minimumVersion ?? 0,
+      query.payload,
+      connector?.payload,
+    ) ??
     boardBindingsProblem(
       surface.payload,
       surface.requiredRuntimeCapability?.minimumVersion ?? 0,
@@ -1527,9 +1535,11 @@ export function addressProjectionRefusal(release: {
   if (!release.declared) return null;
   const parsed = AddressProjectionSchema.safeParse(release.connector());
   if (!parsed.success) return invalid;
-  const required = parsed.data.placements.length
-    ? ADDRESS_MAP_READER
-    : ADDRESS_FIELD_READER;
+  const required = parsed.data.viewports?.length
+    ? MAP_VIEW_READER
+    : parsed.data.placements.length
+      ? ADDRESS_MAP_READER
+      : ADDRESS_FIELD_READER;
   if (floor < required) return invalid;
   const pinned = canonicalize(parsed.data.bindings);
   if (
