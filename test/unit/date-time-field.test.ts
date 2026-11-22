@@ -11,6 +11,7 @@ import {
   normalizeApplicationPackage,
   resolveTypedEntry,
 } from '../../packages/canonical-model/src/index.js';
+import type { StorageTargetPayloadV1 } from '../../packages/compiler/src/index.js';
 import { PROJECTION_FAMILY_IDS } from '../../packages/compiler/src/protocol.js';
 import * as customization from '../../packages/customization/src/index.js';
 import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
@@ -533,19 +534,21 @@ test('serving admission refuses disagreeing bindings, a missing catalog binding 
     entityId: equipment,
     logicalType: 'dateTime',
     zoneSource: { kind: 'perRecordIana', version: 'v1' },
-  };
+  } as const;
   const payload = { dateTimeBindings: [binding] };
   assert.equal(
     dateTimeBindingsProblem(
       [payload, payload, payload],
       DATE_TIME_FIELD_READER,
+      [binding],
     ),
     null,
   );
-  assert.equal(dateTimeBindingsProblem([{}, {}, {}], 34), null);
+  assert.equal(dateTimeBindingsProblem([{}, {}, {}], 34, []), null);
   assert.match(
-    dateTimeBindingsProblem([payload, {}, payload], DATE_TIME_FIELD_READER) ??
-      '',
+    dateTimeBindingsProblem([payload, {}, payload], DATE_TIME_FIELD_READER, [
+      binding,
+    ]) ?? '',
     /disagree/u,
   );
   assert.match(
@@ -563,6 +566,7 @@ test('serving admission refuses disagreeing bindings, a missing catalog binding 
         },
       ],
       DATE_TIME_FIELD_READER,
+      [binding],
     ) ?? '',
     /disagree/u,
   );
@@ -570,11 +574,12 @@ test('serving admission refuses disagreeing bindings, a missing catalog binding 
     dateTimeBindingsProblem(
       [payload, payload, payload],
       DATE_TIME_FIELD_READER - 1,
+      [binding],
     ) ?? '',
     /floor/u,
   );
   assert.match(
-    dateTimeBindingsProblem([{}, {}, {}], DATE_TIME_FIELD_READER) ?? '',
+    dateTimeBindingsProblem([{}, {}, {}], DATE_TIME_FIELD_READER, []) ?? '',
     /floor without/u,
   );
 });
@@ -679,11 +684,128 @@ test('the web control preserves typed entry, leaves an untouched capture alone a
     'value:f',
     undefined,
     '',
+    '74000000-0000-4000-8000-000000000001',
   );
   assert.doesNotMatch(company, /:zone/u);
+  assert.match(
+    company,
+    /name="value:f:company" value="74000000-0000-4000-8000-000000000001"/u,
+    'the company-calendar control submits the displayed company',
+  );
   assert.equal(
     web.recordZoneText(saved),
     'November 1, 2026, 01:30:15.250 UTC\u221205:00 America/Toronto',
   );
   assert.equal(web.recordZoneText('2026-11-01T06:30:00.000Z'), null);
+});
+
+test('serving and storage independently refuse a consistent omission of an active dateTime binding', async () => {
+  const { declaredDateTimeFields, dateTimeBindingsProblem } =
+    await import('../../packages/postgres-provider/src/date-time-admission.js');
+  const { dateTimeStorageDisagreement } =
+    await import('../../packages/postgres-provider/src/date-time-storage.js');
+  const release = lastRelease(await compile([recordType, appointment]));
+  const payloads = release.compiled.bundle.artifacts
+    .filter((a) => a.artifactKind === 'projectionChunk')
+    .map(
+      (a) =>
+        JSON.parse(new TextDecoder().decode(a.canonicalBytes)) as Record<
+          string,
+          unknown
+        >,
+    );
+  const storage = payloads.find(
+    (p) => p.kind === 'storageTargetPayload',
+  ) as unknown as StorageTargetPayloadV1;
+  const fields = declaredDateTimeFields(release.normalizedDefinitionBytes);
+  assert.deepEqual(
+    fields.active.map((b) => b.fieldId),
+    [fieldId],
+  );
+  const consumers = payloads.filter((p) =>
+    Object.hasOwn(p, 'dateTimeBindings'),
+  );
+  assert.equal(consumers.length, 3);
+  assert.equal(
+    dateTimeBindingsProblem(consumers, DATE_TIME_FIELD_READER, fields.active),
+    null,
+  );
+  assert.equal(
+    dateTimeStorageDisagreement(consumers[0], storage, fields.retired),
+    null,
+  );
+  for (const payload of consumers) delete payload.dateTimeBindings;
+  assert.match(
+    dateTimeBindingsProblem(
+      consumers,
+      DATE_TIME_FIELD_READER - 1,
+      fields.active,
+    ) ?? '',
+    /active field declaration/u,
+    'the serving loader must compare the catalogs with the pinned declaration',
+  );
+  assert.equal(
+    dateTimeStorageDisagreement(consumers[0], storage, fields.retired),
+    fieldId,
+    'active capture is missing its writer binding',
+  );
+  // Retirement keeps the physical capture but removes its logical binding.
+  const definition = JSON.parse(
+    new TextDecoder().decode(release.normalizedDefinitionBytes),
+  ) as { fields: { fieldId: string; lifecycle: string }[] };
+  definition.fields.find((f) => f.fieldId === fieldId)!.lifecycle = 'retired';
+  const retired = declaredDateTimeFields(
+    Buffer.from(JSON.stringify(definition)),
+  );
+  assert.deepEqual([...retired.retired], [fieldId]);
+  assert.equal(
+    dateTimeBindingsProblem(
+      consumers,
+      DATE_TIME_FIELD_READER - 1,
+      retired.active,
+    ),
+    null,
+  );
+  assert.equal(
+    dateTimeStorageDisagreement(consumers[0], storage, retired.retired),
+    null,
+  );
+});
+
+test('dateTime entry offers both UTC spellings on the pinned tzdb and retains historical zone choices', async () => {
+  const { renderDateTimeEntry } =
+    await import('../../apps/web/src/component-registry.js');
+  const binding = {
+    schemaVersion: 'v6',
+    entityId: equipment,
+    fieldId,
+    logicalType: 'dateTime',
+    zoneSource: { kind: 'perRecordIana', version: 'v1' },
+  } as const;
+  const empty = renderDateTimeEntry(binding, 'visit', null, '');
+  for (const zone of ['UTC', 'Etc/UTC'])
+    assert.ok(
+      empty.includes(`<option value="${zone}">`),
+      `picker is missing ${zone}`,
+    );
+  for (const zone of ['Etc/UTC', 'Etc/UCT']) {
+    const reopened = renderDateTimeEntry(
+      binding,
+      'visit',
+      {
+        schemaVersion: 'northstar.date-time-value/v1',
+        instant: '2026-11-02T12:00:00.000Z',
+        civil: '2026-11-02T12:00:00.000',
+        offsetSeconds: 0,
+        zone,
+        tzdbVersion: '2025c',
+        zoneSource: { kind: 'perRecordIana' },
+      },
+      '',
+    );
+    assert.ok(
+      reopened.includes(`<option value="${zone}" selected>`),
+      `the reopened picker must select the recorded zone ${zone}`,
+    );
+  }
 });

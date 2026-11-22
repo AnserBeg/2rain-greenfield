@@ -1,5 +1,9 @@
 import type { StorageTargetPayloadV1 } from '@north-star/compiler';
-import { canonicalize } from '@north-star/canonical-model';
+import {
+  canonicalize,
+  SavedDateTimeSchema,
+  formatRecordZone,
+} from '@north-star/canonical-model';
 import {
   DOCUMENT_TEMPLATE_MAX_ROWS,
   type DOCUMENT_TEMPLATE_RENDERER,
@@ -356,6 +360,15 @@ function formatField(
     }
     case 'dateFieldType':
     case 'dateTimeFieldType': {
+      if (
+        field.fieldKind === 'dateTimeFieldType' &&
+        typeof value === 'object'
+      ) {
+        const capture = SavedDateTimeSchema.safeParse(value);
+        if (!capture.success) throw unavailableBinding();
+        // PDFKit's WinAnsi fonts encode the offset sign as ASCII hyphen-minus.
+        return formatRecordZone(capture.data).replace('UTC−', 'UTC-');
+      }
       if (typeof value !== 'string') throw unavailableBinding();
       const civil = readCivilDate(field.fieldKind, value);
       if (!civil && field.fieldKind === 'dateFieldType')

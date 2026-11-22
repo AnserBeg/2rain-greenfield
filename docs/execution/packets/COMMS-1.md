@@ -1,6 +1,25 @@
 # COMMS-1 · Configure email, personal notifications and reminders
 
-**Slice 0 · Accepted design, 2026-11-20 (Fable read, amendments R1–R12 incorporated).** An owner can declare who receives a reminder, when it appears, and which email a person may approve. The [communications ADR](../../decisions/ADR-0088-governed-communications-and-reminders.md) defines the contract. The Fable read is complete. This checkpoint changes documentation only.
+**Slice 0 · Accepted design, 2026-11-20 (Fable read, amendments R1–R12 incorporated).** An owner can declare who receives a reminder, when it appears, and which email a person may approve. The [communications ADR](../../decisions/ADR-0088-governed-communications-and-reminders.md) defines the contract. The Fable read is complete. Slice 0 changed documentation only.
+
+## Slice 1 · Discussion notices in the personal inbox
+
+The scheduler can reconcile a committed staff mention or reply into a durable notice and the recipient can read or archive it through the PostgreSQL inbox API. The browser List and COMMS-2's production message store are pending.
+
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44918544703
+
+[Packet CI 44912316925](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44912316925) promoted `0581e760d` to full. The unit tests passed, but the coverage manifest omitted the deadline test. Commit `938a724d4` registers it and `8388e7eb3` checks the declared arguments against the unit runner. Exact full CI passed on the corrected packet tip `82f600c9`.
+All eight inbox cases passed in 3.3 seconds on [hosted PostgreSQL](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44912366862/job/136870772151). Shard 3 later reached its 30-minute limit during release-persistence tests. The full run failed.
+
+- The branch began on main `d083dd4a`. Merge `38f97a2bd` brought in CONNECT-1’s published thread writer at `ec519295`. It now includes the writer’s reviewed corrections through `f70011747` and main’s WORKFLOW-2 integration at `6787792c4`. TRAIN-D uses the accepted thread migration `0063_communication_threads.sql` and renumbers the inbox migration to `0066_personal_inbox.sql`.
+- The same personal-inbox and discussion-notice blocks serve stock exceptions in distribution, dispatch handoffs in field service, and reservation changes in hotels.
+- The inbox implements the published `DiscussionInboxPort`. A short lease transaction commits before reconciliation. The worker locks the shared thread, resolves current reasons, replaces the recipient set and commits before acknowledging the lease token. Replay keeps the original recipient receipt, read time and archive time.
+- Reads use fixed text and an exact staff-discussion link. The current revision, reply parent, active staff account, company membership and channel govern the page, count, preview, copied ID and cursor. The source admits ten distinct mentions and a reply author. Pages contain up to 25 notices and unread displays at most 99+.
+- COMMS-2 publishes `platform.enqueue_discussion_notice` in its message transaction. Its database channel supplies `discussion_notice_source_v1` for the current revision and parent, `discussion_can_read_message_v1` for exact live visibility, and `discussion_notice_fence_v1` for saved-record, release and membership locks before the shared thread. Their parameter contracts and scoped fixture are in [the integration fixture](../../../test/fixtures/discussion-inbox-channel.sql). An absent binding withholds reads and leaves the occurrence retryable. COMMS-2 remains the message-store writer.
+- **Owner ruling, 2026-11-21.** A record type may declare one stable staff-reference field as its owner in Customize. Rules naming `recordOwner` require that field at compile time. Booking resolves the staff assignment through its owning business record. Without it, booking offers role delivery only. Audit authorship supplies no recipient.
+- `resolveReminderDeadline` applies ADR-0083 A1 to each derived civil deadline. Elapsed leads use the stored instant and working-day leads need a versioned calendar covering the horizon. The supported lead is 1–720 units.
+- Remaining work includes the browser List, shared thread history, reusable record notifications, role and assigned-owner delivery, `saveReminderRule` registrations and exactly-once scheduler effects. The owner and reminder Customize members still need drafter/evals, merge-time reader rungs, archived query/refusal, persisted byte parity and upgrade replay.
+- **Try it yourself.** Run `node --import tsx --test --test-concurrency=1 test/postgres/personal-inbox.test.ts test/unit/reminder-deadline.test.ts` with Docker available. The channel fixture lets you observe a withdrawn mention, a replayed reply, a copied cursor and an independently revoked company membership. Fourteen controls remove individual database checks and roll back each change.
 
 ## Slice plan
 
@@ -31,3 +50,28 @@
 **Design gate.** All 24 hosted jobs passed at `9d24e862` before synchronization with main. [Packet CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44768626226)
 
 Run `scripts/check-records.sh` at the repository root and expect exit zero. Executable acceptance will use the archived production loader, actual scoped database roles, persisted release rows and a deterministic fake provider. Each incompatible capability gets its rung and any migration number at its own merge. Binary deployment observes tenant parser and reader high-water marks.
+
+```record-claim
+{
+  "schemaVersion": "northstar.record-claim/v1",
+  "packet": "COMMS-1",
+  "base": "6787792c4564dc0757583c043738f8daa59ca76b",
+  "head": "8388e7eb3a5ba78121f014ee5a8417911c817b11",
+  "changedPaths": [
+    "db/migrations/0061_communication_threads.sql", "db/migrations/0062_personal_inbox.sql", "db/schema.snapshot.json",
+    "package.json", "packages/domain/src/billing/calendar.ts", "packages/domain/src/communication/reminder-deadline.ts",
+    "packages/postgres-provider/package.json", "packages/postgres-provider/src/personal-inbox.ts", "packages/postgres-provider/src/workflow-worker.ts",
+    "packages/runtime/src/discussion-inbox.ts", "test/architecture/release-persistence-boundary.test.ts", "test/architecture/repository-hygiene.test.ts",
+    "test/architecture/tenant-completeness.manifest.json", "test/architecture/tenant-completeness.test.ts", "test/evidence/COMMS-1-deadlines.expected-red.json",
+    "test/evidence/CONNECT-1-threads.expected-red.json", "test/fixtures/booking-commitments.sql", "test/fixtures/communication-threads.sql",
+    "test/fixtures/discussion-inbox-channel.sql", "test/helpers/personal-inbox-controls.ts", "test/helpers/reachability-producers.ts", "test/postgres/communication-threads.test.ts",
+    "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts",
+    "test/postgres/personal-inbox.test.ts", "test/postgres/trust-substrate.test.ts", "test/unit/reminder-deadline.test.ts"
+  ],
+  "symbols": [
+    {"path": "packages/postgres-provider/src/personal-inbox.ts", "name": "PostgresPersonalInbox"},
+    {"path": "packages/postgres-provider/src/personal-inbox.ts", "name": "discussionInboxPort"},
+    {"path": "packages/domain/src/communication/reminder-deadline.ts", "name": "resolveReminderDeadline"}
+  ]
+}
+```

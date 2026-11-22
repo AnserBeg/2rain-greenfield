@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "packet": "CUSTOMIZE-5-fix",
+  "entries": [
+    {
+      "name": "date-time-shared-company-inactive",
+      "claim": "A shared appointment can capture only an authorized active company.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "(await lockActiveCompany(client, storage, workingCompany))",
+      "replacement": "true",
+      "test": {
+        "files": ["test/postgres/date-time-field.test.ts"],
+        "namePattern": "a shared appointment form saves the displayed company and reopens its own zone"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/date-time-field.test.ts",
+          "name": "a shared appointment form saves the displayed company and reopens its own zone",
+          "expected": "shared capture requires a live working company"
+        }
+      ]
+    },
+    {
+      "name": "date-time-shared-form-company-dropped",
+      "claim": "A shared record submits the company displayed when its form opened.",
+      "file": "apps/web/src/component-registry.ts",
+      "original": "} else if (workingCompany) {",
+      "replacement": "} else if (false) {",
+      "test": {
+        "files": ["test/unit/date-time-field.test.ts"],
+        "namePattern": "the web control preserves typed entry, leaves an untouched capture alone and prints record zone"
+      },
+      "kills": [
+        {
+          "file": "test/unit/date-time-field.test.ts",
+          "name": "the web control preserves typed entry, leaves an untouched capture alone and prints record zone",
+          "expected": "the company-calendar control submits the displayed company"
+        }
+      ]
+    },
+    {
+      "name": "date-time-reopened-zone-dropped",
+      "claim": "Editing the civil time in a reopened UTC appointment preserves its instant in the recorded zone.",
+      "file": "apps/web/src/component-registry.ts",
+      "original": "option === zone ? ' selected' : ''",
+      "replacement": "option === zone && zone !== 'Etc/UTC' ? ' selected' : ''",
+      "test": {
+        "files": ["test/unit/date-time-field.test.ts"],
+        "namePattern": "dateTime entry offers both UTC spellings on the pinned tzdb and retains historical zone choices"
+      },
+      "kills": [
+        {
+          "file": "test/unit/date-time-field.test.ts",
+          "name": "dateTime entry offers both UTC spellings on the pinned tzdb and retains historical zone choices",
+          "expected": "the reopened picker must select the recorded zone Etc/UTC"
+        }
+      ]
+    },
+    {
+      "name": "date-time-ceiling-snapshot-before-lock",
+      "claim": "The window-index count sees the crossing row after the writer releases its lock, including under a repeatable-read login default.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "? 'BEGIN ISOLATION LEVEL READ COMMITTED'",
+      "replacement": "? 'BEGIN'",
+      "test": {
+        "files": ["test/postgres/date-time-field.test.ts"],
+        "namePattern": "one row over the window-index ceiling refuses the attempt by name while the source release keeps serving, and the build at the ceiling is measured"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/date-time-field.test.ts",
+          "name": "one row over the window-index ceiling refuses the attempt by name while the source release keeps serving, and the build at the ceiling is measured",
+          "expected": "the post-lock count includes the committed crossing row"
+        }
+      ]
+    },
+    {
+      "name": "date-time-active-declaration-omitted",
+      "claim": "An active field in the pinned revision requires its binding in every consumer catalog.",
+      "file": "packages/postgres-provider/src/date-time-admission.ts",
+      "original": "canonicalize(bound[0]?.dateTimeBindings ?? []) !== canonicalize(active)",
+      "replacement": "false",
+      "test": {
+        "files": ["test/unit/date-time-field.test.ts"],
+        "namePattern": "serving and storage independently refuse a consistent omission of an active dateTime binding"
+      },
+      "kills": [
+        {
+          "file": "test/unit/date-time-field.test.ts",
+          "name": "serving and storage independently refuse a consistent omission of an active dateTime binding",
+          "expected": "the serving loader must compare the catalogs with the pinned declaration"
+        }
+      ]
+    },
+    {
+      "name": "date-time-active-storage-unbound",
+      "claim": "Physical captures may outlive their binding only on field retirement.",
+      "file": "packages/postgres-provider/src/date-time-storage.ts",
+      "original": "expected === undefined && retired.has(check.canonicalFieldId)",
+      "replacement": "expected === undefined",
+      "test": {
+        "files": ["test/unit/date-time-field.test.ts"],
+        "namePattern": "serving and storage independently refuse a consistent omission of an active dateTime binding"
+      },
+      "kills": [
+        {
+          "file": "test/unit/date-time-field.test.ts",
+          "name": "serving and storage independently refuse a consistent omission of an active dateTime binding",
+          "expected": "active capture is missing its writer binding"
+        }
+      ]
+    }
+  ]
+}
