@@ -5,11 +5,11 @@
 **Slice 1 · BUILD checkpoint, 2026-11-21.** Invoice reports use the stored sales currency. CAD, USD and EUR have independent partitions. A missing amount contributes to coverage. A present amount without a recognized currency contributes to **No currency**. The canonical money profile is unchanged.
 
 The Invoice date query uses `nsm_i_kyu3zu6vouaduhmjm5lbunvswejls2t4ls5svgycueyib3fqieka`. The provider probe, row policy, group ceiling, unavailable index, and pre-key byte identity have focused PostgreSQL/compiler witnesses. The published Invoice page and CSV [passed the PostgreSQL case](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44959811505/job/137016081557). The [Inspection browser case](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44959811505/job/137016081496) exercised rename, retirement and rollback. A failed audit append withholds the download. [Regression controls](../../../test/evidence/REPORTS-1-s1.expected-red.json)
-Preview and activation use CUSTOMIZE-5’s pooled-table probe from migration 0061. The approved attempt checks the ceiling under the table lock. After TRAIN-F, the archived predecessor at `7046abc74` includes migration 0067 and UI-COMPOSE’s surface rung 40. It answers a governed query on compatible persisted releases, including a pop-up action, and refuses the higher floors by capability name. REPORTS-1 uses 41 for the company access key, 42 for the Invoice source binding and 43 for grouped reports.
+Preview and activation use CUSTOMIZE-5’s pooled-table probe from migration 0061. The approved attempt checks the ceiling under the table lock. After TRAIN-G, the archived predecessor at `5710c05ae` includes migration 0068 and BILLING’s surface rung 41. It answers a governed query on compatible persisted releases, including a pop-up action, and refuses the higher floors by capability name. REPORTS-1 uses 42 for the company access key, 43 for the Invoice source binding and 44 for grouped reports.
 
 Grouped table and CSV output, scoped index admission and revision replay serve distribution (Invoices), field service (Inspections) and clinics (visits). Each business selects its record type, operands and labels in the declaration.
 
-The linked full run is historical slice evidence. The TRAIN-F refresh gets a new run on its packet tip.
+The linked full run is historical slice evidence. The TRAIN-G refresh gets a new run on its packet tip.
 
 CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44965531770
 
@@ -65,7 +65,7 @@ Resolved by the design read and orchestrator rulings: a report’s index on an e
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "REPORTS-1",
-  "base": "7046abc74feacc8943874f1ced6d4674ddcb7548", "head": "3116190e4a3ba7f705d4d49e47ce5ad1250ac525",
+  "base": "5710c05ae2529b742bf15f8f484c75c0b3930180", "head": "677dc357df2cee5e79913c0e33bea389069c0699",
   "changedPaths": [
     "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json", "apps/web/src/component-registry.ts", "apps/web/src/customize-report.ts", "apps/web/src/customize-screen.ts", "apps/web/src/grouped-report.ts", "apps/web/src/ledger-styles.ts", "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts",
     "apps/web/test/browser/customize-inspection.composed-application.spec.ts", "apps/web/test/browser/customize.composed-application.spec.ts", "package.json", "packages/canonical-model/src/constants.ts", "packages/canonical-model/src/declared-report.ts", "packages/canonical-model/src/grouped-aggregate.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/normalize.ts", "packages/canonical-model/src/schemas.ts",
