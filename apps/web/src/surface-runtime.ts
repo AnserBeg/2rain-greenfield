@@ -1,6 +1,7 @@
 import { reportRequest } from './grouped-report.js';
 import { reportQueryId } from '../../../packages/canonical-model/src/declared-report.js';
 import type { RegisteredReport } from '../../../packages/canonical-model/src/declared-report.js';
+import { availablePopups } from '../../../packages/runtime/src/popup-actions.js';
 import {
   AddressProjectionSchema,
   SavedAddressSchema,
@@ -63,6 +64,7 @@ import {
   registeredSemanticQueryFromPinnedView,
   SEMANTIC_QUERY_REQUEST_VERSION,
   type SemanticQueryResultEnvelope,
+  type SemanticRecordDto,
 } from '../../../packages/runtime/src/semantic-query-gateway.js';
 import type { SemanticQueryGateway } from '../../../packages/runtime/src/semantic-query-gateway.js';
 import {
@@ -871,6 +873,23 @@ async function renderSurfaceRuntimeWithDataInContext(
       }
       if (
         data.status === 'READY' &&
+        data.records[0] &&
+        selection.selected.popupActions
+      ) {
+        data = {
+          ...data,
+          popupButtons: await recordPopupButtons(
+            view,
+            selection.selected,
+            data.records[0],
+            url.pathname + url.search,
+            compositionScope,
+            gateways.operationGateway,
+          ),
+        };
+      }
+      if (
+        data.status === 'READY' &&
         !selection.selected.composition &&
         selection.selected.surfaceRole === 'record' &&
         gateways.applicationExtension
@@ -1568,12 +1587,16 @@ async function submitSurfaceRuntimeIntentInContext(
   assertRequestRuntimeView(view);
   const selection = selectSurface(view, requestUrl);
   if ('statusCode' in selection) return selection;
+  const popup = selection.selected.popupActions?.find(
+    (p) => p.task && p.revision.actionId === submission.compositionAction,
+  );
   const fragment = transport === 'task-fragment';
   if (
     fragment &&
     (!submission.compositionAction ||
-      selection.selected.composition?.presentation?.task?.mode !==
-        'nativeDialog')
+      (!popup &&
+        selection.selected.composition?.presentation?.task?.mode !==
+          'nativeDialog'))
   )
     return { statusCode: 409, html: '' };
   let binding: CompiledSurfaceDataBinding;
@@ -1585,7 +1608,7 @@ async function submitSurfaceRuntimeIntentInContext(
   // Existing continuations carry their own pinned authority and reauthorization.
   // Entry must not turn a committed, redacted Task/draft replay into a new failure.
   const entry =
-    (selection.selected.composition &&
+    ((selection.selected.composition || popup) &&
       submission.compositionAction &&
       submission.taskToken) ||
     (selection.selected.documentEditor && submission.draftSession)
@@ -1609,7 +1632,10 @@ async function submitSurfaceRuntimeIntentInContext(
       new URL(requestUrl, 'http://surface-runtime.local'),
     ),
   );
-  if (selection.selected.composition && submission.compositionAction) {
+  if (
+    (selection.selected.composition || popup) &&
+    submission.compositionAction
+  ) {
     const workspaceContext = await loadWorkspaceContextBar(
       view,
       selection,
@@ -1624,7 +1650,7 @@ async function submitSurfaceRuntimeIntentInContext(
     // The step's page is rendered after the step's reads and writes, with
     // the sidebar's queue counts read last (SPEED-1): after a Confirm they
     // count what it committed.
-    const renderStep = (
+    const renderStep = async (
       html: string,
       data: Parameters<Parameters<typeof submitCompositionAction>[5]>[1],
       statusCode: number,
@@ -1639,8 +1665,19 @@ async function submitSurfaceRuntimeIntentInContext(
             {
               status: 'READY',
               records: [data.record],
-              composition: data,
-              ...(fragment && outcome?.inline ? {} : { compositionTask: html }),
+              ...(selection.selected.composition ? { composition: data } : {}),
+              ...(fragment && outcome?.inline
+                ? {
+                    popupButtons: await recordPopupButtons(
+                      view,
+                      selection.selected,
+                      data.record,
+                      data.url,
+                      data.scope,
+                      gateways.operationGateway,
+                    ),
+                  }
+                : { compositionTask: html }),
             },
             null,
             offeredOperations,
@@ -1668,9 +1705,23 @@ async function submitSurfaceRuntimeIntentInContext(
     };
     const step: { render?: () => ReturnType<typeof renderStep> } = {};
     const deferred = Object.freeze({ html: '', statusCode: 0 });
+    const base = selection.selected.composition;
+    const taskSurface = popup?.task
+      ? {
+          ...selection.selected,
+          composition: {
+            kind: 'surfaceComposition' as const,
+            schemaVersion: 'v6' as const,
+            fields: [],
+            children: [],
+            ...base,
+            actions: [...(base?.actions ?? []), popup.task],
+          },
+        }
+      : selection.selected;
     const answered = await submitCompositionAction(
       view,
-      selection.selected,
+      taskSurface,
       requestUrl,
       submission,
       gateways,
@@ -2005,6 +2056,33 @@ async function submitSurfaceRuntimeIntentInContext(
   );
 }
 
+async function recordPopupButtons(
+  view: RuntimeViewContract.RequestRuntimeView,
+  surface: CompiledSurfaceDefinition,
+  record: SemanticRecordDto,
+  url: string,
+  scope: string | null,
+  gateway: SemanticOperationGateway,
+) {
+  if (!surface.popupActions) return '';
+  const offered = await availablePopups(
+    view,
+    surface.popupActions,
+    record,
+    scope,
+    gateway,
+  );
+  const buttons = offered
+    .map(
+      ({ revision }) =>
+        `<form method="post" action="${escapeHtml(url)}"><input type="hidden" name="compositionAction" value="${escapeHtml(revision.actionId)}"><button class="secondary-action">${escapeHtml(revision.label.text)}</button></form>`,
+    )
+    .join('');
+  return buttons
+    ? `<details class="action-overflow"><summary>Custom actions</summary><div class="action-overflow__menu">${buttons}</div></details>`
+    : '';
+}
+
 function renderSelectedSurface(
   view: RuntimeViewContract.RequestRuntimeView,
   { navigation, selected, surfaces }: SelectedSurface,
@@ -2062,8 +2140,9 @@ function renderSelectedSurface(
       </div>
     </header>`;
   const nativeTask =
-    selected.composition?.presentation?.task?.mode === 'nativeDialog';
-  const body = `${nativeTask ? recordTaskRegion(fragment?.outcome ?? '') : ''}${pageHeading}
+    selected.composition?.presentation?.task?.mode === 'nativeDialog' ||
+    !!selected.popupActions;
+  const body = `${nativeTask ? recordTaskRegion(fragment?.outcome ?? (data.status === 'READY' && (!selected.composition || !selected.slots.some((s) => s.slot === 'childTables')) ? (data.compositionTask ?? '') : '')) : ''}${pageHeading}
     <div class="surface-grid" data-surface-archetype="${escapeHtml(selected.archetype)}">
       ${renderedSlots.map((result) => result.html).join('')}
     </div>`;
@@ -3103,6 +3182,12 @@ export function renderWorkflowApprovals(
 ): SurfaceRuntimeResponse {
   assertRequestRuntimeView(view);
   const plans = worklist.approvals.map(renderApprovalPlan).join('');
+  const waiting = (worklist.waitingStarts ?? [])
+    .map(
+      ({ instanceId, workflowId, disposition, notBefore }) =>
+        `<li>${escapeHtml(workflowId)} · <code>${escapeHtml(instanceId)}</code> · ${disposition === 'rate-limit-overflow' ? 'Queue full. A platform operator must release or dismiss this start.' : `Waiting for capacity. Eligible from ${escapeHtml(notBefore.toISOString())}.`}</li>`,
+    )
+    .join('');
   const runs = worklist.suspended
     .map(
       ({ runId, workflowId, reason }) =>
@@ -3124,6 +3209,7 @@ export function renderWorkflowApprovals(
     <section class="panel"><h2>Pending plans</h2>
       ${plans || workflowWorklistEmpty('WORKFLOW_APPROVALS_EMPTY')}
     </section>
+    ${waiting ? `<section class="panel"><h2>Waiting workflow starts</h2><ul>${waiting}</ul></section>` : ''}
     <section class="panel"><h2>Suspended runs</h2>
       ${
         runs

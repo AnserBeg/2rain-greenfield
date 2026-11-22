@@ -9,7 +9,9 @@ import {
 } from '../../packages/customization/src/index.js';
 import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 
-export const reportsPredecessor = '6a991b21f6faa7df9833a8e27cee5aac5c0d7bf9';
+import { reportsPredecessor } from './archived-runtime-process.js';
+
+export { reportsPredecessor };
 export const readReportsPredecessor = (file: string) =>
   JSON.parse(
     execFileSync('git', ['show', reportsPredecessor + ':' + file], {

@@ -425,11 +425,19 @@ company, and every path that creates or transitions a tenant record (form, API,
 assistant, import, workflow). The owner-decision stop applies to `recordCreated`
 as well as `recordTransitioned`.
 
+**Owner ruling, 2026-11-21.** A governed writer that creates several records in
+one transaction emits a durable occurrence for each affected record, including
+children such as stock-count lines. Each occurrence identifies its record and
+has a stable identity linked to the committed trust event. The occurrences and
+the records commit or roll back together. Every eligible creation must be
+observable by a subscription on its record type.
+
 **Exactly-once firing, and the occurrence key.** The existing unique start key
 (tenant, environment, source event, stable workflow identity) stays the
 mechanism. What changes is what the "source event" is for each member:
 
-- `recordCreated`: the create's domain event ID. A record has one create event.
+- `recordCreated`: the create's domain event ID for a single create, or the individual
+  occurrence ID linked to that event for a multi-record create.
 - `recordTransitioned`: the individual transition's domain event ID, not
   (record, from, to). Records cycle through states, and each real transition
   must be a separate occurrence.

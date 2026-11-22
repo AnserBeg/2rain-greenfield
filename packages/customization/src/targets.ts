@@ -1,4 +1,8 @@
 import { reportTargets, type ReportTarget } from './report-revision.js';
+import {
+  popupOptions,
+  type PopupOption,
+} from '../../canonical-model/src/popup-actions.js';
 import type {
   DocumentTemplatePointer,
   DocumentTemplateRevision,
@@ -53,11 +57,18 @@ export interface DocumentTemplateTarget {
 
 export interface CustomizationTargets {
   readonly reports?: readonly ReportTarget[];
+  readonly popupActions?: readonly PopupOption[];
   readonly documentTemplateTargets?: readonly DocumentTemplateTarget[];
   readonly boards?: readonly BoardTarget[];
   readonly layouts?: readonly LayoutTarget[];
   readonly documentTargets?: readonly {
     readonly entityId: string;
+    readonly label: string;
+  }[];
+  /** Live files fields, which can gain an internal upload category. */
+  readonly documentFields?: readonly {
+    readonly entityId: string;
+    readonly fieldId: string;
     readonly label: string;
   }[];
   readonly calculatedDisplayTargets?: readonly CalculatedDisplayTarget[];
@@ -143,6 +154,7 @@ export function customizationTargets(definition: {
   readonly documentTemplateRevisions?:
     readonly DocumentTemplateRevision[] | undefined;
   readonly calculatedDisplayFields?: LayoutDefinition['calculatedDisplayFields'];
+  readonly documentFields?: readonly Json[] | undefined;
   readonly entities: readonly Json[];
   readonly fields: readonly Json[];
   readonly languageVersion?: string;
@@ -201,6 +213,13 @@ export function customizationTargets(definition: {
       label: String(entity.label),
     }))
     .sort((left, right) => left.label.localeCompare(right.label));
+  const documentFields = (definition.documentFields ?? [])
+    .filter((field) => field.lifecycle !== 'retired')
+    .map((field) => ({
+      entityId: String(field.entityId),
+      fieldId: String(field.fieldId),
+      label: String(field.label),
+    }));
   const queryChoices = (query: Json) => ({
     queryId: String(query.queryId),
     fields: ((query.selections ?? []) as Json[]).flatMap(({ field }) => {
@@ -684,6 +703,9 @@ export function customizationTargets(definition: {
         }))
         .sort((left, right) => left.label.localeCompare(right.label)),
     }),
+    popupActions: definition.surfaces.flatMap((s) =>
+      popupOptions(definition, s),
+    ),
     boards: boardTargets(definition),
     reports: reportTargets(definition),
     layouts: definition.surfaces.flatMap((s) =>
@@ -698,6 +720,7 @@ export function customizationTargets(definition: {
     lists,
     recordTypes,
     ...(documentTargets.length > 0 ? { documentTargets } : {}),
+    ...(documentFields.length > 0 ? { documentFields } : {}),
     ...(documentTemplateTargets.length > 0 ? { documentTemplateTargets } : {}),
     ...(metricLists.length ? { metricLists } : {}),
   });

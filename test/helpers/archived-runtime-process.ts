@@ -89,6 +89,8 @@ try {
 }
 `;
 
+export const reportsPredecessor = '7046abc74feacc8943874f1ced6d4674ddcb7548';
+
 // Produce genuine pre-index change sets for witnesses isolating earlier reader floors.
 export async function draftBeforeCompanyAccessIndex(
   options: {
@@ -101,7 +103,7 @@ export async function draftBeforeCompanyAccessIndex(
   request?: string,
 ): Promise<DraftOutcome> {
   return withArchivedCustomizationRuntime(
-    '6a991b21f6faa7df9833a8e27cee5aac5c0d7bf9',
+    reportsPredecessor,
     async (run) =>
       (await run(
         `

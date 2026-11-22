@@ -3,6 +3,7 @@ import test from 'node:test';
 import type { Pool, PoolClient } from 'pg';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { StorageTargetPayloadV1 } from '../../packages/compiler/src/storage.js';
+import { PROJECTION_FAMILY_IDS } from '../../packages/compiler/src/index.js';
 import { CAPABILITY_EXECUTOR_FACTORIES } from '../../apps/api/src/erp-capabilities.js';
 import {
   composeServingGateways,
@@ -23,9 +24,15 @@ import {
   COMPANY_ACCESS_INDEX,
   COMPANY_ACCESS_INDEX_READER,
 } from '../../packages/canonical-model/src/index.js';
+import { POPUP_READER } from '../../packages/canonical-model/src/popup-actions.js';
+import {
+  popupCommand,
+  popupOptionId,
+} from '../../packages/customization/src/popup-revision.js';
 import {
   compileInSandbox,
   CustomizationPatchSchema,
+  parseSerializedRelease,
   serializeRelease,
   type SerializedRelease,
 } from '../../packages/customization/src/index.js';
@@ -167,18 +174,34 @@ test(
                 label: 'Historical inspection',
                 fields: [{ type: 'text', label: 'Name' }],
               });
+              const placeOrder = (
+                await opened.service.targets()
+              ).popupActions?.find((option) => option.label === 'Place order');
+              assert.ok(placeOrder);
+              const popup = popupCommand([placeOrder], {
+                option: popupOptionId(placeOrder),
+                label: 'Send to vendor',
+                inputs: placeOrder.fields.map((field) => ({
+                  binding: field.id,
+                  source: 'entry',
+                })),
+              });
               const historical = (await run(
                 `
           import {readFile} from 'node:fs/promises';
           import {openCustomizeService} from './apps/api/src/composition-root.ts';
-          const {options,change}=JSON.parse(await readFile(process.argv[2],'utf8'));
+          const {options,chain}=JSON.parse(await readFile(process.argv[2],'utf8'));
           const opened=await openCustomizeService(options);
           try {
-            const draft=await opened.service.draft(change,'visualBuilder');
-            if(draft.status!=='drafted')throw new Error(JSON.stringify(draft));
-            await opened.service.approve(draft.patchId);
-            await opened.service.activate(draft.patchId);
-            console.log(JSON.stringify(draft.patchId));
+            const patchIds=[];
+            for(const change of chain) {
+              const draft=await opened.service.draft(change,'visualBuilder');
+              if(draft.status!=='drafted')throw new Error(JSON.stringify(draft));
+              await opened.service.approve(draft.patchId);
+              await opened.service.activate(draft.patchId);
+              patchIds.push(draft.patchId);
+            }
+            console.log(JSON.stringify(patchIds[1]));
           } finally {await opened.close();}
         `,
                 {
@@ -186,19 +209,19 @@ test(
                     databaseUrl: options.databaseUrl,
                     tenantSlug: options.tenantSlug,
                   },
-                  change,
+                  chain: [popup, change],
                 },
               )) as string;
               assert.deepEqual(
                 await run(archivedQuery, readInput),
                 control,
-                'the preceding binary serves the customized pre-key release too',
+                'the preceding binary serves a customized pre-key release with a pop-up action',
               );
               const old = await recordedPatch(pool, historical);
               assert.deepEqual(JSON.parse(old.payload.toString()), change);
               const reproduced = await compileInSandbox({
                 base: readReportsPredecessor(path),
-                chain: [change],
+                chain: [popup, change],
                 tip,
                 acknowledgement: readUnboundPermissionAcknowledgementFor(
                   path,
@@ -206,10 +229,18 @@ test(
                 ),
               });
               assert.ok(reproduced.status === 'compiled');
+              const preKeyRelease = reproduced.steps[1]!.release;
+              const preKeySurfaceFloor = parseSerializedRelease(
+                preKeyRelease,
+              ).compiled.bundle.releaseManifest.projections.find(
+                (projection) =>
+                  projection.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
+              )?.requiredRuntimeCapability.minimumVersion;
+              assert.equal(preKeySurfaceFloor, POPUP_READER);
               await assertStoredBytes(
                 pool,
                 old.resulting_release_id,
-                reproduced.steps[0]!.release,
+                preKeyRelease,
               );
               const draft = await opened.service.draft(
                 { ...change, label: 'Inspection' },
@@ -238,7 +269,7 @@ test(
                   message:
                     'runtime capability northstar.runtime:capability.surface-manifest requires version ' +
                     COMPANY_ACCESS_INDEX_READER +
-                    ' and this runtime supports 39',
+                    ' and this runtime supports 40',
                 });
               await requireRefusal();
               // Mutate only the extracted production loader in this disposable archive.
@@ -312,7 +343,7 @@ test(
                     (
                       await import('../../packages/canonical-model/src/constants.js')
                     ).REPORT_SOURCE_READER +
-                    ' and this runtime supports 39',
+                    ' and this runtime supports 40',
                 });
                 await assertStoredBytes(pool, app.runtime.activeReleaseId, tip);
               } finally {
@@ -322,7 +353,7 @@ test(
               await assertStoredBytes(
                 pool,
                 old.resulting_release_id,
-                reproduced.steps[0]!.release,
+                preKeyRelease,
               );
             },
           );
@@ -383,7 +414,7 @@ test(
                   message:
                     'runtime capability northstar.runtime:capability.surface-manifest requires version ' +
                     minimumVersion +
-                    ' and this runtime supports 39',
+                    ' and this runtime supports 40',
                 });
               },
             );

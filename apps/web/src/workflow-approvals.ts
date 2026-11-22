@@ -20,6 +20,12 @@ export interface ApprovalPlan extends ApprovalSelection {
 export interface WorkflowApprovalsService {
   worklist(actor: TrustedRequestContext): Promise<{
     readonly approvals: readonly ApprovalPlan[];
+    readonly waitingStarts?: readonly {
+      readonly instanceId: string;
+      readonly workflowId: string;
+      readonly disposition: string;
+      readonly notBefore: Date;
+    }[];
     readonly suspended: readonly {
       readonly runId: string;
       readonly workflowId: string;

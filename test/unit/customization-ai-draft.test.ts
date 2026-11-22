@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   DRAFT_CUSTOMIZATION_TOOL,
+  DRAFTING_TOOL,
   applyCustomizationPatches,
   customizationTargets,
   draftPatchFromRequest,
@@ -590,11 +591,14 @@ test('the drafter binds a grouped Invoice balance from the generated report sche
     result.patch.body.operands.map((f) => f.fieldId),
     [balance, 'northstar.app:field.customer_invoice_currency', customer].sort(),
   );
-  const { ReportDraftSchema } =
-    await import('../../packages/customization/src/report-revision.js');
+  const { describeDrafterKind } =
+    await import('../../packages/customization/src/ai-draft-kinds.js');
   assert.ok(
-    seen[0]!.system.includes(JSON.stringify(ReportDraftSchema.toJSONSchema())),
+    DRAFTING_TOOL.description.includes(
+      describeDrafterKind('addReportRevision'),
+    ),
   );
+  assert.match(seen[0]!.system, /"sum":true/u);
   const invalid = await draftPatchFromRequest(
     scripted([
       {
