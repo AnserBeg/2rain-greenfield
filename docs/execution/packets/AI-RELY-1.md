@@ -1,7 +1,9 @@
 # AI-RELY-1 — every AI behaviour measured, gated in CI without a model, and recoverable
 
-Status: task 0 and slice 1 built 2026-11-22 on `packet/AI-RELY-1-s1` (base `5710c05a`). **CI: red, diagnosed, fixed at `a0eb2563` (tests added up to `1e2f7341`), not yet re-run.** The full run on `9abd831c` failed only in architecture and hygiene: the two new test files were not in the reviewed suite inventory or the reachability producers, and the probe's stand-in tool was named `erp_read`, which AUTH005 reserves. PostgreSQL shard 3 hit its 30-minute limit with no failure line; it was still passing tests (the last was the Location contracts), and `build-eval.test.ts`, which goes through the changed classifier, had passed in it. On the fix, locally: hygiene passes 12/12 and the boundary test (CI test 38) passes; `check:app-release` and `check:demo-release` pass. It needs one full run. Not Critical: no AGENTS.md Critical path, no migration, no reader rung. Charter: orchestrator missions folder, `ai-review/AI-RELY-1-charter.md`.
-CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/45004579188
+Status: task 0 and slice 1 built 2026-11-22 on `packet/AI-RELY-1-s1`, merged with origin/main `37bfd473` (TRAIN-H, CI-6). **CI: full green on `e7f2e533`** (run below). Ready for review, then a train. Not Critical: no AGENTS.md Critical path, no migration, no reader rung. Charter: orchestrator missions folder, `ai-review/AI-RELY-1-charter.md`.
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/45015301370
+
+Earlier full run 45004579188 on `9abd831c` was red in architecture and hygiene: the new test files were not in the suite inventory or reachability producers, and the probe's tool was named `erp_read` (reserved by AUTH005). Fixed in `a0eb2563`. Its shard 3 timed out with no failure line. After the merge, gates (a) and (b) went red on what REPORTS added, as designed. `addReportRevision` now has a dated exception, and `CUSTOMIZE_REPORT_CONFLICT` is pinned as final (`e7f2e533`).
 
 ## Task 0 — does the assistant's request pattern fail or run stale? (review R1)
 
@@ -30,7 +32,7 @@ Owner-approved live spend, cap USD 1.00. **Spent USD 0.083** (29 calls, `count_t
 | task 0 fix | `test/agent/operations-agent.test.ts` (3 tests) | keep reasoning on a rebuilt prompt: red; keep it after a cut: red |
 | endpoint wiring | `test/agent/assistant-endpoint.test.ts` (1 test) | drop `conversation.historySystem = run.system`: red |
 
-- (a) `scoredKinds` reads what the scorer checks from each hand-written expectation. 11 of 23 drafted kinds are scored, matching the review; the 12 others carry exceptions (since 2026-11-22, owner AI-RELY-1 slice 3). The gate refuses an exception for a scored kind, so slice 3 must remove each one as it adds the case.
+- (a) `scoredKinds` reads what the scorer checks from each hand-written expectation. 11 of 23 drafted kinds are scored, matching the review; the 12 others carry exceptions (13 after REPORTS added `addReportRevision`) (since 2026-11-22, owner AI-RELY-1 slice 3). The gate refuses an exception for a scored kind, so slice 3 must remove each one as it adds the case.
 - (d) `classifyDraftOutcome` now appends `rule: <AUTHORING_RULES[code]>` to a repairable refusal's repair diagnostics, so the model is told the rule as well as the code. This changes what the live drafter sees on repair; it has not been measured live.
 - Bridge (§7): `REPAIRABLE_REFUSAL_CODES` is exported for the test.
 
@@ -43,7 +45,7 @@ Owner-approved live spend, cap USD 1.00. **Spent USD 0.083** (29 calls, `count_t
 
 - Model switch: not fixed here. One model per conversation needs the router (AI-FAST-1) and is slice 0's. Measured cost: Opus reasoning dropped, unbilled, no error.
 - `prefix_mismatch_behavior` and the `input_transformations` log are left to slice 0. With the fix every replayed block passes, so the setting becomes a guard. It needs the beta endpoint in `anthropic-model.ts`.
-- `CUSTOMIZE_POPUP_CONFLICT` stays final (not repairable). It is pinned by gate (b); filed for the owner of popup actions to decide.
+- `CUSTOMIZE_POPUP_CONFLICT` and `CUSTOMIZE_REPORT_CONFLICT` stay final (not repairable). They are pinned by gate (b); filed for their owners to decide.
 - Gate (c) covers the checked-in first-party release. A domain pack's release joins it when the pack lands.
 
 ## Test it yourself (about 5 minutes, no model)
@@ -56,5 +58,5 @@ node --import tsx --test --test-name-pattern="reasoning|rebuilt|cut from the fro
 ```
 
 ```record-claim
-{"schemaVersion": "northstar.record-claim/v1", "packet": "AI-RELY-1", "base": "5710c05ae2529b742bf15f8f484c75c0b3930180", "head": "1e2f7341e4efce77ecfae15acf9b80a25e8abacc", "changedPaths": ["apps/api/src/assistant-endpoint.ts", "package.json", "packages/operations-agent/probes/prefix-check-probe.ts", "packages/operations-agent/src/loop.ts", "packages/postgres-provider/src/customization-service.ts", "test/agent/assistant-endpoint.test.ts", "test/agent/build-eval-cases.ts", "test/agent/capability-coverage.test.ts", "test/agent/operations-agent.test.ts", "test/architecture/repository-hygiene.test.ts", "test/helpers/reachability-producers.ts", "test/unit/customization-ai-draft-gates.test.ts"], "symbols": [{"path": "packages/operations-agent/src/loop.ts", "name": "withoutReasoning"}, {"path": "packages/operations-agent/src/loop.ts", "name": "runOperationsAgent"}, {"path": "packages/postgres-provider/src/customization-service.ts", "name": "classifyDraftOutcome"}, {"path": "packages/postgres-provider/src/customization-service.ts", "name": "REPAIRABLE_REFUSAL_CODES"}, {"path": "test/agent/build-eval-cases.ts", "name": "scoredKinds"}, {"path": "test/agent/build-eval-cases.ts", "name": "EVAL_CASE_EXCEPTIONS"}]}
+{"schemaVersion": "northstar.record-claim/v1", "packet": "AI-RELY-1", "base": "37bfd47311c58060000cebca49d5f55174e3874a", "head": "e7f2e53340586f013b64242de90df752ccff3455", "changedPaths": ["apps/api/src/assistant-endpoint.ts", "package.json", "packages/operations-agent/probes/prefix-check-probe.ts", "packages/operations-agent/src/loop.ts", "packages/postgres-provider/src/customization-service.ts", "test/agent/assistant-endpoint.test.ts", "test/agent/build-eval-cases.ts", "test/agent/capability-coverage.test.ts", "test/agent/operations-agent.test.ts", "test/architecture/repository-hygiene.test.ts", "test/helpers/reachability-producers.ts", "test/unit/customization-ai-draft-gates.test.ts"], "symbols": [{"path": "packages/operations-agent/src/loop.ts", "name": "withoutReasoning"}, {"path": "packages/operations-agent/src/loop.ts", "name": "runOperationsAgent"}, {"path": "packages/postgres-provider/src/customization-service.ts", "name": "classifyDraftOutcome"}, {"path": "packages/postgres-provider/src/customization-service.ts", "name": "REPAIRABLE_REFUSAL_CODES"}, {"path": "test/agent/build-eval-cases.ts", "name": "scoredKinds"}, {"path": "test/agent/build-eval-cases.ts", "name": "EVAL_CASE_EXCEPTIONS"}]}
 ```
