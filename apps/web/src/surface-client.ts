@@ -900,6 +900,7 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
   document.addEventListener('pointerdown',event=>{
     const svg=event.target.closest?.('svg[data-map-drag]');
     if(!svg || !region()?.contains(svg) || !event.isPrimary || event.button!==0 || event.target.closest('a')) return;
+    event.preventDefault();
     svg.setPointerCapture(event.pointerId);
     drag={svg,x:event.clientX,y:event.clientY,id:event.pointerId};
   });
