@@ -91,6 +91,14 @@ const recognizedDispatches: Readonly<Record<string, readonly PredicateKind[]>> =
       'anyPredicate',
       'notPredicate',
     ]),
+    // AI-UNDO-1: the reversibility derivation ranks which enum a precondition
+    // compares most directly (a conjunction term over a disjunction arm) to
+    // find a record's lifecycle; it evaluates nothing.
+    'packages/compiler/src/reversibility.ts': signature([
+      'allPredicate',
+      'notPredicate',
+      'anyPredicate',
+    ]),
     // STOCK-COUNTS: the stock-count terminal-guard pin reads the guard's
     // shape -- posted refused alone, or as one all-of arm of state refusals --
     // and compares canonical roots; it evaluates nothing.

@@ -49,7 +49,8 @@ That run is on the exact code tip `6d651b08`; the record commit on top is docs-o
 - Blocker 1 (ADR-0047): emitting the key into the agent-discovery chunk fails `COMPILER_HISTORICAL_REPRODUCTION_MISMATCH`; new output must ride a compiler semantic profile v3 adoption (its own packet so far). An unadopted v3 would leave first-party with no declaration, so nothing would act at once.
 - Blocker 2 (A2 at scale): from release facts alone 233 plain edits derive `exact, record` (today 11), including fields capability code reads that the release does not declare (`party_credit_limit`, `item_base_unit`, item inventory policy and standard costs, location and legal-entity status, invoice and bill balances). Each needs a declared gate or a capability read declaration before it may act.
 - The wiring (projection key at agent floor 5, catalog reader, `risk.ts` with no hand list, session lifecycle and parent checks replacing name suffixes and `parentEditApprovals`) is kept on `wip/AI-UNDO-1-s2-switch`, not for merge.
-- After the rulings: CRITFIX-A retarget, second application, architecture test, older-reader proof pinned to `1092e14d`.
+- Done in slice 2 (Fable's slice 1 check, MERGE, findings 1-3): `credit_hold` left the hand list, so a release without the declaration still asks; three panel-configuration tests (act at once on) see the person asked and nothing run, each red alone when the session's act-at-once gate ignores the class; the CRITFIX-A mutation follows the list.
+- After the rulings: second application, architecture test, older-reader proof pinned to `1092e14d`.
 
 ```record-claim
 {
