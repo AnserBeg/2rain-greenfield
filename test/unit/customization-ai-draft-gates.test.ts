@@ -86,6 +86,8 @@ const EXPECTED_REPAIRABLE: Readonly<
   CUSTOMIZE_LAYOUT_CONFLICT: true,
   // A button bound to a Task the person may not run: final (filed).
   CUSTOMIZE_POPUP_CONFLICT: false,
+  // REPORTS (merged 2026-11-22): final on main, not in the allowlist (filed).
+  CUSTOMIZE_REPORT_CONFLICT: false,
 };
 
 test('(b) a drafted outcome is accepted', () => {

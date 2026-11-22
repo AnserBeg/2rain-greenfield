@@ -1160,4 +1160,7 @@ export const EVAL_CASE_EXCEPTIONS: Readonly<Record<string, EvalCaseException>> =
       'Only the hostile probe H01 names it, as a kind that must not be drafted.',
     ),
     unNarrowPermission: noCase('No request removes an action restriction.'),
+    addReportRevision: noCase(
+      'REPORTS merged drafter support on 2026-11-22 without a BUILD_CASES case (rule 12 owed).',
+    ),
   });
