@@ -74,11 +74,20 @@ import {SEMANTIC_QUERY_REQUEST_VERSION} from './packages/runtime/src/semantic-qu
 import {parseCustomizationPatch} from './packages/customization/src/patch.ts';
 const i=JSON.parse(await readFile(process.argv[2],'utf8'));
 const pool=rolePool(i.databaseUrl,'north_star_runtime',2), ctx=await trustedContext(i.identity);
+let loaderRefusal;
 const boot=async()=>{
  const p=await readVerifiedServing(pool,ctx);
  const serving=await loadServingRelease(pool,ctx,p.releaseId);
  const gates=composeServingGateways(pool,pool,ctx,serving,new ObservabilityMetrics(),{providerErrorMappings:[]});
- const entry=new AuthenticatedRequestRuntimeEntryAdapter(new AuthenticatedRequestEntryAdapter(async()=>i.identity),new PostgresRequestRuntimeViewService(pool),gates.policy);
+ const loader=new PostgresRequestRuntimeViewService(pool);
+ // Request entry redacts detailed loader diagnostics. Observe and rethrow the same error.
+ const observedLoader={load:async context=>{
+    try{return await loader.load(context);}catch(error){
+      loaderRefusal={code:error.code,message:error.message,releaseId:(await readVerifiedServing(pool,context)).releaseId};
+      throw error;
+    }
+ }};
+ const entry=new AuthenticatedRequestRuntimeEntryAdapter(new AuthenticatedRequestEntryAdapter(async()=>i.identity),observedLoader,gates.policy);
  return ()=>entry.run({headers:{}},v=>gates.queryGateway.invoke(v,{schemaVersion:SEMANTIC_QUERY_REQUEST_VERSION,queryId:i.queryId,arguments:i.args}));
 };
 const rawParse=JSON.parse, hits=new Set();
@@ -105,7 +114,7 @@ try {
      return {outcome:'refused',code:e.code,message:e.message,decoded:hits.size};
    }
  }
- console.log(JSON.stringify({oldPatch,rows,hot:await refused(query),cold:await refused(boot),releaseId:moved.releaseId}));
+ console.log(JSON.stringify({oldPatch,rows,hot:await refused(query),cold:await refused(boot),loaderRefusal,releaseId:moved.releaseId}));
 }finally {JSON.parse=rawParse;await pool.end();}
 `;
 
@@ -172,6 +181,7 @@ export async function exercisePrecedingReader(input: {
       })) as {
         oldPatch: { status: string; missingCapability: string };
         hot: { code: string; message: string; decoded: number };
+        loaderRefusal: { code: string; message: string; releaseId: string };
         cold: { code: string; message: string; decoded: number };
         releaseId: string;
         rows: string[];
@@ -184,7 +194,11 @@ export async function exercisePrecedingReader(input: {
       );
       assert.ok(activated);
       assert.equal(result.releaseId, activated);
-      for (const refusal of [result.hot, result.cold]) {
+      assert.equal(result.hot.code, 'UNSUPPORTED_RUNTIME_CAPABILITY');
+      assert.equal(result.hot.decoded, 0);
+      assert.equal(result.cold.decoded, 0);
+      assert.equal(result.loaderRefusal.releaseId, activated);
+      for (const refusal of [result.loaderRefusal, result.cold]) {
         assert.equal(refusal.code, 'UNSUPPORTED_RUNTIME_CAPABILITY');
         assert.match(
           refusal.message,
@@ -196,7 +210,6 @@ export async function exercisePrecedingReader(input: {
               ')',
           ),
         );
-        assert.equal(refusal.decoded, 0);
       }
       assert.ok(result.cold.message.includes(activated));
     } finally {

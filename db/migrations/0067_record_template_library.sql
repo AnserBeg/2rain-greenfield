@@ -286,8 +286,11 @@ DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_inte
 
 CREATE FUNCTION platform.record_template_history(company uuid,released uuid,expected_fence bigint,form text,revision uuid DEFAULT NULL)
 RETURNS SETOF jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
-DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_internal.trusted_environment_id(); BEGIN
-  PERFORM north_star_internal.template_access(company,released,expected_fence,form,'read',false);
+DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_internal.trusted_environment_id(); b jsonb; app jsonb; BEGIN
+  b:=north_star_internal.template_access(company,released,expected_fence,form,'read',false);
+  app:=platform.document_app(t,e,released);
+  PERFORM north_star_internal.communication_check_read(company,company,app,
+    north_star_internal.communication_exact_query(app,b#>>'{body,lineEntityId}'));
   RETURN QUERY SELECT jsonb_build_object('templateId',x.template_id,'number',v.number,'revisionId',v.revision_id,'retired',x.retired,
     'digest',r.digest,'content',jsonb_set(r.content,'{members}',(SELECT jsonb_agg(m-'source' ORDER BY ord)
        FROM jsonb_array_elements(r.content->'members') WITH ORDINALITY AS a(m,ord))))
@@ -295,6 +298,10 @@ DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_inte
     JOIN platform.record_template_revisions v USING(tenant_id,environment_id,template_id)
     JOIN platform.record_template_reviews r USING(tenant_id,environment_id,review_id)
     WHERE (l.tenant_id,l.environment_id,l.company_id,x.form_id)=(t,e,company,form) AND (revision IS NULL OR v.revision_id=revision)
+      AND NOT EXISTS (SELECT FROM jsonb_array_elements(r.content->'members') m CROSS JOIN LATERAL jsonb_each(m->'cells') cell
+        WHERE NOT EXISTS(SELECT FROM jsonb_array_elements(b#>'{body,columns}') col
+          WHERE col->>'fieldId'=cell.key AND col->'copyEligible'='true'
+          AND (NOT col ? 'audienceValues' OR (col->'audienceValues') ? (cell.value#>>'{}'))))
     ORDER BY x.template_id,v.number DESC; END $$;
 
 CREATE FUNCTION platform.record_template_author(company uuid,released uuid,expected_fence bigint,form text) RETURNS void

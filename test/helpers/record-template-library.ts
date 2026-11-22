@@ -395,6 +395,10 @@ export async function exerciseTemplateLibrary(
         );
         try {
           await assert.rejects(
+            run((v) => library.history(v, target)),
+            /communication.unavailable/u,
+          );
+          await assert.rejects(
             run((v) => library.publish(v, review.reviewId, review.digest)),
           );
         } finally {
@@ -552,6 +556,25 @@ export async function exerciseTemplateLibrary(
       await assert.rejects(
         run((v) => library.history(v, other, elsewhere.revisionId), 'buyer'),
       );
+      if (kind === 'row') {
+        const updated = draftTemplateBinding(
+          (await opened.service.targets()).templateBindings!,
+          {
+            ...choices,
+            fields: choices.fields.map((c) =>
+              c.fieldId === copies ? { ...c, audienceValues: ['250'] } : c,
+            ),
+          },
+        );
+        await activate(updated);
+        assert.deepEqual(
+          await run(
+            (v) => library.history(v, target, published.revisionId),
+            'buyer',
+          ),
+          [],
+        );
+      }
     }
     assert.equal(
       (
