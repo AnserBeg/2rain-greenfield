@@ -613,7 +613,7 @@ test(
           const createOrder = (currency: string) =>
             world.create('sales_order', {
               customer_party_id: seededId('Northwind Goods'),
-              order_date: dispatchDay,
+              order_date: `${dispatchDay}T12:00:00.000Z`,
               currency,
             });
           const euro = await createOrder('EUR');
