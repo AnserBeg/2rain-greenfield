@@ -1848,3 +1848,133 @@ test('a personal yes executes and compares committed fields before the next mode
   });
   assert.equal(result.answer, 'Read-back found a mismatch.');
 });
+
+// ------------------------------------------- AI-UNDO-1 slice 2: behaviour lock
+
+/**
+ * Today's act-or-ask outcome for every first-party pair that acts at once,
+ * in every state its record (or, for a child line, its parent) can be in.
+ * Written before the policy moved from a hand list to the release's
+ * reversibility declaration, so every difference is a listed change.
+ */
+const LOCK_PAIRS: readonly {
+  operationId: string;
+  patch: Record<string, string>;
+  /** The lifecycle field the record or its parent carries, and its states. */
+  states?: { field: string; values: readonly string[]; parent?: string };
+}[] = [
+  { operationId: 'item_update', patch: { name: 'Bolt' } },
+  { operationId: 'item_update', patch: { description: 'Steel' } },
+  { operationId: 'legal_entity_update', patch: { name: 'Co' } },
+  { operationId: 'location_update', patch: { name: 'Bay' } },
+  { operationId: 'party_update', patch: { contact_summary: 'Ann' } },
+  { operationId: 'party_update', patch: { name: 'Acme' } },
+  {
+    operationId: 'party_update',
+    patch: { payment_terms: `${NS}:option.party_payment_terms_net_30` },
+  },
+  { operationId: 'tax_code_update', patch: { name: 'GST' } },
+  ...(['sales_order', 'purchase_order'] as const).map((type) => ({
+    operationId: `${type}_update`,
+    patch: { notes: 'Call first' },
+    states: {
+      field: `${NS}:derived_state_field.machine.${type}_lifecycle`,
+      values: ['draft', 'released', 'closed', 'cancelled'].map(
+        (state) => `${NS}:state.${type}_${state}`,
+      ),
+    },
+  })),
+  {
+    operationId: 'stock_count_update',
+    patch: { reason_narrative: 'Recount' },
+    states: {
+      field: `${NS}:field.stock_count_state`,
+      values: ['draft', 'counting'].map(
+        (state) => `${NS}:option.stock_count_state_${state}`,
+      ),
+    },
+  },
+  { operationId: 'party_update', patch: { credit_limit: '500' } },
+  { operationId: 'party_update', patch: { number: 'P-7' } },
+  { operationId: 'tax_code_update', patch: { rate_percent: '5' } },
+  {
+    operationId: 'stock_count_line_update',
+    patch: { counted_quantity: '12' },
+    states: {
+      field: `${NS}:field.stock_count_state`,
+      values: ['draft', 'counting', 'reviewed', 'posted', 'cancelled'].map(
+        (state) => `${NS}:option.stock_count_state_${state}`,
+      ),
+      parent: `${NS}:relation.stock_count_line_session`,
+    },
+  },
+];
+
+async function lockOutcomes(): Promise<string[]> {
+  const outcomes: string[] = [];
+  for (const pair of LOCK_PAIRS)
+    for (const value of pair.states?.values ?? [undefined]) {
+      const { session, state } = guardedSession();
+      const entity = pair.operationId.replace(/_update$/u, '');
+      for (const key of Object.keys(pair.patch))
+        state.record.values[`${NS}:field.${entity}_${key}`] =
+          key === 'payment_terms'
+            ? `${NS}:option.party_payment_terms_due_on_receipt`
+            : key === 'counted_quantity'
+              ? '10'
+              : 'Old';
+      if (pair.states && value) state.record.values[pair.states.field] = value;
+      if (pair.states?.parent)
+        Object.assign(state.record, {
+          relationLabels: { [pair.states.parent]: { recordId: PARTY } },
+        });
+      const catalog = pinnedCatalog(compiledAppView());
+      await session.call('erp_query', {
+        queryId: catalog.operation(pair.operationId)!.readBackQueryId,
+        arguments: { recordId: PARTY },
+      });
+      const planned = await session.call('erp_plan', {
+        intents: [
+          { operationId: pair.operationId, target: PARTY, patch: pair.patch },
+        ],
+      });
+      const risk = planned.isError
+        ? 'refused'
+        : String(session.approvals.at(-1)?.riskClass ?? 'refused');
+      outcomes.push(
+        `${pair.operationId} ${Object.keys(pair.patch).join(',')}${value ? ` @${value.split('.').pop()!}` : ''} -> ${risk}`,
+      );
+    }
+  return outcomes;
+}
+
+test('AI-UNDO-1 lock: each first-party act-at-once pair, in each state of its record or parent', async () => {
+  assert.deepEqual(await lockOutcomes(), [
+    'item_update name -> reversible',
+    'item_update description -> reversible',
+    'legal_entity_update name -> reversible',
+    'location_update name -> reversible',
+    'party_update contact_summary -> reversible',
+    'party_update name -> reversible',
+    'party_update payment_terms -> reversible',
+    'tax_code_update name -> reversible',
+    'sales_order_update notes @sales_order_draft -> reversible',
+    'sales_order_update notes @sales_order_released -> refused',
+    'sales_order_update notes @sales_order_closed -> refused',
+    'sales_order_update notes @sales_order_cancelled -> refused',
+    'purchase_order_update notes @purchase_order_draft -> reversible',
+    'purchase_order_update notes @purchase_order_released -> refused',
+    'purchase_order_update notes @purchase_order_closed -> refused',
+    'purchase_order_update notes @purchase_order_cancelled -> refused',
+    'stock_count_update reason_narrative @stock_count_state_draft -> needsYes',
+    'stock_count_update reason_narrative @stock_count_state_counting -> needsYes',
+    'party_update credit_limit -> needsYes',
+    'party_update number -> needsYes',
+    'tax_code_update rate_percent -> needsYes',
+    'stock_count_line_update counted_quantity @stock_count_state_draft -> reversible',
+    'stock_count_line_update counted_quantity @stock_count_state_counting -> needsYes',
+    'stock_count_line_update counted_quantity @stock_count_state_reviewed -> needsYes',
+    'stock_count_line_update counted_quantity @stock_count_state_posted -> needsYes',
+    'stock_count_line_update counted_quantity @stock_count_state_cancelled -> needsYes',
+  ]);
+});
