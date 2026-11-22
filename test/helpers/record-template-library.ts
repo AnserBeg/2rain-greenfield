@@ -641,6 +641,65 @@ export async function exerciseTemplateLibrary(
         run((v) => library.requireAuthor(v, target), 'buyer'),
         /template.unavailable/u,
       );
+      const header = {
+        recordId: randomUUID(),
+        legalEntityId: COMPANY,
+        values: {
+          [ns + 'field.' + local + '_name']: 'Created from ' + label,
+          ...(!selector && { [cls]: contextId }),
+        },
+        relations: selector ? { [selector.relationId]: contextId } : {},
+      };
+      const key = randomUUID();
+      const prepare = (k: string, h: typeof header = header) =>
+        run((v) => library.prepareCreate(v, form, k, h));
+      const create = (k: string, h: typeof header = header) =>
+        world.invoke(local + '_create', h, { idempotencyKey: k });
+      const application = () =>
+        run((v) => library.application(v, target, header.recordId));
+      const prepared = await prepare(key);
+      assert.equal(prepared.assignment?.revision_id, published.revisionId);
+      const staged = { ...header, recordId: randomUUID() };
+      const staleKey = randomUUID();
+      await prepare(staleKey, staged);
+      const results = await Promise.all([create(key), create(key)]);
+      assert.ok(results[0].trust?.invocationId);
+      assert.deepEqual(results[1].trust, results[0].trust);
+      assert.equal(results[0].readBack?.recordId, header.recordId);
+      const pin = await application();
+      assert.deepEqual(pin?.assignment?.content, readable);
+      assert.equal(pin?.context, contextId);
+      if (kind === 'section') assert.deepEqual(pin?.memberRows, {});
+      else {
+        const rowId = pin?.memberRows.first;
+        assert.ok(rowId);
+        const row = await world.read(local + '_lines', rowId);
+        assert.equal(row.recordId, rowId);
+        if (kind === 'row') assert.equal(row.values[copies], '750');
+        await world.invoke(local + '_lines_update', {
+          recordId: rowId,
+          expectedRevision: 1,
+          patch: { [caption]: 'Edited on the record' },
+        });
+      }
+      await assert.rejects(
+        create(key, {
+          ...header,
+          values: {
+            ...header.values,
+            [ns + 'field.' + local + '_name']: 'Changed request',
+          },
+        }),
+      );
+      await world.invoke(local + '_update', {
+        recordId: header.recordId,
+        expectedRevision: 1,
+        patch: { [ns + 'field.' + local + '_name']: 'Edited parent' },
+      });
+      assert.equal(
+        (await create(key)).readBack?.values[ns + 'field.' + local + '_name'],
+        'Edited parent',
+      );
       const successor = await run((v) =>
         library.review(v, target, published.templateId, 1, {
           ...content,
@@ -667,6 +726,31 @@ export async function exerciseTemplateLibrary(
         [2, 1],
       );
       assert.deepEqual(history[1]!.content, readable);
+      await run((v) =>
+        library.assign(v, target, contextId, 1, history[0]!.revisionId),
+      );
+      await assert.rejects(
+        create(staleKey, staged),
+        /template.freshPreviewRequired/u,
+      );
+      const newer = { ...header, recordId: randomUUID() };
+      const nextKey = randomUUID();
+      assert.equal(
+        (await prepare(nextKey, newer)).assignment?.revision_id,
+        history[0]!.revisionId,
+      );
+      assert.equal((await create(nextKey, newer)).outcome, 'succeeded');
+      assert.equal(
+        (await application())?.assignment?.revision_id,
+        published.revisionId,
+      );
+      if (pin?.memberRows.first)
+        assert.equal(
+          (await world.read(local + '_lines', pin.memberRows.first)).values[
+            caption
+          ],
+          'Edited on the record',
+        );
       await run((v) => library.retire(v, published.templateId, 2));
       await assert.rejects(
         run((v) =>
@@ -685,6 +769,7 @@ export async function exerciseTemplateLibrary(
           .length,
         0,
       );
+      assert.deepEqual((await create(key)).trust, results[0].trust);
       const buyer = runtime.identity;
       await pool.query(
         'UPDATE platform.current_policy_memberships SET legal_entity_id=$4 WHERE (tenant_id,environment_id,principal_id)=($1,$2,$3) AND revoked_at IS NULL',

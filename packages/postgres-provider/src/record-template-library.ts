@@ -6,6 +6,7 @@ import {
 } from '../../canonical-model/src/record-template-content.js';
 import type {
   RecordTemplateLibrary,
+  TemplateApplicationSelection,
   RecordTemplateRevision,
   RecordTemplateReview,
   TemplateLibraryTarget,
@@ -26,7 +27,7 @@ export function templatePermissionBindings(
     const binding = s.recordTemplateBinding;
     if (!binding) return [];
     return [
-      ...['publish', 'assign', 'read'].map((action) => ({
+      ...['publish', 'assign', 'read', 'apply'].map((action) => ({
         action,
         permissionId: s.surfaceId.replace(
           ':surface.',
@@ -34,6 +35,16 @@ export function templatePermissionBindings(
         ),
         resourceId: s.surfaceId,
       })),
+      ...binding.body.columns
+        .filter((c) => c.copyEligible)
+        .map((c) => ({
+          action: 'seed',
+          permissionId: c.fieldId.replace(
+            ':field.',
+            ':permission.template_seed_',
+          ),
+          resourceId: c.fieldId,
+        })),
       ...binding.body.columns
         .filter((c) => c.copyEligible)
         .map((c) => ({
@@ -57,6 +68,43 @@ export class PostgresRecordTemplateLibrary implements RecordTemplateLibrary {
         (await client.query<{ result: T }>(sql, params)).rows.map(
           (r) => r.result,
         ),
+    );
+  }
+  async prepareCreate(
+    view: RequestRuntimeView,
+    form: string,
+    requestKey: string,
+    input: unknown,
+  ) {
+    return (
+      await this.call<TemplateApplicationSelection>(
+        view,
+        'SELECT platform.review_record_template_create($1,$2,$3,$4,$5) AS result',
+        [view.release.releaseId, view.pointer.fence, form, requestKey, input],
+      )
+    )[0]!;
+  }
+  async application(
+    view: RequestRuntimeView,
+    target: TemplateLibraryTarget,
+    parentId: string,
+  ) {
+    return (
+      (
+        await this.call<
+          TemplateApplicationSelection & { memberRows: Record<string, string> }
+        >(
+          view,
+          'SELECT platform.record_template_application($1,$2,$3,$4,$5) AS result',
+          [
+            target.company,
+            view.release.releaseId,
+            view.pointer.fence,
+            target.form,
+            parentId,
+          ],
+        )
+      )[0] ?? null
     );
   }
   async requireAuthor(view: RequestRuntimeView, target: TemplateLibraryTarget) {

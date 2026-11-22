@@ -258,7 +258,7 @@ DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_inte
   b jsonb; lib uuid; version_now integer; BEGIN
   b:=north_star_internal.template_access(company,released,expected_fence,form,'assign',true);
   SELECT l.library_id INTO lib FROM platform.record_template_revisions v JOIN platform.record_templates x USING(tenant_id,environment_id,template_id)
-    JOIN platform.record_template_libraries l USING(tenant_id,environment_id,library_id) JOIN platform.record_template_reviews r USING(tenant_id,environment_id,review_id)
+    JOIN platform.record_template_libraries l USING(tenant_id,environment_id,library_id) JOIN platform.record_template_reviews r ON (r.tenant_id,r.environment_id,r.review_id)=(v.tenant_id,v.environment_id,v.review_id)
     WHERE (v.tenant_id,v.environment_id,v.revision_id,l.company_id,x.form_id,r.binding_revision)=(t,e,revision,company,form,(b->>'revisionId')::uuid) AND NOT x.retired;
   IF lib IS NULL THEN RAISE EXCEPTION 'template.revisionUnavailable'; END IF;
   ctx:=north_star_internal.template_context(company,released,b#>'{body,context}',ctx);
@@ -296,7 +296,7 @@ DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_inte
        FROM jsonb_array_elements(r.content->'members') WITH ORDINALITY AS a(m,ord))))
     FROM platform.record_template_libraries l JOIN platform.record_templates x USING(tenant_id,environment_id,library_id)
     JOIN platform.record_template_revisions v USING(tenant_id,environment_id,template_id)
-    JOIN platform.record_template_reviews r USING(tenant_id,environment_id,review_id)
+    JOIN platform.record_template_reviews r ON (r.tenant_id,r.environment_id,r.review_id)=(v.tenant_id,v.environment_id,v.review_id)
     WHERE (l.tenant_id,l.environment_id,l.company_id,x.form_id)=(t,e,company,form) AND (revision IS NULL OR v.revision_id=revision)
       AND NOT EXISTS (SELECT FROM jsonb_array_elements(r.content->'members') m CROSS JOIN LATERAL jsonb_each(m->'cells') cell
         WHERE NOT EXISTS(SELECT FROM jsonb_array_elements(b#>'{body,columns}') col
@@ -318,3 +318,170 @@ REVOKE ALL ON FUNCTION platform.review_record_template(uuid,uuid,bigint,text,uui
 GRANT EXECUTE ON FUNCTION platform.review_record_template(uuid,uuid,bigint,text,uuid,integer,jsonb),
   platform.publish_record_template(uuid,text),platform.assign_record_template(uuid,uuid,bigint,text,text,integer,uuid),
   platform.retire_record_template(uuid,bigint,uuid,integer),platform.record_template_history(uuid,uuid,bigint,text,uuid) TO north_star_runtime;
+
+-- A reviewed create is bound to its exact request and actor. Applying it
+-- pins the member-to-row identities alongside the normal operation receipt.
+CREATE TABLE platform.record_template_creations (
+  tenant_id uuid NOT NULL, environment_id uuid NOT NULL, principal_id uuid NOT NULL,
+  company_id uuid NOT NULL, operation_id text NOT NULL, request_key uuid NOT NULL,
+  parent_id uuid NOT NULL, form_id text NOT NULL, release_id uuid NOT NULL, fence bigint NOT NULL,
+  input_digest text NOT NULL, selection jsonb NOT NULL, probe boolean NOT NULL DEFAULT false,
+  applied boolean NOT NULL DEFAULT false, member_rows jsonb NOT NULL DEFAULT '{}',
+  PRIMARY KEY(tenant_id,environment_id,principal_id,company_id,operation_id,request_key),
+  FOREIGN KEY(tenant_id,environment_id,release_id) REFERENCES platform.tenant_releases(tenant_id,environment_id,release_id)
+);
+CREATE UNIQUE INDEX record_template_applied_parent ON platform.record_template_creations
+  (tenant_id,environment_id,company_id,parent_id,form_id) WHERE applied;
+ALTER TABLE platform.record_template_creations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE platform.record_template_creations FORCE ROW LEVEL SECURITY;
+REVOKE ALL ON platform.record_template_creations FROM PUBLIC,north_star_runtime;
+
+CREATE FUNCTION north_star_internal.template_worker(company uuid, released uuid, binding jsonb, content jsonb)
+RETURNS void LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
+DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_internal.trusted_environment_id();
+  app jsonb:=platform.document_app(t,e,released); body jsonb:=binding->'body'; entity text; op jsonb; field text; BEGIN
+  IF NOT north_star_internal.address_member(company) OR NOT platform.document_granted(company::text,
+     replace(body->>'formId',':surface.',':permission.template_apply_'),body->>'formId')
+    OR NOT platform.document_granted(company::text,replace(body->>'formId',':surface.',':permission.template_read_'),body->>'formId')
+    THEN RAISE EXCEPTION 'template.applyDenied'; END IF;
+  FOREACH entity IN ARRAY ARRAY[body->>'entityId',body->>'lineEntityId'] LOOP
+    SELECT o INTO STRICT op FROM jsonb_array_elements(app->'operations') o WHERE o->>'lifecycle'='active'
+      AND o->>'tier'='o0' AND o#>>'{effect,kind}'='createRecordEffect' AND o#>>'{effect,entity,targetId}'=entity;
+    IF NOT EXISTS(SELECT FROM jsonb_array_elements(app->'permissions') p WHERE p->>'permissionId'=op#>>'{permission,targetId}'
+      AND p->>'lifecycle'='active' AND platform.document_granted(company::text,p->>'permissionId',p#>>'{resource,targetId}'))
+      THEN RAISE EXCEPTION 'template.createDenied'; END IF;
+    PERFORM north_star_internal.communication_check_read(company,company,app,north_star_internal.communication_exact_query(app,entity)); END LOOP;
+  FOR field IN SELECT DISTINCT jsonb_object_keys(m->'cells') FROM jsonb_array_elements(content->'members') m LOOP
+    IF NOT platform.document_granted(company::text,replace(field,':field.',':permission.template_seed_'),field)
+      THEN RAISE EXCEPTION 'template.seedDenied'; END IF; END LOOP; END $$;
+
+CREATE FUNCTION north_star_internal.template_selection(company uuid,released uuid,expected_fence bigint,form text,header jsonb)
+RETURNS jsonb LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
+DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_internal.trusted_environment_id();
+  b jsonb; selector jsonb; ctx text; assignment record; selected jsonb; BEGIN
+  b:=north_star_internal.template_access(company,released,expected_fence,form,'apply',true);
+  selector:=b#>'{body,context}';
+  ctx:=CASE selector->>'kind' WHEN 'wholeType' THEN 'wholeType' WHEN 'choice' THEN header->'values'->>(selector->>'fieldId')
+                              WHEN 'link' THEN header->'relations'->>(selector->>'relationId') END;
+  IF ctx IS NOT NULL THEN
+    ctx:=north_star_internal.template_context(company,released,selector,ctx);
+    SELECT a.version, a.revision_id,x.template_id,x.retired,r.binding_revision,r.digest,r.content INTO assignment
+      FROM platform.record_template_assignments a JOIN platform.record_template_libraries l USING(tenant_id,environment_id,library_id)
+      JOIN platform.record_template_revisions v USING(tenant_id,environment_id,revision_id)
+      JOIN platform.record_templates x ON (x.tenant_id,x.environment_id,x.template_id,x.library_id,x.form_id)=(v.tenant_id,v.environment_id,v.template_id,l.library_id,form)
+      JOIN platform.record_template_reviews r ON (r.tenant_id,r.environment_id,r.review_id)=(v.tenant_id,v.environment_id,v.review_id)
+      WHERE (a.tenant_id,a.environment_id,l.company_id,a.form_id,a.context_key)=(t,e,company,form,ctx)
+      ORDER BY a.version DESC LIMIT 1;
+    IF FOUND THEN
+      IF assignment.retired OR assignment.binding_revision IS DISTINCT FROM (b->>'revisionId')::uuid THEN RAISE EXCEPTION 'template.revisionUnavailable'; END IF;
+      SELECT to_jsonb(assignment)-'retired'-'binding_revision'-'content' || jsonb_build_object('content',
+        jsonb_set(assignment.content,'{members}',(SELECT jsonb_agg(m-'source' ORDER BY ord)
+        FROM jsonb_array_elements(assignment.content->'members') WITH ORDINALITY a(m,ord)))) INTO selected; END IF; END IF;
+  IF selected IS NULL AND b#>'{body,required}'='true' THEN RAISE EXCEPTION 'template.assignmentRequired'; END IF;
+  PERFORM north_star_internal.template_worker(company,released,b,selected->'content');
+  RETURN jsonb_build_object('binding',b,'context',ctx,'assignment',selected); END $$;
+
+CREATE FUNCTION platform.review_record_template_create(released uuid,expected_fence bigint,form text,request_key uuid,header jsonb)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_internal.trusted_environment_id();
+  company uuid:=(header->>'legalEntityId')::uuid; selected jsonb; digest text:=encode(sha256(convert_to(header::text,'UTF8')),'hex');
+  actor uuid:=north_star_internal.address_principal(); prior platform.record_template_creations; BEGIN
+  selected:=north_star_internal.template_selection(company,released,expected_fence,form,header);
+  INSERT INTO platform.record_template_creations(tenant_id,environment_id,principal_id,company_id,operation_id,request_key,parent_id,form_id,release_id,fence,input_digest,selection)
+    VALUES(t,e,actor,company,selected#>>'{binding,body,createOperationId}',request_key,(header->>'recordId')::uuid,form,released,expected_fence,digest,selected) ON CONFLICT DO NOTHING;
+  SELECT * INTO STRICT prior FROM platform.record_template_creations c WHERE
+    (c.tenant_id,c.environment_id,c.principal_id,c.company_id,c.operation_id,c.request_key)=(t,e,actor,company,selected#>>'{binding,body,createOperationId}',review_record_template_create.request_key);
+  IF (prior.input_digest,prior.selection,prior.release_id,prior.fence) IS DISTINCT FROM (digest,selected,released,expected_fence) OR prior.probe OR prior.applied
+    THEN RAISE EXCEPTION 'template.freshPreviewRequired'; END IF;
+  RETURN selected; END $$;
+
+-- Only the independent verification connection can arrange a candidate sample.
+-- Its review is usable by precisely that actor, request, candidate and company.
+CREATE FUNCTION platform.review_record_template_probe(released uuid,expected_fence bigint,form text,request_key uuid,header jsonb)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_internal.trusted_environment_id();
+  b jsonb; company uuid:=(header->>'legalEntityId')::uuid; selected jsonb; BEGIN
+  SELECT s->'recordTemplateBinding' INTO STRICT b FROM jsonb_array_elements(platform.document_app(t,e,released)->'surfaces') s
+    WHERE s->>'surfaceId'=form AND s#>>'{recordTemplateBinding,status}'='active';
+  selected:=jsonb_build_object('binding',b,'context','verification','assignment',jsonb_build_object('revision_id',gen_random_uuid(),
+    'content',jsonb_build_object('version',1,'label','Verification section','columns','[]'::jsonb,
+    'members',jsonb_build_array(jsonb_build_object('kind','section','key','verification','caption','Verification section','cells','{}'::jsonb)))));
+  INSERT INTO platform.record_template_creations(tenant_id,environment_id,principal_id,company_id,operation_id,request_key,parent_id,form_id,release_id,fence,input_digest,selection,probe)
+    VALUES(t,e,north_star_internal.address_principal(),company,b#>>'{body,createOperationId}',request_key,(header->>'recordId')::uuid,
+           form,released,expected_fence,encode(sha256(convert_to(header::text,'UTF8')),'hex'),selected,true) ON CONFLICT DO NOTHING; END $$;
+
+CREATE FUNCTION platform.open_record_template_create(released uuid,expected_fence bigint,op text,request_key uuid,header jsonb,verification boolean)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_internal.trusted_environment_id(); r platform.record_template_creations;
+  company uuid:=(header->>'legalEntityId')::uuid; selected jsonb; BEGIN
+  IF current_setting('transaction_isolation')<>'read committed' THEN RAISE EXCEPTION 'template.requiresReadCommitted'; END IF;
+  SELECT * INTO r FROM platform.record_template_creations c WHERE
+    (c.tenant_id,c.environment_id,c.principal_id,c.company_id,c.operation_id,c.request_key)=(t,e,north_star_internal.address_principal(),company,op,open_record_template_create.request_key) FOR UPDATE;
+  IF NOT FOUND THEN RETURN NULL; END IF;
+  IF r.input_digest<>encode(sha256(convert_to(header::text,'UTF8')),'hex') OR r.probe<>verification THEN RAISE EXCEPTION 'template.requestChanged'; END IF;
+  IF NOT r.probe THEN
+    PERFORM FROM platform.active_release_pointers p WHERE (p.tenant_id,p.environment_id,p.release_id,p.fence)=(t,e,released,expected_fence) FOR SHARE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'template.staleRelease'; END IF;
+    PERFORM platform.lock_current_policy_epoch(t,e);
+    IF r.applied THEN
+      PERFORM north_star_internal.template_worker(company,released,r.selection->'binding',r.selection#>'{assignment,content}');
+      IF r.selection->>'context' IS NOT NULL THEN PERFORM north_star_internal.template_context(company,released,r.selection#>'{binding,body,context}',r.selection->>'context'); END IF;
+    ELSE
+      selected:=north_star_internal.template_selection(company,released,expected_fence,r.form_id,header);
+      IF selected IS DISTINCT FROM r.selection THEN RAISE EXCEPTION 'template.freshPreviewRequired'; END IF; END IF; END IF;
+  IF NOT r.applied AND (r.release_id,r.fence) IS DISTINCT FROM (released,expected_fence) THEN RAISE EXCEPTION 'template.freshPreviewRequired'; END IF;
+  RETURN r.selection || jsonb_build_object('applied',r.applied,'memberRows',r.member_rows); END $$;
+
+REVOKE ALL ON FUNCTION north_star_internal.template_worker(uuid,uuid,jsonb,jsonb),north_star_internal.template_selection(uuid,uuid,bigint,text,jsonb),
+  platform.review_record_template_probe(uuid,bigint,text,uuid,jsonb),platform.review_record_template_create(uuid,bigint,text,uuid,jsonb),
+  platform.open_record_template_create(uuid,bigint,text,uuid,jsonb,boolean) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION platform.review_record_template_probe(uuid,bigint,text,uuid,jsonb) TO north_star_workflow_verifier;
+GRANT EXECUTE ON FUNCTION platform.review_record_template_create(uuid,bigint,text,uuid,jsonb),platform.open_record_template_create(uuid,bigint,text,uuid,jsonb,boolean) TO north_star_runtime;
+
+CREATE FUNCTION platform.finish_record_template_create(released uuid,expected_fence bigint,op text,request_key uuid,header jsonb,verification boolean,owned_rows jsonb)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_internal.trusted_environment_id();
+  company uuid:=(header->>'legalEntityId')::uuid; parent uuid:=(header->>'recordId')::uuid;
+  selection jsonb; storage jsonb; entity jsonb; line jsonb; edge jsonb; member jsonb; seen boolean; total integer:=0; BEGIN
+  selection:=platform.open_record_template_create(released,expected_fence,op,request_key,header,verification);
+  IF selection IS NULL OR selection->'applied'='true' THEN RAISE EXCEPTION 'template.invalidApplication'; END IF;
+  SELECT convert_from(blob.canonical_bytes,'UTF8')::jsonb INTO STRICT storage FROM platform.tenant_release_projection_links p
+    JOIN platform.tenant_release_chunk_links c USING(tenant_id,environment_id,release_id,projection_instance_id)
+    JOIN platform.release_artifact_blobs blob ON (blob.content_hash,blob.artifact_kind)=(c.chunk_hash,'projectionChunk')
+    WHERE (p.tenant_id,p.environment_id,p.release_id,p.projection_family_id)=(t,e,released,'northstar.compiler:projection-family.storage-target');
+  SELECT v INTO STRICT entity FROM jsonb_array_elements(storage->'entities') v WHERE v->>'entityId'=selection#>>'{binding,body,entityId}';
+  SELECT v INTO STRICT line FROM jsonb_array_elements(storage->'entities') v WHERE v->>'entityId'=selection#>>'{binding,body,lineEntityId}';
+  SELECT v INTO STRICT edge FROM jsonb_array_elements(storage->'relations') v WHERE v->>'relationId'=selection#>>'{binding,body,parentRelationId}';
+  EXECUTE format('SELECT true FROM north_star_module.%I WHERE (tenant_id,environment_id,record_id,%I) = ($1,$2,$3,$4) AND xmin=pg_current_xact_id()::xid',
+    entity->>'physicalTableName',entity#>>'{legalEntity,column}') INTO seen USING t,e,parent,company;
+  IF seen IS NOT TRUE THEN RAISE EXCEPTION 'template.parentNotCreated'; END IF;
+  FOR member IN SELECT m FROM jsonb_array_elements(selection#>'{assignment,content,members}') m WHERE m->>'kind'<>'section' LOOP
+    total:=total+1;
+    EXECUTE format('SELECT true FROM north_star_module.%I WHERE (tenant_id,environment_id,record_id,%I,%I)=($1,$2,$3,$4,$5) AND xmin=pg_current_xact_id()::xid',
+      line->>'physicalTableName',line#>>'{legalEntity,column}',edge#>>'{relationColumn,physicalName}')
+      INTO seen USING t,e,(owned_rows->>(member->>'key'))::uuid,company,parent;
+    IF seen IS NOT TRUE THEN RAISE EXCEPTION 'template.seedNotCreated'; END IF; END LOOP;
+  IF (SELECT count(DISTINCT value) FROM jsonb_each_text(owned_rows))<>total OR
+     (SELECT count(*) FROM jsonb_object_keys(owned_rows))<>total THEN RAISE EXCEPTION 'template.invalidMemberRows'; END IF;
+  UPDATE platform.record_template_creations c SET applied=true,member_rows=owned_rows WHERE
+    (c.tenant_id,c.environment_id,c.principal_id,c.company_id,c.operation_id,c.request_key)=(t,e,north_star_internal.address_principal(),company,op,finish_record_template_create.request_key); END $$;
+REVOKE ALL ON FUNCTION platform.finish_record_template_create(uuid,bigint,text,uuid,jsonb,boolean,jsonb) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION platform.finish_record_template_create(uuid,bigint,text,uuid,jsonb,boolean,jsonb) TO north_star_runtime;
+
+CREATE FUNCTION platform.record_template_application(company uuid,released uuid,expected_fence bigint,form text,parent uuid)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_internal.trusted_environment_id();
+  r platform.record_template_creations; app jsonb:=platform.document_app(t,e,released); BEGIN
+  PERFORM FROM platform.active_release_pointers WHERE (tenant_id,environment_id,release_id,fence)=(t,e,released,expected_fence);
+  IF NOT FOUND THEN RAISE EXCEPTION 'template.staleRelease'; END IF;
+  IF NOT north_star_internal.address_member(company) OR NOT platform.document_granted(company::text,replace(form,':surface.',':permission.template_read_'),form)
+    THEN RAISE EXCEPTION 'template.unavailable'; END IF;
+  SELECT * INTO r FROM platform.record_template_creations c WHERE (c.tenant_id,c.environment_id,c.company_id,c.form_id,c.parent_id)=(t,e,company,form,parent)
+    AND c.applied AND NOT c.probe;
+  IF NOT FOUND THEN RETURN NULL; END IF;
+  PERFORM north_star_internal.communication_check_read(company,company,app,north_star_internal.communication_exact_query(app,r.selection#>>'{binding,body,entityId}'));
+  PERFORM north_star_internal.communication_check_read(company,company,app,north_star_internal.communication_exact_query(app,r.selection#>>'{binding,body,lineEntityId}'));
+  IF r.selection->>'context' IS NOT NULL THEN PERFORM north_star_internal.template_context(company,released,r.selection#>'{binding,body,context}',r.selection->>'context'); END IF;
+  RETURN r.selection || jsonb_build_object('memberRows',r.member_rows); END $$;
+REVOKE ALL ON FUNCTION platform.record_template_application(uuid,uuid,bigint,text,uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION platform.record_template_application(uuid,uuid,bigint,text,uuid) TO north_star_runtime;

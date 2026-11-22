@@ -831,6 +831,13 @@ function operationCatalogPayload(
   // Only authored capability Task bindings introduce this envelope. Existing
   // record/revision-only commands retain their exact closed contracts and bytes.
   // The registered executor owns the closed scalar vocabulary inside it.
+  const templateOperations = new Set(
+    original.surfaces.flatMap((surface) =>
+      'recordTemplateBinding' in surface && surface.recordTemplateBinding
+        ? [surface.recordTemplateBinding.body.createOperationId]
+        : [],
+    ),
+  );
   const argumentOperations = new Set(
     original.surfaces
       .filter((surface) => surface.lifecycle === 'active')
@@ -924,6 +931,7 @@ function operationCatalogPayload(
               compilerSemanticProfileVersion,
               'booking' in operation ||
                 argumentOperations.has(operation.operationId),
+              templateOperations.has(operation.operationId),
             ),
             infrastructure: {
               archiveRepresentation: 'nullableArchivedAt',
@@ -2413,6 +2421,7 @@ function operationInputContract(
   storageEntity: StorageTargetPayloadV1['entities'][number] | undefined,
   compilerSemanticProfileVersion: CompilerSemanticProfileVersion,
   capabilityArguments: boolean,
+  templateCreate: boolean,
 ): unknown {
   const effectKind = operation.effect.kind;
   const capabilityRecordScope = effectKind === 'registeredCapabilityEffect';
@@ -2468,6 +2477,7 @@ function operationInputContract(
           ...(systemInput ? [systemInput.argumentKey] : []),
           'recordId',
           'relations',
+          ...(templateCreate ? ['templateLines'] : []),
           'values',
         ]
       : effectKind === 'updateRecordEffect'

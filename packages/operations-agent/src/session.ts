@@ -1,3 +1,4 @@
+import { templateCreateSurface } from '../../runtime/src/record-template-library.js';
 import {
   availablePopups,
   CompiledPopupSchema,
@@ -75,7 +76,8 @@ import { asData, type OperationsAgentToolId } from './tools.js';
 export type AgentRuntime = Pick<
   ComposedApplicationRuntime,
   'entry' | 'operationGateway' | 'operationMediation' | 'queryGateway'
->;
+> &
+  Partial<Pick<ComposedApplicationRuntime, 'recordTemplates'>>;
 
 export interface PlanForApproval {
   readonly planId: string;
@@ -181,6 +183,7 @@ export type UndoOutcome =
 type StepRef = string | { readonly fromStep: number };
 
 interface PlanStep {
+  readonly templateRequest?: { key: string; label: string };
   readonly step: number;
   readonly operation: RegisteredOperationDefinition;
   readonly entity: string;
@@ -1621,6 +1624,40 @@ export class OperationsAgentSession {
           ...step,
           ...(await this.#noun(view, catalog, words, step)),
         };
+      for (const [index, step] of steps.entries()) {
+        const surface =
+          effectKind(step.operation) === 'createRecordEffect' &&
+          templateCreateSurface(view, step.operation.operationId);
+        if (!surface) continue;
+        if (!this.#options.runtime.recordTemplates)
+          throw new ToolInputError('Template review is unavailable.');
+        const key = this.#mint();
+        const selected =
+          await this.#options.runtime.recordTemplates.prepareCreate(
+            view,
+            surface.surfaceId,
+            key,
+            {
+              recordId: resolveRef(step.recordId, []),
+              legalEntityId: this.#options.companyId,
+              values: resolveRefs(step.values ?? {}, []),
+              relations: resolveRefs(step.relations ?? {}, []),
+            },
+          );
+        steps[index] = {
+          ...step,
+          templateRequest: {
+            key,
+            label: selected.assignment
+              ? selected.assignment.content.label +
+                ' · ' +
+                selected.assignment.content.members
+                  .map((m) => m.caption)
+                  .join(', ')
+              : 'No assigned template',
+          },
+        };
+      }
       const release = releaseOf(view);
       const digest = planDigest(steps, release, this.#options.companyId);
       const only = steps.length === 1 ? steps[0] : undefined;
@@ -1664,13 +1701,15 @@ export class OperationsAgentSession {
                 referenceTargets.has(fieldId) ? 'reference' : fieldKind,
               ]),
           ),
-          effect: businessEffect(
-            words,
-            step.operation,
-            step.entity,
-            step.noun ?? null,
-            step.values ?? {},
-          ),
+          effect:
+            (step.templateRequest ? step.templateRequest.label + ' · ' : '') +
+            businessEffect(
+              words,
+              step.operation,
+              step.entity,
+              step.noun ?? null,
+              step.values ?? {},
+            ),
           target: refText(step.recordId),
           targetLabel: step.targetLabel ?? null,
           confirmation: step.operation.confirmation,
@@ -2185,7 +2224,8 @@ export class OperationsAgentSession {
               schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
               operationId: step.operation.operationId,
               input: operationInput,
-              idempotencyKey: derivedKey(planId, key, step.step),
+              idempotencyKey:
+                step.templateRequest?.key ?? derivedKey(planId, key, step.step),
               confirmationGrant:
                 step.operation.confirmation === 'humanRequired'
                   ? this.#options.runtime.operationMediation.issueConfirmationGrant(
