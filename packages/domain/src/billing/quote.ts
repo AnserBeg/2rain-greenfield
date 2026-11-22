@@ -94,7 +94,7 @@ function deriveCoverage(
       : union(bands.flatMap((b) => b.active));
   return { bands, eligible, active };
 }
-interface Line {
+export interface BillingQuoteLine {
   componentId: string;
   occurrence: string;
   servicePeriodStart: string;
@@ -304,7 +304,7 @@ function calculate(
   );
   if (allocations.size !== e.allocations.length)
     throw new Error('Duplicate prior allocation');
-  const lines: Line[] = [];
+  const lines: BillingQuoteLine[] = [];
   function line(
     c: BillingPlan['components'][number],
     occurrence: string,
