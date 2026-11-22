@@ -40,9 +40,9 @@ From the packet checkout, run `git diff --stat 630e2aa6 11d0e030` for the review
 
 ## Gates
 
-`scripts/check-records.sh` passed for the docs-only amendment. The successful full CI reference below covers the unchanged executable base `630e2aa6`. The live map, writer and browser proofs belong to their executable slices.
+Full CI on `c5fc6af2` failed the mutation-manifest, browser and PostgreSQL gates. The corrected packet needs a full run on its own tip.
 
-CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44880757599
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44962598119
 
 ## Slice 1 build checkpoint · 2026-11-21
 
@@ -50,11 +50,11 @@ The collection Map serves rental deliveries, field-service visits and distributi
 
 | Gate | Evidence at this checkpoint |
 | --- | --- |
-| Paging and order | Seven-row and 100-row page limits and the visible overflow count pass. The PostgreSQL gate covers numeric route order, day, separate companies, area rank, cursor restart, candidate ceiling and a published sales currency filter. |
-| §2a | Chromium with injected rows passed linked pins, a route leg, fragment pan, shell identity, focus, Back, 390 px list-first Tab order and script-off zoom. The database-backed tests cover actual gateway calls, cancelled drag, newest reply, sizes and pin-to-Record navigation. |
+| Paging and order | Seven-row and 100-row page limits and the visible overflow count pass. Native PostgreSQL passed numeric route order, day, company isolation, area rank, cursor restart and the candidate ceiling. A separate run published the Sales Map and returned the EUR order while excluding the CAD order. |
+| §2a | The PostgreSQL-backed Chromium dispatch journey passed linked pins, route order, cancelled and completed drags, newest reply, focus, Back, three sizes, compact list-first Tab order and script-off pin-to-Record navigation. |
 | Company and image | Chromium observed the dedicated display origin as the Google referrer and refused frame access to the ERP page. Nine imagery checks passed, including concurrent reservations. Isolated removals of the company binding, public cache sharing, single-stop coarsening, single-call rule and seven raster/deadline checks each failed their test. The served test checks prefetch, company swap and cache reuse against quota rows. |
 | Dispatcher message | Hardcoding 100 made the seven-row overflow assertion fail. The checked-in renderer uses the visible count. |
-| Compatibility and SPEED-1 | The archived and current compilers reproduced the pre-Map Stop release, root `d9b8ff30` and 23 artifacts. The archived query, stored bytes and warm sparse/full SQL counts and p95 await CI. Other lanes were using Docker. |
+| Compatibility and SPEED-1 | Native PostgreSQL matched the prior release root, definition, manifest and artifacts byte for byte. The archived reader served a pre-Map row and refused the Map release by name. Sparse and 100-stop pages each used 2 transactions, 33 statements, 3 authorization reads and zero repeats. Full-page p95 was 178 ms over five requests. The combined local test reached its 15-minute limit while publishing the sales fixture. The sales case passed independently. |
 | Customize, replay and drafter | Seven focused Map tests passed, including label-only upgrade for active and retired revisions and both schema-generated draft order directions. The exhaustive replay inventory and its conflicting/compatible Map case also passed. |
 | Rule 12 | 2026-11-21 exception for live eval registration of `addMapViewRevision`. AI-BUILD-1 owns the inventory and registry in PR #136 until merge. |
 | A1 and CI | The orchestrator landed the Map grammar and four slots at `1fe5b169`. The slice uses the CI-5 shard split from main at `352e43b7`. |
@@ -64,16 +64,16 @@ The collection Map serves rental deliveries, field-service visits and distributi
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "PLANNER-1",
-  "base": "352e43b7e428ed1115fd9328db3a6427cf36a58f", "head": "c7f63d59739cf6f29ab4395c8dc2641c4e0fb2d5",
-  "changedPaths": [".agents/skills/ux-grammar/SKILL.md", "apps/web/src/app-server.ts", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/google-basemap.ts", "apps/web/src/ledger-styles.ts", "apps/web/src/map-view.ts",
-    "apps/web/src/surface-client.ts", "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts", "apps/web/src/workspace-entry.ts", "apps/web/test/browser/planner-map.spec.ts", "apps/web/test/browser/surface-grammar.spec.ts", "docs/decisions/ADR-0036-minimum-client-capability.md",
-    "docs/decisions/ADR-0080-connector-framework.md", "docs/decisions/ADR-0092-map-resource-assignment-and-planner-workspace.md", "docs/execution/ledger.md", "docs/execution/packets/CONNECT-1.md", "docs/execution/packets/PLANNER-1.md", "docs/greenfield-north-star-erp-platform-plan.md", "package.json",
-    "packages/canonical-model/src/address.ts", "packages/canonical-model/src/constants.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/map-view.ts", "packages/canonical-model/src/map-viewport.ts", "packages/canonical-model/src/schemas.ts", "packages/canonical-model/src/surface-workspace.ts",
-    "packages/compiler/src/address.ts", "packages/compiler/src/projections.ts", "packages/customization/src/ai-draft.ts", "packages/customization/src/apply.ts", "packages/customization/src/board-revision.ts", "packages/customization/src/index.ts", "packages/customization/src/map-revision.ts",
-    "packages/customization/src/patch.ts", "packages/customization/src/targets.ts", "packages/customization/src/upgrade-diagnostics.ts", "packages/customization/src/upgrade-replay.ts", "packages/dev-tooling/src/surface-grammar-conformance/index.ts", "packages/dev-tooling/src/surface-runtime-seam.ts", "packages/postgres-provider/src/address-geocodes.ts",
-    "packages/postgres-provider/src/current-policy.ts", "packages/postgres-provider/src/map-admission.ts", "packages/postgres-provider/src/map-imagery.ts", "packages/postgres-provider/src/map-page.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/release-repository.ts", "packages/postgres-provider/src/request-runtime-view-service.ts",
-    "packages/postgres-provider/src/serving-gateways.ts", "packages/runtime/src/address-gateway.ts", "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-query-gateway.ts", "test/architecture/repository-hygiene.test.ts", "test/architecture/ux-grammar-skill.test.ts", "test/helpers/planner-map-fixture.ts",
-    "test/helpers/reachability-producers.ts", "test/postgres/planner-map.test.ts", "test/unit/customization-map.test.ts", "test/unit/customization-upgrade.test.ts", "test/unit/map-imagery.test.ts"
+  "base": "352e43b7e428ed1115fd9328db3a6427cf36a58f", "head": "e73d8710dc0557ab004b85eb2f0d5699cdada61f",
+  "changedPaths": [".agents/skills/ux-grammar/SKILL.md", "apps/api/src/composition-root.ts", "apps/web/src/app-server.ts", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/google-basemap.ts", "apps/web/src/ledger-styles.ts", "apps/web/src/map-view.ts",
+    "apps/web/src/surface-client.ts", "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts", "apps/web/src/workspace-entry.ts", "apps/web/test/browser/planner-map.spec.ts", "apps/web/test/browser/surface-grammar.spec.ts", "docs/decisions/ADR-0036-minimum-client-capability.md", "docs/decisions/ADR-0080-connector-framework.md",
+    "docs/decisions/ADR-0092-map-resource-assignment-and-planner-workspace.md", "docs/execution/ledger.md", "docs/execution/packets/CONNECT-1.md", "docs/execution/packets/PLANNER-1.md", "docs/greenfield-north-star-erp-platform-plan.md", "package.json", "packages/canonical-model/src/address.ts", "packages/canonical-model/src/constants.ts",
+    "packages/canonical-model/src/index.ts", "packages/canonical-model/src/map-view.ts", "packages/canonical-model/src/map-viewport.ts", "packages/canonical-model/src/schemas.ts", "packages/canonical-model/src/surface-workspace.ts", "packages/compiler/src/address.ts", "packages/compiler/src/projections.ts", "packages/customization/src/ai-draft.ts",
+    "packages/customization/src/apply.ts", "packages/customization/src/board-revision.ts", "packages/customization/src/index.ts", "packages/customization/src/map-revision.ts", "packages/customization/src/patch.ts", "packages/customization/src/targets.ts", "packages/customization/src/upgrade-diagnostics.ts", "packages/customization/src/upgrade-replay.ts",
+    "packages/dev-tooling/src/surface-grammar-conformance/index.ts", "packages/dev-tooling/src/surface-runtime-seam.ts", "packages/postgres-provider/src/address-geocodes.ts", "packages/postgres-provider/src/current-policy.ts", "packages/postgres-provider/src/map-admission.ts", "packages/postgres-provider/src/map-imagery.ts", "packages/postgres-provider/src/map-page.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts",
+    "packages/postgres-provider/src/release-repository.ts", "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/postgres-provider/src/serving-gateways.ts", "packages/runtime/src/address-gateway.ts", "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-query-gateway.ts", "test/architecture/repository-hygiene.test.ts", "test/architecture/ux-grammar-skill.test.ts",
+    "test/evidence/CALENDAR-1-board-v2.expected-red.json", "test/evidence/CONNECT-1.expected-red.json", "test/helpers/planner-map-fixture.ts", "test/helpers/reachability-producers.ts", "test/postgres/planner-map.test.ts", "test/postgres/request-runtime-view.test.ts", "test/unit/customization-map.test.ts", "test/unit/customization-upgrade.test.ts",
+    "test/unit/map-imagery.test.ts"
   ],
   "symbols": [{"path":"apps/web/src/map-view.ts","name":"readMapSlots"},{"path":"packages/customization/src/map-revision.ts","name":"applyMapRevision"},{"path":"packages/postgres-provider/src/map-admission.ts","name":"mapBindingsProblem"},{"path":"packages/postgres-provider/src/module-runtime-interpreter.ts","name":"readMapCandidates"}]
 }
