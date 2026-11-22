@@ -213,10 +213,19 @@ test('a condition binds only values the list reads, of one type, and refuses lin
     }),
     'r',
   );
-  refused(
-    compare(field(stock('on_hand')), field(CONTEXT_OPERAND_IDS.today)),
+  for (const context of [
     CONTEXT_OPERAND_IDS.today,
-  );
+    CONTEXT_OPERAND_IDS.currentUser,
+  ])
+    assert.throws(
+      () =>
+        bindToneCondition(
+          operands,
+          'r',
+          compare(field(stock('on_hand')), field(context)) as never,
+        ),
+      /cannot read a context value/u,
+    );
   refused(compare(field(stock('on_hand')), field(stock('name'))), 'r');
   // An unrendered placement is named; the stored member already accepts it.
   const revision = member(base, lowStock());

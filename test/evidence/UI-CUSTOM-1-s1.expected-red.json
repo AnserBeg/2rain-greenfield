@@ -1,0 +1,132 @@
+{
+  "version": 1,
+  "packet": "UI-CUSTOM-1-s1",
+  "entries": [
+    {
+      "name": "presentation-withheld-operand",
+      "claim": "A value the viewer may not read is unreadable: no tone, and the rule is reported unavailable rather than judged.",
+      "file": "packages/canonical-model/src/surface-presentation.ts",
+      "original": "if (!type || !Object.hasOwn(values, fieldId)) return unreadable;",
+      "replacement": "if (!type) return unreadable;",
+      "test": {
+        "files": ["test/unit/surface-presentation.test.ts"],
+        "namePattern": "between-field condition"
+      },
+      "kills": [
+        {
+          "file": "test/unit/surface-presentation.test.ts",
+          "name": "a between-field condition tones the cell and the row, three-valued, and never guesses a withheld value",
+          "expected": "Expected values to be strictly equal"
+        }
+      ]
+    },
+    {
+      "name": "presentation-context-operand",
+      "claim": "A tone rule refuses context values (this week, me) by name in this release.",
+      "file": "packages/canonical-model/src/surface-presentation.ts",
+      "original": "      CONTEXT_OPERANDS.has(operand.fieldId)",
+      "replacement": "      false",
+      "test": {
+        "files": ["test/unit/surface-presentation.test.ts"],
+        "namePattern": "a condition binds only"
+      },
+      "kills": [
+        {
+          "file": "test/unit/surface-presentation.test.ts",
+          "name": "a condition binds only values the list reads, of one type, and refuses linked records, context values and unrendered placements by name",
+          "expected": "cannot read a context value"
+        }
+      ]
+    },
+    {
+      "name": "presentation-unrendered-placement",
+      "claim": "A placement this release does not render is refused by name, never silently dropped.",
+      "file": "packages/canonical-model/src/surface-presentation.ts",
+      "original": "    if (!RENDERED_TONE_PLACEMENTS.has(rule.target.kind))",
+      "replacement": "    if (false)",
+      "test": {
+        "files": ["test/unit/surface-presentation.test.ts"],
+        "namePattern": "a condition binds only"
+      },
+      "kills": [
+        {
+          "file": "test/unit/surface-presentation.test.ts",
+          "name": "a condition binds only values the list reads, of one type, and refuses linked records, context values and unrendered placements by name",
+          "expected": "metricCard placement"
+        }
+      ]
+    },
+    {
+      "name": "presentation-stale-revision",
+      "claim": "Editing a presentation requires its current revision as predecessor.",
+      "file": "packages/customization/src/apply.ts",
+      "original": "        stalePresentation ||",
+      "replacement": "        false ||",
+      "test": {
+        "files": ["test/unit/surface-presentation.test.ts"],
+        "namePattern": "persists choices by stable ID"
+      },
+      "kills": [
+        {
+          "file": "test/unit/surface-presentation.test.ts",
+          "name": "the member persists choices by stable ID: a field add and a relabel keep it, a stale revision is refused, and a retired one is not validated",
+          "expected": "Expected values to be strictly equal"
+        }
+      ]
+    },
+    {
+      "name": "presentation-admission-digest",
+      "claim": "Admission refuses a compiled presentation that differs from what the approved declaration compiles to.",
+      "file": "packages/postgres-provider/src/presentation-admission.ts",
+      "original": "    if (!content || canonicalize(content.presentation) !== expected)",
+      "replacement": "    if (!content)",
+      "test": {
+        "files": ["test/unit/surface-presentation.test.ts"],
+        "namePattern": "compiles at reader rung 49"
+      },
+      "kills": [
+        {
+          "file": "test/unit/surface-presentation.test.ts",
+          "name": "a declared presentation compiles at reader rung 49 and admission refuses a compiled key that differs from the declaration",
+          "expected": "The input did not match the regular expression"
+        }
+      ]
+    },
+    {
+      "name": "presentation-reader-floor",
+      "claim": "A declared presentation raises the surface reader floor to its rung, so an older reader refuses it by name.",
+      "file": "packages/compiler/src/projections.ts",
+      "original": "      ? PRESENTATION_READER",
+      "replacement": "      ? 0",
+      "test": {
+        "files": ["test/unit/surface-presentation.test.ts"],
+        "namePattern": "compiles at reader rung 49"
+      },
+      "kills": [
+        {
+          "file": "test/unit/surface-presentation.test.ts",
+          "name": "a declared presentation compiles at reader rung 49 and admission refuses a compiled key that differs from the declaration",
+          "expected": "Expected values to be strictly equal"
+        }
+      ]
+    },
+    {
+      "name": "presentation-short-mark-bytes",
+      "claim": "The first-party Short mark, now a derived tone rule, renders byte-identically.",
+      "file": "apps/web/src/list-declaration.ts",
+      "original": "      mark: { glyph: '!', attribute: 'data-short-mark' },",
+      "replacement": "      mark: { glyph: '!', attribute: 'data-short' },",
+      "test": {
+        "files": ["test/integration/surface-data-binding.test.ts"],
+        "namePattern": "SUPPLY-WARNINGS: the Sales orders List counts"
+      },
+      "kills": [
+        {
+          "file": "test/integration/surface-data-binding.test.ts",
+          "name": "SUPPLY-WARNINGS: the Sales orders List counts Blocked by supply and Reserved in the statement, marks what each order is short and links reserved work to its shipments, without the supply current policy withholds",
+          "expected": "short-mark"
+        }
+      ]
+    }
+  ]
+}

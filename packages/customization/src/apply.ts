@@ -308,8 +308,10 @@ export function applyOne(
       const prior = surface.presentation as
         | { revisionId: string; status: string }
         | undefined;
+      const stalePresentation =
+        (prior?.revisionId ?? null) !== patch.predecessor;
       if (
-        (prior?.revisionId ?? null) !== patch.predecessor ||
+        stalePresentation ||
         prior?.status === 'retired' ||
         (!prior && patch.status === 'retired') ||
         previous.some(
