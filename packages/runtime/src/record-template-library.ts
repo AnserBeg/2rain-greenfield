@@ -31,6 +31,27 @@ export interface TemplateApplicationSelection {
     content: RecordTemplateContent;
   } | null;
 }
+/**
+ * Whether this release declares a template binding of any status for the
+ * create operation. Creates the release never bound skip the template
+ * receipt lookup; retired bindings keep it, so a retry of an applied create
+ * re-checks current authority.
+ */
+export function declaresTemplateCreate(
+  view: RequestRuntimeView,
+  operationId: string,
+): boolean {
+  const manifest = view.projections.surface.payload as unknown as {
+    surfaces?: {
+      recordTemplateBinding?: { body?: { createOperationId?: string } };
+    }[];
+  };
+  return (
+    manifest.surfaces?.some(
+      (s) => s.recordTemplateBinding?.body?.createOperationId === operationId,
+    ) ?? false
+  );
+}
 export function templateCreateSurface(
   view: RequestRuntimeView,
   operationId: string,

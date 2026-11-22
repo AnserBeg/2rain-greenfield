@@ -791,7 +791,7 @@ export async function exerciseTemplateLibrary(
       );
       // Same principal and the known parent ID: only the stored company
       // differs, so the company check alone refuses the second company's
-      // application, preview and create.
+      // application. Its preview is refused too (company or apply check).
       assert.equal(
         (
           await run(

@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import type { TemplateApplicationSelection } from '../../runtime/src/record-template-library.js';
-import { templateCreateSurface } from '../../runtime/src/record-template-library.js';
+import {
+  declaresTemplateCreate,
+  templateCreateSurface,
+} from '../../runtime/src/record-template-library.js';
 import {
   addressColumns,
   addressScalars,
@@ -874,7 +877,17 @@ export class PostgresModuleRuntimeInterpreter
             }
           : undefined,
         async (client) => {
-          if (creating && (surface || !verifier)) {
+          if (
+            creating &&
+            (surface ||
+              requireRecord(request.input, 'operation input').templateLines !==
+                undefined ||
+              (!verifier &&
+                declaresTemplateCreate(
+                  request.view,
+                  request.definition.operationId,
+                )))
+          ) {
             selection = (
               await client.query<{
                 selection:
