@@ -14,3 +14,9 @@ export * from './ai-draft.js';
 export * from './ai-draft-kinds.js';
 export * from './authoring-rules.js';
 export * from './field-member-draft.js';
+
+export {
+  draftReport,
+  ReportDraftSchema,
+  type ReportTarget,
+} from './report-revision.js';

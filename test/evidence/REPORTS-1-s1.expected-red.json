@@ -1,0 +1,330 @@
+{
+  "version": 1,
+  "packet": "REPORTS-1-s1",
+  "entries": [
+    {
+      "name": "reports-company-index-recording",
+      "claim": "A new company-owned record type records the versioned index choice before the patch is persisted.",
+      "file": "packages/customization/src/patch.ts",
+      "original": "{ ...member, companyAccessIndex: COMPANY_ACCESS_INDEX }",
+      "replacement": "member",
+      "test": {
+        "files": ["test/compiler/report-company-access.test.ts"],
+        "namePattern": "recording a company-owned"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/report-company-access.test.ts",
+          "name": "recording a company-owned type binds its access path once, including in a change set",
+          "expected": "Expected values to be strictly deep-equal"
+        }
+      ]
+    },
+    {
+      "name": "reports-company-index-shared",
+      "claim": "Tenant-shared types reject the company index declaration.",
+      "file": "packages/customization/src/patch.ts",
+      "original": "if (patch.companyAccessIndex && patch.companyOwnership !== 'entityOwned')",
+      "replacement": "if (false)",
+      "test": {
+        "files": ["test/compiler/report-company-access.test.ts"],
+        "namePattern": "recording a company-owned"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/report-company-access.test.ts",
+          "name": "recording a company-owned type binds its access path once, including in a change set",
+          "expected": "Missing expected exception"
+        }
+      ]
+    },
+    {
+      "name": "reports-company-index-floor",
+      "claim": "A release that introduces the optional entity key requires the new surface reader.",
+      "file": "packages/compiler/src/projections.ts",
+      "original": "'companyAccessIndex' in entity && entity.companyAccessIndex,",
+      "replacement": "false,",
+      "test": {
+        "files": ["test/compiler/report-company-access.test.ts"],
+        "namePattern": "the new Inspection"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/report-company-access.test.ts",
+          "name": "the new Inspection declares one named, same-plan secondary index and its own reader floor",
+          "expected": "35 !== 40"
+        }
+      ]
+    },
+    {
+      "name": "reports-company-index-old",
+      "claim": "Replaying a pre-key company-owned type preserves the historical release and plans no index build.",
+      "file": "packages/compiler/src/storage.ts",
+      "original": "if ('companyAccessIndex' in entity && entity.companyAccessIndex)",
+      "replacement": "if (entityOwned && entity.entityId.includes(':entity.custom_'))",
+      "test": {
+        "files": ["test/compiler/report-company-access.test.ts"],
+        "namePattern": "an archived pre-key"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/report-company-access.test.ts",
+          "name": "an archived pre-key company-owned Inspection reproduces every release byte, root and floor and adds zero indexes on replay",
+          "expected": "Expected values to be strictly equal"
+        }
+      ]
+    },
+    {
+      "name": "reports-company-index-admission",
+      "claim": "An internally consistent release that understates the company access index reader is refused before its staging transaction.",
+      "file": "packages/postgres-provider/src/release-repository.ts",
+      "original": "(indexedType && surfaceFloor < COMPANY_ACCESS_INDEX_READER) ||",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/releases.test.ts"],
+        "namePattern": "release admission refuses a company access index"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/releases.test.ts",
+          "name": "release admission refuses a company access index whose release understates its reader floor",
+          "expected": "Understated candidate reached the staging transaction"
+        }
+      ]
+    },
+    {
+      "name": "reports-b1-partition",
+      "claim": "Each stored currency has a distinct amount total.",
+      "file": "packages/canonical-model/src/grouped-aggregate.ts",
+      "original": "const partition = partitionFor(binding, fact);",
+      "replacement": "const partition = {kind:'unitless'} as const;",
+      "test": {
+        "files": ["test/compiler/report-company-access.test.ts"],
+        "namePattern": "Invoice source"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/report-company-access.test.ts",
+          "name": "Invoice source declares its two civil dates and partitions fractional balances by the stored sales currency",
+          "expected": "Expected values to be strictly deep-equal"
+        }
+      ]
+    },
+    {
+      "name": "reports-b1-eur",
+      "claim": "EUR is a valid Invoice partition.",
+      "file": "packages/canonical-model/src/grouped-aggregate.ts",
+      "original": "candidate === fact[binding.fieldId]",
+      "replacement": "candidate !== 'EUR' && candidate === fact[binding.fieldId]",
+      "test": {
+        "files": ["test/compiler/report-company-access.test.ts"],
+        "namePattern": "Invoice source"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/report-company-access.test.ts",
+          "name": "Invoice source declares its two civil dates and partitions fractional balances by the stored sales currency",
+          "expected": "Expected values to be strictly deep-equal"
+        }
+      ]
+    },
+    {
+      "name": "reports-b1-coverage",
+      "claim": "A monetary cell counts the admitted facts without an amount.",
+      "file": "packages/canonical-model/src/grouped-aggregate.ts",
+      "original": "if (value == null) row.cells[i]!.missing++;",
+      "replacement": "if (value == null) continue;",
+      "test": {
+        "files": ["test/compiler/report-company-access.test.ts"],
+        "namePattern": "Invoice source"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/report-company-access.test.ts",
+          "name": "Invoice source declares its two civil dates and partitions fractional balances by the stored sales currency",
+          "expected": "Expected values to be strictly deep-equal"
+        }
+      ]
+    },
+    {
+      "name": "reports-b1-fixed",
+      "claim": "A fixed currency has its canonical scale.",
+      "file": "packages/canonical-model/src/normalize.ts",
+      "original": "if (amount.scale !== CURRENCY_MINOR_UNITS_V0[currency.currencyCode])",
+      "replacement": "if (false)",
+      "test": {
+        "files": ["test/compiler/report-company-access.test.ts"],
+        "namePattern": "amount operands"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/report-company-access.test.ts",
+          "name": "amount operands must resolve locally and fixed currencies require the stored scale to equal the minor unit",
+          "expected": "Missing expected exception"
+        }
+      ]
+    },
+    {
+      "name": "reports-b1-currency",
+      "claim": "A stored currency resolves to a local three-character operand.",
+      "file": "packages/canonical-model/src/normalize.ts",
+      "original": "if (code?.kind !== 'textFieldType' || code.maximumLength !== 3)",
+      "replacement": "if (false)",
+      "test": {
+        "files": ["test/compiler/report-company-access.test.ts"],
+        "namePattern": "amount operands"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/report-company-access.test.ts",
+          "name": "amount operands must resolve locally and fixed currencies require the stored scale to equal the minor unit",
+          "expected": "Missing expected exception"
+        }
+      ]
+    },
+    {
+      "name": "reports-scoped-limit",
+      "claim": "The SQL candidate probe stops at the reader cap plus one.",
+      "file": "packages/postgres-provider/src/grouped-report.ts",
+      "original": " LIMIT ${param(limits.facts + 1)}",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/report-reader-bounds.test.ts"],
+        "namePattern": "the PostgreSQL Invoice candidate probe"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/report-reader-bounds.test.ts",
+          "name": "the PostgreSQL Invoice candidate probe uses the named date index and stops at cap plus one before any residual, even with hidden facts",
+          "expected": "provider scanned past the fourth scoped candidate"
+        }
+      ]
+    },
+    {
+      "name": "reports-row-policy",
+      "claim": "Row-level narrowing removes hidden facts before aggregating coverage and totals.",
+      "file": "packages/postgres-provider/src/grouped-report.ts",
+      "original": "addRowPolicy(args, predicates);",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/report-reader-bounds.test.ts"],
+        "namePattern": "the PostgreSQL Invoice candidate probe"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/report-reader-bounds.test.ts",
+          "name": "the PostgreSQL Invoice candidate probe uses the named date index and stops at cap plus one before any residual, even with hidden facts",
+          "expected": "Expected values to be strictly equal"
+        }
+      ]
+    },
+    {
+      "name": "reports-group-cap",
+      "claim": "The provider refuses groups over the declared reader budget.",
+      "file": "packages/postgres-provider/src/grouped-report.ts",
+      "original": "if (groups.length > limits.groups) return { kind: 'narrow' };",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/report-reader-bounds.test.ts"],
+        "namePattern": "the PostgreSQL Invoice candidate probe"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/report-reader-bounds.test.ts",
+          "name": "the PostgreSQL Invoice candidate probe uses the named date index and stops at cap plus one before any residual, even with hidden facts",
+          "expected": "Expected values to be strictly deep-equal"
+        }
+      ]
+    },
+    {
+      "name": "reports-candidate-count",
+      "claim": "The provider refuses scoped candidates over budget before applying residuals.",
+      "file": "packages/postgres-provider/src/grouped-report.ts",
+      "original": "if (probe.rows[0]!.n > limits.facts) return { kind: 'narrow' };",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/report-reader-bounds.test.ts"],
+        "namePattern": "the PostgreSQL Invoice candidate probe"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/report-reader-bounds.test.ts",
+          "name": "the PostgreSQL Invoice candidate probe uses the named date index and stops at cap plus one before any residual, even with hidden facts",
+          "expected": "Expected values to be strictly deep-equal"
+        }
+      ]
+    },
+    {
+      "name": "reports-invalid-index",
+      "claim": "The reader refuses an access path that is absent from the PostgreSQL catalog.",
+      "file": "packages/postgres-provider/src/grouped-report.ts",
+      "original": "!(await reportIndexReady(client, table, index, keys))",
+      "replacement": "false",
+      "test": {
+        "files": ["test/postgres/report-reader-bounds.test.ts"],
+        "namePattern": "the PostgreSQL Invoice candidate probe"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/report-reader-bounds.test.ts",
+          "name": "the PostgreSQL Invoice candidate probe uses the named date index and stops at cap plus one before any residual, even with hidden facts",
+          "expected": "Expected values to be strictly deep-equal"
+        }
+      ]
+    },
+    {
+      "name": "reports-sql-company",
+      "claim": "Removing only the provider company predicate adds South’s CAD 90 to North’s CAD 12 in the rows, total and CSV.",
+      "file": "packages/postgres-provider/src/grouped-report.ts",
+      "original": "if (entity.legalEntity)\n    conditions.push(`legal_entity_id=${param(scope.legalEntityIds[0])}::uuid`);",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/report-company-reader.test.ts"],
+        "namePattern": "Invoice report reads"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/report-company-reader.test.ts",
+          "name": "Invoice report reads exact company partitions and coverage, filters civil dates, pages complete totals and issues audited bytes",
+          "expected": "Expected values to be strictly deep-equal"
+        }
+      ]
+    },
+    {
+      "name": "reports-sql-currency",
+      "claim": "Removing only the stored currency partition merges CAD, USD, EUR and No currency into CAD 18.995.",
+      "file": "packages/postgres-provider/src/grouped-report.ts",
+      "original": "? `CASE WHEN ${column(currency.fieldId)}=ANY(${param(currency.codes)}::text[]) THEN ${column(currency.fieldId)} END`",
+      "replacement": "? param(currency.codes[0]) + '::text'",
+      "test": {
+        "files": ["test/postgres/report-company-reader.test.ts"],
+        "namePattern": "Invoice report reads"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/report-company-reader.test.ts",
+          "name": "Invoice report reads exact company partitions and coverage, filters civil dates, pages complete totals and issues audited bytes",
+          "expected": "Expected values to be strictly deep-equal"
+        }
+      ]
+    },
+    {
+      "name": "reports-hidden-operand",
+      "claim": "Removing the field permission decision exposes the report after the currency grant is revoked.",
+      "file": "packages/runtime/src/semantic-query-gateway.ts",
+      "original": "...report.columns.map((c) => reportColumnPermission(c.fieldId)),",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/report-company-reader.test.ts"],
+        "namePattern": "Invoice report reads"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/report-company-reader.test.ts",
+          "name": "Invoice report reads exact company partitions and coverage, filters civil dates, pages complete totals and issues audited bytes",
+          "expected": "Expected values to be strictly deep-equal"
+        }
+      ]
+    }
+  ]
+}

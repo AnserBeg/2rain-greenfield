@@ -1,3 +1,4 @@
+import { reportTargets, type ReportTarget } from './report-revision.js';
 import type {
   DocumentTemplatePointer,
   DocumentTemplateRevision,
@@ -51,6 +52,7 @@ export interface DocumentTemplateTarget {
 }
 
 export interface CustomizationTargets {
+  readonly reports?: readonly ReportTarget[];
   readonly documentTemplateTargets?: readonly DocumentTemplateTarget[];
   readonly boards?: readonly BoardTarget[];
   readonly layouts?: readonly LayoutTarget[];
@@ -697,6 +699,7 @@ export function customizationTargets(definition: {
         .sort((left, right) => left.label.localeCompare(right.label)),
     }),
     boards: boardTargets(definition),
+    reports: reportTargets(definition),
     layouts: definition.surfaces.flatMap((s) =>
       (['create', 'edit', 'detail'] as const).flatMap((mode) => {
         const target = currentLayout(definition, s, mode);

@@ -24,6 +24,7 @@ import {
   unsupported,
 } from './patch.js';
 import type { CustomizationPatch, UnsupportedCustomization } from './patch.js';
+import { ReportDraftSchema, draftReport } from './report-revision.js';
 import { customizationTargets, type CustomizationTargets } from './targets.js';
 import {
   fieldComparisonValidationDraft,
@@ -230,6 +231,23 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
     ...(targets.forms ?? []).map(
       (form) =>
         `- ${form.surfaceId} — ${form.label}: ${form.fields.map((field) => `${field.fieldId} "${field.label}"`).join(', ')}`,
+    ),
+    'Report sources (list surface, available fields and live reports):',
+    ...(targets.reports ?? []).map((target) =>
+      JSON.stringify({
+        source: target.source.listSurfaceId,
+        label: target.label,
+        reportFields: target.fields.map((f) => ({
+          fieldId: f.operand.fieldId,
+          label: f.label,
+          type: f.operand.type,
+          sum: !!(f.operand.currency || f.operand.unitId),
+          dateRange: !!f.operand.basis,
+        })),
+        existing: target.reports
+          .filter((r) => r.lifecycle === 'active')
+          .map((r) => ({ id: r.revision.reportId, label: r.label })),
+      }),
     ),
     'Board collections (list surface, stages, moves by operation ID, facts by field ID):',
     ...(targets.boards ?? []).map(
@@ -568,6 +586,22 @@ function convertMember(
     }
     case 'addBoardViewRevision':
       return [boardMember(req, local())];
+    case 'addReportRevision': {
+      const draft = ReportDraftSchema.parse(req.report);
+      const target = local().reports?.find(
+        (t) => t.source.listSurfaceId === draft.listSurfaceId,
+      );
+      if (!target) throw new Error('Choose an available report source.');
+      return [
+        draftReport(
+          target,
+          draft.label,
+          draft.choices,
+          draft.reportId,
+          draft.status,
+        ),
+      ];
+    }
     case 'addAddressField': {
       if (typeof req.entity !== 'string' || typeof req.label !== 'string')
         throw new Error('An address field names a record type and a label.');

@@ -1,3 +1,4 @@
+import type { DraftOutcome } from '../../packages/postgres-provider/src/customization-service.js';
 import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -88,6 +89,46 @@ try {
 }
 `;
 
+// Produce genuine pre-index change sets for witnesses isolating earlier reader floors.
+export async function draftBeforeCompanyAccessIndex(
+  options: {
+    databaseUrl: string;
+    tenantSlug: string;
+    compiledApplication: unknown;
+  },
+  patch: unknown,
+  channel: 'declarativeEditor' | 'visualBuilder',
+  request?: string,
+): Promise<DraftOutcome> {
+  return withArchivedCustomizationRuntime(
+    '6a991b21f6faa7df9833a8e27cee5aac5c0d7bf9',
+    async (run) =>
+      (await run(
+        `
+      import assert from 'node:assert/strict';
+      import { readFile } from 'node:fs/promises';
+      import { openCustomizeService } from './apps/api/src/composition-root.ts';
+      import { DRAFT_CUSTOMIZATION_TOOL } from './packages/customization/src/ai-draft.ts';
+      import { scriptedModel } from './packages/operations-agent/src/model.ts';
+      const { options, patch, channel, request } = JSON.parse(await readFile(process.argv[2], 'utf8'));
+      const opened = await openCustomizeService({
+        ...options,
+        draftingProvider: async () => scriptedModel([(conversation) => {
+          assert.deepEqual(conversation, [{ role: 'user', text: request }]);
+          return { toolCalls: [{ name: DRAFT_CUSTOMIZATION_TOOL, input: patch }] };
+        }]),
+      });
+      try {
+        const draft = request
+          ? await opened.service.draftFromRequest(request)
+          : await opened.service.draft(patch, channel);
+        console.log(JSON.stringify(draft));
+      } finally { await opened.close(); }
+    `,
+        { options, patch, channel, request },
+      )) as DraftOutcome,
+  );
+}
 /**
  * The previous serving binary's request path with one query issued: it loads
  * the request view (where capability refusals happen), then resolves a query

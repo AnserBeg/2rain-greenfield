@@ -40,6 +40,9 @@ export const AUTHORING_RULES: Readonly<
   CUSTOMIZE_BOARD_CONFLICT: [
     "A board groups a list by its record type's lifecycle: choose stages from that lifecycle, moves between the chosen stages and at most three facts.",
   ],
+  CUSTOMIZE_REPORT_CONFLICT: [
+    'Use a listed report source and its available fields. To edit or retire a report, choose its current report ID from that source.',
+  ],
   CUSTOMIZE_LAYOUT_CONFLICT: [
     'A layout edit uses the listed section and field IDs of that layout.',
   ],

@@ -8,6 +8,7 @@ import {
   MAX_CUSTOMIZATION_CHANGE_PATCHES,
   type CustomizationPatchKind,
 } from './patch.js';
+import { ReportDraftSchema } from './report-revision.js';
 import { VALIDATION_COMPARISONS } from './validation-draft.js';
 import { WorkflowDraftSchema } from './workflow-draft.js';
 
@@ -186,6 +187,14 @@ export const DRAFTER_KINDS = {
     input: DRAFTER_SELECTION_SCHEMAS.addCalculatedDisplayField,
     guidance:
       'Show an exact decimal value on a record page from the calculated display targets. Include listSurfaceId only when both fields are on that list. Needs its own draft.',
+  },
+  addReportRevision: {
+    input: z.strictObject({
+      kind: z.literal('addReportRevision'),
+      report: ReportDraftSchema,
+    }),
+    guidance:
+      'Build, edit or retire a grouped report on a listed source. Choose the dimensions and measures by field ID and enable CSV when requested.',
   },
   addBoardViewRevision: {
     input: DRAFTER_SELECTION_SCHEMAS.addBoardViewRevision,

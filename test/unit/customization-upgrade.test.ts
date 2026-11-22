@@ -9,6 +9,7 @@ import { replayCustomizationPatches } from '../../packages/customization/src/upg
 import * as customization from '../../packages/customization/src/index.js';
 import {
   normalizeApplicationPackage,
+  ReportChoicesSchema,
   type SurfaceLayout,
 } from '../../packages/canonical-model/src/index.js';
 import { VALIDATION_NODE_VERSION } from '../../packages/canonical-model/src/formula-validation.js';
@@ -231,6 +232,29 @@ const appointment = {
   required: false,
   zoneSource: { kind: 'perRecordIana', version: 'v1' },
 };
+const equipmentReports = (definition: Base) =>
+  customization
+    .customizationTargets(normalizeApplicationPackage(definition))
+    .reports!.find((target) => target.source.entityId === equipment)!;
+const equipmentReport = customization.draftReport(
+  equipmentReports(extended),
+  'Equipment counts',
+  ReportChoicesSchema.parse({
+    dimensions: [
+      { kind: 'direct', fieldId: id('field.custom_equipment_status') },
+    ],
+    measures: [
+      {
+        kind: 'inline',
+        measureId: id('measure.custom_count'),
+        label: 'Count',
+        operator: { kind: 'count' },
+      },
+    ],
+    filters: [],
+    outputs: [{ kind: 'table' }],
+  }),
+);
 const cancel = id('operation.purchase_order_draft_cancel');
 const newOption = id('option.custom_equipment_status_loaned');
 const terms = id('field.sales_order_payment_terms');
@@ -240,7 +264,19 @@ function appendOption(target: Base, optionId: string, label: string) {
   };
   type.options.push({ ...type.options[0], optionId, label, orderKey: 90 });
 }
+const reportOperand = id('field.custom_equipment_status');
+const missingReportOperand = structuredClone(extended);
+missingReportOperand.fields = (missingReportOperand.fields as Base[]).filter(
+  (field) => field.fieldId !== reportOperand,
+);
 const cases = {
+  addReportRevision: {
+    source: extended,
+    conflict: missingReportOperand,
+    change: equipmentReport,
+    subject: reportOperand,
+    code: 'RETIRED_TARGET',
+  },
   addDateTimeField: {
     source: extended,
     conflict: applied(extended, [appointment]),
@@ -409,6 +445,36 @@ const cases = {
   changeSet: itemRetired(changeSet({ ...field, entity: item }, itemFiles)),
 } satisfies Record<customization.CustomizationPatchKind, ReplayCase>;
 
+test('active and retired reports allow further fields and list layout edits on their source', async () => {
+  const retire = customization.draftReport(
+    equipmentReports(applied(extended, [equipmentReport])),
+    equipmentReport.label,
+    undefined,
+    equipmentReport.reportId,
+    'retired',
+  );
+  for (const reports of [[equipmentReport], [equipmentReport, retire]]) {
+    const result = await customization.compileInSandbox({
+      acknowledgement,
+      base: extended,
+      chain: [
+        ...reports,
+        field,
+        {
+          kind: 'arrangeLayout',
+          surface: id('surface.custom_equipment_list'),
+          relabel: [{ field: reportOperand, label: 'Condition' }],
+        },
+      ].map(patch),
+      tip: customization.serializeRelease(tip),
+    });
+    assert.ok(
+      result.status === 'compiled',
+      JSON.stringify(result.status === 'compiled' ? null : result),
+    );
+  }
+});
+
 test('an active or retired template never blocks editing its record type', async () => {
   const retire = {
     kind: 'retireDocumentTemplate',
@@ -519,6 +585,9 @@ for (const [kind, example] of Object.entries<ReplayCase>(cases)) {
     const compatible = structuredClone(source);
     declaration(compatible, 'fields', 'fieldId', itemSku).label =
       'Stock identifier';
+    if (kind === 'addReportRevision')
+      declaration(compatible, 'fields', 'fieldId', reportOperand).label =
+        'Equipment condition';
     const result = await customization.compileInSandbox({
       acknowledgement,
       base: compatible,

@@ -19,11 +19,7 @@ import { serializeRelease } from '../../packages/customization/src/index.js';
 import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../packages/runtime/src/semantic-query-gateway.js';
 import { compilerInput, normalizedBytes } from '../compiler/helpers.js';
-import {
-  authoredPath,
-  compiledApplication,
-  firstPartyAuthored,
-} from '../helpers/customization-fixture.js';
+import { authoredPath } from '../helpers/customization-fixture.js';
 import { startComposedApplication } from '../../apps/api/src/composition-root.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 import { withArchivedCustomizationRuntime } from '../helpers/archived-runtime-process.js';
@@ -40,21 +36,12 @@ const ref = (kind: string, targetId: string) => ({
   targetId,
   schemaVersion: 'v6',
 });
-// DOCS-1's optional read-model dependencies sit at query-catalog rung 6,
-// above booking's rungs, so this suite starts from the base without them and
-// measures booking's own reader floors.
-const bookingBase = structuredClone(firstPartyAuthored) as {
-  queries: { readModel?: { queries: Record<string, { required?: false }> } }[];
-};
-for (const { readModel } of bookingBase.queries)
-  for (const dependency of Object.values(readModel?.queries ?? {}))
-    delete dependency.required;
 function bookingRelease(
   mode: 'operation' | 'query',
   ordinaryCorrection = false,
 ) {
   const source = parseAuthoredApplicationPackageJson(
-    JSON.stringify(bookingBase),
+    JSON.stringify(applicationBeforeStockCountWorkflow().authored),
   );
   const detail = source.queries.find((q) => q.queryId === detailQuery)!;
   assert.ok(detail.queryType === 'get');
@@ -153,7 +140,9 @@ function bookingRelease(
       },
     ],
   });
-  const prior = parseCompiledApplication(compiledApplication);
+  const prior = parseCompiledApplication(
+    applicationBeforeStockCountWorkflow().release,
+  );
   const input = compilerInput(
     bytes,
     expectedActiveReleaseFrom(prior.application.compiled),

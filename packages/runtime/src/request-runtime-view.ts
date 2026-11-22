@@ -1,5 +1,4 @@
 import {
-  DATE_TIME_FIELD_READER,
   BOOKING_FULFILMENT_READER,
   CONNECTOR_FAMILY,
   OPTIONAL_DEPENDENCY_QUERY_READER,
@@ -11,6 +10,7 @@ import {
   type UntrustedRequestInput,
 } from './request-context.js';
 import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents.js';
+import { DECLARED_REPORT_READER } from '../../canonical-model/src/declared-report.js';
 import {
   WORKFLOW_PROJECTION_FAMILY,
   WORKFLOW_RUNTIME_CAPABILITY,
@@ -237,7 +237,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // stable ID with pinned contracts, labels from the release.
     // 38 adds document templates and governed PDF generation.
     // 39 reads tenant dateTime fields (ADR-0087).
-    maximumSupportedVersion: DATE_TIME_FIELD_READER,
+    // 40 adds company access indexes, 41 report sources and 42 grouped reports.
+    maximumSupportedVersion: DECLARED_REPORT_READER,
   },
 });
 
