@@ -51,18 +51,19 @@ export interface ListAssignment {
   effectiveEnd?: string | undefined;
   revision: string;
 }
-// Effective time orders a selector's versions. Publication time fences what
-// was knowable at opening and orders corrections with the same effective time.
+// Effective time orders a selector's versions. Publication time orders
+// corrections with the same effective time within the visible snapshot.
 function headsAt<T extends { effectiveFrom: string; publishedAt: string }>(
   rows: readonly T[],
   keyFor: (row: T) => string,
   opening: number,
+  publishedThrough: number,
 ) {
   const heads = new Map<string, T[]>();
   for (const row of rows) {
     const effective = instant(row.effectiveFrom),
       published = instant(row.publishedAt);
-    if (effective > opening || published > opening) continue;
+    if (effective > opening || published > publishedThrough) continue;
     const key = keyFor(row),
       head = heads.get(key);
     const order = head
@@ -79,6 +80,7 @@ export function selectTable(
   customer: string,
   assignments: readonly ListAssignment[],
   opening: number,
+  publishedThrough: number,
 ) {
   let best: {
     rank: number;
@@ -88,8 +90,18 @@ export function selectTable(
   }[] = [];
   // A successor ends only the series with the identical selector. An ended
   // successor never revives an older override.
-  const assignmentHeads = headsAt(assignments, (a) => a.listId, opening);
-  const series = headsAt(tables, (t) => digest(t.selector), opening);
+  const assignmentHeads = headsAt(
+    assignments,
+    (a) => a.listId,
+    opening,
+    publishedThrough,
+  );
+  const series = headsAt(
+    tables,
+    (t) => digest(t.selector),
+    opening,
+    publishedThrough,
+  );
   for (const t of [...series.values()].flat()) {
     if (t.effectiveEnd && instant(t.effectiveEnd) <= opening) continue;
     const s = t.selector;

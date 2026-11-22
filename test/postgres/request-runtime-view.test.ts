@@ -10,7 +10,10 @@ import test from 'node:test';
 import { promisify } from 'node:util';
 
 import pg from 'pg';
-import { BILLING_INTERVAL_READER } from '../../packages/canonical-model/src/billing.js';
+import {
+  BILLING_ALLOCATION_READER,
+  BILLING_INTERVAL_READER,
+} from '../../packages/canonical-model/src/billing.js';
 import { DATE_TIME_FIELD_READER } from '../../packages/canonical-model/src/date-time-field.js';
 import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../packages/canonical-model/src/surface-workspace.js';
 import { BOARD_READER } from '../../packages/canonical-model/src/board.js';
@@ -349,6 +352,7 @@ test('the capability comparison binds the family to its capability, then compare
     DOCUMENT_TEMPLATES_SURFACE_FLOOR,
     DATE_TIME_FIELD_READER,
     POPUP_READER,
+    BILLING_ALLOCATION_READER,
   ];
   for (const reader of surfaceFloors) {
     for (const floor of surfaceFloors) {
@@ -402,7 +406,7 @@ test('the capability comparison binds the family to its capability, then compare
   // capability on one side alone reds here rather than in production.
   assert.deepEqual(SUPPORTED_RUNTIME_CAPABILITIES[surface], {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
-    maximumSupportedVersion: POPUP_READER,
+    maximumSupportedVersion: BILLING_ALLOCATION_READER,
   });
 });
 
@@ -1036,7 +1040,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
               ],
               {
                 capabilityId: 'northstar.runtime:capability.surface-manifest',
-                maximumSupportedVersion: POPUP_READER,
+                maximumSupportedVersion: BILLING_ALLOCATION_READER,
               },
             );
           },
@@ -1061,7 +1065,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
               new RegExp(
-                `requires version 999 and this runtime supports ${POPUP_READER}`,
+                `requires version 999 and this runtime supports ${BILLING_ALLOCATION_READER}`,
               ),
             );
           },
@@ -1092,7 +1096,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
               new RegExp(
-                `requires version 999 and this runtime supports ${POPUP_READER}`,
+                `requires version 999 and this runtime supports ${BILLING_ALLOCATION_READER}`,
               ),
             );
           },

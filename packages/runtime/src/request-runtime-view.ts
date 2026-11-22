@@ -1,9 +1,9 @@
-import { POPUP_READER } from '../../canonical-model/src/popup-actions.js';
 import {
   BOOKING_FULFILMENT_READER,
   CONNECTOR_FAMILY,
   OPTIONAL_DEPENDENCY_QUERY_READER,
 } from '@north-star/canonical-model';
+import { BILLING_ALLOCATION_READER } from '../../canonical-model/src/billing.js';
 import {
   assertTrustedRequestContext,
   type AuthenticatedRequestEntryAdapter,
@@ -238,7 +238,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 38 adds document templates and governed PDF generation.
     // 39 reads tenant dateTime fields (ADR-0087).
     // 40 adds custom buttons that open a record Task.
-    maximumSupportedVersion: POPUP_READER,
+    // 41 pins the terms and assignment at first billing allocation.
+    maximumSupportedVersion: BILLING_ALLOCATION_READER,
   },
 });
 

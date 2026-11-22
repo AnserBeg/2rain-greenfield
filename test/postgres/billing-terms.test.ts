@@ -1,27 +1,36 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { resolve } from 'node:path';
 import test from 'node:test';
+import type { QueryResult } from 'pg';
 import {
   loadMigrations,
   runMigrations,
 } from '../../packages/postgres-provider/src/migrations.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
-import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
+import {
+  readUnboundPermissionAcknowledgementFor,
+  type UnboundPermissionAcknowledgementInput,
+} from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import { parseAuthoredApplicationPackageJson } from '../../packages/canonical-model/src/index.js';
 import {
   BillingPlanSchema,
+  BILLING_ALLOCATION_READER,
   BILLING_TERMS_CAPABILITY,
   BILLING_QUOTE_CAPABILITY,
 } from '../../packages/canonical-model/src/billing.js';
-import { canonicalize } from '../../packages/canonical-model/src/canonicalize.js';
+import {
+  canonicalize,
+  canonicalizeAndHash,
+} from '../../packages/canonical-model/src/canonicalize.js';
 import {
   quoteBillingService,
   replayBillingQuote,
 } from '../../packages/domain/src/billing/quote.js';
 import {
-  archivedRuntimeRead,
+  type ArchivedRunner,
   withArchivedCustomizationRuntime,
-} from '../helpers/archived-customization-runtime.js';
+} from '../helpers/archived-runtime-process.js';
 import { compileRatePlan } from '../../packages/domain/src/billing/terms.js';
 import {
   compileApplicationRelease,
@@ -37,8 +46,12 @@ import {
   firstPartyAuthored,
   compiledApplication,
 } from '../helpers/customization-fixture.js';
-import { applicationBeforeStockCountWorkflow } from '../helpers/application-before-stock-count-workflow.js';
 import { withOrderEntryFixture } from '../helpers/order-entry-fixture.js';
+import {
+  archivedBillingBase,
+  archivedBillingMigration,
+  archivedBillingQuery,
+} from '../helpers/archived-billing-probes.js';
 
 const id = (name: string) => 'northstar.app:' + name;
 const ref = (kind: string, targetId: string) => ({
@@ -48,7 +61,11 @@ const ref = (kind: string, targetId: string) => ({
 });
 const quoteId = id('query.billable_quote'),
   sourceId = id('query.sales_order_get'),
-  field = id('field.sales_order_notes');
+  notesField = id('field.sales_order_notes'),
+  proposalField = id('field.sales_order_billing_proposal');
+const precedingDeclarationReader = 'f25df5af44df132045c67ba29eb9aebe1084dcc7';
+const precedingPublicationWriter = 'f1829ea9ce70a886a050e043dce23cb12267335d';
+const precedingAllocationReader = '7046abc74feacc8943874f1ced6d4674ddcb7548';
 const readPermission = id('permission.billing_quote'),
   publishPermission = id('permission.billing_publish_terms');
 const plan = BillingPlanSchema.parse({
@@ -85,18 +102,35 @@ const plan = BillingPlanSchema.parse({
       zone: 'UTC',
     },
     termsQueryId: sourceId,
-    termsFieldId: field,
+    termsFieldId: proposalField,
     publishOperationId: id('operation.billing_publish'),
     overrideOperationId: id('operation.billing_override'),
     assignmentOperationId: id('operation.billing_assign'),
   },
 });
-function release(mode: 'bound' | 'legacy' | 'declaration' = 'bound') {
-  const compatibility =
-    mode === 'declaration' ? applicationBeforeStockCountWorkflow() : undefined;
-  const p = parseAuthoredApplicationPackageJson(
-    JSON.stringify(compatibility?.authored ?? firstPartyAuthored),
-  );
+type BillingFixtureBase = {
+  authored: unknown;
+  release: unknown;
+  ack: UnboundPermissionAcknowledgementInput;
+};
+const currentBase: BillingFixtureBase = {
+  authored: firstPartyAuthored,
+  release: compiledApplication,
+  ack: readUnboundPermissionAcknowledgementFor(
+    authoredPath,
+    id('package.application'),
+  ),
+};
+
+async function archivedBase(run: ArchivedRunner): Promise<BillingFixtureBase> {
+  return (await run(archivedBillingBase, null)) as BillingFixtureBase;
+}
+
+function billingFixture(
+  mode: 'bound' | 'legacy' | 'declaration',
+  base: BillingFixtureBase = currentBase,
+) {
+  const p = parseAuthoredApplicationPackageJson(JSON.stringify(base.authored));
   const source = p.queries.find((q) => q.queryId === sourceId)!;
   if (source.queryType !== 'get')
     throw new Error('Expected an exact fixture query');
@@ -132,10 +166,36 @@ function release(mode: 'bound' | 'legacy' | 'declaration' = 'bound') {
     { ...writePermission, permissionId: publishPermission },
   ];
   const b = plan.bindings!;
+  const notes = p.fields.find((f) => f.fieldId === notesField)!;
+  const termsSource = {
+    ...source,
+    selections: [
+      ...source.selections,
+      {
+        ...source.selections[0]!,
+        field: ref('fieldReference', proposalField),
+        selectionId: id('selection.sales_order_get_billing_proposal'),
+        orderKey: 10000,
+      },
+    ],
+  };
   const boundInput = {
     ...p,
     billingPlans: [plan],
-    queries: [...p.queries, quote],
+    fields: [
+      ...p.fields,
+      {
+        ...notes,
+        fieldId: proposalField,
+        label: 'Billing proposal',
+        orderKey: 10000,
+      },
+    ],
+    queries: [
+      ...p.queries.filter((q) => q.queryId !== sourceId),
+      termsSource,
+      quote,
+    ],
     permissions: [...p.permissions, ...permissions],
     operations: [
       ...p.operations,
@@ -177,20 +237,31 @@ function release(mode: 'bound' | 'legacy' | 'declaration' = 'bound') {
                 bindings: {
                   ...b,
                   agreedInterval: undefined,
-                  evidenceFieldId: field,
+                  evidenceFieldId: notesField,
                 },
               },
             ],
           }
         : boundInput;
-  const old = parseCompiledApplication(
-    compatibility?.release ?? compiledApplication,
+  const old = parseCompiledApplication(base.release);
+  const bytes = normalizedBytes(JSON.parse(JSON.stringify(input)));
+  return {
+    bytes,
+    old,
+    permissions,
+    ack: base.ack,
+    languageVersion: p.languageVersion,
+  };
+}
+
+function release(
+  mode: 'bound' | 'legacy' | 'declaration' = 'bound',
+  base?: BillingFixtureBase,
+) {
+  const { bytes, old, permissions, ack, languageVersion } = billingFixture(
+    mode,
+    base,
   );
-  const bytes = normalizedBytes(JSON.parse(JSON.stringify(input))),
-    ack = readUnboundPermissionAcknowledgementFor(
-      authoredPath,
-      p.package.packageId,
-    );
   const args = compilerInput(
     bytes,
     expectedActiveReleaseFrom(old.application.compiled),
@@ -200,7 +271,7 @@ function release(mode: 'bound' | 'legacy' | 'declaration' = 'bound') {
       ...args,
       profile: {
         ...MODULE_COMPILER_PROFILE,
-        languageVersion: p.languageVersion,
+        languageVersion,
         normalizationProfileVersion: args.profile.normalizationProfileVersion,
       },
     },
@@ -261,33 +332,159 @@ test('the serving role has no direct billing table privileges', async () => {
   });
 });
 
+test('billing publication compares receipt xmin after the transaction ID wraps', async () => {
+  await withEphemeralPostgres('billing-publication-xid', async ({ pool }) => {
+    const admin = await pool.connect();
+    try {
+      await runMigrations(admin, await loadMigrations('db/migrations'));
+      const functionDefinition = await admin.query<{ definition: string }>(
+        "SELECT pg_get_functiondef('platform.billing_publish(text,uuid,text,text)'::regprocedure) AS definition",
+      );
+      const cast = /r\.xmin=pg_current_xact_id\(\)((?:::[a-z0-9]+)+)/u.exec(
+        functionDefinition.rows[0]!.definition,
+      );
+      assert.ok(
+        cast,
+        'publication must compare the active transaction ID to receipt xmin',
+      );
+      // Exercise the installed conversion with an xid8 past the first wrap.
+      const converted = await admin.query(
+        'SELECT ($1::xid8)' + cast[1] + '::text AS xid',
+        ['4294967338'],
+      );
+      assert.deepEqual(converted.rows, [{ xid: '42' }]);
+    } finally {
+      admin.release();
+    }
+  });
+});
+
 test('the compiler refuses an editable notes source', () => {
   release('legacy');
 });
 
+async function probeArchivedBilling(
+  run: ArchivedRunner,
+  f: Parameters<Parameters<typeof withOrderEntryFixture>[0]>[0],
+) {
+  const { host, port, database, user } = f.pool.options;
+  const stored = () =>
+    f.pool.query(`SELECT
+        (SELECT jsonb_agg(to_jsonb(p) ORDER BY to_jsonb(p)) FROM platform.active_release_pointers p) AS pointers,
+        (SELECT jsonb_agg(to_jsonb(r) ORDER BY to_jsonb(r)) FROM platform.tenant_releases r) AS releases,
+        (SELECT jsonb_agg(to_jsonb(p) ORDER BY to_jsonb(p)) FROM platform.tenant_release_projection_links p) AS projections,
+        (SELECT jsonb_agg(to_jsonb(c) ORDER BY to_jsonb(c)) FROM platform.tenant_release_chunk_links c) AS chunks,
+        (SELECT jsonb_agg(to_jsonb(r) - 'desired_state' || jsonb_build_object('desired_state', encode(sha256(desired_state), 'hex')) ORDER BY to_jsonb(r)) FROM platform.app_package_revisions r) AS revisions,
+        (SELECT jsonb_agg(to_jsonb(b) - 'canonical_bytes' || jsonb_build_object('canonical_bytes', encode(sha256(canonical_bytes), 'hex')) ORDER BY b.content_hash, b.artifact_kind) FROM platform.release_artifact_blobs b) AS artifacts`);
+  const before = (await stored()).rows;
+  const result = (await run(archivedBillingQuery, {
+    databaseUrl: `postgresql://${user}@${host}:${port}/${database}`,
+    identity: f.app.runtime.identity,
+    item: f.item,
+  })) as {
+    outcome: string;
+    code?: string;
+    message?: string;
+    recordIds?: string[];
+  };
+  assert.deepEqual(
+    (await stored()).rows,
+    before,
+    'the archived probe changed stored release bytes',
+  );
+  return result;
+}
+
 test('the archived serving reader refuses the declaring capacity release', async () => {
-  await withOrderEntryFixture(
-    async (f) => {
-      const { host, port, database, user } = f.pool.options;
-      await withArchivedCustomizationRuntime(
-        'f25df5af44df132045c67ba29eb9aebe1084dcc7',
-        async (run) => {
-          const result = await archivedRuntimeRead(run, {
-            databaseUrl: `postgresql://${user}@${host}:${port}/${database}`,
-            identity: f.app.runtime.identity,
+  await withArchivedCustomizationRuntime(
+    precedingDeclarationReader,
+    async (run) => {
+      const base = await archivedBase(run);
+      await withOrderEntryFixture(
+        async (f) => {
+          assert.deepEqual(await probeArchivedBilling(run, f), {
+            outcome: 'exact',
+            recordIds: [f.item],
           });
-          assert.equal(result.code, 'UNSUPPORTED_RUNTIME_CAPABILITY');
-          assert.match(
-            result.message ?? '',
-            /surface-manifest requires version 30/,
-          );
         },
+        'demo',
+        0,
+        0,
+        base.release,
+      );
+      await withOrderEntryFixture(
+        async (f) => {
+          assert.deepEqual(await probeArchivedBilling(run, f), {
+            outcome: 'refused',
+            code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
+            message:
+              'runtime capability northstar.runtime:capability.surface-manifest requires version 30 and this runtime supports 29',
+          });
+        },
+        'demo',
+        0,
+        0,
+        release('declaration', base),
       );
     },
-    'demo',
-    0,
-    0,
-    release('declaration'),
+  );
+});
+
+test('the preceding serving reader answers a stored query and refuses first-allocation billing by name', async () => {
+  await withArchivedCustomizationRuntime(
+    precedingAllocationReader,
+    async (run) => {
+      const base = await archivedBase(run);
+      await withOrderEntryFixture(
+        async (f) => {
+          assert.deepEqual(await probeArchivedBilling(run, f), {
+            outcome: 'exact',
+            recordIds: [f.item],
+          });
+        },
+        'demo',
+        0,
+        0,
+        base.release,
+      );
+      await withOrderEntryFixture(
+        async (f) => {
+          assert.deepEqual(await probeArchivedBilling(run, f), {
+            outcome: 'refused',
+            code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
+            message: `runtime capability northstar.runtime:capability.surface-manifest requires version ${BILLING_ALLOCATION_READER} and this runtime supports 40`,
+          });
+        },
+        'demo',
+        0,
+        0,
+        release('bound', base),
+      );
+    },
+  );
+});
+
+test('the billing migrations preserve rates and assignments published by the preceding runtime', async () => {
+  await withArchivedCustomizationRuntime(
+    precedingPublicationWriter,
+    async (run) => {
+      const { bytes, permissions } = billingFixture(
+        'legacy',
+        await archivedBase(run),
+      );
+      assert.deepEqual(
+        await run(archivedBillingMigration, {
+          definition: Buffer.from(bytes).toString('utf8'),
+          permissions: permissions.map((p) => ({
+            permissionId: p.permissionId,
+            resource: p.resource.targetId,
+            action: p.action,
+          })),
+          migrationDirectory: resolve('db/migrations'),
+        }),
+        { outcome: 'upgraded' },
+      );
+    },
   );
 });
 
@@ -309,6 +506,7 @@ test('governed terms and scoped source facts produce a quote through the install
         recordId: string = randomUUID(),
         currency = 'CAD',
         company: string = f.scope,
+        proposal?: unknown,
       ) => {
         const values = {
           customer_party_id: f.customer,
@@ -316,6 +514,9 @@ test('governed terms and scoped source facts produce a quote through the install
           requested_date: end,
           currency,
           notes: JSON.stringify(notes),
+          ...(proposal === undefined
+            ? {}
+            : { billing_proposal: JSON.stringify(proposal) }),
           ship_to_name: 'Service desk',
           ship_to_street: '100 Industrial Way',
           ship_to_city: 'Calgary',
@@ -346,7 +547,15 @@ test('governed terms and scoped source facts produce a quote through the install
         effectiveFrom: anchor,
         values: { daily: '30', weekly: '100' },
       };
-      const proposal = await create(version);
+      const propose = (body: unknown, company: string = f.scope) =>
+        create(
+          { ...version, values: { daily: '1', weekly: '5' } },
+          randomUUID(),
+          'CAD',
+          company,
+          body,
+        );
+      const proposal = await propose(version);
       const revision = {
           recordId: proposal.recordId,
           expectedRevision: proposal.revision,
@@ -363,6 +572,15 @@ test('governed terms and scoped source facts produce a quote through the install
         0,
       );
       await f.measure('allow', undefined, undefined, 'billing_publish_terms');
+      const notesOnly = await create(version);
+      await assert.rejects(
+        () =>
+          f.invoke('billing_publish', {
+            recordId: notesOnly.recordId,
+            expectedRevision: notesOnly.revision,
+          }),
+        { code: 'BILLING_TERMS_INVALID' },
+      );
       const published = await f.invoke('billing_publish', revision, key);
       assert.equal(published.outcome, 'succeeded');
       const receipt = published.trust;
@@ -381,14 +599,18 @@ test('governed terms and scoped source facts produce a quote through the install
         ],
       );
       assert.equal(storedReceipt.rowCount, 1);
+      assert.deepEqual(
+        (
+          await f.pool.query(
+            'SELECT body FROM platform.billing_rate_tables WHERE invocation_id=$1',
+            [receipt.invocationId],
+          )
+        ).rows,
+        [{ body: version }],
+      );
       assert.equal(
         (await f.invoke('billing_publish', revision, key)).trust?.invocationId,
         receipt.invocationId,
-      );
-      // Simulate an already published historical base in the isolated fixture.
-      await f.pool.query(
-        'UPDATE platform.billing_rate_tables SET published_at=$1 WHERE invocation_id=$2',
-        [anchor, receipt.invocationId],
       );
       const archived = await f.invoke('sales_order_archive', revision);
       assert.equal(archived.outcome, 'succeeded');
@@ -413,21 +635,16 @@ test('governed terms and scoped source facts produce a quote through the install
           false,
         )
       ).recordId;
-      const bProposal = await create(version, randomUUID(), 'CAD', companyB);
+      const bProposal = await propose(version, companyB);
       const bRevision = {
         recordId: bProposal.recordId,
         expectedRevision: bProposal.revision,
       };
-      assert.equal(
-        (await f.invoke('billing_publish', bRevision)).outcome,
-        'succeeded',
-      );
-      const bSuccessor = await create(
-        { ...version, version: 'baseB2' },
-        randomUUID(),
-        'CAD',
-        companyB,
-      );
+      const bPublished = await f.invoke('billing_publish', bRevision);
+      assert.equal(bPublished.outcome, 'succeeded');
+      assert.ok(bPublished.trust);
+      const bBody = { ...version, version: 'baseB2' };
+      const bSuccessor = await propose(bBody, companyB);
       await f.pool.query(
         'UPDATE platform.current_policy_memberships SET legal_entity_id=$4 WHERE (tenant_id,environment_id,principal_id)=($1,$2,$3) AND legal_entity_id IS NULL',
         [ids.tenantId, ids.environmentId, ids.principalId, f.scope],
@@ -452,6 +669,51 @@ test('governed terms and scoped source facts produce a quote through the install
       const db = await f.pool.connect();
       try {
         await db.query('BEGIN');
+        // Copy the accepted trust chain for a new exact proposal in company B.
+        // The function's receipt check requires it to be written in this transaction.
+        const headers = {
+          invocation_id: randomUUID(),
+          change_document_id: randomUUID(),
+          domain_event_id: randomUUID(),
+          outbox_id: randomUUID(),
+          correlation_id: randomUUID(),
+        };
+        const requestKey = randomUUID();
+        const tableDigest = canonicalizeAndHash(bBody).contentHash;
+        const metadata = {
+          companyId: { classification: 'INTERNAL', value: companyB },
+          tableDigest: { classification: 'INTERNAL', value: tableDigest },
+        };
+        for (const [table, patch] of [
+          ['trust_action_invocations', { metadata, policy_inputs: metadata }],
+          [
+            'trust_business_change_documents',
+            { record_id: bSuccessor.recordId, revision: bSuccessor.revision },
+          ],
+          ['trust_domain_events', { payload: metadata }],
+          ['trust_outbox', { deduplication_key: requestKey }],
+          [
+            'semantic_operation_receipts',
+            {
+              idempotency_key: requestKey,
+              mutation_result: {
+                recordId: bSuccessor.recordId,
+                planDigest: bBody.planDigest,
+              },
+            },
+          ],
+        ] as const) {
+          const cloned: QueryResult = await db.query(
+            `INSERT INTO platform.${table}
+            SELECT (jsonb_populate_record(NULL::platform.${table}, to_jsonb(s) || $2::jsonb)).*
+            FROM platform.${table} s WHERE s.invocation_id=$1`,
+            [
+              bPublished.trust.invocationId,
+              JSON.stringify({ ...headers, ...patch }),
+            ],
+          );
+          assert.equal(cloned.rowCount, 1);
+        }
         await db.query('SET LOCAL ROLE north_star_runtime');
         await db.query(
           "SELECT set_config('north_star.tenant_id',$1,true),set_config('north_star.environment_id',$2,true),set_config('north_star.principal_id',$3,true)",
@@ -481,6 +743,22 @@ test('governed terms and scoped source facts produce a quote through the install
           1,
         );
         await denied(query, [ids.releaseId, companyB, ...readArgs.slice(2)]);
+        const publishSql = 'SELECT platform.billing_publish($1,$2,$3,$4)';
+        const publishArgs = [
+          id('operation.billing_publish'),
+          requestKey,
+          canonicalize(bBody),
+          readArgs[2],
+        ];
+        await denied(publishSql, publishArgs);
+        // Restore the grant and run the identical SQL to prove every other check accepts it.
+        await db.query('RESET ROLE');
+        await db.query(
+          'UPDATE platform.current_policy_memberships SET legal_entity_id=NULL WHERE (tenant_id,environment_id,principal_id,legal_entity_id)=($1,$2,$3,$4)',
+          [ids.tenantId, ids.environmentId, ids.principalId, f.scope],
+        );
+        await db.query('SET LOCAL ROLE north_star_runtime');
+        await db.query(publishSql, publishArgs);
         await db.query("SELECT set_config('north_star.tenant_id',$1,true)", [
           randomUUID(),
         ]);
@@ -494,7 +772,7 @@ test('governed terms and scoped source facts produce a quote through the install
         [ids.tenantId, ids.environmentId, ids.principalId, f.scope],
       );
       const otherCustomer = randomUUID();
-      const override = await create({
+      const override = await propose({
         ...version,
         version: 'other-customer',
         selector: { kind: 'customer', customerId: otherCustomer },
@@ -505,11 +783,7 @@ test('governed terms and scoped source facts produce a quote through the install
         expectedRevision: override.revision,
       });
       assert.ok(applied.trust);
-      await f.pool.query(
-        'UPDATE platform.billing_rate_tables SET published_at=$1 WHERE invocation_id=$2',
-        [anchor, applied.trust.invocationId],
-      );
-      const assignment = await create({
+      const assignment = await propose({
         schemaVersion: 'northstar.billing-list-assignment/v1',
         customerId: f.customer,
         listId: 'standard',
@@ -551,12 +825,17 @@ test('governed terms and scoped source facts produce a quote through the install
       assert.equal(saved.inputs.evidence.customerId, f.customer);
       assert.equal(saved.inputs.evidence.companyId, f.scope);
       assert.equal(saved.lines[0]!.differenceCents, '13000');
+      const first = quoteBillingService(saved.inputs.plan, {
+        ...saved.inputs.evidence,
+        serviceEnd: '2025-01-05T00:00:00.000Z',
+      });
+      assert.equal(first.lines[0]!.entitlementCents, '10000');
       const usd = await create(notes, randomUUID(), 'USD');
       await assert.rejects(
         () => get(usd.recordId),
         /source identity, currency or interval disagrees/,
       );
-      const successor = await create({
+      const successor = await propose({
         ...version,
         version: 'base2',
         values: { daily: '10', weekly: '50' },
@@ -571,20 +850,16 @@ test('governed terms and scoped source facts produce a quote through the install
         String(next.records[0]!.values[id('metric.billing_explanation')]),
       ) as typeof saved;
       assert.equal(later.inputs.evidence.tables.length, 2);
-      assert.equal(later.lines[0]!.entitlementCents, '13000');
-      const first = quoteBillingService(saved.inputs.plan, {
-        ...saved.inputs.evidence,
-        asOf: '2025-01-05T00:00:00.000Z',
-      }).lines[0]!;
-      assert.equal(first.entitlementCents, '10000');
+      assert.equal(later.lines[0]!.entitlementCents, '6000');
       const difference = quoteBillingService(later.inputs.plan, {
         ...later.inputs.evidence,
         periodStart: '2025-01-05T00:00:00.000Z',
+        termPins: first.terms,
         allocations: [
           {
-            componentId: first.componentId,
-            occurrence: first.occurrence,
-            allocatedCents: first.entitlementCents,
+            componentId: first.lines[0]!.componentId,
+            occurrence: first.lines[0]!.occurrence,
+            allocatedCents: first.lines[0]!.entitlementCents,
             reservedCents: '0',
           },
         ],
