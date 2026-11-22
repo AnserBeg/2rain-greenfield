@@ -30,6 +30,14 @@ import {
   addressJson,
 } from '@north-star/canonical-model';
 import { declaredDateTimeFields } from './date-time-admission.js';
+import {
+  bindWriteInvariants,
+  MODULE_WRITE_INVARIANT_REFUSAL_CODE,
+  stateWriteInvariantRefusal,
+  validatedWriteInvariantProviders,
+  type ModuleWriteInvariantProvider,
+  type StateDependentWriteInvariant,
+} from './module-write-invariants.js';
 import { enqueueAddress } from './address-geocodes.js';
 import {
   DateTimeEntryError,
@@ -283,6 +291,11 @@ export class PostgresModuleRuntimeInterpreter
 {
   readonly #pinnedStorageTargets: ValidatedPinnedStorageTargetCache;
   readonly #providerErrorMappings: readonly ModuleProviderErrorMapping[];
+  readonly #writeInvariants: readonly ModuleWriteInvariantProvider[];
+  readonly #boundInvariants = new WeakMap<
+    StorageTargetPayloadV1,
+    ReadonlyMap<string, readonly StateDependentWriteInvariant[]>
+  >();
   readonly #trust: PostgresTrustService;
   readonly #reportLimits: ReportLimits;
   readonly #documentNumbers: DocumentNumberMode;
@@ -310,6 +323,12 @@ export class PostgresModuleRuntimeInterpreter
       readonly validationReadPolicy?: (
         releaseId: string,
       ) => CurrentPolicyGateway | Promise<CurrentPolicyGateway>;
+      /**
+       * Capability-declared write invariants, supplied by product assembly.
+       * Every production construction site passes them; an architecture test
+       * (module-write-invariants) refuses one that does not.
+       */
+      readonly writeInvariants?: readonly ModuleWriteInvariantProvider[];
     } = {},
   ) {
     this.#reportLimits = { ...REPORT_READER_POLICY, ...options.reportLimits };
@@ -329,7 +348,21 @@ export class PostgresModuleRuntimeInterpreter
     this.#providerErrorMappings = validatedProviderErrorMappings(
       providerErrorMappings,
     );
+    this.#writeInvariants = validatedWriteInvariantProviders(
+      options.writeInvariants ?? [],
+    );
     this.#trust = new PostgresTrustService(pool);
+  }
+
+  #boundWriteInvariants(
+    storage: StorageTargetPayloadV1,
+  ): ReadonlyMap<string, readonly StateDependentWriteInvariant[]> {
+    let bound = this.#boundInvariants.get(storage);
+    if (!bound) {
+      bound = bindWriteInvariants(this.#writeInvariants, storage);
+      this.#boundInvariants.set(storage, bound);
+    }
+    return bound;
   }
 
   execute(
@@ -839,6 +872,7 @@ export class PostgresModuleRuntimeInterpreter
               input,
               this.#documentNumbers === 'verificationSentinel',
               authorizedValidationReads,
+              this.#boundWriteInvariants(currentStorage),
             );
             const ids = {
               changeDocumentId: randomUUID(),
@@ -1174,6 +1208,7 @@ async function prepareMutation(
   input: MutationInput,
   verifying: boolean,
   authorizedValidationReads: ReadonlySet<string>,
+  writeInvariants: ReadonlyMap<string, readonly StateDependentWriteInvariant[]>,
 ): Promise<MutationPreparation> {
   const kind = request.definition.effect.kind;
   const formula = request.view.projections.formulaRule;
@@ -1243,7 +1278,12 @@ async function prepareMutation(
       { ...prior.values, ...input.patch },
       'projected',
     );
-    requireStockCountCountingMode(entity, prior.values, input.patch);
+    requireStateWriteInvariants(
+      writeInvariants,
+      entity,
+      prior.values,
+      input.patch,
+    );
     if (bindings.length)
       await requireFormulaValidation(
         client,
@@ -1585,37 +1625,28 @@ function requirePeriodLockDirection(
     );
 }
 
-function requireStockCountCountingMode(
+/**
+ * GENERALIZE-1: the capability-declared state-dependent write invariants on
+ * this entity. The writer enforces whatever was declared and names no
+ * module, entity or field of its own.
+ */
+function requireStateWriteInvariants(
+  invariants: ReadonlyMap<string, readonly StateDependentWriteInvariant[]>,
   entity: StorageEntity,
   prior: Readonly<Record<string, ImmutableJsonValue>>,
   patch: Readonly<Record<string, ImmutableJsonValue>>,
 ): void {
-  const suffix = ':entity.stock_count';
-  if (!entity.entityId.endsWith(suffix)) return;
-  const namespace = entity.entityId.slice(0, -suffix.length);
-  const state = `${namespace}:field.stock_count_state`;
-  const mode = `${namespace}:field.stock_count_counting_mode`;
-  // Older count definitions do not have a mode.
-  if (
-    !Object.hasOwn(prior, mode) ||
-    prior[state] !== `${namespace}:option.stock_count_state_counting`
-  ) {
-    return;
-  }
-  if (Object.hasOwn(patch, mode) && patch[mode] !== prior[mode]) {
+  const refusal = stateWriteInvariantRefusal(
+    invariants.get(entity.entityId) ?? [],
+    prior,
+    patch,
+  );
+  if (refusal !== null)
     throw failure(
-      'MODULE_OPERATION_PRECONDITION_REFUSED',
-      'counting mode is fixed after Start counting',
+      MODULE_WRITE_INVARIANT_REFUSAL_CODE,
+      refusal,
       entity.entityId,
     );
-  }
-  if (Object.hasOwn(patch, state) && patch[state] !== prior[state]) {
-    throw failure(
-      'MODULE_OPERATION_PRECONDITION_REFUSED',
-      'use a stock count command to leave counting',
-      entity.entityId,
-    );
-  }
 }
 
 function acceptedCommand(

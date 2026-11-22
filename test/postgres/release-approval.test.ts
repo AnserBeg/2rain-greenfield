@@ -1408,6 +1408,7 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
                 },
               },
               {
+                writeInvariants: [],
                 acknowledgement: {
                   entries: [],
                   packageId: sourceAuthored.package.packageId,
