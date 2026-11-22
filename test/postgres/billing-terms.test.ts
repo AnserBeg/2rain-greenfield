@@ -499,6 +499,29 @@ test('period meter bindings require distinct selected boundaries, canonical unit
   const meter = bindings.arrearsSource;
   assert.ok(meter?.kind === 'periodMeter');
   assert.equal(billingBindingProblem(pkg), undefined);
+  const selected = pkg.fields.find(
+    (f) => f.fieldId === meter.closingReadingFieldId,
+  )!;
+  const quantity = selected.fieldType;
+  assert.ok(quantity.kind === 'quantityFieldType');
+  for (const fieldType of [
+    {
+      ...quantity,
+      baseUnit: { ...quantity.baseUnit, targetId: id('capability.other_unit') },
+    },
+    { ...quantity, scale: 10 },
+    { ...quantity, precision: 21 },
+  ]) {
+    assert.equal(
+      billingBindingProblem({
+        ...pkg,
+        fields: pkg.fields.map((f) =>
+          f.fieldId === selected.fieldId ? { ...f, fieldType } : f,
+        ),
+      }),
+      'BILLING_METER_SOURCE_REQUIRED',
+    );
+  }
   for (const wrong of [
     { openingReadingFieldId: meter.closingReadingFieldId },
     { closingReadingFieldId: notesField },
