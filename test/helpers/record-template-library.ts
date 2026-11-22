@@ -234,6 +234,9 @@ export async function exerciseTemplateLibrary(
           before.recordId,
         );
       } else await activate(patch);
+      await assert.rejects(world.create(local, { name: 'Unprepared record' }), {
+        code: 'MODULE_SEMANTIC_CONTRACT_UNSUPPORTED',
+      });
       const target = { company: COMPANY, form },
         other = { company: otherCompany, form };
       const content: RecordTemplateContent = {
@@ -371,9 +374,19 @@ export async function exerciseTemplateLibrary(
         run((v) => library.publish(v, review.reviewId, '0'.repeat(64))),
       );
       if (sourceLine) {
-        const grantId = ns + 'query.' + local + '_lines_get';
+        const {
+          rows: [sourceQuery],
+        } = await pool.query<{ permission: string }>(
+          `SELECT q#>>'{permission,targetId}' AS permission
+          FROM platform.tenant_releases r JOIN platform.app_package_revisions d ON (r.tenant_id,r.app_package_revision_id)=(d.tenant_id,d.revision_id)
+          CROSS JOIN LATERAL jsonb_array_elements(convert_from(d.desired_state,'UTF8')::jsonb->'queries') q
+          WHERE r.release_id=$1 AND q->>'queryId'=$2`,
+          [compatibleId, ns + 'query.' + local + '_lines_get'],
+        );
+        assert.ok(sourceQuery);
+        const grantId = sourceQuery.permission;
         const scoped = await pool.query<{ role_id: string }>(
-          'UPDATE platform.current_policy_permission_grants SET revoked_at=clock_timestamp() WHERE tenant_id=$1 AND environment_id=$2 AND resource_id=$3 AND revoked_at IS NULL RETURNING role_id',
+          'UPDATE platform.current_policy_permission_grants SET revoked_at=clock_timestamp() WHERE tenant_id=$1 AND environment_id=$2 AND permission_id=$3 AND revoked_at IS NULL RETURNING role_id',
           [runtime.identity.tenantId, runtime.identity.environmentId, grantId],
         );
         assert.ok(
@@ -386,7 +399,7 @@ export async function exerciseTemplateLibrary(
           );
         } finally {
           await pool.query(
-            'UPDATE platform.current_policy_permission_grants SET revoked_at=NULL WHERE (tenant_id,environment_id,resource_id)=($1,$2,$3) AND role_id=ANY($4::uuid[])',
+            'UPDATE platform.current_policy_permission_grants SET revoked_at=NULL WHERE (tenant_id,environment_id,permission_id)=($1,$2,$3) AND role_id=ANY($4::uuid[])',
             [
               runtime.identity.tenantId,
               runtime.identity.environmentId,
@@ -467,6 +480,17 @@ export async function exerciseTemplateLibrary(
         run((v) =>
           library.assign(v, target, contextId, 0, published.revisionId),
         ),
+      );
+      await assert.rejects(
+        run(
+          (v) => library.assign(v, target, contextId, 1, published.revisionId),
+          'buyer',
+        ),
+        /template.unavailable/u,
+      );
+      await assert.rejects(
+        run((v) => library.requireAuthor(v, target), 'buyer'),
+        /template.unavailable/u,
       );
       const successor = await run((v) =>
         library.review(v, target, published.templateId, 1, {

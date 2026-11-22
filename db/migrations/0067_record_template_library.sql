@@ -164,7 +164,7 @@ DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_inte
       IF member ? 'source' THEN
         IF NOT EXISTS(SELECT FROM jsonb_array_elements(source_query->'selections') s WHERE s#>>'{field,targetId}'=item.key)
           THEN RAISE EXCEPTION 'template.sourceUnavailable'; END IF;
-        SELECT c->>'physicalName' INTO STRICT actual FROM jsonb_array_elements(line_spec->'columns') c WHERE c->>'fieldId'=item.key;
+        SELECT c->>'physicalName' INTO STRICT actual FROM jsonb_array_elements(line_spec->'columns') c WHERE c->>'canonicalFieldId'=item.key;
         EXECUTE format('SELECT %I::text FROM north_star_module.%I WHERE tenant_id=$1 AND environment_id=$2 AND record_id=$3',
           actual,line_spec->>'physicalTableName') INTO STRICT actual USING t,e,(member#>>'{source,rowId}')::uuid;
         IF actual IS DISTINCT FROM typed THEN RAISE EXCEPTION 'template.sourceChanged'; END IF; END IF; END LOOP; END LOOP; END $$;
