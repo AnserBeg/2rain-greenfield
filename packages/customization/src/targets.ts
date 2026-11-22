@@ -1,4 +1,8 @@
 import { reportTargets, type ReportTarget } from './report-revision.js';
+import {
+  popupOptions,
+  type PopupOption,
+} from '../../canonical-model/src/popup-actions.js';
 import type {
   DocumentTemplatePointer,
   DocumentTemplateRevision,
@@ -53,6 +57,7 @@ export interface DocumentTemplateTarget {
 
 export interface CustomizationTargets {
   readonly reports?: readonly ReportTarget[];
+  readonly popupActions?: readonly PopupOption[];
   readonly documentTemplateTargets?: readonly DocumentTemplateTarget[];
   readonly boards?: readonly BoardTarget[];
   readonly layouts?: readonly LayoutTarget[];
@@ -698,6 +703,9 @@ export function customizationTargets(definition: {
         }))
         .sort((left, right) => left.label.localeCompare(right.label)),
     }),
+    popupActions: definition.surfaces.flatMap((s) =>
+      popupOptions(definition, s),
+    ),
     boards: boardTargets(definition),
     reports: reportTargets(definition),
     layouts: definition.surfaces.flatMap((s) =>

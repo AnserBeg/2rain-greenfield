@@ -40,6 +40,9 @@ export const AUTHORING_RULES: Readonly<
   CUSTOMIZE_BOARD_CONFLICT: [
     "A board groups a list by its record type's lifecycle: choose stages from that lifecycle, moves between the chosen stages and at most three facts.",
   ],
+  CUSTOMIZE_POPUP_CONFLICT: [
+    'Bind a button to an offered Task using its listed inputs. Editing or retiring a button requires its current revision.',
+  ],
   CUSTOMIZE_REPORT_CONFLICT: [
     'Use a listed report source and its available fields. To edit or retire a report, choose its current report ID from that source.',
   ],

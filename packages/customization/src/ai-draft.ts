@@ -1,3 +1,4 @@
+import { popupCommand, popupOptionId } from './popup-revision.js';
 import { z } from 'zod';
 
 import { WorkflowDefinitionSchema } from '../../canonical-model/src/schemas.js';
@@ -249,6 +250,28 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
           .map((r) => ({ id: r.revision.reportId, label: r.label })),
       }),
     ),
+    ...(targets.popupActions?.length
+      ? [
+          ...targets.popupActions.map((o) =>
+            JSON.stringify({
+              option: popupOptionId(o),
+              page: o.page,
+              operation: o.label,
+              inputs: o.fields.map((f) => ({
+                binding: f.id,
+                label: f.label,
+                sources: f.automatic
+                  ? ['entry', 'constant', 'record']
+                  : ['entry'],
+              })),
+              recordFields: o.sources.map((s) => ({
+                fieldId: s.id,
+                label: s.label,
+              })),
+            }),
+          ),
+        ]
+      : []),
     'Board collections (list surface, stages, moves by operation ID, facts by field ID):',
     ...(targets.boards ?? []).map(
       (t) =>
@@ -586,6 +609,8 @@ function convertMember(
     }
     case 'addBoardViewRevision':
       return [boardMember(req, local())];
+    case 'addPopupActionRevision':
+      return [popupCommand(local().popupActions ?? [], req.button)];
     case 'addReportRevision': {
       const draft = ReportDraftSchema.parse(req.report);
       const target = local().reports?.find(

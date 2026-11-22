@@ -8,6 +8,7 @@ import {
   MAX_CUSTOMIZATION_CHANGE_PATCHES,
   type CustomizationPatchKind,
 } from './patch.js';
+import { PopupCommandSchema } from './popup-revision.js';
 import { ReportDraftSchema } from './report-revision.js';
 import { VALIDATION_COMPARISONS } from './validation-draft.js';
 import { WorkflowDraftSchema } from './workflow-draft.js';
@@ -187,6 +188,14 @@ export const DRAFTER_KINDS = {
     input: DRAFTER_SELECTION_SCHEMAS.addCalculatedDisplayField,
     guidance:
       'Show an exact decimal value on a record page from the calculated display targets. Include listSurfaceId only when both fields are on that list. Needs its own draft.',
+  },
+  addPopupActionRevision: {
+    input: z.strictObject({
+      kind: z.literal('addPopupActionRevision'),
+      button: PopupCommandSchema,
+    }),
+    guidance:
+      'Add a secondary record button using an offered Task and its input bindings. Use entry to ask the person, constant to supply a fixed value, or record to supply a field ID. Keep all inputs of an existing Task.',
   },
   addReportRevision: {
     input: z.strictObject({
