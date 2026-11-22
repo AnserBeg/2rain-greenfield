@@ -1,6 +1,6 @@
 # AI-UNDO-1 — the assistant asks before putting a customer on or off credit hold
 
-Status: slice 1 of the AI-UNDO-1 charter (AI review, 2026-11-22, findings A1-A3) built on `packet/AI-UNDO-1-s1`; awaiting the rule 11 check (Fable or Codex sol) and a train. Tier: packet, first-party base change. No migration, grant or reader rung. Stops taken: none.
+Status: slice 1 (`packet/AI-UNDO-1-s1`, tip `3048f69c5`) is with Fable for the rule 11 check, then a train. Slice 2 (`packet/AI-UNDO-1-s2`) STOPPED at a safe boundary; see Slice 2 below. Tier: packet, first-party base change. No migration, grant or reader rung. Stops taken: none.
 
 ## Claims
 
@@ -10,12 +10,12 @@ Status: slice 1 of the AI-UNDO-1 charter (AI review, 2026-11-22, findings A1-A3)
 
 ## Decisions
 
-- **For orchestrator approval:** the CRITFIX-A auto-run snapshot drops `party_update -> party_credit_hold` (12 -> 11 fields), and the X5 expectation for the hold flips from `reversible` to `needsYes` (charter slice 1 names both).
-- **For orchestrator approval:** the AGENT-5 7 pinned `confirmationRequiredFor` list gains `party_credit_hold` (4 -> 5 ids).
+- **Approved by the orchestrator (2026-11-22):** the CRITFIX-A auto-run snapshot drops `party_update -> party_credit_hold` (12 -> 11 fields), and the X5 expectation for the hold flips from `reversible` to `needsYes` (charter slice 1 names both).
+- **Approved by the orchestrator (2026-11-22):** the AGENT-5 7 pinned `confirmationRequiredFor` list gains `party_credit_hold` (4 -> 5 ids).
 - The hand list in `risk.ts` is left untouched in this slice so the declaration is the only layer that refuses (rule 8 one layer); charter slice 2 deletes the list.
 - Rule 13: no rung. The v6 field schema has accepted `requiresAssistantConfirmation` since `69e29d07f` (AGENT-5, 2026-11-18) and the first-party agent floor is already 2 (the list was non-empty), so an admitted older reader parses the new stored definition and the projection without a new key. The app release lineage advances by one release, as AGENT-5's did.
 - Rules 2 and 3: this slice adds no read and no authority source; the class comes from the stored release declaration.
-- Scope: charter slice 2 (the derived reversibility declaration, no first-party IDs in `risk.ts`, state field from the state machine, the second-application proof) is NOT in this slice; the charter orders it next, as its own merge. Charter slice 0 (the census and evals) has not been built either.
+- Charter slice 0 (census and eval families) moves to AI-RELY-1's next slice (orchestrator, 2026-11-22).
 
 ## General blocks (rule 16)
 
@@ -43,9 +43,13 @@ That run is on the exact code tip `6d651b08`; the record commit on top is docs-o
 - `node --import tsx --test --test-name-pattern='X5|credit hold|auto-run snapshot|AGENT-5 7' test/agent/business-map.test.ts` — hold and release ask; a name edit stays reversible.
 - In the app, ask the assistant to release a customer's credit hold: it shows a card and waits for your yes.
 
-## Filed
+## Slice 2 — stopped for two rulings
 
-- Charter slice 2 (derivation and second application) and slice 0 (census, evals) wait for the orchestrator's go-ahead.
+- Built, not wired: `packages/canonical-model/src/reversibility.ts` (the consumer-neutral declaration, its strict reader, absence = `none, outward`) and `packages/compiler/src/reversibility.ts` (derivation from contracts, preconditions, state machines, `parentScopedChild` relations, field declarations; no names). Measured by `test/compiler/reversibility-census.test.ts`; today's per-state behaviour pinned by the `AI-UNDO-1 lock` test.
+- Blocker 1 (ADR-0047): emitting the key into the agent-discovery chunk fails `COMPILER_HISTORICAL_REPRODUCTION_MISMATCH`; new output must ride a compiler semantic profile v3 adoption (its own packet so far). An unadopted v3 would leave first-party with no declaration, so nothing would act at once.
+- Blocker 2 (A2 at scale): from release facts alone 233 plain edits derive `exact, record` (today 11), including fields capability code reads that the release does not declare (`party_credit_limit`, `item_base_unit`, item inventory policy and standard costs, location and legal-entity status, invoice and bill balances). Each needs a declared gate or a capability read declaration before it may act.
+- The wiring (projection key at agent floor 5, catalog reader, `risk.ts` with no hand list, session lifecycle and parent checks replacing name suffixes and `parentEditApprovals`) is kept on `wip/AI-UNDO-1-s2-switch`, not for merge.
+- After the rulings: CRITFIX-A retarget, second application, architecture test, older-reader proof pinned to `1092e14d`.
 
 ```record-claim
 {
