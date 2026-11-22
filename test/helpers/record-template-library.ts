@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
+import { templateLibraryPanel } from '../../apps/web/src/record-template-library.js';
 import {
   openCustomizeService,
   startComposedApplication,
@@ -322,6 +323,36 @@ export async function exerciseTemplateLibrary(
         'Draft ' + line,
       );
       assert.equal(spoken.members[0]!.caption, 'Suggested ' + label);
+      const labels = new Map(
+        offer.columns.map((column) => [column.fieldId, column.label]),
+      );
+      let calls = 0;
+      const describe = (view: RequestRuntimeView) =>
+        templateLibraryPanel(
+          view,
+          library,
+          target,
+          patch,
+          labels,
+          new Map(),
+          { templateAction: 'draftContent', request: 'Draft ' + line },
+          async () => {
+            calls++;
+            return spoken;
+          },
+        );
+      await assert.rejects(run(describe, 'buyer'), /template.unavailable/u);
+      assert.equal(
+        calls,
+        0,
+        'denying the author must happen before invoking the provider',
+      );
+      const editable = await run(describe);
+      assert.equal(calls, 1);
+      assert.ok(editable.includes('value="Suggested ' + label + '"'));
+      assert.ok(editable.includes('Preview publication'));
+      assert.deepEqual(await run((v) => library.history(v, target)), []);
+
       if (kind === 'row') {
         const revised = (
           cells: Record<string, string>,
