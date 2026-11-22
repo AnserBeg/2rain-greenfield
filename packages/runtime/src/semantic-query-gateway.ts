@@ -131,6 +131,8 @@ export interface SemanticQueryResultEnvelope {
     readonly installationId?: string;
     readonly display?: 'browser' | 'raster';
     readonly attribution?: string;
+    /** Located stops in this filter across every page. */
+    readonly total?: number;
     readonly hasNext?: string;
     readonly stops: readonly {
       recordId: string;

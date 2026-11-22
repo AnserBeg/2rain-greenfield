@@ -72,10 +72,10 @@ export async function readMapSlots(
     (f) => f.fieldId === b.group?.fieldId,
   );
   const routes = groupField?.kind === 'enumFieldType' ? groupField.options : [];
-  // Wording comes from the declarations: the group field's List column label
-  // and the collection's List label (rule 16), never dispatch vocabulary.
+  // Wording comes from the declarations: the group and day fields' List
+  // column labels (rule 16), never dispatch vocabulary. Sentences never
+  // pluralize a declared label, so a singular List label reads well too.
   const owner = surfaces.find((s) => s.surfaceId === b.listSurfaceId);
-  const collection = owner?.label ?? surface.label;
   const groupLabel =
     owner?.list?.columns.find((c) => c.field === b.group?.fieldId)?.label ??
     surface.label;
@@ -339,7 +339,7 @@ export async function readMapSlots(
       link('Zoom in', at({ ...v, zoom: Math.min(13, v.zoom + 1) }, true)),
       link('Zoom out', at({ ...v, zoom: Math.max(0, v.zoom - 1) }, true)),
       link('Fit this page', localUrl(fit)),
-      link('All ' + collection + ' in this filter', localUrl(all)),
+      link('Show all in this filter', localUrl(all)),
     ].join(' ') +
     '</nav>' +
     (browserDisplay
@@ -352,7 +352,7 @@ export async function readMapSlots(
     ' ' +
     height +
     '" aria-label="' +
-    h('Map of ' + collection) +
+    h(surface.label) +
     '">' +
     (!browserDisplay && handle
       ? '<text x="8" y="24">Map background unavailable.</text>'
@@ -367,7 +367,7 @@ export async function readMapSlots(
       ? '<p>' + h(page.attribution) + '</p>'
       : '') +
     '<p>' +
-    h('Order of the ' + collection + ' you can see') +
+    h('Order of the pins you can see') +
     ' · straight lines, not roads</p>' +
     (b.group
       ? '<ul aria-label="' +
@@ -461,7 +461,6 @@ export async function readMapSlots(
       page,
       page.hasNext ? localUrl(next) : null,
       {
-        collection,
         narrow: [b.group && groupLabel, day && dayLabel].filter(
           (x): x is string => Boolean(x),
         ),
@@ -472,9 +471,13 @@ export async function readMapSlots(
 
 export function renderMapStopList(
   items: readonly string[],
-  page: { readonly partial: boolean; readonly restarted?: boolean },
+  page: {
+    readonly partial: boolean;
+    readonly restarted?: boolean;
+    readonly total?: number;
+  },
   nextUrl: string | null,
-  words: { readonly collection: string; readonly narrow: readonly string[] },
+  words: { readonly narrow: readonly string[] },
 ) {
   const narrow = words.narrow.length
     ? ' — choose a ' + words.narrow.join(' or ')
@@ -483,21 +486,21 @@ export function renderMapStopList(
     (page.partial ? '<p role="status">Narrow the search</p>' : '') +
     (page.restarted
       ? '<p role="status">' +
-        h('This page changed. Showing the first ' + words.collection + '.') +
+        h('This page changed. Showing the first page.') +
         '</p>'
       : '') +
     (items.length
       ? '<ol class="map-stops">' + items.join('') + '</ol>'
       : page.partial
         ? ''
-        : '<p>' + h('No ' + words.collection + ' in this filter.') + '</p>') +
+        : '<p>Nothing in this filter.</p>') +
     (nextUrl
       ? '<p role="status">' +
         h(
           'Showing ' +
             items.length +
-            ' of this filter’s ' +
-            words.collection +
+            (page.total === undefined ? '' : ' of ' + page.total) +
+            ' in this filter' +
             narrow,
         ) +
         '</p>' +

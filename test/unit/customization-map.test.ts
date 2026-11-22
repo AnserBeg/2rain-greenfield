@@ -76,7 +76,7 @@ function applied(input: typeof chain, source = base) {
   );
   return out.authored;
 }
-const words = { collection: 'Stops', narrow: [] };
+const words = { narrow: [] };
 function offered() {
   const model = normalizeApplicationPackage(applied(chain));
   const targets = customizationTargets(model);
@@ -292,9 +292,12 @@ test('overflow displays the governed page size', async () => {
       page.records.map(() => '<li>Stop</li>'),
       coverage,
       '/?stops=' + coverage.hasNext,
-      { collection: 'Stops', narrow: [] },
+      { narrow: [] },
     );
-    assert.ok(html.includes('Showing ' + expected + ' of this filter’s Stops'));
+    assert.ok(
+      html.includes('Showing ' + expected + ' of 101 in this filter</p>'),
+      html,
+    );
     const last = await finishMapPage(
       client,
       request,
@@ -467,10 +470,10 @@ test('Map admission binds the reader, collection, selected fields, slots and con
 test('a Map beyond its candidate budget asks the dispatcher to narrow the search', () => {
   const partial = renderMapStopList([], { partial: true }, null, words);
   assert.match(partial, /Narrow the search/);
-  assert.doesNotMatch(partial, /No Stops/);
+  assert.doesNotMatch(partial, /Nothing in this filter/);
   assert.match(
     renderMapStopList([], { partial: false }, null, words),
-    /No Stops/,
+    /Nothing in this filter/,
   );
 });
 
@@ -708,17 +711,17 @@ test('a Parties map grouped by Territory speaks in its declared labels and title
     stops: [stop(randomUUID(), 'north', 1, 51.05)],
     values: () => ({ [labelField]: 'party-7f3a' }),
     displayValues: () => ({ [labelField]: 'Acme Ltd' }),
-    coverage: { hasNext: randomUUID() },
+    coverage: { hasNext: randomUUID(), total: 30 },
   });
   const slots = await render();
   const all = slots.savedViews + slots.mapCanvas + slots.stopList;
   assert.match(slots.savedViews, /<label>Territory <select name="route">/u);
   assert.match(slots.savedViews, /<option value="ungrouped">No Territory</u);
-  assert.match(slots.mapCanvas, /All Parties in this filter/u);
+  assert.match(slots.mapCanvas, /Show all in this filter/u);
   assert.match(slots.mapCanvas, /aria-label="Territory legend"/u);
   assert.match(
     slots.stopList,
-    /of this filter’s Parties — choose a Territory/u,
+    /Showing 1 of 30 in this filter — choose a Territory/u,
   );
   assert.match(all, /1\. Acme Ltd/u);
   assert.doesNotMatch(all, /party-7f3a/u);

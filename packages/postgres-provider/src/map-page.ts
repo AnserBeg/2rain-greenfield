@@ -101,6 +101,7 @@ export async function finishMapPage(
       installationId?: string;
       display?: 'browser' | 'raster';
       attribution?: string;
+      total?: number;
     },
   ) => ({
     kind: 'semanticQueryResult' as const,
@@ -222,6 +223,7 @@ export async function finishMapPage(
   const rows = filtered.slice(start, start + pageSize);
   return page(rows, {
     partial: false,
+    total: filtered.length,
     ...(installationId &&
       provider && {
         installationId,

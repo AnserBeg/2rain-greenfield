@@ -530,7 +530,10 @@ test(
               sparseBindings,
             );
             assert.equal(full.status, 200);
-            assert.match(body, /Showing 100 of this filter’s stops/u);
+            assert.match(
+              body,
+              /Showing 100 of \d+ in this filter — choose a Route or Day/u,
+            );
             assert.doesNotMatch(
               body,
               /South private yard|Tomorrow only|class="map-route group-/u,
