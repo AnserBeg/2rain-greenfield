@@ -43,6 +43,7 @@ const tenantIndependentV1TableAuthorities: ReadonlyMap<
     'north_star_internal.analysis_operator_controls',
     'kernel-integrity-witness',
   ],
+  ['north_star_internal.workflow_start_limits', 'kernel-integrity-witness'],
   ['north_star_internal.module_storage_elements', 'shared-immutable-catalog'],
   ['north_star_internal.schema_migrations', 'migration-history'],
   ['north_star_internal.staff_store_mode', 'kernel-integrity-witness'],

@@ -49,7 +49,7 @@ export function renderWorkflowReview(
           ? `Runs ${label(call.id)} without asking.`
           : `Requests ${label(call.id)}. This action requires human approval.`;
       case 'requestApproval':
-        return `Asks a person to approve “${call.summary}”${target ? ' (' + label(target) + ')' : ''}.`;
+        return `Asks a person to approve ${JSON.stringify(call.summary).replace(/[\u007f-\u009f\u2028\u2029]/gu, (char) => '\\u' + char.charCodeAt(0).toString(16).padStart(4, '0'))}${target ? ' (' + label(target) + ')' : ''}.`;
       case 'waitForEvent':
         return 'Waits for a receipt event without asking.';
     }

@@ -78,21 +78,27 @@ export const WORKFLOW_RECEIPT_PAGE_SQL = `
    WHERE o.event_type = $8
    ORDER BY o.outbox_id`;
 
+export async function workerScopes(
+  pool: Pool,
+): Promise<readonly WorkflowScope[]> {
+  const client = await pool.connect();
+  try {
+    await assertWorkerRole(client);
+    return (
+      await client.query<WorkflowScope>(
+        'SELECT * FROM platform.workflow_environment_ids()',
+      )
+    ).rows;
+  } finally {
+    client.release();
+  }
+}
+
 export class PostgresWorkflowConsumer {
   constructor(private readonly pool: Pool) {}
 
-  async scopes(): Promise<readonly WorkflowScope[]> {
-    const client = await this.pool.connect();
-    try {
-      await assertWorkerRole(client);
-      return (
-        await client.query<WorkflowScope>(
-          'SELECT * FROM platform.workflow_environment_ids()',
-        )
-      ).rows;
-    } finally {
-      client.release();
-    }
+  scopes() {
+    return workerScopes(this.pool);
   }
 
   async claim(scope: WorkflowScope): Promise<number> {
@@ -105,8 +111,12 @@ export class PostgresWorkflowConsumer {
       if (!lock.rows[0]?.acquired) return 0;
       const pointer = await lockWorkflowPointer(client);
       if (!pointer?.release_id) return 0;
+      const resumed = await client.query<{ started: number }>(
+        'SELECT platform.workflow_resume_capacity() AS started',
+      );
+      let count = resumed.rows[0]!.started;
       const watermark = await verifiedWorkflowWatermark(client, scope, pointer);
-      if (!watermark) return 0;
+      if (!watermark) return count;
       const scopeKeys = [scope.tenant_id, scope.environment_id];
       const definitions = await client.query<{ workflow_id: string }>(
         `SELECT d.workflow_id
@@ -124,7 +134,7 @@ export class PostgresWorkflowConsumer {
           pointer.fence,
         ],
       );
-      if (!definitions.rows.length) return 0;
+      if (!definitions.rows.length) return count;
       const position = await client.query<{ next_outbox_id: string }>(
         `SELECT next_outbox_id FROM platform.workflow_receipt_scan_positions
            WHERE tenant_id = $1 AND environment_id = $2 AND pointer_id = $3 AND fence = $4`,
@@ -143,7 +153,6 @@ export class PostgresWorkflowConsumer {
           RECEIPT_POSTED_TYPE,
         ],
       );
-      let count = 0;
       for (const event of candidates.rows.slice(0, WORKFLOW_POLL_BATCH_SIZE)) {
         const eligible =
           event.release_id === pointer.release_id &&
@@ -188,7 +197,7 @@ export class PostgresWorkflowConsumer {
             ],
           );
           if (!instance.rows[0]) continue;
-          await client.query(
+          const started = await client.query(
             `INSERT INTO platform.workflow_runs (
                tenant_id, environment_id, run_id, instance_id, workflow_id, pointer_id,
                release_id, release_root, initial_fence, execution_fence
@@ -204,7 +213,7 @@ export class PostgresWorkflowConsumer {
               pointer.fence,
             ],
           );
-          count++;
+          count += started.rowCount ?? 0;
         }
       }
       const next = candidates.rows[WORKFLOW_POLL_BATCH_SIZE];

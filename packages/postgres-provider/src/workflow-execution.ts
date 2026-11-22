@@ -90,6 +90,7 @@ interface Run extends Omit<WorkflowRunPin, keyof ReceiptScope> {
   readonly workflow_id: string;
   readonly status:
     | 'RUNNABLE'
+    | 'CAPACITY_WAIT'
     | 'WAITING'
     | 'COMPLETED'
     | 'CANCELLED'

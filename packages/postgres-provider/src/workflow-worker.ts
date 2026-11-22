@@ -1,5 +1,9 @@
 import type { TrustedRequestContext } from '@north-star/runtime';
 import pg, { type Pool } from 'pg';
+import {
+  superviseWorkerPolls,
+  type ScheduledWorker,
+} from './worker-scheduler.js';
 import { withTrustedRequestTransaction } from './request-context.js';
 import {
   PostgresWorkflowConsumer,
@@ -10,8 +14,6 @@ import {
   WorkflowRemedyRefused,
   type WorkflowBusinessClock,
 } from './workflow-execution.js';
-import { reconcileNextDiscussionNotice } from '../../runtime/src/discussion-inbox.js';
-import { discussionInboxPort } from './personal-inbox.js';
 import { PostgresWorkflowGateway } from './workflow-gateway.js';
 
 /** One scheduler pass. Separate pools keep enumeration off the request role. */
@@ -38,19 +40,7 @@ export class PostgresWorkflowWorker {
 
   async poll(): Promise<void> {
     const failures: unknown[] = [];
-    try {
-      await this.workerPool.query('SELECT platform.booking_sweep_due(16)');
-    } catch (error) {
-      failures.push(error);
-    }
     for (const scope of await this.#consumer.scopes()) {
-      try {
-        await reconcileNextDiscussionNotice(
-          discussionInboxPort(this.workerPool, scope),
-        );
-      } catch (error) {
-        failures.push(error);
-      }
       try {
         await this.#consumer.claim(scope);
         await this.#execution.tick(scope);
@@ -96,7 +86,7 @@ export class PostgresWorkflowWorker {
           )
         ).rows,
     );
-    const suspended = await this.#gateway
+    const capacity = await this.#gateway
       .withRemedyAuthority(operator, () =>
         withWorkflowTransaction(
           this.workerPool,
@@ -104,8 +94,8 @@ export class PostgresWorkflowWorker {
             tenant_id: operator.tenantId,
             environment_id: operator.environmentId,
           },
-          async (client) =>
-            (
+          async (client) => ({
+            suspended: (
               await client.query<{
                 runId: string;
                 workflowId: string;
@@ -118,13 +108,24 @@ export class PostgresWorkflowWorker {
                 [operator.tenantId, operator.environmentId],
               )
             ).rows,
+            waitingStarts: (
+              await client.query<{
+                instanceId: string;
+                workflowId: string;
+                disposition: string;
+                notBefore: Date;
+              }>(`SELECT instance_id AS "instanceId",workflow_id AS "workflowId",disposition,not_before AS "notBefore"
+                   FROM platform.workflow_waiting_starts()`)
+            ).rows,
+          }),
         ),
       )
       .catch((error: unknown) => {
-        if (error instanceof WorkflowRemedyRefused) return [];
+        if (error instanceof WorkflowRemedyRefused)
+          return { suspended: [], waitingStarts: [] };
         throw error;
       });
-    return { approvals, suspended };
+    return { approvals, ...capacity };
   }
 
   decide(
@@ -194,6 +195,7 @@ function validateRoleUrl(
 export function startWorkflowScheduler(
   config: WorkflowSchedulerConfig,
   reportFailure: () => void,
+  registrations: readonly ((pool: Pool) => ScheduledWorker)[] = [],
 ) {
   validateRoleUrl(config.workerDatabaseUrl, 'north_star_workflow_worker');
   validateRoleUrl(config.runtimeDatabaseUrl, 'north_star_runtime');
@@ -214,7 +216,10 @@ export function startWorkflowScheduler(
     runtimePool,
     config.businessClock,
   );
-  const stop = superviseWorkflowPolls(worker, reportFailure);
+  const stop = superviseWorkerPolls(
+    [...registrations.map((register) => register(workerPool)), worker],
+    reportFailure,
+  );
   return {
     worker,
     async close() {
@@ -225,28 +230,9 @@ export function startWorkflowScheduler(
 }
 
 export function superviseWorkflowPolls(
-  worker: Pick<PostgresWorkflowWorker, 'poll'>,
+  worker: ScheduledWorker,
   reportFailure: () => void,
-  interval = 1_000,
-): () => Promise<void> {
-  let stopped = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  async function poll(): Promise<void> {
-    try {
-      await worker.poll();
-    } catch {
-      reportFailure();
-    } finally {
-      if (!stopped)
-        timer = setTimeout(() => {
-          active = poll();
-        }, interval).unref();
-    }
-  }
-  let active = poll();
-  return async () => {
-    stopped = true;
-    clearTimeout(timer);
-    await active;
-  };
+  interval?: number,
+) {
+  return superviseWorkerPolls([worker], reportFailure, interval);
 }
