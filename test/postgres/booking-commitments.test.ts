@@ -6,6 +6,10 @@ import test from 'node:test';
 import pg, { type PoolClient } from 'pg';
 import { AuthenticatedRequestEntryAdapter } from '../../packages/runtime/src/request-context.js';
 import { withIdempotentTransaction } from '../../packages/postgres-provider/src/request-context.js';
+import {
+  billingBookingUsage,
+  fenceBillingBookingOwners,
+} from '../../packages/postgres-provider/src/billing-booking-usage.js';
 import { bookingOwnerCursorFence } from '../../packages/postgres-provider/src/booking-owner-usage.js';
 
 import {
@@ -2564,6 +2568,68 @@ test('booking commitment writer', async (t) => {
           assert.deepEqual(
             kitOrder.rows.map((row) => row.record_id),
             [owner(85), owner(89)],
+          );
+        },
+      );
+      await t.test(
+        'a Billing review consumes the actual projected leg and fences its observed owner cursor',
+        async () => {
+          const day = '2025-02-11';
+          await time(day + 'T15:00Z');
+          const held = await call(
+            left,
+            'holdTracked',
+            hold(90, 75, {
+              kind: 'time',
+              start: day + 'T10:00',
+              end: day + 'T11:00',
+            }),
+          );
+          const confirmed = await call(left, 'confirm', terms(90, held));
+          await time(day + 'T17:00Z');
+          const started = await call(left, 'start', terms(90, confirmed));
+          assert.equal(started.state, 'inUse');
+          await time(day + 'T18:00Z');
+          const returned = await call(left, 'return', terms(90, started));
+          assert.equal(returned.state, 'returned');
+          const queryId = 'example.booking:query.usage';
+          const source = {
+            entityId: 'example.booking:entity.visit',
+            recordId: owner(90),
+            companyId: fixtureId('company0'),
+          };
+          const snapshot = await left.query(
+            'SELECT platform.booking_owner_usage($1,$2,$3,$4,$5,$6,NULL,NULL,64) AS usage',
+            [
+              release,
+              activeFence,
+              queryId,
+              source.recordId,
+              day + 'T17:00Z',
+              day + 'T18:00Z',
+            ],
+          );
+          const usage = billingBookingUsage(
+            snapshot.rows[0].usage,
+            source,
+            'example.booking:slot.visit',
+            'each',
+            day + 'T18:00Z',
+          );
+          assert.deepEqual(
+            usage.bands[0]?.intervals.map((i) => [i.start, i.end]),
+            [[day + 'T17:00:00.000Z', day + 'T18:00:00.000Z']],
+          );
+          assert.equal(usage.cursor, '4');
+          const observed = { ...source, queryId, cursor: usage.cursor };
+          await fenceBillingBookingOwners(left, release, activeFence, [
+            observed,
+          ]);
+          await assert.rejects(
+            fenceBillingBookingOwners(left, release, activeFence, [
+              { ...observed, cursor: '3' },
+            ]),
+            /Stale billing booking cursor/,
           );
         },
       );

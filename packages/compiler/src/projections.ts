@@ -3,6 +3,8 @@ import { DECLARED_REPORT_READER } from '../../canonical-model/src/declared-repor
 import {
   BILLING_READER,
   BILLING_ALLOCATION_READER,
+  BILLING_ARREARS_READER,
+  BILLING_CYCLE_CALCULATION,
   BILLING_CALCULATION_VERSION,
 } from '../../canonical-model/src/billing.js';
 import {
@@ -534,17 +536,24 @@ export function lowerBaseProjectionPayloads(
     const hasAgreedInterval = billingPlans.some(
       (p) => p.bindings?.agreedInterval,
     );
+    const hasArrears = billingPlans.some((p) => p.bindings?.arrearsSource);
     surface.payload = {
       ...(surface.payload as object),
       billingPlans,
       ...(hasAgreedInterval && {
-        billingCalculationVersion: BILLING_CALCULATION_VERSION,
+        billingCalculationVersion: hasArrears
+          ? BILLING_CYCLE_CALCULATION
+          : BILLING_CALCULATION_VERSION,
       }),
     };
     surface.requiredRuntimeCapability = {
       ...surface.requiredRuntimeCapability,
       minimumVersion: Math.max(
-        hasAgreedInterval ? BILLING_ALLOCATION_READER : BILLING_READER,
+        hasArrears
+          ? BILLING_ARREARS_READER
+          : hasAgreedInterval
+            ? BILLING_ALLOCATION_READER
+            : BILLING_READER,
         surface.requiredRuntimeCapability.minimumVersion,
       ),
     };

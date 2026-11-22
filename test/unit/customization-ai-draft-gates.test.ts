@@ -59,6 +59,8 @@ test('(a) scored kinds are read from the expectation, one case per shape', () =>
   assert.deepEqual(kinds('F01'), ['addField']);
   assert.deepEqual(kinds('W01'), ['saveWorkflow']);
   assert.deepEqual(kinds('F06'), ['addBoardViewRevision']);
+  for (const id of ['B01', 'B02', 'B03'])
+    assert.deepEqual(kinds(id), ['addRatePlanVersion'], id);
   assert.deepEqual(kinds('U02'), [], 'an unsupported case scores no kind');
 });
 

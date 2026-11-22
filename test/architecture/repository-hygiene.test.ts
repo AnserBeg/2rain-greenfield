@@ -98,6 +98,7 @@ const suiteDefinitions = [
   {
     discoveryPattern: 'test/integration/**/*.test.ts',
     expectedFiles: [
+      'test/integration/billing-booking-possession.test.ts',
       'test/integration/billing-quote.test.ts',
       'test/integration/billing-release.test.ts',
       'test/integration/catalog-runtime.test.ts',
