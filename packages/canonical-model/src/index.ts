@@ -209,3 +209,8 @@ export {
   CompiledPresentationSchema,
   type CompiledPresentation,
 } from './schemas.js';
+export type {
+  ValidationOperand,
+  ValidationPredicate,
+  ValidationScalar,
+} from './formula-validation.js';
