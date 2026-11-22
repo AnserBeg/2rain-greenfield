@@ -762,7 +762,11 @@ test('arrears review stops at the next earned cycle and pins the exact late quot
   const changed = reviewArrearsCharges(p, { ...e, sourceRevision: '2' });
   assert.notEqual(changed.quoteDigest, review.quoteDigest);
   assert.deepEqual(
-    reviewArrearsCharges(p, { ...e, asOf: roll(e.anchor, 27) }),
+    reviewArrearsCharges(p, {
+      ...e,
+      asOf: roll(e.anchor, 27),
+      tables: e.tables.map((t) => ({ ...t, publishedAt: e.anchor })),
+    }),
     { status: 'notDue' },
   );
   assert.throws(
@@ -959,6 +963,32 @@ test('three businesses review net charge lines through the same closed-cycle cal
     /Incomplete booking/,
   );
   assert.throws(() => read({ ...snapshot, asOf: start }), /Incomplete booking/);
+  for (const ownerRef of [
+    { ...owner, entityId: 'foreign' },
+    { ...owner, recordId: 'other' },
+  ])
+    assert.throws(() => read({ ...snapshot, ownerRef }), /owner or company/);
+  for (const invalid of [
+    { slotId: 'elsewhere' },
+    { fulfilmentMode: 'scheduled' },
+    { unit: 'hour' },
+  ])
+    assert.throws(
+      () =>
+        read({
+          ...snapshot,
+          bookings: snapshot.bookings.map((b) => ({ ...b, ...invalid })),
+        }),
+      /identifiable/,
+    );
+  assert.throws(
+    () =>
+      read({
+        ...snapshot,
+        evidence: snapshot.evidence.map((r) => ({ ...r, voided: true })),
+      }),
+    /actual use/,
+  );
   assert.throws(
     () =>
       read({
