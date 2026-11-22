@@ -1,6 +1,6 @@
 # CI-6 — PostgreSQL shard 10 and a lighter catch-all shard
 
-Packet tip `ad7946032ae1ebd567bb9b259fc40784183e765b` on base `5710c05ae2529b742bf15f8f484c75c0b3930180`. Tier: CI infrastructure, not Critical. No product code, migration or test body changed. CI-5 has no packet record, so this one follows CI-4 and CI-5's commit `6545ae7f8`.
+Tested tip `ad7946032ae1ebd567bb9b259fc40784183e765b` on base `5710c05ae2529b742bf15f8f484c75c0b3930180`. Tier: CI infrastructure, not Critical. No product code, migration or test body changed. CI-5 has no packet record, so this one follows CI-4 and CI-5's commit `6545ae7f8`.
 
 CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44991394141
 
@@ -30,7 +30,7 @@ Per-file times come from the top-level TAP `duration_ms` values in each job log.
 
 The REPORTS shard 3 figure includes that branch's `report-company-reader`, which took 7m 14s. CI-6 run 44991394141 passed every job on attempt 1.
 
-**Shard 9 missed the 18-minute target.** On the CI-6 run, `date-time-field` alone took 19m 41s. It took 11m 29s on main and 12m 05s on REPORTS. CI-5 had already measured it at 17m 32s alone. Adding `declared-list` (2m 50s) to the shard took away the margin that a slow runner needs. The follow-up is to move `declared-list` back to shard 6, which took 9m 57s here, or into shard 7 or 8. That would leave `date-time-field` alone as CI-5 intended. This follow-up has not run in CI.
+**Shard 9 missed the 18-minute target.** On the CI-6 run, `date-time-field` alone took 19m 41s. It took 11m 29s on main and 12m 05s on REPORTS. CI-5 had already measured it at 17m 32s alone. Adding `declared-list` (2m 50s) to the shard took away the margin that a slow runner needs. The follow-up is to move `declared-list` back to shard 6, which took 9m 57s here, or into shard 7 or 8. That would restore the isolation CI-5 chose on purpose, which its workflow comment records. It would still leave shard 9 at about 20 minutes on this runner, though. Meeting 18 minutes on slow runners means splitting `date-time-field` itself, which changes a test body and is outside CI-6's scope. Neither follow-up has run in CI.
 
 The heaviest files measured on main were:
 
@@ -43,6 +43,8 @@ The heaviest files measured on main were:
 | `declared-list` | 2m 47s | shard 9 |
 | `address-authority` | 2m 16s | shard 10 |
 | `request-runtime-view` | 1m 37s | shard 4 |
+
+Test code is identical between main's run (`b03e68c`) and the CI-6 base (`git diff --stat b03e68c 5710c05 -- test` is empty). Across all PostgreSQL jobs both runs report 577 top-level tests, 577 passes and 0 skipped, cancelled or `# SKIP`. In CI-6's shard 3, `the compiled application serves real template PDFs through the production launcher` reports `ok` and was not skipped.
 
 On the CI-6 tip, `test-reachability`, `repository-hygiene` and `test-lock-observability` passed (45 tests), as did all of `test:architecture` (236), lint and typecheck.
 
@@ -62,7 +64,7 @@ The rule-8 controls ran on the committed tip. Each one went red and was restored
 ## Note for the integrator
 
 - PLANNER-1-s1 edits the same `package.json` lines: the shard 3 exclusion (it adds `planner-map`) and shard 5 (it adds `planner-map.test.ts`). It also edits the shard 3 glob in `reachability-producers.ts` and adds to `repository-hygiene.test.ts`. Expect a small conflict there. Keep both edits: add `planner-map` to this exclusion list and to shard 5.
-- REPORTS-1-s1 adds `report-company-reader` (7m 14s on its run) and `report-reader-bounds` to the catch-all. Shard 3 should land at about 15 to 16 minutes after that merge.
+- REPORTS-1-s1 adds `report-company-reader` (7m 14s on its run) and `report-reader-bounds` to the catch-all. Shard 3 measured 12m 26s here, so it would reach about 19 to 20 minutes after that merge. When resolving REPORTS, name `report-company-reader` explicitly in shard 7 (9m 53s here) or shard 6 (9m 57s) instead of leaving it in the catch-all. That means editing the exclusion, the shard list and the producer, as with the planner hunk.
 - BILLING-1-s2 grows `billing-terms` by about 950 lines. That file stays in shard 8, which this packet lightens by about 3m 50s on main's timings.
 
 ```record-claim
