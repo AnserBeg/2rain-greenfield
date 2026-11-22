@@ -44,18 +44,72 @@ At `eda6d12f`, the regression tests caught direct grants, the notes binding, the
 - The next run failed the language coverage check. The optional `arrearsSource` binding adds five ledger obligations: its presence, its absence and the `agreedInterval`, `periodMeter` and `bookingActuals` kinds. No first-party coverage package declares a billing plan, so all five are recorded under the unused-shape exemption. The two observed-set decisions are re-recorded unchanged against the new ledger. A new billing-terms test compiles each kind at reader 42 with calculation v3 and keeps an unsourced plan at reader 41 with v2. It also refuses a meter on an agreed-interval source and an unknown kind such as advance. Before this test, `agreedInterval` had no test.
 - This review creates no invoice, allocation or accounting entry. Enrollment, cutover carry, archive protection for unbilled use, quote-digest allocation, human issue and void/reissue belong to the atomic Receivables v2 writer. Advance awaits an admitted credit or refund path.
 
+## Slice 2 checkpoint · fix round (Fable review REVISE, 2026-11-22)
+
+- **Merged main 5710c05a.** The four conflicts, in canonical-model `billing.ts`, `release-repository.ts`, `request-runtime-view.ts` and its test, repeated main's 72e4988d. The packet side contains main's version plus rung 42 in each, so it was kept. Rung 42 stays provisional for the integrator.
+- **Finding 1, Booking precision.** Booking stamps its clock in microseconds. The adapter now truncates every Booking instant to the millisecond instead of refusing it. Truncation preserves order, and a sub-millisecond span becomes empty and is accepted. ADR-0083 states the rule under calculation v3.
+- **Finding 2, possession past the agreed end (owner ruling).** Under `bookingActuals`, billing follows actual possession. Possession is read through the review instant. A live leg keeps the service open, and the final cycle ends at the recorded return. An agreed five-day hire returned on day nine at CAD 30 a day reviews CAD 270.00. Before this fix it reviewed CAD 150.00.
+- **Rule 16.** The compiler no longer requires the customer and currency field IDs to end in `_customer_party_id` and `_currency`. Each role the plan declares must be a required text field selected on the billed entity. The two roles need different fields, and the currency field holds exactly three characters. A second business with differently named fields binds. Optional notes still cannot carry either role.
+- **Journeys through the released quote query (finding 4).**
+  - Contract: an agreed-interval contract reviews CAD 130.00 for its closed cycle.
+  - Hire: a hire is held, confirmed, started and returned through released Booking operations. No instant is entered, so Booking stamps its production clock. The quoted leg equals the truncated stored instants. While the leg is live past the agreed end the review stays open. After the return it is due at the return.
+  - Meter: the existing period-meter journey.
+  - Isolation: each journey refuses Company B in the same tenant, both by row scope and by policy.
+- **Rule 8.** Each new check has a manifest control that fails its own test, and all of them were reproduced and restored:
+  - `billing-booking-microseconds`
+  - `billing-booking-live-leg`
+  - `billing-booking-overrun`
+  - `billing-booking-possession-wired`, the PostgreSQL journey
+  - `billing-role-required`
+  - `billing-role-currency-code`
+  - `billing-role-distinct`
+- **New refusal.** Reading possession through the review instant can return a second booking for the same owner in the slot. That review is refused, since it needs exactly one tracked booking.
+- **Open for the owner.** The ruling does not cover an early return. A return before the agreed end keeps the agreed end, as before.
+
+### First tasks of the next billing slice (ride-alongs from the fix round)
+
+1. Finding 3: give each of these 17 checks a test that fails without it.
+   - `packages/customization/src/patch.ts`: bindings are kept out of the tenant member. Use a negative with a fully valid bindings object.
+   - `packages/compiler/src/billing.ts`, six checks:
+     - the usage query is scoped to one company
+     - the usage query reads the billing owner query
+     - the slot owner is the billing entity
+     - the slot is tracked
+     - a meter source has no time component
+     - a meter source uses a per-cycle allowance
+   - `packages/domain/src/billing/quote.ts`, six checks beside boundary readings:
+     - basis
+     - usage events
+     - pauses
+     - opening instant
+     - stream
+     - per-cycle allowance
+   - `packages/domain/src/billing/arrears.ts`: an invalid service period.
+   - `packages/postgres-provider/src/billing-booking-usage.ts`, two checks:
+     - evidence of other bookings
+     - the leg unit
+   - `release-repository.ts`: the loader's arrears floor. Add a `BILLING_PLAN_MISMATCH` assertion.
+   - Add manifest entries for the controls this record cites.
+2. Finding 5:
+   - Render `oneOf` in the drafter's generated description (`ai-draft-kinds.ts` typeText).
+   - Record live results for B01 to B03.
+   - Make the B-case meter eval use the reading field's canonical unit ID instead of the free-text unit "copy".
+3. Rule 16 follow-up seen in this round: the quote query's permission must still be named `<namespace>:permission.billing_quote` (`packages/compiler/src/billing.ts`). Replace the name with a declared binding.
+
 ## Test it yourself
 
 Run `node --import tsx --test test/integration/billing-quote.test.ts`. The three-business test expects CAD 100.00 for hire after a pause, CAD 8.25 for usage above allowance and CAD 15.50 for a prorated contract.
 Run `node --import tsx --test --test-name-pattern='^a period meter reviews' test/postgres/billing-terms.test.ts` to publish terms, review a service, withhold a reading and exercise company isolation.
+Run `node --import tsx --test test/integration/billing-booking-possession.test.ts` for microsecond Booking instants and the CAD 270.00 overrun.
+Run `node --import tsx --test --test-name-pattern='agreed-interval contract reviews|equipment hire reviews possession' test/postgres/billing-terms.test.ts` for the contract and hire journeys (Docker).
 
 ```record-claim
 {
   "schemaVersion":"northstar.record-claim/v1",
   "packet":"BILLING-1",
-  "base":"86a28ed55f25bd9b6428a6596d36ad6830a64612",
-  "head":"68f8c7b18c33b6346c04182931e354295edb8326",
-  "changedPaths":["docs/execution/packets/BILLING-1.md","packages/canonical-model/src/billing-evidence.ts","packages/canonical-model/src/billing.ts","packages/compiler/src/billing.ts","packages/compiler/src/projections.ts","packages/customization/src/ai-draft-kinds.ts","packages/customization/src/apply.ts","packages/customization/src/patch.ts","packages/customization/src/render.ts","packages/customization/src/upgrade-diagnostics.ts","packages/customization/src/upgrade-replay.ts","packages/domain/src/billing/arrears.ts","packages/domain/src/billing/quote.ts","packages/postgres-provider/src/billing-booking-usage.ts","packages/postgres-provider/src/billing-quote.ts","packages/postgres-provider/src/customization-service.ts","packages/postgres-provider/src/release-repository.ts","packages/runtime/src/request-runtime-view.ts","test/agent/build-bakeoff-run.ts","test/agent/build-eval-cases.ts","test/agent/build-eval.ts","test/fixtures/g2/language-conformance/coverage-decisions.json","test/helpers/archived-billing-probes.ts","test/integration/billing-quote.test.ts","test/postgres/billing-terms.test.ts","test/postgres/booking-commitments.test.ts","test/postgres/request-runtime-view.test.ts","test/unit/customization-ai-draft-slice2.test.ts","test/unit/customization-upgrade.test.ts"],
-  "symbols":[{"path":"packages/domain/src/billing/arrears.ts","name":"reviewArrearsCharges"},{"path":"packages/postgres-provider/src/billing-booking-usage.ts","name":"fenceBillingBookingOwners"},{"path":"packages/postgres-provider/src/billing-quote.ts","name":"billingQuoteReadModel"}]
+  "base":"5710c05ae2529b742bf15f8f484c75c0b3930180",
+  "head":"5079c9cf46def5d1cde43f97589870b58197da2d",
+  "changedPaths":["docs/decisions/ADR-0083-period-and-usage-billing.md","docs/execution/packets/BILLING-1.md","packages/canonical-model/src/billing-evidence.ts","packages/canonical-model/src/billing.ts","packages/compiler/src/billing.ts","packages/compiler/src/projections.ts","packages/customization/src/ai-draft-kinds.ts","packages/customization/src/apply.ts","packages/customization/src/patch.ts","packages/customization/src/render.ts","packages/customization/src/upgrade-diagnostics.ts","packages/customization/src/upgrade-replay.ts","packages/domain/src/billing/arrears.ts","packages/domain/src/billing/quote.ts","packages/postgres-provider/src/billing-booking-usage.ts","packages/postgres-provider/src/billing-quote.ts","packages/postgres-provider/src/customization-service.ts","packages/postgres-provider/src/release-repository.ts","packages/runtime/src/request-runtime-view.ts","test/agent/build-bakeoff-run.ts","test/agent/build-eval-cases.ts","test/agent/build-eval.ts","test/evidence/BILLING-1.expected-red.json","test/fixtures/g2/language-conformance/coverage-decisions.json","test/helpers/archived-billing-probes.ts","test/integration/billing-booking-possession.test.ts","test/integration/billing-quote.test.ts","test/postgres/billing-terms.test.ts","test/postgres/booking-commitments.test.ts","test/postgres/request-runtime-view.test.ts","test/unit/customization-ai-draft-slice2.test.ts","test/unit/customization-upgrade.test.ts"],
+  "symbols":[{"path":"packages/domain/src/billing/arrears.ts","name":"reviewArrearsCharges"},{"path":"packages/postgres-provider/src/billing-booking-usage.ts","name":"fenceBillingBookingOwners"},{"path":"packages/postgres-provider/src/billing-booking-usage.ts","name":"bookingPossessionServiceEnd"},{"path":"packages/postgres-provider/src/billing-booking-usage.ts","name":"truncateBookingInstant"},{"path":"packages/postgres-provider/src/billing-quote.ts","name":"billingQuoteReadModel"}]
 }
 ```
