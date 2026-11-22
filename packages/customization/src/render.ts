@@ -117,6 +117,47 @@ export function renderReleaseDiff(input: {
         },
       ),
     );
+  for (const form of to.surfaces) {
+    const binding = form.recordTemplateBinding as
+      import('@north-star/canonical-model').RecordTemplateBinding | undefined;
+    const old = from.surfaces.find((s) => s.surfaceId === form.surfaceId)
+      ?.recordTemplateBinding as typeof binding;
+    if (!binding || binding.revisionId === old?.revisionId) continue;
+    const { body } = binding;
+    const label = (id: string) =>
+      String(
+        [...to.fields, ...(to.relations ?? [])].find(
+          (f) => f.fieldId === id || f.relationId === id,
+        )?.label ?? id,
+      );
+    const selector =
+      body.context.kind === 'choice'
+        ? label(body.context.fieldId)
+        : body.context.kind === 'link'
+          ? label(body.context.relationId)
+          : 'entire record type';
+    lines.push(
+      binding.status === 'retired'
+        ? 'Retires the record template binding on ' +
+            entityLabel(to, body.entityId) +
+            '.'
+        : 'Enables ' +
+            (body.required ? 'required' : 'optional') +
+            ' templates on ' +
+            entityLabel(to, body.entityId) +
+            ' by ' +
+            selector +
+            '. Columns: ' +
+            body.columns
+              .map(
+                (c) =>
+                  label(c.fieldId) +
+                  (c.copyEligible ? ' (copy permitted)' : ' (answer only)'),
+              )
+              .join(', ') +
+            '.',
+    );
+  }
   const beforeTemplates = activeTemplates(from);
   const afterTemplates = activeTemplates(to);
   for (const [templateId, revision] of afterTemplates) {

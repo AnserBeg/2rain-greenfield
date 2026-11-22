@@ -1,6 +1,7 @@
 export * from './upgrade-diagnostics.js';
 export { finalFormulaConflict } from './upgrade-replay.js';
 export * from './board-revision.js';
+export * from './record-template-binding.js';
 export * from './layout-revision.js';
 export * from './apply.js';
 export * from './candidate.js';

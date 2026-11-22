@@ -1,4 +1,5 @@
 export * from './board.js';
+export * from './record-template.js';
 export * from './layout.js';
 export * from './read-model-dependencies.js';
 export {

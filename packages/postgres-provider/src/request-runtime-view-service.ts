@@ -1,3 +1,4 @@
+import { recordTemplateDeclarationProblem } from './record-template-admission.js';
 import { boardBindingsProblem } from './board-admission.js';
 import {
   dateTimeBindingsProblem,
@@ -921,6 +922,12 @@ function definitionFromSnapshotRows(
   } catch {
     throw malformedProjection('invalid dateTime field declaration');
   }
+  const templateProblem = recordTemplateDeclarationProblem(
+    declarations.definition,
+    surface.payload,
+    surface.requiredRuntimeCapability?.minimumVersion ?? 0,
+  );
+  if (templateProblem) throw malformedProjection(templateProblem);
   const dateTimeProblem = dateTimeBindingsProblem(
     consumers.map((p) => p.payload),
     surface.requiredRuntimeCapability?.minimumVersion ?? 0,

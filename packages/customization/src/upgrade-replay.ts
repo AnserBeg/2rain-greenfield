@@ -359,7 +359,13 @@ export function replayCustomizationPatches(
   const failedLayouts = new Map<string, EditLocation>();
   const applied: SingleCustomizationPatch[] = [];
   const historical: SingleCustomizationPatch[] = [];
-  const superseded = supersededBoardRevisions(chain);
+  const superseded = {
+    addBoardViewRevision: supersededBoardRevisions(chain),
+    addRecordTemplateBindingRevision: supersededBoardRevisions(
+      chain,
+      'addRecordTemplateBindingRevision',
+    ),
+  };
   for (const [patchIndex, change] of chain.entries()) {
     const origin = origins[patchIndex];
     if (origin?.parent) original = structuredClone(origin.parent);
@@ -442,9 +448,10 @@ export function replayCustomizationPatches(
         // A Board checks its own bindings by stable ID, and only on the last
         // revision of each Board surface (ADR-0086 items 4 and 5).
         const board =
-          patch.kind === 'addBoardViewRevision'
+          patch.kind === 'addBoardViewRevision' ||
+          patch.kind === 'addRecordTemplateBindingRevision'
             ? {
-                check: (superseded.has(patch.revisionId)
+                check: (superseded[patch.kind].has(patch.revisionId)
                   ? 'identity'
                   : origin?.differentBase === false
                     ? 'authoring'

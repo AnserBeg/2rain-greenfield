@@ -240,7 +240,44 @@ function appendOption(target: Base, optionId: string, label: string) {
   };
   type.options.push({ ...type.options[0], optionId, label, orderKey: 90 });
 }
+const collectionBase = applied(extended, [
+  {
+    kind: 'addLineTable',
+    entity: equipment,
+    label: 'Steps',
+    fields: [
+      { label: 'Step', type: 'text' },
+      { label: 'Copies', type: 'number' },
+    ],
+  },
+]);
+const collection = customization
+  .customizationTargets(normalizeApplicationPackage(collectionBase))
+  .templateBindings!.find((o) => o.frame.entityId === equipment)!;
+const copies = collection.columns.find((c) => c.label === 'Copies')!.fieldId;
+const changedCopies = structuredClone(collectionBase);
+declaration(changedCopies, 'fields', 'fieldId', copies).fieldType = {
+  kind: 'textFieldType',
+  schemaVersion: 'v6',
+  maximumLength: 240,
+};
 const cases = {
+  addRecordTemplateBindingRevision: {
+    source: collectionBase,
+    conflict: changedCopies,
+    subject: copies,
+    code: 'INCOMPATIBLE_TYPE',
+    change: customization.draftTemplateBinding([collection], {
+      formId: collection.frame.formId,
+      lifecycle: 'active',
+      required: true,
+      contextId: null,
+      fields: collection.columns.map((c) => ({
+        fieldId: c.fieldId,
+        copyEligible: true,
+      })),
+    }),
+  },
   addDateTimeField: {
     source: extended,
     conflict: applied(extended, [appointment]),

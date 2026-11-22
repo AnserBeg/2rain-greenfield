@@ -1,6 +1,7 @@
 import { AddressBindingSchema, MapPlacementSchema } from './address.js';
 import { DateTimeFieldDeclarationSchema } from './date-time-field.js';
 import { BillingPlansSchema } from './billing.js';
+import { RecordTemplateBindingSchema } from './record-template.js';
 import { SurfaceBoardSchema } from './board.js';
 import { BookingOperationBinding } from './booking.js';
 import { SurfaceLayoutSchema } from './layout.js';
@@ -2215,6 +2216,7 @@ export const SurfaceLauncherSchema = z.strictObject({
 export type SurfaceLauncher = z.infer<typeof SurfaceLauncherSchema>;
 const normalizedV6SurfaceDefinition = normalizedSurfaceDefinition.extend({
   board: SurfaceBoardSchema.optional(),
+  recordTemplateBinding: RecordTemplateBindingSchema.optional(),
   layouts: z.array(SurfaceLayoutSchema).min(1).max(2).optional(),
   composition: SurfaceCompositionSchema.optional(),
   workspace: SurfaceWorkspaceSchema.optional(),

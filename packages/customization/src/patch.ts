@@ -1,3 +1,4 @@
+import { TemplateBindingPatchSchema } from './record-template-binding.js';
 import { BoardViewRevisionSchema } from './board-revision.js';
 import { LayoutRevisionSchema } from './layout-revision.js';
 import {
@@ -230,6 +231,7 @@ const ChangeMemberSchema = z.discriminatedUnion('kind', [
     sectionId: z.string().min(1).max(512),
   }),
   BoardViewRevisionSchema,
+  TemplateBindingPatchSchema,
   addRecordType,
   addField,
   addChoice,
@@ -359,6 +361,7 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'arrangeLayout',
   'addLayoutRevision',
   'addBoardViewRevision',
+  'addRecordTemplateBindingRevision',
   'saveListView',
   'addValidation',
   'addCalculatedDisplayField',

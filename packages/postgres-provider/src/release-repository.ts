@@ -1,3 +1,4 @@
+import { recordTemplateDeclarationProblem } from './record-template-admission.js';
 import {
   BILLING_READER,
   BILLING_INTERVAL_READER,
@@ -773,6 +774,11 @@ function verifyCompiledRelease(
           'The billing plan or reader floor disagrees with the release.',
         );
       const problem =
+        recordTemplateDeclarationProblem(
+          layoutDefinition,
+          payload,
+          reference.requiredRuntimeCapability.minimumVersion,
+        ) ??
         boardDeclarationProblem(
           layoutDefinition,
           payload,

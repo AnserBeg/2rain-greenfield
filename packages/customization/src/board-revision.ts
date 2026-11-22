@@ -552,24 +552,33 @@ export function applyBoardRevision(
   return null;
 }
 
-/** ADR-0086 item 5: binding checks apply to the last revision of each Board. */
+/** A later revision supersedes earlier bindings on the same editor or Board. */
 export function supersededBoardRevisions(
-  chain: readonly (
-    { kind: string; patches?: readonly unknown[] } | Record<string, unknown>
-  )[],
+  chain: readonly { kind: string; patches?: readonly unknown[] }[],
+  kind:
+    | 'addBoardViewRevision'
+    | 'addRecordTemplateBindingRevision' = 'addBoardViewRevision',
 ): Set<string> {
-  const last = new Map<string, string>();
+  const latest = new Map<string, string>();
   const all: string[] = [];
   for (const change of chain) {
     const members = (
-      change.kind === 'changeSet' ? (change.patches as unknown[]) : [change]
-    ) as { kind?: string; surfaceId?: string; revisionId?: string }[];
-    for (const member of members)
-      if (member.kind === 'addBoardViewRevision' && member.revisionId) {
-        last.set(String(member.surfaceId), member.revisionId);
-        all.push(member.revisionId);
-      }
+      change.kind === 'changeSet' ? (change.patches ?? []) : [change]
+    ) as readonly {
+      kind?: string;
+      revisionId?: string;
+      surfaceId?: string;
+      body?: { formId?: string };
+    }[];
+    for (const m of members) {
+      if (m.kind !== kind || !m.revisionId) continue;
+      latest.set(
+        String(kind === 'addBoardViewRevision' ? m.surfaceId : m.body?.formId),
+        m.revisionId,
+      );
+      all.push(m.revisionId);
+    }
   }
-  const latest = new Set(last.values());
-  return new Set(all.filter((id) => !latest.has(id)));
+  const heads = new Set(latest.values());
+  return new Set(all.filter((id) => !heads.has(id)));
 }

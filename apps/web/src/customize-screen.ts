@@ -1,6 +1,11 @@
 import type { AddressInstallation } from '../../../packages/runtime/src/address-gateway.js';
-import { canonicalizeAndHash, layoutDigest } from '@north-star/canonical-model';
 import {
+  canonicalizeAndHash,
+  layoutDigest,
+  type RecordTemplateOffer,
+} from '@north-star/canonical-model';
+import {
+  draftTemplateBinding,
   defaultBoardChoices,
   draftBoardRevision,
   type BoardTarget,
@@ -69,6 +74,7 @@ interface CustomizationStatus {
 }
 interface CustomizationTargets {
   readonly documentTemplateTargets?: readonly DocumentTemplateTarget[];
+  readonly templateBindings?: readonly RecordTemplateOffer[];
   readonly boards?: readonly BoardTarget[];
   readonly layouts?: readonly LayoutTarget[];
   readonly documentTargets?: readonly {
@@ -334,30 +340,37 @@ export async function renderCustomizeScreen(
                     ({ entityId }) => entityId === submission.entity,
                   ),
                 )
-              : submission.kind === 'addBoardViewRevision'
-                ? boardSubmission(
-                    (await loadTargets()).boards ?? [],
+              : submission.kind === 'addRecordTemplateBindingRevision'
+                ? bindingFromForm(
+                    (await loadTargets()).templateBindings ?? [],
                     submission,
                   )
-                : submission.kind === 'addLayoutRevision'
-                  ? layoutSubmission(
-                      (await loadTargets()).layouts ?? [],
+                : submission.kind === 'addBoardViewRevision'
+                  ? boardSubmission(
+                      (await loadTargets()).boards ?? [],
                       submission,
                     )
-                  : patchFromForm(
-                      submission,
-                      submission.kind === 'addValidation'
-                        ? (await loadTargets()).validationTargets?.find(
-                            ({ entityId }) => entityId === submission.entity,
-                          )
-                        : undefined,
-                      submission.kind === 'addCalculatedDisplayField'
-                        ? (await loadTargets()).calculatedDisplayTargets?.find(
-                            ({ recordSurfaceId }) =>
-                              recordSurfaceId === submission.surface,
-                          )
-                        : undefined,
-                    ),
+                  : submission.kind === 'addLayoutRevision'
+                    ? layoutSubmission(
+                        (await loadTargets()).layouts ?? [],
+                        submission,
+                      )
+                    : patchFromForm(
+                        submission,
+                        submission.kind === 'addValidation'
+                          ? (await loadTargets()).validationTargets?.find(
+                              ({ entityId }) => entityId === submission.entity,
+                            )
+                          : undefined,
+                        submission.kind === 'addCalculatedDisplayField'
+                          ? (
+                              await loadTargets()
+                            ).calculatedDisplayTargets?.find(
+                              ({ recordSurfaceId }) =>
+                                recordSurfaceId === submission.surface,
+                            )
+                          : undefined,
+                      ),
             'visualBuilder',
             undefined,
             actor,
@@ -526,6 +539,7 @@ async function overview(
     targets.boards?.length
       ? `<form method="get"><fieldset><legend>Add view</legend><input type="hidden" name="customize" value=""><label>Record type <select name="board">${targets.boards.map((t) => `<option value="${escapeHtml(t.frame.listSurfaceId)}">${escapeHtml(t.listLabel)}</option>`).join('')}</select></label> <button>Add Board view</button></fieldset></form>`
       : '',
+    ...(targets.templateBindings ?? []).map(bindingForm),
     layoutPicker(targets.layouts ?? []),
     arrangePicker(targets),
     savedViewPicker(targets),
@@ -1286,6 +1300,8 @@ function describe(patch: PatchSummary): string {
       return `New line table "${label}"`;
     case 'declareLifecycle':
       return 'New states and actions';
+    case 'addRecordTemplateBindingRevision':
+      return 'Record template binding';
     case 'addBoardViewRevision':
       return 'Board view revision';
     case 'addLayoutRevision':
@@ -1388,6 +1404,41 @@ function page(
 }
 
 /** The offer's own digest: the builder refuses a form drafted against another offer. */
+function bindingForm(offer: RecordTemplateOffer) {
+  const h = escapeHtml;
+  const prior = offer.previous?.body;
+  const contextId = (s: RecordTemplateOffer['contexts'][number]['selector']) =>
+    s.kind === 'choice' ? s.fieldId : s.kind === 'link' ? s.relationId : '';
+  return `<form method="post"><fieldset><legend>Record templates for ${h(offer.label)}</legend><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="addRecordTemplateBindingRevision"><input type="hidden" name="formId" value="${h(offer.frame.formId)}"><input type="hidden" name="source" value="${canonicalizeAndHash(offer).contentHash}"><label>Assign by <select name="contextId">${offer.contexts.map((c) => `<option value="${h(contextId(c.selector))}"${prior && contextId(prior.context) === contextId(c.selector) ? ' selected' : ''}>${h(c.label)}</option>`).join('')}</select></label><label><input type="checkbox" name="required"${prior?.required ? ' checked' : ''}>Require an assignment</label>${offer.columns
+    .map((c) => {
+      const pinned = prior?.columns.find((p) => p.fieldId === c.fieldId);
+      return `<label>${h(c.label)} <select name="field:${h(c.fieldId)}"><option value="">Exclude</option><option value="answer"${pinned && !pinned.copyEligible ? ' selected' : ''}>Answer only</option><option value="copy"${pinned?.copyEligible ? ' selected' : ''}>Allow reviewed defaults</option></select></label>`;
+    })
+    .join(
+      '',
+    )}<button name="lifecycle" value="active">Draft template binding</button>${offer.previous?.status === 'active' ? '<button name="lifecycle" value="retired">Retire template binding</button>' : ''}</fieldset></form>`;
+}
+function bindingFromForm(
+  offers: readonly RecordTemplateOffer[],
+  form: CustomizeScreenSubmission,
+) {
+  const offer = offers.find((o) => o.frame.formId === form.formId);
+  if (!offer || canonicalizeAndHash(offer).contentHash !== form.source)
+    throw new Error('This collection changed. Reopen it in Customize.');
+  const fields = offer.columns.flatMap((c) => {
+    const selected = form['field:' + c.fieldId];
+    return selected === 'answer' || selected === 'copy'
+      ? [{ fieldId: c.fieldId, copyEligible: selected === 'copy' }]
+      : [];
+  });
+  return draftTemplateBinding(offers, {
+    formId: form.formId,
+    lifecycle: form.lifecycle,
+    required: form.required === 'on',
+    contextId: form.contextId || null,
+    fields,
+  });
+}
 function boardOfferDigest(target: BoardTarget) {
   return canonicalizeAndHash({
     frame: target.frame,

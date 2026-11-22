@@ -1,3 +1,7 @@
+import {
+  draftTemplateBinding,
+  TemplateBindingChoicesSchema,
+} from './record-template-binding.js';
 import { defaultBoardChoices, draftBoardRevision } from './board-revision.js';
 import { z } from 'zod';
 import { layoutCommand } from './layout-revision.js';
@@ -138,6 +142,7 @@ const singlePatchSchema = {
     entity: { type: 'string' },
     target: { anyOf: [{ type: 'string' }, dateTimeTarget] },
     ...dateTimeMemberProperties,
+    templateBinding: z.toJSONSchema(TemplateBindingChoicesSchema),
     required: { type: 'boolean' },
     companyOwnership: { enum: ['entityOwned', 'tenantShared'] },
     initial: { type: 'string' },
@@ -410,6 +415,15 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
       (form) =>
         `- ${form.surfaceId} — ${form.label}: ${form.fields.map((field) => `${field.fieldId} "${field.label}"`).join(', ')}`,
     ),
+    ...(targets.templateBindings?.length
+      ? [
+          JSON.stringify({
+            kind: 'addRecordTemplateBindingRevision',
+            templateBinding: z.toJSONSchema(TemplateBindingChoicesSchema),
+          }),
+          JSON.stringify(targets.templateBindings),
+        ]
+      : []),
     '- addBoardViewRevision {kind,surface,label,stageIds,operationIds,factFieldIds}: choose a listed collection, its ordered lifecycle stages, the moves offered between them (by operation ID) and up to three card facts (by field ID). Each choice is recorded by ID.',
     ...(targets.boards ?? []).map(
       (t) =>
@@ -632,6 +646,24 @@ function readToolInput(
             : 'The validation selection is invalid.',
         ],
       };
+    }
+  }
+  if (
+    input &&
+    typeof input === 'object' &&
+    'kind' in input &&
+    input.kind === 'addRecordTemplateBindingRevision'
+  ) {
+    try {
+      return {
+        status: 'parsed',
+        patch: draftTemplateBinding(
+          targets.templateBindings ?? [],
+          'templateBinding' in input ? input.templateBinding : null,
+        ),
+      };
+    } catch (error) {
+      return { status: 'invalid', issues: [(error as Error).message] };
     }
   }
   if (

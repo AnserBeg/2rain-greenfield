@@ -1,3 +1,7 @@
+import {
+  recordTemplateOffers,
+  type RecordTemplateOffer,
+} from '@north-star/canonical-model';
 import type {
   DocumentTemplatePointer,
   DocumentTemplateRevision,
@@ -52,6 +56,7 @@ export interface DocumentTemplateTarget {
 
 export interface CustomizationTargets {
   readonly documentTemplateTargets?: readonly DocumentTemplateTarget[];
+  readonly templateBindings?: readonly RecordTemplateOffer[];
   readonly boards?: readonly BoardTarget[];
   readonly layouts?: readonly LayoutTarget[];
   readonly documentTargets?: readonly {
@@ -682,6 +687,7 @@ export function customizationTargets(definition: {
         }))
         .sort((left, right) => left.label.localeCompare(right.label)),
     }),
+    templateBindings: recordTemplateOffers(definition),
     boards: boardTargets(definition),
     layouts: definition.surfaces.flatMap((s) =>
       (['create', 'edit', 'detail'] as const).flatMap((mode) => {
