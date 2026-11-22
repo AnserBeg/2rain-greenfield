@@ -2,8 +2,9 @@ import { mapCentre } from '@north-star/canonical-model';
 import {
   basemapCsp,
   googleBasemapDocument,
-  mapDisplayOrigins,
+  type mapDisplayOrigins,
 } from './google-basemap.js';
+export { mapDisplayOrigins } from './google-basemap.js';
 import { addressSettings } from './address-settings.js';
 import { offerPlaces } from './address-context.js';
 import { createServer } from 'node:http';
@@ -70,6 +71,7 @@ export interface RequestWorkProbe {
 }
 
 export interface SurfaceRuntimeServerOptions {
+  readonly mapDisplay?: ReturnType<typeof mapDisplayOrigins>;
   /**
    * SPEED-1: a page read (a GET, or a task's step) runs all its reads in one
    * read snapshot, ended by `finishReads` or when the page is assembled; a
@@ -108,10 +110,7 @@ export function createSurfaceRuntimeServer(
 ): Server {
   const documents =
     options.documents && mountDocumentHttp(entry, options.documents);
-  const origins = mapDisplayOrigins(
-    process.env.NORTH_STAR_MAP_APP_ORIGIN,
-    process.env.NORTH_STAR_MAP_DISPLAY_ORIGIN,
-  );
+  const origins = options.mapDisplay;
   return createServer((request, response) => {
     if (origins && request.headers.host === origins.maps.host) {
       if (

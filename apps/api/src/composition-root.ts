@@ -35,6 +35,7 @@ import {
 import {
   assistantCompany,
   createSurfaceRuntimeServer,
+  mapDisplayOrigins,
 } from '@north-star/web/app-server';
 import { COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION } from '@north-star/web/sales-section';
 
@@ -289,6 +290,10 @@ export async function startComposedApplication(
       // Loopback-only dev and test server: each response reports its
       // database work as `Server-Timing` (SPEED-1).
       {
+        mapDisplay: mapDisplayOrigins(
+          process.env.NORTH_STAR_MAP_APP_ORIGIN,
+          process.env.NORTH_STAR_MAP_DISPLAY_ORIGIN,
+        ),
         readSnapshot: (work, snapshotOptions) =>
           runtime.readSnapshot(work, snapshotOptions),
         selectedDemoActor: localDemoActor,
