@@ -3315,6 +3315,8 @@ const PATCH_SELECT = `SELECT patch.compiler_acknowledgement, patch.base_release_
 
 function patchDisplayLabel(patch: CustomizationPatch): string | null {
   if (patch.kind === 'addPopupActionRevision') return patch.label.text;
+  if (patch.kind === 'addPresentationRevision')
+    return patch.toneRules.map((rule) => rule.reason.text).join(', ') || null;
   switch (patch.kind) {
     case 'addField':
       return patch.field.label;

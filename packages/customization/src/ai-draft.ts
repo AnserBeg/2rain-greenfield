@@ -30,6 +30,7 @@ import {
 } from './patch.js';
 import type { CustomizationPatch, UnsupportedCustomization } from './patch.js';
 import { popupCommand, popupOptionId } from './popup-revision.js';
+import { presentationMember } from './presentation-revision.js';
 import { customizationTargets, type CustomizationTargets } from './targets.js';
 import {
   fieldComparisonValidationDraft,
@@ -254,6 +255,28 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
           .map((r) => ({ id: r.revision.reportId, label: r.label })),
       }),
     ),
+    ...(targets.presentation?.length
+      ? [
+          'Lists a colour rule or sizing can present (surface, values its rows read with type and options, columns, current rules):',
+          ...targets.presentation.map((t) =>
+            JSON.stringify({
+              surface: t.surfaceId,
+              label: t.label,
+              values: t.operands.map((o) => ({
+                fieldId: o.fieldId,
+                label: o.label,
+                type: o.type.kind,
+                ...(o.options ? { options: o.options.map((x) => x.label) } : {}),
+              })),
+              columns: t.columns.map((c) => c.fieldId),
+              current: (t.current?.status === 'active'
+                ? t.current.toneRules
+                : []
+              ).map((r) => r.reason.text),
+            }),
+          ),
+        ]
+      : []),
     ...(targets.popupActions?.length
       ? [
           ...targets.popupActions.map((o) =>
@@ -628,6 +651,8 @@ function convertMember(
         ),
       ];
     }
+    case 'addPresentationRevision':
+      return [presentationMember(local().presentation ?? [], input)];
     case 'addPopupActionRevision':
       return [popupCommand(base.popupActions ?? [], req.button)];
     case 'addBoardViewRevision':

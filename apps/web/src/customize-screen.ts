@@ -1338,6 +1338,8 @@ function describe(patch: PatchSummary): string {
       return 'New states and actions';
     case 'addPopupActionRevision':
       return `Record button “${label}”`;
+    case 'addPresentationRevision':
+      return 'List colours and sizing';
     case 'addBoardViewRevision':
       return 'Board view revision';
     case 'addLayoutRevision':

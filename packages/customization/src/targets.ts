@@ -1,3 +1,7 @@
+import {
+  presentationTargets,
+  type PresentationTarget,
+} from './presentation-revision.js';
 import { reportTargets, type ReportTarget } from './report-revision.js';
 import {
   popupOptions,
@@ -56,6 +60,7 @@ export interface DocumentTemplateTarget {
 }
 
 export interface CustomizationTargets {
+  readonly presentation?: readonly PresentationTarget[];
   readonly reports?: readonly ReportTarget[];
   readonly popupActions?: readonly PopupOption[];
   readonly documentTemplateTargets?: readonly DocumentTemplateTarget[];
@@ -703,6 +708,9 @@ export function customizationTargets(definition: {
         }))
         .sort((left, right) => left.label.localeCompare(right.label)),
     }),
+    presentation: presentationTargets(
+      definition as unknown as Parameters<typeof presentationTargets>[0],
+    ),
     popupActions: definition.surfaces.flatMap((s) =>
       popupOptions(definition, s),
     ),

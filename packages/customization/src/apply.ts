@@ -74,7 +74,8 @@ export type CustomizationRefusalCode =
   | 'CUSTOMIZE_BOARD_CONFLICT'
   | 'CUSTOMIZE_REPORT_CONFLICT'
   | 'CUSTOMIZE_LAYOUT_CONFLICT'
-  | 'CUSTOMIZE_POPUP_CONFLICT';
+  | 'CUSTOMIZE_POPUP_CONFLICT'
+  | 'CUSTOMIZE_PRESENTATION_CONFLICT';
 
 export interface CustomizationRefusal {
   readonly code: CustomizationRefusalCode;
@@ -292,6 +293,43 @@ export function applyOne(
         reportIdentityOnly,
       );
       return problem ? refusal('CUSTOMIZE_REPORT_CONFLICT', problem) : null;
+    }
+    case 'addPresentationRevision': {
+      // UI-CUSTOM-1: one current revision per surface, edited and retired by
+      // its predecessor; normalization compiles it (an active one only).
+      const surface = list(authored, 'surfaces').find(
+        (s) => s.surfaceId === patch.surface,
+      );
+      const fail = (message: string) =>
+        refusal('CUSTOMIZE_PRESENTATION_CONFLICT', message);
+      if (!surface || surface.archetype !== 'list' || !surface.list)
+        return fail('Choose a list to present.');
+      const { kind, ...revision } = patch;
+      const prior = surface.presentation as
+        | { revisionId: string; status: string }
+        | undefined;
+      if (
+        (prior?.revisionId ?? null) !== patch.predecessor ||
+        prior?.status === 'retired' ||
+        (!prior && patch.status === 'retired') ||
+        previous.some(
+          (p) => p.kind === kind && p.revisionId === patch.revisionId,
+        )
+      )
+        return fail(
+          'The presentation revision is stale or its ID is already in use.',
+        );
+      surface.presentation = revision;
+      try {
+        normalizeApplicationPackage(authored);
+      } catch (error) {
+        return fail(
+          error instanceof CanonicalModelError
+            ? error.diagnostics.map((d) => d.rule).join('. ')
+            : String(error),
+        );
+      }
+      return null;
     }
     case 'addPopupActionRevision': {
       if (patch.target.kind === 'workflowStart')

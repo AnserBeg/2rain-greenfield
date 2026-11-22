@@ -244,6 +244,29 @@ button:disabled{opacity:.55;cursor:not-allowed}
 td[data-zero]{color:var(--faint)}
 .data-table-wrap td .status-pill[data-status-role=success]{height:auto;padding:0;border:0;background:transparent;color:var(--muted);font-weight:400}
 .data-table-wrap td .status-pill[data-status-role=success]::before{content:none}
+/* UI-CUSTOM-1: a declared tone always shows colour + dot + word, success too.
+   A whole-row tone is a tinted ground plus a leading marker; its word sits in
+   the row's title cell. Sizing is named widths and wrap only, never pixels
+   chosen by a company, and the compact projection drops it. */
+.data-table-wrap td .status-pill[data-tone-rule][data-status-role=success]{height:20px;padding:0 8px;background:var(--status-success-ground);color:var(--status-success-ink);font-weight:500}
+.data-table-wrap td .status-pill[data-tone-rule][data-status-role=success]::before{content:"";width:4px;height:8px;border:solid currentColor;border-width:0 1.7px 1.7px 0;border-radius:0;transform:translate(1px,-1px) rotate(45deg);margin-right:1px}
+.data-table-wrap tr[data-row-tone=success] td{background:var(--status-success-ground)}
+.data-table-wrap tr[data-row-tone=attention] td{background:var(--status-attention-ground)}
+.data-table-wrap tr[data-row-tone=blocked] td{background:var(--status-blocked-ground)}
+.data-table-wrap tr[data-row-tone=inProgress] td{background:var(--status-inprogress-ground)}
+.data-table-wrap tr[data-row-tone] td:first-child{box-shadow:inset 3px 0 0 var(--rule-2)}
+.data-table-wrap tr[data-row-tone=success] td:first-child{box-shadow:inset 3px 0 0 var(--status-success-ink)}
+.data-table-wrap tr[data-row-tone=attention] td:first-child{box-shadow:inset 3px 0 0 var(--status-attention-ink)}
+.data-table-wrap tr[data-row-tone=blocked] td:first-child{box-shadow:inset 3px 0 0 var(--status-blocked-ink)}
+.data-table-wrap tr[data-row-tone=inProgress] td:first-child{box-shadow:inset 3px 0 0 var(--status-inprogress-ink)}
+.data-table-wrap [data-column-width=narrow]{width:9ch}
+.data-table-wrap [data-column-width=wide]{min-width:28ch}
+.data-table-wrap [data-column-width=auto]{width:auto}
+.data-table-wrap td[data-column-overflow=wrap]{white-space:normal;overflow-wrap:anywhere}
+.data-table-wrap td[data-column-overflow=truncate]{max-width:24ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.data-table-wrap[data-density=comfortable]{--row-y:12px}
+.data-table-wrap[data-density=compact]{--row-y:8px}
+.list-tone-note{margin:8px 0 0;font-size:12px}
 [data-declared-list] td .record-link{font-family:var(--f-mono);font-size:12px;font-weight:400}
 .list-controls{flex-wrap:nowrap;align-items:center}
 .list-controls__search>label>span,.list-controls .form-field:has(>select[name=sort],>select[name=dir])>label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
@@ -757,6 +780,7 @@ main{padding:14px max(16px,env(safe-area-inset-left,0px)) 40px}
 
 /* ---------- 800px and below: the compact projection ---------- */
 @container ledger (max-width:800px){
+.data-table-wrap tr[data-compact-card=true] td[data-column-width],.data-table-wrap tr[data-compact-card=true] td[data-column-overflow]{width:auto;min-width:0;max-width:none;white-space:normal}
 /* A record's title keeps the gutter; its badge sits beside it or just
    under it, never alone across the page (round 4). */
 .surface-heading--slot:has(.eyebrow){flex-direction:row;flex-wrap:wrap;align-items:flex-end;justify-content:flex-start;gap:8px}

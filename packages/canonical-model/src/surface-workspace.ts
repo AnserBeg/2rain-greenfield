@@ -1,4 +1,5 @@
 import { compiledPopups } from './popup-actions.js';
+import { compilePresentation } from './surface-presentation.js';
 import { boardBindingConflicts, boardSelfProblem } from './board.js';
 import { SURFACE_SLOTS } from './constants.js';
 import { baseLayout, layoutProblem } from './layout.js';
@@ -36,6 +37,16 @@ export function validateSurfaceWorkspaces(
     ]);
   };
   for (const surface of model.surfaces) {
+    if ('presentation' in surface && surface.presentation) {
+      try {
+        compilePresentation(
+          model as unknown as Parameters<typeof compilePresentation>[0],
+          surface as unknown as Record<string, unknown>,
+        );
+      } catch (error) {
+        fail(surface.surfaceId, String(error));
+      }
+    }
     if ('popupActions' in surface && surface.popupActions) {
       try {
         compiledPopups(model, surface);

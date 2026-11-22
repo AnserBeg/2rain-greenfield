@@ -280,7 +280,34 @@ const missingReportOperand = structuredClone(extended);
 missingReportOperand.fields = (missingReportOperand.fields as Base[]).filter(
   (field) => field.fieldId !== reportOperand,
 );
+const equipmentList = id('surface.custom_equipment_list');
+const equipmentPresentation = customization.presentationMember(
+  customization
+    .customizationTargets(normalizeApplicationPackage(extended))
+    .presentation!.filter((t) => t.surfaceId === equipmentList),
+  {
+    kind: 'addPresentationRevision',
+    surface: equipmentList,
+    tones: [
+      {
+        target: 'row',
+        fieldId: reportOperand,
+        operator: 'equal',
+        compareTo: { value: 'Held' },
+        tone: 'blocked',
+        reason: 'On hold',
+      },
+    ],
+  },
+);
 const cases = {
+  addPresentationRevision: {
+    source: extended,
+    conflict: missingReportOperand,
+    change: equipmentPresentation,
+    subject: reportOperand,
+    code: 'RETIRED_TARGET',
+  },
   addReportRevision: {
     source: extended,
     conflict: missingReportOperand,

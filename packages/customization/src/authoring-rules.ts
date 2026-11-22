@@ -43,6 +43,9 @@ export const AUTHORING_RULES: Readonly<
   CUSTOMIZE_REPORT_CONFLICT: [
     'Use the field IDs and measures offered for the selected report source. Edit or retire only a listed active report, on its original source.',
   ],
+  CUSTOMIZE_PRESENTATION_CONFLICT: [
+    'A colour rule compares values the list already shows, of the same type, and picks success, attention, blocked, inProgress or neutral with a word. Column sizes are narrow, normal, wide or auto. Editing or retiring needs the current revision.',
+  ],
   CUSTOMIZE_POPUP_CONFLICT: [
     'Bind a button to an offered Task using its listed inputs. Editing or retiring a button requires its current revision.',
   ],

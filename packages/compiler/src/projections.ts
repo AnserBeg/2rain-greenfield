@@ -9,6 +9,8 @@ import {
   POPUP_READER,
   compiledPopups,
 } from '../../canonical-model/src/popup-actions.js';
+import { compilePresentation } from '../../canonical-model/src/surface-presentation.js';
+import { PRESENTATION_READER } from '../../canonical-model/src/surface-presentation-schema.js';
 import {
   DATE_TIME_FIELD_READER,
   type DateTimeBinding,
@@ -1193,6 +1195,11 @@ function surfaceManifestPayload(
       ),
   );
   const surfaceFloor = Math.max(
+    original.surfaces.some(
+      (surface) => 'presentation' in surface && surface.presentation,
+    )
+      ? PRESENTATION_READER
+      : 0,
     original.entities.some(
       (entity) => 'reportSource' in entity && entity.reportSource,
     )
@@ -1309,6 +1316,16 @@ function surfaceManifestPayload(
           }),
           ...(declared && 'popupActions' in declared && declared.popupActions
             ? { popupActions: compiledPopups(original, declared) }
+            : {}),
+          ...(declared && 'presentation' in declared && declared.presentation
+            ? {
+                presentation: compilePresentation(
+                  original as unknown as Parameters<
+                    typeof compilePresentation
+                  >[0],
+                  declared as unknown as Record<string, unknown>,
+                ),
+              }
             : {}),
           // Labels and roles render from this release, beside the digested member.
           ...(declared && 'report' in declared && declared.report

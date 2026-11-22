@@ -454,6 +454,34 @@ export function renderReleaseDiff(input: {
     if (!before || !after) continue;
     const beforeMetrics = ((before.launcher as Json | undefined)?.metrics ??
       []) as Json[];
+    const presented = after.presentation as
+      | {
+          revisionId: string;
+          status: string;
+          toneRules: { tone: string; reason: { text: string }; target: { kind: string } }[];
+          sizing: { kind: string; fieldId?: string; width?: string }[];
+          density: string | null;
+        }
+      | undefined;
+    if (
+      presented &&
+      (before.presentation as { revisionId?: string } | undefined)
+        ?.revisionId !== presented.revisionId
+    ) {
+      if (presented.status === 'retired')
+        lines.push(`On ${String(after.label)}, retire the colour rules and sizing.`);
+      else {
+        for (const rule of presented.toneRules)
+          lines.push(
+            `On ${String(after.label)}, show "${rule.reason.text}" as ${rule.tone} on the ${rule.target.kind === 'listRow' ? 'whole row' : 'cell'} when its condition holds.`,
+          );
+        for (const entry of presented.sizing)
+          if (entry.kind === 'listColumn')
+            lines.push(`On ${String(after.label)}, make column ${String(entry.fieldId)} ${String(entry.width)}.`);
+        if (presented.density)
+          lines.push(`On ${String(after.label)}, use ${presented.density} density.`);
+      }
+    }
     for (const revision of (after.popupActions ?? []) as PopupRevision[]) {
       const prior = ((before.popupActions ?? []) as PopupRevision[]).find(
         (r) => r.actionId === revision.actionId,

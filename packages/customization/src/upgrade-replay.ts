@@ -1,3 +1,4 @@
+import { presentationReplayProblem } from './presentation-revision.js';
 import { supersededReports } from './report-revision.js';
 import {
   boundPopupOption,
@@ -278,6 +279,21 @@ function applyRefusal(
       expected: patch.surface,
       observed: null,
     };
+  if (patch.kind === 'addPresentationRevision') {
+    const problem = presentationReplayProblem(
+      normalizeApplicationPackage(target) as unknown as Parameters<
+        typeof presentationReplayProblem
+      >[0],
+      patch,
+    );
+    if (problem)
+      return {
+        code: 'RETIRED_TARGET',
+        subject: problem.subject,
+        expected: patch.surface,
+        observed: problem.message,
+      };
+  }
   if (patch.kind === 'addPopupActionRevision') {
     const model = normalizeApplicationPackage(
       target,
