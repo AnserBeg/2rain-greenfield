@@ -1,3 +1,7 @@
+import {
+  popupCommand,
+  popupOptionId,
+} from '../../packages/customization/src/popup-revision.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
@@ -232,6 +236,13 @@ const depotMap = customization
   .customizationTargets(normalizeApplicationPackage(depotBase))
   .maps!.find((t) => t.frame.entityId === equipment)!;
 
+const equipmentPopup = customization
+  .customizationTargets(normalizeApplicationPackage(extended))
+  .popupActions!.find(
+    (o) =>
+      o.surface === id('surface.custom_equipment_detail') &&
+      o.target.kind === 'update',
+  )!;
 const appointment = {
   kind: 'addDateTimeField',
   schemaVersion: 'northstar.date-time-field/v1',
@@ -251,6 +262,17 @@ function appendOption(target: Base, optionId: string, label: string) {
   type.options.push({ ...type.options[0], optionId, label, orderKey: 90 });
 }
 const cases = {
+  addPopupActionRevision: {
+    source: extended,
+    conflict: base,
+    change: popupCommand([equipmentPopup], {
+      option: popupOptionId(equipmentPopup),
+      label: 'Edit equipment name',
+      inputs: [{ binding: id('field.custom_equipment_name'), source: 'entry' }],
+    }),
+    code: 'RETIRED_TARGET',
+    subject: equipmentPopup.surface,
+  },
   addDateTimeField: {
     source: extended,
     conflict: applied(extended, [appointment]),

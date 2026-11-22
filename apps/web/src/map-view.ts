@@ -239,7 +239,7 @@ export async function readMapSlots(
         '</a> ' +
         h(b.group ? routeName(s.group) : '') +
         ' · ' +
-        h(s.source) +
+        h(s.provenance) +
         (s.ordinal === null ? ' · Order unknown' : '') +
         '</li>',
     );

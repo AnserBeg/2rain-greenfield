@@ -827,7 +827,14 @@ How to apply: Require a scoped human decision for a fence advance and its replay
 
 Date: 2026-11-20
 Why: A backdated successor reduced an eight-day entitlement below the amount already allocated after four days.
-How to apply: At each occurrence opening, select among the terms and assignments published by then. Save the inputs served to the caller and replay them after publishing a successor. [BILLING-1](docs/execution/packets/BILLING-1.md)
+How to apply: Evaluate effectiveness at opening and pin the exact visible terms and assignment at first allocation. Save the allocating quote inputs and replay them after publishing a successor. [BILLING-1](docs/execution/packets/BILLING-1.md)
+
+## Compare receipt xmin using the native transaction ID cast
+
+Date: 2026-11-20
+Why: The decimal text of an xid8 includes the transaction epoch and can exceed the xid input range.
+How to apply: Compare receipt xmin with `pg_current_xact_id()::xid` when proving both writes occurred in the same transaction.
+
 
 ## Check company-list coverage before stating a tenant-wide total
 
@@ -846,3 +853,9 @@ How to apply: Claim each supported mode and compare its effective privileges aga
 Date: 2026-11-20
 Why: A blind recount's ordinary line queries exposed stored supervisor figures after Return to counting.
 How to apply: Clear stale derived figures in the state transition. Exercise ordinary and derived queries with an actor allowed to enter data and denied access to the source figures. [STOCK-COUNTS-fixes](docs/execution/packets/STOCK-COUNTS-fixes.md)
+
+## Load historical release fixtures with their own policy files
+
+Date: 2026-11-21
+Why: The BILLING-1 declaration fixture paired its archived application with current stock-count evaluator bindings. Compilation failed before the archived reader could test the capability refusal.
+How to apply: Load the authored application, compiled lineage, and policy files from the preceding reader's revision. Verify that reader's successful stored query and its exact refusal of the new rung. [BILLING-1-fix2](docs/execution/packets/BILLING-1-fix2.md)

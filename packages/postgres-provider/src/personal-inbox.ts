@@ -3,14 +3,33 @@ import type { TrustedRequestContext } from '@north-star/runtime';
 import { withTrustedRequestTransaction } from './request-context.js';
 import {
   DISCUSSION_INBOX_CHANNEL,
+  reconcileNextDiscussionNotice,
   type DiscussionInboxPort,
   type DiscussionMessageRef,
   type DiscussionNoticeReason,
 } from '../../runtime/src/discussion-inbox.js';
 import {
+  workerScopes,
   withWorkflowTransaction,
   type WorkflowScope,
 } from './workflow-consumer.js';
+
+export function registerDiscussionInboxWork(pool: Pool) {
+  return {
+    async poll() {
+      const failures: unknown[] = [];
+      for (const scope of await workerScopes(pool)) {
+        try {
+          await reconcileNextDiscussionNotice(discussionInboxPort(pool, scope));
+        } catch (error) {
+          failures.push(error);
+        }
+      }
+      if (failures.length)
+        throw new AggregateError(failures, 'Discussion inbox poll failed');
+    },
+  };
+}
 
 /** The scheduler supplies the environment. A committed claim supplies the
  * company and message. None of the three phases shares a connection lease. */

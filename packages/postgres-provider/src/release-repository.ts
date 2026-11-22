@@ -4,9 +4,15 @@ import {
   mapBindingsProblem,
 } from './map-admission.js';
 import {
+  BILLING_ALLOCATION_READER,
+  BILLING_CALCULATION_VERSION,
   BILLING_READER,
   BILLING_INTERVAL_READER,
 } from '../../canonical-model/src/billing.js';
+import {
+  popupDeclarationProblem,
+  popupBindingsProblem,
+} from './popup-admission.js';
 import {
   boardBindingsProblem,
   boardDeclarationProblem,
@@ -603,6 +609,11 @@ function verifyCompiledRelease(
   );
   const needsLayout =
     hasMapDeclaration(layoutDefinition) ||
+    (isRecord(layoutDefinition) &&
+      Array.isArray(layoutDefinition.surfaces) &&
+      layoutDefinition.surfaces.some(
+        (s) => isRecord(s) && Object.hasOwn(s, 'popupActions'),
+      )) ||
     hasBoardDeclaration(layoutDefinition) ||
     declaredLayouts(isRecord(layoutDefinition) ? layoutDefinition.surfaces : [])
       .length > 0;
@@ -612,13 +623,11 @@ function verifyCompiledRelease(
   const billingPlans = isRecord(layoutDefinition)
     ? layoutDefinition.billingPlans
     : undefined;
-  const billingFloor =
+  const hasAgreedBillingInterval =
     Array.isArray(billingPlans) &&
     billingPlans.some(
       (p) => isRecord(p) && isRecord(p.bindings) && p.bindings.agreedInterval,
-    )
-      ? BILLING_INTERVAL_READER
-      : BILLING_READER;
+    );
   if (billingPlans && !surfaceReference)
     throw integrity(
       'BILLING_PLAN_MISMATCH',
@@ -764,15 +773,40 @@ function verifyCompiledRelease(
         projectionPayloadBytes[0]!,
         'PROJECTION_CHUNK_NOT_CANONICAL',
       );
+      const popupProblem = popupDeclarationProblem(
+        layoutDefinition,
+        payload,
+        reference.requiredRuntimeCapability.minimumVersion,
+      );
+      if (popupProblem)
+        throw integrity('POPUP_PROJECTION_CONTRACT_MISMATCH', popupProblem);
+      const hasBillingCalculation = Object.hasOwn(
+        payload,
+        'billingCalculationVersion',
+      );
+      const surfaceFloor = reference.requiredRuntimeCapability.minimumVersion;
+      const billingFloor = hasBillingCalculation
+        ? BILLING_ALLOCATION_READER
+        : hasAgreedBillingInterval
+          ? BILLING_INTERVAL_READER
+          : BILLING_READER;
       if (
         canonicalize(payload.billingPlans ?? null) !==
           canonicalize(billingPlans ?? null) ||
-        (billingPlans &&
-          reference.requiredRuntimeCapability.minimumVersion < billingFloor) ||
+        (hasBillingCalculation &&
+          (!hasAgreedBillingInterval ||
+            payload.billingCalculationVersion !==
+              BILLING_CALCULATION_VERSION)) ||
+        (hasAgreedBillingInterval &&
+          surfaceFloor >= BILLING_ALLOCATION_READER &&
+          !hasBillingCalculation) ||
+        (billingPlans && surfaceFloor < billingFloor) ||
         (!billingPlans &&
-          [BILLING_READER, BILLING_INTERVAL_READER].includes(
-            reference.requiredRuntimeCapability.minimumVersion,
-          ))
+          [
+            BILLING_READER,
+            BILLING_INTERVAL_READER,
+            BILLING_ALLOCATION_READER,
+          ].includes(surfaceFloor))
       )
         throw integrity(
           'BILLING_PLAN_MISMATCH',
@@ -839,6 +873,14 @@ function verifyCompiledRelease(
         ? decodeCanonicalObject(bytes, 'PROJECTION_CHUNK_NOT_CANONICAL')
         : null;
     };
+    const popupProblem = popupBindingsProblem(
+      payload(PROJECTION_FAMILY_IDS.surfaceManifest),
+      surfaceReference!.requiredRuntimeCapability.minimumVersion,
+      payload(PROJECTION_FAMILY_IDS.operationCatalog),
+      payload(PROJECTION_FAMILY_IDS.queryCatalog),
+    );
+    if (popupProblem)
+      throw integrity('POPUP_PROJECTION_CONTRACT_MISMATCH', popupProblem);
     const problem =
       mapBindingsProblem(
         payload(PROJECTION_FAMILY_IDS.surfaceManifest),

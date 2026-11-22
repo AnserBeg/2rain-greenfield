@@ -5,7 +5,7 @@ import {
 import ts from 'typescript';
 
 import { MAXIMUM_WORKFLOW_SOURCE_BYTES } from './workflow-isolate.js';
-import type { WorkflowSdk } from './workflow-sdk.js';
+import { WORKFLOW_CALL_ENVELOPES, type WorkflowSdk } from './workflow-sdk.js';
 
 export interface CompiledWorkflow {
   readonly executable: string;
@@ -48,14 +48,39 @@ const forbiddenNames = new Set([
   'random',
 ]);
 
+/** The function a workflow body is the inside of. */
+export const WORKFLOW_BODY_SIGNATURE =
+  'function run(sdk: WorkflowSdk, event: ReceiptEvent): void' as const;
+
+/**
+ * The rules this compiler and its lint enforce, stated to the AI drafter
+ * (AI-BUILD-1 slice 2), generated from the same signature and ban list.
+ */
+export function workflowAuthoringRules(): readonly string[] {
+  return [
+    `body is ONLY the statements inside \`${WORKFLOW_BODY_SIGNATURE} { ... }\`: no function wrapper, no export or import, no async or await, and no return value (it returns void). Use sdk and event directly.`,
+    `The body must not use these names: ${[...forbiddenNames].join(', ')}. Use sdk.now() for the time.`,
+    'The body type-checks under strict TypeScript against the SDK declarations below; fixtures replay the body twice and must list exactly the calls it makes, in order, with exactly the inputs it passes.',
+    `Each fixture effect's call has exactly these keys: ${Object.entries(
+      WORKFLOW_CALL_ENVELOPES,
+    )
+      .map(
+        ([kind, keys]) =>
+          `${kind} {${keys.map((key) => (key === 'kind' ? `kind: "${kind}"` : key)).join(', ')}}`,
+      )
+      .join(
+        '; ',
+      )}. A requestApproval call's operationId and input are exactly the operation ID and input the body passes to sdk.requestApproval (never id); once approved, the body calls that operation itself with the same input, listed as its own operation call.`,
+  ];
+}
+
 export function compileWorkflowBody(body: string, sdk: WorkflowSdk) {
   if (Buffer.byteLength(body) > MAXIMUM_WORKFLOW_SOURCE_BYTES) {
     throw new Error('Workflow source exceeds the bundle limit');
   }
   const fileName = '/workflow.ts';
   const sdkFileName = '/workflow-sdk.d.ts';
-  const prefix =
-    'function run(sdk: WorkflowSdk, event: ReceiptEvent): void {\n';
+  const prefix = `${WORKFLOW_BODY_SIGNATURE} {\n`;
   const source = `${prefix}${body}\n}`;
   const options: ts.CompilerOptions = {
     target: ts.ScriptTarget.ES2022,
@@ -86,24 +111,22 @@ export function compileWorkflowBody(body: string, sdk: WorkflowSdk) {
   ) {
     throw new Error('Workflow reference directives are forbidden');
   }
-  const scanner = ts.createScanner(
-    ts.ScriptTarget.ES2022,
-    false,
-    ts.LanguageVariant.Standard,
-    body,
-  );
-  for (
-    let token = scanner.scan();
-    token !== ts.SyntaxKind.EndOfFileToken;
-    token = scanner.scan()
-  ) {
-    if (
-      (token === ts.SyntaxKind.SingleLineCommentTrivia ||
-        token === ts.SyntaxKind.MultiLineCommentTrivia) &&
-      /@ts-(?:ignore|nocheck|expect-error)\b/u.test(scanner.getTokenText())
-    )
-      throw new Error('Workflow compiler suppression is forbidden');
+  // The parser rescans template tails and regular expressions in context.
+  // Only inspect the trivia before its tokens, never the text of a literal.
+  function checkTrivia(node: ts.Node): void {
+    if (ts.isToken(node)) {
+      if (
+        /@ts-(?:ignore|nocheck|expect-error)\b/u.test(
+          source.slice(node.pos, node.getStart(file)),
+        )
+      )
+        throw new Error('Workflow compiler suppression is forbidden');
+      return;
+    }
+    for (const child of node.getChildren(file)) checkTrivia(child);
   }
+  checkTrivia(file);
+  lintWorkflowBody(declaration.body, file, sdk.version);
 
   const host = ts.createCompilerHost(options);
   const defaultLibPath = host.getDefaultLibLocation!();
@@ -142,17 +165,6 @@ export function compileWorkflowBody(body: string, sdk: WorkflowSdk) {
 
   const program = ts.createProgram([fileName, sdkFileName], options, host);
   const diagnostics = ts.getPreEmitDiagnostics(program);
-  if (
-    sdk.version === WORKFLOW_SDK_VERSION &&
-    diagnostics.some(
-      (d) =>
-        d.code === 2339 &&
-        ts.flattenDiagnosticMessageText(d.messageText, '\n') ===
-          "Property 'waitForEvent' does not exist on type 'WorkflowSdk'.",
-    )
-  )
-    throw new RemovedWorkflowAction();
-  lintWorkflowBody(declaration.body, file);
   if (diagnostics.length) {
     throw new Error(
       ts
@@ -282,7 +294,23 @@ function workflowSites(
   return sites;
 }
 
-function lintWorkflowBody(node: ts.Node, file: ts.SourceFile): void {
+function lintWorkflowBody(
+  node: ts.Node,
+  file: ts.SourceFile,
+  version: WorkflowSdk['version'],
+): void {
+  if (
+    isSdkAccess(node) &&
+    node.name.text === 'waitForEvent' &&
+    version === WORKFLOW_SDK_VERSION
+  )
+    throw new RemovedWorkflowAction();
+  if (
+    ts.isCallExpression(node) &&
+    isSdkAccess(node.expression) &&
+    node.arguments.some(ts.isSpreadElement)
+  )
+    throw new Error('Workflow SDK calls cannot use spread arguments');
   if (
     (ts.isIdentifier(node) &&
       node.text === 'sdk' &&
@@ -321,5 +349,5 @@ function lintWorkflowBody(node: ts.Node, file: ts.SourceFile): void {
       `Workflow uses forbidden syntax: ${node.getText(file).slice(0, 80)}`,
     );
   }
-  ts.forEachChild(node, (child) => lintWorkflowBody(child, file));
+  ts.forEachChild(node, (child) => lintWorkflowBody(child, file, version));
 }

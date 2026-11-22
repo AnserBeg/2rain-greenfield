@@ -1,3 +1,4 @@
+import { POPUP_READER } from '../../packages/canonical-model/src/popup-actions.js';
 import { DOCUMENT_TEMPLATES_SURFACE_FLOOR } from '../../packages/canonical-model/src/documents.js';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
@@ -9,7 +10,10 @@ import test from 'node:test';
 import { promisify } from 'node:util';
 
 import pg from 'pg';
-import { BILLING_INTERVAL_READER } from '../../packages/canonical-model/src/billing.js';
+import {
+  BILLING_ALLOCATION_READER,
+  BILLING_INTERVAL_READER,
+} from '../../packages/canonical-model/src/billing.js';
 import {
   MAP_VIEW_READER,
   VIEWPORT_READER,
@@ -351,6 +355,8 @@ test('the capability comparison binds the family to its capability, then compare
     BOARD_READER,
     DOCUMENT_TEMPLATES_SURFACE_FLOOR,
     DATE_TIME_FIELD_READER,
+    POPUP_READER,
+    BILLING_ALLOCATION_READER,
     VIEWPORT_READER,
     MAP_VIEW_READER,
   ];

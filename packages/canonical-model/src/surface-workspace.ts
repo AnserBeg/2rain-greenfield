@@ -1,4 +1,5 @@
 import { mapBindingConflicts, mapDigest } from './map-view.js';
+import { compiledPopups } from './popup-actions.js';
 import { boardBindingConflicts, boardSelfProblem } from './board.js';
 import { SURFACE_SLOTS } from './constants.js';
 import { baseLayout, layoutProblem } from './layout.js';
@@ -60,6 +61,13 @@ export function validateSurfaceWorkspaces(
       if (surface.lifecycle !== 'retired') {
         const problem = mapBindingConflicts(model, map.body)[0];
         if (problem) fail(problem.subject, 'Map binding: ' + problem.code);
+      }
+    }
+    if ('popupActions' in surface && surface.popupActions) {
+      try {
+        compiledPopups(model, surface);
+      } catch (error) {
+        fail(surface.surfaceId, String(error));
       }
     }
     const board = 'board' in surface ? surface.board : undefined;

@@ -8,8 +8,8 @@ import {
 import { canonicalizeAndHash } from './canonicalize.js';
 
 // Provisional against main. Both capabilities are assigned again at integration.
-export const VIEWPORT_READER = 40;
-export const MAP_VIEW_READER = 41;
+export const VIEWPORT_READER = 42;
+export const MAP_VIEW_READER = 43;
 export const VIEWPORT_CONTRACT = 'map.viewport/v1' as const;
 const id = z.string().min(5).max(180);
 const field = z.strictObject({ fieldId: id, fieldType: z.string().min(1) });

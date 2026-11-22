@@ -31,6 +31,8 @@ import {
   draftMapRevision,
   draftPatchFromRequest,
   draftingSystemPrompt,
+  describeDrafterKind,
+  DRAFTING_TOOL,
   DRAFT_CUSTOMIZATION_TOOL,
   MapDraftSchema,
 } from '../../packages/customization/src/index.js';
@@ -143,9 +145,17 @@ test('Map choices survive label changes, unrelated fields and list arrangements 
 });
 test('drafter advertises the Map schema and emits the same selected contracts as Customize', async () => {
   const { targets, target, choice } = offered();
+  // The tool describes the member from MapDraftSchema itself (rule 12), and
+  // the prompt lists the collection's choices by ID.
+  const description = describeDrafterKind('addMapViewRevision');
+  assert.ok(DRAFTING_TOOL.description.includes(description));
+  for (const key of Object.keys(MapDraftSchema.shape).filter(
+    (key) => key !== 'kind',
+  ))
+    assert.match(description, new RegExp(`\\b${key}\\b`, 'u'), key);
   assert.ok(
     draftingSystemPrompt(targets).includes(
-      JSON.stringify(MapDraftSchema.toJSONSchema()),
+      JSON.stringify(target.frame.listSurfaceId),
     ),
   );
   for (const direction of ['asc', 'desc'] as const) {

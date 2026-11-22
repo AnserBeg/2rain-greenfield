@@ -136,7 +136,7 @@ export interface SemanticQueryResultEnvelope {
       group: string | null;
       ordinal: number | null;
       point: { latitude: number; longitude: number } | null;
-      source: string;
+      provenance: string;
     }[];
   };
   readonly boardCoverage?: {

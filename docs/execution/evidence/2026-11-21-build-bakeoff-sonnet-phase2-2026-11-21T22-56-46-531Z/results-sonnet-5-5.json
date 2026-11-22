@@ -1,0 +1,221 @@
+{
+  "candidate": {
+    "name": "sonnet-5-5",
+    "provider": "anthropic",
+    "modelId": "claude-sonnet-5-5",
+    "effort": "medium",
+    "prices": {
+      "input": 2,
+      "output": 10,
+      "cacheRead": 0.2,
+      "cacheWrite": 2.5
+    }
+  },
+  "spend": 1.0099662,
+  "results": [
+    {
+      "id": "M03",
+      "split": "dev",
+      "category": "module",
+      "expected": "module",
+      "status": "drafted",
+      "modelCalls": 1,
+      "drafted": true,
+      "approved": true,
+      "activated": true,
+      "firstTry": true,
+      "afterRepair": true,
+      "repairTurns": 0,
+      "e2e": true,
+      "behaviour": true,
+      "reasons": [],
+      "kinds": [
+        "changeSet",
+        "addRecordType",
+        "declareLifecycle"
+      ],
+      "modelMs": 3229,
+      "wallMs": 442029,
+      "usd": 0.1023105,
+      "tokens": {
+        "input": 4,
+        "output": 385,
+        "cacheRead": 0,
+        "cacheWrite": 39381
+      },
+      "candidate": "sonnet-5-5",
+      "type": "whole module"
+    },
+    {
+      "id": "M04",
+      "split": "dev",
+      "category": "module",
+      "expected": "module",
+      "status": "drafted",
+      "modelCalls": 1,
+      "drafted": true,
+      "approved": true,
+      "activated": true,
+      "firstTry": true,
+      "afterRepair": true,
+      "repairTurns": 0,
+      "e2e": true,
+      "behaviour": true,
+      "reasons": [],
+      "kinds": [
+        "changeSet",
+        "addRecordType",
+        "addLink",
+        "declareLifecycle"
+      ],
+      "modelMs": 7318,
+      "wallMs": 165424,
+      "usd": 0.017250900000000003,
+      "tokens": {
+        "input": 4,
+        "output": 905,
+        "cacheRead": 39252,
+        "cacheWrite": 137
+      },
+      "candidate": "sonnet-5-5",
+      "type": "whole module"
+    },
+    {
+      "id": "M07",
+      "split": "dev",
+      "category": "multi-step",
+      "expected": "module",
+      "status": "drafted",
+      "modelCalls": 1,
+      "drafted": true,
+      "approved": true,
+      "activated": true,
+      "firstTry": true,
+      "afterRepair": true,
+      "repairTurns": 0,
+      "e2e": true,
+      "behaviour": true,
+      "reasons": [],
+      "kinds": [
+        "changeSet",
+        "addRecordType",
+        "addLineTable",
+        "declareLifecycle",
+        "addBoardViewRevision"
+      ],
+      "modelMs": 3134,
+      "wallMs": 172096,
+      "usd": 0.012860900000000001,
+      "tokens": {
+        "input": 4,
+        "output": 477,
+        "cacheRead": 39252,
+        "cacheWrite": 93
+      },
+      "candidate": "sonnet-5-5",
+      "type": "module + lines + board"
+    },
+    {
+      "id": "T04",
+      "split": "test",
+      "category": "follow-up",
+      "expected": "module",
+      "status": "drafted",
+      "modelCalls": 1,
+      "drafted": true,
+      "approved": true,
+      "activated": true,
+      "firstTry": true,
+      "afterRepair": true,
+      "repairTurns": 0,
+      "e2e": true,
+      "behaviour": true,
+      "reasons": [],
+      "kinds": [
+        "changeSet",
+        "addField",
+        "addField"
+      ],
+      "modelMs": 2938,
+      "wallMs": 383632,
+      "usd": 0.1158583,
+      "tokens": {
+        "input": 4,
+        "output": 212,
+        "cacheRead": 11439,
+        "cacheWrite": 44577
+      },
+      "candidate": "sonnet-5-5",
+      "type": "single change"
+    },
+    {
+      "id": "N02",
+      "split": "test",
+      "category": "module",
+      "expected": "module",
+      "status": "drafted",
+      "modelCalls": 1,
+      "drafted": true,
+      "approved": true,
+      "activated": true,
+      "firstTry": true,
+      "afterRepair": true,
+      "repairTurns": 0,
+      "e2e": true,
+      "behaviour": true,
+      "reasons": [],
+      "kinds": [
+        "changeSet",
+        "addRecordType",
+        "addLink",
+        "declareLifecycle"
+      ],
+      "modelMs": 5104,
+      "wallMs": 754958,
+      "usd": 0.015253400000000002,
+      "tokens": {
+        "input": 4,
+        "output": 705,
+        "cacheRead": 39252,
+        "cacheWrite": 138
+      },
+      "candidate": "sonnet-5-5",
+      "type": "whole module"
+    },
+    {
+      "id": "N03",
+      "split": "test",
+      "category": "multi-step",
+      "expected": "module",
+      "status": "drafted",
+      "modelCalls": 1,
+      "drafted": true,
+      "approved": true,
+      "activated": true,
+      "firstTry": true,
+      "afterRepair": true,
+      "repairTurns": 0,
+      "e2e": true,
+      "behaviour": true,
+      "reasons": [],
+      "kinds": [
+        "changeSet",
+        "addRecordType",
+        "addLineTable",
+        "declareLifecycle",
+        "addBoardViewRevision"
+      ],
+      "modelMs": 2942,
+      "wallMs": 385184,
+      "usd": 0.0125184,
+      "tokens": {
+        "input": 4,
+        "output": 431,
+        "cacheRead": 39252,
+        "cacheWrite": 140
+      },
+      "candidate": "sonnet-5-5",
+      "type": "module + lines + board"
+    }
+  ]
+}

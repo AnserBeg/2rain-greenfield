@@ -1,7 +1,12 @@
 import {
   BILLING_READER,
-  BILLING_INTERVAL_READER,
+  BILLING_ALLOCATION_READER,
+  BILLING_CALCULATION_VERSION,
 } from '../../canonical-model/src/billing.js';
+import {
+  POPUP_READER,
+  compiledPopups,
+} from '../../canonical-model/src/popup-actions.js';
 import {
   DATE_TIME_FIELD_READER,
   type DateTimeBinding,
@@ -481,18 +486,21 @@ export function lowerBaseProjectionPayloads(
     const surface = plans.find(
       (p) => p.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
     )!;
+    const billingPlans = verificationPackageRevision.billingPlans;
+    const hasAgreedInterval = billingPlans.some(
+      (p) => p.bindings?.agreedInterval,
+    );
     surface.payload = {
       ...(surface.payload as object),
-      billingPlans: verificationPackageRevision.billingPlans,
+      billingPlans,
+      ...(hasAgreedInterval && {
+        billingCalculationVersion: BILLING_CALCULATION_VERSION,
+      }),
     };
     surface.requiredRuntimeCapability = {
       ...surface.requiredRuntimeCapability,
       minimumVersion: Math.max(
-        verificationPackageRevision.billingPlans.some(
-          (p) => p.bindings?.agreedInterval,
-        )
-          ? BILLING_INTERVAL_READER
-          : BILLING_READER,
+        hasAgreedInterval ? BILLING_ALLOCATION_READER : BILLING_READER,
         surface.requiredRuntimeCapability.minimumVersion,
       ),
     };
@@ -1140,28 +1148,31 @@ function surfaceManifestPayload(
         (layout) => layout.placementRuleVersion === 1,
       ),
   );
-  // Map and Board each require their renderer even when other bindings are present.
+  // Map is the highest rung, then the popup buttons: each release needs its
+  // renderer whatever else it has.
   const surfaceFloor = original.surfaces.some((s) => s.archetype === 'map')
     ? MAP_VIEW_READER
-    : original.surfaces.some((s) => s.archetype === 'board')
-      ? BOARD_READER
-      : needsStockCountReader
-        ? LINE_CREATE_VALUES_SURFACE_FLOOR
-        : replayedLayout
-          ? REPLAYED_LAYOUT_READER
-          : original.surfaces.some((s) => 'layouts' in s && s.layouts)
-            ? LAYOUT_READER
-            : extendedEditor || declaredRelationList
-              ? 26
-              : hasMetrics(original)
-                ? 25
-                : hasSavedListLayouts(original)
-                  ? 24
-                  : recordFieldPresentation
-                    ? 23
-                    : rankedDefaultsOrChainedTasks
-                      ? 22
-                      : null;
+    : original.surfaces.some((s) => 'popupActions' in s && s.popupActions)
+      ? POPUP_READER
+      : original.surfaces.some((s) => s.archetype === 'board')
+        ? BOARD_READER
+        : needsStockCountReader
+          ? LINE_CREATE_VALUES_SURFACE_FLOOR
+          : replayedLayout
+            ? REPLAYED_LAYOUT_READER
+            : original.surfaces.some((s) => 'layouts' in s && s.layouts)
+              ? LAYOUT_READER
+              : extendedEditor || declaredRelationList
+                ? 26
+                : hasMetrics(original)
+                  ? 25
+                  : hasSavedListLayouts(original)
+                    ? 24
+                    : recordFieldPresentation
+                      ? 23
+                      : rankedDefaultsOrChainedTasks
+                        ? 22
+                        : null;
   const payloadSchemaVersion = composed
     ? COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION
     : navigation
@@ -1241,6 +1252,9 @@ function surfaceManifestPayload(
                     ),
                   },
           }),
+          ...(declared && 'popupActions' in declared && declared.popupActions
+            ? { popupActions: compiledPopups(original, declared) }
+            : {}),
           // Labels and roles render from this release, beside the digested member.
           ...(declared && 'map' in declared && declared.map
             ? { map: declared.map }

@@ -68,7 +68,7 @@ export interface MapCandidate {
 }
 type Located = MapCandidate & {
   point: Point | null;
-  source: string;
+  provenance: string;
 };
 const anchors = new Map<string, { context: string; last: string }>();
 function newAnchor(context: string, last: string) {
@@ -111,7 +111,7 @@ export async function finishMapPage(
         group: r.group,
         ordinal: r.ordered ? r.ordinal : null,
         point: r.point,
-        source: r.source,
+        provenance: r.provenance,
       })),
     },
   });
@@ -166,7 +166,7 @@ export async function finishMapPage(
     return {
       ...c,
       point: point && Math.abs(point.latitude) <= MERCATOR_LIMIT ? point : null,
-      source: !point
+      provenance: !point
         ? 'Location unavailable'
         : Math.abs(point.latitude) > MERCATOR_LIMIT
           ? 'Outside map coverage'
