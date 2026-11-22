@@ -138,6 +138,11 @@ export const DRAFTER_SELECTION_SCHEMAS = {
 } as const;
 
 export const DRAFTER_KINDS = {
+  addRatePlanVersion: {
+    input: member('addRatePlanVersion'),
+    guidance:
+      'Declare reusable period or usage pricing structure with named price slots. Choose a stable plan ID and version. Prices are published separately. Source attachment, invoice generation and issuing require their own capabilities.',
+  },
   addRecordType: {
     input: member('addRecordType'),
     hidden: ['companyAccessIndex'],

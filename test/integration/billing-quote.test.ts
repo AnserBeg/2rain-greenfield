@@ -1,3 +1,8 @@
+import type { PoolClient } from 'pg';
+import {
+  billingBookingUsage,
+  fenceBillingBookingOwners,
+} from '../../packages/postgres-provider/src/billing-booking-usage.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
@@ -5,7 +10,12 @@ import {
   hourMs,
 } from '../../packages/domain/src/billing/calendar.js';
 import { compileRatePlan } from '../../packages/domain/src/billing/terms.js';
-import { quoteBillingService } from '../../packages/domain/src/billing/quote.js';
+import { reviewArrearsCharges } from '../../packages/domain/src/billing/arrears.js';
+import {
+  quoteBillingCycle,
+  quoteBillingService,
+  replayBillingQuote,
+} from '../../packages/domain/src/billing/quote.js';
 import type { BillingQuoteEvidence } from '../../packages/canonical-model/src/billing-evidence.js';
 import type {
   BillingPlan,
@@ -731,4 +741,381 @@ test('a 31-digit entitlement is accepted as either allocated or reserved cents',
     quoteBillingService(p, split).lines[0]!.differenceCents,
     String(first),
   );
+});
+
+test('arrears review stops at the next earned cycle and pins the exact late quote', () => {
+  const p = plan();
+  p.schedule = { kind: 'anniversary', months: 1 };
+  const e = evidence(p, 70, undefined, '2025-01-31T16:00:00.000Z');
+  // A backdated publication visible at review may price an unopened allocation.
+  e.tables[0]!.publishedAt = '2025-03-05T00:00:00.000Z';
+  e.serviceEnd = roll(e.anchor, 65);
+  const review = reviewArrearsCharges(p, e);
+  assert.equal(review.status, 'due');
+  assert.deepEqual(review.cycle, {
+    start: e.anchor,
+    end: '2025-02-28T16:00:00.000Z',
+  });
+  assert.equal(review.quote.lines[0]!.differenceCents, '40000');
+  assert.deepEqual(replayBillingQuote(review.quote), review.quote);
+  assert.equal(reviewArrearsCharges(p, e).quoteDigest, review.quoteDigest);
+  const changed = reviewArrearsCharges(p, { ...e, sourceRevision: '2' });
+  assert.notEqual(changed.quoteDigest, review.quoteDigest);
+  assert.deepEqual(
+    reviewArrearsCharges(p, {
+      ...e,
+      asOf: roll(e.anchor, 27),
+      tables: e.tables.map((t) => ({ ...t, publishedAt: e.anchor })),
+    }),
+    { status: 'notDue' },
+  );
+  assert.throws(
+    () => reviewArrearsCharges(p, { ...e, periodStart: roll(e.anchor, 1) }),
+    /cutover evidence/,
+  );
+  const next = reviewArrearsCharges(p, {
+    ...e,
+    periodStart: review.cycle.end,
+    termPins: review.quote.terms,
+    allocations: review.quote.lines.map((l) => ({
+      componentId: l.componentId,
+      occurrence: l.occurrence,
+      allocatedCents: '0',
+      reservedCents: l.entitlementCents,
+    })),
+  });
+  assert.equal(next.status, 'due');
+  assert.equal(next.cycle.end, '2025-03-31T15:00:00.000Z');
+  assert.equal(next.quote.lines[0]!.differenceCents, '49000');
+});
+
+test('arrears end charges require an attested end and keep the original quote replayable', () => {
+  const p = plan([
+    {
+      kind: 'fixed',
+      id: 'finish',
+      base: 'enrollment',
+      stage: 'afterCapBeforeTax',
+      taxClassification: 'untaxed',
+      amount: 'fee',
+      occurrence: { kind: 'oneOff', at: 'serviceEnd' },
+    },
+  ]);
+  p.schedule = { kind: 'fixedDays', days: 7 };
+  const e = evidence(p, 14, { fee: '31' });
+  e.serviceEnd = roll(e.anchor, 10);
+  const first = reviewArrearsCharges(p, e);
+  assert.equal(first.status, 'due');
+  assert.deepEqual(first.quote.lines, []);
+  const last = reviewArrearsCharges(p, { ...e, periodStart: first.cycle.end });
+  assert.equal(last.status, 'due');
+  assert.equal(last.quote.lines[0]!.differenceCents, '3100');
+  assert.throws(
+    () => quoteBillingCycle(p, e, roll(e.anchor, 15)),
+    /not delivered/,
+  );
+  assert.throws(
+    () => quoteBillingService(p, { ...e, coverageThrough: first.cycle.end }),
+    /coverage boundary/,
+  );
+  p.schedule = { kind: 'onServiceEnd' };
+  assert.deepEqual(reviewArrearsCharges(p, { ...e, serviceEnd: null }), {
+    status: 'notDue',
+  });
+});
+
+test('three businesses review net charge lines through the same closed-cycle calculator', () => {
+  const cycle = { kind: 'fixedDays', days: 10 } as const;
+  const rental = plan([{ ...time, cap: 'cap' }], 'fourWeek');
+  rental.schedule = cycle;
+  const usagePlan = plan([
+    {
+      kind: 'meter',
+      id: 'meter',
+      streamId: 'copies',
+      unit: 'copy',
+      stage: 'afterCapBeforeTax',
+      taxClassification: 'untaxed',
+      overageRate: 'price',
+      allowanceProration: 'none',
+      allowanceBasis: { kind: 'perCycle', quantity: 'allowance' },
+    },
+  ]);
+  usagePlan.schedule = cycle;
+  const contract = plan([
+    {
+      kind: 'fixed',
+      id: 'retainer',
+      base: 'enrollment',
+      amount: 'fee',
+      stage: 'afterCapBeforeTax',
+      taxClassification: 'untaxed',
+      occurrence: {
+        kind: 'recurring',
+        cadence: cycle,
+        fixedFeeDuringPause: 'continue',
+        feeProration: 'activeCoverage',
+      },
+    },
+  ]);
+  contract.schedule = cycle;
+  const hire = evidence(rental, 10, { daily: '30', weekly: '100', cap: '140' });
+  const owner = {
+    entityId: 'example:entity.service',
+    recordId: 's1',
+    companyId: 'company',
+  };
+  const snapshot = {
+    schemaVersion: 'booking.ownerUsage/v1',
+    ownerRef: owner,
+    ownerScope: { kind: 'company', companyId: 'company' },
+    asOf: hire.asOf,
+    cursor: '9',
+    highWater: '9',
+    hasMore: false,
+    changes: [],
+    bookings: [
+      {
+        bookingId: 'hire',
+        slotId: 'equipment',
+        fulfilmentMode: 'tracked',
+        unit: 'each',
+      },
+    ],
+    evidence: [
+      {
+        id: 'leg1',
+        revision: 1,
+        bookingId: 'hire',
+        kind: 'use',
+        voided: false,
+        effectiveStart: start,
+        effectiveEnd: roll(start, 5),
+        quantity: '1',
+        unit: 'each',
+      },
+      {
+        id: 'leg2',
+        revision: 1,
+        bookingId: 'hire',
+        kind: 'use',
+        voided: false,
+        effectiveStart: roll(start, 5),
+        effectiveEnd: null,
+        quantity: '1',
+        unit: 'each',
+      },
+      {
+        id: 'pause',
+        revision: 1,
+        bookingId: 'hire',
+        kind: 'pause',
+        voided: false,
+        effectiveStart: roll(start, 5),
+        effectiveEnd: roll(start, 8),
+        quantity: null,
+        unit: null,
+      },
+    ],
+  };
+  const read = (input: unknown) =>
+    billingBookingUsage(input, owner, 'equipment', 'each', hire.asOf);
+  Object.assign(hire, read(snapshot));
+  const meter = evidence(usagePlan, 10, { price: '1.50', allowance: '10' });
+  meter.basis = 'usageOnly';
+  meter.bands = [];
+  meter.periodMeter = {
+    streamId: 'copies',
+    unit: 'copy',
+    opening: { at: start, reading: '9007199254740993.25' },
+    closing: { at: meter.asOf, reading: '9007199254741008.75' },
+  };
+  const fee = evidence(contract, 20, { fee: '31' });
+  fee.basis = 'agreed';
+  fee.serviceEnd = roll(start, 5);
+  for (const [p, e, expected] of [
+    [rental, hire, '10000'],
+    [usagePlan, meter, '825'],
+    [contract, fee, '1550'],
+  ] as const) {
+    const review = reviewArrearsCharges(p, e);
+    assert.equal(review.status, 'due');
+    assert.deepEqual(
+      review.quote.lines.map((l) => [
+        l.servicePeriodStart,
+        l.servicePeriodEnd,
+        l.differenceCents,
+      ]),
+      [[start, review.cycle.end, expected]],
+    );
+    assert.deepEqual(replayBillingQuote(review.quote), review.quote);
+  }
+  assert.throws(
+    () =>
+      read({
+        ...snapshot,
+        ownerScope: { kind: 'company', companyId: 'other' },
+      }),
+    /owner or company/,
+  );
+  assert.throws(
+    () => read({ ...snapshot, highWater: '10' }),
+    /Incomplete booking/,
+  );
+  assert.throws(() => read({ ...snapshot, asOf: start }), /Incomplete booking/);
+  for (const ownerRef of [
+    { ...owner, entityId: 'foreign' },
+    { ...owner, recordId: 'other' },
+  ])
+    assert.throws(() => read({ ...snapshot, ownerRef }), /owner or company/);
+  for (const invalid of [
+    { slotId: 'elsewhere' },
+    { fulfilmentMode: 'scheduled' },
+    { unit: 'hour' },
+  ])
+    assert.throws(
+      () =>
+        read({
+          ...snapshot,
+          bookings: snapshot.bookings.map((b) => ({ ...b, ...invalid })),
+        }),
+      /identifiable/,
+    );
+  assert.throws(
+    () =>
+      read({
+        ...snapshot,
+        evidence: snapshot.evidence.map((r) => ({ ...r, voided: true })),
+      }),
+    /actual use/,
+  );
+  assert.throws(
+    () =>
+      read({
+        ...snapshot,
+        evidence: snapshot.evidence.filter((r) => r.kind === 'pause'),
+      }),
+    /actual use/,
+  );
+  assert.throws(
+    () =>
+      read({
+        ...snapshot,
+        evidence: snapshot.evidence.map((r) =>
+          r.id === 'leg2' ? { ...r, quantity: '2' } : r,
+        ),
+      }),
+    /unambiguous/,
+  );
+  // Booking's microsecond clock truncates to the Billing millisecond (ADR-0083).
+  assert.equal(
+    read({
+      ...snapshot,
+      evidence: snapshot.evidence.map((r) =>
+        r.id === 'leg1'
+          ? { ...r, effectiveStart: start.replace('.000Z', '.000999Z') }
+          : r,
+      ),
+    }).bands[0]!.intervals.find((i) => i.id === 'leg1')!.start,
+    start,
+  );
+  assert.throws(
+    () =>
+      read({
+        ...snapshot,
+        bookings: [...snapshot.bookings, ...snapshot.bookings],
+      }),
+    /identifiable/,
+  );
+  assert.throws(
+    () =>
+      reviewArrearsCharges(usagePlan, {
+        ...meter,
+        periodMeter: {
+          ...meter.periodMeter!,
+          closing: { at: meter.asOf, reading: '1' },
+        },
+      }),
+    /decreased/,
+  );
+  assert.throws(
+    () =>
+      reviewArrearsCharges(usagePlan, {
+        ...meter,
+        periodMeter: {
+          ...meter.periodMeter!,
+          closing: { at: roll(start, 11), reading: '100' },
+        },
+      }),
+    /boundary readings/,
+  );
+  assert.throws(
+    () =>
+      reviewArrearsCharges(usagePlan, {
+        ...meter,
+        periodMeter: { ...meter.periodMeter!, unit: 'liter' },
+      }),
+    /boundary readings/,
+  );
+});
+
+test('the billing consumer fences all owners in one call and checks identities and cursors', async () => {
+  const owners = [
+    { queryId: 'one', entityId: 'visit', recordId: 'a', cursor: '2' },
+    { queryId: 'two', entityId: 'account', recordId: 'b', cursor: '7' },
+  ];
+  const result = owners.toReversed().map(({ entityId, recordId, cursor }) => ({
+    ownerRef: { entityId, recordId },
+    cursor,
+  }));
+  let observed = result;
+  let calls = 0;
+  const client = {
+    async query(sql: string, args: unknown[]) {
+      calls++;
+      assert.equal(
+        sql,
+        'SELECT platform.booking_owner_cursor_fence($1,$2,$3) AS result',
+      );
+      assert.deepEqual(args, [
+        'release',
+        4,
+        JSON.stringify([
+          { queryId: 'one', recordId: 'a' },
+          { queryId: 'two', recordId: 'b' },
+        ]),
+      ]);
+      return {
+        rows: [
+          {
+            result: {
+              schemaVersion: 'booking.ownerCursorFence/v1',
+              owners: observed,
+            },
+          },
+        ],
+      };
+    },
+  } as unknown as PoolClient;
+  await fenceBillingBookingOwners(client, 'release', 4, owners);
+  await assert.rejects(
+    fenceBillingBookingOwners(client, 'release', 4, [owners[0]!, owners[0]!]),
+    /Duplicate billing booking owner/,
+  );
+  assert.equal(calls, 1);
+  for (const incorrect of [
+    result.slice(1),
+    [result[0]!, result[0]!],
+    [{ ...result[0]!, cursor: '6' }, result[1]!],
+    [
+      { ...result[0]!, ownerRef: { entityId: 'foreign', recordId: 'b' } },
+      result[1]!,
+    ],
+  ]) {
+    observed = incorrect;
+    await assert.rejects(
+      fenceBillingBookingOwners(client, 'release', 4, owners),
+      /Stale billing booking cursor/,
+    );
+  }
 });

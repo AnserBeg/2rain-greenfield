@@ -1,5 +1,6 @@
 import {
   BILLING_CALCULATION_VERSION,
+  BILLING_CYCLE_CALCULATION,
   type BillingPlan,
 } from '../../../canonical-model/src/billing.js';
 import {
@@ -93,7 +94,7 @@ function deriveCoverage(
       : union(bands.flatMap((b) => b.active));
   return { bands, eligible, active };
 }
-interface Line {
+export interface BillingQuoteLine {
   componentId: string;
   occurrence: string;
   servicePeriodStart: string;
@@ -111,7 +112,9 @@ interface Line {
 const occurrenceId = (...parts: string[]) => JSON.stringify(parts);
 const legacyCalculation = 'northstar.billing-calculation/v1';
 type CalculationVersion =
-  typeof legacyCalculation | typeof BILLING_CALCULATION_VERSION;
+  | typeof legacyCalculation
+  | typeof BILLING_CALCULATION_VERSION
+  | typeof BILLING_CYCLE_CALCULATION;
 
 function termPin(at: number, selection: ReturnType<typeof selectTable>) {
   const { publishedAt, ...table } = selection.table;
@@ -129,6 +132,19 @@ export function quoteBillingService(
   evidenceInput: unknown,
 ) {
   return calculate(planInput, evidenceInput);
+}
+
+export function quoteBillingCycle(
+  plan: BillingPlan,
+  evidence: BillingQuoteEvidence,
+  through: string,
+) {
+  return calculate(
+    plan,
+    { ...evidence, coverageThrough: through },
+    undefined,
+    BILLING_CYCLE_CALCULATION,
+  );
 }
 export function replayBillingQuote(
   quote: ReturnType<typeof quoteBillingService>,
@@ -174,7 +190,15 @@ function calculate(
   const anchor = instant(e.anchor),
     asOf = instant(e.asOf),
     serviceEnd = e.serviceEnd === null ? null : instant(e.serviceEnd);
-  const through = Math.min(serviceEnd ?? asOf, asOf),
+  if (
+    (algorithm === BILLING_CYCLE_CALCULATION) !==
+    (e.coverageThrough !== undefined)
+  )
+    throw new Error('Billing cycle requires its coverage boundary');
+  const coverageThrough = e.coverageThrough ? instant(e.coverageThrough) : asOf;
+  if (coverageThrough > asOf)
+    throw new Error('Billing coverage is not delivered');
+  const through = Math.min(serviceEnd ?? asOf, coverageThrough),
     periodStart = instant(e.periodStart);
   if (through - anchor > 3660 * 86_400_000)
     throw new Error('Billing service exceeds the calendar horizon');
@@ -209,6 +233,26 @@ function calculate(
     )
   )
     throw new Error('Prior allocation requires pinned billing terms');
+  if (
+    e.periodMeter &&
+    (algorithm !== BILLING_CYCLE_CALCULATION ||
+      e.basis !== 'usageOnly' ||
+      e.usage.length ||
+      e.pauses.length ||
+      e.periodMeter.opening.at !== e.periodStart ||
+      e.periodMeter.closing.at !== e.coverageThrough ||
+      !plan.components.some((c) => c.kind === 'meter') ||
+      plan.components.some(
+        (c) =>
+          c.kind === 'meter' &&
+          (c.streamId !== e.periodMeter!.streamId ||
+            c.unit !== e.periodMeter!.unit ||
+            c.allowanceBasis.kind !== 'perCycle'),
+      ))
+  )
+    throw new Error(
+      'Billing requires complete boundary readings for one unpaused meter cycle',
+    );
   const calendar = new BillingCalendar(anchor, e.zone, pinned),
     coverage = deriveCoverage(e, anchor, through);
   const windows = pricingWindows(
@@ -260,7 +304,7 @@ function calculate(
   );
   if (allocations.size !== e.allocations.length)
     throw new Error('Duplicate prior allocation');
-  const lines: Line[] = [];
+  const lines: BillingQuoteLine[] = [];
   function line(
     c: BillingPlan['components'][number],
     occurrence: string,
@@ -467,7 +511,18 @@ function calculate(
         const used = events.filter(
           (u) => u.active && o.start <= u.at && u.at < o.end,
         );
-        const usage = used.reduce((v, u) => v.plus(decimal(u.quantity)), zero);
+        let usage = used.reduce((v, u) => v.plus(decimal(u.quantity)), zero);
+        if (e.periodMeter) {
+          if (
+            iso(o.start) !== e.periodMeter.opening.at ||
+            iso(o.end) !== e.periodMeter.closing.at
+          )
+            throw new Error('Billing requires readings for every meter cycle');
+          usage = decimal(e.periodMeter.closing.reading).minus(
+            decimal(e.periodMeter.opening.reading),
+          );
+          if (usage.n < 0n) throw new Error('Billing meter reading decreased');
+        }
         const overage = usage.minus(allowance).max(zero),
           rate = decimal(t.values[c.overageRate]!);
         line(

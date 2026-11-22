@@ -35,6 +35,8 @@ export const BillingQuoteEvidenceSchema = z.strictObject({
   anchor: time,
   zone: z.string().min(1).max(100),
   asOf: time,
+  // Arrears can be reviewed after close, using terms published by the review.
+  coverageThrough: time.optional(),
   serviceEnd: time.nullable(),
   periodStart: time,
   basis: z.enum(['actual', 'agreed', 'usageOnly']),
@@ -49,6 +51,14 @@ export const BillingQuoteEvidenceSchema = z.strictObject({
     )
     .max(32),
   pauses: z.array(interval.extend({ bandId: id.optional() })).max(256),
+  periodMeter: z
+    .strictObject({
+      streamId: id,
+      unit: id,
+      opening: z.strictObject({ at: time, reading: value }),
+      closing: z.strictObject({ at: time, reading: value }),
+    })
+    .optional(),
   usage: z
     .array(
       z.strictObject({

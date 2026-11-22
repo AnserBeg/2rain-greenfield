@@ -37,6 +37,132 @@
           "expected": "-4000 !== 3000"
         }
       ]
+    },
+    {
+      "name": "billing-booking-microseconds",
+      "claim": "Billing accepts the microsecond instants Booking writes and truncates them to the millisecond.",
+      "file": "packages/postgres-provider/src/billing-booking-usage.ts",
+      "original": "  .transform(truncateBookingInstant);",
+      "replacement": "  .refine((s) => !/\\.\\d{3}\\d*[1-9]/u.test(s), 'Booking time exceeds the Billing precision')\n  .transform(truncateBookingInstant);",
+      "test": {
+        "files": ["test/integration/billing-booking-possession.test.ts"],
+        "namePattern": "^Booking microsecond instants truncate toward the past to the Billing millisecond$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-booking-possession.test.ts",
+          "name": "Booking microsecond instants truncate toward the past to the Billing millisecond",
+          "expected": "Booking time exceeds the Billing precision"
+        }
+      ]
+    },
+    {
+      "name": "billing-booking-live-leg",
+      "claim": "A live use leg keeps the hire open past its agreed end.",
+      "file": "packages/postgres-provider/src/billing-booking-usage.ts",
+      "original": "    if (leg.effectiveEnd === null) return null;",
+      "replacement": "    if (leg.effectiveEnd === null) return agreedEnd;",
+      "test": {
+        "files": ["test/integration/billing-booking-possession.test.ts"],
+        "namePattern": "^a live use leg past the agreed end keeps earning completed cycles$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-booking-possession.test.ts",
+          "name": "a live use leg past the agreed end keeps earning completed cycles",
+          "expected": "a live use leg keeps the service open"
+        }
+      ]
+    },
+    {
+      "name": "billing-booking-overrun",
+      "claim": "A hire returned after its agreed end bills through the recorded return.",
+      "file": "packages/postgres-provider/src/billing-booking-usage.ts",
+      "original": "agreedEnd === null ? returned : Math.max(returned, Date.parse(agreedEnd)),",
+      "replacement": "agreedEnd === null ? returned : Date.parse(agreedEnd),",
+      "test": {
+        "files": ["test/integration/billing-booking-possession.test.ts"],
+        "namePattern": "^possession past the agreed end bills through the recorded return$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-booking-possession.test.ts",
+          "name": "possession past the agreed end bills through the recorded return",
+          "expected": "the final cycle ends at the recorded return"
+        }
+      ]
+    },
+    {
+      "name": "billing-role-required",
+      "claim": "Optional free text cannot carry the customer or currency role.",
+      "file": "packages/compiler/src/billing.ts",
+      "original": "        field.presence === 'required'",
+      "replacement": "        true",
+      "test": {
+        "files": ["test/postgres/billing-terms.test.ts"],
+        "namePattern": "^the plan binds its customer and currency by declared role, not by field name$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/billing-terms.test.ts",
+          "name": "the plan binds its customer and currency by declared role, not by field name",
+          "expected": "optional notes cannot be the customer"
+        }
+      ]
+    },
+    {
+      "name": "billing-role-currency-code",
+      "claim": "The currency role holds exactly one three-letter code.",
+      "file": "packages/compiler/src/billing.ts",
+      "original": "      roleField(interval.currencyFieldId)?.maximumLength !== 3 ||",
+      "replacement": "      !roleField(interval.currencyFieldId) ||",
+      "test": {
+        "files": ["test/postgres/billing-terms.test.ts"],
+        "namePattern": "^the plan binds its customer and currency by declared role, not by field name$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/billing-terms.test.ts",
+          "name": "the plan binds its customer and currency by declared role, not by field name",
+          "expected": "a currency holds one three-letter code"
+        }
+      ]
+    },
+    {
+      "name": "billing-role-distinct",
+      "claim": "One field cannot carry both the customer and the currency role.",
+      "file": "packages/compiler/src/billing.ts",
+      "original": "      interval.customerFieldId === interval.currencyFieldId ||",
+      "replacement": "      false ||",
+      "test": {
+        "files": ["test/postgres/billing-terms.test.ts"],
+        "namePattern": "^the plan binds its customer and currency by declared role, not by field name$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/billing-terms.test.ts",
+          "name": "the plan binds its customer and currency by declared role, not by field name",
+          "expected": "one field cannot carry both roles"
+        }
+      ]
+    },
+    {
+      "name": "billing-booking-possession-wired",
+      "claim": "The released quote query sets the hire service end from Booking possession.",
+      "file": "packages/postgres-provider/src/billing-quote.ts",
+      "original": "  evidence.serviceEnd = bookingPossessionServiceEnd(",
+      "replacement": "  void bookingPossessionServiceEnd(",
+      "test": {
+        "files": ["test/postgres/billing-terms.test.ts"],
+        "namePattern": "^an equipment hire reviews possession Booking stamped on its production clock through the released quote query$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/billing-terms.test.ts",
+          "name": "an equipment hire reviews possession Booking stamped on its production clock through the released quote query",
+          "expected": "a live hire past its end is open"
+        }
+      ]
     }
   ]
 }

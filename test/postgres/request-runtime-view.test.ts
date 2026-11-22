@@ -11,6 +11,7 @@ import { promisify } from 'node:util';
 
 import pg from 'pg';
 import {
+  BILLING_ARREARS_READER,
   BILLING_ALLOCATION_READER,
   BILLING_INTERVAL_READER,
 } from '../../packages/canonical-model/src/billing.js';
@@ -361,6 +362,7 @@ test('the capability comparison binds the family to its capability, then compare
     COMPANY_ACCESS_INDEX_READER,
     REPORT_SOURCE_READER,
     DECLARED_REPORT_READER,
+    BILLING_ARREARS_READER,
   ];
   for (const reader of surfaceFloors) {
     for (const floor of surfaceFloors) {
@@ -414,7 +416,7 @@ test('the capability comparison binds the family to its capability, then compare
   // capability on one side alone reds here rather than in production.
   assert.deepEqual(SUPPORTED_RUNTIME_CAPABILITIES[surface], {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
-    maximumSupportedVersion: DECLARED_REPORT_READER,
+    maximumSupportedVersion: BILLING_ARREARS_READER,
   });
 });
 
@@ -1048,7 +1050,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
               ],
               {
                 capabilityId: 'northstar.runtime:capability.surface-manifest',
-                maximumSupportedVersion: DECLARED_REPORT_READER,
+                maximumSupportedVersion: BILLING_ARREARS_READER,
               },
             );
           },
@@ -1073,7 +1075,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
               new RegExp(
-                `requires version 999 and this runtime supports ${DECLARED_REPORT_READER}`,
+                `requires version 999 and this runtime supports ${BILLING_ARREARS_READER}`,
               ),
             );
           },
@@ -1104,7 +1106,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
               new RegExp(
-                `requires version 999 and this runtime supports ${DECLARED_REPORT_READER}`,
+                `requires version 999 and this runtime supports ${BILLING_ARREARS_READER}`,
               ),
             );
           },

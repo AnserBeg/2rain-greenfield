@@ -69,6 +69,7 @@ export interface WorkflowCallSpec {
 }
 
 export type Expectation =
+  | { readonly outcome: 'ratePlan'; readonly kind: 'time' | 'meter' | 'fixed' }
   | {
       readonly outcome: 'module';
       readonly types: readonly TypeSpec[];
@@ -227,6 +228,31 @@ export const toolBase = {
 } as const;
 
 export const BUILD_CASES: readonly BuildCase[] = [
+  {
+    id: 'B01',
+    split: 'dev',
+    category: 'module',
+    request:
+      'Declare just the untaxed CAD rate plan structure for equipment hire, with daily, weekly and monthly offers, a cap for each four-week pricing window, and calendar-month invoicing at midnight. Leave amounts for later publication.',
+    expect: { outcome: 'ratePlan', kind: 'time' },
+  },
+  {
+    id: 'B02',
+    split: 'test',
+    category: 'module',
+    request:
+      'Define the pricing structure only for an untaxed CAD printing subscription. Every monthly anniversary gives an included number of copies with a price for each excess copy. No time charge, booking or recurring fee. We publish the allowance and price later.',
+    expect: { outcome: 'ratePlan', kind: 'meter' },
+  },
+  {
+    id: 'B03',
+    split: 'dev',
+    category: 'module',
+    request:
+      'Declare an untaxed CAD service contract rate plan with just one fixed retainer, earned each monthly anniversary, prorated for active coverage. No meter or time offers. The fee will be published separately.',
+    expect: { outcome: 'ratePlan', kind: 'fixed' },
+  },
+
   // ---- development set ----
   {
     id: 'M01',
