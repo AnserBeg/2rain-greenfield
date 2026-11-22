@@ -281,7 +281,6 @@ test('the compiled catalog auto-run snapshot covers every O0 update field', () =
     'northstar.app:operation.legal_entity_update -> northstar.app:field.legal_entity_name',
     'northstar.app:operation.location_update -> northstar.app:field.location_name',
     'northstar.app:operation.party_update -> northstar.app:field.party_contact_summary',
-    'northstar.app:operation.party_update -> northstar.app:field.party_credit_hold',
     'northstar.app:operation.party_update -> northstar.app:field.party_name',
     'northstar.app:operation.party_update -> northstar.app:field.party_payment_terms',
     'northstar.app:operation.purchase_order_update -> northstar.app:field.purchase_order_notes',
@@ -841,7 +840,9 @@ test('X5: a status or state change, a settings update, and a create its maker ca
     ),
     'needsYes',
   );
-  // A master field edit stays reversible (charter): Undo puts it back.
+  // AI-UNDO-1 slice 1: the credit hold is a gate (a hold stops every order of
+  // the customer from being confirmed; an order confirmed while released stays
+  // confirmed after Undo). The release declares it, so both directions ask.
   assert.equal(
     await classOf(
       {
@@ -851,8 +852,41 @@ test('X5: a status or state change, a settings update, and a create its maker ca
       },
       { [`${NS}:field.party_credit_hold`]: false },
     ),
+    'needsYes',
+  );
+  assert.equal(
+    await classOf(
+      {
+        operationId: 'party_update',
+        target: PARTY,
+        patch: { credit_hold: false },
+      },
+      { [`${NS}:field.party_credit_hold`]: true },
+    ),
+    'needsYes',
+  );
+  // A plain master field edit stays reversible (charter): Undo puts it back.
+  assert.equal(
+    await classOf({
+      operationId: 'party_update',
+      target: PARTY,
+      patch: { name: 'Renamed customer' },
+    }),
     'reversible',
   );
+});
+
+test('AI-UNDO-1: the release declares the credit hold as needing the assistant to ask', () => {
+  const catalog = pinnedCatalog(compiledAppView());
+  const hold = `${NS}:field.party_credit_hold`;
+  assert.ok(catalog.confirmationRequiredFor.has(hold));
+  const party = catalog.operation('party_update')!;
+  for (const written of [[hold], [`${NS}:field.party_name`, hold]]) {
+    const risk = operationRisk(catalog, party, written);
+    assert.equal(risk.riskClass, 'needsYes');
+    assert.equal(risk.reason, 'This changes a setting, so it needs your OK.');
+    assert.equal(risk.inverse, undefined);
+  }
 });
 
 test('X4: the lines a posting will read are bound to the yes; a line changed after it refuses the step', async () => {
@@ -1577,6 +1611,8 @@ test('AGENT-5 7: the pinned release guards policy fields and every settings edit
       `${NS}:entity.purchasing_settings`,
       `${NS}:field.legal_entity_is_default`,
       `${NS}:field.legal_entity_reorder_point_percent`,
+      // AI-UNDO-1 slice 1: the credit hold is a gate on order confirmation.
+      `${NS}:field.party_credit_hold`,
       `${NS}:field.tax_code_rate_percent`,
     ].sort(),
   );

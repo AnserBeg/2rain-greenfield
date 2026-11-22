@@ -330,6 +330,10 @@ export function partyModuleDefinition(
           orderKey: 170,
           presence: 'optional',
           reportable: true,
+          // A gate: a hold stops this customer's orders from being confirmed,
+          // and an order confirmed while released stays confirmed after Undo.
+          // So the assistant asks before putting on or releasing a hold.
+          requiresAssistantConfirmation: true,
           schemaVersion: version,
           searchable: false,
         },
