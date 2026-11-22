@@ -607,6 +607,7 @@ export async function exerciseTemplateLibrary(
         run((v) =>
           library.assign(v, target, contextId, 0, elsewhere.revisionId),
         ),
+        /template.revisionUnavailable/u,
       );
       const firstAssignments = await Promise.allSettled(
         [0, 1].map(() =>
@@ -627,6 +628,7 @@ export async function exerciseTemplateLibrary(
         run((v) =>
           library.assign(v, target, contextId, 0, published.revisionId),
         ),
+        /template.assignmentChanged/u,
       );
       await assert.rejects(
         run(
@@ -670,6 +672,7 @@ export async function exerciseTemplateLibrary(
         run((v) =>
           library.assign(v, target, contextId, 1, published.revisionId),
         ),
+        /template.revisionUnavailable/u,
       );
       assert.ok(
         (await run((v) => library.history(v, target))).every((r) => r.retired),
@@ -698,6 +701,7 @@ export async function exerciseTemplateLibrary(
       );
       await assert.rejects(
         run((v) => library.history(v, other, elsewhere.revisionId), 'buyer'),
+        /template.unavailable/u,
       );
       if (kind === 'row') {
         const updated = draftTemplateBinding(
