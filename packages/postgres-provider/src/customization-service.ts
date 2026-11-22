@@ -44,6 +44,7 @@ import {
   storageElements,
   customizationTargets,
   draftPatchFromRequest,
+  AUTHORING_RULES,
   DRAFT_SHAPE_CAPABILITIES,
   type AcknowledgementInput,
   type CheckableDraft,
@@ -3353,7 +3354,7 @@ function parseUpgradeRecord(row: UpgradeRow): UpgradeRecord | null {
  * staleness, lineage and every other `unsupported` are final, so a correct
  * refusal is never argued away.
  */
-const REPAIRABLE_REFUSAL_CODES: ReadonlySet<string> = new Set([
+export const REPAIRABLE_REFUSAL_CODES: ReadonlySet<string> = new Set([
   'CUSTOMIZE_CHOICE_PLATFORM_OWNED',
   'CUSTOMIZE_DUPLICATE_LABEL',
   'CUSTOMIZE_RECORD_TYPE_EXISTS',
@@ -3371,18 +3372,27 @@ export function classifyDraftOutcome(
 ): DraftCheckResult<DraftOutcome> {
   if (outcome.status === 'drafted')
     return { status: 'accepted', value: outcome };
+  const repairableRefusal =
+    outcome.status === 'refused' &&
+    !!outcome.code &&
+    REPAIRABLE_REFUSAL_CODES.has(outcome.code);
   const diagnostics = [
     ...(outcome.code
       ? [`${outcome.code}: ${outcome.message}`]
       : [outcome.message]),
+    // What to change (AI-RELY-1 slice 1, the W02/T08 lesson): a repairable
+    // refusal carries the platform rule it broke, not only its code.
+    ...(repairableRefusal
+      ? AUTHORING_RULES[outcome.code as PatchRefusalCode].map(
+          (rule) => `rule: ${rule}`,
+        )
+      : []),
     ...(outcome.issues ?? []),
   ];
   const repairable =
     outcome.status === 'invalid' ||
     (outcome.status === 'rejected' && !outcome.replayDiagnostics) ||
-    (outcome.status === 'refused' &&
-      !!outcome.code &&
-      REPAIRABLE_REFUSAL_CODES.has(outcome.code)) ||
+    repairableRefusal ||
     (outcome.status === 'unsupported' &&
       DRAFT_SHAPE_CAPABILITIES.includes(outcome.missingCapability ?? ''));
   return repairable
