@@ -1,7 +1,7 @@
 # AI-BUILD-1 — measure whether the in-app AI builds customized modules from plain English
 
 Status: slices 1 and 2, merging as one packet (orchestrator ruling, 2026-11-21). Slice 1: the eval and its live baseline (test files and evidence). Slice 2: the drafter generated from the patch schemas, platform rules in the prompt, a two-turn repair loop, address/map/files/board drafting, and the live re-run. Not Critical: no AGENTS.md Critical path, no migration, no reader rung.
-CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44954610888
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44966355574
 
 ## Slice 2 — raise the drafter's success (built 2026-11-21)
 
@@ -54,7 +54,7 @@ Also fixed on the way: slice 1's scorer read `board.body` after Board v2 renamed
 
 ### Gates
 
-- CI tier is full (shared paths). Latest PR #136 runs: see the CI tier line above; the scripted build-eval cases (compiler-refusal repair, workflow repair from the verifier, module with board, address with map) passed in CI on 67d6db64.
+- CI tier is full (shared paths): full run 44966355574 green at b436f04a (main merged through TRAIN-D, every executable change, record and evidence); the scripted build-eval cases (compiler-refusal repair, workflow repair from the verifier, module with board, address with map) passed in CI on 67d6db64.
 - Merged with main twice (DOCS-1 slice 2, CUSTOMIZE-5, WORKFLOW-2, BOOKING-1, CONNECT-1, UPGRADE-2, TRAIN-B). After the merge the drafter also covers `addDateTimeField` from its schema; DOCS-1's template members carry dated, named drafter exceptions (owner AI-BUILD-1 slice 3).
 - The 40-run measured the drafter at `f3f427c2`; the branch tip adds the main merges and the workflow envelope fix (`ce0b8b47`), measured only by the W02/T08 rescore above.
 
