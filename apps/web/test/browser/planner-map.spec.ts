@@ -114,8 +114,17 @@ test('dispatchers pan just the map, return with Back and can open each stop with
     await svg.scrollIntoViewIfNeeded();
     const box = await svg.boundingBox();
     expect(box).toBeTruthy();
-    const x = box!.x + 4,
-      y = box!.y + 4;
+    const x = box!.x + box!.width / 4,
+      y = box!.y + box!.height / 3;
+    expect(
+      await svg.evaluate(
+        (el, { x, y }) => {
+          const hit = document.elementFromPoint(x, y);
+          return hit?.closest('[data-map-drag]') === el && !hit.closest('a');
+        },
+        { x, y },
+      ),
+    ).toBe(true);
     await page.mouse.move(x, y);
     await page.mouse.down();
     await page.mouse.move(x + 50, y + 25);
@@ -131,7 +140,14 @@ test('dispatchers pan just the map, return with Back and can open each stop with
     await page.mouse.move(x, y);
     await page.mouse.down();
     await page.mouse.move(x + 60, y + 25);
+    const dragged = page.waitForRequest(
+      (request) =>
+        request.headers()['x-rain-fragment'] === 'map' &&
+        new URL(request.url()).searchParams.has('panX'),
+      { timeout: 5000 },
+    );
     await page.mouse.up();
+    await dragged;
     await expect(page).toHaveURL(/area=1/u);
     for (const width of [1280, 390]) {
       const context = await browser.newContext({
