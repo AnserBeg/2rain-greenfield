@@ -74,7 +74,7 @@ const scrub = (text: string) => text.split(key.reveal()).join('[model key]');
 const cacheControl = { type: 'ephemeral' as const };
 const TOOLS = [
   {
-    name: 'erp_read',
+    name: 'record_lookup',
     description:
       'Read one ERP record by its number. Returns the record fields as JSON.',
     input_schema: {
@@ -85,7 +85,7 @@ const TOOLS = [
   },
 ];
 const base =
-  'You operate an ERP for an office worker. Look records up with erp_read before you answer; never guess a value. Answer in one short sentence.';
+  'You operate an ERP for an office worker. Look records up with record_lookup before you answer; never guess a value. Answer in one short sentence.';
 const SYSTEM_V1 = `${base}\nBusiness map (release r1): customer records have fields name, credit_limit, currency.`;
 const SYSTEM_V2 = `${base}\nBusiness map (release r2): customer records have fields name, credit_limit, currency, payment_terms.`;
 const RECORD = JSON.stringify({
