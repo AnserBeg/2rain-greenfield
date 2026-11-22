@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "packet": "TEMPLATE-1",
+  "entries": [
+    {
+      "name": "template-verifier-probe",
+      "claim": "Release verification creates its sample of a template-bound record only through the independent verifier review, so a declaring release cannot activate without it.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "    if (surface) {",
+      "replacement": "    if (surface && false) {",
+      "test": {
+        "files": ["test/postgres/record-template-library.test.ts"],
+        "namePattern": "^publish and assign company templates for inspections, print tickets and school enrolments$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/record-template-library.test.ts",
+          "name": "publish and assign company templates for inspections, print tickets and school enrolments",
+          "expected": "MODULE_SEMANTIC_CONTRACT_UNSUPPORTED"
+        }
+      ]
+    },
+    {
+      "name": "template-fresh-preview",
+      "claim": "A preview reviewed before the assignment changed cannot create a record from the old selection.",
+      "file": "db/migrations/0069_record_template_library.sql",
+      "original": "IF selected IS DISTINCT FROM r.selection THEN RAISE EXCEPTION 'template.freshPreviewRequired'; END IF;",
+      "replacement": "NULL;",
+      "test": {
+        "files": ["test/postgres/record-template-library.test.ts"],
+        "namePattern": "^publish and assign company templates for inspections, print tickets and school enrolments$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/record-template-library.test.ts",
+          "name": "publish and assign company templates for inspections, print tickets and school enrolments",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    },
+    {
+      "name": "template-changed-request",
+      "claim": "A create under a reviewed key with a different payload refuses instead of applying the reviewed template.",
+      "file": "db/migrations/0069_record_template_library.sql",
+      "original": "IF r.input_digest<>encode(sha256(convert_to(header::text,'UTF8')),'hex') OR r.probe<>verification THEN",
+      "replacement": "IF r.probe<>verification THEN",
+      "test": {
+        "files": ["test/postgres/record-template-library.test.ts"],
+        "namePattern": "^publish and assign company templates for inspections, print tickets and school enrolments$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/record-template-library.test.ts",
+          "name": "publish and assign company templates for inspections, print tickets and school enrolments",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    },
+    {
+      "name": "template-application-company",
+      "claim": "A worker limited to one company cannot read another company's template application for a known parent ID.",
+      "file": "db/migrations/0069_record_template_library.sql",
+      "original": "IF NOT north_star_internal.address_member(company) OR NOT platform.document_granted(company::text,replace(form,':surface.',':permission.template_read_'),form)",
+      "replacement": "IF NOT platform.document_granted(company::text,replace(form,':surface.',':permission.template_read_'),form)",
+      "test": {
+        "files": ["test/postgres/record-template-library.test.ts"],
+        "namePattern": "^publish and assign company templates for inspections, print tickets and school enrolments$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/record-template-library.test.ts",
+          "name": "publish and assign company templates for inspections, print tickets and school enrolments",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    }
+  ]
+}
