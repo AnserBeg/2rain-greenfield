@@ -22,18 +22,18 @@
     },
     {
       "name": "billing-window-publication",
-      "claim": "A backdated publication cannot change an open pricing window.",
-      "file": "packages/domain/src/billing/terms.ts",
-      "original": "effective > opening || published > opening",
-      "replacement": "effective > opening",
+      "claim": "A backdated publication cannot replace terms pinned at first allocation.",
+      "file": "packages/domain/src/billing/quote.ts",
+      "original": "const pin = termPins.get(at);",
+      "replacement": "const pin = undefined;",
       "test": {
         "files": ["test/integration/billing-quote.test.ts"],
-        "namePattern": "^publication after opening preserves CAD 100 plus 30 even on a late first quote$"
+        "namePattern": "^publication after first allocation never reprices that window$"
       },
       "kills": [
         {
           "file": "test/integration/billing-quote.test.ts",
-          "name": "publication after opening preserves CAD 100 plus 30 even on a late first quote",
+          "name": "publication after first allocation never reprices that window",
           "expected": "-4000 !== 3000"
         }
       ]

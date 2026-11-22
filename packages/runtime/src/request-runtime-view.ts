@@ -238,7 +238,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 38 adds document templates and governed PDF generation.
     // 39 reads tenant dateTime fields (ADR-0087).
     // 40 adds custom buttons that open a record Task.
-    // 41 adds company access indexes, 42 report sources and 43 grouped reports.
+    // 41 pins the terms and assignment at first billing allocation.
+    // 42 adds company access indexes, 43 report sources and 44 grouped reports.
     maximumSupportedVersion: DECLARED_REPORT_READER,
   },
 });

@@ -269,7 +269,7 @@ test(
                   message:
                     'runtime capability northstar.runtime:capability.surface-manifest requires version ' +
                     COMPANY_ACCESS_INDEX_READER +
-                    ' and this runtime supports 40',
+                    ' and this runtime supports 41',
                 });
               await requireRefusal();
               // Mutate only the extracted production loader in this disposable archive.
@@ -343,7 +343,7 @@ test(
                     (
                       await import('../../packages/canonical-model/src/constants.js')
                     ).REPORT_SOURCE_READER +
-                    ' and this runtime supports 40',
+                    ' and this runtime supports 41',
                 });
                 await assertStoredBytes(pool, app.runtime.activeReleaseId, tip);
               } finally {
@@ -414,7 +414,7 @@ test(
                   message:
                     'runtime capability northstar.runtime:capability.surface-manifest requires version ' +
                     minimumVersion +
-                    ' and this runtime supports 40',
+                    ' and this runtime supports 41',
                 });
               },
             );

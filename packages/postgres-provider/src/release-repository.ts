@@ -2,6 +2,8 @@ import type { StorageTargetPayloadV1 } from '../../compiler/src/storage.js';
 import { lowerDeclaredReports } from '../../compiler/src/declared-reports.js';
 import { DECLARED_REPORT_READER } from '../../canonical-model/src/declared-report.js';
 import {
+  BILLING_ALLOCATION_READER,
+  BILLING_CALCULATION_VERSION,
   BILLING_READER,
   BILLING_INTERVAL_READER,
 } from '../../canonical-model/src/billing.js';
@@ -680,13 +682,11 @@ function verifyCompiledRelease(
   const billingPlans = isRecord(layoutDefinition)
     ? layoutDefinition.billingPlans
     : undefined;
-  const billingFloor =
+  const hasAgreedBillingInterval =
     Array.isArray(billingPlans) &&
     billingPlans.some(
       (p) => isRecord(p) && isRecord(p.bindings) && p.bindings.agreedInterval,
-    )
-      ? BILLING_INTERVAL_READER
-      : BILLING_READER;
+    );
   if (billingPlans && !surfaceReference)
     throw integrity(
       'BILLING_PLAN_MISMATCH',
@@ -883,15 +883,33 @@ function verifyCompiledRelease(
       );
       if (popupProblem)
         throw integrity('POPUP_PROJECTION_CONTRACT_MISMATCH', popupProblem);
+      const hasBillingCalculation = Object.hasOwn(
+        payload,
+        'billingCalculationVersion',
+      );
+      const surfaceFloor = reference.requiredRuntimeCapability.minimumVersion;
+      const billingFloor = hasBillingCalculation
+        ? BILLING_ALLOCATION_READER
+        : hasAgreedBillingInterval
+          ? BILLING_INTERVAL_READER
+          : BILLING_READER;
       if (
         canonicalize(payload.billingPlans ?? null) !==
           canonicalize(billingPlans ?? null) ||
-        (billingPlans &&
-          reference.requiredRuntimeCapability.minimumVersion < billingFloor) ||
+        (hasBillingCalculation &&
+          (!hasAgreedBillingInterval ||
+            payload.billingCalculationVersion !==
+              BILLING_CALCULATION_VERSION)) ||
+        (hasAgreedBillingInterval &&
+          surfaceFloor >= BILLING_ALLOCATION_READER &&
+          !hasBillingCalculation) ||
+        (billingPlans && surfaceFloor < billingFloor) ||
         (!billingPlans &&
-          [BILLING_READER, BILLING_INTERVAL_READER].includes(
-            reference.requiredRuntimeCapability.minimumVersion,
-          ))
+          [
+            BILLING_READER,
+            BILLING_INTERVAL_READER,
+            BILLING_ALLOCATION_READER,
+          ].includes(surfaceFloor))
       )
         throw integrity(
           'BILLING_PLAN_MISMATCH',

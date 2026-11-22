@@ -89,7 +89,7 @@ try {
 }
 `;
 
-export const reportsPredecessor = '7046abc74feacc8943874f1ced6d4674ddcb7548';
+export const reportsPredecessor = '5710c05ae2529b742bf15f8f484c75c0b3930180';
 
 // Produce genuine pre-index change sets for witnesses isolating earlier reader floors.
 export async function draftBeforeCompanyAccessIndex(

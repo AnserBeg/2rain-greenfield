@@ -2,7 +2,8 @@ import { lowerDeclaredReports } from './declared-reports.js';
 import { DECLARED_REPORT_READER } from '../../canonical-model/src/declared-report.js';
 import {
   BILLING_READER,
-  BILLING_INTERVAL_READER,
+  BILLING_ALLOCATION_READER,
+  BILLING_CALCULATION_VERSION,
 } from '../../canonical-model/src/billing.js';
 import {
   POPUP_READER,
@@ -529,18 +530,21 @@ export function lowerBaseProjectionPayloads(
     const surface = plans.find(
       (p) => p.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
     )!;
+    const billingPlans = verificationPackageRevision.billingPlans;
+    const hasAgreedInterval = billingPlans.some(
+      (p) => p.bindings?.agreedInterval,
+    );
     surface.payload = {
       ...(surface.payload as object),
-      billingPlans: verificationPackageRevision.billingPlans,
+      billingPlans,
+      ...(hasAgreedInterval && {
+        billingCalculationVersion: BILLING_CALCULATION_VERSION,
+      }),
     };
     surface.requiredRuntimeCapability = {
       ...surface.requiredRuntimeCapability,
       minimumVersion: Math.max(
-        verificationPackageRevision.billingPlans.some(
-          (p) => p.bindings?.agreedInterval,
-        )
-          ? BILLING_INTERVAL_READER
-          : BILLING_READER,
+        hasAgreedInterval ? BILLING_ALLOCATION_READER : BILLING_READER,
         surface.requiredRuntimeCapability.minimumVersion,
       ),
     };
