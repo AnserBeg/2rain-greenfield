@@ -145,6 +145,24 @@
           "expected": "one field cannot carry both roles"
         }
       ]
+    },
+    {
+      "name": "billing-booking-possession-wired",
+      "claim": "The released quote query sets the hire service end from Booking possession.",
+      "file": "packages/postgres-provider/src/billing-quote.ts",
+      "original": "  evidence.serviceEnd = bookingPossessionServiceEnd(",
+      "replacement": "  void bookingPossessionServiceEnd(",
+      "test": {
+        "files": ["test/postgres/billing-terms.test.ts"],
+        "namePattern": "^an equipment hire reviews possession Booking stamped on its production clock through the released quote query$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/billing-terms.test.ts",
+          "name": "an equipment hire reviews possession Booking stamped on its production clock through the released quote query",
+          "expected": "a live hire past its end is open"
+        }
+      ]
     }
   ]
 }
