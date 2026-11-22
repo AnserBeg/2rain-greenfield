@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./app-server": "./src/app-server.ts",
+    "./google-basemap": "./src/google-basemap.ts",
     "./receiving-section": "./src/receiving-section.ts",
     "./sales-section": "./src/sales-section.ts"
   },

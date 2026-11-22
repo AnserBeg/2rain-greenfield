@@ -14,7 +14,6 @@ import {
   ADDRESS_MAP_READER,
   CONNECTOR_PAYLOAD,
   type AddressProjection,
-  VIEWPORT_READER,
   MAP_VIEW_READER,
   BOARD_READER,
   boardPresentation,
@@ -443,7 +442,7 @@ export function lowerBaseProjectionPayloads(
           minimumVersion: Math.max(
             projection.requiredRuntimeCapability.minimumVersion,
             address.viewports?.length
-              ? VIEWPORT_READER
+              ? MAP_VIEW_READER
               : address.placements.length
                 ? ADDRESS_MAP_READER
                 : ADDRESS_FIELD_READER,

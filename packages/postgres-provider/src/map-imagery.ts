@@ -158,10 +158,11 @@ export class MapImagery {
     handle: string,
     live: MapImageScope,
     reserve: () => Promise<void>,
+    provider: MapImageryProvider = this.provider,
   ) {
     const req = this.authorized(handle, live);
     const { viewport: v } = req,
-      c = this.provider.contract;
+      c = provider.contract;
     const key = JSON.stringify([
       c.id,
       c.style,
@@ -191,7 +192,7 @@ export class MapImagery {
       });
       try {
         const data = await Promise.race([
-          this.provider.raster(v, controller.signal),
+          provider.raster(v, controller.signal),
           deadline,
         ]);
         const [width, height] = MAP_SIZES[v.size];

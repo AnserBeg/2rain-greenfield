@@ -7,9 +7,9 @@ import {
 } from './date-time-admission.js';
 import {
   CONTENT_HASH_DOMAIN,
-  VIEWPORT_READER,
   ADDRESS_FIELD_READER,
   ADDRESS_MAP_READER,
+  MAP_VIEW_READER,
   AddressProjectionSchema,
   CONNECTOR_FAMILY,
   CONNECTOR_PAYLOAD,
@@ -1536,7 +1536,7 @@ export function addressProjectionRefusal(release: {
   const parsed = AddressProjectionSchema.safeParse(release.connector());
   if (!parsed.success) return invalid;
   const required = parsed.data.viewports?.length
-    ? VIEWPORT_READER
+    ? MAP_VIEW_READER
     : parsed.data.placements.length
       ? ADDRESS_MAP_READER
       : ADDRESS_FIELD_READER;

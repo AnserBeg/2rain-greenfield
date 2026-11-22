@@ -76,6 +76,7 @@ function applied(input: typeof chain, source = base) {
   );
   return out.authored;
 }
+const words = { collection: 'Stops', narrow: [] };
 function offered() {
   const model = normalizeApplicationPackage(applied(chain));
   const targets = customizationTargets(model);
@@ -291,8 +292,9 @@ test('overflow displays the governed page size', async () => {
       page.records.map(() => '<li>Stop</li>'),
       coverage,
       '/?stops=' + coverage.hasNext,
+      { collection: 'Stops', narrow: [] },
     );
-    assert.ok(html.includes('Showing ' + expected + ' of this filter’s stops'));
+    assert.ok(html.includes('Showing ' + expected + ' of this filter’s Stops'));
     const last = await finishMapPage(
       client,
       request,
@@ -300,7 +302,7 @@ test('overflow displays the governed page size', async () => {
     );
     assert.equal(last.mapCoverage!.hasNext, undefined);
     assert.doesNotMatch(
-      renderMapStopList([], last.mapCoverage!, null),
+      renderMapStopList([], last.mapCoverage!, null, words),
       /Showing|Next/u,
     );
   }
@@ -463,8 +465,312 @@ test('Map admission binds the reader, collection, selected fields, slots and con
 });
 
 test('a Map beyond its candidate budget asks the dispatcher to narrow the search', () => {
-  const partial = renderMapStopList([], { partial: true }, null);
+  const partial = renderMapStopList([], { partial: true }, null, words);
   assert.match(partial, /Narrow the search/);
-  assert.doesNotMatch(partial, /No stops/);
-  assert.match(renderMapStopList([], { partial: false }, null), /No stops/);
+  assert.doesNotMatch(partial, /No Stops/);
+  assert.match(
+    renderMapStopList([], { partial: false }, null, words),
+    /No Stops/,
+  );
+});
+
+// ---- PLANNER-1 slice 1 review fixes: provider descriptors and wording ----
+
+function stubMap(options: {
+  readonly stops: readonly {
+    recordId: string;
+    group: string | null;
+    ordinal: number | null;
+    point: { latitude: number; longitude: number } | null;
+    provenance: string;
+  }[];
+  readonly values?: (index: number) => Record<string, unknown>;
+  readonly displayValues?: (index: number) => Record<string, string>;
+  readonly coverage?: Record<string, unknown>;
+  readonly url?: string;
+}) {
+  const { target, choice } = offered();
+  const revision = draftMapRevision(target, choice);
+  const group = revision.body.group!;
+  const surface = {
+    label: 'Sales map',
+    map: revision,
+    surfaceId: revision.surfaceId,
+    fields: [
+      {
+        kind: 'enumFieldType',
+        fieldId: group.fieldId,
+        options: [
+          { optionId: 'north', label: 'North' },
+          { optionId: 'south', label: 'South' },
+        ],
+      },
+    ],
+  } as unknown as Parameters<typeof readMapSlots>[1];
+  const owner = {
+    surfaceId: revision.body.listSurfaceId,
+    lifecycle: 'active',
+    label: 'Parties',
+    list: { columns: [{ field: group.fieldId, label: 'Territory' }] },
+  } as unknown as Parameters<typeof readMapSlots>[1];
+  const record = {
+    surfaceId: revision.body.recordSurfaceId,
+    lifecycle: 'active',
+    fields: [],
+  } as unknown as Parameters<typeof readMapSlots>[1];
+  const records = options.stops.map((s, i) => ({
+    recordId: s.recordId,
+    entityId: entity,
+    archived: false,
+    revision: 1,
+    values: options.values?.(i) ?? {},
+    ...(options.displayValues && { displayValues: options.displayValues(i) }),
+  }));
+  const gateways = {
+    viewportNavigation: true,
+    addresses: { issueViewport: () => 'handle-1' },
+    queryGateway: {
+      previewEligibility: async () => 'eligible',
+      invoke: async () => ({
+        outcome: 'exact',
+        records,
+        mapCoverage: {
+          revisionId: revision.revisionId,
+          pageSize: 100,
+          partial: false,
+          stops: options.stops,
+          ...options.coverage,
+        },
+      }),
+    },
+  } as unknown as Parameters<typeof readMapSlots>[6];
+  return {
+    revision,
+    render: () =>
+      readMapSlots(
+        {} as Parameters<typeof readMapSlots>[0],
+        surface,
+        [owner, record],
+        new URL(options.url ?? 'http://localhost/'),
+        {},
+        'company-a',
+        gateways,
+        (recordId) => '/?record=' + recordId,
+      ),
+  };
+}
+const stop = (
+  recordId: string,
+  group: string,
+  ordinal: number,
+  latitude: number,
+) => ({
+  recordId,
+  group,
+  ordinal,
+  point: { latitude, longitude: -114 + ordinal / 100 },
+  provenance: 'User pin',
+});
+
+test('a third provider declared only in its adapter descriptor drives display and credit', async () => {
+  const { MAP_PROVIDERS } =
+    await import('../../packages/postgres-provider/src/address-provider.js');
+  const { target, choice } = offered();
+  const revision = draftMapRevision(target, choice);
+  const companyId = randomUUID();
+  const recordId = randomUUID();
+  const surface = {
+    archetype: 'map',
+    lifecycle: 'active',
+    surfaceId: revision.surfaceId,
+    map: {
+      revisionId: revision.revisionId,
+      predecessor: revision.predecessor,
+      body: revision.body,
+      resultDigest: revision.resultDigest,
+    },
+  };
+  const request = {
+    view: {
+      projections: { surface: { payload: { surfaces: [surface] } } },
+      pointer: { fence: 1 },
+      release: { contentHash: 'test' },
+    },
+    definition: {
+      queryId: revision.body.listQueryId,
+      sourceEntityId: entity,
+      maximumResultCount: 100,
+    },
+    legalEntityReadScope: { legalEntityIds: [companyId] },
+    arguments: {
+      mapPage: {
+        surfaceId: revision.surfaceId,
+        revisionId: revision.revisionId,
+        companyId,
+      },
+    },
+  } as unknown as SemanticQueryExecutionRequest;
+  const candidates = [
+    {
+      record: {
+        recordId,
+        entityId: entity,
+        archived: false,
+        revision: 1,
+        values: {},
+      },
+      group: 'north',
+      ordered: true,
+      ordinal: 1,
+    },
+  ];
+  const installed = (provider: string) =>
+    ({
+      query: async () => ({
+        rows: [
+          {
+            installation_id: randomUUID(),
+            provider,
+            record_id: recordId,
+            latitude: '51.05',
+            longitude: '-114.07',
+          },
+        ],
+      }),
+    }) as unknown as PoolClient;
+  // Only the descriptor table changes; the generic page read is unedited.
+  const providers = {
+    ...MAP_PROVIDERS,
+    'osm-like': { display: 'raster', attribution: 'OSM-like tiles' },
+    'globe-like': {
+      display: 'browser',
+      attribution: 'Globe tiles',
+      frame: {
+        document: 'globe-js',
+        title: 'Globe',
+        browserKey: () => 'k',
+      },
+    },
+  } as const;
+  for (const [name, display, attribution] of [
+    ['osm-like', 'raster', 'OSM-like tiles'],
+    ['globe-like', 'browser', 'Globe tiles'],
+    ['fake', 'raster', 'Demo Maps'],
+    ['google', 'browser', 'Google Maps'],
+  ] as const) {
+    const coverage = (
+      await finishMapPage(installed(name), request, candidates, providers)
+    ).mapCoverage!;
+    assert.equal(coverage.display, display, name);
+    assert.equal(coverage.attribution, attribution, name);
+    assert.equal(coverage.stops[0]!.provenance, attribution, name);
+  }
+  // An undeclared provider gets no display at all, not another's.
+  const unknown = (
+    await finishMapPage(installed('unlisted'), request, candidates, providers)
+  ).mapCoverage!;
+  assert.equal(unknown.display, undefined);
+  assert.equal(unknown.installationId, undefined);
+  // The renderer prints the credit it is given.
+  const { render } = stubMap({
+    stops: [stop(randomUUID(), 'north', 1, 51.05)],
+    coverage: {
+      installationId: 'i-1',
+      display: 'raster',
+      attribution: 'OSM-like tiles',
+    },
+  });
+  const slots = await render();
+  assert.match(slots.mapCanvas, /<p>OSM-like tiles<\/p>/u);
+  assert.match(slots.mapCanvas, /\/map\/image\?/u);
+});
+
+test('generic Map code names no map provider', () => {
+  for (const file of [
+    'packages/postgres-provider/src/map-page.ts',
+    'packages/runtime/src/address-gateway.ts',
+    'apps/web/src/map-view.ts',
+    'apps/web/src/map-display-origins.ts',
+    'apps/web/src/app-server.ts',
+    'apps/web/src/surface-client.ts',
+  ])
+    assert.doesNotMatch(
+      readFileSync(file, 'utf8'),
+      /\b(?:google|fake|demo maps)\b/iu,
+      file,
+    );
+});
+
+test('a Parties map grouped by Territory speaks in its declared labels and titles', async () => {
+  const { target, choice } = offered();
+  const labelField = draftMapRevision(target, choice).body.label.fieldId;
+  const { render } = stubMap({
+    stops: [stop(randomUUID(), 'north', 1, 51.05)],
+    values: () => ({ [labelField]: 'party-7f3a' }),
+    displayValues: () => ({ [labelField]: 'Acme Ltd' }),
+    coverage: { hasNext: randomUUID() },
+  });
+  const slots = await render();
+  const all = slots.savedViews + slots.mapCanvas + slots.stopList;
+  assert.match(slots.savedViews, /<label>Territory <select name="route">/u);
+  assert.match(slots.savedViews, /<option value="ungrouped">No Territory</u);
+  assert.match(slots.mapCanvas, /All Parties in this filter/u);
+  assert.match(slots.mapCanvas, /aria-label="Territory legend"/u);
+  assert.match(
+    slots.stopList,
+    /of this filter’s Parties — choose a Territory/u,
+  );
+  assert.match(all, /1\. Acme Ltd/u);
+  assert.doesNotMatch(all, /party-7f3a/u);
+  // Visible words only: markup and URLs keep their own parameter names.
+  const text = all.replace(/<[^>]*>/gu, ' ');
+  assert.doesNotMatch(text, /\bRoutes?\b|All routes|\bstops\b/iu);
+});
+
+test('two routes on one page get different styles in first-seen order', async () => {
+  const { render } = stubMap({
+    stops: [
+      stop(randomUUID(), 'north', 1, 51.05),
+      stop(randomUUID(), 'north', 2, 51.06),
+      stop(randomUUID(), 'south', 1, 51.0),
+      stop(randomUUID(), 'south', 2, 51.01),
+    ],
+  });
+  const { mapCanvas } = await render();
+  assert.match(mapCanvas, /<li class="group-0">North · solid<\/li>/u);
+  assert.match(mapCanvas, /<li class="group-1">South · dashed<\/li>/u);
+  assert.match(mapCanvas, /map-route group-0/u);
+  assert.match(mapCanvas, /map-route group-1/u);
+});
+
+test('Next fits its own page unless an area is chosen, and the summary counts this page', async () => {
+  const stops = [
+    stop(randomUUID(), 'north', 1, 51.05),
+    stop(randomUUID(), 'north', 2, 51.06),
+  ];
+  const fitted = await stubMap({
+    stops,
+    coverage: { hasNext: randomUUID() },
+    url: 'http://localhost/?cx=3325&cy=7165&zoom=9&size=medium',
+  }).render();
+  const next = /href="([^"]*)">Next</u.exec(fitted.stopList)![1]!;
+  assert.doesNotMatch(next, /[?&](?:amp;)?(?:cx|cy|zoom)=/u);
+  assert.match(next, /stops=/u);
+  const inArea = await stubMap({
+    stops,
+    coverage: { hasNext: randomUUID() },
+    url: 'http://localhost/?cx=3325&cy=7165&zoom=9&size=medium&area=1',
+  }).render();
+  assert.match(
+    /href="([^"]*)">Next</u.exec(inArea.stopList)![1]!,
+    /cx=3325&amp;cy=7165&amp;zoom=9/u,
+  );
+  // A frame far from the page's pins draws none of them on the canvas.
+  const away = await stubMap({
+    stops,
+    url: 'http://localhost/?cx=100&cy=100&zoom=9&size=medium',
+  }).render();
+  assert.match(away.mapCanvas, /Map · 0 of 2 on the map/u);
+  const own = await stubMap({ stops }).render();
+  assert.match(own.mapCanvas, /Map · 2 of 2 on the map/u);
 });

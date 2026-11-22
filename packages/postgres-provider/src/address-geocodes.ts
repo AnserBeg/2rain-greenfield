@@ -39,6 +39,7 @@ import {
 } from '../../runtime/src/semantic-query-gateway.js';
 import {
   addressProvider,
+  mapProviderDescriptor,
   AddressProviderError,
   type AddressProvider,
   type InstallationIdentity,
@@ -233,34 +234,48 @@ export class PostgresAddresses implements AddressGateway {
     handle: string,
     companyId: string,
   ) {
-    const display = await this.viewportAccess(view, handle, companyId, 'fake');
-    return this.imagery.image(handle, display.scope, display.reserve);
+    const display = await this.viewportAccess(
+      view,
+      handle,
+      companyId,
+      'raster',
+    );
+    return this.imagery.image(
+      handle,
+      display.scope,
+      display.reserve,
+      display.provider.imagery,
+    );
   }
   async viewportDisplay(view: RequestRuntimeView, handle: string) {
     const company = this.imagery.request(handle)?.scope.companyId;
-    const key = process.env.NORTH_STAR_GOOGLE_MAPS_BROWSER_KEY;
     if (
       !company ||
-      !key ||
       process.env.CI ||
       !this.demo ||
-      process.env.NORTH_STAR_CONNECTOR_DEMO !== '1' ||
-      process.env.NORTH_STAR_GOOGLE_MAPS_TERMS !== 'non-eea'
+      process.env.NORTH_STAR_CONNECTOR_DEMO !== '1'
     )
       throw denied();
-    const display = await this.viewportAccess(view, handle, company, 'google');
+    const display = await this.viewportAccess(view, handle, company, 'browser');
+    const frame = display.provider.frame;
+    const key = frame?.browserKey();
+    if (!frame || !key) throw denied();
     const viewport = await this.imagery.browserViewport(
       handle,
       display.scope,
       display.reserve,
     );
-    return { provider: 'google' as const, browserKey: key, viewport };
+    return {
+      frame: { document: frame.document, title: frame.title },
+      browserKey: key,
+      viewport,
+    };
   }
   private async viewportAccess(
     view: RequestRuntimeView,
     handle: string,
     companyId: string,
-    provider: Install['provider'],
+    display: 'browser' | 'raster',
   ) {
     const request = this.imagery.request(handle);
     if (!request || !isUuid(companyId)) throw denied();
@@ -314,11 +329,14 @@ export class PostgresAddresses implements AddressGateway {
     const live = async (c: PoolClient) => {
       await active(c, view);
       const i = await installation(c, view, companyId);
-      if (!i || i.provider !== provider) throw denied();
+      if (!i || mapProviderDescriptor(i.provider)?.display !== display)
+        throw denied();
       return i;
     };
     const i = await this.tx(view, live);
+    const provider = mapProviderDescriptor(i.provider)!;
     return {
+      provider,
       scope: this.viewportScope(view, surfaceId, companyId, i.installationId),
       reserve: () =>
         this.tx(view, async (c) => {

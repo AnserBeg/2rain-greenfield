@@ -13,6 +13,11 @@ import type {
   SemanticRecordDto,
   SemanticQueryResultEnvelope,
 } from '../../runtime/src/semantic-query-gateway.js';
+import {
+  MAP_PROVIDERS,
+  mapProviderDescriptor,
+  type MapProviderDescriptor,
+} from './address-provider.js';
 
 const bindings = new WeakMap<object, Map<string, SurfaceMap>>();
 export const mapPageInput = z.strictObject({
@@ -81,6 +86,7 @@ export async function finishMapPage(
   client: PoolClient,
   request: SemanticQueryExecutionRequest,
   candidates: readonly MapCandidate[],
+  providers: Readonly<Record<string, MapProviderDescriptor>> = MAP_PROVIDERS,
 ): Promise<SemanticQueryResultEnvelope> {
   const { map, input } = mapPageBinding(request),
     b = map.body,
@@ -94,6 +100,7 @@ export async function finishMapPage(
       restarted?: boolean;
       installationId?: string;
       display?: 'browser' | 'raster';
+      attribution?: string;
     },
   ) => ({
     kind: 'semanticQueryResult' as const,
@@ -126,7 +133,7 @@ export async function finishMapPage(
   // One runtime-role statement for the installation and all authorized address revisions.
   const result = await client.query<{
     installation_id: string;
-    provider: 'google' | 'fake';
+    provider: string;
     record_id: string | null;
     latitude: string | null;
     longitude: string | null;
@@ -148,8 +155,9 @@ export async function finishMapPage(
       b.addressFieldId,
     ],
   );
-  const installationId = result.rows[0]?.installation_id;
-  const browserDisplay = result.rows[0]?.provider === 'google';
+  // The installed provider's own descriptor decides display and credit.
+  const provider = mapProviderDescriptor(result.rows[0]?.provider, providers);
+  const installationId = provider && result.rows[0]?.installation_id;
   const pins = new Map(
     result.rows
       .filter((r) => r.record_id && r.latitude !== null && r.longitude !== null)
@@ -172,9 +180,7 @@ export async function finishMapPage(
           ? 'Outside map coverage'
           : user
             ? 'User pin'
-            : browserDisplay
-              ? 'Google Maps'
-              : 'Demo Maps',
+            : (provider?.attribution ?? 'Location unavailable'),
     };
   });
   const area = input.area && mapExtent(input.area);
@@ -216,10 +222,12 @@ export async function finishMapPage(
   const rows = filtered.slice(start, start + pageSize);
   return page(rows, {
     partial: false,
-    ...(installationId && {
-      installationId,
-      display: browserDisplay ? 'browser' : 'raster',
-    }),
+    ...(installationId &&
+      provider && {
+        installationId,
+        display: provider.display,
+        attribution: provider.attribution,
+      }),
     ...(input.cursor && !valid && { restarted: true }),
     ...(start + rows.length < filtered.length && {
       hasNext: newAnchor(context, rows.at(-1)!.record.recordId),

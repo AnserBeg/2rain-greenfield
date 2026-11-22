@@ -19,19 +19,21 @@ export interface AddressInstallation {
   companyId: string;
   installationId: string;
   account: string;
-  provider: 'google' | 'fake';
+  /** The installed provider's connector name, resolved by its adapter. */
+  provider: string;
   enrichment: boolean;
 }
 export interface AddressSettings {
-  provider: 'fake' | 'google';
+  provider: string;
   account: string;
   enrichment: boolean;
   calls: number;
   budgetMicros: number;
   enabled: boolean;
 }
+/** A browser provider's isolated frame, as its adapter declares it. */
 export interface BrowserBasemap {
-  provider: 'google';
+  frame: { document: string; title: string };
   browserKey: string;
   viewport: MapViewport;
 }

@@ -14,10 +14,7 @@ import {
   BILLING_ALLOCATION_READER,
   BILLING_INTERVAL_READER,
 } from '../../packages/canonical-model/src/billing.js';
-import {
-  MAP_VIEW_READER,
-  VIEWPORT_READER,
-} from '../../packages/canonical-model/src/map-view.js';
+import { MAP_VIEW_READER } from '../../packages/canonical-model/src/map-view.js';
 import { DATE_TIME_FIELD_READER } from '../../packages/canonical-model/src/date-time-field.js';
 import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../packages/canonical-model/src/surface-workspace.js';
 import { BOARD_READER } from '../../packages/canonical-model/src/board.js';
@@ -357,7 +354,6 @@ test('the capability comparison binds the family to its capability, then compare
     DATE_TIME_FIELD_READER,
     POPUP_READER,
     BILLING_ALLOCATION_READER,
-    VIEWPORT_READER,
     MAP_VIEW_READER,
   ];
   for (const reader of surfaceFloors) {

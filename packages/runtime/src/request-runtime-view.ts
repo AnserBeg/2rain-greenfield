@@ -239,7 +239,7 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 39 reads tenant dateTime fields (ADR-0087).
     // 40 adds custom buttons that open a record Task.
     // 41 pins the terms and assignment at first billing allocation.
-    // 42 reads viewport declarations and 43 renders Map views.
+    // 43 reads viewport declarations and renders Map views (one rung).
     maximumSupportedVersion: MAP_VIEW_READER,
   },
 });

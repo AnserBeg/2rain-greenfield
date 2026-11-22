@@ -39,6 +39,7 @@ import {
   createSurfaceRuntimeServer,
   mapDisplayOrigins,
 } from '@north-star/web/app-server';
+import { GOOGLE_MAP_FRAME } from '@north-star/web/google-basemap';
 import { COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION } from '@north-star/web/sales-section';
 
 import {
@@ -300,6 +301,7 @@ export async function startComposedApplication(
           process.env.NORTH_STAR_MAP_APP_ORIGIN,
           process.env.NORTH_STAR_MAP_DISPLAY_ORIGIN,
         ),
+        mapFrames: { 'google-maps-js': GOOGLE_MAP_FRAME },
         readSnapshot: (work, snapshotOptions) =>
           runtime.readSnapshot(work, snapshotOptions),
         selectedDemoActor: localDemoActor,

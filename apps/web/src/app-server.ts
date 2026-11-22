@@ -1,10 +1,10 @@
 import { mapCentre } from '@north-star/canonical-model';
 import {
-  basemapCsp,
-  googleBasemapDocument,
+  type MapFrameDocument,
   type mapDisplayOrigins,
-} from './google-basemap.js';
-export { mapDisplayOrigins } from './google-basemap.js';
+} from './map-display-origins.js';
+export { mapDisplayOrigins } from './map-display-origins.js';
+export type { MapFrameDocument } from './map-display-origins.js';
 import { addressSettings } from './address-settings.js';
 import { offerPlaces } from './address-context.js';
 import { createServer } from 'node:http';
@@ -72,6 +72,8 @@ export interface RequestWorkProbe {
 
 export interface SurfaceRuntimeServerOptions {
   readonly mapDisplay?: ReturnType<typeof mapDisplayOrigins>;
+  /** Browser map frame documents by the name a provider descriptor declares. */
+  readonly mapFrames?: Readonly<Record<string, MapFrameDocument>>;
   /**
    * SPEED-1: a page read (a GET, or a task's step) runs all its reads in one
    * read snapshot, ended by `finishReads` or when the page is assembled; a
@@ -111,20 +113,25 @@ export function createSurfaceRuntimeServer(
   const documents =
     options.documents && mountDocumentHttp(entry, options.documents);
   const origins = options.mapDisplay;
+  const frames = options.mapFrames ?? {};
   return createServer((request, response) => {
     if (origins && request.headers.host === origins.maps.host) {
+      const name = /^\/basemap\/([a-z0-9-]{1,64})$/u.exec(
+        request.url ?? '',
+      )?.[1];
+      const frame = name && Object.hasOwn(frames, name) && frames[name];
       if (
+        frame &&
         request.method === 'GET' &&
-        request.url === '/basemap' &&
         request.headers['sec-fetch-dest'] === 'iframe'
       ) {
         response.writeHead(200, {
           'content-type': 'text/html; charset=utf-8',
           'cache-control': 'no-store',
           'referrer-policy': 'origin',
-          'content-security-policy': basemapCsp(origins.app),
+          'content-security-policy': frame.csp(origins.app),
         });
-        response.end(googleBasemapDocument(origins.app));
+        response.end(frame.document(origins.app));
       } else {
         response.writeHead(404);
         response.end();
@@ -188,6 +195,7 @@ export function createSurfaceRuntimeServer(
         options.workflowApprovals,
         options.selectedDemoActor,
         origins,
+        frames,
       );
     };
     const probe = options.requestWork;
@@ -213,6 +221,7 @@ async function handleRequest(
   workflowApprovals?: WorkflowApprovalsService,
   selectedDemoActor?: (cookie: string | undefined) => 'buyer' | 'manager',
   origins?: ReturnType<typeof mapDisplayOrigins>,
+  frames: Readonly<Record<string, MapFrameDocument>> = {},
 ): Promise<void> {
   response.setHeader('cache-control', 'no-store');
   response.setHeader(
@@ -284,11 +293,15 @@ async function handleRequest(
           url.searchParams.get('image') ?? '',
         ),
       );
+      // The installed provider's descriptor names the frame document.
+      if (!Object.hasOwn(frames, display.frame.document)) throw Error();
       const centre = mapCentre(display.viewport);
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(
         JSON.stringify({
-          frame: new URL('/basemap', origins.maps).href,
+          frame: new URL('/basemap/' + display.frame.document, origins.maps)
+            .href,
+          title: display.frame.title,
           camera: {
             key: display.browserKey,
             center: { lat: centre.latitude, lng: centre.longitude },

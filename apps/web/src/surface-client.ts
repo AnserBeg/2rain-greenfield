@@ -836,7 +836,7 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
       const frame = document.createElement('iframe');
       frame.setAttribute('sandbox','allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox');
       frame.referrerPolicy = 'origin';
-      frame.title = 'Google Maps';
+      frame.title = String(display.title ?? '');
       frame.addEventListener('load', () => frame.contentWindow?.postMessage(display.camera, url.origin), {once:true});
       frame.src = url.href;
       slot.replaceChildren(frame);

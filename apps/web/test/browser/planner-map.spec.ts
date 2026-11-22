@@ -261,7 +261,8 @@ test('the isolated Google loader uses the public camera and an origin referrer',
     )
       return route.fulfill({
         json: {
-          frame: display + '/basemap',
+          frame: display + '/basemap/google-maps-js',
+          title: 'Google Maps',
           camera: {
             key: 'fixture-browser-key',
             center: { lat: centre.latitude, lng: centre.longitude },
@@ -269,7 +270,7 @@ test('the isolated Google loader uses the public camera and an origin referrer',
           },
         },
       });
-    if (url.origin === display && url.pathname === '/basemap')
+    if (url.origin === display && url.pathname === '/basemap/google-maps-js')
       return route.fulfill({
         headers: {
           'content-type': 'text/html',
@@ -316,7 +317,7 @@ test('the isolated Google loader uses the public camera and an origin referrer',
   });
   const child = page
     .frames()
-    .find((frame) => frame.url() === display + '/basemap')!;
+    .find((frame) => frame.url() === display + '/basemap/google-maps-js')!;
   expect(
     await child.evaluate(() => Reflect.get(window, 'camera').center),
   ).toEqual({ lat: centre.latitude, lng: centre.longitude });

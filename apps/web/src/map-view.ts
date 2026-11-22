@@ -48,6 +48,8 @@ export async function readMapSlots(
   scope: Readonly<Record<string, ImmutableJsonValue>>,
   company: string | null,
   gateways: SurfaceRuntimeGateways,
+  /** The Record link for a stop; injected only by renderer tests. */
+  recordHref?: (recordId: string) => string,
 ) {
   const map = surface.map!,
     b = map.body;
@@ -70,10 +72,34 @@ export async function readMapSlots(
     (f) => f.fieldId === b.group?.fieldId,
   );
   const routes = groupField?.kind === 'enumFieldType' ? groupField.options : [];
+  // Wording comes from the declarations: the group field's List column label
+  // and the collection's List label (rule 16), never dispatch vocabulary.
+  const owner = surfaces.find((s) => s.surfaceId === b.listSurfaceId);
+  const collection = owner?.label ?? surface.label;
+  const groupLabel =
+    owner?.list?.columns.find((c) => c.field === b.group?.fieldId)?.label ??
+    surface.label;
+  const dayLabel =
+    (b.defaultScope.kind === 'day' &&
+      owner?.list?.columns.find(
+        (c) =>
+          b.defaultScope.kind === 'day' && c.field === b.defaultScope.fieldId,
+      )?.label) ||
+    'Day';
   const routeName = (group: string | null) =>
     routes.find((option) => option.optionId === group)?.label ??
     group ??
-    'Ungrouped';
+    'No ' + groupLabel;
+  const labelField = surface.fields?.find((f) => f.fieldId === b.label.fieldId);
+  const titleOf = (r: (typeof result.records)[number]) => {
+    const value = r.values[b.label.fieldId];
+    if (labelField?.kind === 'enumFieldType')
+      return (
+        labelField.options.find((o) => o.optionId === value)?.label ??
+        String(value ?? r.recordId)
+      );
+    return r.displayValues?.[b.label.fieldId] ?? String(value ?? r.recordId);
+  };
   const size = MapViewportSchema.shape.size.parse(
     params.get('size') ?? 'medium',
   );
@@ -152,12 +178,13 @@ export async function readMapSlots(
   };
   const link = (label: string, href: string) =>
     '<a data-pan-link href="' + h(href) + '">' + h(label) + '</a>';
-  const pattern = (group: string | null) => {
-    let hash = 0;
-    for (const c of group ?? '') hash = (31 * hash + c.charCodeAt(0)) | 0;
-    return Math.abs(hash) % 4;
-  };
+  // Styles follow the first-seen order of this page's groups, so two routes
+  // on one page never share a style while four or fewer are visible.
   const groups = new Map<string | null, number>();
+  const pattern = (group: string | null) => {
+    if (!groups.has(group)) groups.set(group, groups.size % 4);
+    return groups.get(group)!;
+  };
   let prev: {
     ordinal: number;
     group: string | null;
@@ -167,21 +194,24 @@ export async function readMapSlots(
   const lines: string[] = [],
     pins: string[] = [],
     items: string[] = [];
+  let onCanvas = 0;
   for (const [index, s] of page.stops.entries()) {
     const r = result.records[index]!;
     if (r.recordId !== s.recordId) throw new Error('Map row differs.');
-    groups.set(s.group, pattern(s.group));
-    const label = String(r.values[b.label.fieldId] ?? r.recordId);
+    const label = titleOf(r);
     const text = (s.ordinal ? s.ordinal + '. ' : '') + label;
     const href = h(
-      surfaceHref(record, r.recordId, false, {
-        view,
-        legalEntitySelection: [company],
-      }),
+      recordHref
+        ? recordHref(r.recordId)
+        : surfaceHref(record, r.recordId, false, {
+            view,
+            legalEntitySelection: [company],
+          }),
     );
     const p = s.point && projectPin(v, s.point),
       style = pattern(s.group);
     if (p) {
+      if (p.x >= 0 && p.x <= width && p.y >= 0 && p.y <= height) onCanvas++;
       if (
         prev &&
         s.ordinal !== null &&
@@ -280,8 +310,10 @@ export async function readMapSlots(
           encodeURIComponent(handle) +
           '"/>'
         : '';
+  // The next page fits its own pins unless the person chose an area.
   const next = new URLSearchParams(params);
   if (page.hasNext) next.set('stops', page.hasNext);
+  if (!area) for (const k of ['cx', 'cy', 'zoom']) next.delete(k);
   const all = new URLSearchParams(params);
   for (const k of ['area', 'cx', 'cy', 'zoom', 'stops', 'bounds'])
     all.delete(k);
@@ -294,7 +326,7 @@ export async function readMapSlots(
   }
   const canvas =
     '<details open><summary>Map · ' +
-    points.length +
+    onCanvas +
     ' of ' +
     items.length +
     ' on the map</summary>' +
@@ -307,7 +339,7 @@ export async function readMapSlots(
       link('Zoom in', at({ ...v, zoom: Math.min(13, v.zoom + 1) }, true)),
       link('Zoom out', at({ ...v, zoom: Math.max(0, v.zoom - 1) }, true)),
       link('Fit this page', localUrl(fit)),
-      link('All stops in this filter', localUrl(all)),
+      link('All ' + collection + ' in this filter', localUrl(all)),
     ].join(' ') +
     '</nav>' +
     (browserDisplay
@@ -319,7 +351,9 @@ export async function readMapSlots(
     width +
     ' ' +
     height +
-    '" aria-label="Map of stops">' +
+    '" aria-label="' +
+    h('Map of ' + collection) +
+    '">' +
     (!browserDisplay && handle
       ? '<text x="8" y="24">Map background unavailable.</text>'
       : '') +
@@ -329,10 +363,16 @@ export async function readMapSlots(
     pins.join('') +
     (browserDisplay ? '</g>' : '') +
     '</svg>' +
-    (!browserDisplay && handle ? '<p>Demo Maps · simulated basemap</p>' : '') +
-    '<p>Order of the stops you can see · straight lines, not roads</p>' +
+    (!browserDisplay && handle && page.attribution
+      ? '<p>' + h(page.attribution) + '</p>'
+      : '') +
+    '<p>' +
+    h('Order of the ' + collection + ' you can see') +
+    ' · straight lines, not roads</p>' +
     (b.group
-      ? '<ul aria-label="Route legend">' +
+      ? '<ul aria-label="' +
+        h(groupLabel + ' legend') +
+        '">' +
         [...groups]
           .map(
             ([g, n]) =>
@@ -369,13 +409,17 @@ export async function readMapSlots(
     '<form action="/#map" method="get" data-map-form>' +
     preserved +
     (day
-      ? '<label>Day <input type="date" required name="day" value="' +
+      ? '<label>' +
+        h(dayLabel) +
+        ' <input type="date" required name="day" value="' +
         h(day) +
         '"></label>'
       : '') +
     (b.group
-      ? '<label>Route <select name="route"><option value="">All routes</option>' +
-        [...routes, { optionId: 'ungrouped', label: 'Ungrouped' }]
+      ? '<label>' +
+        h(groupLabel) +
+        ' <select name="route"><option value="">All</option>' +
+        [...routes, { optionId: 'ungrouped', label: 'No ' + groupLabel }]
           .map(
             (option) =>
               '<option value="' +
@@ -416,6 +460,12 @@ export async function readMapSlots(
       items,
       page,
       page.hasNext ? localUrl(next) : null,
+      {
+        collection,
+        narrow: [b.group && groupLabel, day && dayLabel].filter(
+          (x): x is string => Boolean(x),
+        ),
+      },
     ),
   };
 }
@@ -424,21 +474,33 @@ export function renderMapStopList(
   items: readonly string[],
   page: { readonly partial: boolean; readonly restarted?: boolean },
   nextUrl: string | null,
+  words: { readonly collection: string; readonly narrow: readonly string[] },
 ) {
+  const narrow = words.narrow.length
+    ? ' — choose a ' + words.narrow.join(' or ')
+    : '';
   return (
     (page.partial ? '<p role="status">Narrow the search</p>' : '') +
     (page.restarted
-      ? '<p role="status">This page changed. Showing the first stops.</p>'
+      ? '<p role="status">' +
+        h('This page changed. Showing the first ' + words.collection + '.') +
+        '</p>'
       : '') +
     (items.length
       ? '<ol class="map-stops">' + items.join('') + '</ol>'
       : page.partial
         ? ''
-        : '<p>No stops in this filter.</p>') +
+        : '<p>' + h('No ' + words.collection + ' in this filter.') + '</p>') +
     (nextUrl
-      ? '<p role="status">Showing ' +
-        items.length +
-        ' of this filter’s stops — choose a route or day</p>' +
+      ? '<p role="status">' +
+        h(
+          'Showing ' +
+            items.length +
+            ' of this filter’s ' +
+            words.collection +
+            narrow,
+        ) +
+        '</p>' +
         '<a data-pan-link href="' +
         h(nextUrl) +
         '">Next</a>'
