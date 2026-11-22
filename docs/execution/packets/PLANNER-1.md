@@ -40,7 +40,7 @@ From the packet checkout, run `git diff --stat 630e2aa6 11d0e030` for the review
 
 ## Gates
 
-Full CI on `c5fc6af2` failed the mutation-manifest, browser and PostgreSQL gates. The corrected packet needs a full run on its own tip.
+Full CI on `ffbe80a8` failed only the SPEED-1 inline-style check, caused by the basemap frame's `<style>`. The fix round moves that sizing into the hash-pinned loader and records why `'unsafe-inline'` stays (ADR-0036). The run on the fix tip is in the lane result.
 
 CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44962598119
 
@@ -56,7 +56,7 @@ The collection Map serves rental deliveries, field-service visits and distributi
 | Dispatcher message | Hardcoding 100 made the seven-row overflow assertion fail. The checked-in renderer uses the visible count. |
 | Compatibility and SPEED-1 | Native PostgreSQL matched the prior release root, definition, manifest and artifacts byte for byte. The archived reader served a pre-Map row and refused the Map release by name. Sparse and 100-stop pages each used 2 transactions, 33 statements, 3 authorization reads and zero repeats. Full-page p95 was 178 ms over five requests. The combined local test reached its 15-minute limit while publishing the sales fixture. The sales case passed independently. |
 | Customize, replay and drafter | Seven focused Map tests passed, including label-only upgrade for active and retired revisions and both schema-generated draft order directions. The exhaustive replay inventory and its conflicting/compatible Map case also passed. |
-| Rule 12 | 2026-11-21 exception for live eval registration of `addMapViewRevision`. AI-BUILD-1 owns the inventory and registry in PR #136 until merge. |
+| Rule 12 | AI-BUILD-1 slices 1–2 are on main (341453f9), so the eval exception ends. Main's fail-closed test (`customization-ai-draft-slice2`) will red on `addMapViewRevision` once integrated: it is in `CUSTOMIZATION_PATCH_KINDS` but not in main's `DRAFTER_KINDS`. The fix needs main-only files, so it lands in the integration merge per the recipe in `2rain-missions/PLANNER-1-s1-rule12-integration.txt`. The guidance sentence is exported as `MAP_VIEW_DRAFTER_GUIDANCE`, and the description is generated from `MapDraftSchema`. |
 | A1 and CI | The orchestrator landed the Map grammar and four slots at `1fe5b169`. The slice uses the CI-5 shard split from main at `352e43b7`. |
 
 **Try it yourself** · `node --import tsx --test --test-concurrency=1 test/unit/map-imagery.test.ts test/unit/customization-map.test.ts` exercises the fake raster, scope checks, page sizes, route filters, Customize and replay.
