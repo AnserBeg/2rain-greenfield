@@ -3,7 +3,11 @@ import { createServer } from 'node:http';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import type pg from 'pg';
-import type { SerializedRelease } from '../../packages/customization/src/index.js';
+import {
+  CustomizationPatchSchema,
+  preparePatchForRecording,
+  type SerializedRelease,
+} from '../../packages/customization/src/index.js';
 import {
   assertArchivedTenantEnvelopeForChange,
   withArchivedCustomizationRuntime,
@@ -216,7 +220,15 @@ export async function exercisePrecedingReader(input: {
     await assertPersisted(
       pool,
       input.compatibleId,
-      await assertArchivedTenantEnvelopeForChange(run, input.compatiblePatch),
+      // The service records a change after preparePatchForRecording (it binds
+      // new company-owned types to the company access index), so the archived
+      // compiler is given the change exactly as recorded.
+      await assertArchivedTenantEnvelopeForChange(
+        run,
+        preparePatchForRecording(
+          CustomizationPatchSchema.parse(input.compatiblePatch),
+        ),
+      ),
     );
     const hashes = await fingerprints(input.compatibleId);
     let activated: string | undefined;
