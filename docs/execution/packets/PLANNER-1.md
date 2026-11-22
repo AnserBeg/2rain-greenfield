@@ -46,7 +46,7 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44962598
 
 ## Slice 1 build checkpoint · 2026-11-21
 
-The collection Map serves rental deliveries, field-service visits and distribution pickups. The owner selected Google Maps JS behind the viewport seam. The licensed basemap runs in an isolated browser frame, with the ordered links and accessible list in the parent. CI uses Demo Maps. Main took rungs 40 (record buttons) and 41 (billing allocation). One provisional rung, 43, covers the Map member and its viewport binding, so an older reader refuses both by one name. The older-reader proof is pinned to main `5710c05a`. Slice 3 will compose registered views with shared context and quick-create, including a phone desk without a map.
+The collection Map serves rental deliveries, field-service visits and distribution pickups. The owner selected Google Maps JS behind the viewport seam. The licensed basemap runs in an isolated browser frame, with the ordered links and accessible list in the parent. CI uses Demo Maps. Main took rungs 40–44 (record buttons, billing allocation, company access indexes, report sources, grouped reports), and BILLING takes 45 in TRAIN-I. One rung, 46, covers the Map member and its viewport binding, so an older reader refuses both by one name. The older-reader proof is pinned to main `37bfd473`, merged in with CI-6's shard rebalance. The Map proof runs in shard 5. Slice 3 will compose registered views with shared context and quick-create, including a phone desk without a map.
 
 | Gate | Evidence at this checkpoint |
 | --- | --- |
@@ -64,7 +64,7 @@ The collection Map serves rental deliveries, field-service visits and distributi
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "PLANNER-1",
-  "base": "5710c05ae2529b742bf15f8f484c75c0b3930180", "head": "7e05bcd4c6342946123e79e5a487d2e10d5e3882",
+  "base": "37bfd47311c58060000cebca49d5f55174e3874a", "head": "af0ceac0779584f7d4ad2fa055c19d0c82903f42",
   "changedPaths": [
     ".agents/skills/ux-grammar/SKILL.md", "apps/api/src/composition-root.ts", "apps/web/package.json", "apps/web/src/app-server.ts", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/google-basemap.ts", "apps/web/src/ledger-styles.ts", "apps/web/src/map-display-origins.ts", "apps/web/src/map-view.ts",
     "apps/web/src/surface-client.ts", "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts", "apps/web/src/workspace-entry.ts", "apps/web/test/browser/planner-map.spec.ts", "apps/web/test/browser/surface-grammar.spec.ts", "docs/decisions/ADR-0036-minimum-client-capability.md", "docs/decisions/ADR-0080-connector-framework.md", "docs/decisions/ADR-0092-map-resource-assignment-and-planner-workspace.md", "docs/execution/ledger.md",
