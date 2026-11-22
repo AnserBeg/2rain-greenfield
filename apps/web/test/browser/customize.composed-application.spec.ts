@@ -1,4 +1,8 @@
 import { performance } from 'node:perf_hooks';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { require as loadFixture } from 'tsx/cjs/api';
+import type * as ApplicationFixture from '../../../../test/helpers/application-before-stock-count-workflow.js';
 
 import { expect, test } from '@playwright/test';
 
@@ -11,6 +15,7 @@ import {
 } from '../../../../packages/runtime/src/semantic-operation-gateway.js';
 import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../../../packages/runtime/src/semantic-query-gateway.js';
 import {
+  COMPOSED_APPLICATION_INVENTORY_SCOPE,
   openCustomizeService,
   startComposedApplication,
 } from '../../../api/src/composition-root.js';
@@ -734,6 +739,214 @@ test('a keyboard user moves a card through its reviewed Task with JavaScript dis
       } finally {
         mock.restoreAll();
         await context.close();
+        await opened.close();
+        await app.close();
+      }
+    },
+    LINEAGE_INSTALL_VOLUME,
+  );
+});
+
+test('a person groups Inspection outcomes, renames and retires the report, and restores it by rollback', async ({
+  page,
+}) => {
+  test.setTimeout(900_000);
+  const COMPANY = COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId;
+  // Publish through the real verifier. Historical first-party releases are exercised separately.
+  const { singleTransitionApplication }: typeof ApplicationFixture =
+    loadFixture(
+      './test/helpers/application-before-stock-count-workflow.ts',
+      resolve('package.json'),
+    );
+  const authored = JSON.parse(
+    readFileSync(resolve('apps/web/release/app.authored.json'), 'utf8'),
+  );
+  const compiledApplication = singleTransitionApplication(authored).release;
+  await withEphemeralPostgres(
+    'report-inspection-browser',
+    async ({ connection, pool }) => {
+      const options = {
+        tenantSlug: 'inspection-reports',
+        compiledApplication,
+        databaseUrl: `postgresql://postgres@127.0.0.1:${connection.port}/postgres`,
+      };
+      const app = await startComposedApplication({ ...options, port: 0 });
+      const opened = await openCustomizeService(options);
+      try {
+        const type = await opened.service.draft(
+          {
+            kind: 'addRecordType',
+            label: 'Inspection',
+            companyOwnership: 'entityOwned',
+            fields: [
+              { label: 'Name', type: 'text' },
+              { label: 'Outcome', type: 'choice', options: ['Pass', 'Fail'] },
+            ],
+          },
+          'visualBuilder',
+        );
+        if (type.status !== 'drafted') throw Error(JSON.stringify(type));
+        await opened.service.approve(type.patchId);
+        await opened.service.activate(type.patchId);
+        const listId = 'northstar.app:surface.custom_inspection_list';
+        const target = (await opened.service.targets()).reports!.find(
+          (t) => t.source.listSurfaceId === listId,
+        )!;
+        const outcome = target.fields.find((f) => f.label === 'Outcome')!;
+        for (const [i, value] of ['Pass', 'Fail', 'Pass'].entries())
+          await app.runtime.entry.run({}, async (view) => {
+            const created = await app.runtime.operationGateway.invoke(
+              view,
+              {
+                schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+                operationId: 'northstar.app:operation.custom_inspection_create',
+                idempotencyKey: randomUUID(),
+                confirmationGrant: null,
+                input: {
+                  recordId: randomUUID(),
+                  legalEntityId: COMPANY,
+                  values: {
+                    'northstar.app:field.custom_inspection_name':
+                      'Inspection ' + i,
+                    [outcome.operand.fieldId]: outcome.options!.find(
+                      (o) => o.label === value,
+                    )!.id,
+                  },
+                },
+              },
+              app.runtime.operationMediation.issueInvocation(view, 'UI'),
+            );
+            expect(created.outcome).toBe('succeeded');
+          });
+        const publish = async (
+          beforeActivation?: (patchId: string) => Promise<void>,
+        ) => {
+          await page
+            .getByRole('button', { name: 'Approve', exact: true })
+            .click({ noWaitAfter: true });
+          await expect(
+            page.getByRole('heading', { name: 'Approved', exact: true }),
+          ).toBeVisible({ timeout: 180_000 });
+          if (beforeActivation) {
+            const form = page.locator('form').filter({
+              has: page.getByRole('button', { name: 'Activate now' }),
+            });
+            await beforeActivation(
+              await form.locator('input[name="patchId"]').inputValue(),
+            );
+          }
+          await page
+            .getByRole('button', { name: 'Activate now' })
+            .click({ noWaitAfter: true });
+          await expect(
+            page.locator('[data-customize-result="activated"]'),
+          ).toBeVisible({ timeout: 180_000 });
+        };
+        const editor = new URL('/?customize', app.baseUrl);
+        editor.searchParams.set('report', listId);
+        const list = new URL('/', app.baseUrl);
+        list.searchParams.set('surface', listId);
+        list.searchParams.set(
+          'northstar.app:parameter.custom_inspection_list_legal_entity_scope',
+          COMPANY,
+        );
+        await page.goto(editor.href);
+        await page.getByLabel('Report name').fill('Inspections by outcome');
+        await page
+          .getByRole('combobox', { name: 'Group 1', exact: true })
+          .selectOption({ label: 'Outcome' }, { timeout: 15_000 });
+        await page
+          .getByRole('button', { name: 'Draft report', exact: true })
+          .click();
+        await publish();
+        await page.goto(list.href);
+        await page
+          .getByRole('link', { name: 'Inspections by outcome', exact: true })
+          .click();
+        const reportUrl = page.url();
+        const table = page.getByRole('table', {
+          name: 'Inspections by outcome',
+        });
+        await expect(
+          table.getByRole('row', { name: 'Pass 2', exact: true }),
+        ).toBeVisible();
+        await expect(
+          table.getByRole('row', { name: 'Fail 1', exact: true }),
+        ).toBeVisible();
+        await expect(table.locator('tfoot')).toContainText('3');
+        await page.setViewportSize({ width: 390, height: 844 });
+        const mobileRow = page
+          .locator('.grouped-report-table tbody tr')
+          .filter({
+            has: page.getByText('Pass', { exact: true }),
+          });
+        await expect(mobileRow).toBeVisible();
+        await expect(mobileRow.locator('td')).toHaveText(['Pass', '2']);
+        await page.goto(editor.href);
+        await page
+          .getByRole('link', { name: 'Inspections by outcome' })
+          .click();
+        await page.getByLabel('Report name').fill('Inspection totals');
+        await page
+          .getByRole('button', { name: 'Draft report', exact: true })
+          .click();
+        await publish(async (patchId) => {
+          const index =
+            'nsm_i_57kahsinwt3fo73cpq5mduuaqnwmyh6a7jjowaafqx5jvwtbwnsa';
+          const { rows } = await pool.query<{ ddl: string }>(
+            'SELECT pg_get_indexdef($1::regclass) AS ddl',
+            ['north_star_module.' + index],
+          );
+          const prior = (await opened.service.status()).activeReleaseId;
+          await pool.query('DROP INDEX north_star_module.' + index);
+          try {
+            await expect(
+              opened.service.activate(patchId),
+            ).rejects.toMatchObject({
+              code: 'REPORT_INDEX_UNAVAILABLE',
+              message: expect.stringMatching(
+                /Inspection totals.*tenant_id, environment_id, legal_entity_id, record_id/u,
+              ),
+            });
+            expect((await opened.service.status()).activeReleaseId).toBe(prior);
+          } finally {
+            await pool.query(rows[0]!.ddl);
+          }
+        });
+        await page.goto(reportUrl);
+        await expect(
+          page.getByRole('heading', { name: 'Inspection totals' }),
+        ).toBeVisible();
+        await page.goto(editor.href);
+        await page.getByRole('link', { name: 'Inspection totals' }).click();
+        await page.getByRole('button', { name: 'Draft retirement' }).click();
+        await publish();
+        const retired = (await opened.service.status()).activeChain.at(-1)!;
+        await page.goto(reportUrl);
+        await expect(
+          page.getByRole('heading', { name: 'View not available' }),
+        ).toBeVisible();
+        await page.goto(list.href);
+        await expect(
+          page.getByRole('link', { name: 'Inspection totals' }),
+        ).toHaveCount(0);
+        await page.goto(app.baseUrl + '/?customize');
+        await page
+          .getByRole('button', { name: 'Roll back the latest change' })
+          .click();
+        await expect(
+          page.locator('[data-customize-result="rolledBack"]'),
+        ).toBeVisible({ timeout: 180_000 });
+        await page.goto(reportUrl);
+        await expect(
+          page
+            .getByRole('table', { name: 'Inspection totals' })
+            .locator('tfoot'),
+        ).toContainText('3');
+        await expect(
+          opened.service.activate(retired.patchId),
+        ).rejects.toMatchObject({ code: 'CUSTOMIZE_NOT_APPROVED' });
+      } finally {
         await opened.close();
         await app.close();
       }

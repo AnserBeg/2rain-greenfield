@@ -3,7 +3,6 @@ import {
   CONNECTOR_FAMILY,
   OPTIONAL_DEPENDENCY_QUERY_READER,
 } from '@north-star/canonical-model';
-import { BILLING_ALLOCATION_READER } from '../../canonical-model/src/billing.js';
 import {
   assertTrustedRequestContext,
   type AuthenticatedRequestEntryAdapter,
@@ -11,6 +10,7 @@ import {
   type UntrustedRequestInput,
 } from './request-context.js';
 import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents.js';
+import { DECLARED_REPORT_READER } from '../../canonical-model/src/declared-report.js';
 import {
   WORKFLOW_PROJECTION_FAMILY,
   WORKFLOW_RUNTIME_CAPABILITY,
@@ -239,7 +239,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 39 reads tenant dateTime fields (ADR-0087).
     // 40 adds custom buttons that open a record Task.
     // 41 pins the terms and assignment at first billing allocation.
-    maximumSupportedVersion: BILLING_ALLOCATION_READER,
+    // 42 adds company access indexes, 43 report sources and 44 grouped reports.
+    maximumSupportedVersion: DECLARED_REPORT_READER,
   },
 });
 

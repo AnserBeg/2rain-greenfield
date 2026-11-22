@@ -1,3 +1,5 @@
+import { reportIndexCeilingProblem } from './report-index-build.js';
+import { reportIndexReady } from './grouped-report.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 
@@ -99,6 +101,7 @@ export class ModuleStorageMaterializationError extends Error {
   constructor(
     readonly code: string,
     message: string,
+    readonly reportIndex?: string,
   ) {
     super(message);
   }
@@ -1408,6 +1411,35 @@ async function applyDdlElement(
     }
     case 'createIndex': {
       const located = locateIndex(target, element);
+      const reportIndex =
+        located.index.indexKind === 'reportAccess'
+          ? {
+              table: located.entity.physicalTableName,
+              index: located.index.physicalName,
+              keys: [...located.index.columnNames],
+            }
+          : undefined;
+      if (
+        reportIndex &&
+        element.classification.preparationValidity === 'deferredOnlineFamily'
+      ) {
+        await client.query(
+          'LOCK TABLE north_star_module.' +
+            quoted(reportIndex.table) +
+            ' IN SHARE MODE',
+        );
+        const problem = await reportIndexCeilingProblem(
+          client,
+          reportIndex,
+          located.entity.entityId,
+        );
+        if (problem)
+          throw new ModuleStorageMaterializationError(
+            'REPORT_INDEX_UNAVAILABLE',
+            problem,
+            reportIndex.index,
+          );
+      }
       if (
         located.index.indexKind === 'dateTimeWindow' &&
         element.classification.preparationValidity === 'deferredOnlineFamily'
@@ -1426,6 +1458,22 @@ async function applyDdlElement(
            ON north_star_module.${quoted(located.entity.physicalTableName)}
            (${columns.join(', ')})${predicate ? ` WHERE ${predicate}` : ''}`,
       );
+      if (
+        reportIndex &&
+        !(await reportIndexReady(
+          client,
+          reportIndex.table,
+          reportIndex.index,
+          reportIndex.keys,
+        ))
+      )
+        throw new ModuleStorageMaterializationError(
+          'REPORT_INDEX_UNAVAILABLE',
+          located.entity.entityId +
+            ' needs a ready index on ' +
+            reportIndex.keys.join(', '),
+          reportIndex.index,
+        );
       return;
     }
     case 'addForeignKey': {
