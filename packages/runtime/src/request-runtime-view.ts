@@ -3,7 +3,7 @@ import {
   CONNECTOR_FAMILY,
   OPTIONAL_DEPENDENCY_QUERY_READER,
 } from '@north-star/canonical-model';
-import { BILLING_ALLOCATION_READER } from '../../canonical-model/src/billing.js';
+import { BILLING_ARREARS_READER } from '../../canonical-model/src/billing.js';
 import {
   assertTrustedRequestContext,
   type AuthenticatedRequestEntryAdapter,
@@ -239,7 +239,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 39 reads tenant dateTime fields (ADR-0087).
     // 40 adds custom buttons that open a record Task.
     // 41 pins the terms and assignment at first billing allocation.
-    maximumSupportedVersion: BILLING_ALLOCATION_READER,
+    // 42 reads closed-cycle charge reviews and their source contracts.
+    maximumSupportedVersion: BILLING_ARREARS_READER,
   },
 });
 

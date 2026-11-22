@@ -51,6 +51,14 @@ export const BillingQuoteEvidenceSchema = z.strictObject({
     )
     .max(32),
   pauses: z.array(interval.extend({ bandId: id.optional() })).max(256),
+  periodMeter: z
+    .strictObject({
+      streamId: id,
+      unit: id,
+      opening: z.strictObject({ at: time, reading: value }),
+      closing: z.strictObject({ at: time, reading: value }),
+    })
+    .optional(),
   usage: z
     .array(
       z.strictObject({

@@ -1,5 +1,7 @@
 import {
   BILLING_ALLOCATION_READER,
+  BILLING_ARREARS_READER,
+  BILLING_CYCLE_CALCULATION,
   BILLING_CALCULATION_VERSION,
   BILLING_READER,
   BILLING_INTERVAL_READER,
@@ -622,6 +624,11 @@ function verifyCompiledRelease(
     billingPlans.some(
       (p) => isRecord(p) && isRecord(p.bindings) && p.bindings.agreedInterval,
     );
+  const hasArrears =
+    Array.isArray(billingPlans) &&
+    billingPlans.some(
+      (p) => isRecord(p) && isRecord(p.bindings) && p.bindings.arrearsSource,
+    );
   if (billingPlans && !surfaceReference)
     throw integrity(
       'BILLING_PLAN_MISMATCH',
@@ -772,11 +779,13 @@ function verifyCompiledRelease(
         'billingCalculationVersion',
       );
       const surfaceFloor = reference.requiredRuntimeCapability.minimumVersion;
-      const billingFloor = hasBillingCalculation
-        ? BILLING_ALLOCATION_READER
-        : hasAgreedBillingInterval
-          ? BILLING_INTERVAL_READER
-          : BILLING_READER;
+      const billingFloor = hasArrears
+        ? BILLING_ARREARS_READER
+        : hasBillingCalculation
+          ? BILLING_ALLOCATION_READER
+          : hasAgreedBillingInterval
+            ? BILLING_INTERVAL_READER
+            : BILLING_READER;
       const popupProblem = popupDeclarationProblem(
         layoutDefinition,
         payload,
@@ -790,7 +799,9 @@ function verifyCompiledRelease(
         (hasBillingCalculation &&
           (!hasAgreedBillingInterval ||
             payload.billingCalculationVersion !==
-              BILLING_CALCULATION_VERSION)) ||
+              (hasArrears
+                ? BILLING_CYCLE_CALCULATION
+                : BILLING_CALCULATION_VERSION))) ||
         (hasAgreedBillingInterval &&
           surfaceFloor >= BILLING_ALLOCATION_READER &&
           !hasBillingCalculation) ||
@@ -800,6 +811,7 @@ function verifyCompiledRelease(
             BILLING_READER,
             BILLING_INTERVAL_READER,
             BILLING_ALLOCATION_READER,
+            BILLING_ARREARS_READER,
           ].includes(surfaceFloor))
       )
         throw integrity(

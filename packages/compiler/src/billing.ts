@@ -1,5 +1,9 @@
 import type { VersionedNormalizedApplicationPackage } from '@north-star/canonical-model';
 import {
+  BOOKING_USAGE_BINDING,
+  BOOKING_USAGE_CAPABILITY,
+} from '../../canonical-model/src/booking.js';
+import {
   BILLING_QUOTE_CAPABILITY,
   BILLING_TERMS_CAPABILITY,
 } from '../../canonical-model/src/billing.js';
@@ -37,6 +41,68 @@ export function billingBindingProblem(
               f.entity.targetId === q.sourceEntity.targetId,
           )
         : undefined;
+    const arrears = b.arrearsSource;
+    if (arrears?.kind === 'periodMeter') {
+      const boundFields = [
+        arrears.openingReadingFieldId,
+        arrears.closingReadingFieldId,
+        arrears.openingInstantFieldId,
+        arrears.closingInstantFieldId,
+      ];
+      if (
+        new Set(boundFields).size !== 4 ||
+        ![arrears.openingReadingFieldId, arrears.closingReadingFieldId].every(
+          (id) => {
+            const type = selectedField(source, id)?.fieldType;
+            return (
+              type?.kind === 'quantityFieldType' &&
+              type.baseUnit.targetId === arrears.unit &&
+              type.scale <= 9 &&
+              type.precision - type.scale <= 18
+            );
+          },
+        ) ||
+        ![arrears.openingInstantFieldId, arrears.closingInstantFieldId].every(
+          (id) =>
+            selectedField(source, id)?.fieldType.kind === 'dateTimeFieldType',
+        ) ||
+        !p.components.some((c) => c.kind === 'meter') ||
+        p.components.some(
+          (c) =>
+            c.kind === 'time' ||
+            (c.kind === 'meter' &&
+              (c.allowanceBasis.kind !== 'perCycle' ||
+                c.streamId !== arrears.streamId ||
+                c.unit !== arrears.unit)),
+        )
+      )
+        return 'BILLING_METER_SOURCE_REQUIRED';
+    }
+    if (arrears?.kind === 'bookingActuals') {
+      const usage = def.queries.find((q) => q.queryId === arrears.queryId);
+      const declaredSlot = def.operations.some(
+        (op) =>
+          op.lifecycle === 'active' &&
+          'booking' in op &&
+          op.booking &&
+          op.booking.slotId === arrears.slotId &&
+          op.booking.ownerEntity === source?.sourceEntity.targetId &&
+          op.booking.fulfilmentMode === 'tracked' &&
+          op.booking.unit === p.serviceUnit &&
+          op.booking.scale <= 9,
+      );
+      if (
+        !declaredSlot ||
+        model?.queries.usage?.targetId !== arrears.queryId ||
+        usage?.queryType !== 'get' ||
+        usage.legalEntityScope?.cardinality !== 'exactlyOne' ||
+        usage.readModel?.capability.targetId !== BOOKING_USAGE_CAPABILITY ||
+        usage.readModel.binding !== BOOKING_USAGE_BINDING ||
+        usage.readModel.queries.owner?.targetId !== source?.queryId ||
+        usage.sourceEntity.targetId !== source?.sourceEntity.targetId
+      )
+        return 'BILLING_BOOKING_SOURCE_REQUIRED';
+    }
     const interval = b.agreedInterval;
     const sourcePrefix = source?.sourceEntity.targetId.replace(
       ':entity.',
@@ -63,7 +129,8 @@ export function billingBindingProblem(
         'dateTimeFieldType' ||
       selectedField(source, interval.endFieldId)?.fieldType.kind !==
         'dateTimeFieldType' ||
-      p.components.some((c) => c.kind === 'meter')
+      (arrears?.kind !== 'periodMeter' &&
+        p.components.some((c) => c.kind === 'meter'))
     )
       return 'BILLING_SOURCE_FIELDS_REQUIRED';
     if (
@@ -76,7 +143,8 @@ export function billingBindingProblem(
       model?.capability.targetId !== BILLING_QUOTE_CAPABILITY ||
       model.queries.evidence?.targetId !== b.evidenceQueryId ||
       !model.resultFields.explanation ||
-      Object.keys(model.queries).length !== 1 ||
+      Object.keys(model.queries).length !==
+        (arrears?.kind === 'bookingActuals' ? 2 : 1) ||
       Object.keys(model.resultFields).length !== 1 ||
       outer.sourceEntity.targetId !== source?.sourceEntity.targetId ||
       selectedField(terms, b.termsFieldId)?.fieldType.kind !==

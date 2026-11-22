@@ -1,5 +1,6 @@
 import {
   BILLING_CALCULATION_VERSION,
+  BILLING_CYCLE_CALCULATION,
   type BillingPlan,
 } from '../../../canonical-model/src/billing.js';
 import {
@@ -109,12 +110,11 @@ interface Line {
   derivation: readonly unknown[];
 }
 const occurrenceId = (...parts: string[]) => JSON.stringify(parts);
-export const CYCLE_CALCULATION_VERSION = 'northstar.billing-calculation/v3';
 const legacyCalculation = 'northstar.billing-calculation/v1';
 type CalculationVersion =
   | typeof legacyCalculation
   | typeof BILLING_CALCULATION_VERSION
-  | typeof CYCLE_CALCULATION_VERSION;
+  | typeof BILLING_CYCLE_CALCULATION;
 
 function termPin(at: number, selection: ReturnType<typeof selectTable>) {
   const { publishedAt, ...table } = selection.table;
@@ -143,7 +143,7 @@ export function quoteBillingCycle(
     plan,
     { ...evidence, coverageThrough: through },
     undefined,
-    CYCLE_CALCULATION_VERSION,
+    BILLING_CYCLE_CALCULATION,
   );
 }
 export function replayBillingQuote(
@@ -191,7 +191,7 @@ function calculate(
     asOf = instant(e.asOf),
     serviceEnd = e.serviceEnd === null ? null : instant(e.serviceEnd);
   if (
-    (algorithm === CYCLE_CALCULATION_VERSION) !==
+    (algorithm === BILLING_CYCLE_CALCULATION) !==
     (e.coverageThrough !== undefined)
   )
     throw new Error('Billing cycle requires its coverage boundary');
@@ -233,6 +233,26 @@ function calculate(
     )
   )
     throw new Error('Prior allocation requires pinned billing terms');
+  if (
+    e.periodMeter &&
+    (algorithm !== BILLING_CYCLE_CALCULATION ||
+      e.basis !== 'usageOnly' ||
+      e.usage.length ||
+      e.pauses.length ||
+      e.periodMeter.opening.at !== e.periodStart ||
+      e.periodMeter.closing.at !== e.coverageThrough ||
+      !plan.components.some((c) => c.kind === 'meter') ||
+      plan.components.some(
+        (c) =>
+          c.kind === 'meter' &&
+          (c.streamId !== e.periodMeter!.streamId ||
+            c.unit !== e.periodMeter!.unit ||
+            c.allowanceBasis.kind !== 'perCycle'),
+      ))
+  )
+    throw new Error(
+      'Billing requires complete boundary readings for one unpaused meter cycle',
+    );
   const calendar = new BillingCalendar(anchor, e.zone, pinned),
     coverage = deriveCoverage(e, anchor, through);
   const windows = pricingWindows(
@@ -491,7 +511,18 @@ function calculate(
         const used = events.filter(
           (u) => u.active && o.start <= u.at && u.at < o.end,
         );
-        const usage = used.reduce((v, u) => v.plus(decimal(u.quantity)), zero);
+        let usage = used.reduce((v, u) => v.plus(decimal(u.quantity)), zero);
+        if (e.periodMeter) {
+          if (
+            iso(o.start) !== e.periodMeter.opening.at ||
+            iso(o.end) !== e.periodMeter.closing.at
+          )
+            throw new Error('Billing requires readings for every meter cycle');
+          usage = decimal(e.periodMeter.closing.reading).minus(
+            decimal(e.periodMeter.opening.reading),
+          );
+          if (usage.n < 0n) throw new Error('Billing meter reading decreased');
+        }
         const overage = usage.minus(allowance).max(zero),
           rate = decimal(t.values[c.overageRate]!);
         line(

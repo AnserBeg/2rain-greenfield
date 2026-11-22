@@ -4,6 +4,8 @@ export const BILLING_CALCULATION_VERSION = 'northstar.billing-calculation/v2';
 export const BILLING_READER = 30;
 export const BILLING_INTERVAL_READER = 36;
 export const BILLING_ALLOCATION_READER = 41;
+export const BILLING_ARREARS_READER = 42;
+export const BILLING_CYCLE_CALCULATION = 'northstar.billing-calculation/v3';
 export const BILLING_QUOTE_CAPABILITY = 'northstar.billing:capability.quote';
 export const BILLING_TERMS_CAPABILITY = 'northstar.billing:capability.terms';
 export const billingPeriods = [
@@ -115,6 +117,25 @@ export const BillingPlanSchema = z
             endFieldId: id,
             zone: z.string().min(1).max(100),
           })
+          .optional(),
+        arrearsSource: z
+          .discriminatedUnion('kind', [
+            z.strictObject({ kind: z.literal('agreedInterval') }),
+            z.strictObject({
+              kind: z.literal('periodMeter'),
+              streamId: id,
+              unit: id,
+              openingReadingFieldId: id,
+              closingReadingFieldId: id,
+              openingInstantFieldId: id,
+              closingInstantFieldId: id,
+            }),
+            z.strictObject({
+              kind: z.literal('bookingActuals'),
+              queryId: id,
+              slotId: id,
+            }),
+          ])
           .optional(),
         publishOperationId: id,
         overrideOperationId: id,
