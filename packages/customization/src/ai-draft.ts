@@ -24,6 +24,7 @@ import {
   unsupported,
 } from './patch.js';
 import type { CustomizationPatch, UnsupportedCustomization } from './patch.js';
+import { popupCommand, popupOptionId } from './popup-revision.js';
 import { customizationTargets, type CustomizationTargets } from './targets.js';
 import {
   fieldComparisonValidationDraft,
@@ -231,6 +232,28 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
       (form) =>
         `- ${form.surfaceId} — ${form.label}: ${form.fields.map((field) => `${field.fieldId} "${field.label}"`).join(', ')}`,
     ),
+    ...(targets.popupActions?.length
+      ? [
+          ...targets.popupActions.map((o) =>
+            JSON.stringify({
+              option: popupOptionId(o),
+              page: o.page,
+              operation: o.label,
+              inputs: o.fields.map((f) => ({
+                binding: f.id,
+                label: f.label,
+                sources: f.automatic
+                  ? ['entry', 'constant', 'record']
+                  : ['entry'],
+              })),
+              recordFields: o.sources.map((s) => ({
+                fieldId: s.id,
+                label: s.label,
+              })),
+            }),
+          ),
+        ]
+      : []),
     'Board collections (list surface, stages, moves by operation ID, facts by field ID):',
     ...(targets.boards ?? []).map(
       (t) =>
@@ -566,6 +589,8 @@ function convertMember(
         ),
       ];
     }
+    case 'addPopupActionRevision':
+      return [popupCommand(base.popupActions ?? [], req.button)];
     case 'addBoardViewRevision':
       return [boardMember(req, local())];
     case 'addAddressField': {

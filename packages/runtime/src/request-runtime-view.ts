@@ -1,5 +1,5 @@
+import { POPUP_READER } from '../../canonical-model/src/popup-actions.js';
 import {
-  DATE_TIME_FIELD_READER,
   BOOKING_FULFILMENT_READER,
   CONNECTOR_FAMILY,
   OPTIONAL_DEPENDENCY_QUERY_READER,
@@ -237,7 +237,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // stable ID with pinned contracts, labels from the release.
     // 38 adds document templates and governed PDF generation.
     // 39 reads tenant dateTime fields (ADR-0087).
-    maximumSupportedVersion: DATE_TIME_FIELD_READER,
+    // 40 adds custom buttons that open a record Task.
+    maximumSupportedVersion: POPUP_READER,
   },
 });
 
