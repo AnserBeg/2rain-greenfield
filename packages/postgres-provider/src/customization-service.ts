@@ -100,6 +100,7 @@ import {
   readCustomizationLineage,
 } from './customization-lineage.js';
 import type { ModuleProviderErrorMapping } from './module-runtime-interpreter.js';
+import type { ModuleWriteInvariantProvider } from './module-write-invariants.js';
 import {
   ModuleStorageMaterializationError,
   PostgresModuleStorageMaterializer,
@@ -181,6 +182,8 @@ export interface CustomizationServiceOptions {
   /** Verification of a candidate runs the same executors serving does. */
   readonly capabilityOperationExecutorFactories?: readonly PostgresCapabilityOperationExecutorFactory[];
   readonly providerErrorMappings?: readonly ModuleProviderErrorMapping[];
+  /** Required: a candidate's verification writes through the same invariants. */
+  readonly writeInvariants: readonly ModuleWriteInvariantProvider[];
   /**
    * The local demo's full-release roles receive a tenant release's new
    * permissions at activation, exactly as boot grants first-party ones.
@@ -1255,6 +1258,7 @@ export class PostgresCustomizationService {
     const context = await this.#context(actor);
     const view = await new PostgresWorkflowGateway(
       this.connection.runtimePool,
+      this.options.writeInvariants,
     ).loadView(context);
     const operations = parsePinnedOperationCatalog(
       view.projections.operation.payload,
@@ -1903,6 +1907,7 @@ export class PostgresCustomizationService {
     const base = await this.#loadRelease(context, releaseId);
     const view = await new PostgresWorkflowGateway(
       this.connection.runtimePool,
+      this.options.writeInvariants,
     ).loadView(context);
     if (
       view.release.releaseId !== releaseId ||
@@ -2053,6 +2058,7 @@ export class PostgresCustomizationService {
           identity,
           candidate,
           this.options.providerErrorMappings ?? [],
+          this.options.writeInvariants,
           this.options.capabilityOperationExecutorFactories ?? [],
           this.connection.adminPool,
         );

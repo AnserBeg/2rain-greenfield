@@ -15,6 +15,7 @@ import {
   type WorkflowBusinessClock,
 } from './workflow-execution.js';
 import { PostgresWorkflowGateway } from './workflow-gateway.js';
+import type { ModuleWriteInvariantProvider } from './module-write-invariants.js';
 
 /** One scheduler pass. Separate pools keep enumeration off the request role. */
 export class PostgresWorkflowWorker {
@@ -25,10 +26,11 @@ export class PostgresWorkflowWorker {
   constructor(
     private readonly workerPool: Pool,
     private readonly runtimePool: Pool,
+    writeInvariants: readonly ModuleWriteInvariantProvider[],
     businessClock?: WorkflowBusinessClock,
   ) {
     this.#consumer = new PostgresWorkflowConsumer(workerPool);
-    this.#gateway = new PostgresWorkflowGateway(runtimePool);
+    this.#gateway = new PostgresWorkflowGateway(runtimePool, writeInvariants);
     this.#execution = new PostgresWorkflowExecution(
       workerPool,
       runtimePool,
@@ -195,7 +197,8 @@ function validateRoleUrl(
 export function startWorkflowScheduler(
   config: WorkflowSchedulerConfig,
   reportFailure: () => void,
-  registrations: readonly ((pool: Pool) => ScheduledWorker)[] = [],
+  registrations: readonly ((pool: Pool) => ScheduledWorker)[],
+  writeInvariants: readonly ModuleWriteInvariantProvider[],
 ) {
   validateRoleUrl(config.workerDatabaseUrl, 'north_star_workflow_worker');
   validateRoleUrl(config.runtimeDatabaseUrl, 'north_star_runtime');
@@ -214,6 +217,7 @@ export function startWorkflowScheduler(
   const worker = new PostgresWorkflowWorker(
     workerPool,
     runtimePool,
+    writeInvariants,
     config.businessClock,
   );
   const stop = superviseWorkerPolls(
