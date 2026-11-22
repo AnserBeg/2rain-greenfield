@@ -217,6 +217,13 @@ export async function exerciseTemplateLibrary(
             { parent: source.recordId },
           )
         : undefined;
+      const restrictedSource = source
+        ? await world.create(
+            local + '_lines',
+            { line_number: '2', copies: '999', caption: 'Restricted original' },
+            { parent: source.recordId },
+          )
+        : undefined;
       if (kind === 'question') {
         const before = await world.create(local, {
           name: 'Compatible inspection',
@@ -316,9 +323,17 @@ export async function exerciseTemplateLibrary(
       );
       assert.equal(spoken.members[0]!.caption, 'Suggested ' + label);
       if (kind === 'row') {
-        const revised = (cells: Record<string, string>) => ({
+        const revised = (
+          cells: Record<string, string>,
+          sourceRowId?: string,
+        ) => ({
           ...content,
-          members: content.members.map((m) => ({ ...m, cells })),
+          members: content.members.map((m) => ({
+            ...m,
+            cells,
+            ...(sourceRowId &&
+              m.source && { source: { ...m.source, rowId: sourceRowId } }),
+          })),
         });
         await assert.rejects(
           run((v) =>
@@ -334,7 +349,13 @@ export async function exerciseTemplateLibrary(
         );
         await assert.rejects(
           run((v) =>
-            library.review(v, target, null, 0, revised({ [copies]: '999' })),
+            library.review(
+              v,
+              target,
+              null,
+              0,
+              revised({ [copies]: '999' }, restrictedSource!.recordId),
+            ),
           ),
           /template.audienceDenied/u,
         );
@@ -407,35 +428,51 @@ export async function exerciseTemplateLibrary(
           [compatibleId, ns + 'query.' + local + '_lines_get'],
         );
         assert.ok(sourceQuery);
-        const grantId = sourceQuery.permission;
-        const scoped = await pool.query<{ role_id: string }>(
-          'UPDATE platform.current_policy_permission_grants SET revoked_at=clock_timestamp() WHERE tenant_id=$1 AND environment_id=$2 AND permission_id=$3 AND revoked_at IS NULL RETURNING role_id',
-          [runtime.identity.tenantId, runtime.identity.environmentId, grantId],
-        );
-        assert.ok(
-          scoped.rowCount,
-          'revoke the source read while retaining publish',
-        );
-        try {
-          await assert.rejects(
-            run((v) => library.history(v, target)),
-            /communication.unavailable/u,
-          );
-          await assert.rejects(
-            run((v) => library.publish(v, review.reviewId, review.digest)),
-          );
-        } finally {
-          await pool.query(
-            'UPDATE platform.current_policy_permission_grants SET revoked_at=NULL WHERE (tenant_id,environment_id,permission_id)=($1,$2,$3) AND role_id=ANY($4::uuid[])',
+        for (const [grantId, refusal] of [
+          [sourceQuery.permission, /communication.unavailable/u],
+          [
+            copies.replace(':field.', ':permission.template_disclose_'),
+            /template.audienceDenied/u,
+          ],
+        ] as const) {
+          const scoped = await pool.query<{ role_id: string }>(
+            'UPDATE platform.current_policy_permission_grants SET revoked_at=clock_timestamp() WHERE tenant_id=$1 AND environment_id=$2 AND permission_id=$3 AND revoked_at IS NULL RETURNING role_id',
             [
               runtime.identity.tenantId,
               runtime.identity.environmentId,
               grantId,
-              scoped.rows.map((r) => r.role_id),
             ],
           );
+          assert.ok(
+            scoped.rowCount,
+            'revoke only the selected source or disclosure grant',
+          );
+          try {
+            if (grantId === sourceQuery.permission)
+              await assert.rejects(
+                run((v) => library.history(v, target)),
+                /communication.unavailable/u,
+              );
+            await assert.rejects(
+              run((v) => library.publish(v, review.reviewId, review.digest)),
+              refusal,
+            );
+          } finally {
+            await pool.query(
+              'UPDATE platform.current_policy_permission_grants SET revoked_at=NULL WHERE (tenant_id,environment_id,permission_id)=($1,$2,$3) AND role_id=ANY($4::uuid[])',
+              [
+                runtime.identity.tenantId,
+                runtime.identity.environmentId,
+                grantId,
+                scoped.rows.map((r) => r.role_id),
+              ],
+            );
+          }
+          assert.equal(
+            (await run((v) => library.history(v, target))).length,
+            0,
+          );
         }
-        assert.equal((await run((v) => library.history(v, target))).length, 0);
       }
       const published = await run((v) =>
         library.publish(v, review.reviewId, review.digest),
