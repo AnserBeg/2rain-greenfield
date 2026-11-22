@@ -203,7 +203,7 @@ export const DRAFTER_KINDS = {
   addPresentationRevision: {
     input: PresentationDraftSchema,
     guidance:
-      'Colour cells or whole rows of a listed list by a condition, size its columns, or set its density. Compare a listed value (fieldId) with another listed value of the same type (compareTo.fieldId) or a value (compareTo.value; for a choice or status, an option label). Tones: blocked for danger or red, attention for warning or amber, success for good or green, inProgress for active, neutral for none. reason is the short word shown, such as "Low stock". A row target colours the whole row; a cell target colours cellFieldId (default fieldId). Set keepCurrent to keep the listed current rules. Colour, flashing, icons, CSS and linked records are unsupported.',
+      'Colour cells or whole rows of a listed list by a condition, size its columns, or set its density. Compare a listed value (fieldId) with another listed value of the same type (compareTo.fieldId) or a value (compareTo.value; for a choice or status, an option label). Tones: blocked for danger or red, attention for warning or amber, success for good or green, inProgress for active, neutral for none. reason is the short word shown, such as "Low stock". A row target colours the whole row; a cell target colours cellFieldId (default fieldId). The listed current rules and sizes are kept unless named in remove or replaceCurrent is set. Colour, flashing, icons, CSS and linked records are unsupported.',
   },
   addPopupActionRevision: {
     input: z.strictObject({

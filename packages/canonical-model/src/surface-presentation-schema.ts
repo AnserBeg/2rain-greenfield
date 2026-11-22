@@ -283,5 +283,15 @@ export function compiledPresentationSchema(
     operands: z
       .record(id, z.record(id, PresentationOperandTypeSchema))
       .optional(),
+    /** Rules or sizes that stopped applying on this base, by affected ID. */
+    inert: z
+      .array(
+        z.strictObject({
+          id: z.string().min(1).max(512),
+          subject: z.string().min(1).max(512),
+          reason: z.string().min(1).max(400),
+        }),
+      )
+      .optional(),
   });
 }

@@ -266,7 +266,9 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
                 fieldId: o.fieldId,
                 label: o.label,
                 type: o.type.kind,
-                ...(o.options ? { options: o.options.map((x) => x.label) } : {}),
+                ...(o.options
+                  ? { options: o.options.map((x) => x.label) }
+                  : {}),
               })),
               columns: t.columns.map((c) => c.fieldId),
               current: (t.current?.status === 'active'

@@ -458,7 +458,11 @@ export function renderReleaseDiff(input: {
       | {
           revisionId: string;
           status: string;
-          toneRules: { tone: string; reason: { text: string }; target: { kind: string } }[];
+          toneRules: {
+            tone: string;
+            reason: { text: string };
+            target: { kind: string };
+          }[];
           sizing: { kind: string; fieldId?: string; width?: string }[];
           density: string | null;
         }
@@ -469,17 +473,32 @@ export function renderReleaseDiff(input: {
         ?.revisionId !== presented.revisionId
     ) {
       if (presented.status === 'retired')
-        lines.push(`On ${String(after.label)}, retire the colour rules and sizing.`);
+        lines.push(
+          `On ${String(after.label)}, retire the colour rules and sizing.`,
+        );
       else {
+        const kept = new Set(presented.toneRules.map((r) => r.reason.text));
+        for (const prior of (
+          before.presentation as
+            { toneRules?: { reason: { text: string } }[] } | undefined
+        )?.toneRules ?? [])
+          if (!kept.has(prior.reason.text))
+            lines.push(
+              `On ${String(after.label)}, remove the colour rule "${prior.reason.text}".`,
+            );
         for (const rule of presented.toneRules)
           lines.push(
             `On ${String(after.label)}, show "${rule.reason.text}" as ${rule.tone} on the ${rule.target.kind === 'listRow' ? 'whole row' : 'cell'} when its condition holds.`,
           );
         for (const entry of presented.sizing)
           if (entry.kind === 'listColumn')
-            lines.push(`On ${String(after.label)}, make column ${String(entry.fieldId)} ${String(entry.width)}.`);
+            lines.push(
+              `On ${String(after.label)}, make column ${String(entry.fieldId)} ${String(entry.width)}.`,
+            );
         if (presented.density)
-          lines.push(`On ${String(after.label)}, use ${presented.density} density.`);
+          lines.push(
+            `On ${String(after.label)}, use ${presented.density} density.`,
+          );
       }
     }
     for (const revision of (after.popupActions ?? []) as PopupRevision[]) {

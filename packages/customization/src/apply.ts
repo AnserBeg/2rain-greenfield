@@ -1,3 +1,7 @@
+import {
+  compilePresentation,
+  PresentationProblem,
+} from '../../canonical-model/src/surface-presentation.js';
 import { type PopupRevision } from '../../canonical-model/src/popup-actions.js';
 import type { ReplayOrigin } from './upgrade-diagnostics.js';
 import { applyReportRevision, supersededReports } from './report-revision.js';
@@ -306,8 +310,7 @@ export function applyOne(
         return fail('Choose a list to present.');
       const { kind, ...revision } = patch;
       const prior = surface.presentation as
-        | { revisionId: string; status: string }
-        | undefined;
+        { revisionId: string; status: string } | undefined;
       const stalePresentation =
         (prior?.revisionId ?? null) !== patch.predecessor;
       if (
@@ -323,8 +326,17 @@ export function applyOne(
         );
       surface.presentation = revision;
       try {
-        normalizeApplicationPackage(authored);
+        // The authoring gates run here, on the authoring base only.
+        const model = normalizeApplicationPackage(authored) as unknown as {
+          surfaces: Json[];
+        };
+        compilePresentation(
+          model as unknown as Parameters<typeof compilePresentation>[0],
+          model.surfaces.find((s) => s.surfaceId === patch.surface)!,
+          'authoring',
+        );
       } catch (error) {
+        if (error instanceof PresentationProblem) return fail(error.message);
         return fail(
           error instanceof CanonicalModelError
             ? error.diagnostics.map((d) => d.rule).join('. ')

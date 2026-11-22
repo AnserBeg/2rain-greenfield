@@ -44,8 +44,14 @@ export interface PresentationTarget {
   readonly revisionId: string | null;
   readonly current: SurfacePresentationRevision | null;
   readonly operands: readonly PresentationOperand[];
-  readonly columns: readonly { readonly fieldId: string; readonly label: string }[];
-  readonly views: readonly { readonly viewId: string; readonly label: string }[];
+  readonly columns: readonly {
+    readonly fieldId: string;
+    readonly label: string;
+  }[];
+  readonly views: readonly {
+    readonly viewId: string;
+    readonly label: string;
+  }[];
 }
 
 export function presentationTargets(
@@ -132,8 +138,13 @@ export const PresentationDraftSchema = z.strictObject({
     .max(MAX_SIZING_ENTRIES)
     .optional(),
   density: z.enum(DENSITIES).optional(),
-  /** Keep the current rules and sizing, and add or replace these. */
-  keepCurrent: z.boolean().optional(),
+  /**
+   * The current rules and sizing are kept by default; a drafted rule with the
+   * same reason replaces its namesake. `remove` names reasons to drop, and
+   * `replaceCurrent` starts from nothing.
+   */
+  remove: z.array(z.string().trim().min(1).max(80)).max(24).optional(),
+  replaceCurrent: z.boolean().optional(),
   retire: z.boolean().optional(),
 });
 export type PresentationDraft = z.infer<typeof PresentationDraftSchema>;
@@ -145,15 +156,11 @@ const slug = (text: string) =>
     .replaceAll(/^_+|_+$/gu, '')
     .slice(0, 60) || 'rule';
 
-function literal(
-  operand: PresentationOperand,
-  raw: string,
-): ValidationScalar {
+function literal(operand: PresentationOperand, raw: string): ValidationScalar {
   const type = operand.type;
   if (operand.options) {
     const option = operand.options.find(
-      (o) =>
-        o.id === raw || o.label.toLowerCase() === raw.trim().toLowerCase(),
+      (o) => o.id === raw || o.label.toLowerCase() === raw.trim().toLowerCase(),
     );
     if (!option)
       throw new Error(
@@ -190,11 +197,16 @@ export function presentationMember(
   const target = targets.find((t) => t.surfaceId === draft.surface);
   if (!target) throw new Error('Choose a listed list surface.');
   const namespace = target.surfaceId.split(':')[0]!;
-  const current = draft.keepCurrent ? target.current : null;
+  const current =
+    draft.replaceCurrent || target.current?.status !== 'active'
+      ? null
+      : target.current;
   const operand = (fieldId: string) => {
     const found = target.operands.find((o) => o.fieldId === fieldId);
     if (!found)
-      throw new Error(`The list does not read ${fieldId}; choose a listed value.`);
+      throw new Error(
+        `The list does not read ${fieldId}; choose a listed value.`,
+      );
     return found;
   };
   const field = (fieldId: string): ValidationOperand => ({
@@ -203,7 +215,7 @@ export function presentationMember(
     fieldId,
     select: 'value',
   });
-  const used = new Set(current?.toneRules.map((r) => r.ruleId) ?? []);
+  const used = new Set<string>();
   const toneRules = (draft.tones ?? []).map((tone) => {
     const left = operand(tone.fieldId);
     const right: ValidationOperand =
@@ -221,6 +233,7 @@ export function presentationMember(
       left: field(left.fieldId),
       right,
     };
+    // The ID derives from the reason, so redrafting "Low stock" replaces it.
     let ruleId = `${namespace}:tone.custom_${slug(tone.reason)}`;
     for (let n = 2; used.has(ruleId); n += 1)
       ruleId = `${namespace}:tone.custom_${slug(tone.reason)}_${String(n)}`;
@@ -269,7 +282,16 @@ export function presentationMember(
     revisionId: randomUUID(),
     predecessor: target.revisionId,
     status: draft.retire ? 'retired' : 'active',
-    toneRules: [...(current?.toneRules ?? []), ...toneRules],
+    toneRules: [
+      ...(current?.toneRules ?? []).filter(
+        (rule) =>
+          !toneRules.some((next) => next.ruleId === rule.ruleId) &&
+          !(draft.remove ?? []).some(
+            (reason) => reason.toLowerCase() === rule.reason.text.toLowerCase(),
+          ),
+      ),
+      ...toneRules,
+    ],
     sizing,
     density: draft.density ?? current?.density ?? null,
     viewDensity: current?.viewDensity ?? [],
@@ -311,8 +333,9 @@ export function presentationReplayProblem(
     throw error;
   }
   const columns = new Set(
-    ((surface.list as { columns?: { field: string }[] } | undefined)
-      ?.columns ?? []
+    (
+      (surface.list as { columns?: { field: string }[] } | undefined)
+        ?.columns ?? []
     ).map((c) => c.field),
   );
   for (const entry of patch.sizing)

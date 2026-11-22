@@ -163,9 +163,15 @@ test('a between-field condition tones the cell and the row, three-valued, and ne
   const fine = row({ [stock('on_hand')]: '9', [stock('reorder_point')]: '5' });
   assert.equal(fine.cells.size, 0);
   assert.equal(fine.row, null);
-  const equal = row({ [stock('on_hand')]: '5', [stock('reorder_point')]: '5.0' });
+  const equal = row({
+    [stock('on_hand')]: '5',
+    [stock('reorder_point')]: '5.0',
+  });
   assert.equal(equal.row, null);
-  const unknown = row({ [stock('on_hand')]: null, [stock('reorder_point')]: '5' });
+  const unknown = row({
+    [stock('on_hand')]: null,
+    [stock('reorder_point')]: '5',
+  });
   assert.equal(unknown.row, null);
   assert.deepEqual(unknown.unavailable, []);
   // A field the viewer may not read is absent from the row: no tone, and the
@@ -176,11 +182,11 @@ test('a between-field condition tones the cell and the row, three-valued, and ne
   assert.equal(hidden.unavailable.length, 2);
 });
 
-
 test('a condition binds only values the list reads, of one type, and refuses linked records, context values and unrendered placements by name', () => {
   const model = normalizeApplicationPackage(base) as unknown as Json;
-  const operands = targetsOf(base).find((t) => t.surfaceId === stockList)!
-    .operands;
+  const operands = targetsOf(base).find(
+    (t) => t.surfaceId === stockList,
+  )!.operands;
   const field = (fieldId: string) => ({
     schemaVersion: 'v6' as const,
     kind: 'field' as const,
@@ -257,6 +263,37 @@ test('the member persists choices by stable ID: a field add and a relabel keep i
       relabel: [{ field: stock('on_hand'), label: 'Qty on hand' }],
     },
   ]);
+  // Arranging the list keeps compiling with the rule active: hiding the
+  // toned and the sized columns leaves those entries inert, by field ID.
+  const arranged = applied(defn, [
+    {
+      kind: 'arrangeLayout',
+      surface: stockList,
+      hide: [stock('on_hand'), stock('name')],
+    },
+  ]);
+  const arrangedModel = normalizeApplicationPackage(arranged) as unknown as {
+    surfaces: Json[];
+  };
+  const arrangedList = arrangedModel.surfaces.find(
+    (s) => s.surfaceId === stockList,
+  )!;
+  const hidden = compilePresentationFn(arrangedModel as never, arrangedList);
+  const hiddenColumns = (
+    arrangedList.list as { columns: { field: string }[] }
+  ).columns.map((c) => c.field);
+  if (!hiddenColumns.includes(stock('on_hand')))
+    assert.ok(
+      hidden.inert?.some((entry) => entry.subject === stock('on_hand')),
+      JSON.stringify(hidden.inert),
+    );
+  assert.ok(
+    evaluableTones(hidden).every(
+      (rule) =>
+        rule.target.kind !== 'listCell' ||
+        hiddenColumns.includes(rule.target.fieldId),
+    ),
+  );
   const stale = structuredClone(first);
   stale.revisionId = '6b0d7a4e-6d2c-4b9e-9a51-1d3c1f7d0a11';
   const refusal = customization.applyCustomizationPatches(defn, [stale]);
@@ -274,9 +311,7 @@ test('the member persists choices by stable ID: a field add and a relabel keep i
   const surface = (defn.surfaces as Json[]).find(
     (s) => s.surfaceId === stockList,
   )!;
-  (
-    (surface.presentation as Json).toneRules as Json[]
-  )[0]!.when = {
+  ((surface.presentation as Json).toneRules as Json[])[0]!.when = {
     schemaVersion: 'v6',
     kind: 'required',
     operand: {
@@ -328,7 +363,10 @@ test('the same block serves a clinic and a rental firm with different names and 
     noShow.toneRules[0]!.when as { right: { scalar: { value: string } } }
   ).right.scalar.value;
   assert.match(optionId, /no_show/u);
-  assert.equal(presentRow(rules, { [outcome]: optionId }).row?.reason, 'No-show');
+  assert.equal(
+    presentRow(rules, { [outcome]: optionId }).row?.reason,
+    'No-show',
+  );
   assert.equal(presentRow(rules, { [outcome]: 'x' }).row, null);
 
   const firm = applied(authored, [rental]);

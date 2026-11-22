@@ -81,10 +81,13 @@ export function surfacePlacements(
       out.push({ schemaVersion: v, kind: 'formHeader' });
     const layouts =
       (surface.layouts as
-        | { body: { sections: { id: string }[] } }[]
-        | undefined) ?? [];
+        { body: { sections: { id: string }[] } }[] | undefined) ?? [];
     for (const section of layouts.flatMap((l) => l.body.sections))
-      out.push({ schemaVersion: v, kind: 'formSection', sectionId: section.id });
+      out.push({
+        schemaVersion: v,
+        kind: 'formSection',
+        sectionId: section.id,
+      });
     const query = def.queries.find(
       (q) => q.queryId === target(surface.dataSource),
     );
@@ -117,7 +120,11 @@ export function surfacePlacements(
       ?.metrics ?? [];
   for (const metric of metrics)
     if (metric.metricId)
-      out.push({ schemaVersion: v, kind: 'metricCard', metricId: metric.metricId });
+      out.push({
+        schemaVersion: v,
+        kind: 'metricCard',
+        metricId: metric.metricId,
+      });
   if (surface.archetype === 'home')
     for (const slot of slots)
       out.push({ schemaVersion: v, kind: 'homeSection', slotId: slot.slotId });
@@ -151,7 +158,9 @@ export function presentationOperands(
     String(
       (list?.columns as { field: string; label?: string }[] | undefined)?.find(
         (c) => c.field === fieldId,
-      )?.label ?? fallback ?? fieldId,
+      )?.label ??
+        fallback ??
+        fieldId,
     );
   const out: PresentationOperand[] = [];
   for (const fieldId of selectedFieldIds(query)) {
@@ -166,14 +175,17 @@ export function presentationOperands(
           type: { kind: 'text' },
           options: (
             (fieldType.options as { optionId: string; label?: string }[]) ?? []
-          ).map((o) => ({ id: o.optionId, label: String(o.label ?? o.optionId) })),
+          ).map((o) => ({
+            id: o.optionId,
+            label: String(o.label ?? o.optionId),
+          })),
         });
         continue;
       }
       if (
-        (def as { dateTimeFields?: { fieldId: string }[] }).dateTimeFields?.some(
-          (d) => d.fieldId === fieldId,
-        )
+        (
+          def as { dateTimeFields?: { fieldId: string }[] }
+        ).dateTimeFields?.some((d) => d.fieldId === fieldId)
       )
         continue;
       const type = formulaFieldType(
@@ -321,10 +333,7 @@ export function bindToneCondition(
         const left = typeOf(term.left);
         const right = typeOf(term.right);
         if (!sameType(left, right))
-          fail(
-            ruleId,
-            'Compare values with the same type, currency and unit',
-          );
+          fail(ruleId, 'Compare values with the same type, currency and unit');
         if (
           term.operator !== 'equal' &&
           term.operator !== 'notEqual' &&
@@ -357,15 +366,24 @@ export function bindToneCondition(
 
 /**
  * The compiled surface key. A retired revision is carried, never validated
- * (rule 10). An active one must target placements this surface exposes and
- * this release renders, by stable ID, and bind every operand.
+ * (rule 10). An active one binds every rule it can on this base.
+ *
+ * `authoring` (the authoring base only, as Board v2's eligibility gates):
+ * every rule and sized column must target what the surface exposes and this
+ * release renders, by stable ID, or the change is refused by name.
+ * `structural` (normalization, the compiler, admission, another base): a rule
+ * or sized column whose placement or value is gone is carried INERT with a
+ * diagnostic naming the affected ID. It stops applying and never mis-colours,
+ * so hiding a column or removing a field never blocks arranging the list.
  */
 export function compilePresentation(
   def: PresentationSource,
   surface: Row,
+  mode: 'authoring' | 'structural' = 'structural',
 ): {
   revision: SurfacePresentationRevision;
   operands?: Record<string, Record<string, PresentationOperandType>>;
+  inert?: { id: string; subject: string; reason: string }[];
 } {
   const revision = surface.presentation as SurfacePresentationRevision;
   if (revision.surface !== surface.surfaceId)
@@ -386,46 +404,68 @@ export function compilePresentation(
     throw new PresentationProblem(subject, 'Each tone rule needs its own ID');
   if (revision.toneRules.length > MAX_TONE_RULES)
     throw new PresentationProblem(subject, 'Too many tone rules');
+  const inert: { id: string; subject: string; reason: string }[] = [];
+  const check = (id: string, work: () => void) => {
+    try {
+      work();
+    } catch (error) {
+      if (mode === 'authoring' || !(error instanceof PresentationProblem))
+        throw error;
+      inert.push({ id, subject: error.subject, reason: error.message });
+    }
+  };
   const operands = presentationOperands(def, surface);
   const bound: Record<string, Record<string, PresentationOperandType>> = {};
-  for (const rule of revision.toneRules) {
-    if (!RENDERED_TONE_PLACEMENTS.has(rule.target.kind))
-      throw new PresentationProblem(
-        rule.ruleId,
-        `This release does not render a tone on a ${rule.target.kind} placement`,
-      );
-    if (!placements.has(placementKey(rule.target)))
-      throw new PresentationProblem(
-        rule.target.kind === 'listCell' ? rule.target.fieldId : rule.ruleId,
-        'The tone targets a placement this surface does not have',
-      );
-    bound[rule.ruleId] = bindToneCondition(operands, rule.ruleId, rule.when);
-  }
+  for (const rule of revision.toneRules)
+    check(rule.ruleId, () => {
+      if (!RENDERED_TONE_PLACEMENTS.has(rule.target.kind))
+        throw new PresentationProblem(
+          rule.ruleId,
+          `This release does not render a tone on a ${rule.target.kind} placement`,
+        );
+      if (!placements.has(placementKey(rule.target)))
+        throw new PresentationProblem(
+          rule.target.kind === 'listCell' ? rule.target.fieldId : rule.ruleId,
+          'The tone targets a placement this surface does not have',
+        );
+      bound[rule.ruleId] = bindToneCondition(operands, rule.ruleId, rule.when);
+    });
   const sized = new Set<string>();
   for (const entry of revision.sizing) {
-    if (!RENDERED_SIZING.has(entry.kind))
-      throw new PresentationProblem(
-        subject,
-        `This release does not size a ${entry.kind}`,
-      );
-    if (entry.kind !== 'listColumn') continue;
-    if (!list?.columns.some((c) => c.field === entry.fieldId))
-      throw new PresentationProblem(
-        entry.fieldId,
-        'The sized column is not on this list',
-      );
-    if (sized.has(entry.fieldId))
+    if (entry.kind === 'listColumn' && sized.has(entry.fieldId))
       throw new PresentationProblem(entry.fieldId, 'Size each column once');
-    sized.add(entry.fieldId);
+    if (entry.kind === 'listColumn') sized.add(entry.fieldId);
+    check(entry.kind === 'listColumn' ? entry.fieldId : entry.kind, () => {
+      if (!RENDERED_SIZING.has(entry.kind))
+        throw new PresentationProblem(
+          subject,
+          `This release does not size a ${entry.kind}`,
+        );
+      if (
+        entry.kind === 'listColumn' &&
+        !list?.columns.some((c) => c.field === entry.fieldId)
+      )
+        throw new PresentationProblem(
+          entry.fieldId,
+          'The sized column is not on this list',
+        );
+    });
   }
   if ((revision.density !== null || revision.viewDensity.length) && !list)
     throw new PresentationProblem(subject, 'Density applies to a list');
   for (const view of revision.viewDensity)
-    if (!list?.views.some((v) => v.viewId === view.viewId))
-      throw new PresentationProblem(view.viewId, 'The view is not on this list');
-  return Object.keys(bound).length
-    ? { revision, operands: bound }
-    : { revision };
+    check(view.viewId, () => {
+      if (!list?.views.some((v) => v.viewId === view.viewId))
+        throw new PresentationProblem(
+          view.viewId,
+          'The view is not on this list',
+        );
+    });
+  return {
+    revision,
+    ...(Object.keys(bound).length ? { operands: bound } : {}),
+    ...(inert.length ? { inert } : {}),
+  };
 }
 
 /** A rule ready to evaluate: a tenant's declared rule, or one a release derives. */
@@ -447,18 +487,22 @@ export interface EvaluableTone {
 export function evaluableTones(compiled: {
   readonly revision: SurfacePresentationRevision;
   readonly operands?:
-    | Record<string, Record<string, PresentationOperandType>>
-    | undefined;
+    Record<string, Record<string, PresentationOperandType>> | undefined;
+  readonly inert?:
+    readonly { readonly id: string; readonly subject: string }[] | undefined;
 }): EvaluableTone[] {
   if (compiled.revision.status !== 'active') return [];
-  return compiled.revision.toneRules.map((rule) => ({
-    ruleId: rule.ruleId,
-    target: rule.target,
-    when: rule.when,
-    tone: rule.tone,
-    reason: rule.reason.text,
-    operands: compiled.operands?.[rule.ruleId] ?? {},
-  }));
+  const inert = new Set((compiled.inert ?? []).map((entry) => entry.id));
+  return compiled.revision.toneRules
+    .flatMap((rule) => (inert.has(rule.ruleId) ? [] : [rule]))
+    .map((rule) => ({
+      ruleId: rule.ruleId,
+      target: rule.target,
+      when: rule.when,
+      tone: rule.tone,
+      reason: rule.reason.text,
+      operands: compiled.operands?.[rule.ruleId] ?? {},
+    }));
 }
 
 function readValue(

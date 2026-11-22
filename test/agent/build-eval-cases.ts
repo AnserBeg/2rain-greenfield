@@ -60,7 +60,8 @@ export const CAPABILITY_BUCKETS = {
   presentation:
     /\bflash|\bblink|\banimat|\bicons?\b|\bcss\b|\bcustom colou?r|\bstyles?\b/iu,
   // UI-CUSTOM-1 slice 1: a tone cannot compare with today yet.
-  today: /\btoday\b|\bcurrent date\b|\bdate context|\boverdue|\brelative date/iu,
+  today:
+    /\btoday\b|\bcurrent date\b|\bdate context|\boverdue|\brelative date/iu,
 } as const;
 export type CapabilityBucket = keyof typeof CAPABILITY_BUCKETS;
 
@@ -1102,12 +1103,18 @@ export const BUILD_CASES: readonly BuildCase[] = [
         {
           target: 'listCell',
           tones: ['blocked'],
-          fields: ['custom_stock_item_on_hand', 'custom_stock_item_reorder_point'],
+          fields: [
+            'custom_stock_item_on_hand',
+            'custom_stock_item_reorder_point',
+          ],
         },
         {
           target: 'listCell',
           tones: ['success'],
-          fields: ['custom_stock_item_on_hand', 'custom_stock_item_maximum_stock'],
+          fields: [
+            'custom_stock_item_on_hand',
+            'custom_stock_item_maximum_stock',
+          ],
         },
       ],
     },
@@ -1117,8 +1124,7 @@ export const BUILD_CASES: readonly BuildCase[] = [
     split: 'test',
     category: 'follow-up',
     base: [rentalBase],
-    request:
-      'Highlight rental rows where fewer units came back than went out.',
+    request: 'Highlight rental rows where fewer units came back than went out.',
     expect: {
       outcome: 'presentation',
       list: 'custom_rental',
