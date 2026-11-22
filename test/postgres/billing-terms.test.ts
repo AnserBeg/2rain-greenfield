@@ -13,6 +13,7 @@ import {
   type UnboundPermissionAcknowledgementInput,
 } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import {
+  CanonicalIdSchema,
   parseAuthoredApplicationPackageJson,
   parseNormalizedApplicationPackageJson,
 } from '../../packages/canonical-model/src/index.js';
@@ -507,7 +508,10 @@ test('period meter bindings require distinct selected boundaries, canonical unit
   for (const fieldType of [
     {
       ...quantity,
-      baseUnit: { ...quantity.baseUnit, targetId: id('capability.other_unit') },
+      baseUnit: {
+        ...quantity.baseUnit,
+        targetId: CanonicalIdSchema.parse(id('capability.other_unit')),
+      },
     },
     { ...quantity, scale: 10 },
     { ...quantity, precision: 21 },
