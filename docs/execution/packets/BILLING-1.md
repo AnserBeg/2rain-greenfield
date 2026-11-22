@@ -25,22 +25,35 @@ The narrow Fable re-read accepted [ADR-0083](../../decisions/ADR-0083-period-and
 - Publication retries discover their recorded company before checking the proposal and repeat authorization. Allocated and reserved cents admit every entitlement within the fraction precision bound.
 - The compiler refuses notes as evidence with `BILLING_SOURCE_FIELDS_REQUIRED`. Reader 30 covers declarations and reader 36 covers typed interval bindings.
 
+Slice 1 evidence
+
 CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44831287787
 
 At `eda6d12f`, the regression tests caught direct grants, the notes binding, the archived retry, negative split, schedule-dependent fee and rejected large allocation. Removing minimum pricing, calendar-month handling, table currency validation or the archived loader check made the corresponding proof fail.
 
+## Slice 2 checkpoint · review the first earned cycle
+
+- The released quote query reviews one closed arrears cycle. Coverage ends at that cycle even when the review is late. Recurrence uses the original anchor and zone. The quote records the operands, prices and service dates needed to replay its net lines and identifies the review by digest.
+- Equipment hire uses tracked possession and pause evidence from the released Booking owner query. A metered subscription uses two stored readings in the same unit without Booking. A fixed-fee service contract uses the agreed interval. All three use the same rating and rounding code.
+- A reader compares every Booking owner and cursor in one fence call. Pending meter readings identify the missing fields. A company-scoped buyer can review its own record. A correct record and company ID from a different company are refused.
+- Customize can draft a structural rate-plan version and replay it on upgrade. The schema-generated drafter registry and its equipment, subscription and contract eval cases keep prices and live bindings under the existing governed operations.
+- General blocks are civil-time schedules, interval and meter evidence, scoped release queries, exact-fraction rating and versioned plan declarations. Equipment hire, copy subscriptions and recurring service contracts exercise them.
+- The unchanged bound release has identical serialized bytes at reader 41. Its archived serving process answers an item query and refuses the new binding at provisional surface rung 42. The stored release rows and artifact bytes survive both probes.
+- Negative controls caught early cycles, excess coverage, foreign owners, cursor drift, mixed quantities, dropped pauses, a decreasing meter, mismatched units and duplicate owners.
+- This review creates no invoice, allocation or accounting entry. Enrollment, cutover carry, archive protection for unbilled use, quote-digest allocation, human issue and void/reissue belong to the atomic Receivables v2 writer. Advance awaits an admitted credit or refund path.
+
 ## Test it yourself
 
-Run `node --import tsx --test test/integration/billing-quote.test.ts`. Expect 17 proofs, including CAD 100 + 30 after a backdated publication, the capped three-day minimum of CAD 70, and a CAD 100 month from Jan 31 to Feb 28.
-Run `node --import tsx --test test/postgres/billing-terms.test.ts` for direct SQL denial, company isolation, archived retries, served replay and the historical reader’s refusal.
+Run `node --import tsx --test test/integration/billing-quote.test.ts`. The three-business test expects CAD 100.00 for hire after a pause, CAD 8.25 for usage above allowance and CAD 15.50 for a prorated contract.
+Run `node --import tsx --test --test-name-pattern='^a period meter reviews' test/postgres/billing-terms.test.ts` to publish terms, review a service, withhold a reading and exercise company isolation.
 
 ```record-claim
 {
   "schemaVersion":"northstar.record-claim/v1",
   "packet":"BILLING-1",
-  "base":"f1829ea9ce70a886a050e043dce23cb12267335d",
-  "head":"29821a4c527842b440904ea135090000d032a87e",
-  "changedPaths":["db/migrations/0057_billing_publication.sql","db/schema.snapshot.json","learnings.md","packages/canonical-model/src/billing-evidence.ts","packages/canonical-model/src/billing.ts","packages/compiler/src/billing.ts","packages/compiler/src/projections.ts","packages/domain/src/billing/quote.ts","packages/domain/src/billing/terms.ts","packages/postgres-provider/src/billing-quote.ts","packages/postgres-provider/src/billing-terms.ts","packages/postgres-provider/src/release-repository.ts","packages/postgres-provider/src/trust/postgres-trust-service.ts","packages/runtime/src/request-runtime-view.ts","packages/runtime/src/semantic-operation-gateway.ts","test/architecture/release-persistence-boundary.test.ts","test/evidence/BILLING-1.expected-red.json","test/fixtures/g2/language-conformance/coverage-decisions.json","test/integration/billing-quote.test.ts","test/integration/billing-release.test.ts","test/postgres/application-grants.tsv","test/postgres/billing-terms.test.ts","test/postgres/inventory-storage.test.ts","test/postgres/migrations.test.ts","test/postgres/module-storage-transition.test.ts","test/postgres/request-runtime-view.test.ts","test/postgres/trust-substrate.test.ts"],
-  "symbols":[{"path":"packages/domain/src/billing/quote.ts","name":"quoteBillingService"},{"path":"packages/postgres-provider/src/billing-quote.ts","name":"billingQuoteReadModel"},{"path":"packages/postgres-provider/src/billing-terms.ts","name":"BILLING_TERMS_FACTORY"}]
+  "base":"86a28ed55f25bd9b6428a6596d36ad6830a64612",
+  "head":"bb2b93683b27cfe51ffbe5be0a0c6195f7cf74e0",
+  "changedPaths":["packages/canonical-model/src/billing-evidence.ts","packages/canonical-model/src/billing.ts","packages/compiler/src/billing.ts","packages/compiler/src/projections.ts","packages/customization/src/ai-draft-kinds.ts","packages/customization/src/apply.ts","packages/customization/src/patch.ts","packages/customization/src/render.ts","packages/customization/src/upgrade-diagnostics.ts","packages/customization/src/upgrade-replay.ts","packages/domain/src/billing/arrears.ts","packages/domain/src/billing/quote.ts","packages/postgres-provider/src/billing-booking-usage.ts","packages/postgres-provider/src/billing-quote.ts","packages/postgres-provider/src/customization-service.ts","packages/postgres-provider/src/release-repository.ts","packages/runtime/src/request-runtime-view.ts","test/agent/build-bakeoff-run.ts","test/agent/build-eval-cases.ts","test/agent/build-eval.ts","test/helpers/archived-billing-probes.ts","test/integration/billing-quote.test.ts","test/postgres/billing-terms.test.ts","test/postgres/booking-commitments.test.ts","test/postgres/request-runtime-view.test.ts","test/unit/customization-ai-draft-slice2.test.ts","test/unit/customization-upgrade.test.ts"],
+  "symbols":[{"path":"packages/domain/src/billing/arrears.ts","name":"reviewArrearsCharges"},{"path":"packages/postgres-provider/src/billing-booking-usage.ts","name":"fenceBillingBookingOwners"},{"path":"packages/postgres-provider/src/billing-quote.ts","name":"billingQuoteReadModel"}]
 }
 ```
