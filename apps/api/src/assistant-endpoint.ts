@@ -134,6 +134,8 @@ interface Conversation {
   readonly session: OperationsAgentSession;
   readonly meter: SpendMeter;
   history: readonly ConversationEntry[];
+  /** The system prompt `history` was produced under (AI-RELY-1). */
+  historySystem?: string;
   /** Events visible to the person. Model prompts, tool results and deltas stay out. */
   readonly transcript: PanelEvent[];
   step: string;
@@ -576,6 +578,9 @@ export function createAssistantEndpoint(
           : conversation.meter,
       preamble,
       history: conversation.history,
+      ...(conversation.historySystem === undefined
+        ? {}
+        : { historySystem: conversation.historySystem }),
       signal: controller.signal,
       onEvent: (event) => {
         const label = stepLabel(event);
@@ -585,6 +590,7 @@ export function createAssistantEndpoint(
       },
     });
     conversation.history = run.conversation;
+    conversation.historySystem = run.system;
     // Whatever cut the model off (Stop, a handoff, a cap), the host reads
     // back every write of this turn that the model did not verify.
     const checked = await conversation.session.verifyPending();

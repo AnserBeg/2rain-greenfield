@@ -439,3 +439,147 @@ test('module parity uses within-task spread and requires three timed attempts on
     false,
   );
 });
+
+// ---- AI-RELY-1 task 0: replayed reasoning follows only its own prefix ----
+
+function reasoningModel(seen: unknown[][]): ModelAdapter {
+  return {
+    modelId: 'reasoning-fake',
+    next: ({ conversation }) => {
+      seen.push(
+        conversation.flatMap((entry) =>
+          entry.role === 'assistant' && Array.isArray(entry.providerContent)
+            ? (entry.providerContent as { type: string }[]).map((b) => b.type)
+            : [],
+        ),
+      );
+      return Promise.resolve({
+        text: 'answer',
+        toolCalls: [],
+        stop: 'end',
+        usage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+        providerContent: [
+          { type: 'thinking', thinking: '', signature: 'signed' },
+          { type: 'text', text: 'answer' },
+        ],
+      });
+    },
+  };
+}
+const quietSession = {
+  call: () => Promise.resolve({ content: {}, isError: false }),
+} as unknown as OperationsAgentSession;
+const preamble = (map: string) => ({ businessMap: map, turnContext: '' });
+
+test('reasoning is replayed unchanged while the system prompt is the one it followed', async () => {
+  const seen: unknown[][] = [];
+  const model = reasoningModel(seen);
+  const meter = new SpendMeter(PRICES_FREE, 10);
+  const first = await runOperationsAgent({
+    model,
+    session: quietSession,
+    meter,
+    request: 'one',
+    preamble: preamble('## customer'),
+  });
+  await runOperationsAgent({
+    model,
+    session: quietSession,
+    meter,
+    request: 'two',
+    preamble: preamble('## customer'),
+    history: first.conversation,
+    historySystem: first.system,
+  });
+  assert.deepEqual(seen[1], ['thinking', 'text']);
+});
+
+test('a rebuilt system prompt replays the history without its reasoning', async () => {
+  const seen: unknown[][] = [];
+  const model = reasoningModel(seen);
+  const meter = new SpendMeter(PRICES_FREE, 10);
+  const first = await runOperationsAgent({
+    model,
+    session: quietSession,
+    meter,
+    request: 'one',
+    preamble: preamble('## customer'),
+  });
+  // A release change: the business map, and so the system prompt, differ.
+  const second = await runOperationsAgent({
+    model,
+    session: quietSession,
+    meter,
+    request: 'two',
+    preamble: preamble('## customer\n## customer_note'),
+    history: first.conversation,
+    historySystem: first.system,
+  });
+  assert.deepEqual(seen[1], ['text'], 'no stale reasoning block is sent');
+  assert.notEqual(second.system, first.system);
+  // The kept turn's words survive; only the reasoning block is gone.
+  const replayed = second.conversation[1];
+  assert.equal(replayed?.role, 'assistant');
+  // A history of unknown origin is replayed without reasoning too.
+  await runOperationsAgent({
+    model,
+    session: quietSession,
+    meter,
+    request: 'three',
+    preamble: preamble('## customer\n## customer_note'),
+    history: second.conversation,
+  });
+  assert.deepEqual(seen[2], ['text', 'text']);
+});
+
+test('history cut from the front keeps no reasoning made after the cut turns', async () => {
+  const seen: unknown[][] = [];
+  const model = reasoningModel(seen);
+  const signed = {
+    role: 'assistant' as const,
+    text: 'earlier',
+    toolCalls: [],
+    providerContent: [
+      { type: 'thinking', thinking: '', signature: 'signed' },
+      { type: 'text', text: 'earlier' },
+    ],
+  };
+  const system = (
+    await runOperationsAgent({
+      model: reasoningModel([]),
+      session: quietSession,
+      meter: new SpendMeter(PRICES_FREE, 10),
+      request: 'probe',
+    })
+  ).system;
+  // The first exchange is too large to replay under this cap; the second
+  // exchange is kept, and its reasoning followed the first.
+  const meter = new SpendMeter(
+    { input: 4, output: 20, cacheRead: 0.4, cacheWrite: 5 },
+    0.07,
+  );
+  const run = await runOperationsAgent({
+    model,
+    session: quietSession,
+    meter,
+    request: 'three',
+    history: [
+      { role: 'user', text: '€'.repeat(30000) },
+      signed,
+      { role: 'user', text: 'two' },
+      signed,
+    ],
+    historySystem: system,
+  });
+  assert.equal(run.stop, 'answered');
+  assert.equal(seen.length, 1);
+  assert.deepEqual(seen[0], ['text'], 'the kept turn lost its reasoning');
+  assert.deepEqual(run.conversation[0], { role: 'user', text: 'two' });
+});
+
+const PRICES_FREE = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };

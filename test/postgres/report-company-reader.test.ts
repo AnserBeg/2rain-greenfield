@@ -687,6 +687,7 @@ test(
               app.runtime.metrics,
               {
                 providerErrorMappings: [],
+                writeInvariants: [],
                 capabilityOperationExecutorFactories:
                   CAPABILITY_EXECUTOR_FACTORIES,
                 reportLimits: { bytes: 256 },

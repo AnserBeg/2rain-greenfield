@@ -11,6 +11,7 @@ import {
 } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/inventory-posting-capability-executor.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
+import { INVENTORY_WRITE_INVARIANTS } from '../../packages/postgres-provider/src/inventory-write-invariants.js';
 import { PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/purchase-order-approval-executor.js';
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receiving-capability-executor.js';
 import { SHARED_LIST_QUERY_VERSION } from '../../packages/runtime/src/list-behavior/index.js';
@@ -70,6 +71,7 @@ export function startRuntime(
     localDemoIdentity: true,
     migrationsDirectory,
     providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
+    writeInvariants: INVENTORY_WRITE_INVARIANTS,
     tenantSlug: slug,
   });
 }

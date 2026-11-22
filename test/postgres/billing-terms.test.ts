@@ -1324,7 +1324,7 @@ test('governed terms and scoped source facts produce a quote through the install
 test('a period meter reviews the first earned cycle through its company-scoped gateway', async () => {
   const anchor = '2025-01-31T00:00:00.000Z';
   const end = '2025-02-28T00:00:00.000Z';
-  const preceding = '37bfd47311c58060000cebca49d5f55174e3874a';
+  const preceding = '1092e14d22890d172ac8e68099fdd78093898339';
   await withOrderEntryFixture(
     async (f) => {
       const version = {
@@ -1712,7 +1712,7 @@ test('an equipment hire reviews possession Booking stamped on its production clo
 
 test('the preceding cycle reader answers an item query on the persisted release without arrears', async () => {
   await withArchivedCustomizationRuntime(
-    '37bfd47311c58060000cebca49d5f55174e3874a',
+    '1092e14d22890d172ac8e68099fdd78093898339',
     async (run) => {
       const base = await archivedBase(run);
       const application = release('bound', base)!;

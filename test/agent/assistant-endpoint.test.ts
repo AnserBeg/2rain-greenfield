@@ -1504,3 +1504,52 @@ test('23: a resume racing eviction opens a conversation that the next request ca
     server.close();
   }
 });
+
+test('AI-RELY-1: a follow-up on the same release replays the earlier reasoning block', async () => {
+  const replayed: string[][] = [];
+  const model: ModelAdapter = {
+    modelId: 'reasoning-fake',
+    next: ({ conversation }) => {
+      replayed.push(
+        conversation.flatMap((entry) =>
+          entry.role === 'assistant' && Array.isArray(entry.providerContent)
+            ? (entry.providerContent as { type: string }[]).map((b) => b.type)
+            : [],
+        ),
+      );
+      return Promise.resolve({
+        text: 'ok',
+        toolCalls: [],
+        stop: 'end',
+        usage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+        providerContent: [
+          { type: 'thinking', thinking: '', signature: 'signed' },
+          { type: 'text', text: 'ok' },
+        ],
+      });
+    },
+  };
+  const { url, server } = await serve(model, []);
+  try {
+    const ask = async (conversation?: string) =>
+      events(
+        await fetch(`${url}/?assistant=ask`, {
+          method: 'POST',
+          headers: headers('buyer', url),
+          body: JSON.stringify({ text: 'hi', conversation }),
+        }),
+      );
+    const [opened] = await ask();
+    await ask(opened!.id as string);
+    // The endpoint kept the prompt the first turn ran under, so the
+    // unchanged prompt replays the block (a changed one would drop it).
+    assert.deepEqual(replayed, [[], ['thinking', 'text']]);
+  } finally {
+    server.close();
+  }
+});

@@ -88,6 +88,7 @@ import type { SemanticQueryGateway } from '../../runtime/src/semantic-query-gate
 import { type PostgresCapabilityOperationExecutorFactory } from './capability-operation-executor-factory.js';
 import { loadMigrations, runMigrations } from './migrations.js';
 import { type ModuleProviderErrorMapping } from './module-runtime-interpreter.js';
+import type { ModuleWriteInvariantProvider } from './module-write-invariants.js';
 import { PostgresModuleStorageMaterializer } from './module-storage-materializer.js';
 import { PostgresReleaseActivationService } from './release-activation-service.js';
 import { PostgresReleaseApprovalService } from './release-approval-service.js';
@@ -168,6 +169,8 @@ export type ComposedApplicationRuntimeOptions = (
   readonly monotonicMilliseconds?: () => number;
   readonly migrationsDirectory: string;
   readonly providerErrorMappings: readonly ModuleProviderErrorMapping[];
+  /** Capability-declared write invariants every record writer enforces. */
+  readonly writeInvariants: readonly ModuleWriteInvariantProvider[];
   readonly releaseSelection?: Readonly<{
     readonly kind: 'rollback';
     readonly targetReleaseRoot: string;
@@ -406,6 +409,7 @@ export async function createComposedApplicationRuntime(
                   ? { localDemoIdentity: true as const }
                   : {}),
                 providerErrorMappings: options.providerErrorMappings,
+                writeInvariants: options.writeInvariants,
                 capabilityOperationExecutorFactories:
                   options.capabilityOperationExecutorFactories ?? [],
               },
@@ -710,6 +714,7 @@ async function selectBootRelease(
         lineage[activeLineageIndex]!,
         releaseLineage[activeLineageIndex]!,
         options.providerErrorMappings,
+        options.writeInvariants,
         options.capabilityOperationExecutorFactories ?? [],
       );
     }
@@ -739,6 +744,7 @@ async function selectBootRelease(
         targetIdentity,
         target,
         options.providerErrorMappings,
+        options.writeInvariants,
         options.capabilityOperationExecutorFactories ?? [],
       );
       const reverseAuthorization = await withTrustedRequestTransaction(
@@ -844,6 +850,7 @@ async function selectBootRelease(
               targetIdentity,
               target,
               options.providerErrorMappings,
+              options.writeInvariants,
               options.capabilityOperationExecutorFactories ?? [],
             );
           } else {
@@ -887,6 +894,7 @@ async function selectBootRelease(
               targetIdentity,
               target,
               options.providerErrorMappings,
+              options.writeInvariants,
               options.capabilityOperationExecutorFactories ?? [],
             );
           } else {
@@ -1878,6 +1886,7 @@ export async function ensureReleaseAdmitted(
   identity: PersistedReleaseIdentity,
   release: ParsedRelease,
   providerErrorMappings: readonly ModuleProviderErrorMapping[],
+  writeInvariants: readonly ModuleWriteInvariantProvider[],
   capabilityOperationExecutorFactories: readonly PostgresCapabilityOperationExecutorFactory[],
   workflowVerifierPool?: pg.Pool,
 ): Promise<void> {
@@ -1888,6 +1897,7 @@ export async function ensureReleaseAdmitted(
     providerErrorMappings,
     capabilityOperationExecutorFactories,
     workflowVerifierPool,
+    writeInvariants,
   ).executeSemanticCandidateAndPersist(context, {
     compiledRelease: release.compiled,
     evidenceId: identity.evidenceId,
