@@ -1,3 +1,4 @@
+import { draftBeforeCompanyAccessIndex } from '../helpers/archived-runtime-process.js';
 import { CAPABILITY_EXECUTOR_FACTORIES } from '../../apps/api/src/erp-capabilities.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
 import assert from 'node:assert/strict';
@@ -1382,7 +1383,11 @@ test(
               },
             ],
           };
-          const candidate = await service.draft(fileChange, 'visualBuilder');
+          const candidate = await draftBeforeCompanyAccessIndex(
+            options,
+            fileChange,
+            'visualBuilder',
+          );
           assert.equal(candidate.status, 'drafted', JSON.stringify(candidate));
           assert.match(
             candidate.renderedDiff,

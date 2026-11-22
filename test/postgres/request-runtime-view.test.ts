@@ -16,6 +16,11 @@ import {
 } from '../../packages/canonical-model/src/billing.js';
 import { DATE_TIME_FIELD_READER } from '../../packages/canonical-model/src/date-time-field.js';
 import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../packages/canonical-model/src/surface-workspace.js';
+import { DECLARED_REPORT_READER } from '../../packages/canonical-model/src/declared-report.js';
+import {
+  COMPANY_ACCESS_INDEX_READER,
+  REPORT_SOURCE_READER,
+} from '../../packages/canonical-model/src/constants.js';
 import { BOARD_READER } from '../../packages/canonical-model/src/board.js';
 import { startComposedApplication } from '../../apps/api/src/composition-root.js';
 import { STOCK_COUNT_PRECEDING_READER } from '../helpers/application-before-stock-count-workflow.js';
@@ -353,6 +358,9 @@ test('the capability comparison binds the family to its capability, then compare
     DATE_TIME_FIELD_READER,
     POPUP_READER,
     BILLING_ALLOCATION_READER,
+    COMPANY_ACCESS_INDEX_READER,
+    REPORT_SOURCE_READER,
+    DECLARED_REPORT_READER,
   ];
   for (const reader of surfaceFloors) {
     for (const floor of surfaceFloors) {
@@ -406,7 +414,7 @@ test('the capability comparison binds the family to its capability, then compare
   // capability on one side alone reds here rather than in production.
   assert.deepEqual(SUPPORTED_RUNTIME_CAPABILITIES[surface], {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
-    maximumSupportedVersion: BILLING_ALLOCATION_READER,
+    maximumSupportedVersion: DECLARED_REPORT_READER,
   });
 });
 
@@ -1040,7 +1048,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
               ],
               {
                 capabilityId: 'northstar.runtime:capability.surface-manifest',
-                maximumSupportedVersion: BILLING_ALLOCATION_READER,
+                maximumSupportedVersion: DECLARED_REPORT_READER,
               },
             );
           },
@@ -1065,7 +1073,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
               new RegExp(
-                `requires version 999 and this runtime supports ${BILLING_ALLOCATION_READER}`,
+                `requires version 999 and this runtime supports ${DECLARED_REPORT_READER}`,
               ),
             );
           },
@@ -1096,7 +1104,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
               new RegExp(
-                `requires version 999 and this runtime supports ${BILLING_ALLOCATION_READER}`,
+                `requires version 999 and this runtime supports ${DECLARED_REPORT_READER}`,
               ),
             );
           },
@@ -1713,6 +1721,9 @@ function mustCompile(bytes: Uint8Array): CompileSuccess {
 
 function groupedNavigationDefinitionBytes(): Uint8Array {
   const definition = structuredClone(composedApplicationDefinition());
+  // This specimen varies the surface floor independently of the Invoice feature.
+  for (const entity of definition.entities as { reportSource?: unknown }[])
+    delete entity.reportSource;
   // As the product mounts it: with stock documents (INVENTORY-PARITY)
   // and a company's reorder rule (CATALOG-EXTRAS).
   const inventory = inventoryModuleDefinition('northstar.app', {

@@ -38,6 +38,7 @@ import {
   withArchivedCustomizationRuntime,
 } from '../helpers/archived-customization-runtime.js';
 import { archivedStockCountQuery } from '../helpers/archived-runtime-process.js';
+import { readReportsPredecessor } from '../helpers/reports-preceding-release.js';
 import {
   LINEAGE_INSTALL_VOLUME,
   withEphemeralPostgres,
@@ -457,6 +458,11 @@ test(
             const options = {
               databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
               tenantSlug: 'customize-popup',
+              // The first-party release before REPORTS-1 sits below the
+              // pop-up rung, so the archived 39 reader answers first.
+              compiledApplication: readReportsPredecessor(
+                'apps/web/release/app.compiled.json',
+              ),
             };
             const app = await startComposedApplication({
               ...options,

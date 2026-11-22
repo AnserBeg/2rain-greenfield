@@ -1008,6 +1008,9 @@ function compileDefinition(
 
 function composedApplicationWithInventory(): Record<string, unknown> {
   const composed = structuredClone(composedApplicationDefinition());
+  // Exercise the inventory and navigation floors independently of Invoice reporting.
+  for (const entity of composed.entities as { reportSource?: unknown }[])
+    delete entity.reportSource;
   // As the product mounts it: with stock documents (INVENTORY-PARITY)
   // and a company's reorder rule (CATALOG-EXTRAS).
   const inventory = inventoryModuleDefinition('northstar.app', {

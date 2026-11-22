@@ -1,3 +1,6 @@
+import type { StorageTargetPayloadV1 } from '../../compiler/src/storage.js';
+import { lowerDeclaredReports } from '../../compiler/src/declared-reports.js';
+import { DECLARED_REPORT_READER } from '../../canonical-model/src/declared-report.js';
 import {
   BILLING_ALLOCATION_READER,
   BILLING_CALCULATION_VERSION,
@@ -31,6 +34,8 @@ import { createHash } from 'node:crypto';
 
 import {
   CANONICALIZATION_PROFILE_VERSION,
+  COMPANY_ACCESS_INDEX_READER,
+  REPORT_SOURCE_READER,
   CONTENT_HASH_ALGORITHM,
   CONTENT_HASH_DOMAIN,
   canonicalize,
@@ -614,6 +619,66 @@ function verifyCompiledRelease(
   const surfaceReference = manifest.projections.find(
     (ref) => ref.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
   );
+  const indexedType =
+    isRecord(layoutDefinition) &&
+    Array.isArray(layoutDefinition.entities) &&
+    layoutDefinition.entities.find(
+      (entity: unknown) => isRecord(entity) && entity.companyAccessIndex,
+    );
+  const surfaceFloor =
+    surfaceReference?.requiredRuntimeCapability.minimumVersion ?? 0;
+  if (
+    (indexedType && surfaceFloor < COMPANY_ACCESS_INDEX_READER) ||
+    (!indexedType && surfaceFloor === COMPANY_ACCESS_INDEX_READER)
+  ) {
+    throw integrity(
+      'REPORT_INDEX_READER_MISMATCH',
+      'The company access index declaration and surface reader floor disagree.',
+    );
+  }
+  const hasReports =
+    isRecord(layoutDefinition) &&
+    Array.isArray(layoutDefinition.surfaces) &&
+    layoutDefinition.surfaces.some((s: unknown) => isRecord(s) && s.report);
+  if (
+    hasReports
+      ? surfaceFloor < DECLARED_REPORT_READER
+      : surfaceFloor === DECLARED_REPORT_READER
+  )
+    throw integrity(
+      'REPORT_READER_MISMATCH',
+      'Declared reports and the surface reader floor disagree.',
+    );
+  const reportInputs = new Map<string, unknown>();
+  const sourceTerms = (value: unknown, activeOnly: boolean) => {
+    if (!isRecord(value) || !Array.isArray(value.entities)) return [];
+    return value.entities.flatMap((e: unknown) =>
+      isRecord(e) &&
+      e.reportSource &&
+      (!activeOnly || e.lifecycle !== 'retired')
+        ? [{ entityId: e.entityId, reportSource: e.reportSource }]
+        : [],
+    );
+  };
+  const hasSource = sourceTerms(layoutDefinition, false).length > 0;
+  if (
+    (hasSource && surfaceFloor < REPORT_SOURCE_READER) ||
+    (!hasSource && surfaceFloor === REPORT_SOURCE_READER)
+  )
+    throw integrity(
+      'REPORT_SOURCE_READER_MISMATCH',
+      'The report source and surface reader floor disagree.',
+    );
+  if (
+    hasSource &&
+    !manifest.projections.some(
+      (p) => p.familyId === PROJECTION_FAMILY_IDS.reporting,
+    )
+  )
+    throw integrity(
+      'REPORT_SOURCE_BINDING_MISMATCH',
+      'A declared report source requires its reporting projection.',
+    );
   const billingPlans = isRecord(layoutDefinition)
     ? layoutDefinition.billingPlans
     : undefined;
@@ -732,6 +797,50 @@ function verifyCompiledRelease(
       projectionManifest,
       projectionPayloadBytes,
     );
+    if (
+      revision.languageVersion === 'v6' &&
+      [
+        PROJECTION_FAMILY_IDS.queryCatalog,
+        PROJECTION_FAMILY_IDS.policyReferences,
+        PROJECTION_FAMILY_IDS.reporting,
+        PROJECTION_FAMILY_IDS.agentDiscovery,
+        PROJECTION_FAMILY_IDS.verificationPlan,
+        PROJECTION_FAMILY_IDS.surfaceManifest,
+        PROJECTION_FAMILY_IDS.storageTarget,
+      ].some((f) => f === reference.familyId)
+    ) {
+      const payload = decodeCanonicalObject(
+        projectionPayloadBytes[0]!,
+        'PROJECTION_CHUNK_NOT_CANONICAL',
+      );
+      if (hasReports) reportInputs.set(reference.familyId, payload);
+      else if (
+        Object.hasOwn(payload, 'groupedReports') ||
+        (Array.isArray(payload.surfaces) &&
+          payload.surfaces.some((s: unknown) => isRecord(s) && s.report))
+      )
+        throw integrity(
+          'REPORT_DECLARATION_MISMATCH',
+          'A projection carries an undeclared report.',
+        );
+    }
+    if (
+      reference.familyId === PROJECTION_FAMILY_IDS.reporting &&
+      revision.languageVersion === 'v6'
+    ) {
+      const reporting = decodeCanonicalObject(
+        projectionPayloadBytes[0]!,
+        'PROJECTION_CHUNK_NOT_CANONICAL',
+      );
+      if (
+        canonicalize(sourceTerms(reporting, false)) !==
+        canonicalize(sourceTerms(layoutDefinition, true))
+      )
+        throw integrity(
+          'REPORT_SOURCE_BINDING_MISMATCH',
+          'The reporting projection disagrees with the declared source.',
+        );
+    }
     if (
       (reference.familyId === PROJECTION_FAMILY_IDS.operationCatalog ||
         reference.familyId === PROJECTION_FAMILY_IDS.queryCatalog) &&
@@ -858,6 +967,72 @@ function verifyCompiledRelease(
     }
   }
 
+  if (hasReports) {
+    const def = parseNormalizedApplicationPackageJson(revision.desiredState);
+    if (def.languageVersion !== 'v6')
+      throw integrity(
+        'REPORT_DECLARATION_MISMATCH',
+        'Unexpected report language.',
+      );
+    const payload = (family: string) =>
+      reportInputs.get(family) as Record<string, unknown> | undefined;
+    const target = payload(PROJECTION_FAMILY_IDS.storageTarget);
+    if (!target)
+      throw integrity(
+        'REPORT_DECLARATION_MISMATCH',
+        'Missing report storage target.',
+      );
+    const registrations = lowerDeclaredReports(
+      def,
+      target as unknown as StorageTargetPayloadV1,
+    );
+    const refs = registrations.map((r) => ({
+      reportId: r.revision.reportId,
+      revisionId: r.revision.revisionId,
+      queryId: r.queryId,
+      surfaceId: r.surfaceId,
+    }));
+    for (const family of [
+      PROJECTION_FAMILY_IDS.queryCatalog,
+      PROJECTION_FAMILY_IDS.policyReferences,
+      PROJECTION_FAMILY_IDS.reporting,
+      PROJECTION_FAMILY_IDS.agentDiscovery,
+      PROJECTION_FAMILY_IDS.verificationPlan,
+    ]) {
+      const catalog = payload(family);
+      const expected = registrations.length
+        ? family === PROJECTION_FAMILY_IDS.queryCatalog
+          ? registrations
+          : refs
+        : null;
+      if (
+        !catalog ||
+        canonicalize(catalog.groupedReports ?? null) !== canonicalize(expected)
+      )
+        throw integrity(
+          'REPORT_DECLARATION_MISMATCH',
+          'Report registration disagrees with ' + family,
+        );
+    }
+    const surfaceTerms = (surfaces: unknown) =>
+      Array.isArray(surfaces)
+        ? surfaces.flatMap((s: unknown) =>
+            isRecord(s) && s.report
+              ? [{ surfaceId: s.surfaceId, report: s.report }]
+              : [],
+          )
+        : [];
+    if (
+      canonicalize(surfaceTerms(def.surfaces)) !==
+      canonicalize(
+        surfaceTerms(payload(PROJECTION_FAMILY_IDS.surfaceManifest)?.surfaces),
+      )
+    )
+      throw integrity(
+        'REPORT_DECLARATION_MISMATCH',
+        'The grouped List disagrees with the declared report.',
+      );
+  }
   if (needsLayout) {
     const payload = (family: string) => {
       const bytes = layoutInputs.get(family);

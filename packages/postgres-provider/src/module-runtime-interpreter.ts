@@ -1,3 +1,22 @@
+import type { GroupedExecution } from '../../runtime/src/semantic-query-gateway.js';
+import {
+  trustedContextForRequestRuntimeView,
+  legalEntityIdsFromIssuedReadScope,
+} from '../../runtime/src/request-runtime-view.js';
+import {
+  REPORT_READER_POLICY,
+  reportCsv,
+  reportHash,
+  reportPage,
+  type ReportLimits,
+  type ReportResult,
+} from '../../runtime/src/declared-report.js';
+import {
+  activeReportCompany,
+  readGroupedSnapshot,
+  reportHorizon,
+} from './grouped-report.js';
+import { withReadSnapshot } from './request-context.js';
 import {
   addressColumns,
   addressScalars,
@@ -265,6 +284,7 @@ export class PostgresModuleRuntimeInterpreter
   readonly #pinnedStorageTargets: ValidatedPinnedStorageTargetCache;
   readonly #providerErrorMappings: readonly ModuleProviderErrorMapping[];
   readonly #trust: PostgresTrustService;
+  readonly #reportLimits: ReportLimits;
   readonly #documentNumbers: DocumentNumberMode;
   readonly #workflowRunId: string | undefined;
   readonly #validationReadPolicy:
@@ -284,6 +304,7 @@ export class PostgresModuleRuntimeInterpreter
       | ((observation: PinnedStorageTargetCacheObservation) => void)
       | undefined = undefined,
     options: {
+      readonly reportLimits?: Partial<Omit<ReportLimits, 'deadlineMs'>>;
       readonly documentNumbers?: DocumentNumberMode;
       readonly workflowRunId?: string;
       readonly validationReadPolicy?: (
@@ -291,6 +312,14 @@ export class PostgresModuleRuntimeInterpreter
       ) => CurrentPolicyGateway | Promise<CurrentPolicyGateway>;
     } = {},
   ) {
+    this.#reportLimits = { ...REPORT_READER_POLICY, ...options.reportLimits };
+    for (const [k, value] of Object.entries(this.#reportLimits))
+      if (
+        !Number.isSafeInteger(value) ||
+        value < 1 ||
+        value > REPORT_READER_POLICY[k as keyof ReportLimits]
+      )
+        throw new RangeError('Invalid report reader limit ' + k);
     this.#documentNumbers = options.documentNumbers ?? 'sequence';
     this.#workflowRunId = options.workflowRunId;
     this.#validationReadPolicy = options.validationReadPolicy;
@@ -337,6 +366,182 @@ export class PostgresModuleRuntimeInterpreter
             : result;
         })
       : this.#executeOperation(request);
+  }
+
+  async executeGrouped(request: GroupedExecution): Promise<ReportResult> {
+    const { view, input, report, remaining } = request;
+    const context = trustedContextForRequestRuntimeView(view);
+    const companies = legalEntityIdsFromIssuedReadScope(request.scope, view);
+    if (
+      companies.length !== 1 ||
+      companies[0] !== input.company ||
+      request.scope.policyVersion !== view.entryPolicyVersion
+    )
+      return { kind: 'unavailable' };
+    const limits = {
+      ...this.#reportLimits,
+      facts: Math.min(this.#reportLimits.facts, request.maximumFacts),
+    };
+    if (input.pageSize > limits.page) return { kind: 'narrow' };
+    const snapshot = await withReadSnapshot(
+      this.pool,
+      () =>
+        withTrustedRequestRead(this.pool, context, async (client, held) => {
+          if (!held) throw new Error('Report snapshot unavailable');
+          await client.query(
+            "SELECT pg_catalog.set_config('statement_timeout',$1,true)",
+            [String(Math.min(limits.statementMs, remaining()))],
+          );
+          const storage = await this.#loadPinnedStorageTarget(client, {
+            view,
+            context,
+          });
+          const entity = requiredEntity(
+            storage,
+            report.revision.body.source.entityId,
+          );
+          const horizon = await reportHorizon(client, view.tenantId);
+          return withModuleRuntimeRole(client, async () => {
+            if (
+              !(await activeReportCompany(
+                client,
+                storage.entities,
+                view.tenantId,
+                view.environmentId,
+                input.company,
+              ))
+            )
+              return { kind: 'unavailable' } as const;
+            return readGroupedSnapshot(
+              client,
+              entity,
+              request,
+              horizon,
+              (values, predicates) =>
+                appendQueryFilterPredicates(
+                  entity,
+                  request.filterPlans,
+                  values,
+                  predicates,
+                  undefined,
+                  report.legalEntityScope
+                    ? {
+                        [report.legalEntityScope.operand.parameterId]:
+                          input.company,
+                      }
+                    : {},
+                ),
+              limits,
+            );
+          });
+        }),
+      { retry: false },
+    );
+    remaining();
+    if ('kind' in snapshot) return snapshot;
+    const page = reportPage(view, report, input, snapshot, limits);
+    if (page.kind !== 'page') return page;
+    const verifyAuthority = async (client: PoolClient) => {
+      const fenced = await client.query(
+        'SELECT 1 FROM platform.active_release_pointers WHERE tenant_id=$1 AND environment_id=$2 AND pointer_id=$3 AND release_id=$4 AND fence=$5 FOR SHARE',
+        [
+          view.tenantId,
+          view.environmentId,
+          view.pointer.pointerId,
+          view.release.releaseId,
+          view.pointer.fence,
+        ],
+      );
+      const epoch = await client.query<{ policy_version: string }>(
+        'SELECT platform.lock_current_policy_epoch($1,$2) AS policy_version',
+        [view.tenantId, view.environmentId],
+      );
+      if (
+        fenced.rowCount !== 1 ||
+        currentPolicyVersionOf(epoch.rows[0]?.policy_version) !==
+          view.entryPolicyVersion
+      )
+        throw new Error('Report authority changed');
+      remaining();
+    };
+    if (!input.export) {
+      await withTrustedRequestTransaction(
+        this.pool,
+        context,
+        verifyAuthority,
+        remaining,
+      );
+      return Buffer.byteLength(JSON.stringify(page)) <= limits.bytes
+        ? page
+        : { kind: 'narrow' };
+    }
+    const bytes = reportCsv(report, snapshot, input.company);
+    if (Buffer.byteLength(bytes) > limits.bytes) return { kind: 'narrow' };
+    const actor = await this.actorIssuer.issue(context);
+    const receiptId = randomUUID();
+    const digest = createHash('sha256').update(bytes).digest('hex');
+    const metadata = Object.fromEntries(
+      Object.entries({
+        companyId: input.company,
+        fence: view.pointer.fence,
+        reportId: report.revision.reportId,
+        revisionId: report.revision.revisionId,
+        measures: report.revision.body.measures.map((m) => m.measureId),
+        parameterDigest: reportHash(input.parameters),
+        horizon: snapshot.horizon,
+        format: 'csv',
+        facts: snapshot.facts,
+        groups: snapshot.groups.length,
+        totals: snapshot.totals.length,
+        byteCount: Buffer.byteLength(bytes),
+        outputDigest: digest,
+      }).map(([k, value]) => [k, classified('INTERNAL', value)]),
+    );
+    await this.#trust.executeAcceptedMutation(
+      context,
+      actor,
+      {
+        actionId: 'northstar.runtime:action.issue_report_csv',
+        channel: 'UI',
+        causationId: null,
+        correlationId: randomUUID(),
+        invocationId: receiptId,
+        metadata,
+        releaseId: view.release.releaseId,
+        releaseContentHash: view.release.contentHash,
+        policy: {
+          decision: 'ALLOW',
+          evaluatorVersion: 'northstar.postgres-current-policy/v1',
+          policyVersion: view.entryPolicyVersion,
+          relevantInputs: metadata,
+          schemaVersion: POLICY_DECISION_EVIDENCE_VERSION,
+        },
+        change: {
+          changeDocumentId: randomUUID(),
+          recordType: 'northstar.runtime:entity.report_issuance',
+          recordId: receiptId,
+          revision: 1,
+          changes: [
+            {
+              fieldId: 'outputDigest',
+              classification: 'INTERNAL',
+              oldState: { state: 'ABSENT' },
+              newState: { state: 'VALUE', value: digest },
+            },
+          ],
+        },
+        event: {
+          eventId: randomUUID(),
+          eventType: 'northstar.runtime:event.report_issued',
+          eventSchemaVersion: 'northstar.report-issued/v1',
+          payload: metadata,
+        },
+        outbox: { outboxId: randomUUID(), deduplicationKey: receiptId },
+      },
+      verifyAuthority,
+    );
+    remaining();
+    return { kind: 'csv', bytes, receiptId };
   }
 
   async executeAggregate(
@@ -828,10 +1033,7 @@ export class PostgresModuleRuntimeInterpreter
 
   #loadPinnedStorageTarget(
     client: PoolClient,
-    request:
-      | SemanticAggregateQueryExecutionRequest
-      | SemanticOperationExecutionRequest
-      | SemanticQueryExecutionRequest,
+    request: Pick<SemanticQueryExecutionRequest, 'view' | 'context'>,
   ): Promise<PinnedStorageTarget> {
     const key = pinnedStorageTargetCacheKey(request);
     return this.#pinnedStorageTargets.get(key, (observeValidation) =>
@@ -923,10 +1125,7 @@ class ValidatedPinnedStorageTargetCache {
 }
 
 function pinnedStorageTargetCacheKey(
-  request:
-    | SemanticAggregateQueryExecutionRequest
-    | SemanticOperationExecutionRequest
-    | SemanticQueryExecutionRequest,
+  request: Pick<SemanticQueryExecutionRequest, 'view' | 'context'>,
 ): PinnedStorageTargetCacheKey {
   return Object.freeze({
     contentHash: request.view.release.contentHash,
@@ -6564,10 +6763,7 @@ function queryResult(
 
 async function loadPinnedStorageTarget(
   client: PoolClient,
-  request:
-    | SemanticAggregateQueryExecutionRequest
-    | SemanticOperationExecutionRequest
-    | SemanticQueryExecutionRequest,
+  request: Pick<SemanticQueryExecutionRequest, 'view' | 'context'>,
   observeValidation: PinnedStorageTargetValidationObservation,
 ): Promise<PinnedStorageTarget> {
   const result = await client.query<ArtifactRow>(
