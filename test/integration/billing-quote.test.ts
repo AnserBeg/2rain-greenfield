@@ -1,4 +1,8 @@
-import { billingBookingUsage } from '../../packages/postgres-provider/src/billing-booking-usage.js';
+import type { PoolClient } from 'pg';
+import {
+  billingBookingUsage,
+  fenceBillingBookingOwners,
+} from '../../packages/postgres-provider/src/billing-booking-usage.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
@@ -1023,4 +1027,63 @@ test('three businesses review net charge lines through the same closed-cycle cal
       }),
     /boundary readings/,
   );
+});
+
+test('the billing consumer fences all owners in one call and checks identities and cursors', async () => {
+  const owners = [
+    { queryId: 'one', entityId: 'visit', recordId: 'a', cursor: '2' },
+    { queryId: 'two', entityId: 'account', recordId: 'b', cursor: '7' },
+  ];
+  const result = owners
+    .toReversed()
+    .map(({ entityId, recordId, cursor }) => ({
+      ownerRef: { entityId, recordId },
+      cursor,
+    }));
+  let observed = result;
+  let calls = 0;
+  const client = {
+    async query(sql: string, args: unknown[]) {
+      calls++;
+      assert.equal(
+        sql,
+        'SELECT platform.booking_owner_cursor_fence($1,$2,$3) AS result',
+      );
+      assert.deepEqual(args, [
+        'release',
+        4,
+        JSON.stringify([
+          { queryId: 'one', recordId: 'a' },
+          { queryId: 'two', recordId: 'b' },
+        ]),
+      ]);
+      return {
+        rows: [
+          {
+            result: {
+              schemaVersion: 'booking.ownerCursorFence/v1',
+              owners: observed,
+            },
+          },
+        ],
+      };
+    },
+  } as unknown as PoolClient;
+  await fenceBillingBookingOwners(client, 'release', 4, owners);
+  assert.equal(calls, 1);
+  for (const incorrect of [
+    result.slice(1),
+    [result[0]!, result[0]!],
+    [{ ...result[0]!, cursor: '6' }, result[1]!],
+    [
+      { ...result[0]!, ownerRef: { entityId: 'foreign', recordId: 'b' } },
+      result[1]!,
+    ],
+  ]) {
+    observed = incorrect;
+    await assert.rejects(
+      fenceBillingBookingOwners(client, 'release', 4, owners),
+      /Stale billing booking cursor/,
+    );
+  }
 });

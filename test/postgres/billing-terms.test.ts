@@ -16,6 +16,7 @@ import { parseAuthoredApplicationPackageJson } from '../../packages/canonical-mo
 import {
   BillingPlanSchema,
   BILLING_ALLOCATION_READER,
+  BILLING_ARREARS_READER,
   BILLING_TERMS_CAPABILITY,
   BILLING_QUOTE_CAPABILITY,
 } from '../../packages/canonical-model/src/billing.js';
@@ -126,8 +127,47 @@ async function archivedBase(run: ArchivedRunner): Promise<BillingFixtureBase> {
   return (await run(archivedBillingBase, null)) as BillingFixtureBase;
 }
 
+const meterUnit = 'northstar.app:capability.unit_copy';
+const openingReading = id('field.sales_order_opening_reading');
+const closingReading = id('field.sales_order_closing_reading');
+const meterPlan = BillingPlanSchema.parse({
+  ...plan,
+  id: 'period-usage',
+  serviceUnit: 'subscription',
+  schedule: { kind: 'anniversary', months: 1 },
+  slots: [
+    { kind: 'money', id: 'rate', currency: 'CAD', scale: 2 },
+    { kind: 'quantity', id: 'included', unit: meterUnit, scale: 2 },
+  ],
+  components: [
+    {
+      id: 'overage',
+      kind: 'meter',
+      stage: 'afterCapBeforeTax',
+      taxClassification: 'untaxed',
+      streamId: 'copies',
+      unit: meterUnit,
+      overageRate: 'rate',
+      allowanceProration: 'none',
+      allowanceBasis: { kind: 'perCycle', quantity: 'included' },
+    },
+  ],
+  bindings: {
+    ...plan.bindings,
+    arrearsSource: {
+      kind: 'periodMeter',
+      unit: meterUnit,
+      streamId: 'copies',
+      openingReadingFieldId: openingReading,
+      closingReadingFieldId: closingReading,
+      openingInstantFieldId: plan.bindings!.agreedInterval!.startFieldId,
+      closingInstantFieldId: plan.bindings!.agreedInterval!.endFieldId,
+    },
+  },
+});
+type FixtureMode = 'bound' | 'legacy' | 'declaration' | 'arrears';
 function billingFixture(
-  mode: 'bound' | 'legacy' | 'declaration',
+  mode: FixtureMode,
   base: BillingFixtureBase = currentBase,
 ) {
   const p = parseAuthoredApplicationPackageJson(JSON.stringify(base.authored));
@@ -171,6 +211,14 @@ function billingFixture(
     ...source,
     selections: [
       ...source.selections,
+      ...(mode === 'arrears'
+        ? [openingReading, closingReading].map((field, index) => ({
+            ...source.selections[0]!,
+            field: ref('fieldReference', field),
+            selectionId: id('selection.billing_meter_' + index),
+            orderKey: 10001 + index,
+          }))
+        : []),
       {
         ...source.selections[0]!,
         field: ref('fieldReference', proposalField),
@@ -181,9 +229,25 @@ function billingFixture(
   };
   const boundInput = {
     ...p,
-    billingPlans: [plan],
+    billingPlans: [mode === 'arrears' ? meterPlan : plan],
     fields: [
       ...p.fields,
+      ...(mode === 'arrears'
+        ? [openingReading, closingReading].map((field, index) => ({
+            ...notes,
+            fieldId: field,
+            label: index ? 'Closing reading' : 'Opening reading',
+            orderKey: 10001 + index,
+            fieldType: {
+              kind: 'quantityFieldType',
+              schemaVersion: 'v6',
+              representation: 'canonicalString',
+              precision: 20,
+              scale: 2,
+              baseUnit: ref('unitReference', meterUnit),
+            },
+          }))
+        : []),
       {
         ...notes,
         fieldId: proposalField,
@@ -217,6 +281,15 @@ function billingFixture(
     ],
     capabilityRequirements: [
       ...p.capabilityRequirements,
+      ...(mode === 'arrears'
+        ? [
+            {
+              ...requirement,
+              capabilityId: meterUnit,
+              declaredEffects: ['read'],
+            },
+          ]
+        : []),
       { ...requirement, capabilityId: BILLING_TERMS_CAPABILITY },
       {
         ...requirement,
@@ -254,10 +327,7 @@ function billingFixture(
   };
 }
 
-function release(
-  mode: 'bound' | 'legacy' | 'declaration' = 'bound',
-  base?: BillingFixtureBase,
-) {
+function release(mode: FixtureMode = 'bound', base?: BillingFixtureBase) {
   const { bytes, old, permissions, ack, languageVersion } = billingFixture(
     mode,
     base,
@@ -870,5 +940,117 @@ test('governed terms and scoped source facts produce a quote through the install
     0,
     0,
     release(),
+  );
+});
+
+test('a period meter reviews the first earned cycle through its company-scoped gateway', async () => {
+  const anchor = '2025-01-31T00:00:00.000Z';
+  const end = '2025-02-28T00:00:00.000Z';
+  const preceding = '72e4988d721ce9a234c813a654c5e15d7545f40d';
+  await withOrderEntryFixture(
+    async (f) => {
+      const version = {
+        schemaVersion: 'northstar.billing-rate-table/v1',
+        version: 'first',
+        currency: 'CAD',
+        selector: { kind: 'base' },
+        planDigest: compileRatePlan(meterPlan).digest,
+        effectiveFrom: anchor,
+        values: { rate: '1.50', included: '10' },
+      };
+      const record = await f.create('sales_order', {
+        customer_party_id: f.customer,
+        currency: 'CAD',
+        order_date: anchor,
+        requested_date: end,
+        opening_reading: '100',
+        closing_reading: '115.5',
+        billing_proposal: JSON.stringify(version),
+        ship_to_name: 'Service desk',
+        ship_to_street: 'Main',
+        ship_to_city: 'Calgary',
+        ship_to_region: 'AB',
+        ship_to_postal_code: 'T2P 0A1',
+        ship_to_country: 'Canada',
+      });
+      assert.equal(
+        (
+          await f.invoke('billing_publish', {
+            recordId: record.recordId,
+            expectedRevision: record.revision,
+          })
+        ).outcome,
+        'succeeded',
+      );
+      const read = (company: string) =>
+        f.app.runtime.entry.run(
+          { headers: { cookie: 'northstar-demo-actor=buyer' } },
+          (v) =>
+            f.app.runtime.queryGateway.invoke(v, {
+              schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+              queryId: quoteId,
+              arguments: {
+                recordId: record.recordId,
+                [id('parameter.sales_order_get_legal_entity_scope')]: company,
+              },
+            }),
+        );
+      const result = await read(f.scope);
+      assert.equal(result.outcome, 'exact');
+      const review = JSON.parse(
+        String(result.records[0]!.values[id('metric.billing_explanation')]),
+      );
+      assert.deepEqual(review.cycle, { start: anchor, end });
+      assert.equal(review.quote.lines[0].differenceCents, '825');
+      assert.equal(review.quote.inputs.evidence.companyId, f.scope);
+      assert.equal(
+        replayBillingQuote(review.quote).resultDigest,
+        review.quote.resultDigest,
+      );
+      const other = await f.create(
+        'legal_entity',
+        {
+          code: 'AR-B',
+          name: 'Company B',
+          status: id('option.legal_entity_status_active'),
+          is_default: false,
+        },
+        {},
+        false,
+      );
+      assert.equal((await read(other.recordId)).records.length, 0);
+      await withArchivedCustomizationRuntime(preceding, async (run) => {
+        assert.deepEqual(await probeArchivedBilling(run, f), {
+          outcome: 'refused',
+          code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
+          message: `runtime capability northstar.runtime:capability.surface-manifest requires version ${BILLING_ARREARS_READER} and this runtime supports 41`,
+        });
+      });
+    },
+    'demo',
+    0,
+    0,
+    release('arrears'),
+  );
+});
+
+test('the preceding cycle reader answers an item query on the persisted release without arrears', async () => {
+  await withArchivedCustomizationRuntime(
+    '72e4988d721ce9a234c813a654c5e15d7545f40d',
+    async (run) => {
+      const base = await archivedBase(run);
+      await withOrderEntryFixture(
+        async (f) => {
+          assert.deepEqual(await probeArchivedBilling(run, f), {
+            outcome: 'exact',
+            recordIds: [f.item],
+          });
+        },
+        'demo',
+        0,
+        0,
+        release('bound', base),
+      );
+    },
   );
 });

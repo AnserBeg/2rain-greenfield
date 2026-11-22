@@ -215,11 +215,13 @@ export const AddDateTimeFieldSchema = z.strictObject({
 
 // Price publication and source attachment have separate authority. This
 // authored member carries structural choices only.
-const { bindings: _sourceBindings, ...rateStructure } = BillingPlanSchema.shape;
+const rateStructure = z
+  .strictObject(BillingPlanSchema.shape)
+  .omit({ bindings: true });
 const addRatePlanVersion = z.strictObject({
   kind: z.literal('addRatePlanVersion'),
   schemaVersion: z.literal('v6'),
-  ratePlan: z.strictObject(rateStructure).pipe(BillingPlanSchema),
+  ratePlan: rateStructure.pipe(BillingPlanSchema),
 });
 
 const ChangeMemberSchema = z.discriminatedUnion('kind', [

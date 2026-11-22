@@ -1,3 +1,4 @@
+import type { PoolClient } from 'pg';
 import { bookingOwnerCursorFence } from './booking-owner-usage.js';
 import { z } from 'zod';
 import type { BillingQuoteEvidence } from '../../canonical-model/src/billing-evidence.js';
@@ -113,7 +114,7 @@ export function billingBookingUsage(
 }
 
 export async function fenceBillingBookingOwners(
-  client: import('pg').PoolClient,
+  client: PoolClient,
   releaseId: string,
   fence: number,
   owners: readonly {
@@ -136,6 +137,7 @@ export async function fenceBillingBookingOwners(
     owners.map((o) => [key(o.entityId, o.recordId), o.cursor]),
   );
   if (
+    expected.size !== owners.length ||
     current.schemaVersion !== 'booking.ownerCursorFence/v1' ||
     current.owners.length !== expected.size ||
     current.owners.some((row) => {
