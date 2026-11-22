@@ -11,6 +11,7 @@ import {
 } from './request-context.js';
 import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents.js';
 import { DECLARED_REPORT_READER } from '../../canonical-model/src/declared-report.js';
+import { REVERSIBILITY_AGENT_READER } from '../../canonical-model/src/reversibility.js';
 import {
   WORKFLOW_PROJECTION_FAMILY,
   WORKFLOW_RUNTIME_CAPABILITY,
@@ -178,7 +179,9 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
   }),
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.agent]: {
     capabilityId: 'northstar.runtime:capability.agent-discovery',
-    maximumSupportedVersion: 4,
+    // 2 assistant confirmation declarations, 3 saved list layouts, 4 metric
+    // cards, 5 the reversibility declaration (AI-UNDO-1).
+    maximumSupportedVersion: REVERSIBILITY_AGENT_READER,
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.catalog]: {
     capabilityId: 'northstar.runtime:capability.semantic-model',

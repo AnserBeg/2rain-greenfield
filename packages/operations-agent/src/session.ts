@@ -64,10 +64,7 @@ import {
 } from './business-words.js';
 import { operationRisk, type OperationRisk, type RiskClass } from './risk.js';
 import { capabilityChildren } from '../../domain/src/app/capability-children.js';
-import {
-  parentEditApprovals,
-  referenceTargets,
-} from '../../domain/src/app/record-references.js';
+import { referenceTargets } from '../../domain/src/app/record-references.js';
 import { PO_APPROVAL_CAPABILITY_ID } from '../../domain/src/purchasing/approvals.js';
 import { effectiveApprovalArguments } from '../../domain/src/purchasing/approval-arguments.js';
 import { asData, type OperationsAgentToolId } from './tools.js';
@@ -1875,13 +1872,7 @@ export class OperationsAgentSession {
       entity,
       // A create is judged here (nothing exists yet); an update is judged
       // again below against the record it changes.
-      risk: writeRisk(
-        catalog,
-        operation,
-        prefix,
-        { ...values, ...patch },
-        null,
-      ),
+      risk: writeRisk(catalog, operation, { ...values, ...patch }, null),
       ...(values ? { values } : {}),
       ...(relations ? { relations } : {}),
       ...(patch ? { patch } : {}),
@@ -1927,7 +1918,11 @@ export class OperationsAgentSession {
         check: 'lookup required',
         refused: `${where}: the target record ${target} did not come from a lookup for ${localName(entity)}.`,
       };
-    const parentEditApproval = parentEditApprovals.get(entity);
+    // The release's declaration names the parent whose lifecycle state an
+    // edit's Undo depends on (AI-UNDO-1); the record read carries its link.
+    const parents =
+      catalog.reversibility.get(operation.operationId)?.holdsWhile?.parents ??
+      [];
     const record = await readRecord(
       this.#options.runtime,
       view,
@@ -1936,33 +1931,30 @@ export class OperationsAgentSession {
       target,
       this.#options.companyId,
       false,
-      parentEditApproval?.relationId,
+      parents[0]?.relationId,
     );
     if (!record)
       throw new ToolInputError(
         `${where}: no ${localName(entity)} ${target} is visible to the person`,
       );
     this.#identities.set(`${entity}/${target}`, 'exact');
-    let parentApprovalReason: string | undefined;
-    if (parentEditApproval) {
-      const parent =
-        record.relationLabels?.[parentEditApproval.relationId]?.recordId;
-      const parentState = parent
+    const parentStates = new Map<
+      string,
+      Readonly<Record<string, ImmutableJsonValue>> | null
+    >();
+    for (const parent of parents.slice(0, 1)) {
+      const parentId = record.relationLabels?.[parent.relationId]?.recordId;
+      const parentRecord = parentId
         ? await readRecord(
             this.#options.runtime,
             view,
             catalog,
-            parentEditApproval.queryId,
-            parent,
+            parent.queryId,
+            parentId,
             this.#options.companyId,
           )
         : null;
-      if (
-        parentState?.values[parentEditApproval.stateFieldId] !==
-        parentEditApproval.reversibleStateId
-      ) {
-        parentApprovalReason = parentEditApproval.reason;
-      }
+      parentStates.set(parent.relationId, parentRecord?.values ?? null);
     }
     const evaluation = evaluateRegisteredOperationPrecondition(
       operation.precondition,
@@ -1975,18 +1967,13 @@ export class OperationsAgentSession {
         ...(effectKind(operation) === 'registeredCapabilityEffect'
           ? { children: await this.#children(view, catalog, operation, target) }
           : {}),
-        risk: parentApprovalReason
-          ? {
-              riskClass: 'needsYes',
-              reason: parentApprovalReason,
-            }
-          : writeRisk(
-              catalog,
-              operation,
-              prefix,
-              { ...values, ...patch },
-              record.values,
-            ),
+        risk: writeRisk(
+          catalog,
+          operation,
+          { ...values, ...patch },
+          record.values,
+          parentStates,
+        ),
         recordId: target,
         // Undo pins the revision the agent's write left; otherwise the
         // revision read now.
@@ -2492,53 +2479,38 @@ function screenFacts(
 
 /**
  * The risk of a create or update given what it writes and, for an update,
- * the record it changes (end review X5). On top of the operation's own
- * class (`operationRisk`):
- * - any written choice field named `..._state` or `..._status` is a state
- *   write: it needs a yes whenever the value changes and either the old or
- *   the new value is not the field's first option (for a create, whenever
- *   the value is not the first option);
- * - operationRisk enforces the release's setup field and entity declarations.
+ * the record it changes (end review X5; AI-UNDO-1). On top of the
+ * operation's own class (`operationRisk`, which reads the release's
+ * reversibility declaration): an update's Undo holds only while its record,
+ * and each declared parent, is in the lifecycle state the declaration names.
+ * The state field and its states come from the release, never from a name.
  */
 function writeRisk(
   catalog: PinnedCatalog,
   operation: RegisteredOperationDefinition,
-  prefix: string,
   written: Readonly<Record<string, ImmutableJsonValue>>,
   current: Readonly<Record<string, ImmutableJsonValue>> | null,
+  parentStates: ReadonlyMap<
+    string,
+    Readonly<Record<string, ImmutableJsonValue>> | null
+  > = new Map(),
 ): OperationRisk {
   const catalogRisk = operationRisk(catalog, operation, Object.keys(written));
-  if (catalogRisk.riskClass !== 'reversible') return catalogRisk;
-  for (const field of operation.inputContract?.fields ?? []) {
-    const name = localName(field.fieldId);
+  if (catalogRisk.riskClass !== 'reversible' || !current) return catalogRisk;
+  const outside = (state: { stateLabels: readonly string[] }) => ({
+    riskClass: 'needsYes' as const,
+    reason: `Editing this outside ${state.stateLabels.join(' or ').toLowerCase()} needs your OK.`,
+  });
+  const state = catalogRisk.holdsWhile?.state;
+  if (state && !state.stateIds.includes(String(current[state.stateFieldId])))
+    return outside(state);
+  for (const parent of catalogRisk.holdsWhile?.parents ?? []) {
+    const values = parentStates.get(parent.relationId);
     if (
-      current &&
-      name.endsWith('_state') &&
-      field.enumOptionIds[0]?.endsWith('_draft') &&
-      current[field.fieldId] !== field.enumOptionIds[0]
+      !values ||
+      !parent.stateIds.includes(String(values[parent.stateFieldId]))
     )
-      return {
-        riskClass: 'needsYes',
-        reason: 'Editing a document outside draft needs your OK.',
-      };
-    if (
-      !/_(?:state|status)$/u.test(name) ||
-      field.enumOptionIds.length === 0 ||
-      !(field.fieldId in written)
-    )
-      continue;
-    const next = written[field.fieldId] ?? null;
-    const first = field.enumOptionIds[0];
-    const before = current ? (current[field.fieldId] ?? null) : null;
-    const changes = current ? next !== before : next !== null;
-    if (changes && (next !== first || (current !== null && before !== first)))
-      return {
-        riskClass: 'needsYes',
-        reason: `This changes its ${(name.startsWith(`${prefix}_`)
-          ? name.slice(prefix.length + 1)
-          : name
-        ).replaceAll('_', ' ')}, so it needs your OK.`,
-      };
+      return outside(parent);
   }
   return catalogRisk;
 }

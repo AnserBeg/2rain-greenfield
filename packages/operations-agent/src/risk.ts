@@ -1,5 +1,14 @@
-/** Only a revision-checked O0 patch can run before confirmation. */
+/**
+ * The assistant's autonomy policy: act at once only where the release proves
+ * Undo. It reads the release's reversibility declaration (AI-UNDO-1) and holds
+ * no id, namespace or name: an operation or field the release does not
+ * declare is the worst case, and asks.
+ */
 import type { RegisteredOperationDefinition } from '../../runtime/src/semantic-operation-gateway.js';
+import type {
+  OperationReversibility,
+  ReversibilityClass,
+} from '../../canonical-model/src/reversibility.js';
 
 import { effectKind, type PinnedCatalog } from './catalog.js';
 
@@ -17,30 +26,30 @@ export interface OperationRisk {
     readonly kind: 'restorePriorValues';
     readonly operationId: string;
   };
+  /**
+   * For a reversible update: the lifecycle states its record (and each
+   * declared parent) must be in for Undo to hold. The session checks them
+   * against the record it read.
+   */
+  readonly holdsWhile?: OperationReversibility['holdsWhile'];
 }
 
-// Field identities are scoped to the reviewed first-party record and update.
-// A newly compiled patch contract alone supplies no evidence for auto-approval.
-const reversibleUpdates = new Map(
-  Object.entries({
-    item: ['description', 'name'],
-    legal_entity: ['name'],
-    location: ['name'],
-    party: ['contact_summary', 'credit_hold', 'name', 'payment_terms'],
-    purchase_order: ['notes'],
-    sales_order: ['notes'],
-    stock_count_line: ['counted_quantity'],
-    tax_code: ['name'],
-  }).map(([entity, fields]) => [
-    `northstar.app:operation.${entity}_update`,
-    {
-      entity: `northstar.app:entity.${entity}`,
-      fields: new Set(
-        fields.map((field) => `northstar.app:field.${entity}_${field}`),
-      ),
-    },
-  ]),
-);
+const CANNOT_VERIFY =
+  'The assistant cannot verify Undo for this change, so it needs your OK.';
+
+/** The plain reason a field's declared class asks, or null when it may act. */
+function fieldReason(declared: ReversibilityClass | undefined): string | null {
+  if (!declared) return CANNOT_VERIFY;
+  if (declared.basis === 'declared')
+    return 'This changes a setting, so it needs your OK.';
+  if (declared.because.includes('confirmedWriter'))
+    return 'This changes something that always needs your OK.';
+  if (declared.because.includes('readAsGate'))
+    return 'Other actions depend on this value, so changing it needs your OK.';
+  if (declared.undo !== 'exact' || declared.reach !== 'record')
+    return CANNOT_VERIFY;
+  return null;
+}
 
 export function operationRisk(
   catalog: PinnedCatalog,
@@ -68,43 +77,26 @@ export function operationRisk(
   if (kind === 'createRecordEffect')
     return { riskClass: 'needsYes', reason: 'Adding a record needs your OK.' };
   if (kind === 'updateRecordEffect') {
-    const keys = operation.inputContract?.closedArgumentKeys ?? [];
-    const entity = catalog.operationEntity(operation);
-    if (
-      catalog.confirmationRequiredFor.has(entity) ||
-      writtenFieldIds.some((id) => catalog.confirmationRequiredFor.has(id))
-    )
-      return {
-        riskClass: 'needsYes',
-        reason: 'This changes a setting, so it needs your OK.',
-      };
-    // A field another operation of the record type writes only with the
-    // person's confirmation (a period's reopen) is guarded: changing it, or
-    // putting it back, needs that confirmation too.
-    const fields = new Set(operation.inputContract?.writableFieldIds ?? []);
-    const guarded = catalog.operations.some(
-      (candidate) =>
-        candidate !== operation &&
-        candidate.confirmation !== 'none' &&
-        catalog.operationEntity(candidate) === entity &&
-        (candidate.inputContract?.writableFieldIds ?? []).some((field) =>
-          fields.has(field),
-        ),
+    const declared = catalog.reversibility.get(operation.operationId);
+    const fields = new Map(
+      (declared?.fields ?? []).map((field) => [field.fieldId, field]),
     );
-    if (guarded)
-      return {
-        riskClass: 'needsYes',
-        reason: 'This changes something that always needs your OK.',
-      };
-    const reviewed = reversibleUpdates.get(operation.operationId);
-    return keys.includes('patch') &&
+    if (writtenFieldIds.length === 0 || !declared)
+      return { riskClass: 'needsYes', reason: CANNOT_VERIFY };
+    for (const field of writtenFieldIds) {
+      const reason = fieldReason(fields.get(field));
+      if (reason) return { riskClass: 'needsYes', reason };
+    }
+    // The declaration is the release's claim; the pinned contract must still
+    // be the revision-checked patch the claim was derived from.
+    const keys = operation.inputContract?.closedArgumentKeys ?? [];
+    const writable = new Set(operation.inputContract?.writableFieldIds ?? []);
+    return declared.undo === 'exact' &&
+      declared.inverse === 'restorePriorValues' &&
+      keys.includes('patch') &&
       keys.includes('expectedRevision') &&
       operation.infrastructure?.optimisticRevision === 'compareAndIncrement' &&
-      reviewed?.entity === entity &&
-      writtenFieldIds.length > 0 &&
-      writtenFieldIds.every(
-        (field) => reviewed.fields.has(field) && fields.has(field),
-      )
+      writtenFieldIds.every((field) => writable.has(field))
       ? {
           riskClass: 'reversible',
           reason: 'Undo puts the old values back.',
@@ -112,12 +104,9 @@ export function operationRisk(
             kind: 'restorePriorValues',
             operationId: operation.operationId,
           },
+          ...(declared.holdsWhile ? { holdsWhile: declared.holdsWhile } : {}),
         }
-      : {
-          riskClass: 'needsYes',
-          reason:
-            'The assistant cannot verify Undo for this change, so it needs your OK.',
-        };
+      : { riskClass: 'needsYes', reason: CANNOT_VERIFY };
   }
   return {
     riskClass: 'needsYes',

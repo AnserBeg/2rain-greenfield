@@ -17,6 +17,10 @@ import {
   type CalculatedDisplayProjectionEntry,
 } from '../../canonical-model/src/calculated-display-projection.js';
 import { parseFormulaValidationBindings } from '../../canonical-model/src/formula-validation-projection.js';
+import {
+  parseReversibilityDeclaration,
+  type OperationReversibility,
+} from '../../canonical-model/src/reversibility.js';
 import type { FormulaValidationRule } from '../../canonical-model/src/formula-validation-schema.js';
 import {
   parsePinnedOperationCatalog,
@@ -104,6 +108,12 @@ interface AgentDiscoveryPayload {
 
 export interface PinnedCatalog {
   readonly confirmationRequiredFor: ReadonlySet<string>;
+  /**
+   * The release's reversibility declaration per operation (AI-UNDO-1). An
+   * operation missing here, or a release that carries none, is the worst case
+   * (`none, outward`) to every reader.
+   */
+  readonly reversibility: ReadonlyMap<string, OperationReversibility>;
   readonly operations: readonly RegisteredOperationDefinition[];
   readonly queries: readonly QueryCatalogEntry[];
   readonly presets: readonly ListPreset[];
@@ -180,7 +190,13 @@ export function pinnedCatalog(view: RequestRuntimeView): PinnedCatalog {
       }),
   );
   const formulaPayload = view.projections.formulaRule?.payload;
+  const declaration = parseReversibilityDeclaration(
+    (agent as { reversibility?: unknown }).reversibility,
+  );
   const catalog: PinnedCatalog = {
+    reversibility: new Map(
+      (declaration?.operations ?? []).map((entry) => [entry.operationId, entry]),
+    ),
     ...(isRecord(formulaPayload) &&
     Object.hasOwn(formulaPayload, 'calculatedFields')
       ? { calculatedDisplays: parseCalculatedDisplayProjection(formulaPayload) }
