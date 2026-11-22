@@ -1,4 +1,5 @@
 import { TemplateBindingPatchSchema } from './record-template-binding.js';
+import { PopupRevisionSchema } from '../../canonical-model/src/popup-actions.js';
 import { BoardViewRevisionSchema } from './board-revision.js';
 import { LayoutRevisionSchema } from './layout-revision.js';
 import {
@@ -273,6 +274,7 @@ export const CUSTOMIZATION_CHANGE_MEMBER_KINDS = Object.freeze(
 );
 
 const singlePatchKinds = [
+  PopupRevisionSchema.extend({ kind: z.literal('addPopupActionRevision') }),
   LayoutRevisionSchema,
   ...ChangeMemberSchema.options,
   z.strictObject({
@@ -296,6 +298,21 @@ const singlePatchKinds = [
     roleKey: OperationRoleKeySchema,
   }),
 ] as const;
+
+/**
+ * The schema of each change member and single patch, by kind. The AI drafter
+ * generates its description of a kind from these (MIGRATION-RULE rule 12);
+ * parsing still goes through `parseCustomizationPatch` only.
+ */
+export const CUSTOMIZATION_MEMBER_SCHEMAS: Readonly<Record<string, z.ZodType>> =
+  Object.freeze(
+    Object.fromEntries(
+      [...singlePatchKinds, ...ChangeMemberSchema.options].map((schema) => [
+        schema.shape.kind.value,
+        schema as z.ZodType,
+      ]),
+    ),
+  );
 
 const validationPatch: z.ZodObject<
   {
@@ -360,6 +377,7 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'declareLifecycle',
   'arrangeLayout',
   'addLayoutRevision',
+  'addPopupActionRevision',
   'addBoardViewRevision',
   'addRecordTemplateBindingRevision',
   'saveListView',

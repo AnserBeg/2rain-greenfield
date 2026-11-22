@@ -14,7 +14,7 @@ import {
 } from '../../packages/canonical-model/src/record-template.js';
 
 // Update to the actual immediately preceding serving tip when the train is integrated.
-const preceding = '352e43b7e428ed1115fd9328db3a6427cf36a58f';
+const preceding = '7046abc74feacc8943874f1ced6d4674ddcb7548';
 
 async function assertPersisted(
   pool: pg.Pool,

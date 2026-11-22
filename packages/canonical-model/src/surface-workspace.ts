@@ -3,6 +3,7 @@ import {
   templateBindingConflict,
   templateBindingDigest,
 } from './record-template.js';
+import { compiledPopups } from './popup-actions.js';
 import { boardBindingConflicts, boardSelfProblem } from './board.js';
 import { SURFACE_SLOTS } from './constants.js';
 import { baseLayout, layoutProblem } from './layout.js';
@@ -62,6 +63,13 @@ export function validateSurfaceWorkspaces(
             conflict.subject,
             'Record template binding differs from its declared contract.',
           );
+      }
+    }
+    if ('popupActions' in surface && surface.popupActions) {
+      try {
+        compiledPopups(model, surface);
+      } catch (error) {
+        fail(surface.surfaceId, String(error));
       }
     }
     const board = 'board' in surface ? surface.board : undefined;

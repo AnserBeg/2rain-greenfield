@@ -3,6 +3,7 @@ import {
   RECORD_TEMPLATE_OPERATION_READER,
 } from '@north-star/canonical-model';
 import { recordTemplateDeclarationProblem } from './record-template-admission.js';
+import { popupBindingsProblem } from './popup-admission.js';
 import { boardBindingsProblem } from './board-admission.js';
 import {
   dateTimeBindingsProblem,
@@ -1127,6 +1128,13 @@ function definitionFromSnapshotRows(
       throw malformedProjection('formula/rule projection has invalid bindings');
     }
   }
+  const popupProblem = popupBindingsProblem(
+    surface.payload,
+    surface.requiredRuntimeCapability?.minimumVersion ?? 0,
+    operation.payload,
+    query.payload,
+  );
+  if (popupProblem) throw malformedProjection(popupProblem);
   const problem =
     boardBindingsProblem(
       surface.payload,

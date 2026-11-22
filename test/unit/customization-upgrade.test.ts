@@ -1,4 +1,9 @@
+import { DRAFTER_EXCEPTIONS } from '../../packages/customization/src/ai-draft-kinds.js';
 import { TemplateBindingChoicesSchema } from '../../packages/customization/src/record-template-binding.js';
+import {
+  popupCommand,
+  popupOptionId,
+} from '../../packages/customization/src/popup-revision.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
@@ -223,6 +228,13 @@ const map = {
   sectionId:
     mapSurface + '/detail/northstar.app:slot.item_detail_sections/details',
 };
+const equipmentPopup = customization
+  .customizationTargets(normalizeApplicationPackage(extended))
+  .popupActions!.find(
+    (o) =>
+      o.surface === id('surface.custom_equipment_detail') &&
+      o.target.kind === 'update',
+  )!;
 const appointment = {
   kind: 'addDateTimeField',
   schemaVersion: 'northstar.date-time-field/v1',
@@ -278,6 +290,17 @@ const cases = {
         copyEligible: true,
       })),
     }),
+  },
+  addPopupActionRevision: {
+    source: extended,
+    conflict: base,
+    change: popupCommand([equipmentPopup], {
+      option: popupOptionId(equipmentPopup),
+      label: 'Edit equipment name',
+      inputs: [{ binding: id('field.custom_equipment_name'), source: 'entry' }],
+    }),
+    code: 'RETIRED_TARGET',
+    subject: equipmentPopup.surface,
   },
   addDateTimeField: {
     source: extended,
@@ -598,15 +621,19 @@ test('the Customize tool admits the parsed vocabulary and declares template sele
   };
   assert.deepEqual(
     schema.properties.kind.enum.filter((k) => k !== 'unsupported').sort(),
-    [...customization.CUSTOMIZATION_PATCH_KINDS].sort(),
+    customization.CUSTOMIZATION_PATCH_KINDS.filter(
+      (k) => !(k in DRAFTER_EXCEPTIONS),
+    ).sort(),
   );
   assert.deepEqual(
     [...schema.properties.patches.items.properties.kind.enum].sort(),
-    [...customization.CUSTOMIZATION_CHANGE_MEMBER_KINDS].sort(),
+    customization.CUSTOMIZATION_CHANGE_MEMBER_KINDS.filter(
+      (k) => !(k in DRAFTER_EXCEPTIONS),
+    ).sort(),
   );
   assert.deepEqual(
-    schema.properties.templateBinding,
-    TemplateBindingChoicesSchema.toJSONSchema(),
+    (schema.properties.templateBinding as { properties: unknown }).properties,
+    TemplateBindingChoicesSchema.toJSONSchema().properties,
   );
 });
 test('upgrade replay admission and its named cases cover the independently parsed vocabulary', () => {

@@ -1,3 +1,5 @@
+import { CompiledPopupSchema } from '../../../packages/runtime/src/popup-actions.js';
+import type { CompiledPopup } from '../../../packages/canonical-model/src/popup-actions.js';
 import {
   RecordTemplateBindingSchema,
   type RecordTemplateBinding,
@@ -317,6 +319,7 @@ export function formFieldIds(
 
 export interface CompiledSurfaceDefinition {
   readonly recordTemplateBinding?: RecordTemplateBinding;
+  readonly popupActions?: readonly CompiledPopup[];
   readonly board?: SurfaceBoard;
   /** The Board's labels and roles, compiled from this release beside `board`. */
   readonly boardPresentation?: BoardPresentation;
@@ -1168,6 +1171,13 @@ function parseSurface(
     ...(value.list === undefined
       ? {}
       : { list: SurfaceListSchema.parse(value.list) }),
+    ...(value.popupActions === undefined
+      ? {}
+      : {
+          popupActions: CompiledPopupSchema.array()
+            .min(1)
+            .parse(value.popupActions),
+        }),
     ...(value.layouts === undefined
       ? {}
       : {

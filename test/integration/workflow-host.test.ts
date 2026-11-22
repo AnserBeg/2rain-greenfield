@@ -1,6 +1,8 @@
 import { checkRetainedWorkflowReplay } from '../../packages/postgres-provider/src/release-verification-service.js';
 import type { MintedUuid } from '../../packages/platform-runtime/src/release-records.js';
-import type { Pool } from 'pg';
+import { Pool } from 'pg';
+import { registerBookingDueWork } from '../../packages/postgres-provider/src/booking-capability-executor.js';
+import { PostgresWorkflowConsumer } from '../../packages/postgres-provider/src/workflow-consumer.js';
 import { WorkflowDefinitionSchema } from '../../packages/canonical-model/src/schemas.js';
 import { WorkflowWatchdogExpired } from '../../packages/postgres-provider/src/workflow-isolate.js';
 import {
@@ -34,6 +36,7 @@ import {
   type WorkflowSdk,
 } from '../../packages/postgres-provider/src/workflow-sdk.js';
 import {
+  startWorkflowScheduler,
   superviseWorkflowPolls,
   workflowSchedulerConfig,
 } from '../../packages/postgres-provider/src/workflow-worker.js';
@@ -446,6 +449,39 @@ test('workflow scheduling is opt-in and a failed pass does not stop polling', as
   assert.equal(polls, 2);
 });
 
+test('Booking registers a bounded sweep and a failed job leaves the next worker runnable', async (t) => {
+  const calls: unknown[] = [];
+  t.mock.method(
+    Pool.prototype,
+    'query',
+    async (sql: string, args: unknown[]) => {
+      calls.push([sql, args]);
+      throw new Error('sweep unavailable');
+    },
+  );
+  t.mock.method(PostgresWorkflowConsumer.prototype, 'scopes', async () => {
+    calls.push('workflow');
+    return [];
+  });
+  const scheduler = startWorkflowScheduler(
+    {
+      workerDatabaseUrl:
+        'postgres://north_star_workflow_worker@localhost/postgres',
+      runtimeDatabaseUrl: 'postgres://north_star_runtime@localhost/postgres',
+    },
+    () => {
+      calls.push('reported');
+    },
+    [registerBookingDueWork],
+  );
+  await scheduler.close();
+  assert.deepEqual(calls, [
+    ['SELECT platform.booking_sweep_due($1)', [16]],
+    'reported',
+    'workflow',
+  ]);
+});
+
 test('workflow verification derives the complete Tier B relation and ownership closure', () => {
   const receipt = 'northstar.app:entity.goods_receipt';
   const child = 'northstar.app:entity.custom_child';
@@ -661,6 +697,118 @@ test('workflow review lint requires every SDK access to be a direct call', () =>
   ]) {
     assert.throws(() => compile(body), /forbidden syntax/);
   }
+});
+
+test('parsed trivia refuses compiler suppression after interpolated templates', () => {
+  const current = generateWorkflowSdk(view, { operations: [], queries: [] });
+  for (const directive of ['@ts-ignore', '@ts-expect-error', '@ts-nocheck']) {
+    assert.throws(
+      () =>
+        compileWorkflowBody(
+          'const text = `${event.eventId}`;\n// ' +
+            directive +
+            '\nconst wrong: number = text;',
+          current,
+        ),
+      /compiler suppression/,
+    );
+  }
+  // A declaration drift must never re-enable this removed call in v2.
+  assert.throws(
+    () =>
+      compileWorkflowBody("sdk.waitForEvent('goodsReceiptPosted', 1);", {
+        ...current,
+        declarations: sdk.declarations,
+      }),
+    RemovedWorkflowAction,
+  );
+});
+
+test('SDK call sites refuse spread arguments including an approval target', () => {
+  const current = generateWorkflowSdk(view, {
+    operations: [operationId],
+    queries: [],
+  });
+  for (const body of [
+    `sdk.requestApproval(...(['review', ${JSON.stringify(operationId)}, { recordId: event.receiptId, values: ${JSON.stringify(recordValues)} }] as const));`,
+    'sdk.now(...([] as const));',
+  ])
+    assert.throws(() => compileWorkflowBody(body, current), /spread arguments/);
+});
+
+test('approval summaries reject control characters and render as one JSON-quoted line', async () => {
+  const grants = { operations: [operationId], queries: [] };
+  const current = generateWorkflowSdk(view, grants);
+  const request = {
+    kind: 'requestApproval',
+    summary: 'Review "A"',
+    operationId,
+    input: { recordId: event.receiptId, values: recordValues },
+  };
+  assert.deepEqual(current.admitCall(request), request);
+  for (const control of [
+    '\n',
+    '\r',
+    '\t',
+    '\u0000',
+    '\u0085',
+    '\u2028',
+    '\u2029',
+  ]) {
+    assert.throws(
+      () =>
+        current.admitCall({
+          ...request,
+          summary: 'review' + control + 'Test 2',
+        }),
+      /control characters/,
+    );
+  }
+  const { renderWorkflowReview } =
+    await import('../../packages/postgres-provider/src/workflow-review.js');
+  const review = renderWorkflowReview(
+    WorkflowDefinitionSchema.parse({
+      schemaVersion: 'v6',
+      workflowId: 'review',
+      trigger: 'goodsReceiptPosted',
+      bodyDigest: '1'.repeat(64),
+      grants,
+    }),
+    '',
+    {
+      coverage: [[0]],
+      sites: [
+        {
+          method: 'requestApproval',
+          target: operationId,
+          fields: [],
+          branch: false,
+          loop: false,
+          line: 1,
+        },
+      ],
+      journals: [
+        [
+          {
+            request: canonicalize({
+              ...request,
+              summary: 'Review "A"\nTest 2\u2028next',
+            }),
+            result: 'true',
+          },
+        ],
+      ],
+    },
+    new Map([[operationId, 'Create']]),
+    new Set(),
+  );
+  assert.ok(
+    review.text
+      .split('\n')
+      .includes(
+        'Asks a person to approve "Review \\"A\\"\\nTest 2\\u2028next" (Create).',
+      ),
+  );
 });
 
 test('v2 drops event waits and caps sleep while a v1 pin retains both contracts', async () => {
