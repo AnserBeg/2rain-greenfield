@@ -42,8 +42,8 @@
       "name": "presentation-unrendered-placement",
       "claim": "A placement this release does not render is refused by name, never silently dropped.",
       "file": "packages/canonical-model/src/surface-presentation.ts",
-      "original": "    if (!RENDERED_TONE_PLACEMENTS.has(rule.target.kind))",
-      "replacement": "    if (false)",
+      "original": "      if (!RENDERED_TONE_PLACEMENTS.has(rule.target.kind))",
+      "replacement": "      if (false)",
       "test": {
         "files": ["test/unit/surface-presentation.test.ts"],
         "namePattern": "a condition binds only"
