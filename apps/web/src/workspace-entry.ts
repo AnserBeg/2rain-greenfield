@@ -147,17 +147,38 @@ export async function resolveWorkspaceEntry(
     null,
   ).catch(() => []);
   const options: { recordId: string; label: string }[] = [];
+  const authorization =
+    surface.map &&
+    registeredSemanticQueryFromPinnedView(view, policy.authorizationQueryId);
   for (const record of candidates) {
     if (record.values[policy.companyStateFieldId] !== policy.activeStateId)
       continue;
     try {
-      // A current scoped semantic read proves entry authority for this workspace.
-      await workspaceList(
-        view,
-        gateway,
-        policy.authorizationQueryId,
-        record.recordId,
-      );
+      // A Map needs the scoped read to succeed even for an empty route. Reading
+      // one row proves that authority without paging through every company's stops.
+      if (
+        authorization?.queryType === 'list' &&
+        authorization.legalEntityScope &&
+        !authorization.readModel
+      ) {
+        const probe = await gateway.invoke(view, {
+          schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+          queryId: policy.authorizationQueryId,
+          arguments: {
+            [authorization.legalEntityScope.operand.parameterId]:
+              record.recordId,
+            limit: 1,
+          },
+        });
+        if (probe.outcome !== 'exact') continue;
+      } else {
+        await workspaceList(
+          view,
+          gateway,
+          policy.authorizationQueryId,
+          record.recordId,
+        );
+      }
       const label = record.values[policy.companyNameFieldId];
       if (typeof label === 'string' && label.trim())
         options.push({ recordId: record.recordId, label });

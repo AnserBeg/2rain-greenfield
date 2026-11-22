@@ -612,7 +612,7 @@ test(
           await activate(deliveries);
           const createOrder = (currency: string) =>
             world.create('sales_order', {
-              customer_party_id: seededId('Ponoka Livestock Equipment'),
+              customer_party_id: seededId('Northwind Goods'),
               order_date: dispatchDay,
               currency,
             });

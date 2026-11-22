@@ -2406,12 +2406,15 @@ async function loadWorkspaceContextBar(
     targetSurface?.binding.query.legalEntityScope?.operand.parameterId;
   if (!targetSurface || !parameterId) return null;
 
-  const entry = await resolveWorkspaceEntry(
-    view,
-    selection.selected,
-    currentUrl,
-    queryGateway,
-  );
+  const entry =
+    resolved !== undefined
+      ? resolved
+      : await resolveWorkspaceEntry(
+          view,
+          selection.selected,
+          currentUrl,
+          queryGateway,
+        );
   const enumeration = entry
     ? { options: entry.options }
     : await recordPickerOptions(view, legalEntityList, queryGateway, []);
