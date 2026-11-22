@@ -8,7 +8,10 @@ import {
   runMigrations,
 } from '../../packages/postgres-provider/src/migrations.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
-import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
+import {
+  readUnboundPermissionAcknowledgementFor,
+  type UnboundPermissionAcknowledgementInput,
+} from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import { parseAuthoredApplicationPackageJson } from '../../packages/canonical-model/src/index.js';
 import {
   BillingPlanSchema,
@@ -105,10 +108,18 @@ const plan = BillingPlanSchema.parse({
     assignmentOperationId: id('operation.billing_assign'),
   },
 });
-type BillingFixtureBase = { authored: unknown; release: unknown };
-const currentBase = {
+type BillingFixtureBase = {
+  authored: unknown;
+  release: unknown;
+  ack: UnboundPermissionAcknowledgementInput;
+};
+const currentBase: BillingFixtureBase = {
   authored: firstPartyAuthored,
   release: compiledApplication,
+  ack: readUnboundPermissionAcknowledgementFor(
+    authoredPath,
+    id('package.application'),
+  ),
 };
 
 async function archivedBase(run: ArchivedRunner): Promise<BillingFixtureBase> {
@@ -233,12 +244,14 @@ function billingFixture(
           }
         : boundInput;
   const old = parseCompiledApplication(base.release);
-  const bytes = normalizedBytes(JSON.parse(JSON.stringify(input))),
-    ack = readUnboundPermissionAcknowledgementFor(
-      authoredPath,
-      p.package.packageId,
-    );
-  return { bytes, old, permissions, ack, languageVersion: p.languageVersion };
+  const bytes = normalizedBytes(JSON.parse(JSON.stringify(input)));
+  return {
+    bytes,
+    old,
+    permissions,
+    ack: base.ack,
+    languageVersion: p.languageVersion,
+  };
 }
 
 function release(

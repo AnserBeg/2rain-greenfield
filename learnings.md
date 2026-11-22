@@ -853,3 +853,9 @@ How to apply: Claim each supported mode and compare its effective privileges aga
 Date: 2026-11-20
 Why: A blind recount's ordinary line queries exposed stored supervisor figures after Return to counting.
 How to apply: Clear stale derived figures in the state transition. Exercise ordinary and derived queries with an actor allowed to enter data and denied access to the source figures. [STOCK-COUNTS-fixes](docs/execution/packets/STOCK-COUNTS-fixes.md)
+
+## Load historical release fixtures with their own policy files
+
+Date: 2026-11-21
+Why: The BILLING-1 declaration fixture paired its archived application with current stock-count evaluator bindings. Compilation failed before the archived reader could test the capability refusal.
+How to apply: Load the authored application, compiled lineage, and policy files from the preceding reader's revision. Verify that reader's successful stored query and its exact refusal of the new rung. [BILLING-1-fix2](docs/execution/packets/BILLING-1-fix2.md)

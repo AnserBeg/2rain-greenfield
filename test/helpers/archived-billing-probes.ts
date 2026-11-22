@@ -1,10 +1,13 @@
 export const archivedBillingBase = `
 import { readFile } from 'node:fs/promises';
+import { readUnboundPermissionAcknowledgementFor } from './apps/web/scripts/unbound-permission-acknowledgement.ts';
+const authoredPath = 'apps/web/release/app.authored.json';
 const [authored, release] = await Promise.all(
-  ['app.authored.json', 'app.compiled.json'].map(async (file) =>
-    JSON.parse(await readFile('apps/web/release/' + file, 'utf8'))),
+  [authoredPath, 'apps/web/release/app.compiled.json'].map(async (file) =>
+    JSON.parse(await readFile(file, 'utf8'))),
 );
-console.log(JSON.stringify({ authored, release }));
+const ack = readUnboundPermissionAcknowledgementFor(authoredPath, authored.package.packageId);
+console.log(JSON.stringify({ authored, release, ack }));
 `;
 
 export const archivedBillingQuery = `
