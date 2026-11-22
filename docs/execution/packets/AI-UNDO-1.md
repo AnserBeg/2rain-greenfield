@@ -1,6 +1,6 @@
 # AI-UNDO-1 — the assistant asks before putting a customer on or off credit hold
 
-Status: slice 1 (`packet/AI-UNDO-1-s1`, tip `3048f69c5`) is with Fable for the rule 11 check, then a train. Slice 2 (`packet/AI-UNDO-1-s2`) STOPPED at a safe boundary; see Slice 2 below. Tier: packet, first-party base change. No migration, grant or reader rung. Stops taken: none.
+Status: slice 1 (`packet/AI-UNDO-1-s1`, tip `3048f69c5`): Fable check MERGE, waiting for a train. Slice 2 (`packet/AI-UNDO-1-s2`): capability declarations built, ready for the emission step after REBASE-1; see Slice 2 below. Tier: packet, first-party base change. No migration, grant or reader rung. Stops taken: none.
 
 ## Claims
 
@@ -43,14 +43,15 @@ That run is on the exact code tip `6d651b08`; the record commit on top is docs-o
 - `node --import tsx --test --test-name-pattern='X5|credit hold|auto-run snapshot|AGENT-5 7' test/agent/business-map.test.ts` — hold and release ask; a name edit stays reversible.
 - In the app, ask the assistant to release a customer's credit hold: it shows a card and waits for your yes.
 
-## Slice 2 — stopped for two rulings
+## Slice 2 — capability declarations built; emission waits for REBASE-1
 
-- Built, not wired: `packages/canonical-model/src/reversibility.ts` (the consumer-neutral declaration, its strict reader, absence = `none, outward`) and `packages/compiler/src/reversibility.ts` (derivation from contracts, preconditions, state machines, `parentScopedChild` relations, field declarations; no names). Measured by `test/compiler/reversibility-census.test.ts`; today's per-state behaviour pinned by the `AI-UNDO-1 lock` test.
-- Blocker 1 (ADR-0047): emitting the key into the agent-discovery chunk fails `COMPILER_HISTORICAL_REPRODUCTION_MISMATCH`; new output must ride a compiler semantic profile v3 adoption (its own packet so far). An unadopted v3 would leave first-party with no declaration, so nothing would act at once.
-- Blocker 2 (A2 at scale): from release facts alone 233 plain edits derive `exact, record` (today 11), including fields capability code reads that the release does not declare (`party_credit_limit`, `item_base_unit`, item inventory policy and standard costs, location and legal-entity status, invoice and bill balances). Each needs a declared gate or a capability read declaration before it may act.
-- The wiring (projection key at agent floor 5, catalog reader, `risk.ts` with no hand list, session lifecycle and parent checks replacing name suffixes and `parentEditApprovals`) is kept on `wip/AI-UNDO-1-s2-switch`, not for merge.
-- Done in slice 2 (Fable's slice 1 check, MERGE, findings 1-3): `credit_hold` left the hand list, so a release without the declaration still asks; three panel-configuration tests (act at once on) see the person asked and nothing run, each red alone when the session's act-at-once gate ignores the class; the CRITFIX-A mutation follows the list.
-- After the rulings: second application, architecture test, older-reader proof pinned to `1092e14d`.
+- Rulings (orchestrator, 2026-11-22): no profile v3; the key is emitted after REBASE-1 (ADR-0066 re-baseline) in the same commit as a re-baseline; rung = agent-discovery floor 5, not surface 48. The 233-field widening is rejected: act at once needs a value inverse AND no consumer the release cannot see.
+- Built: each capability supplies at product assembly an `ImmediateEditDeclaration` for the record types it owns (`packages/canonical-model/src/reversibility.ts`); a field it does not list asks (fail closed). First-party modules declare today's eleven (`packages/domain/src/app/immediate-edits.ts`), so behaviour is unchanged (the `AI-UNDO-1 lock` test). `risk.ts` and the session's write check name no record type, field or state; Inventory's declaration carries the count line's parent-in-draft rule, replacing `parentEditApprovals` and the `_state/_status/_draft` suffixes. The session option is required, so every assembly passes declarations.
+- The compiler derivation (not emitted) also counts a field read by a workflow, validation rule or calculated field as consumed. Census: 233 would derive record-only on first-party types, which are capability-owned and so stay at eleven.
+- Proofs: a second application (the release renamed to a clinic) acts only on its own capability's declaration, and its line rule follows the declared parent condition; an architecture scan keeps names out of `risk.ts` and `writeRisk`; CRITFIX-A's expected-red now mutates the declaration. Rule 8: each red when its check is removed (parents ignored, declaration ignored, party number added, a planted name, consumers ignored).
+- Fable's slice 1 findings 1-3, done first: a release without the credit-hold declaration still asks; panel-configuration tests see the person asked and nothing run; the record no longer claims a tenant can mark a field.
+- Stays narrow: first-party masters act only on what their capability declares, until capabilities declare their reads. Tenant types ask until the emission step. Customize members are charter slice 5.
+- Next (after REBASE-1): merge main and REGENERATE release files (never hand-merge them), emit the key with the re-baseline, route unowned types through the compiled declaration (`wip/AI-UNDO-1-s2-switch`, out of every train), older-reader proof pinned to `1092e14d`.
 
 ```record-claim
 {
