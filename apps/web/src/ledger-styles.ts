@@ -13,6 +13,7 @@
  */
 export const LEDGER_STYLES = `
 .surface-grid:has(> .map-canvas){display:flex;flex-direction:column;reading-flow:flex-visual;gap:1rem}
+.surface-grid:has(> .map-canvas)>.surface-slot{display:block}
 .map-canvas svg{display:block;width:100%;max-width:1024px;background:var(--sheet);touch-action:none}
 .map-canvas nav a,.map-list a,.map-canvas summary,.map-views button{display:inline-flex;align-items:center;min-height:44px;padding:0 .65rem}
 .map-canvas [data-map-frame],.map-canvas iframe{width:100%;height:100%;border:0;display:block}
