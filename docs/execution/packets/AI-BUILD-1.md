@@ -5,6 +5,8 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44966355
 
 ## Slice 2 — raise the drafter's success (built 2026-11-21)
 
+**What was measured where.** The 40-run measured the drafter at `f3f427c2`. The branch tip adds the main merges (the drafter also covers `addDateTimeField`) and the workflow call-envelope fix (`ce0b8b47`); on the tip only W02 and T08 were re-run. Every commit after `b436f04a` is docs only.
+
 Charter: orchestrator missions folder, `charters/AI-BUILD-1-slice2.md`, items 1–7. Not Critical (no AGENTS.md Critical path, no migration, no reader rung). Slice 1 and slice 2 merge as one packet (orchestrator ruling, 2026-11-21).
 
 ### What changed
@@ -50,7 +52,8 @@ Also fixed on the way: slice 1's scorer read `board.body` after Board v2 renamed
 
 - **Same first drafts, live repairs** (`--force-first-turn`; [evidence](../evidence/2026-11-21-build-eval-2026-11-21T21-55-15-295Z/)): both pass after one repair turn. The refusal now reads "expected exactly {kind, summary, operationId, input}; missing "operationId"; unexpected "id"". Two new model calls in all (USD 0.85 for both cases including the replayed first turns).
 - **Fresh first drafts on the fixed drafter** (the envelope generated into the prompt; [evidence](../evidence/2026-11-21-build-eval-2026-11-21T22-09-31-798Z/)): both pass on the first draft, no repair (USD 0.70 for both).
-- With these, receipt workflows are 4/4 on the fixed drafter (W01 and N08 unchanged from the 40-run).
+- On the frozen 40-run the original three workflows scored 1/3, below the charter's 2/3 target; the target is met only after the post-run fix. "4/4" combines these two re-runs with W01 and N08 carried over from `f3f427c2`. T08's post-fix pass is not a clean held-out result: the clean held-out number stays 17/18.
+- Rescore (a) does not isolate the clearer refusal: its repair turn also had the envelope rule in the prompt.
 
 ### Gates
 
@@ -76,7 +79,17 @@ The owner asked for a conservative bake-off: which Claude model fits which reque
 - **Escalation (policy, not measured):** a request routed to Sonnet that fails its second repair is retried once on Opus 5.5 medium; after a second failed repair on Opus medium, retry once on Opus 5.5 high or Fable 5.2, then return the diagnostics to the person.
 - **Sonnet is recommended only because it matched Opus on all six activation cases (n=6)**; if a larger held-out check shows it below Opus on a tier, that tier reverts to Opus.
 - **Haiku 5.5:** not for drafting (it accepted a request the platform cannot do). It may later be considered for request classification only.
+- **Cost per success is not like for like** where one run paid a cache write and the other read the cache. On the four cases both runs read from cache (M04, N02, M07, N03): Opus about USD 0.024, Sonnet about USD 0.015 per success. T04 paid a write in both: Opus 0.229, Sonnet 0.116 as priced (Sonnet's draft actually paid a one-hour write, priced here at the five-minute rate, so its true T04 cost is about 0.18). The Sonnet phase-2 summary's "bake-off total USD 11.12" double-counts Sonnet's drafts; the true bake-off total is USD 10.11.
 - **Confidence:** every number here is one attempt per request. Sonnet's activation evidence is n=6 on dev and held-out modules plus one simple edit; it says nothing yet about workflows or refusals. Treat Sonnet routing as provisional until a larger held-out set confirms it.
+
+### Owed (named, not fixed in this slice)
+
+- Rule 8 for the repair classifier: no test reds if `classifyDraftOutcome`'s repairable allowlist is removed (the unit tests use a hand-written check; the scripted PostgreSQL cases exercise the real one).
+- Checks that run only at approval (release verification) are outside the repair loop; a draft that compiles but fails approval is not repaired.
+- "One model at lower effort" (Opus low) was not scored on activation; its saved first drafts can be scored later at no spend. The OpenAI drafts are saved and unscored.
+- Routing is a recommendation; no routing code shipped. Sonnet's simple-edit row is n=1.
+- The workflow rule "once approved, the body calls that operation itself with the same input" rests on reading `workflow-execution.ts`, not a test; WORKFLOW-2's owner should confirm it.
+- DOCS-1 template members carry dated drafter exceptions (owner AI-BUILD-1 slice 3).
 
 ### Test it yourself (slice 2)
 
