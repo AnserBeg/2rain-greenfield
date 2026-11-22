@@ -65,6 +65,8 @@ import {
   compiledApplication,
 } from '../helpers/customization-fixture.js';
 import { withOrderEntryFixture } from '../helpers/order-entry-fixture.js';
+import { truncateBookingInstant } from '../../packages/postgres-provider/src/billing-booking-usage.js';
+import type { ImmutableJsonValue } from '../../packages/runtime/src/request-runtime-view.js';
 import {
   archivedBillingBase,
   archivedBillingReleaseBytes,
@@ -263,6 +265,25 @@ function billingFixture(
       holdSeconds: 900,
     },
   };
+  // Confirm, start and return complete a tracked hire. Start and return take
+  // Booking's own decision clock whenever no effective instant is entered.
+  const stewardPermission = id('permission.service_booking_steward');
+  const lifecycle = (['confirm', 'start', 'return'] as const).map((verb) => ({
+    ...hold,
+    operationId: id(`operation.${verb}_service`),
+    confirmation: 'humanRequired' as const,
+    booking: {
+      ...hold.booking,
+      operation: verb,
+      ...(verb === 'confirm'
+        ? {}
+        : {
+            bindingVersion: 'booking.fulfilment/v1',
+            stewardPermission,
+            maxCorrectionAgeDays: 90,
+          }),
+    },
+  }));
   const quote = {
     ...source,
     queryId: quoteId,
@@ -282,7 +303,14 @@ function billingFixture(
   };
   const permissions = [
     ...(booking
-      ? [{ ...sourcePermission, permissionId: usagePermission }]
+      ? [
+          { ...sourcePermission, permissionId: usagePermission },
+          {
+            ...writePermission,
+            action: 'transition' as const,
+            permissionId: stewardPermission,
+          },
+        ]
       : []),
     { ...sourcePermission, permissionId: readPermission },
     { ...writePermission, permissionId: publishPermission },
@@ -368,7 +396,7 @@ function billingFixture(
     permissions: [...p.permissions, ...permissions],
     operations: [
       ...p.operations,
-      ...(booking ? [hold] : []),
+      ...(booking ? [hold, ...lifecycle] : []),
       ...[
         b.publishOperationId,
         b.overrideOperationId,
@@ -1429,6 +1457,250 @@ test('a period meter reviews the first earned cycle through its company-scoped g
     0,
     0,
     release('arrears'),
+  );
+});
+
+type JourneyFixture = Parameters<
+  Parameters<typeof withOrderEntryFixture>[0]
+>[0];
+const buyer = { headers: { cookie: 'northstar-demo-actor=buyer' } };
+const scopeParameter = id('parameter.sales_order_get_legal_entity_scope');
+// Reads the released quote query as the buyer for one company.
+const readQuote = (f: JourneyFixture, company: string, recordId: string) =>
+  f.app.runtime.entry.run(buyer, (v) =>
+    f.app.runtime.queryGateway.invoke(v, {
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      queryId: quoteId,
+      arguments: { recordId, [scopeParameter]: company },
+    }),
+  );
+const explanation = (result: Awaited<ReturnType<typeof readQuote>>) =>
+  JSON.parse(
+    String(result.records[0]!.values[id('metric.billing_explanation')]),
+  );
+const serviceValues = (
+  f: JourneyFixture,
+  anchor: string,
+  end: string,
+  version: unknown,
+) => ({
+  customer_party_id: f.customer,
+  currency: 'CAD',
+  order_date: anchor,
+  requested_date: end,
+  billing_proposal: JSON.stringify(version),
+  ship_to_name: 'Service desk',
+  ship_to_street: 'Main',
+  ship_to_city: 'Calgary',
+  ship_to_region: 'AB',
+  ship_to_postal_code: 'T2P 0A1',
+  ship_to_country: 'Canada',
+});
+const termsFor = (ratePlan: unknown, anchor: string) => ({
+  schemaVersion: 'northstar.billing-rate-table/v1',
+  version: 'first',
+  currency: 'CAD',
+  selector: { kind: 'base' },
+  planDigest: compileRatePlan(ratePlan as typeof plan).digest,
+  effectiveFrom: anchor,
+  values: { daily: '30', weekly: '100' },
+});
+async function publishTerms(
+  f: JourneyFixture,
+  record: { recordId: string; revision: number },
+) {
+  assert.equal(
+    (
+      await f.invoke('billing_publish', {
+        recordId: record.recordId,
+        expectedRevision: record.revision,
+      })
+    ).outcome,
+    'succeeded',
+  );
+}
+// Company B is a second legal entity in the SAME tenant and environment.
+async function assertCompanyBRefused(f: JourneyFixture, recordId: string) {
+  const other = await f.create(
+    'legal_entity',
+    {
+      code: 'AR-B',
+      name: 'Company B',
+      status: id('option.legal_entity_status_active'),
+      is_default: false,
+    },
+    {},
+    false,
+  );
+  assert.equal(
+    (await readQuote(f, other.recordId, recordId)).records.length,
+    0,
+  );
+  const principal = await f.app.runtime.entry.run(buyer, async (v) => [
+    v.tenantId,
+    v.environmentId,
+    v.principalId,
+    f.scope,
+  ]);
+  await f.pool.query(
+    'UPDATE platform.current_policy_memberships SET legal_entity_id=$4 WHERE (tenant_id,environment_id,principal_id)=($1,$2,$3) AND legal_entity_id IS NULL',
+    principal,
+  );
+  assert.equal(
+    (await readQuote(f, f.scope, recordId)).records[0]!.recordId,
+    recordId,
+  );
+  await assert.rejects(() => readQuote(f, other.recordId, recordId), {
+    code: 'SEMANTIC_QUERY_POLICY_DENIED',
+  });
+}
+
+test('an agreed-interval contract reviews its closed cycle through the released quote query', async () => {
+  const anchor = '2025-01-01T00:00:00.000Z';
+  const end = '2025-01-09T00:00:00.000Z';
+  const intervalPlan = {
+    ...plan,
+    bindings: { ...plan.bindings!, arrearsSource: { kind: 'agreedInterval' } },
+  };
+  await withOrderEntryFixture(
+    async (f) => {
+      const record = await f.create(
+        'sales_order',
+        serviceValues(f, anchor, end, termsFor(intervalPlan, anchor)),
+      );
+      await publishTerms(f, record);
+      const review = explanation(await readQuote(f, f.scope, record.recordId));
+      assert.equal(review.status, 'due');
+      assert.deepEqual(review.cycle, { start: anchor, end });
+      assert.equal(review.quote.inputs.evidence.companyId, f.scope);
+      assert.equal(review.quote.inputs.evidence.basis, 'agreed');
+      assert.deepEqual(
+        review.quote.lines.map(
+          (l: { differenceCents: string }) => l.differenceCents,
+        ),
+        ['13000'],
+      );
+      assert.equal(
+        replayBillingQuote(review.quote).resultDigest,
+        review.quote.resultDigest,
+      );
+      await assertCompanyBRefused(f, record.recordId);
+    },
+    'demo',
+    0,
+    0,
+    release('interval'),
+  );
+});
+
+test('an equipment hire reviews possession Booking stamped on its production clock through the released quote query', async () => {
+  const bookingPlan = {
+    ...plan,
+    bindings: {
+      ...plan.bindings!,
+      arrearsSource: {
+        kind: 'bookingActuals',
+        queryId: usageQuery,
+        slotId: trackedSlot,
+      },
+    },
+  };
+  // The billed agreement has already ended; the equipment is still out.
+  const second = (offset: number) =>
+    new Date(Math.floor((Date.now() + offset) / 1000) * 1000).toISOString();
+  const anchor = second(-2 * 3_600_000);
+  const agreedEnd = second(-3_600_000);
+  await withOrderEntryFixture(
+    async (f) => {
+      const values = serviceValues(
+        f,
+        anchor,
+        agreedEnd,
+        termsFor(bookingPlan, anchor),
+      );
+      const hire = await f.create('sales_order', values);
+      await publishTerms(f, hire);
+      const equipment = await f.create('sales_order', values);
+      const revision = async () =>
+        (
+          await f.app.runtime.entry.run(buyer, (v) =>
+            f.app.runtime.queryGateway.invoke(v, {
+              schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+              queryId: sourceId,
+              arguments: { recordId: hire.recordId, [scopeParameter]: f.scope },
+            }),
+          )
+        ).records[0]!.revision;
+      const book = async (
+        verb: string,
+        args: Record<string, ImmutableJsonValue>,
+      ) => {
+        const result = await f.invoke(`${verb}_service`, {
+          recordId: hire.recordId,
+          expectedRevision: await revision(),
+          arguments: args,
+        });
+        assert.equal(result.outcome, 'succeeded', verb);
+        return result.capabilityResult as {
+          bookingId: string;
+          revision: number;
+          state: string;
+        };
+      };
+      const until = new Date(Date.now() + 2 * 86_400_000)
+        .toISOString()
+        .slice(0, 16);
+      const held = await book('hold', {
+        resourceId: equipment.recordId,
+        quantity: '1',
+        interval: { kind: 'now', end: until },
+      });
+      const step = (b: { bookingId: string; revision: number }) => ({
+        bookingId: b.bookingId,
+        bookingRevision: b.revision,
+      });
+      const confirmed = await book('confirm', step(held));
+      // No effective instant is entered: Booking stamps clock_timestamp().
+      const started = await book('start', step(confirmed));
+      assert.equal(started.state, 'inUse');
+      const live = explanation(await readQuote(f, f.scope, hire.recordId));
+      assert.equal(live.status, 'notDue', 'a live hire past its end is open');
+      const returned = await book('return', step(started));
+      assert.equal(returned.state, 'returned');
+      const stored = await f.pool.query<{ start: string; end: string }>(
+        `SELECT to_jsonb(effective_start)#>>'{}' AS start, to_jsonb(effective_end)#>>'{}' AS end
+           FROM platform.booking_use_revisions WHERE booking_id=$1 ORDER BY revision DESC LIMIT 1`,
+        [held.bookingId],
+      );
+      const leg = stored.rows[0]!;
+      const review = explanation(await readQuote(f, f.scope, hire.recordId));
+      assert.equal(review.status, 'due', JSON.stringify(review));
+      const evidence = review.quote.inputs.evidence;
+      assert.deepEqual(
+        evidence.bands[0].intervals.map((i: { start: string; end: string }) => [
+          i.start,
+          i.end,
+        ]),
+        [[truncateBookingInstant(leg.start), truncateBookingInstant(leg.end)]],
+      );
+      // Possession ran past the agreed end, so the service ends at the return.
+      assert.equal(evidence.serviceEnd, truncateBookingInstant(leg.end));
+      assert.deepEqual(review.cycle, {
+        start: anchor,
+        end: truncateBookingInstant(leg.end),
+      });
+      assert.equal(evidence.basis, 'actual');
+      assert.equal(evidence.companyId, f.scope);
+      assert.equal(
+        replayBillingQuote(review.quote).resultDigest,
+        review.quote.resultDigest,
+      );
+      await assertCompanyBRefused(f, hire.recordId);
+    },
+    'demo',
+    0,
+    0,
+    release('booking'),
   );
 });
 
