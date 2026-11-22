@@ -60,8 +60,8 @@
       "name": "unreviewed-field-auto-approved",
       "claim": "A newly auto-approved catalog field must change the human-reviewed snapshot.",
       "file": "packages/operations-agent/src/risk.ts",
-      "original": "'contact_summary', 'credit_hold', 'name', 'payment_terms'",
-      "replacement": "'contact_summary', 'credit_hold', 'name', 'number', 'payment_terms'",
+      "original": "'contact_summary', 'name', 'payment_terms'",
+      "replacement": "'contact_summary', 'name', 'number', 'payment_terms'",
       "test": {
         "files": ["test/agent/business-map.test.ts"],
         "namePattern": "the compiled catalog auto-run snapshot"

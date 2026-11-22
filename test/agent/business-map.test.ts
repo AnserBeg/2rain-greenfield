@@ -854,17 +854,6 @@ test('X5: a status or state change, a settings update, and a create its maker ca
     ),
     'needsYes',
   );
-  assert.equal(
-    await classOf(
-      {
-        operationId: 'party_update',
-        target: PARTY,
-        patch: { credit_hold: false },
-      },
-      { [`${NS}:field.party_credit_hold`]: true },
-    ),
-    'needsYes',
-  );
   // A plain master field edit stays reversible (charter): Undo puts it back.
   assert.equal(
     await classOf({
@@ -932,8 +921,13 @@ interface StoredRow {
  * gateway, list filters match exactly, and a test can fail the next
  * invocation of an operation or move a row's revision between reads.
  */
-function storeSession() {
-  const base = compiledAppView('manager');
+function storeSession(
+  options: {
+    readonly view?: RequestRuntimeView;
+    readonly approve?: (plan: PlanForApproval) => Promise<boolean>;
+  } = {},
+) {
+  const base = options.view ?? compiledAppView('manager');
   const rows = new Map<string, StoredRow>();
   rows.set(PARTY, {
     recordId: PARTY,
@@ -1044,7 +1038,7 @@ function storeSession() {
     personHeaders: {},
     companyId: 'c',
     autoApproveReversible: true,
-    approve: () => Promise.resolve(true),
+    approve: options.approve ?? (() => Promise.resolve(true)),
   });
   return { session, state };
 }
@@ -1977,4 +1971,94 @@ test('AI-UNDO-1 lock: each first-party act-at-once pair, in each state of its re
     'stock_count_line_update counted_quantity @stock_count_state_posted -> needsYes',
     'stock_count_line_update counted_quantity @stock_count_state_cancelled -> needsYes',
   ]);
+});
+
+// ------------------------------- AI-UNDO-1 slice 1 check (Fable findings 1, 2)
+
+/** Plans one patch on the party under the panel's configuration (act at once on). */
+async function panelPlan(
+  patch: Record<string, unknown>,
+  current: Record<string, string | boolean>,
+  view?: RequestRuntimeView,
+) {
+  let asked = 0;
+  const { session, state } = storeSession({
+    ...(view ? { view } : {}),
+    approve: () => {
+      asked += 1;
+      return Promise.resolve(false);
+    },
+  });
+  Object.assign(state.rows.get(PARTY)!.values, current);
+  await session.call('erp_query', {
+    queryId: 'party_get',
+    arguments: { recordId: PARTY },
+  });
+  const planned = (
+    await session.call('erp_plan', {
+      intents: [{ operationId: 'party_update', target: PARTY, patch }],
+    })
+  ).content as { planId?: string };
+  if (planned.planId)
+    await session.call('erp_execute', {
+      planId: planned.planId,
+      executionIdempotencyKey: 'k',
+    });
+  return { asked, invoked: state.invoked };
+}
+
+test('AI-UNDO-1: releasing a credit hold asks the person under the panel configuration, and nothing runs on a no', async () => {
+  assert.deepEqual(
+    await panelPlan(
+      { credit_hold: false },
+      { [`${NS}:field.party_credit_hold`]: true },
+    ),
+    { asked: 1, invoked: [] },
+  );
+});
+
+test('AI-UNDO-1: putting a customer on credit hold asks under the panel configuration', async () => {
+  assert.deepEqual(
+    await panelPlan(
+      { credit_hold: true },
+      { [`${NS}:field.party_credit_hold`]: false },
+    ),
+    { asked: 1, invoked: [] },
+  );
+});
+
+test('AI-UNDO-1: a plain name edit still runs at once under the panel configuration', async () => {
+  assert.deepEqual(await panelPlan({ name: 'After' }, {}), {
+    asked: 0,
+    invoked: ['party_update'],
+  });
+});
+
+test('AI-UNDO-1: a release without the credit-hold declaration still asks (an older tenant release)', async () => {
+  const view = compiledAppView('manager');
+  const agent = view.projections.agent;
+  const payload = agent.payload as { confirmationRequiredFor: string[] };
+  const older = {
+    ...view,
+    projections: {
+      ...view.projections,
+      agent: {
+        ...agent,
+        payload: {
+          ...payload,
+          confirmationRequiredFor: payload.confirmationRequiredFor.filter(
+            (id) => id !== `${NS}:field.party_credit_hold`,
+          ),
+        },
+      },
+    },
+  } as RequestRuntimeView;
+  assert.deepEqual(
+    await panelPlan(
+      { credit_hold: false },
+      { [`${NS}:field.party_credit_hold`]: true },
+      older,
+    ),
+    { asked: 1, invoked: [] },
+  );
 });

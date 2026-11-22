@@ -24,7 +24,7 @@ Status: slice 1 (`packet/AI-UNDO-1-s1`, tip `3048f69c5`) is with Fable for the r
 ## Most general form (rule 17)
 
 - (a) The general thing is a reversibility declaration every operation, field and Customize member carries (`undo`, `inverse`, `reach`, `basis`), derived by the compiler from release facts and readable by any consumer: an autonomy policy, the UI's Undo, workflows that must not fire on an undoable draft, and audit. A gate field is one case of it (`exact, internal`).
-- (b) Unchanged users of this slice: every release, first-party or tenant-built, can mark any field or entity so the assistant asks; no code names the field.
+- (b) Unchanged users: any release definition can mark a field or entity so the assistant asks, and no code names the field. No Customize member can set the key yet, so tenant-built fields cannot be marked; they always ask today (Fable finding 3).
 - (c) Deliberately narrower: this slice reuses the existing, assistant-scoped `requiresAssistantConfirmation` because charter slice 1 is the defect fix only and a new projection key needs its own reader rung. Charter slice 2 builds the general declaration in the agent-discovery projection with a consumer-neutral shape (not assistant-named), and derives the gate case from "another operation, rule or capability reads this field" instead of a mark.
 
 ## Controls

@@ -26,7 +26,9 @@ const reversibleUpdates = new Map(
     item: ['description', 'name'],
     legal_entity: ['name'],
     location: ['name'],
-    party: ['contact_summary', 'credit_hold', 'name', 'payment_terms'],
+    // Not credit_hold: a gate on order confirmation, so it always asks, even
+    // on a release compiled before it was declared (AI-UNDO-1).
+    party: ['contact_summary', 'name', 'payment_terms'],
     purchase_order: ['notes'],
     sales_order: ['notes'],
     stock_count_line: ['counted_quantity'],
