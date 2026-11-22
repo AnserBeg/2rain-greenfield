@@ -25,9 +25,9 @@ The narrow Fable re-read accepted [ADR-0083](../../decisions/ADR-0083-period-and
 - Publication retries discover their recorded company before checking the proposal and repeat authorization. Allocated and reserved cents admit every entitlement within the fraction precision bound.
 - The compiler refuses notes as evidence with `BILLING_SOURCE_FIELDS_REQUIRED`. Reader 30 covers declarations and reader 36 covers typed interval bindings.
 
-Slice 1 evidence
+Slice 1 passed its [full CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44831287787).
 
-CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44831287787
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44981275903
 
 At `eda6d12f`, the regression tests caught direct grants, the notes binding, the archived retry, negative split, schedule-dependent fee and rejected large allocation. Removing minimum pricing, calendar-month handling, table currency validation or the archived loader check made the corresponding proof fail.
 
@@ -40,6 +40,7 @@ At `eda6d12f`, the regression tests caught direct grants, the notes binding, the
 - General blocks are civil-time schedules, interval and meter evidence, scoped release queries, exact-fraction rating and versioned plan declarations. Equipment hire, copy subscriptions and recurring service contracts exercise them.
 - The unchanged bound release has identical serialized bytes at reader 41. Its archived serving process answers an item query and refuses the new binding at provisional surface rung 42. The stored release rows and artifact bytes survive both probes.
 - Negative controls caught early cycles, excess coverage, foreign owners, cursor drift, mixed quantities, dropped pauses, a decreasing meter, mismatched units and duplicate owners.
+- The first slice 2 packet run failed declaration emit at the exported arrears result. Billing now exports its quote-line type.
 - This review creates no invoice, allocation or accounting entry. Enrollment, cutover carry, archive protection for unbilled use, quote-digest allocation, human issue and void/reissue belong to the atomic Receivables v2 writer. Advance awaits an admitted credit or refund path.
 
 ## Test it yourself
@@ -52,7 +53,7 @@ Run `node --import tsx --test --test-name-pattern='^a period meter reviews' test
   "schemaVersion":"northstar.record-claim/v1",
   "packet":"BILLING-1",
   "base":"86a28ed55f25bd9b6428a6596d36ad6830a64612",
-  "head":"ff0d357b3a909f8ac15c86fde6ee8481e0d81ce9",
+  "head":"87021860a1b5f64717f2b43362a69b4476e022e7",
   "changedPaths":["docs/execution/packets/BILLING-1.md","packages/canonical-model/src/billing-evidence.ts","packages/canonical-model/src/billing.ts","packages/compiler/src/billing.ts","packages/compiler/src/projections.ts","packages/customization/src/ai-draft-kinds.ts","packages/customization/src/apply.ts","packages/customization/src/patch.ts","packages/customization/src/render.ts","packages/customization/src/upgrade-diagnostics.ts","packages/customization/src/upgrade-replay.ts","packages/domain/src/billing/arrears.ts","packages/domain/src/billing/quote.ts","packages/postgres-provider/src/billing-booking-usage.ts","packages/postgres-provider/src/billing-quote.ts","packages/postgres-provider/src/customization-service.ts","packages/postgres-provider/src/release-repository.ts","packages/runtime/src/request-runtime-view.ts","test/agent/build-bakeoff-run.ts","test/agent/build-eval-cases.ts","test/agent/build-eval.ts","test/helpers/archived-billing-probes.ts","test/integration/billing-quote.test.ts","test/postgres/billing-terms.test.ts","test/postgres/booking-commitments.test.ts","test/postgres/request-runtime-view.test.ts","test/unit/customization-ai-draft-slice2.test.ts","test/unit/customization-upgrade.test.ts"],
   "symbols":[{"path":"packages/domain/src/billing/arrears.ts","name":"reviewArrearsCharges"},{"path":"packages/postgres-provider/src/billing-booking-usage.ts","name":"fenceBillingBookingOwners"},{"path":"packages/postgres-provider/src/billing-quote.ts","name":"billingQuoteReadModel"}]
 }
