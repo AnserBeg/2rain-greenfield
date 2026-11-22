@@ -58,3 +58,21 @@ The audit identifies 12 survey rows, A16, A18, A24, A27, B3, C6, C8, C9, F2, F4,
 The quick run below covers the original ADR at `33c665d62214545c5fa01146c956e57ac817ae42`. The amendment gate is `bash scripts/check-records.sh`. A1–A7 specify tests for future executable slices. [Independent read](/home/rvham/2rain-missions/template1-adr.sol.result.txt)
 
 CI tier: quick https://github.com/AnserBeg/2rain-greenfield/actions/runs/44956138996
+
+## Slice 1 build checkpoint · 2026-11-21
+
+The build branch is `packet/TEMPLATE-1-s1`. The provisional allocations against main at `352e43b7e` are migration 0067, Surface reader 40 and operation reader 7. The train must check these allocations and pin its immediate predecessor.
+
+| General block | Equipment safety | Print production | School administration |
+| --- | --- | --- | --- |
+| Customize binding and replay | Inspection results by class | Job steps by job class | Contact sections by programme |
+| Company publication and assignment | Ordered brake questions | Selected Copies defaults from a saved job | Named contact roles for the selected programme |
+| Editable English draft and human review | Review permitted answers and notes | Review a reusable starting grid | Review proposed role captions and ordering |
+
+The PostgreSQL test exercises all three definitions in one tenant and uses two companies. It includes source-read revocation, field and value restrictions, competing publications, an existing revision in the other company, first assignment and retirement in each lock order. On an isolated fixture with a declaring release already selected, the stored functions passed the source and audience checks, known-ID company denials, competing publications and both lock orders. End-to-end coverage of all three businesses awaits successful production activation.
+
+The preceding binary reproduced the persisted normalized definitions, artifact bytes and roots for the first-party and tenant-authored releases and returned the known inspection from the compatible get query. Original-tree activation stopped during semantic verification. Its fixture needs to create a header, and the candidate’s atomic-application guard refuses an unprepared create. A7’s fleet-wide deployment check after rollback depends on ADR-0085 and UPGRADE-2 slice 5. Packet full pending.
+
+**Rule 12 exception · 2026-11-21 · TEMPLATE-1 / AI-BUILD-1.** The frozen main snapshot predates the AI-BUILD-1 eval registry. Its live binding/content case remains with AI-BUILD-1. This branch supplies schema-generated in-app drafting, a scripted comparison with the visual binding and an editable content proposal.
+
+**Test it yourself** (about two minutes on a prepared checkout). Run `node --import tsx --test --test-name-pattern='record template bindings reproduce|Customize tool admits|upgrade replay admission|upgrade replay of addRecordTemplateBindingRevision' test/unit/customization-upgrade.test.ts`. Expect four passing tests. Removing the binding replay entry or its generated drafter schema fails the corresponding inventory test.
