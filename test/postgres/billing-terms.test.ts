@@ -506,7 +506,7 @@ test('period meter bindings require distinct selected boundaries, canonical unit
     { unit: 'other' },
     { streamId: 'other' },
   ]) {
-    const declared = {
+    const declared: typeof rate = {
       ...rate,
       bindings: { ...bindings, arrearsSource: { ...meter, ...wrong } },
     };
