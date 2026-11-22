@@ -4,15 +4,16 @@ import { z } from 'zod';
 import type { BillingQuoteEvidence } from '../../canonical-model/src/billing-evidence.js';
 import { decimal } from '../../domain/src/billing/fraction.js';
 
-// Booking SQL emits offsets and up to six fractional digits. Effective
-// boundaries must be exactly representable by the millisecond calculator.
+// Booking stamps its decision clock in microseconds. Calculation v3 rates
+// whole milliseconds, so every Booking instant is truncated toward the past
+// before it is parsed. Truncation is monotone: Booking's no-overlap and
+// pause-inside-use rules still hold, and a sub-millisecond span becomes empty.
+export function truncateBookingInstant(value: string) {
+  return new Date(value.replace(/(\.\d{3})\d+/u, '$1')).toISOString();
+}
 const effectiveInstant = z.iso
   .datetime({ offset: true })
-  .refine(
-    (s) => !/\.\d{3}\d*[1-9]\d*(?:Z|[+-])/u.test(s),
-    'Booking time exceeds the Billing precision',
-  )
-  .transform((s) => new Date(s).toISOString());
+  .transform(truncateBookingInstant);
 const ownerUsage = z.object({
   schemaVersion: z.literal('booking.ownerUsage/v1'),
   ownerRef: z.object({ entityId: z.string(), recordId: z.string() }),
@@ -44,6 +45,38 @@ const ownerUsage = z.object({
     }),
   ),
 });
+
+/** Under bookingActuals billing follows actual possession (ADR-0083). A live
+ * use leg keeps the service open, so cycles continue through the review
+ * instant. Once every leg is returned the service ends at the later of the
+ * agreed end and the last recorded return; an early return keeps the agreed
+ * end. Without exactly one booking with use in the slot the agreed end stands,
+ * and the usage adapter refuses any review that falls due. */
+export function bookingPossessionServiceEnd(
+  value: unknown,
+  slotId: string,
+  agreedEnd: string | null,
+) {
+  const snapshot = ownerUsage.parse(value);
+  const bookings = snapshot.bookings.filter((b) => b.slotId === slotId);
+  if (bookings.length !== 1) return agreedEnd;
+  const legs = snapshot.evidence.filter(
+    (r) =>
+      r.bookingId === bookings[0]!.bookingId && !r.voided && r.kind === 'use',
+  );
+  if (!legs.length) return agreedEnd;
+  let returned = Number.NEGATIVE_INFINITY;
+  for (const leg of legs) {
+    if (leg.effectiveEnd === null) return null;
+    returned = Math.max(
+      returned,
+      Date.parse(effectiveInstant.parse(leg.effectiveEnd)),
+    );
+  }
+  return new Date(
+    agreedEnd === null ? returned : Math.max(returned, Date.parse(agreedEnd)),
+  ).toISOString();
+}
 
 export function billingBookingUsage(
   value: unknown,

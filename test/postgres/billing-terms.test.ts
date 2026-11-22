@@ -644,6 +644,79 @@ test('each arrears source kind compiles at the arrears reader with the cycle cal
   }
 });
 
+test('the plan binds its customer and currency by declared role, not by field name', () => {
+  const pkg = parseNormalizedApplicationPackageJson(
+    billingFixture('bound').bytes,
+  );
+  assert.ok(pkg.languageVersion === 'v6');
+  assert.equal(billingBindingProblem(pkg), undefined);
+  // A second business names the same roles differently.
+  const holder = id('field.sales_order_account_holder');
+  const billed = id('field.sales_order_billing_currency');
+  const renamed = JSON.parse(
+    JSON.stringify(pkg)
+      .replaceAll(
+        `"${id('field.sales_order_customer_party_id')}"`,
+        `"${holder}"`,
+      )
+      .replaceAll(`"${id('field.sales_order_currency')}"`, `"${billed}"`),
+  ) as typeof pkg;
+  const rate = renamed.billingPlans![0]!;
+  assert.equal(rate.bindings!.agreedInterval!.customerFieldId, holder);
+  assert.equal(rate.bindings!.agreedInterval!.currencyFieldId, billed);
+  assert.equal(billingBindingProblem(renamed), undefined);
+  const bind = (roles: {
+    customerFieldId?: string;
+    currencyFieldId?: string;
+  }) =>
+    billingBindingProblem({
+      ...renamed,
+      billingPlans: [
+        {
+          ...rate,
+          bindings: {
+            ...rate.bindings!,
+            agreedInterval: { ...rate.bindings!.agreedInterval!, ...roles },
+          },
+        },
+      ],
+    });
+  // Optional free text cannot carry either role, a currency holds one ISO
+  // code, and one field cannot carry both roles.
+  for (const roles of [
+    { customerFieldId: notesField },
+    { currencyFieldId: notesField },
+    { currencyFieldId: holder },
+    { customerFieldId: billed, currencyFieldId: billed },
+  ])
+    assert.equal(
+      bind(roles),
+      'BILLING_SOURCE_FIELDS_REQUIRED',
+      JSON.stringify(roles),
+    );
+  // The refusal of notes is its optional declaration: the same selected field
+  // declared required would carry the customer role.
+  const declaredRequired = {
+    ...renamed,
+    fields: renamed.fields.map((f) =>
+      f.fieldId === notesField ? { ...f, presence: 'required' as const } : f,
+    ),
+    billingPlans: [
+      {
+        ...rate,
+        bindings: {
+          ...rate.bindings!,
+          agreedInterval: {
+            ...rate.bindings!.agreedInterval!,
+            customerFieldId: notesField,
+          },
+        },
+      },
+    ],
+  };
+  assert.equal(billingBindingProblem(declaredRequired), undefined);
+});
+
 test('a released tracked slot and its scoped usage query must agree with the billing plan', () => {
   assert.ok(release('booking'));
   release('wrongSlot');

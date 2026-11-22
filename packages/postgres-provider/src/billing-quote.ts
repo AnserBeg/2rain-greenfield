@@ -25,6 +25,7 @@ import {
 } from '../../runtime/src/semantic-query-gateway.js';
 import {
   billingBookingUsage,
+  bookingPossessionServiceEnd,
   fenceBillingBookingOwners,
 } from './billing-booking-usage.js';
 import {
@@ -252,6 +253,15 @@ async function readArrearsCycle(
   row: SemanticRecordDto,
   arrears: NonNullable<NonNullable<BillingPlan['bindings']>['arrearsSource']>,
 ) {
+  if (arrears.kind === 'bookingActuals')
+    return readBookingArrearsCycle(
+      pool,
+      { view, gateway },
+      plan,
+      evidence,
+      row,
+      arrears,
+    );
   const cycle = dueArrearsCycle(plan, evidence);
   if (!cycle) return { status: 'notDue' as const };
   if (arrears.kind === 'periodMeter') {
@@ -284,67 +294,94 @@ async function readArrearsCycle(
       },
     };
   }
-  if (arrears.kind === 'bookingActuals') {
-    const usage = registeredSemanticQueryFromPinnedView(view, arrears.queryId);
-    if (
-      usage?.queryType !== 'get' ||
-      usage.readModel?.binding !== BOOKING_USAGE_BINDING ||
-      !usage.readModel.resultFields.usage ||
-      usage.sourceEntityId !== row.entityId ||
-      usage.legalEntityScope?.cardinality !== 'exactlyOne'
-    )
-      throw new Error('Billing requires scoped booking usage');
-    const readUsage = await gateway.invoke(view, {
-      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
-      queryId: usage.queryId,
-      arguments: {
-        recordId: row.recordId,
-        [usage.legalEntityScope.operand.parameterId]: evidence.companyId,
-        usage: { from: evidence.anchor, until: cycle.end },
+  return reviewArrearsCharges(plan, evidence);
+}
+
+async function readBookingArrearsCycle(
+  pool: Pool,
+  {
+    view,
+    gateway,
+  }: Pick<Parameters<SemanticQueryReadModelExecutor>[0], 'view' | 'gateway'>,
+  plan: BillingPlan,
+  evidence: BillingQuoteEvidence,
+  row: SemanticRecordDto,
+  arrears: Extract<
+    NonNullable<NonNullable<BillingPlan['bindings']>['arrearsSource']>,
+    { kind: 'bookingActuals' }
+  >,
+) {
+  if (Date.parse(evidence.asOf) <= Date.parse(evidence.anchor))
+    return { status: 'notDue' as const };
+  const usage = registeredSemanticQueryFromPinnedView(view, arrears.queryId);
+  if (
+    usage?.queryType !== 'get' ||
+    usage.readModel?.binding !== BOOKING_USAGE_BINDING ||
+    !usage.readModel.resultFields.usage ||
+    usage.sourceEntityId !== row.entityId ||
+    usage.legalEntityScope?.cardinality !== 'exactlyOne'
+  )
+    throw new Error('Billing requires scoped booking usage');
+  const readUsage = await gateway.invoke(view, {
+    schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+    queryId: usage.queryId,
+    arguments: {
+      recordId: row.recordId,
+      [usage.legalEntityScope.operand.parameterId]: evidence.companyId,
+      // Possession is read through the review instant, so a hire kept past
+      // its agreed end keeps earning cycles (ADR-0083, calculation v3).
+      usage: { from: evidence.anchor, until: evidence.asOf },
+    },
+  });
+  const owner = readUsage.records[0];
+  if (
+    readUsage.outcome !== 'exact' ||
+    readUsage.records.length !== 1 ||
+    owner?.recordId !== row.recordId ||
+    owner.entityId !== row.entityId ||
+    owner.archived ||
+    owner.revision !== row.revision
+  )
+    throw new Error('Incomplete or stale billing booking owner');
+  const snapshot = owner.values[usage.readModel.resultFields.usage];
+  evidence.serviceEnd = bookingPossessionServiceEnd(
+    snapshot,
+    arrears.slotId,
+    evidence.serviceEnd,
+  );
+  const cycle = dueArrearsCycle(plan, evidence);
+  if (!cycle) return { status: 'notDue' as const };
+  Object.assign(
+    evidence,
+    billingBookingUsage(
+      snapshot,
+      {
+        entityId: owner.entityId,
+        recordId: owner.recordId,
+        companyId: evidence.companyId,
       },
-    });
-    const owner = readUsage.records[0];
-    if (
-      readUsage.outcome !== 'exact' ||
-      readUsage.records.length !== 1 ||
-      owner?.recordId !== row.recordId ||
-      owner.entityId !== row.entityId ||
-      owner.archived ||
-      owner.revision !== row.revision
-    )
-      throw new Error('Incomplete or stale billing booking owner');
-    Object.assign(
-      evidence,
-      billingBookingUsage(
-        owner.values[usage.readModel.resultFields.usage],
-        {
-          entityId: owner.entityId,
-          recordId: owner.recordId,
-          companyId: evidence.companyId,
-        },
-        arrears.slotId,
-        plan.serviceUnit,
-        cycle.end,
+      arrears.slotId,
+      plan.serviceUnit,
+      cycle.end,
+    ),
+  );
+  await withTrustedRequestTransaction(
+    pool,
+    trustedContextForRequestRuntimeView(view),
+    (client) =>
+      fenceBillingBookingOwners(
+        client,
+        view.release.releaseId,
+        view.pointer.fence,
+        [
+          {
+            queryId: usage.queryId,
+            entityId: owner.entityId,
+            recordId: owner.recordId,
+            cursor: evidence.cursor,
+          },
+        ],
       ),
-    );
-    await withTrustedRequestTransaction(
-      pool,
-      trustedContextForRequestRuntimeView(view),
-      (client) =>
-        fenceBillingBookingOwners(
-          client,
-          view.release.releaseId,
-          view.pointer.fence,
-          [
-            {
-              queryId: usage.queryId,
-              entityId: owner.entityId,
-              recordId: owner.recordId,
-              cursor: evidence.cursor,
-            },
-          ],
-        ),
-    );
-  }
+  );
   return reviewArrearsCharges(plan, evidence);
 }

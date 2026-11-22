@@ -103,19 +103,23 @@ export function billingBindingProblem(
         return 'BILLING_BOOKING_SOURCE_REQUIRED';
     }
     const interval = b.agreedInterval;
-    const sourcePrefix = source?.sourceEntity.targetId.replace(
-      ':entity.',
-      ':field.',
-    );
+    // The plan declares which source field holds each commercial role. The
+    // role is checked by the field's declaration, never by its name: both are
+    // required stored text on the billed entity, and a currency holds exactly
+    // one ISO 4217 code. An optional free-text field such as notes cannot bind.
+    const roleField = (fieldId: string) => {
+      const field = selectedField(source, fieldId);
+      return field?.fieldType.kind === 'textFieldType' &&
+        field.presence === 'required'
+        ? field.fieldType
+        : undefined;
+    };
     if (
       b.evidenceFieldId ||
       !interval ||
-      interval.customerFieldId !== sourcePrefix + '_customer_party_id' ||
-      interval.currencyFieldId !== sourcePrefix + '_currency' ||
-      selectedField(source, interval.customerFieldId)?.fieldType.kind !==
-        'textFieldType' ||
-      selectedField(source, interval.currencyFieldId)?.fieldType.kind !==
-        'textFieldType' ||
+      interval.customerFieldId === interval.currencyFieldId ||
+      !roleField(interval.customerFieldId) ||
+      roleField(interval.currencyFieldId)?.maximumLength !== 3 ||
       outer?.queryType !== 'get' ||
       !outer.selections.some(
         (s) => s.field.targetId === interval.customerFieldId,
