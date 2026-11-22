@@ -10,7 +10,7 @@ Preview and activation use CUSTOMIZE-5’s pooled-table probe from migration 006
 
 Grouped table and CSV output, scoped index admission and revision replay serve distribution (Invoices), field service (Inspections) and clinics (visits). Each business selects its record type, operands and labels in the declaration.
 
-CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44963499226
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/44965531770
 
 ## Slice plan
 
@@ -64,7 +64,7 @@ Resolved by the design read and orchestrator rulings: a report’s index on an e
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "REPORTS-1",
-  "base": "6a991b21f6faa7df9833a8e27cee5aac5c0d7bf9", "head": "9cec1e717ff08b9504da2f0072130e8290715410",
+  "base": "6a991b21f6faa7df9833a8e27cee5aac5c0d7bf9", "head": "1f29e101cdc90f0fda3c8add129e7686e2efd1c5",
   "changedPaths": [
     "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json", "apps/web/src/component-registry.ts", "apps/web/src/customize-report.ts", "apps/web/src/customize-screen.ts", "apps/web/src/grouped-report.ts", "apps/web/src/ledger-styles.ts", "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts",
     "apps/web/test/browser/customize-inspection.composed-application.spec.ts", "apps/web/test/browser/customize.composed-application.spec.ts", "package.json", "packages/canonical-model/src/constants.ts", "packages/canonical-model/src/declared-report.ts", "packages/canonical-model/src/grouped-aggregate.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/normalize.ts", "packages/canonical-model/src/schemas.ts",
