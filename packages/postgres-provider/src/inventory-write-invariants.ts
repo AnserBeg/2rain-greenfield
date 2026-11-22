@@ -15,7 +15,7 @@ const STOCK_COUNT_ENTITY_SUFFIX = ':entity.stock_count';
  * names Inventory, the stock count or its fields itself.
  */
 export const STOCK_COUNT_COUNTING_INVARIANT = Object.freeze({
-  providerId: 'northstar.inventory:write-invariant.stock-count-counting',
+  providerId: 'stock-count.counting-mode-fixed',
   bind(storage: StorageTargetPayloadV1) {
     return Object.freeze(
       storage.entities

@@ -106,6 +106,7 @@ const suiteDefinitions = [
       'test/integration/location-runtime.test.ts',
       'test/integration/module-runtime.test.ts',
       'test/integration/module-storage-transition.test.ts',
+      'test/integration/module-write-invariants.test.ts',
       'test/integration/observability-ci-contract.test.ts',
       'test/integration/party-runtime.test.ts',
       'test/integration/pinned-catalog-memo.test.ts',
