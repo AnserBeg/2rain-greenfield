@@ -21,6 +21,11 @@ import {
   BILLING_QUOTE_CAPABILITY,
 } from '../../packages/canonical-model/src/billing.js';
 import {
+  BOOKING_CAPABILITY,
+  BOOKING_USAGE_BINDING,
+  BOOKING_USAGE_CAPABILITY,
+} from '../../packages/canonical-model/src/booking.js';
+import {
   canonicalize,
   canonicalizeAndHash,
 } from '../../packages/canonical-model/src/canonicalize.js';
@@ -50,6 +55,7 @@ import {
 import { withOrderEntryFixture } from '../helpers/order-entry-fixture.js';
 import {
   archivedBillingBase,
+  archivedBillingReleaseBytes,
   archivedBillingMigration,
   archivedBillingQuery,
 } from '../helpers/archived-billing-probes.js';
@@ -165,7 +171,10 @@ const meterPlan = BillingPlanSchema.parse({
     },
   },
 });
-type FixtureMode = 'bound' | 'legacy' | 'declaration' | 'arrears';
+const usageQuery = id('query.billing_usage');
+const trackedSlot = id('slot.service_equipment');
+type FixtureMode =
+  'bound' | 'legacy' | 'declaration' | 'arrears' | 'booking' | 'wrongSlot';
 function billingFixture(
   mode: FixtureMode,
   base: BillingFixtureBase = currentBase,
@@ -186,6 +195,56 @@ function billingFixture(
   const requirement = p.capabilityRequirements.find(
     (c) => c.capabilityId === 'northstar.sales:capability.fulfillment',
   )!;
+  const booking = mode === 'booking' || mode === 'wrongSlot';
+  const usagePermission = id('permission.read_service_usage');
+  const usage = {
+    ...source,
+    tier: 'q2',
+    queryId: usageQuery,
+    permission: ref('permissionReference', usagePermission),
+    selections: source.selections.map((selection, i) => ({
+      ...selection,
+      selectionId: id('selection.service_usage_' + i),
+    })),
+    readModel: {
+      capability: ref('capabilityReference', BOOKING_USAGE_CAPABILITY),
+      binding: BOOKING_USAGE_BINDING,
+      queries: { owner: ref('queryReference', sourceId) },
+      resultFields: { usage: id('metric.service_usage') },
+    },
+  };
+  const hold = {
+    ...op,
+    operationId: id('operation.hold_service'),
+    readBack: ref('queryReference', sourceId),
+    precondition: {
+      kind: 'booleanPredicate',
+      schemaVersion: 'v6',
+      value: true,
+    },
+    effect: {
+      kind: 'registeredCapabilityEffect',
+      schemaVersion: 'v6',
+      capability: ref('capabilityReference', BOOKING_CAPABILITY),
+    },
+    booking: {
+      bindingVersion: 'booking.commitment/v1',
+      declarationRevision: id('revision.service'),
+      slotRevision: id('revision.equipment'),
+      slotId: trackedSlot,
+      ownerEntity: source.sourceEntity.targetId,
+      resourceEntity: source.sourceEntity.targetId,
+      resourceReadPermission: sourcePermission.permissionId,
+      ownerReadPermission: sourcePermission.permissionId,
+      operation: 'hold',
+      kind: 'unit',
+      fulfilmentMode: 'tracked',
+      unit: plan.serviceUnit,
+      scale: 0,
+      maxBackdateDays: 1,
+      holdSeconds: 900,
+    },
+  };
   const quote = {
     ...source,
     queryId: quoteId,
@@ -197,11 +256,16 @@ function billingFixture(
     readModel: {
       capability: ref('capabilityReference', BILLING_QUOTE_CAPABILITY),
       binding: 'northstar.billing:read_model.quote',
-      queries: { evidence: ref('queryReference', sourceId) },
+      queries: {
+        evidence: ref('queryReference', sourceId),
+      },
       resultFields: { explanation: id('metric.billing_explanation') },
     },
   };
   const permissions = [
+    ...(booking
+      ? [{ ...sourcePermission, permissionId: usagePermission }]
+      : []),
     { ...sourcePermission, permissionId: readPermission },
     { ...writePermission, permissionId: publishPermission },
   ];
@@ -229,7 +293,23 @@ function billingFixture(
   };
   const boundInput = {
     ...p,
-    billingPlans: [mode === 'arrears' ? meterPlan : plan],
+    billingPlans: [
+      mode === 'arrears'
+        ? meterPlan
+        : booking
+          ? {
+              ...plan,
+              bindings: {
+                ...b,
+                arrearsSource: {
+                  kind: 'bookingActuals',
+                  queryId: usageQuery,
+                  slotId: mode === 'wrongSlot' ? id('slot.other') : trackedSlot,
+                },
+              },
+            }
+          : plan,
+    ],
     fields: [
       ...p.fields,
       ...(mode === 'arrears'
@@ -258,11 +338,13 @@ function billingFixture(
     queries: [
       ...p.queries.filter((q) => q.queryId !== sourceId),
       termsSource,
+      ...(booking ? [usage] : []),
       quote,
     ],
     permissions: [...p.permissions, ...permissions],
     operations: [
       ...p.operations,
+      ...(booking ? [hold] : []),
       ...[
         b.publishOperationId,
         b.overrideOperationId,
@@ -281,6 +363,20 @@ function billingFixture(
     ],
     capabilityRequirements: [
       ...p.capabilityRequirements,
+      ...(booking
+        ? [
+            {
+              ...requirement,
+              capabilityId: BOOKING_USAGE_CAPABILITY,
+              declaredEffects: ['read'],
+            },
+            {
+              ...requirement,
+              capabilityId: BOOKING_CAPABILITY,
+              declaredEffects: ['appendFact'],
+            },
+          ]
+        : []),
       ...(mode === 'arrears'
         ? [
             {
@@ -357,6 +453,16 @@ function release(mode: FixtureMode = 'bound', base?: BillingFixtureBase) {
       ],
     },
   );
+  if (mode === 'wrongSlot') {
+    assert.ok(
+      compiled.status !== 'compiled' &&
+        compiled.diagnostics.some(
+          (d) => d.rule === 'BILLING_BOOKING_SOURCE_REQUIRED',
+        ),
+      JSON.stringify(compiled.diagnostics),
+    );
+    return;
+  }
   if (mode === 'legacy') {
     assert.ok(
       compiled.status !== 'compiled' &&
@@ -380,6 +486,11 @@ function release(mode: FixtureMode = 'bound', base?: BillingFixtureBase) {
     ],
   };
 }
+test('a released tracked slot and its scoped usage query must agree with the billing plan', () => {
+  assert.ok(release('booking'));
+  release('wrongSlot');
+});
+
 test('the serving role has no direct billing table privileges', async () => {
   await withEphemeralPostgres('billing-privileges', async ({ pool }) => {
     const admin = await pool.connect();
@@ -958,7 +1069,7 @@ test('a period meter reviews the first earned cycle through its company-scoped g
         effectiveFrom: anchor,
         values: { rate: '1.50', included: '10' },
       };
-      const record = await f.create('sales_order', {
+      const values = {
         customer_party_id: f.customer,
         currency: 'CAD',
         order_date: anchor,
@@ -972,7 +1083,8 @@ test('a period meter reviews the first earned cycle through its company-scoped g
         ship_to_region: 'AB',
         ship_to_postal_code: 'T2P 0A1',
         ship_to_country: 'Canada',
-      });
+      };
+      const record = await f.create('sales_order', values);
       assert.equal(
         (
           await f.invoke('billing_publish', {
@@ -982,7 +1094,7 @@ test('a period meter reviews the first earned cycle through its company-scoped g
         ).outcome,
         'succeeded',
       );
-      const read = (company: string) =>
+      const read = (company: string, recordId = record.recordId) =>
         f.app.runtime.entry.run(
           { headers: { cookie: 'northstar-demo-actor=buyer' } },
           (v) =>
@@ -990,7 +1102,7 @@ test('a period meter reviews the first earned cycle through its company-scoped g
               schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
               queryId: quoteId,
               arguments: {
-                recordId: record.recordId,
+                recordId,
                 [id('parameter.sales_order_get_legal_entity_scope')]: company,
               },
             }),
@@ -1019,6 +1131,59 @@ test('a period meter reviews the first earned cycle through its company-scoped g
         false,
       );
       assert.equal((await read(other.recordId)).records.length, 0);
+      const pending = await f.create('sales_order', {
+        ...values,
+        closing_reading: null,
+      });
+      const incomplete = await read(f.scope, pending.recordId);
+      assert.deepEqual(
+        JSON.parse(
+          String(
+            incomplete.records[0]!.values[id('metric.billing_explanation')],
+          ),
+        ),
+        {
+          status: 'pendingReadings',
+          cycle: { start: anchor, end },
+          missing: [closingReading],
+        },
+      );
+      const recordB = await f.create(
+        'sales_order',
+        values,
+        {},
+        true,
+        randomUUID(),
+        other.recordId,
+      );
+      assert.equal(
+        (
+          await f.invoke('billing_publish', {
+            recordId: recordB.recordId,
+            expectedRevision: recordB.revision,
+          })
+        ).outcome,
+        'succeeded',
+      );
+      const inB = await read(other.recordId, recordB.recordId);
+      assert.equal(
+        JSON.parse(
+          String(inB.records[0]!.values[id('metric.billing_explanation')]),
+        ).quote.inputs.evidence.companyId,
+        other.recordId,
+      );
+      const principal = await f.app.runtime.entry.run(
+        { headers: { cookie: 'northstar-demo-actor=buyer' } },
+        async (v) => [v.tenantId, v.environmentId, v.principalId, f.scope],
+      );
+      await f.pool.query(
+        'UPDATE platform.current_policy_memberships SET legal_entity_id=$4 WHERE (tenant_id,environment_id,principal_id)=($1,$2,$3) AND legal_entity_id IS NULL',
+        principal,
+      );
+      assert.equal((await read(f.scope)).records[0]!.recordId, record.recordId);
+      await assert.rejects(() => read(other.recordId, recordB.recordId), {
+        code: 'SEMANTIC_QUERY_POLICY_DENIED',
+      });
       await withArchivedCustomizationRuntime(preceding, async (run) => {
         assert.deepEqual(await probeArchivedBilling(run, f), {
           outcome: 'refused',
@@ -1039,6 +1204,20 @@ test('the preceding cycle reader answers an item query on the persisted release 
     '72e4988d721ce9a234c813a654c5e15d7545f40d',
     async (run) => {
       const base = await archivedBase(run);
+      const application = release('bound', base)!;
+      const { bytes, permissions } = billingFixture('bound', base);
+      const oldDigest = await run(archivedBillingReleaseBytes, {
+        definition: Buffer.from(bytes).toString('utf8'),
+        permissions: permissions.map((p) => ({
+          permissionId: p.permissionId,
+          resource: p.resource.targetId,
+          action: p.action,
+        })),
+      });
+      assert.equal(
+        canonicalizeAndHash(application.applications.at(-1)!).contentHash,
+        oldDigest,
+      );
       await withOrderEntryFixture(
         async (f) => {
           assert.deepEqual(await probeArchivedBilling(run, f), {
@@ -1049,7 +1228,7 @@ test('the preceding cycle reader answers an item query on the persisted release 
         'demo',
         0,
         0,
-        release('bound', base),
+        application,
       );
     },
   );

@@ -93,7 +93,6 @@ export function billingBindingProblem(
       );
       if (
         !declaredSlot ||
-        model?.queries.usage?.targetId !== arrears.queryId ||
         usage?.queryType !== 'get' ||
         usage.legalEntityScope?.cardinality !== 'exactlyOne' ||
         usage.readModel?.capability.targetId !== BOOKING_USAGE_CAPABILITY ||
@@ -143,8 +142,7 @@ export function billingBindingProblem(
       model?.capability.targetId !== BILLING_QUOTE_CAPABILITY ||
       model.queries.evidence?.targetId !== b.evidenceQueryId ||
       !model.resultFields.explanation ||
-      Object.keys(model.queries).length !==
-        (arrears?.kind === 'bookingActuals' ? 2 : 1) ||
+      Object.keys(model.queries).length !== 1 ||
       Object.keys(model.resultFields).length !== 1 ||
       outer.sourceEntity.targetId !== source?.sourceEntity.targetId ||
       selectedField(terms, b.termsFieldId)?.fieldType.kind !==

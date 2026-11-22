@@ -1,11 +1,15 @@
 import type { Pool } from 'pg';
 import {
   BillingPlansSchema,
+  type BillingPlan,
   BillingListAssignmentSchema,
   BILLING_INTERVAL_READER,
   BILLING_ARREARS_READER,
 } from '../../canonical-model/src/billing.js';
-import { BillingQuoteEvidenceSchema } from '../../canonical-model/src/billing-evidence.js';
+import {
+  BillingQuoteEvidenceSchema,
+  type BillingQuoteEvidence,
+} from '../../canonical-model/src/billing-evidence.js';
 import { quoteBillingService } from '../../domain/src/billing/quote.js';
 import { canonicalize } from '../../canonical-model/src/canonicalize.js';
 import { compileRatePlan } from '../../domain/src/billing/terms.js';
@@ -17,6 +21,7 @@ import {
   registeredSemanticQueryFromPinnedView,
   SEMANTIC_QUERY_REQUEST_VERSION,
   type SemanticQueryReadModelExecutor,
+  type SemanticRecordDto,
 } from '../../runtime/src/semantic-query-gateway.js';
 import {
   billingBookingUsage,
@@ -114,7 +119,7 @@ export function billingQuoteReadModel(
       base.values[fields.customerFieldId] !== customerId ||
       base.values[fields.currencyFieldId] !== currency ||
       typeof anchor !== 'string' ||
-      typeof end !== 'string'
+      (typeof end !== 'string' && !(b.arrearsSource && end === null))
     )
       throw new Error(
         'Billing source identity, currency or interval disagrees',
@@ -190,95 +195,14 @@ export function billingQuoteReadModel(
     if (!target) throw new Error('Missing quote explanation binding');
     const arrears = b.arrearsSource;
     if (arrears) {
-      const cycle = dueArrearsCycle(plan, evidence);
-      if (cycle && arrears.kind === 'periodMeter') {
-        const reading = (field: string) => {
-          const v = row.values[field];
-          if (typeof v !== 'string')
-            throw new Error('Billing meter reading pending');
-          return v;
-        };
-        evidence.bands = [];
-        evidence.basis = 'usageOnly';
-        evidence.periodMeter = {
-          streamId: arrears.streamId,
-          unit: arrears.unit,
-          opening: {
-            at: reading(arrears.openingInstantFieldId),
-            reading: reading(arrears.openingReadingFieldId),
-          },
-          closing: {
-            at: reading(arrears.closingInstantFieldId),
-            reading: reading(arrears.closingReadingFieldId),
-          },
-        };
-      }
-      if (cycle && arrears.kind === 'bookingActuals') {
-        const usage = registeredSemanticQueryFromPinnedView(
-          view,
-          arrears.queryId,
-        );
-        if (
-          usage?.queryType !== 'get' ||
-          usage.readModel?.binding !== BOOKING_USAGE_BINDING ||
-          !usage.readModel.resultFields.usage ||
-          usage.sourceEntityId !== row.entityId ||
-          usage.legalEntityScope?.cardinality !== 'exactlyOne'
-        )
-          throw new Error('Billing requires scoped booking usage');
-        const readUsage = await gateway.invoke(view, {
-          schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
-          queryId: usage.queryId,
-          arguments: {
-            recordId: row.recordId,
-            [usage.legalEntityScope.operand.parameterId]: company,
-            usage: { from: anchor, until: cycle.end },
-          },
-        });
-        const owner = readUsage.records[0];
-        if (
-          readUsage.outcome !== 'exact' ||
-          readUsage.records.length !== 1 ||
-          owner?.recordId !== row.recordId ||
-          owner.entityId !== row.entityId ||
-          owner.archived ||
-          owner.revision !== row.revision
-        )
-          throw new Error('Incomplete or stale billing booking owner');
-        Object.assign(
-          evidence,
-          billingBookingUsage(
-            owner.values[usage.readModel.resultFields.usage],
-            {
-              entityId: owner.entityId,
-              recordId: owner.recordId,
-              companyId: company,
-            },
-            arrears.slotId,
-            plan.serviceUnit,
-            cycle.end,
-          ),
-        );
-        await withTrustedRequestTransaction(
-          pool,
-          trustedContextForRequestRuntimeView(view),
-          (client) =>
-            fenceBillingBookingOwners(
-              client,
-              view.release.releaseId,
-              view.pointer.fence,
-              [
-                {
-                  queryId: usage.queryId,
-                  entityId: owner.entityId,
-                  recordId: owner.recordId,
-                  cursor: evidence.cursor,
-                },
-              ],
-            ),
-        );
-      }
-      const review = reviewArrearsCharges(plan, evidence);
+      const review = await readArrearsCycle(
+        pool,
+        { view, gateway },
+        plan,
+        evidence,
+        row,
+        arrears,
+      );
       return {
         ...result,
         records: [
@@ -315,4 +239,112 @@ export function billingQuoteReadModel(
       ],
     };
   };
+}
+
+async function readArrearsCycle(
+  pool: Pool,
+  {
+    view,
+    gateway,
+  }: Pick<Parameters<SemanticQueryReadModelExecutor>[0], 'view' | 'gateway'>,
+  plan: BillingPlan,
+  evidence: BillingQuoteEvidence,
+  row: SemanticRecordDto,
+  arrears: NonNullable<NonNullable<BillingPlan['bindings']>['arrearsSource']>,
+) {
+  const cycle = dueArrearsCycle(plan, evidence);
+  if (!cycle) return { status: 'notDue' as const };
+  if (arrears.kind === 'periodMeter') {
+    const missing = [
+      arrears.openingReadingFieldId,
+      arrears.openingInstantFieldId,
+      arrears.closingReadingFieldId,
+      arrears.closingInstantFieldId,
+    ].filter((field) => row.values[field] === null);
+    if (missing.length)
+      return { status: 'pendingReadings' as const, cycle, missing };
+    const reading = (field: string) => {
+      const v = row.values[field];
+      if (typeof v !== 'string')
+        throw new Error('Incomplete billing meter source');
+      return v;
+    };
+    evidence.bands = [];
+    evidence.basis = 'usageOnly';
+    evidence.periodMeter = {
+      streamId: arrears.streamId,
+      unit: arrears.unit,
+      opening: {
+        at: reading(arrears.openingInstantFieldId),
+        reading: reading(arrears.openingReadingFieldId),
+      },
+      closing: {
+        at: reading(arrears.closingInstantFieldId),
+        reading: reading(arrears.closingReadingFieldId),
+      },
+    };
+  }
+  if (arrears.kind === 'bookingActuals') {
+    const usage = registeredSemanticQueryFromPinnedView(view, arrears.queryId);
+    if (
+      usage?.queryType !== 'get' ||
+      usage.readModel?.binding !== BOOKING_USAGE_BINDING ||
+      !usage.readModel.resultFields.usage ||
+      usage.sourceEntityId !== row.entityId ||
+      usage.legalEntityScope?.cardinality !== 'exactlyOne'
+    )
+      throw new Error('Billing requires scoped booking usage');
+    const readUsage = await gateway.invoke(view, {
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      queryId: usage.queryId,
+      arguments: {
+        recordId: row.recordId,
+        [usage.legalEntityScope.operand.parameterId]: evidence.companyId,
+        usage: { from: evidence.anchor, until: cycle.end },
+      },
+    });
+    const owner = readUsage.records[0];
+    if (
+      readUsage.outcome !== 'exact' ||
+      readUsage.records.length !== 1 ||
+      owner?.recordId !== row.recordId ||
+      owner.entityId !== row.entityId ||
+      owner.archived ||
+      owner.revision !== row.revision
+    )
+      throw new Error('Incomplete or stale billing booking owner');
+    Object.assign(
+      evidence,
+      billingBookingUsage(
+        owner.values[usage.readModel.resultFields.usage],
+        {
+          entityId: owner.entityId,
+          recordId: owner.recordId,
+          companyId: evidence.companyId,
+        },
+        arrears.slotId,
+        plan.serviceUnit,
+        cycle.end,
+      ),
+    );
+    await withTrustedRequestTransaction(
+      pool,
+      trustedContextForRequestRuntimeView(view),
+      (client) =>
+        fenceBillingBookingOwners(
+          client,
+          view.release.releaseId,
+          view.pointer.fence,
+          [
+            {
+              queryId: usage.queryId,
+              entityId: owner.entityId,
+              recordId: owner.recordId,
+              cursor: evidence.cursor,
+            },
+          ],
+        ),
+    );
+  }
+  return reviewArrearsCharges(plan, evidence);
 }

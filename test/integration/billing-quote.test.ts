@@ -1034,12 +1034,10 @@ test('the billing consumer fences all owners in one call and checks identities a
     { queryId: 'one', entityId: 'visit', recordId: 'a', cursor: '2' },
     { queryId: 'two', entityId: 'account', recordId: 'b', cursor: '7' },
   ];
-  const result = owners
-    .toReversed()
-    .map(({ entityId, recordId, cursor }) => ({
-      ownerRef: { entityId, recordId },
-      cursor,
-    }));
+  const result = owners.toReversed().map(({ entityId, recordId, cursor }) => ({
+    ownerRef: { entityId, recordId },
+    cursor,
+  }));
   let observed = result;
   let calls = 0;
   const client = {
@@ -1070,6 +1068,10 @@ test('the billing consumer fences all owners in one call and checks identities a
     },
   } as unknown as PoolClient;
   await fenceBillingBookingOwners(client, 'release', 4, owners);
+  await assert.rejects(
+    fenceBillingBookingOwners(client, 'release', 4, [owners[0]!, owners[0]!]),
+    /Duplicate billing booking owner/,
+  );
   assert.equal(calls, 1);
   for (const incorrect of [
     result.slice(1),

@@ -124,6 +124,12 @@ export async function fenceBillingBookingOwners(
     cursor: string;
   }[],
 ) {
+  const key = (entity: string, id: string) => JSON.stringify([entity, id]);
+  const expected = new Map(
+    owners.map((o) => [key(o.entityId, o.recordId), o.cursor]),
+  );
+  if (expected.size !== owners.length)
+    throw new Error('Duplicate billing booking owner');
   // A consolidated writer must take all endpoint record locks first. Booking
   // locks the whole set of cursors in its canonical order in this single call.
   const current = await bookingOwnerCursorFence(
@@ -132,12 +138,7 @@ export async function fenceBillingBookingOwners(
     fence,
     owners.map(({ queryId, recordId }) => ({ queryId, recordId })),
   );
-  const key = (entity: string, id: string) => JSON.stringify([entity, id]);
-  const expected = new Map(
-    owners.map((o) => [key(o.entityId, o.recordId), o.cursor]),
-  );
   if (
-    expected.size !== owners.length ||
     current.schemaVersion !== 'booking.ownerCursorFence/v1' ||
     current.owners.length !== expected.size ||
     current.owners.some((row) => {

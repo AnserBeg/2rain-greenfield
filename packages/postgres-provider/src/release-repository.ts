@@ -774,6 +774,13 @@ function verifyCompiledRelease(
         projectionPayloadBytes[0]!,
         'PROJECTION_CHUNK_NOT_CANONICAL',
       );
+      const popupProblem = popupDeclarationProblem(
+        layoutDefinition,
+        payload,
+        reference.requiredRuntimeCapability.minimumVersion,
+      );
+      if (popupProblem)
+        throw integrity('POPUP_PROJECTION_CONTRACT_MISMATCH', popupProblem);
       const hasBillingCalculation = Object.hasOwn(
         payload,
         'billingCalculationVersion',
@@ -786,13 +793,6 @@ function verifyCompiledRelease(
           : hasAgreedBillingInterval
             ? BILLING_INTERVAL_READER
             : BILLING_READER;
-      const popupProblem = popupDeclarationProblem(
-        layoutDefinition,
-        payload,
-        reference.requiredRuntimeCapability.minimumVersion,
-      );
-      if (popupProblem)
-        throw integrity('POPUP_PROJECTION_CONTRACT_MISMATCH', popupProblem);
       if (
         canonicalize(payload.billingPlans ?? null) !==
           canonicalize(billingPlans ?? null) ||
