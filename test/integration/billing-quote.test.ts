@@ -1007,17 +1007,17 @@ test('three businesses review net charge lines through the same closed-cycle cal
       }),
     /unambiguous/,
   );
-  assert.throws(
-    () =>
-      read({
-        ...snapshot,
-        evidence: snapshot.evidence.map((r) =>
-          r.id === 'leg1'
-            ? { ...r, effectiveStart: start.replace('.000Z', '.000001Z') }
-            : r,
-        ),
-      }),
-    /precision/,
+  // Booking's microsecond clock truncates to the Billing millisecond (ADR-0083).
+  assert.equal(
+    read({
+      ...snapshot,
+      evidence: snapshot.evidence.map((r) =>
+        r.id === 'leg1'
+          ? { ...r, effectiveStart: start.replace('.000Z', '.000999Z') }
+          : r,
+      ),
+    }).bands[0]!.intervals.find((i) => i.id === 'leg1')!.start,
+    start,
   );
   assert.throws(
     () =>
