@@ -2373,7 +2373,27 @@ test('addPopupActionRevision replay accepts a compatible base move and refuses a
   const surface = release.compiled.bundle.releaseManifest.projections.find(
     (p) => p.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
   )!;
-  assert.equal(surface.requiredRuntimeCapability.minimumVersion, POPUP_READER);
+  // The first-party base already carries its own reader floor (REPORTS-1's
+  // Invoice source binding), so a pop-up raises the floor to at least its rung.
+  const surfaceFloorOf = (compiled: typeof release.compiled) =>
+    compiled.bundle.releaseManifest.projections.find(
+      (p) => p.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
+    )!.requiredRuntimeCapability.minimumVersion;
+  assert.equal(
+    surface.requiredRuntimeCapability.minimumVersion,
+    Math.max(surfaceFloorOf(tip.compiled), POPUP_READER),
+  );
+  // On a base below the pop-up rung the pop-up alone sets the floor.
+  const older = await compileInSandbox(surfaceCompatibilityRequest([revision]));
+  assert.ok(older.status === 'compiled', JSON.stringify(older));
+  const olderBase = applicationBeforeStockCountWorkflow().release.application;
+  assert.ok(
+    surfaceFloorOf(parseSerializedRelease(olderBase).compiled) < POPUP_READER,
+  );
+  assert.equal(
+    surfaceFloorOf(parseSerializedRelease(older.steps[0]!.release).compiled),
+    POPUP_READER,
+  );
   const manifest = projectionPayload(
     release.compiled,
     PROJECTION_FAMILY_IDS.surfaceManifest,

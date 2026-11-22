@@ -239,7 +239,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 39 reads tenant dateTime fields (ADR-0087).
     // 40 adds custom buttons that open a record Task.
     // 41 pins the terms and assignment at first billing allocation.
-    // 42 reads closed-cycle charge reviews and their source contracts.
+    // 42 adds company access indexes, 43 report sources and 44 grouped reports.
+    // 45 reads closed-cycle charge reviews and their source contracts.
     maximumSupportedVersion: BILLING_ARREARS_READER,
   },
 });

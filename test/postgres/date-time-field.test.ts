@@ -16,6 +16,8 @@ import {
   assertArchivedTenantEnvelopeForChange,
   withArchivedCustomizationRuntime,
 } from '../helpers/archived-customization-runtime.js';
+import { draftBeforeCompanyAccessIndex } from '../helpers/archived-runtime-process.js';
+import { readReportsPredecessor } from '../helpers/reports-preceding-release.js';
 import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../packages/runtime/src/semantic-query-gateway.js';
 import { SHARED_LIST_QUERY_VERSION } from '../../packages/runtime/src/list-behavior/index.js';
 import { COMPANY, NS, worldOver } from '../agent/agent-world.js';
@@ -546,7 +548,13 @@ test(
       'date-time-reader',
       async ({ connection, pool }) => {
         const databaseUrl = `postgresql://${connection.user}@${connection.host}:${connection.port}/${connection.database}`;
-        const options = { databaseUrl, tenantSlug: 'date-time-reader' };
+        const options = {
+          databaseUrl,
+          tenantSlug: 'date-time-reader',
+          compiledApplication: readReportsPredecessor(
+            'apps/web/release/app.compiled.json',
+          ),
+        };
         const app = await startComposedApplication({ ...options, port: 0 });
         const opened = await openCustomizeService(options);
         try {
@@ -626,7 +634,8 @@ test(
                 (await query(`${NS}:query.item_list`)).outcome,
                 'served',
               );
-              const record = await opened.service.draft(
+              const record = await draftBeforeCompanyAccessIndex(
+                options,
                 {
                   kind: 'addRecordType',
                   label: 'Equipment',

@@ -65,6 +65,7 @@ import {
   compiledApplication,
 } from '../helpers/customization-fixture.js';
 import { withOrderEntryFixture } from '../helpers/order-entry-fixture.js';
+import { DECLARED_REPORT_READER } from '../../packages/canonical-model/src/declared-report.js';
 import { truncateBookingInstant } from '../../packages/postgres-provider/src/billing-booking-usage.js';
 import type { ImmutableJsonValue } from '../../packages/runtime/src/request-runtime-view.js';
 import {
@@ -1318,7 +1319,7 @@ test('governed terms and scoped source facts produce a quote through the install
 test('a period meter reviews the first earned cycle through its company-scoped gateway', async () => {
   const anchor = '2025-01-31T00:00:00.000Z';
   const end = '2025-02-28T00:00:00.000Z';
-  const preceding = '72e4988d721ce9a234c813a654c5e15d7545f40d';
+  const preceding = '37bfd47311c58060000cebca49d5f55174e3874a';
   await withOrderEntryFixture(
     async (f) => {
       const version = {
@@ -1449,7 +1450,7 @@ test('a period meter reviews the first earned cycle through its company-scoped g
         assert.deepEqual(await probeArchivedBilling(run, f), {
           outcome: 'refused',
           code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
-          message: `runtime capability northstar.runtime:capability.surface-manifest requires version ${BILLING_ARREARS_READER} and this runtime supports 41`,
+          message: `runtime capability northstar.runtime:capability.surface-manifest requires version ${BILLING_ARREARS_READER} and this runtime supports ${DECLARED_REPORT_READER}`,
         });
       });
     },
@@ -1706,7 +1707,7 @@ test('an equipment hire reviews possession Booking stamped on its production clo
 
 test('the preceding cycle reader answers an item query on the persisted release without arrears', async () => {
   await withArchivedCustomizationRuntime(
-    '72e4988d721ce9a234c813a654c5e15d7545f40d',
+    '37bfd47311c58060000cebca49d5f55174e3874a',
     async (run) => {
       const base = await archivedBase(run);
       const application = release('bound', base)!;

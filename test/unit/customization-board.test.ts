@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readReportsPredecessor } from '../helpers/reports-preceding-release.js';
 import test from 'node:test';
 import * as customization from '../../packages/customization/src/index.js';
 import {
@@ -25,9 +25,10 @@ import { projectionPayload } from '../compiler/helpers.js';
 type Json = Record<string, unknown>;
 type Revision = ReturnType<typeof customization.draftBoardRevision>;
 const file = 'apps/web/release/app.authored.json';
-const authored: Json = JSON.parse(readFileSync(file, 'utf8'));
+// Isolate the Board floor from the later first-party Invoice source binding.
+const authored: Json = readReportsPredecessor(file);
 const tip = parseCompiledApplication(
-  JSON.parse(readFileSync('apps/web/release/app.compiled.json', 'utf8')),
+  readReportsPredecessor('apps/web/release/app.compiled.json'),
 ).application;
 const acknowledgement = readUnboundPermissionAcknowledgementFor(
   file,

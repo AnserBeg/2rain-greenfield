@@ -24,6 +24,7 @@ import {
 import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../../../packages/runtime/src/semantic-query-gateway.js';
 import {
   archivedRuntimeRead,
+  draftBeforeCompanyAccessIndex,
   withArchivedCustomizationRuntime,
 } from '../../../../test/helpers/archived-runtime-process.js';
 import {
@@ -538,7 +539,8 @@ process.stdout.write(JSON.stringify(applicationBeforeStockCountWorkflow().releas
       try {
         const opened = await openCustomizeService(options);
         try {
-          const recordDraft = await opened.service.draft(
+          const recordDraft = await draftBeforeCompanyAccessIndex(
+            options,
             inspectionChange,
             'declarativeEditor',
           );
