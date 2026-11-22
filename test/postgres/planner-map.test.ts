@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import pg, { type Client, type QueryResult } from 'pg';
@@ -22,6 +23,7 @@ import {
   stopSetup as setup,
 } from '../helpers/planner-map-fixture.js';
 import { MAP_VIEW_READER } from '../../packages/canonical-model/src/map-view.js';
+import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import { parseServerTiming } from '../../packages/postgres-provider/src/request-work-meter.js';
 import { catalogParseCount } from '../../packages/runtime/src/catalog-parse-count.js';
 import { readCompiledSurfaceManifest } from '../../apps/web/src/surface-contract.js';
@@ -140,25 +142,41 @@ test(
               ),
             );
           await withArchivedCustomizationRuntime(predecessor, async (run) => {
+            // The predecessor compiles from the first-party release this
+            // test installed (this tree's release files and acknowledgement),
+            // never from its own copies: a train that advances the release
+            // lineage then moves both sides alike, and byte identity still
+            // compares the same inputs.
+            const installedPath = 'apps/web/release/app.authored.json';
             const historical = (await run(
               `
           import { readFile } from 'node:fs/promises';
           import { parseCompiledApplication } from './packages/postgres-provider/src/composed-application-runtime.ts';
           import { compileInSandbox,serializeRelease } from './packages/customization/src/index.ts';
-          import { readUnboundPermissionAcknowledgementFor } from './apps/web/scripts/unbound-permission-acknowledgement.ts';
-          const file='apps/web/release/app.authored.json';
-          const compiled=parseCompiledApplication(JSON.parse(await readFile('apps/web/release/app.compiled.json','utf8')));
+          const input=JSON.parse(await readFile(process.argv[2],'utf8'));
+          const compiled=parseCompiledApplication(input.compiled);
           const tip=serializeRelease(compiled.application);
-          const setup=JSON.parse(await readFile(process.argv[2],'utf8'));
-          const out=await compileInSandbox({base:JSON.parse(await readFile(file,'utf8')),chain:[setup],tip,
-            acknowledgement:readUnboundPermissionAcknowledgementFor(file,'northstar.app:package.application')});
+          const out=await compileInSandbox({base:input.authored,chain:[input.setup],tip,acknowledgement:input.acknowledgement});
           if(out.status!=='compiled') throw Error(JSON.stringify(out));
           console.log(JSON.stringify([tip,out.steps[0].release]));
         `,
-              // The service records a change after preparePatchForRecording,
-              // which binds a new company-owned type to the company access
-              // index, so the archived compiler gets the change as recorded.
-              preparePatchForRecording(CustomizationPatchSchema.parse(setup)),
+              {
+                authored: JSON.parse(readFileSync(installedPath, 'utf8')),
+                compiled: JSON.parse(
+                  readFileSync('apps/web/release/app.compiled.json', 'utf8'),
+                ),
+                acknowledgement: readUnboundPermissionAcknowledgementFor(
+                  installedPath,
+                  'northstar.app:package.application',
+                ),
+                // The service records a change after
+                // preparePatchForRecording, which binds a new company-owned
+                // type to the company access index, so the archived compiler
+                // gets the change as recorded.
+                setup: preparePatchForRecording(
+                  CustomizationPatchSchema.parse(setup),
+                ),
+              },
             )) as {
               releaseRoot: string;
               normalizedDefinitionBytesBase64: string;
