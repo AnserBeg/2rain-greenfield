@@ -237,6 +237,9 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // stable ID with pinned contracts, labels from the release.
     // 38 adds document templates and governed PDF generation.
     // 39 reads tenant dateTime fields (ADR-0087).
+    // 40 adds custom buttons that open a record Task.
+    // 41 pins the terms and assignment at first billing allocation.
+    // 42 applies versioned record templates at create (provisional).
     maximumSupportedVersion: RECORD_TEMPLATE_READER,
   },
 });

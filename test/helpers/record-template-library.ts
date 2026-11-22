@@ -648,7 +648,8 @@ export async function exerciseTemplateLibrary(
           [ns + 'field.' + local + '_name']: 'Created from ' + label,
           ...(!selector && { [cls]: contextId }),
         },
-        relations: selector ? { [selector.relationId]: contextId } : {},
+        relations:
+          selector?.kind === 'link' ? { [selector.relationId]: contextId } : {},
       };
       const key = randomUUID();
       const prepare = (k: string, h: typeof header = header) =>
