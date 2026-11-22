@@ -11,6 +11,7 @@ import type {
   GROUPED_AGGREGATE_PROFILE,
   GROUPED_RESULT_VERSION,
 } from './grouped-aggregate.js';
+import { inspectPredicateForExecution } from './predicate-kernel.js';
 import { selectedFieldIds } from './board.js';
 
 type Row = Record<string, unknown>;
@@ -48,17 +49,6 @@ export interface RegisteredReport {
   accessPath: { table: string; index: string; keys: string[] };
 }
 
-export function isUnfilteredReportPredicate(filter: unknown): boolean {
-  return (
-    !!filter &&
-    typeof filter === 'object' &&
-    'kind' in filter &&
-    filter.kind === 'booleanPredicate' &&
-    'value' in filter &&
-    filter.value === true
-  );
-}
-
 const ref = (value: unknown) =>
   (value as { targetId?: string } | undefined)?.targetId;
 const live = (row: Row | undefined): row is Row =>
@@ -91,7 +81,7 @@ export function reportOffer(
     query.tier !== 'q0' ||
     query.queryType !== 'list' ||
     (query.filter !== undefined &&
-      !isUnfilteredReportPredicate(query.filter)) ||
+      inspectPredicateForExecution(query.filter).outcome !== 'accepted') ||
     query.readModel
   )
     return null;

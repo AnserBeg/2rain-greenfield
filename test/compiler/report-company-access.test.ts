@@ -7,9 +7,15 @@ import {
   reportTargets,
   draftReport,
 } from '../../packages/customization/src/report-revision.js';
-import type { RegisteredReport } from '../../packages/canonical-model/src/declared-report.js';
-import type { ReportCatalogSource } from '../../packages/canonical-model/src/declared-report.js';
-import { CURRENCY_MINOR_UNITS_V0 } from '../../packages/canonical-model/src/constants.js';
+import {
+  reportOffer,
+  type RegisteredReport,
+  type ReportCatalogSource,
+} from '../../packages/canonical-model/src/declared-report.js';
+import {
+  ADOPTED_LANGUAGE_VERSION,
+  CURRENCY_MINOR_UNITS_V0,
+} from '../../packages/canonical-model/src/constants.js';
 import { evaluateGroupedFacts } from '../../packages/canonical-model/src/grouped-aggregate.js';
 import {
   salesModuleDefinition,
@@ -288,6 +294,38 @@ test('amount operands must resolve locally and fixed currencies require the stor
     make({ kind: 'stored', fieldId: SALES_IDS.stateFieldId, codes: ['EUR'] }),
     /CANON_REPORT_SOURCE_INVALID/u,
   );
+});
+
+test('report discovery requires the canonical literal-true filter contract', () => {
+  const catalog = structuredClone(
+    composedApplicationDefinition(),
+  ) as unknown as ReportCatalogSource;
+  const target = reportTargets(catalog).find((t) =>
+    t.source.queryId.endsWith(':query.customer_invoice_list'),
+  )!;
+  const list = target.source.listSurfaceId;
+  const query = catalog.queries.find(
+    (q) => q.queryId === target.source.queryId,
+  )!;
+  const literal = {
+    kind: 'booleanPredicate',
+    schemaVersion: ADOPTED_LANGUAGE_VERSION,
+    value: true,
+  };
+  query.filter = literal;
+  assert.ok(reportOffer(catalog, list));
+  for (const filter of [
+    { ...literal, schemaVersion: 'unknown' },
+    { ...literal, extra: true },
+    { ...literal, value: false },
+  ]) {
+    query.filter = filter;
+    assert.equal(
+      reportOffer(catalog, list),
+      null,
+      'unrecognized or filtered collections must be unavailable',
+    );
+  }
 });
 
 test('a report keeps selected contracts across list edits, renames and retirement, and refuses a removed operand or stale predecessor', () => {

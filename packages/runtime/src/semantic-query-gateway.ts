@@ -1,7 +1,6 @@
 import {
   REPORT_EXPORT_PERMISSION,
   reportColumnPermission,
-  isUnfilteredReportPredicate,
   type RegisteredReport,
 } from '../../canonical-model/src/declared-report.js';
 import {
@@ -597,7 +596,7 @@ export class SemanticQueryGateway {
           const filterPlans: QueryFilterLoweringPlan[] = [];
           // Slice 1 accepts a generated Q0 collection only. Its literal row filter
           // and the provider's live narrowing both apply to the authorized facts.
-          if (!isUnfilteredReportPredicate(list.filter))
+          if (inspectPredicateForExecution(list.filter).outcome !== 'accepted')
             return { kind: 'unavailable' };
           if (this.policyNarrowing)
             filterPlans.push(
