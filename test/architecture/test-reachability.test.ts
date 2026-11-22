@@ -402,7 +402,7 @@ test('declared unfiltered producers are wired to CI and their evidence paths', (
     let job = extractWorkflowJob(workflow, producer.ciJob);
     if (producer.ciJob === 'postgres') {
       const shard = producer.id.slice('postgres-'.length);
-      assert.match(job, /shard: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10\]/u);
+      assert.match(job, /shard: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11\]/u);
       assert.ok(
         job.includes(
           `if: matrix.shard == ${shard}\n        run: ${producer.ciInvocation}\n`,

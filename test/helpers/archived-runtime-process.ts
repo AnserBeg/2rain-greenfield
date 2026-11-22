@@ -1,6 +1,13 @@
 import type { DraftOutcome } from '../../packages/postgres-provider/src/customization-service.js';
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import {
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readdir,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -129,7 +136,22 @@ export async function draftBeforeCompanyAccessIndex(
     `,
         { options, patch, channel, request },
       )) as DraftOutcome,
+    laterMigrations,
   );
+}
+
+/**
+ * The predecessor opens the Customize service, which verifies every migration
+ * the database records. A later packet's migration is already applied by the
+ * current tree, as after a forward deploy, so the predecessor carries those
+ * files unchanged and verifies them instead of refusing the database.
+ */
+async function laterMigrations(workspace: string): Promise<void> {
+  const target = join(workspace, 'db', 'migrations');
+  const known = new Set(await readdir(target));
+  for (const name of await readdir(join('db', 'migrations')))
+    if (!known.has(name))
+      await copyFile(join('db', 'migrations', name), join(target, name));
 }
 /**
  * The previous serving binary's request path with one query issued: it loads

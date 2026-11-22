@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
-import { templateLibraryPanel } from '../../apps/web/src/record-template-library.js';
+import { templateLibraryPanel } from '../../apps/web/src/surface-runtime.js';
 import {
   openCustomizeService,
   startComposedApplication,
@@ -128,13 +128,17 @@ export async function exerciseTemplateLibrary(
         },
       ];
     };
+    // The older-reader proof compares the first business's release with the
+    // archived compiler's output for that one change from the first-party
+    // base, so it keeps its own structure release and declaring release.
     const structure = {
       kind: 'changeSet',
-      patches: kinds.flatMap(structureFor),
+      patches: structureFor(kinds[0]),
     };
     const compatibleId = await activate(structure);
-    // Phase 1 (before any binding) runs for each business in order, then the
-    // one declaring release activates, then phase 2 runs for each in order.
+    // Phase 1 (before the business's binding) runs for each business in
+    // order; the other two share one structure release and one declaring
+    // release; then phase 2 runs for each in order.
     const gate = () => {
       let open!: () => void;
       const opened = new Promise<void>((resolve) => (open = resolve));
@@ -144,12 +148,14 @@ export async function exerciseTemplateLibrary(
       second = kinds.map(gate),
       declared = gate();
     const bindings: unknown[] = [];
-    let reader:
-      | Omit<Parameters<typeof exercisePrecedingReader>[0], 'declare'>
-      | undefined;
     const runs = kinds.map(
       async ([type, context, line, label, kind], index) => {
         await first[index]!.opened;
+        if (index === 1)
+          await activate({
+            kind: 'changeSet',
+            patches: kinds.slice(1).flatMap(structureFor),
+          });
         const local = 'custom_' + type.toLowerCase().replaceAll(' ', '_');
         const form = ns + 'surface.' + local + '_form';
         const offers = (await opened.service.targets()).templateBindings!;
@@ -263,7 +269,7 @@ export async function exerciseTemplateLibrary(
             ? await world.create(local, { name: 'Compatible inspection' })
             : undefined;
         if (before)
-          reader = {
+          await exercisePrecedingReader({
             pool,
             databaseUrl,
             identity: runtime.identity,
@@ -277,8 +283,9 @@ export async function exerciseTemplateLibrary(
               recordId: before.recordId,
               [ns + 'parameter.' + local + '_get_legal_entity_scope']: COMPANY,
             },
-          };
-        bindings.push(patch);
+            declare: () => activate(patch),
+          });
+        else bindings.push(patch);
         (first[index + 1] ?? declared).open();
         await second[index]!.opened;
         if (before)
@@ -964,11 +971,8 @@ export async function exerciseTemplateLibrary(
     );
     first[0]!.open();
     await Promise.race([declared.opened, Promise.all(runs)]);
-    assert.equal(bindings.length, kinds.length);
-    await exercisePrecedingReader({
-      ...reader!,
-      declare: () => activate({ kind: 'changeSet', patches: bindings }),
-    });
+    assert.equal(bindings.length, kinds.length - 1);
+    await activate({ kind: 'changeSet', patches: bindings });
     second[0]!.open();
     await Promise.all(runs);
     assert.equal(
