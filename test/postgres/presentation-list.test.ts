@@ -268,7 +268,7 @@ test(
           assert.match(first.html, /data-density="comfortable"/u);
           assert.match(
             first.html,
-            /data-column-width="wide" data-column-overflow="wrap"/u,
+            /data-column-width="wide" data-column-wrap="wrap"/u,
           );
 
           // The tone follows the value.

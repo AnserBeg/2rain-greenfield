@@ -3217,6 +3217,32 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
     column.format === 'money' || numeric.has(column.field)
       ? ' data-cell-kind="number"'
       : '';
+  // UI-CUSTOM-1: declared tones (the release's own first), column sizing
+  // and density. Nothing renders, and no byte changes, when none is declared.
+  const tones = listTones(list, input.presentation);
+  const active =
+    input.presentation?.revision.status === 'active'
+      ? input.presentation.revision
+      : null;
+  const declaredRuleIds = new Set(
+    active?.toneRules.map((rule) => rule.ruleId) ?? [],
+  );
+  const sizing = new Map(
+    (active?.sizing ?? []).flatMap((entry) =>
+      entry.kind === 'listColumn' ? [[entry.fieldId, entry] as const] : [],
+    ),
+  );
+  const sized = (column: (typeof columns)[number]) => {
+    const entry = sizing.get(column.field);
+    return entry
+      ? ` data-column-width="${entry.width}" data-column-wrap="${entry.overflow === 'wrap' ? 'wrap' : 'clip'}"`
+      : '';
+  };
+  const density = active
+    ? (active.viewDensity.find((view) => view.viewId === state.viewId)
+        ?.density ?? active.density)
+    : null;
+  const unavailable = new Set<string>();
   const header = columns
     .map((column) => {
       const direction = sortState.get(column.columnId);
@@ -3238,32 +3264,6 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
       return `<th scope="col"${kind(column)}${sized(column)} aria-sort="${direction ?? 'none'}"><a class="list-sort" href="${escapeHtml(href)}" data-sort-column="${escapeHtml(column.columnId)}">${escapeHtml(column.label)} <span aria-hidden="true">${mark}</span><span class="sr-only">${direction ? `, sorted ${direction}; activate to sort ${nextDirection}` : ', activate to sort ascending'}</span></a></th>`;
     })
     .join('');
-  // UI-CUSTOM-1: declared tones (the release's own first), column sizing
-  // and density. Nothing renders, and no byte changes, when none is declared.
-  const tones = listTones(list, input.presentation);
-  const active =
-    input.presentation?.revision.status === 'active'
-      ? input.presentation.revision
-      : null;
-  const declaredRuleIds = new Set(
-    active?.toneRules.map((rule) => rule.ruleId) ?? [],
-  );
-  const sizing = new Map(
-    (active?.sizing ?? []).flatMap((entry) =>
-      entry.kind === 'listColumn' ? [[entry.fieldId, entry] as const] : [],
-    ),
-  );
-  const sized = (column: (typeof columns)[number]) => {
-    const entry = sizing.get(column.field);
-    return entry
-      ? ` data-column-width="${entry.width}" data-column-overflow="${entry.overflow}"`
-      : '';
-  };
-  const density = active
-    ? (active.viewDensity.find((view) => view.viewId === state.viewId)
-        ?.density ?? active.density)
-    : null;
-  const unavailable = new Set<string>();
   const rowActions = (list.rowActions ?? []).length > 0;
   // The row's one action -- the first whose condition holds -- as a link to
   // its record page at the named section, named with the row it opens.

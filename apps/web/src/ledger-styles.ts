@@ -262,8 +262,8 @@ td[data-zero]{color:var(--faint)}
 .data-table-wrap [data-column-width=narrow]{width:9ch}
 .data-table-wrap [data-column-width=wide]{min-width:28ch}
 .data-table-wrap [data-column-width=auto]{width:auto}
-.data-table-wrap td[data-column-overflow=wrap]{white-space:normal;overflow-wrap:anywhere}
-.data-table-wrap td[data-column-overflow=truncate]{max-width:24ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.data-table-wrap td[data-column-wrap=wrap]{white-space:normal;overflow-wrap:anywhere}
+.data-table-wrap td[data-column-wrap=clip]{max-width:24ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .data-table-wrap[data-density=comfortable]{--row-y:12px}
 .data-table-wrap[data-density=compact]{--row-y:8px}
 .list-tone-note{margin:8px 0 0;font-size:12px}
@@ -780,7 +780,7 @@ main{padding:14px max(16px,env(safe-area-inset-left,0px)) 40px}
 
 /* ---------- 800px and below: the compact projection ---------- */
 @container ledger (max-width:800px){
-.data-table-wrap tr[data-compact-card=true] td[data-column-width],.data-table-wrap tr[data-compact-card=true] td[data-column-overflow]{width:auto;min-width:0;max-width:none;white-space:normal}
+.data-table-wrap tr[data-compact-card=true] td[data-column-width],.data-table-wrap tr[data-compact-card=true] td[data-column-wrap]{width:auto;min-width:0;max-width:none;white-space:normal}
 /* A record's title keeps the gutter; its badge sits beside it or just
    under it, never alone across the page (round 4). */
 .surface-heading--slot:has(.eyebrow){flex-direction:row;flex-wrap:wrap;align-items:flex-end;justify-content:flex-start;gap:8px}
