@@ -409,23 +409,27 @@ export async function exerciseTemplateLibrary(
           ),
           /template.invalidAnswer/u,
         );
-        await assert.rejects(
-          run((v) =>
-            library.review(v, target, null, 0, {
-              ...content,
-              members: [
-                {
-                  ...m,
-                  answer: {
-                    ...a,
-                    choices: [{ ...a.choices[0]!, id: 'unknown' }],
+        for (const choice of [
+          { ...a.choices[0]!, id: 'unknown' },
+          { ...a.choices[0]!, meaning: 'Different meaning' },
+        ])
+          await assert.rejects(
+            run((v) =>
+              library.review(v, target, null, 0, {
+                ...content,
+                members: [
+                  {
+                    ...m,
+                    answer: {
+                      ...a,
+                      choices: [choice],
+                    },
                   },
-                },
-              ],
-            }),
-          ),
-          /template.invalidChoice/u,
-        );
+                ],
+              }),
+            ),
+            /template.invalidChoice/u,
+          );
       }
       for (const invalid of [
         { ...content, members: [content.members[0]!, content.members[0]!] },

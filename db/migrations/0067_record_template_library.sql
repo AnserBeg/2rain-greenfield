@@ -137,7 +137,7 @@ DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_inte
           AND length(trim(opt->>'meaning')) BETWEEN 1 AND 180 AND jsonb_typeof(opt->'requiresNote')='boolean'
           AND jsonb_typeof(opt->'blocksTransition')='boolean' AND (opt->'requiresNote'='false' OR member->'answer' ? 'noteFieldId')
           AND EXISTS(SELECT FROM jsonb_array_elements(app->'fields') f CROSS JOIN LATERAL jsonb_array_elements(f#>'{fieldType,options}') o
-            WHERE f->>'fieldId'=col->>'fieldId' AND o->>'optionId'=opt->>'id')) IS NOT TRUE)
+            WHERE f->>'fieldId'=col->>'fieldId' AND o->>'optionId'=opt->>'id' AND o->>'label'=opt->>'meaning')) IS NOT TRUE)
         OR EXISTS(SELECT FROM jsonb_array_elements(member#>'{answer,choices}') opt GROUP BY opt->>'id' HAVING count(*)>1)
         THEN RAISE EXCEPTION 'template.invalidChoice'; END IF; END IF;
     IF member->>'kind' IN ('row','member') AND EXISTS(SELECT FROM jsonb_array_elements(body->'columns') c
