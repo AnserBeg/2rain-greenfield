@@ -1,3 +1,7 @@
+import {
+  hasRecordTemplateBinding,
+  RECORD_TEMPLATE_OPERATION_READER,
+} from '@north-star/canonical-model';
 import { recordTemplateDeclarationProblem } from './record-template-admission.js';
 import { boardBindingsProblem } from './board-admission.js';
 import {
@@ -1031,18 +1035,23 @@ function definitionFromSnapshotRows(
   );
   const operationFloor =
     operation.requiredRuntimeCapability?.minimumVersion ?? 0;
+  const templates = hasRecordTemplateBinding(declarations.definition);
   const expectedBookingFloor = bookingReaderFloor(operation.payload);
   const booking = expectedBookingFloor > 0;
   if (
-    booking
-      ? operationFloor !== expectedBookingFloor
-      : operationFloor >= BOOKING_OPERATION_READER
+    templates
+      ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
+      : booking
+        ? operationFloor !== expectedBookingFloor
+        : operationFloor >= BOOKING_OPERATION_READER
   )
     throw malformedProjection(
       'booking operations and the mandatory reader floor disagree',
     );
   const consumesRules =
-    !booking && operationFloor >= LITERAL_VALIDATION_OPERATION_READER;
+    !booking &&
+    !templates &&
+    operationFloor >= LITERAL_VALIDATION_OPERATION_READER;
   const queryFloor = query.requiredRuntimeCapability?.minimumVersion ?? 0;
   // The query floor is the HIGHEST catalog feature present: optional
   // read-model dependencies, then booking owner usage, both read from the
@@ -1079,7 +1088,7 @@ function definitionFromSnapshotRows(
   const consumesFormula =
     consumesRules ||
     consumesDisplays ||
-    ((booking || usage) && declaresRuleProjection);
+    ((templates || booking || usage) && declaresRuleProjection);
   if (
     declaresRuleProjection !== consumesFormula ||
     hasRuleProjectionLink !== consumesFormula
@@ -1097,7 +1106,7 @@ function definitionFromSnapshotRows(
         ({ rule }) => rule,
       );
       if (
-        (!booking && Boolean(rules.length) !== consumesRules) ||
+        (!templates && !booking && Boolean(rules.length) !== consumesRules) ||
         (consumesRules &&
           operationFloor !== requiredFormulaValidationOperationReader(rules))
       )

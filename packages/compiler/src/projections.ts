@@ -5,6 +5,8 @@ import {
 import {
   DATE_TIME_FIELD_READER,
   RECORD_TEMPLATE_READER,
+  RECORD_TEMPLATE_OPERATION_READER,
+  hasRecordTemplateBinding,
   type DateTimeBinding,
   ADDRESS_FIELD_READER,
   ADDRESS_MAP_READER,
@@ -275,16 +277,18 @@ export function lowerBaseProjectionPayloads(
     hasSavedListLayouts(verificationPackageRevision) ? 3 : 1,
     hasMetrics(verificationPackageRevision) ? 4 : 1,
   );
-  const operationFloor = hasBookingOperations(verificationPackageRevision)
-    ? bookingReaderFloor(verificationPackageRevision)
-    : formulaRules
-      ? requiredFormulaValidationOperationReader(
-          formulaRules.bindings.map(({ rule }) => rule),
-        )
-      : 'operationRoleNarrowings' in verificationPackageRevision &&
-          verificationPackageRevision.operationRoleNarrowings
-        ? 2
-        : 1;
+  const operationFloor = hasRecordTemplateBinding(verificationPackageRevision)
+    ? RECORD_TEMPLATE_OPERATION_READER
+    : hasBookingOperations(verificationPackageRevision)
+      ? bookingReaderFloor(verificationPackageRevision)
+      : formulaRules
+        ? requiredFormulaValidationOperationReader(
+            formulaRules.bindings.map(({ rule }) => rule),
+          )
+        : 'operationRoleNarrowings' in verificationPackageRevision &&
+            verificationPackageRevision.operationRoleNarrowings
+          ? 2
+          : 1;
   const plans = [
     plan(
       PROJECTION_FAMILY_IDS.semanticModel,
@@ -1138,9 +1142,7 @@ function surfaceManifestPayload(
       ),
   );
   // Board v2 is the highest rung: a Board release needs it whatever else it has.
-  const surfaceFloor = original.surfaces.some(
-    (s) => 'recordTemplateBinding' in s && s.recordTemplateBinding,
-  )
+  const surfaceFloor = hasRecordTemplateBinding(original)
     ? RECORD_TEMPLATE_READER
     : original.surfaces.some((s) => s.archetype === 'board')
       ? BOARD_READER

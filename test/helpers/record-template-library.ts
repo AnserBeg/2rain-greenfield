@@ -8,6 +8,7 @@ import {
 import { draftTemplateBinding } from '../../packages/customization/src/record-template-binding.js';
 import type { RecordTemplateContent } from '../../packages/canonical-model/src/record-template-content.js';
 import type { RequestRuntimeView } from '../../packages/runtime/src/request-runtime-view.js';
+import { exercisePrecedingReader } from './record-template-reader.js';
 import { COMPANY, worldOver } from '../agent/agent-world.js';
 
 export async function exerciseTemplateLibrary(
@@ -42,6 +43,7 @@ export async function exerciseTemplateLibrary(
     'template-library',
   );
   try {
+    const firstPartyId = await run((v) => Promise.resolve(v.release.releaseId));
     const otherCompany = randomUUID();
     const created = await world.invoke('legal_entity_create', {
       recordId: otherCompany,
@@ -63,7 +65,7 @@ export async function exerciseTemplateLibrary(
       const local = 'custom_' + type.toLowerCase().replaceAll(' ', '_');
       const entity = ns + 'entity.' + local;
       const form = ns + 'surface.' + local + '_form';
-      await activate({
+      const structure = {
         kind: 'changeSet',
         patches: [
           {
@@ -85,7 +87,8 @@ export async function exerciseTemplateLibrary(
             ],
           },
         ],
-      });
+      };
+      const compatibleId = await activate(structure);
       const offers = (await opened.service.targets()).templateBindings!;
       const offer = offers.find((o) => o.frame.formId === form)!;
       assert.ok(offer);
@@ -106,7 +109,31 @@ export async function exerciseTemplateLibrary(
           copyEligible: true,
         })),
       });
-      await activate(patch);
+      if (kind === 'question') {
+        const before = await world.create(local, {
+          name: 'Compatible inspection',
+        });
+        await exercisePrecedingReader({
+          pool,
+          databaseUrl,
+          identity: runtime.identity,
+          firstPartyId,
+          compatibleId,
+          compatiblePatch: structure,
+          patch,
+          recordId: before.recordId,
+          queryId: ns + 'query.' + local + '_get',
+          args: {
+            recordId: before.recordId,
+            [ns + 'parameter.' + local + '_get_legal_entity_scope']: COMPANY,
+          },
+          declare: () => activate(patch),
+        });
+        assert.equal(
+          (await world.read(local, before.recordId)).recordId,
+          before.recordId,
+        );
+      } else await activate(patch);
       const target = { company: COMPANY, form },
         other = { company: otherCompany, form };
       const content: RecordTemplateContent = {

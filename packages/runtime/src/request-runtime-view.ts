@@ -1,6 +1,6 @@
 import {
   RECORD_TEMPLATE_READER,
-  BOOKING_FULFILMENT_READER,
+  RECORD_TEMPLATE_OPERATION_READER,
   CONNECTOR_FAMILY,
   OPTIONAL_DEPENDENCY_QUERY_READER,
 } from '@north-star/canonical-model';
@@ -186,7 +186,7 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.operation]: {
     capabilityId: 'northstar.runtime:capability.operation-catalog',
-    maximumSupportedVersion: BOOKING_FULFILMENT_READER,
+    maximumSupportedVersion: RECORD_TEMPLATE_OPERATION_READER,
   },
   [REQUEST_RUNTIME_FORMULA_RULE_FAMILY]: {
     capabilityId: 'northstar.runtime:capability.formula-rule',

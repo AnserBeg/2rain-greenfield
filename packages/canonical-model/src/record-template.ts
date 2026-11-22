@@ -3,6 +3,20 @@ import { canonicalizeAndHash } from './canonicalize.js';
 
 // Reconcile this scalar with the immediately preceding build at integration.
 export const RECORD_TEMPLATE_READER = 40;
+export const RECORD_TEMPLATE_OPERATION_READER = 7;
+
+export function hasRecordTemplateBinding(definition: unknown): boolean {
+  if (
+    !definition ||
+    typeof definition !== 'object' ||
+    !('surfaces' in definition)
+  )
+    return false;
+  return (
+    Array.isArray(definition.surfaces) &&
+    definition.surfaces.some((s) => s?.recordTemplateBinding !== undefined)
+  );
+}
 const id = z.string().min(5).max(180);
 const digest = z.string().regex(/^[a-f0-9]{64}$/u);
 const column = z.strictObject({

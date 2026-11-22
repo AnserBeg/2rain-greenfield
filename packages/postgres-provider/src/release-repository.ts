@@ -1,3 +1,7 @@
+import {
+  hasRecordTemplateBinding,
+  RECORD_TEMPLATE_OPERATION_READER,
+} from '@north-star/canonical-model';
 import { recordTemplateDeclarationProblem } from './record-template-admission.js';
 import {
   BILLING_READER,
@@ -907,11 +911,13 @@ function verifyFormulaProjectionReference(
   const reference = references[0];
   if (
     references.length !== Number(Boolean(declaring)) ||
-    (hasBookingOperations(normalized)
-      ? operationFloor !== bookingReaderFloor(normalized)
-      : rules.length
-        ? operationFloor !== requiredFormulaValidationOperationReader(rules)
-        : operationFloor >= LITERAL_VALIDATION_OPERATION_READER) ||
+    (hasRecordTemplateBinding(normalized)
+      ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
+      : hasBookingOperations(normalized)
+        ? operationFloor !== bookingReaderFloor(normalized)
+        : rules.length
+          ? operationFloor !== requiredFormulaValidationOperationReader(rules)
+          : operationFloor >= LITERAL_VALIDATION_OPERATION_READER) ||
     // The query floor is the highest catalog feature present.
     (declaresOptionalReadModelDependency(
       isRecord(normalized) ? normalized.queries : undefined,
