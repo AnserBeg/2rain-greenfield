@@ -1,3 +1,4 @@
+import type { RecordTemplateBinding } from '@north-star/canonical-model';
 import {
   baseLayout,
   type LayoutBody,
@@ -119,7 +120,7 @@ export function renderReleaseDiff(input: {
     );
   for (const form of to.surfaces) {
     const binding = form.recordTemplateBinding as
-      import('@north-star/canonical-model').RecordTemplateBinding | undefined;
+      RecordTemplateBinding | undefined;
     const old = from.surfaces.find((s) => s.surfaceId === form.surfaceId)
       ?.recordTemplateBinding as typeof binding;
     if (!binding || binding.revisionId === old?.revisionId) continue;

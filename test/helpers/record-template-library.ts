@@ -10,6 +10,7 @@ import { draftRecordTemplateContent } from '../../packages/customization/src/rec
 import { draftTemplateBinding } from '../../packages/customization/src/record-template-binding.js';
 import type { RecordTemplateContent } from '../../packages/canonical-model/src/record-template-content.js';
 import type { RequestRuntimeView } from '../../packages/runtime/src/request-runtime-view.js';
+import { raceFirstAssignmentWithRetirement } from './record-template-locks.js';
 import { exercisePrecedingReader } from './record-template-reader.js';
 import { COMPANY, worldOver } from '../agent/agent-world.js';
 
@@ -76,9 +77,29 @@ export async function exerciseTemplateLibrary(
             companyOwnership: 'entityOwned',
             fields: [
               { label: 'Name', type: 'text' },
-              { label: context, type: 'choice', options: ['Standard'] },
+              {
+                label: context,
+                type: 'choice',
+                options: ['Standard', 'First', 'Second'],
+              },
             ],
           },
+          ...(kind === 'section'
+            ? [
+                {
+                  kind: 'addRecordType',
+                  label: 'Programme',
+                  companyOwnership: 'entityOwned',
+                  fields: [{ label: 'Name', type: 'text' }],
+                },
+                {
+                  kind: 'addLink',
+                  entity,
+                  target: ns + 'entity.custom_programme',
+                  label: 'Programme',
+                },
+              ]
+            : []),
           {
             kind: 'addLineTable',
             entity,
@@ -109,10 +130,31 @@ export async function exerciseTemplateLibrary(
         local +
         '_' +
         context.toLowerCase().replaceAll(' ', '_');
-      const contextId = cls.replace(':field.', ':option.') + '_standard';
+      const selector =
+        kind === 'section'
+          ? offer.contexts.find((c) => c.selector.kind === 'link')?.selector
+          : undefined;
+      if (kind === 'section') assert.ok(selector?.kind === 'link');
+      const otherContext = randomUUID();
+      const contextId = selector
+        ? (await world.create('custom_programme', { name: 'Primary' })).recordId
+        : cls.replace(':field.', ':option.') + '_standard';
+      if (selector)
+        assert.equal(
+          (
+            await world.invoke('custom_programme_create', {
+              recordId: otherContext,
+              legalEntityId: otherCompany,
+              relations: {},
+              values: { [ns + 'field.custom_programme_name']: 'Second school' },
+            })
+          ).outcome,
+          'succeeded',
+        );
+
       const choices = {
         formId: form,
-        contextId: cls,
+        contextId: selector?.kind === 'link' ? selector.relationId : cls,
         required: true,
         lifecycle: 'active' as const,
         fields: offer.columns.map((c) => ({
@@ -230,6 +272,14 @@ export async function exerciseTemplateLibrary(
           },
         ],
       };
+      const readable = {
+        ...content,
+        members: content.members.map((m) => {
+          const copy = { ...m };
+          delete copy.source;
+          return copy;
+        }),
+      };
       const spoken = await draftRecordTemplateContent(
         {
           modelId: 'template-content-proof',
@@ -241,7 +291,7 @@ export async function exerciseTemplateLibrary(
                 name: tools[0]!.name,
                 input: {
                   ...content,
-                  members: content.members.map(({ source: _source, ...m }) => ({
+                  members: readable.members.map((m) => ({
                     ...m,
                     caption: 'Suggested ' + label,
                   })),
@@ -254,11 +304,6 @@ export async function exerciseTemplateLibrary(
         'Draft ' + line,
       );
       assert.equal(spoken.members[0]!.caption, 'Suggested ' + label);
-      // Source rows are kept for the narrow publish check and excluded from history.
-      const readable = {
-        ...content,
-        members: content.members.map(({ source: _source, ...m }) => m),
-      };
       if (kind === 'row') {
         const revised = (cells: Record<string, string>) => ({
           ...content,
@@ -356,6 +401,39 @@ export async function exerciseTemplateLibrary(
         library.publish(v, review.reviewId, review.digest),
       );
       assert.equal(published.number, 1);
+      if (selector)
+        await assert.rejects(
+          run((v) =>
+            library.assign(v, target, otherContext, 0, published.revisionId),
+          ),
+          /template.invalidContext/u,
+        );
+      if (kind === 'row') {
+        for (const [suffix, first] of [
+          ['first', 'assign'],
+          ['second', 'retire'],
+        ] as const) {
+          const ctx = cls.replace(':field.', ':option.') + '_' + suffix;
+          const reviewed = await run((v) =>
+            library.review(v, target, null, 0, readable),
+          );
+          const r = await run((v) =>
+            library.publish(v, reviewed.reviewId, reviewed.digest),
+          );
+          await run((v) =>
+            raceFirstAssignmentWithRetirement(
+              pool,
+              databaseUrl,
+              v,
+              library,
+              target,
+              ctx,
+              r,
+              first,
+            ),
+          );
+        }
+      }
       const copy = await run((v) =>
         library.review(v, other, null, 0, {
           ...readable,
@@ -370,10 +448,19 @@ export async function exerciseTemplateLibrary(
           library.assign(v, target, contextId, 0, elsewhere.revisionId),
         ),
       );
-      assert.equal(
-        await run((v) =>
-          library.assign(v, target, contextId, 0, published.revisionId),
+      const firstAssignments = await Promise.allSettled(
+        [0, 1].map(() =>
+          run((v) =>
+            library.assign(v, target, contextId, 0, published.revisionId),
+          ),
         ),
+      );
+      assert.equal(
+        firstAssignments.filter((r) => r.status === 'fulfilled').length,
+        1,
+      );
+      assert.equal(
+        await run((v) => library.assignmentVersion(v, target, contextId)),
         1,
       );
       await assert.rejects(
@@ -399,7 +486,9 @@ export async function exerciseTemplateLibrary(
         ),
       );
       assert.equal(race.filter((r) => r.status === 'fulfilled').length, 1);
-      const history = await run((v) => library.history(v, target));
+      const history = (await run((v) => library.history(v, target))).filter(
+        (r) => r.templateId === published.templateId,
+      );
       assert.deepEqual(
         history.map((r) => r.number),
         [2, 1],

@@ -517,7 +517,12 @@ test('record template bindings reproduce their authoring root and survive indepe
         }),
       });
     const authored = await build(collectionBase, false),
-      reproduced = await build(collectionBase, true);
+      reproduced = await customization.compileInSandbox({
+        acknowledgement,
+        base: structuredClone(collectionBase),
+        chain: chain.map((m) => patch(JSON.parse(JSON.stringify(m)))),
+        tip: customization.serializeRelease(tip),
+      });
     assert.ok(
       authored.status === 'compiled' && reproduced.status === 'compiled',
       JSON.stringify([

@@ -1,3 +1,5 @@
+import type { RecordTemplateBinding } from '@north-star/canonical-model';
+import type { RecordTemplateContent } from '../../../packages/canonical-model/src/record-template-content.js';
 import { templateLibraryPanel } from './record-template-library.js';
 import type { RecordTemplateLibrary } from '../../../packages/runtime/src/record-template-library.js';
 import {
@@ -206,11 +208,9 @@ export interface SurfaceRuntimeResponse {
 export interface SurfaceRuntimeGateways {
   readonly applicationExtension?: SurfaceRuntimeApplicationExtension;
   readonly draftRecordTemplate?: (
-    binding: import('@north-star/canonical-model').RecordTemplateBinding,
+    binding: RecordTemplateBinding,
     request: string,
-  ) => Promise<
-    import('../../../packages/canonical-model/src/record-template-content.js').RecordTemplateContent
-  >;
+  ) => Promise<RecordTemplateContent>;
   readonly recordTemplates?: RecordTemplateLibrary;
   readonly addresses?: AddressGateway;
   readonly documents?: DocumentGateway;
