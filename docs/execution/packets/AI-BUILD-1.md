@@ -58,6 +58,26 @@ Also fixed on the way: slice 1's scorer read `board.body` after Board v2 renamed
 - Merged with main twice (DOCS-1 slice 2, CUSTOMIZE-5, WORKFLOW-2, BOOKING-1, CONNECT-1, UPGRADE-2, TRAIN-B). After the merge the drafter also covers `addDateTimeField` from its schema; DOCS-1's template members carry dated, named drafter exceptions (owner AI-BUILD-1 slice 3).
 - The 40-run measured the drafter at `f3f427c2`; the branch tip adds the main merges and the workflow envelope fix (`ce0b8b47`), measured only by the W02/T08 rescore above.
 
+### Model routing (slice 3 bake-off, conservative scope, 2026-11-21)
+
+The owner asked for a conservative bake-off: which Claude model fits which request tier, judged on reliability first, then cost per success and latency. Opus 5.5 at medium effort is the baseline (the 40-run above) and was not re-run. All bake-off first drafts (USD 10.11 of a USD 12 cap) were made back to back from the captured in-app prompts against the drafter at `53b32ef3`, before the `field` key-collision fix; F02, H02 and N06 (and any draft sending `field` as text) are excluded as measuring that bug. The OpenAI drafts are saved and labelled, not scored. No further first drafts were made; USD 1.89 of the cap is unspent.
+
+- Phase 1, static triage (no model call, no database; [triage](../evidence/2026-11-21-build-bakeoff-triage/triage.md)): on the nine clean screening cases, Haiku false-accepted the booking refusal (U02); Sonnet and Fable matched Opus (Fable and every Opus effort shared one workflow defect, the approval envelope, since fixed).
+- Phase 2, activation scoring of Sonnet's six saved clean drafts (T04, M03, M04, N02, M07, N03; one case at a time on an idle host, repair turns forbidden so no spend; [evidence](../evidence/2026-11-21-build-bakeoff-sonnet-phase2-2026-11-21T22-56-46-531Z/summary.md)): 6/6 behave as asked, all verified on the first draft and end to end, no repair needed; median model time 3.2 s against Opus 6.5 s on the same six; USD 0.046 per success against Opus USD 0.057 (prices of each run; Sonnet's drafts paid one-hour cache writes).
+
+| tier | recommended drafter | evidence (n) | cost per success | median model latency |
+|---|---|---|---|---|
+| simple edits (field, choice, files) | Sonnet 5.5 medium (provisional), Opus 5.5 medium fallback | Opus 9/9 in the 40-run (including U01 address and map on customers); Sonnet 1/1 (T04) in phase 2 | Opus USD 0.087; Sonnet USD 0.116 (n=1; its draft paid a one-hour cache write) | Opus 2.0 s; Sonnet 2.9 s |
+| modules (record types, lifecycle, lines, board, address and map) | Sonnet 5.5 medium (provisional), Opus 5.5 medium fallback | Opus 17/17 in the 40-run; Sonnet 5/5 (M03, M04, N02, M07, N03) in phase 2 | Opus USD 0.030; Sonnet USD 0.032 | Opus 4.9 s; Sonnet 3.2 s |
+| workflows | Opus 5.5 medium | Opus 2/4 in the 40-run, 4/4 after the envelope fix (W02 and T08 re-run) | USD 0.35 per success on a fresh draft (40-run median 35 s model time including failed repairs) | 22 s fresh |
+| safety (refusals, hostile probes) | Opus 5.5 medium | Opus 10/10 in the 40-run (6 refusals, 4 hostile probes) | USD 0.035 | 2.9 s |
+
+- **Default drafter:** Opus 5.5 at medium effort for every tier unless a row says otherwise.
+- **Escalation (policy, not measured):** a request routed to Sonnet that fails its second repair is retried once on Opus 5.5 medium; after a second failed repair on Opus medium, retry once on Opus 5.5 high or Fable 5.2, then return the diagnostics to the person.
+- **Sonnet is recommended only because it matched Opus on all six activation cases (n=6)**; if a larger held-out check shows it below Opus on a tier, that tier reverts to Opus.
+- **Haiku 5.5:** not for drafting (it accepted a request the platform cannot do). It may later be considered for request classification only.
+- **Confidence:** every number here is one attempt per request. Sonnet's activation evidence is n=6 on dev and held-out modules plus one simple edit; it says nothing yet about workflows or refusals. Treat Sonnet routing as provisional until a larger held-out set confirms it.
+
 ### Test it yourself (slice 2)
 
 1. `node --import tsx --test test/unit/customization-ai-draft-slice2.test.ts` (no Docker, about a minute): coverage fails closed, the tool schema is one object with no object-or-text key collision, repairs are bounded and never argue with a refusal, a board drafts with its new record type, an address and its map draft from a label, and a workflow key refusal names its keys.
