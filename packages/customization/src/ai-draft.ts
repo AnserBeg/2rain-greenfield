@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import { MapDraftSchema, draftMapRevision } from './map-revision.js';
+import {
+  MAP_VIEW_DRAFTER_GUIDANCE,
+  MapDraftSchema,
+  draftMapRevision,
+} from './map-revision.js';
 import { defaultBoardChoices, draftBoardRevision } from './board-revision.js';
 import { layoutCommand } from './layout-revision.js';
 import { WorkflowDraftSchema, type WorkflowDraft } from './workflow-draft.js';
@@ -415,7 +419,10 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
       (form) =>
         `- ${form.surfaceId} — ${form.label}: ${form.fields.map((field) => `${field.fieldId} "${field.label}"`).join(', ')}`,
     ),
-    'Map view draft schema: ' + JSON.stringify(z.toJSONSchema(MapDraftSchema)),
+    '- addMapViewRevision: ' +
+      MAP_VIEW_DRAFTER_GUIDANCE +
+      ' Schema: ' +
+      JSON.stringify(z.toJSONSchema(MapDraftSchema)),
     ...(targets.maps ?? []).map((t) =>
       JSON.stringify({
         surface: t.frame.listSurfaceId,

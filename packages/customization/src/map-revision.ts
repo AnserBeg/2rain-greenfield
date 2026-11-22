@@ -48,6 +48,10 @@ export const MapDraftSchema = z.strictObject({
   savedViewId: z.string().min(1).max(180).optional(),
 });
 export type MapDraft = z.input<typeof MapDraftSchema>;
+/** The drafter's one guidance sentence for this member; the rest of its
+ * description is generated from MapDraftSchema (MIGRATION-RULE rule 12). */
+export const MAP_VIEW_DRAFTER_GUIDANCE =
+  'A map view of a listed map collection: name its list surface, its direct Address field, a sortable field and direction for route order, and optionally a choice field that groups routes, a date field that picks the day (with its time zone) and a saved view. Each choice is recorded by ID.';
 export function mapTargets(def: BoardSource) {
   return def.surfaces
     .filter((s) => s.archetype === 'list' && live(s))

@@ -31,7 +31,11 @@ export function mapDisplayOrigins(
   return { app: a, maps: m };
 }
 
-const bootstrap = `const app = document.documentElement.dataset.app;
+const bootstrap = `for (const el of [document.documentElement, document.body, document.getElementById('map')]) {
+  el.style.margin = '0';
+  el.style.height = '100%';
+}
+const app = document.documentElement.dataset.app;
 function receive(event) {
   if (event.source !== parent || event.origin !== app) return;
   window.removeEventListener('message',receive);
@@ -71,6 +75,8 @@ export function basemapCsp(app: URL) {
     "script-src 'sha256-" +
       hash +
       "' https://maps.googleapis.com https://maps.gstatic.com",
+    // Google's allowlist CSP for Maps JS needs inline styles; this origin holds
+    // no record data and script-src is the hash plus Google (ADR-0036).
     "style-src 'unsafe-inline' https://fonts.googleapis.com",
     'font-src https://fonts.gstatic.com',
     'img-src data: blob: https://*.googleapis.com https://*.gstatic.com https://*.google.com https://*.googleusercontent.com',
@@ -82,7 +88,7 @@ export function googleBasemapDocument(app: URL) {
   return (
     '<!doctype html><html lang="en" data-app="' +
     escapeHtml(app.origin) +
-    '"><meta charset="utf-8"><title>Google Maps</title><style>html,body,#map{margin:0;height:100%}</style>' +
+    '"><meta charset="utf-8"><title>Google Maps</title>' +
     '<body><div id="map"></div><script>' +
     bootstrap +
     '</script></body></html>'
