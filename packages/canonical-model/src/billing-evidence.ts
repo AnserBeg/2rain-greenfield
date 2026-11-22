@@ -35,6 +35,8 @@ export const BillingQuoteEvidenceSchema = z.strictObject({
   anchor: time,
   zone: z.string().min(1).max(100),
   asOf: time,
+  // Arrears can be reviewed after close, using terms published by the review.
+  coverageThrough: time.optional(),
   serviceEnd: time.nullable(),
   periodStart: time,
   basis: z.enum(['actual', 'agreed', 'usageOnly']),

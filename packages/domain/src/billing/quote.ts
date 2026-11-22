@@ -109,9 +109,12 @@ interface Line {
   derivation: readonly unknown[];
 }
 const occurrenceId = (...parts: string[]) => JSON.stringify(parts);
+export const CYCLE_CALCULATION_VERSION = 'northstar.billing-calculation/v3';
 const legacyCalculation = 'northstar.billing-calculation/v1';
 type CalculationVersion =
-  typeof legacyCalculation | typeof BILLING_CALCULATION_VERSION;
+  | typeof legacyCalculation
+  | typeof BILLING_CALCULATION_VERSION
+  | typeof CYCLE_CALCULATION_VERSION;
 
 function termPin(at: number, selection: ReturnType<typeof selectTable>) {
   const { publishedAt, ...table } = selection.table;
@@ -129,6 +132,19 @@ export function quoteBillingService(
   evidenceInput: unknown,
 ) {
   return calculate(planInput, evidenceInput);
+}
+
+export function quoteBillingCycle(
+  plan: BillingPlan,
+  evidence: BillingQuoteEvidence,
+  through: string,
+) {
+  return calculate(
+    plan,
+    { ...evidence, coverageThrough: through },
+    undefined,
+    CYCLE_CALCULATION_VERSION,
+  );
 }
 export function replayBillingQuote(
   quote: ReturnType<typeof quoteBillingService>,
@@ -174,7 +190,15 @@ function calculate(
   const anchor = instant(e.anchor),
     asOf = instant(e.asOf),
     serviceEnd = e.serviceEnd === null ? null : instant(e.serviceEnd);
-  const through = Math.min(serviceEnd ?? asOf, asOf),
+  if (
+    (algorithm === CYCLE_CALCULATION_VERSION) !==
+    (e.coverageThrough !== undefined)
+  )
+    throw new Error('Billing cycle requires its coverage boundary');
+  const coverageThrough = e.coverageThrough ? instant(e.coverageThrough) : asOf;
+  if (coverageThrough > asOf)
+    throw new Error('Billing coverage is not delivered');
+  const through = Math.min(serviceEnd ?? asOf, coverageThrough),
     periodStart = instant(e.periodStart);
   if (through - anchor > 3660 * 86_400_000)
     throw new Error('Billing service exceeds the calendar horizon');

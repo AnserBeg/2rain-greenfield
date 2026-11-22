@@ -5,7 +5,12 @@ import {
   hourMs,
 } from '../../packages/domain/src/billing/calendar.js';
 import { compileRatePlan } from '../../packages/domain/src/billing/terms.js';
-import { quoteBillingService } from '../../packages/domain/src/billing/quote.js';
+import { reviewArrearsCharges } from '../../packages/domain/src/billing/arrears.js';
+import {
+  quoteBillingCycle,
+  quoteBillingService,
+  replayBillingQuote,
+} from '../../packages/domain/src/billing/quote.js';
 import type { BillingQuoteEvidence } from '../../packages/canonical-model/src/billing-evidence.js';
 import type {
   BillingPlan,
@@ -731,4 +736,81 @@ test('a 31-digit entitlement is accepted as either allocated or reserved cents',
     quoteBillingService(p, split).lines[0]!.differenceCents,
     String(first),
   );
+});
+
+test('arrears review stops at the next earned cycle and pins the exact late quote', () => {
+  const p = plan();
+  p.schedule = { kind: 'anniversary', months: 1 };
+  const e = evidence(p, 70, undefined, '2025-01-31T16:00:00.000Z');
+  // A backdated publication visible at review may price an unopened allocation.
+  e.tables[0]!.publishedAt = '2025-03-05T00:00:00.000Z';
+  e.serviceEnd = roll(e.anchor, 65);
+  const review = reviewArrearsCharges(p, e);
+  assert.equal(review.status, 'due');
+  assert.deepEqual(review.cycle, {
+    start: e.anchor,
+    end: '2025-02-28T16:00:00.000Z',
+  });
+  assert.equal(review.quote.lines[0]!.differenceCents, '40000');
+  assert.deepEqual(replayBillingQuote(review.quote), review.quote);
+  assert.equal(reviewArrearsCharges(p, e).quoteDigest, review.quoteDigest);
+  const changed = reviewArrearsCharges(p, { ...e, sourceRevision: '2' });
+  assert.notEqual(changed.quoteDigest, review.quoteDigest);
+  assert.deepEqual(
+    reviewArrearsCharges(p, { ...e, asOf: roll(e.anchor, 27) }),
+    { status: 'notDue' },
+  );
+  assert.throws(
+    () => reviewArrearsCharges(p, { ...e, periodStart: roll(e.anchor, 1) }),
+    /cutover evidence/,
+  );
+  const next = reviewArrearsCharges(p, {
+    ...e,
+    periodStart: review.cycle.end,
+    termPins: review.quote.terms,
+    allocations: review.quote.lines.map((l) => ({
+      componentId: l.componentId,
+      occurrence: l.occurrence,
+      allocatedCents: '0',
+      reservedCents: l.entitlementCents,
+    })),
+  });
+  assert.equal(next.status, 'due');
+  assert.equal(next.cycle.end, '2025-03-31T15:00:00.000Z');
+  assert.equal(next.quote.lines[0]!.differenceCents, '49000');
+});
+
+test('arrears end charges require an attested end and keep the original quote replayable', () => {
+  const p = plan([
+    {
+      kind: 'fixed',
+      id: 'finish',
+      base: 'enrollment',
+      stage: 'afterCapBeforeTax',
+      taxClassification: 'untaxed',
+      amount: 'fee',
+      occurrence: { kind: 'oneOff', at: 'serviceEnd' },
+    },
+  ]);
+  p.schedule = { kind: 'fixedDays', days: 7 };
+  const e = evidence(p, 14, { fee: '31' });
+  e.serviceEnd = roll(e.anchor, 10);
+  const first = reviewArrearsCharges(p, e);
+  assert.equal(first.status, 'due');
+  assert.deepEqual(first.quote.lines, []);
+  const last = reviewArrearsCharges(p, { ...e, periodStart: first.cycle.end });
+  assert.equal(last.status, 'due');
+  assert.equal(last.quote.lines[0]!.differenceCents, '3100');
+  assert.throws(
+    () => quoteBillingCycle(p, e, roll(e.anchor, 15)),
+    /not delivered/,
+  );
+  assert.throws(
+    () => quoteBillingService(p, { ...e, coverageThrough: first.cycle.end }),
+    /coverage boundary/,
+  );
+  p.schedule = { kind: 'onServiceEnd' };
+  assert.deepEqual(reviewArrearsCharges(p, { ...e, serviceEnd: null }), {
+    status: 'notDue',
+  });
 });
