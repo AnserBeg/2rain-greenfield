@@ -1320,26 +1320,24 @@ test('a superseded presentation revision is replayed by identity only, so a valu
     },
   );
   assert.ok(!JSON.stringify(v2).includes(reportOperand));
-  const replayed = replayCustomizationPatches(
-    missingReportOperand,
-    [patch(equipmentPresentation), patch(v2)],
-    [
-      { parent: extended, differentBase: true, patchId: 'v1' },
-      { differentBase: true, patchId: 'v2' },
-    ],
-  );
-  assert.equal(
-    replayed.status,
-    'applied',
-    JSON.stringify(replayed.status === 'applied' ? null : replayed),
-  );
+  // A clean base: the same record type without the status field.
+  const withoutStatus = applied(base, [
+    { ...record, fields: record.fields.slice(0, 1) },
+  ]);
+  const replay = (chain: unknown[]) =>
+    replayCustomizationPatches(
+      withoutStatus,
+      chain.map(patch),
+      chain.map((_, index) => ({
+        patchId: String(index + 1),
+        differentBase: true,
+        ...(index === 0 && { parent: extended }),
+      })),
+    );
+  const replayed = replay([equipmentPresentation, v2]);
+  assert.equal(replayed.status, 'applied', JSON.stringify(replayed));
   // Control: the latest revision is still checked in full and names the ID.
-  const latest = replayCustomizationPatches(
-    missingReportOperand,
-    [patch(equipmentPresentation)],
-    [{ parent: extended, differentBase: true, patchId: 'v1' }],
-  );
-  assert.equal(latest.status, 'replayConflict');
+  const latest = replay([equipmentPresentation]);
   assert.ok(
     latest.status === 'replayConflict' &&
       latest.findings.some(
