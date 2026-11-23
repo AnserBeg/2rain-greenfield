@@ -1,6 +1,6 @@
 # AI-UNDO-1 — the assistant asks before putting a customer on or off credit hold
 
-Status: slice 1 (`packet/AI-UNDO-1-s1`, tip `3048f69c5`): Fable check MERGE, on main. Slice 2 (`packet/AI-UNDO-1-s2`): declarations, the declaration on cut profile v3 (agent-discovery 5) and routing built; see Slice 2 below. Tier: packet, first-party base change. No migration or grant; slice 2 takes reader rung agent-discovery 5 (v3 releases only). Stops taken: none.
+Status: slice 1 (`packet/AI-UNDO-1-s1`, tip `3048f69c5`): Fable check MERGE, on main. Slice 2 (`packet/AI-UNDO-1-s2`): declarations, the declaration on cut profile v3 (agent-discovery 5) and routing built; see Slice 2 below. Tier: packet, first-party base change. No migration or grant; slice 2 takes reader rung agent-discovery 5 (v3 releases only). Stops taken: one (slice 2 full run 45264594739 red; orchestrator ruled option 1, profile v3).
 
 ## Claims
 
