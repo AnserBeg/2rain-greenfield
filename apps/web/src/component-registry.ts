@@ -3241,10 +3241,13 @@ export function renderDeclaredList(input: DeclaredListRenderInput): string {
   };
   // A clipped column clips its text, never the cell: a tone pill sits
   // outside the clip and always shows (UX grammar: never colour alone).
-  const clipped = (column: (typeof columns)[number], html: string) =>
-    sizing.get(column.field)?.overflow === 'truncate'
+  // (A sized column that does not wrap clips; `sized` names it "clip".)
+  const clipped = (column: (typeof columns)[number], html: string) => {
+    const entry = sizing.get(column.field);
+    return entry && entry.overflow !== 'wrap'
       ? `<span class="cell-clip">${html}</span>`
       : html;
+  };
   const density = active
     ? (active.viewDensity.find((view) => view.viewId === state.viewId)
         ?.density ?? active.density)
