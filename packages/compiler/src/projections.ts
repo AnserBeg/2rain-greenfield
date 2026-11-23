@@ -15,6 +15,8 @@ import { compilePresentation } from '../../canonical-model/src/surface-presentat
 import { PRESENTATION_READER } from '../../canonical-model/src/surface-presentation-schema.js';
 import {
   DATE_TIME_FIELD_READER,
+  LOGICAL_FIELD_READER,
+  type LogicalFieldBinding,
   type DateTimeBinding,
   ADDRESS_FIELD_READER,
   ADDRESS_MAP_READER,
@@ -234,6 +236,7 @@ export function lowerBaseProjectionPayloads(
   >['payload'],
   address?: AddressProjection,
   dateTimeBindings?: readonly DateTimeBinding[],
+  logicalFieldBindings?: readonly LogicalFieldBinding[],
 ): ProjectionPayloadPlan[] {
   const namespace = packageRevision.package.namespace;
   const packageScope: LogicalScope = {
@@ -529,6 +532,26 @@ export function lowerBaseProjectionPayloads(
           ),
         };
     }
+  }
+  // CUSTOMIZE-6: the surface manifest carries each active logical field's
+  // scale, currency and unit, and any declaration (active or retired) raises
+  // the surface reader floor, since older readers strict-parse the stored
+  // definition. Omission emits nothing.
+  if (logicalFieldBindings) {
+    const surface = plans.find(
+      (p) => p.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
+    )!;
+    surface.payload = {
+      ...(surface.payload as object),
+      logicalFieldBindings,
+    };
+    surface.requiredRuntimeCapability = {
+      ...surface.requiredRuntimeCapability,
+      minimumVersion: Math.max(
+        surface.requiredRuntimeCapability.minimumVersion,
+        LOGICAL_FIELD_READER,
+      ),
+    };
   }
   if (
     verificationPackageRevision.languageVersion === 'v6' &&

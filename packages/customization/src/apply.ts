@@ -2010,6 +2010,26 @@ function addField(
   }
   const boundary = tierBoundary(entityId);
   if (boundary) return boundary;
+  if (field.type in LOGICAL_TYPES) {
+    // CUSTOMIZE-6 named gaps: a first-party record type's amounts are bound
+    // by its own report source and storage, and line fields follow lines.
+    if (!isTenantId(entityId))
+      return unsupported(
+        'decimal, money, quantity, currency and long-text fields on built-in record types',
+        'Add these fields to your own record types for now.',
+      );
+    if (
+      list(authored, 'relations').some(
+        (r) =>
+          r.ownership === 'parentScopedChild' &&
+          (r.sourceEntity as Json).targetId === entityId,
+      )
+    )
+      return unsupported(
+        'decimal, money, quantity, currency and long-text line fields',
+        'Line fields can be text, whole numbers, dates, yes/no or choices for now; add the field to the record type instead.',
+      );
+  }
   const entityLocal = localOf(entityId);
   const fieldLocal = dateTime
     ? localOf(dateTime.fieldId)
@@ -2850,7 +2870,10 @@ function fieldDefinition(
     case 'currency':
       return {
         ...common,
-        collation: 'unicodeCaseInsensitive',
+        // A currency code compares exactly (as every first-party currency
+        // field does): a report partitions amounts by the stored code.
+        collation:
+          field.type === 'currency' ? 'binary' : 'unicodeCaseInsensitive',
         fieldType: {
           kind: 'textFieldType',
           maximumLength:
@@ -2896,18 +2919,19 @@ function declareLogicalFields(
   for (const { fieldId, field } of added) {
     if (!(field.type in LOGICAL_TYPES)) continue;
     const logicalType = LOGICAL_TYPES[field.type as keyof typeof LOGICAL_TYPES];
+    let currencyFieldId: string | undefined;
     if (field.type === 'money' && field.currency?.kind === 'stored') {
-      const currencyFieldId = field.currency.fieldId;
-      const declared = [...declarations, ...pendingCurrency(entityId, added)].some(
-        (d) =>
-          d.fieldId === currencyFieldId &&
-          d.entityId === entityId &&
-          d.logicalType === 'currencyCode',
+      currencyFieldId = storedCurrencyField(
+        authored,
+        entityId,
+        [...declarations, ...pendingCurrency(entityId, added)],
+        added,
+        field.currency,
       );
-      if (!declared)
+      if (!currencyFieldId)
         return refusal(
           'CUSTOMIZE_TARGET_NOT_FOUND',
-          `${String(entity.label)} has no currency field ${currencyFieldId} for "${field.label.trim()}"; add a currency field first.`,
+          `${String(entity.label)} has no currency field ${field.currency.fieldId ?? `"${String(field.currency.fieldLabel)}"`} for "${field.label.trim()}"; add a currency field first.`,
         );
     }
     if (field.type === 'money') {
@@ -2922,7 +2946,7 @@ function declareLogicalFields(
             ? { kind: 'fixed', currencyCode: field.currency!.code }
             : {
                 kind: 'stored',
-                fieldId: field.currency!.fieldId,
+                fieldId: currencyFieldId!,
                 codes: [...STORED_MONEY_CURRENCIES],
               },
       });
@@ -2961,6 +2985,39 @@ function declareLogicalFields(
   }
   if (declarations.length) authored.logicalFields = declarations;
   return null;
+}
+
+/**
+ * The currency field a stored money field reads: one declared currency field
+ * of the same record type, named by its ID or by its label.
+ */
+function storedCurrencyField(
+  authored: Readonly<Json>,
+  entityId: string,
+  declared: readonly Json[],
+  added: readonly { readonly fieldId: string; readonly field: CustomField }[],
+  currency: {
+    readonly fieldId?: string | undefined;
+    readonly fieldLabel?: string | undefined;
+  },
+): string | undefined {
+  const currencyIds = new Set(
+    declared
+      .filter(
+        (d) => d.entityId === entityId && d.logicalType === 'currencyCode',
+      )
+      .map((d) => String(d.fieldId)),
+  );
+  if (currency.fieldId !== undefined)
+    return currencyIds.has(currency.fieldId) ? currency.fieldId : undefined;
+  const wanted = String(currency.fieldLabel).trim().toLowerCase();
+  const labelOf = (fieldId: string) =>
+    added.find((entry) => entry.fieldId === fieldId)?.field.label ??
+    list(authored, 'fields').find((f) => f.fieldId === fieldId)?.label;
+  const matches = [...currencyIds].filter(
+    (fieldId) => String(labelOf(fieldId)).trim().toLowerCase() === wanted,
+  );
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 function pendingCurrency(

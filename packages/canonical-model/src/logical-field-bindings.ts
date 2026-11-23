@@ -34,7 +34,7 @@ export type LogicalFieldBinding = z.infer<typeof LogicalFieldBindingSchema>;
 
 interface DefinitionView {
   readonly package: { readonly namespace: string };
-  readonly logicalFields?: readonly unknown[];
+  readonly logicalFields?: readonly unknown[] | undefined;
   readonly entities: readonly {
     readonly entityId: string;
     readonly reportSource?: {
@@ -48,6 +48,7 @@ interface DefinitionView {
     readonly fieldId: string;
     readonly entity: { readonly targetId: string };
     readonly lifecycle?: string;
+    readonly collation?: string;
     readonly fieldType: Readonly<Record<string, unknown>>;
   }[];
 }
@@ -139,8 +140,14 @@ export function deriveLogicalFieldBindings(
         bindings.push(base);
         break;
       case 'currencyCode':
-        if (type.kind !== 'textFieldType' || type.maximumLength !== 3)
-          return refuse('a currency code stores three characters.');
+        if (
+          type.kind !== 'textFieldType' ||
+          type.maximumLength !== 3 ||
+          field.collation !== 'binary'
+        )
+          return refuse(
+            'a currency code stores three characters compared exactly.',
+          );
         bindings.push(base);
         break;
     }

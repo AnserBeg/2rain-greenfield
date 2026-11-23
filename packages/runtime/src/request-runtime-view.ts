@@ -10,7 +10,7 @@ import {
   type UntrustedRequestInput,
 } from './request-context.js';
 import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents.js';
-import { PRESENTATION_READER } from '../../canonical-model/src/surface-presentation-schema.js';
+import { LOGICAL_FIELD_READER } from '../../canonical-model/src/logical-field.js';
 import {
   WORKFLOW_PROJECTION_FAMILY,
   WORKFLOW_RUNTIME_CAPABILITY,
@@ -244,7 +244,7 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 46 reads viewport declarations and renders Map views (one rung).
     // 47 adds declared presentation: tone rules on list cells and rows,
     // column sizing and list density.
-    maximumSupportedVersion: PRESENTATION_READER,
+    maximumSupportedVersion: LOGICAL_FIELD_READER,
   },
 });
 

@@ -2,6 +2,7 @@ import type { StorageTargetPayloadV1 } from '../../compiler/src/storage.js';
 import { lowerDeclaredReports } from '../../compiler/src/declared-reports.js';
 import { DECLARED_REPORT_READER } from '../../canonical-model/src/declared-report.js';
 import { PRESENTATION_READER } from '../../canonical-model/src/surface-presentation-schema.js';
+import { LOGICAL_FIELD_READER } from '../../canonical-model/src/logical-field.js';
 import { presentationDeclarationProblem } from './presentation-admission.js';
 import {
   hasMapDeclaration,
@@ -677,6 +678,20 @@ function verifyCompiledRelease(
     throw integrity(
       'PRESENTATION_READER_MISMATCH',
       'Declared presentation and the surface reader floor disagree.',
+    );
+  // CUSTOMIZE-6: logical field declarations and their reader floor agree
+  // both ways (a declaration is a key older readers strict-parse).
+  const hasLogicalFields =
+    isRecord(layoutDefinition) &&
+    Object.hasOwn(layoutDefinition, 'logicalFields');
+  if (
+    hasLogicalFields
+      ? surfaceFloor < LOGICAL_FIELD_READER
+      : surfaceFloor === LOGICAL_FIELD_READER
+  )
+    throw integrity(
+      'LOGICAL_FIELD_READER_MISMATCH',
+      'Declared logical fields and the surface reader floor disagree.',
     );
   const reportInputs = new Map<string, unknown>();
   const sourceTerms = (value: unknown, activeOnly: boolean) => {

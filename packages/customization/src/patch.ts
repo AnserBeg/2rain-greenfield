@@ -69,34 +69,66 @@ export type CustomFieldType = (typeof CUSTOM_FIELD_TYPES)[number];
 /** The currencies a stored money field accepts (the REPORTS-1 binding). */
 export const STORED_MONEY_CURRENCIES = ['CAD', 'USD', 'EUR'] as const;
 /** A fixed currency has a registered minor unit, which is the field's scale. */
-export const FIXED_MONEY_CURRENCIES = Object.keys(
-  CURRENCY_MINOR_UNITS_V0,
-) as [keyof typeof CURRENCY_MINOR_UNITS_V0];
+export const FIXED_MONEY_CURRENCIES = Object.keys(CURRENCY_MINOR_UNITS_V0) as [
+  keyof typeof CURRENCY_MINOR_UNITS_V0,
+];
 
-const moneyCurrency = z.discriminatedUnion('kind', [
-  z.strictObject({
-    kind: z.literal('fixed'),
-    code: z.enum(FIXED_MONEY_CURRENCIES),
-  }),
-  z.strictObject({
-    kind: z.literal('stored'),
-    // The record's own currency field, by stable ID (a `currency` field).
-    fieldId: canonicalId,
-  }),
-]);
+const moneyCurrency = z
+  .discriminatedUnion('kind', [
+    z.strictObject({
+      kind: z.literal('fixed'),
+      code: z
+        .enum(FIXED_MONEY_CURRENCIES)
+        .describe('The one currency every amount of this field is in.'),
+    }),
+    z
+      .strictObject({
+        kind: z.literal('stored'),
+        fieldId: canonicalId
+          .optional()
+          .describe(
+            "The record type's existing currency field, by its listed field ID.",
+          ),
+        fieldLabel: label
+          .optional()
+          .describe(
+            'Or the label of a currency field added in this same record type or change.',
+          ),
+      })
+      .refine(
+        (stored) =>
+          (stored.fieldId === undefined) !== (stored.fieldLabel === undefined),
+        'a stored currency names its currency field by fieldId or fieldLabel, not both',
+      ),
+  ])
+  .describe(
+    "A money field's currency: fixed (one code) or stored (each record's own currency field, CAD, USD or EUR).",
+  );
 
 export const CustomFieldSchema = z
   .strictObject({
     label,
-    type: z.enum(CUSTOM_FIELD_TYPES),
+    type: z
+      .enum(CUSTOM_FIELD_TYPES)
+      .describe(
+        'text is one line; longText is paragraphs; number is a whole number; decimal is an exact number with a scale; money is an exact amount with a currency; quantity is an exact amount in a unit; currency is a three-letter currency code (CAD, USD or EUR) that a stored money field reads.',
+      ),
     required: z.boolean().optional(),
     options: z.array(label).min(1).max(20).optional(),
-    /** Digits after the decimal point, for a decimal or quantity field. */
-    scale: z.int().min(0).max(LOGICAL_DECIMAL_MAXIMUM_SCALE).optional(),
-    /** A money field's currency: one fixed code, or the record's currency field. */
-    currency: moneyCurrency.optional(),
-    /** A quantity field's unit as people write it, e.g. "kg" or "h". */
-    unit: UnitLabelSchema.optional(),
+    scale: z
+      .int()
+      .min(0)
+      .max(LOGICAL_DECIMAL_MAXIMUM_SCALE)
+      .optional()
+      .describe(
+        'Required for type decimal or quantity, and only for them: digits after the decimal point.',
+      ),
+    currency: moneyCurrency
+      .optional()
+      .describe('Required for type money, and only for it.'),
+    unit: UnitLabelSchema.optional().describe(
+      'Required for type quantity, and only for it: the unit as people write it, such as kg, h, m3 or pallet.',
+    ),
   })
   .superRefine((field, context) => {
     if (field.type === 'choice' && !field.options) {
