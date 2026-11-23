@@ -87,6 +87,7 @@ import {
 import {
   COMPILER_SEMANTIC_PROFILE_V2_VERSION,
   COMPILER_SEMANTIC_PROFILE_VERSION,
+  SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS,
   COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
   GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -302,8 +303,14 @@ export function lowerBaseProjectionPayloads(
       operation.precondition as unknown,
     ]),
   );
+  // ADR-0047: the key lands on the adopted profile (v2) and later ones; the
+  // frozen output of an older profile never gains it.
+  const profiles: readonly string[] =
+    SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS;
   const reversibility =
-    packageRevision.languageVersion === LANGUAGE_VERSION
+    packageRevision.languageVersion === LANGUAGE_VERSION &&
+    profiles.indexOf(compilerSemanticProfileVersion) >=
+      profiles.indexOf(COMPILER_SEMANTIC_PROFILE_V2_VERSION)
       ? deriveReversibility(
           (
             operationCatalog as {

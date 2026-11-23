@@ -62,7 +62,11 @@ test('workflow-free canonical bytes, release closure and verification evidence m
         negativeProbe: { scenarioId, observed: false },
       }),
   );
-  // Captured on the pre-workflow trunk at 840c1b48 with these fixture identities.
+  // Captured on the pre-workflow trunk at 840c1b48 with these fixture
+  // identities; RE-PINNED by AI-UNDO-1 (root 83599963..., closure 0c911a5c...,
+  // evidence e91baf95...) when the adopted profile's agent-discovery chunk
+  // gained the reversibility declaration (owner ruling, ADR-0066 re-baseline).
+  // The definition is unchanged.
   assert.deepEqual(
     {
       definition: hash(partyDefinitionBytes(fixture.definition)),
@@ -74,11 +78,11 @@ test('workflow-free canonical bytes, release closure and verification evidence m
       definition:
         '210383a2569e8e1b4493194f6cae60c12da52bc4da587871cb532289d721710b',
       releaseRoot:
-        '83599963b0ae19973cb2124a48df2a96a65b30112aa55a70bf1ec9cfcb80c9df',
+        '9c1d51ef552216d01f9cdc2e7b9f951b511dd26570bdfe60aa293abd1b589304',
       artifactClosureDigest:
-        '0c911a5c3fa5997712083d1bd81bb5773e33982892c57f62216b5fad497c48a6',
+        'd5fbd2d85419a1c4638dd0b169696e1dfd13eb407084650e29356ec1515fa95e',
       evidence:
-        'e91baf95197908f66351e8336a021f8da9082cc1565d9463cd9624823d3b0fda',
+        'e5ced781525934f457e2a47875219e72f0835110a2dde437225f5871ac2980bb',
     },
   );
 });

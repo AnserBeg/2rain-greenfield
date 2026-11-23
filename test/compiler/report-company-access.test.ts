@@ -48,6 +48,10 @@ import {
 } from '../../packages/customization/src/index.js';
 import { projectionPayload } from './helpers.js';
 import { withArchivedCustomizationRuntime } from '../helpers/archived-runtime-process.js';
+import {
+  assertReproducedExceptReversibility,
+  projectionFingerprint,
+} from '../helpers/reversibility-reproduction.js';
 
 import {
   compileReportFixture,
@@ -135,7 +139,7 @@ test('the new Inspection declares one named, same-plan secondary index and its o
   );
 });
 
-test('an archived pre-key company-owned Inspection reproduces every release byte, root and floor and adds zero indexes on replay', async () => {
+test('an archived pre-key company-owned Inspection reproduces every release byte, root and floor but the agent-discovery reversibility key, and adds zero indexes on replay', async () => {
   const chain = [
     parse(inspection),
     parse({
@@ -178,13 +182,22 @@ test('an archived pre-key company-owned Inspection reproduces every release byte
     );
     for (const [i, step] of current.steps.entries()) {
       const prior = historical.releases[i]!;
-      assert.equal(step.release.releaseRoot, prior.releaseRoot);
       assert.equal(
         step.release.normalizedDefinitionBytesBase64,
         prior.normalizedDefinitionBytesBase64,
       );
-      assert.deepEqual(step.release, prior);
       const { compiled } = parseSerializedRelease(step.release);
+      // AI-UNDO-1: identical except the agent-discovery reversibility key.
+      assertReproducedExceptReversibility(
+        projectionFingerprint(compiled),
+        projectionFingerprint(parseSerializedRelease(prior).compiled),
+        i > 0
+          ? {
+              current: current.steps[i - 1]!.release.releaseRoot,
+              prior: historical.releases[i - 1]!.releaseRoot,
+            }
+          : undefined,
+      );
       const target = projectionPayload<StorageTargetPayloadV1>(
         compiled,
         PROJECTION_FAMILY_IDS.storageTarget,

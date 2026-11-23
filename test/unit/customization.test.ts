@@ -1,3 +1,4 @@
+import { REVERSIBILITY_AGENT_READER } from '../../packages/canonical-model/src/reversibility.js';
 import type { CompiledPopup } from '../../packages/canonical-model/src/popup-actions.js';
 import assert from 'node:assert/strict';
 import { fork } from 'node:child_process';
@@ -1179,7 +1180,8 @@ test('Today compiles only declared numeric measures of a direct List', async () 
     .compiled.bundle.releaseManifest;
   for (const [family, floor] of [
     [PROJECTION_FAMILY_IDS.surfaceManifest, 25],
-    [PROJECTION_FAMILY_IDS.agentDiscovery, 4],
+    // AI-UNDO-1: the reversibility declaration's floor dominates.
+    [PROJECTION_FAMILY_IDS.agentDiscovery, REVERSIBILITY_AGENT_READER],
     [PROJECTION_FAMILY_IDS.queryCatalog, 3],
   ] as const) {
     const requirement = projections.find(
@@ -1234,7 +1236,8 @@ test('a saved Location view compiles its own columns, sort and declared filter',
     .compiled.bundle.releaseManifest;
   for (const [familyId, version] of [
     [PROJECTION_FAMILY_IDS.surfaceManifest, 24],
-    [PROJECTION_FAMILY_IDS.agentDiscovery, 3],
+    // AI-UNDO-1: the reversibility declaration's floor dominates.
+    [PROJECTION_FAMILY_IDS.agentDiscovery, REVERSIBILITY_AGENT_READER],
   ] as const) {
     const requirement = projections.find(
       (projection) => projection.familyId === familyId,

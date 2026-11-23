@@ -499,8 +499,11 @@ test('cutting v4 leaves v3 output byte-identical', () => {
   // changes. Do not copy the "three keys" claim forward again.
   const V3_RELEASE_MANIFEST_DIGEST_AT_V1 =
     'aac9f52d2fe2fa592ec9df1a04f66d6d6ac4929f4b00ca047533bd7c9e5adce5';
+  // RE-PINNED by AI-UNDO-1 (e91ef814... -> 412a451a...): the adopted
+  // profile's agent-discovery chunk gained the reversibility declaration, a
+  // re-baseline by owner ruling (ADR-0066). The v1 arm below is unchanged.
   const V3_RELEASE_MANIFEST_DIGEST =
-    'e91ef8145f144601cf30ab8a3d810f78e22f00b3b2164a911279f40798d10f4e';
+    '412a451ac0cd24c2f0b2333488ee6a1bf8510b05bceb0bcb0d5f9df454ffa959';
   const before = canonicalizeAndHash(
     mustCompile(compilerInput(v3)).bundle.releaseManifest,
   ).contentHash;
