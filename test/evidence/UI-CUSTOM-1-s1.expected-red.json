@@ -379,6 +379,60 @@
           "expected": "replayConflict"
         }
       ]
+    },
+    {
+      "name": "presentation-redraft-after-remove",
+      "claim": "F1: a drafted rule is appended unless a rule the draft keeps (after remove) has its ID, so a removed and redrafted rule comes back.",
+      "file": "packages/customization/src/presentation-revision.ts",
+      "original": "        (next) => !kept.some((rule) => rule.ruleId === next.ruleId),\n",
+      "replacement": "        (next) =>\n          !(current?.toneRules ?? []).some((rule) => rule.ruleId === next.ruleId),\n",
+      "test": {
+        "files": ["test/unit/surface-presentation.test.ts"],
+        "namePattern": "removed and redrafted in one draft"
+      },
+      "kills": [
+        {
+          "file": "test/unit/surface-presentation.test.ts",
+          "name": "a rule removed and redrafted in one draft comes back, so a narrower band can be listed before a wider one",
+          "expected": "Reorder soon"
+        }
+      ]
+    },
+    {
+      "name": "clip-span-focus-ring-room",
+      "claim": "F2: the clip span pads 4px and takes it back with a negative margin, so a link's focus ring is not clipped.",
+      "file": "apps/web/src/ledger-styles.ts",
+      "original": "max-width:24ch;padding:4px;margin:-4px;overflow:hidden;",
+      "replacement": "max-width:24ch;overflow:hidden;",
+      "test": {
+        "files": ["test/architecture/surface-grammar-conformance.test.ts"],
+        "namePattern": "a clipped list column clips its text"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/surface-grammar-conformance.test.ts",
+          "name": "UI-CUSTOM-1: a clipped list column clips its text, never the cell, so a tone pill always shows",
+          "expected": "no room for a focus ring"
+        }
+      ]
+    },
+    {
+      "name": "presentation-retired-identity-only",
+      "claim": "F3: upgrade replay checks a retired presentation revision by identity only, so the old rules it carries never refuse an upgrade.",
+      "file": "packages/customization/src/upgrade-replay.ts",
+      "original": "            (pastPresentations.has(patch.revisionId) ||\n              patch.status === 'retired'));\n",
+      "replacement": "            (pastPresentations.has(patch.revisionId) || false));\n",
+      "test": {
+        "files": ["test/unit/customization-upgrade.test.ts"],
+        "namePattern": "a retired presentation revision is replayed"
+      },
+      "kills": [
+        {
+          "file": "test/unit/customization-upgrade.test.ts",
+          "name": "a retired presentation revision is replayed by identity only, so the old rules it carries never refuse an upgrade",
+          "expected": "replayConflict"
+        }
+      ]
     }
   ]
 }

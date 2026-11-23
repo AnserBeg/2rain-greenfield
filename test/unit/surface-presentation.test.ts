@@ -543,6 +543,53 @@ test('an edited rule keeps its place, so earlier rules still win, and the approv
   );
 });
 
+test('a rule removed and redrafted in one draft comes back, so a narrower band can be listed before a wider one', () => {
+  const v1 = member(base, {
+    kind: 'addPresentationRevision',
+    surface: stockList,
+    tones: [
+      band('Low stock', 'blocked', '5'),
+      band('Reorder soon', 'attention', '20'),
+    ],
+  });
+  const first = applied(base, [v1]);
+  const toneAt = (definition: Json, onHand: string) =>
+    presentRow(tonesOn(definition), { [stock('on_hand')]: onHand }).cells.get(
+      stock('on_hand'),
+    )?.reason;
+  // Remove and redraft one rule: it is kept, with its new threshold, after
+  // the rule the draft kept.
+  const v2 = member(first, {
+    kind: 'addPresentationRevision',
+    surface: stockList,
+    remove: ['Low stock'],
+    tones: [band('Low stock', 'blocked', '6')],
+  });
+  assert.deepEqual(
+    v2.toneRules.map((rule) => rule.reason.text),
+    ['Reorder soon', 'Low stock'],
+  );
+  // Insert a narrower band: remove both and relist all three, narrowest first.
+  const v3 = member(first, {
+    kind: 'addPresentationRevision',
+    surface: stockList,
+    remove: ['Low stock', 'Reorder soon'],
+    tones: [
+      band('Critical', 'blocked', '2'),
+      band('Low stock', 'blocked', '5'),
+      band('Reorder soon', 'attention', '20'),
+    ],
+  });
+  assert.deepEqual(
+    v3.toneRules.map((rule) => rule.reason.text),
+    ['Critical', 'Low stock', 'Reorder soon'],
+  );
+  const third = applied(first, [v3]);
+  assert.equal(toneAt(third, '1'), 'Critical');
+  assert.equal(toneAt(third, '3'), 'Low stock');
+  assert.equal(toneAt(third, '12'), 'Reorder soon');
+});
+
 test('a yes/no value is only yes or no: true, yes, false and no bind, anything else is refused by name', () => {
   const clinic = applied(authored, [
     {

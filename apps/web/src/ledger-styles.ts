@@ -267,8 +267,9 @@ td[data-zero]{color:var(--faint)}
 .data-table-wrap [data-column-width=auto]{width:auto}
 .data-table-wrap td[data-column-wrap=wrap]{white-space:normal;overflow-wrap:anywhere}
 /* A clipped column clips its text span, never the cell, so a tone pill
-   after the text always shows. */
-.data-table-wrap td[data-column-wrap=clip] .cell-clip{display:inline-block;max-width:24ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+   after the text always shows. The span pads 4px and takes it back with a
+   negative margin, so a link's focus ring (2px at a 2px offset) is not clipped. */
+.data-table-wrap td[data-column-wrap=clip] .cell-clip{display:inline-block;max-width:24ch;padding:4px;margin:-4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
 .data-table-wrap td[data-column-width=narrow][data-column-wrap=clip] .cell-clip{max-width:9ch}
 .data-table-wrap td[data-column-width=wide][data-column-wrap=clip] .cell-clip{max-width:40ch}
 .data-table-wrap[data-density=comfortable]{--row-y:12px}

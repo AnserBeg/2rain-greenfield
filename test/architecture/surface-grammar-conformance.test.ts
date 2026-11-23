@@ -1694,6 +1694,16 @@ test('UI-CUSTOM-1: a clipped list column clips its text, never the cell, so a to
   assert.ok(clipsText, 'no rule clips the text span');
   assert.match(clipsText.body, /overflow:hidden/u);
   assert.match(clipsText.body, /text-overflow:ellipsis/u);
+  // The span clips at its padding box, so a link inside it needs room for
+  // its focus ring (2px at a 2px offset): 4px of padding, taken back by a
+  // negative margin so the text does not move.
+  const pad = /(?:^|;)padding:(\d+)px(?:;|$)/u.exec(clipsText.body);
+  const margin = /(?:^|;)margin:-(\d+)px(?:;|$)/u.exec(clipsText.body);
+  assert.ok(
+    pad && Number(pad[1]) >= 4,
+    'the clip span has no room for a focus ring, so it clips the ring of the link inside it',
+  );
+  assert.equal(margin?.[1], pad[1], 'the clip span padding moves the text');
 });
 
 test('UI-CUSTOM-1: muted text on a tinted row reads at AA in both themes, and the tint survives hover and the card projection', () => {

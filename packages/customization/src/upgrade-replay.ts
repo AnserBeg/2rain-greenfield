@@ -500,12 +500,15 @@ export function replayCustomizationPatches(
               }
             : undefined;
         // A superseded Report or presentation revision is checked by
-        // identity only; the last revision of each is checked in full.
+        // identity only; the last revision of each is checked in full. A
+        // retired presentation is carried, never validated, so it too is
+        // checked by identity only: the old rules it carries never refuse.
         const identityOnly =
           (patch.kind === 'addReportRevision' &&
             pastReports.has(patch.revisionId)) ||
           (patch.kind === 'addPresentationRevision' &&
-            pastPresentations.has(patch.revisionId));
+            (pastPresentations.has(patch.revisionId) ||
+              patch.status === 'retired'));
         if (
           before &&
           !layout &&

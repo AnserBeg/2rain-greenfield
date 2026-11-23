@@ -1294,6 +1294,35 @@ test('a refused report redacts protected evidence on either side, its issue and 
   );
 });
 
+test('a retired presentation revision is replayed by identity only, so the old rules it carries never refuse an upgrade', () => {
+  // "Remove the colours": the retire carries v1's rules, which read the status.
+  const retire = customization.presentationMember(
+    customization
+      .customizationTargets(
+        normalizeApplicationPackage(applied(extended, [equipmentPresentation])),
+      )
+      .presentation!.filter((t) => t.surfaceId === equipmentList),
+    { kind: 'addPresentationRevision', surface: equipmentList, retire: true },
+  );
+  assert.equal(retire.status, 'retired');
+  assert.ok(JSON.stringify(retire).includes(reportOperand));
+  // A clean base: the same record type without the status field.
+  const withoutStatus = applied(base, [
+    { ...record, fields: record.fields.slice(0, 1) },
+  ]);
+  const chain = [equipmentPresentation, retire];
+  const replayed = replayCustomizationPatches(
+    withoutStatus,
+    chain.map(patch),
+    chain.map((_, index) => ({
+      patchId: String(index + 1),
+      differentBase: true,
+      ...(index === 0 && { parent: extended }),
+    })),
+  );
+  assert.equal(replayed.status, 'applied', JSON.stringify(replayed));
+});
+
 test('a superseded presentation revision is replayed by identity only, so a value only it read never refuses an upgrade', () => {
   const nameField = id('field.custom_equipment_name');
   // v2 replaces every rule of v1 and no longer reads the status.

@@ -311,6 +311,15 @@ export function presentationMember(
       };
     }),
   ];
+  // The rules this draft keeps, after `remove`: a drafted rule is appended
+  // unless one of these has its ID, so a removed rule that is redrafted (to
+  // relist the bands in a new order) comes back instead of being dropped.
+  const kept = (current?.toneRules ?? []).filter(
+    (rule) =>
+      !(draft.remove ?? []).some(
+        (reason) => reason.toLowerCase() === rule.reason.text.toLowerCase(),
+      ),
+  );
   const patch: PresentationRevisionPatch = {
     kind: 'addPresentationRevision',
     schemaVersion: v,
@@ -322,23 +331,11 @@ export function presentationMember(
     // Earlier rules win, so an edited rule keeps its place and only a new
     // rule ID is appended: redrafting one threshold never reorders the bands.
     toneRules: [
-      ...(current?.toneRules ?? [])
-        .filter(
-          (rule) =>
-            !(draft.remove ?? []).some(
-              (reason) =>
-                reason.toLowerCase() === rule.reason.text.toLowerCase(),
-            ),
-        )
-        .map(
-          (rule) =>
-            toneRules.find((next) => next.ruleId === rule.ruleId) ?? rule,
-        ),
+      ...kept.map(
+        (rule) => toneRules.find((next) => next.ruleId === rule.ruleId) ?? rule,
+      ),
       ...toneRules.filter(
-        (next) =>
-          !(current?.toneRules ?? []).some(
-            (rule) => rule.ruleId === next.ruleId,
-          ),
+        (next) => !kept.some((rule) => rule.ruleId === next.ruleId),
       ),
     ],
     sizing,
