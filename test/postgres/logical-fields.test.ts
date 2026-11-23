@@ -195,7 +195,7 @@ test(
               legalEntityId: company,
               values: {
                 [field('name')]: name,
-                [field('weight')]: '12.500',
+                [field('weight')]: '12.5',
                 [field('currency')]: currency,
                 [field('freight')]: freight,
                 [field('deposit')]: '1250',
@@ -205,9 +205,9 @@ test(
             assert.equal(created.outcome, 'succeeded', JSON.stringify(created));
             return created.readBack!;
           };
-          const cad = await create(COMPANY, 'Bolts', 'CAD', '100.10');
-          await create(COMPANY, 'Nuts', 'CAD', '0.90');
-          await create(COMPANY, 'Washers', 'USD', '40.00');
+          const cad = await create(COMPANY, 'Bolts', 'CAD', '100.1');
+          await create(COMPANY, 'Nuts', 'CAD', '0.9');
+          await create(COMPANY, 'Washers', 'USD', '40');
           const southern = await create(
             south,
             'Southern pallets',
