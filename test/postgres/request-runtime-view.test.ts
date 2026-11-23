@@ -19,6 +19,7 @@ import { DATE_TIME_FIELD_READER } from '../../packages/canonical-model/src/date-
 import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../packages/canonical-model/src/surface-workspace.js';
 import { DECLARED_REPORT_READER } from '../../packages/canonical-model/src/declared-report.js';
 import { PRESENTATION_READER } from '../../packages/canonical-model/src/surface-presentation-schema.js';
+import { LOGICAL_FIELD_READER } from '../../packages/canonical-model/src/logical-field.js';
 import {
   COMPANY_ACCESS_INDEX_READER,
   REPORT_SOURCE_READER,
@@ -381,6 +382,7 @@ test('the capability comparison binds the family to its capability, then compare
     BILLING_ARREARS_READER,
     MAP_VIEW_READER,
     PRESENTATION_READER,
+    LOGICAL_FIELD_READER,
   ];
   for (const reader of surfaceFloors) {
     for (const floor of surfaceFloors) {
@@ -434,7 +436,7 @@ test('the capability comparison binds the family to its capability, then compare
   // capability on one side alone reds here rather than in production.
   assert.deepEqual(SUPPORTED_RUNTIME_CAPABILITIES[surface], {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
-    maximumSupportedVersion: PRESENTATION_READER,
+    maximumSupportedVersion: LOGICAL_FIELD_READER,
   });
 });
 
@@ -1068,7 +1070,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
               ],
               {
                 capabilityId: 'northstar.runtime:capability.surface-manifest',
-                maximumSupportedVersion: PRESENTATION_READER,
+                maximumSupportedVersion: LOGICAL_FIELD_READER,
               },
             );
           },
@@ -1093,7 +1095,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
               new RegExp(
-                `requires version 999 and this runtime supports ${PRESENTATION_READER}`,
+                `requires version 999 and this runtime supports ${LOGICAL_FIELD_READER}`,
               ),
             );
           },
@@ -1124,7 +1126,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
               new RegExp(
-                `requires version 999 and this runtime supports ${PRESENTATION_READER}`,
+                `requires version 999 and this runtime supports ${LOGICAL_FIELD_READER}`,
               ),
             );
           },
