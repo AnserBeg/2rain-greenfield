@@ -118,12 +118,30 @@ export function compileAddressBindings(
     layouts.set(p.surfaceId, layout);
     ids.add(p.placementId);
   }
+  const viewports = def.surfaces.flatMap((s) =>
+    s.map && s.lifecycle === 'active'
+      ? [
+          {
+            surfaceId: s.surfaceId,
+            fieldId: s.map.body.addressFieldId,
+            contract: s.map.body.viewport,
+          },
+        ]
+      : [],
+  );
+  for (const viewport of viewports)
+    if (!bindings.some((b) => b.fieldId === viewport.fieldId))
+      return {
+        subjectId: viewport.surfaceId,
+        message: 'Map needs a live Address connector.',
+      };
   return {
     payload: AddressProjectionSchema.parse({
       kind: 'connectorPayload',
       schemaVersion: 'northstar.connector-payload/v1',
       bindings,
       placements: activePlacements,
+      ...(viewports.length && { viewports }),
       ...(retired.size && { retiredFieldIds: [...retired].sort() }),
       layouts: [...layouts.values()],
     }),

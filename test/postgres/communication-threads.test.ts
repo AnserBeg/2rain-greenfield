@@ -97,9 +97,13 @@ test('shared communication writer', async (t) => {
         await admin.query(
           await readFile('test/fixtures/booking-commitments.sql', 'utf8'),
         );
-        const release = JSON.parse(
+        // The serving head, whatever the envelope: a one-entry v1 lineage
+        // (ADR-0066 re-baseline) or an appended v2 lineage.
+        const envelope = JSON.parse(
           await readFile('apps/web/release/app.compiled.json', 'utf8'),
-        ).applications.at(-1) as {
+        ) as { application?: unknown; applications?: unknown[] };
+        const release = (envelope.applications?.at(-1) ??
+          envelope.application) as {
           normalizedDefinitionBytesBase64: string;
           artifacts: {
             artifactKind: string;

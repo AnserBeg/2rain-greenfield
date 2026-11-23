@@ -1297,6 +1297,41 @@ export async function runBuildCase(
           'The activated rate structure does not match the requested service.',
         );
     }
+    if (expect.outcome === 'presentation') {
+      if (result.activated) {
+        const after = await opened.service.targets();
+        const target = (after.presentation ?? []).find((t) =>
+          localOf(t.surfaceId).startsWith(expect.list),
+        );
+        const current =
+          target?.current?.status === 'active' ? target.current : null;
+        const fieldsOf = (when: unknown): string[] =>
+          JSON.stringify(when)
+            .match(/"fieldId":"([^"]+)"/gu)
+            ?.map((m) => localOf(m.slice(11, -1))) ?? [];
+        const tonesOk = (expect.tones ?? []).every((want) =>
+          current?.toneRules.some(
+            (rule) =>
+              rule.target.kind === want.target &&
+              want.tones.includes(rule.tone) &&
+              want.fields.every((f) => fieldsOf(rule.when).includes(f)),
+          ),
+        );
+        const columnsOk = (expect.columns ?? []).every((want) =>
+          current?.sizing.some(
+            (entry) =>
+              entry.kind === 'listColumn' &&
+              localOf(entry.fieldId) === want.field &&
+              want.widths.includes(entry.width),
+          ),
+        );
+        const found = !!current && tonesOk && columnsOk;
+        result.e2e = found;
+        result.behaviour = found;
+        if (!found)
+          result.reasons.push('the list presentation is not the requested one');
+      }
+    }
     if (expect.outcome === 'board') {
       if (result.activated) {
         const after = await opened.service.targets();
@@ -1315,6 +1350,22 @@ export async function runBuildCase(
         result.e2e = found;
         result.behaviour = found;
         if (!found) result.reasons.push('no new board view on the list');
+      }
+    }
+    if (expect.outcome === 'map') {
+      if (result.activated) {
+        const after = await opened.service.targets();
+        const found = (after.maps ?? []).some(
+          (map) =>
+            localOf(map.frame.listSurfaceId).startsWith(expect.list) &&
+            map.views.some((view) =>
+              nameMatches(expect.label, slug(view.label)),
+            ) &&
+            !mapsHad(boardsBefore, map.frame.listSurfaceId, map.views.length),
+        );
+        result.e2e = found;
+        result.behaviour = found;
+        if (!found) result.reasons.push('no new map view on the list');
       }
     }
   } catch (error) {
@@ -1337,6 +1388,17 @@ export async function runBuildCase(
     await opened.close();
   }
   return result;
+}
+
+function mapsHad(
+  before: CustomizationTargets,
+  listSurfaceId: string,
+  views: number,
+): boolean {
+  const had = (before.maps ?? []).find(
+    (m) => m.frame.listSurfaceId === listSurfaceId,
+  );
+  return !!had && had.views.length >= views;
 }
 
 function boardsHad(

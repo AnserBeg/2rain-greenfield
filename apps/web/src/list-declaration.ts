@@ -5,6 +5,12 @@ import type {
 } from '../../../packages/canonical-model/src/index.js';
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
 import {
+  evaluableTones,
+  presentRow,
+  type EvaluableTone,
+} from '../../../packages/canonical-model/src/surface-presentation.js';
+import type { CompiledPresentation } from '../../../packages/canonical-model/src/schemas.js';
+import {
   encodeSharedListCursor,
   SHARED_LIST_QUERY_VERSION,
   type SharedListQueryRequest,
@@ -820,20 +826,71 @@ function somethingSupplied(
 }
 
 /**
+ * The tone rule a List's declared supply implies (SUPPLY-WARNINGS): its Short
+ * column is marked "!" -- blocked, named "Short of stock" -- on a row short of
+ * something now, judged from the server-projected figure alone. It is derived
+ * from the release's own declaration at render time, so the release bytes and
+ * floor are unchanged, and it renders through the same tone path as every
+ * declared rule (UI-CUSTOM-1).
+ */
+export function supplyTones(list: SurfaceList): EvaluableTone[] {
+  const supply = list.progress?.supply;
+  if (!supply) return [];
+  const fieldId = supply.outputs.short;
+  const v = 'v6' as const;
+  const type = {
+    kind: 'decimal' as const,
+    precision: 38,
+    scale: 18,
+    currency: null,
+    unit: null,
+  };
+  return [
+    {
+      ruleId: fieldId,
+      target: { schemaVersion: v, kind: 'listCell', fieldId },
+      when: {
+        schemaVersion: v,
+        kind: 'comparison',
+        operator: 'greaterThan',
+        left: { schemaVersion: v, kind: 'field', fieldId, select: 'value' },
+        right: {
+          schemaVersion: v,
+          kind: 'literal',
+          scalar: { ...type, value: '0' },
+        },
+      },
+      tone: 'blocked',
+      reason: 'Short of stock',
+      operands: { [fieldId]: type },
+      mark: { glyph: '!', attribute: 'data-short-mark' },
+    },
+  ];
+}
+
+/** A List's rules in precedence order: the release's own, then the company's. */
+export function listTones(
+  list: SurfaceList,
+  presentation: CompiledPresentation | undefined,
+): EvaluableTone[] {
+  return [
+    ...supplyTones(list),
+    ...(presentation ? evaluableTones(presentation) : []),
+  ];
+}
+
+/**
  * Whether a declared column shows what the row is short of and the row is
- * short (SUPPLY-WARNINGS): such a cell is marked, as the reference marks an
- * exception "!", judged from the server-projected figure alone.
+ * short (SUPPLY-WARNINGS), through the supply's derived tone rule.
  */
 export function shortMarked(
   list: SurfaceList,
   column: DeclaredListColumn,
   record: SemanticRecordDto,
 ): boolean {
-  const supply = list.progress?.supply;
   return (
-    supply !== undefined &&
-    column.field === supply.outputs.short &&
-    somethingSupplied(list, record, 'short')
+    presentRow(supplyTones(list), record.values).cells.get(column.field)
+      ?.mark !== undefined
   );
 }
 

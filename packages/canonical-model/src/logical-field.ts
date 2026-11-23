@@ -20,7 +20,7 @@ import { z } from 'zod';
  * kinds keeps the bytes the preceding compiler produced.
  */
 // Provisional rung: assigned at merge (MIGRATION-RULE, capability rung rule).
-export const LOGICAL_FIELD_READER = 50;
+export const LOGICAL_FIELD_READER = 48;
 export const LOGICAL_FIELD_TYPES = [
   'decimal',
   'money',

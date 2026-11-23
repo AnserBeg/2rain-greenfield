@@ -2,7 +2,7 @@
 name: ux-grammar
 description: Binding UI/UX grammar for the ERP. Read BEFORE writing or
   reviewing any surface, screen, component, navigation, or builder code, and
-  before designing any compiled SurfaceDefinition output. Covers the six
+  before designing any compiled SurfaceDefinition output. Covers the seven
   screen archetypes, the shell contract, status grammar, responsive/mobile
   transformations, and what customization may never change.
 ---
@@ -19,7 +19,7 @@ requires changing all three deliberately; accidental drift fails CI.
 Users customize content, never grammar. The platform owns a closed set of
 screen archetypes; every module — first-party, generated, or tenant-authored —
 is content rendered inside them. If you are about to build a screen that is
-not one of the six archetypes, stop: you are either wrong about the screen,
+not one of the seven archetypes, stop: you are either wrong about the screen,
 or you are proposing a platform change that needs an ADR.
 
 ## G1 executable contract pin
@@ -31,7 +31,7 @@ promise to render every archetype completely.
 <!-- ux-grammar-contract:start -->
 ```json
 {
-  "archetypes": ["home", "list", "record", "task", "builder", "board"],
+  "archetypes": ["home", "list", "record", "task", "builder", "board", "map"],
   "componentPolicy": "closed-own-entry-only",
   "components": [
     "northstar.shell:component.error_probe",
@@ -44,6 +44,7 @@ promise to render every archetype completely.
   "schemaVersion": "northstar.ux-grammar-pin/v1",
   "slots": {
     "home": ["exceptions", "setupChecklist"],
+    "map": ["title", "savedViews", "mapCanvas", "stopList"],
     "board": ["title", "savedViews", "stageSelector", "columns"],
     "list": ["title", "savedViews", "dataGrid", "bulkActions"],
     "record": [
@@ -75,12 +76,13 @@ its `contentReferenceId`. Module-local content references therefore remain legal
 package data while the platform-owned slot vocabulary controls ordinary List and
 Record rendering.
 
-## The six archetypes
+## The seven archetypes
 
 | Archetype | Fixed anatomy (slots) |
 |---|---|
 | Home | role-shaped exception cards; setup checklist until data exists; never an empty dashboard |
 | List | title; saved-view tabs (chips); spreadsheet-grade grid — sort, filter, all-visible-value search, paging; bulk bar |
+| Map | title, saved-view tabs, map canvas with linked pins, numbered stop list |
 | Board | title; saved-view tabs; stage selector; stage columns with linked cards and a Move card Task |
 | Record | breadcrumb; title + status chip; command bar; key facts; sections and child tables; activity rail |
 | Task | one decision per screen; scan-first input; large targets; sticky bottom primary action |
@@ -432,6 +434,7 @@ per-tenant design:
   bottom sheet; command bar → sticky bottom action bar, primary action
   thumb-reachable;
 - list → priority-ranked cards derived from declared column priority;
+- map → numbered stop cards followed by a labelled map disclosure with the same pins, controls and legend;
 - board → one selected stage, labelled stage selector, linked cards and the full Move card Task;
 - record → stacked key facts, accordion sections, activity as a tab;
 - task → already compact-first; desktop shows the same flow centered;
@@ -460,7 +463,7 @@ must make every new field/entity usable with zero design work.
 
 ## Never build
 
-- a seventh archetype or a bespoke screen outside SurfaceRuntime;
+- an unregistered archetype or a bespoke screen outside SurfaceRuntime;
   (ratified exception, 2026-11-17: `apps/web/src/customize-screen.ts`, local demo only, the §8.5 builder replaces it);
   (owner-ruled exception, 2026-11-17: `apps/web/src/assistant-panel.ts`, the assistant panel, local demo only);
 - module-specific UI dialects, routes, or navigation mega-menus;

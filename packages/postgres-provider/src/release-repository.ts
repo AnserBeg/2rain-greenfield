@@ -1,6 +1,13 @@
 import type { StorageTargetPayloadV1 } from '../../compiler/src/storage.js';
 import { lowerDeclaredReports } from '../../compiler/src/declared-reports.js';
 import { DECLARED_REPORT_READER } from '../../canonical-model/src/declared-report.js';
+import { PRESENTATION_READER } from '../../canonical-model/src/surface-presentation-schema.js';
+import { presentationDeclarationProblem } from './presentation-admission.js';
+import {
+  hasMapDeclaration,
+  mapDeclarationProblem,
+  mapBindingsProblem,
+} from './map-admission.js';
 import {
   BILLING_ALLOCATION_READER,
   BILLING_ARREARS_READER,
@@ -610,10 +617,14 @@ function verifyCompiledRelease(
     layoutDefinition,
   );
   const needsLayout =
+    hasMapDeclaration(layoutDefinition) ||
     (isRecord(layoutDefinition) &&
       Array.isArray(layoutDefinition.surfaces) &&
       layoutDefinition.surfaces.some(
-        (s) => isRecord(s) && Object.hasOwn(s, 'popupActions'),
+        (s) =>
+          isRecord(s) &&
+          (Object.hasOwn(s, 'popupActions') ||
+            Object.hasOwn(s, 'presentation')),
       )) ||
     hasBoardDeclaration(layoutDefinition) ||
     declaredLayouts(isRecord(layoutDefinition) ? layoutDefinition.surfaces : [])
@@ -650,6 +661,22 @@ function verifyCompiledRelease(
     throw integrity(
       'REPORT_READER_MISMATCH',
       'Declared reports and the surface reader floor disagree.',
+    );
+  // UI-CUSTOM-1: declared presentation and its reader floor agree both ways.
+  const hasPresentation =
+    isRecord(layoutDefinition) &&
+    Array.isArray(layoutDefinition.surfaces) &&
+    layoutDefinition.surfaces.some(
+      (s: unknown) => isRecord(s) && Object.hasOwn(s, 'presentation'),
+    );
+  if (
+    hasPresentation
+      ? surfaceFloor < PRESENTATION_READER
+      : surfaceFloor === PRESENTATION_READER
+  )
+    throw integrity(
+      'PRESENTATION_READER_MISMATCH',
+      'Declared presentation and the surface reader floor disagree.',
     );
   const reportInputs = new Map<string, unknown>();
   const sourceTerms = (value: unknown, activeOnly: boolean) => {
@@ -883,6 +910,15 @@ function verifyCompiledRelease(
         projectionPayloadBytes[0]!,
         'PROJECTION_CHUNK_NOT_CANONICAL',
       );
+      const presentationProblem = presentationDeclarationProblem(
+        layoutDefinition,
+        payload,
+      );
+      if (presentationProblem)
+        throw integrity(
+          'PRESENTATION_PROJECTION_CONTRACT_MISMATCH',
+          presentationProblem,
+        );
       const popupProblem = popupDeclarationProblem(
         layoutDefinition,
         payload,
@@ -928,6 +964,7 @@ function verifyCompiledRelease(
           'The billing plan or reader floor disagrees with the release.',
         );
       const problem =
+        mapDeclarationProblem(layoutDefinition, payload) ??
         boardDeclarationProblem(
           layoutDefinition,
           payload,
@@ -944,6 +981,7 @@ function verifyCompiledRelease(
     if (
       needsLayout &&
       [
+        PROJECTION_FAMILY_IDS.connector,
         PROJECTION_FAMILY_IDS.surfaceManifest,
         PROJECTION_FAMILY_IDS.queryCatalog,
         PROJECTION_FAMILY_IDS.operationCatalog,
@@ -1061,6 +1099,12 @@ function verifyCompiledRelease(
     if (popupProblem)
       throw integrity('POPUP_PROJECTION_CONTRACT_MISMATCH', popupProblem);
     const problem =
+      mapBindingsProblem(
+        payload(PROJECTION_FAMILY_IDS.surfaceManifest),
+        surfaceReference!.requiredRuntimeCapability.minimumVersion,
+        payload(PROJECTION_FAMILY_IDS.queryCatalog),
+        payload(PROJECTION_FAMILY_IDS.connector),
+      ) ??
       boardBindingsProblem(
         payload(PROJECTION_FAMILY_IDS.surfaceManifest),
         surfaceReference!.requiredRuntimeCapability.minimumVersion,

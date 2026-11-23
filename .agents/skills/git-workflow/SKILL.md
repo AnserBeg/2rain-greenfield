@@ -71,12 +71,19 @@ description: Branches, commits, the frozen SHA, integration, pushing, worktrees
 
 ## Pre-tenant re-baseline (ADR-0066)
 
-When the storage planner refuses a transition on the first-party application:
-`corepack pnpm --filter @north-star/api dev:reset`, delete
-`apps/web/release/app.compiled.json`, rebuild with `build:app-release`, and
-commit the one-entry lineage with the change that needed it. Tests that pinned
-historical entry counts or positions are updated in the same commit. Say
-`Re-baseline: <reason>` in the commit body.
+When the planner refuses a first-party transition, or the lineage grows costly:
+`corepack pnpm --filter @north-star/web build:app-release -- --pre-tenant-rebaseline`
+(ignores the old file, writes a one-entry v1 lineage), then `corepack pnpm
+check:app-release` and `check:demo-release` (the shell has no lineage), and
+`corepack pnpm --filter @north-star/api dev:reset` for your dev database. ALWAYS
+regenerate `test/postgres/fresh-tenant-full-replay-schema.snapshot.json` after a
+re-baseline (its generator, or the `regen-snapshot` PR label) and commit it if
+it differs. Commit with the change that needed it, body `Re-baseline: <reason>`.
+History claims run on synthetic lineages; read the head with
+`parseCompiledApplication` or `applications ?? [application]`. After a
+planner-refused re-baseline no transition from the predecessor exists: an
+older-reader proof reads the predecessor file from git into one database and
+installs the new head fresh in another (REBASE-1).
 
 ## Safety
 

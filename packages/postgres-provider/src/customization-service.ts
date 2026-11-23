@@ -3324,6 +3324,8 @@ function patchDisplayLabel(patch: CustomizationPatch): string | null {
   if (patch.kind === 'addPopupActionRevision') return patch.label.text;
   if (patch.kind === 'addRatePlanVersion')
     return `${patch.ratePlan.id} (${patch.ratePlan.version})`;
+  if (patch.kind === 'addPresentationRevision')
+    return patch.toneRules.map((rule) => rule.reason.text).join(', ') || null;
   switch (patch.kind) {
     case 'addField':
       return patch.field.label;
@@ -3453,6 +3455,8 @@ export const REPAIRABLE_REFUSAL_CODES: ReadonlySet<string> = new Set([
   'CUSTOMIZE_FIELD_NOT_ON_LIST',
   'CUSTOMIZE_BOARD_CONFLICT',
   'CUSTOMIZE_LAYOUT_CONFLICT',
+  // UI-CUSTOM-1: a colour rule naming a value or column the list lacks.
+  'CUSTOMIZE_PRESENTATION_CONFLICT',
 ] satisfies readonly PatchRefusalCode[]);
 
 export function classifyDraftOutcome(

@@ -23,6 +23,7 @@ import {
   uploadCategoryMember,
 } from './field-member-draft.js';
 import { layoutCommand } from './layout-revision.js';
+import { draftMapRevision } from './map-revision.js';
 import {
   AddDateTimeFieldSchema,
   parseCustomizationPatch,
@@ -30,6 +31,7 @@ import {
 } from './patch.js';
 import type { CustomizationPatch, UnsupportedCustomization } from './patch.js';
 import { popupCommand, popupOptionId } from './popup-revision.js';
+import { presentationMember } from './presentation-revision.js';
 import { customizationTargets, type CustomizationTargets } from './targets.js';
 import {
   fieldComparisonValidationDraft,
@@ -254,6 +256,30 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
           .map((r) => ({ id: r.revision.reportId, label: r.label })),
       }),
     ),
+    ...(targets.presentation?.length
+      ? [
+          'Lists a colour rule or sizing can present (surface, values its rows read with type and options, columns, current rules):',
+          ...targets.presentation.map((t) =>
+            JSON.stringify({
+              surface: t.surfaceId,
+              label: t.label,
+              values: t.operands.map((o) => ({
+                fieldId: o.fieldId,
+                label: o.label,
+                type: o.type.kind,
+                ...(o.options
+                  ? { options: o.options.map((x) => x.label) }
+                  : {}),
+              })),
+              columns: t.columns.map((c) => c.fieldId),
+              current: (t.current?.status === 'active'
+                ? t.current.toneRules
+                : []
+              ).map((r) => r.reason.text),
+            }),
+          ),
+        ]
+      : []),
     ...(targets.popupActions?.length
       ? [
           ...targets.popupActions.map((o) =>
@@ -276,6 +302,18 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
           ),
         ]
       : []),
+    'Map collections (list surface, collection, direct Address fields, route-order fields, group fields, day fields, saved views):',
+    ...(targets.maps ?? []).map((t) =>
+      JSON.stringify({
+        surface: t.frame.listSurfaceId,
+        collection: t.listLabel,
+        addresses: t.addresses,
+        order: t.orders,
+        groups: t.groups,
+        dates: t.dates,
+        savedViews: t.savedViews,
+      }),
+    ),
     'Board collections (list surface, stages, moves by operation ID, facts by field ID):',
     ...(targets.boards ?? []).map(
       (t) =>
@@ -628,6 +666,8 @@ function convertMember(
         ),
       ];
     }
+    case 'addPresentationRevision':
+      return [presentationMember(local().presentation ?? [], input)];
     case 'addPopupActionRevision':
       return [popupCommand(base.popupActions ?? [], req.button)];
     case 'addBoardViewRevision':
@@ -639,6 +679,8 @@ function convertMember(
     }
     case 'addMapPlacement':
       return [mapMember(req, local(), prior)];
+    case 'addMapViewRevision':
+      return [mapViewMember(req, base)];
     case 'addDocumentField': {
       if (typeof req.entity !== 'string' || typeof req.label !== 'string')
         throw new Error('A files field names a record type and a label.');
@@ -729,6 +771,21 @@ function boardMember(
       ? req.factFieldIds
       : offered.factFieldIds,
   });
+}
+
+function mapViewMember(
+  req: Record<string, unknown>,
+  targets: CustomizationTargets,
+) {
+  const target = targets.maps?.find(
+    (t) => t.frame.listSurfaceId === req.surface,
+  );
+  if (!target)
+    throw new Error('Choose a listed map collection with a direct Address.');
+  return draftMapRevision(
+    target,
+    req as Parameters<typeof draftMapRevision>[1],
+  );
 }
 
 function mapMember(

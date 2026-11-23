@@ -2,6 +2,8 @@
 
 Slice 0 established the connector contract. Slice 1 delivers Address and Maps. The owner sequenced the shared writer first in slice 2 to unblock COMMS-1 and COMMS-2. The email-action member follows with its own reader rung and replay test. [ADR-0080](../../decisions/ADR-0080-connector-framework.md) · [ADR-0088 R11](../../decisions/ADR-0088-governed-communications-and-reminders.md#amendments-from-the-2026-11-20-fable-read)
 
+On 2026-11-21 the owner assigned PLANNER-1 the viewport contract and imagery adapter seam inside this framework while CONNECT-1 is inactive. Address configuration and credentials retain their existing writers and scope. The owner selected Google Maps JS for live viewport display and a dedicated HTTP-referrer-restricted browser key. CI uses Demo Maps.
+
 ## Claims and decisions
 
 1. A business user adds one Address field and places its map on an eligible office or tenant-authored record. An address requires surface reader 31 and a separate map placement requires 32.
