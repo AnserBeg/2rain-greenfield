@@ -73,6 +73,24 @@
           "expected": "Missing expected rejection"
         }
       ]
+    },
+    {
+      "name": "archived-probe-ledger-level",
+      "claim": "An archived tree's Customize service opens a database migrated past it only because the probe presents the ledger at that tree's own level; without the bridge its migrate() refuses the later migration by name.",
+      "file": "test/helpers/archived-runtime-process.ts",
+      "original": "      const restore = databaseUrl\n",
+      "replacement": "      const restore = false\n",
+      "test": {
+        "files": ["test/postgres/customization-inspection.test.ts"],
+        "namePattern": "^one inspection change activates linked records and owned lines, and an assistant transition needs a yes$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/customization-inspection.test.ts",
+          "name": "one inspection change activates linked records and owned lines, and an assistant transition needs a yes",
+          "expected": "MigrationDriftError"
+        }
+      ]
     }
   ]
 }
