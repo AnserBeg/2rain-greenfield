@@ -18,7 +18,7 @@ import {
 } from '../../packages/canonical-model/src/record-template.js';
 
 // Update to the actual immediately preceding serving tip when the train is integrated.
-const preceding = '37bfd47311c58060000cebca49d5f55174e3874a';
+const preceding = 'd8aad66b3e6ee6231b0580f2702c26d116f5a68c';
 
 // Names what differs when a persisted release root disagrees with the
 // archived compile: the normalized-definition paths and the artifacts held by
@@ -146,7 +146,7 @@ let loaderRefusal;
 const boot=async()=>{
  const p=await readVerifiedServing(pool,ctx);
  const serving=await loadServingRelease(pool,ctx,p.releaseId);
- const gates=composeServingGateways(pool,pool,ctx,serving,new ObservabilityMetrics(),{providerErrorMappings:[]});
+ const gates=composeServingGateways(pool,pool,ctx,serving,new ObservabilityMetrics(),{providerErrorMappings:[],writeInvariants:[]});
  const loader=new PostgresRequestRuntimeViewService(pool);
  // Request entry redacts detailed loader diagnostics. Observe and rethrow the same error.
  const observedLoader={load:async context=>{
@@ -213,7 +213,7 @@ export async function exercisePrecedingReader(input: {
   }
   await withArchivedCustomizationRuntime(preceding, async (run) => {
     const base = (await run(
-      `import {readFile} from 'node:fs/promises';const file=JSON.parse(await readFile('apps/web/release/app.compiled.json','utf8'));console.log(JSON.stringify(file.applications.at(-1)??file.bootstrap));`,
+      `import {readFile} from 'node:fs/promises';const file=JSON.parse(await readFile('apps/web/release/app.compiled.json','utf8'));console.log(JSON.stringify(file.applications?.at(-1)??file.application));`,
       null,
     )) as SerializedRelease;
     await assertPersisted(pool, input.firstPartyId, base);
