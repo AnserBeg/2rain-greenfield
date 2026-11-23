@@ -237,7 +237,28 @@ test('added fields reuse one unit spelling and name a stored currency by ID', as
       currency: { kind: 'stored', fieldId: f('currency') },
     },
   };
-  const { surface } = surfaceOf(await compile([shipmentType, volume, fee]));
+  const billing = {
+    kind: 'changeSet',
+    patches: [
+      {
+        kind: 'addField',
+        entity: shipment,
+        field: { label: 'Billing currency', type: 'currency' },
+      },
+      {
+        kind: 'addField',
+        entity: shipment,
+        field: {
+          label: 'Duty',
+          type: 'money',
+          currency: { kind: 'stored', fieldLabel: 'Billing currency' },
+        },
+      },
+    ],
+  };
+  const { surface } = surfaceOf(
+    await compile([shipmentType, volume, fee, billing]),
+  );
   const bindings = surface.payload.logicalFieldBindings as Forged[];
   assert.deepEqual(bindings.find((b) => b.fieldId === f('volume'))!.unit, {
     unitId: `${NS}:capability.unit_m3`,
@@ -246,6 +267,10 @@ test('added fields reuse one unit spelling and name a stored currency by ID', as
   assert.equal(
     bindings.find((b) => b.fieldId === f('fee'))!.currency.fieldId,
     f('currency'),
+  );
+  assert.equal(
+    bindings.find((b) => b.fieldId === f('duty'))!.currency.fieldId,
+    f('billing_currency'),
   );
   // Removing the one-spelling check in declareLogicalFields reds this.
   const tare = customization.applyCustomizationPatches(base, [

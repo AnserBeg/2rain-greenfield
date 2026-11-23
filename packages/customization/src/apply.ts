@@ -1164,7 +1164,10 @@ function addRecordType(
       // The first field names the record: always present, searchable.
       ...(index === 0 ? { required: true } : {}),
       orderKey: (index + 1) * 10,
-      searchable: index === 0,
+      // A currency code is searchable too: a 3-character value is a
+      // substring of the record name's search text, so it cannot be held
+      // out of search, and finding records by their currency is wanted.
+      searchable: index === 0 || field.type === 'currency',
     }),
   );
   const fieldIds = fieldDefinitions.map((field) => String(field.fieldId));
@@ -2126,7 +2129,7 @@ function addField(
             0,
             ...siblings.map((candidate) => Number(candidate.orderKey)),
           ) + 10,
-        searchable: false,
+        searchable: field.type === 'currency',
       }),
     );
   if (!bindExisting && !address && !dateTime) {
