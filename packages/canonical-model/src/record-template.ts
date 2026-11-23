@@ -198,16 +198,13 @@ export function recordTemplateOffers(
       const type = obj(field.fieldType);
       const kind = column.shape.fieldType.safeParse(type.kind);
       if (!kind.success) return [];
-      const { options, ...contract } = type;
-      // An enum relabel preserves its stable option IDs. Order belongs to the UI.
-      const fieldContract = options
-        ? {
-            ...contract,
-            options: rows(options)
-              .map((o) => String(o.optionId))
-              .sort(),
-          }
-        : contract;
+      // The option set is not pinned (rule 10, most general form): each
+      // template revision pins its own choice IDs and meanings, and applying a
+      // revision that names a removed option refuses by name in the stored
+      // worker (template.invalidChoice / template.invalidDefault). Adding a
+      // choice to a bound column therefore strands no template or assignment.
+      const { options, ...fieldContract } = type;
+      void options;
       return [
         {
           fieldId: String(field.fieldId),

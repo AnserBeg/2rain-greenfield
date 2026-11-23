@@ -763,6 +763,65 @@ test('record template bindings reproduce their authoring root and survive indepe
     );
   }
 });
+test('rule 10: a new choice on a bound choice column compiles with the binding active and retired', async () => {
+  const resultsBase = applied(extended, [
+    {
+      kind: 'addLineTable',
+      entity: equipment,
+      label: 'Results',
+      fields: [
+        { label: 'Caption', type: 'text' },
+        { label: 'Result', type: 'choice', options: ['Pass', 'Fail', 'N/A'] },
+      ],
+    },
+  ]);
+  const offer = customization
+    .customizationTargets(normalizeApplicationPackage(resultsBase))
+    .templateBindings!.find((o) => o.frame.entityId === equipment)!;
+  const result = offer.columns.find((c) => c.label === 'Result')!.fieldId;
+  const choices = (lifecycle: 'active' | 'retired') => ({
+    formId: offer.frame.formId,
+    lifecycle,
+    required: true,
+    contextId: null,
+    fields: offer.columns.map((c) => ({
+      fieldId: c.fieldId,
+      copyEligible: true,
+    })),
+  });
+  const active = customization.draftTemplateBinding([offer], choices('active'));
+  const retired = customization.draftTemplateBinding(
+    [{ ...offer, previous: active }],
+    choices('retired'),
+  );
+  const addChoice = {
+    kind: 'addChoice',
+    enumField: result,
+    option: 'Deferred',
+  };
+  for (const state of [[active], [active, retired]]) {
+    const compiled = await customization.compileInSandbox({
+      acknowledgement,
+      base: resultsBase,
+      chain: [...state, addChoice].map(patch),
+      tip: customization.serializeRelease(tip),
+    });
+    assert.ok(
+      compiled.status === 'compiled',
+      `${state.length === 1 ? 'active' : 'retired'}: ${JSON.stringify(compiled.status === 'compiled' ? null : compiled).slice(0, 1500)}`,
+    );
+  }
+  // The binding still matches its offer after the choice: nothing to re-review.
+  const after = customization
+    .customizationTargets(
+      normalizeApplicationPackage(applied(resultsBase, [active, addChoice])),
+    )
+    .templateBindings!.find((o) => o.frame.entityId === equipment)!;
+  assert.deepEqual(
+    after.columns.map((c) => c.contract),
+    offer.columns.map((c) => c.contract),
+  );
+});
 test('a record template binding compiles beside a validation rule in either order, and after it retires', async () => {
   const active = cases.addRecordTemplateBindingRevision.change;
   const retired = customization.draftTemplateBinding(
