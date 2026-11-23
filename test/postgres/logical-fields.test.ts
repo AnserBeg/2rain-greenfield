@@ -17,6 +17,7 @@ import {
   type SerializedRelease,
 } from '../../packages/customization/src/index.js';
 import { COMPANY, worldOver } from '../agent/agent-world.js';
+import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../packages/runtime/src/semantic-query-gateway.js';
 import { withArchivedCustomizationRuntime } from '../helpers/archived-runtime-process.js';
 import {
   LINEAGE_INSTALL_VOLUME,
@@ -214,6 +215,93 @@ test(
             'CAD',
             '900',
           );
+          // An unlisted or lower-case code is refused on write by the
+          // currency field's own rule, never summed as "No currency".
+          for (const code of ['GBP', 'cad']) {
+            const refusedWrite = await world.invoke('custom_shipment_create', {
+              recordId: randomUUID(),
+              legalEntityId: COMPANY,
+              values: {
+                [field('name')]: `Refused ${code}`,
+                [field('currency')]: code,
+                [field('freight')]: '5',
+              },
+            });
+            assert.notEqual(refusedWrite.outcome, 'succeeded', code);
+            assert.match(
+              JSON.stringify(refusedWrite),
+              /Choose CAD, USD or EUR/u,
+              code,
+            );
+          }
+
+          // The record form posts money and quantities as people type them
+          // and keeps a note's leading blank line, with CRLF as one break.
+          const formUrl = new URL(app.baseUrl);
+          formUrl.searchParams.set(
+            'surface',
+            `${ns}:surface.custom_shipment_form`,
+          );
+          formUrl.searchParams.set(
+            `${ns}:parameter.custom_shipment_list_legal_entity_scope`,
+            COMPANY,
+          );
+          const headers = {
+            cookie: 'northstar-demo-actor=manager',
+            origin: formUrl.origin,
+          };
+          const formPage = await (await fetch(formUrl, { headers })).text();
+          const formMatch =
+            /<form id="surface-record-form" method="post" action="([^"]*)">([\s\S]*?)<\/form>/u.exec(
+              formPage,
+            );
+          assert.ok(formMatch, formPage.slice(0, 1500));
+          const body = new URLSearchParams();
+          for (const [input] of formMatch[2]!.matchAll(/<input\b[^>]*>/gu)) {
+            const name = /\bname="([^"]+)"/u.exec(input)?.[1];
+            if (name)
+              body.set(name, /\bvalue="([^"]*)"/u.exec(input)?.[1] ?? '');
+          }
+          for (const [, name, options] of formMatch[2]!.matchAll(
+            /<select\b[^>]*\bname="([^"]+)"[^>]*>([\s\S]*?)<\/select>/gu,
+          )) {
+            const chosen =
+              /<option value="([^"]*)" selected>/u.exec(options!) ??
+              /<option value="([^"]*)"/u.exec(options!);
+            if (chosen) body.set(name!, chosen[1]!);
+          }
+          assert.match(
+            formMatch[2]!,
+            /<textarea[^>]*maxlength="4000"[^>]*>\n<\/textarea>/u,
+          );
+          body.set(`value:${field('name')}`, 'Typed');
+          body.set(`value:${field('weight')}`, '12.500');
+          body.set(`value:${field('currency')}`, 'USD');
+          body.set(`value:${field('freight')}`, '19.90');
+          body.set(`value:${field('deposit')}`, '1250.00');
+          body.set(`value:${field('notes')}`, '\r\nFirst\r\nSecond');
+          const posted = await fetch(
+            new URL(formMatch[1]!.replaceAll('&amp;', '&'), formUrl),
+            { method: 'POST', headers, body },
+          );
+          const postedHtml = await posted.text();
+          assert.equal(posted.status, 200, postedHtml.slice(-1500));
+          const typedId = body.get('recordId')!;
+          const typed = await app.runtime.entry.run(
+            { headers },
+            async (view) =>
+              (
+                await app.runtime.queryGateway.invoke(view, {
+                  schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+                  queryId: `${ns}:query.custom_shipment_get`,
+                  arguments: { recordId: typedId },
+                })
+              ).records[0]!,
+          );
+          assert.equal(typed.values[field('weight')], '12.5');
+          assert.equal(typed.values[field('freight')], '19.9');
+          assert.equal(typed.values[field('deposit')], '1250');
+          assert.equal(typed.values[field('notes')], '\nFirst\nSecond');
 
           const url = new URL(app.baseUrl);
           url.searchParams.set('surface', list);
@@ -277,14 +365,24 @@ test(
           const page = await sum(COMPANY);
           assert.ok(page.kind === 'page', JSON.stringify(page));
           assert.deepEqual(
-            page.totals.map((t) => [t.partition, Number(t.cells[0]!.value)]),
+            page.totals.map((t) => [t.partition, t.cells[0]!.value]),
             [
-              [{ kind: 'currency', code: 'CAD' }, 101],
-              [{ kind: 'currency', code: 'USD' }, 40],
+              [{ kind: 'currency', code: 'CAD' }, '101.00'],
+              [{ kind: 'currency', code: 'USD' }, '59.90'],
             ],
           );
           // The company check alone refuses South for the North principal.
-          assert.notEqual((await sum(south)).kind, 'page');
+          assert.deepEqual(await sum(south), { kind: 'unavailable' });
+          // And the North principal's list for South shows none of South's rows.
+          const southUrl = new URL(app.baseUrl);
+          southUrl.searchParams.set('surface', list);
+          southUrl.searchParams.set(
+            `${ns}:parameter.custom_shipment_list_legal_entity_scope`,
+            south,
+          );
+          const southHtml = await (await fetch(southUrl)).text();
+          assert.doesNotMatch(southHtml, /Southern pallets/u);
+          assert.doesNotMatch(southHtml, new RegExp(southern.recordId, 'u'));
         } finally {
           await opened.close();
           await app.close();

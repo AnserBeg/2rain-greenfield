@@ -229,6 +229,7 @@ interface ScoredLogicalBinding {
   readonly logicalType: string;
   readonly currency?: { readonly kind: string; readonly currencyCode?: string };
   readonly unit?: { readonly label: string };
+  readonly scale?: number;
 }
 
 /** The served surface manifest's logical field bindings, by field ID. */
@@ -262,6 +263,8 @@ export function logicalMismatch(
     if (found !== wanted.currency)
       return `has currency ${String(found)}, expected ${wanted.currency}`;
   }
+  if (wanted.scale !== undefined && binding.scale !== wanted.scale)
+    return `has scale ${String(binding.scale)}, expected ${String(wanted.scale)}`;
   if (
     wanted.unit &&
     !wanted.unit.some(

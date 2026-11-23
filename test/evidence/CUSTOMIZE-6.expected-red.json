@@ -14,8 +14,8 @@
       "kills": [
         {
           "file": "test/unit/logical-field.test.ts",
-          "name": "serving admission recomputes the bindings and refuses a disagreement, a stray binding and an understated floor",
-          "expected": "disagree"
+          "name": "serving refuses surface bindings that disagree with the recomputed ones",
+          "expected": "a widened scale was served"
         }
       ]
     },
@@ -31,8 +31,8 @@
       "kills": [
         {
           "file": "test/unit/logical-field.test.ts",
-          "name": "serving admission recomputes the bindings and refuses a disagreement, a stray binding and an understated floor",
-          "expected": "need the logical field surface reader floor"
+          "name": "serving refuses a declaration below its reader rung and a rung without one",
+          "expected": "a declaration was served below its rung"
         }
       ]
     },
@@ -48,8 +48,8 @@
       "kills": [
         {
           "file": "test/unit/logical-field.test.ts",
-          "name": "the compiler refuses a forged declaration by field",
-          "expected": "strictly unequal to"
+          "name": "the compiler refuses a currency code compared case-insensitively",
+          "expected": "a case-insensitive currency code compiled"
         }
       ]
     },
@@ -65,8 +65,8 @@
       "kills": [
         {
           "file": "test/unit/logical-field.test.ts",
-          "name": "the compiler refuses a forged declaration by field",
-          "expected": "strictly unequal to"
+          "name": "the compiler refuses a logical field on a first-party record type",
+          "expected": "a first-party logical field compiled"
         }
       ]
     },
@@ -82,8 +82,8 @@
       "kills": [
         {
           "file": "test/unit/logical-field.test.ts",
-          "name": "formula validation and calculated displays read tenant money in its own currency",
-          "expected": "CAD"
+          "name": "formula validation types tenant money in its fixed currency",
+          "expected": "tenant money lost its currency"
         }
       ]
     },
@@ -99,8 +99,110 @@
       "kills": [
         {
           "file": "test/unit/logical-field.test.ts",
-          "name": "web controls keep paragraphs, offer only accepted currency codes and step by scale",
-          "expected": "false"
+          "name": "a long-text control keeps paragraphs and a leading blank line",
+          "expected": "a paragraph value was flagged unavailable"
+        }
+      ]
+    },
+    {
+      "name": "logical-currency-rule-dropped",
+      "claim": "A currency field carries a write-time rule refusing codes outside CAD, USD and EUR.",
+      "file": "packages/customization/src/apply.ts",
+      "original": "  if (!fieldIds.length) return;",
+      "replacement": "  return;",
+      "test": {
+        "files": ["test/unit/logical-field.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/logical-field.test.ts",
+          "name": "a currency field refuses unlisted codes on write and is searchable",
+          "expected": "the currency field carries its code rule"
+        }
+      ]
+    },
+    {
+      "name": "logical-unlisted-code-shown",
+      "claim": "A list shows a stored currency code only when the money field's binding lists it.",
+      "file": "apps/web/src/surface-composition.ts",
+      "original": "    (logical.currency.codes as readonly string[]).includes(stored)",
+      "replacement": "    true",
+      "test": {
+        "files": ["test/unit/logical-field.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/logical-field.test.ts",
+          "name": "a scaled number steps by its scale and shows its unit; money shows only a listed code",
+          "expected": "no listed currency"
+        }
+      ]
+    },
+    {
+      "name": "logical-retired-amount-validated",
+      "claim": "A retired money field left in the report source does not fail later compiles (rule 10).",
+      "file": "packages/canonical-model/src/normalize.ts",
+      "original": "        retired.lifecycle === 'retired' &&",
+      "replacement": "        retired.lifecycle === 'never' &&",
+      "test": {
+        "files": ["test/unit/logical-field.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/logical-field.test.ts",
+          "name": "with logical fields active and after they retire, adding a field and arranging the list still compile",
+          "expected": "CANON_REPORT_SOURCE_INVALID"
+        }
+      ]
+    },
+    {
+      "name": "logical-approval-text-generic",
+      "claim": "The approval text names each logical field's currency, unit and scale.",
+      "file": "packages/customization/src/render.ts",
+      "original": "  if (logical) {",
+      "replacement": "  if (false) {",
+      "test": {
+        "files": ["test/unit/logical-field.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/logical-field.test.ts",
+          "name": "the approval text names each field's currency, unit and scale",
+          "expected": "the approval text lacks"
+        }
+      ]
+    },
+    {
+      "name": "logical-activation-bindings-unchecked",
+      "claim": "Activation refuses a release whose surface bindings disagree with its revision.",
+      "file": "packages/postgres-provider/src/release-repository.ts",
+      "original": "      if (logicalProblem)",
+      "replacement": "      if (false)",
+      "test": {
+        "files": ["test/postgres/releases.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/releases.test.ts",
+          "name": "release admission refuses logical field bindings or a reader floor that disagree with the declaration",
+          "expected": "a widened scale"
+        }
+      ]
+    },
+    {
+      "name": "logical-activation-floor-unchecked",
+      "claim": "Activation refuses a logical declaration whose surface floor is below its rung, or the rung without one.",
+      "file": "packages/postgres-provider/src/release-repository.ts",
+      "original": "    hasLogicalFields\n      ? surfaceFloor < LOGICAL_FIELD_READER\n      : surfaceFloor === LOGICAL_FIELD_READER",
+      "replacement": "    hasLogicalFields\n      ? surfaceFloor < 0\n      : surfaceFloor === LOGICAL_FIELD_READER",
+      "test": {
+        "files": ["test/postgres/releases.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/releases.test.ts",
+          "name": "release admission refuses logical field bindings or a reader floor that disagree with the declaration",
+          "expected": "an understated floor"
         }
       ]
     }

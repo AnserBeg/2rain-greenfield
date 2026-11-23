@@ -37,6 +37,8 @@ export interface FieldSpec {
   readonly currency?: string;
   /** Quantity: accepted spellings of its unit label. */
   readonly unit?: readonly string[];
+  /** Decimal or quantity: the digits after the point the request asks for. */
+  readonly scale?: number;
 }
 
 export interface TypeSpec {
@@ -189,17 +191,21 @@ const choice = (
   names: readonly string[],
   options: readonly (readonly string[])[],
 ): FieldSpec => ({ names, type: 'choice', options });
-const decimal = (...names: string[]): FieldSpec => ({ names, type: 'decimal' });
+const decimal = (scale: number, ...names: string[]): FieldSpec => ({
+  names,
+  type: 'decimal',
+  scale,
+});
 const money = (currency: string, ...names: string[]): FieldSpec => ({
   names,
   type: 'money',
   currency,
 });
-const quantity = (unit: readonly string[], ...names: string[]): FieldSpec => ({
-  names,
-  type: 'quantity',
-  unit,
-});
+const quantity = (
+  unit: readonly string[],
+  scale: number,
+  ...names: string[]
+): FieldSpec => ({ names, type: 'quantity', unit, scale });
 const longText = (...names: string[]): FieldSpec => ({
   names,
   type: 'longText',
@@ -1265,7 +1271,7 @@ export const BUILD_CASES: readonly BuildCase[] = [
           fields: [
             text('contract', 'name'),
             money('CAD', 'deposit', 'security deposit'),
-            decimal('daily rate', 'rate'),
+            decimal(4, 'daily rate', 'rate'),
           ],
         },
       ],
@@ -1285,7 +1291,12 @@ export const BUILD_CASES: readonly BuildCase[] = [
           names: ['shipment'],
           fields: [
             text('reference'),
-            quantity(['kg', 'kilogram', 'kilograms'], 'gross weight', 'weight'),
+            quantity(
+              ['kg', 'kilogram', 'kilograms'],
+              3,
+              'gross weight',
+              'weight',
+            ),
             number('pallets', 'number of pallets', 'pallet count'),
           ],
         },
