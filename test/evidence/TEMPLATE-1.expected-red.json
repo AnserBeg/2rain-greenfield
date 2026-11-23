@@ -16,7 +16,7 @@
         {
           "file": "test/postgres/record-template-library.test.ts",
           "name": "publish and assign company templates for inspections, print tickets and school enrolments",
-          "expected": "MODULE_SEMANTIC_CONTRACT_UNSUPPORTED"
+          "expected": "Creation from this record template requires a current reviewed application."
         }
       ]
     },
