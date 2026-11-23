@@ -1,8 +1,16 @@
 /**
  * Only a revision-checked O0 patch can run before confirmation, and only for
- * fields whose owner declares them safe to change at once (AI-UNDO-1). The
- * policy names no record type or field: the owning capability supplies the
- * declaration at product assembly, and a field nobody declares asks.
+ * fields that have a value inverse and no consumer the release cannot see
+ * (AI-UNDO-1, owner ruling 2026-11-22). The policy names no record type or
+ * field:
+ * - a record type a capability owns acts at once only on the fields that
+ *   capability declares at product assembly (its code is a consumer the
+ *   release cannot see), less any the release's own consumers read;
+ * - a record type no capability owns acts at once only on the fields the
+ *   release's compiled reversibility declaration classes `exact`, inverse
+ *   `restorePriorValues`, reach `record` (no gate, no consumer, no guarded
+ *   writer, no declared confirmation);
+ * - a field nobody declares, or a release without the declaration, asks.
  */
 import type { RegisteredOperationDefinition } from '../../runtime/src/semantic-operation-gateway.js';
 import type {
@@ -90,13 +98,42 @@ export function operationRisk(
         reason: 'This changes something that always needs your OK.',
       };
     // The owner of the record type decides which of its fields may change at
-    // once; a type no capability owns has no such declaration yet (the
-    // release's own derivation is not emitted), so it asks.
+    // once. A type no capability owns follows the release's own compiled
+    // declaration, which never loosens an owned type.
     const owner = immediateEdits.find((declaration) =>
       declaration.ownedEntityIds.includes(entity),
     );
-    const declared = new Map(
-      (owner?.immediateFields ?? []).map((field) => [field.fieldId, field]),
+    const compiled = catalog.reversibility.get(operation.operationId);
+    const compiledFields = new Map(
+      (compiled?.fields ?? []).map((field) => [field.fieldId, field]),
+    );
+    const declared = new Map<string, { readonly holdsWhile?: HoldsWhile }>(
+      owner
+        ? // A consumer the release declares (a tenant workflow, rule or
+          // billing plan reading the field) still makes an owned field ask.
+          owner.immediateFields.flatMap((field) =>
+            compiledFields
+              .get(field.fieldId)
+              ?.because.includes('readByConsumer')
+              ? []
+              : [[field.fieldId, field] as const],
+          )
+        : writtenFieldIds.flatMap((fieldId) => {
+            const field = compiledFields.get(fieldId);
+            return field &&
+              field.undo === 'exact' &&
+              field.inverse === 'restorePriorValues' &&
+              field.reach === 'record'
+              ? [
+                  [
+                    fieldId,
+                    compiled?.holdsWhile
+                      ? { holdsWhile: compiled.holdsWhile }
+                      : {},
+                  ],
+                ]
+              : [];
+          }),
     );
     const holdsWhile = writtenFieldIds.flatMap((field) => {
       const condition = declared.get(field)?.holdsWhile;
@@ -105,7 +142,6 @@ export function operationRisk(
     return keys.includes('patch') &&
       keys.includes('expectedRevision') &&
       operation.infrastructure?.optimisticRevision === 'compareAndIncrement' &&
-      owner !== undefined &&
       writtenFieldIds.length > 0 &&
       writtenFieldIds.every((field) => declared.has(field) && fields.has(field))
       ? {

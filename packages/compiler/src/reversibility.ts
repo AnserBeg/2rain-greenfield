@@ -43,14 +43,15 @@ interface CatalogOperation {
 /** The parts of the normalized release the derivation reads. */
 export interface ReversibilitySource {
   /**
-   * Declared consumers that can act on a value after reading it: workflows
-   * (triggers and steps), validation rules and calculated fields. Restoring a
-   * value does not undo what a consumer did, so a field any of them reads
-   * asks (owner ruling, 2026-11-22).
+   * Every other release member is a declared consumer that can act on a
+   * value after reading it: workflows (triggers and steps), validation
+   * rules, calculated fields, billing plans, document templates, connector
+   * bindings, and any member a later language adds. Restoring a value does
+   * not undo what a consumer did, so a field any of them reads asks (owner
+   * ruling, 2026-11-22). Only the members in `PASSIVE_RELEASE_MEMBERS` are
+   * known not to act on a value.
    */
-  readonly workflows?: unknown;
-  readonly formulaRules?: unknown;
-  readonly calculatedDisplayFields?: unknown;
+  readonly [member: string]: unknown;
   readonly fields: readonly {
     readonly fieldId: string;
     readonly entity: { readonly targetId: string };
@@ -104,6 +105,38 @@ function fieldsRead(tree: unknown, into: Set<string>): Set<string> {
 
 const REDACTED_CLASSIFICATIONS = new Set(['confidential', 'restricted']);
 
+/**
+ * Release members that define, store, show or verify a record but never act
+ * on a value they read. Every member not listed counts as a consumer (fail
+ * closed), so a member a later language adds makes the fields it names ask
+ * until it is reviewed into this list. `operations` is read separately: a
+ * precondition that reads a field makes it a gate.
+ */
+export const PASSIVE_RELEASE_MEMBERS: ReadonlySet<string> = new Set([
+  'assertions',
+  'canonicalizationProfileVersion',
+  'capabilityRequirements',
+  'dateTimeFields',
+  'entities',
+  'fields',
+  'hashAlgorithm',
+  'impactAnalyses',
+  'kind',
+  'languageVersion',
+  'mapPlacements',
+  'modules',
+  'normalizationProfileVersion',
+  'operations',
+  'package',
+  'permissions',
+  'queries',
+  'relations',
+  'schemaVersion',
+  'stateMachines',
+  'storageMappings',
+  'surfaces',
+]);
+
 export function deriveReversibility(
   catalogOperations: readonly CatalogOperation[],
   release: ReversibilitySource,
@@ -143,11 +176,11 @@ export function deriveReversibility(
     else if (tree && typeof tree === 'object')
       for (const value of Object.values(tree)) collect(value);
   };
-  collect([
-    release.workflows,
-    release.formulaRules,
-    release.calculatedDisplayFields,
-  ]);
+  collect(
+    Object.entries(release)
+      .filter(([member]) => !PASSIVE_RELEASE_MEMBERS.has(member))
+      .map(([, value]) => value),
+  );
 
   // A field another operation of the record type writes only with a yes (or
   // at a higher tier) is guarded: changing it, or putting it back, needs that

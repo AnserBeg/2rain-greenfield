@@ -1,5 +1,8 @@
 import { firstPartyImmediateEdits } from '../../packages/domain/src/app/immediate-edits.js';
-import type { ImmediateEditDeclaration } from '../../packages/canonical-model/src/reversibility.js';
+import type {
+  ImmediateEditDeclaration,
+  ReversibilityDeclaration,
+} from '../../packages/canonical-model/src/reversibility.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -2100,16 +2103,72 @@ test('AI-UNDO-1: a release without the credit-hold declaration still asks (an ol
  * and visit checks are the first-party parties and stock counts renamed. Its
  * act-or-ask outcome comes from its own capability's declaration alone.
  */
-function clinicView(): RequestRuntimeView {
-  const view = compiledAppView('manager');
-  const renamed = JSON.parse(
-    JSON.stringify(view.projections)
-      .replaceAll('northstar.app:', 'clinic.care:')
-      .replaceAll('stock_count', 'visit_check')
-      .replaceAll('party', 'patient'),
-  ) as RequestRuntimeView['projections'];
-  return { ...view, projections: renamed };
+function clinicView(
+  declaration: (
+    emitted: ReversibilityDeclaration,
+  ) => ReversibilityDeclaration | undefined = (emitted) => emitted,
+): RequestRuntimeView {
+  return withDeclaration(
+    (() => {
+      const view = compiledAppView('manager');
+      const renamed = JSON.parse(
+        JSON.stringify(view.projections)
+          .replaceAll('northstar.app:', 'clinic.care:')
+          .replaceAll('stock_count', 'visit_check')
+          .replaceAll('party', 'patient'),
+      ) as RequestRuntimeView['projections'];
+      return { ...view, projections: renamed };
+    })(),
+    declaration,
+  );
 }
+
+/** The view with its emitted reversibility declaration edited, or removed. */
+function withDeclaration(
+  view: RequestRuntimeView,
+  edit: (
+    emitted: ReversibilityDeclaration,
+  ) => ReversibilityDeclaration | undefined,
+): RequestRuntimeView {
+  const agent = view.projections.agent;
+  const { reversibility, ...rest } = agent.payload as unknown as {
+    reversibility: ReversibilityDeclaration;
+  };
+  const edited = edit(reversibility);
+  return {
+    ...view,
+    projections: {
+      ...view.projections,
+      agent: {
+        ...agent,
+        payload: { ...rest, ...(edited ? { reversibility: edited } : {}) },
+      },
+    },
+  } as RequestRuntimeView;
+}
+
+/** The declaration with one field of one operation read by a consumer. */
+const consumed =
+  (operationId: string, fieldId: string) =>
+  (emitted: ReversibilityDeclaration): ReversibilityDeclaration => ({
+    ...emitted,
+    operations: emitted.operations.map((operation) =>
+      operation.operationId !== operationId
+        ? operation
+        : {
+            ...operation,
+            fields: (operation.fields ?? []).map((field) =>
+              field.fieldId !== fieldId
+                ? field
+                : {
+                    ...field,
+                    reach: 'internal' as const,
+                    because: [...field.because, 'readByConsumer' as const],
+                  },
+            ),
+          },
+    ),
+  });
 
 const CLINIC = 'clinic.care';
 const CLINIC_EDITS: readonly ImmediateEditDeclaration[] = [
@@ -2146,8 +2205,8 @@ async function clinicClass(
   patch: Record<string, string>,
   values: Record<string, string> = {},
   parent?: string,
+  view: RequestRuntimeView = clinicView(),
 ): Promise<string> {
-  const view = clinicView();
   const { session, state } = guardedSession(
     new Set(),
     [],
@@ -2188,13 +2247,16 @@ test('AI-UNDO-1 second application: a clinic acts at once only on what its own c
     await clinicClass(CLINIC_EDITS, 'patient_update', { name: 'Bo' }, name),
     'needsYes',
   );
-  // The first-party declarations name nothing in the clinic.
+  // The first-party declarations name nothing in the clinic: on a clinic
+  // release without its compiled declaration, the patient type asks.
   assert.equal(
     await clinicClass(
       firstPartyImmediateEdits(),
       'patient_update',
       { contact_summary: 'Ann' },
       contact,
+      undefined,
+      clinicView(() => undefined),
     ),
     'needsYes',
   );
@@ -2244,14 +2306,118 @@ test('AI-UNDO-1 second application: a line acts at once only while its declared 
   );
 });
 
-test('AI-UNDO-1 second application: a record type no capability owns asks until its release declares it', async () => {
+test("AI-UNDO-1 second application: a record type no capability owns follows its release's compiled declaration", async () => {
   // The clinic's item type is owned by no declaration here.
+  const item = { [`${CLINIC}:field.item_name`]: 'Old' };
+  assert.equal(
+    await clinicClass(CLINIC_EDITS, 'item_update', { name: 'Gauze' }, item),
+    'reversible',
+  );
+  // The same edit on a release that carries no declaration (an older
+  // release) asks: absence is the worst case.
   assert.equal(
     await clinicClass(
       CLINIC_EDITS,
       'item_update',
       { name: 'Gauze' },
-      { [`${CLINIC}:field.item_name`]: 'Old' },
+      item,
+      undefined,
+      clinicView(() => undefined),
+    ),
+    'needsYes',
+  );
+});
+
+test('AI-UNDO-1 second application: an unowned line follows the compiled parent condition', async () => {
+  // Only the patient type is owned here, so the visit-check line follows the
+  // release's own declaration, whose parent condition is the check's draft.
+  const patientsOnly: readonly ImmediateEditDeclaration[] = [
+    {
+      ...CLINIC_EDITS[0]!,
+      ownedEntityIds: [`${CLINIC}:entity.patient`],
+      immediateFields: [],
+    },
+  ];
+  const line = `${CLINIC}:field.visit_check_line_counted_quantity`;
+  for (const [stateOption, expected] of [
+    ['draft', 'reversible'],
+    ['reviewed', 'needsYes'],
+  ] as const)
+    assert.equal(
+      await clinicClass(
+        patientsOnly,
+        'visit_check_line_update',
+        { counted_quantity: '12' },
+        {
+          [line]: '10',
+          [`${CLINIC}:field.visit_check_state`]: `${CLINIC}:option.visit_check_state_${stateOption}`,
+        },
+        `${CLINIC}:relation.visit_check_line_session`,
+      ),
+      expected,
+      stateOption,
+    );
+});
+
+test('AI-UNDO-1: a field the release declares a consumer of asks, owned or not (the consumer rule)', async () => {
+  const item = { [`${CLINIC}:field.item_name`]: 'Old' };
+  // Unowned: the compiled class is no longer record-only.
+  assert.equal(
+    await clinicClass(
+      CLINIC_EDITS,
+      'item_update',
+      { name: 'Gauze' },
+      item,
+      undefined,
+      clinicView(
+        consumed(
+          `${CLINIC}:operation.item_update`,
+          `${CLINIC}:field.item_name`,
+        ),
+      ),
+    ),
+    'needsYes',
+  );
+  // Owned and declared safe by its capability: a consumer the release
+  // declares (a tenant workflow reading it) still makes it ask.
+  const contact = { [`${CLINIC}:field.patient_contact_summary`]: 'Old' };
+  assert.equal(
+    await clinicClass(
+      CLINIC_EDITS,
+      'patient_update',
+      { contact_summary: 'Ann' },
+      contact,
+      undefined,
+      clinicView(
+        consumed(
+          `${CLINIC}:operation.patient_update`,
+          `${CLINIC}:field.patient_contact_summary`,
+        ),
+      ),
+    ),
+    'needsYes',
+  );
+});
+
+test('AI-UNDO-1: an owned field its capability does not declare asks though the release classes it record-only', async () => {
+  // The clinic capability owns the patient type and declares only its
+  // contact summary; the compiled class of the name is exact and record-only.
+  const declaration = pinnedCatalog(clinicView()).reversibility.get(
+    `${CLINIC}:operation.patient_update`,
+  );
+  const name = declaration?.fields?.find(
+    (field) => field.fieldId === `${CLINIC}:field.patient_name`,
+  );
+  assert.deepEqual(
+    [name?.undo, name?.inverse, name?.reach],
+    ['exact', 'restorePriorValues', 'record'],
+  );
+  assert.equal(
+    await clinicClass(
+      CLINIC_EDITS,
+      'patient_update',
+      { name: 'Bo' },
+      { [`${CLINIC}:field.patient_name`]: 'Old' },
     ),
     'needsYes',
   );

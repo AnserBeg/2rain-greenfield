@@ -73,6 +73,12 @@ import {
   type FormulaRulePayload,
 } from './formula-validation-plan.js';
 import { hashCanonical } from './hash.js';
+import {
+  deriveReversibility,
+  REVERSIBILITY_AGENT_READER,
+  type ReversibilityDeclaration,
+  type ReversibilitySource,
+} from './reversibility.js';
 import { lowerQueryPredicate } from './predicate-lowering.js';
 import {
   lowerStorageTargetV1,
@@ -280,11 +286,45 @@ export function lowerBaseProjectionPayloads(
       )
       .map((f) => f.fieldId),
   ];
+  const operationCatalog = operationCatalogPayload(
+    packageRevision,
+    currentStorageTarget,
+    compilerSemanticProfileVersion,
+    verificationPackageRevision,
+  );
+  // The reversibility declaration (AI-UNDO-1) needs the compiled input
+  // contracts, which only current-language releases carry. The dispatch
+  // alias's preconditions are placeholders (v3 decoration replaces them), so
+  // the gates and lifecycles come from the authored revision's own.
+  const authoredPreconditions = new Map(
+    verificationPackageRevision.operations.map((operation) => [
+      String(operation.operationId),
+      operation.precondition as unknown,
+    ]),
+  );
+  const reversibility =
+    packageRevision.languageVersion === LANGUAGE_VERSION
+      ? deriveReversibility(
+          (
+            operationCatalog as {
+              operations: Parameters<typeof deriveReversibility>[0];
+            }
+          ).operations.map((operation) => ({
+            ...operation,
+            precondition:
+              authoredPreconditions.get(operation.operationId) ??
+              operation.precondition,
+          })),
+          verificationPackageRevision as unknown as ReversibilitySource,
+          new Set(confirmationRequiredFor),
+        )
+      : undefined;
   const agentCapability =
     runtimeCapabilities[PROJECTION_FAMILY_IDS.agentDiscovery];
   const agentFloor = Math.max(
     agentCapability.minimumVersion,
     confirmationRequiredFor.length > 0 ? 2 : 1,
+    reversibility ? REVERSIBILITY_AGENT_READER : 1,
     hasSavedListLayouts(verificationPackageRevision) ? 3 : 1,
     hasMetrics(verificationPackageRevision) ? 4 : 1,
   );
@@ -329,12 +369,7 @@ export function lowerBaseProjectionPayloads(
       PROJECTION_FAMILY_IDS.operationCatalog,
       namespace,
       packageScope,
-      operationCatalogPayload(
-        packageRevision,
-        currentStorageTarget,
-        compilerSemanticProfileVersion,
-        verificationPackageRevision,
-      ),
+      operationCatalog,
       undefined,
       operationFloor > 1
         ? {
@@ -365,6 +400,7 @@ export function lowerBaseProjectionPayloads(
         packageRevision,
         verificationPackageRevision,
         confirmationRequiredFor,
+        reversibility,
       ),
       undefined,
       agentFloor > agentCapability.minimumVersion
@@ -1924,6 +1960,7 @@ function agentDiscoveryPayload(
   packageRevision: NormalizedApplicationPackage,
   original: VersionedNormalizedApplicationPackage,
   confirmationRequiredFor: readonly string[],
+  reversibility: ReversibilityDeclaration | undefined,
 ): unknown {
   const declared = new Map(
     original.queries.map((query) => [String(query.queryId), query]),
@@ -1979,6 +2016,7 @@ function agentDiscoveryPayload(
     })),
     ...(listPresets.length > 0 ? { listPresets } : {}),
     ...(metricCards.length > 0 ? { metricCards } : {}),
+    ...(reversibility ? { reversibility } : {}),
     schemaVersion: payloadSchemaVersions[PROJECTION_FAMILY_IDS.agentDiscovery],
     surfaces: packageRevision.surfaces.map((surface) => surface.surfaceId),
     toolIds: [...OPERATIONS_AGENT_TOOL_IDS],

@@ -1,10 +1,9 @@
 /**
- * AI-UNDO-1 slice 2 (partial): the reversibility declaration derived from the
- * first-party release, measured. The compiler does not emit it yet: adding a
- * key to the agent-discovery chunk fails historical reproduction (ADR-0047),
- * so emission waits for a compiler semantic profile adoption. This census is
- * what the orchestrator decides that adoption, and the widened act-at-once
- * set, from.
+ * AI-UNDO-1 slice 2: the reversibility declaration derived from the
+ * first-party release. The compiler emits it in the agent-discovery chunk
+ * (reader floor 5), re-baselined with the release lineage (ADR-0066); the
+ * assistant routes record types no capability owns through it. This census
+ * is what the act-at-once set is reviewed from.
  */
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -17,6 +16,8 @@ import {
   type ReversibilitySource,
 } from '../../packages/compiler/src/reversibility.js';
 import { compiledAppView } from '../agent/compiled-view.js';
+import { REVERSIBILITY_AGENT_READER } from '../../packages/canonical-model/src/reversibility.js';
+import { PASSIVE_RELEASE_MEMBERS } from '../../packages/compiler/src/reversibility.js';
 
 const NS = 'northstar.app';
 
@@ -133,6 +134,66 @@ test('a field a workflow, rule or calculated field reads is consumed, so it is n
     assert.ok(classOf(declaration, name).because.includes('readByConsumer'));
     assert.equal(classOf(declaration, summary).reach, 'record');
   }
+});
+
+test('the compiled release emits the declaration the release derives, behind agent-discovery floor 5', () => {
+  const view = compiledAppView();
+  const emitted = parseReversibilityDeclaration(
+    (view.projections.agent.payload as { reversibility?: unknown })
+      .reversibility,
+  );
+  // The same declaration the authored release derives: gates and lifecycles
+  // come from the authored preconditions, not the dispatch alias's.
+  assert.deepEqual(emitted, firstPartyDeclaration());
+  const file = JSON.parse(
+    readFileSync('apps/web/release/app.compiled.json', 'utf8'),
+  ) as {
+    application: {
+      releaseManifest: {
+        projections: {
+          familyId: string;
+          requiredRuntimeCapability: unknown;
+        }[];
+      };
+    };
+  };
+  assert.deepEqual(
+    file.application.releaseManifest.projections.find(
+      (projection) =>
+        projection.familyId ===
+        'northstar.compiler:projection-family.agent-discovery',
+    )?.requiredRuntimeCapability,
+    {
+      capabilityId: 'northstar.runtime:capability.agent-discovery',
+      minimumVersion: REVERSIBILITY_AGENT_READER,
+    },
+  );
+  assert.equal(REVERSIBILITY_AGENT_READER, 5);
+});
+
+test('every release member not known to be passive is a consumer, including one a later language adds', () => {
+  const name = `${NS}:field.party_name`;
+  const classOf = (declaration: ReturnType<typeof firstPartyDeclaration>) =>
+    declaration.operations
+      .find((entry) => entry.operationId === `${NS}:operation.party_update`)!
+      .fields!.find((field) => field.fieldId === name)!;
+  for (const extra of [
+    { billingPlans: [{ quantityField: name }] },
+    { documentTemplateRevisions: [{ body: { fieldId: name } }] },
+    { connectorBindings: [{ fields: [name] }] },
+    // A member no language has today counts until it is reviewed passive.
+    { laterLanguageMember: [{ reads: name }] },
+  ]) {
+    const field = classOf(firstPartyDeclaration(extra));
+    assert.equal(field.reach, 'internal', Object.keys(extra)[0]);
+    assert.ok(field.because.includes('readByConsumer'));
+  }
+  // A passive member that names the field (a surface showing it) does not.
+  assert.ok(PASSIVE_RELEASE_MEMBERS.has('surfaces'));
+  assert.equal(
+    classOf(firstPartyDeclaration({ mapPlacements: [{ label: name }] })).reach,
+    'record',
+  );
 });
 
 // For record types no capability owns (tenant-built), the derivation decides.
