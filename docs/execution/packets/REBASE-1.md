@@ -76,6 +76,8 @@ it before the first tenant.
 
 ## Changed tests
 
+Also re-derived, not edited: the full-replay schema snapshot (see CI).
+
 | Test | Proved before | Proves now |
 | --- | --- | --- |
 | `test/postgres/request-runtime-view.test.ts` "STOCK-COUNTS: the archived rung-34 reader serves the prior release and refuses the shipped count release by name" | Found the archived reader's (`7900ebd0`) head inside the checked-in lineage, served the lineage up to the entry after it, and expected the refusal literal `surface-manifest requires version 35 and this runtime supports 34`. | The checked-in lineage no longer holds that head, so the shipped release is staged as its direct successor with `nextPlatformRelease(old, today's authored package)` (same definition bytes and same projection manifests as the checked-in head). The archived reader still answers an item query on the prior release, persisted byte for byte, and still refuses the successor by name with `UNSUPPORTED_RUNTIME_CAPABILITY`. The demanded version is now read from the successor's own manifest (it names query-catalog 6 against its 4; surface-manifest is asserted above 34), so neither a later rung nor the next re-baseline re-pins a literal. Retired, with reason: the exact "rung 35" literal named the STOCK-COUNTS entry, which ADR-0066 discards. |
@@ -134,4 +136,28 @@ Sequential, load checked (1-min load stayed under 6), on the one-entry lineage:
 
 ## CI
 
-One full run dispatched on `packet/REBASE-1` (see the lane result).
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/45090295561
+
+That first run, on `6f1c4180`, was red in two places, both fixed after it:
+
+- The quality job failed in `check-record-ci-tier.mjs`, because this line was
+  missing. Reachability failed only because quality did.
+- In `composed-application`, "composed product activates through the
+  kernel..." and "a fresh install replays a synthetic storage history..."
+  failed against `test/postgres/fresh-tenant-full-replay-schema.snapshot.json`.
+  That snapshot was a full replay of the old 5-entry lineage. Columns that
+  history added later sat at later ordinal positions. A one-entry install
+  creates them in definition order.
+
+The snapshot was regenerated with its generator
+(`node --import tsx test/helpers/generate-fresh-tenant-full-replay-schema.ts`),
+not edited by hand. Compared with the old snapshot, ignoring
+`ordinal_position`, every collection holds the same rows: 873 columns, 323
+column privileges, 271 constraints, 248 indexes, 164 policies, 50 relations,
+29 triggers and the rest. Only column order moved.
+
+Every other shard of that run was green, including every PostgreSQL shard,
+which covers `date-time-field`, `booking-serving`, `customization`,
+`customization-inspection` and `document-attachments`, and every browser
+runner, which covers the archived `552b13d8` reader in
+`customize-inspection`.
