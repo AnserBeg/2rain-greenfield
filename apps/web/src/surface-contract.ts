@@ -8,6 +8,8 @@ import { recordCatalogParse } from '../../../packages/runtime/src/catalog-parse-
 import {
   BoardPresentationSchema,
   SurfaceBoardSchema,
+  SurfaceMapSchema,
+  type SurfaceMap,
   ReportRevisionSchema,
   type ReportRevision,
   type BoardPresentation,
@@ -61,6 +63,7 @@ type SurfaceManifestPayloadVersion =
 
 const archetypes = [
   'board',
+  'map',
   'builder',
   'home',
   'list',
@@ -92,6 +95,7 @@ export const COMPILED_FIELD_KINDS = Object.freeze([
   'timeFieldType',
 ] as const);
 const slotsByArchetype = Object.freeze({
+  map: Object.freeze(['title', 'savedViews', 'mapCanvas', 'stopList']),
   board: Object.freeze(['title', 'savedViews', 'stageSelector', 'columns']),
   builder: Object.freeze([
     'modeSwitch',
@@ -316,6 +320,7 @@ export function formFieldIds(
 }
 
 export interface CompiledSurfaceDefinition {
+  readonly map?: SurfaceMap;
   readonly report?: ReportRevision;
   readonly popupActions?: readonly CompiledPopup[];
   readonly board?: SurfaceBoard;
@@ -817,6 +822,7 @@ function surfaceAcceptsQuery(
   surface: CompiledSurfaceDefinition,
   queryType: RegisteredSemanticQueryDefinition['queryType'],
 ): boolean {
+  if (surface.archetype === 'map') return !!surface.map && queryType === 'list';
   if (surface.archetype === 'list' && surface.report)
     return (
       queryType === 'list' &&
@@ -1150,6 +1156,7 @@ function parseSurface(
   const fields = parseSurfaceFields(value, index);
 
   return Object.freeze({
+    ...(archetype === 'map' ? { map: SurfaceMapSchema.parse(value.map) } : {}),
     ...(value.report
       ? { report: ReportRevisionSchema.parse(value.report) }
       : {}),

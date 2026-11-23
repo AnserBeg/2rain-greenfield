@@ -1,3 +1,4 @@
+import type { MapViewport } from '../../canonical-model/src/map-viewport.js';
 import type { Coordinates } from '@north-star/canonical-model';
 import type { RequestRuntimeView } from './request-runtime-view.js';
 
@@ -18,18 +19,41 @@ export interface AddressInstallation {
   companyId: string;
   installationId: string;
   account: string;
-  provider: 'google' | 'fake';
+  /** The installed provider's connector name, resolved by its adapter. */
+  provider: string;
   enrichment: boolean;
 }
 export interface AddressSettings {
-  provider: 'fake' | 'google';
+  provider: string;
   account: string;
   enrichment: boolean;
   calls: number;
   budgetMicros: number;
   enabled: boolean;
 }
+/** A browser provider's isolated frame, as its adapter declares it. */
+export interface BrowserBasemap {
+  frame: { document: string; title: string };
+  browserKey: string;
+  viewport: MapViewport;
+}
 export interface AddressGateway {
+  issueViewport?(
+    view: RequestRuntimeView,
+    surfaceId: string,
+    companyId: string,
+    installationId: string,
+    viewport: MapViewport,
+  ): string;
+  viewportDisplay?(
+    view: RequestRuntimeView,
+    handle: string,
+  ): Promise<BrowserBasemap>;
+  viewportImage?(
+    view: RequestRuntimeView,
+    handle: string,
+    companyId: string,
+  ): Promise<Uint8Array>;
   installations(
     view: RequestRuntimeView,
   ): Promise<readonly AddressInstallation[]>;

@@ -2,6 +2,11 @@ import type { StorageTargetPayloadV1 } from '../../compiler/src/storage.js';
 import { lowerDeclaredReports } from '../../compiler/src/declared-reports.js';
 import { DECLARED_REPORT_READER } from '../../canonical-model/src/declared-report.js';
 import {
+  hasMapDeclaration,
+  mapDeclarationProblem,
+  mapBindingsProblem,
+} from './map-admission.js';
+import {
   BILLING_ALLOCATION_READER,
   BILLING_ARREARS_READER,
   BILLING_CYCLE_CALCULATION,
@@ -610,6 +615,7 @@ function verifyCompiledRelease(
     layoutDefinition,
   );
   const needsLayout =
+    hasMapDeclaration(layoutDefinition) ||
     (isRecord(layoutDefinition) &&
       Array.isArray(layoutDefinition.surfaces) &&
       layoutDefinition.surfaces.some(
@@ -928,6 +934,7 @@ function verifyCompiledRelease(
           'The billing plan or reader floor disagrees with the release.',
         );
       const problem =
+        mapDeclarationProblem(layoutDefinition, payload) ??
         boardDeclarationProblem(
           layoutDefinition,
           payload,
@@ -944,6 +951,7 @@ function verifyCompiledRelease(
     if (
       needsLayout &&
       [
+        PROJECTION_FAMILY_IDS.connector,
         PROJECTION_FAMILY_IDS.surfaceManifest,
         PROJECTION_FAMILY_IDS.queryCatalog,
         PROJECTION_FAMILY_IDS.operationCatalog,
@@ -1061,6 +1069,12 @@ function verifyCompiledRelease(
     if (popupProblem)
       throw integrity('POPUP_PROJECTION_CONTRACT_MISMATCH', popupProblem);
     const problem =
+      mapBindingsProblem(
+        payload(PROJECTION_FAMILY_IDS.surfaceManifest),
+        surfaceReference!.requiredRuntimeCapability.minimumVersion,
+        payload(PROJECTION_FAMILY_IDS.queryCatalog),
+        payload(PROJECTION_FAMILY_IDS.connector),
+      ) ??
       boardBindingsProblem(
         payload(PROJECTION_FAMILY_IDS.surfaceManifest),
         surfaceReference!.requiredRuntimeCapability.minimumVersion,

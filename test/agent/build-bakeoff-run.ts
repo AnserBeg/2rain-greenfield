@@ -180,6 +180,7 @@ export function requestType(c: BuildCase): RequestType {
   if (expect.outcome === 'workflow') return 'workflow';
   if (
     expect.outcome === 'board' ||
+    expect.outcome === 'map' ||
     expect.outcome === 'validation' ||
     expect.outcome === 'ratePlan'
   )

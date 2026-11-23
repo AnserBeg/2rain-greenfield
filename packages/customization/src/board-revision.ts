@@ -459,7 +459,9 @@ export function draftBoardRevision(
 export type BoardCheck = 'authoring' | 'structural' | 'identity';
 export interface BoardApplyProblem {
   message: string;
-  conflicts: BoardBindingConflict[];
+  conflicts: (Omit<BoardBindingConflict, 'code'> & {
+    code: BoardBindingConflict['code'] | 'INCOMPATIBLE_SCOPE';
+  })[];
 }
 export function applyBoardRevision(
   def: BoardSource & { surfaces: Record<string, unknown>[] },
@@ -565,7 +567,11 @@ export function supersededBoardRevisions(
       change.kind === 'changeSet' ? (change.patches as unknown[]) : [change]
     ) as { kind?: string; surfaceId?: string; revisionId?: string }[];
     for (const member of members)
-      if (member.kind === 'addBoardViewRevision' && member.revisionId) {
+      if (
+        (member.kind === 'addBoardViewRevision' ||
+          member.kind === 'addMapViewRevision') &&
+        member.revisionId
+      ) {
         last.set(String(member.surfaceId), member.revisionId);
         all.push(member.revisionId);
       }

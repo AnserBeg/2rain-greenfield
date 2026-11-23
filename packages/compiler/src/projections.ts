@@ -18,6 +18,7 @@ import {
   ADDRESS_MAP_READER,
   CONNECTOR_PAYLOAD,
   type AddressProjection,
+  MAP_VIEW_READER,
   BOARD_READER,
   COMPANY_ACCESS_INDEX_READER,
   REPORT_SOURCE_READER,
@@ -490,9 +491,11 @@ export function lowerBaseProjectionPayloads(
           ...projection.requiredRuntimeCapability,
           minimumVersion: Math.max(
             projection.requiredRuntimeCapability.minimumVersion,
-            address.placements.length
-              ? ADDRESS_MAP_READER
-              : ADDRESS_FIELD_READER,
+            address.viewports?.length
+              ? MAP_VIEW_READER
+              : address.placements.length
+                ? ADDRESS_MAP_READER
+                : ADDRESS_FIELD_READER,
           ),
         };
     }
@@ -1202,6 +1205,7 @@ function surfaceManifestPayload(
       ),
   );
   const surfaceFloor = Math.max(
+    original.surfaces.some((s) => s.archetype === 'map') ? MAP_VIEW_READER : 0,
     original.entities.some(
       (entity) => 'reportSource' in entity && entity.reportSource,
     )
@@ -1320,6 +1324,9 @@ function surfaceManifestPayload(
             ? { popupActions: compiledPopups(original, declared) }
             : {}),
           // Labels and roles render from this release, beside the digested member.
+          ...(declared && 'map' in declared && declared.map
+            ? { map: declared.map }
+            : {}),
           ...(declared && 'report' in declared && declared.report
             ? { report: declared.report }
             : {}),

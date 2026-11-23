@@ -2,6 +2,7 @@ import { PopupRevisionSchema } from './popup-actions.js';
 import { AddressBindingSchema, MapPlacementSchema } from './address.js';
 import { DateTimeFieldDeclarationSchema } from './date-time-field.js';
 import { BillingPlansSchema } from './billing.js';
+import { SurfaceMapSchema } from './map-view.js';
 import { SurfaceBoardSchema } from './board.js';
 import { BookingOperationBinding } from './booking.js';
 import { SurfaceLayoutSchema } from './layout.js';
@@ -2337,6 +2338,7 @@ const normalizedV6SurfaceDefinition = normalizedSurfaceDefinition.extend({
   report: ReportRevisionSchema.optional(),
   popupActions: z.array(PopupRevisionSchema).min(1).optional(),
   board: SurfaceBoardSchema.optional(),
+  map: SurfaceMapSchema.optional(),
   layouts: z.array(SurfaceLayoutSchema).min(1).max(2).optional(),
   composition: SurfaceCompositionSchema.optional(),
   workspace: SurfaceWorkspaceSchema.optional(),

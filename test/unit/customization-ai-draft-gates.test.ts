@@ -90,6 +90,8 @@ const EXPECTED_REPAIRABLE: Readonly<
   CUSTOMIZE_POPUP_CONFLICT: false,
   // REPORTS (merged 2026-11-22): final on main, not in the allowlist (filed).
   CUSTOMIZE_REPORT_CONFLICT: false,
+  // PLANNER-1 Map: final, not in the allowlist (a slice 2 task, filed).
+  CUSTOMIZE_MAP_CONFLICT: false,
 };
 
 test('(b) a drafted outcome is accepted', () => {

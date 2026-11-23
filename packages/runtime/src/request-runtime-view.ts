@@ -1,9 +1,9 @@
 import {
+  MAP_VIEW_READER,
   BOOKING_FULFILMENT_READER,
   CONNECTOR_FAMILY,
   OPTIONAL_DEPENDENCY_QUERY_READER,
 } from '@north-star/canonical-model';
-import { BILLING_ARREARS_READER } from '../../canonical-model/src/billing.js';
 import {
   assertTrustedRequestContext,
   type AuthenticatedRequestEntryAdapter,
@@ -241,7 +241,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 41 pins the terms and assignment at first billing allocation.
     // 42 adds company access indexes, 43 report sources and 44 grouped reports.
     // 45 reads closed-cycle charge reviews and their source contracts.
-    maximumSupportedVersion: BILLING_ARREARS_READER,
+    // 46 reads viewport declarations and renders Map views (one rung).
+    maximumSupportedVersion: MAP_VIEW_READER,
   },
 });
 

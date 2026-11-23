@@ -254,6 +254,16 @@ const map = {
   sectionId:
     mapSurface + '/detail/northstar.app:slot.item_detail_sections/details',
 };
+const depotAddress = {
+  ...address,
+  entity: equipment,
+  fieldId: id('field.custom_equipment_depot'),
+};
+const depotBase = applied(extended, [depotAddress]);
+const depotMap = customization
+  .customizationTargets(normalizeApplicationPackage(depotBase))
+  .maps!.find((t) => t.frame.entityId === equipment)!;
+
 const equipmentPopup = customization
   .customizationTargets(normalizeApplicationPackage(extended))
   .popupActions!.find(
@@ -343,6 +353,20 @@ const cases = {
       customization.defaultBoardChoices(board),
     ),
   ),
+  addMapViewRevision: {
+    source: depotBase,
+    conflict: extended,
+    change: customization.draftMapRevision(depotMap, {
+      kind: 'addMapViewRevision',
+      surface: depotMap.frame.listSurfaceId,
+      label: 'Depot map',
+      addressFieldId: depotAddress.fieldId,
+      orderFieldId: depotMap.frame.label.fieldId,
+      direction: 'asc',
+    }),
+    code: 'RETIRED_TARGET',
+    subject: depotAddress.fieldId,
+  },
   addAddressField: itemRetired(address),
   addMapPlacement: retirement(
     'surfaces',

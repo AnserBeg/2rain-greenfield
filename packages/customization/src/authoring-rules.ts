@@ -40,6 +40,9 @@ export const AUTHORING_RULES: Readonly<
   CUSTOMIZE_BOARD_CONFLICT: [
     "A board groups a list by its record type's lifecycle: choose stages from that lifecycle, moves between the chosen stages and at most three facts.",
   ],
+  CUSTOMIZE_MAP_CONFLICT: [
+    'A map view names a listed map collection, one of its direct Address fields and one of its listed route-order fields; a route group, day field or saved view must be one listed for that collection. Editing or retiring a map view requires its current revision.',
+  ],
   CUSTOMIZE_REPORT_CONFLICT: [
     'Use the field IDs and measures offered for the selected report source. Edit or retire only a listed active report, on its original source.',
   ],

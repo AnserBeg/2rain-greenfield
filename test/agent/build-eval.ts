@@ -1317,6 +1317,22 @@ export async function runBuildCase(
         if (!found) result.reasons.push('no new board view on the list');
       }
     }
+    if (expect.outcome === 'map') {
+      if (result.activated) {
+        const after = await opened.service.targets();
+        const found = (after.maps ?? []).some(
+          (map) =>
+            localOf(map.frame.listSurfaceId).startsWith(expect.list) &&
+            map.views.some((view) =>
+              nameMatches(expect.label, slug(view.label)),
+            ) &&
+            !mapsHad(boardsBefore, map.frame.listSurfaceId, map.views.length),
+        );
+        result.e2e = found;
+        result.behaviour = found;
+        if (!found) result.reasons.push('no new map view on the list');
+      }
+    }
   } catch (error) {
     result.status =
       result.status === 'not-started' ? 'harness-error' : result.status;
@@ -1337,6 +1353,17 @@ export async function runBuildCase(
     await opened.close();
   }
   return result;
+}
+
+function mapsHad(
+  before: CustomizationTargets,
+  listSurfaceId: string,
+  views: number,
+): boolean {
+  const had = (before.maps ?? []).find(
+    (m) => m.frame.listSurfaceId === listSurfaceId,
+  );
+  return !!had && had.views.length >= views;
 }
 
 function boardsHad(
