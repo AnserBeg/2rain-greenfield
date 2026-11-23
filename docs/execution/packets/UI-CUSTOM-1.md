@@ -4,7 +4,7 @@ Charter: `/home/rvham/2rain-missions/charters/UI-CUSTOM-1-charter.md` (slice 1, 
 
 **Slice 1 · BUILD checkpoint, 2026-11-22.** A company, or the in-app AI on its behalf, adds one Customize member, `addPresentationRevision`, to a list. The member does three things: it colours a cell or a whole row when a condition holds, it sizes columns by stable field ID, and it sets density for the list or for one saved view. The member is stored on the surface and compiled into the surface manifest. It renders on the server from rows the list has already read.
 
-CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/45103557540
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/45110643699/attempts/2
 
 ## General blocks (rules 16 and 17)
 
@@ -72,7 +72,19 @@ Each fix has a test that goes red without it (rule 8):
 
 The full run 45103557540 is green on `afff54d5`. An earlier full run on `3c27fc47` (45100635717) passed every test, but its quality job hit the 15-minute limit. The fix-round witnesses were then trimmed to fewer release compiles. The slice-1 full run was 45062389207, on `13eee9a4`.
 
-A Chromium render of the real CSS (light and dark, 1280px and 600px) shows both pills fully inside their clipped cells, the tint kept on hover, and the card tint and marker.
+A Chromium render of the real CSS (light and dark, 1280px and 600px) shows both pills fully inside their clipped cells, the tint kept on hover, and the card tint. The card marker does not show as a bar: at 800px and below the cell tints paint over it, so only ticks show in the row gaps. The tint and the word still show. This is a slice-2 ride-along (R10).
+
+## Fix round 2 (targeted check FIX, 2026-11-22)
+
+Each fix has a test that goes red without it (rule 8):
+
+- **F1 (regression):** a rule removed and redrafted in the same draft came back dropped. A drafted rule is now appended unless a rule the draft keeps (after `remove`) has its ID. The test covers remove-plus-redraft and the narrower-band insert (remove both, relist three).
+- **F2:** the clip span pads 4px and takes it back with a negative margin, so a link's focus ring (2px at a 2px offset) is not clipped. Pinned in the surface-grammar case. Not yet seen in a Chromium render.
+- **F3:** upgrade replay checks a retired presentation revision by identity only, so the old rules a retire carries never refuse an upgrade. The test replays [v1 reads the status, retire] on a clean base without that field.
+
+Three manifest entries were re-pointed at the moved source and re-proved.
+
+The full run 45110643699 is green on `caa29218` at attempt 2. Attempt 1 passed every job except the browser runner, where one test (`meta-sales.spec.ts`, JS on) hit the 8-minute test timeout; the same flow with JS off passed in 1.2 minutes, and no list in that flow clips a column. The whole workflow was rerun once.
 
 **Slice 2 starts with these ride-alongs from the review:**
 
@@ -98,13 +110,21 @@ A Chromium render of the real CSS (light and dark, 1280px and 600px) shows both 
   - show inert entries to a person;
   - make the rental case assert behaviour;
   - prove byte identity on rows read back.
+- **R10, from the fix-round targeted check:**
+  - the card marker at 800px and below is painted over by the cell tints (0,2,3 outranks the transparent card cells at 0,2,2), and a declared-list card has no side padding;
+  - confirm the F2 focus ring in the next Chromium render;
+  - the approval diff prints an option ID, not its label, inside a condition, and never says that a column clips;
+  - the R2 test should deep-equal that only the presentation changed;
+  - rule 8 gaps: the apply-level refusal of a retire with nothing active is reached only through the member; the view-density drop has no test;
+  - inserting a narrower band works only by restating every condition, and the prompt lists current rules by reason only (decide with R4);
+  - report accuracy: expected-red runs 1 and 2 of the fix round both ended FAIL; the report named only run 2.
 
 **Try it yourself.** Add a record type **Stock item** with On hand and Reorder point. Ask the assistant: "make items with on-hand below reorder point red". Approve and activate. On the list, a row with on hand 2 and reorder point 5 shows a red **Low stock** pill. Change on hand to 12: the pill disappears.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "UI-CUSTOM-1",
-  "base": "1092e14d22890d172ac8e68099fdd78093898339", "head": "ebf90c270527702fc744e28cb08a309e6eebb897",
+  "base": "1092e14d22890d172ac8e68099fdd78093898339", "head": "caa2921855878f7acd4cd9662799db3b3a9c5cc3",
   "changedPaths": [
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/design-tokens.ts", "apps/web/src/ledger-styles.ts", "apps/web/src/list-declaration.ts", "apps/web/src/surface-contract.ts", "package.json",
     "packages/canonical-model/src/index.ts", "packages/canonical-model/src/schemas.ts", "packages/canonical-model/src/surface-presentation-schema.ts", "packages/canonical-model/src/surface-presentation.ts",
