@@ -27,7 +27,7 @@ import { parsePinnedOperationCatalog } from '../../packages/runtime/src/semantic
 import type { RequestRuntimeView } from '../../packages/runtime/src/request-runtime-view.js';
 
 import { toMessages } from '../../packages/operations-agent/src/anthropic-model.js';
-import { compiledAppView } from './compiled-view.js';
+import { compiledAppView, compiledAppViewV3 } from './compiled-view.js';
 
 const NS = 'northstar.app';
 
@@ -2110,7 +2110,8 @@ function clinicView(
 ): RequestRuntimeView {
   return withDeclaration(
     (() => {
-      const view = compiledAppView('manager');
+      // Compiled under the cut v3 profile, so it carries the declaration.
+      const { view } = compiledAppViewV3('manager');
       const renamed = JSON.parse(
         JSON.stringify(view.projections)
           .replaceAll('northstar.app:', 'clinic.care:')

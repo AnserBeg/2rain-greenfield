@@ -1,10 +1,4 @@
 import assert from 'node:assert/strict';
-import {
-  FINGERPRINT_SOURCE,
-  assertReproducedExceptReversibility,
-  projectionFingerprint,
-  type ProjectionFingerprint,
-} from '../helpers/reversibility-reproduction.js';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { canonicalize } from '../../packages/canonical-model/src/canonicalize.js';
@@ -80,17 +74,12 @@ test('a declaring release carries its plan and preserves pre-billing release byt
      import {readFileSync} from 'node:fs';
      import {compilerInput,normalizedBytes,mustCompile} from './test/compiler/helpers.ts';
      const input=JSON.parse(readFileSync(process.argv[2],'utf8'));
-     ${FINGERPRINT_SOURCE}
      const result=mustCompile(compilerInput(normalizedBytes(input)));
-     console.log(JSON.stringify(projectionFingerprint(result)));
+     console.log(JSON.stringify(result.releaseRoot));
    `,
         authored,
-      )) as ProjectionFingerprint;
-      // AI-UNDO-1: identical except the agent-discovery reversibility key.
-      assertReproducedExceptReversibility(
-        projectionFingerprint(absent),
-        previous,
-      );
+      )) as string;
+      assert.equal(previous, absent.releaseRoot);
       await assertArchivedTenantEnvelope(run);
     },
   );

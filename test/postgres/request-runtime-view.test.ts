@@ -3,7 +3,6 @@ import { DOCUMENT_TEMPLATES_SURFACE_FLOOR } from '../../packages/canonical-model
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 import test from 'node:test';
@@ -26,6 +25,7 @@ import {
 } from '../../packages/canonical-model/src/constants.js';
 import { BOARD_READER } from '../../packages/canonical-model/src/board.js';
 import { REVERSIBILITY_AGENT_READER } from '../../packages/canonical-model/src/reversibility.js';
+import { compiledAppViewV3 } from '../agent/compiled-view.js';
 import { startComposedApplication } from '../../apps/api/src/composition-root.js';
 import { STOCK_COUNT_PRECEDING_READER } from '../helpers/application-before-stock-count-workflow.js';
 import {
@@ -285,7 +285,7 @@ test(
 const AI_UNDO_PRECEDING_READER = 'd8aad66b3e6ee6231b0580f2702c26d116f5a68c';
 
 test(
-  'AI-UNDO-1: the archived pre-merge reader serves its own release and refuses the reversibility release by agent-discovery floor 5',
+  'AI-UNDO-1: the archived pre-merge reader serves its own release and refuses a v3 reversibility release by agent-discovery floor 5',
   { timeout: 900_000 },
   async () => {
     const releasePath = 'apps/web/release/app.compiled.json';
@@ -298,10 +298,10 @@ test(
         )
       ).stdout,
     );
-    // The RECORDED change: the checked-in release file, as shipped.
-    const shipped = JSON.parse(
-      await readFile(resolve(releasePath), 'utf8'),
-    ) as {
+    // The checked-in head compiled under the cut, unadopted v3 profile: the
+    // release that adopting v3 will ship. The adopted head itself is
+    // unchanged, so main's reader keeps serving it.
+    const shipped = compiledAppViewV3().envelope as unknown as {
       application: {
         releaseRoot: string;
         normalizedDefinitionBytesBase64: string;

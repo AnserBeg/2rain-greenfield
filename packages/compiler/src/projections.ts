@@ -86,8 +86,9 @@ import {
 } from './storage.js';
 import {
   COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+  COMPILER_SEMANTIC_PROFILE_V3_VERSION,
   COMPILER_SEMANTIC_PROFILE_VERSION,
-  SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS,
+  compilerSemanticProfileAtLeast,
   COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
   GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -303,14 +304,14 @@ export function lowerBaseProjectionPayloads(
       operation.precondition as unknown,
     ]),
   );
-  // ADR-0047: the key lands on the adopted profile (v2) and later ones; the
-  // frozen output of an older profile never gains it.
-  const profiles: readonly string[] =
-    SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS;
+  // ADR-0047: the key rides the cut, unadopted v3, so every adopted release
+  // stays byte-identical and needs no agent-discovery floor 5.
   const reversibility =
     packageRevision.languageVersion === LANGUAGE_VERSION &&
-    profiles.indexOf(compilerSemanticProfileVersion) >=
-      profiles.indexOf(COMPILER_SEMANTIC_PROFILE_V2_VERSION)
+    compilerSemanticProfileAtLeast(
+      compilerSemanticProfileVersion,
+      COMPILER_SEMANTIC_PROFILE_V3_VERSION,
+    )
       ? deriveReversibility(
           (
             operationCatalog as {
@@ -1154,8 +1155,10 @@ function surfaceManifestPayload(
   );
   // One condition, read by both the emission below and the capability floor, so
   // the floor cannot drift from what the payload actually carries.
-  const emitsFieldKinds =
-    compilerSemanticProfileVersion === COMPILER_SEMANTIC_PROFILE_V2_VERSION;
+  const emitsFieldKinds = compilerSemanticProfileAtLeast(
+    compilerSemanticProfileVersion,
+    COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+  );
   // Load-bearing compatibility fence: labelling grouped output as v0 lets
   // v0 readers ignore the tree and silently reconstruct unreachable overflow.
   const composed = original.languageVersion === 'v6';
@@ -1444,8 +1447,10 @@ function surfaceManifestPayload(
             // projection time rather than by materializing it into the
             // normalized definition, which is what keeps those roots stable --
             // the `surfaceRole` precedent one line below does exactly the same.
-            ...(compilerSemanticProfileVersion ===
-            COMPILER_SEMANTIC_PROFILE_V2_VERSION
+            ...(compilerSemanticProfileAtLeast(
+              compilerSemanticProfileVersion,
+              COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+            )
               ? {
                   disclosureTier:
                     slot.disclosureTier ?? DEFAULT_DISCLOSURE_TIER,
@@ -2600,7 +2605,10 @@ function operationInputContract(
   const relationTargets =
     effectKind === 'createRecordEffect' &&
     relations.length > 0 &&
-    compilerSemanticProfileVersion === COMPILER_SEMANTIC_PROFILE_V2_VERSION;
+    compilerSemanticProfileAtLeast(
+      compilerSemanticProfileVersion,
+      COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+    );
   const closedArgumentKeys =
     effectKind === 'createRecordEffect'
       ? [

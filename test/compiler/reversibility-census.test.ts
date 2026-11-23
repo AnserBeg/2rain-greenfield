@@ -1,8 +1,9 @@
 /**
  * AI-UNDO-1 slice 2: the reversibility declaration derived from the
  * first-party release. The compiler emits it in the agent-discovery chunk
- * (reader floor 5), re-baselined with the release lineage (ADR-0066); the
- * assistant routes record types no capability owns through it. This census
+ * (reader floor 5) under the cut, unadopted compiler-semantic profile v3
+ * (ADR-0047); the assistant routes record types no capability owns through
+ * it, and a release without it asks. This census
  * is what the act-at-once set is reviewed from.
  */
 import assert from 'node:assert/strict';
@@ -15,7 +16,11 @@ import {
   deriveReversibility,
   type ReversibilitySource,
 } from '../../packages/compiler/src/reversibility.js';
-import { compiledAppView } from '../agent/compiled-view.js';
+import { compiledAppView, compiledAppViewV3 } from '../agent/compiled-view.js';
+import {
+  ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
+  COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+} from '../../packages/compiler/src/index.js';
 import { REVERSIBILITY_AGENT_READER } from '../../packages/canonical-model/src/reversibility.js';
 import { PASSIVE_RELEASE_MEMBERS } from '../../packages/compiler/src/reversibility.js';
 
@@ -136,8 +141,20 @@ test('a field a workflow, rule or calculated field reads is consumed, so it is n
   }
 });
 
-test('the compiled release emits the declaration the release derives, behind agent-discovery floor 5', () => {
-  const view = compiledAppView();
+const agentCapability = (manifest: {
+  projections: readonly {
+    familyId: string;
+    requiredRuntimeCapability?: unknown;
+  }[];
+}) =>
+  manifest.projections.find(
+    (projection) =>
+      projection.familyId ===
+      'northstar.compiler:projection-family.agent-discovery',
+  )?.requiredRuntimeCapability;
+
+test('a release compiled under the cut v3 profile emits the declaration the release derives, behind agent-discovery floor 5', () => {
+  const { view, compiled } = compiledAppViewV3();
   const emitted = parseReversibilityDeclaration(
     (view.projections.agent.payload as { reversibility?: unknown })
       .reversibility,
@@ -145,6 +162,15 @@ test('the compiled release emits the declaration the release derives, behind age
   // The same declaration the authored release derives: gates and lifecycles
   // come from the authored preconditions, not the dispatch alias's.
   assert.deepEqual(emitted, firstPartyDeclaration());
+  assert.deepEqual(agentCapability(compiled.bundle.releaseManifest), {
+    capabilityId: 'northstar.runtime:capability.agent-discovery',
+    minimumVersion: REVERSIBILITY_AGENT_READER,
+  });
+  assert.equal(REVERSIBILITY_AGENT_READER, 5);
+});
+
+test('profile v3 is v2 plus the reversibility key and nothing else', () => {
+  const { view, compiled } = compiledAppViewV3();
   const file = JSON.parse(
     readFileSync('apps/web/release/app.compiled.json', 'utf8'),
   ) as {
@@ -152,23 +178,58 @@ test('the compiled release emits the declaration the release derives, behind age
       releaseManifest: {
         projections: {
           familyId: string;
-          requiredRuntimeCapability: unknown;
+          artifactRoot: string;
+          requiredRuntimeCapability?: unknown;
         }[];
       };
     };
   };
+  const agentFamily = 'northstar.compiler:projection-family.agent-discovery';
+  const roots = (
+    projections: readonly { familyId: string; artifactRoot: string }[],
+  ) =>
+    Object.fromEntries(
+      projections
+        .filter((projection) => projection.familyId !== agentFamily)
+        .map((projection) => [projection.familyId, projection.artifactRoot]),
+    );
   assert.deepEqual(
-    file.application.releaseManifest.projections.find(
-      (projection) =>
-        projection.familyId ===
-        'northstar.compiler:projection-family.agent-discovery',
-    )?.requiredRuntimeCapability,
-    {
-      capabilityId: 'northstar.runtime:capability.agent-discovery',
-      minimumVersion: REVERSIBILITY_AGENT_READER,
-    },
+    roots(compiled.bundle.releaseManifest.projections),
+    roots(file.application.releaseManifest.projections),
   );
-  assert.equal(REVERSIBILITY_AGENT_READER, 5);
+  const { reversibility, ...rest } = view.projections.agent.payload as Record<
+    string,
+    unknown
+  >;
+  assert.ok(reversibility);
+  assert.deepEqual(rest, compiledAppView().projections.agent.payload);
+});
+
+test('the adopted v2 release carries no declaration and keeps its agent-discovery floor (v3 is cut, not adopted)', () => {
+  assert.equal(
+    ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
+    COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+  );
+  assert.ok(
+    !Object.hasOwn(
+      compiledAppView().projections.agent.payload as object,
+      'reversibility',
+    ),
+  );
+  const file = JSON.parse(
+    readFileSync('apps/web/release/app.compiled.json', 'utf8'),
+  ) as {
+    application: {
+      releaseManifest: {
+        projections: { familyId: string; requiredRuntimeCapability: unknown }[];
+      };
+    };
+  };
+  assert.deepEqual(agentCapability(file.application.releaseManifest), {
+    capabilityId: 'northstar.runtime:capability.agent-discovery',
+    // Today: assistant confirmations (2); main's floor, unchanged.
+    minimumVersion: 2,
+  });
 });
 
 test('every release member not known to be passive is a consumer, including one a later language adds', () => {

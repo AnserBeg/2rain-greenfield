@@ -89,6 +89,7 @@ import {
   CHUNKING_SCHEME_VERSION,
   COMPILER_ATTESTATION_VERSION,
   COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+  compilerSemanticProfileAtLeast,
   COMPILER_VERSION,
   SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS,
   HASH_ALGORITHM,
@@ -895,7 +896,12 @@ function validateDisclosureTierEmission(
   packageRevision: VersionedNormalizedApplicationPackage,
   compilerSemanticProfileVersion: CompilerSemanticProfileVersion,
 ): CompilerDiagnostic[] {
-  if (compilerSemanticProfileVersion === COMPILER_SEMANTIC_PROFILE_V2_VERSION) {
+  if (
+    compilerSemanticProfileAtLeast(
+      compilerSemanticProfileVersion,
+      COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+    )
+  ) {
     return [];
   }
   return packageRevision.surfaces.flatMap((surface) =>

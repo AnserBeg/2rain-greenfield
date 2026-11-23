@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { parseNormalizedApplicationPackageJson } from '../../packages/canonical-model/src/index.js';
+import {
+  canonicalize,
+  parseNormalizedApplicationPackageJson,
+} from '../../packages/canonical-model/src/index.js';
 import {
   compileInSandbox,
   parseCustomizationPatch,
@@ -8,10 +11,6 @@ import {
 } from '../../packages/customization/src/index.js';
 
 import type { ArchivedRunner } from './archived-runtime-process.js';
-import {
-  assertReproducedExceptReversibility,
-  projectionFingerprint,
-} from './reversibility-reproduction.js';
 export {
   archivedRuntimeRead,
   archivedServingQuery,
@@ -72,16 +71,10 @@ console.log(JSON.stringify({ request, release: result.steps[0].release }));
       .package.provenance,
     'tenantAuthored',
   );
-  // AI-UNDO-1: both tenant runners reproduce the v6 envelope but the
-  // agent-discovery reversibility key the current compiler adds (owner
-  // ruling, ADR-0066 re-baseline); every other projection is byte-identical.
   assert.equal(
-    envelope.normalizedDefinitionBytesBase64,
-    historical.normalizedDefinitionBytesBase64,
-  );
-  assertReproducedExceptReversibility(
-    projectionFingerprint(compiled.compiled),
-    projectionFingerprint(parseSerializedRelease(historical).compiled),
+    canonicalize(envelope),
+    canonicalize(historical),
+    'both tenant runners reproduce the entire v6 envelope',
   );
   return historical;
 }
