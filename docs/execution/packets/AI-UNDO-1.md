@@ -1,6 +1,6 @@
 # AI-UNDO-1 — the assistant asks before putting a customer on or off credit hold
 
-Status: slice 1 (`packet/AI-UNDO-1-s1`, tip `3048f69c5`): Fable check MERGE, on main. Slice 2 (`packet/AI-UNDO-1-s2`): declarations, emission (agent-discovery floor 5) and routing built; see Slice 2 below. Tier: packet, first-party base change. No migration or grant; slice 2 takes reader rung agent-discovery 5. Stops taken: none.
+Status: slice 1 (`packet/AI-UNDO-1-s1`, tip `3048f69c5`): Fable check MERGE, on main. Slice 2 (`packet/AI-UNDO-1-s2`): declarations, the declaration on cut profile v3 (agent-discovery 5) and routing built; see Slice 2 below. Tier: packet, first-party base change. No migration or grant; slice 2 takes reader rung agent-discovery 5 (v3 releases only). Stops taken: none.
 
 ## Claims
 
@@ -43,34 +43,31 @@ That run is on the exact code tip `6d651b08`; the record commit on top is docs-o
 - `node --import tsx --test --test-name-pattern='X5|credit hold|auto-run snapshot|AGENT-5 7' test/agent/business-map.test.ts` — hold and release ask; a name edit stays reversible.
 - In the app, ask the assistant to release a customer's credit hold: it shows a card and waits for your yes.
 
-## Slice 2 — capability declarations, the emitted declaration, unowned types follow it
+## Slice 2 — capability declarations, the declaration on cut profile v3, unowned types follow it
 
-- Rulings (orchestrator, 2026-11-22): act at once only with a value inverse AND no undeclared consumer; capabilities declare safe fields at the composition root; no profile cut, the key is emitted with an ADR-0066 re-baseline; rung = agent-discovery floor 5.
+- Rulings (orchestrator, 2026-11-22/23): act at once only with a value inverse AND no undeclared consumer; capabilities declare safe fields at the composition root; the key rides compiler-semantic profile v3, cut but NOT adopted (option 1, reversing "no profile v3" after full run 45264594739 showed an unconditional key breaks ~15 older-reader proofs and customization reproduction); rung = agent-discovery 5.
 - Capability side (`b8df0bb2b`): each capability supplies an `ImmediateEditDeclaration` (`packages/canonical-model/src/reversibility.ts`); first-party modules declare today's eleven (`packages/domain/src/app/immediate-edits.ts`); `risk.ts` and `writeRisk` name no record type, field or state.
-- Emission (`c4a81b05e`, on main `d8aad66b3` via `e1e8e83c1`): the compiler emits the derived declaration in the agent-discovery chunk on the adopted profile (v2) and later, floor 5; the runtime reads agent discovery up to 5. Re-baselined in the same commit (`build:app-release -- --pre-tenant-rebaseline`, both release checks, `dev:reset`; full-replay snapshot regenerated identical).
-- Fixed on the way: the dispatch alias carries placeholder preconditions, so the emitted declaration had lost every gate and enum lifecycle; it now reads the authored preconditions, and a test pins emitted = derived.
-- Routing (`risk.ts`): an owned type acts at once only on its capability's declared fields, less any a release consumer reads; a type no capability owns acts at once only on fields classed `exact` / `restorePriorValues` / `record`, under the compiled `holdsWhile`; a release without the declaration asks.
+- Emission (`c4a81b05e`, `4f466e143`; on main `d8aad66b3` via `e1e8e83c1`): under v3 the agent-discovery chunk carries the derived declaration, floor 5; v3 is v2 plus that key and nothing else (`compilerSemanticProfileAtLeast` replaces the `=== v2` checks). The runtime reads agent discovery up to 5. The checked-in release is byte-identical to main (floor 2), so no re-pin or re-baseline is owed.
+- Fixed on the way: the dispatch alias carries placeholder preconditions, so the derived declaration had lost every gate and enum lifecycle; it now reads the authored preconditions, and a test pins emitted = derived.
+- Routing (`risk.ts`): an owned type acts at once only on its capability's declared fields, less any a release consumer reads; a type no capability owns acts at once only on fields classed `exact` / `restorePriorValues` / `record`, under the compiled `holdsWhile`; a release without the declaration asks, so today tenant types ask.
 - Consumer rule, fail closed: every release member not in `PASSIVE_RELEASE_MEMBERS` (workflows, rules, calculated fields, billing plans, documents, connector bindings, any later member) makes the fields it names ask.
-- Older reader (rule 13): the archived `d8aad66b3` binary answers an item query on its own release and refuses the shipped head with `UNSUPPORTED_RUNTIME_CAPABILITY`, agent-discovery 5 against 4; the head's rows persist byte for byte (`request-runtime-view.test.ts`).
-- Re-baseline consequences (`c9ed64b63`): v0/v1 profile output unchanged (profile gate). Re-pinned adopted-profile pins: g1 golden roots and diff, g2 v1/v2 structural golden, v3 manifest digest (`e91ef814` -> `412a451a`), workflow-free fixture pins (root `83599963` -> `9c1d51ef`), agent floor 4/3 -> 5 in two Customize unit tests. Narrowed, not re-pinned, the cross-binary reproductions (archived tenant envelope helper, archived Inspection replay, pre-billing bytes): all projections identical except the agent payload gains `reversibility` and a transition names its moved predecessor (`test/helpers/reversibility-reproduction.ts`).
-- Rule 8, each applied after `c9ed64b63` and restored: emission removed (release check, emission test, unowned test); alias preconditions back (emission, unowned-line); consumer scan narrowed to three members (fail-closed test); routing removed (unowned test); owned consumer tightening removed (consumer-rule test); compiled `holdsWhile` dropped (unowned-line); floor 4 (emission test); profile gate removed (v0 byte-identity test).
-- Rule 17: (a) one release-derived reversibility class per operation and field, readable by any consumer (autonomy, Undo, workflows, audit); (b) any release unchanged, first-party or tenant, a clinic, distributor or rental desk: tenant-built types act at once from their own facts; (c) narrower: owned masters still act only on what their capability declares (capabilities do not yet declare their reads); creates, archives and transitions still ask; Customize members are charter slice 5.
-- `wip/AI-UNDO-1-s2-switch` stays out of every train.
-- Gates (slice 2): local typecheck, lint, unit 527, compiler 195, agent 95, architecture 240, integration 341, check-records; PostgreSQL: the older-reader proof alone. Full CI on the branch tip: see the review-log row.
+- Older reader (rule 13): the head compiled under v3 (`compiledAppViewV3`) is installed fresh; the archived `d8aad66b3` binary answers an item query on its own release and refuses the v3 release with `UNSUPPORTED_RUNTIME_CAPABILITY`, agent-discovery 5 against 4; rows persist byte for byte (`request-runtime-view.test.ts`).
+- Rule 8, each applied after `4f466e143` and restored: emission removed (emission, unowned tests); alias preconditions back (emission, unowned-line); consumer scan narrowed (fail-closed test); routing removed (unowned test); owned consumer tightening removed (consumer-rule test); compiled `holdsWhile` dropped (unowned-line); floor 4 (emission test); key on v2 (check:app-release, golden vectors); v3 drops v2 output (v3 = v2 + key test).
+- Rule 17: (a) one release-derived reversibility class per operation and field, readable by any consumer (autonomy, Undo, workflows, audit); (b) any release unchanged once it compiles under v3, first-party or tenant, a clinic, distributor or rental desk; (c) narrower: v3 is not adopted, so no shipped release carries the key and tenant types ask (adoption is a later packet, bundled with other floor raises so the ~15 older-reader re-pins happen once); owned masters act only on what their capability declares; creates, archives and transitions ask; Customize members are charter slice 5.
+- Also: the census test is registered as a compiler language-coverage producer; the profile-axis tests list v3. `wip/AI-UNDO-1-s2-switch` stays out of every train.
+- Gates (slice 2): local typecheck, lint, unit 527, compiler 197, agent 95, architecture 240, integration 341, check-records, check:language-coverage; PostgreSQL: the older-reader proof alone. Full CI on the branch tip: see the review-log row.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "AI-UNDO-1",
   "base": "e1e8e83c137aa45538a7099e2a4aa1a440128d4e",
-  "head": "c9ed64b63d3979c30d5414af758e41d75afb8cd9",
+  "head": "4f466e1432083e011b17052a710e7fe3ba3038a1",
   "changedPaths": [
-    "apps/web/release/app.compiled.json", "packages/compiler/src/projections.ts", "packages/compiler/src/reversibility.ts",
-    "packages/operations-agent/src/catalog.ts", "packages/operations-agent/src/risk.ts", "packages/runtime/src/request-runtime-view.ts",
-    "test/agent/business-map.test.ts", "test/compiler/legal-entity-query-scope.test.ts", "test/compiler/report-company-access.test.ts",
-    "test/compiler/reversibility-census.test.ts", "test/fixtures/g1/compiler/bootstrap.release-root.golden.sha256", "test/fixtures/g1/compiler/vertical-v1-v2.diff.golden.sha256",
-    "test/fixtures/g1/compiler/vertical-v1.release-root.golden.sha256", "test/fixtures/g1/compiler/vertical-v2.release-root.golden.sha256", "test/fixtures/g2/module-conformance/v1-v2.release.structural.golden.json",
-    "test/helpers/archived-customization-runtime.ts", "test/helpers/reversibility-reproduction.ts", "test/integration/billing-release.test.ts",
-    "test/integration/workflow-admission.test.ts", "test/postgres/request-runtime-view.test.ts", "test/unit/customization.test.ts"
+    "packages/compiler/src/compiler.ts", "packages/compiler/src/index.ts", "packages/compiler/src/projections.ts",
+    "packages/compiler/src/protocol.ts", "packages/compiler/src/reversibility.ts", "packages/operations-agent/src/catalog.ts",
+    "packages/operations-agent/src/risk.ts", "packages/runtime/src/request-runtime-view.ts", "test/agent/business-map.test.ts",
+    "test/agent/compiled-view.ts", "test/compiler/compiler-semantic-profile.test.ts", "test/compiler/disclosure-tier-projection.test.ts",
+    "test/compiler/reversibility-census.test.ts", "test/helpers/reachability-producers.ts", "test/postgres/request-runtime-view.test.ts"
   ],
   "symbols": []
 }
