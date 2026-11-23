@@ -3,7 +3,6 @@ import { DOCUMENT_TEMPLATES_SURFACE_FLOOR } from '../../packages/canonical-model
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 import test from 'node:test';
@@ -11,13 +10,16 @@ import { promisify } from 'node:util';
 
 import pg from 'pg';
 import {
+  BILLING_ARREARS_READER,
   BILLING_ALLOCATION_READER,
   BILLING_INTERVAL_READER,
 } from '../../packages/canonical-model/src/billing.js';
 import { RECORD_TEMPLATE_READER } from '../../packages/canonical-model/src/record-template.js';
+import { MAP_VIEW_READER } from '../../packages/canonical-model/src/map-view.js';
 import { DATE_TIME_FIELD_READER } from '../../packages/canonical-model/src/date-time-field.js';
 import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../packages/canonical-model/src/surface-workspace.js';
 import { DECLARED_REPORT_READER } from '../../packages/canonical-model/src/declared-report.js';
+import { PRESENTATION_READER } from '../../packages/canonical-model/src/surface-presentation-schema.js';
 import {
   COMPANY_ACCESS_INDEX_READER,
   REPORT_SOURCE_READER,
@@ -104,9 +106,11 @@ import {
 
 const execFileAsync = promisify(execFile);
 const checkedInMigrations = resolve('db/migrations');
+// The STOCK-COUNTS merge: its release file is the archived head plus the count release.
+const STOCK_COUNT_RELEASE_REVISION = 'b8a91a6f94c3c1ad6aa505fe81adee39412f6777';
 
 test(
-  'STOCK-COUNTS: the archived rung-34 reader serves the prior release and refuses the shipped count release by name',
+  'STOCK-COUNTS: the archived rung-34 reader serves the prior release and refuses the STOCK-COUNTS release from its merge by name',
   { timeout: 600_000 },
   async () => {
     const archivedRevision = STOCK_COUNT_PRECEDING_READER;
@@ -124,7 +128,20 @@ test(
       ).stdout,
     );
     const prior = old.application ?? old.applications.at(-1);
-    const shipped = JSON.parse(await readFile(releasePath, 'utf8'));
+    // ADR-0066: the checked-in lineage is re-baselined to one entry, so the
+    // count release is read from its own merge, as the prior release is.
+    const shipped = JSON.parse(
+      (
+        await execFileAsync(
+          'git',
+          ['show', `${STOCK_COUNT_RELEASE_REVISION}:${releasePath}`],
+          {
+            encoding: 'utf8',
+            maxBuffer: 64 * 1024 * 1024,
+          },
+        )
+      ).stdout,
+    );
     const priorIndex = shipped.applications.findIndex(
       (release: { releaseRoot: string }) =>
         release.releaseRoot === prior.releaseRoot,
@@ -362,6 +379,9 @@ test('the capability comparison binds the family to its capability, then compare
     COMPANY_ACCESS_INDEX_READER,
     REPORT_SOURCE_READER,
     DECLARED_REPORT_READER,
+    BILLING_ARREARS_READER,
+    MAP_VIEW_READER,
+    PRESENTATION_READER,
     RECORD_TEMPLATE_READER,
   ];
   for (const reader of surfaceFloors) {

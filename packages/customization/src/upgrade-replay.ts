@@ -1,3 +1,7 @@
+import {
+  presentationReplayProblem,
+  supersededPresentations,
+} from './presentation-revision.js';
 import { supersededReports } from './report-revision.js';
 import {
   boundPopupOption,
@@ -271,6 +275,13 @@ function applyRefusal(
   outcome: NonNullable<ReturnType<typeof applyOne>>,
 ): ReplayConflict {
   const ids = declarations(target);
+  if (patch.kind === 'addRatePlanVersion')
+    return {
+      code: 'ID_COLLISION',
+      subject: patch.ratePlan.id,
+      expected: { id: patch.ratePlan.id, version: patch.ratePlan.version },
+      observed: outcome.message,
+    };
   if (patch.kind === 'arrangeLayout' && !ids.has(patch.surface))
     return {
       code: 'RETIRED_TARGET',
@@ -278,6 +289,21 @@ function applyRefusal(
       expected: patch.surface,
       observed: null,
     };
+  if (patch.kind === 'addPresentationRevision') {
+    const problem = presentationReplayProblem(
+      normalizeApplicationPackage(target) as unknown as Parameters<
+        typeof presentationReplayProblem
+      >[0],
+      patch,
+    );
+    if (problem)
+      return {
+        code: 'RETIRED_TARGET',
+        subject: problem.subject,
+        expected: patch.surface,
+        observed: problem.message,
+      };
+  }
   if (patch.kind === 'addPopupActionRevision') {
     const model = normalizeApplicationPackage(
       target,
@@ -387,12 +413,14 @@ export function replayCustomizationPatches(
   const historical: SingleCustomizationPatch[] = [];
   const superseded = {
     addBoardViewRevision: supersededBoardRevisions(chain),
+    addMapViewRevision: supersededBoardRevisions(chain),
     addRecordTemplateBindingRevision: supersededBoardRevisions(
       chain,
       'addRecordTemplateBindingRevision',
     ),
   };
   const pastReports = supersededReports(chain);
+  const pastPresentations = supersededPresentations(chain);
   for (const [patchIndex, change] of chain.entries()) {
     const origin = origins[patchIndex];
     if (origin?.parent) original = structuredClone(origin.parent);
@@ -476,7 +504,8 @@ export function replayCustomizationPatches(
         // revision of each Board surface (ADR-0086 items 4 and 5).
         const board =
           patch.kind === 'addBoardViewRevision' ||
-          patch.kind === 'addRecordTemplateBindingRevision'
+          patch.kind === 'addRecordTemplateBindingRevision' ||
+          patch.kind === 'addMapViewRevision'
             ? {
                 check: (superseded[patch.kind].has(patch.revisionId)
                   ? 'identity'
@@ -486,10 +515,23 @@ export function replayCustomizationPatches(
                 problem: undefined as BoardApplyProblem | undefined,
               }
             : undefined;
-        const reportIdentityOnly =
-          patch.kind === 'addReportRevision' &&
-          pastReports.has(patch.revisionId);
-        if (before && !layout && !board && patch.kind !== 'addReportRevision')
+        // A superseded Report or presentation revision is checked by
+        // identity only; the last revision of each is checked in full. A
+        // retired presentation is carried, never validated, so it too is
+        // checked by identity only: the old rules it carries never refuse.
+        const identityOnly =
+          (patch.kind === 'addReportRevision' &&
+            pastReports.has(patch.revisionId)) ||
+          (patch.kind === 'addPresentationRevision' &&
+            (pastPresentations.has(patch.revisionId) ||
+              patch.status === 'retired'));
+        if (
+          before &&
+          !layout &&
+          !board &&
+          patch.kind !== 'addReportRevision' &&
+          !identityOnly
+        )
           conflicts.push(...bindings(patch, before, target));
         if (patch.kind === 'addMapPlacement' && !conflicts.length) {
           const surface = target.get(patch.surfaceId);
@@ -535,7 +577,7 @@ export function replayCustomizationPatches(
             applied,
             layout,
             board,
-            reportIdentityOnly,
+            identityOnly,
           );
           if (outcome) {
             if (board?.problem?.conflicts.length)

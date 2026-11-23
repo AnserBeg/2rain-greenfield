@@ -2,6 +2,7 @@ import {
   PostgresRecordTemplateLibrary,
   templatePermissionBindings,
 } from './record-template-library.js';
+import { MAP_VIEWPORT_READ_BINDING } from './current-policy.js';
 import type { ReportLimits } from '../../runtime/src/declared-report.js';
 import {
   REPORT_EXPORT_PERMISSION,
@@ -59,6 +60,7 @@ import {
   PostgresModuleRuntimeInterpreter,
   type ModuleProviderErrorMapping,
 } from './module-runtime-interpreter.js';
+import type { ModuleWriteInvariantProvider } from './module-write-invariants.js';
 import {
   ADDRESS_CONNECTOR_CONFIGURE_BINDING,
   PostgresCurrentPolicyGateway,
@@ -96,6 +98,7 @@ export function composeServingGateways(
   metrics: ObservabilityMetrics,
   options: {
     readonly providerErrorMappings: readonly ModuleProviderErrorMapping[];
+    readonly writeInvariants: readonly ModuleWriteInvariantProvider[];
     readonly capabilityOperationExecutorFactories?: readonly PostgresCapabilityOperationExecutorFactory[];
     readonly approvalPool?: pg.Pool;
     readonly localDemoIdentity?: true;
@@ -119,6 +122,7 @@ export function composeServingGateways(
         ...(options.reportLimits && { reportLimits: options.reportLimits }),
         validationReadPolicy: async (releaseId) =>
           (await servingFor(releaseId)).policy,
+        writeInvariants: options.writeInvariants,
       },
     );
   const operationMediation = capabilityMediationAuthority(
@@ -740,6 +744,11 @@ export function releasePolicyBindings(
       : []),
     ...currentPolicyBindingsFromPermissions(definition.permissions),
     ...templatePermissionBindings(definition.surfaces),
+    ...(definition.surfaces.some(
+      (s) => s.archetype === 'map' && s.lifecycle === 'active',
+    )
+      ? [MAP_VIEWPORT_READ_BINDING]
+      : []),
     ...(documents ? documentPermissionBindings(definition.entities) : []),
   ];
 }

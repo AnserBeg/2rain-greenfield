@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { canonicalizeAndHash } from './canonicalize.js';
 
 // Reconcile this scalar with the immediately preceding build at integration.
-export const RECORD_TEMPLATE_READER = 47;
+export const RECORD_TEMPLATE_READER = 48;
 export const RECORD_TEMPLATE_OPERATION_READER = 7;
 
 export function hasRecordTemplateBinding(definition: unknown): boolean {

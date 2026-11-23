@@ -1,10 +1,15 @@
 import type { Pool } from 'pg';
 import {
   BillingPlansSchema,
+  type BillingPlan,
   BillingListAssignmentSchema,
   BILLING_INTERVAL_READER,
+  BILLING_ARREARS_READER,
 } from '../../canonical-model/src/billing.js';
-import { BillingQuoteEvidenceSchema } from '../../canonical-model/src/billing-evidence.js';
+import {
+  BillingQuoteEvidenceSchema,
+  type BillingQuoteEvidence,
+} from '../../canonical-model/src/billing-evidence.js';
 import { quoteBillingService } from '../../domain/src/billing/quote.js';
 import { canonicalize } from '../../canonical-model/src/canonicalize.js';
 import { compileRatePlan } from '../../domain/src/billing/terms.js';
@@ -16,8 +21,22 @@ import {
   registeredSemanticQueryFromPinnedView,
   SEMANTIC_QUERY_REQUEST_VERSION,
   type SemanticQueryReadModelExecutor,
+  type SemanticRecordDto,
 } from '../../runtime/src/semantic-query-gateway.js';
-import { withTrustedRequestRead } from './request-context.js';
+import {
+  billingBookingUsage,
+  bookingPossessionServiceEnd,
+  fenceBillingBookingOwners,
+} from './billing-booking-usage.js';
+import {
+  dueArrearsCycle,
+  reviewArrearsCharges,
+} from '../../domain/src/billing/arrears.js';
+import { BOOKING_USAGE_BINDING } from '../../canonical-model/src/booking.js';
+import {
+  withTrustedRequestRead,
+  withTrustedRequestTransaction,
+} from './request-context.js';
 
 export function billingPlansIn(payload: unknown) {
   if (!payload || typeof payload !== 'object' || !('billingPlans' in payload))
@@ -36,7 +55,9 @@ export function billingQuoteReadModel(
     if (
       !p?.bindings ||
       (surface.requiredRuntimeCapability?.minimumVersion ?? 0) <
-        BILLING_INTERVAL_READER ||
+        (p.bindings.arrearsSource
+          ? BILLING_ARREARS_READER
+          : BILLING_INTERVAL_READER) ||
       definition.queryType !== 'get' ||
       result.records.length !== 1 ||
       !args ||
@@ -99,7 +120,7 @@ export function billingQuoteReadModel(
       base.values[fields.customerFieldId] !== customerId ||
       base.values[fields.currencyFieldId] !== currency ||
       typeof anchor !== 'string' ||
-      typeof end !== 'string'
+      (typeof end !== 'string' && !(b.arrearsSource && end === null))
     )
       throw new Error(
         'Billing source identity, currency or interval disagrees',
@@ -171,9 +192,29 @@ export function billingQuoteReadModel(
       assignments,
       allocations: [],
     });
-    const quote = quoteBillingService(p, evidence);
     const target = definition.readModel?.resultFields.explanation;
     if (!target) throw new Error('Missing quote explanation binding');
+    const arrears = b.arrearsSource;
+    if (arrears) {
+      const review = await readArrearsCycle(
+        pool,
+        { view, gateway },
+        plan,
+        evidence,
+        row,
+        arrears,
+      );
+      return {
+        ...result,
+        records: [
+          {
+            ...base,
+            values: { ...base.values, [target]: JSON.stringify(review) },
+          },
+        ],
+      };
+    }
+    const quote = quoteBillingService(p, evidence);
     return {
       ...result,
       records: [
@@ -199,4 +240,148 @@ export function billingQuoteReadModel(
       ],
     };
   };
+}
+
+async function readArrearsCycle(
+  pool: Pool,
+  {
+    view,
+    gateway,
+  }: Pick<Parameters<SemanticQueryReadModelExecutor>[0], 'view' | 'gateway'>,
+  plan: BillingPlan,
+  evidence: BillingQuoteEvidence,
+  row: SemanticRecordDto,
+  arrears: NonNullable<NonNullable<BillingPlan['bindings']>['arrearsSource']>,
+) {
+  if (arrears.kind === 'bookingActuals')
+    return readBookingArrearsCycle(
+      pool,
+      { view, gateway },
+      plan,
+      evidence,
+      row,
+      arrears,
+    );
+  const cycle = dueArrearsCycle(plan, evidence);
+  if (!cycle) return { status: 'notDue' as const };
+  if (arrears.kind === 'periodMeter') {
+    const missing = [
+      arrears.openingReadingFieldId,
+      arrears.openingInstantFieldId,
+      arrears.closingReadingFieldId,
+      arrears.closingInstantFieldId,
+    ].filter((field) => row.values[field] === null);
+    if (missing.length)
+      return { status: 'pendingReadings' as const, cycle, missing };
+    const reading = (field: string) => {
+      const v = row.values[field];
+      if (typeof v !== 'string')
+        throw new Error('Incomplete billing meter source');
+      return v;
+    };
+    evidence.bands = [];
+    evidence.basis = 'usageOnly';
+    evidence.periodMeter = {
+      streamId: arrears.streamId,
+      unit: arrears.unit,
+      opening: {
+        at: reading(arrears.openingInstantFieldId),
+        reading: reading(arrears.openingReadingFieldId),
+      },
+      closing: {
+        at: reading(arrears.closingInstantFieldId),
+        reading: reading(arrears.closingReadingFieldId),
+      },
+    };
+  }
+  return reviewArrearsCharges(plan, evidence);
+}
+
+async function readBookingArrearsCycle(
+  pool: Pool,
+  {
+    view,
+    gateway,
+  }: Pick<Parameters<SemanticQueryReadModelExecutor>[0], 'view' | 'gateway'>,
+  plan: BillingPlan,
+  evidence: BillingQuoteEvidence,
+  row: SemanticRecordDto,
+  arrears: Extract<
+    NonNullable<NonNullable<BillingPlan['bindings']>['arrearsSource']>,
+    { kind: 'bookingActuals' }
+  >,
+) {
+  if (Date.parse(evidence.asOf) <= Date.parse(evidence.anchor))
+    return { status: 'notDue' as const };
+  const usage = registeredSemanticQueryFromPinnedView(view, arrears.queryId);
+  if (
+    usage?.queryType !== 'get' ||
+    usage.readModel?.binding !== BOOKING_USAGE_BINDING ||
+    !usage.readModel.resultFields.usage ||
+    usage.sourceEntityId !== row.entityId ||
+    usage.legalEntityScope?.cardinality !== 'exactlyOne'
+  )
+    throw new Error('Billing requires scoped booking usage');
+  const readUsage = await gateway.invoke(view, {
+    schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+    queryId: usage.queryId,
+    arguments: {
+      recordId: row.recordId,
+      [usage.legalEntityScope.operand.parameterId]: evidence.companyId,
+      // Possession is read through the review instant, so a hire kept past
+      // its agreed end keeps earning cycles (ADR-0083, calculation v3).
+      usage: { from: evidence.anchor, until: evidence.asOf },
+    },
+  });
+  const owner = readUsage.records[0];
+  if (
+    readUsage.outcome !== 'exact' ||
+    readUsage.records.length !== 1 ||
+    owner?.recordId !== row.recordId ||
+    owner.entityId !== row.entityId ||
+    owner.archived ||
+    owner.revision !== row.revision
+  )
+    throw new Error('Incomplete or stale billing booking owner');
+  const snapshot = owner.values[usage.readModel.resultFields.usage];
+  evidence.serviceEnd = bookingPossessionServiceEnd(
+    snapshot,
+    arrears.slotId,
+    evidence.serviceEnd,
+  );
+  const cycle = dueArrearsCycle(plan, evidence);
+  if (!cycle) return { status: 'notDue' as const };
+  Object.assign(
+    evidence,
+    billingBookingUsage(
+      snapshot,
+      {
+        entityId: owner.entityId,
+        recordId: owner.recordId,
+        companyId: evidence.companyId,
+      },
+      arrears.slotId,
+      plan.serviceUnit,
+      cycle.end,
+    ),
+  );
+  await withTrustedRequestTransaction(
+    pool,
+    trustedContextForRequestRuntimeView(view),
+    (client) =>
+      fenceBillingBookingOwners(
+        client,
+        view.release.releaseId,
+        view.pointer.fence,
+        [
+          {
+            queryId: usage.queryId,
+            entityId: owner.entityId,
+            recordId: owner.recordId,
+            cursor: evidence.cursor,
+          },
+        ],
+      ),
+  );
+  return reviewArrearsCharges(plan, evidence);
 }

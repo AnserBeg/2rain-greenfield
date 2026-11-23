@@ -108,6 +108,7 @@ import {
   verificationSentinelNumber,
   withModuleRuntimeRole,
 } from './module-runtime-interpreter.js';
+import type { ModuleWriteInvariantProvider } from './module-write-invariants.js';
 import { withTrustedRequestTransaction } from './request-context.js';
 import { TrustedActorEnvelopeIssuer } from './trust/trusted-actor-envelope.js';
 
@@ -299,6 +300,7 @@ export class PostgresReleaseVerificationService {
     private readonly providerErrorMappings: readonly ModuleProviderErrorMapping[] = [],
     private readonly capabilityOperationExecutorFactories: readonly PostgresCapabilityOperationExecutorFactory[] = [],
     private readonly workflowVerifierPool?: Pool,
+    private readonly writeInvariants: readonly ModuleWriteInvariantProvider[] = [],
   ) {}
 
   async #executeAndPersist(
@@ -421,7 +423,10 @@ export class PostgresReleaseVerificationService {
       this.providerErrorMappings,
       undefined,
       undefined,
-      { documentNumbers: 'verificationSentinel' },
+      {
+        documentNumbers: 'verificationSentinel',
+        writeInvariants: this.writeInvariants,
+      },
     );
     return this.#executeSemanticCandidateWithExecutorAndPersist(
       context,

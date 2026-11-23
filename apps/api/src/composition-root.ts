@@ -18,6 +18,7 @@ import {
 import { registerDiscussionInboxWork } from '@north-star/postgres-provider/personal-inbox';
 import { registerBookingDueWork } from '@north-star/postgres-provider/booking-capability-executor';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '@north-star/postgres-provider/inventory-provider-error-mappings';
+import { INVENTORY_WRITE_INVARIANTS } from '@north-star/postgres-provider/inventory-write-invariants';
 import {
   AGENT_KEY_FILE_VARIABLE,
   anthropicModel,
@@ -38,7 +39,9 @@ import {
 import {
   assistantCompany,
   createSurfaceRuntimeServer,
+  mapDisplayOrigins,
 } from '@north-star/web/app-server';
+import { GOOGLE_MAP_FRAME } from '@north-star/web/google-basemap';
 import { COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION } from '@north-star/web/sales-section';
 
 import {
@@ -251,6 +254,7 @@ export async function startComposedApplication(
           process.stderr.write('WORKFLOW_SCHEDULER_POLL_FAILED\n');
         },
         [registerBookingDueWork, registerDiscussionInboxWork],
+        INVENTORY_WRITE_INVARIANTS,
       );
     }
     if (
@@ -303,6 +307,11 @@ export async function startComposedApplication(
       // Loopback-only dev and test server: each response reports its
       // database work as `Server-Timing` (SPEED-1).
       {
+        mapDisplay: mapDisplayOrigins(
+          process.env.NORTH_STAR_MAP_APP_ORIGIN,
+          process.env.NORTH_STAR_MAP_DISPLAY_ORIGIN,
+        ),
+        mapFrames: { 'google-maps-js': GOOGLE_MAP_FRAME },
         readSnapshot: (work, snapshotOptions) =>
           runtime.readSnapshot(work, snapshotOptions),
         selectedDemoActor: localDemoActor,
@@ -451,6 +460,7 @@ export async function openComposedApplicationRuntime(
     migrationsDirectory: new URL('../../../db/migrations/', import.meta.url)
       .pathname,
     providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
+    writeInvariants: INVENTORY_WRITE_INVARIANTS,
     ...(options.rollbackReleaseRoot !== undefined
       ? {
           releaseSelection: {
@@ -520,6 +530,7 @@ export async function openCustomizeService(
     migrationsDirectory: new URL('../../../db/migrations/', import.meta.url)
       .pathname,
     providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
+    writeInvariants: INVENTORY_WRITE_INVARIANTS,
     tenantSlug: options.tenantSlug ?? 'local-composed-application',
   });
 }

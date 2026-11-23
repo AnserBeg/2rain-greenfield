@@ -12,13 +12,26 @@ import {
   readUnboundPermissionAcknowledgementFor,
   type UnboundPermissionAcknowledgementInput,
 } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
-import { parseAuthoredApplicationPackageJson } from '../../packages/canonical-model/src/index.js';
+import {
+  CanonicalIdSchema,
+  parseAuthoredApplicationPackageJson,
+  parseNormalizedApplicationPackageJson,
+} from '../../packages/canonical-model/src/index.js';
+import { billingBindingProblem } from '../../packages/compiler/src/billing.js';
 import {
   BillingPlanSchema,
   BILLING_ALLOCATION_READER,
+  BILLING_ARREARS_READER,
+  BILLING_CALCULATION_VERSION,
+  BILLING_CYCLE_CALCULATION,
   BILLING_TERMS_CAPABILITY,
   BILLING_QUOTE_CAPABILITY,
 } from '../../packages/canonical-model/src/billing.js';
+import {
+  BOOKING_CAPABILITY,
+  BOOKING_USAGE_BINDING,
+  BOOKING_USAGE_CAPABILITY,
+} from '../../packages/canonical-model/src/booking.js';
 import {
   canonicalize,
   canonicalizeAndHash,
@@ -35,20 +48,29 @@ import { compileRatePlan } from '../../packages/domain/src/billing/terms.js';
 import {
   compileApplicationRelease,
   MODULE_COMPILER_PROFILE,
+  PROJECTION_FAMILY_IDS,
   expectedActiveReleaseFrom,
 } from '../../packages/compiler/src/index.js';
 import { serializeRelease } from '../../packages/customization/src/index.js';
 import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../packages/runtime/src/semantic-query-gateway.js';
-import { compilerInput, normalizedBytes } from '../compiler/helpers.js';
+import {
+  compilerInput,
+  normalizedBytes,
+  projectionPayload,
+} from '../compiler/helpers.js';
 import {
   authoredPath,
   firstPartyAuthored,
   compiledApplication,
 } from '../helpers/customization-fixture.js';
 import { withOrderEntryFixture } from '../helpers/order-entry-fixture.js';
+import { DECLARED_REPORT_READER } from '../../packages/canonical-model/src/declared-report.js';
+import { truncateBookingInstant } from '../../packages/postgres-provider/src/billing-booking-usage.js';
+import type { ImmutableJsonValue } from '../../packages/runtime/src/request-runtime-view.js';
 import {
   archivedBillingBase,
+  archivedBillingReleaseBytes,
   archivedBillingMigration,
   archivedBillingQuery,
 } from '../helpers/archived-billing-probes.js';
@@ -126,8 +148,56 @@ async function archivedBase(run: ArchivedRunner): Promise<BillingFixtureBase> {
   return (await run(archivedBillingBase, null)) as BillingFixtureBase;
 }
 
+const meterUnit = 'northstar.app:capability.unit_copy';
+const openingReading = id('field.sales_order_opening_reading');
+const closingReading = id('field.sales_order_closing_reading');
+const meterPlan = BillingPlanSchema.parse({
+  ...plan,
+  id: 'period-usage',
+  serviceUnit: 'subscription',
+  schedule: { kind: 'anniversary', months: 1 },
+  slots: [
+    { kind: 'money', id: 'rate', currency: 'CAD', scale: 2 },
+    { kind: 'quantity', id: 'included', unit: meterUnit, scale: 2 },
+  ],
+  components: [
+    {
+      id: 'overage',
+      kind: 'meter',
+      stage: 'afterCapBeforeTax',
+      taxClassification: 'untaxed',
+      streamId: 'copies',
+      unit: meterUnit,
+      overageRate: 'rate',
+      allowanceProration: 'none',
+      allowanceBasis: { kind: 'perCycle', quantity: 'included' },
+    },
+  ],
+  bindings: {
+    ...plan.bindings,
+    arrearsSource: {
+      kind: 'periodMeter',
+      unit: meterUnit,
+      streamId: 'copies',
+      openingReadingFieldId: openingReading,
+      closingReadingFieldId: closingReading,
+      openingInstantFieldId: plan.bindings!.agreedInterval!.startFieldId,
+      closingInstantFieldId: plan.bindings!.agreedInterval!.endFieldId,
+    },
+  },
+});
+const usageQuery = id('query.billing_usage');
+const trackedSlot = id('slot.service_equipment');
+type FixtureMode =
+  | 'bound'
+  | 'legacy'
+  | 'declaration'
+  | 'arrears'
+  | 'interval'
+  | 'booking'
+  | 'wrongSlot';
 function billingFixture(
-  mode: 'bound' | 'legacy' | 'declaration',
+  mode: FixtureMode,
   base: BillingFixtureBase = currentBase,
 ) {
   const p = parseAuthoredApplicationPackageJson(JSON.stringify(base.authored));
@@ -146,6 +216,75 @@ function billingFixture(
   const requirement = p.capabilityRequirements.find(
     (c) => c.capabilityId === 'northstar.sales:capability.fulfillment',
   )!;
+  const booking = mode === 'booking' || mode === 'wrongSlot';
+  const usagePermission = id('permission.read_service_usage');
+  const usage = {
+    ...source,
+    tier: 'q2',
+    queryId: usageQuery,
+    permission: ref('permissionReference', usagePermission),
+    selections: source.selections.map((selection, i) => ({
+      ...selection,
+      selectionId: id('selection.service_usage_' + i),
+    })),
+    readModel: {
+      capability: ref('capabilityReference', BOOKING_USAGE_CAPABILITY),
+      binding: BOOKING_USAGE_BINDING,
+      queries: { owner: ref('queryReference', sourceId) },
+      resultFields: { usage: id('metric.service_usage') },
+    },
+  };
+  const hold = {
+    ...op,
+    operationId: id('operation.hold_service'),
+    readBack: ref('queryReference', sourceId),
+    precondition: {
+      kind: 'booleanPredicate',
+      schemaVersion: 'v6',
+      value: true,
+    },
+    effect: {
+      kind: 'registeredCapabilityEffect',
+      schemaVersion: 'v6',
+      capability: ref('capabilityReference', BOOKING_CAPABILITY),
+    },
+    booking: {
+      bindingVersion: 'booking.commitment/v1',
+      declarationRevision: id('revision.service'),
+      slotRevision: id('revision.equipment'),
+      slotId: trackedSlot,
+      ownerEntity: source.sourceEntity.targetId,
+      resourceEntity: source.sourceEntity.targetId,
+      resourceReadPermission: sourcePermission.permissionId,
+      ownerReadPermission: sourcePermission.permissionId,
+      operation: 'hold',
+      kind: 'unit',
+      fulfilmentMode: 'tracked',
+      unit: plan.serviceUnit,
+      scale: 0,
+      maxBackdateDays: 1,
+      holdSeconds: 900,
+    },
+  };
+  // Confirm, start and return complete a tracked hire. Start and return take
+  // Booking's own decision clock whenever no effective instant is entered.
+  const stewardPermission = id('permission.service_booking_steward');
+  const lifecycle = (['confirm', 'start', 'return'] as const).map((verb) => ({
+    ...hold,
+    operationId: id(`operation.${verb}_service`),
+    confirmation: 'humanRequired' as const,
+    booking: {
+      ...hold.booking,
+      operation: verb,
+      ...(verb === 'confirm'
+        ? {}
+        : {
+            bindingVersion: 'booking.fulfilment/v1',
+            stewardPermission,
+            maxCorrectionAgeDays: 90,
+          }),
+    },
+  }));
   const quote = {
     ...source,
     queryId: quoteId,
@@ -157,11 +296,23 @@ function billingFixture(
     readModel: {
       capability: ref('capabilityReference', BILLING_QUOTE_CAPABILITY),
       binding: 'northstar.billing:read_model.quote',
-      queries: { evidence: ref('queryReference', sourceId) },
+      queries: {
+        evidence: ref('queryReference', sourceId),
+      },
       resultFields: { explanation: id('metric.billing_explanation') },
     },
   };
   const permissions = [
+    ...(booking
+      ? [
+          { ...sourcePermission, permissionId: usagePermission },
+          {
+            ...writePermission,
+            action: 'transition' as const,
+            permissionId: stewardPermission,
+          },
+        ]
+      : []),
     { ...sourcePermission, permissionId: readPermission },
     { ...writePermission, permissionId: publishPermission },
   ];
@@ -171,6 +322,14 @@ function billingFixture(
     ...source,
     selections: [
       ...source.selections,
+      ...(mode === 'arrears'
+        ? [openingReading, closingReading].map((field, index) => ({
+            ...source.selections[0]!,
+            field: ref('fieldReference', field),
+            selectionId: id('selection.billing_meter_' + index),
+            orderKey: 10001 + index,
+          }))
+        : []),
       {
         ...source.selections[0]!,
         field: ref('fieldReference', proposalField),
@@ -181,9 +340,47 @@ function billingFixture(
   };
   const boundInput = {
     ...p,
-    billingPlans: [plan],
+    billingPlans: [
+      mode === 'arrears'
+        ? meterPlan
+        : mode === 'interval'
+          ? {
+              ...plan,
+              bindings: { ...b, arrearsSource: { kind: 'agreedInterval' } },
+            }
+          : booking
+            ? {
+                ...plan,
+                bindings: {
+                  ...b,
+                  arrearsSource: {
+                    kind: 'bookingActuals',
+                    queryId: usageQuery,
+                    slotId:
+                      mode === 'wrongSlot' ? id('slot.other') : trackedSlot,
+                  },
+                },
+              }
+            : plan,
+    ],
     fields: [
       ...p.fields,
+      ...(mode === 'arrears'
+        ? [openingReading, closingReading].map((field, index) => ({
+            ...notes,
+            fieldId: field,
+            label: index ? 'Closing reading' : 'Opening reading',
+            orderKey: 10001 + index,
+            fieldType: {
+              kind: 'quantityFieldType',
+              schemaVersion: 'v6',
+              representation: 'canonicalString',
+              precision: 20,
+              scale: 2,
+              baseUnit: ref('unitReference', meterUnit),
+            },
+          }))
+        : []),
       {
         ...notes,
         fieldId: proposalField,
@@ -194,11 +391,13 @@ function billingFixture(
     queries: [
       ...p.queries.filter((q) => q.queryId !== sourceId),
       termsSource,
+      ...(booking ? [usage] : []),
       quote,
     ],
     permissions: [...p.permissions, ...permissions],
     operations: [
       ...p.operations,
+      ...(booking ? [hold, ...lifecycle] : []),
       ...[
         b.publishOperationId,
         b.overrideOperationId,
@@ -217,6 +416,29 @@ function billingFixture(
     ],
     capabilityRequirements: [
       ...p.capabilityRequirements,
+      ...(booking
+        ? [
+            {
+              ...requirement,
+              capabilityId: BOOKING_USAGE_CAPABILITY,
+              declaredEffects: ['read'],
+            },
+            {
+              ...requirement,
+              capabilityId: BOOKING_CAPABILITY,
+              declaredEffects: ['appendFact'],
+            },
+          ]
+        : []),
+      ...(mode === 'arrears'
+        ? [
+            {
+              ...requirement,
+              capabilityId: meterUnit,
+              declaredEffects: ['read'],
+            },
+          ]
+        : []),
       { ...requirement, capabilityId: BILLING_TERMS_CAPABILITY },
       {
         ...requirement,
@@ -254,10 +476,7 @@ function billingFixture(
   };
 }
 
-function release(
-  mode: 'bound' | 'legacy' | 'declaration' = 'bound',
-  base?: BillingFixtureBase,
-) {
+function compileBillingFixture(mode: FixtureMode, base?: BillingFixtureBase) {
   const { bytes, old, permissions, ack, languageVersion } = billingFixture(
     mode,
     base,
@@ -287,6 +506,21 @@ function release(
       ],
     },
   );
+  return { compiled, bytes, old };
+}
+
+function release(mode: FixtureMode = 'bound', base?: BillingFixtureBase) {
+  const { compiled, bytes, old } = compileBillingFixture(mode, base);
+  if (mode === 'wrongSlot') {
+    assert.ok(
+      compiled.status !== 'compiled' &&
+        compiled.diagnostics.some(
+          (d) => d.rule === 'BILLING_BOOKING_SOURCE_REQUIRED',
+        ),
+      JSON.stringify(compiled.diagnostics),
+    );
+    return;
+  }
   if (mode === 'legacy') {
     assert.ok(
       compiled.status !== 'compiled' &&
@@ -310,6 +544,220 @@ function release(
     ],
   };
 }
+test('period meter bindings require distinct selected boundaries, canonical units and a single stream', () => {
+  const { bytes } = billingFixture('arrears');
+  const pkg = parseNormalizedApplicationPackageJson(bytes);
+  assert.ok(pkg.languageVersion === 'v6');
+  const rate = pkg.billingPlans![0]!;
+  const bindings = rate.bindings!;
+  const meter = bindings.arrearsSource;
+  assert.ok(meter?.kind === 'periodMeter');
+  assert.equal(billingBindingProblem(pkg), undefined);
+  const selected = pkg.fields.find(
+    (f) => f.fieldId === meter.closingReadingFieldId,
+  )!;
+  const quantity = selected.fieldType;
+  assert.ok(quantity.kind === 'quantityFieldType');
+  for (const fieldType of [
+    {
+      ...quantity,
+      baseUnit: {
+        ...quantity.baseUnit,
+        targetId: CanonicalIdSchema.parse(id('capability.other_unit')),
+      },
+    },
+    { ...quantity, scale: 10 },
+    { ...quantity, precision: 21 },
+  ]) {
+    assert.equal(
+      billingBindingProblem({
+        ...pkg,
+        fields: pkg.fields.map((f) =>
+          f.fieldId === selected.fieldId ? { ...f, fieldType } : f,
+        ),
+      }),
+      'BILLING_METER_SOURCE_REQUIRED',
+    );
+  }
+  for (const wrong of [
+    { openingReadingFieldId: meter.closingReadingFieldId },
+    { closingReadingFieldId: notesField },
+    { closingInstantFieldId: proposalField },
+    { unit: 'other' },
+    { streamId: 'other' },
+  ]) {
+    const declared: typeof rate = {
+      ...rate,
+      bindings: { ...bindings, arrearsSource: { ...meter, ...wrong } },
+    };
+    assert.equal(
+      billingBindingProblem({ ...pkg, billingPlans: [declared] }),
+      'BILLING_METER_SOURCE_REQUIRED',
+    );
+  }
+});
+
+test('each arrears source kind compiles at the arrears reader with the cycle calculation, and absence keeps the allocation reader', () => {
+  const family = PROJECTION_FAMILY_IDS.surfaceManifest;
+  const surface = (mode: FixtureMode) => {
+    const { compiled } = compileBillingFixture(mode);
+    assert.ok(
+      compiled.status === 'compiled',
+      JSON.stringify(compiled.diagnostics),
+    );
+    return {
+      reader: compiled.bundle.releaseManifest.projections.find(
+        (p) => p.familyId === family,
+      )!.requiredRuntimeCapability.minimumVersion,
+      calculation: projectionPayload<{ billingCalculationVersion?: string }>(
+        compiled,
+        family,
+      ).billingCalculationVersion,
+    };
+  };
+  // The first-party base carries its own surface floor (main's company access
+  // and report readers). An unsourced plan raises it to no more than the
+  // allocation reader; every arrears source raises it to the arrears reader.
+  const baseFloor = surface('declaration').reader;
+  assert.ok(baseFloor < BILLING_ARREARS_READER);
+  assert.deepEqual(surface('bound'), {
+    reader: Math.max(BILLING_ALLOCATION_READER, baseFloor),
+    calculation: BILLING_CALCULATION_VERSION,
+  });
+  for (const mode of ['interval', 'arrears', 'booking'] as const) {
+    assert.deepEqual(
+      surface(mode),
+      {
+        reader: BILLING_ARREARS_READER,
+        calculation: BILLING_CYCLE_CALCULATION,
+      },
+      mode,
+    );
+  }
+  const pkg = parseNormalizedApplicationPackageJson(
+    billingFixture('interval').bytes,
+  );
+  assert.ok(pkg.languageVersion === 'v6');
+  const rate = pkg.billingPlans![0]!;
+  assert.deepEqual(rate.bindings!.arrearsSource, { kind: 'agreedInterval' });
+  assert.equal(billingBindingProblem(pkg), undefined);
+  const metered: typeof rate = {
+    ...rate,
+    components: [
+      ...rate.components,
+      {
+        id: 'overage',
+        kind: 'meter',
+        stage: 'afterCapBeforeTax',
+        taxClassification: 'untaxed',
+        streamId: 'copies',
+        unit: 'copy',
+        overageRate: 'daily',
+        allowanceProration: 'none',
+        allowanceBasis: { kind: 'perCycle', quantity: 'daily' },
+      },
+    ],
+  };
+  assert.equal(
+    billingBindingProblem({ ...pkg, billingPlans: [metered] }),
+    'BILLING_SOURCE_FIELDS_REQUIRED',
+  );
+  assert.ok(BillingPlanSchema.safeParse(plan).success);
+  for (const arrearsSource of [
+    { kind: 'advance' },
+    { kind: 'agreedInterval', queryId: usageQuery },
+  ]) {
+    assert.equal(
+      BillingPlanSchema.safeParse({
+        ...plan,
+        bindings: { ...plan.bindings, arrearsSource },
+      }).success,
+      false,
+      JSON.stringify(arrearsSource),
+    );
+  }
+});
+
+test('the plan binds its customer and currency by declared role, not by field name', () => {
+  const pkg = parseNormalizedApplicationPackageJson(
+    billingFixture('bound').bytes,
+  );
+  assert.ok(pkg.languageVersion === 'v6');
+  assert.equal(billingBindingProblem(pkg), undefined);
+  // A second business names the same roles differently.
+  const holder = id('field.sales_order_account_holder');
+  const billed = id('field.sales_order_billing_currency');
+  const renamed = JSON.parse(
+    JSON.stringify(pkg)
+      .replaceAll(
+        `"${id('field.sales_order_customer_party_id')}"`,
+        `"${holder}"`,
+      )
+      .replaceAll(`"${id('field.sales_order_currency')}"`, `"${billed}"`),
+  ) as typeof pkg;
+  const rate = renamed.billingPlans![0]!;
+  assert.equal(rate.bindings!.agreedInterval!.customerFieldId, holder);
+  assert.equal(rate.bindings!.agreedInterval!.currencyFieldId, billed);
+  assert.equal(billingBindingProblem(renamed), undefined);
+  const bind = (roles: {
+    customerFieldId?: string;
+    currencyFieldId?: string;
+  }) =>
+    billingBindingProblem({
+      ...renamed,
+      billingPlans: [
+        {
+          ...rate,
+          bindings: {
+            ...rate.bindings!,
+            agreedInterval: { ...rate.bindings!.agreedInterval!, ...roles },
+          },
+        },
+      ],
+    });
+  // Optional free text cannot carry either role, a currency holds one ISO
+  // code, and one field cannot carry both roles.
+  for (const [reason, roles] of [
+    ['optional notes cannot be the customer', { customerFieldId: notesField }],
+    ['optional notes cannot be the currency', { currencyFieldId: notesField }],
+    [
+      'a currency holds one three-letter code',
+      { customerFieldId: billed, currencyFieldId: holder },
+    ],
+    [
+      'one field cannot carry both roles',
+      { customerFieldId: billed, currencyFieldId: billed },
+    ],
+  ] as const)
+    assert.equal(bind(roles), 'BILLING_SOURCE_FIELDS_REQUIRED', reason);
+  // The refusal of notes is its optional declaration: the same selected field
+  // declared required would carry the customer role.
+  const declaredRequired = {
+    ...renamed,
+    fields: renamed.fields.map((f) =>
+      f.fieldId === notesField ? { ...f, presence: 'required' as const } : f,
+    ),
+    billingPlans: [
+      {
+        ...rate,
+        bindings: {
+          ...rate.bindings!,
+          agreedInterval: {
+            ...rate.bindings!.agreedInterval!,
+            customerFieldId: notesField,
+          },
+        },
+      },
+    ],
+  };
+  assert.equal(billingBindingProblem(declaredRequired), undefined);
+});
+
+test('a released tracked slot and its scoped usage query must agree with the billing plan', () => {
+  assert.ok(release('booking'));
+  release('wrongSlot');
+});
+
 test('the serving role has no direct billing table privileges', async () => {
   await withEphemeralPostgres('billing-privileges', async ({ pool }) => {
     const admin = await pool.connect();
@@ -870,5 +1318,429 @@ test('governed terms and scoped source facts produce a quote through the install
     0,
     0,
     release(),
+  );
+});
+
+test('a period meter reviews the first earned cycle through its company-scoped gateway', async () => {
+  const anchor = '2025-01-31T00:00:00.000Z';
+  const end = '2025-02-28T00:00:00.000Z';
+  const preceding = '1092e14d22890d172ac8e68099fdd78093898339';
+  await withOrderEntryFixture(
+    async (f) => {
+      const version = {
+        schemaVersion: 'northstar.billing-rate-table/v1',
+        version: 'first',
+        currency: 'CAD',
+        selector: { kind: 'base' },
+        planDigest: compileRatePlan(meterPlan).digest,
+        effectiveFrom: anchor,
+        values: { rate: '1.50', included: '10' },
+      };
+      const values = {
+        customer_party_id: f.customer,
+        currency: 'CAD',
+        order_date: anchor,
+        requested_date: end,
+        opening_reading: '100',
+        closing_reading: '115.5',
+        billing_proposal: JSON.stringify(version),
+        ship_to_name: 'Service desk',
+        ship_to_street: 'Main',
+        ship_to_city: 'Calgary',
+        ship_to_region: 'AB',
+        ship_to_postal_code: 'T2P 0A1',
+        ship_to_country: 'Canada',
+      };
+      const record = await f.create('sales_order', values);
+      assert.equal(
+        (
+          await f.invoke('billing_publish', {
+            recordId: record.recordId,
+            expectedRevision: record.revision,
+          })
+        ).outcome,
+        'succeeded',
+      );
+      const read = (company: string, recordId = record.recordId) =>
+        f.app.runtime.entry.run(
+          { headers: { cookie: 'northstar-demo-actor=buyer' } },
+          (v) =>
+            f.app.runtime.queryGateway.invoke(v, {
+              schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+              queryId: quoteId,
+              arguments: {
+                recordId,
+                [id('parameter.sales_order_get_legal_entity_scope')]: company,
+              },
+            }),
+        );
+      const result = await read(f.scope);
+      assert.equal(result.outcome, 'exact');
+      const review = JSON.parse(
+        String(result.records[0]!.values[id('metric.billing_explanation')]),
+      );
+      assert.deepEqual(review.cycle, { start: anchor, end });
+      assert.equal(review.quote.lines[0].differenceCents, '825');
+      assert.equal(review.quote.inputs.evidence.companyId, f.scope);
+      assert.equal(
+        replayBillingQuote(review.quote).resultDigest,
+        review.quote.resultDigest,
+      );
+      const other = await f.create(
+        'legal_entity',
+        {
+          code: 'AR-B',
+          name: 'Company B',
+          status: id('option.legal_entity_status_active'),
+          is_default: false,
+        },
+        {},
+        false,
+      );
+      assert.equal((await read(other.recordId)).records.length, 0);
+      const pending = await f.create('sales_order', {
+        ...values,
+        closing_reading: null,
+      });
+      const incomplete = await read(f.scope, pending.recordId);
+      assert.deepEqual(
+        JSON.parse(
+          String(
+            incomplete.records[0]!.values[id('metric.billing_explanation')],
+          ),
+        ),
+        {
+          status: 'pendingReadings',
+          cycle: { start: anchor, end },
+          missing: [closingReading],
+        },
+      );
+      const recordB = await f.create(
+        'sales_order',
+        values,
+        {},
+        true,
+        randomUUID(),
+        other.recordId,
+      );
+      assert.equal(
+        (
+          await f.invoke('billing_publish', {
+            recordId: recordB.recordId,
+            expectedRevision: recordB.revision,
+          })
+        ).outcome,
+        'succeeded',
+      );
+      const inB = await read(other.recordId, recordB.recordId);
+      assert.equal(
+        JSON.parse(
+          String(inB.records[0]!.values[id('metric.billing_explanation')]),
+        ).quote.inputs.evidence.companyId,
+        other.recordId,
+      );
+      const principal = await f.app.runtime.entry.run(
+        { headers: { cookie: 'northstar-demo-actor=buyer' } },
+        async (v) => [v.tenantId, v.environmentId, v.principalId, f.scope],
+      );
+      await f.pool.query(
+        'UPDATE platform.current_policy_memberships SET legal_entity_id=$4 WHERE (tenant_id,environment_id,principal_id)=($1,$2,$3) AND legal_entity_id IS NULL',
+        principal,
+      );
+      assert.equal((await read(f.scope)).records[0]!.recordId, record.recordId);
+      await assert.rejects(() => read(other.recordId, recordB.recordId), {
+        code: 'SEMANTIC_QUERY_POLICY_DENIED',
+      });
+      await withArchivedCustomizationRuntime(preceding, async (run) => {
+        assert.deepEqual(await probeArchivedBilling(run, f), {
+          outcome: 'refused',
+          code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
+          message: `runtime capability northstar.runtime:capability.surface-manifest requires version ${BILLING_ARREARS_READER} and this runtime supports ${DECLARED_REPORT_READER}`,
+        });
+      });
+    },
+    'demo',
+    0,
+    0,
+    release('arrears'),
+  );
+});
+
+type JourneyFixture = Parameters<
+  Parameters<typeof withOrderEntryFixture>[0]
+>[0];
+const buyer = { headers: { cookie: 'northstar-demo-actor=buyer' } };
+const scopeParameter = id('parameter.sales_order_get_legal_entity_scope');
+// Reads the released quote query as the buyer for one company.
+const readQuote = (f: JourneyFixture, company: string, recordId: string) =>
+  f.app.runtime.entry.run(buyer, (v) =>
+    f.app.runtime.queryGateway.invoke(v, {
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      queryId: quoteId,
+      arguments: { recordId, [scopeParameter]: company },
+    }),
+  );
+const explanation = (result: Awaited<ReturnType<typeof readQuote>>) =>
+  JSON.parse(
+    String(result.records[0]!.values[id('metric.billing_explanation')]),
+  );
+const serviceValues = (
+  f: JourneyFixture,
+  anchor: string,
+  end: string,
+  version: unknown,
+) => ({
+  customer_party_id: f.customer,
+  currency: 'CAD',
+  order_date: anchor,
+  requested_date: end,
+  billing_proposal: JSON.stringify(version),
+  ship_to_name: 'Service desk',
+  ship_to_street: 'Main',
+  ship_to_city: 'Calgary',
+  ship_to_region: 'AB',
+  ship_to_postal_code: 'T2P 0A1',
+  ship_to_country: 'Canada',
+});
+const termsFor = (ratePlan: unknown, anchor: string) => ({
+  schemaVersion: 'northstar.billing-rate-table/v1',
+  version: 'first',
+  currency: 'CAD',
+  selector: { kind: 'base' },
+  planDigest: compileRatePlan(ratePlan as typeof plan).digest,
+  effectiveFrom: anchor,
+  values: { daily: '30', weekly: '100' },
+});
+async function publishTerms(
+  f: JourneyFixture,
+  record: { recordId: string; revision: number },
+) {
+  assert.equal(
+    (
+      await f.invoke('billing_publish', {
+        recordId: record.recordId,
+        expectedRevision: record.revision,
+      })
+    ).outcome,
+    'succeeded',
+  );
+}
+// Company B is a second legal entity in the SAME tenant and environment.
+async function assertCompanyBRefused(f: JourneyFixture, recordId: string) {
+  const other = await f.create(
+    'legal_entity',
+    {
+      code: 'AR-B',
+      name: 'Company B',
+      status: id('option.legal_entity_status_active'),
+      is_default: false,
+    },
+    {},
+    false,
+  );
+  assert.equal(
+    (await readQuote(f, other.recordId, recordId)).records.length,
+    0,
+  );
+  const principal = await f.app.runtime.entry.run(buyer, async (v) => [
+    v.tenantId,
+    v.environmentId,
+    v.principalId,
+    f.scope,
+  ]);
+  await f.pool.query(
+    'UPDATE platform.current_policy_memberships SET legal_entity_id=$4 WHERE (tenant_id,environment_id,principal_id)=($1,$2,$3) AND legal_entity_id IS NULL',
+    principal,
+  );
+  assert.equal(
+    (await readQuote(f, f.scope, recordId)).records[0]!.recordId,
+    recordId,
+  );
+  await assert.rejects(() => readQuote(f, other.recordId, recordId), {
+    code: 'SEMANTIC_QUERY_POLICY_DENIED',
+  });
+}
+
+test('an agreed-interval contract reviews its closed cycle through the released quote query', async () => {
+  const anchor = '2025-01-01T00:00:00.000Z';
+  const end = '2025-01-09T00:00:00.000Z';
+  const intervalPlan = {
+    ...plan,
+    bindings: { ...plan.bindings!, arrearsSource: { kind: 'agreedInterval' } },
+  };
+  await withOrderEntryFixture(
+    async (f) => {
+      const record = await f.create(
+        'sales_order',
+        serviceValues(f, anchor, end, termsFor(intervalPlan, anchor)),
+      );
+      await publishTerms(f, record);
+      const review = explanation(await readQuote(f, f.scope, record.recordId));
+      assert.equal(review.status, 'due');
+      assert.deepEqual(review.cycle, { start: anchor, end });
+      assert.equal(review.quote.inputs.evidence.companyId, f.scope);
+      assert.equal(review.quote.inputs.evidence.basis, 'agreed');
+      assert.deepEqual(
+        review.quote.lines.map(
+          (l: { differenceCents: string }) => l.differenceCents,
+        ),
+        ['13000'],
+      );
+      assert.equal(
+        replayBillingQuote(review.quote).resultDigest,
+        review.quote.resultDigest,
+      );
+      await assertCompanyBRefused(f, record.recordId);
+    },
+    'demo',
+    0,
+    0,
+    release('interval'),
+  );
+});
+
+test('an equipment hire reviews possession Booking stamped on its production clock through the released quote query', async () => {
+  const bookingPlan = {
+    ...plan,
+    bindings: {
+      ...plan.bindings!,
+      arrearsSource: {
+        kind: 'bookingActuals',
+        queryId: usageQuery,
+        slotId: trackedSlot,
+      },
+    },
+  };
+  // The billed agreement has already ended; the equipment is still out.
+  const second = (offset: number) =>
+    new Date(Math.floor((Date.now() + offset) / 1000) * 1000).toISOString();
+  const anchor = second(-2 * 3_600_000);
+  const agreedEnd = second(-3_600_000);
+  await withOrderEntryFixture(
+    async (f) => {
+      const values = serviceValues(
+        f,
+        anchor,
+        agreedEnd,
+        termsFor(bookingPlan, anchor),
+      );
+      const hire = await f.create('sales_order', values);
+      await publishTerms(f, hire);
+      const equipment = await f.create('sales_order', values);
+      const revision = async () =>
+        (
+          await f.app.runtime.entry.run(buyer, (v) =>
+            f.app.runtime.queryGateway.invoke(v, {
+              schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+              queryId: sourceId,
+              arguments: { recordId: hire.recordId, [scopeParameter]: f.scope },
+            }),
+          )
+        ).records[0]!.revision;
+      const book = async (
+        verb: string,
+        args: Record<string, ImmutableJsonValue>,
+      ) => {
+        const result = await f.invoke(`${verb}_service`, {
+          recordId: hire.recordId,
+          expectedRevision: await revision(),
+          arguments: args,
+        });
+        assert.equal(result.outcome, 'succeeded', verb);
+        return result.capabilityResult as {
+          bookingId: string;
+          revision: number;
+          state: string;
+        };
+      };
+      const until = new Date(Date.now() + 2 * 86_400_000)
+        .toISOString()
+        .slice(0, 16);
+      const held = await book('hold', {
+        resourceId: equipment.recordId,
+        quantity: '1',
+        interval: { kind: 'now', end: until },
+      });
+      const step = (b: { bookingId: string; revision: number }) => ({
+        bookingId: b.bookingId,
+        bookingRevision: b.revision,
+      });
+      const confirmed = await book('confirm', step(held));
+      // No effective instant is entered: Booking stamps clock_timestamp().
+      const started = await book('start', step(confirmed));
+      assert.equal(started.state, 'inUse');
+      const live = explanation(await readQuote(f, f.scope, hire.recordId));
+      assert.equal(live.status, 'notDue', 'a live hire past its end is open');
+      const returned = await book('return', step(started));
+      assert.equal(returned.state, 'returned');
+      const stored = await f.pool.query<{ start: string; end: string }>(
+        `SELECT to_jsonb(effective_start)#>>'{}' AS start, to_jsonb(effective_end)#>>'{}' AS end
+           FROM platform.booking_use_revisions WHERE booking_id=$1 ORDER BY revision DESC LIMIT 1`,
+        [held.bookingId],
+      );
+      const leg = stored.rows[0]!;
+      const review = explanation(await readQuote(f, f.scope, hire.recordId));
+      assert.equal(review.status, 'due', JSON.stringify(review));
+      const evidence = review.quote.inputs.evidence;
+      assert.deepEqual(
+        evidence.bands[0].intervals.map((i: { start: string; end: string }) => [
+          i.start,
+          i.end,
+        ]),
+        [[truncateBookingInstant(leg.start), truncateBookingInstant(leg.end)]],
+      );
+      // Possession ran past the agreed end, so the service ends at the return.
+      assert.equal(evidence.serviceEnd, truncateBookingInstant(leg.end));
+      assert.deepEqual(review.cycle, {
+        start: anchor,
+        end: truncateBookingInstant(leg.end),
+      });
+      assert.equal(evidence.basis, 'actual');
+      assert.equal(evidence.companyId, f.scope);
+      assert.equal(
+        replayBillingQuote(review.quote).resultDigest,
+        review.quote.resultDigest,
+      );
+      await assertCompanyBRefused(f, hire.recordId);
+    },
+    'demo',
+    0,
+    0,
+    release('booking'),
+  );
+});
+
+test('the preceding cycle reader answers an item query on the persisted release without arrears', async () => {
+  await withArchivedCustomizationRuntime(
+    '1092e14d22890d172ac8e68099fdd78093898339',
+    async (run) => {
+      const base = await archivedBase(run);
+      const application = release('bound', base)!;
+      const { bytes, permissions } = billingFixture('bound', base);
+      const oldDigest = await run(archivedBillingReleaseBytes, {
+        definition: Buffer.from(bytes).toString('utf8'),
+        permissions: permissions.map((p) => ({
+          permissionId: p.permissionId,
+          resource: p.resource.targetId,
+          action: p.action,
+        })),
+      });
+      assert.equal(
+        canonicalizeAndHash(application.applications.at(-1)!).contentHash,
+        oldDigest,
+      );
+      await withOrderEntryFixture(
+        async (f) => {
+          assert.deepEqual(await probeArchivedBilling(run, f), {
+            outcome: 'exact',
+            recordIds: [f.item],
+          });
+        },
+        'demo',
+        0,
+        0,
+        application,
+      );
+    },
   );
 });

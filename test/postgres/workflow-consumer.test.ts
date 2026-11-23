@@ -56,6 +56,7 @@ import {
   SpendMeter,
 } from '../../packages/operations-agent/src/index.js';
 import { checkWorkflowStartLimits } from '../helpers/workflow-start-limits.js';
+import { INVENTORY_WRITE_INVARIANTS } from '../../packages/postgres-provider/src/inventory-write-invariants.js';
 import { checkRetryDecision } from '../helpers/staff-decision-checks.js';
 import { COMPANY, worldOver, type AgentWorld } from '../agent/agent-world.js';
 import { referenceScript } from '../agent/reference-scripts.js';
@@ -265,7 +266,10 @@ test(
             bindings,
             'workflow-receipt-approver',
           );
-          const gateways = new PostgresWorkflowGateway(runtimePool);
+          const gateways = new PostgresWorkflowGateway(
+            runtimePool,
+            INVENTORY_WRITE_INVARIANTS,
+          );
           const grants = {
             queries: [],
             operations: [operation, companyReview].sort(),

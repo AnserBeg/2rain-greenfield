@@ -459,7 +459,9 @@ export function draftBoardRevision(
 export type BoardCheck = 'authoring' | 'structural' | 'identity';
 export interface BoardApplyProblem {
   message: string;
-  conflicts: BoardBindingConflict[];
+  conflicts: (Omit<BoardBindingConflict, 'code'> & {
+    code: BoardBindingConflict['code'] | 'INCOMPATIBLE_SCOPE';
+  })[];
 }
 export function applyBoardRevision(
   def: BoardSource & { surfaces: Record<string, unknown>[] },
@@ -554,7 +556,9 @@ export function applyBoardRevision(
 
 /** A later revision supersedes earlier bindings on the same editor or Board. */
 export function supersededBoardRevisions(
-  chain: readonly { kind: string; patches?: readonly unknown[] }[],
+  chain: readonly (
+    { kind: string; patches?: readonly unknown[] } | Record<string, unknown>
+  )[],
   kind:
     | 'addBoardViewRevision'
     | 'addRecordTemplateBindingRevision' = 'addBoardViewRevision',
@@ -571,7 +575,11 @@ export function supersededBoardRevisions(
       body?: { formId?: string };
     }[];
     for (const m of members) {
-      if (m.kind !== kind || !m.revisionId) continue;
+      // A Map view revision is keyed by its surface, like a Board.
+      const matches =
+        m.kind === kind ||
+        (kind === 'addBoardViewRevision' && m.kind === 'addMapViewRevision');
+      if (!matches || !m.revisionId) continue;
       latest.set(
         String(kind === 'addBoardViewRevision' ? m.surfaceId : m.body?.formId),
         m.revisionId,

@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "packet": "GENERALIZE-1",
+  "entries": [
+    {
+      "name": "write-invariant-frozen-field-unchecked",
+      "claim": "While a record holds the declared guarded state, an ordinary update cannot change a declared frozen field (first-party stock count and second-app visit).",
+      "file": "packages/postgres-provider/src/module-write-invariants.ts",
+      "original": "      if (Object.hasOwn(patch, fieldId) && patch[fieldId] !== prior[fieldId])",
+      "replacement": "      if (Object.hasOwn(patch, fieldId) && false)",
+      "test": {
+        "files": ["test/integration/module-write-invariants.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/integration/module-write-invariants.test.ts",
+          "name": "GENERALIZE-1: first-party stock count keeps its exact counting refusals",
+          "expected": "Expected values to be strictly equal"
+        },
+        {
+          "file": "test/integration/module-write-invariants.test.ts",
+          "name": "GENERALIZE-1: a second application gets the same writer behaviour purely by declaration",
+          "expected": "Expected values to be strictly equal"
+        }
+      ]
+    },
+    {
+      "name": "write-invariant-not-enforced-on-update",
+      "claim": "The generic update path enforces the declared invariants against the stored image.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "    requireStateWriteInvariants(\n      writeInvariants,\n      entity,\n      prior.values,\n      input.patch,\n    );",
+      "replacement": "    void writeInvariants;",
+      "test": {
+        "files": ["test/integration/module-write-invariants.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/integration/module-write-invariants.test.ts",
+          "name": "GENERALIZE-1: the generic record writer names no stock count and enforces declared invariants on update",
+          "expected": "the update path enforces the declared invariants"
+        }
+      ]
+    },
+    {
+      "name": "stock-count-mode-not-declared",
+      "claim": "Inventory declares the counting mode as frozen while counting, with its exact refusal.",
+      "file": "packages/postgres-provider/src/inventory-write-invariants.ts",
+      "original": "                fieldId: mode,\n                refusal: 'counting mode is fixed after Start counting',",
+      "replacement": "                fieldId: `${namespace}:field.unrelated`,\n                refusal: 'counting mode is fixed after Start counting',",
+      "test": {
+        "files": ["test/integration/module-write-invariants.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/integration/module-write-invariants.test.ts",
+          "name": "GENERALIZE-1: Inventory binds the counting invariant on the governed first-party storage",
+          "expected": "Expected values to be strictly deep-equal"
+        },
+        {
+          "file": "test/integration/module-write-invariants.test.ts",
+          "name": "GENERALIZE-1: first-party stock count keeps its exact counting refusals",
+          "expected": "Expected values to be strictly equal"
+        }
+      ]
+    },
+    {
+      "name": "workflow-writer-omits-invariants",
+      "claim": "The workflow worker's record writer receives the same declared invariants as serving.",
+      "file": "packages/postgres-provider/src/workflow-gateway.ts",
+      "original": "        writeInvariants: this.writeInvariants,\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/integration/module-write-invariants.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/integration/module-write-invariants.test.ts",
+          "name": "GENERALIZE-1: every production record writer is constructed with the declared write invariants",
+          "expected": "constructs a record writer without write invariants"
+        }
+      ]
+    }
+  ]
+}

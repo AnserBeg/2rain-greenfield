@@ -24,6 +24,11 @@ import {
 } from './grouped-report.js';
 import { withReadSnapshot } from './request-context.js';
 import {
+  mapPageBinding,
+  finishMapPage,
+  type MapCandidate,
+} from './map-page.js';
+import {
   addressColumns,
   addressScalars,
   hasAddress,
@@ -36,6 +41,14 @@ import {
   addressJson,
 } from '@north-star/canonical-model';
 import { declaredDateTimeFields } from './date-time-admission.js';
+import {
+  bindWriteInvariants,
+  MODULE_WRITE_INVARIANT_REFUSAL_CODE,
+  stateWriteInvariantRefusal,
+  validatedWriteInvariantProviders,
+  type ModuleWriteInvariantProvider,
+  type StateDependentWriteInvariant,
+} from './module-write-invariants.js';
 import { enqueueAddress } from './address-geocodes.js';
 import {
   DateTimeEntryError,
@@ -290,6 +303,11 @@ export class PostgresModuleRuntimeInterpreter
 {
   readonly #pinnedStorageTargets: ValidatedPinnedStorageTargetCache;
   readonly #providerErrorMappings: readonly ModuleProviderErrorMapping[];
+  readonly #writeInvariants: readonly ModuleWriteInvariantProvider[];
+  readonly #boundInvariants = new WeakMap<
+    StorageTargetPayloadV1,
+    ReadonlyMap<string, readonly StateDependentWriteInvariant[]>
+  >();
   readonly #trust: PostgresTrustService;
   readonly #reportLimits: ReportLimits;
   readonly #documentNumbers: DocumentNumberMode;
@@ -317,6 +335,12 @@ export class PostgresModuleRuntimeInterpreter
       readonly validationReadPolicy?: (
         releaseId: string,
       ) => CurrentPolicyGateway | Promise<CurrentPolicyGateway>;
+      /**
+       * Capability-declared write invariants, supplied by product assembly.
+       * Every production construction site passes them; an architecture test
+       * (module-write-invariants) refuses one that does not.
+       */
+      readonly writeInvariants?: readonly ModuleWriteInvariantProvider[];
     } = {},
   ) {
     this.#reportLimits = { ...REPORT_READER_POLICY, ...options.reportLimits };
@@ -336,7 +360,21 @@ export class PostgresModuleRuntimeInterpreter
     this.#providerErrorMappings = validatedProviderErrorMappings(
       providerErrorMappings,
     );
+    this.#writeInvariants = validatedWriteInvariantProviders(
+      options.writeInvariants ?? [],
+    );
     this.#trust = new PostgresTrustService(pool);
+  }
+
+  #boundWriteInvariants(
+    storage: StorageTargetPayloadV1,
+  ): ReadonlyMap<string, readonly StateDependentWriteInvariant[]> {
+    let bound = this.#boundInvariants.get(storage);
+    if (!bound) {
+      bound = bindWriteInvariants(this.#writeInvariants, storage);
+      this.#boundInvariants.set(storage, bound);
+    }
+    return bound;
   }
 
   execute(
@@ -629,6 +667,32 @@ export class PostgresModuleRuntimeInterpreter
             );
           },
         );
+      if (
+        (request.arguments as Record<string, unknown> | null)?.mapPage !==
+        undefined
+      ) {
+        if (
+          request.definition.queryType !== 'list' ||
+          request.definition.readModel ||
+          request.list
+        )
+          throw failure('MODULE_LIST_FIELD_INVALID', 'Invalid Map collection.');
+        const mapRequest = request as SemanticQueryExecutionRequest;
+        return await withTrustedRequestRead(
+          this.pool,
+          request.context,
+          async (client, snapshot) => {
+            const storage = await this.#loadPinnedStorageTarget(
+              client,
+              request,
+            );
+            const candidates = await withModuleRuntimeRole(client, () =>
+              readMapCandidates(client, storage, mapRequest, snapshot),
+            );
+            return finishMapPage(client, mapRequest, candidates);
+          },
+        );
+      }
       // The pinned storage target is read as the runtime login role (release
       // artifacts); alone, the read then switches to the module role itself.
       const loaded = await withTrustedRequestRead(
@@ -869,6 +933,7 @@ export class PostgresModuleRuntimeInterpreter
                 input,
                 this.#documentNumbers === 'verificationSentinel',
                 authorizedValidationReads,
+                this.#boundWriteInvariants(currentStorage),
               );
               const ids = {
                 changeDocumentId: randomUUID(),
@@ -941,6 +1006,7 @@ export class PostgresModuleRuntimeInterpreter
                     seed,
                     verifier,
                     new Set(),
+                    this.#boundWriteInvariants(currentStorage),
                   );
                   await insertRecord(
                     client,
@@ -997,6 +1063,7 @@ export class PostgresModuleRuntimeInterpreter
                       seed,
                       verifier,
                       new Set(),
+                      this.#boundWriteInvariants(currentStorage),
                     );
                     await insertRecord(
                       client,
@@ -1391,6 +1458,7 @@ async function prepareMutation(
   input: MutationInput,
   verifying: boolean,
   authorizedValidationReads: ReadonlySet<string>,
+  writeInvariants: ReadonlyMap<string, readonly StateDependentWriteInvariant[]>,
 ): Promise<MutationPreparation> {
   const kind = request.definition.effect.kind;
   const formula = request.view.projections.formulaRule;
@@ -1460,7 +1528,12 @@ async function prepareMutation(
       { ...prior.values, ...input.patch },
       'projected',
     );
-    requireStockCountCountingMode(entity, prior.values, input.patch);
+    requireStateWriteInvariants(
+      writeInvariants,
+      entity,
+      prior.values,
+      input.patch,
+    );
     if (bindings.length)
       await requireFormulaValidation(
         client,
@@ -1802,37 +1875,28 @@ function requirePeriodLockDirection(
     );
 }
 
-function requireStockCountCountingMode(
+/**
+ * GENERALIZE-1: the capability-declared state-dependent write invariants on
+ * this entity. The writer enforces whatever was declared and names no
+ * module, entity or field of its own.
+ */
+function requireStateWriteInvariants(
+  invariants: ReadonlyMap<string, readonly StateDependentWriteInvariant[]>,
   entity: StorageEntity,
   prior: Readonly<Record<string, ImmutableJsonValue>>,
   patch: Readonly<Record<string, ImmutableJsonValue>>,
 ): void {
-  const suffix = ':entity.stock_count';
-  if (!entity.entityId.endsWith(suffix)) return;
-  const namespace = entity.entityId.slice(0, -suffix.length);
-  const state = `${namespace}:field.stock_count_state`;
-  const mode = `${namespace}:field.stock_count_counting_mode`;
-  // Older count definitions do not have a mode.
-  if (
-    !Object.hasOwn(prior, mode) ||
-    prior[state] !== `${namespace}:option.stock_count_state_counting`
-  ) {
-    return;
-  }
-  if (Object.hasOwn(patch, mode) && patch[mode] !== prior[mode]) {
+  const refusal = stateWriteInvariantRefusal(
+    invariants.get(entity.entityId) ?? [],
+    prior,
+    patch,
+  );
+  if (refusal !== null)
     throw failure(
-      'MODULE_OPERATION_PRECONDITION_REFUSED',
-      'counting mode is fixed after Start counting',
+      MODULE_WRITE_INVARIANT_REFUSAL_CODE,
+      refusal,
       entity.entityId,
     );
-  }
-  if (Object.hasOwn(patch, state) && patch[state] !== prior[state]) {
-    throw failure(
-      'MODULE_OPERATION_PRECONDITION_REFUSED',
-      'use a stock count command to leave counting',
-      entity.entityId,
-    );
-  }
 }
 
 function acceptedCommand(
@@ -3725,6 +3789,96 @@ async function listRecords(
     values,
   );
   return rows.rows.map((row) => rawRecord(entity, row));
+}
+
+async function readMapCandidates(
+  client: PoolClient,
+  storage: StorageTargetPayloadV1,
+  request: SemanticQueryExecutionRequest,
+  snapshot: ReadSnapshotHandle | null,
+): Promise<MapCandidate[]> {
+  const { map, input } = mapPageBinding(request),
+    body = map.body,
+    def = request.definition;
+  const entity = requiredEntity(storage, body.entityId);
+  const scope = await verifyLegalEntityReadScope(
+    client,
+    snapshot,
+    storage,
+    request.legalEntityReadScope,
+    [entity],
+  );
+  const values: unknown[] = [],
+    predicates = archivePredicate(entity, false);
+  appendLegalEntityReadScopePredicate(entity, scope, values, predicates);
+  appendQueryFilterPredicates(
+    entity,
+    request.filterPlans,
+    values,
+    predicates,
+    undefined,
+    request.parameterValues,
+  );
+  const column = (id: string) => {
+    const c = entity.columns.find((c) => c.canonicalFieldId === id);
+    if (!c || !def.selections.some((f) => f.fieldId === id))
+      throw failure('MODULE_LIST_FIELD_INVALID', 'Unavailable Map field.');
+    return quoted(c.physicalName);
+  };
+  if (input.day && body.defaultScope.kind === 'day')
+    predicates.push(
+      column(body.defaultScope.fieldId) +
+        ' = ' +
+        parameter(values, input.day) +
+        '::date',
+    );
+  const group = body.group ? column(body.group.fieldId) : 'NULL::text',
+    order = column(body.order.field.fieldId);
+  if (input.route !== undefined)
+    predicates.push(
+      group + ' IS NOT DISTINCT FROM ' + parameter(values, input.route || null),
+    );
+  if (body.savedViewId) {
+    const payload = request.view.projections.surface.payload as {
+      surfaces: readonly Record<string, unknown>[];
+    };
+    const list = payload.surfaces.find(
+      (s) => s.surfaceId === body.listSurfaceId,
+    )?.list as
+      | {
+          views: readonly {
+            viewId: string;
+            filters?: readonly { field: string; value: string }[];
+          }[];
+        }
+      | undefined;
+    const saved = list?.views.find((v) => v.viewId === body.savedViewId);
+    if (!saved)
+      throw failure(
+        'MODULE_LIST_FIELD_INVALID',
+        'Saved Map filter is unavailable.',
+      );
+    for (const filter of saved.filters ?? [])
+      predicates.push(
+        column(filter.field) + '::text = ' + parameter(values, filter.value),
+      );
+  }
+  const id = quoted(entity.recordIdentity.column);
+  const direction = body.order.direction === 'asc' ? 'ASC' : 'DESC';
+  const result = await client.query(
+    `WITH candidates AS MATERIALIZED (
+    ${selectSql(entity, predicates, `ORDER BY ${id} LIMIT 513`)}
+  ) SELECT candidates.*, ${group}::text AS map_group, ${order} IS NOT NULL AS map_ordered,
+    row_number() OVER (PARTITION BY ${group} ORDER BY ${order} ${direction} NULLS LAST,${id}) AS map_ordinal
+    FROM candidates ORDER BY map_group NULLS LAST,map_ordinal`,
+    values,
+  );
+  return result.rows.map((r) => ({
+    record: toDto(entity, rawRecord(entity, r), def.selections),
+    group: r.map_group as string | null,
+    ordinal: Number(r.map_ordinal),
+    ordered: r.map_ordered === true,
+  }));
 }
 
 // The immutable surface projection is shared by warm views of the same release.

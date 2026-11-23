@@ -54,6 +54,7 @@ import {
   type FreshTenantIntermediateActivationObservation,
 } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
+import { INVENTORY_WRITE_INVARIANTS } from '../../packages/postgres-provider/src/inventory-write-invariants.js';
 import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/inventory-posting-capability-executor.js';
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receiving-capability-executor.js';
 import {
@@ -3228,6 +3229,7 @@ async function assertFailClosedIdentitySeam(
     inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
     migrationsDirectory,
     providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
+    writeInvariants: INVENTORY_WRITE_INVARIANTS,
     tenantSlug,
   });
   try {
@@ -7010,6 +7012,7 @@ function createRuntime(
     localDemoIdentity: true,
     migrationsDirectory,
     providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
+    writeInvariants: INVENTORY_WRITE_INVARIANTS,
     ...(releaseSelection ? { releaseSelection } : {}),
     tenantSlug,
   });

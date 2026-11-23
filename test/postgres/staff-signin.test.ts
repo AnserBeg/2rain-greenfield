@@ -364,6 +364,7 @@ test('staff sign-in integrity under the pilot database roles', async (suite) => 
                 localDemoIdentity: true,
                 migrationsDirectory: 'db/migrations',
                 providerErrorMappings: [],
+                writeInvariants: [],
                 tenantSlug: 'mode-check',
                 compiledApplication: {},
               });

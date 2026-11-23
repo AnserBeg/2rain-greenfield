@@ -467,3 +467,47 @@ test('the drafter states every workflow call envelope, generated from the admiss
       kind,
     );
 });
+
+test('the drafting tool builds a rate plan version and keeps amounts and source authority out of the patch', async () => {
+  const ratePlan = {
+    schemaVersion: 'v6',
+    id: 'subscription',
+    version: '1',
+    currency: 'CAD',
+    serviceUnit: 'account',
+    schedule: { kind: 'anniversary', months: 1 },
+    slots: [
+      { id: 'copies', kind: 'quantity', unit: 'copy', scale: 0 },
+      { id: 'rate', kind: 'money', currency: 'CAD', scale: 2 },
+    ],
+    components: [
+      {
+        id: 'excess',
+        kind: 'meter',
+        stage: 'afterCapBeforeTax',
+        taxClassification: 'untaxed',
+        streamId: 'printer',
+        unit: 'copy',
+        overageRate: 'rate',
+        allowanceBasis: { kind: 'perCycle', quantity: 'copies' },
+      },
+    ],
+  };
+  const input = { kind: 'addRatePlanVersion', schemaVersion: 'v6', ratePlan };
+  const outcome = await draftPatchFromRequest(
+    scripted([input], []),
+    'Declare a usage-only CAD printing subscription',
+    targets,
+  );
+  assert.deepEqual(outcome, { status: 'parsed', patch: input });
+  assert.equal(outcome.status, 'parsed');
+  const applied = applyCustomizationPatches(application, [outcome.patch]);
+  assert.equal(applied.status, 'applied');
+  assert.deepEqual(applied.authored.billingPlans, [ratePlan]);
+  for (const extra of [{ bindings: {} }, { amount: '123.00' }])
+    assert.equal(
+      parseCustomizationPatch({ ...input, ratePlan: { ...ratePlan, ...extra } })
+        .status,
+      'invalid',
+    );
+});

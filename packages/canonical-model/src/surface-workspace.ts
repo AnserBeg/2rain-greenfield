@@ -3,7 +3,9 @@ import {
   templateBindingConflict,
   templateBindingDigest,
 } from './record-template.js';
+import { mapBindingConflicts, mapDigest } from './map-view.js';
 import { compiledPopups } from './popup-actions.js';
+import { compilePresentation } from './surface-presentation.js';
 import { boardBindingConflicts, boardSelfProblem } from './board.js';
 import { SURFACE_SLOTS } from './constants.js';
 import { baseLayout, layoutProblem } from './layout.js';
@@ -63,6 +65,42 @@ export function validateSurfaceWorkspaces(
             conflict.subject,
             'Record template binding differs from its declared contract.',
           );
+      }
+    }
+    const map = 'map' in surface ? surface.map : undefined;
+    if (surface.archetype === 'map' || map) {
+      if (
+        !map ||
+        surface.archetype !== 'map' ||
+        mapDigest(map.body) !== map.resultDigest ||
+        map.predecessor === map.revisionId ||
+        surface.dataSource.targetId !== map.body.listQueryId ||
+        surface.surfaceRole !== undefined ||
+        !('workspace' in surface) ||
+        surface.workspace?.membership !== 'contextual' ||
+        surface.workspace.ownerSurfaceId !== map.body.listSurfaceId ||
+        [...surface.slots]
+          .sort((a, b) => a.orderKey - b.orderKey)
+          .map((s) => s.slot)
+          .join() !== SURFACE_SLOTS.map.join()
+      )
+        return fail(
+          surface.surfaceId,
+          'Invalid Map declaration, owner or slots.',
+        );
+      if (surface.lifecycle !== 'retired') {
+        const problem = mapBindingConflicts(model, map.body)[0];
+        if (problem) fail(problem.subject, 'Map binding: ' + problem.code);
+      }
+    }
+    if ('presentation' in surface && surface.presentation) {
+      try {
+        compilePresentation(
+          model as unknown as Parameters<typeof compilePresentation>[0],
+          surface as unknown as Record<string, unknown>,
+        );
+      } catch (error) {
+        fail(surface.surfaceId, String(error));
       }
     }
     if ('popupActions' in surface && surface.popupActions) {

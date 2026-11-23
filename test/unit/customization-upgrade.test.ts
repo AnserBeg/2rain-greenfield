@@ -196,6 +196,33 @@ const changeSet = (...patches: unknown[]) => ({ kind: 'changeSet', patches });
 const item = id('entity.item');
 const itemList = id('surface.item_list');
 const itemSku = id('field.item_sku');
+const feePlan = {
+  kind: 'addRatePlanVersion',
+  schemaVersion: 'v6',
+  ratePlan: {
+    schemaVersion: 'v6',
+    id: 'service-fee',
+    version: '1',
+    currency: 'CAD',
+    serviceUnit: 'service',
+    schedule: { kind: 'anniversary', months: 1 },
+    slots: [{ id: 'fee', kind: 'money', currency: 'CAD', scale: 2 }],
+    components: [
+      {
+        kind: 'fixed',
+        id: 'retainer',
+        base: 'enrollment',
+        stage: 'afterCapBeforeTax',
+        amount: 'fee',
+        taxClassification: 'untaxed',
+        occurrence: {
+          kind: 'recurring',
+          cadence: { kind: 'anniversary', months: 1 },
+        },
+      },
+    ],
+  },
+};
 const itemFiles = {
   ...files,
   entityId: item,
@@ -233,6 +260,16 @@ const map = {
   sectionId:
     mapSurface + '/detail/northstar.app:slot.item_detail_sections/details',
 };
+const depotAddress = {
+  ...address,
+  entity: equipment,
+  fieldId: id('field.custom_equipment_depot'),
+};
+const depotBase = applied(extended, [depotAddress]);
+const depotMap = customization
+  .customizationTargets(normalizeApplicationPackage(depotBase))
+  .maps!.find((t) => t.frame.entityId === equipment)!;
+
 const equipmentPopup = customization
   .customizationTargets(normalizeApplicationPackage(extended))
   .popupActions!.find(
@@ -307,6 +344,26 @@ const missingReportOperand = structuredClone(extended);
 missingReportOperand.fields = (missingReportOperand.fields as Base[]).filter(
   (field) => field.fieldId !== reportOperand,
 );
+const equipmentList = id('surface.custom_equipment_list');
+const equipmentPresentation = customization.presentationMember(
+  customization
+    .customizationTargets(normalizeApplicationPackage(extended))
+    .presentation!.filter((t) => t.surfaceId === equipmentList),
+  {
+    kind: 'addPresentationRevision',
+    surface: equipmentList,
+    tones: [
+      {
+        target: 'row',
+        fieldId: reportOperand,
+        operator: 'equal',
+        compareTo: { value: 'Held' },
+        tone: 'blocked',
+        reason: 'On hold',
+      },
+    ],
+  },
+);
 const cases = {
   addRecordTemplateBindingRevision: {
     source: collectionBase,
@@ -323,6 +380,13 @@ const cases = {
         copyEligible: true,
       })),
     }),
+  },
+  addPresentationRevision: {
+    source: extended,
+    conflict: missingReportOperand,
+    change: equipmentPresentation,
+    subject: reportOperand,
+    code: 'RETIRED_TARGET',
   },
   addReportRevision: {
     source: extended,
@@ -359,6 +423,20 @@ const cases = {
       customization.defaultBoardChoices(board),
     ),
   ),
+  addMapViewRevision: {
+    source: depotBase,
+    conflict: extended,
+    change: customization.draftMapRevision(depotMap, {
+      kind: 'addMapViewRevision',
+      surface: depotMap.frame.listSurfaceId,
+      label: 'Depot map',
+      addressFieldId: depotAddress.fieldId,
+      orderFieldId: depotMap.frame.label.fieldId,
+      direction: 'asc',
+    }),
+    code: 'RETIRED_TARGET',
+    subject: depotAddress.fieldId,
+  },
   addAddressField: itemRetired(address),
   addMapPlacement: retirement(
     'surfaces',
@@ -373,6 +451,9 @@ const cases = {
       (target.modules as Base[])[0]!.label = 'Equipment';
     },
   ),
+  addRatePlanVersion: collision(feePlan, feePlan.ratePlan.id, (target) => {
+    target.billingPlans = [{ ...feePlan.ratePlan, serviceUnit: 'different' }];
+  }),
   addField: itemRetired({ ...field, entity: item }),
   addChoice: collision(
     changeSet(record, {
@@ -1526,4 +1607,86 @@ test('the record template eval cases score a drafted binding in three businesses
       'no active template binding on the form',
     ]);
   }
+});
+
+test('a retired presentation revision is replayed by identity only, so the old rules it carries never refuse an upgrade', () => {
+  // "Remove the colours": the retire carries v1's rules, which read the status.
+  const retire = customization.presentationMember(
+    customization
+      .customizationTargets(
+        normalizeApplicationPackage(applied(extended, [equipmentPresentation])),
+      )
+      .presentation!.filter((t) => t.surfaceId === equipmentList),
+    { kind: 'addPresentationRevision', surface: equipmentList, retire: true },
+  );
+  assert.equal(retire.status, 'retired');
+  assert.ok(JSON.stringify(retire).includes(reportOperand));
+  // A clean base: the same record type without the status field.
+  const withoutStatus = applied(base, [
+    { ...record, fields: record.fields.slice(0, 1) },
+  ]);
+  const chain = [equipmentPresentation, retire];
+  const replayed = replayCustomizationPatches(
+    withoutStatus,
+    chain.map(patch),
+    chain.map((_, index) => ({
+      patchId: String(index + 1),
+      differentBase: true,
+      ...(index === 0 && { parent: extended }),
+    })),
+  );
+  assert.equal(replayed.status, 'applied', JSON.stringify(replayed));
+});
+
+test('a superseded presentation revision is replayed by identity only, so a value only it read never refuses an upgrade', () => {
+  const nameField = id('field.custom_equipment_name');
+  // v2 replaces every rule of v1 and no longer reads the status.
+  const v2 = customization.presentationMember(
+    customization
+      .customizationTargets(
+        normalizeApplicationPackage(applied(extended, [equipmentPresentation])),
+      )
+      .presentation!.filter((t) => t.surfaceId === equipmentList),
+    {
+      kind: 'addPresentationRevision',
+      surface: equipmentList,
+      replaceCurrent: true,
+      tones: [
+        {
+          target: 'row',
+          fieldId: nameField,
+          operator: 'equal',
+          compareTo: { value: 'Spare' },
+          tone: 'attention',
+          reason: 'Spare',
+        },
+      ],
+    },
+  );
+  assert.ok(!JSON.stringify(v2).includes(reportOperand));
+  // A clean base: the same record type without the status field.
+  const withoutStatus = applied(base, [
+    { ...record, fields: record.fields.slice(0, 1) },
+  ]);
+  const replay = (chain: unknown[]) =>
+    replayCustomizationPatches(
+      withoutStatus,
+      chain.map(patch),
+      chain.map((_, index) => ({
+        patchId: String(index + 1),
+        differentBase: true,
+        ...(index === 0 && { parent: extended }),
+      })),
+    );
+  const replayed = replay([equipmentPresentation, v2]);
+  assert.equal(replayed.status, 'applied', JSON.stringify(replayed));
+  // Control: the latest revision is still checked in full and names the ID.
+  const latest = replay([equipmentPresentation]);
+  assert.ok(
+    latest.status === 'replayConflict' &&
+      latest.findings.some(
+        (f) => f.code === 'RETIRED_TARGET' && f.subject === reportOperand,
+      ),
+    JSON.stringify(latest),
+  );
 });

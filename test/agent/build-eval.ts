@@ -12,6 +12,7 @@
  * it. Behaviour is scored separately against the case's hand-written
  * expectation (`build-eval-cases.ts`), never against the model's own words.
  */
+import { billingPlansIn } from '../../packages/postgres-provider/src/billing-quote.js';
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 
@@ -1261,6 +1262,87 @@ export async function runBuildCase(
       result.behaviour = misses.length === 0;
       result.reasons.push(...misses);
     }
+    if (expect.outcome === 'ratePlan' && result.activated) {
+      const plans = await world.runtime.entry.run(MANAGER, (view) =>
+        Promise.resolve(billingPlansIn(view.projections.surface.payload)),
+      );
+      const matches = plans.filter((p) => {
+        const component = p.components[0];
+        if (
+          p.bindings ||
+          p.currency !== 'CAD' ||
+          p.components.length !== 1 ||
+          component?.taxClassification !== 'untaxed' ||
+          component.kind !== expect.kind
+        )
+          return false;
+        if (component.kind === 'time')
+          return (
+            p.schedule.kind === 'calendarMonth' &&
+            p.schedule.boundaryMinutes === 0 &&
+            p.pricingWindow === 'fourWeek' &&
+            !!component.cap &&
+            Object.keys(component.rates).sort().join(',') === 'day,month,week'
+          );
+        if (p.schedule.kind !== 'anniversary' || p.schedule.months !== 1)
+          return false;
+        if (component.kind === 'meter')
+          return (
+            /^cop(?:y|ies)$/iu.test(component.unit) &&
+            component.allowanceBasis.kind === 'perCycle'
+          );
+        return (
+          component.occurrence.kind === 'recurring' &&
+          component.occurrence.cadence.kind === 'anniversary' &&
+          component.occurrence.cadence.months === 1 &&
+          component.occurrence.feeProration === 'activeCoverage'
+        );
+      });
+      result.e2e = matches.length === 1;
+      result.behaviour =
+        result.e2e &&
+        result.kinds.length === 1 &&
+        result.kinds[0] === 'addRatePlanVersion';
+      if (!result.behaviour)
+        result.reasons.push(
+          'The activated rate structure does not match the requested service.',
+        );
+    }
+    if (expect.outcome === 'presentation') {
+      if (result.activated) {
+        const after = await opened.service.targets();
+        const target = (after.presentation ?? []).find((t) =>
+          localOf(t.surfaceId).startsWith(expect.list),
+        );
+        const current =
+          target?.current?.status === 'active' ? target.current : null;
+        const fieldsOf = (when: unknown): string[] =>
+          JSON.stringify(when)
+            .match(/"fieldId":"([^"]+)"/gu)
+            ?.map((m) => localOf(m.slice(11, -1))) ?? [];
+        const tonesOk = (expect.tones ?? []).every((want) =>
+          current?.toneRules.some(
+            (rule) =>
+              rule.target.kind === want.target &&
+              want.tones.includes(rule.tone) &&
+              want.fields.every((f) => fieldsOf(rule.when).includes(f)),
+          ),
+        );
+        const columnsOk = (expect.columns ?? []).every((want) =>
+          current?.sizing.some(
+            (entry) =>
+              entry.kind === 'listColumn' &&
+              localOf(entry.fieldId) === want.field &&
+              want.widths.includes(entry.width),
+          ),
+        );
+        const found = !!current && tonesOk && columnsOk;
+        result.e2e = found;
+        result.behaviour = found;
+        if (!found)
+          result.reasons.push('the list presentation is not the requested one');
+      }
+    }
     if (expect.outcome === 'board') {
       if (result.activated) {
         const after = await opened.service.targets();
@@ -1279,6 +1361,22 @@ export async function runBuildCase(
         result.e2e = found;
         result.behaviour = found;
         if (!found) result.reasons.push('no new board view on the list');
+      }
+    }
+    if (expect.outcome === 'map') {
+      if (result.activated) {
+        const after = await opened.service.targets();
+        const found = (after.maps ?? []).some(
+          (map) =>
+            localOf(map.frame.listSurfaceId).startsWith(expect.list) &&
+            map.views.some((view) =>
+              nameMatches(expect.label, slug(view.label)),
+            ) &&
+            !mapsHad(boardsBefore, map.frame.listSurfaceId, map.views.length),
+        );
+        result.e2e = found;
+        result.behaviour = found;
+        if (!found) result.reasons.push('no new map view on the list');
       }
     }
   } catch (error) {
@@ -1301,6 +1399,17 @@ export async function runBuildCase(
     await opened.close();
   }
   return result;
+}
+
+function mapsHad(
+  before: CustomizationTargets,
+  listSurfaceId: string,
+  views: number,
+): boolean {
+  const had = (before.maps ?? []).find(
+    (m) => m.frame.listSurfaceId === listSurfaceId,
+  );
+  return !!had && had.views.length >= views;
 }
 
 function boardsHad(

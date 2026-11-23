@@ -1,6 +1,9 @@
 import { TemplateBindingPatchSchema } from './record-template-binding.js';
+import { BillingPlanSchema } from '../../canonical-model/src/billing.js';
+import { MapViewRevisionSchema } from './map-revision.js';
 import { AddReportRevisionSchema } from './report-revision.js';
 import { PopupRevisionSchema } from '../../canonical-model/src/popup-actions.js';
+import { PresentationRevisionPatchSchema } from './presentation-revision.js';
 import { BoardViewRevisionSchema } from './board-revision.js';
 import { LayoutRevisionSchema } from './layout-revision.js';
 import {
@@ -223,7 +226,19 @@ export const AddDateTimeFieldSchema = z.strictObject({
   zoneSource: DateTimeZoneSourceSchema,
 });
 
+// Price publication and source attachment have separate authority. This
+// authored member carries structural choices only.
+const rateStructure = z
+  .strictObject(BillingPlanSchema.shape)
+  .omit({ bindings: true });
+const addRatePlanVersion = z.strictObject({
+  kind: z.literal('addRatePlanVersion'),
+  schemaVersion: z.literal('v6'),
+  ratePlan: rateStructure.pipe(BillingPlanSchema),
+});
+
 const ChangeMemberSchema = z.discriminatedUnion('kind', [
+  addRatePlanVersion,
   AddDateTimeFieldSchema,
   z.strictObject({
     kind: z.literal('addAddressField'),
@@ -241,6 +256,7 @@ const ChangeMemberSchema = z.discriminatedUnion('kind', [
     fieldId: canonicalId,
     sectionId: z.string().min(1).max(512),
   }),
+  MapViewRevisionSchema,
   BoardViewRevisionSchema,
   TemplateBindingPatchSchema,
   AddReportRevisionSchema,
@@ -285,6 +301,7 @@ export const CUSTOMIZATION_CHANGE_MEMBER_KINDS = Object.freeze(
 );
 
 const singlePatchKinds = [
+  PresentationRevisionPatchSchema,
   PopupRevisionSchema.extend({ kind: z.literal('addPopupActionRevision') }),
   LayoutRevisionSchema,
   ...ChangeMemberSchema.options,
@@ -377,6 +394,7 @@ export type CustomizationPatch =
   SingleCustomizationPatch | z.infer<typeof changeSet>;
 export type CustomizationPatchKind = CustomizationPatch['kind'];
 export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
+  'addRatePlanVersion',
   'addDateTimeField',
   'addAddressField',
   'addMapPlacement',
@@ -388,7 +406,9 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'declareLifecycle',
   'arrangeLayout',
   'addLayoutRevision',
+  'addMapViewRevision',
   'addPopupActionRevision',
+  'addPresentationRevision',
   'addBoardViewRevision',
   'addRecordTemplateBindingRevision',
   'addReportRevision',

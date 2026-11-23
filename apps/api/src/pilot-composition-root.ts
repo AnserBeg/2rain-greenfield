@@ -18,6 +18,7 @@ import {
   meterPoolStatements,
 } from '@north-star/postgres-provider/request-work-meter';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '@north-star/postgres-provider/inventory-provider-error-mappings';
+import { INVENTORY_WRITE_INVARIANTS } from '@north-star/postgres-provider/inventory-write-invariants';
 import { createSurfaceRuntimeServer } from '@north-star/web/app-server';
 import { COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION } from '@north-star/web/sales-section';
 import { CAPABILITY_EXECUTOR_FACTORIES } from './erp-capabilities.js';
@@ -83,6 +84,7 @@ export async function createPilotApplication(options: {
         ...(approvalPool ? { approvalPool } : {}),
         capabilityOperationExecutorFactories: CAPABILITY_EXECUTOR_FACTORIES,
         providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
+        writeInvariants: INVENTORY_WRITE_INVARIANTS,
       },
       {},
     );

@@ -28,7 +28,7 @@ try {
   const definitions = await loader.load(context);
   const serving = await loadServingRelease(pool, context, definitions.release.releaseId);
   const { policy, queryGateway } = composeServingGateways(pool, pool, context, serving,
-    new ObservabilityMetrics(), { providerErrorMappings: [] });
+    new ObservabilityMetrics(), { providerErrorMappings: [], writeInvariants: [] });
   const entry = new AuthenticatedRequestRuntimeEntryAdapter(new AuthenticatedRequestEntryAdapter(async () => identity), loader, policy);
   const result = await entry.run({}, (view) => queryGateway.invoke(view, {
     schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
@@ -41,6 +41,28 @@ try {
 } finally {
   await pool.end();
 }
+`;
+
+export const archivedBillingReleaseBytes = `
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { canonicalizeAndHash } from './packages/canonical-model/src/canonicalize.ts';
+import { compileApplicationRelease, MODULE_COMPILER_PROFILE, expectedActiveReleaseFrom } from './packages/compiler/src/index.ts';
+import { serializeRelease } from './packages/customization/src/index.ts';
+import { parseCompiledApplication } from './packages/postgres-provider/src/composed-application-runtime.ts';
+import { compilerInput } from './test/compiler/helpers.ts';
+import { readUnboundPermissionAcknowledgementFor } from './apps/web/scripts/unbound-permission-acknowledgement.ts';
+
+const { definition, permissions } = JSON.parse(await readFile(process.argv[2], 'utf8'));
+const bytes = Buffer.from(definition, 'utf8');
+const old = parseCompiledApplication(JSON.parse(await readFile('apps/web/release/app.compiled.json', 'utf8')));
+const args = compilerInput(bytes, expectedActiveReleaseFrom(old.application.compiled));
+const ack = readUnboundPermissionAcknowledgementFor('apps/web/release/app.authored.json', 'northstar.app:package.application');
+const compiled = compileApplicationRelease({
+  ...args, profile: { ...MODULE_COMPILER_PROFILE, languageVersion: 'v6', normalizationProfileVersion: args.profile.normalizationProfileVersion },
+}, { ...ack, evaluatorBindings: [...ack.evaluatorBindings, ...permissions] });
+assert.equal(compiled.status, 'compiled', JSON.stringify(compiled.diagnostics));
+console.log(JSON.stringify(canonicalizeAndHash(serializeRelease({ compiled, normalizedDefinitionBytes: bytes })).contentHash));
 `;
 
 export const archivedBillingMigration = String.raw`

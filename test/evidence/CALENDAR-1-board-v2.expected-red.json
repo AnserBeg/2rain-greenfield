@@ -42,8 +42,8 @@
       "name": "board-v2-retired-board-validated",
       "claim": "A retired Board is not validated on normalization: its removed binding does not block the package.",
       "file": "packages/canonical-model/src/surface-workspace.ts",
-      "original": "      if (surface.lifecycle !== 'retired') {\n",
-      "replacement": "      if (surface.lifecycle !== 'retired' || surface.lifecycle === 'retired') {\n",
+      "original": "      if (surface.lifecycle !== 'retired') {\n        const conflict = boardBindingConflicts(model, body)[0];",
+      "replacement": "      if (surface.lifecycle !== 'retired' || surface.lifecycle === 'retired') {\n        const conflict = boardBindingConflicts(model, body)[0];",
       "test": {
         "files": ["test/unit/customization-board.test.ts"],
         "namePattern": "normalization checks"

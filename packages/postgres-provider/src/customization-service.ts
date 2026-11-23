@@ -48,6 +48,7 @@ import {
   storageElements,
   customizationTargets,
   draftPatchFromRequest,
+  AUTHORING_RULES,
   DRAFT_SHAPE_CAPABILITIES,
   type AcknowledgementInput,
   type CheckableDraft,
@@ -100,6 +101,7 @@ import {
   readCustomizationLineage,
 } from './customization-lineage.js';
 import type { ModuleProviderErrorMapping } from './module-runtime-interpreter.js';
+import type { ModuleWriteInvariantProvider } from './module-write-invariants.js';
 import {
   ModuleStorageMaterializationError,
   PostgresModuleStorageMaterializer,
@@ -181,6 +183,8 @@ export interface CustomizationServiceOptions {
   /** Verification of a candidate runs the same executors serving does. */
   readonly capabilityOperationExecutorFactories?: readonly PostgresCapabilityOperationExecutorFactory[];
   readonly providerErrorMappings?: readonly ModuleProviderErrorMapping[];
+  /** Required: a candidate's verification writes through the same invariants. */
+  readonly writeInvariants: readonly ModuleWriteInvariantProvider[];
   /**
    * The local demo's full-release roles receive a tenant release's new
    * permissions at activation, exactly as boot grants first-party ones.
@@ -1255,6 +1259,7 @@ export class PostgresCustomizationService {
     const context = await this.#context(actor);
     const view = await new PostgresWorkflowGateway(
       this.connection.runtimePool,
+      this.options.writeInvariants,
     ).loadView(context);
     const operations = parsePinnedOperationCatalog(
       view.projections.operation.payload,
@@ -1903,6 +1908,7 @@ export class PostgresCustomizationService {
     const base = await this.#loadRelease(context, releaseId);
     const view = await new PostgresWorkflowGateway(
       this.connection.runtimePool,
+      this.options.writeInvariants,
     ).loadView(context);
     if (
       view.release.releaseId !== releaseId ||
@@ -2053,6 +2059,7 @@ export class PostgresCustomizationService {
           identity,
           candidate,
           this.options.providerErrorMappings ?? [],
+          this.options.writeInvariants,
           this.options.capabilityOperationExecutorFactories ?? [],
           this.connection.adminPool,
         );
@@ -3315,6 +3322,10 @@ const PATCH_SELECT = `SELECT patch.compiler_acknowledgement, patch.base_release_
 
 function patchDisplayLabel(patch: CustomizationPatch): string | null {
   if (patch.kind === 'addPopupActionRevision') return patch.label.text;
+  if (patch.kind === 'addRatePlanVersion')
+    return `${patch.ratePlan.id} (${patch.ratePlan.version})`;
+  if (patch.kind === 'addPresentationRevision')
+    return patch.toneRules.map((rule) => rule.reason.text).join(', ') || null;
   switch (patch.kind) {
     case 'addField':
       return patch.field.label;
@@ -3433,7 +3444,7 @@ function parseUpgradeRecord(row: UpgradeRow): UpgradeRecord | null {
  * staleness, lineage and every other `unsupported` are final, so a correct
  * refusal is never argued away.
  */
-const REPAIRABLE_REFUSAL_CODES: ReadonlySet<string> = new Set([
+export const REPAIRABLE_REFUSAL_CODES: ReadonlySet<string> = new Set([
   'CUSTOMIZE_CHOICE_PLATFORM_OWNED',
   'CUSTOMIZE_DUPLICATE_LABEL',
   'CUSTOMIZE_RECORD_TYPE_EXISTS',
@@ -3444,6 +3455,10 @@ const REPAIRABLE_REFUSAL_CODES: ReadonlySet<string> = new Set([
   'CUSTOMIZE_FIELD_NOT_ON_LIST',
   'CUSTOMIZE_BOARD_CONFLICT',
   'CUSTOMIZE_LAYOUT_CONFLICT',
+  // TEMPLATE-1: a binding naming a collection, context or column not offered.
+  'CUSTOMIZE_RECORD_TEMPLATE_CONFLICT',
+  // UI-CUSTOM-1: a colour rule naming a value or column the list lacks.
+  'CUSTOMIZE_PRESENTATION_CONFLICT',
 ] satisfies readonly PatchRefusalCode[]);
 
 export function classifyDraftOutcome(
@@ -3451,18 +3466,27 @@ export function classifyDraftOutcome(
 ): DraftCheckResult<DraftOutcome> {
   if (outcome.status === 'drafted')
     return { status: 'accepted', value: outcome };
+  const repairableRefusal =
+    outcome.status === 'refused' &&
+    !!outcome.code &&
+    REPAIRABLE_REFUSAL_CODES.has(outcome.code);
   const diagnostics = [
     ...(outcome.code
       ? [`${outcome.code}: ${outcome.message}`]
       : [outcome.message]),
+    // What to change (AI-RELY-1 slice 1, the W02/T08 lesson): a repairable
+    // refusal carries the platform rule it broke, not only its code.
+    ...(repairableRefusal
+      ? AUTHORING_RULES[outcome.code as PatchRefusalCode].map(
+          (rule) => `rule: ${rule}`,
+        )
+      : []),
     ...(outcome.issues ?? []),
   ];
   const repairable =
     outcome.status === 'invalid' ||
     (outcome.status === 'rejected' && !outcome.replayDiagnostics) ||
-    (outcome.status === 'refused' &&
-      !!outcome.code &&
-      REPAIRABLE_REFUSAL_CODES.has(outcome.code)) ||
+    repairableRefusal ||
     (outcome.status === 'unsupported' &&
       DRAFT_SHAPE_CAPABILITIES.includes(outcome.missingCapability ?? ''));
   return repairable

@@ -1,4 +1,8 @@
 import type { RecordTemplateBinding } from '@north-star/canonical-model';
+import type {
+  BillingPlan,
+  BillingSchedule,
+} from '../../canonical-model/src/billing.js';
 import type { ReportRevision } from '@north-star/canonical-model';
 import type { PopupRevision } from '../../canonical-model/src/popup-actions.js';
 import {
@@ -19,6 +23,10 @@ import type {
   DocumentTemplateRevision,
 } from '../../canonical-model/src/document-template-schema.js';
 import type { WorkflowDefinition } from '../../canonical-model/src/schemas.js';
+import type {
+  ValidationOperand,
+  ValidationPredicate,
+} from '../../canonical-model/src/formula-validation.js';
 import type { ReleaseDiffEnvelope } from '@north-star/compiler';
 
 /**
@@ -51,6 +59,7 @@ export interface DiffDefinition extends LayoutDefinition {
     readonly categoryId: string;
     readonly label: string;
   }[];
+  readonly billingPlans?: readonly BillingPlan[];
   readonly entities: readonly Json[];
   readonly fields: readonly Json[];
   readonly operations?: readonly Json[];
@@ -109,6 +118,58 @@ export function renderReleaseDiff(input: {
         ?.label ?? entityId,
     );
   const lines: string[] = [];
+  const sameVersion = (a: BillingPlan, b: BillingPlan) =>
+    a.id === b.id && a.version === b.version;
+  for (const plan of to.billingPlans ?? []) {
+    if (from.billingPlans?.some((p) => sameVersion(p, plan))) continue;
+    lines.push(
+      `Adds rate plan “${plan.id}” version ${plan.version}, in ${plan.currency} per ${plan.serviceUnit}. Reviews arrears ${billingScheduleText(plan.schedule)}.`,
+    );
+    for (const c of plan.components) {
+      let terms: string;
+      if (c.kind === 'time') {
+        const offers = Object.entries(c.rates)
+          .map(([period, slot]) => `${period} at “${slot}”`)
+          .join(', ');
+        terms =
+          `Best price across ${offers} in each ${plan.pricingWindow} window. Tail policy ${c.partialTime}.` +
+          (c.cap ? ` Cap at “${c.cap}”.` : '') +
+          (c.minimumMoney
+            ? ` Minimum “${c.minimumMoney}” ${c.minimumScope}.`
+            : '') +
+          (c.minimumDuration
+            ? ` Minimum duration ${c.minimumDuration.count} ${c.minimumDuration.period} ${c.minimumScope}.`
+            : '');
+      } else if (c.kind === 'fixed') {
+        const fee = c.occurrence;
+        terms =
+          fee.kind === 'oneOff'
+            ? `One charge from “${c.amount}” at ${fee.at}.`
+            : `Charge “${c.amount}” ${billingScheduleText(fee.cadence)}. Proration ${fee.feeProration}, pause policy ${fee.fixedFeeDuringPause}.`;
+      } else {
+        const basis = c.allowanceBasis;
+        const allowance =
+          basis.kind === 'perBilledPeriod'
+            ? Object.entries(basis.quantities)
+                .map(([period, slot]) => `${period} uses “${slot}”`)
+                .join(', ') + ` for ${basis.timeComponent}`
+            : basis.quantity;
+        terms = `Stream “${c.streamId}” in ${c.unit} with allowance “${allowance}” ${basis.kind} and overage rate “${c.overageRate}”. Allowance proration ${c.allowanceProration}.`;
+      }
+      lines.push(
+        `Component “${c.id}”. ${terms} Tax classification “${c.taxClassification}”.`,
+      );
+    }
+    for (const slot of plan.slots)
+      lines.push(
+        `Publish “${slot.id}” in ${slot.kind === 'money' ? slot.currency : slot.unit} with up to ${slot.scale} decimal places.`,
+      );
+  }
+  for (const plan of from.billingPlans ?? [])
+    if (!to.billingPlans?.some((p) => sameVersion(p, plan)))
+      lines.push(
+        `Removes rate plan “${plan.id}” version ${plan.version} from this release.`,
+      );
   const activeTemplates = (definition: DiffDefinition) =>
     new Map(
       (definition.documentTemplatePointers ?? []).flatMap(
@@ -502,6 +563,71 @@ export function renderReleaseDiff(input: {
     if (!before || !after) continue;
     const beforeMetrics = ((before.launcher as Json | undefined)?.metrics ??
       []) as Json[];
+    type Presented = {
+      revisionId: string;
+      status: string;
+      toneRules: {
+        ruleId: string;
+        tone: string;
+        reason: { text: string };
+        target: { kind: string; fieldId?: string };
+        when: ValidationPredicate;
+      }[];
+      sizing: { kind: string; fieldId?: string; width?: string }[];
+      density: string | null;
+      viewDensity?: { viewId: string; density: string }[];
+    };
+    const presented = after.presentation as Presented | undefined;
+    const prior = before.presentation as Presented | undefined;
+    if (presented && prior?.revisionId !== presented.revisionId) {
+      const on = `On ${String(after.label)}`;
+      const label = (fieldId: string) =>
+        String(
+          to.fields.find((entry) => entry.fieldId === fieldId)?.label ??
+            fieldId,
+        );
+      if (presented.status === 'retired')
+        lines.push(`${on}, retire the colour rules and sizing.`);
+      else {
+        const was = prior?.status === 'active' ? prior : undefined;
+        const kept = new Set(presented.toneRules.map((r) => r.reason.text));
+        for (const rule of was?.toneRules ?? [])
+          if (!kept.has(rule.reason.text))
+            lines.push(`${on}, remove the colour rule "${rule.reason.text}".`);
+        // Rules are judged in order and the first that holds wins, so the
+        // diff shows each rule's place and its condition.
+        const count = presented.toneRules.length;
+        for (const [index, rule] of presented.toneRules.entries())
+          lines.push(
+            `${on}, rule ${String(index + 1)} of ${String(count)}: show "${rule.reason.text}" as ${rule.tone} on the ${rule.target.kind === 'listRow' ? 'whole row' : `${label(String(rule.target.fieldId))} cell`} when ${describeCondition(rule.when, label)}. An earlier rule that holds wins.`,
+          );
+        const sized = new Set(
+          presented.sizing.flatMap((entry) =>
+            entry.kind === 'listColumn' ? [String(entry.fieldId)] : [],
+          ),
+        );
+        for (const entry of was?.sizing ?? [])
+          if (entry.kind === 'listColumn' && !sized.has(String(entry.fieldId)))
+            lines.push(
+              `${on}, stop sizing column ${label(String(entry.fieldId))} (${String(entry.fieldId)}).`,
+            );
+        for (const entry of presented.sizing)
+          if (entry.kind === 'listColumn')
+            lines.push(
+              `${on}, make column ${label(String(entry.fieldId))} ${String(entry.width)}.`,
+            );
+        const views = new Set(
+          (presented.viewDensity ?? []).map((view) => view.viewId),
+        );
+        for (const view of was?.viewDensity ?? [])
+          if (!views.has(view.viewId))
+            lines.push(
+              `${on}, stop setting the density of view ${view.viewId}.`,
+            );
+        if (presented.density)
+          lines.push(`${on}, use ${presented.density} density.`);
+      }
+    }
     for (const revision of (after.popupActions ?? []) as PopupRevision[]) {
       const prior = ((before.popupActions ?? []) as PopupRevision[]).find(
         (r) => r.actionId === revision.actionId,
@@ -756,4 +882,52 @@ function humanKind(kind: string): string {
   return kind
     .replace(/Definition$/u, '')
     .replace(/[A-Z]/gu, (c) => ` ${c.toLowerCase()}`);
+}
+
+function billingScheduleText(schedule: BillingSchedule): string {
+  switch (schedule.kind) {
+    case 'onServiceEnd':
+      return 'at service end';
+    case 'anniversary':
+      return `every ${schedule.months} month(s) from the original anniversary`;
+    case 'fixedDays':
+      return `every ${schedule.days} local day(s)`;
+    case 'calendarMonth':
+      return `at ${String(Math.floor(schedule.boundaryMinutes / 60)).padStart(2, '0')}:${String(schedule.boundaryMinutes % 60).padStart(2, '0')} on the first local day of the month`;
+  }
+}
+
+const COMPARISON_WORDS: Record<string, string> = {
+  equal: 'is',
+  notEqual: 'is not',
+  lessThan: 'is below',
+  lessThanOrEqual: 'is at most',
+  greaterThan: 'is above',
+  greaterThanOrEqual: 'is at least',
+};
+
+/** A tone rule's condition in words, for the approval diff (any kernel shape). */
+function describeCondition(
+  when: ValidationPredicate,
+  label: (fieldId: string) => string,
+): string {
+  const operand = (o: ValidationOperand): string =>
+    o.kind === 'literal'
+      ? JSON.stringify(o.scalar.value)
+      : o.kind === 'field'
+        ? `${label(o.fieldId)}${o.select === 'textLength' ? ' length' : ''}`
+        : `${o.relationIds.join(' > ')} > ${label(o.fieldId)}`;
+  switch (when.kind) {
+    case 'comparison':
+      return `${operand(when.left)} ${COMPARISON_WORDS[when.operator] ?? when.operator} ${operand(when.right)}`;
+    case 'required':
+      return `${operand(when.operand)} has a value`;
+    case 'not':
+      return `not (${describeCondition(when.term, label)})`;
+    case 'all':
+    case 'any':
+      return when.terms
+        .map((term) => `(${describeCondition(term, label)})`)
+        .join(when.kind === 'all' ? ' and ' : ' or ');
+  }
 }
