@@ -45,15 +45,19 @@ async function archivedMigrations(directory: string) {
   );
 }
 
-// Ordered by the stored bigint: the text alias would sort 10 before 2.
-const ledgerQuery = `SELECT m.ordinal::text AS ordinal, m.name, m.checksum, m.applied_at
+// Ordered by the stored bigint: the text alias would sort 10 before 2. The
+// time travels as text, so the restore is exact to the microsecond.
+const ledgerQuery = `SELECT m.ordinal::text AS ordinal, m.name, m.checksum, m.applied_at::text AS applied_at
   FROM north_star_internal.schema_migrations m ORDER BY m.ordinal`;
+// One presentation at a time per database, held from mask to restore. Not the
+// migration lock: the archived migrate() takes that one inside the run.
+const presentationLock = 'north-star:archived-ledger-presentation:v1';
 
 interface LedgerRow {
   readonly ordinal: string;
   readonly name: string;
   readonly checksum: string;
-  readonly applied_at: Date;
+  readonly applied_at: string;
 }
 
 /**
@@ -63,15 +67,24 @@ interface LedgerRow {
  * behaviour for a real rollback. A probe of an older binary therefore sees
  * the ledger as it stood at that binary's level: every recorded migration
  * after the archived tree's last file is set aside for the probe and put
- * back, with its ordinal and time, before the next statement of the test.
+ * back, with its ordinal and its applied_at text, and the restore is checked
+ * row for row.
  *
  * Exactly the ledger is presented at the older level. The schema still holds
- * the later objects, which is safe only because a migration is additive to
- * what older code writes; a later migration that alters such an object would
- * make the older binary fail on its own, by name. Nothing is set aside when
- * the archived files are not a prefix of the ledger (a renamed or edited
+ * the later objects, which is safe only while later migrations are additive to
+ * what older code writes; one that alters such an object makes the older
+ * binary fail on its own, by name. It is also safe only while nothing but
+ * migrate() reads the ledger: the reader proof moves the release pointer in
+ * the parent while the ledger is presented. Nothing is set aside when the
+ * archived files are not a prefix of the ledger (a renamed or edited
  * migration, or a file the database never applied): the archived `migrate()`
  * then refuses or applies exactly as it would in production.
+ *
+ * One session holds an advisory lock from mask to restore, so two
+ * presentations on one database never interleave. A killed test process
+ * never restores, and a failed restore throws rather than retrying; both are
+ * harmless because every caller uses its own throwaway container
+ * (test/helpers/postgres.ts, withEphemeralPostgres).
  *
  * Any packet that adds a migration passes through here unchanged.
  */
@@ -80,16 +93,31 @@ export async function presentLedgerAtArchivedLevel(
   migrationDirectory: string,
 ): Promise<(() => Promise<void>) | undefined> {
   const files = await archivedMigrations(migrationDirectory);
-  const client = new pg.Client({ connectionString: databaseUrl });
-  await client.connect();
+  const holder = new pg.Client({ connectionString: databaseUrl });
+  await holder.connect();
+  let held = false;
+  const release = async () => {
+    if (held)
+      await holder.query('SELECT pg_advisory_unlock(hashtext($1))', [
+        presentationLock,
+      ]);
+    await holder.end();
+  };
   try {
-    const exists = await client.query<{ present: boolean }>(
+    const exists = await holder.query<{ present: boolean }>(
       `SELECT to_regclass('north_star_internal.schema_migrations') IS NOT NULL AS present`,
     );
-    if (!exists.rows[0]?.present) return undefined;
-    await client.query('BEGIN');
-    await client.query('LOCK TABLE north_star_internal.schema_migrations');
-    const ledger = await client.query<LedgerRow>(ledgerQuery);
+    if (!exists.rows[0]?.present) {
+      await release();
+      return undefined;
+    }
+    await holder.query('SELECT pg_advisory_lock(hashtext($1))', [
+      presentationLock,
+    ]);
+    held = true;
+    await holder.query('BEGIN');
+    await holder.query('LOCK TABLE north_star_internal.schema_migrations');
+    const ledger = await holder.query<LedgerRow>(ledgerQuery);
     const prefix =
       ledger.rows.length > files.length &&
       files.every(
@@ -98,50 +126,44 @@ export async function presentLedgerAtArchivedLevel(
           ledger.rows[index]?.checksum === file.checksum,
       );
     if (!prefix) {
-      await client.query('ROLLBACK');
+      await holder.query('ROLLBACK');
+      await release();
       return undefined;
     }
     const later = ledger.rows.slice(files.length);
-    await client.query(
+    await holder.query(
       `DELETE FROM north_star_internal.schema_migrations
        WHERE ordinal = ANY($1::bigint[])`,
       [later.map((row) => row.ordinal)],
     );
-    await client.query('COMMIT');
+    await holder.query('COMMIT');
     return async () => {
-      const restore = new pg.Client({ connectionString: databaseUrl });
-      await restore.connect();
       try {
-        await restore.query('BEGIN');
+        await holder.query('BEGIN');
         for (const row of later)
-          await restore.query(
+          await holder.query(
             `INSERT INTO north_star_internal.schema_migrations
                (ordinal, name, checksum, applied_at)
-             OVERRIDING SYSTEM VALUE VALUES ($1::bigint, $2, $3, $4)`,
+             OVERRIDING SYSTEM VALUE VALUES ($1::bigint, $2, $3, $4::timestamptz)`,
             [row.ordinal, row.name, row.checksum, row.applied_at],
           );
-        const after = await restore.query<LedgerRow>(ledgerQuery);
-        const key = (rows: readonly LedgerRow[]) =>
-          JSON.stringify(
-            rows.map((r) => [r.ordinal, r.name, r.checksum, +r.applied_at]),
-          );
-        if (key(after.rows) !== key(ledger.rows))
+        const after = await holder.query<LedgerRow>(ledgerQuery);
+        if (JSON.stringify(after.rows) !== JSON.stringify(ledger.rows))
           throw new Error(
             'The archived probe changed the migration ledger; it is not restored.',
           );
-        await restore.query('COMMIT');
+        await holder.query('COMMIT');
       } catch (error) {
-        await restore.query('ROLLBACK');
+        await holder.query('ROLLBACK').catch(() => undefined);
         throw error;
       } finally {
-        await restore.end();
+        await release();
       }
     };
   } catch (error) {
-    await client.query('ROLLBACK').catch(() => undefined);
+    await holder.query('ROLLBACK').catch(() => undefined);
+    await release().catch(() => undefined);
     throw error;
-  } finally {
-    await client.end();
   }
 }
 export type ArchivedRunner = (
