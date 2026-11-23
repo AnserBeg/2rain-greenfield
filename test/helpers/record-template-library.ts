@@ -783,6 +783,22 @@ export async function exerciseTemplateLibrary(
           history[0]!.revisionId,
         );
         assert.equal((await create(nextKey, newer)).outcome, 'succeeded');
+        // A reviewed key no create has used: the operation layer holds no
+        // receipt to compare, so only the template review can refuse a create
+        // whose payload changed after the preview.
+        const reviewed = { ...header, recordId: randomUUID() };
+        const reviewedKey = randomUUID();
+        await prepare(reviewedKey, reviewed);
+        await assert.rejects(
+          create(reviewedKey, {
+            ...reviewed,
+            values: {
+              ...reviewed.values,
+              [ns + 'field.' + local + '_name']: 'Changed after review',
+            },
+          }),
+          /template.requestChanged/u,
+        );
         assert.equal(
           (await application())?.assignment?.revision_id,
           published.revisionId,

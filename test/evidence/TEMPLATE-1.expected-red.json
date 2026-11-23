@@ -40,7 +40,7 @@
     },
     {
       "name": "template-changed-request",
-      "claim": "A create under a reviewed key with a different payload refuses instead of applying the reviewed template.",
+      "claim": "A create under a reviewed key that no create has used, with a payload changed after the preview, refuses by name instead of applying the reviewed template; the operation layer holds no receipt for that key, so only the template review can refuse it.",
       "file": "db/migrations/0069_record_template_library.sql",
       "original": "IF r.input_digest<>encode(sha256(convert_to(header::text,'UTF8')),'hex') OR r.probe<>verification THEN",
       "replacement": "IF r.probe<>verification THEN",
@@ -58,10 +58,10 @@
     },
     {
       "name": "template-application-company",
-      "claim": "A worker limited to one company cannot read another company's template application for a known parent ID.",
+      "claim": "A worker limited to one company is refused, by the company-scoped read authority alone, another company's template application for a known parent ID; without it the stored-company lookup answers nothing instead of refusing.",
       "file": "db/migrations/0069_record_template_library.sql",
       "original": "IF NOT north_star_internal.address_member(company) OR NOT platform.document_granted(company::text,replace(form,':surface.',':permission.template_read_'),form)",
-      "replacement": "IF NOT platform.document_granted(company::text,replace(form,':surface.',':permission.template_read_'),form)",
+      "replacement": "IF false",
       "test": {
         "files": ["test/postgres/record-template-library.test.ts"],
         "namePattern": "^publish and assign company templates for inspections, print tickets and school enrolments$"
