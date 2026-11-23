@@ -1,7 +1,14 @@
 import type { DraftOutcome } from '../../packages/postgres-provider/src/customization-service.js';
-import { loadMigrations } from '../../packages/postgres-provider/src/migrations.js';
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -18,6 +25,29 @@ function probedDatabase(input: unknown): string | undefined {
   const url = record?.databaseUrl ?? record?.options?.databaseUrl;
   return typeof url === 'string' ? url : undefined;
 }
+
+/**
+ * The archived tree's migration files, named and digested as its own loader
+ * does (sha256 of the UTF-8 text). Read here rather than imported, so the
+ * browser runner's loader never resolves a provider module.
+ */
+async function archivedMigrations(directory: string) {
+  const names = (await readdir(directory))
+    .filter((name) => /^\d{4}_[a-z0-9_]+\.sql$/u.test(name))
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return Promise.all(
+    names.map(async (name) => ({
+      name,
+      checksum: createHash('sha256')
+        .update(await readFile(join(directory, name), 'utf8'))
+        .digest('hex'),
+    })),
+  );
+}
+
+// Ordered by the stored bigint: the text alias would sort 10 before 2.
+const ledgerQuery = `SELECT m.ordinal::text AS ordinal, m.name, m.checksum, m.applied_at
+  FROM north_star_internal.schema_migrations m ORDER BY m.ordinal`;
 
 interface LedgerRow {
   readonly ordinal: string;
@@ -49,7 +79,7 @@ export async function presentLedgerAtArchivedLevel(
   databaseUrl: string,
   migrationDirectory: string,
 ): Promise<(() => Promise<void>) | undefined> {
-  const files = await loadMigrations(migrationDirectory);
+  const files = await archivedMigrations(migrationDirectory);
   const client = new pg.Client({ connectionString: databaseUrl });
   await client.connect();
   try {
@@ -59,10 +89,7 @@ export async function presentLedgerAtArchivedLevel(
     if (!exists.rows[0]?.present) return undefined;
     await client.query('BEGIN');
     await client.query('LOCK TABLE north_star_internal.schema_migrations');
-    const ledger = await client.query<LedgerRow>(
-      `SELECT ordinal::text AS ordinal, name, checksum, applied_at
-       FROM north_star_internal.schema_migrations ORDER BY ordinal`,
-    );
+    const ledger = await client.query<LedgerRow>(ledgerQuery);
     const prefix =
       ledger.rows.length > files.length &&
       files.every(
@@ -93,10 +120,7 @@ export async function presentLedgerAtArchivedLevel(
              OVERRIDING SYSTEM VALUE VALUES ($1::bigint, $2, $3, $4)`,
             [row.ordinal, row.name, row.checksum, row.applied_at],
           );
-        const after = await restore.query<LedgerRow>(
-          `SELECT ordinal::text AS ordinal, name, checksum, applied_at
-           FROM north_star_internal.schema_migrations ORDER BY ordinal`,
-        );
+        const after = await restore.query<LedgerRow>(ledgerQuery);
         const key = (rows: readonly LedgerRow[]) =>
           JSON.stringify(
             rows.map((r) => [r.ordinal, r.name, r.checksum, +r.applied_at]),
