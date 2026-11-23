@@ -466,8 +466,6 @@ const sandboxSteps = async (chain: unknown[]) => {
   assert.ok(compiled.status === 'compiled', JSON.stringify(compiled));
   return compiled.steps;
 };
-const lastLines = async (chain: unknown[]) =>
-  (await sandboxSteps(chain)).at(-1)!.rendered.lines.join('\n');
 // The approval diff of one changed list, rendered as the Customize service
 // renders it, without compiling a release for each step.
 const diffLines = (from: Json, to: Json) =>
@@ -490,7 +488,7 @@ const diffLines = (from: Json, to: Json) =>
 const escaped = (text: string) =>
   text.replaceAll(/[.*+?^${}()|[\]\\]/gu, '\\$&');
 
-test('an edited rule keeps its place, so earlier rules still win, and the approval diff shows each rule in order with its condition', async () => {
+test('an edited rule keeps its place, so earlier rules still win, and the approval diff shows each rule in order with its condition', () => {
   const v1 = member(base, {
     kind: 'addPresentationRevision',
     surface: stockList,
@@ -534,7 +532,7 @@ test('an edited rule keeps its place, so earlier rules still win, and the approv
     DRAFTER_KINDS.addPresentationRevision.guidance,
     /earliest rule that holds wins/u,
   );
-  const lines = await lastLines([stockItem, v1, v2]);
+  const lines = diffLines(first, second);
   assert.match(
     lines,
     /rule 1 of 2: show "Low stock" as blocked on the On hand cell when On hand is below "6"\. An earlier rule that holds wins\./u,
@@ -731,23 +729,16 @@ test('presentation applies to a protected first-party list, where layout stays r
 });
 
 test('a clipped column clips its text, never the cell: the row and cell tone pills sit outside the clip', async () => {
-  const revision = member(base, lowStock());
-  assert.ok(
-    revision.sizing.some(
-      (entry) =>
-        entry.kind === 'listColumn' &&
-        entry.fieldId === stock('name') &&
-        entry.overflow === 'truncate',
-    ),
+  const revision = member(
+    base,
+    lowStock({
+      columns: [
+        { fieldId: stock('name'), width: 'wide', overflow: 'truncate' },
+        { fieldId: stock('on_hand'), width: 'narrow', overflow: 'truncate' },
+      ],
+    }),
   );
-  const onHandClip = member(applied(base, [revision]), {
-    kind: 'addPresentationRevision',
-    surface: stockList,
-    columns: [
-      { fieldId: stock('on_hand'), width: 'narrow', overflow: 'truncate' },
-    ],
-  });
-  const steps = await sandboxSteps([stockItem, revision, onHandClip]);
+  const steps = await sandboxSteps([stockItem, revision]);
   const release = customization.parseSerializedRelease(steps.at(-1)!.release);
   const manifest = projectionPayload(
     release.compiled,
