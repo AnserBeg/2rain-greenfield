@@ -15,13 +15,28 @@
 const NS = 'northstar.app';
 
 export type FieldType =
-  'text' | 'number' | 'date' | 'yesNo' | 'choice' | 'address';
+  | 'text'
+  | 'number'
+  | 'date'
+  | 'yesNo'
+  | 'choice'
+  | 'address'
+  // CUSTOMIZE-6: scored on the surface manifest's logical field binding.
+  | 'decimal'
+  | 'money'
+  | 'quantity'
+  | 'longText'
+  | 'currency';
 
 export interface FieldSpec {
   readonly names: readonly string[];
   readonly type: FieldType;
   /** Each inner list is the aliases of one option that must exist. */
   readonly options?: readonly (readonly string[])[];
+  /** Money: its one fixed code, or `stored` (the record's currency field). */
+  readonly currency?: string;
+  /** Quantity: accepted spellings of its unit label. */
+  readonly unit?: readonly string[];
 }
 
 export interface TypeSpec {
@@ -174,6 +189,25 @@ const choice = (
   names: readonly string[],
   options: readonly (readonly string[])[],
 ): FieldSpec => ({ names, type: 'choice', options });
+const decimal = (...names: string[]): FieldSpec => ({ names, type: 'decimal' });
+const money = (currency: string, ...names: string[]): FieldSpec => ({
+  names,
+  type: 'money',
+  currency,
+});
+const quantity = (unit: readonly string[], ...names: string[]): FieldSpec => ({
+  names,
+  type: 'quantity',
+  unit,
+});
+const longText = (...names: string[]): FieldSpec => ({
+  names,
+  type: 'longText',
+});
+const currency = (...names: string[]): FieldSpec => ({
+  names,
+  type: 'currency',
+});
 
 const RECORD = ['addRecordType'];
 
@@ -1212,6 +1246,93 @@ export const BUILD_CASES: readonly BuildCase[] = [
     base: [rentalBase],
     request: 'Highlight rentals that are overdue: return date before today.',
     expect: { outcome: 'unsupported', capabilities: ['today'] },
+  },
+  // CUSTOMIZE-6 slice 1 (rule 12): decimal, money (fixed and stored),
+  // quantity and long text, across rentals, logistics, clinics and
+  // distribution. Written by hand from the request text before any run.
+  {
+    id: 'L01',
+    split: 'dev',
+    category: 'module',
+    request:
+      'Track equipment rentals: the contract name, a security deposit in Canadian dollars, and a daily rate with four decimal places.',
+    expect: {
+      outcome: 'module',
+      allowedKinds: RECORD,
+      types: [
+        {
+          names: ['equipment rental', 'rental'],
+          fields: [
+            text('contract', 'name'),
+            money('CAD', 'deposit', 'security deposit'),
+            decimal('daily rate', 'rate'),
+          ],
+        },
+      ],
+    },
+  },
+  {
+    id: 'L02',
+    split: 'dev',
+    category: 'module',
+    request:
+      'Add shipments with a reference, the gross weight in kg to three decimals, and the number of pallets.',
+    expect: {
+      outcome: 'module',
+      allowedKinds: RECORD,
+      types: [
+        {
+          names: ['shipment'],
+          fields: [
+            text('reference'),
+            quantity(['kg', 'kilogram', 'kilograms'], 'gross weight', 'weight'),
+            number('pallets', 'number of pallets', 'pallet count'),
+          ],
+        },
+      ],
+    },
+  },
+  {
+    id: 'L03',
+    split: 'test',
+    category: 'module',
+    request:
+      'Clinic visits: the patient name, the visit fee in US dollars, and the clinician notes, which can run to several paragraphs.',
+    expect: {
+      outcome: 'module',
+      allowedKinds: RECORD,
+      types: [
+        {
+          names: ['clinic visit', 'visit'],
+          fields: [
+            text('patient', 'patient name'),
+            money('USD', 'visit fee', 'fee'),
+            longText('notes', 'clinician notes'),
+          ],
+        },
+      ],
+    },
+  },
+  {
+    id: 'L04',
+    split: 'test',
+    category: 'module',
+    request:
+      'Track customer orders with an order number, the currency the customer pays in (CAD, USD or EUR), and the order total in that currency.',
+    expect: {
+      outcome: 'module',
+      allowedKinds: RECORD,
+      types: [
+        {
+          names: ['customer order', 'order'],
+          fields: [
+            text('order number', 'number'),
+            currency('currency'),
+            money('stored', 'order total', 'total'),
+          ],
+        },
+      ],
+    },
   },
 ];
 

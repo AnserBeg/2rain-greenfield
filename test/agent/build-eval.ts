@@ -208,7 +208,69 @@ const fieldKinds: Record<FieldType, readonly string[]> = {
   yesNo: ['booleanFieldType'],
   choice: ['enumFieldType'],
   address: ['addressFieldType'],
+  decimal: ['exactDecimalFieldType'],
+  money: ['exactDecimalFieldType'],
+  quantity: ['quantityFieldType'],
+  longText: ['textFieldType'],
+  currency: ['textFieldType'],
 };
+
+/** The logical kind a scored field type must be bound to (CUSTOMIZE-6). */
+const logicalKinds: Partial<Record<FieldType, string>> = {
+  decimal: 'decimal',
+  money: 'money',
+  quantity: 'quantity',
+  longText: 'longText',
+  currency: 'currencyCode',
+};
+
+interface ScoredLogicalBinding {
+  readonly fieldId: string;
+  readonly logicalType: string;
+  readonly currency?: { readonly kind: string; readonly currencyCode?: string };
+  readonly unit?: { readonly label: string };
+}
+
+/** The served surface manifest's logical field bindings, by field ID. */
+async function logicalBindings(
+  world: AgentWorld,
+): Promise<ReadonlyMap<string, ScoredLogicalBinding>> {
+  return world.runtime.entry.run(MANAGER, (view) => {
+    const payload = view.projections.surface.payload as {
+      logicalFieldBindings?: readonly ScoredLogicalBinding[];
+    };
+    return new Map(
+      (payload.logicalFieldBindings ?? []).map((b) => [b.fieldId, b]),
+    );
+  });
+}
+
+/** Why a found field does not have the logical facts its spec asks for. */
+export function logicalMismatch(
+  wanted: FieldSpec,
+  binding: ScoredLogicalBinding | undefined,
+): string | null {
+  const kind = logicalKinds[wanted.type];
+  if (!kind) return null;
+  if (binding?.logicalType !== kind)
+    return `is ${binding?.logicalType ?? 'not a logical field'}, expected ${wanted.type}`;
+  if (wanted.currency !== undefined) {
+    const found =
+      binding.currency?.kind === 'fixed'
+        ? binding.currency.currencyCode
+        : binding.currency?.kind;
+    if (found !== wanted.currency)
+      return `has currency ${String(found)}, expected ${wanted.currency}`;
+  }
+  if (
+    wanted.unit &&
+    !wanted.unit.some(
+      (unit) => unit.toLowerCase() === binding.unit?.label.toLowerCase(),
+    )
+  )
+    return `has unit ${String(binding.unit?.label)}, expected ${wanted.unit[0]!}`;
+  return null;
+}
 
 /** An alias matches an id suffix when the slugs are equal or one contains the other. */
 export function nameMatches(aliases: readonly string[], suffix: string) {
@@ -295,6 +357,8 @@ function valueFor(
     case 'quantityFieldType':
       return '7';
     case 'textFieldType': {
+      // A three-character text is a currency code a money field may read.
+      if (field.bounds.maximumLength === 3) return 'CAD';
       const text = `Eval ${localOf(field.fieldId).slice(-24)}`;
       return field.bounds.maximumLength
         ? text.slice(0, field.bounds.maximumLength)
@@ -463,6 +527,7 @@ export async function scoreModule(
   },
 ): Promise<Score> {
   const after = await catalog(world);
+  const logical = await logicalBindings(world);
   const created = newEntities(before, after);
   const reasons: string[] = [];
   let e2e = true;
@@ -523,6 +588,10 @@ export async function scoreModule(
         miss(
           `${label}: field "${wanted.names[0]!}" is ${found.fieldKind}, expected ${wanted.type}`,
         );
+      else {
+        const mismatch = logicalMismatch(wanted, logical.get(found.fieldId));
+        if (mismatch) miss(`${label}: field "${wanted.names[0]!}" ${mismatch}`);
+      }
       for (const option of wanted.options ?? [])
         if (!found.enumOptionIds.some((id) => nameMatches(option, localOf(id))))
           miss(
