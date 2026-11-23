@@ -150,7 +150,7 @@
       "name": "presentation-clip-text-style",
       "claim": "D1: the clip styles sit on the text span, never on the cell (surface grammar).",
       "file": "apps/web/src/ledger-styles.ts",
-      "original": ".data-table-wrap td[data-column-wrap=clip] .cell-clip{display:inline-block;max-width:24ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}",
+      "original": ".data-table-wrap td[data-column-wrap=clip] .cell-clip{display:inline-block;max-width:24ch;padding:4px;margin:-4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}",
       "replacement": ".data-table-wrap td[data-column-wrap=clip]{max-width:24ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
       "test": {
         "files": ["test/architecture/surface-grammar-conformance.test.ts"],
@@ -222,8 +222,8 @@
       "name": "presentation-edit-in-place",
       "claim": "D2: an edited rule is replaced where it stands, so earlier rules keep winning.",
       "file": "packages/customization/src/presentation-revision.ts",
-      "original": "            toneRules.find((next) => next.ruleId === rule.ruleId) ?? rule,",
-      "replacement": "            rule,",
+      "original": "        (rule) => toneRules.find((next) => next.ruleId === rule.ruleId) ?? rule,",
+      "replacement": "        (rule) => rule,",
       "test": {
         "files": ["test/unit/surface-presentation.test.ts"],
         "namePattern": "an edited rule keeps its place"
@@ -330,8 +330,8 @@
       "name": "presentation-superseded-replay",
       "claim": "D6: upgrade replay checks a superseded presentation revision by identity only.",
       "file": "packages/customization/src/upgrade-replay.ts",
-      "original": "            pastPresentations.has(patch.revisionId));",
-      "replacement": "            false);",
+      "original": "            (pastPresentations.has(patch.revisionId) ||",
+      "replacement": "            (false ||",
       "test": {
         "files": ["test/unit/customization-upgrade.test.ts"],
         "namePattern": "a superseded presentation revision"
