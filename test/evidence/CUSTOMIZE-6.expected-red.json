@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "packet": "CUSTOMIZE-6",
+  "entries": [
+    {
+      "name": "logical-serving-comparator-removed",
+      "claim": "Serving refuses surface bindings that disagree with the bindings recomputed from the pinned revision.",
+      "file": "packages/postgres-provider/src/logical-field-admission.ts",
+      "original": "    ) !== canonicalize(outcome.bindings)",
+      "replacement": "    ) !== canonicalize(outcome.bindings) && false",
+      "test": {
+        "files": ["test/unit/logical-field.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/logical-field.test.ts",
+          "name": "serving admission recomputes the bindings and refuses a disagreement, a stray binding and an understated floor",
+          "expected": "disagree"
+        }
+      ]
+    },
+    {
+      "name": "logical-serving-floor-removed",
+      "claim": "Serving refuses a logical field declaration served below its reader rung.",
+      "file": "packages/postgres-provider/src/logical-field-admission.ts",
+      "original": "  if (surfaceFloor < LOGICAL_FIELD_READER)",
+      "replacement": "  if (surfaceFloor < 0)",
+      "test": {
+        "files": ["test/unit/logical-field.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/logical-field.test.ts",
+          "name": "serving admission recomputes the bindings and refuses a disagreement, a stray binding and an understated floor",
+          "expected": "need the logical field surface reader floor"
+        }
+      ]
+    },
+    {
+      "name": "logical-currency-collation-removed",
+      "claim": "A currency code field compares exactly, so a report never splits cad from CAD.",
+      "file": "packages/canonical-model/src/logical-field-bindings.ts",
+      "original": "          field.collation !== 'binary'",
+      "replacement": "          false",
+      "test": {
+        "files": ["test/unit/logical-field.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/logical-field.test.ts",
+          "name": "the compiler refuses a forged declaration by field",
+          "expected": "compared exactly"
+        }
+      ]
+    },
+    {
+      "name": "logical-compiler-tenant-check-removed",
+      "claim": "The compiler refuses a logical field on a first-party record type by name.",
+      "file": "packages/compiler/src/logical-fields.ts",
+      "original": "    if (!isTenantRecordType(declaration.entityId))",
+      "replacement": "    if (false)",
+      "test": {
+        "files": ["test/unit/logical-field.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/logical-field.test.ts",
+          "name": "the compiler refuses a forged declaration by field",
+          "expected": "only a tenant record type"
+        }
+      ]
+    },
+    {
+      "name": "logical-money-currency-typing-removed",
+      "claim": "Formula validation types tenant money in its fixed currency and refuses stored-currency money.",
+      "file": "packages/canonical-model/src/formula-validation-bindings.ts",
+      "original": "  if (logical?.logicalType === 'money') {",
+      "replacement": "  if (logical?.logicalType === 'never') {",
+      "test": {
+        "files": ["test/unit/logical-field.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/logical-field.test.ts",
+          "name": "formula validation and calculated displays read tenant money in its own currency",
+          "expected": "CAD"
+        }
+      ]
+    },
+    {
+      "name": "logical-long-text-preserve-removed",
+      "claim": "A long-text value with paragraphs renders intact rather than as unavailable.",
+      "file": "apps/web/src/component-registry.ts",
+      "original": "      if (field.logical?.logicalType === 'longText')\n        return typeof value === 'string';",
+      "replacement": "      if (field.logical?.logicalType === 'longText')\n        return oneLineInputPreservesValue(value);",
+      "test": {
+        "files": ["test/unit/logical-field.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/logical-field.test.ts",
+          "name": "web controls keep paragraphs, offer only accepted currency codes and step by scale",
+          "expected": "false"
+        }
+      ]
+    }
+  ]
+}
