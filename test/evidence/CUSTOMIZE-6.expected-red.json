@@ -49,7 +49,7 @@
         {
           "file": "test/unit/logical-field.test.ts",
           "name": "the compiler refuses a forged declaration by field",
-          "expected": "compared exactly"
+          "expected": "strictly unequal to"
         }
       ]
     },
@@ -66,7 +66,7 @@
         {
           "file": "test/unit/logical-field.test.ts",
           "name": "the compiler refuses a forged declaration by field",
-          "expected": "only a tenant record type"
+          "expected": "strictly unequal to"
         }
       ]
     },
