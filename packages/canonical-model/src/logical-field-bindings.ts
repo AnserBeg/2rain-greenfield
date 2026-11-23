@@ -64,7 +64,7 @@ export type LogicalFieldOutcome =
 export function deriveLogicalFieldBindings(
   definition: DefinitionView,
 ): LogicalFieldOutcome {
-  const bindings: LogicalFieldBinding[] = [];
+  const bindings: z.input<typeof LogicalFieldBindingSchema>[] = [];
   const seen = new Set<string>();
   const unitLabels = new Map<string, string>();
   for (const raw of definition.logicalFields ?? []) {
@@ -148,5 +148,10 @@ export function deriveLogicalFieldBindings(
   bindings.sort((a, b) =>
     a.fieldId < b.fieldId ? -1 : a.fieldId > b.fieldId ? 1 : 0,
   );
-  return { status: 'bound', bindings };
+  return {
+    status: 'bound',
+    bindings: bindings.map((binding) =>
+      LogicalFieldBindingSchema.parse(binding),
+    ),
+  };
 }
