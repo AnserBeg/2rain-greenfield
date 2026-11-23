@@ -1,4 +1,8 @@
 import { applyMapRevision } from './map-revision.js';
+import {
+  compilePresentation,
+  PresentationProblem,
+} from '../../canonical-model/src/surface-presentation.js';
 import { type PopupRevision } from '../../canonical-model/src/popup-actions.js';
 import type { ReplayOrigin } from './upgrade-diagnostics.js';
 import { applyReportRevision, supersededReports } from './report-revision.js';
@@ -76,7 +80,8 @@ export type CustomizationRefusalCode =
   | 'CUSTOMIZE_BOARD_CONFLICT'
   | 'CUSTOMIZE_REPORT_CONFLICT'
   | 'CUSTOMIZE_LAYOUT_CONFLICT'
-  | 'CUSTOMIZE_POPUP_CONFLICT';
+  | 'CUSTOMIZE_POPUP_CONFLICT'
+  | 'CUSTOMIZE_PRESENTATION_CONFLICT';
 
 export interface CustomizationRefusal {
   readonly code: CustomizationRefusalCode;
@@ -235,7 +240,11 @@ export function applyOne(
   board: { check: BoardCheck; problem?: BoardApplyProblem | undefined } = {
     check: 'authoring',
   },
-  reportIdentityOnly = false,
+  /**
+   * Upgrade replay of a superseded Report or presentation revision: checked by
+   * identity only, as Board's superseded revisions are (rule 10).
+   */
+  identityOnly = false,
 ): Outcome | null {
   switch (patch.kind) {
     case 'addDateTimeField':
@@ -328,9 +337,60 @@ export function applyOne(
       const problem = applyReportRevision(
         authored as unknown as ReportCatalogSource & { surfaces: Json[] },
         patch,
-        reportIdentityOnly,
+        identityOnly,
       );
       return problem ? refusal('CUSTOMIZE_REPORT_CONFLICT', problem) : null;
+    }
+    case 'addPresentationRevision': {
+      // UI-CUSTOM-1: one current revision per surface, edited and retired by
+      // its predecessor; normalization compiles it (an active one only).
+      const surface = list(authored, 'surfaces').find(
+        (s) => s.surfaceId === patch.surface,
+      );
+      const fail = (message: string) =>
+        refusal('CUSTOMIZE_PRESENTATION_CONFLICT', message);
+      if (!surface || surface.archetype !== 'list' || !surface.list)
+        return fail('Choose a list to present.');
+      const { kind, ...revision } = patch;
+      const prior = surface.presentation as
+        { revisionId: string; status: string } | undefined;
+      const stalePresentation =
+        (prior?.revisionId ?? null) !== patch.predecessor;
+      // A retired presentation is followed by a new one (a list has only one
+      // presentation); only retiring what is not active is refused.
+      if (
+        stalePresentation ||
+        (prior?.status !== 'active' && patch.status === 'retired') ||
+        previous.some(
+          (p) => p.kind === kind && p.revisionId === patch.revisionId,
+        )
+      )
+        return fail(
+          'The presentation revision is stale or its ID is already in use.',
+        );
+      surface.presentation = revision;
+      // A superseded revision is replayed by identity only; its successor,
+      // checked in full, replaces it.
+      if (identityOnly) return null;
+      try {
+        // The authoring gates run here, on the authoring base only.
+        const model = normalizeApplicationPackage(authored) as unknown as {
+          surfaces: Json[];
+        };
+        compilePresentation(
+          model as unknown as Parameters<typeof compilePresentation>[0],
+          model.surfaces.find((s) => s.surfaceId === patch.surface)!,
+          'authoring',
+        );
+      } catch (error) {
+        if (error instanceof PresentationProblem) return fail(error.message);
+        return fail(
+          error instanceof CanonicalModelError
+            ? error.diagnostics.map((d) => d.rule).join('. ')
+            : String(error),
+        );
+      }
+      return null;
     }
     case 'addPopupActionRevision': {
       if (patch.target.kind === 'workflowStart')

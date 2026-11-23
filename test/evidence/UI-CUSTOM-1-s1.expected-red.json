@@ -1,0 +1,438 @@
+{
+  "version": 1,
+  "packet": "UI-CUSTOM-1-s1",
+  "entries": [
+    {
+      "name": "presentation-withheld-operand",
+      "claim": "A value the viewer may not read is unreadable: no tone, and the rule is reported unavailable rather than judged.",
+      "file": "packages/canonical-model/src/surface-presentation.ts",
+      "original": "if (!type || !Object.hasOwn(values, fieldId)) return unreadable;",
+      "replacement": "if (!type) return unreadable;",
+      "test": {
+        "files": ["test/unit/surface-presentation.test.ts"],
+        "namePattern": "between-field condition"
+      },
+      "kills": [
+        {
+          "file": "test/unit/surface-presentation.test.ts",
+          "name": "a between-field condition tones the cell and the row, three-valued, and never guesses a withheld value",
+          "expected": "Expected values to be strictly equal"
+        }
+      ]
+    },
+    {
+      "name": "presentation-context-operand",
+      "claim": "A tone rule refuses context values (this week, me) by name in this release.",
+      "file": "packages/canonical-model/src/surface-presentation.ts",
+      "original": "      CONTEXT_OPERANDS.has(operand.fieldId)",
+      "replacement": "      false",
+      "test": {
+        "files": ["test/unit/surface-presentation.test.ts"],
+        "namePattern": "a condition binds only"
+      },
+      "kills": [
+        {
+          "file": "test/unit/surface-presentation.test.ts",
+          "name": "a condition binds only values the list reads, of one type, and refuses linked records, context values and unrendered placements by name",
+          "expected": "cannot read a context value"
+        }
+      ]
+    },
+    {
+      "name": "presentation-unrendered-placement",
+      "claim": "A placement this release does not render is refused by name, never silently dropped.",
+      "file": "packages/canonical-model/src/surface-presentation.ts",
+      "original": "      if (!RENDERED_TONE_PLACEMENTS.has(rule.target.kind))",
+      "replacement": "      if (false)",
+      "test": {
+        "files": ["test/unit/surface-presentation.test.ts"],
+        "namePattern": "a condition binds only"
+      },
+      "kills": [
+        {
+          "file": "test/unit/surface-presentation.test.ts",
+          "name": "a condition binds only values the list reads, of one type, and refuses linked records, context values and unrendered placements by name",
+          "expected": "metricCard placement"
+        }
+      ]
+    },
+    {
+      "name": "presentation-stale-revision",
+      "claim": "Editing a presentation requires its current revision as predecessor.",
+      "file": "packages/customization/src/apply.ts",
+      "original": "        stalePresentation ||",
+      "replacement": "        false ||",
+      "test": {
+        "files": ["test/unit/surface-presentation.test.ts"],
+        "namePattern": "persists choices by stable ID"
+      },
+      "kills": [
+        {
+          "file": "test/unit/surface-presentation.test.ts",
+          "name": "the member persists choices by stable ID: a field add and a relabel keep it, a stale revision is refused, and a retired one is not validated",
+          "expected": "Expected values to be strictly equal"
+        }
+      ]
+    },
+    {
+      "name": "presentation-admission-digest",
+      "claim": "Admission refuses a compiled presentation that differs from what the approved declaration compiles to.",
+      "file": "packages/postgres-provider/src/presentation-admission.ts",
+      "original": "    if (!content || canonicalize(content.presentation) !== expected)",
+      "replacement": "    if (!content)",
+      "test": {
+        "files": ["test/unit/surface-presentation.test.ts"],
+        "namePattern": "compiles at reader rung 47"
+      },
+      "kills": [
+        {
+          "file": "test/unit/surface-presentation.test.ts",
+          "name": "a declared presentation compiles at reader rung 47 and admission refuses a compiled key that differs from the declaration",
+          "expected": "The input did not match the regular expression"
+        }
+      ]
+    },
+    {
+      "name": "presentation-reader-floor",
+      "claim": "A declared presentation raises the surface reader floor to its rung, so an older reader refuses it by name.",
+      "file": "packages/compiler/src/projections.ts",
+      "original": "      ? PRESENTATION_READER",
+      "replacement": "      ? 0",
+      "test": {
+        "files": ["test/unit/surface-presentation.test.ts"],
+        "namePattern": "compiles at reader rung 47"
+      },
+      "kills": [
+        {
+          "file": "test/unit/surface-presentation.test.ts",
+          "name": "a declared presentation compiles at reader rung 47 and admission refuses a compiled key that differs from the declaration",
+          "expected": "Expected values to be strictly equal"
+        }
+      ]
+    },
+    {
+      "name": "presentation-short-mark-bytes",
+      "claim": "The first-party Short mark, now a derived tone rule, renders byte-identically.",
+      "file": "apps/web/src/list-declaration.ts",
+      "original": "      mark: { glyph: '!', attribute: 'data-short-mark' },",
+      "replacement": "      mark: { glyph: '!', attribute: 'data-short' },",
+      "test": {
+        "files": ["test/integration/surface-data-binding.test.ts"],
+        "namePattern": "SUPPLY-WARNINGS: the Sales orders List counts"
+      },
+      "kills": [
+        {
+          "file": "test/integration/surface-data-binding.test.ts",
+          "name": "SUPPLY-WARNINGS: the Sales orders List counts Blocked by supply and Reserved in the statement, marks what each order is short and links reserved work to its shipments, without the supply current policy withholds",
+          "expected": "short-mark"
+        }
+      ]
+    },
+    {
+      "name": "presentation-clip-text-markup",
+      "claim": "D1: a clipped column wraps only its text in the clip span, so a tone pill after it always shows.",
+      "file": "apps/web/src/component-registry.ts",
+      "original": "      ? `<span class=\"cell-clip\">${html}</span>`",
+      "replacement": "      ? html",
+      "test": {
+        "files": ["test/unit/surface-presentation.test.ts"],
+        "namePattern": "a clipped column clips"
+      },
+      "kills": [
+        {
+          "file": "test/unit/surface-presentation.test.ts",
+          "name": "a clipped column clips its text, never the cell: the row and cell tone pills sit outside the clip",
+          "expected": "The input did not match the regular expression"
+        }
+      ]
+    },
+    {
+      "name": "presentation-clip-text-style",
+      "claim": "D1: the clip styles sit on the text span, never on the cell (surface grammar).",
+      "file": "apps/web/src/ledger-styles.ts",
+      "original": ".data-table-wrap td[data-column-wrap=clip] .cell-clip{display:inline-block;max-width:24ch;padding:4px;margin:-4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}",
+      "replacement": ".data-table-wrap td[data-column-wrap=clip]{max-width:24ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+      "test": {
+        "files": ["test/architecture/surface-grammar-conformance.test.ts"],
+        "namePattern": "clipped list column"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/surface-grammar-conformance.test.ts",
+          "name": "UI-CUSTOM-1: a clipped list column clips its text, never the cell, so a tone pill always shows",
+          "expected": "a rule clips the whole cell"
+        }
+      ]
+    },
+    {
+      "name": "presentation-muted-on-tint",
+      "claim": "R5: muted text on a tinted row reads through its own token at AA in the light theme.",
+      "file": "apps/web/src/ledger-styles.ts",
+      "original": ".data-table-wrap tbody tr[data-row-tone]:not([data-row-tone=neutral]) td{--muted:var(--muted-on-tint)}",
+      "replacement": ".data-table-wrap tbody tr[data-row-tone]:not([data-row-tone=neutral]) td{--muted:var(--muted)}",
+      "test": {
+        "files": ["test/architecture/surface-grammar-conformance.test.ts"],
+        "namePattern": "muted text on a tinted row"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/surface-grammar-conformance.test.ts",
+          "name": "UI-CUSTOM-1: muted text on a tinted row reads at AA in both themes, and the tint survives hover and the card projection",
+          "expected": "muted text below AA on a light tinted row"
+        }
+      ]
+    },
+    {
+      "name": "presentation-tint-on-hover",
+      "claim": "R5: a row tint outranks the row hover, so a toned row keeps its ground.",
+      "file": "apps/web/src/ledger-styles.ts",
+      "original": ".data-table-wrap tbody tr[data-row-tone=blocked] td{background:var(--status-blocked-ground)}",
+      "replacement": ".data-table-wrap tr[data-row-tone=blocked] td{background:var(--status-blocked-ground)}",
+      "test": {
+        "files": ["test/architecture/surface-grammar-conformance.test.ts"],
+        "namePattern": "muted text on a tinted row"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/surface-grammar-conformance.test.ts",
+          "name": "UI-CUSTOM-1: muted text on a tinted row reads at AA in both themes, and the tint survives hover and the card projection",
+          "expected": "the blocked tint loses to the row hover"
+        }
+      ]
+    },
+    {
+      "name": "presentation-tint-as-card",
+      "claim": "R5: a toned row keeps its tint in the 800px card projection.",
+      "file": "apps/web/src/ledger-styles.ts",
+      "original": ".data-table-wrap tr[data-compact-card=true][data-row-tone=blocked]{background",
+      "replacement": ".data-table-wrap tr[data-compact-card=true][data-row-tone=blocked] td{background",
+      "test": {
+        "files": ["test/architecture/surface-grammar-conformance.test.ts"],
+        "namePattern": "muted text on a tinted row"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/surface-grammar-conformance.test.ts",
+          "name": "UI-CUSTOM-1: muted text on a tinted row reads at AA in both themes, and the tint survives hover and the card projection",
+          "expected": "the blocked tint is lost as a card"
+        }
+      ]
+    },
+    {
+      "name": "presentation-edit-in-place",
+      "claim": "D2: an edited rule is replaced where it stands, so earlier rules keep winning.",
+      "file": "packages/customization/src/presentation-revision.ts",
+      "original": "        (rule) => toneRules.find((next) => next.ruleId === rule.ruleId) ?? rule,",
+      "replacement": "        (rule) => rule,",
+      "test": {
+        "files": ["test/unit/surface-presentation.test.ts"],
+        "namePattern": "an edited rule keeps its place"
+      },
+      "kills": [
+        {
+          "file": "test/unit/surface-presentation.test.ts",
+          "name": "an edited rule keeps its place, so earlier rules still win, and the approval diff shows each rule in order with its condition",
+          "expected": "Expected values to be strictly equal"
+        }
+      ]
+    },
+    {
+      "name": "presentation-diff-condition",
+      "claim": "D2: the approval diff shows each rule with its order and its condition.",
+      "file": "packages/customization/src/render.ts",
+      "original": " when ${describeCondition(rule.when, label)}. An earlier rule that holds wins.`,",
+      "replacement": " when its condition holds.`,",
+      "test": {
+        "files": ["test/unit/surface-presentation.test.ts"],
+        "namePattern": "an edited rule keeps its place"
+      },
+      "kills": [
+        {
+          "file": "test/unit/surface-presentation.test.ts",
+          "name": "an edited rule keeps its place, so earlier rules still win, and the approval diff shows each rule in order with its condition",
+          "expected": "The input did not match the regular expression"
+        }
+      ]
+    },
+    {
+      "name": "presentation-yes-no-only",
+      "claim": "D3: a yes/no literal is true, yes, false or no; anything else is refused by name.",
+      "file": "packages/customization/src/presentation-revision.ts",
+      "original": "      if (word === 'false' || word === 'no')",
+      "replacement": "      if (true)",
+      "test": {
+        "files": ["test/unit/surface-presentation.test.ts"],
+        "namePattern": "a yes/no value is only yes or no"
+      },
+      "kills": [
+        {
+          "file": "test/unit/surface-presentation.test.ts",
+          "name": "a yes/no value is only yes or no: true, yes, false and no bind, anything else is refused by name",
+          "expected": "Missing expected exception"
+        }
+      ]
+    },
+    {
+      "name": "presentation-present-after-retire",
+      "claim": "D4: a retired list presentation is followed by a new one.",
+      "file": "packages/customization/src/apply.ts",
+      "original": "        (prior?.status !== 'active' && patch.status === 'retired') ||",
+      "replacement": "        prior?.status === 'retired' ||",
+      "test": {
+        "files": ["test/unit/surface-presentation.test.ts"],
+        "namePattern": "a retired presentation is followed"
+      },
+      "kills": [
+        {
+          "file": "test/unit/surface-presentation.test.ts",
+          "name": "a retired presentation is followed by a new one, and a stale or repeated retire is refused",
+          "expected": "CUSTOMIZE_PRESENTATION_CONFLICT"
+        }
+      ]
+    },
+    {
+      "name": "presentation-drop-unbound",
+      "claim": "D5: the next revision drops current entries that no longer bind on this base.",
+      "file": "packages/customization/src/presentation-revision.ts",
+      "original": "  const binds = (id: string) => !target.inert.includes(id);",
+      "replacement": "  const binds = (_id: string) => true;",
+      "test": {
+        "files": ["test/unit/surface-presentation.test.ts"],
+        "namePattern": "after a toned or sized column is hidden"
+      },
+      "kills": [
+        {
+          "file": "test/unit/surface-presentation.test.ts",
+          "name": "after a toned or sized column is hidden, the next revision drops the entries that no longer bind and the diff names them",
+          "expected": "Expected values to be strictly deep-equal"
+        }
+      ]
+    },
+    {
+      "name": "presentation-diff-dropped-size",
+      "claim": "D5: the approval diff names a dropped column size.",
+      "file": "packages/customization/src/render.ts",
+      "original": "          if (entry.kind === 'listColumn' && !sized.has(String(entry.fieldId)))",
+      "replacement": "          if (false)",
+      "test": {
+        "files": ["test/unit/surface-presentation.test.ts"],
+        "namePattern": "after a toned or sized column is hidden"
+      },
+      "kills": [
+        {
+          "file": "test/unit/surface-presentation.test.ts",
+          "name": "after a toned or sized column is hidden, the next revision drops the entries that no longer bind and the diff names them",
+          "expected": "The input did not match the regular expression"
+        }
+      ]
+    },
+    {
+      "name": "presentation-superseded-replay",
+      "claim": "D6: upgrade replay checks a superseded presentation revision by identity only.",
+      "file": "packages/customization/src/upgrade-replay.ts",
+      "original": "            (pastPresentations.has(patch.revisionId) ||",
+      "replacement": "            (false ||",
+      "test": {
+        "files": ["test/unit/customization-upgrade.test.ts"],
+        "namePattern": "a superseded presentation revision"
+      },
+      "kills": [
+        {
+          "file": "test/unit/customization-upgrade.test.ts",
+          "name": "a superseded presentation revision is replayed by identity only, so a value only it read never refuses an upgrade",
+          "expected": "replayConflict"
+        }
+      ]
+    },
+    {
+      "name": "presentation-superseded-apply-gate",
+      "claim": "D6: apply skips the authoring gate for a superseded revision (the apply layer alone).",
+      "file": "packages/customization/src/apply.ts",
+      "original": "      if (identityOnly) return null;",
+      "replacement": "      if (false) return null;",
+      "test": {
+        "files": ["test/unit/customization-upgrade.test.ts"],
+        "namePattern": "a superseded presentation revision"
+      },
+      "kills": [
+        {
+          "file": "test/unit/customization-upgrade.test.ts",
+          "name": "a superseded presentation revision is replayed by identity only, so a value only it read never refuses an upgrade",
+          "expected": "replayConflict"
+        }
+      ]
+    },
+    {
+      "name": "presentation-superseded-bindings",
+      "claim": "D6: the generic ID check skips a superseded revision (the replay binding layer alone).",
+      "file": "packages/customization/src/upgrade-replay.ts",
+      "original": "          !identityOnly\n",
+      "replacement": "          true\n",
+      "test": {
+        "files": ["test/unit/customization-upgrade.test.ts"],
+        "namePattern": "a superseded presentation revision"
+      },
+      "kills": [
+        {
+          "file": "test/unit/customization-upgrade.test.ts",
+          "name": "a superseded presentation revision is replayed by identity only, so a value only it read never refuses an upgrade",
+          "expected": "replayConflict"
+        }
+      ]
+    },
+    {
+      "name": "presentation-redraft-after-remove",
+      "claim": "F1: a drafted rule is appended unless a rule the draft keeps (after remove) has its ID, so a removed and redrafted rule comes back.",
+      "file": "packages/customization/src/presentation-revision.ts",
+      "original": "        (next) => !kept.some((rule) => rule.ruleId === next.ruleId),\n",
+      "replacement": "        (next) =>\n          !(current?.toneRules ?? []).some((rule) => rule.ruleId === next.ruleId),\n",
+      "test": {
+        "files": ["test/unit/surface-presentation.test.ts"],
+        "namePattern": "removed and redrafted in one draft"
+      },
+      "kills": [
+        {
+          "file": "test/unit/surface-presentation.test.ts",
+          "name": "a rule removed and redrafted in one draft comes back, so a narrower band can be listed before a wider one",
+          "expected": "Reorder soon"
+        }
+      ]
+    },
+    {
+      "name": "clip-span-focus-ring-room",
+      "claim": "F2: the clip span pads 4px and takes it back with a negative margin, so a link's focus ring is not clipped.",
+      "file": "apps/web/src/ledger-styles.ts",
+      "original": "max-width:24ch;padding:4px;margin:-4px;overflow:hidden;",
+      "replacement": "max-width:24ch;overflow:hidden;",
+      "test": {
+        "files": ["test/architecture/surface-grammar-conformance.test.ts"],
+        "namePattern": "a clipped list column clips its text"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/surface-grammar-conformance.test.ts",
+          "name": "UI-CUSTOM-1: a clipped list column clips its text, never the cell, so a tone pill always shows",
+          "expected": "no room for a focus ring"
+        }
+      ]
+    },
+    {
+      "name": "presentation-retired-identity-only",
+      "claim": "F3: upgrade replay checks a retired presentation revision by identity only, so the old rules it carries never refuse an upgrade.",
+      "file": "packages/customization/src/upgrade-replay.ts",
+      "original": "            (pastPresentations.has(patch.revisionId) ||\n              patch.status === 'retired'));\n",
+      "replacement": "            (pastPresentations.has(patch.revisionId) || false));\n",
+      "test": {
+        "files": ["test/unit/customization-upgrade.test.ts"],
+        "namePattern": "a retired presentation revision is replayed"
+      },
+      "kills": [
+        {
+          "file": "test/unit/customization-upgrade.test.ts",
+          "name": "a retired presentation revision is replayed by identity only, so the old rules it carries never refuse an upgrade",
+          "expected": "replayConflict"
+        }
+      ]
+    }
+  ]
+}

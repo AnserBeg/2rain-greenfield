@@ -1,3 +1,7 @@
+import {
+  CompiledPresentationSchema,
+  type CompiledPresentation,
+} from '../../../packages/canonical-model/src/schemas.js';
 import { CompiledPopupSchema } from '../../../packages/runtime/src/popup-actions.js';
 import type { CompiledPopup } from '../../../packages/canonical-model/src/popup-actions.js';
 import {
@@ -321,6 +325,8 @@ export function formFieldIds(
 
 export interface CompiledSurfaceDefinition {
   readonly map?: SurfaceMap;
+  /** UI-CUSTOM-1: declared tones and sizing, at surface reader 47. */
+  readonly presentation?: CompiledPresentation;
   readonly report?: ReportRevision;
   readonly popupActions?: readonly CompiledPopup[];
   readonly board?: SurfaceBoard;
@@ -1177,6 +1183,11 @@ function parseSurface(
     ...(value.list === undefined
       ? {}
       : { list: SurfaceListSchema.parse(value.list) }),
+    ...(value.presentation === undefined
+      ? {}
+      : {
+          presentation: CompiledPresentationSchema.parse(value.presentation),
+        }),
     ...(value.popupActions === undefined
       ? {}
       : {

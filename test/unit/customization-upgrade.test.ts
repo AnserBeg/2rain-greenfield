@@ -317,7 +317,34 @@ const missingReportOperand = structuredClone(extended);
 missingReportOperand.fields = (missingReportOperand.fields as Base[]).filter(
   (field) => field.fieldId !== reportOperand,
 );
+const equipmentList = id('surface.custom_equipment_list');
+const equipmentPresentation = customization.presentationMember(
+  customization
+    .customizationTargets(normalizeApplicationPackage(extended))
+    .presentation!.filter((t) => t.surfaceId === equipmentList),
+  {
+    kind: 'addPresentationRevision',
+    surface: equipmentList,
+    tones: [
+      {
+        target: 'row',
+        fieldId: reportOperand,
+        operator: 'equal',
+        compareTo: { value: 'Held' },
+        tone: 'blocked',
+        reason: 'On hold',
+      },
+    ],
+  },
+);
 const cases = {
+  addPresentationRevision: {
+    source: extended,
+    conflict: missingReportOperand,
+    change: equipmentPresentation,
+    subject: reportOperand,
+    code: 'RETIRED_TARGET',
+  },
   addReportRevision: {
     source: extended,
     conflict: missingReportOperand,
@@ -1318,5 +1345,87 @@ test('a refused report redacts protected evidence on either side, its issue and 
   );
   assert.ok(
     historical.report.findings.every((f) => f.subject === 'Restricted field'),
+  );
+});
+
+test('a retired presentation revision is replayed by identity only, so the old rules it carries never refuse an upgrade', () => {
+  // "Remove the colours": the retire carries v1's rules, which read the status.
+  const retire = customization.presentationMember(
+    customization
+      .customizationTargets(
+        normalizeApplicationPackage(applied(extended, [equipmentPresentation])),
+      )
+      .presentation!.filter((t) => t.surfaceId === equipmentList),
+    { kind: 'addPresentationRevision', surface: equipmentList, retire: true },
+  );
+  assert.equal(retire.status, 'retired');
+  assert.ok(JSON.stringify(retire).includes(reportOperand));
+  // A clean base: the same record type without the status field.
+  const withoutStatus = applied(base, [
+    { ...record, fields: record.fields.slice(0, 1) },
+  ]);
+  const chain = [equipmentPresentation, retire];
+  const replayed = replayCustomizationPatches(
+    withoutStatus,
+    chain.map(patch),
+    chain.map((_, index) => ({
+      patchId: String(index + 1),
+      differentBase: true,
+      ...(index === 0 && { parent: extended }),
+    })),
+  );
+  assert.equal(replayed.status, 'applied', JSON.stringify(replayed));
+});
+
+test('a superseded presentation revision is replayed by identity only, so a value only it read never refuses an upgrade', () => {
+  const nameField = id('field.custom_equipment_name');
+  // v2 replaces every rule of v1 and no longer reads the status.
+  const v2 = customization.presentationMember(
+    customization
+      .customizationTargets(
+        normalizeApplicationPackage(applied(extended, [equipmentPresentation])),
+      )
+      .presentation!.filter((t) => t.surfaceId === equipmentList),
+    {
+      kind: 'addPresentationRevision',
+      surface: equipmentList,
+      replaceCurrent: true,
+      tones: [
+        {
+          target: 'row',
+          fieldId: nameField,
+          operator: 'equal',
+          compareTo: { value: 'Spare' },
+          tone: 'attention',
+          reason: 'Spare',
+        },
+      ],
+    },
+  );
+  assert.ok(!JSON.stringify(v2).includes(reportOperand));
+  // A clean base: the same record type without the status field.
+  const withoutStatus = applied(base, [
+    { ...record, fields: record.fields.slice(0, 1) },
+  ]);
+  const replay = (chain: unknown[]) =>
+    replayCustomizationPatches(
+      withoutStatus,
+      chain.map(patch),
+      chain.map((_, index) => ({
+        patchId: String(index + 1),
+        differentBase: true,
+        ...(index === 0 && { parent: extended }),
+      })),
+    );
+  const replayed = replay([equipmentPresentation, v2]);
+  assert.equal(replayed.status, 'applied', JSON.stringify(replayed));
+  // Control: the latest revision is still checked in full and names the ID.
+  const latest = replay([equipmentPresentation]);
+  assert.ok(
+    latest.status === 'replayConflict' &&
+      latest.findings.some(
+        (f) => f.code === 'RETIRED_TARGET' && f.subject === reportOperand,
+      ),
+    JSON.stringify(latest),
   );
 });

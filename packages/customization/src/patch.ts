@@ -2,6 +2,7 @@ import { BillingPlanSchema } from '../../canonical-model/src/billing.js';
 import { MapViewRevisionSchema } from './map-revision.js';
 import { AddReportRevisionSchema } from './report-revision.js';
 import { PopupRevisionSchema } from '../../canonical-model/src/popup-actions.js';
+import { PresentationRevisionPatchSchema } from './presentation-revision.js';
 import { BoardViewRevisionSchema } from './board-revision.js';
 import { LayoutRevisionSchema } from './layout-revision.js';
 import {
@@ -298,6 +299,7 @@ export const CUSTOMIZATION_CHANGE_MEMBER_KINDS = Object.freeze(
 );
 
 const singlePatchKinds = [
+  PresentationRevisionPatchSchema,
   PopupRevisionSchema.extend({ kind: z.literal('addPopupActionRevision') }),
   LayoutRevisionSchema,
   ...ChangeMemberSchema.options,
@@ -404,6 +406,7 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'addLayoutRevision',
   'addMapViewRevision',
   'addPopupActionRevision',
+  'addPresentationRevision',
   'addBoardViewRevision',
   'addReportRevision',
   'saveListView',

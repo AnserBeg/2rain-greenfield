@@ -48,6 +48,11 @@ import {
 
 import { escapeHtml, shortIdentity } from './html.js';
 import {
+  presentRow,
+  type AppliedTone,
+} from '../../../packages/canonical-model/src/surface-presentation.js';
+import type { CompiledPresentation } from '../../../packages/canonical-model/src/schemas.js';
+import {
   renderReceivingSection,
   renderReceivingNavigation,
   type ReceivingNavigation,
@@ -73,7 +78,7 @@ import {
   orderedFilters,
   orderedViews,
   overdueDays,
-  shortMarked,
+  listTones,
   startOfTodayUtc,
   type DeclaredListColumn,
   type DeclaredListRowAction,
@@ -766,6 +771,9 @@ function renderDataGrid(context: SurfaceComponentContext): string {
             ? (binding.query.exportMaximumResultCount ?? null)
             : null,
         list: context.surface.list,
+        ...(context.surface.presentation
+          ? { presentation: context.surface.presentation }
+          : {}),
         now: data.declaredList.now,
         // A band figure reads as the label its List declares for the value.
         present: (record, fieldId, value) =>
@@ -3010,8 +3018,10 @@ function declaredStatusRole(
   return column.statusRoles?.find((entry) => entry.value === raw)?.role ?? null;
 }
 
-interface DeclaredListRenderInput {
+export interface DeclaredListRenderInput {
   readonly base: URLSearchParams;
+  /** UI-CUSTOM-1: the surface's declared tones and sizing. */
+  readonly presentation?: CompiledPresentation;
   readonly coverage: SharedListCoverage;
   readonly detailHref: (record: SemanticRecordDto) => string | null;
   readonly exportLimit: number | null;
@@ -3120,7 +3130,21 @@ function renderDeclaredListViews(
     .join('')}</ul></nav>`;
 }
 
-function renderDeclaredList(input: DeclaredListRenderInput): string {
+/**
+ * One applied tone: colour + dot + word on a tinted ground (UX grammar). A
+ * declared rule shows its word; a rule a release derives may show a glyph,
+ * the word then its accessible name. Neutral is the outlined, role-less pill.
+ */
+function tonePill(applied: AppliedTone): string {
+  const role =
+    applied.tone === 'neutral' ? '' : ` data-status-role="${applied.tone}"`;
+  return applied.mark
+    ? ` <span class="status-pill"${role} ${applied.mark.attribute}="true"><span aria-hidden="true">${escapeHtml(applied.mark.glyph)}</span><span class="sr-only">${escapeHtml(applied.reason)}</span></span>`
+    : ` <span class="status-pill"${role} data-tone-rule="${escapeHtml(applied.ruleId)}">${escapeHtml(applied.reason)}</span>`;
+}
+
+/** Exported for the presentation render witness (UI-CUSTOM-1). */
+export function renderDeclaredList(input: DeclaredListRenderInput): string {
   const { list, state, coverage, base } = input;
   const columns = orderedColumns(list, state.viewId);
   const fixed = new Map(
@@ -3216,11 +3240,46 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
     column.format === 'money' || numeric.has(column.field)
       ? ' data-cell-kind="number"'
       : '';
+  // UI-CUSTOM-1: declared tones (the release's own first), column sizing
+  // and density. Nothing renders, and no byte changes, when none is declared.
+  const tones = listTones(list, input.presentation);
+  const active =
+    input.presentation?.revision.status === 'active'
+      ? input.presentation.revision
+      : null;
+  const declaredRuleIds = new Set(
+    active?.toneRules.map((rule) => rule.ruleId) ?? [],
+  );
+  const sizing = new Map(
+    (active?.sizing ?? []).flatMap((entry) =>
+      entry.kind === 'listColumn' ? [[entry.fieldId, entry] as const] : [],
+    ),
+  );
+  const sized = (column: (typeof columns)[number]) => {
+    const entry = sizing.get(column.field);
+    return entry
+      ? ` data-column-width="${entry.width}" data-column-wrap="${entry.overflow === 'wrap' ? 'wrap' : 'clip'}"`
+      : '';
+  };
+  // A clipped column clips its text, never the cell: a tone pill sits
+  // outside the clip and always shows (UX grammar: never colour alone).
+  // (A sized column that does not wrap clips; `sized` names it "clip".)
+  const clipped = (column: (typeof columns)[number], html: string) => {
+    const entry = sizing.get(column.field);
+    return entry && entry.overflow !== 'wrap'
+      ? `<span class="cell-clip">${html}</span>`
+      : html;
+  };
+  const density = active
+    ? (active.viewDensity.find((view) => view.viewId === state.viewId)
+        ?.density ?? active.density)
+    : null;
+  const unavailable = new Set<string>();
   const header = columns
     .map((column) => {
       const direction = sortState.get(column.columnId);
       if (!column.sortable)
-        return `<th scope="col"${kind(column)}>${escapeHtml(column.label)}</th>`;
+        return `<th scope="col"${kind(column)}${sized(column)}>${escapeHtml(column.label)}</th>`;
       const nextDirection =
         direction === 'ascending' ? 'descending' : 'ascending';
       const href = `/?${declaredListParameters(state, base, {
@@ -3234,7 +3293,7 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
           : direction === 'descending'
             ? '↓'
             : '↕';
-      return `<th scope="col"${kind(column)} aria-sort="${direction ?? 'none'}"><a class="list-sort" href="${escapeHtml(href)}" data-sort-column="${escapeHtml(column.columnId)}">${escapeHtml(column.label)} <span aria-hidden="true">${mark}</span><span class="sr-only">${direction ? `, sorted ${direction}; activate to sort ${nextDirection}` : ', activate to sort ascending'}</span></a></th>`;
+      return `<th scope="col"${kind(column)}${sized(column)} aria-sort="${direction ?? 'none'}"><a class="list-sort" href="${escapeHtml(href)}" data-sort-column="${escapeHtml(column.columnId)}">${escapeHtml(column.label)} <span aria-hidden="true">${mark}</span><span class="sr-only">${direction ? `, sorted ${direction}; activate to sort ${nextDirection}` : ', activate to sort ascending'}</span></a></th>`;
     })
     .join('');
   const rowActions = (list.rowActions ?? []).length > 0;
@@ -3252,9 +3311,14 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
   };
   const body = input.records
     .map((record) => {
+      const judged = tones.length ? presentRow(tones, record.values) : null;
+      for (const ruleId of judged?.unavailable ?? [])
+        if (declaredRuleIds.has(ruleId)) unavailable.add(ruleId);
       const cells = columns
         .map((column) => {
           const text = declaredCellText(column, record, input.present);
+          const cellTone = judged?.cells.get(column.field);
+          const pill = cellTone ? tonePill(cellTone) : '';
           // The label leads and the column id ends the cell's attributes, as
           // readers of the List's markup expect; the kind sits between.
           // A zero figure reads faint, so the figures that matter stand out
@@ -3263,31 +3327,30 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
             text !== null &&
             kind(column) !== '' &&
             /^-?0(?:\.0+)?$/u.test(text);
-          const label = `data-column-label="${escapeHtml(column.label)}"${kind(column)}${zero ? ' data-zero' : ''} data-column-priority="${String(column.priority)}" data-column-id="${escapeHtml(column.columnId)}"`;
+          const label = `data-column-label="${escapeHtml(column.label)}"${kind(column)}${zero ? ' data-zero' : ''}${sized(column)} data-column-priority="${String(column.priority)}" data-column-id="${escapeHtml(column.columnId)}"`;
           if (column.role === 'title') {
             const title = text ?? record.recordId.slice(0, 8);
             const href = input.detailHref(record);
-            return `<td ${label}>${href ? `<a class="record-link" href="${escapeHtml(href)}" aria-label="Open ${escapeHtml(input.recordLabel)} ${escapeHtml(title)}">${escapeHtml(title)}</a>` : escapeHtml(title)}${record.archived ? ' <span class="status-pill" data-status-role="attention">Archived</span>' : ''}</td>`;
+            return `<td ${label}>${clipped(column, href ? `<a class="record-link" href="${escapeHtml(href)}" aria-label="Open ${escapeHtml(input.recordLabel)} ${escapeHtml(title)}">${escapeHtml(title)}</a>` : escapeHtml(title))}${record.archived ? ' <span class="status-pill" data-status-role="attention">Archived</span>' : ''}${judged?.row ? tonePill(judged.row) : ''}${pill}</td>`;
           }
           if (column.role === 'status') {
             const role = declaredStatusRole(column, record);
-            return `<td ${label}>${text === null ? '<span class="muted">—</span>' : `<span class="status-pill"${role ? ` data-status-role="${escapeHtml(role)}"` : ''}>${escapeHtml(text)}</span>`}</td>`;
+            return `<td ${label}>${text === null ? '<span class="muted">—</span>' : `<span class="status-pill"${role ? ` data-status-role="${escapeHtml(role)}"` : ''}>${escapeHtml(text)}</span>`}${pill}</td>`;
           }
           if (column.relation && text !== null) {
             const recordId = record.relationLabels?.[column.field]?.recordId;
             if (recordId) {
               const href = `/?${declaredListParameters(state, base, { page: 1, referenceScope: { relationId: column.field, recordId } })}`;
-              return `<td ${label}><a href="${escapeHtml(href)}" aria-label="${escapeHtml(`Filter by ${column.label} ${text}`)}">${escapeHtml(text)}</a></td>`;
+              return `<td ${label}>${clipped(column, `<a href="${escapeHtml(href)}" aria-label="${escapeHtml(`Filter by ${column.label} ${text}`)}">${escapeHtml(text)}</a>`)}${pill}</td>`;
             }
           }
           // A declared overdue date reads "N days late" when the row meets its
           // view's conditions -- the same ones its tab was counted by.
           const late = overdueDays(list, column, record, input.now);
-          // What the row is short of now is marked, as the reference marks
-          // an exception "!" (SUPPLY-WARNINGS).
-          const short = shortMarked(list, column, record);
+          // A holding tone rule follows -- among them what the row is short
+          // of now, which the List's supply declares (SUPPLY-WARNINGS).
 
-          return `<td ${label}>${text === null ? '<span class="muted">—</span>' : escapeHtml(text)}${late === null ? '' : ` <span class="status-pill" data-status-role="attention" data-overdue-days="${String(late)}">${escapeHtml(`${String(late)} ${late === 1 ? 'day' : 'days'} late`)}</span>`}${short ? ' <span class="status-pill" data-status-role="blocked" data-short-mark="true"><span aria-hidden="true">!</span><span class="sr-only">Short of stock</span></span>' : ''}</td>`;
+          return `<td ${label}>${text === null ? '<span class="muted">—</span>' : clipped(column, escapeHtml(text))}${late === null ? '' : ` <span class="status-pill" data-status-role="attention" data-overdue-days="${String(late)}">${escapeHtml(`${String(late)} ${late === 1 ? 'day' : 'days'} late`)}</span>`}${pill}</td>`;
         })
         .join('');
       const title =
@@ -3296,7 +3359,10 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
           record,
           input.present,
         ) ?? record.recordId.slice(0, 8);
-      return `<tr data-compact-card="true" data-record-id="${escapeHtml(record.recordId)}">${input.selectionCell ? input.selectionCell(record, title) : ''}${cells}${actionCell(record, title)}</tr>`;
+      const rowTone = judged?.row
+        ? ` data-row-tone="${judged.row.tone}" data-tone-rule="${escapeHtml(judged.row.ruleId)}"`
+        : '';
+      return `<tr data-compact-card="true"${rowTone} data-record-id="${escapeHtml(record.recordId)}">${input.selectionCell ? input.selectionCell(record, title) : ''}${cells}${actionCell(record, title)}</tr>`;
     })
     .join('');
   const empty =
@@ -3341,7 +3407,16 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
     input.progressWithheld,
     input.supplyWithheld,
   );
-  return `<section class="panel data-panel" data-data-state="exact" data-list-result="${escapeHtml(coverage.schemaVersion)}" data-declared-list="true"${anchor}><div class="panel__heading"><div><h2>${escapeHtml(input.recordLabel)}</h2></div><div class="list-summary"><span class="list-count" data-list-total="${String(coverage.totalCount)}">${escapeHtml(count)}</span>${range ? `<span class="muted">${escapeHtml(range)}</span>` : ''}${exportControl}</div></div>${withheld}${controls}${empty}${input.records.length > 0 ? `<div class="data-table-wrap" data-list-rendering="responsive-single"${list.compact ? ` data-compact="${escapeHtml(list.compact)}"` : ''}><table><thead><tr>${input.selectionCell ? '<th scope="col">Select</th>' : ''}${header}${rowActions ? '<th scope="col">Actions</th>' : ''}</tr></thead><tbody>${body}</tbody></table></div>` : ''}${paging}</section>`;
+  // A rule that could not be judged on some row says so quietly, once.
+  const toneNote = unavailable.size
+    ? `<p class="muted list-tone-note" data-tone-unavailable="${escapeHtml([...unavailable].join(' '))}">Some colour rules could not be judged for every row: ${escapeHtml(
+        tones
+          .filter((rule) => unavailable.has(rule.ruleId))
+          .map((rule) => rule.reason)
+          .join(', '),
+      )}.</p>`
+    : '';
+  return `<section class="panel data-panel" data-data-state="exact" data-list-result="${escapeHtml(coverage.schemaVersion)}" data-declared-list="true"${anchor}><div class="panel__heading"><div><h2>${escapeHtml(input.recordLabel)}</h2></div><div class="list-summary"><span class="list-count" data-list-total="${String(coverage.totalCount)}">${escapeHtml(count)}</span>${range ? `<span class="muted">${escapeHtml(range)}</span>` : ''}${exportControl}</div></div>${withheld}${toneNote}${controls}${empty}${input.records.length > 0 ? `<div class="data-table-wrap" data-list-rendering="responsive-single"${list.compact ? ` data-compact="${escapeHtml(list.compact)}"` : ''}${density ? ` data-density="${density}"` : ''}><table><thead><tr>${input.selectionCell ? '<th scope="col">Select</th>' : ''}${header}${rowActions ? '<th scope="col">Actions</th>' : ''}</tr></thead><tbody>${body}</tbody></table></div>` : ''}${paging}</section>`;
 }
 
 export function renderDocumentSection(

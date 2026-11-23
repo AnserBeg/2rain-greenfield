@@ -204,3 +204,15 @@ export {
   type DocumentTemplatePointer,
   type DocumentTemplateRevision,
 } from './document-template-schema.js';
+export * from './surface-presentation-schema.js';
+export * from './surface-presentation.js';
+export {
+  SurfacePresentationRevisionSchema,
+  CompiledPresentationSchema,
+  type CompiledPresentation,
+} from './schemas.js';
+export type {
+  ValidationOperand,
+  ValidationPredicate,
+  ValidationScalar,
+} from './formula-validation.js';

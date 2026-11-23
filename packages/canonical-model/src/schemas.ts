@@ -1,4 +1,8 @@
 import { PopupRevisionSchema } from './popup-actions.js';
+import {
+  compiledPresentationSchema,
+  surfacePresentationRevisionSchema,
+} from './surface-presentation-schema.js';
 import { AddressBindingSchema, MapPlacementSchema } from './address.js';
 import { DateTimeFieldDeclarationSchema } from './date-time-field.js';
 import { BillingPlansSchema } from './billing.js';
@@ -2334,7 +2338,24 @@ export type ReportBody = z.infer<typeof ReportBodySchema>;
 export type ReportChoices = z.infer<typeof ReportChoicesSchema>;
 export type ReportRevision = z.infer<typeof ReportRevisionSchema>;
 
+/** UI-CUSTOM-1: a surface's declared tones and sizing, on the ADR-0076 kernel. */
+export const SurfacePresentationRevisionSchema =
+  surfacePresentationRevisionSchema(
+    formulaValidationRuleSchema({
+      canonicalId: CanonicalIdSchema,
+      currencyCode: CurrencyCodeSchema,
+      date: IsoDateValueSchema,
+      decimal: CanonicalSignedDecimalStringSchema,
+      integer: CanonicalIntegerStringSchema,
+    }).shape.predicate,
+  );
+export const CompiledPresentationSchema = compiledPresentationSchema(
+  SurfacePresentationRevisionSchema,
+);
+export type CompiledPresentation = z.infer<typeof CompiledPresentationSchema>;
+
 const normalizedV6SurfaceDefinition = normalizedSurfaceDefinition.extend({
+  presentation: SurfacePresentationRevisionSchema.optional(),
   report: ReportRevisionSchema.optional(),
   popupActions: z.array(PopupRevisionSchema).min(1).optional(),
   board: SurfaceBoardSchema.optional(),

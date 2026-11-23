@@ -56,6 +56,12 @@ export const CAPABILITY_BUCKETS = {
   trigger:
     /\btriggers?\b|\bevents?\b|\bsubscriptions?\b|\bautomat|\bworkflows?\b|\bon (?:create|status change)/iu,
   file: /\bfiles?\b|\battachments?\b|\buploads?\b|\bphotos?\b/iu,
+  // UI-CUSTOM-1: what a declared tone cannot do (no motion, icons or styles).
+  presentation:
+    /\bflash|\bblink|\banimat|\bicons?\b|\bcss\b|\bcustom colou?r|\bstyles?\b/iu,
+  // UI-CUSTOM-1 slice 1: a tone cannot compare with today yet.
+  today:
+    /\btoday\b|\bcurrent date\b|\bdate context|\boverdue|\brelative date/iu,
 } as const;
 export type CapabilityBucket = keyof typeof CAPABILITY_BUCKETS;
 
@@ -102,6 +108,23 @@ export type Expectation =
       /** For compareFields: the other field local, and the relation if any. */
       readonly otherField?: string;
       readonly relation?: string;
+    }
+  | {
+      /** UI-CUSTOM-1: a colour rule or sizing on a list. */
+      readonly outcome: 'presentation';
+      /** The list surface local starts with this. */
+      readonly list: string;
+      /** Each tone rule that must exist: target, accepted tones, compared field locals. */
+      readonly tones?: readonly {
+        readonly target: 'listCell' | 'listRow';
+        readonly tones: readonly string[];
+        readonly fields: readonly string[];
+      }[];
+      /** Column field locals that must be sized, with the accepted widths. */
+      readonly columns?: readonly {
+        readonly field: string;
+        readonly widths: readonly string[];
+      }[];
     }
   | {
       readonly outcome: 'board';
@@ -153,6 +176,29 @@ const choice = (
 ): FieldSpec => ({ names, type: 'choice', options });
 
 const RECORD = ['addRecordType'];
+
+export const stockItemBase = {
+  kind: 'addRecordType',
+  label: 'Stock item',
+  companyOwnership: 'entityOwned',
+  fields: [
+    { label: 'Part number', type: 'text' },
+    { label: 'On hand', type: 'number' },
+    { label: 'Reorder point', type: 'number' },
+    { label: 'Maximum stock', type: 'number' },
+  ],
+} as const;
+export const rentalBase = {
+  kind: 'addRecordType',
+  label: 'Rental',
+  companyOwnership: 'entityOwned',
+  fields: [
+    { label: 'Contract', type: 'text' },
+    { label: 'Units out', type: 'number' },
+    { label: 'Units returned', type: 'number' },
+    { label: 'Return date', type: 'date' },
+  ],
+} as const;
 const MODULE = [
   'changeSet',
   'addRecordType',
@@ -1089,6 +1135,84 @@ export const BUILD_CASES: readonly BuildCase[] = [
       ],
     },
   },
+  // UI-CUSTOM-1 slice 1 (rule 12): list cell, list row and list sizing, each
+  // with an unsupported request naming what is missing.
+  {
+    id: 'P01',
+    split: 'dev',
+    category: 'follow-up',
+    base: [stockItemBase],
+    request:
+      'Make stock items with on-hand below the reorder point red, and items above the maximum stock green.',
+    expect: {
+      outcome: 'presentation',
+      list: 'custom_stock_item',
+      tones: [
+        {
+          target: 'listCell',
+          tones: ['blocked'],
+          fields: [
+            'custom_stock_item_on_hand',
+            'custom_stock_item_reorder_point',
+          ],
+        },
+        {
+          target: 'listCell',
+          tones: ['success'],
+          fields: [
+            'custom_stock_item_on_hand',
+            'custom_stock_item_maximum_stock',
+          ],
+        },
+      ],
+    },
+  },
+  {
+    id: 'P02',
+    split: 'test',
+    category: 'follow-up',
+    base: [rentalBase],
+    request: 'Highlight rental rows where fewer units came back than went out.',
+    expect: {
+      outcome: 'presentation',
+      list: 'custom_rental',
+      tones: [
+        {
+          target: 'listRow',
+          tones: ['attention', 'blocked'],
+          fields: ['custom_rental_units_returned', 'custom_rental_units_out'],
+        },
+      ],
+    },
+  },
+  {
+    id: 'P03',
+    split: 'test',
+    category: 'follow-up',
+    base: [stockItemBase],
+    request: 'Make the part number column narrow on the stock items list.',
+    expect: {
+      outcome: 'presentation',
+      list: 'custom_stock_item',
+      columns: [{ field: 'custom_stock_item_part_number', widths: ['narrow'] }],
+    },
+  },
+  {
+    id: 'P04',
+    split: 'test',
+    category: 'unsupported',
+    base: [stockItemBase],
+    request: 'Make low-stock rows flash on the stock items list.',
+    expect: { outcome: 'unsupported', capabilities: ['presentation'] },
+  },
+  {
+    id: 'P05',
+    split: 'test',
+    category: 'unsupported',
+    base: [rentalBase],
+    request: 'Highlight rentals that are overdue: return date before today.',
+    expect: { outcome: 'unsupported', capabilities: ['today'] },
+  },
 ];
 
 /**
@@ -1192,6 +1316,7 @@ export function scoredKinds(c: BuildCase): readonly string[] {
   if (e.outcome === 'validation') return ['addValidation'];
   // B01-B03 score one activated rate-plan structure (build-eval: kinds[0]).
   if (e.outcome === 'ratePlan') return ['addRatePlanVersion'];
+  if (e.outcome === 'presentation') return ['addPresentationRevision'];
   if (e.outcome !== 'module') return [];
   const kinds = new Set<string>(e.requiredKinds ?? []);
   for (const type of e.types) {

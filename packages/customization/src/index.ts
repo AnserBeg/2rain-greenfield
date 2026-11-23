@@ -21,3 +21,4 @@ export {
 export * from './ai-draft-kinds.js';
 export * from './authoring-rules.js';
 export * from './field-member-draft.js';
+export * from './presentation-revision.js';

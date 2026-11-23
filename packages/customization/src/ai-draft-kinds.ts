@@ -10,6 +10,7 @@ import {
 } from './patch.js';
 import { MAP_VIEW_DRAFTER_GUIDANCE, MapDraftSchema } from './map-revision.js';
 import { PopupCommandSchema } from './popup-revision.js';
+import { PresentationDraftSchema } from './presentation-revision.js';
 import { ReportDraftSchema } from './report-revision.js';
 import { VALIDATION_COMPARISONS } from './validation-draft.js';
 import { WorkflowDraftSchema } from './workflow-draft.js';
@@ -205,6 +206,11 @@ export const DRAFTER_KINDS = {
     input: DRAFTER_SELECTION_SCHEMAS.addReportRevision,
     guidance:
       'Group a listed report source by its offered field IDs and count records or sum an offered measure. Enable CSV only when requested. Use a listed active report ID when editing or retiring it.',
+  },
+  addPresentationRevision: {
+    input: PresentationDraftSchema,
+    guidance:
+      'Colour cells or whole rows of a listed list by a condition, size its columns, or set its density. Compare a listed value (fieldId) with another listed value of the same type (compareTo.fieldId) or a value (compareTo.value; for a choice or status, an option label; for yes/no, yes or no). Rules are judged in order and the earliest rule that holds wins on each cell or row, so list a narrower band before a wider one; an edited rule keeps its place and a new rule goes last. Tones: blocked for danger or red, attention for warning or amber, success for good or green, inProgress for active, neutral for none. reason is the short word shown, such as "Low stock". A row target colours the whole row; a cell target colours cellFieldId (default fieldId). The listed current rules and sizes are kept unless named in remove or replaceCurrent is set. Colour, flashing, icons, CSS and linked records are unsupported.',
   },
   addPopupActionRevision: {
     input: z.strictObject({
