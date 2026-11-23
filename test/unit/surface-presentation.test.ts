@@ -468,6 +468,25 @@ const sandboxSteps = async (chain: unknown[]) => {
 };
 const lastLines = async (chain: unknown[]) =>
   (await sandboxSteps(chain)).at(-1)!.rendered.lines.join('\n');
+// The approval diff of one changed list, rendered as the Customize service
+// renders it, without compiling a release for each step.
+const diffLines = (from: Json, to: Json) =>
+  customization
+    .renderReleaseDiff({
+      diff: {
+        changes: [
+          {
+            constructKind: 'surfaceDefinition',
+            changeKind: 'changed',
+            subjectId: stockList,
+          },
+        ],
+      } as never,
+      from: normalizeApplicationPackage(from) as never,
+      storage: [],
+      to: normalizeApplicationPackage(to) as never,
+    })
+    .lines.join('\n');
 const escaped = (text: string) =>
   text.replaceAll(/[.*+?^${}()|[\]\\]/gu, '\\$&');
 
@@ -606,7 +625,7 @@ test('a retired presentation is followed by a new one, and a stale or repeated r
   );
 });
 
-test('after a toned or sized column is hidden, the next revision drops the entries that no longer bind and the diff names them', async () => {
+test('after a toned or sized column is hidden, the next revision drops the entries that no longer bind and the diff names them', () => {
   const v1 = member(base, {
     kind: 'addPresentationRevision',
     surface: stockList,
@@ -654,7 +673,7 @@ test('after a toned or sized column is hidden, the next revision drops the entri
   const afterSized = member(sized, density);
   assert.deepEqual(afterSized.sizing, []);
   applied(sized, [afterSized]);
-  const lines = await lastLines([stockItem, v1, hideSized, afterSized]);
+  const lines = diffLines(sized, applied(sized, [afterSized]));
   assert.match(
     lines,
     new RegExp(
@@ -663,7 +682,7 @@ test('after a toned or sized column is hidden, the next revision drops the entri
     ),
   );
   assert.match(lines, /use compact density/u);
-  const tonedLines = await lastLines([stockItem, v1, hideToned, afterToned]);
+  const tonedLines = diffLines(toned, applied(toned, [afterToned]));
   assert.match(tonedLines, /remove the colour rule "Low stock"/u);
 });
 
