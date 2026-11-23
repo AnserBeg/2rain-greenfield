@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import {
+  STORED_CURRENCY_CODES,
   LOGICAL_FIELD_TYPES,
   LogicalFieldDeclarationSchema,
   UnitLabelSchema,
@@ -29,6 +30,8 @@ export const LogicalFieldBindingSchema = z.strictObject({
   unit: z
     .strictObject({ unitId: CanonicalIdSchema, label: UnitLabelSchema })
     .optional(),
+  /** A currency field's codes: those its money fields read, else all stored codes. */
+  codes: z.array(z.enum(STORED_CURRENCY_CODES)).min(1).optional(),
 });
 export type LogicalFieldBinding = z.infer<typeof LogicalFieldBindingSchema>;
 
@@ -148,7 +151,21 @@ export function deriveLogicalFieldBindings(
           return refuse(
             'a currency code stores three characters compared exactly.',
           );
-        bindings.push(base);
+        {
+          const read = new Set<string>(
+            (entity.reportSource?.amounts ?? []).flatMap((a) =>
+              a.currency.kind === 'stored' && a.currency.fieldId === fieldId
+                ? a.currency.codes
+                : [],
+            ),
+          );
+          bindings.push({
+            ...base,
+            codes: STORED_CURRENCY_CODES.filter(
+              (code) => read.size === 0 || read.has(code),
+            ),
+          });
+        }
         break;
     }
   }

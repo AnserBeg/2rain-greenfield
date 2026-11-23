@@ -8,6 +8,7 @@ import { LayoutRevisionSchema } from './layout-revision.js';
 import {
   COMPANY_ACCESS_INDEX,
   CURRENCY_MINOR_UNITS_V0,
+  STORED_CURRENCY_CODES,
   LOGICAL_DECIMAL_MAXIMUM_SCALE,
   UnitLabelSchema,
   DATE_TIME_PATCH_VERSION,
@@ -67,7 +68,7 @@ export const CUSTOM_FIELD_TYPES = [
 ] as const;
 export type CustomFieldType = (typeof CUSTOM_FIELD_TYPES)[number];
 /** The currencies a stored money field accepts (the REPORTS-1 binding). */
-export const STORED_MONEY_CURRENCIES = ['CAD', 'USD', 'EUR'] as const;
+export const STORED_MONEY_CURRENCIES = STORED_CURRENCY_CODES;
 /** A fixed currency has a registered minor unit, which is the field's scale. */
 export const FIXED_MONEY_CURRENCIES = Object.keys(CURRENCY_MINOR_UNITS_V0) as [
   keyof typeof CURRENCY_MINOR_UNITS_V0,

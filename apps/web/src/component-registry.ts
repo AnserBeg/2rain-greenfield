@@ -1,3 +1,4 @@
+import { LONG_TEXT_MAXIMUM_LENGTH } from '../../../packages/canonical-model/src/logical-field.js';
 import type { RegisteredReport } from '../../../packages/canonical-model/src/declared-report.js';
 import type { GroupedRow } from '@north-star/canonical-model';
 import {
@@ -2683,7 +2684,9 @@ export function renderFormControl(
     // CUSTOMIZE-6: paragraphs in a text area, a currency code from the codes
     // its money fields accept, and a scaled number with its currency or unit.
     if (logical?.logicalType === 'longText')
-      return `<textarea${kind} name="${name}" rows="4" data-logical-field="longText">${current}</textarea>`;
+      // The newline after the start tag keeps a leading blank line: HTML
+      // drops the first newline of a text area's content.
+      return `<textarea${kind} name="${name}" rows="4" maxlength="${String(LONG_TEXT_MAXIMUM_LENGTH)}" data-logical-field="longText">\n${current}</textarea>`;
     if (logical?.logicalType === 'currencyCode')
       return renderEnumControl(
         (logical.currencyCodes ?? []).map((code) => ({

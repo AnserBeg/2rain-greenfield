@@ -1,3 +1,4 @@
+import { VALIDATION_NODE_VERSION } from '../../canonical-model/src/formula-validation.js';
 import { applyMapRevision } from './map-revision.js';
 import {
   compilePresentation,
@@ -1347,6 +1348,13 @@ function addRecordType(
     kind: 'assertionDefinition',
     schemaVersion: version,
   });
+  declareCurrencyRules(
+    authored,
+    entityId,
+    fields.flatMap((field, index) =>
+      field.type === 'currency' ? [fieldIds[index]!] : [],
+    ),
+  );
   return null;
 }
 
@@ -2309,6 +2317,8 @@ function addField(
     });
   }
   placeAddedLayoutField(authored as unknown as LayoutDefinition, fieldId);
+  if (!bindExisting && field.type === 'currency')
+    declareCurrencyRules(authored, entityId, [fieldId]);
   return null;
 }
 
@@ -3019,6 +3029,68 @@ function storedCurrencyField(
     (fieldId) => String(labelOf(fieldId)).trim().toLowerCase() === wanted,
   );
   return matches.length === 1 ? matches[0] : undefined;
+}
+
+/**
+ * A currency field holds only the codes a stored money field can sum: each
+ * gets one literal validation (any of the codes, compared exactly), bound to
+ * its record type's create and update operations, so "GBP" or "cad" is
+ * refused on every write path rather than reported as "No currency".
+ */
+function declareCurrencyRules(
+  authored: Json,
+  entityId: string,
+  fieldIds: readonly string[],
+): void {
+  if (!fieldIds.length) return;
+  const operationIds = list(authored, 'operations').flatMap((operation) => {
+    const effect = operation.effect as Json | undefined;
+    return (effect?.kind === 'createRecordEffect' ||
+      effect?.kind === 'updateRecordEffect') &&
+      (effect.entity as Json | undefined)?.targetId === entityId
+      ? [String(operation.operationId)]
+      : [];
+  });
+  const node = VALIDATION_NODE_VERSION;
+  const rules =
+    authored.formulaRules === undefined ? [] : list(authored, 'formulaRules');
+  for (const fieldId of fieldIds) {
+    const [namespace = '', local = ''] = fieldId.split(':field.');
+    rules.push({
+      kind: 'validationRule',
+      schemaVersion: node,
+      ruleId: `${namespace}:rule.${local}_code`,
+      targetId: entityId,
+      boundOperationIds: [...operationIds].sort(),
+      trigger: { kind: 'afterDefaultsOrChangedFields', schemaVersion: node },
+      absence: { kind: 'validationThreeValued', schemaVersion: node },
+      effect: 'refuse',
+      existingRecords: 'grandfather',
+      message: `Choose ${STORED_MONEY_CURRENCIES.slice(0, -1).join(', ')} or ${STORED_MONEY_CURRENCIES.at(-1)!}.`,
+      fieldAnchors: [fieldId],
+      predicate: {
+        schemaVersion: node,
+        kind: 'any',
+        terms: STORED_MONEY_CURRENCIES.map((code) => ({
+          schemaVersion: node,
+          kind: 'comparison',
+          operator: 'equal',
+          left: {
+            schemaVersion: node,
+            kind: 'field',
+            fieldId,
+            select: 'value',
+          },
+          right: {
+            schemaVersion: node,
+            kind: 'literal',
+            scalar: { kind: 'text', value: code },
+          },
+        })),
+      },
+    });
+  }
+  authored.formulaRules = rules;
 }
 
 function pendingCurrency(

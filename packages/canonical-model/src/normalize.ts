@@ -1382,6 +1382,17 @@ function validateReportSources(
         ),
       );
     for (const { fieldId, currency } of source.amounts ?? []) {
+      // CUSTOMIZE-6 (rule 10): a retired amount field stays bound but is
+      // not validated; reports offer only live fields.
+      const retired = fields.get(fieldId);
+      if (
+        retired?.entity.targetId === entity.entityId &&
+        retired.lifecycle === 'retired' &&
+        !seen.has(fieldId)
+      ) {
+        seen.add(fieldId);
+        continue;
+      }
       const amount = local(fieldId)?.fieldType;
       if (seen.has(fieldId) || amount?.kind !== 'exactDecimalFieldType') {
         invalid(

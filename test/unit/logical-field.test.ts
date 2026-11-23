@@ -103,10 +103,6 @@ async function compile(
     tip: customization.serializeRelease(tip),
   });
 }
-function refusalOf(result: customization.SandboxResponse): string {
-  assert.notEqual(result.status, 'compiled');
-  return JSON.stringify(result);
-}
 function surfaceOf(result: customization.SandboxResponse) {
   assert.ok(result.status === 'compiled', JSON.stringify(result).slice(0, 800));
   const bundle = customization.parseSerializedRelease(
@@ -139,7 +135,12 @@ function surfaceOf(result: customization.SandboxResponse) {
 }
 
 const expectedBindings = [
-  { fieldId: f('currency'), entityId: shipment, logicalType: 'currencyCode' },
+  {
+    fieldId: f('currency'),
+    entityId: shipment,
+    logicalType: 'currencyCode',
+    codes: ['CAD', 'USD', 'EUR'],
+  },
   {
     fieldId: f('deposit'),
     entityId: shipment,
@@ -351,11 +352,18 @@ test('built-in record types, line tables and a missing currency field are named 
     );
 });
 
-test('the compiler refuses a forged declaration by field', async () => {
-  const declarations = (def: Forged) => def.logicalFields as Forged[];
-  // deriveLogicalFieldBindings: money without its report-source currency.
+const declarations = (def: Forged) => def.logicalFields as Forged[];
+function refusedWith(
+  result: customization.SandboxResponse,
+  message: string,
+): string {
+  assert.notEqual(result.status, 'compiled', message);
+  return JSON.stringify(result);
+}
+
+test('the compiler refuses money whose currency the record type does not bind', async () => {
   assert.match(
-    refusalOf(
+    refusedWith(
       await compile([shipmentType], (def) => {
         const entity = (def.entities as Forged[]).find(
           (e) => e.entityId === shipment,
@@ -364,33 +372,42 @@ test('the compiler refuses a forged declaration by field', async () => {
           (a: Forged) => a.fieldId !== f('deposit'),
         );
       }),
+      'money without a bound currency compiled',
     ),
     /logical field northstar\.app:field\.custom_shipment_deposit: money stores an exact decimal bound to a currency/u,
   );
-  // deriveLogicalFieldBindings: a currency code that compares case-insensitively.
+});
+
+test('the compiler refuses a currency code compared case-insensitively', async () => {
   assert.match(
-    refusalOf(
+    refusedWith(
       await compile([shipmentType], (def) => {
         (def.fields as Forged[]).find(
           (x) => x.fieldId === f('currency'),
         )!.collation = 'unicodeCaseInsensitive';
       }),
+      'a case-insensitive currency code compiled',
     ),
     /currency code stores three characters compared exactly/u,
   );
-  // deriveLogicalFieldBindings: a quantity whose base unit is not its declared unit.
+});
+
+test('the compiler refuses a quantity whose base unit is not its declared unit', async () => {
   assert.match(
-    refusalOf(
+    refusedWith(
       await compile([shipmentType], (def) => {
         declarations(def).find((d) => d.fieldId === f('weight'))!.unitLabel =
           'lb';
       }),
+      'a quantity with another unit compiled',
     ),
     /quantity stores its declared unit/u,
   );
-  // compileLogicalFields: a first-party record type.
+});
+
+test('the compiler refuses a logical field on a first-party record type', async () => {
   assert.match(
-    refusalOf(
+    refusedWith(
       await compile([shipmentType], (def) => {
         declarations(def).push({
           schemaVersion: 'v6',
@@ -399,12 +416,13 @@ test('the compiler refuses a forged declaration by field', async () => {
           logicalType: 'longText',
         });
       }),
+      'a first-party logical field compiled',
     ),
     /only a tenant record type can hold a longText field/u,
   );
 });
 
-test('with logical fields active and after one retires, adding a field and arranging the list still compile', async () => {
+test('with logical fields active and after they retire, adding a field and arranging the list still compile', async () => {
   const later = [
     {
       kind: 'addField',
@@ -418,29 +436,34 @@ test('with logical fields active and after one retires, adding a field and arran
     },
   ];
   surfaceOf(await compile([shipmentType, ...later]));
-  const retired = await compile([shipmentType, ...later], (def) => {
-    for (const local of ['deposit', 'weight'])
-      (def.fields as Forged[]).find((x) => x.fieldId === f(local))!.lifecycle =
-        'retired';
-    // REPORTS-1 binds only active amounts: a retired money field leaves the
-    // report source with it, while its logical declaration stays (rule 10).
-    const entity = (def.entities as Forged[]).find(
-      (e) => e.entityId === shipment,
-    )!;
-    entity.reportSource.amounts = entity.reportSource.amounts.filter(
-      (a: Forged) => a.fieldId !== f('deposit'),
-    );
+  // Retire money (still bound in the report source), the currency it reads
+  // and the quantity in the BASE, then add and arrange after the retirement.
+  const retiredBase = structuredClone(applied([shipmentType]));
+  for (const local of ['deposit', 'freight', 'weight'])
+    (retiredBase.fields as Forged[]).find(
+      (x) => x.fieldId === f(local),
+    )!.lifecycle = 'retired';
+  const retired = await customization.compileInSandbox({
+    acknowledgement,
+    base: retiredBase,
+    chain: later.map(patch),
+    tip: customization.serializeRelease(tip),
   });
   const { surface } = surfaceOf(retired);
   const ids = (surface.payload.logicalFieldBindings as Forged[]).map(
     (b) => b.fieldId,
   );
-  assert.equal(ids.includes(f('deposit')), false);
-  assert.equal(ids.includes(f('weight')), false);
+  for (const local of ['deposit', 'freight', 'weight'])
+    assert.equal(ids.includes(f(local)), false, local);
   assert.equal(surface.floor, LOGICAL_FIELD_READER);
+  // The retired amounts stay in the report source, unvalidated.
+  const entity = (
+    normalizeApplicationPackage(retiredBase).entities as Forged[]
+  ).find((e) => e.entityId === shipment)!;
+  assert.equal(entity.reportSource.amounts.length, 2);
 });
 
-test('serving admission recomputes the bindings and refuses a disagreement, a stray binding and an understated floor', () => {
+function servingFixture() {
   const normalized = normalizeApplicationPackage(applied([shipmentType]));
   const revision = new TextEncoder().encode(JSON.stringify(normalized));
   const derived = deriveLogicalFieldBindings(
@@ -448,31 +471,38 @@ test('serving admission recomputes the bindings and refuses a disagreement, a st
   );
   assert.ok(derived.status === 'bound');
   assert.equal(canonicalize(derived.bindings), canonicalize(expectedBindings));
-  const payload = { logicalFieldBindings: derived.bindings };
+  return { revision, payload: { logicalFieldBindings: derived.bindings } };
+}
+
+test('serving refuses surface bindings that disagree with the recomputed ones', () => {
+  const { revision, payload } = servingFixture();
   assert.equal(
     logicalFieldBindingsProblem(payload, LOGICAL_FIELD_READER, revision),
     null,
   );
-  // The comparator: a widened scale is refused.
   const widened = structuredClone(expectedBindings) as Forged[];
   widened.find((b) => b.fieldId === f('rate'))!.scale = 2;
-  assert.match(
+  assert.equal(
     logicalFieldBindingsProblem(
       { logicalFieldBindings: widened },
       LOGICAL_FIELD_READER,
       revision,
-    ) ?? '',
-    /disagree/u,
+    ),
+    'logical field bindings disagree with the field declarations.',
+    'a widened scale was served',
   );
   assert.match(
     logicalFieldBindingsProblem({}, LOGICAL_FIELD_READER, revision) ?? '',
     /disagree/u,
   );
-  // The floor check: a declaration served below its rung.
-  assert.match(
-    logicalFieldBindingsProblem(payload, LOGICAL_FIELD_READER - 1, revision) ??
-      '',
-    /need the logical field surface reader floor/u,
+});
+
+test('serving refuses a declaration below its reader rung and a rung without one', () => {
+  const { revision, payload } = servingFixture();
+  assert.equal(
+    logicalFieldBindingsProblem(payload, LOGICAL_FIELD_READER - 1, revision),
+    'logical field bindings need the logical field surface reader floor.',
+    'a declaration was served below its rung',
   );
   const plain = new TextEncoder().encode(
     JSON.stringify(normalizeApplicationPackage(base)),
@@ -488,7 +518,65 @@ test('serving admission recomputes the bindings and refuses a disagreement, a st
   );
 });
 
-test('formula validation and calculated displays read tenant money in its own currency', () => {
+test('a currency field offers the codes its money fields read, else every stored code', () => {
+  const normalized = normalizeApplicationPackage(
+    applied([shipmentType]),
+  ) as unknown as Forged;
+  const derive = (def: Forged) => {
+    const outcome = deriveLogicalFieldBindings(
+      def as Parameters<typeof deriveLogicalFieldBindings>[0],
+    );
+    assert.ok(outcome.status === 'bound');
+    return outcome.bindings.find((b) => b.fieldId === f('currency'))!.codes;
+  };
+  assert.deepEqual(derive(normalized), ['CAD', 'USD', 'EUR']);
+  const narrowed = structuredClone(normalized);
+  (narrowed.entities as Forged[])
+    .find((e) => e.entityId === shipment)!
+    .reportSource.amounts.find(
+      (a: Forged) => a.fieldId === f('freight'),
+    ).currency.codes = ['USD', 'CAD'];
+  assert.deepEqual(derive(narrowed), ['CAD', 'USD']);
+  // Alone (no money field reads it), it still offers every stored code.
+  const alone = normalizeApplicationPackage(
+    applied([
+      {
+        kind: 'addRecordType',
+        label: 'Shipment',
+        companyOwnership: 'entityOwned',
+        fields: [
+          { label: 'Name', type: 'text', required: true },
+          { label: 'Currency', type: 'currency' },
+        ],
+      },
+    ]),
+  ) as unknown as Forged;
+  assert.deepEqual(derive(alone), ['CAD', 'USD', 'EUR']);
+});
+
+test('a currency field refuses unlisted codes on write and is searchable', () => {
+  const authored = applied([shipmentType]);
+  const currency = (authored.fields as Forged[]).find(
+    (x) => x.fieldId === f('currency'),
+  )!;
+  assert.equal(currency.searchable, true, 'the currency field is searchable');
+  const rule = (authored.formulaRules as Forged[]).find(
+    (r) => r.ruleId === `${NS}:rule.custom_shipment_currency_code`,
+  )!;
+  assert.ok(rule, 'the currency field carries its code rule');
+  assert.deepEqual(rule.boundOperationIds, [
+    `${NS}:operation.custom_shipment_create`,
+    `${NS}:operation.custom_shipment_update`,
+  ]);
+  assert.equal(rule.effect, 'refuse');
+  assert.equal(rule.predicate.kind, 'any');
+  assert.deepEqual(
+    (rule.predicate.terms as Forged[]).map((t) => t.right.scalar.value),
+    ['CAD', 'USD', 'EUR'],
+  );
+});
+
+test('formula validation types tenant money in its fixed currency', () => {
   const normalized = normalizeApplicationPackage(
     applied([shipmentType]),
   ) as unknown as Forged;
@@ -499,10 +587,10 @@ test('formula validation and calculated displays read tenant money in its own cu
       field(local) as Parameters<typeof formulaFieldType>[0],
       normalized as Parameters<typeof formulaFieldType>[1],
     );
-  assert.equal(typed('deposit')?.kind, 'decimal');
   assert.equal(
-    (typed('deposit') as { currency: string | null }).currency,
+    (typed('deposit') as { currency: string | null } | null)?.currency,
     'CAD',
+    'tenant money lost its currency',
   );
   // A stored currency varies by record: no single currency to compare in.
   assert.equal(typed('freight'), null);
@@ -531,6 +619,21 @@ test('formula validation and calculated displays read tenant money in its own cu
   assert.equal(display('freight'), null);
 });
 
+test("the approval text names each field's currency, unit and scale", async () => {
+  const result = await compile([shipmentType]);
+  assert.ok(result.status === 'compiled', JSON.stringify(result).slice(0, 400));
+  const text = JSON.stringify(result.steps.at(-1));
+  for (const line of [
+    'Deposit (money in CAD)',
+    "Freight (money in the record's Currency (CAD, USD, EUR))",
+    'Weight (quantity in kg, 3 decimals)',
+    'Rate (decimal, 4 decimals)',
+    'Notes (long text)',
+    'Currency (currency: one of CAD, USD, EUR)',
+  ])
+    assert.ok(text.includes(line), `the approval text lacks "${line}"`);
+});
+
 test('the drafter describes the new kinds from their schemas', () => {
   const schema = JSON.stringify(customization.drafterToolSchema());
   for (const word of [
@@ -544,33 +647,40 @@ test('the drafter describes the new kinds from their schemas', () => {
   assert.match(lines, /quantity is an exact amount in a unit/u);
 });
 
-test('web controls keep paragraphs, offer only accepted currency codes and step by scale', () => {
-  const logical = (binding: Partial<CompiledLogicalField>) =>
-    ({ fieldId: 'x', entityId: shipment, ...binding }) as CompiledLogicalField;
-  const text = (
-    binding: Partial<CompiledLogicalField>,
-  ): CompiledSurfaceField => ({
-    fieldId: f('notes'),
-    kind: 'textFieldType',
-    required: false,
-    logical: logical(binding),
-  });
-  const paragraphs = 'First line\nSecond line';
+const logical = (binding: Partial<CompiledLogicalField>) =>
+  ({ fieldId: 'x', entityId: shipment, ...binding }) as CompiledLogicalField;
+const textField = (
+  binding: Partial<CompiledLogicalField>,
+): CompiledSurfaceField => ({
+  fieldId: f('notes'),
+  kind: 'textFieldType',
+  required: false,
+  logical: logical(binding),
+});
+
+test('a long-text control keeps paragraphs and a leading blank line', () => {
   const notes = renderFormControl(
-    text({ logicalType: 'longText' }),
+    textField({ logicalType: 'longText' }),
     undefined,
     f('notes'),
     0,
-    paragraphs,
+    '\nFirst line\nSecond line',
   );
-  assert.equal(notes.storedValueUnavailable, false);
+  assert.equal(
+    notes.storedValueUnavailable,
+    false,
+    'a paragraph value was flagged unavailable',
+  );
   assert.match(
     notes.html,
-    /<textarea[^>]*>First line\nSecond line<\/textarea>/u,
+    /<textarea[^>]*maxlength="4000"[^>]*>\n\nFirst line\nSecond line<\/textarea>/u,
   );
+});
+
+test('a currency control offers only its codes and flags any other', () => {
   const code = (value: string) =>
     renderFormControl(
-      text({
+      textField({
         logicalType: 'currencyCode',
         currencyCodes: ['CAD', 'USD', 'EUR'],
       }),
@@ -582,6 +692,9 @@ test('web controls keep paragraphs, offer only accepted currency codes and step 
   assert.match(code('USD').html, /<option value="USD" selected>USD<\/option>/u);
   // A code outside the list is announced, never posted as another value.
   assert.equal(code('cad').storedValueUnavailable, true);
+});
+
+test('a scaled number steps by its scale and shows its unit; money shows only a listed code', () => {
   const weight = renderFormControl(
     {
       fieldId: f('weight'),
@@ -596,7 +709,7 @@ test('web controls keep paragraphs, offer only accepted currency codes and step 
     undefined,
     f('weight'),
     0,
-    '12.500',
+    '12.5',
   );
   assert.match(weight.html, /step="0\.001"/u);
   assert.match(weight.html, /data-field-unit>kg<\/span>/u);
@@ -606,15 +719,16 @@ test('web controls keep paragraphs, offer only accepted currency codes and step 
     currency: {
       kind: 'stored',
       fieldId: f('currency'),
-      codes: ['CAD'],
+      codes: ['CAD', 'USD'],
     } as never,
   });
-  assert.equal(
+  const suffix = (code: string) =>
     logicalSuffix(stored, {
       recordId: 'r',
-      values: { [f('currency')]: 'USD' },
-    } as never),
-    'USD',
-  );
+      values: { [f('currency')]: code },
+    } as never);
+  assert.equal(suffix('USD'), 'USD');
+  assert.equal(suffix('GBP'), '(no listed currency)');
+  assert.equal(suffix('cad'), '(no listed currency)');
   assert.equal(logicalSuffix(stored), null);
 });

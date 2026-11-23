@@ -29,6 +29,8 @@ export const LOGICAL_FIELD_TYPES = [
   'currencyCode',
 ] as const;
 export type LogicalFieldType = (typeof LOGICAL_FIELD_TYPES)[number];
+/** The codes a stored currency field may hold (the REPORTS-1 stored list). */
+export const STORED_CURRENCY_CODES = ['CAD', 'USD', 'EUR'] as const;
 /** The longest text a tenant long-text field holds. */
 export const LONG_TEXT_MAXIMUM_LENGTH = 4_000;
 /** Precision of a tenant decimal, money or quantity field. */

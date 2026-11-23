@@ -221,23 +221,13 @@ function parseLogicalFieldBindings(
       'INVALID_SURFACE_MANIFEST',
       'compiled surface projection has invalid logical field bindings',
     );
-  const codes = new Map<string, Set<string>>();
-  for (const binding of parsed.data)
-    if (binding.currency?.kind === 'stored')
-      for (const code of binding.currency.codes)
-        (
-          codes.get(binding.currency.fieldId) ??
-          codes
-            .set(binding.currency.fieldId, new Set())
-            .get(binding.currency.fieldId)!
-        ).add(code);
   return new Map(
     parsed.data.map((binding) => [
       binding.fieldId,
       Object.freeze({
         ...binding,
         ...(binding.logicalType === 'currencyCode' && {
-          currencyCodes: Object.freeze([...(codes.get(binding.fieldId) ?? [])]),
+          currencyCodes: Object.freeze([...(binding.codes ?? [])]),
         }),
       }),
     ]),

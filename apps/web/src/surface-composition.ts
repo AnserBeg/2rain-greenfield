@@ -275,7 +275,13 @@ export function logicalSuffix(
   if (logical.logicalType !== 'money' || !logical.currency) return null;
   if (logical.currency.kind === 'fixed') return logical.currency.currencyCode;
   const stored = record?.values[logical.currency.fieldId];
-  return typeof stored === 'string' && stored !== '' ? stored : null;
+  if (stored === undefined || stored === null) return null;
+  // Only a listed code is shown as a currency: a report sums anything else
+  // as "No currency", and the list says the same.
+  return typeof stored === 'string' &&
+    (logical.currency.codes as readonly string[]).includes(stored)
+    ? stored
+    : '(no listed currency)';
 }
 
 export function displayFieldValue(
