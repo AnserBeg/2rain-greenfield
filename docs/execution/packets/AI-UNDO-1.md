@@ -1,6 +1,6 @@
 # AI-UNDO-1 — the assistant asks before putting a customer on or off credit hold
 
-Status: slice 1 (`packet/AI-UNDO-1-s1`, tip `3048f69c5`): Fable check MERGE, waiting for a train. Slice 2 (`packet/AI-UNDO-1-s2`): capability declarations built, ready for the emission step after REBASE-1; see Slice 2 below. Tier: packet, first-party base change. No migration, grant or reader rung. Stops taken: none.
+Status: slice 1 (`packet/AI-UNDO-1-s1`, tip `3048f69c5`): Fable check MERGE, on main. Slice 2 (`packet/AI-UNDO-1-s2`): declarations, emission (agent-discovery floor 5) and routing built; see Slice 2 below. Tier: packet, first-party base change. No migration or grant; slice 2 takes reader rung agent-discovery 5. Stops taken: none.
 
 ## Claims
 
@@ -43,27 +43,34 @@ That run is on the exact code tip `6d651b08`; the record commit on top is docs-o
 - `node --import tsx --test --test-name-pattern='X5|credit hold|auto-run snapshot|AGENT-5 7' test/agent/business-map.test.ts` — hold and release ask; a name edit stays reversible.
 - In the app, ask the assistant to release a customer's credit hold: it shows a card and waits for your yes.
 
-## Slice 2 — capability declarations built; emission waits for REBASE-1
+## Slice 2 — capability declarations, the emitted declaration, unowned types follow it
 
-- Rulings (orchestrator, 2026-11-22): no profile v3; the key is emitted after REBASE-1 (ADR-0066 re-baseline) in the same commit as a re-baseline; rung = agent-discovery floor 5, not surface 48. The 233-field widening is rejected: act at once needs a value inverse AND no consumer the release cannot see.
-- Built: each capability supplies at product assembly an `ImmediateEditDeclaration` for the record types it owns (`packages/canonical-model/src/reversibility.ts`); a field it does not list asks (fail closed). First-party modules declare today's eleven (`packages/domain/src/app/immediate-edits.ts`), so behaviour is unchanged (the `AI-UNDO-1 lock` test). `risk.ts` and the session's write check name no record type, field or state; Inventory's declaration carries the count line's parent-in-draft rule, replacing `parentEditApprovals` and the `_state/_status/_draft` suffixes. The session option is required, so every assembly passes declarations.
-- The compiler derivation (not emitted) also counts a field read by a workflow, validation rule or calculated field as consumed. Census: 233 would derive record-only on first-party types, which are capability-owned and so stay at eleven.
-- Proofs: a second application (the release renamed to a clinic) acts only on its own capability's declaration, and its line rule follows the declared parent condition; an architecture scan keeps names out of `risk.ts` and `writeRisk`; CRITFIX-A's expected-red now mutates the declaration. Rule 8: each red when its check is removed (parents ignored, declaration ignored, party number added, a planted name, consumers ignored).
-- Fable's slice 1 findings 1-3, done first: a release without the credit-hold declaration still asks; panel-configuration tests see the person asked and nothing run; the record no longer claims a tenant can mark a field.
-- Stays narrow: first-party masters act only on what their capability declares, until capabilities declare their reads. Tenant types ask until the emission step. Customize members are charter slice 5.
-- Next (after REBASE-1): merge main and REGENERATE release files (never hand-merge them), emit the key with the re-baseline, route unowned types through the compiled declaration (`wip/AI-UNDO-1-s2-switch`, out of every train), older-reader proof pinned to `1092e14d`.
+- Rulings (orchestrator, 2026-11-22): act at once only with a value inverse AND no undeclared consumer; capabilities declare safe fields at the composition root; no profile cut, the key is emitted with an ADR-0066 re-baseline; rung = agent-discovery floor 5.
+- Capability side (`b8df0bb2b`): each capability supplies an `ImmediateEditDeclaration` (`packages/canonical-model/src/reversibility.ts`); first-party modules declare today's eleven (`packages/domain/src/app/immediate-edits.ts`); `risk.ts` and `writeRisk` name no record type, field or state.
+- Emission (`c4a81b05e`, on main `d8aad66b3` via `e1e8e83c1`): the compiler emits the derived declaration in the agent-discovery chunk on the adopted profile (v2) and later, floor 5; the runtime reads agent discovery up to 5. Re-baselined in the same commit (`build:app-release -- --pre-tenant-rebaseline`, both release checks, `dev:reset`; full-replay snapshot regenerated identical).
+- Fixed on the way: the dispatch alias carries placeholder preconditions, so the emitted declaration had lost every gate and enum lifecycle; it now reads the authored preconditions, and a test pins emitted = derived.
+- Routing (`risk.ts`): an owned type acts at once only on its capability's declared fields, less any a release consumer reads; a type no capability owns acts at once only on fields classed `exact` / `restorePriorValues` / `record`, under the compiled `holdsWhile`; a release without the declaration asks.
+- Consumer rule, fail closed: every release member not in `PASSIVE_RELEASE_MEMBERS` (workflows, rules, calculated fields, billing plans, documents, connector bindings, any later member) makes the fields it names ask.
+- Older reader (rule 13): the archived `d8aad66b3` binary answers an item query on its own release and refuses the shipped head with `UNSUPPORTED_RUNTIME_CAPABILITY`, agent-discovery 5 against 4; the head's rows persist byte for byte (`request-runtime-view.test.ts`).
+- Re-baseline consequences (`c9ed64b63`): v0/v1 profile output unchanged (profile gate). Re-pinned adopted-profile pins: g1 golden roots and diff, g2 v1/v2 structural golden, v3 manifest digest (`e91ef814` -> `412a451a`), workflow-free fixture pins (root `83599963` -> `9c1d51ef`), agent floor 4/3 -> 5 in two Customize unit tests. Narrowed, not re-pinned, the cross-binary reproductions (archived tenant envelope helper, archived Inspection replay, pre-billing bytes): all projections identical except the agent payload gains `reversibility` and a transition names its moved predecessor (`test/helpers/reversibility-reproduction.ts`).
+- Rule 8, each applied after `c9ed64b63` and restored: emission removed (release check, emission test, unowned test); alias preconditions back (emission, unowned-line); consumer scan narrowed to three members (fail-closed test); routing removed (unowned test); owned consumer tightening removed (consumer-rule test); compiled `holdsWhile` dropped (unowned-line); floor 4 (emission test); profile gate removed (v0 byte-identity test).
+- Rule 17: (a) one release-derived reversibility class per operation and field, readable by any consumer (autonomy, Undo, workflows, audit); (b) any release unchanged, first-party or tenant, a clinic, distributor or rental desk: tenant-built types act at once from their own facts; (c) narrower: owned masters still act only on what their capability declares (capabilities do not yet declare their reads); creates, archives and transitions still ask; Customize members are charter slice 5.
+- `wip/AI-UNDO-1-s2-switch` stays out of every train.
+- Gates (slice 2): local typecheck, lint, unit 527, compiler 195, agent 95, architecture 240, integration 341, check-records; PostgreSQL: the older-reader proof alone. Full CI on the branch tip: see the review-log row.
 
 ```record-claim
 {
-  "schemaVersion": "northstar.record-claim/v1",
-  "packet": "AI-UNDO-1",
-  "base": "37bfd47311c58060000cebca49d5f55174e3874a",
-  "head": "6d651b08ff8e3ac4c7b3e1e51f63455278dbb73c",
+  "schemaVersion": "northstar.record-claim/v1", "packet": "AI-UNDO-1",
+  "base": "e1e8e83c137aa45538a7099e2a4aa1a440128d4e",
+  "head": "c9ed64b63d3979c30d5414af758e41d75afb8cd9",
   "changedPaths": [
-    "apps/web/release/app.authored.json",
-    "apps/web/release/app.compiled.json",
-    "packages/domain/src/party/definition.ts",
-    "test/agent/business-map.test.ts"
+    "apps/web/release/app.compiled.json", "packages/compiler/src/projections.ts", "packages/compiler/src/reversibility.ts",
+    "packages/operations-agent/src/catalog.ts", "packages/operations-agent/src/risk.ts", "packages/runtime/src/request-runtime-view.ts",
+    "test/agent/business-map.test.ts", "test/compiler/legal-entity-query-scope.test.ts", "test/compiler/report-company-access.test.ts",
+    "test/compiler/reversibility-census.test.ts", "test/fixtures/g1/compiler/bootstrap.release-root.golden.sha256", "test/fixtures/g1/compiler/vertical-v1-v2.diff.golden.sha256",
+    "test/fixtures/g1/compiler/vertical-v1.release-root.golden.sha256", "test/fixtures/g1/compiler/vertical-v2.release-root.golden.sha256", "test/fixtures/g2/module-conformance/v1-v2.release.structural.golden.json",
+    "test/helpers/archived-customization-runtime.ts", "test/helpers/reversibility-reproduction.ts", "test/integration/billing-release.test.ts",
+    "test/integration/workflow-admission.test.ts", "test/postgres/request-runtime-view.test.ts", "test/unit/customization.test.ts"
   ],
   "symbols": []
 }
