@@ -3,6 +3,8 @@
 ## Slice 1 · The in-app AI adds exact numbers, amounts, measures and notes — record
 Status: packet tip ready for review on `packet/CUSTOMIZE-6-s1`. Base `origin/main` d8aad66b3 (TRAIN-L) merged once and the release files were checked rather than hand-merged (`check:app-release` and `check:demo-release` both green: first-party bytes are unchanged). Surface rung LOGICAL_FIELD_READER = 48 is **provisional**. TEMPLATE-1 also holds a provisional 48, so the integrator renumbers. No Critical path or migration is touched. Stops taken: none.
 
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/45263789868
+
 **Claims.**
 1. `addRecordType` and `addField` gain five field types, each stored as an existing canonical scalar:
    - `decimal`: `exactDecimalFieldType`, precision 18 with the declared scale.
@@ -66,7 +68,7 @@ The same test proves:
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-6",
   "base": "d8aad66b3e6ee6231b0580f2702c26d116f5a68c",
-  "head": "4032263e3128b61593bf474028722802ef5737e4",
+  "head": "cf78b2dd1e1651eadad83fd9284d48b624faed59",
   "changedPaths": ["apps/web/src/component-registry.ts", "apps/web/src/surface-composition.ts", "apps/web/src/surface-contract.ts", "package.json", "packages/canonical-model/src/calculated-display-bindings.ts", "packages/canonical-model/src/formula-validation-bindings.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/logical-field-bindings.ts", "packages/canonical-model/src/logical-field.ts", "packages/canonical-model/src/normalize.ts", "packages/canonical-model/src/schemas.ts", "packages/canonical-model/src/surface-presentation.ts", "packages/compiler/src/compiler.ts", "packages/compiler/src/logical-fields.ts", "packages/compiler/src/projections.ts", "packages/customization/src/ai-draft-kinds.ts", "packages/customization/src/apply.ts", "packages/customization/src/patch.ts", "packages/customization/src/targets.ts", "packages/postgres-provider/src/logical-field-admission.ts", "packages/postgres-provider/src/release-repository.ts", "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/runtime/src/request-runtime-view.ts", "test/agent/build-eval-cases.ts", "test/agent/build-eval.ts", "test/architecture/repository-hygiene.test.ts", "test/evidence/CUSTOMIZE-6.expected-red.json", "test/helpers/reachability-producers.ts", "test/postgres/logical-fields.test.ts", "test/postgres/request-runtime-view.test.ts", "test/unit/logical-field.test.ts"],
   "symbols": [
     {"path": "packages/canonical-model/src/logical-field-bindings.ts", "name": "deriveLogicalFieldBindings"},
