@@ -52,6 +52,10 @@ import { billingBindingProblem } from './billing.js';
 import { WorkflowGrantBindingError } from './workflows.js';
 import { compileDocuments } from './documents.js';
 import { requiredFormulaValidationOperationReader } from '../../canonical-model/src/formula-validation-reader.js';
+import {
+  hasRecordTemplateBinding,
+  RECORD_TEMPLATE_OPERATION_READER,
+} from '../../canonical-model/src/record-template.js';
 import { compileCalculatedDisplayFields } from './calculated-display-plan.js';
 import {
   compileLiteralFormulaRules,
@@ -2350,11 +2354,15 @@ function verifyCompleteness(
   if (
     ruleProjection.length !==
       Number(Boolean(declaredRules || declaredDisplays)) ||
-    (hasBookingOperations(packageRevision)
-      ? operationFloor !== bookingReaderFloor(packageRevision)
-      : declaredRules &&
-        operationFloor !==
-          requiredFormulaValidationOperationReader(declaredRules)) ||
+    // The record template reader is the highest operation floor; it claims
+    // the Booking and validation readers below it (projections.ts).
+    (hasRecordTemplateBinding(packageRevision)
+      ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
+      : hasBookingOperations(packageRevision)
+        ? operationFloor !== bookingReaderFloor(packageRevision)
+        : declaredRules &&
+          operationFloor !==
+            requiredFormulaValidationOperationReader(declaredRules)) ||
     // The query floor is the highest catalog feature present, so a lower
     // feature's floor is exact only when no higher feature rides the catalog.
     (hasBookingUsage(packageRevision) ||

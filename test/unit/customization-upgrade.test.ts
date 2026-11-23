@@ -23,6 +23,7 @@ import {
   type SurfaceLayout,
 } from '../../packages/canonical-model/src/index.js';
 import { VALIDATION_NODE_VERSION } from '../../packages/canonical-model/src/formula-validation.js';
+import { RECORD_TEMPLATE_OPERATION_READER } from '../../packages/canonical-model/src/record-template.js';
 import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 
@@ -759,6 +760,53 @@ test('record template bindings reproduce their authoring root and survive indepe
     assert.ok(
       moved.status === 'compiled',
       JSON.stringify(moved.status === 'compiled' ? null : moved),
+    );
+  }
+});
+test('a record template binding compiles beside a validation rule in either order, and after it retires', async () => {
+  const active = cases.addRecordTemplateBindingRevision.change;
+  const retired = customization.draftTemplateBinding(
+    [{ ...collection, previous: active }],
+    {
+      formId: collection.frame.formId,
+      contextId: null,
+      required: true,
+      lifecycle: 'retired',
+      fields: active.body.columns.map(({ fieldId, copyEligible }) => ({
+        fieldId,
+        copyEligible,
+      })),
+    },
+  );
+  // The template operation reader (7) claims the validation readers below it.
+  for (const [label, chain] of [
+    ['[rule, binding]', [rule, active]],
+    ['[binding, rule]', [active, rule]],
+    ['[binding, retired binding, rule]', [active, retired, rule]],
+  ] as const) {
+    const result = await customization.compileInSandbox({
+      acknowledgement,
+      base: collectionBase,
+      chain: chain.map(patch),
+      tip: customization.serializeRelease(tip),
+    });
+    assert.ok(
+      result.status === 'compiled',
+      `${label}: ${JSON.stringify(result.status === 'compiled' ? null : result).slice(0, 1500)}`,
+    );
+    const manifest = result.steps.at(-1)!.release.releaseManifest as {
+      projections: {
+        familyId: string;
+        requiredRuntimeCapability: { minimumVersion: number };
+      }[];
+    };
+    const operation = manifest.projections.find((p) =>
+      p.familyId.endsWith('operation-catalog'),
+    )!;
+    assert.equal(
+      operation.requiredRuntimeCapability.minimumVersion,
+      RECORD_TEMPLATE_OPERATION_READER,
+      label,
     );
   }
 });
