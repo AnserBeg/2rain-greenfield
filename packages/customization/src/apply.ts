@@ -19,7 +19,11 @@ import type {
   LayoutDefinition,
 } from '@north-star/canonical-model';
 import {
+  CURRENCY_MINOR_UNITS_V0,
   CUSTOMIZABLE_FIRST_PARTY_ENTITY_LOCALS,
+  LOGICAL_DECIMAL_PRECISION,
+  LONG_TEXT_MAXIMUM_LENGTH,
+  logicalUnitId,
   isNarrowableOperationId,
   canonicalize,
   normalizeApplicationPackage,
@@ -31,7 +35,7 @@ import type {
   SingleCustomizationPatch,
   UnsupportedCustomization,
 } from './patch.js';
-import { unsupported } from './patch.js';
+import { STORED_MONEY_CURRENCIES, unsupported } from './patch.js';
 
 /**
  * Patch application: an ordered patch chain applied to the first-party
@@ -1126,6 +1130,12 @@ function addRecordType(
     storage: reference('storageMappingReference', id('storage')),
   });
   push(authored, 'fields', ...fieldDefinitions);
+  const declared = declareLogicalFields(
+    authored,
+    entityId,
+    fields.map((field, index) => ({ field, fieldId: fieldIds[index]! })),
+  );
+  if (declared) return declared;
   push(authored, 'storageMappings', {
     entity: reference('entityReference', entityId),
     kind: 'storageMappingDefinition',
@@ -1217,6 +1227,7 @@ function addRecordType(
               role: index === 0 ? 'title' : 'value',
               sortable: true,
               ...(fields[index]!.type === 'date' ? { format: 'date' } : {}),
+              ...(fields[index]!.type === 'money' ? { format: 'money' } : {}),
             })),
             defaultSort: [],
             filters: [],
@@ -1418,6 +1429,11 @@ function addLineTable(
       'This record type already has a line table, or its generated line type name is in use.',
     );
 
+  if (patch.fields.some((field) => field.type in LOGICAL_TYPES))
+    return unsupported(
+      'decimal, money, quantity, currency and long-text line fields',
+      'Line fields can be text, whole numbers, dates, yes/no or choices for now; add the field to the record type instead.',
+    );
   const nameIndex = patch.fields.findIndex((field) => field.type === 'text');
   if (nameIndex < 0)
     return unsupported(
@@ -1567,10 +1583,12 @@ function addLineTable(
     ...(parent.companyOwnership === 'entityOwned'
       ? {}
       : { scope: 'tenantShared' }),
-    headerFields: headerFields.map(editorField),
+    headerFields: headerFields.map((field) =>
+      editorField(field, longTextFields(authored)),
+    ),
     headerFormSurfaceId: parentForm.surfaceId,
     kind: 'draftDocumentEditor',
-    lineFields: lineFields.slice(1).map(editorField),
+    lineFields: lineFields.slice(1).map((field) => editorField(field)),
     lineFormSurfaceId: lineFormId,
     lineNumberFieldId: lineNumberId,
     lineQueryId: id('query', '_list'),
@@ -1686,11 +1704,14 @@ function ensureChildTables(authored: Json, surface: Json, local: string): void {
   });
 }
 
-function editorField(field: Json): Json {
+function editorField(field: Json, longText?: ReadonlySet<string>): Json {
   const type = field.fieldType as Json;
   return {
     fieldId: field.fieldId,
     label: field.label,
+    ...(longText?.has(String(field.fieldId))
+      ? { presentation: { kind: 'multiline' } }
+      : {}),
     ...(type.kind === 'enumFieldType'
       ? {
           presentation: {
@@ -1969,6 +1990,9 @@ function addField(
     'legacy' in prior &&
     prior.field.type === field.type &&
     JSON.stringify(prior.field.options) === JSON.stringify(field.options) &&
+    prior.field.scale === field.scale &&
+    JSON.stringify(prior.field.currency) === JSON.stringify(field.currency) &&
+    prior.field.unit === field.unit &&
     (!isTenantId(entityId) ||
       Boolean(prior.field.required) === Boolean(field.required));
   if (
@@ -2001,6 +2025,12 @@ function addField(
         searchable: false,
       }),
     );
+  if (!bindExisting && !address && !dateTime) {
+    const declared = declareLogicalFields(authored, entityId, [
+      { fieldId, field },
+    ]);
+    if (declared) return declared;
+  }
   if (address) {
     const added = list(authored, 'fields').at(-1)!;
     Object.assign(added, {
@@ -2065,6 +2095,7 @@ function addField(
         role: 'value',
         sortable: !address,
         ...(field.type === 'date' ? { format: 'date' } : {}),
+        ...(field.type === 'money' ? { format: 'money' } : {}),
       });
     }
   }
@@ -2084,7 +2115,13 @@ function addField(
         ...(isTenantId(entityId) ? {} : { disclosure: 'more' }),
       };
       const editor = surface.documentEditor as Json | undefined;
-      if (editor) (editor.headerFields as Json[]).push(presentation);
+      if (editor)
+        (editor.headerFields as Json[]).push({
+          ...presentation,
+          ...(field.type === 'longText'
+            ? { presentation: { kind: 'multiline' } }
+            : {}),
+        });
       else if (surface.surfaceRole === 'form') {
         const form = (surface.form ??= {
           kind: 'surfaceForm',
@@ -2694,7 +2731,173 @@ function fieldDefinition(
           schemaVersion: version,
         },
       };
+    case 'decimal':
+    case 'money':
+      return {
+        ...common,
+        collation: 'binary',
+        fieldType: {
+          kind: 'exactDecimalFieldType',
+          precision: LOGICAL_DECIMAL_PRECISION,
+          representation: 'canonicalString',
+          scale: moneyScale(field) ?? field.scale!,
+          schemaVersion: version,
+        },
+      };
+    case 'quantity':
+      return {
+        ...common,
+        collation: 'binary',
+        fieldType: {
+          baseUnit: {
+            kind: 'unitReference',
+            schemaVersion: version,
+            targetId: logicalUnitId(namespace, field.unit!),
+          },
+          kind: 'quantityFieldType',
+          precision: LOGICAL_DECIMAL_PRECISION,
+          representation: 'canonicalString',
+          scale: field.scale!,
+          schemaVersion: version,
+        },
+      };
+    case 'longText':
+    case 'currency':
+      return {
+        ...common,
+        collation: 'unicodeCaseInsensitive',
+        fieldType: {
+          kind: 'textFieldType',
+          maximumLength:
+            field.type === 'currency' ? 3 : LONG_TEXT_MAXIMUM_LENGTH,
+          schemaVersion: version,
+        },
+      };
   }
+}
+
+/** A money field's scale is its currency's minor unit; every stored currency has two. */
+function moneyScale(field: CustomField): number | undefined {
+  if (field.type !== 'money' || !field.currency) return undefined;
+  return field.currency.kind === 'fixed'
+    ? CURRENCY_MINOR_UNITS_V0[field.currency.code]
+    : 2;
+}
+
+const LOGICAL_TYPES = {
+  decimal: 'decimal',
+  money: 'money',
+  quantity: 'quantity',
+  longText: 'longText',
+  currency: 'currencyCode',
+} as const;
+
+/**
+ * CUSTOMIZE-6: declare each new field's logical kind beside its existing
+ * canonical scalar. Money appends its currency to the record type's REPORTS-1
+ * amount binding (never rebuilding it), and a quantity's unit is declared
+ * once per namespace, so two record types weighing in kg share one unit.
+ */
+function declareLogicalFields(
+  authored: Json,
+  entityId: string,
+  added: readonly { readonly fieldId: string; readonly field: CustomField }[],
+): Outcome | null {
+  const namespace = namespaceOf(authored);
+  const entity = list(authored, 'entities').find(
+    (candidate) => candidate.entityId === entityId,
+  )!;
+  const declarations = (authored.logicalFields ?? []) as Json[];
+  for (const { fieldId, field } of added) {
+    if (!(field.type in LOGICAL_TYPES)) continue;
+    const logicalType = LOGICAL_TYPES[field.type as keyof typeof LOGICAL_TYPES];
+    if (field.type === 'money' && field.currency?.kind === 'stored') {
+      const currencyFieldId = field.currency.fieldId;
+      const declared = [...declarations, ...pendingCurrency(entityId, added)].some(
+        (d) =>
+          d.fieldId === currencyFieldId &&
+          d.entityId === entityId &&
+          d.logicalType === 'currencyCode',
+      );
+      if (!declared)
+        return refusal(
+          'CUSTOMIZE_TARGET_NOT_FOUND',
+          `${String(entity.label)} has no currency field ${currencyFieldId} for "${field.label.trim()}"; add a currency field first.`,
+        );
+    }
+    if (field.type === 'money') {
+      const source = (entity.reportSource ??= {
+        version: 'report-source/v1',
+      }) as Json;
+      const amounts = (source.amounts ??= []) as Json[];
+      amounts.push({
+        fieldId,
+        currency:
+          field.currency!.kind === 'fixed'
+            ? { kind: 'fixed', currencyCode: field.currency!.code }
+            : {
+                kind: 'stored',
+                fieldId: field.currency!.fieldId,
+                codes: [...STORED_MONEY_CURRENCIES],
+              },
+      });
+    }
+    if (field.type === 'quantity') {
+      const unitId = logicalUnitId(namespace, field.unit!);
+      const label = declarations.find(
+        (d) =>
+          d.logicalType === 'quantity' &&
+          logicalUnitId(namespace, String(d.unitLabel)) === unitId,
+      )?.unitLabel;
+      if (label !== undefined && label !== field.unit!.trim())
+        return refusal(
+          'CUSTOMIZE_DUPLICATE_LABEL',
+          `The unit is already written "${String(label)}"; use that spelling for "${field.label.trim()}".`,
+        );
+      const requirements = list(authored, 'capabilityRequirements');
+      if (!requirements.some((r) => r.capabilityId === unitId))
+        requirements.push({
+          capabilityId: unitId,
+          capabilityVersion: 1,
+          declaredEffects: ['read'],
+          kind: 'capabilityRequirement',
+          requiredProjections: ['query'],
+          schemaVersion: version,
+          supportStatus: 'supported',
+        });
+    }
+    declarations.push({
+      schemaVersion: version,
+      fieldId,
+      entityId,
+      logicalType,
+      ...(field.type === 'quantity' ? { unitLabel: field.unit!.trim() } : {}),
+    });
+  }
+  if (declarations.length) authored.logicalFields = declarations;
+  return null;
+}
+
+function pendingCurrency(
+  entityId: string,
+  added: readonly { readonly fieldId: string; readonly field: CustomField }[],
+): Json[] {
+  return added
+    .filter((entry) => entry.field.type === 'currency')
+    .map((entry) => ({
+      fieldId: entry.fieldId,
+      entityId,
+      logicalType: 'currencyCode',
+    }));
+}
+
+/** The field IDs the record type declares as long text. */
+function longTextFields(authored: Readonly<Json>): Set<string> {
+  return new Set(
+    ((authored.logicalFields ?? []) as Json[])
+      .filter((d) => d.logicalType === 'longText')
+      .map((d) => String(d.fieldId)),
+  );
 }
 
 /** A label's canonical-id local: lower case words joined by underscores. */

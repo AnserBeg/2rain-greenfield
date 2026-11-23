@@ -250,6 +250,12 @@ export function normalizeApplicationPackage(
         ),
       }),
     ...(authored.languageVersion === 'v6' &&
+      authored.logicalFields && {
+        logicalFields: [...authored.logicalFields].sort((a, b) =>
+          compareCodeUnits(a.fieldId, b.fieldId),
+        ),
+      }),
+    ...(authored.languageVersion === 'v6' &&
       authored.mapPlacements && {
         mapPlacements: [...authored.mapPlacements].sort((a, b) =>
           compareCodeUnits(a.placementId, b.placementId),

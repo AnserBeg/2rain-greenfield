@@ -5,6 +5,9 @@ import { BoardViewRevisionSchema } from './board-revision.js';
 import { LayoutRevisionSchema } from './layout-revision.js';
 import {
   COMPANY_ACCESS_INDEX,
+  CURRENCY_MINOR_UNITS_V0,
+  LOGICAL_DECIMAL_MAXIMUM_SCALE,
+  UnitLabelSchema,
   DATE_TIME_PATCH_VERSION,
   DateTimeZoneSourceSchema,
   CalculatedDisplayFieldDefinitionSchema,
@@ -53,8 +56,32 @@ export const CUSTOM_FIELD_TYPES = [
   'date',
   'yesNo',
   'choice',
+  // CUSTOMIZE-6: exact decimals, money, quantities and paragraphs.
+  'decimal',
+  'money',
+  'quantity',
+  'longText',
+  'currency',
 ] as const;
 export type CustomFieldType = (typeof CUSTOM_FIELD_TYPES)[number];
+/** The currencies a stored money field accepts (the REPORTS-1 binding). */
+export const STORED_MONEY_CURRENCIES = ['CAD', 'USD', 'EUR'] as const;
+/** A fixed currency has a registered minor unit, which is the field's scale. */
+export const FIXED_MONEY_CURRENCIES = Object.keys(
+  CURRENCY_MINOR_UNITS_V0,
+) as [keyof typeof CURRENCY_MINOR_UNITS_V0];
+
+const moneyCurrency = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('fixed'),
+    code: z.enum(FIXED_MONEY_CURRENCIES),
+  }),
+  z.strictObject({
+    kind: z.literal('stored'),
+    // The record's own currency field, by stable ID (a `currency` field).
+    fieldId: canonicalId,
+  }),
+]);
 
 export const CustomFieldSchema = z
   .strictObject({
@@ -62,6 +89,12 @@ export const CustomFieldSchema = z
     type: z.enum(CUSTOM_FIELD_TYPES),
     required: z.boolean().optional(),
     options: z.array(label).min(1).max(20).optional(),
+    /** Digits after the decimal point, for a decimal or quantity field. */
+    scale: z.int().min(0).max(LOGICAL_DECIMAL_MAXIMUM_SCALE).optional(),
+    /** A money field's currency: one fixed code, or the record's currency field. */
+    currency: moneyCurrency.optional(),
+    /** A quantity field's unit as people write it, e.g. "kg" or "h". */
+    unit: UnitLabelSchema.optional(),
   })
   .superRefine((field, context) => {
     if (field.type === 'choice' && !field.options) {
@@ -78,6 +111,33 @@ export const CustomFieldSchema = z
         path: ['options'],
       });
     }
+    const scaled = field.type === 'decimal' || field.type === 'quantity';
+    if (scaled !== (field.scale !== undefined))
+      context.addIssue({
+        code: 'custom',
+        message: scaled
+          ? 'a decimal or quantity field declares its scale'
+          : 'only a decimal or quantity field has a scale',
+        path: ['scale'],
+      });
+    if ((field.type === 'money') !== (field.currency !== undefined))
+      context.addIssue({
+        code: 'custom',
+        message:
+          field.type === 'money'
+            ? 'a money field declares its currency'
+            : 'only a money field has a currency',
+        path: ['currency'],
+      });
+    if ((field.type === 'quantity') !== (field.unit !== undefined))
+      context.addIssue({
+        code: 'custom',
+        message:
+          field.type === 'quantity'
+            ? 'a quantity field declares its unit'
+            : 'only a quantity field has a unit',
+        path: ['unit'],
+      });
   });
 export type CustomField = z.infer<typeof CustomFieldSchema>;
 

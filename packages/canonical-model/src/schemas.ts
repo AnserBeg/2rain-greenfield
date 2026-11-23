@@ -1,6 +1,7 @@
 import { PopupRevisionSchema } from './popup-actions.js';
 import { AddressBindingSchema, MapPlacementSchema } from './address.js';
 import { DateTimeFieldDeclarationSchema } from './date-time-field.js';
+import { LogicalFieldDeclarationSchema } from './logical-field.js';
 import { BillingPlansSchema } from './billing.js';
 import { SurfaceBoardSchema } from './board.js';
 import { BookingOperationBinding } from './booking.js';
@@ -3137,6 +3138,11 @@ const v6NormalizedShape = {
     .min(1)
     .max(128)
     .optional(),
+  logicalFields: z
+    .array(LogicalFieldDeclarationSchema)
+    .min(1)
+    .max(512)
+    .optional(),
   billingPlans: BillingPlansSchema.optional(),
   documentFields,
   documentCategories,
@@ -3280,6 +3286,11 @@ const v6AuthoredShape = {
     .array(DateTimeFieldDeclarationSchema)
     .min(1)
     .max(128)
+    .optional(),
+  logicalFields: z
+    .array(LogicalFieldDeclarationSchema)
+    .min(1)
+    .max(512)
     .optional(),
   billingPlans: BillingPlansSchema.optional(),
   documentFields,
