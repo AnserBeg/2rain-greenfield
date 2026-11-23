@@ -839,6 +839,23 @@ export async function exerciseTemplateLibrary(
           ).assignment?.revision_id,
           elsewhere.revisionId,
         );
+        // A real second-company instance: a record created in company B from
+        // B's assigned revision, so the company checks below guard B's data.
+        const secondParent = crossed();
+        const secondKey = randomUUID();
+        await prepare(secondKey, secondParent);
+        assert.equal(
+          (await create(secondKey, secondParent)).outcome,
+          'succeeded',
+        );
+        assert.equal(
+          (
+            await run((v) =>
+              library.application(v, other, secondParent.recordId),
+            )
+          )?.assignment?.revision_id,
+          elsewhere.revisionId,
+        );
         const assigner = await run((v) => Promise.resolve(v.principalId));
         const memberships = (
           await pool.query<{
@@ -949,6 +966,24 @@ export async function exerciseTemplateLibrary(
         );
         await assert.rejects(
           run((v) => library.application(v, other, header.recordId), 'buyer'),
+          /template.unavailable/u,
+        );
+        // Company B's own application, read by the A-only worker: under A it
+        // is not found (the stored-company lookup), under B it is refused (the
+        // company-scoped read authority). Each check reds alone.
+        assert.equal(
+          await run(
+            (v) => library.application(v, target, secondParent.recordId),
+            'buyer',
+          ),
+          null,
+          'a company A lookup finds no application for a company B parent',
+        );
+        await assert.rejects(
+          run(
+            (v) => library.application(v, other, secondParent.recordId),
+            'buyer',
+          ),
           /template.unavailable/u,
         );
         if (kind === 'row') {
