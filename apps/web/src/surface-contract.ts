@@ -1,4 +1,8 @@
 import {
+  LogicalFieldBindingSchema,
+  type LogicalFieldBinding,
+} from '../../../packages/canonical-model/src/logical-field-bindings.js';
+import {
   CompiledPresentationSchema,
   type CompiledPresentation,
 } from '../../../packages/canonical-model/src/schemas.js';
@@ -192,6 +196,52 @@ export interface CompiledFieldTemporal {
 interface CompiledFieldCommon {
   readonly fieldId: string;
   readonly required: boolean;
+  /** CUSTOMIZE-6: the field's logical kind, scale, currency and unit (rung 48). */
+  readonly logical?: CompiledLogicalField;
+}
+
+/**
+ * A logical field as the surface manifest binds it, with the codes a
+ * currency field offers: the codes of every stored money field reading it.
+ */
+export type CompiledLogicalField = LogicalFieldBinding & {
+  readonly currencyCodes?: readonly string[];
+};
+
+/** Reads the manifest's logical field bindings, refusing any it cannot parse. */
+function parseLogicalFieldBindings(
+  payload: Record<string, unknown>,
+): ReadonlyMap<string, CompiledLogicalField> {
+  if (!Object.hasOwn(payload, 'logicalFieldBindings')) return new Map();
+  const parsed = LogicalFieldBindingSchema.array().safeParse(
+    payload.logicalFieldBindings,
+  );
+  if (!parsed.success)
+    throw new SurfaceProjectionError(
+      'INVALID_SURFACE_MANIFEST',
+      'compiled surface projection has invalid logical field bindings',
+    );
+  const codes = new Map<string, Set<string>>();
+  for (const binding of parsed.data)
+    if (binding.currency?.kind === 'stored')
+      for (const code of binding.currency.codes)
+        (
+          codes.get(binding.currency.fieldId) ??
+          codes
+            .set(binding.currency.fieldId, new Set())
+            .get(binding.currency.fieldId)!
+        ).add(code);
+  return new Map(
+    parsed.data.map((binding) => [
+      binding.fieldId,
+      Object.freeze({
+        ...binding,
+        ...(binding.logicalType === 'currencyCode' && {
+          currencyCodes: Object.freeze([...(codes.get(binding.fieldId) ?? [])]),
+        }),
+      }),
+    ]),
+  );
 }
 
 /**
@@ -929,8 +979,9 @@ function parseCompiledSurfaceManifest(
   }
 
   const seenSurfaceIds = new Set<string>();
+  const logical = parseLogicalFieldBindings(payload);
   const surfaces = payload.surfaces.map((value, index) => {
-    const surface = parseSurface(value, index);
+    const surface = parseSurface(value, index, logical);
     if (seenSurfaceIds.has(surface.surfaceId)) {
       throw new SurfaceProjectionError(
         'DUPLICATE_SURFACE_ID',
@@ -1119,6 +1170,7 @@ function invalidNavigation(message: string): SurfaceProjectionError {
 function parseSurface(
   value: unknown,
   index: number,
+  logical: ReadonlyMap<string, CompiledLogicalField> = new Map(),
 ): CompiledSurfaceDefinition {
   if (!isRecord(value)) invalidSurface(index);
   const archetype = value.archetype;
@@ -1159,7 +1211,7 @@ function parseSurface(
     return parsed;
   });
 
-  const fields = parseSurfaceFields(value, index);
+  const fields = parseSurfaceFields(value, index, logical);
 
   return Object.freeze({
     ...(archetype === 'map' ? { map: SurfaceMapSchema.parse(value.map) } : {}),
@@ -1255,6 +1307,7 @@ function invalidField(message: string): SurfaceProjectionError {
 function parseSurfaceFields(
   value: Record<string, unknown>,
   surfaceIndex: number,
+  logical: ReadonlyMap<string, CompiledLogicalField>,
 ): readonly CompiledSurfaceField[] | undefined {
   // Absence is a state, not a default. Under every profile that does not emit
   // per-field kinds the key is not there at all; `Object.hasOwn` keeps that
@@ -1265,9 +1318,11 @@ function parseSurfaceFields(
       `compiled surface ${surfaceIndex} declares a non-array field list`,
     );
   }
-  const fields = value.fields.map((entry, fieldIndex) =>
-    parseSurfaceField(entry, surfaceIndex, fieldIndex),
-  );
+  const fields = value.fields.map((entry, fieldIndex) => {
+    const field = parseSurfaceField(entry, surfaceIndex, fieldIndex);
+    const binding = logical.get(field.fieldId);
+    return binding ? Object.freeze({ ...field, logical: binding }) : field;
+  });
   const fieldIds = value.fieldIds as readonly string[];
   if (
     fields.length !== fieldIds.length ||

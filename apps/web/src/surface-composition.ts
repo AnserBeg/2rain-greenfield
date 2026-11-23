@@ -1,3 +1,4 @@
+import type { CompiledLogicalField } from './surface-contract.js';
 import { availablePopups } from '../../../packages/runtime/src/popup-actions.js';
 import { SavedAddressSchema } from '@north-star/canonical-model';
 import { recordZoneText } from './date-time-field.js';
@@ -260,6 +261,23 @@ export function referenceLabel(
 }
 
 /** Presents a stored value by its compiled field kind; shared with declared Lists. */
+/**
+ * What follows a logical field's value: a money field's currency (its fixed
+ * code, or the record's own currency field when one is read) and a
+ * quantity's unit. Nothing for other kinds, or for a stored currency the
+ * record does not carry.
+ */
+export function logicalSuffix(
+  logical: CompiledLogicalField,
+  record?: SemanticRecordDto,
+): string | null {
+  if (logical.logicalType === 'quantity') return logical.unit?.label ?? null;
+  if (logical.logicalType !== 'money' || !logical.currency) return null;
+  if (logical.currency.kind === 'fixed') return logical.currency.currencyCode;
+  const stored = record?.values[logical.currency.fieldId];
+  return typeof stored === 'string' && stored !== '' ? stored : null;
+}
+
 export function displayFieldValue(
   view: RequestRuntimeView,
   record: SemanticRecordDto,
@@ -280,6 +298,20 @@ export function displayFieldValue(
   // A flag reads as a word, such as a counter sale's.
   if (field?.kind === 'booleanFieldType' && typeof value === 'boolean')
     return value ? 'Yes' : 'No';
+  // CUSTOMIZE-6: money reads with its currency, a quantity with its unit.
+  const logical = field?.logical;
+  if (
+    logical &&
+    typeof value === 'string' &&
+    (logical.logicalType === 'money' || logical.logicalType === 'quantity')
+  ) {
+    const suffix = logicalSuffix(logical, record);
+    const shown =
+      logical.logicalType === 'money'
+        ? moneyText(value)
+        : value.replace(/(\.\d*?[1-9])0+$|\.0+$/u, '$1');
+    return suffix ? `${shown} ${suffix}` : shown;
+  }
   const result = record.displayValues?.[fieldId] ?? text(value);
   if (
     field &&

@@ -1312,7 +1312,6 @@ function addRecordType(
               role: index === 0 ? 'title' : 'value',
               sortable: true,
               ...(fields[index]!.type === 'date' ? { format: 'date' } : {}),
-              ...(fields[index]!.type === 'money' ? { format: 'money' } : {}),
             })),
             defaultSort: [],
             filters: [],
@@ -2200,7 +2199,6 @@ function addField(
         role: 'value',
         sortable: !address,
         ...(field.type === 'date' ? { format: 'date' } : {}),
-        ...(field.type === 'money' ? { format: 'money' } : {}),
       });
     }
   }
