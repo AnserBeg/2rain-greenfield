@@ -2,12 +2,15 @@ import type { CustomizationPatchKind } from './patch.js';
 
 /** Admission changes independently of the parser. Each entry has a replay fixture. */
 export const UPGRADE_PATCH_KINDS: ReadonlySet<string> = new Set([
+  'addRatePlanVersion',
   'addDateTimeField',
   'addAddressField',
   'addMapPlacement',
+  'addMapViewRevision',
   'addBoardViewRevision',
   'addReportRevision',
   'addPopupActionRevision',
+  'addPresentationRevision',
   'addRecordType',
   'addField',
   'addChoice',

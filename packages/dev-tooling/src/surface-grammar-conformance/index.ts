@@ -179,8 +179,12 @@ export function checkSurfaceGrammarConformance(
     active.map((surface) => surface.archetype),
   );
   for (const archetype of SURFACE_ARCHETYPES) {
-    // A Board is an optional view on a collection, introduced after the base grammar.
-    if (archetype !== 'board' && !observedArchetypes.has(archetype)) {
+    // Collections opt in to Board and Map independently of the base grammar.
+    if (
+      archetype !== 'board' &&
+      archetype !== 'map' &&
+      !observedArchetypes.has(archetype)
+    ) {
       add(
         violations,
         'SG002_ARCHETYPE_COVERAGE',

@@ -196,9 +196,23 @@ export {
 } from './schemas.js';
 export * from './grouped-aggregate.js';
 export * from './date-time-field.js';
+export * from './map-view.js';
+export * from './map-viewport.js';
 export {
   DocumentTemplatePointerSchema,
   DocumentTemplateRevisionSchema,
   type DocumentTemplatePointer,
   type DocumentTemplateRevision,
 } from './document-template-schema.js';
+export * from './surface-presentation-schema.js';
+export * from './surface-presentation.js';
+export {
+  SurfacePresentationRevisionSchema,
+  CompiledPresentationSchema,
+  type CompiledPresentation,
+} from './schemas.js';
+export type {
+  ValidationOperand,
+  ValidationPredicate,
+  ValidationScalar,
+} from './formula-validation.js';

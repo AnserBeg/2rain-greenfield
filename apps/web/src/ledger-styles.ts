@@ -12,6 +12,16 @@
  * floor on phone-width targets.
  */
 export const LEDGER_STYLES = `
+.surface-grid:has(> .map-canvas){display:flex;flex-direction:column;reading-flow:flex-visual;gap:1rem}
+.surface-grid:has(> .map-canvas)>.surface-slot{display:block}
+.map-canvas svg{display:block;width:100%;max-width:1024px;background:var(--sheet);touch-action:none}
+.map-canvas nav a,.map-list a,.map-canvas summary,.map-views button{display:inline-flex;align-items:center;min-height:44px;padding:0 .65rem}
+.map-canvas [data-map-frame],.map-canvas iframe{width:100%;height:100%;border:0;display:block}
+.map-hit{fill:transparent;stroke:transparent;stroke-width:44px;vector-effect:non-scaling-stroke;pointer-events:all}.map-pin{fill:var(--ink)}.map-canvas svg text{fill:var(--sheet);pointer-events:none}
+.map-route{stroke:var(--ink);stroke-width:2;fill:none}.map-route.group-1{stroke-dasharray:8 3}.map-route.group-2{stroke-dasharray:2 4}.map-route.group-3{stroke-dasharray:8 3 2 3}
+.map-pin.group-1,.map-pin.group-3{fill:var(--accent)}.map-route.group-1,.map-route.group-3{stroke:var(--accent)}
+.map-stops{padding:0;list-style:none}.map-stops li{border-bottom:1px solid var(--rule)}
+@media(max-width:800px){.map-title{order:0}.map-views{order:1}.map-list{order:2}.map-canvas{order:3}.map-stops li{padding:.4rem;border:1px solid var(--rule)}}
 .grouped-report-table{width:100%;text-align:start;background:var(--sheet)}
 .grouped-report-table td,.grouped-report-table th{padding:.6rem;border-bottom:1px solid var(--rule);text-align:start;overflow-wrap:anywhere}
 .grouped-report-table small{display:block}.grouped-report-table tfoot{font-weight:600}
@@ -244,6 +254,37 @@ button:disabled{opacity:.55;cursor:not-allowed}
 td[data-zero]{color:var(--faint)}
 .data-table-wrap td .status-pill[data-status-role=success]{height:auto;padding:0;border:0;background:transparent;color:var(--muted);font-weight:400}
 .data-table-wrap td .status-pill[data-status-role=success]::before{content:none}
+/* UI-CUSTOM-1: a declared tone always shows colour + dot + word, success too.
+   A whole-row tone is a tinted ground plus a leading marker; its word sits in
+   the row's title cell. Sizing is named widths and wrap only, never pixels
+   chosen by a company, and the compact projection drops it. */
+.data-table-wrap td .status-pill[data-tone-rule][data-status-role=success]{height:20px;padding:0 8px;background:var(--status-success-ground);color:var(--status-success-ink);font-weight:500}
+.data-table-wrap td .status-pill[data-tone-rule][data-status-role=success]::before{content:"";width:4px;height:8px;border:solid currentColor;border-width:0 1.7px 1.7px 0;border-radius:0;transform:translate(1px,-1px) rotate(45deg);margin-right:1px}
+/* The tint outranks the row hover, so a toned row keeps its ground; muted
+   text on a tinted ground reads at AA through its own token. */
+.data-table-wrap tbody tr[data-row-tone=success] td{background:var(--status-success-ground)}
+.data-table-wrap tbody tr[data-row-tone=attention] td{background:var(--status-attention-ground)}
+.data-table-wrap tbody tr[data-row-tone=blocked] td{background:var(--status-blocked-ground)}
+.data-table-wrap tbody tr[data-row-tone=inProgress] td{background:var(--status-inprogress-ground)}
+.data-table-wrap tbody tr[data-row-tone]:not([data-row-tone=neutral]) td{--muted:var(--muted-on-tint)}
+.data-table-wrap tr[data-row-tone] td:first-child{box-shadow:inset 3px 0 0 var(--rule-2)}
+.data-table-wrap tr[data-row-tone=success] td:first-child{box-shadow:inset 3px 0 0 var(--status-success-ink)}
+.data-table-wrap tr[data-row-tone=attention] td:first-child{box-shadow:inset 3px 0 0 var(--status-attention-ink)}
+.data-table-wrap tr[data-row-tone=blocked] td:first-child{box-shadow:inset 3px 0 0 var(--status-blocked-ink)}
+.data-table-wrap tr[data-row-tone=inProgress] td:first-child{box-shadow:inset 3px 0 0 var(--status-inprogress-ink)}
+.data-table-wrap [data-column-width=narrow]{width:9ch}
+.data-table-wrap [data-column-width=wide]{min-width:28ch}
+.data-table-wrap [data-column-width=auto]{width:auto}
+.data-table-wrap td[data-column-wrap=wrap]{white-space:normal;overflow-wrap:anywhere}
+/* A clipped column clips its text span, never the cell, so a tone pill
+   after the text always shows. The span pads 4px and takes it back with a
+   negative margin, so a link's focus ring (2px at a 2px offset) is not clipped. */
+.data-table-wrap td[data-column-wrap=clip] .cell-clip{display:inline-block;max-width:24ch;padding:4px;margin:-4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+.data-table-wrap td[data-column-width=narrow][data-column-wrap=clip] .cell-clip{max-width:9ch}
+.data-table-wrap td[data-column-width=wide][data-column-wrap=clip] .cell-clip{max-width:40ch}
+.data-table-wrap[data-density=comfortable]{--row-y:12px}
+.data-table-wrap[data-density=compact]{--row-y:8px}
+.list-tone-note{margin:8px 0 0;font-size:12px}
 [data-declared-list] td .record-link{font-family:var(--f-mono);font-size:12px;font-weight:400}
 .list-controls{flex-wrap:nowrap;align-items:center}
 .list-controls__search>label>span,.list-controls .form-field:has(>select[name=sort],>select[name=dir])>label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
@@ -757,6 +798,15 @@ main{padding:14px max(16px,env(safe-area-inset-left,0px)) 40px}
 
 /* ---------- 800px and below: the compact projection ---------- */
 @container ledger (max-width:800px){
+.data-table-wrap tr[data-compact-card=true] td[data-column-width],.data-table-wrap tr[data-compact-card=true] td[data-column-wrap]{width:auto;min-width:0;max-width:none;white-space:normal}
+.data-table-wrap tr[data-compact-card=true] td[data-column-wrap=clip] .cell-clip{display:inline;max-width:none;overflow:visible;white-space:normal}
+/* A toned row keeps its tint and its leading marker as a card. */
+.data-table-wrap tr[data-compact-card=true][data-row-tone=success]{background:var(--status-success-ground);box-shadow:inset 3px 0 0 var(--status-success-ink)}
+.data-table-wrap tr[data-compact-card=true][data-row-tone=attention]{background:var(--status-attention-ground);box-shadow:inset 3px 0 0 var(--status-attention-ink)}
+.data-table-wrap tr[data-compact-card=true][data-row-tone=blocked]{background:var(--status-blocked-ground);box-shadow:inset 3px 0 0 var(--status-blocked-ink)}
+.data-table-wrap tr[data-compact-card=true][data-row-tone=inProgress]{background:var(--status-inprogress-ground);box-shadow:inset 3px 0 0 var(--status-inprogress-ink)}
+.data-table-wrap tr[data-compact-card=true][data-row-tone=neutral]{box-shadow:inset 3px 0 0 var(--rule-2)}
+.data-table-wrap tr[data-compact-card=true][data-row-tone] td:first-child{box-shadow:none}
 /* A record's title keeps the gutter; its badge sits beside it or just
    under it, never alone across the page (round 4). */
 .surface-heading--slot:has(.eyebrow){flex-direction:row;flex-wrap:wrap;align-items:flex-end;justify-content:flex-start;gap:8px}

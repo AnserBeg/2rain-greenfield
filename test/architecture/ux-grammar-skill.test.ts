@@ -44,6 +44,7 @@ test('Task dialog presentation retains the Record archetype and explicit page fa
     'builder',
     'home',
     'list',
+    'map',
     'record',
     'task',
   ]);
@@ -91,6 +92,23 @@ test('an induced plan status-vocabulary mismatch fails with UX002', () => {
       checkUxGrammarPin(root).violations.some(
         (violation) =>
           violation.file === planPath && violation.ruleId === 'UX002_PLAN_PIN',
+      ),
+    );
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('removing the stop list from the Map pin reports slot drift', () => {
+  const files = contractFixture();
+  const path = '.agents/skills/ux-grammar/SKILL.md';
+  files[path] = files[path]!.replace('"mapCanvas", "stopList"', '"mapCanvas"');
+  const root = createArchitectureFixture(files);
+  try {
+    assert.ok(
+      checkUxGrammarPin(root).violations.some(
+        (v) =>
+          v.ruleId === 'UX003_VOCABULARY_DRIFT' && v.message.includes('slots'),
       ),
     );
   } finally {

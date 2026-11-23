@@ -1,6 +1,7 @@
 export * from './upgrade-diagnostics.js';
 export { finalFormulaConflict } from './upgrade-replay.js';
 export * from './board-revision.js';
+export * from './map-revision.js';
 export * from './layout-revision.js';
 export * from './apply.js';
 export * from './candidate.js';
@@ -20,3 +21,4 @@ export {
 export * from './ai-draft-kinds.js';
 export * from './authoring-rules.js';
 export * from './field-member-draft.js';
+export * from './presentation-revision.js';

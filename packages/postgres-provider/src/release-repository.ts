@@ -1,8 +1,17 @@
 import type { StorageTargetPayloadV1 } from '../../compiler/src/storage.js';
 import { lowerDeclaredReports } from '../../compiler/src/declared-reports.js';
 import { DECLARED_REPORT_READER } from '../../canonical-model/src/declared-report.js';
+import { PRESENTATION_READER } from '../../canonical-model/src/surface-presentation-schema.js';
+import { presentationDeclarationProblem } from './presentation-admission.js';
+import {
+  hasMapDeclaration,
+  mapDeclarationProblem,
+  mapBindingsProblem,
+} from './map-admission.js';
 import {
   BILLING_ALLOCATION_READER,
+  BILLING_ARREARS_READER,
+  BILLING_CYCLE_CALCULATION,
   BILLING_CALCULATION_VERSION,
   BILLING_READER,
   BILLING_INTERVAL_READER,
@@ -608,10 +617,14 @@ function verifyCompiledRelease(
     layoutDefinition,
   );
   const needsLayout =
+    hasMapDeclaration(layoutDefinition) ||
     (isRecord(layoutDefinition) &&
       Array.isArray(layoutDefinition.surfaces) &&
       layoutDefinition.surfaces.some(
-        (s) => isRecord(s) && Object.hasOwn(s, 'popupActions'),
+        (s) =>
+          isRecord(s) &&
+          (Object.hasOwn(s, 'popupActions') ||
+            Object.hasOwn(s, 'presentation')),
       )) ||
     hasBoardDeclaration(layoutDefinition) ||
     declaredLayouts(isRecord(layoutDefinition) ? layoutDefinition.surfaces : [])
@@ -648,6 +661,22 @@ function verifyCompiledRelease(
     throw integrity(
       'REPORT_READER_MISMATCH',
       'Declared reports and the surface reader floor disagree.',
+    );
+  // UI-CUSTOM-1: declared presentation and its reader floor agree both ways.
+  const hasPresentation =
+    isRecord(layoutDefinition) &&
+    Array.isArray(layoutDefinition.surfaces) &&
+    layoutDefinition.surfaces.some(
+      (s: unknown) => isRecord(s) && Object.hasOwn(s, 'presentation'),
+    );
+  if (
+    hasPresentation
+      ? surfaceFloor < PRESENTATION_READER
+      : surfaceFloor === PRESENTATION_READER
+  )
+    throw integrity(
+      'PRESENTATION_READER_MISMATCH',
+      'Declared presentation and the surface reader floor disagree.',
     );
   const reportInputs = new Map<string, unknown>();
   const sourceTerms = (value: unknown, activeOnly: boolean) => {
@@ -686,6 +715,11 @@ function verifyCompiledRelease(
     Array.isArray(billingPlans) &&
     billingPlans.some(
       (p) => isRecord(p) && isRecord(p.bindings) && p.bindings.agreedInterval,
+    );
+  const hasArrears =
+    Array.isArray(billingPlans) &&
+    billingPlans.some(
+      (p) => isRecord(p) && isRecord(p.bindings) && p.bindings.arrearsSource,
     );
   if (billingPlans && !surfaceReference)
     throw integrity(
@@ -876,6 +910,15 @@ function verifyCompiledRelease(
         projectionPayloadBytes[0]!,
         'PROJECTION_CHUNK_NOT_CANONICAL',
       );
+      const presentationProblem = presentationDeclarationProblem(
+        layoutDefinition,
+        payload,
+      );
+      if (presentationProblem)
+        throw integrity(
+          'PRESENTATION_PROJECTION_CONTRACT_MISMATCH',
+          presentationProblem,
+        );
       const popupProblem = popupDeclarationProblem(
         layoutDefinition,
         payload,
@@ -888,18 +931,22 @@ function verifyCompiledRelease(
         'billingCalculationVersion',
       );
       const surfaceFloor = reference.requiredRuntimeCapability.minimumVersion;
-      const billingFloor = hasBillingCalculation
-        ? BILLING_ALLOCATION_READER
-        : hasAgreedBillingInterval
-          ? BILLING_INTERVAL_READER
-          : BILLING_READER;
+      const billingFloor = hasArrears
+        ? BILLING_ARREARS_READER
+        : hasBillingCalculation
+          ? BILLING_ALLOCATION_READER
+          : hasAgreedBillingInterval
+            ? BILLING_INTERVAL_READER
+            : BILLING_READER;
       if (
         canonicalize(payload.billingPlans ?? null) !==
           canonicalize(billingPlans ?? null) ||
         (hasBillingCalculation &&
           (!hasAgreedBillingInterval ||
             payload.billingCalculationVersion !==
-              BILLING_CALCULATION_VERSION)) ||
+              (hasArrears
+                ? BILLING_CYCLE_CALCULATION
+                : BILLING_CALCULATION_VERSION))) ||
         (hasAgreedBillingInterval &&
           surfaceFloor >= BILLING_ALLOCATION_READER &&
           !hasBillingCalculation) ||
@@ -909,6 +956,7 @@ function verifyCompiledRelease(
             BILLING_READER,
             BILLING_INTERVAL_READER,
             BILLING_ALLOCATION_READER,
+            BILLING_ARREARS_READER,
           ].includes(surfaceFloor))
       )
         throw integrity(
@@ -916,6 +964,7 @@ function verifyCompiledRelease(
           'The billing plan or reader floor disagrees with the release.',
         );
       const problem =
+        mapDeclarationProblem(layoutDefinition, payload) ??
         boardDeclarationProblem(
           layoutDefinition,
           payload,
@@ -932,6 +981,7 @@ function verifyCompiledRelease(
     if (
       needsLayout &&
       [
+        PROJECTION_FAMILY_IDS.connector,
         PROJECTION_FAMILY_IDS.surfaceManifest,
         PROJECTION_FAMILY_IDS.queryCatalog,
         PROJECTION_FAMILY_IDS.operationCatalog,
@@ -1049,6 +1099,12 @@ function verifyCompiledRelease(
     if (popupProblem)
       throw integrity('POPUP_PROJECTION_CONTRACT_MISMATCH', popupProblem);
     const problem =
+      mapBindingsProblem(
+        payload(PROJECTION_FAMILY_IDS.surfaceManifest),
+        surfaceReference!.requiredRuntimeCapability.minimumVersion,
+        payload(PROJECTION_FAMILY_IDS.queryCatalog),
+        payload(PROJECTION_FAMILY_IDS.connector),
+      ) ??
       boardBindingsProblem(
         payload(PROJECTION_FAMILY_IDS.surfaceManifest),
         surfaceReference!.requiredRuntimeCapability.minimumVersion,

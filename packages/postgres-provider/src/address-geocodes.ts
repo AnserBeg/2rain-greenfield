@@ -1,3 +1,8 @@
+import { MapImagery } from './map-imagery.js';
+import {
+  SurfaceMapSchema,
+  type MapViewport,
+} from '@north-star/canonical-model';
 import {
   addressColumns,
   readAddress,
@@ -34,14 +39,19 @@ import {
 } from '../../runtime/src/semantic-query-gateway.js';
 import {
   addressProvider,
+  mapProviderDescriptor,
   AddressProviderError,
   type AddressProvider,
   type InstallationIdentity,
 } from './address-provider.js';
-import { withTrustedRequestTransaction } from './request-context.js';
 import {
-  ADDRESS_CONNECTOR_CONFIGURE_BINDING,
+  withTrustedRequestRead,
+  withTrustedRequestTransaction,
+} from './request-context.js';
+import {
   currentPolicyVersionOf,
+  ADDRESS_CONNECTOR_CONFIGURE_BINDING,
+  MAP_VIEWPORT_READ_BINDING,
 } from './current-policy.js';
 import type { StorageTargetPayloadV1 } from '@north-star/compiler';
 
@@ -188,6 +198,154 @@ export class PostgresAddresses implements AddressGateway {
         process.env.NORTH_STAR_GOOGLE_MAPS_TERMS === 'non-eea',
       ),
   ) {}
+  private readonly imagery = new MapImagery();
+  private viewportScope(
+    view: RequestRuntimeView,
+    surfaceId: string,
+    companyId: string,
+    installationId: string,
+  ) {
+    return {
+      surfaceId,
+      companyId,
+      installationId,
+      tenantId: view.tenantId,
+      environmentId: view.environmentId,
+      principalId: view.principalId,
+      fence: String(view.pointer.fence),
+      releaseId: view.release.releaseId,
+      policyVersion: String(view.entryPolicyVersion),
+    };
+  }
+  issueViewport(
+    view: RequestRuntimeView,
+    surfaceId: string,
+    companyId: string,
+    installationId: string,
+    viewport: MapViewport,
+  ) {
+    return this.imagery.issue(
+      this.viewportScope(view, surfaceId, companyId, installationId),
+      viewport,
+    );
+  }
+  async viewportImage(
+    view: RequestRuntimeView,
+    handle: string,
+    companyId: string,
+  ) {
+    const display = await this.viewportAccess(
+      view,
+      handle,
+      companyId,
+      'raster',
+    );
+    return this.imagery.image(
+      handle,
+      display.scope,
+      display.reserve,
+      display.provider.imagery,
+    );
+  }
+  async viewportDisplay(view: RequestRuntimeView, handle: string) {
+    const company = this.imagery.request(handle)?.scope.companyId;
+    if (
+      !company ||
+      process.env.CI ||
+      !this.demo ||
+      process.env.NORTH_STAR_CONNECTOR_DEMO !== '1'
+    )
+      throw denied();
+    const display = await this.viewportAccess(view, handle, company, 'browser');
+    const frame = display.provider.frame;
+    const key = frame?.browserKey();
+    if (!frame || !key) throw denied();
+    const viewport = await this.imagery.browserViewport(
+      handle,
+      display.scope,
+      display.reserve,
+    );
+    return {
+      frame: { document: frame.document, title: frame.title },
+      browserKey: key,
+      viewport,
+    };
+  }
+  private async viewportAccess(
+    view: RequestRuntimeView,
+    handle: string,
+    companyId: string,
+    display: 'browser' | 'raster',
+  ) {
+    const request = this.imagery.request(handle);
+    if (!request || !isUuid(companyId)) throw denied();
+    const { surfaceId } = request.scope;
+    const manifest = view.projections.surface.payload as {
+      surfaces: readonly Record<string, unknown>[];
+    };
+    const surface = manifest.surfaces.find(
+      (s) =>
+        s.surfaceId === surfaceId &&
+        s.lifecycle === 'active' &&
+        s.archetype === 'map',
+    );
+    const binding = SurfaceMapSchema.safeParse(surface?.map);
+    if (!binding.success) throw denied();
+    const { body } = binding.data;
+    const connector = AddressProjectionSchema.parse(
+      view.projections.connector?.payload,
+    );
+    if (
+      !connector.viewports?.some(
+        (v) => v.surfaceId === surfaceId && v.fieldId === body.addressFieldId,
+      )
+    )
+      throw denied();
+    const { policy } = await this.release(view.release.releaseId);
+    await issueLegalEntityReadScope(policy, view, [companyId]);
+    const disclosure = await authorizeCurrentPolicy(
+      policy,
+      view,
+      MAP_VIEWPORT_READ_BINDING.permissionId,
+      {
+        arguments: { legalEntityId: companyId },
+        kind: 'registeredSemanticQueryPolicyInput',
+        queryId: body.viewport,
+        requestId: view.requestId,
+        schemaVersion: 'northstar.semantic-query-policy-input/v1',
+      },
+    );
+    if (
+      disclosure.decision !== 'ALLOW' ||
+      disclosure.policyVersion !== view.entryPolicyVersion
+    )
+      throw denied();
+    for (const queryId of [body.listQueryId, body.getQueryId])
+      if (
+        (await this.queries.previewEligibility(view, queryId, companyId)) !==
+        'eligible'
+      )
+        throw denied();
+    const live = async (c: PoolClient) => {
+      await active(c, view);
+      const i = await installation(c, view, companyId);
+      if (!i || mapProviderDescriptor(i.provider)?.display !== display)
+        throw denied();
+      return i;
+    };
+    const i = await this.tx(view, live);
+    const provider = mapProviderDescriptor(i.provider)!;
+    return {
+      provider,
+      scope: this.viewportScope(view, surfaceId, companyId, i.installationId),
+      reserve: () =>
+        this.tx(view, async (c) => {
+          const current = await live(c);
+          if (current.installationId !== i.installationId) throw denied();
+          await reserve(c, current);
+        }),
+    };
+  }
   private tx<T>(
     view: RequestRuntimeView,
     work: (client: PoolClient) => Promise<T>,
@@ -201,8 +359,9 @@ export class PostgresAddresses implements AddressGateway {
   async installations(view: RequestRuntimeView) {
     // The installation read policy filters by the trusted principal's live
     // company memberships on this connection.
-    return this.tx(
-      view,
+    return withTrustedRequestRead(
+      this.pool,
+      trustedContextForRequestRuntimeView(view),
       async (c) =>
         (
           await c.query<AddressInstallation>(

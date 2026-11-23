@@ -59,6 +59,8 @@ test('(a) scored kinds are read from the expectation, one case per shape', () =>
   assert.deepEqual(kinds('F01'), ['addField']);
   assert.deepEqual(kinds('W01'), ['saveWorkflow']);
   assert.deepEqual(kinds('F06'), ['addBoardViewRevision']);
+  for (const id of ['B01', 'B02', 'B03'])
+    assert.deepEqual(kinds(id), ['addRatePlanVersion'], id);
   assert.deepEqual(kinds('U02'), [], 'an unsupported case scores no kind');
 });
 
@@ -84,10 +86,13 @@ const EXPECTED_REPAIRABLE: Readonly<
   CUSTOMIZE_FIELD_NOT_ON_LIST: true,
   CUSTOMIZE_BOARD_CONFLICT: true,
   CUSTOMIZE_LAYOUT_CONFLICT: true,
+  CUSTOMIZE_PRESENTATION_CONFLICT: true,
   // A button bound to a Task the person may not run: final (filed).
   CUSTOMIZE_POPUP_CONFLICT: false,
   // REPORTS (merged 2026-11-22): final on main, not in the allowlist (filed).
   CUSTOMIZE_REPORT_CONFLICT: false,
+  // PLANNER-1 Map: final, not in the allowlist (a slice 2 task, filed).
+  CUSTOMIZE_MAP_CONFLICT: false,
 };
 
 test('(b) a drafted outcome is accepted', () => {

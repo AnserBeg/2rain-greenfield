@@ -178,7 +178,13 @@ export function requestType(c: BuildCase): RequestType {
   const expect = c.expect;
   if (expect.outcome === 'unsupported') return 'refusal';
   if (expect.outcome === 'workflow') return 'workflow';
-  if (expect.outcome === 'board' || expect.outcome === 'validation')
+  if (
+    expect.outcome === 'board' ||
+    expect.outcome === 'map' ||
+    expect.outcome === 'validation' ||
+    expect.outcome === 'ratePlan' ||
+    expect.outcome === 'presentation'
+  )
     return 'single change';
   if (expect.types.some((t) => t.board)) return 'module + lines + board';
   return expect.types.every((t) => t.existing)

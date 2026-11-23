@@ -3,12 +3,16 @@ import { DECLARED_REPORT_READER } from '../../canonical-model/src/declared-repor
 import {
   BILLING_READER,
   BILLING_ALLOCATION_READER,
+  BILLING_ARREARS_READER,
+  BILLING_CYCLE_CALCULATION,
   BILLING_CALCULATION_VERSION,
 } from '../../canonical-model/src/billing.js';
 import {
   POPUP_READER,
   compiledPopups,
 } from '../../canonical-model/src/popup-actions.js';
+import { compilePresentation } from '../../canonical-model/src/surface-presentation.js';
+import { PRESENTATION_READER } from '../../canonical-model/src/surface-presentation-schema.js';
 import {
   DATE_TIME_FIELD_READER,
   type DateTimeBinding,
@@ -16,6 +20,7 @@ import {
   ADDRESS_MAP_READER,
   CONNECTOR_PAYLOAD,
   type AddressProjection,
+  MAP_VIEW_READER,
   BOARD_READER,
   COMPANY_ACCESS_INDEX_READER,
   REPORT_SOURCE_READER,
@@ -488,9 +493,11 @@ export function lowerBaseProjectionPayloads(
           ...projection.requiredRuntimeCapability,
           minimumVersion: Math.max(
             projection.requiredRuntimeCapability.minimumVersion,
-            address.placements.length
-              ? ADDRESS_MAP_READER
-              : ADDRESS_FIELD_READER,
+            address.viewports?.length
+              ? MAP_VIEW_READER
+              : address.placements.length
+                ? ADDRESS_MAP_READER
+                : ADDRESS_FIELD_READER,
           ),
         };
     }
@@ -534,17 +541,24 @@ export function lowerBaseProjectionPayloads(
     const hasAgreedInterval = billingPlans.some(
       (p) => p.bindings?.agreedInterval,
     );
+    const hasArrears = billingPlans.some((p) => p.bindings?.arrearsSource);
     surface.payload = {
       ...(surface.payload as object),
       billingPlans,
       ...(hasAgreedInterval && {
-        billingCalculationVersion: BILLING_CALCULATION_VERSION,
+        billingCalculationVersion: hasArrears
+          ? BILLING_CYCLE_CALCULATION
+          : BILLING_CALCULATION_VERSION,
       }),
     };
     surface.requiredRuntimeCapability = {
       ...surface.requiredRuntimeCapability,
       minimumVersion: Math.max(
-        hasAgreedInterval ? BILLING_ALLOCATION_READER : BILLING_READER,
+        hasArrears
+          ? BILLING_ARREARS_READER
+          : hasAgreedInterval
+            ? BILLING_ALLOCATION_READER
+            : BILLING_READER,
         surface.requiredRuntimeCapability.minimumVersion,
       ),
     };
@@ -1193,6 +1207,12 @@ function surfaceManifestPayload(
       ),
   );
   const surfaceFloor = Math.max(
+    original.surfaces.some((s) => s.archetype === 'map') ? MAP_VIEW_READER : 0,
+    original.surfaces.some(
+      (surface) => 'presentation' in surface && surface.presentation,
+    )
+      ? PRESENTATION_READER
+      : 0,
     original.entities.some(
       (entity) => 'reportSource' in entity && entity.reportSource,
     )
@@ -1310,7 +1330,20 @@ function surfaceManifestPayload(
           ...(declared && 'popupActions' in declared && declared.popupActions
             ? { popupActions: compiledPopups(original, declared) }
             : {}),
+          ...(declared && 'presentation' in declared && declared.presentation
+            ? {
+                presentation: compilePresentation(
+                  original as unknown as Parameters<
+                    typeof compilePresentation
+                  >[0],
+                  declared as unknown as Record<string, unknown>,
+                ),
+              }
+            : {}),
           // Labels and roles render from this release, beside the digested member.
+          ...(declared && 'map' in declared && declared.map
+            ? { map: declared.map }
+            : {}),
           ...(declared && 'report' in declared && declared.report
             ? { report: declared.report }
             : {}),

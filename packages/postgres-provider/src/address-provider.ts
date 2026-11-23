@@ -7,6 +7,10 @@ import {
   type Coordinates,
 } from '@north-star/canonical-model';
 import { z } from 'zod';
+import {
+  FakeMapImageryProvider,
+  type MapImageryProvider,
+} from './map-imagery.js';
 
 const place = z.string().regex(/^[A-Za-z0-9_-]{1,256}$/u);
 const suggestion = z.strictObject({
@@ -317,6 +321,51 @@ class GoogleAddressProvider implements AddressProvider {
   staticMap() {
     return null;
   }
+}
+/**
+ * What generic Map code needs to know about an installed provider, declared
+ * here in the adapter only (MIGRATION-RULE rule 16). A raster provider renders
+ * through the governed image route; a browser provider through an isolated
+ * frame document on the display origin, named by `frame.document`.
+ */
+export interface MapProviderDescriptor {
+  readonly display: 'browser' | 'raster';
+  /** Credit printed on the pins the provider placed and under its map. */
+  readonly attribution: string;
+  /** Raster providers: the image source behind the governed image route. */
+  readonly imagery?: MapImageryProvider;
+  /** Browser providers: the frame document, its title and its browser key. */
+  readonly frame?: {
+    readonly document: string;
+    readonly title: string;
+    browserKey(): string | undefined;
+  };
+}
+const fakeImagery = new FakeMapImageryProvider();
+export const MAP_PROVIDERS: Readonly<Record<string, MapProviderDescriptor>> =
+  Object.freeze({
+    fake: { display: 'raster', attribution: 'Demo Maps', imagery: fakeImagery },
+    google: {
+      display: 'browser',
+      attribution: 'Google Maps',
+      frame: {
+        document: 'google-maps-js',
+        title: 'Google Maps',
+        browserKey: () =>
+          process.env.NORTH_STAR_GOOGLE_MAPS_TERMS === 'non-eea'
+            ? process.env.NORTH_STAR_GOOGLE_MAPS_BROWSER_KEY
+            : undefined,
+      },
+    },
+  });
+/** The installed provider's descriptor; an undeclared provider has none. */
+export function mapProviderDescriptor(
+  provider: string | undefined,
+  providers: Readonly<Record<string, MapProviderDescriptor>> = MAP_PROVIDERS,
+): MapProviderDescriptor | undefined {
+  return provider !== undefined && Object.hasOwn(providers, provider)
+    ? providers[provider]
+    : undefined;
 }
 export function addressProvider(
   scope: InstallationIdentity,
