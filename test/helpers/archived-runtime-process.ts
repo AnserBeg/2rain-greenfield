@@ -1,11 +1,125 @@
 import type { DraftOutcome } from '../../packages/postgres-provider/src/customization-service.js';
+import { loadMigrations } from '../../packages/postgres-provider/src/migrations.js';
 import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import pg from 'pg';
 
 const execute = promisify(execFile);
+
+/** The database an archived probe opens, wherever its input names one. */
+function probedDatabase(input: unknown): string | undefined {
+  const record = input as {
+    databaseUrl?: unknown;
+    options?: { databaseUrl?: unknown };
+  } | null;
+  const url = record?.databaseUrl ?? record?.options?.databaseUrl;
+  return typeof url === 'string' ? url : undefined;
+}
+
+interface LedgerRow {
+  readonly ordinal: string;
+  readonly name: string;
+  readonly checksum: string;
+  readonly applied_at: Date;
+}
+
+/**
+ * UPGRADE-2 entry condition (owner ruling, option 1): an archived tree meets
+ * the database at its OWN migration level. Its `migrate()` refuses, by name,
+ * a ledger that records a migration it has no file for, and that is correct
+ * behaviour for a real rollback. A probe of an older binary therefore sees
+ * the ledger as it stood at that binary's level: every recorded migration
+ * after the archived tree's last file is set aside for the probe and put
+ * back, with its ordinal and time, before the next statement of the test.
+ *
+ * Exactly the ledger is presented at the older level. The schema still holds
+ * the later objects, which is safe only because a migration is additive to
+ * what older code writes; a later migration that alters such an object would
+ * make the older binary fail on its own, by name. Nothing is set aside when
+ * the archived files are not a prefix of the ledger (a renamed or edited
+ * migration, or a file the database never applied): the archived `migrate()`
+ * then refuses or applies exactly as it would in production.
+ *
+ * Any packet that adds a migration passes through here unchanged.
+ */
+export async function presentLedgerAtArchivedLevel(
+  databaseUrl: string,
+  migrationDirectory: string,
+): Promise<(() => Promise<void>) | undefined> {
+  const files = await loadMigrations(migrationDirectory);
+  const client = new pg.Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const exists = await client.query<{ present: boolean }>(
+      `SELECT to_regclass('north_star_internal.schema_migrations') IS NOT NULL AS present`,
+    );
+    if (!exists.rows[0]?.present) return undefined;
+    await client.query('BEGIN');
+    await client.query('LOCK TABLE north_star_internal.schema_migrations');
+    const ledger = await client.query<LedgerRow>(
+      `SELECT ordinal::text AS ordinal, name, checksum, applied_at
+       FROM north_star_internal.schema_migrations ORDER BY ordinal`,
+    );
+    const prefix =
+      ledger.rows.length > files.length &&
+      files.every(
+        (file, index) =>
+          ledger.rows[index]?.name === file.name &&
+          ledger.rows[index]?.checksum === file.checksum,
+      );
+    if (!prefix) {
+      await client.query('ROLLBACK');
+      return undefined;
+    }
+    const later = ledger.rows.slice(files.length);
+    await client.query(
+      `DELETE FROM north_star_internal.schema_migrations
+       WHERE ordinal = ANY($1::bigint[])`,
+      [later.map((row) => row.ordinal)],
+    );
+    await client.query('COMMIT');
+    return async () => {
+      const restore = new pg.Client({ connectionString: databaseUrl });
+      await restore.connect();
+      try {
+        await restore.query('BEGIN');
+        for (const row of later)
+          await restore.query(
+            `INSERT INTO north_star_internal.schema_migrations
+               (ordinal, name, checksum, applied_at)
+             OVERRIDING SYSTEM VALUE VALUES ($1::bigint, $2, $3, $4)`,
+            [row.ordinal, row.name, row.checksum, row.applied_at],
+          );
+        const after = await restore.query<LedgerRow>(
+          `SELECT ordinal::text AS ordinal, name, checksum, applied_at
+           FROM north_star_internal.schema_migrations ORDER BY ordinal`,
+        );
+        const key = (rows: readonly LedgerRow[]) =>
+          JSON.stringify(
+            rows.map((r) => [r.ordinal, r.name, r.checksum, +r.applied_at]),
+          );
+        if (key(after.rows) !== key(ledger.rows))
+          throw new Error(
+            'The archived probe changed the migration ledger; it is not restored.',
+          );
+        await restore.query('COMMIT');
+      } catch (error) {
+        await restore.query('ROLLBACK');
+        throw error;
+      } finally {
+        await restore.end();
+      }
+    };
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    await client.end();
+  }
+}
 export type ArchivedRunner = (
   source: string,
   input: unknown,
@@ -60,11 +174,23 @@ export async function withArchivedCustomizationRuntime<T>(
         writeFile(script, source, 'utf8'),
         writeFile(data, JSON.stringify(input), 'utf8'),
       ]);
-      const result = await execute(
-        process.execPath,
-        ['--import', 'tsx', script, data],
-        { cwd: workspace, maxBuffer: 64 * 1024 * 1024 },
-      );
+      const databaseUrl = probedDatabase(input);
+      const restore = databaseUrl
+        ? await presentLedgerAtArchivedLevel(
+            databaseUrl,
+            join(workspace, 'db', 'migrations'),
+          )
+        : undefined;
+      let result;
+      try {
+        result = await execute(
+          process.execPath,
+          ['--import', 'tsx', script, data],
+          { cwd: workspace, maxBuffer: 64 * 1024 * 1024 },
+        );
+      } finally {
+        await restore?.();
+      }
       return JSON.parse(result.stdout) as unknown;
     });
   } finally {
