@@ -1613,3 +1613,156 @@ function navigationRuleIds(result: {
       ruleId === 'SG012_NAVIGATION_REACHABILITY',
   );
 }
+
+// UI-CUSTOM-1: a declared tone in a declared list keeps the grammar. Read as
+// text, as the token block is: the rules the browser receives.
+const LEDGER_STYLES_PATH = 'apps/web/src/ledger-styles.ts';
+const COMPACT_BLOCK = '@container ledger (max-width:800px){';
+
+interface StyleRule {
+  readonly selectors: readonly string[];
+  readonly body: string;
+  readonly index: number;
+  readonly compact: boolean;
+}
+
+function ledgerStyleRules(): StyleRule[] {
+  const source = readFileSync(
+    resolve(process.cwd(), LEDGER_STYLES_PATH),
+    'utf8',
+  );
+  const compactAt = source.indexOf(COMPACT_BLOCK);
+  assert.ok(compactAt > 0, 'the compact projection block not found');
+  let depth = 1;
+  let compactEnd = compactAt + COMPACT_BLOCK.length;
+  for (; compactEnd < source.length && depth > 0; compactEnd += 1) {
+    if (source[compactEnd] === '{') depth += 1;
+    if (source[compactEnd] === '}') depth -= 1;
+  }
+  const rules: StyleRule[] = [];
+  for (const match of source
+    .replaceAll(/\/\*[\s\S]*?\*\//gu, (comment) => ' '.repeat(comment.length))
+    .matchAll(/([^{}]+)\{([^{}]*)\}/gu))
+    rules.push({
+      selectors: match[1]!.split(',').map((s) => s.trim()),
+      body: match[2]!,
+      index: match.index,
+      compact: match.index > compactAt && match.index < compactEnd,
+    });
+  return rules;
+}
+
+/** CSS specificity of a simple selector, as [ids, classes, elements]. */
+function specificity(selector: string): [number, number, number] {
+  const bare = selector.replaceAll(/:not\(([^)]*)\)/gu, ' $1');
+  const ids = (bare.match(/#[\w-]+/gu) ?? []).length;
+  const classes =
+    (bare.match(/\.[\w-]+/gu) ?? []).length +
+    (bare.match(/\[[^\]]+\]/gu) ?? []).length +
+    (bare.match(/(?<!:):[\w-]+/gu) ?? []).length;
+  const elements = (
+    bare.replaceAll(/\[[^\]]+\]/gu, '').match(/(?:^|[\s>+~])([a-z][\w-]*)/gu) ??
+    []
+  ).length;
+  return [ids, classes, elements];
+}
+const outranks = (a: string, b: string) => {
+  const [x, y] = [specificity(a), specificity(b)];
+  for (let i = 0; i < 3; i += 1) if (x[i] !== y[i]) return x[i]! > y[i]!;
+  return null;
+};
+
+test('UI-CUSTOM-1: a clipped list column clips its text, never the cell, so a tone pill always shows', () => {
+  const rules = ledgerStyleRules();
+  const clipsCell = rules.filter(
+    (rule) =>
+      rule.selectors.some((s) => /td\[data-column-wrap=clip\]$/u.test(s)) &&
+      /overflow:hidden|text-overflow/u.test(rule.body),
+  );
+  assert.deepEqual(
+    clipsCell.map((rule) => rule.selectors.join(',')),
+    [],
+    'a rule clips the whole cell, so the pill after the text is cut off',
+  );
+  const clipsText = rules.find(
+    (rule) =>
+      !rule.compact &&
+      rule.selectors.some((s) =>
+        /td\[data-column-wrap=clip\] \.cell-clip$/u.test(s),
+      ),
+  );
+  assert.ok(clipsText, 'no rule clips the text span');
+  assert.match(clipsText.body, /overflow:hidden/u);
+  assert.match(clipsText.body, /text-overflow:ellipsis/u);
+});
+
+test('UI-CUSTOM-1: muted text on a tinted row reads at AA in both themes, and the tint survives hover and the card projection', () => {
+  const rules = ledgerStyleRules();
+  // Muted text on a tinted ground: the row redefines --muted through a token.
+  const override = rules.find(
+    (rule) =>
+      rule.selectors.some((s) => /tr\[data-row-tone\]/u.test(s)) &&
+      /--muted:var\(--[a-z0-9-]+\)/u.test(rule.body),
+  );
+  assert.ok(override, 'no tinted-row rule redefines --muted');
+  const token = /--muted:var\(--([a-z0-9-]+)\)/u.exec(override.body)![1]!;
+  for (const scheme of ['light', 'dark'] as const) {
+    const tokens = readDesignTokens(scheme);
+    const muted = resolveToken(tokens, token);
+    const result = checkSurfaceAccessibility(
+      STATUS_ROLE_TOKENS.map(({ subjectId, token: role }) => ({
+        background: resolveToken(tokens, `status-${role}-ground`),
+        foreground: muted,
+        subjectId: `muted-on-${subjectId}-${scheme}`,
+      })),
+      [{ height: 44, subjectId: 'minimum-target', width: 44 }],
+    );
+    assert.equal(result.contrastPairsRead, 4);
+    assert.deepEqual(
+      result.violations,
+      [],
+      `muted text below AA on a ${scheme} tinted row`,
+    );
+  }
+  // The tint outranks the row hover and comes after it.
+  const hover = rules.find((rule) =>
+    rule.selectors.includes('.data-table-wrap tbody tr:hover td'),
+  );
+  assert.ok(hover, 'the row hover rule moved');
+  for (const { subjectId } of STATUS_ROLE_TOKENS) {
+    const tint = rules.find(
+      (rule) =>
+        !rule.compact &&
+        rule.selectors.some((s) =>
+          s.includes(`tr[data-row-tone=${subjectId}] td`),
+        ) &&
+        rule.body.includes('background:var(--status-'),
+    );
+    assert.ok(tint, `no tint for ${subjectId}`);
+    const selector = tint.selectors.find((s) =>
+      s.includes(`tr[data-row-tone=${subjectId}]`),
+    )!;
+    const wins = outranks(selector, '.data-table-wrap tbody tr:hover td');
+    assert.ok(
+      wins === true || (wins === null && tint.index > hover.index),
+      `the ${subjectId} tint loses to the row hover`,
+    );
+    // The card projection keeps the tint on the card itself.
+    const card = rules.find(
+      (rule) =>
+        rule.compact &&
+        rule.selectors.some((s) =>
+          s.endsWith(`tr[data-compact-card=true][data-row-tone=${subjectId}]`),
+        ),
+    );
+    assert.ok(card, `the ${subjectId} tint is lost as a card`);
+    assert.match(card.body, /background:var\(--status-[a-z]+-ground\)/u);
+    assert.equal(
+      outranks(
+        card.selectors[0]!,
+        '.data-table-wrap tr[data-compact-card=true]',
+      ),
+      true,
+    );
+  }
+});

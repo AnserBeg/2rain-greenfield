@@ -2996,7 +2996,7 @@ function declaredStatusRole(
   return column.statusRoles?.find((entry) => entry.value === raw)?.role ?? null;
 }
 
-interface DeclaredListRenderInput {
+export interface DeclaredListRenderInput {
   readonly base: URLSearchParams;
   /** UI-CUSTOM-1: the surface's declared tones and sizing. */
   readonly presentation?: CompiledPresentation;
@@ -3121,7 +3121,8 @@ function tonePill(applied: AppliedTone): string {
     : ` <span class="status-pill"${role} data-tone-rule="${escapeHtml(applied.ruleId)}">${escapeHtml(applied.reason)}</span>`;
 }
 
-function renderDeclaredList(input: DeclaredListRenderInput): string {
+/** Exported for the presentation render witness (UI-CUSTOM-1). */
+export function renderDeclaredList(input: DeclaredListRenderInput): string {
   const { list, state, coverage, base } = input;
   const columns = orderedColumns(list, state.viewId);
   const fixed = new Map(
@@ -3238,6 +3239,12 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
       ? ` data-column-width="${entry.width}" data-column-wrap="${entry.overflow === 'wrap' ? 'wrap' : 'clip'}"`
       : '';
   };
+  // A clipped column clips its text, never the cell: a tone pill sits
+  // outside the clip and always shows (UX grammar: never colour alone).
+  const clipped = (column: (typeof columns)[number], html: string) =>
+    sizing.get(column.field)?.overflow === 'truncate'
+      ? `<span class="cell-clip">${html}</span>`
+      : html;
   const density = active
     ? (active.viewDensity.find((view) => view.viewId === state.viewId)
         ?.density ?? active.density)
@@ -3299,7 +3306,7 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
           if (column.role === 'title') {
             const title = text ?? record.recordId.slice(0, 8);
             const href = input.detailHref(record);
-            return `<td ${label}>${href ? `<a class="record-link" href="${escapeHtml(href)}" aria-label="Open ${escapeHtml(input.recordLabel)} ${escapeHtml(title)}">${escapeHtml(title)}</a>` : escapeHtml(title)}${record.archived ? ' <span class="status-pill" data-status-role="attention">Archived</span>' : ''}${judged?.row ? tonePill(judged.row) : ''}${pill}</td>`;
+            return `<td ${label}>${clipped(column, href ? `<a class="record-link" href="${escapeHtml(href)}" aria-label="Open ${escapeHtml(input.recordLabel)} ${escapeHtml(title)}">${escapeHtml(title)}</a>` : escapeHtml(title))}${record.archived ? ' <span class="status-pill" data-status-role="attention">Archived</span>' : ''}${judged?.row ? tonePill(judged.row) : ''}${pill}</td>`;
           }
           if (column.role === 'status') {
             const role = declaredStatusRole(column, record);
@@ -3309,7 +3316,7 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
             const recordId = record.relationLabels?.[column.field]?.recordId;
             if (recordId) {
               const href = `/?${declaredListParameters(state, base, { page: 1, referenceScope: { relationId: column.field, recordId } })}`;
-              return `<td ${label}><a href="${escapeHtml(href)}" aria-label="${escapeHtml(`Filter by ${column.label} ${text}`)}">${escapeHtml(text)}</a>${pill}</td>`;
+              return `<td ${label}>${clipped(column, `<a href="${escapeHtml(href)}" aria-label="${escapeHtml(`Filter by ${column.label} ${text}`)}">${escapeHtml(text)}</a>`)}${pill}</td>`;
             }
           }
           // A declared overdue date reads "N days late" when the row meets its
@@ -3318,7 +3325,7 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
           // A holding tone rule follows -- among them what the row is short
           // of now, which the List's supply declares (SUPPLY-WARNINGS).
 
-          return `<td ${label}>${text === null ? '<span class="muted">—</span>' : escapeHtml(text)}${late === null ? '' : ` <span class="status-pill" data-status-role="attention" data-overdue-days="${String(late)}">${escapeHtml(`${String(late)} ${late === 1 ? 'day' : 'days'} late`)}</span>`}${pill}</td>`;
+          return `<td ${label}>${text === null ? '<span class="muted">—</span>' : clipped(column, escapeHtml(text))}${late === null ? '' : ` <span class="status-pill" data-status-role="attention" data-overdue-days="${String(late)}">${escapeHtml(`${String(late)} ${late === 1 ? 'day' : 'days'} late`)}</span>`}${pill}</td>`;
         })
         .join('');
       const title =

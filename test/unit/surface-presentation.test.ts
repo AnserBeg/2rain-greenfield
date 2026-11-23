@@ -18,6 +18,8 @@ import {
 } from '../../packages/canonical-model/src/index.js';
 import { PROJECTION_FAMILY_IDS } from '../../packages/compiler/src/index.js';
 import * as customization from '../../packages/customization/src/index.js';
+import { DRAFTER_KINDS } from '../../packages/customization/src/ai-draft-kinds.js';
+import { renderDeclaredList } from '../../apps/web/src/component-registry.js';
 import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { presentationDeclarationProblem } from '../../packages/postgres-provider/src/presentation-admission.js';
 import { projectionPayload } from '../compiler/helpers.js';
@@ -430,5 +432,368 @@ test('a declared presentation compiles at reader rung 49 and admission refuses a
   assert.match(
     presentationDeclarationProblem(definition, tampered) ?? '',
     /differs/u,
+  );
+});
+
+// ---- UI-CUSTOM-1 slice 1 fix round (Fable review D1-D5, R2) ----
+
+const tonesOn = (definition: Json, surfaceId = stockList) => {
+  const model = normalizeApplicationPackage(definition) as unknown as {
+    surfaces: Json[];
+  };
+  return evaluableTones(
+    compilePresentationFn(
+      model as never,
+      model.surfaces.find((s) => s.surfaceId === surfaceId)!,
+    ),
+  );
+};
+const band = (reason: string, tone: string, below: string) => ({
+  target: 'cell',
+  fieldId: stock('on_hand'),
+  operator: 'lessThan',
+  compareTo: { value: below },
+  tone,
+  reason,
+});
+const sandboxSteps = async (chain: unknown[]) => {
+  const compiled = await customization.compileInSandbox({
+    acknowledgement,
+    base: authored,
+    chain: chain.map(patch),
+    tip: customization.serializeRelease(tip),
+  });
+  assert.ok(compiled.status === 'compiled', JSON.stringify(compiled));
+  return compiled.steps;
+};
+const lastLines = async (chain: unknown[]) =>
+  (await sandboxSteps(chain)).at(-1)!.rendered.lines.join('\n');
+const escaped = (text: string) =>
+  text.replaceAll(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+
+test('an edited rule keeps its place, so earlier rules still win, and the approval diff shows each rule in order with its condition', async () => {
+  const v1 = member(base, {
+    kind: 'addPresentationRevision',
+    surface: stockList,
+    tones: [
+      band('Low stock', 'blocked', '5'),
+      band('Reorder soon', 'attention', '20'),
+    ],
+  });
+  const first = applied(base, [v1]);
+  const toneAt = (definition: Json, onHand: string) =>
+    presentRow(tonesOn(definition), { [stock('on_hand')]: onHand }).cells.get(
+      stock('on_hand'),
+    )?.reason;
+  assert.equal(toneAt(first, '2'), 'Low stock');
+  // Redraft only the red threshold: the rule is replaced where it stands.
+  const v2 = member(first, {
+    kind: 'addPresentationRevision',
+    surface: stockList,
+    tones: [band('Low stock', 'blocked', '6')],
+  });
+  assert.deepEqual(
+    v2.toneRules.map((rule) => rule.reason.text),
+    ['Low stock', 'Reorder soon'],
+  );
+  const second = applied(first, [v2]);
+  assert.equal(toneAt(second, '2'), 'Low stock');
+  assert.equal(toneAt(second, '5'), 'Low stock');
+  assert.equal(toneAt(second, '12'), 'Reorder soon');
+  // A new rule goes last.
+  const v3 = member(second, {
+    kind: 'addPresentationRevision',
+    surface: stockList,
+    tones: [band('Out', 'blocked', '1')],
+  });
+  assert.deepEqual(
+    v3.toneRules.map((rule) => rule.reason.text),
+    ['Low stock', 'Reorder soon', 'Out'],
+  );
+  // The drafter is told that earlier rules win.
+  assert.match(
+    DRAFTER_KINDS.addPresentationRevision.guidance,
+    /earliest rule that holds wins/u,
+  );
+  const lines = await lastLines([stockItem, v1, v2]);
+  assert.match(
+    lines,
+    /rule 1 of 2: show "Low stock" as blocked on the On hand cell when On hand is below "6"\. An earlier rule that holds wins\./u,
+  );
+  assert.match(
+    lines,
+    /rule 2 of 2: show "Reorder soon" as attention on the On hand cell when On hand is below "20"/u,
+  );
+});
+
+test('a yes/no value is only yes or no: true, yes, false and no bind, anything else is refused by name', () => {
+  const clinic = applied(authored, [
+    {
+      kind: 'addRecordType',
+      label: 'Referral',
+      companyOwnership: 'entityOwned',
+      fields: [
+        { label: 'Patient', type: 'text', required: true },
+        { label: 'Urgent', type: 'yesNo' },
+      ],
+    },
+  ]);
+  const surface = `${ns}:surface.custom_referral_list`;
+  const urgent = `${ns}:field.custom_referral_urgent`;
+  const draft = (value: string) => ({
+    kind: 'addPresentationRevision',
+    surface,
+    tones: [
+      {
+        target: 'row',
+        fieldId: urgent,
+        operator: 'equal',
+        compareTo: { value },
+        tone: 'attention',
+        reason: 'Urgent',
+      },
+    ],
+  });
+  const bound = (value: string) =>
+    (
+      member(clinic, draft(value)).toneRules[0]!.when as {
+        right: { scalar: { value: unknown } };
+      }
+    ).right.scalar.value;
+  assert.equal(bound('true'), true);
+  assert.equal(bound('Yes'), true);
+  assert.equal(bound('false'), false);
+  assert.equal(bound('no'), false);
+  for (const value of ['checked', '1', 'on'])
+    assert.throws(
+      () => member(clinic, draft(value)),
+      new RegExp(`Give Urgent yes or no .*not "${value}"`, 'u'),
+    );
+});
+
+test('a retired presentation is followed by a new one, and a stale or repeated retire is refused', () => {
+  const first = member(base, lowStock());
+  let defn = applied(base, [first]);
+  const retired = member(defn, {
+    kind: 'addPresentationRevision',
+    surface: stockList,
+    retire: true,
+  });
+  defn = applied(defn, [retired]);
+  assert.throws(
+    () =>
+      member(defn, {
+        kind: 'addPresentationRevision',
+        surface: stockList,
+        retire: true,
+      }),
+    /no presentation to retire/u,
+  );
+  const again = member(defn, lowStock());
+  assert.equal(again.status, 'active');
+  assert.equal(again.predecessor, retired.revisionId);
+  const stale = customization.applyCustomizationPatches(defn, [
+    patch({ ...again, predecessor: null }),
+  ]);
+  assert.equal(stale.status, 'refused');
+  defn = applied(defn, [again]);
+  assert.equal(
+    presentRow(tonesOn(defn), {
+      [stock('on_hand')]: '2',
+      [stock('reorder_point')]: '5',
+    }).row?.reason,
+    'Reorder',
+  );
+});
+
+test('after a toned or sized column is hidden, the next revision drops the entries that no longer bind and the diff names them', async () => {
+  const v1 = member(base, {
+    kind: 'addPresentationRevision',
+    surface: stockList,
+    tones: [
+      {
+        target: 'cell',
+        fieldId: stock('on_hand'),
+        operator: 'lessThan',
+        compareTo: { fieldId: stock('reorder_point') },
+        tone: 'blocked',
+        reason: 'Low stock',
+      },
+    ],
+    columns: [{ fieldId: stock('reorder_point'), width: 'narrow' }],
+  });
+  const first = applied(base, [v1]);
+  const density = {
+    kind: 'addPresentationRevision',
+    surface: stockList,
+    density: 'compact',
+  };
+  // The toned column is hidden: the rule is dropped, the size kept.
+  const hideToned = {
+    kind: 'arrangeLayout',
+    surface: stockList,
+    hide: [stock('on_hand')],
+  };
+  const toned = applied(first, [hideToned]);
+  const afterToned = member(toned, density);
+  assert.deepEqual(afterToned.toneRules, []);
+  assert.deepEqual(
+    afterToned.sizing.map(
+      (entry) => entry.kind === 'listColumn' && entry.fieldId,
+    ),
+    [stock('reorder_point')],
+  );
+  applied(toned, [afterToned]);
+  // The sized column is hidden: the size is dropped.
+  const hideSized = {
+    kind: 'arrangeLayout',
+    surface: stockList,
+    hide: [stock('reorder_point')],
+  };
+  const sized = applied(first, [hideSized]);
+  const afterSized = member(sized, density);
+  assert.deepEqual(afterSized.sizing, []);
+  applied(sized, [afterSized]);
+  const lines = await lastLines([stockItem, v1, hideSized, afterSized]);
+  assert.match(
+    lines,
+    new RegExp(
+      `stop sizing column Reorder point \\(${escaped(stock('reorder_point'))}\\)`,
+      'u',
+    ),
+  );
+  assert.match(lines, /use compact density/u);
+  const tonedLines = await lastLines([stockItem, v1, hideToned, afterToned]);
+  assert.match(tonedLines, /remove the colour rule "Low stock"/u);
+});
+
+test('presentation applies to a protected first-party list, where layout stays refused (orchestrator ruling on R2)', () => {
+  const invoices = `${ns}:surface.customer_invoice_list`;
+  const target = targetsOf(authored).find((t) => t.surfaceId === invoices);
+  assert.ok(target, 'the invoice list is offered for presentation');
+  const column = target.columns[0]!.fieldId;
+  const arranged = customization.applyCustomizationPatches(authored, [
+    patch({
+      kind: 'arrangeLayout',
+      surface: invoices,
+      relabel: [{ field: column, label: 'Renamed' }],
+    }),
+  ]);
+  assert.equal(arranged.status, 'refused');
+  assert.match(
+    JSON.stringify(arranged),
+    /CUSTOMIZE_TARGET_IN_TIER_B_DEPENDENCY_SET/u,
+  );
+  const operand = target.operands.find(
+    (o) => target.columns.some((c) => c.fieldId === o.fieldId) && !o.options,
+  )!;
+  assert.ok(operand, 'the invoice list shows a value a rule can read');
+  const presented = customization.applyCustomizationPatches(authored, [
+    patch(
+      member(authored, {
+        kind: 'addPresentationRevision',
+        surface: invoices,
+        tones: [
+          {
+            target: 'row',
+            fieldId: operand.fieldId,
+            operator: 'equal',
+            compareTo: { fieldId: operand.fieldId },
+            tone: 'attention',
+            reason: 'Check',
+          },
+        ],
+        columns: [{ fieldId: column, width: 'narrow' }],
+        density: 'compact',
+      }),
+    ),
+  ]);
+  assert.equal(presented.status, 'applied', JSON.stringify(presented));
+});
+
+test('a clipped column clips its text, never the cell: the row and cell tone pills sit outside the clip', async () => {
+  const revision = member(base, lowStock());
+  assert.ok(
+    revision.sizing.some(
+      (entry) =>
+        entry.kind === 'listColumn' &&
+        entry.fieldId === stock('name') &&
+        entry.overflow === 'truncate',
+    ),
+  );
+  const onHandClip = member(applied(base, [revision]), {
+    kind: 'addPresentationRevision',
+    surface: stockList,
+    columns: [
+      { fieldId: stock('on_hand'), width: 'narrow', overflow: 'truncate' },
+    ],
+  });
+  const steps = await sandboxSteps([stockItem, revision, onHandClip]);
+  const release = customization.parseSerializedRelease(steps.at(-1)!.release);
+  const manifest = projectionPayload(
+    release.compiled,
+    PROJECTION_FAMILY_IDS.surfaceManifest,
+  ) as { surfaces: Json[] };
+  const surface = manifest.surfaces.find((s) => s.surfaceId === stockList)!;
+  const title = 'Hex bolt M12 x 80 zinc plated grade 8.8 box of 200';
+  const html = renderDeclaredList({
+    base: new URLSearchParams(),
+    presentation: surface.presentation as CompiledPresentation,
+    coverage: {
+      schemaVersion: 'v1',
+      totalCount: 1,
+      returnedCount: 1,
+      effectivePageSize: 25,
+      pageOffset: 0,
+    } as never,
+    detailHref: () => '/?surface=detail',
+    exportLimit: null,
+    list: surface.list as never,
+    now: new Date('2026-11-22T12:00:00Z'),
+    present: (_record, _fieldId, value) =>
+      value === null || value === undefined ? '' : String(value),
+    progressWithheld: null,
+    supplyWithheld: null,
+    recordLabel: 'Stock item',
+    records: [
+      {
+        recordId: '00000000-0000-4000-8000-000000000001',
+        archived: false,
+        values: {
+          [stock('name')]: title,
+          [stock('on_hand')]: '2',
+          [stock('reorder_point')]: '5',
+        },
+      } as never,
+    ],
+    rowActionHref: () => null,
+    selectionCell: null,
+    state: {
+      filterValues: {},
+      includeArchived: false,
+      page: 1,
+      search: '',
+      sort: [],
+      sortIsExplicit: false,
+      viewId: null,
+    },
+  });
+  const cell = (label: string) =>
+    new RegExp(
+      `<td data-column-label="${escaped(label)}"[^>]*data-column-wrap="clip"[^>]*>([\\s\\S]*?)</td>`,
+      'u',
+    ).exec(html)?.[1];
+  const titleCell = cell('Name');
+  assert.ok(titleCell, html);
+  // The title link sits in the clip span; the row's word follows it, outside.
+  assert.match(
+    titleCell,
+    /^<span class="cell-clip"><a class="record-link"[^>]*>Hex bolt[^<]*<\/a><\/span> <span class="status-pill" data-status-role="attention" data-tone-rule="[^"]+">Reorder<\/span>$/u,
+  );
+  const onHandCell = cell('On hand');
+  assert.ok(onHandCell, html);
+  assert.match(
+    onHandCell,
+    /^<span class="cell-clip">2<\/span> <span class="status-pill" data-status-role="blocked" data-tone-rule="[^"]+">Low stock<\/span>$/u,
   );
 });

@@ -1293,3 +1293,58 @@ test('a refused report redacts protected evidence on either side, its issue and 
     historical.report.findings.every((f) => f.subject === 'Restricted field'),
   );
 });
+
+test('a superseded presentation revision is replayed by identity only, so a value only it read never refuses an upgrade', () => {
+  const nameField = id('field.custom_equipment_name');
+  // v2 replaces every rule of v1 and no longer reads the status.
+  const v2 = customization.presentationMember(
+    customization
+      .customizationTargets(
+        normalizeApplicationPackage(applied(extended, [equipmentPresentation])),
+      )
+      .presentation!.filter((t) => t.surfaceId === equipmentList),
+    {
+      kind: 'addPresentationRevision',
+      surface: equipmentList,
+      replaceCurrent: true,
+      tones: [
+        {
+          target: 'row',
+          fieldId: nameField,
+          operator: 'equal',
+          compareTo: { value: 'Spare' },
+          tone: 'attention',
+          reason: 'Spare',
+        },
+      ],
+    },
+  );
+  assert.ok(!JSON.stringify(v2).includes(reportOperand));
+  const replayed = replayCustomizationPatches(
+    missingReportOperand,
+    [patch(equipmentPresentation), patch(v2)],
+    [
+      { parent: extended, differentBase: true, patchId: 'v1' },
+      { differentBase: true, patchId: 'v2' },
+    ],
+  );
+  assert.equal(
+    replayed.status,
+    'applied',
+    JSON.stringify(replayed.status === 'applied' ? null : replayed),
+  );
+  // Control: the latest revision is still checked in full and names the ID.
+  const latest = replayCustomizationPatches(
+    missingReportOperand,
+    [patch(equipmentPresentation)],
+    [{ parent: extended, differentBase: true, patchId: 'v1' }],
+  );
+  assert.equal(latest.status, 'replayConflict');
+  assert.ok(
+    latest.status === 'replayConflict' &&
+      latest.findings.some(
+        (f) => f.code === 'RETIRED_TARGET' && f.subject === reportOperand,
+      ),
+    JSON.stringify(latest),
+  );
+});

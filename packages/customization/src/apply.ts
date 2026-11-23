@@ -237,7 +237,11 @@ export function applyOne(
   board: { check: BoardCheck; problem?: BoardApplyProblem | undefined } = {
     check: 'authoring',
   },
-  reportIdentityOnly = false,
+  /**
+   * Upgrade replay of a superseded Report or presentation revision: checked by
+   * identity only, as Board's superseded revisions are (rule 10).
+   */
+  identityOnly = false,
 ): Outcome | null {
   switch (patch.kind) {
     case 'addDateTimeField':
@@ -294,7 +298,7 @@ export function applyOne(
       const problem = applyReportRevision(
         authored as unknown as ReportCatalogSource & { surfaces: Json[] },
         patch,
-        reportIdentityOnly,
+        identityOnly,
       );
       return problem ? refusal('CUSTOMIZE_REPORT_CONFLICT', problem) : null;
     }
@@ -313,10 +317,11 @@ export function applyOne(
         { revisionId: string; status: string } | undefined;
       const stalePresentation =
         (prior?.revisionId ?? null) !== patch.predecessor;
+      // A retired presentation is followed by a new one (a list has only one
+      // presentation); only retiring what is not active is refused.
       if (
         stalePresentation ||
-        prior?.status === 'retired' ||
-        (!prior && patch.status === 'retired') ||
+        (prior?.status !== 'active' && patch.status === 'retired') ||
         previous.some(
           (p) => p.kind === kind && p.revisionId === patch.revisionId,
         )
@@ -325,6 +330,9 @@ export function applyOne(
           'The presentation revision is stale or its ID is already in use.',
         );
       surface.presentation = revision;
+      // A superseded revision is replayed by identity only; its successor,
+      // checked in full, replaces it.
+      if (identityOnly) return null;
       try {
         // The authoring gates run here, on the authoring base only.
         const model = normalizeApplicationPackage(authored) as unknown as {

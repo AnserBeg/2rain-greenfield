@@ -12,6 +12,7 @@ import {
 } from '../../canonical-model/src/surface-presentation-schema.js';
 import {
   bindToneCondition,
+  compilePresentation,
   presentationOperands,
   PresentationProblem,
   type PresentationOperand,
@@ -43,6 +44,12 @@ export interface PresentationTarget {
   /** The current revision, the predecessor of the next one. */
   readonly revisionId: string | null;
   readonly current: SurfacePresentationRevision | null;
+  /**
+   * IDs of current rules, sized columns and view densities that no longer
+   * bind on this base (a hidden column, a removed field or view). The next
+   * revision drops them and the approval diff names each one.
+   */
+  readonly inert: readonly string[];
   readonly operands: readonly PresentationOperand[];
   readonly columns: readonly {
     readonly fieldId: string;
@@ -72,12 +79,22 @@ export function presentationTargets(
       return [];
     const current =
       (surface.presentation as SurfacePresentationRevision | undefined) ?? null;
+    let inert: string[] = [];
+    if (current?.status === 'active')
+      try {
+        inert = (compilePresentation(def, surface).inert ?? []).map(
+          (entry) => entry.id,
+        );
+      } catch (error) {
+        if (!(error instanceof PresentationProblem)) throw error;
+      }
     return [
       {
         surfaceId: String(surface.surfaceId),
         label: String(surface.label),
         revisionId: current?.revisionId ?? null,
         current,
+        inert,
         operands: presentationOperands(def, surface),
         columns: list.columns.map((c) => ({
           fieldId: c.field,
@@ -179,8 +196,16 @@ function literal(operand: PresentationOperand, raw: string): ValidationScalar {
       if (!/^-?(?:0|[1-9]\d*)$/u.test(raw.trim()))
         throw new Error(`Give ${operand.label} a whole number.`);
       return { kind: 'integer', value: raw.trim() };
-    case 'boolean':
-      return { kind: 'boolean', value: /^(?:true|yes)$/iu.test(raw.trim()) };
+    case 'boolean': {
+      const word = raw.trim().toLowerCase();
+      if (word === 'true' || word === 'yes')
+        return { kind: 'boolean', value: true };
+      if (word === 'false' || word === 'no')
+        return { kind: 'boolean', value: false };
+      throw new Error(
+        `Give ${operand.label} yes or no (true, yes, false or no), not "${raw.trim()}".`,
+      );
+    }
     case 'date':
       return { kind: 'date', value: raw.trim() };
     default:
@@ -197,10 +222,22 @@ export function presentationMember(
   const target = targets.find((t) => t.surfaceId === draft.surface);
   if (!target) throw new Error('Choose a listed list surface.');
   const namespace = target.surfaceId.split(':')[0]!;
-  const current =
+  const active =
     draft.replaceCurrent || target.current?.status !== 'active'
       ? null
       : target.current;
+  // An entry that no longer binds on this base (its column hidden, its field
+  // or view removed) is dropped, never carried into the strict gates; the
+  // approval diff names each dropped entry.
+  const binds = (id: string) => !target.inert.includes(id);
+  const current = active && {
+    ...active,
+    toneRules: active.toneRules.filter((rule) => binds(rule.ruleId)),
+    sizing: active.sizing.filter((entry) =>
+      binds(entry.kind === 'listColumn' ? entry.fieldId : entry.kind),
+    ),
+    viewDensity: active.viewDensity.filter((view) => binds(view.viewId)),
+  };
   const operand = (fieldId: string) => {
     const found = target.operands.find((o) => o.fieldId === fieldId);
     if (!found)
@@ -282,22 +319,35 @@ export function presentationMember(
     revisionId: randomUUID(),
     predecessor: target.revisionId,
     status: draft.retire ? 'retired' : 'active',
+    // Earlier rules win, so an edited rule keeps its place and only a new
+    // rule ID is appended: redrafting one threshold never reorders the bands.
     toneRules: [
-      ...(current?.toneRules ?? []).filter(
-        (rule) =>
-          !toneRules.some((next) => next.ruleId === rule.ruleId) &&
-          !(draft.remove ?? []).some(
-            (reason) => reason.toLowerCase() === rule.reason.text.toLowerCase(),
+      ...(current?.toneRules ?? [])
+        .filter(
+          (rule) =>
+            !(draft.remove ?? []).some(
+              (reason) =>
+                reason.toLowerCase() === rule.reason.text.toLowerCase(),
+            ),
+        )
+        .map(
+          (rule) =>
+            toneRules.find((next) => next.ruleId === rule.ruleId) ?? rule,
+        ),
+      ...toneRules.filter(
+        (next) =>
+          !(current?.toneRules ?? []).some(
+            (rule) => rule.ruleId === next.ruleId,
           ),
       ),
-      ...toneRules,
     ],
     sizing,
     density: draft.density ?? current?.density ?? null,
     viewDensity: current?.viewDensity ?? [],
   };
   if (draft.retire) {
-    if (!target.current) throw new Error('There is no presentation to retire.');
+    if (target.current?.status !== 'active')
+      throw new Error('There is no presentation to retire.');
     return {
       ...target.current,
       kind: 'addPresentationRevision',
@@ -309,6 +359,33 @@ export function presentationMember(
   for (const rule of patch.toneRules)
     bindToneCondition(target.operands, rule.ruleId, rule.when);
   return PresentationRevisionPatchSchema.parse(patch);
+}
+
+/**
+ * Presentation revisions a later revision of the same list replaces in the
+ * chain: upgrade replay checks these by identity only (rule 10), as Board and
+ * Report do, so a value only a superseded revision read never refuses an
+ * upgrade.
+ */
+export function supersededPresentations(
+  chain: readonly { kind: string; patches?: readonly unknown[] }[],
+): Set<string> {
+  const latest = new Map<string, string>();
+  const superseded = new Set<string>();
+  for (const change of chain)
+    for (const item of (change.kind === 'changeSet'
+      ? change.patches!
+      : [change]) as {
+      kind: string;
+      surface?: string;
+      revisionId?: string;
+    }[]) {
+      if (item.kind !== 'addPresentationRevision') continue;
+      const previous = latest.get(item.surface!);
+      if (previous) superseded.add(previous);
+      latest.set(item.surface!, item.revisionId!);
+    }
+  return superseded;
 }
 
 /**

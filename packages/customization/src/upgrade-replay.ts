@@ -1,4 +1,7 @@
-import { presentationReplayProblem } from './presentation-revision.js';
+import {
+  presentationReplayProblem,
+  supersededPresentations,
+} from './presentation-revision.js';
 import { supersededReports } from './report-revision.js';
 import {
   boundPopupOption,
@@ -403,6 +406,7 @@ export function replayCustomizationPatches(
   const historical: SingleCustomizationPatch[] = [];
   const superseded = supersededBoardRevisions(chain);
   const pastReports = supersededReports(chain);
+  const pastPresentations = supersededPresentations(chain);
   for (const [patchIndex, change] of chain.entries()) {
     const origin = origins[patchIndex];
     if (origin?.parent) original = structuredClone(origin.parent);
@@ -495,10 +499,20 @@ export function replayCustomizationPatches(
                 problem: undefined as BoardApplyProblem | undefined,
               }
             : undefined;
-        const reportIdentityOnly =
-          patch.kind === 'addReportRevision' &&
-          pastReports.has(patch.revisionId);
-        if (before && !layout && !board && patch.kind !== 'addReportRevision')
+        // A superseded Report or presentation revision is checked by
+        // identity only; the last revision of each is checked in full.
+        const identityOnly =
+          (patch.kind === 'addReportRevision' &&
+            pastReports.has(patch.revisionId)) ||
+          (patch.kind === 'addPresentationRevision' &&
+            pastPresentations.has(patch.revisionId));
+        if (
+          before &&
+          !layout &&
+          !board &&
+          patch.kind !== 'addReportRevision' &&
+          !identityOnly
+        )
           conflicts.push(...bindings(patch, before, target));
         if (patch.kind === 'addMapPlacement' && !conflicts.length) {
           const surface = target.get(patch.surfaceId);
@@ -544,7 +558,7 @@ export function replayCustomizationPatches(
             applied,
             layout,
             board,
-            reportIdentityOnly,
+            identityOnly,
           );
           if (outcome) {
             if (board?.problem?.conflicts.length)

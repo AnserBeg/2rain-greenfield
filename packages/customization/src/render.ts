@@ -18,6 +18,10 @@ import type {
   DocumentTemplateRevision,
 } from '../../canonical-model/src/document-template-schema.js';
 import type { WorkflowDefinition } from '../../canonical-model/src/schemas.js';
+import type {
+  ValidationOperand,
+  ValidationPredicate,
+} from '../../canonical-model/src/formula-validation.js';
 import type { ReleaseDiffEnvelope } from '@north-star/compiler';
 
 /**
@@ -454,51 +458,69 @@ export function renderReleaseDiff(input: {
     if (!before || !after) continue;
     const beforeMetrics = ((before.launcher as Json | undefined)?.metrics ??
       []) as Json[];
-    const presented = after.presentation as
-      | {
-          revisionId: string;
-          status: string;
-          toneRules: {
-            tone: string;
-            reason: { text: string };
-            target: { kind: string };
-          }[];
-          sizing: { kind: string; fieldId?: string; width?: string }[];
-          density: string | null;
-        }
-      | undefined;
-    if (
-      presented &&
-      (before.presentation as { revisionId?: string } | undefined)
-        ?.revisionId !== presented.revisionId
-    ) {
-      if (presented.status === 'retired')
-        lines.push(
-          `On ${String(after.label)}, retire the colour rules and sizing.`,
+    type Presented = {
+      revisionId: string;
+      status: string;
+      toneRules: {
+        ruleId: string;
+        tone: string;
+        reason: { text: string };
+        target: { kind: string; fieldId?: string };
+        when: ValidationPredicate;
+      }[];
+      sizing: { kind: string; fieldId?: string; width?: string }[];
+      density: string | null;
+      viewDensity?: { viewId: string; density: string }[];
+    };
+    const presented = after.presentation as Presented | undefined;
+    const prior = before.presentation as Presented | undefined;
+    if (presented && prior?.revisionId !== presented.revisionId) {
+      const on = `On ${String(after.label)}`;
+      const label = (fieldId: string) =>
+        String(
+          to.fields.find((entry) => entry.fieldId === fieldId)?.label ??
+            fieldId,
         );
+      if (presented.status === 'retired')
+        lines.push(`${on}, retire the colour rules and sizing.`);
       else {
+        const was = prior?.status === 'active' ? prior : undefined;
         const kept = new Set(presented.toneRules.map((r) => r.reason.text));
-        for (const prior of (
-          before.presentation as
-            { toneRules?: { reason: { text: string } }[] } | undefined
-        )?.toneRules ?? [])
-          if (!kept.has(prior.reason.text))
-            lines.push(
-              `On ${String(after.label)}, remove the colour rule "${prior.reason.text}".`,
-            );
-        for (const rule of presented.toneRules)
+        for (const rule of was?.toneRules ?? [])
+          if (!kept.has(rule.reason.text))
+            lines.push(`${on}, remove the colour rule "${rule.reason.text}".`);
+        // Rules are judged in order and the first that holds wins, so the
+        // diff shows each rule's place and its condition.
+        const count = presented.toneRules.length;
+        for (const [index, rule] of presented.toneRules.entries())
           lines.push(
-            `On ${String(after.label)}, show "${rule.reason.text}" as ${rule.tone} on the ${rule.target.kind === 'listRow' ? 'whole row' : 'cell'} when its condition holds.`,
+            `${on}, rule ${String(index + 1)} of ${String(count)}: show "${rule.reason.text}" as ${rule.tone} on the ${rule.target.kind === 'listRow' ? 'whole row' : `${label(String(rule.target.fieldId))} cell`} when ${describeCondition(rule.when, label)}. An earlier rule that holds wins.`,
           );
+        const sized = new Set(
+          presented.sizing.flatMap((entry) =>
+            entry.kind === 'listColumn' ? [String(entry.fieldId)] : [],
+          ),
+        );
+        for (const entry of was?.sizing ?? [])
+          if (entry.kind === 'listColumn' && !sized.has(String(entry.fieldId)))
+            lines.push(
+              `${on}, stop sizing column ${label(String(entry.fieldId))} (${String(entry.fieldId)}).`,
+            );
         for (const entry of presented.sizing)
           if (entry.kind === 'listColumn')
             lines.push(
-              `On ${String(after.label)}, make column ${String(entry.fieldId)} ${String(entry.width)}.`,
+              `${on}, make column ${label(String(entry.fieldId))} ${String(entry.width)}.`,
+            );
+        const views = new Set(
+          (presented.viewDensity ?? []).map((view) => view.viewId),
+        );
+        for (const view of was?.viewDensity ?? [])
+          if (!views.has(view.viewId))
+            lines.push(
+              `${on}, stop setting the density of view ${view.viewId}.`,
             );
         if (presented.density)
-          lines.push(
-            `On ${String(after.label)}, use ${presented.density} density.`,
-          );
+          lines.push(`${on}, use ${presented.density} density.`);
       }
     }
     for (const revision of (after.popupActions ?? []) as PopupRevision[]) {
@@ -755,4 +777,39 @@ function humanKind(kind: string): string {
   return kind
     .replace(/Definition$/u, '')
     .replace(/[A-Z]/gu, (c) => ` ${c.toLowerCase()}`);
+}
+
+const COMPARISON_WORDS: Record<string, string> = {
+  equal: 'is',
+  notEqual: 'is not',
+  lessThan: 'is below',
+  lessThanOrEqual: 'is at most',
+  greaterThan: 'is above',
+  greaterThanOrEqual: 'is at least',
+};
+
+/** A tone rule's condition in words, for the approval diff (any kernel shape). */
+function describeCondition(
+  when: ValidationPredicate,
+  label: (fieldId: string) => string,
+): string {
+  const operand = (o: ValidationOperand): string =>
+    o.kind === 'literal'
+      ? JSON.stringify(o.scalar.value)
+      : o.kind === 'field'
+        ? `${label(o.fieldId)}${o.select === 'textLength' ? ' length' : ''}`
+        : `${o.relationIds.join(' > ')} > ${label(o.fieldId)}`;
+  switch (when.kind) {
+    case 'comparison':
+      return `${operand(when.left)} ${COMPARISON_WORDS[when.operator] ?? when.operator} ${operand(when.right)}`;
+    case 'required':
+      return `${operand(when.operand)} has a value`;
+    case 'not':
+      return `not (${describeCondition(when.term, label)})`;
+    case 'all':
+    case 'any':
+      return when.terms
+        .map((term) => `(${describeCondition(term, label)})`)
+        .join(when.kind === 'all' ? ' and ' : ' or ');
+  }
 }
