@@ -9,6 +9,7 @@ import {
 import { draftPatchFromRequest } from '../../packages/customization/src/ai-draft.js';
 import { draftRecordTemplateContent } from '../../packages/customization/src/record-template-content-draft.js';
 import { draftTemplateBinding } from '../../packages/customization/src/record-template-binding.js';
+import { literalValidationDraft } from '../../packages/customization/src/validation-draft.js';
 import type { RecordTemplateContent } from '../../packages/canonical-model/src/record-template-content.js';
 import type { RequestRuntimeView } from '../../packages/runtime/src/request-runtime-view.js';
 import { raceFirstAssignmentWithRetirement } from './record-template-locks.js';
@@ -841,7 +842,8 @@ export async function exerciseTemplateLibrary(
         );
         // A real second-company instance: a record created in company B from
         // B's assigned revision, so the company checks below guard B's data.
-        const secondParent = crossed();
+        // The header type pins company A; this parent is company B by design.
+        const secondParent = crossed() as unknown as typeof header;
         const secondKey = randomUUID();
         await prepare(secondKey, secondParent);
         assert.equal(
@@ -1016,12 +1018,37 @@ export async function exerciseTemplateLibrary(
     first[0]!.open();
     await Promise.race([declared.opened, Promise.all(runs)]);
     assert.equal(bindings.length, kinds.length);
+    // The declaring release also carries a validation rule (Fable finding 1):
+    // it must compile and activate, the rule must still refuse a bad write,
+    // and phase 2's template creates must still apply under it.
+    const price = ns + 'field.item_price_cad';
+    const ruleMessage = 'Enter a price of at least $10.';
+    const validation = literalValidationDraft(
+      (await opened.service.targets()).validationTargets!.find(
+        (t) => t.entityId === ns + 'entity.item',
+      )!,
+      { fieldId: price, check: 'minimum', limit: '10', message: ruleMessage },
+    );
     await exercisePrecedingReader({
       ...reader!,
-      declare: () => activate({ kind: 'changeSet', patches: bindings }),
+      declare: () =>
+        activate({ kind: 'changeSet', patches: [...bindings, validation] }),
     });
     second[0]!.open();
     await Promise.all(runs);
+    await assert.rejects(
+      world.invoke('item_create', {
+        recordId: randomUUID(),
+        relations: {},
+        values: {
+          [ns + 'field.item_name']: 'Below the floor',
+          [price]: '1',
+          [ns + 'field.item_sku']: 'TPL-RULE',
+          [ns + 'field.item_base_unit']: 'EA',
+        },
+      }),
+      { code: 'MODULE_VALIDATION_REFUSED', message: ruleMessage },
+    );
     assert.equal(
       (
         await pool.query(
