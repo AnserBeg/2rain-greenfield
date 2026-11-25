@@ -1,6 +1,6 @@
 # AI-UNDO-1 — the assistant asks before putting a customer on or off credit hold
 
-Status: slice 1 of the AI-UNDO-1 charter (AI review, 2026-11-22, findings A1-A3) built on `packet/AI-UNDO-1-s1`; awaiting the rule 11 check (Fable or Codex sol) and a train. Tier: packet, first-party base change. No migration, grant or reader rung. Stops taken: none.
+Status: slice 1 (`packet/AI-UNDO-1-s1`, tip `3048f69c5`): Fable check MERGE, on main. Slice 2 (`packet/AI-UNDO-1-s2`): declarations, the declaration on cut profile v3 (agent-discovery 5) and routing built; see Slice 2 below. Tier: packet, first-party base change. No migration or grant; slice 2 takes reader rung agent-discovery 5 (v3 releases only). Stops taken: one (slice 2 full run 45264594739 red; orchestrator ruled option 1, profile v3).
 
 ## Claims
 
@@ -10,12 +10,12 @@ Status: slice 1 of the AI-UNDO-1 charter (AI review, 2026-11-22, findings A1-A3)
 
 ## Decisions
 
-- **For orchestrator approval:** the CRITFIX-A auto-run snapshot drops `party_update -> party_credit_hold` (12 -> 11 fields), and the X5 expectation for the hold flips from `reversible` to `needsYes` (charter slice 1 names both).
-- **For orchestrator approval:** the AGENT-5 7 pinned `confirmationRequiredFor` list gains `party_credit_hold` (4 -> 5 ids).
+- **Approved by the orchestrator (2026-11-22):** the CRITFIX-A auto-run snapshot drops `party_update -> party_credit_hold` (12 -> 11 fields), and the X5 expectation for the hold flips from `reversible` to `needsYes` (charter slice 1 names both).
+- **Approved by the orchestrator (2026-11-22):** the AGENT-5 7 pinned `confirmationRequiredFor` list gains `party_credit_hold` (4 -> 5 ids).
 - The hand list in `risk.ts` is left untouched in this slice so the declaration is the only layer that refuses (rule 8 one layer); charter slice 2 deletes the list.
 - Rule 13: no rung. The v6 field schema has accepted `requiresAssistantConfirmation` since `69e29d07f` (AGENT-5, 2026-11-18) and the first-party agent floor is already 2 (the list was non-empty), so an admitted older reader parses the new stored definition and the projection without a new key. The app release lineage advances by one release, as AGENT-5's did.
 - Rules 2 and 3: this slice adds no read and no authority source; the class comes from the stored release declaration.
-- Scope: charter slice 2 (the derived reversibility declaration, no first-party IDs in `risk.ts`, state field from the state machine, the second-application proof) is NOT in this slice; the charter orders it next, as its own merge. Charter slice 0 (the census and evals) has not been built either.
+- Charter slice 0 (census and eval families) moves to AI-RELY-1's next slice (orchestrator, 2026-11-22).
 
 ## General blocks (rule 16)
 
@@ -24,7 +24,7 @@ Status: slice 1 of the AI-UNDO-1 charter (AI review, 2026-11-22, findings A1-A3)
 ## Most general form (rule 17)
 
 - (a) The general thing is a reversibility declaration every operation, field and Customize member carries (`undo`, `inverse`, `reach`, `basis`), derived by the compiler from release facts and readable by any consumer: an autonomy policy, the UI's Undo, workflows that must not fire on an undoable draft, and audit. A gate field is one case of it (`exact, internal`).
-- (b) Unchanged users of this slice: every release, first-party or tenant-built, can mark any field or entity so the assistant asks; no code names the field.
+- (b) Unchanged users: any release definition can mark a field or entity so the assistant asks, and no code names the field. No Customize member can set the key yet, so tenant-built fields cannot be marked; they always ask today (Fable finding 3).
 - (c) Deliberately narrower: this slice reuses the existing, assistant-scoped `requiresAssistantConfirmation` because charter slice 1 is the defect fix only and a new projection key needs its own reader rung. Charter slice 2 builds the general declaration in the agent-discovery projection with a consumer-neutral shape (not assistant-named), and derives the gate case from "another operation, rule or capability reads this field" instead of a mark.
 
 ## Controls
@@ -43,21 +43,34 @@ That run is on the exact code tip `6d651b08`; the record commit on top is docs-o
 - `node --import tsx --test --test-name-pattern='X5|credit hold|auto-run snapshot|AGENT-5 7' test/agent/business-map.test.ts` — hold and release ask; a name edit stays reversible.
 - In the app, ask the assistant to release a customer's credit hold: it shows a card and waits for your yes.
 
-## Filed
+## Slice 2 — capability declarations, the declaration on cut profile v3, unowned types follow it
 
-- Charter slice 2 (derivation and second application) and slice 0 (census, evals) wait for the orchestrator's go-ahead.
+- Rulings (orchestrator, 2026-11-22/23): act at once only with a value inverse AND no undeclared consumer; capabilities declare safe fields at the composition root; the key rides compiler-semantic profile v3, cut but NOT adopted (option 1, reversing "no profile v3" after full run 45264594739 showed an unconditional key breaks ~15 older-reader proofs and customization reproduction); rung = agent-discovery 5.
+- Capability side (`b8df0bb2b`): each capability supplies an `ImmediateEditDeclaration` (`packages/canonical-model/src/reversibility.ts`); first-party modules declare today's eleven (`packages/domain/src/app/immediate-edits.ts`); `risk.ts` and `writeRisk` name no record type, field or state.
+- Emission (`c4a81b05e`, `4f466e143`; on main `d8aad66b3` via `e1e8e83c1`): under v3 the agent-discovery chunk carries the derived declaration, floor 5; v3 is v2 plus that key and nothing else (`compilerSemanticProfileAtLeast` replaces the `=== v2` checks). The runtime reads agent discovery up to 5. The checked-in release is byte-identical to main (floor 2), so no re-pin or re-baseline is owed.
+- Fixed on the way: the dispatch alias carries placeholder preconditions, so the derived declaration had lost every gate and enum lifecycle; it now reads the authored preconditions, and a test pins emitted = derived.
+- Routing (`risk.ts`): an owned type acts at once only on its capability's declared fields, less any a release consumer reads (on a v3 release only: an adopted release carries no declaration, so there the eleven act at once even when a tenant consumer reads them); a type no capability owns acts at once only on fields classed `exact` / `restorePriorValues` / `record`, under the compiled `holdsWhile`; a release without the declaration asks, so today tenant types ask.
+- Consumer rule: every top-level release member not in `PASSIVE_RELEASE_MEMBERS` (workflows, rules, calculated fields, billing plans, documents, connector bindings, any later member) makes the fields it names ask, and a query it names makes every field that query names ask (a workflow reads through its granted queries). Keys inside the passive members are not scanned: reports, boards and presentations (surfaces), bookings (operations) and read models (queries) do not make a field ask.
+- Older reader (rule 13): the head compiled under v3 (`compiledAppViewV3`) is installed fresh; the archived `d8aad66b3` binary answers an item query on its own release and refuses the v3 release with `UNSUPPORTED_RUNTIME_CAPABILITY`, agent-discovery 5 against 4; rows persist byte for byte (`request-runtime-view.test.ts`).
+- Rule 8, each applied after `4f466e143` and restored: emission removed (emission, unowned tests); alias preconditions back (emission, unowned-line); consumer scan narrowed (fail-closed test); routing removed (unowned test); owned consumer tightening removed (consumer-rule test); compiled `holdsWhile` dropped (unowned-line); floor 4 (emission test); key on v2 (check:app-release, golden vectors); v3 drops v2 output (v3 = v2 + key test).
+- Rule 17: (a) one release-derived reversibility class per operation and field, readable by any consumer (autonomy, Undo, workflows, audit); (b) any release unchanged once it compiles under v3, first-party or tenant, a clinic, distributor or rental desk; (c) narrower: v3 is not adopted, so no shipped release carries the key and tenant types ask, while first-party owned fields act at once even when a tenant consumer reads them (PROFILE-V3-ADOPT is a pre-first-tenant blocker; it also owes the older-reader proof on the bytes it records); reports, boards, presentations, bookings and read models are passive (adoption is a later packet, bundled with other floor raises so the ~15 older-reader re-pins happen once); owned masters act only on what their capability declares; creates, archives and transitions ask; Customize members are charter slice 5.
+- Review fix (Fable FIX; `ac6643210`): a query a consumer names (a workflow grant, a billing binding) makes every field it names ask (F1); a parent with a lifecycle but no read-back query holds in no state (F5); tests for a schema-valid workflow, a field without an exact inverse, an unparseable declaration and an explicit v2 compile (F3), each with its rule 8 red. F2 and F6 stay with PROFILE-V3-ADOPT (rule 17c).
+- Also: the census test is registered as a compiler language-coverage producer; the profile-axis tests list v3. `wip/AI-UNDO-1-s2-switch` stays out of every train.
+- Gates (slice 2): local typecheck, lint, unit 527, compiler 200, agent 96, architecture 240, integration 341, check-records, check:language-coverage; PostgreSQL: the older-reader proof alone. CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/45276436860 (fix round 1, tip `6095d5f55`). CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/45553532535 (review fix, tip `32ba2a830`).
+- Owed by PROFILE-V3-ADOPT (Fable targeted check, P3, not blocking): read-model dependencies are not expanded (`namedFields` marks field ids only), so a later consumer that can name a read model must collect its queries; on v3 a template `headerQueryId` or table `queryId` makes every field those queries select ask, not only the printed ones (`sales_order_notes` and `purchase_order_notes` will ask once a template reads the order get query); a no-state condition has no labels, so the card reads "Editing this outside  needs your OK." (`session.ts` :2522-2525).
 
 ```record-claim
 {
-  "schemaVersion": "northstar.record-claim/v1",
-  "packet": "AI-UNDO-1",
-  "base": "37bfd47311c58060000cebca49d5f55174e3874a",
-  "head": "6d651b08ff8e3ac4c7b3e1e51f63455278dbb73c",
+  "schemaVersion": "northstar.record-claim/v1", "packet": "AI-UNDO-1",
+  "base": "e1e8e83c137aa45538a7099e2a4aa1a440128d4e",
+  "head": "ac6643210605045eb06521b05d259c53da908098",
   "changedPaths": [
-    "apps/web/release/app.authored.json",
-    "apps/web/release/app.compiled.json",
-    "packages/domain/src/party/definition.ts",
-    "test/agent/business-map.test.ts"
+    "packages/canonical-model/src/reversibility.ts", "packages/compiler/src/compiler.ts", "packages/compiler/src/index.ts",
+    "packages/compiler/src/projections.ts", "packages/compiler/src/protocol.ts", "packages/compiler/src/reversibility.ts",
+    "packages/operations-agent/src/catalog.ts", "packages/operations-agent/src/risk.ts", "packages/operations-agent/src/session.ts",
+    "packages/runtime/src/request-runtime-view.ts", "test/agent/business-map.test.ts", "test/agent/compiled-view.ts",
+    "test/compiler/compiler-semantic-profile.test.ts", "test/compiler/disclosure-tier-projection.test.ts", "test/compiler/reversibility-census.test.ts",
+    "test/helpers/reachability-producers.ts", "test/postgres/request-runtime-view.test.ts"
   ],
   "symbols": []
 }

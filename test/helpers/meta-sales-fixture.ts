@@ -6,6 +6,7 @@ import {
   startComposedApplication,
   COMPOSED_APPLICATION_INVENTORY_SCOPE,
 } from '../../apps/api/src/composition-root.js';
+import { closeFixtureApp } from './close-fixture-app.js';
 import { withEphemeralPostgres } from './postgres.js';
 import {
   parsePinnedOperationCatalog,
@@ -26,10 +27,7 @@ export async function withMetaSalesFixture(
     try {
       await run(await seed(app, pool));
     } finally {
-      // The browser still holds sockets when the fixture is told to stop, and
-      // `server.close` calls back only once every connection is gone.
-      app.server.closeAllConnections();
-      await app.close();
+      await closeFixtureApp(app, 'meta-sales');
     }
   });
 }

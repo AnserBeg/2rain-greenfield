@@ -1,3 +1,8 @@
+import {
+  recordTemplateOffers,
+  templateBindingConflict,
+  templateBindingDigest,
+} from './record-template.js';
 import { mapBindingConflicts, mapDigest } from './map-view.js';
 import { compiledPopups } from './popup-actions.js';
 import { compilePresentation } from './surface-presentation.js';
@@ -38,6 +43,30 @@ export function validateSurfaceWorkspaces(
     ]);
   };
   for (const surface of model.surfaces) {
+    if ('recordTemplateBinding' in surface && surface.recordTemplateBinding) {
+      const binding = surface.recordTemplateBinding;
+      if (
+        binding.body.formId !== surface.surfaceId ||
+        binding.resultDigest !== templateBindingDigest(binding.body) ||
+        new Set(binding.body.columns.map((c) => c.fieldId)).size !==
+          binding.body.columns.length
+      )
+        fail(
+          surface.surfaceId,
+          'Invalid record template binding identity or choices.',
+        );
+      if (binding.status === 'active') {
+        const offer = recordTemplateOffers(model).find(
+          (o) => o.frame.formId === surface.surfaceId,
+        );
+        const conflict = templateBindingConflict(binding, offer);
+        if (conflict)
+          fail(
+            conflict.subject,
+            'Record template binding differs from its declared contract.',
+          );
+      }
+    }
     const map = 'map' in surface ? surface.map : undefined;
     if (surface.archetype === 'map' || map) {
       if (

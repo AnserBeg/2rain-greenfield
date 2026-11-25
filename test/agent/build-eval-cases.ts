@@ -133,6 +133,17 @@ export type Expectation =
       readonly label: readonly string[];
     }
   | {
+      /** A record template binding (TEMPLATE-1, dated set 2026-11-22). */
+      readonly outcome: 'templateBinding';
+      /** The editor form surface local the binding is on starts with this. */
+      readonly form: string;
+      /** Local of the choice field or link the revision is assigned by; null for the whole type. */
+      readonly context: string | null;
+      readonly required: boolean;
+      /** Line field locals the binding must include. */
+      readonly columns: readonly string[];
+    }
+  | {
       readonly outcome: 'map';
       /** The list surface local the map view is on starts with this. */
       readonly list: string;
@@ -1266,6 +1277,140 @@ export const VALIDATION_FOLLOWUP_CASES: readonly BuildCase[] = [
 ];
 
 /**
+ * Dated set (2026-11-22, TEMPLATE-1 slice 1, MIGRATION-RULE rule 12): one
+ * record-template binding request for each of three businesses. Written by
+ * hand before any live run and NOT part of the 40 scored in AI-BUILD-1 slice
+ * 2; run them with `--cases R01,R02,R03`. Each base installs a company-owned
+ * record type with a line table through the declarative editor channel.
+ */
+const templateBase = (
+  type: string,
+  context: string,
+  line: string,
+  columns: readonly { label: string; type: string; options?: string[] }[],
+  link?: string,
+) => {
+  const local = 'custom_' + type.toLowerCase().replaceAll(' ', '_');
+  return {
+    kind: 'changeSet',
+    patches: [
+      ...(link
+        ? [
+            {
+              kind: 'addRecordType',
+              label: link,
+              companyOwnership: 'entityOwned',
+              fields: [{ label: 'Name', type: 'text' }],
+            },
+          ]
+        : []),
+      {
+        kind: 'addRecordType',
+        label: type,
+        companyOwnership: 'entityOwned',
+        fields: [
+          { label: 'Name', type: 'text' },
+          ...(link
+            ? []
+            : [
+                {
+                  label: context,
+                  type: 'choice',
+                  options: ['Standard', 'Heavy', 'Special'],
+                },
+              ]),
+        ],
+      },
+      ...(link
+        ? [
+            {
+              kind: 'addLink',
+              entity: entity(local),
+              target: entity('custom_' + link.toLowerCase()),
+              label: link,
+            },
+          ]
+        : []),
+      {
+        kind: 'addLineTable',
+        entity: entity(local),
+        label: line,
+        fields: columns,
+      },
+    ],
+  };
+};
+
+export const RECORD_TEMPLATE_CASES: readonly BuildCase[] = [
+  {
+    id: 'R01',
+    split: 'test',
+    category: 'follow-up',
+    base: [
+      templateBase('Inspection', 'Equipment class', 'Results', [
+        { label: 'Question', type: 'text' },
+        { label: 'Result', type: 'choice', options: ['Pass', 'Fail', 'N/A'] },
+      ]),
+    ],
+    request:
+      'Every new inspection must start from the reviewed checklist assigned to its equipment class, so the results questions are filled in for the inspector.',
+    expect: {
+      outcome: 'templateBinding',
+      form: 'custom_inspection',
+      context: 'custom_inspection_equipment_class',
+      required: true,
+      columns: ['question'],
+    },
+  },
+  {
+    id: 'R02',
+    split: 'test',
+    category: 'follow-up',
+    base: [
+      templateBase('Job ticket', 'Job class', 'Steps', [
+        { label: 'Step', type: 'text' },
+        { label: 'Copies', type: 'number' },
+      ]),
+    ],
+    request:
+      'Let staff optionally start a job ticket from a saved grid of steps and copies chosen by job class.',
+    expect: {
+      outcome: 'templateBinding',
+      form: 'custom_job_ticket',
+      context: 'custom_job_ticket_job_class',
+      required: false,
+      columns: ['step', 'copies'],
+    },
+  },
+  {
+    id: 'R03',
+    split: 'test',
+    category: 'follow-up',
+    base: [
+      templateBase(
+        'Enrolment',
+        'Programme',
+        'Contacts',
+        [
+          { label: 'Role', type: 'text' },
+          { label: 'Person', type: 'text' },
+        ],
+        'Programme',
+      ),
+    ],
+    request:
+      'New enrolments must begin with the contact roles reviewed for the programme the pupil joins.',
+    expect: {
+      outcome: 'templateBinding',
+      form: 'custom_enrolment',
+      context: 'custom_enrolment_programme',
+      required: true,
+      columns: ['role'],
+    },
+  },
+];
+
+/**
  * Dated follow-up (2026-11-21, PLANNER-1 slice 1, MIGRATION-RULE rule 12):
  * the Map view member, one development and one held-out request. NEW, written
  * before any run, and NOT part of the 40 scored in AI-BUILD-1 slice 2; run
@@ -1299,6 +1444,69 @@ export const MAP_FOLLOWUP_CASES: readonly BuildCase[] = [
   },
 ];
 
+interface TemplateBindingView {
+  readonly frame: { readonly formId: string };
+  readonly previous?: {
+    readonly revisionId: string;
+    readonly status: string;
+    readonly body: {
+      readonly required: boolean;
+      readonly context:
+        | { readonly kind: 'wholeType' }
+        | { readonly kind: 'choice'; readonly fieldId: string }
+        | { readonly kind: 'link'; readonly relationId: string };
+      readonly columns: readonly { readonly fieldId: string }[];
+    };
+  };
+}
+
+/**
+ * Scores a templateBinding expectation from the Customize targets before and
+ * after activation: a NEW active binding revision on the expected form with
+ * the expected context, requirement and columns (matched as field-local
+ * suffixes). Empty means it passed.
+ */
+export function templateBindingMisses(
+  expect: Extract<Expectation, { outcome: 'templateBinding' }>,
+  before: { readonly templateBindings?: readonly TemplateBindingView[] },
+  after: { readonly templateBindings?: readonly TemplateBindingView[] },
+): string[] {
+  const local = (id: string) => id.slice(id.indexOf('.', id.indexOf(':')) + 1);
+  const offer = (after.templateBindings ?? []).find((o) =>
+    local(o.frame.formId).startsWith(expect.form),
+  );
+  const binding = offer?.previous;
+  if (!offer || binding?.status !== 'active')
+    return ['no active template binding on the form'];
+  const had = (before.templateBindings ?? []).find(
+    (o) => o.frame.formId === offer.frame.formId,
+  )?.previous;
+  const misses: string[] = [];
+  if (had?.revisionId === binding.revisionId)
+    misses.push('the binding is not a new revision');
+  const context = binding.body.context;
+  const chosen =
+    context.kind === 'choice'
+      ? local(context.fieldId)
+      : context.kind === 'link'
+        ? local(context.relationId)
+        : null;
+  if (chosen !== expect.context)
+    misses.push(
+      `assigned by ${String(chosen)}, expected ${String(expect.context)}`,
+    );
+  if (binding.body.required !== expect.required)
+    misses.push(
+      expect.required ? 'binding is optional' : 'binding is required',
+    );
+  const columns = binding.body.columns.map((c) => local(c.fieldId));
+  const absent = expect.columns.filter(
+    (c) => !columns.some((column) => column.endsWith('_' + c)),
+  );
+  if (absent.length) misses.push(`columns missing: ${absent.join(', ')}`);
+  return misses;
+}
+
 /**
  * AI-RELY-1 slice 1, gate (a): the patch kinds a case's scorer checks,
  * read from its hand-written expectation (never from a model's output).
@@ -1313,6 +1521,8 @@ export function scoredKinds(c: BuildCase): readonly string[] {
   if (e.outcome === 'workflow') return ['saveWorkflow'];
   if (e.outcome === 'board') return ['addBoardViewRevision'];
   if (e.outcome === 'map') return ['addMapViewRevision'];
+  if (e.outcome === 'templateBinding')
+    return ['addRecordTemplateBindingRevision'];
   if (e.outcome === 'validation') return ['addValidation'];
   // B01-B03 score one activated rate-plan structure (build-eval: kinds[0]).
   if (e.outcome === 'ratePlan') return ['addRatePlanVersion'];
@@ -1378,5 +1588,11 @@ export const EVAL_CASE_EXCEPTIONS: Readonly<Record<string, EvalCaseException>> =
       owner: 'PLANNER-1 slice 2',
       reason:
         'P01-P02 are written (MAP_FOLLOWUP_CASES) but not yet in BUILD_CASES.',
+    },
+    addRecordTemplateBindingRevision: {
+      since: '2026-11-22',
+      owner: 'TEMPLATE-1 slice 2',
+      reason:
+        'R01-R03 are written (RECORD_TEMPLATE_CASES) but not yet in BUILD_CASES.',
     },
   });

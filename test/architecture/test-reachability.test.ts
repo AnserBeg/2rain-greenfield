@@ -402,7 +402,7 @@ test('declared unfiltered producers are wired to CI and their evidence paths', (
     let job = extractWorkflowJob(workflow, producer.ciJob);
     if (producer.ciJob === 'postgres') {
       const shard = producer.id.slice('postgres-'.length);
-      assert.match(job, /shard: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10\]/u);
+      assert.match(job, /shard: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11\]/u);
       assert.ok(
         job.includes(
           `if: matrix.shard == ${shard}\n        run: ${producer.ciInvocation}\n`,
@@ -482,6 +482,7 @@ test('every file selected by the former general PostgreSQL glob belongs to exact
     'postgres-8',
     'postgres-9',
     'postgres-10',
+    'postgres-11',
   ].map(getReachabilityProducer);
   const files = globSync(oldGeneralGlob);
   assert.ok(files.length > 0);
@@ -930,3 +931,12 @@ function parseAggregateScripts(command: string): string[] {
     .filter((script): script is string => script !== undefined)
     .sort();
 }
+
+test('a failed browser job keeps Playwright traces (CI-7)', () => {
+  const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
+  const job = extractWorkflowJob(workflow, 'browser');
+  assert.match(
+    job,
+    /- name: Retain browser failure traces\n {8}if: failure\(\)\n {8}uses: actions\/upload-artifact@[0-9a-f]{40} # v4\n {8}with:\n {10}name: browser-failure-traces-\$\{\{ github\.sha \}\}\n {10}path: apps\/web\/test-results\/\n/u,
+  );
+});

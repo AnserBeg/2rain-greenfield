@@ -41,7 +41,7 @@ export function creditedProducerFiles(
         throw new Error(
           `LANGUAGE_COVERAGE_STALE_REACHABILITY_EVIDENCE: ${producer.id} (${producer.evidencePath}) was not produced by this run under the current definition of the producer.\n` +
             `${error.message}\n` +
-            `Regenerate it: run \`node --import tsx test/helpers/begin-reachability-run.ts\`, then \`${producer.command}\`; or delete test-results/reachability and run the whole matrix.`,
+            `Rerun \`${producer.command}\`. Do not begin a new run: that makes every other producer's evidence stale. If it still mismatches, package.json and reachability-producers.ts name different files for ${producer.id}.`,
           { cause: error },
         );
       }

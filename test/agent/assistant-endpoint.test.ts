@@ -1,3 +1,4 @@
+import { firstPartyImmediateEdits } from '../../packages/domain/src/app/immediate-edits.js';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import test from 'node:test';
@@ -106,6 +107,7 @@ async function serve(
 ): Promise<{ url: string; server: Server }> {
   let port = 0;
   const endpoint = createAssistantEndpoint({
+    immediateEdits: firstPartyImmediateEdits(),
     runtime: fakeRuntime(log) as never,
     company: () =>
       Promise.resolve({ companyId: 'company', label: 'Foothills Supply' }),

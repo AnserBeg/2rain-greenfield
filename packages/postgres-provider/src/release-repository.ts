@@ -9,6 +9,11 @@ import {
   mapBindingsProblem,
 } from './map-admission.js';
 import {
+  hasRecordTemplateBinding,
+  RECORD_TEMPLATE_OPERATION_READER,
+} from '@north-star/canonical-model';
+import { recordTemplateDeclarationProblem } from './record-template-admission.js';
+import {
   BILLING_ALLOCATION_READER,
   BILLING_ARREARS_READER,
   BILLING_CYCLE_CALCULATION,
@@ -964,6 +969,11 @@ function verifyCompiledRelease(
           'The billing plan or reader floor disagrees with the release.',
         );
       const problem =
+        recordTemplateDeclarationProblem(
+          layoutDefinition,
+          payload,
+          reference.requiredRuntimeCapability.minimumVersion,
+        ) ??
         mapDeclarationProblem(layoutDefinition, payload) ??
         boardDeclarationProblem(
           layoutDefinition,
@@ -1174,11 +1184,13 @@ function verifyFormulaProjectionReference(
   const reference = references[0];
   if (
     references.length !== Number(Boolean(declaring)) ||
-    (hasBookingOperations(normalized)
-      ? operationFloor !== bookingReaderFloor(normalized)
-      : rules.length
-        ? operationFloor !== requiredFormulaValidationOperationReader(rules)
-        : operationFloor >= LITERAL_VALIDATION_OPERATION_READER) ||
+    (hasRecordTemplateBinding(normalized)
+      ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
+      : hasBookingOperations(normalized)
+        ? operationFloor !== bookingReaderFloor(normalized)
+        : rules.length
+          ? operationFloor !== requiredFormulaValidationOperationReader(rules)
+          : operationFloor >= LITERAL_VALIDATION_OPERATION_READER) ||
     // The query floor is the highest catalog feature present.
     (declaresOptionalReadModelDependency(
       isRecord(normalized) ? normalized.queries : undefined,

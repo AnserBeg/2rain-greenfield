@@ -1,3 +1,4 @@
+import { TemplateBindingPatchSchema } from './record-template-binding.js';
 import { BillingPlanSchema } from '../../canonical-model/src/billing.js';
 import { MapViewRevisionSchema } from './map-revision.js';
 import { AddReportRevisionSchema } from './report-revision.js';
@@ -257,6 +258,7 @@ const ChangeMemberSchema = z.discriminatedUnion('kind', [
   }),
   MapViewRevisionSchema,
   BoardViewRevisionSchema,
+  TemplateBindingPatchSchema,
   AddReportRevisionSchema,
   addRecordType,
   addField,
@@ -408,6 +410,7 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'addPopupActionRevision',
   'addPresentationRevision',
   'addBoardViewRevision',
+  'addRecordTemplateBindingRevision',
   'addReportRevision',
   'saveListView',
   'addValidation',

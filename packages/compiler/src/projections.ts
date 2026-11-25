@@ -15,6 +15,9 @@ import { compilePresentation } from '../../canonical-model/src/surface-presentat
 import { PRESENTATION_READER } from '../../canonical-model/src/surface-presentation-schema.js';
 import {
   DATE_TIME_FIELD_READER,
+  RECORD_TEMPLATE_READER,
+  RECORD_TEMPLATE_OPERATION_READER,
+  hasRecordTemplateBinding,
   type DateTimeBinding,
   ADDRESS_FIELD_READER,
   ADDRESS_MAP_READER,
@@ -73,6 +76,12 @@ import {
   type FormulaRulePayload,
 } from './formula-validation-plan.js';
 import { hashCanonical } from './hash.js';
+import {
+  deriveReversibility,
+  REVERSIBILITY_AGENT_READER,
+  type ReversibilityDeclaration,
+  type ReversibilitySource,
+} from './reversibility.js';
 import { lowerQueryPredicate } from './predicate-lowering.js';
 import {
   lowerStorageTargetV1,
@@ -80,7 +89,9 @@ import {
 } from './storage.js';
 import {
   COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+  COMPILER_SEMANTIC_PROFILE_V3_VERSION,
   COMPILER_SEMANTIC_PROFILE_VERSION,
+  compilerSemanticProfileAtLeast,
   COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
   GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -280,24 +291,66 @@ export function lowerBaseProjectionPayloads(
       )
       .map((f) => f.fieldId),
   ];
+  const operationCatalog = operationCatalogPayload(
+    packageRevision,
+    currentStorageTarget,
+    compilerSemanticProfileVersion,
+    verificationPackageRevision,
+  );
+  // The reversibility declaration (AI-UNDO-1) needs the compiled input
+  // contracts, which only current-language releases carry. The dispatch
+  // alias's preconditions are placeholders (v3 decoration replaces them), so
+  // the gates and lifecycles come from the authored revision's own.
+  const authoredPreconditions = new Map(
+    verificationPackageRevision.operations.map((operation) => [
+      String(operation.operationId),
+      operation.precondition as unknown,
+    ]),
+  );
+  // ADR-0047: the key rides the cut, unadopted v3, so every adopted release
+  // stays byte-identical and needs no agent-discovery floor 5.
+  const reversibility =
+    packageRevision.languageVersion === LANGUAGE_VERSION &&
+    compilerSemanticProfileAtLeast(
+      compilerSemanticProfileVersion,
+      COMPILER_SEMANTIC_PROFILE_V3_VERSION,
+    )
+      ? deriveReversibility(
+          (
+            operationCatalog as {
+              operations: Parameters<typeof deriveReversibility>[0];
+            }
+          ).operations.map((operation) => ({
+            ...operation,
+            precondition:
+              authoredPreconditions.get(operation.operationId) ??
+              operation.precondition,
+          })),
+          verificationPackageRevision as unknown as ReversibilitySource,
+          new Set(confirmationRequiredFor),
+        )
+      : undefined;
   const agentCapability =
     runtimeCapabilities[PROJECTION_FAMILY_IDS.agentDiscovery];
   const agentFloor = Math.max(
     agentCapability.minimumVersion,
     confirmationRequiredFor.length > 0 ? 2 : 1,
+    reversibility ? REVERSIBILITY_AGENT_READER : 1,
     hasSavedListLayouts(verificationPackageRevision) ? 3 : 1,
     hasMetrics(verificationPackageRevision) ? 4 : 1,
   );
-  const operationFloor = hasBookingOperations(verificationPackageRevision)
-    ? bookingReaderFloor(verificationPackageRevision)
-    : formulaRules
-      ? requiredFormulaValidationOperationReader(
-          formulaRules.bindings.map(({ rule }) => rule),
-        )
-      : 'operationRoleNarrowings' in verificationPackageRevision &&
-          verificationPackageRevision.operationRoleNarrowings
-        ? 2
-        : 1;
+  const operationFloor = hasRecordTemplateBinding(verificationPackageRevision)
+    ? RECORD_TEMPLATE_OPERATION_READER
+    : hasBookingOperations(verificationPackageRevision)
+      ? bookingReaderFloor(verificationPackageRevision)
+      : formulaRules
+        ? requiredFormulaValidationOperationReader(
+            formulaRules.bindings.map(({ rule }) => rule),
+          )
+        : 'operationRoleNarrowings' in verificationPackageRevision &&
+            verificationPackageRevision.operationRoleNarrowings
+          ? 2
+          : 1;
   const plans = [
     plan(
       PROJECTION_FAMILY_IDS.semanticModel,
@@ -329,12 +382,7 @@ export function lowerBaseProjectionPayloads(
       PROJECTION_FAMILY_IDS.operationCatalog,
       namespace,
       packageScope,
-      operationCatalogPayload(
-        packageRevision,
-        currentStorageTarget,
-        compilerSemanticProfileVersion,
-        verificationPackageRevision,
-      ),
+      operationCatalog,
       undefined,
       operationFloor > 1
         ? {
@@ -365,6 +413,7 @@ export function lowerBaseProjectionPayloads(
         packageRevision,
         verificationPackageRevision,
         confirmationRequiredFor,
+        reversibility,
       ),
       undefined,
       agentFloor > agentCapability.minimumVersion
@@ -892,6 +941,13 @@ function operationCatalogPayload(
   // Only authored capability Task bindings introduce this envelope. Existing
   // record/revision-only commands retain their exact closed contracts and bytes.
   // The registered executor owns the closed scalar vocabulary inside it.
+  const templateOperations = new Set(
+    original.surfaces.flatMap((surface) =>
+      'recordTemplateBinding' in surface && surface.recordTemplateBinding
+        ? [surface.recordTemplateBinding.body.createOperationId]
+        : [],
+    ),
+  );
   const argumentOperations = new Set(
     original.surfaces
       .filter((surface) => surface.lifecycle === 'active')
@@ -985,6 +1041,7 @@ function operationCatalogPayload(
               compilerSemanticProfileVersion,
               'booking' in operation ||
                 argumentOperations.has(operation.operationId),
+              templateOperations.has(operation.operationId),
             ),
             infrastructure: {
               archiveRepresentation: 'nullableArchivedAt',
@@ -1111,8 +1168,10 @@ function surfaceManifestPayload(
   );
   // One condition, read by both the emission below and the capability floor, so
   // the floor cannot drift from what the payload actually carries.
-  const emitsFieldKinds =
-    compilerSemanticProfileVersion === COMPILER_SEMANTIC_PROFILE_V2_VERSION;
+  const emitsFieldKinds = compilerSemanticProfileAtLeast(
+    compilerSemanticProfileVersion,
+    COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+  );
   // Load-bearing compatibility fence: labelling grouped output as v0 lets
   // v0 readers ignore the tree and silently reconstruct unreachable overflow.
   const composed = original.languageVersion === 'v6';
@@ -1207,6 +1266,7 @@ function surfaceManifestPayload(
       ),
   );
   const surfaceFloor = Math.max(
+    hasRecordTemplateBinding(original) ? RECORD_TEMPLATE_READER : 0,
     original.surfaces.some((s) => s.archetype === 'map') ? MAP_VIEW_READER : 0,
     original.surfaces.some(
       (surface) => 'presentation' in surface && surface.presentation,
@@ -1341,6 +1401,11 @@ function surfaceManifestPayload(
               }
             : {}),
           // Labels and roles render from this release, beside the digested member.
+          ...(declared &&
+          'recordTemplateBinding' in declared &&
+          declared.recordTemplateBinding
+            ? { recordTemplateBinding: declared.recordTemplateBinding }
+            : {}),
           ...(declared && 'map' in declared && declared.map
             ? { map: declared.map }
             : {}),
@@ -1401,8 +1466,10 @@ function surfaceManifestPayload(
             // projection time rather than by materializing it into the
             // normalized definition, which is what keeps those roots stable --
             // the `surfaceRole` precedent one line below does exactly the same.
-            ...(compilerSemanticProfileVersion ===
-            COMPILER_SEMANTIC_PROFILE_V2_VERSION
+            ...(compilerSemanticProfileAtLeast(
+              compilerSemanticProfileVersion,
+              COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+            )
               ? {
                   disclosureTier:
                     slot.disclosureTier ?? DEFAULT_DISCLOSURE_TIER,
@@ -1924,6 +1991,7 @@ function agentDiscoveryPayload(
   packageRevision: NormalizedApplicationPackage,
   original: VersionedNormalizedApplicationPackage,
   confirmationRequiredFor: readonly string[],
+  reversibility: ReversibilityDeclaration | undefined,
 ): unknown {
   const declared = new Map(
     original.queries.map((query) => [String(query.queryId), query]),
@@ -1979,6 +2047,7 @@ function agentDiscoveryPayload(
     })),
     ...(listPresets.length > 0 ? { listPresets } : {}),
     ...(metricCards.length > 0 ? { metricCards } : {}),
+    ...(reversibility ? { reversibility } : {}),
     schemaVersion: payloadSchemaVersions[PROJECTION_FAMILY_IDS.agentDiscovery],
     surfaces: packageRevision.surfaces.map((surface) => surface.surfaceId),
     toolIds: [...OPERATIONS_AGENT_TOOL_IDS],
@@ -2507,6 +2576,7 @@ function operationInputContract(
   storageEntity: StorageTargetPayloadV1['entities'][number] | undefined,
   compilerSemanticProfileVersion: CompilerSemanticProfileVersion,
   capabilityArguments: boolean,
+  templateCreate: boolean,
 ): unknown {
   const effectKind = operation.effect.kind;
   const capabilityRecordScope = effectKind === 'registeredCapabilityEffect';
@@ -2555,13 +2625,17 @@ function operationInputContract(
   const relationTargets =
     effectKind === 'createRecordEffect' &&
     relations.length > 0 &&
-    compilerSemanticProfileVersion === COMPILER_SEMANTIC_PROFILE_V2_VERSION;
+    compilerSemanticProfileAtLeast(
+      compilerSemanticProfileVersion,
+      COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+    );
   const closedArgumentKeys =
     effectKind === 'createRecordEffect'
       ? [
           ...(systemInput ? [systemInput.argumentKey] : []),
           'recordId',
           'relations',
+          ...(templateCreate ? ['templateLines'] : []),
           'values',
         ]
       : effectKind === 'updateRecordEffect'

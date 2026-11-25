@@ -1,3 +1,4 @@
+import { firstPartyImmediateEdits } from '../../packages/domain/src/app/immediate-edits.js';
 import { measureParity } from './proof-metrics.js';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile } from 'node:fs/promises';
@@ -265,6 +266,7 @@ function contextSession(surfaces: unknown[]) {
     },
   };
   return new OperationsAgentSession({
+    immediateEdits: firstPartyImmediateEdits(),
     runtime: {
       entry: {
         run: (_request: unknown, work: (v: unknown) => unknown) => work(view),

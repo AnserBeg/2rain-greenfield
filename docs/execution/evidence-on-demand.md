@@ -31,7 +31,7 @@ gh pr edit <n> --add-label regen-snapshot
 ## Asking for a run without a pull request (CI-7)
 
 A lane that opens no pull request dispatches the controls by hand. The `ref`
-input is a branch, tag or SHA, and the run resolves it to one SHA that every
+input is a branch, tag or full 40-character commit SHA (a short SHA is refused), and the run resolves it to one SHA that every
 control job checks out and every cited line names. The `controls` input is a
 space-separated list of entry names; empty runs the entries the ref adds or
 changes against `origin/main`.

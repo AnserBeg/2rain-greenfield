@@ -5,6 +5,10 @@ import {
 } from './presentation-revision.js';
 import { reportTargets, type ReportTarget } from './report-revision.js';
 import {
+  recordTemplateOffers,
+  type RecordTemplateOffer,
+} from '@north-star/canonical-model';
+import {
   popupOptions,
   type PopupOption,
 } from '../../canonical-model/src/popup-actions.js';
@@ -66,6 +70,7 @@ export interface CustomizationTargets {
   readonly reports?: readonly ReportTarget[];
   readonly popupActions?: readonly PopupOption[];
   readonly documentTemplateTargets?: readonly DocumentTemplateTarget[];
+  readonly templateBindings?: readonly RecordTemplateOffer[];
   readonly boards?: readonly BoardTarget[];
   readonly layouts?: readonly LayoutTarget[];
   readonly documentTargets?: readonly {
@@ -710,6 +715,7 @@ export function customizationTargets(definition: {
         }))
         .sort((left, right) => left.label.localeCompare(right.label)),
     }),
+    templateBindings: recordTemplateOffers(definition),
     maps: mapTargets(definition),
     presentation: presentationTargets(
       definition as unknown as Parameters<typeof presentationTargets>[0],

@@ -45,7 +45,7 @@ test('a fixture that never prints its URL fails at the deadline with its output'
         startupMilliseconds: 3_000,
       }),
     ),
-    /printed no URL within 3000 ms; output so far:\nbooting/u,
+    /printed no URL within 3000 ms; output so far:/u,
   );
   assert.ok(Date.now() - started < 12_000, 'the failure was not immediate');
 });

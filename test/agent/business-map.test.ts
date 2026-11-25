@@ -1,3 +1,8 @@
+import { firstPartyImmediateEdits } from '../../packages/domain/src/app/immediate-edits.js';
+import type {
+  ImmediateEditDeclaration,
+  ReversibilityDeclaration,
+} from '../../packages/canonical-model/src/reversibility.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -22,7 +27,7 @@ import { parsePinnedOperationCatalog } from '../../packages/runtime/src/semantic
 import type { RequestRuntimeView } from '../../packages/runtime/src/request-runtime-view.js';
 
 import { toMessages } from '../../packages/operations-agent/src/anthropic-model.js';
-import { compiledAppView } from './compiled-view.js';
+import { compiledAppView, compiledAppViewV3 } from './compiled-view.js';
 
 const NS = 'northstar.app';
 
@@ -143,6 +148,7 @@ function personSession(
 ) {
   const view = compiledAppView(person);
   return new OperationsAgentSession({
+    immediateEdits: firstPartyImmediateEdits(),
     runtime: {
       entry: {
         run: (_request: unknown, work: (v: unknown) => unknown) => work(view),
@@ -223,7 +229,7 @@ test('a short name stands for exactly one id or for none', () => {
 test('the risk class comes from contract facts: only eligible O0 updates are reversible, everything else needs a yes', () => {
   const catalog = pinnedCatalog(compiledAppView());
   const risk = (local: string, fields: readonly string[] = []) =>
-    operationRisk(catalog, catalog.operation(local)!, fields);
+    operationRisk(catalog, catalog.operation(local)!, fields, FIRST);
   assert.equal(risk('party_create').riskClass, 'needsYes');
   assert.equal(risk('party_create').inverse, undefined);
   assert.deepEqual(
@@ -250,7 +256,10 @@ test('the risk class comes from contract facts: only eligible O0 updates are rev
     ...catalog.operation('party_create')!,
     tier: 'o9',
   } as never;
-  assert.equal(operationRisk(catalog, strange).riskClass, 'needsYes');
+  assert.equal(
+    operationRisk(catalog, strange, [], FIRST).riskClass,
+    'needsYes',
+  );
 });
 
 test('the compiled catalog auto-run snapshot covers every O0 update field', () => {
@@ -271,7 +280,10 @@ test('the compiled catalog auto-run snapshot covers every O0 update field', () =
       ...contract.fields.filter((f) => f.writable).map((f) => f.fieldId),
     ]);
     for (const field of fields) {
-      if (operationRisk(catalog, operation, [field]).riskClass === 'reversible')
+      if (
+        operationRisk(catalog, operation, [field], FIRST).riskClass ===
+        'reversible'
+      )
         eligible.push(`${operation.operationId} -> ${field}`);
     }
   }
@@ -308,7 +320,7 @@ test('a new field, record type or risk tier needs confirmation even with a revis
   };
   for (const fields of [[], [field], [name, field]])
     assert.equal(
-      operationRisk(catalog, extended, fields).riskClass,
+      operationRisk(catalog, extended, fields, FIRST).riskClass,
       'needsYes',
     );
   const custom = {
@@ -322,11 +334,21 @@ test('a new field, record type or risk tier needs confirmation even with a revis
     },
     operationId: `${NS}:operation.custom_equipment_update`,
   };
-  assert.equal(operationRisk(catalog, custom, [field]).riskClass, 'needsYes');
-  assert.equal(operationRisk(catalog, custom, [name]).riskClass, 'needsYes');
   assert.equal(
-    operationRisk(catalog, { ...party, tier: 'unknown' } as never, [name])
-      .riskClass,
+    operationRisk(catalog, custom, [field], FIRST).riskClass,
+    'needsYes',
+  );
+  assert.equal(
+    operationRisk(catalog, custom, [name], FIRST).riskClass,
+    'needsYes',
+  );
+  assert.equal(
+    operationRisk(
+      catalog,
+      { ...party, tier: 'unknown' } as never,
+      [name],
+      FIRST,
+    ).riskClass,
     'needsYes',
   );
 });
@@ -334,6 +356,7 @@ test('a new field, record type or risk tier needs confirmation even with a revis
 // ------------------------------------------------ plan guards (audit A1, A2)
 
 const PARTY = '0d9c6f2e-3a1b-4c5d-8e7f-001122334455';
+const FIRST = firstPartyImmediateEdits();
 
 /** A session over the compiled release whose release and record a test moves. */
 function guardedSession(
@@ -342,8 +365,12 @@ function guardedSession(
   roles: readonly string[] = [],
   approve: (plan: PlanForApproval) => Promise<boolean> = () =>
     Promise.resolve(true),
+  application: {
+    readonly view?: RequestRuntimeView;
+    readonly immediateEdits?: readonly ImmediateEditDeclaration[];
+  } = {},
 ) {
-  const base = compiledAppView('manager');
+  const base = application.view ?? compiledAppView('manager');
   const state = {
     company: 'c',
     release: { ...base.release },
@@ -382,6 +409,7 @@ function guardedSession(
     onView: () => {},
   };
   const session = new OperationsAgentSession({
+    immediateEdits: application.immediateEdits ?? firstPartyImmediateEdits(),
     runtime: {
       entry: {
         run: (_request: unknown, work: (v: unknown) => unknown) => {
@@ -854,17 +882,6 @@ test('X5: a status or state change, a settings update, and a create its maker ca
     ),
     'needsYes',
   );
-  assert.equal(
-    await classOf(
-      {
-        operationId: 'party_update',
-        target: PARTY,
-        patch: { credit_hold: false },
-      },
-      { [`${NS}:field.party_credit_hold`]: true },
-    ),
-    'needsYes',
-  );
   // A plain master field edit stays reversible (charter): Undo puts it back.
   assert.equal(
     await classOf({
@@ -882,7 +899,7 @@ test('AI-UNDO-1: the release declares the credit hold as needing the assistant t
   assert.ok(catalog.confirmationRequiredFor.has(hold));
   const party = catalog.operation('party_update')!;
   for (const written of [[hold], [`${NS}:field.party_name`, hold]]) {
-    const risk = operationRisk(catalog, party, written);
+    const risk = operationRisk(catalog, party, written, FIRST);
     assert.equal(risk.riskClass, 'needsYes');
     assert.equal(risk.reason, 'This changes a setting, so it needs your OK.');
     assert.equal(risk.inverse, undefined);
@@ -932,8 +949,13 @@ interface StoredRow {
  * gateway, list filters match exactly, and a test can fail the next
  * invocation of an operation or move a row's revision between reads.
  */
-function storeSession() {
-  const base = compiledAppView('manager');
+function storeSession(
+  options: {
+    readonly view?: RequestRuntimeView;
+    readonly approve?: (plan: PlanForApproval) => Promise<boolean>;
+  } = {},
+) {
+  const base = options.view ?? compiledAppView('manager');
   const rows = new Map<string, StoredRow>();
   rows.set(PARTY, {
     recordId: PARTY,
@@ -951,6 +973,7 @@ function storeSession() {
     onGet: (() => undefined) as (id: string) => void,
   };
   const session = new OperationsAgentSession({
+    immediateEdits: firstPartyImmediateEdits(),
     runtime: {
       entry: {
         run: (_r: unknown, work: (v: unknown) => unknown) =>
@@ -1044,7 +1067,7 @@ function storeSession() {
     personHeaders: {},
     companyId: 'c',
     autoApproveReversible: true,
-    approve: () => Promise.resolve(true),
+    approve: options.approve ?? (() => Promise.resolve(true)),
   });
   return { session, state };
 }
@@ -1632,8 +1655,12 @@ test('AGENT-5 7: the pinned release guards policy fields and every settings edit
     },
   });
   assert.equal(
-    operationRisk(amended, amended.operation('tax_code_update')!, [field])
-      .riskClass,
+    operationRisk(
+      amended,
+      amended.operation('tax_code_update')!,
+      [field],
+      FIRST,
+    ).riskClass,
     'needsYes',
   );
   for (const [entity, patch, expected] of [
@@ -1847,4 +1874,603 @@ test('a personal yes executes and compares committed fields before the next mode
     },
   });
   assert.equal(result.answer, 'Read-back found a mismatch.');
+});
+
+// ------------------------------------------- AI-UNDO-1 slice 2: behaviour lock
+
+/**
+ * Today's act-or-ask outcome for every first-party pair that acts at once,
+ * in every state its record (or, for a child line, its parent) can be in.
+ * Written before the policy moved from a hand list to the release's
+ * reversibility declaration, so every difference is a listed change.
+ */
+const LOCK_PAIRS: readonly {
+  operationId: string;
+  patch: Record<string, string>;
+  /** The lifecycle field the record or its parent carries, and its states. */
+  states?: { field: string; values: readonly string[]; parent?: string };
+}[] = [
+  { operationId: 'item_update', patch: { name: 'Bolt' } },
+  { operationId: 'item_update', patch: { description: 'Steel' } },
+  { operationId: 'legal_entity_update', patch: { name: 'Co' } },
+  { operationId: 'location_update', patch: { name: 'Bay' } },
+  { operationId: 'party_update', patch: { contact_summary: 'Ann' } },
+  { operationId: 'party_update', patch: { name: 'Acme' } },
+  {
+    operationId: 'party_update',
+    patch: { payment_terms: `${NS}:option.party_payment_terms_net_30` },
+  },
+  { operationId: 'tax_code_update', patch: { name: 'GST' } },
+  ...(['sales_order', 'purchase_order'] as const).map((type) => ({
+    operationId: `${type}_update`,
+    patch: { notes: 'Call first' },
+    states: {
+      field: `${NS}:derived_state_field.machine.${type}_lifecycle`,
+      values: ['draft', 'released', 'closed', 'cancelled'].map(
+        (state) => `${NS}:state.${type}_${state}`,
+      ),
+    },
+  })),
+  {
+    operationId: 'stock_count_update',
+    patch: { reason_narrative: 'Recount' },
+    states: {
+      field: `${NS}:field.stock_count_state`,
+      values: ['draft', 'counting'].map(
+        (state) => `${NS}:option.stock_count_state_${state}`,
+      ),
+    },
+  },
+  { operationId: 'party_update', patch: { credit_limit: '500' } },
+  { operationId: 'party_update', patch: { number: 'P-7' } },
+  { operationId: 'tax_code_update', patch: { rate_percent: '5' } },
+  {
+    operationId: 'stock_count_line_update',
+    patch: { counted_quantity: '12' },
+    states: {
+      field: `${NS}:field.stock_count_state`,
+      values: ['draft', 'counting', 'reviewed', 'posted', 'cancelled'].map(
+        (state) => `${NS}:option.stock_count_state_${state}`,
+      ),
+      parent: `${NS}:relation.stock_count_line_session`,
+    },
+  },
+];
+
+async function lockOutcomes(): Promise<string[]> {
+  const outcomes: string[] = [];
+  for (const pair of LOCK_PAIRS)
+    for (const value of pair.states?.values ?? [undefined]) {
+      const { session, state } = guardedSession();
+      const entity = pair.operationId.replace(/_update$/u, '');
+      for (const key of Object.keys(pair.patch))
+        state.record.values[`${NS}:field.${entity}_${key}`] =
+          key === 'payment_terms'
+            ? `${NS}:option.party_payment_terms_due_on_receipt`
+            : key === 'counted_quantity'
+              ? '10'
+              : 'Old';
+      if (pair.states && value) state.record.values[pair.states.field] = value;
+      if (pair.states?.parent)
+        Object.assign(state.record, {
+          relationLabels: { [pair.states.parent]: { recordId: PARTY } },
+        });
+      const catalog = pinnedCatalog(compiledAppView());
+      await session.call('erp_query', {
+        queryId: catalog.operation(pair.operationId)!.readBackQueryId,
+        arguments: { recordId: PARTY },
+      });
+      const planned = await session.call('erp_plan', {
+        intents: [
+          { operationId: pair.operationId, target: PARTY, patch: pair.patch },
+        ],
+      });
+      const risk = planned.isError
+        ? 'refused'
+        : String(session.approvals.at(-1)?.riskClass ?? 'refused');
+      outcomes.push(
+        `${pair.operationId} ${Object.keys(pair.patch).join(',')}${value ? ` @${value.split('.').pop()!}` : ''} -> ${risk}`,
+      );
+    }
+  return outcomes;
+}
+
+test('AI-UNDO-1 lock: each first-party act-at-once pair, in each state of its record or parent', async () => {
+  assert.deepEqual(await lockOutcomes(), [
+    'item_update name -> reversible',
+    'item_update description -> reversible',
+    'legal_entity_update name -> reversible',
+    'location_update name -> reversible',
+    'party_update contact_summary -> reversible',
+    'party_update name -> reversible',
+    'party_update payment_terms -> reversible',
+    'tax_code_update name -> reversible',
+    'sales_order_update notes @sales_order_draft -> reversible',
+    'sales_order_update notes @sales_order_released -> refused',
+    'sales_order_update notes @sales_order_closed -> refused',
+    'sales_order_update notes @sales_order_cancelled -> refused',
+    'purchase_order_update notes @purchase_order_draft -> reversible',
+    'purchase_order_update notes @purchase_order_released -> refused',
+    'purchase_order_update notes @purchase_order_closed -> refused',
+    'purchase_order_update notes @purchase_order_cancelled -> refused',
+    'stock_count_update reason_narrative @stock_count_state_draft -> needsYes',
+    'stock_count_update reason_narrative @stock_count_state_counting -> needsYes',
+    'party_update credit_limit -> needsYes',
+    'party_update number -> needsYes',
+    'tax_code_update rate_percent -> needsYes',
+    'stock_count_line_update counted_quantity @stock_count_state_draft -> reversible',
+    'stock_count_line_update counted_quantity @stock_count_state_counting -> needsYes',
+    'stock_count_line_update counted_quantity @stock_count_state_reviewed -> needsYes',
+    'stock_count_line_update counted_quantity @stock_count_state_posted -> needsYes',
+    'stock_count_line_update counted_quantity @stock_count_state_cancelled -> needsYes',
+  ]);
+});
+
+// ------------------------------- AI-UNDO-1 slice 1 check (Fable findings 1, 2)
+
+/** Plans one patch on the party under the panel's configuration (act at once on). */
+async function panelPlan(
+  patch: Record<string, unknown>,
+  current: Record<string, string | boolean>,
+  view?: RequestRuntimeView,
+) {
+  let asked = 0;
+  const { session, state } = storeSession({
+    ...(view ? { view } : {}),
+    approve: () => {
+      asked += 1;
+      return Promise.resolve(false);
+    },
+  });
+  Object.assign(state.rows.get(PARTY)!.values, current);
+  await session.call('erp_query', {
+    queryId: 'party_get',
+    arguments: { recordId: PARTY },
+  });
+  const planned = (
+    await session.call('erp_plan', {
+      intents: [{ operationId: 'party_update', target: PARTY, patch }],
+    })
+  ).content as { planId?: string };
+  if (planned.planId)
+    await session.call('erp_execute', {
+      planId: planned.planId,
+      executionIdempotencyKey: 'k',
+    });
+  return { asked, invoked: state.invoked };
+}
+
+test('AI-UNDO-1: releasing a credit hold asks the person under the panel configuration, and nothing runs on a no', async () => {
+  assert.deepEqual(
+    await panelPlan(
+      { credit_hold: false },
+      { [`${NS}:field.party_credit_hold`]: true },
+    ),
+    { asked: 1, invoked: [] },
+  );
+});
+
+test('AI-UNDO-1: putting a customer on credit hold asks under the panel configuration', async () => {
+  assert.deepEqual(
+    await panelPlan(
+      { credit_hold: true },
+      { [`${NS}:field.party_credit_hold`]: false },
+    ),
+    { asked: 1, invoked: [] },
+  );
+});
+
+test('AI-UNDO-1: a plain name edit still runs at once under the panel configuration', async () => {
+  assert.deepEqual(await panelPlan({ name: 'After' }, {}), {
+    asked: 0,
+    invoked: ['party_update'],
+  });
+});
+
+test('AI-UNDO-1: a release without the credit-hold declaration still asks (an older tenant release)', async () => {
+  const view = compiledAppView('manager');
+  const agent = view.projections.agent;
+  const payload = agent.payload as { confirmationRequiredFor: string[] };
+  const older = {
+    ...view,
+    projections: {
+      ...view.projections,
+      agent: {
+        ...agent,
+        payload: {
+          ...payload,
+          confirmationRequiredFor: payload.confirmationRequiredFor.filter(
+            (id) => id !== `${NS}:field.party_credit_hold`,
+          ),
+        },
+      },
+    },
+  } as RequestRuntimeView;
+  assert.deepEqual(
+    await panelPlan(
+      { credit_hold: false },
+      { [`${NS}:field.party_credit_hold`]: true },
+      older,
+    ),
+    { asked: 1, invoked: [] },
+  );
+});
+
+// ------------------------ AI-UNDO-1 slice 2: a second application, other names
+
+/**
+ * The compiled release under other names and IDs: a clinic whose patients
+ * and visit checks are the first-party parties and stock counts renamed. Its
+ * act-or-ask outcome comes from its own capability's declaration alone.
+ */
+function clinicView(
+  declaration: (
+    emitted: ReversibilityDeclaration,
+  ) => ReversibilityDeclaration | undefined = (emitted) => emitted,
+): RequestRuntimeView {
+  return withDeclaration(
+    (() => {
+      // Compiled under the cut v3 profile, so it carries the declaration.
+      const { view } = compiledAppViewV3('manager');
+      const renamed = JSON.parse(
+        JSON.stringify(view.projections)
+          .replaceAll('northstar.app:', 'clinic.care:')
+          .replaceAll('stock_count', 'visit_check')
+          .replaceAll('party', 'patient'),
+      ) as RequestRuntimeView['projections'];
+      return { ...view, projections: renamed };
+    })(),
+    declaration,
+  );
+}
+
+/** The view with its emitted reversibility declaration edited, or removed. */
+function withDeclaration(
+  view: RequestRuntimeView,
+  edit: (
+    emitted: ReversibilityDeclaration,
+  ) => ReversibilityDeclaration | undefined,
+): RequestRuntimeView {
+  const agent = view.projections.agent;
+  const { reversibility, ...rest } = agent.payload as unknown as {
+    reversibility: ReversibilityDeclaration;
+  };
+  const edited = edit(reversibility);
+  return {
+    ...view,
+    projections: {
+      ...view.projections,
+      agent: {
+        ...agent,
+        payload: { ...rest, ...(edited ? { reversibility: edited } : {}) },
+      },
+    },
+  } as RequestRuntimeView;
+}
+
+/** The declaration with one field of one operation read by a consumer. */
+const consumed =
+  (operationId: string, fieldId: string) =>
+  (emitted: ReversibilityDeclaration): ReversibilityDeclaration => ({
+    ...emitted,
+    operations: emitted.operations.map((operation) =>
+      operation.operationId !== operationId
+        ? operation
+        : {
+            ...operation,
+            fields: (operation.fields ?? []).map((field) =>
+              field.fieldId !== fieldId
+                ? field
+                : {
+                    ...field,
+                    reach: 'internal' as const,
+                    because: [...field.because, 'readByConsumer' as const],
+                  },
+            ),
+          },
+    ),
+  });
+
+const CLINIC = 'clinic.care';
+const CLINIC_EDITS: readonly ImmediateEditDeclaration[] = [
+  {
+    owner: `${CLINIC}:module.patients`,
+    ownedEntityIds: [
+      `${CLINIC}:entity.patient`,
+      `${CLINIC}:entity.visit_check`,
+      `${CLINIC}:entity.visit_check_line`,
+    ],
+    immediateFields: [
+      { fieldId: `${CLINIC}:field.patient_contact_summary` },
+      {
+        fieldId: `${CLINIC}:field.visit_check_line_counted_quantity`,
+        holdsWhile: {
+          parents: [
+            {
+              relationId: `${CLINIC}:relation.visit_check_line_session`,
+              queryId: `${CLINIC}:query.visit_check_get`,
+              stateFieldId: `${CLINIC}:field.visit_check_state`,
+              stateIds: [`${CLINIC}:option.visit_check_state_draft`],
+              stateLabels: ['open'],
+            },
+          ],
+        },
+      },
+    ],
+  },
+];
+
+async function clinicClass(
+  immediateEdits: readonly ImmediateEditDeclaration[],
+  operationId: string,
+  patch: Record<string, string>,
+  values: Record<string, string> = {},
+  parent?: string,
+  view: RequestRuntimeView = clinicView(),
+): Promise<string> {
+  const { session, state } = guardedSession(
+    new Set(),
+    [],
+    () => Promise.resolve(true),
+    { view, immediateEdits },
+  );
+  state.record.values = { ...values };
+  if (parent)
+    Object.assign(state.record, {
+      relationLabels: { [parent]: { recordId: PARTY } },
+    });
+  const catalog = pinnedCatalog(view);
+  await session.call('erp_query', {
+    queryId: catalog.operation(operationId)!.readBackQueryId,
+    arguments: { recordId: PARTY },
+  });
+  const planned = await session.call('erp_plan', {
+    intents: [{ operationId, target: PARTY, patch }],
+  });
+  assert.equal(planned.isError, false, JSON.stringify(planned.content));
+  return String(session.approvals.at(-1)?.riskClass);
+}
+
+test('AI-UNDO-1 second application: a clinic acts at once only on what its own capability declares', async () => {
+  const contact = { [`${CLINIC}:field.patient_contact_summary`]: 'Old' };
+  const name = { [`${CLINIC}:field.patient_name`]: 'Old' };
+  assert.equal(
+    await clinicClass(
+      CLINIC_EDITS,
+      'patient_update',
+      { contact_summary: 'Ann' },
+      contact,
+    ),
+    'reversible',
+  );
+  // Declared nowhere in the clinic, though first-party declares its name.
+  assert.equal(
+    await clinicClass(CLINIC_EDITS, 'patient_update', { name: 'Bo' }, name),
+    'needsYes',
+  );
+  // The first-party declarations name nothing in the clinic: on a clinic
+  // release without its compiled declaration, the patient type asks.
+  assert.equal(
+    await clinicClass(
+      firstPartyImmediateEdits(),
+      'patient_update',
+      { contact_summary: 'Ann' },
+      contact,
+      undefined,
+      clinicView(() => undefined),
+    ),
+    'needsYes',
+  );
+});
+
+test('AI-UNDO-1 second application: a line acts at once only while its declared parent is in the declared state', async () => {
+  const line = `${CLINIC}:field.visit_check_line_counted_quantity`;
+  const parent = `${CLINIC}:relation.visit_check_line_session`;
+  for (const [stateOption, expected] of [
+    ['draft', 'reversible'],
+    ['reviewed', 'needsYes'],
+  ] as const)
+    assert.equal(
+      await clinicClass(
+        CLINIC_EDITS,
+        'visit_check_line_update',
+        { counted_quantity: '12' },
+        {
+          [line]: '10',
+          [`${CLINIC}:field.visit_check_state`]: `${CLINIC}:option.visit_check_state_${stateOption}`,
+        },
+        parent,
+      ),
+      expected,
+      stateOption,
+    );
+  // Without the declared condition, the same line edit acts in any state:
+  // the parent rule comes from the declaration, not from the record names.
+  const unconditional: readonly ImmediateEditDeclaration[] = [
+    {
+      ...CLINIC_EDITS[0]!,
+      immediateFields: [{ fieldId: line }],
+    },
+  ];
+  assert.equal(
+    await clinicClass(
+      unconditional,
+      'visit_check_line_update',
+      { counted_quantity: '12' },
+      {
+        [line]: '10',
+        [`${CLINIC}:field.visit_check_state`]: `${CLINIC}:option.visit_check_state_reviewed`,
+      },
+      parent,
+    ),
+    'reversible',
+  );
+});
+
+test("AI-UNDO-1 second application: a record type no capability owns follows its release's compiled declaration", async () => {
+  // The clinic's item type is owned by no declaration here.
+  const item = { [`${CLINIC}:field.item_name`]: 'Old' };
+  assert.equal(
+    await clinicClass(CLINIC_EDITS, 'item_update', { name: 'Gauze' }, item),
+    'reversible',
+  );
+  // The same edit on a release that carries no declaration (an older
+  // release) asks: absence is the worst case.
+  assert.equal(
+    await clinicClass(
+      CLINIC_EDITS,
+      'item_update',
+      { name: 'Gauze' },
+      item,
+      undefined,
+      clinicView(() => undefined),
+    ),
+    'needsYes',
+  );
+});
+
+test('AI-UNDO-1: an unowned field without an exact value inverse asks, and so does a declaration this reader cannot parse', async () => {
+  const item = { [`${CLINIC}:field.item_name`]: 'Old' };
+  const noInverse = (emitted: ReversibilityDeclaration) => ({
+    ...emitted,
+    operations: emitted.operations.map((operation) =>
+      operation.operationId !== `${CLINIC}:operation.item_update`
+        ? operation
+        : {
+            ...operation,
+            fields: (operation.fields ?? []).map((field) =>
+              field.fieldId !== `${CLINIC}:field.item_name`
+                ? field
+                : {
+                    ...field,
+                    undo: 'none' as const,
+                    inverse: 'none' as const,
+                    reach: 'record' as const,
+                  },
+            ),
+          },
+    ),
+  });
+  assert.equal(
+    await clinicClass(
+      CLINIC_EDITS,
+      'item_update',
+      { name: 'Gauze' },
+      item,
+      undefined,
+      clinicView(noInverse),
+    ),
+    'needsYes',
+  );
+  const unreadable = (emitted: ReversibilityDeclaration) =>
+    ({
+      ...emitted,
+      schemaVersion: 'northstar.reversibility-declaration/v9',
+    }) as unknown as ReversibilityDeclaration;
+  assert.equal(
+    await clinicClass(
+      CLINIC_EDITS,
+      'item_update',
+      { name: 'Gauze' },
+      item,
+      undefined,
+      clinicView(unreadable),
+    ),
+    'needsYes',
+  );
+});
+
+test('AI-UNDO-1 second application: an unowned line follows the compiled parent condition', async () => {
+  // Only the patient type is owned here, so the visit-check line follows the
+  // release's own declaration, whose parent condition is the check's draft.
+  const patientsOnly: readonly ImmediateEditDeclaration[] = [
+    {
+      ...CLINIC_EDITS[0]!,
+      ownedEntityIds: [`${CLINIC}:entity.patient`],
+      immediateFields: [],
+    },
+  ];
+  const line = `${CLINIC}:field.visit_check_line_counted_quantity`;
+  for (const [stateOption, expected] of [
+    ['draft', 'reversible'],
+    ['reviewed', 'needsYes'],
+  ] as const)
+    assert.equal(
+      await clinicClass(
+        patientsOnly,
+        'visit_check_line_update',
+        { counted_quantity: '12' },
+        {
+          [line]: '10',
+          [`${CLINIC}:field.visit_check_state`]: `${CLINIC}:option.visit_check_state_${stateOption}`,
+        },
+        `${CLINIC}:relation.visit_check_line_session`,
+      ),
+      expected,
+      stateOption,
+    );
+});
+
+test('AI-UNDO-1: a field the release declares a consumer of asks, owned or not (the consumer rule)', async () => {
+  const item = { [`${CLINIC}:field.item_name`]: 'Old' };
+  // Unowned: the compiled class is no longer record-only.
+  assert.equal(
+    await clinicClass(
+      CLINIC_EDITS,
+      'item_update',
+      { name: 'Gauze' },
+      item,
+      undefined,
+      clinicView(
+        consumed(
+          `${CLINIC}:operation.item_update`,
+          `${CLINIC}:field.item_name`,
+        ),
+      ),
+    ),
+    'needsYes',
+  );
+  // Owned and declared safe by its capability: a consumer the release
+  // declares (a tenant workflow reading it) still makes it ask.
+  const contact = { [`${CLINIC}:field.patient_contact_summary`]: 'Old' };
+  assert.equal(
+    await clinicClass(
+      CLINIC_EDITS,
+      'patient_update',
+      { contact_summary: 'Ann' },
+      contact,
+      undefined,
+      clinicView(
+        consumed(
+          `${CLINIC}:operation.patient_update`,
+          `${CLINIC}:field.patient_contact_summary`,
+        ),
+      ),
+    ),
+    'needsYes',
+  );
+});
+
+test('AI-UNDO-1: an owned field its capability does not declare asks though the release classes it record-only', async () => {
+  // The clinic capability owns the patient type and declares only its
+  // contact summary; the compiled class of the name is exact and record-only.
+  const declaration = pinnedCatalog(clinicView()).reversibility.get(
+    `${CLINIC}:operation.patient_update`,
+  );
+  const name = declaration?.fields?.find(
+    (field) => field.fieldId === `${CLINIC}:field.patient_name`,
+  );
+  assert.deepEqual(
+    [name?.undo, name?.inverse, name?.reach],
+    ['exact', 'restorePriorValues', 'record'],
+  );
+  assert.equal(
+    await clinicClass(
+      CLINIC_EDITS,
+      'patient_update',
+      { name: 'Bo' },
+      { [`${CLINIC}:field.patient_name`]: 'Old' },
+    ),
+    'needsYes',
+  );
 });

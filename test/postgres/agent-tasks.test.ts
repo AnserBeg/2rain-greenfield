@@ -5,6 +5,7 @@
  * guards around writes -- a declined plan cannot run, planning writes nothing,
  * and the model cannot supply what the host owns.
  */
+import { firstPartyImmediateEdits } from '../../packages/domain/src/app/immediate-edits.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -59,6 +60,7 @@ async function lookUp(agent: OperationsAgentSession): Promise<void> {
 
 const session = (world: AgentWorld, approve: boolean) =>
   new OperationsAgentSession({
+    immediateEdits: firstPartyImmediateEdits(),
     // The panel's act-then-undo (a host option since the end review X6).
     autoApproveReversible: true,
     runtime: world.runtime,
@@ -325,6 +327,7 @@ test(
         );
         const asked: string[] = [];
         const careful = new OperationsAgentSession({
+          immediateEdits: firstPartyImmediateEdits(),
           // The panel's act-then-undo (a host option since the end review X6).
           autoApproveReversible: true,
           runtime: world.runtime,
@@ -352,6 +355,7 @@ test(
         // agent's write; and puts prior values back when it did not.
         {
           const agent = new OperationsAgentSession({
+            immediateEdits: firstPartyImmediateEdits(),
             // The panel's act-then-undo (a host option since the end review X6).
             autoApproveReversible: true,
             runtime: world.runtime,
@@ -420,6 +424,7 @@ test(
         // never written.
         const planPurchaseOrder = async (withCurrency: boolean) => {
           const agent = new OperationsAgentSession({
+            immediateEdits: firstPartyImmediateEdits(),
             // The panel's act-then-undo (a host option since the end review X6).
             autoApproveReversible: true,
             runtime: world.runtime,
@@ -646,6 +651,7 @@ test(
         // differ, and an operation the buyer may not use loads as denied.
         const as = (actor: 'buyer' | 'manager') =>
           new OperationsAgentSession({
+            immediateEdits: firstPartyImmediateEdits(),
             // The panel's act-then-undo (a host option since the end review X6).
             autoApproveReversible: true,
             runtime: world.runtime,
@@ -792,6 +798,7 @@ test(
         let rollBackAfterFirst = false;
         const real = world.runtime.operationGateway;
         const agent = new OperationsAgentSession({
+          immediateEdits: firstPartyImmediateEdits(),
           // The panel's act-then-undo (a host option since the end review X6).
           autoApproveReversible: true,
           runtime: {

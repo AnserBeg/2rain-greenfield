@@ -30,7 +30,12 @@ export interface FixtureProcess {
   readonly url: string;
   output(): string;
   /** SIGTERM, then SIGKILL at the deadline. Never throws. */
-  stop(): Promise<{ readonly exited: boolean; readonly output: string }>;
+  stop(): Promise<{
+    readonly exited: boolean;
+    readonly code: number | null;
+    readonly signal: NodeJS.Signals | null;
+    readonly output: string;
+  }>;
 }
 
 export async function startFixtureProcess(
@@ -42,8 +47,12 @@ export async function startFixtureProcess(
   });
   let output = '';
   let exitedAlready = false;
+  let exitCode: number | null = null;
+  let exitSignal: NodeJS.Signals | null = null;
   const exited = new Promise<void>((resolve) => {
-    child.once('exit', () => {
+    child.once('exit', (code, signal) => {
+      exitCode = code;
+      exitSignal = signal;
       exitedAlready = true;
       resolve();
     });
@@ -59,7 +68,7 @@ export async function startFixtureProcess(
       child.kill('SIGKILL');
       await didNotSettleWithin(exited, 5_000);
     }
-    return { exited: !stalled, output };
+    return { exited: !stalled, code: exitCode, signal: exitSignal, output };
   };
   child.stdout.on('data', (chunk: Buffer) => {
     output += chunk.toString();

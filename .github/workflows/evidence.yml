@@ -12,7 +12,7 @@ name: Evidence on demand
 # for a run and cite it: docs/execution/evidence-on-demand.md.
 #
 # CI-7: a lane that opens no pull request dispatches the controls by hand
-# (`gh workflow run evidence.yml -f ref=<branch or sha> -f controls="a b"`). A
+# (`gh workflow run evidence.yml -f ref=<branch or full commit sha> -f controls="a b"`). A
 # dispatch runs only run-controls, on the commit the `ref` input names, and
 # every dispatch keeps its own concurrency group so lanes never cancel each
 # other. regen-snapshot stays pull-request only.
@@ -22,7 +22,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: Branch, tag or commit SHA whose expected-red controls run
+        description: Branch, tag or full 40-character commit SHA whose expected-red controls run
         type: string
         required: true
       controls:
@@ -111,7 +111,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ needs.select-controls.outputs.head_sha }}
-          fetch-depth: ${{ (matrix.control == 'validation-refusal-does-not-veto' || matrix.control == 'validation-related-row-read-ignored' || matrix.control == 'late-address-response' || matrix.control == 'shared-record-company-pin' || matrix.control == 'address-map-placement-reader-floor' || startsWith(matrix.control, 'generated-pdf-') || startsWith(matrix.control, 'documents-')) && '0' || '1' }}
+          fetch-depth: ${{ (matrix.control == 'validation-refusal-does-not-veto' || matrix.control == 'validation-related-row-read-ignored' || matrix.control == 'late-address-response' || matrix.control == 'shared-record-company-pin' || matrix.control == 'address-map-placement-reader-floor' || startsWith(matrix.control, 'generated-pdf-') || startsWith(matrix.control, 'documents-') || startsWith(matrix.control, 'template-') || startsWith(matrix.control, 'archived-')) && '0' || '1' }}
           persist-credentials: false
       - name: Set up pinned Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4

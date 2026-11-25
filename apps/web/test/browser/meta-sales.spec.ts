@@ -457,18 +457,20 @@ async function withBrowserFixture(
     startupMilliseconds: 240_000,
     stopMilliseconds: 120_000,
   });
-  let failure: unknown;
+  let stopped: Awaited<ReturnType<typeof fixture.stop>> | undefined;
   try {
     await run(fixture.url);
-  } catch (error) {
-    failure = error;
+  } finally {
+    // stop() never throws, so the body's own failure always propagates.
+    stopped = await fixture.stop();
   }
-  const stopped = await fixture.stop();
-  // The test body's own failure is never replaced by a teardown failure.
-  if (failure !== undefined) throw failure;
   expect(
     stopped.exited,
     `the fixture did not exit within 120 s of SIGTERM; its output:\n${stopped.output}`,
   ).toBe(true);
+  expect(
+    { code: stopped.code, signal: stopped.signal },
+    `the fixture's exit; its output:\n${stopped.output}`,
+  ).toEqual({ code: 0, signal: null });
   expect(stopped.output).toContain('META_SALES_VERIFIED');
 }

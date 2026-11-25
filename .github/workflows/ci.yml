@@ -302,10 +302,11 @@ jobs:
         # agent-dev-tasks and address-authority; see docs/execution/packets/CI-6.md.
         # CI-7: shard 5 took 24m 39s on run 45551926366 (a branch that added a
         # 441 s file to it) and shard 3 hit 30 minutes once. Shards were repacked
-        # so each file total is at most 15 minutes of measured file time (900 s):
-        # at the 1.7 times runner variance seen on date-time-field that is 25.5
-        # minutes against the 30-minute limit. See docs/execution/packets/CI-7.md.
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        # on main 20762dbcd, with shard 11 added, so each shard's total is at most
+        # 900 s of measured file time (median of three runs). The slowest observed
+        # runner was 1.84 times (CI-6), so 900 s is 27.6 minutes against the
+        # 30-minute limit: a margin, not a bound. See docs/execution/packets/CI-7.md.
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -360,6 +361,9 @@ jobs:
       - name: Run PostgreSQL shard 10
         if: matrix.shard == 10
         run: corepack pnpm test:postgres:10
+      - name: Run PostgreSQL shard 11
+        if: matrix.shard == 11
+        run: corepack pnpm test:postgres:11
       - name: Run non-C locale determinism probe
         if: matrix.shard == 1
         run: corepack pnpm test:locale

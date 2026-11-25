@@ -1,5 +1,6 @@
 import {
-  BOOKING_FULFILMENT_READER,
+  RECORD_TEMPLATE_READER,
+  RECORD_TEMPLATE_OPERATION_READER,
   CONNECTOR_FAMILY,
   OPTIONAL_DEPENDENCY_QUERY_READER,
 } from '@north-star/canonical-model';
@@ -10,7 +11,7 @@ import {
   type UntrustedRequestInput,
 } from './request-context.js';
 import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents.js';
-import { PRESENTATION_READER } from '../../canonical-model/src/surface-presentation-schema.js';
+import { REVERSIBILITY_AGENT_READER } from '../../canonical-model/src/reversibility.js';
 import {
   WORKFLOW_PROJECTION_FAMILY,
   WORKFLOW_RUNTIME_CAPABILITY,
@@ -178,7 +179,9 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
   }),
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.agent]: {
     capabilityId: 'northstar.runtime:capability.agent-discovery',
-    maximumSupportedVersion: 4,
+    // 2 assistant confirmation declarations, 3 saved list layouts, 4 metric
+    // cards, 5 the reversibility declaration (AI-UNDO-1).
+    maximumSupportedVersion: REVERSIBILITY_AGENT_READER,
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.catalog]: {
     capabilityId: 'northstar.runtime:capability.semantic-model',
@@ -186,7 +189,7 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.operation]: {
     capabilityId: 'northstar.runtime:capability.operation-catalog',
-    maximumSupportedVersion: BOOKING_FULFILMENT_READER,
+    maximumSupportedVersion: RECORD_TEMPLATE_OPERATION_READER,
   },
   [REQUEST_RUNTIME_FORMULA_RULE_FAMILY]: {
     capabilityId: 'northstar.runtime:capability.formula-rule',
@@ -244,7 +247,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 46 reads viewport declarations and renders Map views (one rung).
     // 47 adds declared presentation: tone rules on list cells and rows,
     // column sizing and list density.
-    maximumSupportedVersion: PRESENTATION_READER,
+    // 48 applies versioned record templates at create (assigned at TRAIN-M).
+    maximumSupportedVersion: RECORD_TEMPLATE_READER,
   },
 });
 

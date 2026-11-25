@@ -1,3 +1,4 @@
+import { draftTemplateBinding } from './record-template-binding.js';
 import { draftReport } from './report-revision.js';
 import { z } from 'zod';
 
@@ -238,6 +239,19 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
     ...(targets.forms ?? []).map(
       (form) =>
         `- ${form.surfaceId} — ${form.label}: ${form.fields.map((field) => `${field.fieldId} "${field.label}"`).join(', ')}`,
+    ),
+    ...(targets.templateBindings ?? []).map(
+      ({ label, frame, contexts, columns }) =>
+        JSON.stringify({
+          label,
+          formId: frame.formId,
+          contexts,
+          fields: columns.map(({ fieldId, label, required }) => ({
+            fieldId,
+            label,
+            required,
+          })),
+        }),
     ),
     'Report sources (collection, eligible fields, and active reports):',
     ...(targets.reports ?? []).map((target) =>
@@ -649,6 +663,13 @@ function convertMember(
         ),
       ];
     }
+    case 'addRecordTemplateBindingRevision':
+      return [
+        draftTemplateBinding(
+          local().templateBindings ?? [],
+          req.templateBinding,
+        ),
+      ];
     case 'addReportRevision': {
       const { report } =
         DRAFTER_SELECTION_SCHEMAS.addReportRevision.parse(input);

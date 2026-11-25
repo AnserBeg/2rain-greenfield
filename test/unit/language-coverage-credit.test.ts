@@ -119,7 +119,8 @@ test('evidence written under an older file list is stale, named, and says how to
           error.message,
           /^LANGUAGE_COVERAGE_STALE_REACHABILITY_EVIDENCE: fake \(test-results\/reachability\/fake\.json\)/u,
         );
-        assert.match(error.message, /begin-reachability-run\.ts/u);
+        assert.match(error.message, /Do not begin a new run/u);
+        assert.match(error.message, /name different files for fake/u);
         assert.match(error.message, /corepack pnpm test:fake/u);
         // The underlying comparison stays visible for the owner.
         assert.match(error.message, /Observed argv mismatch for fake/u);

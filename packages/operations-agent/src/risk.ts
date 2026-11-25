@@ -1,5 +1,22 @@
-/** Only a revision-checked O0 patch can run before confirmation. */
+/**
+ * Only a revision-checked O0 patch can run before confirmation, and only for
+ * fields that have a value inverse and no consumer the release cannot see
+ * (AI-UNDO-1, owner ruling 2026-11-22). The policy names no record type or
+ * field:
+ * - a record type a capability owns acts at once only on the fields that
+ *   capability declares at product assembly (its code is a consumer the
+ *   release cannot see), less any the release's own consumers read;
+ * - a record type no capability owns acts at once only on the fields the
+ *   release's compiled reversibility declaration classes `exact`, inverse
+ *   `restorePriorValues`, reach `record` (no gate, no consumer, no guarded
+ *   writer, no declared confirmation);
+ * - a field nobody declares, or a release without the declaration, asks.
+ */
 import type { RegisteredOperationDefinition } from '../../runtime/src/semantic-operation-gateway.js';
+import type {
+  HoldsWhile,
+  ImmediateEditDeclaration,
+} from '../../canonical-model/src/reversibility.js';
 
 import { effectKind, type PinnedCatalog } from './catalog.js';
 
@@ -17,35 +34,19 @@ export interface OperationRisk {
     readonly kind: 'restorePriorValues';
     readonly operationId: string;
   };
+  /**
+   * For a reversible update: the lifecycle states the record (or a parent)
+   * must be in for Undo to hold, from the owner's declaration. The session
+   * checks them against what it read.
+   */
+  readonly holdsWhile?: readonly HoldsWhile[];
 }
-
-// Field identities are scoped to the reviewed first-party record and update.
-// A newly compiled patch contract alone supplies no evidence for auto-approval.
-const reversibleUpdates = new Map(
-  Object.entries({
-    item: ['description', 'name'],
-    legal_entity: ['name'],
-    location: ['name'],
-    party: ['contact_summary', 'credit_hold', 'name', 'payment_terms'],
-    purchase_order: ['notes'],
-    sales_order: ['notes'],
-    stock_count_line: ['counted_quantity'],
-    tax_code: ['name'],
-  }).map(([entity, fields]) => [
-    `northstar.app:operation.${entity}_update`,
-    {
-      entity: `northstar.app:entity.${entity}`,
-      fields: new Set(
-        fields.map((field) => `northstar.app:field.${entity}_${field}`),
-      ),
-    },
-  ]),
-);
 
 export function operationRisk(
   catalog: PinnedCatalog,
   operation: RegisteredOperationDefinition,
-  writtenFieldIds: readonly string[] = [],
+  writtenFieldIds: readonly string[],
+  immediateEdits: readonly ImmediateEditDeclaration[],
 ): OperationRisk {
   const kind = effectKind(operation);
   const tier = (operation as { tier?: unknown }).tier;
@@ -96,15 +97,53 @@ export function operationRisk(
         riskClass: 'needsYes',
         reason: 'This changes something that always needs your OK.',
       };
-    const reviewed = reversibleUpdates.get(operation.operationId);
+    // The owner of the record type decides which of its fields may change at
+    // once. A type no capability owns follows the release's own compiled
+    // declaration, which never loosens an owned type.
+    const owner = immediateEdits.find((declaration) =>
+      declaration.ownedEntityIds.includes(entity),
+    );
+    const compiled = catalog.reversibility.get(operation.operationId);
+    const compiledFields = new Map(
+      (compiled?.fields ?? []).map((field) => [field.fieldId, field]),
+    );
+    const declared = new Map<string, { readonly holdsWhile?: HoldsWhile }>(
+      owner
+        ? // A consumer the release declares (a tenant workflow, rule or
+          // billing plan reading the field) still makes an owned field ask.
+          owner.immediateFields.flatMap((field) =>
+            compiledFields
+              .get(field.fieldId)
+              ?.because.includes('readByConsumer')
+              ? []
+              : [[field.fieldId, field] as const],
+          )
+        : writtenFieldIds.flatMap((fieldId) => {
+            const field = compiledFields.get(fieldId);
+            return field &&
+              field.undo === 'exact' &&
+              field.inverse === 'restorePriorValues' &&
+              field.reach === 'record'
+              ? [
+                  [
+                    fieldId,
+                    compiled?.holdsWhile
+                      ? { holdsWhile: compiled.holdsWhile }
+                      : {},
+                  ],
+                ]
+              : [];
+          }),
+    );
+    const holdsWhile = writtenFieldIds.flatMap((field) => {
+      const condition = declared.get(field)?.holdsWhile;
+      return condition ? [condition] : [];
+    });
     return keys.includes('patch') &&
       keys.includes('expectedRevision') &&
       operation.infrastructure?.optimisticRevision === 'compareAndIncrement' &&
-      reviewed?.entity === entity &&
       writtenFieldIds.length > 0 &&
-      writtenFieldIds.every(
-        (field) => reviewed.fields.has(field) && fields.has(field),
-      )
+      writtenFieldIds.every((field) => declared.has(field) && fields.has(field))
       ? {
           riskClass: 'reversible',
           reason: 'Undo puts the old values back.',
@@ -112,6 +151,7 @@ export function operationRisk(
             kind: 'restorePriorValues',
             operationId: operation.operationId,
           },
+          ...(holdsWhile.length > 0 ? { holdsWhile } : {}),
         }
       : {
           riskClass: 'needsYes',

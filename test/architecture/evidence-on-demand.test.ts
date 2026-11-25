@@ -116,11 +116,28 @@ test('the evidence workflow is label-gated, read-only and pinned', () => {
       "BASE_SHA: ${{ github.event.pull_request.base.sha || 'origin/main' }}",
     ),
   );
-  assert.doesNotMatch(
-    workflow,
-    /run: [^\n]*\$\{\{ *inputs\./u,
-    'a dispatch input must never be interpolated into a shell command',
+  // A dispatch input appears only as the select checkout's ref and inside the
+  // PR_BODY expression: never in a `run:` block, a `--base` or an `echo`.
+  assert.deepEqual(
+    workflow
+      .split('\n')
+      .filter((line) => line.includes('inputs.'))
+      .map((line) => line.trim().split(':')[0]),
+    ['ref', 'PR_BODY'],
   );
+  // The cited SHA is the resolved commit, never github.sha (on a dispatch that
+  // is the tip of the branch the workflow ran from, not the commit tested).
+  assert.ok(select.includes('HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}'));
+  assert.ok(
+    control.includes('HEAD_SHA: ${{ needs.select-controls.outputs.head_sha }}'),
+  );
+  assert.doesNotMatch(workflow, /github\.sha/u);
+  assert.match(
+    select,
+    /ref: \$\{\{ github\.event\.pull_request\.head\.sha \|\| inputs\.ref \}\}\n {10}fetch-depth: 0\n/u,
+    'the merge base needs the whole history',
+  );
+
   assert.ok(
     select.includes('node scripts/expected-red-on-demand.mjs select \\'),
   );

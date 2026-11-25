@@ -29,13 +29,38 @@ export const COMPILER_SEMANTIC_PROFILE_V1_VERSION =
  */
 export const COMPILER_SEMANTIC_PROFILE_V2_VERSION =
   'northstar.compiler-semantic/v2' as const;
+/**
+ * Cut by AI-UNDO-1 slice 2, and deliberately NOT adopted (ADR-0047 §2): v2
+ * plus the agent-discovery reversibility declaration, and nothing else. No
+ * default compile and no recorded entry uses it, so every adopted release,
+ * every older-reader proof and every recorded customization stays
+ * byte-identical; a release compiled under it requires agent discovery 5.
+ * Adoption is a later, lineage-minting packet.
+ */
+export const COMPILER_SEMANTIC_PROFILE_V3_VERSION =
+  'northstar.compiler-semantic/v3' as const;
 export const SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS = Object.freeze([
   COMPILER_SEMANTIC_PROFILE_VERSION,
   COMPILER_SEMANTIC_PROFILE_V1_VERSION,
   COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+  COMPILER_SEMANTIC_PROFILE_V3_VERSION,
 ] as const);
 export type CompilerSemanticProfileVersion =
   (typeof SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS)[number];
+
+/**
+ * Whether `version` carries everything `floor` introduced: the axis is
+ * append-only (ADR-0047 §2), so a later profile keeps every earlier output.
+ */
+export function compilerSemanticProfileAtLeast(
+  version: CompilerSemanticProfileVersion,
+  floor: CompilerSemanticProfileVersion,
+): boolean {
+  return (
+    SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS.indexOf(version) >=
+    SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS.indexOf(floor)
+  );
+}
 export const OUTPUT_PROTOCOL_VERSION =
   'northstar.compiler-output/v0-experimental' as const;
 export const RELEASE_MANIFEST_VERSION =
