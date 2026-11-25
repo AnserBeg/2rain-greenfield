@@ -19,6 +19,7 @@ import {
 import {
   calculatedDisplayDraft,
   customizationTargets,
+  type CustomizationPatch,
 } from '../../packages/customization/src/index.js';
 import {
   HASH_ALGORITHM,
@@ -2158,7 +2159,17 @@ test('release admission refuses an analysed report or a named measure whose rele
     [trial, REPORT_ANALYSIS_READER - 1, 'REPORT_MEASURE_READER_MISMATCH'],
   ] as const) {
     const { compiled, normalizedDefinitionBytes: bytes } =
-      await compileReportFixture([reportAnalysisTypes, patch]);
+      await compileReportFixture([
+        // One ordered change set: the fixture compiles its first step only.
+        {
+          kind: 'changeSet',
+          patches: [
+            ...(reportAnalysisTypes as { patches: CustomizationPatch[] })
+              .patches,
+            patch,
+          ],
+        } as CustomizationPatch,
+      ]);
     assert.equal(
       compiled.bundle.releaseManifest.projections.find(
         (p) => p.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
