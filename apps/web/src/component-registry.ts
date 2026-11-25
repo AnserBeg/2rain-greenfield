@@ -2687,7 +2687,7 @@ export function renderFormControl(
       // The newline after the start tag keeps a leading blank line: HTML
       // drops the first newline of a text area's content.
       return `<textarea${kind} name="${name}" rows="4" maxlength="${String(LONG_TEXT_MAXIMUM_LENGTH)}" data-logical-field="longText">\n${current}</textarea>`;
-    if (logical?.logicalType === 'currencyCode')
+    if (logical?.currencyCodes)
       return renderEnumControl(
         (logical.currencyCodes ?? []).map((code) => ({
           label: code,
@@ -2803,7 +2803,7 @@ function typedControlPreservesValue(
       // A text area carries paragraphs whole; a currency code only one it offers.
       if (field.logical?.logicalType === 'longText')
         return typeof value === 'string';
-      if (field.logical?.logicalType === 'currencyCode')
+      if (field.logical?.currencyCodes)
         return (
           typeof value === 'string' &&
           (field.logical.currencyCodes ?? []).includes(value)

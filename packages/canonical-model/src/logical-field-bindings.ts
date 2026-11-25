@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import {
   STORED_CURRENCY_CODES,
+  AllowedValuesSchema,
   LOGICAL_FIELD_TYPES,
   LogicalFieldDeclarationSchema,
   UnitLabelSchema,
@@ -30,8 +31,8 @@ export const LogicalFieldBindingSchema = z.strictObject({
   unit: z
     .strictObject({ unitId: CanonicalIdSchema, label: UnitLabelSchema })
     .optional(),
-  /** A currency field's codes: those its money fields read, else all stored codes. */
-  codes: z.array(z.enum(STORED_CURRENCY_CODES)).min(1).optional(),
+  /** A text field's declared allowed values (a currency field's codes). */
+  allowedValues: AllowedValuesSchema.optional(),
 });
 export type LogicalFieldBinding = z.infer<typeof LogicalFieldBindingSchema>;
 
@@ -138,10 +139,19 @@ export function deriveLogicalFieldBindings(
         break;
       }
       case 'longText':
+      case 'text': {
         if (type.kind !== 'textFieldType')
-          return refuse('long text stores a text value.');
-        bindings.push(base);
+          return refuse(`${declaration.logicalType} stores a text value.`);
+        const allowed = declaration.allowedValues;
+        if (
+          allowed?.some(
+            (value) => [...value].length > Number(type.maximumLength),
+          )
+        )
+          return refuse('an allowed value is longer than the field holds.');
+        bindings.push(allowed ? { ...base, allowedValues: allowed } : base);
         break;
+      }
       case 'currencyCode':
         if (
           type.kind !== 'textFieldType' ||
@@ -151,21 +161,15 @@ export function deriveLogicalFieldBindings(
           return refuse(
             'a currency code stores three characters compared exactly.',
           );
-        {
-          const read = new Set<string>(
-            (entity.reportSource?.amounts ?? []).flatMap((a) =>
-              a.currency.kind === 'stored' && a.currency.fieldId === fieldId
-                ? a.currency.codes
-                : [],
-            ),
+        if (
+          !declaration.allowedValues.every((code) =>
+            (STORED_CURRENCY_CODES as readonly string[]).includes(code),
+          )
+        )
+          return refuse(
+            `a currency field allows only ${STORED_CURRENCY_CODES.join(', ')}.`,
           );
-          bindings.push({
-            ...base,
-            codes: STORED_CURRENCY_CODES.filter(
-              (code) => read.size === 0 || read.has(code),
-            ),
-          });
-        }
+        bindings.push({ ...base, allowedValues: declaration.allowedValues });
         break;
     }
   }

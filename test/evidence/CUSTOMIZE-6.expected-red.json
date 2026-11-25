@@ -105,23 +105,6 @@
       ]
     },
     {
-      "name": "logical-currency-rule-dropped",
-      "claim": "A currency field carries a write-time rule refusing codes outside CAD, USD and EUR.",
-      "file": "packages/customization/src/apply.ts",
-      "original": "  if (!fieldIds.length) return;",
-      "replacement": "  return;",
-      "test": {
-        "files": ["test/unit/logical-field.test.ts"]
-      },
-      "kills": [
-        {
-          "file": "test/unit/logical-field.test.ts",
-          "name": "a currency field refuses unlisted codes on write and is searchable",
-          "expected": "the currency field carries its code rule"
-        }
-      ]
-    },
-    {
       "name": "logical-unlisted-code-shown",
       "claim": "A list shows a stored currency code only when the money field's binding lists it.",
       "file": "apps/web/src/surface-composition.ts",
@@ -203,6 +186,74 @@
           "file": "test/postgres/releases.test.ts",
           "name": "release admission refuses logical field bindings or a reader floor that disagree with the declaration",
           "expected": "an understated floor"
+        }
+      ]
+    },
+    {
+      "name": "logical-allowed-values-unprojected",
+      "claim": "A declared allowed-values list reaches every create and update write contract of its field.",
+      "file": "packages/compiler/src/projections.ts",
+      "original": "    if (allowed.size) {",
+      "replacement": "    if (false) {",
+      "test": {
+        "files": ["test/unit/logical-field.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/logical-field.test.ts",
+          "name": "a currency field refuses unlisted codes on write through its own contract and is searchable",
+          "expected": "the write contract lacks the allowed values"
+        }
+      ]
+    },
+    {
+      "name": "logical-allowed-values-unenforced",
+      "claim": "The write path refuses a text value outside its field's declared allowed values (GBP, cad).",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "        field.allowedTexts &&\n",
+      "replacement": "        false &&\n",
+      "test": {
+        "files": ["test/postgres/logical-fields.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/logical-fields.test.ts",
+          "name": "tenant money, quantity and long text serve with currency and unit per company, sum per currency, and the preceding reader refuses them by name",
+          "expected": "GBP was written"
+        }
+      ]
+    },
+    {
+      "name": "logical-currency-declaration-ignored",
+      "claim": "A currency field's codes are read from its own declaration, never from the platform constant.",
+      "file": "packages/canonical-model/src/logical-field-bindings.ts",
+      "original": "        bindings.push({ ...base, allowedValues: declaration.allowedValues });",
+      "replacement": "        bindings.push({ ...base, allowedValues: [...STORED_CURRENCY_CODES] });",
+      "test": {
+        "files": ["test/unit/logical-field.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/logical-field.test.ts",
+          "name": "a currency field reads its allowed codes from its own declaration",
+          "expected": "the binding ignored the declaration"
+        }
+      ]
+    },
+    {
+      "name": "logical-editor-textarea-unbounded",
+      "claim": "The document editor's text area keeps a leading blank line and its field's maxlength.",
+      "file": "apps/web/src/editor-controls.ts",
+      "original": "    return `<textarea${shared} name=\"${h(name)}\" rows=\"3\"${maxLength(input)}>\\n${h(text(value))}</textarea>${error.html}`;",
+      "replacement": "    return `<textarea${shared} name=\"${h(name)}\" rows=\"3\">${h(text(value))}</textarea>${error.html}`;",
+      "test": {
+        "files": ["test/unit/logical-field.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/logical-field.test.ts",
+          "name": "the document editor text area keeps a leading blank line, bounds its length and posts CRLF as one break",
+          "expected": "the editor text area lost its leading blank line or bound"
         }
       ]
     }

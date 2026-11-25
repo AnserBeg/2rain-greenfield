@@ -809,8 +809,10 @@ function describeField(field: Json, to?: DiffDefinition): string {
         return `${label} (quantity in ${String(logical.unit?.label)}, ${places(logical.scale)}${required})`;
       case 'longText':
         return `${label} (long text${required})`;
+      case 'text':
+        return `${label} (one of ${(logical.allowedValues ?? []).join(', ')}${required})`;
       case 'currencyCode':
-        return `${label} (currency: one of ${(logical.codes ?? []).join(', ')}${required})`;
+        return `${label} (currency: one of ${(logical.allowedValues ?? []).join(', ')}${required})`;
     }
   }
   switch (fieldType.kind) {

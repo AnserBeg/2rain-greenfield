@@ -233,10 +233,14 @@ test(
                 (error: Error & { code?: string }) =>
                   `${String(error.code)} ${error.message}`,
               );
-            assert.doesNotMatch(refusedWrite, /"outcome":"succeeded"/u, code);
+            assert.doesNotMatch(
+              refusedWrite,
+              /"outcome":"succeeded"/u,
+              `${code} was written`,
+            );
             assert.match(
               refusedWrite,
-              /MODULE_VALIDATION_REFUSED Choose CAD, USD or EUR/u,
+              /MODULE_FIELD_VALUE_NOT_ALLOWED Choose CAD, USD or EUR\./u,
               code,
             );
           }

@@ -1405,6 +1405,8 @@ function validateReportSources(
             fieldId,
             'A fixed currency amount needs its currency minor-unit scale.',
           );
+      } else if (fields.get(currency.fieldId)?.lifecycle === 'retired') {
+        // CUSTOMIZE-6 (rule 10): a retired currency field stays bound.
       } else {
         const code = local(currency.fieldId)?.fieldType;
         if (code?.kind !== 'textFieldType' || code.maximumLength !== 3)

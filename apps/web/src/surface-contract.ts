@@ -226,8 +226,9 @@ function parseLogicalFieldBindings(
       binding.fieldId,
       Object.freeze({
         ...binding,
-        ...(binding.logicalType === 'currencyCode' && {
-          currencyCodes: Object.freeze([...(binding.codes ?? [])]),
+        // A field with declared allowed values offers exactly those.
+        ...(binding.allowedValues && {
+          currencyCodes: Object.freeze([...(binding.allowedValues ?? [])]),
         }),
       }),
     ]),

@@ -201,7 +201,9 @@ export function renderValueControl(context: RenderContext): string {
   const shared = ` id="${h(id)}" form="draft-editor-form"${named}${input.required ? ' required' : ''}${frozen ? ' disabled' : ''}${focused}${error.attributes}${context.lineSource ? ' data-line-source' : ''}`;
   const presentation = field.presentation;
   if (presentation?.kind === 'multiline')
-    return `<textarea${shared} name="${h(name)}" rows="3">${h(text(value))}</textarea>${error.html}`;
+    // The newline after the start tag keeps a leading blank line; the
+    // field's own bound is the text area's maxlength.
+    return `<textarea${shared} name="${h(name)}" rows="3"${maxLength(input)}>\n${h(text(value))}</textarea>${error.html}`;
   if (presentation?.kind === 'choice')
     // A stored value outside the offered set is shown and kept, never replaced
     // by the first option during an unrelated edit.
@@ -434,7 +436,7 @@ export function renderCreatePanel(context: {
       const presentation = collected.presentation;
       const control =
         presentation?.kind === 'multiline'
-          ? `<textarea name="${h(name)}" rows="2"${attributes}>${h(value)}</textarea>`
+          ? `<textarea name="${h(name)}" rows="2"${attributes}${maxLength(input)}>\n${h(value)}</textarea>`
           : presentation?.kind === 'choice'
             ? renderChoice(
                 presentation,
@@ -513,4 +515,13 @@ function renderPossibleDuplicates(
     )
     .join('');
   return `<section class="editor-create__duplicates" data-editor-create-duplicates aria-labelledby="editor-create-duplicates-heading"><p id="editor-create-duplicates-heading"><strong>Existing records match “${h(duplicates.term)}”</strong></p><ul>${items}</ul>${duplicates.more ? '<p class="muted">More records match; refine the name to see them.</p>' : ''}<p class="muted">Create and use makes a new, separate record.</p></section>`;
+}
+
+/** A text area's maxlength: its field's declared maximum length, if any. */
+function maxLength(
+  input:
+    { readonly bounds?: { readonly maximumLength: number | null } } | undefined,
+): string {
+  const length = input?.bounds?.maximumLength;
+  return typeof length === 'number' ? ` maxlength="${String(length)}"` : '';
 }

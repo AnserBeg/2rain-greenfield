@@ -538,6 +538,46 @@ export function lowerBaseProjectionPayloads(
   // the surface reader floor, since older readers strict-parse the stored
   // definition. Omission emits nothing.
   if (logicalFieldBindings) {
+    // Each declared allowed-values list joins its field's write contract, so
+    // every create and update refuses any other value (CUSTOMIZE-6).
+    const allowed = new Map(
+      logicalFieldBindings.flatMap((binding) =>
+        binding.allowedValues
+          ? [[String(binding.fieldId), binding.allowedValues] as const]
+          : [],
+      ),
+    );
+    if (allowed.size) {
+      const catalog = plans.find(
+        (p) => p.familyId === PROJECTION_FAMILY_IDS.operationCatalog,
+      )!;
+      const payload = catalog.payload as {
+        operations: { inputContract?: { fields: Record<string, unknown>[] } }[];
+      };
+      catalog.payload = {
+        ...payload,
+        operations: payload.operations.map((operation) =>
+          operation.inputContract?.fields.some((f) =>
+            allowed.has(String(f.fieldId)),
+          )
+            ? {
+                ...operation,
+                inputContract: {
+                  ...operation.inputContract,
+                  fields: operation.inputContract.fields.map((f) =>
+                    allowed.has(String(f.fieldId))
+                      ? {
+                          ...f,
+                          allowedTexts: [...allowed.get(String(f.fieldId))!],
+                        }
+                      : f,
+                  ),
+                },
+              }
+            : operation,
+        ),
+      };
+    }
     const surface = plans.find(
       (p) => p.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
     )!;

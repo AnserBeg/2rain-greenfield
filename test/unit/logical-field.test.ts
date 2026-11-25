@@ -24,6 +24,9 @@ import { logicalFieldBindingsProblem } from '../../packages/postgres-provider/sr
 import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { renderFormControl } from '../../apps/web/src/component-registry.js';
 import { logicalSuffix } from '../../apps/web/src/surface-composition.js';
+import { literalValidationDraft } from '../../packages/customization/src/validation-draft.js';
+import { renderValueControl } from '../../apps/web/src/editor-controls.js';
+import { captureDraftFields } from '../../apps/web/src/document-editor.js';
 import type {
   CompiledLogicalField,
   CompiledSurfaceField,
@@ -139,7 +142,7 @@ const expectedBindings = [
     fieldId: f('currency'),
     entityId: shipment,
     logicalType: 'currencyCode',
-    codes: ['CAD', 'USD', 'EUR'],
+    allowedValues: ['CAD', 'USD', 'EUR'],
   },
   {
     fieldId: f('deposit'),
@@ -439,7 +442,7 @@ test('with logical fields active and after they retire, adding a field and arran
   // Retire money (still bound in the report source), the currency it reads
   // and the quantity in the BASE, then add and arrange after the retirement.
   const retiredBase = structuredClone(applied([shipmentType]));
-  for (const local of ['deposit', 'freight', 'weight'])
+  for (const local of ['deposit', 'freight', 'currency', 'weight'])
     (retiredBase.fields as Forged[]).find(
       (x) => x.fieldId === f(local),
     )!.lifecycle = 'retired';
@@ -518,61 +521,98 @@ test('serving refuses a declaration below its reader rung and a rung without one
   );
 });
 
-test('a currency field offers the codes its money fields read, else every stored code', () => {
+test('a currency field reads its allowed codes from its own declaration', () => {
   const normalized = normalizeApplicationPackage(
     applied([shipmentType]),
   ) as unknown as Forged;
-  const derive = (def: Forged) => {
-    const outcome = deriveLogicalFieldBindings(
+  const declaration = (normalized.logicalFields as Forged[]).find(
+    (d) => d.fieldId === f('currency'),
+  )!;
+  assert.deepEqual(declaration.allowedValues, ['CAD', 'USD', 'EUR']);
+  const derive = (def: Forged) =>
+    deriveLogicalFieldBindings(
       def as Parameters<typeof deriveLogicalFieldBindings>[0],
     );
-    assert.ok(outcome.status === 'bound');
-    return outcome.bindings.find((b) => b.fieldId === f('currency'))!.codes;
+  const codes = (def: Forged) => {
+    const outcome = derive(def);
+    assert.ok(outcome.status === 'bound', JSON.stringify(outcome));
+    return outcome.bindings.find((b) => b.fieldId === f('currency'))!
+      .allowedValues;
   };
-  assert.deepEqual(derive(normalized), ['CAD', 'USD', 'EUR']);
+  assert.deepEqual(codes(normalized), ['CAD', 'USD', 'EUR']);
+  // The binding follows the declaration, not a platform constant.
   const narrowed = structuredClone(normalized);
-  (narrowed.entities as Forged[])
-    .find((e) => e.entityId === shipment)!
-    .reportSource.amounts.find(
-      (a: Forged) => a.fieldId === f('freight'),
-    ).currency.codes = ['USD', 'CAD'];
-  assert.deepEqual(derive(narrowed), ['CAD', 'USD']);
-  // Alone (no money field reads it), it still offers every stored code.
-  const alone = normalizeApplicationPackage(
-    applied([
-      {
-        kind: 'addRecordType',
-        label: 'Shipment',
-        companyOwnership: 'entityOwned',
-        fields: [
-          { label: 'Name', type: 'text', required: true },
-          { label: 'Currency', type: 'currency' },
-        ],
-      },
-    ]),
-  ) as unknown as Forged;
-  assert.deepEqual(derive(alone), ['CAD', 'USD', 'EUR']);
+  (narrowed.logicalFields as Forged[]).find(
+    (d) => d.fieldId === f('currency'),
+  )!.allowedValues = ['USD'];
+  assert.deepEqual(
+    codes(narrowed),
+    ['USD'],
+    'the binding ignored the declaration',
+  );
+  const widened = structuredClone(normalized);
+  (widened.logicalFields as Forged[]).find(
+    (d) => d.fieldId === f('currency'),
+  )!.allowedValues = ['CAD', 'GBP'];
+  assert.match(
+    JSON.stringify(derive(widened)),
+    /a currency field allows only CAD, USD, EUR/u,
+  );
 });
 
-test('a currency field refuses unlisted codes on write and is searchable', () => {
+test('a currency field refuses unlisted codes on write through its own contract and is searchable', async () => {
   const authored = applied([shipmentType]);
   const currency = (authored.fields as Forged[]).find(
     (x) => x.fieldId === f('currency'),
   )!;
   assert.equal(currency.searchable, true, 'the currency field is searchable');
-  const rule = ((authored.formulaRules ?? []) as Forged[]).find(
-    (r) => r.ruleId === `${NS}:rule.custom_shipment_currency_code`,
-  )!;
-  assert.ok(rule, 'the currency field carries its code rule');
-  assert.deepEqual(rule.boundOperationIds, [
-    `${NS}:operation.custom_shipment_create`,
-    `${NS}:operation.custom_shipment_update`,
-  ]);
-  assert.equal(rule.effect, 'refuse');
-  assert.equal(rule.predicate.kind, 'any');
-  assert.deepEqual(
-    (rule.predicate.terms as Forged[]).map((t) => t.right.scalar.value),
-    ['CAD', 'USD', 'EUR'],
+  assert.equal(
+    ((authored.formulaRules ?? []) as Forged[]).length,
+    0,
+    'the allowed codes are not a formula rule',
+  );
+  const { operation } = surfaceOf(await compile([shipmentType]));
+  const contract = (local: string) =>
+    (
+      (operation.payload.operations as Forged[]).find(
+        (o) => o.operationId === `${NS}:operation.custom_shipment_${local}`,
+      )!.inputContract.fields as Forged[]
+    ).find((x) => x.fieldId === f('currency'))!;
+  for (const local of ['create', 'update'])
+    assert.deepEqual(
+      contract(local).allowedTexts,
+      ['CAD', 'USD', 'EUR'],
+      'the write contract lacks the allowed values',
+    );
+});
+
+test('a currency field and two validated optional numbers compile together', async () => {
+  const type = {
+    kind: 'addRecordType',
+    label: 'Shipment',
+    companyOwnership: 'entityOwned',
+    fields: [
+      { label: 'Name', type: 'text', required: true },
+      { label: 'Currency', type: 'currency' },
+      { label: 'Pieces', type: 'number' },
+      { label: 'Pallets', type: 'number' },
+    ],
+  };
+  const target = customization
+    .customizationTargets(normalizeApplicationPackage(applied([type])))
+    .validationTargets!.find((t) => t.entityId === shipment)!;
+  const rule = (local: string) =>
+    literalValidationDraft(target, {
+      fieldId: f(local),
+      check: 'minimum',
+      limit: '1',
+      message: `At least one ${local}.`,
+    });
+  const result = await compile([type, rule('pieces'), rule('pallets')]);
+  assert.equal(
+    result.status,
+    'compiled',
+    `two rules beside a currency field refused: ${JSON.stringify(result).slice(0, 600)}`,
   );
 });
 
@@ -731,4 +771,43 @@ test('a scaled number steps by its scale and shows its unit; money shows only a 
   assert.equal(suffix('GBP'), '(no listed currency)');
   assert.equal(suffix('cad'), '(no listed currency)');
   assert.equal(logicalSuffix(stored), null);
+});
+
+test('the document editor text area keeps a leading blank line, bounds its length and posts CRLF as one break', () => {
+  const input = {
+    fieldId: f('notes'),
+    kind: 'textFieldType',
+    required: false,
+    bounds: { maximumLength: 4000, precision: null, scale: null },
+  } as never;
+  const field = {
+    fieldId: f('notes'),
+    label: 'Notes',
+    presentation: { kind: 'multiline' },
+  } as never;
+  const html = renderValueControl({
+    row: { id: 'r1', values: { [f('notes')]: '\nFirst\nSecond' } },
+    field,
+    compiled: undefined,
+    input,
+    frozen: false,
+    index: 0,
+    accessibleName: null,
+    focus: null,
+    error: null,
+  } as never);
+  assert.match(
+    html,
+    /<textarea[^>]*maxlength="4000"[^>]*>\n\nFirst\nSecond<\/textarea>/u,
+    'the editor text area lost its leading blank line or bound',
+  );
+  const row = { id: 'r1', values: {} as Record<string, unknown> };
+  const refused = captureDraftFields(
+    row as never,
+    [field] as never,
+    new Map([[f('notes'), input]]) as never,
+    { [`draft:r1:${f('notes')}`]: '\r\nFirst\r\nSecond' } as never,
+  );
+  assert.deepEqual(refused, []);
+  assert.equal(row.values[f('notes')], '\nFirst\nSecond');
 });

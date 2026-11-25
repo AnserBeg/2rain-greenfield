@@ -27,6 +27,8 @@ export const LOGICAL_FIELD_TYPES = [
   'quantity',
   'longText',
   'currencyCode',
+  // A plain text field whose value is one of its declared allowed values.
+  'text',
 ] as const;
 export type LogicalFieldType = (typeof LOGICAL_FIELD_TYPES)[number];
 /** The codes a stored currency field may hold (the REPORTS-1 stored list). */
@@ -59,6 +61,18 @@ const common = {
   fieldId: id,
   entityId: id,
 };
+/**
+ * The exact values a text field accepts, declared on the field itself: the
+ * write path refuses anything else (case-sensitive), and readers offer these.
+ * General: any text-backed logical kind may declare them.
+ */
+export const AllowedValuesSchema = z
+  .array(z.string().min(1).max(240))
+  .min(1)
+  .max(64)
+  .refine((values) => new Set(values).size === values.length, {
+    message: 'allowed values are unique',
+  });
 export const LogicalFieldDeclarationSchema = z.discriminatedUnion(
   'logicalType',
   [
@@ -69,8 +83,21 @@ export const LogicalFieldDeclarationSchema = z.discriminatedUnion(
       logicalType: z.literal('quantity'),
       unitLabel: UnitLabelSchema,
     }),
-    z.strictObject({ ...common, logicalType: z.literal('longText') }),
-    z.strictObject({ ...common, logicalType: z.literal('currencyCode') }),
+    z.strictObject({
+      ...common,
+      logicalType: z.literal('longText'),
+      allowedValues: AllowedValuesSchema.optional(),
+    }),
+    z.strictObject({
+      ...common,
+      logicalType: z.literal('currencyCode'),
+      allowedValues: AllowedValuesSchema,
+    }),
+    z.strictObject({
+      ...common,
+      logicalType: z.literal('text'),
+      allowedValues: AllowedValuesSchema,
+    }),
   ],
 );
 export type LogicalFieldDeclaration = z.infer<
