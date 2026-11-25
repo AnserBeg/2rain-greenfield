@@ -1,7 +1,12 @@
 import {
+  allFields,
+  at,
+  dimensionChoices,
+  measureChoices,
   measureSubmission,
-  reportEditor,
+  pick,
   reportSubmission,
+  same,
 } from './customize-report.js';
 import type { ReportTarget } from '@north-star/customization';
 import {
@@ -2099,4 +2104,79 @@ function mapSubmission(
     prior,
     s.lifecycle === 'retired',
   );
+}
+
+const hidden = (name: string, value: string) =>
+  `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`;
+const option = (value: string, label: string, selected: boolean) =>
+  `<option value="${escapeHtml(value)}"${selected ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+
+function reportEditor(target: ReportTarget, reportId: string | null) {
+  const previous = target.reports.find(
+    (r) => r.revision.reportId === reportId && r.lifecycle === 'active',
+  );
+  if (reportId && !previous) throw new Error('Report unavailable.');
+  const body = previous?.revision.body;
+  const visible = target.reports.filter((r) => r.lifecycle === 'active');
+  const existing = visible
+    .map(
+      (r) =>
+        `<a href="/?${escapeHtml(new URLSearchParams({ customize: '', report: target.source.listSurfaceId, editReport: r.revision.reportId }).toString())}">${escapeHtml(r.label)}</a>`,
+    )
+    .join(' ');
+  const ageDim = body?.dimensions.find((d) => d.kind === 'age');
+  const edges = ageDim
+    ? ageDim.bands
+        .slice(1, -1)
+        .map((b) => String(b.through))
+        .join(',')
+    : '30,60,90';
+  const dims = dimensionChoices(target, edges);
+  const groups = Array.from({ length: 4 }, (_, i) => {
+    const chosen = body?.dimensions[i]
+      ? dims.find((d) => same(d.value, body.dimensions[i]))
+      : undefined;
+    return `<label>Group ${i + 1}<select name="group${i}">${option('', 'Choose a field', !chosen)}${dims.map((d) => option(JSON.stringify(d.value), d.label, d === chosen)).join('')}</select></label>`;
+  }).join('');
+  const filters = allFields(target)
+    .map((f) => {
+      const selected = body?.filters.find((c) =>
+        same(
+          'via' in c && c.via
+            ? { fieldId: c.fieldId, via: c.via }
+            : { fieldId: c.fieldId },
+          at(f),
+        ),
+      )?.kind;
+      const name = 'filter:' + JSON.stringify(at(f));
+      return `<label>${escapeHtml(f.label)}<select name="${escapeHtml(name)}">${option('', 'None', !selected)}${option('equals', 'Equals', selected === 'equals')}${f.operand.type === 'choice' ? option('membership', 'One of', selected === 'membership') : ''}${f.operand.basis && !f.operand.via ? option('dateRange', 'Date range', selected === 'dateRange') : ''}</select></label>`;
+    })
+    .join('');
+  const measures = measureChoices(target);
+  const chosen = new Set(
+    body
+      ? body.measures.flatMap((m) => {
+          const c = pick(measures, m);
+          return c ? [c] : [];
+        })
+      : [measures[0]],
+  );
+  const grain =
+    target.grain === 'line' ? 'One row per line' : 'One row per record';
+  return `<h1>${previous ? 'Edit report' : 'Add report'}</h1>${existing && '<nav aria-label="Reports">' + existing + '</nav>'}<form method="post">${hidden('action', 'draft')}${hidden('kind', 'addReportRevision')}${hidden('surface', target.source.listSurfaceId)}${hidden('reportId', reportId ?? '')}${hidden('prior', previous?.revision.revisionId ?? '')}<p>${escapeHtml(grain)}</p><label>Report name <input name="label" value="${escapeHtml(previous?.label ?? '')}" required maxlength="240"></label><fieldset><legend>Group by</legend>${groups}<label>Age band edges in days <input name="ageEdges" value="${escapeHtml(edges)}" maxlength="80"></label></fieldset><fieldset><legend>Measures</legend>${measures.map((m, i) => `<label><input type="checkbox" name="measure${i}" value="${escapeHtml(JSON.stringify(m.value))}"${chosen.has(m) ? ' checked' : ''}>${escapeHtml(m.label)}</label>`).join('')}</fieldset><details><summary>Filter parameters</summary>${filters}</details><label><input type="checkbox" name="csv"${!body || body.outputs.some((o) => o.kind === 'csv') ? ' checked' : ''}>Allow audited CSV</label><button name="status" value="active">Draft report</button>${previous ? '<button name="status" value="retired">Draft retirement</button>' : ''}</form>${measureEditor(target)}`;
+}
+
+/** Trial a named measure on authorized data, then approve exactly that. */
+function measureEditor(target: ReportTarget) {
+  const operators = measureChoices(target).filter(
+    (m) => m.value.kind === 'inline',
+  );
+  const current = target.namedMeasures
+    .filter((m) => m.lifecycle === 'active')
+    .map(
+      (m) =>
+        `<li>${escapeHtml(m.label)} · ${m.revision.status === 'approved' ? 'approved' : 'trial'}<form method="post">${hidden('action', 'draft')}${hidden('kind', 'addMeasureRevision')}${hidden('surface', target.source.listSurfaceId)}${hidden('measureId', m.revision.measureId)}${hidden('prior', m.revision.revisionId)}${hidden('label', m.label)}${m.revision.status === 'trial' ? '<button name="status" value="approved">Approve this measure</button>' : ''}<button name="status" value="retired">Retire</button></form></li>`,
+    )
+    .join('');
+  return `<section aria-label="Named measures"><h2>Named measures</h2>${current && '<ul>' + current + '</ul>'}<form method="post">${hidden('action', 'draft')}${hidden('kind', 'addMeasureRevision')}${hidden('surface', target.source.listSurfaceId)}<label>Measure name <input name="label" required maxlength="240"></label><label>Calculation<select name="operator">${operators.map((m) => option(JSON.stringify(m.value.operator), m.label, false)).join('')}</select></label><button name="status" value="trial">Draft a trial</button></form></section>`;
 }

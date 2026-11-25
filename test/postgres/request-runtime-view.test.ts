@@ -1106,7 +1106,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
               new RegExp(
-                `requires version 999 and this runtime supports ${PRESENTATION_READER}`,
+                `requires version 999 and this runtime supports ${REPORT_MEASURE_READER}`,
               ),
             );
           },
@@ -1137,7 +1137,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
               new RegExp(
-                `requires version 999 and this runtime supports ${PRESENTATION_READER}`,
+                `requires version 999 and this runtime supports ${REPORT_MEASURE_READER}`,
               ),
             );
           },

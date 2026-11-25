@@ -19,7 +19,6 @@ import {
 import {
   calculatedDisplayDraft,
   customizationTargets,
-  type CustomizationPatch,
 } from '../../packages/customization/src/index.js';
 import {
   HASH_ALGORITHM,
@@ -2096,112 +2095,6 @@ test('release admission refuses a company access index whose release understates
     }),
     { code: 'REPORT_INDEX_READER_MISMATCH' },
   );
-});
-
-test('release admission refuses an analysed report or a named measure whose release understates its reader floor', async (t) => {
-  const { applyCustomizationPatches } =
-    await import('../../packages/customization/src/index.js');
-  const { reportTargets, draftReport } =
-    await import('../../packages/customization/src/report-revision.js');
-  const { draftMeasure } =
-    await import('../../packages/customization/src/measure-revision.js');
-  const { readReportsPredecessor } =
-    await import('../helpers/reports-preceding-release.js');
-  const { reportAnalysisTypes } =
-    await import('../helpers/report-analysis-fixture.js');
-  const { REPORT_ANALYSIS_READER, REPORT_MEASURE_READER } =
-    await import('../../packages/canonical-model/src/declared-report-v2.js');
-  const { DEFAULT_AGE_BANDS, ReportChoicesSchema } =
-    await import('../../packages/canonical-model/src/index.js');
-  const applied = applyCustomizationPatches(
-    readReportsPredecessor('apps/web/release/app.authored.json'),
-    [reportAnalysisTypes],
-  );
-  assert.ok(applied.status === 'applied');
-  const target = reportTargets(
-    applied.authored as unknown as Parameters<typeof reportTargets>[0],
-  ).find((r) => r.source.queryId.endsWith(':query.custom_inspection_list'))!;
-  const aging = draftReport(
-    target,
-    'Inspection age',
-    ReportChoicesSchema.parse({
-      dimensions: [
-        {
-          kind: 'age',
-          fieldId: 'northstar.app:field.custom_inspection_due',
-          bands: DEFAULT_AGE_BANDS,
-          absentLabel: 'No due date',
-        },
-      ],
-      filters: [],
-      measures: [
-        {
-          kind: 'inline',
-          measureId: 'northstar.app:measure.custom_count',
-          label: 'Count',
-          operator: { kind: 'count' },
-        },
-      ],
-      outputs: [{ kind: 'table' }],
-    }),
-  );
-  const trial = draftMeasure(target, 'Inspections', 'trial', {
-    kind: 'count',
-  });
-  const context = await contextFor(requestEntry(), 'session-a');
-  const pool = new pg.Pool();
-  t.after(() => pool.end());
-  t.mock.method(pool, 'connect', () => {
-    throw new Error('Understated candidate reached the staging transaction');
-  });
-  // One compile carries both (shard 3 is near its limit): floor 51. At 49 the
-  // analysed-report check refuses; at 50 that check passes and the measure
-  // check refuses.
-  const { compiled, normalizedDefinitionBytes: bytes } =
-    await compileReportFixture([
-      // One ordered change set: the fixture compiles its first step only.
-      {
-        kind: 'changeSet',
-        patches: [
-          ...(reportAnalysisTypes as { patches: CustomizationPatch[] }).patches,
-          aging,
-          trial,
-        ],
-      } as CustomizationPatch,
-    ]);
-  assert.equal(
-    compiled.bundle.releaseManifest.projections.find(
-      (p) => p.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
-    )?.requiredRuntimeCapability.minimumVersion,
-    REPORT_MEASURE_READER,
-  );
-  for (const [floor, code] of [
-    [REPORT_ANALYSIS_READER - 1, 'REPORT_ANALYSIS_READER_MISMATCH'],
-    [REPORT_MEASURE_READER - 1, 'REPORT_MEASURE_READER_MISMATCH'],
-  ] as const) {
-    const understated = rewriteProjectionPayload(
-      compiled,
-      PROJECTION_FAMILY_IDS.surfaceManifest,
-      () => {},
-      floor,
-    );
-    const repository = new PostgresImmutableReleaseRepository(pool);
-    t.mock.method(repository, 'getAppPackageRevision', async () => ({
-      ...revisionCommand(context, revisionA, bytes),
-      createdAt: '2026-11-25T00:00:00.000Z',
-    }));
-    await assert.rejects(
-      repository.stageTenantReleaseCandidate(context, {
-        appPackageRevisionId: revisionA,
-        compiledRelease: understated,
-        createdBy: context.principalId,
-        environmentId: context.environmentId,
-        releaseId: releaseA,
-        tenantId: context.tenantId,
-      }),
-      { code },
-    );
-  }
 });
 
 test('release admission requires the formula projection and its mandatory reader only on a declaring revision', async (t) => {

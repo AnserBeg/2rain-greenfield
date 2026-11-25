@@ -225,12 +225,12 @@
       "original": "hasAnalysis\n      ? surfaceFloor < REPORT_ANALYSIS_READER",
       "replacement": "hasAnalysis\n      ? false",
       "test": {
-        "files": ["test/postgres/releases.test.ts"],
+        "files": ["test/postgres/report-admission.test.ts"],
         "namePattern": "release admission refuses an analysed report"
       },
       "kills": [
         {
-          "file": "test/postgres/releases.test.ts",
+          "file": "test/postgres/report-admission.test.ts",
           "name": "release admission refuses an analysed report or a named measure whose release understates its reader floor",
           "expected": "Understated candidate reached the staging transaction"
         }
@@ -243,12 +243,12 @@
       "original": "hasMeasure\n      ? surfaceFloor < REPORT_MEASURE_READER",
       "replacement": "hasMeasure\n      ? false",
       "test": {
-        "files": ["test/postgres/releases.test.ts"],
+        "files": ["test/postgres/report-admission.test.ts"],
         "namePattern": "release admission refuses an analysed report"
       },
       "kills": [
         {
-          "file": "test/postgres/releases.test.ts",
+          "file": "test/postgres/report-admission.test.ts",
           "name": "release admission refuses an analysed report or a named measure whose release understates its reader floor",
           "expected": "Understated candidate reached the staging transaction"
         }
