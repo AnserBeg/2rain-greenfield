@@ -415,6 +415,42 @@
           "expected": "did not match the regular expression"
         }
       ]
+    },
+    {
+      "name": "reports-s2-bill-instant-basis",
+      "claim": "Vendor Bill dates are posting instants read in the company calendar: a bill posted in the Edmonton evening buckets by its local month and ages from its local due date. Declaring them civil again moves it a month and a band.",
+      "file": "packages/domain/src/purchasing/definition.ts",
+      "original": "          basis: 'instant',",
+      "replacement": "          basis: 'civilDate',",
+      "test": {
+        "files": ["test/compiler/report-analysis.test.ts"],
+        "namePattern": "local evening:"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/report-analysis.test.ts",
+          "name": "local evening: a Vendor Bill posted in the Edmonton evening buckets by its local month and ages from its local due date",
+          "expected": "a bill posted at 18:00 on Nov 30 in Edmonton is a November bill"
+        }
+      ]
+    },
+    {
+      "name": "reports-s2-ceiling-stored",
+      "claim": "The group ceiling is an authoring check: a stored body revalidated against live option counts is never refused for them, so a saved report near the cap still compiles and replays after a grouped choice gains an option.",
+      "file": "packages/canonical-model/src/declared-report-v2.ts",
+      "original": "    'stored',",
+      "replacement": "    'authoring',",
+      "test": {
+        "files": ["test/compiler/report-analysis.test.ts"],
+        "namePattern": "group ceiling at authoring only"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/report-analysis.test.ts",
+          "name": "group ceiling at authoring only: a saved report near the cap still compiles and replays clean after a grouped choice gains an option",
+          "expected": "500-group ceiling"
+        }
+      ]
     }
   ]
 }
