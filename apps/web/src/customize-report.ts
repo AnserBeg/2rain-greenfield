@@ -176,11 +176,10 @@ const pick = <T extends { value: Record<string, unknown> }>(
   choices: T[],
   chosen: unknown,
 ) => {
-  const { label: _ignored, ...wanted } = chosen as Record<string, unknown>;
-  return choices.find((c) => {
-    const { label: _label, ...offered } = c.value;
-    return same(offered, wanted);
-  });
+  const unlabelled = (v: Record<string, unknown>) =>
+    Object.fromEntries(Object.entries(v).filter(([k]) => k !== 'label'));
+  const wanted = unlabelled(chosen as Record<string, unknown>);
+  return choices.find((c) => same(unlabelled(c.value), wanted));
 };
 
 export function reportEditor(target: ReportTarget, reportId: string | null) {

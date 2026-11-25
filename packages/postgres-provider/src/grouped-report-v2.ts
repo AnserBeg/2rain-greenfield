@@ -200,7 +200,10 @@ export async function readGroupedSnapshotV2(
   }
 
   // 3. Group keys: 'v'-prefixed values, 'r' for Restricted, NULL for absence.
-  const asOf = param(horizon.businessDate);
+  // Every bound parameter must appear in the statement: bind the business
+  // date only for a report that ages something.
+  let asOfParameter: string | undefined;
+  const asOf = () => (asOfParameter ??= param(horizon.businessDate));
   const dims = body.dimensions.map((d, i) => {
     let value: string;
     if (d.kind === 'direct') value = `'v' || ${text(d)}`;
@@ -213,7 +216,7 @@ export async function readGroupedSnapshotV2(
             ? `'v' || to_char(date_trunc('week', ${day})::date, 'YYYY-MM-DD')`
             : `'v' || to_char(${day}, 'YYYY-MM')`;
     } else {
-      const age = `(${asOf}::date - ${civilDate(d)})`;
+      const age = `(${asOf()}::date - ${civilDate(d)})`;
       value =
         'CASE' +
         d.bands

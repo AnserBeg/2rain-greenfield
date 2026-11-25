@@ -89,6 +89,7 @@ export const reachabilityProducers = [
     'test/compiler/publish-path-breadth-envelope.test.ts',
     'test/compiler/relation-target-projection.test.ts',
     'test/compiler/report-company-access.test.ts',
+    'test/compiler/report-analysis.test.ts',
   ]),
   nodeProducer('performance', 'performance', 'test:performance', [
     'test/compiler/performance-budget.test.ts',
@@ -127,7 +128,7 @@ export const reachabilityProducers = [
     'test/postgres/booking-serving.test.ts',
   ]),
   nodeProducer('postgres-3', 'postgres', 'test:postgres:3', [
-    'test/postgres/{!(address-authority|address-connector|agent-dev-tasks|agent-tasks|billing-terms|board-policy|booking-serving|boot-capabilities|build-eval|commercial-totals|composed-application|counter-sale|customer-credit|customization|customization-display|customization-formulas|customization-governed-reads|customization-inspection|customization-live|customization-validation|customization-world|date-time-field|declared-list|document-attachments|document-numbering|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-stock-counts|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|locations|module-storage-transition|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|planner-map|period-lock-commands|price-lists|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|replenishment|request-runtime-view|stock-serializer|workflow-consumer),*/**/*}.test.ts',
+    'test/postgres/{!(address-authority|address-connector|agent-dev-tasks|agent-tasks|billing-terms|board-policy|booking-serving|boot-capabilities|build-eval|commercial-totals|composed-application|counter-sale|customer-credit|customization|customization-display|customization-formulas|customization-governed-reads|customization-inspection|customization-live|customization-validation|customization-world|date-time-field|declared-list|document-attachments|document-numbering|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-stock-counts|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|locations|module-storage-transition|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|planner-map|period-lock-commands|price-lists|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|replenishment|report-analysis|request-runtime-view|stock-serializer|workflow-consumer),*/**/*}.test.ts',
   ]),
   nodeProducer('postgres-4', 'postgres', 'test:postgres:4', [
     'test/postgres/boot-capabilities.test.ts',
@@ -139,6 +140,7 @@ export const reachabilityProducers = [
     'test/postgres/customization-world.test.ts',
     'test/postgres/locations.test.ts',
     'test/postgres/planner-map.test.ts',
+    'test/postgres/report-analysis.test.ts',
   ]),
   nodeProducer('postgres-6', 'postgres', 'test:postgres:6', [
     'test/postgres/customization-governed-reads.test.ts',

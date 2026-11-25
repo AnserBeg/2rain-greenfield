@@ -90,6 +90,9 @@ try {
 `;
 
 export const reportsPredecessor = '5710c05ae2529b742bf15f8f484c75c0b3930180';
+// REPORTS-1 slice 2: the serving binary on main when the slice was cut (rung 47).
+export const reportsAnalysisPredecessor =
+  'd8aad66b3e6ee6231b0580f2702c26d116f5a68c';
 
 // Produce genuine pre-index change sets for witnesses isolating earlier reader floors.
 export async function draftBeforeCompanyAccessIndex(

@@ -4,6 +4,7 @@ import {
   type ReportBody,
   type ReportBodyV1,
   type ReportBodyV2,
+  type ReportOperator,
   type ReportChoices,
   type ReportSource,
   type ReportRevision,
@@ -78,7 +79,7 @@ export interface RegisteredReportLink {
 export interface EffectiveReportMeasure {
   measureId: string;
   label: string;
-  operator: import('./schemas.js').ReportOperator;
+  operator: ReportOperator;
   approved?: { contractDigest: string };
 }
 
@@ -232,8 +233,7 @@ export function resolveAnyReportChoices(
   choices: ReportChoices,
 ): ReportBody | string {
   if (offer.v1 && isV1Shape(offer, choices)) {
-    const { grain: _grain, ...rest } = choices;
-    return resolveReportChoices(offer.v1, rest as V1Choices);
+    return resolveReportChoices(offer.v1, choices as V1Choices);
   }
   return resolveReportChoicesV2(offer, choices);
 }

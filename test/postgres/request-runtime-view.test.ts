@@ -20,6 +20,10 @@ import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../packages/canonical-model
 import { DECLARED_REPORT_READER } from '../../packages/canonical-model/src/declared-report.js';
 import { PRESENTATION_READER } from '../../packages/canonical-model/src/surface-presentation-schema.js';
 import {
+  REPORT_ANALYSIS_READER,
+  REPORT_MEASURE_READER,
+} from '../../packages/canonical-model/src/declared-report-v2.js';
+import {
   COMPANY_ACCESS_INDEX_READER,
   REPORT_SOURCE_READER,
 } from '../../packages/canonical-model/src/constants.js';
@@ -381,7 +385,16 @@ test('the capability comparison binds the family to its capability, then compare
     BILLING_ARREARS_READER,
     MAP_VIEW_READER,
     PRESENTATION_READER,
+    REPORT_ANALYSIS_READER,
+    REPORT_MEASURE_READER,
   ];
+  // Each capability owns its own rung: a renumbering collision at a merge
+  // would let one feature's floor stand in for another's.
+  assert.equal(
+    new Set(surfaceFloors).size,
+    surfaceFloors.length,
+    'two capabilities share a surface rung',
+  );
   for (const reader of surfaceFloors) {
     for (const floor of surfaceFloors) {
       const refusal = unsupportedRuntimeCapability(
@@ -434,7 +447,7 @@ test('the capability comparison binds the family to its capability, then compare
   // capability on one side alone reds here rather than in production.
   assert.deepEqual(SUPPORTED_RUNTIME_CAPABILITIES[surface], {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
-    maximumSupportedVersion: PRESENTATION_READER,
+    maximumSupportedVersion: REPORT_MEASURE_READER,
   });
 });
 
@@ -1068,7 +1081,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
               ],
               {
                 capabilityId: 'northstar.runtime:capability.surface-manifest',
-                maximumSupportedVersion: PRESENTATION_READER,
+                maximumSupportedVersion: REPORT_MEASURE_READER,
               },
             );
           },

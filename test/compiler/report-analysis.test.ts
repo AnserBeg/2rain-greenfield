@@ -38,18 +38,14 @@ import {
 } from '../../packages/customization/src/report-revision.js';
 import { draftMeasure } from '../../packages/customization/src/measure-revision.js';
 import { projectionPayload } from './helpers.js';
+import {
+  AGING_AS_OF,
+  AGING_DUE_DATES,
+  reportAnalysisTypes,
+} from '../helpers/report-analysis-fixture.js';
 
-const asOf = { businessDate: '2026-11-20', zone: 'UTC', boundary: '00:00:00' };
-const due = [
-  '2026-11-21',
-  '2026-11-20',
-  '2026-10-21',
-  '2026-10-20',
-  '2026-09-21',
-  '2026-09-20',
-  '2026-08-22',
-  '2026-08-21',
-];
+const asOf = { businessDate: AGING_AS_OF, zone: 'UTC', boundary: '00:00:00' };
+const due = AGING_DUE_DATES;
 const count: ReportMeasureSpec = { id: 'count', operator: 'count', scale: 0 };
 
 test('the packet aging fixture lands 1, 2, 2, 2 and 1 with day 90 in exactly one band', () => {
@@ -377,49 +373,7 @@ test('Invoice lines report one row per line with the invoice as required parent;
   assert.ok(balance.currency);
 });
 
-const site = {
-  kind: 'addRecordType',
-  label: 'Site',
-  companyOwnership: 'entityOwned',
-  fields: [
-    { label: 'Name', type: 'text' },
-    { label: 'Region', type: 'choice', options: ['East', 'West'] },
-  ],
-};
-const inspection = {
-  kind: 'addRecordType',
-  label: 'Inspection',
-  companyOwnership: 'entityOwned',
-  fields: [
-    { label: 'Name', type: 'text' },
-    { label: 'Outcome', type: 'choice', options: ['Pass', 'Fail'] },
-    { label: 'Due', type: 'date' },
-    { label: 'Score', type: 'number' },
-  ],
-};
-const tenantTypes = CustomizationPatchSchema.parse({
-  kind: 'changeSet',
-  patches: [
-    site,
-    inspection,
-    {
-      kind: 'addLink',
-      entity: 'northstar.app:entity.custom_inspection',
-      label: 'Site',
-      target: 'northstar.app:entity.custom_site',
-    },
-    {
-      kind: 'addLineTable',
-      entity: 'northstar.app:entity.custom_inspection',
-      label: 'Checks',
-      fields: [
-        { label: 'Item', type: 'text' },
-        { label: 'Points', type: 'number' },
-      ],
-    },
-  ],
-});
-export { tenantTypes };
+const tenantTypes = reportAnalysisTypes;
 
 test('a tenant Inspection groups by a linked Site field, counts distinct sites, and an approved measure is reused by ID and contract', async () => {
   const applied = applyCustomizationPatches(
@@ -462,7 +416,15 @@ test('a tenant Inspection groups by a linked Site field, counts distinct sites, 
     trial.measureId,
   );
   assert.equal(approve.contractDigest, trial.contractDigest);
-  const tampered = { ...approve, contractDigest: 'f'.repeat(64) };
+  // A self-consistent approval of a different contract than the trial refuses.
+  const tampered = draftMeasure(
+    t2,
+    'Average score',
+    'approved',
+    { kind: 'count' },
+    trial.measureId,
+  );
+  assert.notEqual(tampered.contractDigest, trial.contractDigest);
   assert.equal(
     applyCustomizationPatches(afterTrial.authored as Record<string, unknown>, [
       tampered,

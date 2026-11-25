@@ -172,7 +172,13 @@ export function declaredListSurface(
     dataSource: owner.dataSource,
     workspace: {
       membership: 'contextual',
-      ownerSurfaceId: listSurfaceId,
+      // A line collection is itself contextual: its page sits beside the
+      // workspace List that owns that collection.
+      ownerSurfaceId:
+        (owner.workspace as { membership?: string; ownerSurfaceId?: string })
+          ?.membership === 'contextual'
+          ? (owner.workspace as { ownerSurfaceId: string }).ownerSurfaceId
+          : listSurfaceId,
       ...((owner.workspace as { entry?: unknown })?.entry
         ? {
             entry: (owner.workspace as { entry: unknown }).entry,

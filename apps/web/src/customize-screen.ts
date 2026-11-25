@@ -2101,7 +2101,3 @@ function mapSubmission(
   );
 }
 
-const hidden = (name: string, value: string) =>
-  `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`;
-const option = (id: string, label: string, selected: boolean) =>
-  `<option value="${escapeHtml(id)}"${selected ? ' selected' : ''}>${escapeHtml(label)}</option>`;
