@@ -1,4 +1,5 @@
 import { setTrustedIdentity } from './request-context.js';
+import { recordCreations } from './record-creation-occurrences.js';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   InventoryPostingError,
@@ -5979,6 +5980,17 @@ async function writeCompanionTransaction(
       { transactionId: command.transactionId },
     );
   }
+  const companion = (entity: EntityBinding) => ({
+    entityId: entity.entityId,
+    physicalTableName: entity.tableName,
+    legalEntity: true,
+  });
+  await recordCreations(
+    client,
+    companion(binding.transaction),
+    command.legalEntityId,
+    [command.transactionId],
+  );
   for (const line of command.lines) {
     const quantity =
       'quantityDelta' in line ? line.quantityDelta : line.varianceQuantity;
@@ -6033,6 +6045,12 @@ async function writeCompanionTransaction(
         { transactionLineId: line.transactionLineId },
       );
     }
+    await recordCreations(
+      client,
+      companion(binding.transactionLine),
+      command.legalEntityId,
+      [line.transactionLineId],
+    );
   }
   return revision;
 }

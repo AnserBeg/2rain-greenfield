@@ -313,8 +313,10 @@ export class PostgresWorkflowGateway implements WorkflowGateway {
               reason: 'operation-company-scope-refused',
             }
           : 'relations' in input &&
-              Object.values(asObject(input.relations)).some(
-                (value) => value !== run.trigger_record_id,
+              Object.entries(asObject(input.relations)).some(
+                ([relationId, value]) =>
+                  value !== run.trigger_record_id ||
+                  !linksTriggerType(operation, relationId, run.record_type),
               )
             ? {
                 code: 'WORKFLOW_OPERATION_RECEIPT_LINK_REFUSED',
@@ -425,4 +427,27 @@ function asObject(
   if (value && typeof value === 'object' && !Array.isArray(value))
     return value as Readonly<Record<string, ImmutableJsonValue>>;
   throw new WorkflowEffectRefusal('invalid-effect-input');
+}
+
+/**
+ * ADR-0073 A1 "Unattended links": a general trigger's run may link only the
+ * record that started it, through a relation whose declared target type is the
+ * trigger's record type, so an equal ID on another type is never linked. The
+ * receipt member keeps its value-only check (persisted behaviour).
+ */
+function linksTriggerType(
+  operation: { readonly inputContract?: unknown },
+  relationId: string,
+  recordType: string | null,
+): boolean {
+  if (recordType === null) return true;
+  const inputs = (operation.inputContract as { relationInputs?: unknown })
+    ?.relationInputs;
+  return (
+    Array.isArray(inputs) &&
+    inputs.some(
+      (entry: { relationId?: unknown; targetEntityId?: unknown }) =>
+        entry.relationId === relationId && entry.targetEntityId === recordType,
+    )
+  );
 }

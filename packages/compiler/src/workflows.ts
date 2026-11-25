@@ -46,29 +46,58 @@ export class WorkflowTriggerBindingError extends Error {
 /**
  * ADR-0073 A1 admission for general members: the record type is a stored
  * entity of the release with exactly one owning company per record, because a
- * run needs a company scope. Returns whether any general member is declared.
+ * run needs a company scope, and the release creates it through an active
+ * create operation, whose governed writer records each creation. A type that
+ * only a writer without that guarantee creates (a projection, a ledger row, a
+ * provisioned lock) fails closed. Returns whether any general member is
+ * declared.
  */
+export function workflowTriggerRecordTypes(
+  storagePayload: unknown,
+  operationsPayload: unknown,
+): ReadonlySet<string> {
+  const entities = (storagePayload as { entities?: unknown } | null)?.entities;
+  const operations = (operationsPayload as { operations?: unknown } | null)
+    ?.operations;
+  const created = new Set(
+    (Array.isArray(operations) ? (operations as CatalogEntry[]) : [])
+      .filter(
+        (operation) =>
+          operation.lifecycle === 'active' &&
+          (operation.effect as { kind?: unknown } | undefined)?.kind ===
+            'createRecordEffect',
+      )
+      .map(
+        (operation) =>
+          (operation.effect as { entity?: { targetId?: unknown } }).entity
+            ?.targetId,
+      ),
+  );
+  return new Set(
+    (Array.isArray(entities) ? (entities as CatalogEntry[]) : [])
+      .filter(
+        (entity) =>
+          entity.lifecycle === 'active' &&
+          entity.storageClass === 'dedicatedTable' &&
+          (entity.legalEntity as { nullable?: unknown } | undefined)
+            ?.nullable === false &&
+          created.has(entity.entityId),
+      )
+      .map((entity) => String(entity.entityId)),
+  );
+}
+
 export function assertWorkflowTriggers(
   workflows: readonly WorkflowDefinition[],
   storagePayload: unknown,
+  operationsPayload: unknown,
 ): boolean {
-  const entities = (storagePayload as { entities?: unknown } | null)?.entities;
+  const admitted = workflowTriggerRecordTypes(storagePayload, operationsPayload);
   let general = false;
   for (const { trigger } of workflows) {
     if (typeof trigger === 'string') continue;
     general = true;
-    const entity = Array.isArray(entities)
-      ? (entities as CatalogEntry[]).find(
-          (candidate) => candidate.entityId === trigger.recordTypeId,
-        )
-      : undefined;
-    if (
-      !entity ||
-      entity.lifecycle !== 'active' ||
-      entity.storageClass !== 'dedicatedTable' ||
-      (entity.legalEntity as { nullable?: unknown } | undefined)?.nullable !==
-        false
-    )
+    if (!admitted.has(trigger.recordTypeId))
       throw new WorkflowTriggerBindingError(trigger.recordTypeId);
   }
   return general;

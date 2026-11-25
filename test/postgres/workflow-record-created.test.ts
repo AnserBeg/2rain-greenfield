@@ -318,135 +318,245 @@ test(
   },
 );
 
+/** One migrated database for the schema-level proofs; each test isolates one check. */
+async function withMigrated(
+  label: string,
+  run: (client: pg.PoolClient) => Promise<void>,
+): Promise<void> {
+  await withEphemeralPostgres(label, async ({ pool }) => {
+    const { loadMigrations, runMigrations } =
+      await import('../../packages/postgres-provider/src/migrations.js');
+    const client = await pool.connect();
+    try {
+      await runMigrations(client, await loadMigrations('db/migrations'));
+      await client.query(`CREATE TABLE north_star_module.workflow_probe (
+        tenant_id uuid, environment_id uuid, legal_entity_id uuid, record_id uuid,
+        PRIMARY KEY (tenant_id, environment_id, legal_entity_id, record_id))`);
+      await run(client);
+    } finally {
+      client.release();
+    }
+  });
+}
+
+const probeAction = 'northstar.test:operation.probe_create';
+async function governed(
+  client: pg.PoolClient,
+  action: string | null,
+): Promise<string> {
+  const tenant = randomUUID();
+  await client.query('BEGIN');
+  await client.query(
+    `SELECT set_config('north_star.tenant_id', $1, true),
+            set_config('north_star.environment_id', $1, true),
+            set_config('north_star.request_id', $2, true),
+            set_config('north_star.creation_action', $3, true)`,
+    [tenant, randomUUID(), action ?? ''],
+  );
+  return tenant;
+}
+const store = (
+  client: pg.PoolClient,
+  tenant: string,
+  company: string,
+  ids: string[],
+) =>
+  client.query(
+    `INSERT INTO north_star_module.workflow_probe
+     SELECT $1::uuid, $1::uuid, $2::uuid, unnest($3::uuid[])`,
+    [tenant, company, ids],
+  );
+const claim = (client: pg.PoolClient, company: string, ids: string[]) =>
+  client.query(
+    `SELECT north_star_internal.record_creations('workflow_probe', 'record_id',
+       'northstar.test:entity.probe', $1::uuid, $2::uuid[])`,
+    [company, ids],
+  );
+const occurrences = async (client: pg.PoolClient, tenant: string) =>
+  (
+    await client.query<{ record_id: string; company_id: string }>(
+      `SELECT record_id, company_id FROM platform.record_creation_occurrences
+        WHERE tenant_id = $1 ORDER BY record_id, company_id`,
+      [tenant],
+    )
+  ).rows;
+
 test(
-  'the start key is the occurrence: one command creating N records starts N runs, a duplicate none',
+  'the start key is the occurrence, so N records from one command cannot collapse into one run',
   { timeout: 300_000 },
   async () => {
-    // The schema contract the consumer relies on. Before this slice the key
-    // was (event, workflow), so a second record of the same command collapsed.
-    await withEphemeralPostgres('workflow-start-key', async ({ pool }) => {
-      const { loadMigrations, runMigrations } =
-        await import('../../packages/postgres-provider/src/migrations.js');
-      const client = await pool.connect();
-      try {
-        await runMigrations(client, await loadMigrations('db/migrations'));
-        const indexes = (
-          await client.query<{ indexdef: string }>(
-            `SELECT indexdef FROM pg_indexes
-              WHERE schemaname = 'platform' AND tablename = 'workflow_instances'
-                AND indexdef LIKE 'CREATE UNIQUE INDEX%' ORDER BY indexname`,
+    // Before this slice the key was (event, workflow): a second record of the
+    // same command collapsed into the first one's run.
+    await withMigrated('workflow-start-key', async (client) => {
+      const indexes = (
+        await client.query<{ indexdef: string }>(
+          `SELECT indexdef FROM pg_indexes
+            WHERE schemaname = 'platform' AND tablename = 'workflow_instances'
+              AND indexdef LIKE 'CREATE UNIQUE INDEX%' ORDER BY indexname`,
+        )
+      ).rows.map((r) => r.indexdef);
+      assert.ok(
+        indexes.some((d) =>
+          /\(tenant_id, environment_id, creation_occurrence_id, workflow_id\) WHERE \(creation_occurrence_id IS NOT NULL\)/u.test(
+            d,
+          ),
+        ),
+        JSON.stringify(indexes),
+      );
+      assert.ok(
+        !indexes.some((d) =>
+          /\(tenant_id, environment_id, event_id, workflow_id\)$/u.test(d),
+        ),
+        'no unconditional (event, workflow) key collapses a multi-record command',
+      );
+    });
+  },
+);
+
+test(
+  'a recordCreated definition digest covers its record type; a receipt keeps its bytes',
+  { timeout: 300_000 },
+  async () => {
+    await withMigrated('workflow-digest', async (client) => {
+      const definition = (recordType: string | null) =>
+        JSON.stringify({
+          tenant_id: randomUUID(),
+          environment_id: randomUUID(),
+          release_id: randomUUID(),
+          workflow_id: 'probe',
+          event_type: recordType
+            ? 'northstar.runtime:event.record-created'
+            : 'northstar.purchasing:event.receipt_posted',
+          body_digest: 'b'.repeat(64),
+          executable_digest: 'c'.repeat(64),
+          sdk_digest: 'd'.repeat(64),
+          engine_build: 'engine',
+          host_version: 'host',
+          sdk_version: 'sdk',
+          automation_principal_id: randomUUID(),
+          authored_by: randomUUID(),
+          grants: { queries: [], operations: [] },
+          record_type: recordType,
+        });
+      const digest = async (recordType: string | null) =>
+        (
+          await client.query<{ digest: string; legacy: string }>(
+            `SELECT platform.workflow_definition_digest(d) AS digest,
+                    encode(sha256(convert_to(jsonb_build_array(
+                      d.tenant_id, d.environment_id, d.release_id, d.workflow_id, d.event_type,
+                      d.body_digest, d.executable_digest, d.sdk_digest, d.engine_build,
+                      d.host_version, d.sdk_version, d.automation_principal_id, d.authored_by,
+                      d.grants)::text, 'UTF8')), 'hex') AS legacy
+               FROM jsonb_populate_record(NULL::platform.workflow_definitions, $1::jsonb) AS d`,
+            [definition(recordType)],
           )
-        ).rows.map((r) => r.indexdef);
-        assert.ok(
-          indexes.some((d) =>
-            /\(tenant_id, environment_id, creation_occurrence_id, workflow_id\) WHERE \(creation_occurrence_id IS NOT NULL\)/u.test(
-              d,
-            ),
-          ),
-          JSON.stringify(indexes),
-        );
-        assert.ok(
-          !indexes.some((d) =>
-            /\(tenant_id, environment_id, event_id, workflow_id\)$/u.test(d),
-          ),
-          'no unconditional (event, workflow) key collapses a multi-record command',
-        );
+        ).rows[0]!;
+      const receipt = await digest(null);
+      assert.equal(receipt.digest, receipt.legacy);
+      const general = await digest('northstar.app:entity.custom_appointment');
+      assert.notEqual(general.digest, general.legacy);
+    });
+  },
+);
 
-        // The digest of a receipt definition is the pre-slice formula; the
-        // record type of a general member is covered, so it cannot be swapped.
-        const definition = (recordType: string | null) =>
-          JSON.stringify({
-            tenant_id: randomUUID(),
-            environment_id: randomUUID(),
-            release_id: randomUUID(),
-            workflow_id: 'probe',
-            event_type: recordType
-              ? 'northstar.runtime:event.record-created'
-              : 'northstar.purchasing:event.receipt_posted',
-            body_digest: 'b'.repeat(64),
-            executable_digest: 'c'.repeat(64),
-            sdk_digest: 'd'.repeat(64),
-            engine_build: 'engine',
-            host_version: 'host',
-            sdk_version: 'sdk',
-            automation_principal_id: randomUUID(),
-            authored_by: randomUUID(),
-            grants: { queries: [], operations: [] },
-            record_type: recordType,
-          });
-        const digest = async (recordType: string | null) =>
-          (
-            await client.query<{ digest: string; legacy: string }>(
-              `SELECT platform.workflow_definition_digest(d) AS digest,
-                      encode(sha256(convert_to(jsonb_build_array(
-                        d.tenant_id, d.environment_id, d.release_id, d.workflow_id, d.event_type,
-                        d.body_digest, d.executable_digest, d.sdk_digest, d.engine_build,
-                        d.host_version, d.sdk_version, d.automation_principal_id, d.authored_by,
-                        d.grants)::text, 'UTF8')), 'hex') AS legacy
-                 FROM jsonb_populate_record(NULL::platform.workflow_definitions, $1::jsonb) AS d`,
-              [definition(recordType)],
-            )
-          ).rows[0]!;
-        const receipt = await digest(null);
-        assert.equal(receipt.digest, receipt.legacy);
-        const general = await digest('northstar.app:entity.custom_appointment');
-        assert.notEqual(general.digest, general.legacy);
+test(
+  'one command creating N records seals N occurrences into one batch on its one event',
+  { timeout: 300_000 },
+  async () => {
+    await withMigrated('workflow-seal', async (client) => {
+      const tenant = await governed(client, probeAction);
+      const company = randomUUID();
+      const ids = [randomUUID(), randomUUID(), randomUUID()];
+      await store(client, tenant, company, ids);
+      await claim(client, company, ids);
+      const event = randomUUID();
+      // A synthetic outbox row for this command; its trust FKs are deferred
+      // and the transaction rolls back before they would fire.
+      await client.query(
+        `INSERT INTO platform.trust_outbox (
+           tenant_id, environment_id, outbox_id, outbox_version, invocation_id, change_document_id,
+           domain_event_id, request_id, action_id, correlation_id, release_id, release_content_hash,
+           event_type, event_schema_version, deduplication_key)
+         VALUES ($1, $1, gen_random_uuid(), 'northstar.trust-outbox/v1', gen_random_uuid(), gen_random_uuid(), $2,
+           current_setting('north_star.request_id')::uuid, $3, gen_random_uuid(), gen_random_uuid(),
+           repeat('a', 64), 'northstar.test:event.probe_created', 'v1', gen_random_uuid()::text)`,
+        [tenant, event, probeAction],
+      );
+      const batches = (
+        await client.query<{ domain_event_id: string; record_count: string }>(
+          `SELECT b.domain_event_id, b.record_count::text
+             FROM platform.record_creation_batches AS b WHERE b.tenant_id = $1`,
+          [tenant],
+        )
+      ).rows;
+      assert.deepEqual(batches, [
+        { domain_event_id: event, record_count: '3' },
+      ]);
+      const linked = (
+        await client.query<{ count: number }>(
+          `SELECT count(*)::integer AS count
+             FROM platform.record_creation_occurrences AS c
+             JOIN platform.record_creation_batches AS b
+               USING (tenant_id, environment_id, writer_xid, request_id, action_id)
+            WHERE c.tenant_id = $1 AND b.domain_event_id = $2`,
+          [tenant, event],
+        )
+      ).rows[0]!.count;
+      assert.equal(
+        linked,
+        3,
+        'each record is its own occurrence of the one event',
+      );
+      // A creation after the seal would never reach a subscriber.
+      await assert.rejects(
+        claim(client, company, [randomUUID()]),
+        /after its command was sealed/u,
+      );
+      await client.query('ROLLBACK');
+    });
+  },
+);
 
-        // An occurrence written under a creation action that no outbox row
-        // seals cannot commit; without an action nothing is recorded.
-        await client.query(`CREATE TABLE north_star_module.workflow_probe (
-          tenant_id uuid, environment_id uuid, record_id uuid, legal_entity_id uuid)`);
-        const insert = async (action: string | null) => {
-          const tenant = randomUUID();
-          await client.query('BEGIN');
-          await client.query(
-            `SELECT set_config('north_star.tenant_id', $1, true),
-                    set_config('north_star.environment_id', $1, true),
-                    set_config('north_star.request_id', $2, true),
-                    set_config('north_star.creation_action', $3, true)`,
-            [tenant, randomUUID(), action ?? ''],
-          );
-          const ids = (
-            await client.query<{ record_id: string }>(
-              `INSERT INTO north_star_module.workflow_probe
-               SELECT $1::uuid, $1::uuid, gen_random_uuid(), gen_random_uuid() FROM generate_series(1, 2)
-               RETURNING record_id`,
-              [tenant],
-            )
-          ).rows.map((row) => row.record_id);
-          await client.query(
-            `SELECT north_star_internal.record_creations('workflow_probe', 'record_id',
-               'northstar.test:entity.probe', $1::uuid[])`,
-            [ids],
-          );
-          const recorded = (
-            await client.query<{ count: number }>(
-              'SELECT count(*)::integer AS count FROM platform.record_creation_occurrences WHERE tenant_id = $1',
-              [tenant],
-            )
-          ).rows[0]!.count;
-          return { recorded, commit: () => client.query('COMMIT') };
-        };
-        const unsealed = await insert('northstar.test:operation.probe_create');
-        assert.equal(unsealed.recorded, 2, 'one occurrence per inserted row');
-        await assert.rejects(unsealed.commit(), { code: '23503' });
-        // A claim for a record the transaction's scope does not store refuses.
-        const claimed = await insert('northstar.test:operation.probe_create');
-        assert.equal(claimed.recorded, 2);
-        await assert.rejects(
-          client.query(
-            `SELECT north_star_internal.record_creations('workflow_probe', 'record_id',
-               'northstar.test:entity.probe', ARRAY[gen_random_uuid()])`,
-          ),
-          /not stored in this scope/u,
-        );
-        await client.query('ROLLBACK');
-        const ungoverned = await insert(null);
-        assert.equal(ungoverned.recorded, 0);
-        await ungoverned.commit();
-      } finally {
-        client.release();
-      }
+test('an unsealed occurrence cannot commit', { timeout: 300_000 }, async () => {
+  await withMigrated('workflow-unsealed', async (client) => {
+    const tenant = await governed(client, probeAction);
+    const company = randomUUID();
+    const ids = [randomUUID(), randomUUID()];
+    await store(client, tenant, company, ids);
+    await claim(client, company, ids);
+    assert.equal((await occurrences(client, tenant)).length, 2);
+    await assert.rejects(client.query('COMMIT'), { code: '23503' });
+  });
+});
+
+test(
+  'a creation is matched in its own company and refused outside a governed write',
+  { timeout: 300_000 },
+  async () => {
+    await withMigrated('workflow-company', async (client) => {
+      const tenant = await governed(client, probeAction);
+      const [north, south] = [randomUUID(), randomUUID()];
+      const shared = randomUUID();
+      // North already stores the ID; South creates the same ID.
+      await store(client, tenant, north, [shared]);
+      await store(client, tenant, south, [shared]);
+      await claim(client, south, [shared]);
+      assert.deepEqual(await occurrences(client, tenant), [
+        { record_id: shared, company_id: south },
+      ]);
+      // A record this company does not store is refused, never recorded.
+      await assert.rejects(
+        claim(client, south, [randomUUID()]),
+        /not stored in this scope/u,
+      );
+      await client.query('ROLLBACK');
+      await governed(client, null);
+      await store(client, tenant, north, [randomUUID()]);
+      await assert.rejects(
+        claim(client, north, [shared]),
+        /outside a governed write/u,
+      );
+      await client.query('ROLLBACK');
     });
   },
 );

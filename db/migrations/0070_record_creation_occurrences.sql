@@ -10,6 +10,7 @@ CREATE TABLE platform.record_creation_batches (
     REFERENCES platform.trust_outbox (tenant_id, environment_id, outbox_id),
   FOREIGN KEY (tenant_id, environment_id, domain_event_id)
     REFERENCES platform.trust_domain_events (tenant_id, environment_id, domain_event_id)
+    DEFERRABLE INITIALLY DEFERRED
 );
 CREATE TABLE platform.record_creation_occurrences (
   tenant_id uuid NOT NULL, environment_id uuid NOT NULL, writer_xid xid8 NOT NULL,
@@ -32,15 +33,24 @@ ALTER TABLE platform.record_creation_occurrences FORCE ROW LEVEL SECURITY;
 -- managed table carries a trigger, so the managed catalog of a release without a
 -- recordCreated workflow is unchanged and an older binary still verifies it.
 CREATE FUNCTION north_star_internal.record_creations(
-  physical_table text, identity_column text, record_type text, record_ids uuid[]
+  physical_table text, identity_column text, record_type text, company uuid, record_ids uuid[]
 ) RETURNS integer
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE
   action text := nullif(current_setting('north_star.creation_action', true), '');
   recorded integer; BEGIN
-  IF action IS NULL OR cardinality(record_ids) IS NULL THEN RETURN 0; END IF;
+  -- A creation outside a governed write, or after its command was sealed,
+  -- would never reach a subscriber: refuse it by name instead of recording 0.
+  IF action IS NULL THEN
+    RAISE EXCEPTION 'record creation outside a governed write' USING ERRCODE = 'P0001'; END IF;
+  IF action = 'sealed' THEN
+    RAISE EXCEPTION 'record creation after its command was sealed' USING ERRCODE = 'P0001'; END IF;
   IF record_type !~ '^[a-z][a-z0-9_.:-]{0,190}$' THEN
     RAISE EXCEPTION 'record creation type is not a canonical ID'; END IF;
+  IF company IS NULL OR cardinality(record_ids) IS NULL THEN
+    RAISE EXCEPTION 'record creation names no company or record'; END IF;
+  -- Company-owned tables key on (tenant, environment, company, record): the
+  -- same record ID may exist in another company and is not this creation.
   EXECUTE format(
     'INSERT INTO platform.record_creation_occurrences
        (tenant_id, environment_id, writer_xid, request_id, action_id, record_type, record_id, company_id)
@@ -50,14 +60,15 @@ DECLARE
        FROM north_star_module.%2$I AS r
       WHERE r.tenant_id = north_star_internal.trusted_tenant_id()
         AND r.environment_id = north_star_internal.trusted_environment_id()
-        AND r.%1$I = ANY($3)', identity_column, physical_table)
-    USING action, record_type, record_ids;
+        AND r.legal_entity_id = $3
+        AND r.%1$I = ANY($4)', identity_column, physical_table)
+    USING action, record_type, company, record_ids;
   GET DIAGNOSTICS recorded = ROW_COUNT;
   IF recorded <> cardinality(record_ids) THEN
     RAISE EXCEPTION 'a claimed record creation is not stored in this scope'; END IF;
   RETURN recorded; END $$;
-REVOKE ALL ON FUNCTION north_star_internal.record_creations(text, text, text, uuid[]) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION north_star_internal.record_creations(text, text, text, uuid[])
+REVOKE ALL ON FUNCTION north_star_internal.record_creations(text, text, text, uuid, uuid[]) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION north_star_internal.record_creations(text, text, text, uuid, uuid[])
   TO north_star_runtime, north_star_module_runtime;
 
 CREATE FUNCTION north_star_internal.seal_record_creations() RETURNS trigger
@@ -72,7 +83,7 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$ BE
    WHERE (tenant_id, environment_id, writer_xid, request_id, action_id) =
          (NEW.tenant_id, NEW.environment_id, pg_current_xact_id(), NEW.request_id, NEW.action_id)
   HAVING count(*) > 0;
-  PERFORM set_config('north_star.creation_action', '', true);
+  PERFORM set_config('north_star.creation_action', 'sealed', true);
   RETURN NULL; END $$;
 REVOKE ALL ON FUNCTION north_star_internal.seal_record_creations() FROM PUBLIC;
 CREATE TRIGGER seal_record_creations AFTER INSERT ON platform.trust_outbox
@@ -405,4 +416,200 @@ DECLARE
      AND c.record_type = ANY(COALESCE(subscribed_records, '{}'::text[])) AND NOT c.resolved;
 
   RETURN NEW; END
+$$;
+
+-- ADR-0073 A1: approval and staff Retry read the company from the run's own
+-- trigger source, so a recordCreated run can ask for approval and be retried.
+-- A receipt instance reads exactly the chain it read before.
+CREATE OR REPLACE FUNCTION platform.workflow_approval_worklist(requested_run uuid DEFAULT NULL)
+RETURNS TABLE (run_id uuid, cursor integer, fence bigint, plan bytea, plan_digest text, company_id uuid)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp
+AS $$
+  SELECT a.run_id, a.cursor, a.fence, a.plan, a.plan_digest, target_scope.company_id
+    FROM platform.workflow_pending_approvals AS a
+    JOIN platform.workflow_runs AS r USING (tenant_id, environment_id, run_id)
+    JOIN platform.workflow_definitions AS d USING (tenant_id, environment_id, release_id, workflow_id)
+    JOIN platform.workflow_instances AS i USING (tenant_id, environment_id, instance_id, workflow_id)
+    JOIN platform.active_release_pointers AS p
+      ON (p.tenant_id, p.environment_id, p.pointer_id, p.fence, p.release_id) =
+         (r.tenant_id, r.environment_id, r.pointer_id, r.execution_fence, r.release_id)
+    JOIN platform.workflow_activation_watermarks AS w
+      ON (w.tenant_id, w.environment_id, w.pointer_id, w.fence, w.release_id, w.release_root) =
+         (r.tenant_id, r.environment_id, r.pointer_id, r.execution_fence, r.release_id, r.release_root)
+    JOIN platform.workflow_activation_watermarks AS initial
+      ON (initial.tenant_id, initial.environment_id, initial.pointer_id, initial.fence, initial.release_id, initial.release_root) =
+         (r.tenant_id, r.environment_id, r.pointer_id, r.initial_fence, r.release_id, r.release_root)
+    JOIN platform.workflow_journal AS j
+      ON (j.tenant_id, j.environment_id, j.run_id, j.cursor) =
+         (a.tenant_id, a.environment_id, a.run_id, a.cursor)
+    -- The trigger source names the company: the receipt event chain, or, for a
+    -- creation instance, the verified occurrence chain (ADR-0073 A1).
+    JOIN LATERAL (
+      SELECT event.payload #>> '{legalEntityId,value}' AS company
+        FROM platform.trust_domain_events AS event
+        JOIN platform.trust_outbox AS source
+          ON (source.tenant_id, source.environment_id, source.outbox_id, source.domain_event_id) =
+             (event.tenant_id, event.environment_id, event.outbox_id, event.domain_event_id)
+         AND (source.invocation_id, source.change_document_id, source.action_id) =
+             (event.invocation_id, event.change_document_id, event.action_id)
+         AND (source.release_id, source.release_content_hash, source.event_type, source.event_schema_version) =
+             (event.release_id, event.release_content_hash, event.event_type, event.event_schema_version)
+        JOIN platform.trust_action_invocations AS invocation
+          ON (invocation.tenant_id, invocation.environment_id, invocation.invocation_id, invocation.action_id) =
+             (event.tenant_id, event.environment_id, event.invocation_id, event.action_id)
+         AND (invocation.release_id, invocation.release_content_hash) = (event.release_id, event.release_content_hash)
+         AND invocation.outcome = 'SUCCEEDED'
+         AND invocation.policy_inputs #>> '{legalEntityId,representation}' = 'VALUE'
+         AND invocation.policy_inputs #>> '{legalEntityId,value}' = event.payload #>> '{legalEntityId,value}'
+        JOIN platform.trust_business_change_documents AS change
+          ON (change.tenant_id, change.environment_id, change.change_document_id) =
+             (event.tenant_id, event.environment_id, event.change_document_id)
+         AND (change.invocation_id, change.outbox_id, change.domain_event_id) =
+             (event.invocation_id, event.outbox_id, event.domain_event_id)
+         AND (change.release_id, change.release_content_hash, change.action_id) =
+             (event.release_id, event.release_content_hash, event.action_id)
+       WHERE i.creation_occurrence_id IS NULL
+         AND (event.tenant_id, event.environment_id, event.domain_event_id, event.outbox_id) =
+             (r.tenant_id, r.environment_id, i.event_id, i.outbox_id)
+         AND (event.release_id, event.release_content_hash) = (r.release_id, r.release_root)
+         AND event.event_type = d.event_type
+         AND event.payload #>> '{legalEntityId,representation}' = 'VALUE'
+      UNION ALL
+      SELECT created.legal_entity_id::text
+        FROM platform.workflow_record_trigger_scope(i.instance_id) AS created
+       WHERE i.creation_occurrence_id IS NOT NULL
+         AND (created.release_id, created.release_content_hash, created.record_type) =
+             (r.release_id, r.release_root, d.record_type)
+    ) AS source_scope ON true
+    JOIN platform.tenant_releases AS release
+      ON (release.tenant_id, release.environment_id, release.release_id, release.content_hash) =
+         (r.tenant_id, r.environment_id, r.release_id, r.release_root)
+    JOIN platform.app_package_revisions AS revision
+      ON (revision.tenant_id, revision.revision_id) = (release.tenant_id, release.app_package_revision_id)
+    JOIN platform.tenant_release_projection_links AS projection
+      ON (projection.tenant_id, projection.environment_id, projection.release_id) =
+         (r.tenant_id, r.environment_id, r.release_id)
+     AND projection.projection_family_id = 'northstar.compiler:projection-family.operation-catalog'
+    JOIN platform.tenant_release_chunk_links AS chunk
+      ON (chunk.tenant_id, chunk.environment_id, chunk.release_id, chunk.projection_instance_id) =
+         (projection.tenant_id, projection.environment_id, projection.release_id, projection.projection_instance_id)
+    JOIN platform.release_artifact_blobs AS catalog
+      ON catalog.content_hash = chunk.chunk_hash AND catalog.artifact_kind = 'projectionChunk'
+    JOIN platform.tenant_release_projection_links AS storage_projection
+      ON (storage_projection.tenant_id, storage_projection.environment_id, storage_projection.release_id) =
+         (r.tenant_id, r.environment_id, r.release_id)
+     AND storage_projection.projection_family_id = 'northstar.compiler:projection-family.storage-target'
+    JOIN platform.tenant_release_chunk_links AS storage_chunk
+      ON (storage_chunk.tenant_id, storage_chunk.environment_id, storage_chunk.release_id, storage_chunk.projection_instance_id) =
+         (storage_projection.tenant_id, storage_projection.environment_id, storage_projection.release_id, storage_projection.projection_instance_id)
+    JOIN platform.release_artifact_blobs AS storage
+      ON storage.content_hash = storage_chunk.chunk_hash AND storage.artifact_kind = 'projectionChunk'
+    CROSS JOIN LATERAL (SELECT
+      nullif(current_setting('north_star.principal_id', true), '')::uuid AS principal,
+      convert_from(j.canonical_bytes, 'UTF8')::jsonb AS request,
+      source_scope.company AS company
+    ) AS binding
+    JOIN LATERAL jsonb_array_elements(convert_from(catalog.canonical_bytes, 'UTF8')::jsonb->'operations') AS operation(value)
+      ON operation.value->>'lifecycle' = 'active'
+     AND operation.value->>'tier' = 'o0'
+     AND operation.value->>'operationId' = binding.request->>'operationId'
+    JOIN LATERAL jsonb_array_elements(convert_from(storage.canonical_bytes, 'UTF8')::jsonb->'entities') AS target(value)
+      ON target.value->>'entityId' = operation.value #>> '{effect,entity,targetId}'
+    CROSS JOIN LATERAL platform.workflow_approval_target_scope(
+      a.tenant_id, a.environment_id, target.value, operation.value #>> '{effect,kind}', binding.request->'input'
+    ) AS target_scope
+    CROSS JOIN LATERAL jsonb_array_elements(convert_from(revision.desired_state, 'UTF8')::jsonb->'permissions') AS permission(value)
+   WHERE a.tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
+     AND a.environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid
+     AND (requested_run IS NULL OR a.run_id = requested_run)
+     AND a.status = 'PENDING' AND r.status = 'WAITING' AND a.fence = r.execution_fence
+     AND binding.principal IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1 FROM platform.workflow_definitions AS automation
+        WHERE automation.tenant_id = a.tenant_id AND automation.automation_principal_id = binding.principal
+     )
+     AND COALESCE((
+       SELECT eligible FROM platform.release_approver_eligibility_events AS eligibility
+        WHERE eligibility.tenant_id = a.tenant_id AND eligibility.principal_id = binding.principal
+        ORDER BY eligibility.policy_version DESC LIMIT 1
+     ), false)
+     AND w.verified_approval_binding AND initial.verified_approval_binding
+     AND w.definition_bindings->d.workflow_id->>'digest' = platform.workflow_definition_digest(d)
+     AND initial.definition_bindings->d.workflow_id->>'digest' = w.definition_bindings->d.workflow_id->>'digest'
+     AND j.kind = 'REQUEST' AND binding.request->>'kind' = 'requestApproval'
+     AND jsonb_typeof(binding.request->'input') = 'object'
+     AND binding.company IS NOT NULL
+     AND (NOT (binding.request->'input' ? 'legalEntityId')
+       OR binding.request #>> '{input,legalEntityId}' = binding.company)
+     AND convert_from(a.plan, 'UTF8')::jsonb = jsonb_build_object(
+       'companyId', binding.company, 'cursor', a.cursor, 'fence', a.fence::text,
+       'pointerId', r.pointer_id, 'releaseId', r.release_id, 'releaseRoot', r.release_root,
+       'request', binding.request, 'runId', r.run_id
+     )
+     AND d.grants->'operations' ? (binding.request->>'operationId')
+     AND permission.value->>'permissionId' = operation.value->>'permissionId'
+     AND permission.value->>'lifecycle' = 'active'
+     AND EXISTS (
+       SELECT 1 FROM platform.current_policy_memberships AS membership
+       JOIN platform.current_policy_roles AS role USING (tenant_id, environment_id, role_id)
+       JOIN platform.current_policy_permission_grants AS grant_row USING (tenant_id, environment_id, role_id)
+        WHERE (membership.tenant_id, membership.environment_id, membership.principal_id) =
+              (a.tenant_id, a.environment_id, binding.principal)
+          AND membership.revoked_at IS NULL AND role.revoked_at IS NULL AND grant_row.revoked_at IS NULL
+          AND grant_row.permission_id = 'northstar.runtime:permission.semantic-operation-boundary'
+          AND grant_row.resource_id = 'northstar.runtime:gateway.semantic-operation'
+     )
+     AND EXISTS (
+       SELECT 1 FROM platform.current_policy_memberships AS membership
+       JOIN platform.current_policy_roles AS role USING (tenant_id, environment_id, role_id)
+       JOIN platform.current_policy_permission_grants AS grant_row USING (tenant_id, environment_id, role_id)
+        WHERE (membership.tenant_id, membership.environment_id, membership.principal_id) =
+              (a.tenant_id, a.environment_id, binding.principal)
+          AND membership.revoked_at IS NULL AND role.revoked_at IS NULL AND grant_row.revoked_at IS NULL
+          AND (membership.legal_entity_id IS NULL OR membership.legal_entity_id = target_scope.company_id)
+          AND grant_row.permission_id = operation.value->>'permissionId'
+          AND grant_row.resource_id = permission.value #>> '{resource,targetId}'
+          AND NOT COALESCE(operation.value->'excludedRoleKeys' ? role.role_key, false)
+     )
+   ORDER BY r.created_at, a.run_id, a.cursor
+   LIMIT 100
+$$;
+CREATE OR REPLACE FUNCTION north_star_internal.staff_retry_terms(t uuid,e uuid,target uuid,company uuid)
+RETURNS jsonb LANGUAGE sql STABLE SET search_path = pg_catalog, pg_temp AS $$
+  SELECT jsonb_build_object('run',r.run_id,'instance',i.instance_id,'occurrence',i.event_id,'workflow',r.workflow_id,
+    'release',r.release_id,'root',r.release_root,'pointer',p.pointer_id,'originalFence',r.initial_fence::text,
+    'previousFence',r.execution_fence::text,'fence',p.fence::text,'company',i.legal_entity_id,
+    'body',d.body_digest,'executable',d.executable_digest,'sdk',d.sdk_digest,'sdkVersion',d.sdk_version,'host',d.host_version,'engine',d.engine_build,
+    'definition',platform.workflow_definition_digest(d),'journal',(
+      SELECT coalesce(jsonb_agg(jsonb_build_array(j.cursor,j.kind,j.journal_id,encode(sha256(j.canonical_bytes),'hex'))
+        ORDER BY j.cursor,j.kind,j.journal_id),'[]'::jsonb) FROM platform.workflow_journal j
+      WHERE (j.tenant_id,j.environment_id,j.run_id)=(r.tenant_id,r.environment_id,r.run_id)))
+  FROM platform.workflow_runs r JOIN platform.workflow_instances i USING (tenant_id,environment_id,instance_id,workflow_id)
+  JOIN platform.workflow_definitions d USING (tenant_id,environment_id,workflow_id,release_id)
+  JOIN platform.active_release_pointers p USING (tenant_id,environment_id,release_id,pointer_id)
+  JOIN platform.workflow_activation_watermarks w USING (tenant_id,environment_id,release_id,pointer_id,release_root)
+  JOIN platform.workflow_activation_watermarks old ON (old.tenant_id,old.environment_id,old.pointer_id,old.fence,old.release_id,old.release_root)
+    =(r.tenant_id,r.environment_id,r.pointer_id,r.initial_fence,r.release_id,r.release_root)
+  JOIN LATERAL (
+    SELECT event.payload #>> '{legalEntityId,value}' AS source_company
+      FROM platform.trust_domain_events event
+      JOIN platform.trust_action_invocations invocation ON (invocation.tenant_id,invocation.environment_id,invocation.invocation_id,invocation.action_id,
+        invocation.release_id,invocation.release_content_hash)=(event.tenant_id,event.environment_id,event.invocation_id,event.action_id,r.release_id,r.release_root)
+        AND invocation.outcome='SUCCEEDED'
+     WHERE i.creation_occurrence_id IS NULL
+       AND (event.tenant_id,event.environment_id,event.domain_event_id,event.outbox_id,
+        event.release_id,event.release_content_hash,event.event_type)=(r.tenant_id,r.environment_id,i.event_id,i.outbox_id,r.release_id,r.release_root,d.event_type)
+       AND invocation.policy_inputs #>> '{legalEntityId,representation}'='VALUE'
+       AND invocation.policy_inputs #>> '{legalEntityId,value}'=event.payload #>> '{legalEntityId,value}'
+    UNION ALL
+    SELECT created.legal_entity_id::text FROM platform.workflow_record_trigger_scope(i.instance_id) created
+     WHERE i.creation_occurrence_id IS NOT NULL
+       AND (created.release_id,created.release_content_hash,created.record_type)=(r.release_id,r.release_root,d.record_type)
+  ) source_scope ON true
+  WHERE r.tenant_id=t AND r.environment_id=e AND r.run_id=target AND i.legal_entity_id=company
+    AND source_scope.source_company=company::text
+    AND r.status='SUSPENDED' AND r.reason='stale-release-pin' AND p.fence>r.execution_fence
+    AND w.fence=p.fence AND old.verified_approval_binding AND w.verified_approval_binding
+    AND w.definition_bindings->r.workflow_id->>'digest'=platform.workflow_definition_digest(d)
+    AND old.definition_bindings->r.workflow_id=w.definition_bindings->r.workflow_id
 $$;

@@ -2357,7 +2357,20 @@ async function insertRecord(
      VALUES (${parameters.join(', ')})`,
     values,
   );
-  await recordCreations(client, entity, [input.recordId]);
+  if (entity.legalEntity) {
+    // The company the row was written with, as stored by this insert.
+    const slot = parameters[columns.indexOf(entity.legalEntity.column)];
+    const company = slot?.match(/^\$(\d+)$/u)
+      ? values[Number(slot.slice(1)) - 1]
+      : undefined;
+    if (typeof company !== 'string')
+      throw failure(
+        'MODULE_STORAGE_COLUMN_AUTHORITY_CONFLICT',
+        'a company-owned create names no company',
+        entity.entityId,
+      );
+    await recordCreations(client, entity, company, [input.recordId]);
+  }
 }
 
 async function requireExistingParentGuards(

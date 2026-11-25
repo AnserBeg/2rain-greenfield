@@ -988,7 +988,7 @@ async function insertLine(
   if (inserted.rowCount !== 1) {
     throw inputError('a count line was not written');
   }
-  await recordCreations(client, binding.line, [recordId]);
+  await recordCreations(client, binding.line, count.legalEntityId, [recordId]);
 }
 
 async function updateLine(

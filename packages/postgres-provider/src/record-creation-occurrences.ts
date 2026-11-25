@@ -20,15 +20,19 @@ export async function recordCreations(
     readonly legalEntity?: unknown;
     readonly recordIdentity?: { readonly column: string };
   },
+  company: string,
   recordIds: readonly string[],
 ): Promise<void> {
   if (!entity.legalEntity || recordIds.length === 0) return;
+  // The function refuses outside a governed write or after the seal, and
+  // when a named record is not stored in this company: never a silent 0.
   await client.query(
-    'SELECT north_star_internal.record_creations($1, $2, $3, $4::uuid[])',
+    'SELECT north_star_internal.record_creations($1, $2, $3, $4::uuid, $5::uuid[])',
     [
       entity.physicalTableName,
       entity.recordIdentity?.column ?? 'record_id',
       entity.entityId,
+      company,
       recordIds,
     ],
   );

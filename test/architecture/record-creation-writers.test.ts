@@ -22,6 +22,32 @@ interface Writer {
   readonly reason?: string;
 }
 
+/**
+ * SQL definer functions that insert into a table named at run time. Each type
+ * they create has no create operation, so recordCreated admission refuses it.
+ */
+const SQL_INSERT = /'INSERT INTO (?:%s|north_star_module\.)/gu;
+export const SQL_RECORD_WRITERS: Readonly<Record<string, Writer>> =
+  Object.freeze({
+    'db/migrations/0015_inventory_storage_foundation.sql': {
+      inserts: 2,
+      records: 0,
+      reason:
+        'Inventory projection rebuild and period-lock provisioning, superseded by 0033: no create operation.',
+    },
+    'db/migrations/0020_semantic_aggregate_anchors.sql': {
+      inserts: 1,
+      records: 0,
+      reason: 'Aggregate anchor rows are platform bookkeeping, not records.',
+    },
+    'db/migrations/0033_definer_search_paths.sql': {
+      inserts: 1,
+      records: 0,
+      reason:
+        'provision_inventory_period_lock creates a company-owned lock row; the lock type has no create operation, so admission refuses it.',
+    },
+  });
+
 export const RECORD_CREATION_WRITERS: Readonly<Record<string, Writer>> =
   Object.freeze({
     'packages/postgres-provider/src/module-runtime-interpreter.ts': {
@@ -40,14 +66,13 @@ export const RECORD_CREATION_WRITERS: Readonly<Record<string, Writer>> =
     },
     'packages/postgres-provider/src/inventory-posting-service.ts': {
       inserts: 5,
-      records: 0,
+      records: 2,
       reason:
-        'Owed (WORKFLOW-2 slice 5): posting-kernel movements, companion transactions and lines. Fulfilment progress and balances are projections.',
+        'Companion transactions and their lines record their creations. Movements have no create operation (admission refuses the type); fulfilment progress and balances are projections.',
     },
     'packages/postgres-provider/src/settlement-capability-executor.ts': {
       inserts: 1,
-      records: 0,
-      reason: 'Owed (WORKFLOW-2 slice 5): settlement allocation lines.',
+      records: 1,
     },
     'packages/postgres-provider/src/goods-receipt.ts': {
       inserts: 1,
@@ -56,9 +81,7 @@ export const RECORD_CREATION_WRITERS: Readonly<Record<string, Writer>> =
     },
     'packages/postgres-provider/src/purchase-order-approval-executor.ts': {
       inserts: 1,
-      records: 0,
-      reason:
-        'Owed (WORKFLOW-2 slice 5): the goods receipt an approval opens. The receipt workflow trigger covers its posting today.',
+      records: 1,
     },
     'packages/postgres-provider/src/fulfillment-lifecycle.ts': {
       inserts: 1,
@@ -85,6 +108,25 @@ function sources(directory: string): string[] {
     return path.endsWith('.ts') && !path.endsWith('.d.ts') ? [path] : [];
   });
 }
+
+test('every SQL insert into a run-time table is classified', () => {
+  const found: Record<string, number> = {};
+  for (const name of readdirSync('db/migrations')) {
+    const path = `db/migrations/${name}`;
+    const count = readFileSync(path, 'utf8').match(SQL_INSERT)?.length ?? 0;
+    if (count) found[path] = count;
+  }
+  assert.deepEqual(
+    found,
+    Object.fromEntries(
+      Object.entries(SQL_RECORD_WRITERS).map(([path, writer]) => [
+        path,
+        writer.inserts,
+      ]),
+    ),
+    'a SQL insert into a run-time table was added: classify it in SQL_RECORD_WRITERS',
+  );
+});
 
 test('every insert into a managed table records its creations or says why not', () => {
   const found: Record<string, number> = {};

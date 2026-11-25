@@ -1376,6 +1376,20 @@ export class PostgresCustomizationService {
           ? {
               workflowSdk: generateWorkflowSdk(view, { queries, operations })
                 .declarations,
+              // The same create-operation rule the compiler admits by.
+              workflowRecordTypeIds: parsePinnedOperationCatalog(
+                view.projections.operation.payload,
+              )
+                .filter(
+                  (operation) =>
+                    operation.lifecycle === 'active' &&
+                    operation.effect.kind === 'createRecordEffect',
+                )
+                .map((operation) =>
+                  'entity' in operation.effect
+                    ? operation.effect.entity.targetId
+                    : '',
+                ),
             }
           : {}),
       },

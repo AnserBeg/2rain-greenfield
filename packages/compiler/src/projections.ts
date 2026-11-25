@@ -638,6 +638,7 @@ export function appendWorkflowProjection(
     plans.find(
       ({ familyId }) => familyId === PROJECTION_FAMILY_IDS.storageTarget,
     )?.payload,
+    operations,
   );
   surface.requiredRuntimeCapability = {
     ...surface.requiredRuntimeCapability,

@@ -514,7 +514,11 @@ export async function draftPatchFromRequest<T = never>(
           targets.workflowSdk,
           options.workflowRules,
           (targets.linkTargets ?? [])
-            .filter(({ companyOwned }) => companyOwned)
+            .filter(
+              ({ companyOwned, entityId }) =>
+                companyOwned &&
+                (targets.workflowRecordTypeIds ?? []).includes(entityId),
+            )
             .map(
               ({ entityId, label }) => `${entityId} (${JSON.stringify(label)})`,
             ),
