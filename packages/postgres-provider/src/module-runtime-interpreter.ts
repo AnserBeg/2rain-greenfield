@@ -1091,6 +1091,9 @@ export class PostgresModuleRuntimeInterpreter
                   { ...request, policyVersion },
                   preparation,
                   ids,
+                  // ADR-0073 A1: a write a workflow run commits names the run
+                  // as its causation, taken from the run row, never the script.
+                  this.#workflowRunId ?? null,
                 ),
                 mutationResult,
               });
@@ -1909,6 +1912,7 @@ function acceptedCommand(
     invocationId: string;
     outboxId: string;
   },
+  causationId: string | null,
 ): AcceptedMutationCommand {
   const metadata: EvidenceMetadataInput = Object.freeze({
     operationId: classified('INTERNAL', request.definition.operationId),
@@ -1916,7 +1920,7 @@ function acceptedCommand(
   });
   return Object.freeze({
     actionId: request.definition.operationId,
-    causationId: null,
+    causationId,
     change: Object.freeze({
       changeDocumentId: ids.changeDocumentId,
       changes: preparation.changes,

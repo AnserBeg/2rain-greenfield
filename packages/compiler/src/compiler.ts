@@ -49,7 +49,10 @@ import {
 } from './conformance.js';
 import { compilerDiagnostic, finalizeDiagnostics } from './diagnostics.js';
 import { billingBindingProblem } from './billing.js';
-import { WorkflowGrantBindingError } from './workflows.js';
+import {
+  WorkflowGrantBindingError,
+  WorkflowTriggerBindingError,
+} from './workflows.js';
 import { compileDocuments } from './documents.js';
 import { requiredFormulaValidationOperationReader } from '../../canonical-model/src/formula-validation-reader.js';
 import {
@@ -580,6 +583,21 @@ function compileApplicationInternal(
   try {
     appendWorkflowProjection(basePlans, packageRevision);
   } catch (error) {
+    if (error instanceof WorkflowTriggerBindingError)
+      return failure(
+        [
+          {
+            ...compilerDiagnostic(
+              'COMPILER_TYPE_INVALID',
+              'typeCheck',
+              '$.workflows',
+              error.recordTypeId,
+            ),
+            rule: 'Workflow trigger names a stored record type with one owning company.',
+          },
+        ],
+        maximumDiagnostics,
+      );
     if (!(error instanceof WorkflowGrantBindingError)) throw error;
     return failure(
       [

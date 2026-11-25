@@ -314,7 +314,7 @@ export class PostgresWorkflowGateway implements WorkflowGateway {
             }
           : 'relations' in input &&
               Object.values(asObject(input.relations)).some(
-                (value) => value !== run.receipt_id,
+                (value) => value !== run.trigger_record_id,
               )
             ? {
                 code: 'WORKFLOW_OPERATION_RECEIPT_LINK_REFUSED',

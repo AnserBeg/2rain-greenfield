@@ -41,6 +41,7 @@ import {
 import {
   WORKFLOW_PAYLOAD_VERSION,
   WORKFLOW_PROJECTION_FAMILY,
+  RECORD_CREATED_TRIGGER_READER,
   WORKFLOW_SURFACE_FLOOR,
 } from '../../canonical-model/src/workflows.js';
 import {
@@ -1010,9 +1011,11 @@ function definitionFromSnapshotRows(
       const workflow = WorkflowProjectionSchema.parse(
         projectionFor(WORKFLOW_PROJECTION_FAMILY).payload,
       );
+      const floor = surface.requiredRuntimeCapability?.minimumVersion ?? 0;
       if (
-        (surface.requiredRuntimeCapability?.minimumVersion ?? 0) <
-          WORKFLOW_SURFACE_FLOOR ||
+        floor < WORKFLOW_SURFACE_FLOOR ||
+        (workflow.workflows.some(({ trigger }) => typeof trigger !== 'string') &&
+          floor < RECORD_CREATED_TRIGGER_READER) ||
         workflow.workflows.some(
           ({ grants, sdkDigest }) =>
             workflowSdkBindingDigest(

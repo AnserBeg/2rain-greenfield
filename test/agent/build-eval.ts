@@ -30,7 +30,11 @@ import {
 } from '../../packages/operations-agent/src/index.js';
 import { compileWorkflowBody } from '../../packages/postgres-provider/src/workflow-compile.js';
 import { InMemoryWorkflowRun } from '../../packages/postgres-provider/src/workflow-run.js';
-import { generateWorkflowSdk } from '../../packages/postgres-provider/src/workflow-sdk.js';
+import {
+  generateWorkflowSdk,
+  type WorkflowEvent,
+} from '../../packages/postgres-provider/src/workflow-sdk.js';
+import { WorkflowTriggerSchema } from '../../packages/canonical-model/src/schemas.js';
 import type { ImmutableJsonValue } from '../../packages/runtime/src/request-runtime-view.js';
 import {
   parsePinnedOperationCatalog,
@@ -751,6 +755,7 @@ async function updateExisting(
 
 interface DraftedWorkflow {
   readonly body: string;
+  readonly trigger?: unknown;
   readonly grants: {
     readonly operations: readonly string[];
     readonly queries: readonly string[];
@@ -769,9 +774,19 @@ export async function scoreWorkflow(
   expected: {
     operations: readonly string[];
     calls: readonly WorkflowCallSpec[];
+    trigger?: string;
   },
 ): Promise<Score & { overGranted: boolean }> {
   const reasons: string[] = [];
+  const trigger = drafted.trigger ?? 'goodsReceiptPosted';
+  const recordType =
+    typeof trigger === 'object' && trigger !== null
+      ? String((trigger as { recordTypeId?: unknown }).recordTypeId)
+      : null;
+  if ((expected.trigger ?? null) !== (recordType && localOf(recordType)))
+    reasons.push(
+      `trigger ${recordType ? localOf(recordType) : String(trigger)}; expected ${expected.trigger ?? 'goodsReceiptPosted'}`,
+    );
   const granted = drafted.grants.operations.map(localOf).sort();
   const wanted = [...expected.operations].sort();
   if (JSON.stringify(granted) !== JSON.stringify(wanted))
@@ -782,12 +797,21 @@ export async function scoreWorkflow(
     reasons.push(
       `query grants ${drafted.grants.queries.map(localOf).join(', ')}`,
     );
-  const event = {
-    type: 'goodsReceiptPosted' as const,
-    eventId: randomUUID(),
-    receiptId: randomUUID(),
-    legalEntityId: COMPANY,
-  };
+  const triggerRecordId = randomUUID();
+  const event: WorkflowEvent = recordType
+    ? {
+        type: 'recordCreated',
+        eventId: randomUUID(),
+        recordTypeId: recordType,
+        recordId: triggerRecordId,
+        legalEntityId: COMPANY,
+      }
+    : {
+        type: 'goodsReceiptPosted',
+        eventId: randomUUID(),
+        receiptId: triggerRecordId,
+        legalEntityId: COMPANY,
+      };
   const calls: {
     kind: string;
     id?: string;
@@ -800,7 +824,13 @@ export async function scoreWorkflow(
     const compiled = await world.runtime.entry.run(MANAGER, (view) =>
       compileWorkflowBody(
         drafted.body,
-        generateWorkflowSdk(view, drafted.grants),
+        generateWorkflowSdk(
+          view,
+          drafted.grants,
+          undefined,
+          undefined,
+          WorkflowTriggerSchema.parse(trigger),
+        ),
       ),
     );
     const run = new InMemoryWorkflowRun(compiled, event);
@@ -822,7 +852,7 @@ export async function scoreWorkflow(
   for (const spec of expected.calls) {
     const at = calls
       .slice(cursor)
-      .findIndex((call) => callMatches(call, spec, event.receiptId));
+      .findIndex((call) => callMatches(call, spec, triggerRecordId));
     if (at < 0) {
       reasons.push(
         `expected call ${spec.kind}${spec.operation ? ` ${spec.operation}` : ''}${spec.milliseconds ? ` ${String(spec.milliseconds)} ms` : ''} not made in order`,
@@ -1197,7 +1227,13 @@ export async function runBuildCase(
     }
     if (expect.outcome === 'workflow') {
       const input = accepted as
-        | { workflow?: { grants?: DraftedWorkflow['grants'] }; body?: unknown }
+        | {
+            workflow?: {
+              grants?: DraftedWorkflow['grants'];
+              trigger?: unknown;
+            };
+            body?: unknown;
+          }
         | undefined;
       if (
         result.activated &&
@@ -1206,7 +1242,11 @@ export async function runBuildCase(
       ) {
         const score = await scoreWorkflow(
           world,
-          { body: input.body, grants: input.workflow.grants },
+          {
+            body: input.body,
+            grants: input.workflow.grants,
+            trigger: input.workflow.trigger,
+          },
           expect,
         );
         result.e2e = score.e2e;
@@ -1433,7 +1473,9 @@ export function summarize(results: readonly CaseResult[]) {
   const drafts = ran.filter((r) => r.expected !== 'unsupported');
   const unsupported = ran.filter((r) => r.expected === 'unsupported');
   const hostile = ran.filter((r) => r.category === 'hostile');
-  const workflows = ran.filter((r) => r.category === 'workflow-receipt');
+  const workflows = ran.filter(
+    (r) => r.category === 'workflow-receipt' || r.category === 'workflow-record',
+  );
   const refusals = ran.filter((r) => r.status === 'unsupported');
   const byBucket = new Map<string, { correct: number; false: number }>();
   for (const r of refusals) {

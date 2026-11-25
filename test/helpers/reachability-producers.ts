@@ -72,6 +72,7 @@ export const reachabilityProducers = [
     'test/unit/map-imagery.test.ts',
     'test/unit/reminder-deadline.test.ts',
     'test/unit/surface-presentation.test.ts',
+    'test/unit/workflow-triggers.test.ts',
   ]),
   nodeProducer('compiler', 'quality', 'test:compiler', [
     'test/compiler/adopted-language-shape.test.ts',

@@ -3,8 +3,38 @@ import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 
 import { RECEIPT_POSTED_EVENT } from '../../domain/src/purchasing/receipt-posted-event.js';
+import type { WorkflowTrigger } from '../../canonical-model/src/schemas.js';
+import { RECORD_CREATED_EVENT_TYPE } from '../../canonical-model/src/workflows.js';
 
 export const RECEIPT_POSTED_TYPE = RECEIPT_POSTED_EVENT.eventType;
+/** ADR-0073 A1: a run started by a run of depth 3 starts nothing. */
+export const WORKFLOW_MAX_CAUSATION_DEPTH = 3;
+
+/**
+ * The persisted source of a trigger member. The receipt member keeps its
+ * event type and no record type, so its definitions and digests are unchanged.
+ */
+export function workflowTriggerSource(trigger: WorkflowTrigger): {
+  readonly eventType: string;
+  readonly recordType: string | null;
+} {
+  return typeof trigger === 'string'
+    ? { eventType: RECEIPT_POSTED_TYPE, recordType: null }
+    : { eventType: RECORD_CREATED_EVENT_TYPE, recordType: trigger.recordTypeId };
+}
+
+interface RecordCreationCandidate {
+  readonly occurrence_id: string;
+  readonly record_type: string;
+  readonly record_id: string;
+  readonly company_id: string;
+  readonly event_id: string | null;
+  readonly release_id: string | null;
+  readonly release_content_hash: string | null;
+  readonly trigger_principal_id: string | null;
+  readonly cause_workflow_id: string | null;
+  readonly cause_depth: number | null;
+}
 const FIRST_UUID = '00000000-0000-0000-0000-000000000000';
 export const WORKFLOW_POLL_BATCH_SIZE = 64;
 
@@ -118,6 +148,7 @@ export class PostgresWorkflowConsumer {
       const watermark = await verifiedWorkflowWatermark(client, scope, pointer);
       if (!watermark) return count;
       const scopeKeys = [scope.tenant_id, scope.environment_id];
+      count += await claimRecordCreations(client, scope, pointer, watermark);
       const definitions = await client.query<{ workflow_id: string }>(
         `SELECT d.workflow_id
             FROM platform.workflow_definitions AS d
@@ -175,14 +206,16 @@ export class PostgresWorkflowConsumer {
           const instance = await client.query<{ instance_id: string }>(
             `INSERT INTO platform.workflow_instances (
                tenant_id, environment_id, instance_id, outbox_id, event_id,
-               workflow_id, legal_entity_id, receipt_id, trigger_principal_id
+               workflow_id, legal_entity_id, receipt_id, trigger_principal_id,
+               trigger_record_id
              )
              SELECT $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid,
-                    $6::text, $7::uuid, $8::uuid, $9::uuid
+                    $6::text, $7::uuid, $8::uuid, $9::uuid, $8::uuid
              WHERE NOT EXISTS (
                SELECT 1 FROM platform.workflow_instances
                 WHERE tenant_id = $1 AND environment_id = $2
                   AND event_id = $5 AND workflow_id = $6
+                  AND creation_occurrence_id IS NULL
              )
              RETURNING instance_id`,
             [
@@ -197,23 +230,14 @@ export class PostgresWorkflowConsumer {
             ],
           );
           if (!instance.rows[0]) continue;
-          const started = await client.query(
-            `INSERT INTO platform.workflow_runs (
-               tenant_id, environment_id, run_id, instance_id, workflow_id, pointer_id,
-               release_id, release_root, initial_fence, execution_fence
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)`,
-            [
-              ...scopeKeys,
-              randomUUID(),
-              instance.rows[0].instance_id,
-              workflow_id,
-              pointer.pointer_id,
-              pointer.release_id,
-              watermark.release_root,
-              pointer.fence,
-            ],
+          count += await startRun(
+            client,
+            scope,
+            pointer,
+            watermark,
+            instance.rows[0].instance_id,
+            workflow_id,
           );
-          count += started.rowCount ?? 0;
         }
       }
       const next = candidates.rows[WORKFLOW_POLL_BATCH_SIZE];
@@ -235,6 +259,152 @@ export class PostgresWorkflowConsumer {
     });
   }
 }
+
+async function startRun(
+  client: PoolClient,
+  scope: WorkflowScope,
+  pointer: WorkflowPointer,
+  watermark: Watermark,
+  instanceId: string,
+  workflowId: string,
+): Promise<number> {
+  const started = await client.query(
+    `INSERT INTO platform.workflow_runs (
+       tenant_id, environment_id, run_id, instance_id, workflow_id, pointer_id,
+       release_id, release_root, initial_fence, execution_fence
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)`,
+    [
+      scope.tenant_id,
+      scope.environment_id,
+      randomUUID(),
+      instanceId,
+      workflowId,
+      pointer.pointer_id,
+      pointer.release_id,
+      watermark.release_root,
+      pointer.fence,
+    ],
+  );
+  return started.rowCount ?? 0;
+}
+
+/**
+ * ADR-0073 A1 recordCreated. Each occurrence of a subscribed record type gets
+ * one disposition and, when eligible, one start per matching definition, all
+ * in the claim transaction. The start key is the occurrence, so a command that
+ * creates N records starts N runs. Company and record come from the verified
+ * source chain, never from the script or the worker.
+ */
+async function claimRecordCreations(
+  client: PoolClient,
+  scope: WorkflowScope,
+  pointer: WorkflowPointer,
+  watermark: Watermark,
+): Promise<number> {
+  const scopeKeys = [scope.tenant_id, scope.environment_id];
+  const definitions = await client.query<{
+    workflow_id: string;
+    record_type: string;
+  }>(
+    `SELECT d.workflow_id, d.record_type
+        FROM platform.workflow_definitions AS d
+        JOIN platform.workflow_activation_watermarks AS w USING (tenant_id, environment_id, release_id)
+       WHERE d.tenant_id = $1 AND d.environment_id = $2 AND d.release_id = $3 AND d.event_type = $4
+         AND w.pointer_id = $5 AND w.fence = $6
+         AND w.definition_bindings->d.workflow_id->>'digest' = platform.workflow_definition_digest(d)
+         AND w.definition_bindings->d.workflow_id->>'recordType' = d.record_type
+       ORDER BY d.workflow_id`,
+    [
+      ...scopeKeys,
+      pointer.release_id,
+      RECORD_CREATED_EVENT_TYPE,
+      pointer.pointer_id,
+      pointer.fence,
+    ],
+  );
+  if (!definitions.rows.length) return 0;
+  const candidates = await client.query<RecordCreationCandidate>(
+    'SELECT * FROM platform.workflow_record_creation_page($1)',
+    [WORKFLOW_POLL_BATCH_SIZE],
+  );
+  let count = 0;
+  for (const occurrence of candidates.rows) {
+    const eligible =
+      occurrence.release_id === pointer.release_id &&
+      occurrence.release_content_hash === watermark.release_root &&
+      [
+        occurrence.event_id,
+        occurrence.record_id,
+        occurrence.company_id,
+        occurrence.trigger_principal_id,
+      ].every((id) => id !== null && UUID.test(id));
+    await client.query(
+      `INSERT INTO platform.workflow_record_dispositions (
+         tenant_id, environment_id, occurrence_id, pointer_id, fence, disposition
+       ) VALUES ($1, $2, $3, $4, $5, $6)`,
+      [
+        ...scopeKeys,
+        occurrence.occurrence_id,
+        pointer.pointer_id,
+        pointer.fence,
+        eligible ? 'CLAIMED' : 'INELIGIBLE',
+      ],
+    );
+    if (!eligible) continue;
+    const depth =
+      occurrence.cause_depth === null ? 0 : occurrence.cause_depth + 1;
+    for (const { workflow_id, record_type } of definitions.rows) {
+      if (record_type !== occurrence.record_type) continue;
+      const skip =
+        occurrence.cause_workflow_id === workflow_id
+          ? 'self-caused'
+          : depth > WORKFLOW_MAX_CAUSATION_DEPTH
+            ? 'depth-exceeded'
+            : null;
+      if (skip) {
+        await client.query(
+          `INSERT INTO platform.workflow_record_start_skips (
+             tenant_id, environment_id, occurrence_id, workflow_id, reason
+           ) VALUES ($1, $2, $3, $4, $5)`,
+          [...scopeKeys, occurrence.occurrence_id, workflow_id, skip],
+        );
+        continue;
+      }
+      const instance = await client.query<{ instance_id: string }>(
+        `INSERT INTO platform.workflow_instances (
+           tenant_id, environment_id, instance_id, event_id, workflow_id,
+           legal_entity_id, trigger_principal_id, trigger_record_id, record_type,
+           creation_occurrence_id, causation_depth
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         RETURNING instance_id`,
+        [
+          ...scopeKeys,
+          randomUUID(),
+          occurrence.event_id,
+          workflow_id,
+          occurrence.company_id,
+          occurrence.trigger_principal_id,
+          occurrence.record_id,
+          occurrence.record_type,
+          occurrence.occurrence_id,
+          depth,
+        ],
+      );
+      count += await startRun(
+        client,
+        scope,
+        pointer,
+        watermark,
+        instance.rows[0]!.instance_id,
+        workflow_id,
+      );
+    }
+  }
+  return count;
+}
+
+const UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function validReceipt(event: ReceiptCandidate): boolean {
   const uuid =

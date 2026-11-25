@@ -1096,6 +1096,25 @@ test(
         .map(([item]) => item)
         .sort();
       const prefilled = await read.lines(countId);
+      const creations = await fixture.pool.query<{
+        record_id: string;
+        company_id: string;
+        record_type: string;
+        occurrence_id: string;
+        record_count: number;
+      }>(
+        `SELECT c.record_id, c.company_id, c.record_type, c.occurrence_id, b.record_count::integer
+           FROM platform.record_creation_occurrences c
+           JOIN platform.record_creation_batches b USING (tenant_id, environment_id, writer_xid, request_id, action_id)
+          WHERE b.outbox_id = $1 AND b.domain_event_id = $2 ORDER BY c.record_id`,
+        [started.trust!.outboxId, started.trust!.domainEventId],
+      );
+      assert.ok(prefilled.length > 1, 'this command creates several lines');
+      assert.deepEqual(creations.rows.map((row) => row.record_id), prefilled.map((line) => line.recordId).sort());
+      assert.equal(new Set(creations.rows.map((row) => row.occurrence_id)).size, prefilled.length);
+      assert.ok(creations.rows.every((row) => row.record_type === `${ns}:entity.stock_count_line`
+        && row.company_id === fixture.scope && row.record_count === prefilled.length));
+
       assert.deepEqual(
         prefilled.map((value) => value.item).sort(),
         stocked,

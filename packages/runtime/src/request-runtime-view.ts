@@ -1,5 +1,4 @@
 import {
-  RECORD_TEMPLATE_READER,
   RECORD_TEMPLATE_OPERATION_READER,
   CONNECTOR_FAMILY,
   OPTIONAL_DEPENDENCY_QUERY_READER,
@@ -10,6 +9,7 @@ import {
   type TrustedRequestContext,
   type UntrustedRequestInput,
 } from './request-context.js';
+import { RECORD_CREATED_TRIGGER_READER } from '../../canonical-model/src/workflows.js';
 import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents.js';
 import { REVERSIBILITY_AGENT_READER } from '../../canonical-model/src/reversibility.js';
 import {
@@ -248,7 +248,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 47 adds declared presentation: tone rules on list cells and rows,
     // column sizing and list density.
     // 48 applies versioned record templates at create (assigned at TRAIN-M).
-    maximumSupportedVersion: RECORD_TEMPLATE_READER,
+    // 51 (provisional) reads general workflow trigger members (ADR-0073 A1).
+    maximumSupportedVersion: RECORD_CREATED_TRIGGER_READER,
   },
 });
 

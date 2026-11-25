@@ -3117,10 +3117,37 @@ const workflowGrantIds = z
     (ids) => new Set(ids).size === ids.length,
     'Workflow grants must be unique',
   );
+/**
+ * ADR-0073 A1. The receipt trigger stays the bare string, byte for byte. Each
+ * general member is a strict, add-only object keyed by `kind` and pinned to its
+ * own `triggerVersion`; it persists only the author's choice by stable ID. (A
+ * node's `schemaVersion` is the package language version, CANON_VERSION_MIXED,
+ * so the member's own version cannot reuse that key.)
+ */
+export const RecordCreatedTriggerSchema = z.strictObject({
+  kind: z.literal('recordCreated'),
+  triggerVersion: z.literal('v1'),
+  recordTypeId: CanonicalIdSchema,
+});
+export const WORKFLOW_TRIGGER_MEMBERS = Object.freeze({
+  goodsReceiptPosted: z.literal('goodsReceiptPosted'),
+  recordCreated: RecordCreatedTriggerSchema,
+});
+export const WorkflowTriggerSchema = z.union([
+  WORKFLOW_TRIGGER_MEMBERS.goodsReceiptPosted,
+  WORKFLOW_TRIGGER_MEMBERS.recordCreated,
+]);
+export type WorkflowTrigger = z.infer<typeof WorkflowTriggerSchema>;
+export type WorkflowTriggerMember = keyof typeof WORKFLOW_TRIGGER_MEMBERS;
+export function workflowTriggerMember(
+  trigger: WorkflowTrigger,
+): WorkflowTriggerMember {
+  return typeof trigger === 'string' ? trigger : trigger.kind;
+}
 export const WorkflowDefinitionSchema = z.strictObject({
   schemaVersion: z.literal('v6'),
   workflowId: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
-  trigger: z.literal('goodsReceiptPosted'),
+  trigger: WorkflowTriggerSchema,
   bodyDigest: workflowDigest,
   grants: z.strictObject({
     operations: workflowGrantIds,
