@@ -106,7 +106,7 @@
         {
           "file": "test/architecture/test-reachability.test.ts",
           "name": "the ledger gives a helper module's nested passes to the test file that ran them (CI-8)",
-          "expected": "TBD"
+          "expected": "name: 'wrapper'"
         }
       ]
     },
@@ -124,7 +124,7 @@
         {
           "file": "test/architecture/test-reachability.test.ts",
           "name": "the ledger gives a helper module's nested passes to the test file that ran them (CI-8)",
-          "expected": "TBD"
+          "expected": "'from the helper'"
         }
       ]
     },
@@ -142,7 +142,7 @@
         {
           "file": "test/architecture/ci-tiers.test.ts",
           "name": "a pending CI tier marker is accepted on a packet branch only (CI-8)",
-          "expected": "TBD"
+          "expected": "0 !== 1"
         }
       ]
     },
@@ -160,7 +160,7 @@
         {
           "file": "test/architecture/ci-tiers.test.ts",
           "name": "a pending CI tier marker is accepted on a packet branch only (CI-8)",
-          "expected": "TBD"
+          "expected": "1 !== 0"
         }
       ]
     },
@@ -178,7 +178,7 @@
         {
           "file": "test/architecture/ci-tiers.test.ts",
           "name": "a pending CI tier marker is accepted on a packet branch only (CI-8)",
-          "expected": "TBD"
+          "expected": "0 !== 1"
         }
       ]
     },
@@ -196,7 +196,7 @@
         {
           "file": "test/architecture/ci-tiers.test.ts",
           "name": "a pending CI tier marker is accepted on a packet branch only (CI-8)",
-          "expected": "TBD"
+          "expected": "0 !== 1"
         }
       ]
     },
@@ -214,7 +214,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "a migration without its schema snapshot is named, with the regeneration command",
-          "expected": "TBD"
+          "expected": "db/migrations/0042_x.sql changed but db/schema.snapshot.json did not"
         }
       ]
     },
@@ -232,7 +232,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "a release or migration change without the replay snapshot warns with the regeneration command",
-          "expected": "TBD"
+          "expected": "changed and test/postgres/fresh-tenant-full-replay-schema.snapshot.json did not"
         }
       ]
     },
@@ -250,7 +250,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "the schema-snapshot step fails on a migration alone and only warns on a release alone",
-          "expected": "TBD"
+          "expected": "true !== false"
         }
       ]
     },
@@ -268,7 +268,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "failing test names are read from TAP output",
-          "expected": "TBD"
+          "expected": "'fine'"
         }
       ]
     },
@@ -286,7 +286,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "preflight runs every check the lanes keep failing on, each with a remedy",
-          "expected": "TBD"
+          "expected": "corepack pnpm exec prettier --version a.ts"
         }
       ]
     },
@@ -304,7 +304,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "a changed file list that holds nothing formattable skips format and lint",
-          "expected": "TBD"
+          "expected": "'corepack pnpm exec eslint'"
         }
       ]
     },
@@ -322,7 +322,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "preflight runs every check the lanes keep failing on, each with a remedy",
-          "expected": "TBD"
+          "expected": "'corepack pnpm lint'"
         }
       ]
     },
@@ -358,7 +358,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "preflight runs every check the lanes keep failing on, each with a remedy",
-          "expected": "TBD"
+          "expected": "scripts/check-records.sh --help"
         }
       ]
     },
@@ -376,7 +376,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "preflight runs every check the lanes keep failing on, each with a remedy",
-          "expected": "TBD"
+          "expected": "check:app-releases"
         }
       ]
     },
@@ -394,7 +394,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "preflight runs every check the lanes keep failing on, each with a remedy",
-          "expected": "TBD"
+          "expected": "check-expected-red.sh --list"
         }
       ]
     },
@@ -412,7 +412,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "preflight runs every check the lanes keep failing on, each with a remedy",
-          "expected": "TBD"
+          "expected": "--test-skip-pattern=. test/architecture/repository-hygiene.test.ts"
         }
       ]
     },
@@ -430,7 +430,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "preflight runs every check the lanes keep failing on, each with a remedy",
-          "expected": "TBD"
+          "expected": "repository-hygiene-x.test.ts"
         }
       ]
     },
@@ -448,7 +448,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "preflight runs every check the lanes keep failing on, each with a remedy",
-          "expected": "TBD"
+          "expected": "--test test/architecture/test-reachability.test.ts'"
         }
       ]
     },
@@ -466,7 +466,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "preflight runs every check the lanes keep failing on, each with a remedy",
-          "expected": "TBD"
+          "expected": "surface-runtime-seam.test.ts'"
         }
       ]
     },
@@ -484,7 +484,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "preflight runs every check the lanes keep failing on, each with a remedy",
-          "expected": "TBD"
+          "expected": "evidence-on-demand.test.ts test/architecture/preflight.test.ts'"
         }
       ]
     },
