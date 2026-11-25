@@ -1207,6 +1207,8 @@ interface VerificationFieldContract {
     readonly scale: number | null;
   };
   readonly enumOptionIds: readonly string[];
+  /** CUSTOMIZE-6: declared allowed values of a text field. */
+  readonly allowedTexts?: readonly string[];
   readonly fieldId: string;
   readonly fieldKind: string;
   readonly normalization: string;
@@ -3326,6 +3328,8 @@ function verificationFieldValue(
         ? '2026-01-01T12:34:56.000Z'
         : '2026-01-01T12:34:56.000';
     case 'textFieldType': {
+      // CUSTOMIZE-6: a field with declared allowed values is probed with one.
+      if (field.allowedTexts?.length) return field.allowedTexts[0]!;
       const value = `V-${createHash('sha256')
         .update(token, 'utf8')
         .update(Uint8Array.of(0))

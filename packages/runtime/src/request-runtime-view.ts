@@ -1,5 +1,4 @@
 import {
-  RECORD_TEMPLATE_READER,
   RECORD_TEMPLATE_OPERATION_READER,
   CONNECTOR_FAMILY,
   OPTIONAL_DEPENDENCY_QUERY_READER,
@@ -12,6 +11,7 @@ import {
 } from './request-context.js';
 import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents.js';
 import { REVERSIBILITY_AGENT_READER } from '../../canonical-model/src/reversibility.js';
+import { LOGICAL_FIELD_READER } from '../../canonical-model/src/logical-field.js';
 import {
   WORKFLOW_PROJECTION_FAMILY,
   WORKFLOW_RUNTIME_CAPABILITY,
@@ -248,7 +248,9 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 47 adds declared presentation: tone rules on list cells and rows,
     // column sizing and list density.
     // 48 applies versioned record templates at create (assigned at TRAIN-M).
-    maximumSupportedVersion: RECORD_TEMPLATE_READER,
+    // 49 reads declared logical value kinds: decimal, money, quantity, long
+    // text and currency code (assigned at TRAIN-O).
+    maximumSupportedVersion: LOGICAL_FIELD_READER,
   },
 });
 

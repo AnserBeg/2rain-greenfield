@@ -7714,6 +7714,17 @@ function validateFieldValue(
         typeof value === 'string' &&
         (field.bounds.maximumLength === null ||
           [...value].length <= field.bounds.maximumLength);
+      // A declared allowed-values list is exact and case-sensitive.
+      if (
+        valid &&
+        field.allowedTexts &&
+        !field.allowedTexts.includes(value as string)
+      )
+        throw failure(
+          'MODULE_FIELD_VALUE_NOT_ALLOWED',
+          `Choose ${allowedText(field.allowedTexts)}.`,
+          field.fieldId,
+        );
       break;
     case 'enumFieldType':
       valid = typeof value === 'string' && field.enumOptionIds.includes(value);
@@ -7760,6 +7771,13 @@ function validateFieldValue(
       field.fieldId,
     );
   }
+}
+
+/** "CAD, USD or EUR": the allowed values as a person reads them. */
+function allowedText(values: readonly string[]): string {
+  return values.length === 1
+    ? values[0]!
+    : `${values.slice(0, -1).join(', ')} or ${values.at(-1)!}`;
 }
 
 function decimalFits(

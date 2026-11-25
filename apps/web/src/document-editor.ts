@@ -2509,12 +2509,22 @@ async function editorResponse(
           const headerInputs = inputsOf(definition.headerFormSurfaceId);
           const lineInputs = inputsOf(definition.lineFormSurfaceId);
           const refusedLabels = [
-            ...capture(buffer.header, headerFields, headerInputs, submission),
+            ...captureDraftFields(
+              buffer.header,
+              headerFields,
+              headerInputs,
+              submission,
+            ),
           ];
           for (const line of buffer.lines)
             if (!line.removed)
               refusedLabels.push(
-                ...capture(line, definition.lineFields, lineInputs, submission),
+                ...captureDraftFields(
+                  line,
+                  definition.lineFields,
+                  lineInputs,
+                  submission,
+                ),
               );
           if (refusedLabels.length) {
             refused = true;
@@ -2762,6 +2772,7 @@ async function editorResponse(
                       'code' in error &&
                       [
                         'MODULE_FIELD_VALUE_INVALID',
+                        'MODULE_FIELD_VALUE_NOT_ALLOWED',
                         'MODULE_ENUM_VALUE_INVALID',
                         'MODULE_REQUIRED_FIELD_MISSING',
                       ].includes(String(error.code)))
@@ -3230,7 +3241,8 @@ function reconcileCompletedRemovals(
  * a stale or altered form cannot introduce a value the editor never offered.
  * Returns the labels of refused fields.
  */
-function capture(
+/** Reads submitted draft values into a row (exported for tests). */
+export function captureDraftFields(
   row: DraftRow,
   fields: SurfaceDocumentEditor['headerFields'],
   inputs: ReadonlyMap<string, CompiledSurfaceInputField>,
@@ -3268,7 +3280,10 @@ function capture(
     const decimal = DECIMAL_KINDS.includes(kind)
       ? canonicalDecimal(value)
       : null;
-    row.values[field.fieldId] = value === '' ? null : (decimal ?? value);
+    // A text area posts CRLF; one line break is one character (CUSTOMIZE-6).
+    const typed =
+      kind === 'textFieldType' ? value.replace(/\r\n?/gu, '\n') : value;
+    row.values[field.fieldId] = typed === '' ? null : (decimal ?? typed);
   }
   return refused;
 }

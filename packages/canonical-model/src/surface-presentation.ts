@@ -190,6 +190,7 @@ export function presentationOperands(
         continue;
       const type = formulaFieldType(
         field as Parameters<typeof formulaFieldType>[0],
+        def as unknown as Parameters<typeof formulaFieldType>[1],
       );
       if (!type || type.kind === 'address' || type.kind === 'dateTime')
         continue;

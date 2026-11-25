@@ -8,7 +8,11 @@ import type {
   CalculatedDisplayField,
   DisplayOperand,
 } from './calculated-display-schema.js';
-import { formulaFieldType } from './formula-validation-bindings.js';
+import {
+  formulaFieldType,
+  logicalDecimals,
+  type LogicalTypeRevision,
+} from './formula-validation-bindings.js';
 import type { VersionedNormalizedApplicationPackage } from './schemas.js';
 
 type PackageV6 = Extract<
@@ -46,10 +50,13 @@ const catalogCurrencyByField = new Map([
   ['northstar.app:field.item_standard_cost_eur', 'EUR'],
 ]);
 
-export function displayTypeForField(field: Field): DisplayDecimalType | null {
+export function displayTypeForField(
+  field: Field,
+  revision?: LogicalTypeRevision,
+): DisplayDecimalType | null {
   if (field.classification !== 'public' && field.classification !== 'internal')
     return null;
-  const type = formulaFieldType(field);
+  const type = formulaFieldType(field, revision);
   if (type?.kind === 'integer')
     return { precision: 19, scale: 0, currency: null, unit: null };
   if (!type || type.kind !== 'decimal') return null;
@@ -59,6 +66,16 @@ export function displayTypeForField(field: Field): DisplayDecimalType | null {
       scale: type.scale,
       currency: type.currency,
       unit: type.unit,
+    };
+  // CUSTOMIZE-6: a tenant decimal is unitless; tenant money in a fixed
+  // currency already carries it (formulaFieldType), stored money is refused.
+  const logical = logicalDecimals(revision).get(field.fieldId);
+  if (logical)
+    return {
+      precision: type.precision,
+      scale: type.scale,
+      currency: logical.logicalType === 'money' ? type.currency : null,
+      unit: null,
     };
   const currency = catalogCurrencyByField.get(field.fieldId);
   return currency
@@ -100,7 +117,7 @@ export function bindCalculatedDisplayField(
         field.entity.targetId === declaration.entityId &&
         field.lifecycle === 'active',
     );
-    return field ? displayTypeForField(field) : null;
+    return field ? displayTypeForField(field, revision) : null;
   };
   const { operator, left, right } = declaration.expression;
   const leftType = operandType(left);
@@ -236,7 +253,7 @@ export function retypedCalculatedDisplayField(
           ? {
               fieldType: field.fieldType,
               classification: field.classification,
-              displayType: displayTypeForField(field),
+              displayType: displayTypeForField(field, revision),
             }
           : null;
       });

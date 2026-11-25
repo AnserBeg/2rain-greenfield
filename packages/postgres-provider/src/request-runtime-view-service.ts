@@ -3,6 +3,7 @@ import {
   RECORD_TEMPLATE_OPERATION_READER,
 } from '@north-star/canonical-model';
 import { recordTemplateDeclarationProblem } from './record-template-admission.js';
+import { logicalFieldBindingsProblem } from './logical-field-admission.js';
 import { mapBindingsProblem } from './map-admission.js';
 import { popupBindingsProblem } from './popup-admission.js';
 import { boardBindingsProblem } from './board-admission.js';
@@ -941,6 +942,17 @@ function definitionFromSnapshotRows(
     declarations.active,
   );
   if (dateTimeProblem) throw malformedProjection(dateTimeProblem);
+  let logicalProblem: string | null;
+  try {
+    logicalProblem = logicalFieldBindingsProblem(
+      surface.payload,
+      surface.requiredRuntimeCapability?.minimumVersion ?? 0,
+      revision,
+    );
+  } catch {
+    logicalProblem = 'invalid logical field declaration';
+  }
+  if (logicalProblem) throw malformedProjection(logicalProblem);
   const referencesDocuments = references.some(
     (entry) =>
       isRecord(entry) && entry.familyId === DOCUMENTS_PROJECTION_FAMILY,

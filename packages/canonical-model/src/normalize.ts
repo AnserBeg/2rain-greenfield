@@ -250,6 +250,12 @@ export function normalizeApplicationPackage(
         ),
       }),
     ...(authored.languageVersion === 'v6' &&
+      authored.logicalFields && {
+        logicalFields: [...authored.logicalFields].sort((a, b) =>
+          compareCodeUnits(a.fieldId, b.fieldId),
+        ),
+      }),
+    ...(authored.languageVersion === 'v6' &&
       authored.mapPlacements && {
         mapPlacements: [...authored.mapPlacements].sort((a, b) =>
           compareCodeUnits(a.placementId, b.placementId),
@@ -1376,6 +1382,17 @@ function validateReportSources(
         ),
       );
     for (const { fieldId, currency } of source.amounts ?? []) {
+      // CUSTOMIZE-6 (rule 10): a retired amount field stays bound but is
+      // not validated; reports offer only live fields.
+      const retired = fields.get(fieldId);
+      if (
+        retired?.entity.targetId === entity.entityId &&
+        retired.lifecycle === 'retired' &&
+        !seen.has(fieldId)
+      ) {
+        seen.add(fieldId);
+        continue;
+      }
       const amount = local(fieldId)?.fieldType;
       if (seen.has(fieldId) || amount?.kind !== 'exactDecimalFieldType') {
         invalid(
@@ -1388,6 +1405,8 @@ function validateReportSources(
             fieldId,
             'A fixed currency amount needs its currency minor-unit scale.',
           );
+      } else if (fields.get(currency.fieldId)?.lifecycle === 'retired') {
+        // CUSTOMIZE-6 (rule 10): a retired currency field stays bound.
       } else {
         const code = local(currency.fieldId)?.fieldType;
         if (code?.kind !== 'textFieldType' || code.maximumLength !== 3)

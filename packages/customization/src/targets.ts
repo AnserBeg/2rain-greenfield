@@ -349,6 +349,7 @@ export function customizationTargets(definition: {
               return [];
             const valueType = formulaFieldType(
               field as Parameters<typeof formulaFieldType>[0],
+              definition as unknown as Parameters<typeof formulaFieldType>[1],
             );
             return valueType
               ? [
@@ -385,7 +386,14 @@ export function customizationTargets(definition: {
                     typeof resolveValidationPath
                   >[2],
                 );
-                const valueType = path && formulaFieldType(path.field);
+                const valueType =
+                  path &&
+                  formulaFieldType(
+                    path.field,
+                    definition as unknown as Parameters<
+                      typeof formulaFieldType
+                    >[1],
+                  );
                 if (!path || !valueType) return [];
                 const relationLabel = (
                   relationId.split(':relation.')[1] ?? relationId
@@ -470,6 +478,7 @@ export function customizationTargets(definition: {
           return [];
         const valueType = displayTypeForField(
           field as Parameters<typeof displayTypeForField>[0],
+          definition as unknown as Parameters<typeof displayTypeForField>[1],
         );
         return valueType
           ? [

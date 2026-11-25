@@ -35,6 +35,8 @@ import {
   displayFieldValue,
   renderCompositionPrintDocument,
   taskTransportError,
+  DECIMAL_KINDS,
+  canonicalDecimal,
 } from './surface-composition.js';
 import {
   workspaceList,
@@ -3132,6 +3134,12 @@ function formFieldMutation(
 
   const emptyIntent = readEmptyIntent(field, intent, rawEmptyIntent);
   if (rawValue !== '') {
+    // CUSTOMIZE-6: an exact decimal posts in canonical form ("1250.00" is
+    // 1250), and a text area's CRLF line breaks are one character each.
+    if (DECIMAL_KINDS.includes(field.kind))
+      return { kind: 'set', value: canonicalDecimal(rawValue) ?? rawValue };
+    if (field.kind === 'textFieldType')
+      return { kind: 'set', value: rawValue.replace(/\r\n?/gu, '\n') };
     if (field.kind !== 'booleanFieldType') {
       return { kind: 'set', value: rawValue };
     }

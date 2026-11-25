@@ -79,11 +79,16 @@ function coefficientText(value: bigint, scale: number): string {
   );
 }
 
+/** CUSTOMIZE-6: a text field's declared allowed values, by field ID. */
+export type AllowedTexts = ReadonlyMap<string, readonly string[]>;
+const NO_ALLOWED_TEXTS: AllowedTexts = new Map();
+
 function syntheticScalars(
   field: Field,
   type: FieldType,
   bounds: readonly Bound[],
   businessDate: string,
+  allowedTexts: AllowedTexts = NO_ALLOWED_TEXTS,
 ): readonly ValidationScalar[] {
   switch (type.kind) {
     case 'address':
@@ -136,6 +141,10 @@ function syntheticScalars(
     }
     case 'text': {
       if (field.fieldType.kind !== 'textFieldType') return [];
+      // A field with declared allowed values is only ever written with one
+      // of them, so its witnesses are drawn from that list alone.
+      const allowed = allowedTexts.get(field.fieldId);
+      if (allowed) return allowed.map((value) => ({ kind: 'text', value }));
       const limit = field.fieldType.maximumLength;
       const candidates = ['◇', 'A', '', 'B'];
       for (const { select, value } of bounds) {
@@ -161,6 +170,7 @@ export function synthesizeLiteralRows(
   bindings: readonly BoundFormulaValidation[],
   fields: readonly Field[],
   businessDate: string,
+  allowedTexts: AllowedTexts = NO_ALLOWED_TEXTS,
 ): readonly Values[] {
   const bounds = new Map<string, Bound[]>();
   const watchedFields = new Map<string, FieldType>();
@@ -169,13 +179,20 @@ export function synthesizeLiteralRows(
     for (const [id, type] of Object.entries(binding.watchedFields))
       watchedFields.set(id, type);
   }
-  return synthesizeRows(watchedFields, fields, bounds, businessDate);
+  return synthesizeRows(
+    watchedFields,
+    fields,
+    bounds,
+    businessDate,
+    allowedTexts,
+  );
 }
 
 export function synthesizeRelatedRows(
   bindings: readonly BoundFormulaValidation[],
   fields: readonly Field[],
   businessDate: string,
+  allowedTexts: AllowedTexts = NO_ALLOWED_TEXTS,
 ): readonly ValidationRelatedValues[] {
   const related = new Map<string, Map<string, FieldType>>();
   for (const { paths } of bindings) {
@@ -194,6 +211,7 @@ export function synthesizeRelatedRows(
       fields,
       new Map(),
       businessDate,
+      allowedTexts,
     );
     const expanded: ValidationRelatedValues[] = [];
     for (const row of rows) {
@@ -213,6 +231,7 @@ function synthesizeRows(
   fields: readonly Field[],
   bounds: ReadonlyMap<string, readonly Bound[]>,
   businessDate: string,
+  allowedTexts: AllowedTexts,
 ): readonly Values[] {
   const fieldById = new Map<string, Field>(
     fields.map((field) => [field.fieldId, field]),
@@ -227,6 +246,7 @@ function synthesizeRows(
       type,
       bounds.get(fieldId) ?? [],
       businessDate,
+      allowedTexts,
     );
     const options =
       field.presence === 'optional' ? [...scalars, null] : scalars;

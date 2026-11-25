@@ -6601,7 +6601,7 @@ test('order entry picker and quick create: offered-only selection, verified carr
       assert.equal(created.statusCode, 200);
       assert.match(created.slots!.keyFacts!, /data-editor-create-selected/);
       assert.doesNotMatch(created.slots!.keyFacts!, /<dialog/);
-      assert.match(created.slots!.keyFacts!, />SO-KEPT<\/textarea>/);
+      assert.match(created.slots!.keyFacts!, />\n?SO-KEPT<\/textarea>/);
       const [party] = creates(f, 'party');
       const [role] = creates(f, 'party_role');
       assert.equal(creates(f, 'party').length, 1);
@@ -6644,7 +6644,7 @@ test('order entry picker and quick create: offered-only selection, verified carr
       assert.equal(cancelled.statusCode, 200);
       assert.equal(f.executor.calls.length, 0);
       assert.doesNotMatch(cancelled.slots!.keyFacts!, /<dialog/);
-      assert.match(cancelled.slots!.keyFacts!, />SO-KEPT<\/textarea>/);
+      assert.match(cancelled.slots!.keyFacts!, />\n?SO-KEPT<\/textarea>/);
       assert.equal(carrier(cancelled, header, customer), '');
       assert.match(
         cancelled.slots!.keyFacts!,
@@ -8138,7 +8138,7 @@ test('FORM-1: unselected lookup results are shown only under the current read au
   assert.doesNotMatch(page.html, protectedResults);
   await submit(`more:${header}:${customer}`);
   assert.doesNotMatch(page.html, protectedResults);
-  assert.match(page.html, />SO-FORM1<\/textarea>/);
+  assert.match(page.html, />\n?SO-FORM1<\/textarea>/);
   // Read handling performed no business mutation.
   assert.equal(f.executor.calls.length, calls);
 
@@ -8281,7 +8281,7 @@ test('FORM-PAGING: a bounded lookup says when more matches exist beyond its disp
           ),
       );
       assert.match(p.html(), /data-selected-label="Paging match 201"/);
-      assert.match(p.html(), />SO-PAGING<\/textarea>/);
+      assert.match(p.html(), />\n?SO-PAGING<\/textarea>/);
       assert.equal(p.f.executor.calls.length, 0);
     },
   );

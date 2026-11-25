@@ -18,6 +18,8 @@ import {
   RECORD_TEMPLATE_READER,
   RECORD_TEMPLATE_OPERATION_READER,
   hasRecordTemplateBinding,
+  LOGICAL_FIELD_READER,
+  type LogicalFieldBinding,
   type DateTimeBinding,
   ADDRESS_FIELD_READER,
   ADDRESS_MAP_READER,
@@ -245,6 +247,7 @@ export function lowerBaseProjectionPayloads(
   >['payload'],
   address?: AddressProjection,
   dateTimeBindings?: readonly DateTimeBinding[],
+  logicalFieldBindings?: readonly LogicalFieldBinding[],
 ): ProjectionPayloadPlan[] {
   const namespace = packageRevision.package.namespace;
   const packageScope: LogicalScope = {
@@ -578,6 +581,66 @@ export function lowerBaseProjectionPayloads(
           ),
         };
     }
+  }
+  // CUSTOMIZE-6: the surface manifest carries each active logical field's
+  // scale, currency and unit, and any declaration (active or retired) raises
+  // the surface reader floor, since older readers strict-parse the stored
+  // definition. Omission emits nothing.
+  if (logicalFieldBindings) {
+    // Each declared allowed-values list joins its field's write contract, so
+    // every create and update refuses any other value (CUSTOMIZE-6).
+    const allowed = new Map(
+      logicalFieldBindings.flatMap((binding) =>
+        binding.allowedValues
+          ? [[String(binding.fieldId), binding.allowedValues] as const]
+          : [],
+      ),
+    );
+    if (allowed.size) {
+      const catalog = plans.find(
+        (p) => p.familyId === PROJECTION_FAMILY_IDS.operationCatalog,
+      )!;
+      const payload = catalog.payload as {
+        operations: { inputContract?: { fields: Record<string, unknown>[] } }[];
+      };
+      catalog.payload = {
+        ...payload,
+        operations: payload.operations.map((operation) =>
+          operation.inputContract?.fields.some((f) =>
+            allowed.has(String(f.fieldId)),
+          )
+            ? {
+                ...operation,
+                inputContract: {
+                  ...operation.inputContract,
+                  fields: operation.inputContract.fields.map((f) =>
+                    allowed.has(String(f.fieldId))
+                      ? {
+                          ...f,
+                          allowedTexts: [...allowed.get(String(f.fieldId))!],
+                        }
+                      : f,
+                  ),
+                },
+              }
+            : operation,
+        ),
+      };
+    }
+    const surface = plans.find(
+      (p) => p.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
+    )!;
+    surface.payload = {
+      ...(surface.payload as object),
+      logicalFieldBindings,
+    };
+    surface.requiredRuntimeCapability = {
+      ...surface.requiredRuntimeCapability,
+      minimumVersion: Math.max(
+        surface.requiredRuntimeCapability.minimumVersion,
+        LOGICAL_FIELD_READER,
+      ),
+    };
   }
   if (
     verificationPackageRevision.languageVersion === 'v6' &&

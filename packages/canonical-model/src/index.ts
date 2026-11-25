@@ -9,6 +9,7 @@ export {
   CANONICAL_LANGUAGE_PROFILES,
   COMPANY_ACCESS_INDEX,
   COMPANY_ACCESS_INDEX_READER,
+  CURRENCY_MINOR_UNITS_V0,
   REPORT_SOURCE_READER,
   CONTENT_HASH_ALGORITHM,
   CONTENT_HASH_DOMAIN,
@@ -197,6 +198,8 @@ export {
 } from './schemas.js';
 export * from './grouped-aggregate.js';
 export * from './date-time-field.js';
+export * from './logical-field.js';
+export * from './logical-field-bindings.js';
 export * from './map-view.js';
 export * from './map-viewport.js';
 export {

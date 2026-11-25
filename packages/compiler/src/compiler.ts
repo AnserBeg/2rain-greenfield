@@ -6,6 +6,7 @@ import {
 } from '@north-star/canonical-model';
 import { compileAddressBindings } from './address.js';
 import { compileDateTimeFields } from './date-time.js';
+import { compileLogicalFields } from './logical-fields.js';
 import {
   BOOKING_USAGE_QUERY_READER,
   hasBookingUsage,
@@ -470,6 +471,23 @@ function compileApplicationInternal(
       maximumDiagnostics,
     );
   }
+  const logical = compileLogicalFields(packageRevision);
+  if (logical && 'message' in logical) {
+    return failure(
+      [
+        {
+          ...compilerDiagnostic(
+            'COMPILER_TYPE_INVALID',
+            'typeCheck',
+            logical.path,
+            logical.subjectId,
+          ),
+          rule: logical.message,
+        },
+      ],
+      maximumDiagnostics,
+    );
+  }
   const billingProblem = billingBindingProblem(packageRevision);
   if (billingProblem)
     return failure(
@@ -574,6 +592,7 @@ function compileApplicationInternal(
       documents?.payload,
       address?.payload,
       dateTime?.payload,
+      logical?.payload,
     ),
     packageRevision,
   );

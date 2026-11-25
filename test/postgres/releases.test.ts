@@ -92,6 +92,7 @@ import {
   normalizedBytes,
 } from '../compiler/helpers.js';
 import { compileReportFixture } from '../helpers/reports-preceding-release.js';
+import { LOGICAL_FIELD_READER } from '../../packages/canonical-model/src/logical-field.js';
 import { datedPartyDefinition } from '../fixtures/g2/party/validation.js';
 import { compilePartyFixture } from '../fixtures/g2/party/compiler.js';
 import type { FormulaRulePayload } from '../../packages/compiler/src/formula-validation-plan.js';
@@ -2095,6 +2096,89 @@ test('release admission refuses a company access index whose release understates
     }),
     { code: 'REPORT_INDEX_READER_MISMATCH' },
   );
+});
+
+test('release admission refuses logical field bindings or a reader floor that disagree with the declaration', async (t) => {
+  const shipment = {
+    kind: 'addRecordType',
+    label: 'Shipment',
+    companyOwnership: 'entityOwned',
+    fields: [
+      { label: 'Name', type: 'text' },
+      { label: 'Rate', type: 'decimal', scale: 4 },
+    ],
+  };
+  const declaring = await compileReportFixture([shipment as never]);
+  const plain = await compileReportFixture([
+    { ...shipment, fields: [{ label: 'Name', type: 'text' }] } as never,
+  ]);
+  const surface = PROJECTION_FAMILY_IDS.surfaceManifest;
+  const floorOf = (compiled: CompileSuccess) =>
+    compiled.bundle.releaseManifest.projections.find(
+      ({ familyId }) => familyId === surface,
+    )!.requiredRuntimeCapability.minimumVersion;
+  assert.equal(floorOf(declaring.compiled), LOGICAL_FIELD_READER);
+  const context = await contextFor(requestEntry(), 'session-a');
+  const pool = new pg.Pool();
+  t.after(() => pool.end());
+  t.mock.method(pool, 'connect', () => {
+    throw new Error('A disagreeing candidate reached the staging transaction');
+  });
+  const repository = new PostgresImmutableReleaseRepository(pool);
+  for (const [reason, candidate, bytes, code] of [
+    [
+      'a widened scale',
+      rewriteProjectionPayload(declaring.compiled, surface, (payload) => {
+        (payload.logicalFieldBindings as { scale?: number }[])[0]!.scale = 2;
+      }),
+      declaring.normalizedDefinitionBytes,
+      'LOGICAL_FIELD_PROJECTION_CONTRACT_MISMATCH',
+    ],
+    [
+      'an understated floor',
+      rewriteProjectionPayload(
+        declaring.compiled,
+        surface,
+        () => {},
+        floorOf(plain.compiled),
+      ),
+      declaring.normalizedDefinitionBytes,
+      'LOGICAL_FIELD_READER_MISMATCH',
+    ],
+    [
+      'the rung without a declaration',
+      rewriteProjectionPayload(
+        plain.compiled,
+        surface,
+        () => {},
+        LOGICAL_FIELD_READER,
+      ),
+      plain.normalizedDefinitionBytes,
+      'LOGICAL_FIELD_READER_MISMATCH',
+    ],
+  ] as const) {
+    const stored = t.mock.method(
+      repository,
+      'getAppPackageRevision',
+      async () => ({
+        ...revisionCommand(context, revisionA, bytes),
+        createdAt: '2026-11-23T00:00:00.000Z',
+      }),
+    );
+    await assert.rejects(
+      repository.stageTenantReleaseCandidate(context, {
+        appPackageRevisionId: revisionA,
+        compiledRelease: candidate,
+        createdBy: context.principalId,
+        environmentId: context.environmentId,
+        releaseId: releaseA,
+        tenantId: context.tenantId,
+      }),
+      { code },
+      reason,
+    );
+    stored.mock.restore();
+  }
 });
 
 test('release admission requires the formula projection and its mandatory reader only on a declaring revision', async (t) => {
