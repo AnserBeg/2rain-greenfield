@@ -232,7 +232,7 @@
         {
           "file": "test/postgres/report-admission.test.ts",
           "name": "release admission refuses an analysed report or a named measure whose release understates its reader floor",
-          "expected": "Understated candidate reached the staging transaction"
+          "expected": "Expected values to be strictly deep-equal"
         }
       ]
     },
@@ -250,7 +250,7 @@
         {
           "file": "test/postgres/report-admission.test.ts",
           "name": "release admission refuses an analysed report or a named measure whose release understates its reader floor",
-          "expected": "Understated candidate reached the staging transaction"
+          "expected": "Expected values to be strictly deep-equal"
         }
       ]
     }
