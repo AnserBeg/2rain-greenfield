@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import {
@@ -126,6 +129,23 @@ test('preflight runs every check the lanes keep failing on, each with a remedy',
     commands.get('language-coverage') ?? '',
     /preflight-language-coverage\.ts/u,
   );
+  // Each family runs the exact thing CI runs, so each is pinned by what it runs.
+  const commandOf = (id: string) => commands.get(id) ?? '';
+  assert.match(commandOf('format'), /prettier --check a\.ts$/u);
+  assert.match(commandOf('typecheck'), /pnpm typecheck$/u);
+  assert.match(commandOf('reachability'), /test-lock-observability\.test\.ts/u);
+  assert.match(commandOf('surface'), /surface-data-binding\.test\.ts/u);
+  for (const pin of ['evidence-on-demand', 'ci-tiers', 'preflight']) {
+    assert.match(
+      commandOf('ci-evidence'),
+      new RegExp(`${pin}\\.test\\.ts`, 'u'),
+    );
+  }
+  // The hygiene step skips only the one lock case, never a whole file.
+  assert.match(
+    commandOf('hygiene'),
+    /--test-skip-pattern=matrix lock and legacy-process waits/u,
+  );
 });
 
 test('a changed file list that holds nothing formattable skips format and lint', () => {
@@ -149,4 +169,57 @@ test('the preflight command is a package script and the packet record makes it m
     readFileSync('docs/execution/packets/CI-8.md', 'utf8'),
     /`pnpm preflight` is mandatory before any full-run dispatch/u,
   );
+});
+
+test('a stale language-coverage digest, decision or observation snapshot is named, each alone', () => {
+  const decisionsPath =
+    'test/fixtures/g2/language-conformance/coverage-decisions.json';
+  const original = JSON.parse(readFileSync(decisionsPath, 'utf8')) as {
+    ledgerDigest: string;
+    decisions: { ledgerDigest: string }[];
+    observationSnapshot: Record<string, unknown>;
+  };
+  const dir = mkdtempSync(join(tmpdir(), 'ci-8-coverage-'));
+  const run = (edit: (document: typeof original) => void) => {
+    const document = structuredClone(original);
+    edit(document);
+    const path = join(dir, 'decisions.json');
+    writeFileSync(path, JSON.stringify(document));
+    return spawnSync(
+      process.execPath,
+      ['--import', 'tsx', 'test/helpers/preflight-language-coverage.ts'],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, PREFLIGHT_DECISIONS_PATH: path },
+      },
+    );
+  };
+  try {
+    const clean = run(() => undefined);
+    assert.equal(clean.status, 0, clean.stderr);
+    const document = run((value) => {
+      value.ledgerDigest = 'sha256:stale';
+    });
+    assert.equal(document.status, 1);
+    assert.match(document.stderr, /LANGUAGE_COVERAGE_PREFLIGHT_STALE/u);
+    assert.match(document.stderr, /ledgerDigest is sha256:stale/u);
+    assert.doesNotMatch(document.stderr, /decision\(s\) name an older/u);
+    assert.doesNotMatch(document.stderr, /observationSnapshot differs/u);
+    const decision = run((value) => {
+      if (value.decisions[0] === undefined) throw new Error('no decisions');
+      value.decisions[0].ledgerDigest = 'sha256:stale';
+    });
+    assert.equal(decision.status, 1);
+    assert.match(decision.stderr, /decision\(s\) name an older ledger digest/u);
+    assert.doesNotMatch(decision.stderr, /ledgerDigest is /u);
+    const snapshot = run((value) => {
+      value.observationSnapshot = { stale: true };
+    });
+    assert.equal(snapshot.status, 1);
+    assert.match(snapshot.stderr, /observationSnapshot differs/u);
+    assert.match(snapshot.stderr, /fresh observationSnapshot: /u);
+    assert.doesNotMatch(snapshot.stderr, /ledgerDigest is /u);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

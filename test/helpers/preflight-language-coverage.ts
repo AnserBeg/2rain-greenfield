@@ -18,6 +18,7 @@ import {
  * `test/fixtures/g2/language-conformance/coverage-decisions.json`.
  */
 const decisionsPath =
+  process.env.PREFLIGHT_DECISIONS_PATH ??
   'test/fixtures/g2/language-conformance/coverage-decisions.json';
 
 function root(start: string): string {
