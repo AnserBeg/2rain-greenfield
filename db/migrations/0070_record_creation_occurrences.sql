@@ -475,6 +475,9 @@ AS $$
        AND a.environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid
        AND (requested_run IS NULL OR a.run_id = requested_run)
        AND a.status = 'PENDING'
+       -- A staff-retried wait keeps its old-fence PENDING row; only the run's
+       -- current fence is listable, so each (run, cursor) resolves once.
+       AND a.fence = r.execution_fence
   )
   SELECT a.run_id, a.cursor, a.fence, a.plan, a.plan_digest, target_scope.company_id
     FROM platform.workflow_pending_approvals AS a
