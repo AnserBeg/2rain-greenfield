@@ -82,7 +82,7 @@
       "replacement": "if (owner === undefined) owned.push({ ...record, file: owner });",
       "test": {
         "files": ["test/architecture/test-reachability.test.ts"],
-        "namePattern": "the ledger gives a helper module's nested passes to the test file that ran them (CI-8)"
+        "namePattern": "the ledger gives a helper module's nested passes to the test file that ran them"
       },
       "kills": [
         {
@@ -100,7 +100,7 @@
       "replacement": "",
       "test": {
         "files": ["test/architecture/test-reachability.test.ts"],
-        "namePattern": "the ledger gives a helper module's nested passes to the test file that ran them (CI-8)"
+        "namePattern": "the ledger gives a helper module's nested passes to the test file that ran them"
       },
       "kills": [
         {
@@ -118,7 +118,7 @@
       "replacement": "return owner;",
       "test": {
         "files": ["test/architecture/test-reachability.test.ts"],
-        "namePattern": "the ledger gives a helper module's nested passes to the test file that ran them (CI-8)"
+        "namePattern": "the ledger gives a helper module's nested passes to the test file that ran them"
       },
       "kills": [
         {
@@ -136,7 +136,7 @@
       "replacement": "} else if (false) {",
       "test": {
         "files": ["test/architecture/ci-tiers.test.ts"],
-        "namePattern": "a pending CI tier marker is accepted on a packet branch only (CI-8)"
+        "namePattern": "a pending CI tier marker is accepted on a packet branch only"
       },
       "kills": [
         {
@@ -154,7 +154,7 @@
       "replacement": "const pendingAllowed = false;",
       "test": {
         "files": ["test/architecture/ci-tiers.test.ts"],
-        "namePattern": "a pending CI tier marker is accepted on a packet branch only (CI-8)"
+        "namePattern": "a pending CI tier marker is accepted on a packet branch only"
       },
       "kills": [
         {
@@ -172,7 +172,7 @@
       "replacement": "if ([...body.matchAll(line)].length + pending < 1) {",
       "test": {
         "files": ["test/architecture/ci-tiers.test.ts"],
-        "namePattern": "a pending CI tier marker is accepted on a packet branch only (CI-8)"
+        "namePattern": "a pending CI tier marker is accepted on a packet branch only"
       },
       "kills": [
         {
@@ -190,7 +190,7 @@
       "replacement": "const pendingLine = /^CI tier: pending/gmu;",
       "test": {
         "files": ["test/architecture/ci-tiers.test.ts"],
-        "namePattern": "a pending CI tier marker is accepted on a packet branch only (CI-8)"
+        "namePattern": "a pending CI tier marker is accepted on a packet branch only"
       },
       "kills": [
         {
