@@ -645,13 +645,18 @@ test(
                 [tenantId, workflowId, recordId],
               )
             ).rows[0]!.run_id;
-          const status = async (runId: string) =>
-            (
-              await pool.query<{ status: string }>(
-                'SELECT status FROM platform.workflow_runs WHERE run_id = $1',
+          const status = async (runId: string) => {
+            const row = (
+              await pool.query<{ status: string; reason: string | null }>(
+                'SELECT status, reason FROM platform.workflow_runs WHERE run_id = $1',
                 [runId],
               )
-            ).rows[0]!.status;
+            ).rows[0]!;
+            // The reason rides in the failure message of any status assertion.
+            if (row.status === 'SUSPENDED' || row.status === 'QUARANTINED')
+              return `${row.status}:${row.reason ?? ''}`;
+            return row.status;
+          };
           const settle = async (runId: string) => {
             for (let step = 0; step < 4; step += 1) {
               await execution.step(scope, runId);
@@ -749,6 +754,9 @@ test(
               await decide(waiting, plan.fence, plan.plan_digest, 'APPROVED'),
               true,
             );
+            // The activation approver's grants are re-read at dispatch; the
+            // company narrowing above is only for the decision.
+            await membership(null);
             assert.equal(await settle(waiting), 'COMPLETED');
             assert.deepEqual(await created(followUp, south), [otherCompany]);
 
@@ -771,6 +779,7 @@ test(
               ),
               true,
             );
+            await membership(null);
             assert.equal(await settle(declined), 'COMPLETED');
             assert.deepEqual(await created(followUp, north), []);
           } finally {
