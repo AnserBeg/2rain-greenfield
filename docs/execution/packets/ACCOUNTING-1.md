@@ -8,7 +8,7 @@
 
 **Ratified one-way doors, 2026-11-25.** Door 1: every journal amount is a whole count of the currency's ISO 4217 minor unit with a separate debit-or-credit marker and the currency on each line. Door 2: the core role list and its permanent IDs (`northstar.ledger:role.<name>`), classes and normal sides, as written in ADR-0093 §3.
 
-CI tier: quick RUNLINK
+CI tier: quick https://github.com/AnserBeg/2rain-greenfield/actions/runs/45649842672
 
 ## Dependency packets (not yet chartered; each needs an owner lane before the slice that needs it)
 
