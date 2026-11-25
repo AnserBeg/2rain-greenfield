@@ -118,7 +118,7 @@ function overrideFrom(body) {
   if (lines.length === 0) return undefined;
   if (lines.length > 1) {
     throw new UsageError(
-      `the pull request body has ${lines.length} "controls:" lines; keep exactly one`,
+      `the controls text (pull request body or dispatch input) has ${lines.length} "controls:" lines; keep exactly one`,
     );
   }
   const names = [
@@ -218,14 +218,14 @@ function selectionSummary(selection) {
   const lines = ['### Expected-red controls', ''];
   if (selection.source === 'override') {
     lines.push(
-      `Named by the pull request body's \`controls:\` line, at ${head}:`,
+      `Named by the \`controls:\` line of the pull request body (or the dispatch's controls input), at ${head}:`,
       '',
       ...selection.names.map((name) => `- \`${name}\``),
     );
   } else if (selection.names.length === 0) {
     lines.push(
       `No expected-red manifest entry was added or changed at ${head} since the merge base \`${String(selection.mergeBase).slice(0, 12)}\`, so no control runs.`,
-      'To run existing controls, put a line `controls: <name> <name>` in the pull request body, then remove and re-add the `run-controls` label.',
+      'To run existing controls, name them: put a line `controls: <name> <name>` in the pull request body and remove and re-add the `run-controls` label, or dispatch again with `-f controls="<name> <name>"`.',
     );
   } else {
     lines.push(
@@ -357,7 +357,7 @@ function main(argv) {
       annotate(
         'warning',
         'expected-red selection',
-        'run-controls selected no control: no manifest entry was added or changed. Name existing ones with a "controls:" line in the pull request body.',
+        'run-controls selected no control: no manifest entry was added or changed. Name existing ones with a "controls:" line in the pull request body or the dispatch\'s controls input.',
       );
     }
     return 0;

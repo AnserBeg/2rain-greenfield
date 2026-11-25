@@ -32,6 +32,9 @@ test('a fixture that prints its URL and exits on SIGTERM starts and stops cleanl
   assert.equal(fixture.url, 'http://127.0.0.1:1/');
   const stopped = await fixture.stop();
   assert.equal(stopped.exited, true);
+  // The spec asserts a clean exit from these two fields (CI-8).
+  assert.equal(stopped.code, 0);
+  assert.equal(stopped.signal, null);
   assert.match(stopped.output, /DONE/u);
 });
 
@@ -67,7 +70,22 @@ test('a fixture that ignores SIGTERM is reported as not exited and is killed', a
   const started = Date.now();
   const stopped = await fixture.stop();
   assert.equal(stopped.exited, false);
+  assert.equal(stopped.code, null);
   assert.ok(Date.now() - started < 4_000, 'stop waited far past its deadline');
   // A second stop finds nothing left to wait for.
-  assert.equal((await fixture.stop()).exited, true);
+  const again = await fixture.stop();
+  assert.equal(again.exited, true);
+  // It died of the kill, so it is not a clean exit.
+  assert.equal(again.signal, 'SIGKILL');
+});
+
+test('a fixture that exits non-zero on SIGTERM reports that code', async () => {
+  const fixture = await startFixtureProcess(
+    options(
+      `process.on('SIGTERM', () => process.exit(7)); console.log('READY=u'); setInterval(() => {}, 1000);`,
+    ),
+  );
+  const stopped = await fixture.stop();
+  assert.equal(stopped.exited, true);
+  assert.equal(stopped.code, 7);
 });
