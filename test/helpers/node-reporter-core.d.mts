@@ -3,6 +3,7 @@ export interface NodeResultEvent {
   readonly data: {
     readonly name?: unknown;
     readonly file?: unknown;
+    readonly nesting?: unknown;
     readonly skip?: unknown;
     readonly todo?: unknown;
     readonly counts?: { readonly tests?: unknown };
@@ -26,6 +27,11 @@ export interface NodeResultLedger {
   observe(event: NodeResultEvent): void;
   /** Results whose file completed, taken before that file reported its summary. */
   credited(): ReadonlyArray<{
+    readonly event: NodeResultEvent;
+    readonly file: string;
+  }>;
+  /** Everything the run selected, skipped and todo included. */
+  selected(): ReadonlyArray<{
     readonly event: NodeResultEvent;
     readonly file: string;
   }>;

@@ -163,14 +163,21 @@ export function createNodeResultLedger() {
     },
     /** Everything the run selected, skipped and todo included. */
     selected() {
-      return pending.filter((record) => {
+      const owned = [];
+      for (const record of pending) {
         const summary = summaries.get(record.file);
-        // A file that never reported a summary did not complete its run, so its
-        // only result is Node's own wrapper rather than anything that executed.
-        if (summary === undefined) return false;
+        if (summary === undefined) {
+          const owner = ownerOfHelperResult(record, pending, summaries);
+          if (owner !== undefined) owned.push({ ...record, file: owner });
+          // Otherwise: a file that never reported a summary did not complete
+          // its run, so its only result is Node's own wrapper rather than
+          // anything that executed.
+          continue;
+        }
         // A result after its file's summary is the synthetic pass.
-        return record.sequence < summary.sequence;
-      });
+        if (record.sequence < summary.sequence) owned.push(record);
+      }
+      return owned;
     },
     /** Selected minus skip/todo — what earns reachability credit. */
     credited() {
@@ -184,4 +191,50 @@ export function createNodeResultLedger() {
       );
     },
   };
+}
+
+/**
+ * A nested result whose `file` is a HELPER module, not the test file that ran it.
+ *
+ * Node reports a subtest's `file` as the module that called `t.test`, so a
+ * helper that opens subtests (CI-8: `staff-decision-checks.ts`, called from
+ * `workflow-consumer.test.ts`) reports its passes under the helper's path, a
+ * file that never gets a summary. Node still counts them under the test file's
+ * summary. Dropping them made the evidence for the mutated run count 10 passes
+ * against Node's 14, and the control failed.
+ *
+ * Such a result belongs to the test file whose summary follows it, but only
+ * when that is unambiguous: it is nested (a top-level result with no summary is
+ * the file wrapper, which must stay refused), and between the previous file
+ * summary and the owner's own, no other summary-bearing file reported anything
+ * (with several files in flight at once the owner cannot be known, and the
+ * result stays dropped, so reconciliation still refuses it by name).
+ */
+function ownerOfHelperResult(record, pending, summaries) {
+  if (!(record.event.data.nesting > 0)) return undefined;
+  let owner;
+  let ownerSequence = Infinity;
+  let previous = 0;
+  for (const [file, summary] of summaries) {
+    if (
+      summary.sequence > record.sequence &&
+      summary.sequence < ownerSequence
+    ) {
+      owner = file;
+      ownerSequence = summary.sequence;
+    }
+  }
+  if (owner === undefined) return undefined;
+  for (const summary of summaries.values()) {
+    if (summary.sequence < ownerSequence)
+      previous = Math.max(previous, summary.sequence);
+  }
+  const interleaved = pending.some(
+    (other) =>
+      other.sequence > previous &&
+      other.sequence < ownerSequence &&
+      summaries.has(other.file) &&
+      other.file !== owner,
+  );
+  return interleaved ? undefined : owner;
 }
