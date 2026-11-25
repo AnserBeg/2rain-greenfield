@@ -1,6 +1,7 @@
 import { reportBindingProblem } from './declared-report.js';
 import { normalizeBillingPlan } from './billing-normalization.js';
 import { dateTimeConsumerRefusal } from './date-time-field.js';
+import { currencyHolderEntity } from './logical-field-bindings.js';
 import {
   validateSurfaceCompositions,
   normalizeSurfaceComposition,
@@ -1405,15 +1406,39 @@ function validateReportSources(
             fieldId,
             'A fixed currency amount needs its currency minor-unit scale.',
           );
-      } else if (fields.get(currency.fieldId)?.lifecycle === 'retired') {
-        // CUSTOMIZE-6 (rule 10): a retired currency field stays bound.
       } else {
-        const code = local(currency.fieldId)?.fieldType;
-        if (code?.kind !== 'textFieldType' || code.maximumLength !== 3)
+        // CUSTOMIZE-6 slice 2: the currency field sits on the amount's own
+        // record, or on its header when the path is the line's parent link.
+        const holder = currencyHolderEntity(
+          revision,
+          entity.entityId,
+          currency.via,
+        );
+        const holderField = fields.get(currency.fieldId);
+        if (holder === null) {
           invalid(
             currency.fieldId,
-            'A stored currency needs a three-character currency field on the amount record.',
+            "A stored currency path must be the line's own parent link.",
           );
+        } else if (
+          holderField?.entity.targetId === holder &&
+          holderField.lifecycle === 'retired'
+        ) {
+          // CUSTOMIZE-6 (rule 10): a retired currency field of the holding
+          // record type stays bound; any other retired field is refused.
+        } else {
+          const code =
+            holderField?.entity.targetId === holder &&
+            holderField.lifecycle === 'active' &&
+            holderField.reportable
+              ? holderField.fieldType
+              : undefined;
+          if (code?.kind !== 'textFieldType' || code.maximumLength !== 3)
+            invalid(
+              currency.fieldId,
+              'A stored currency needs a three-character currency field on the amount record or its header.',
+            );
+        }
       }
       seen.add(fieldId);
     }

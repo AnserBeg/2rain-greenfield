@@ -1578,11 +1578,6 @@ function addLineTable(
       'This record type already has a line table, or its generated line type name is in use.',
     );
 
-  if (patch.fields.some((field) => field.type in LOGICAL_TYPES))
-    return unsupported(
-      'decimal, money, quantity, currency and long-text line fields',
-      'Line fields can be text, whole numbers, dates, yes/no or choices for now; add the field to the record type instead.',
-    );
   const nameIndex = patch.fields.findIndex((field) => field.type === 'text');
   if (nameIndex < 0)
     return unsupported(
@@ -1650,6 +1645,17 @@ function addLineTable(
     sourceEntity: reference('entityReference', entityId),
     targetEntity: reference('entityReference', patch.entity),
   });
+  // CUSTOMIZE-6 slice 2: line fields hold the same logical kinds as their
+  // header, and line money may read the header's currency.
+  const declared = declareLogicalFields(
+    authored,
+    entityId,
+    patch.fields.map((field, index) => ({
+      fieldId: String(lineFields[index + 1]!.fieldId),
+      field,
+    })),
+  );
+  if (declared) return declared;
   addRecordOperations(
     authored,
     entityId,
@@ -1737,7 +1743,9 @@ function addLineTable(
     ),
     headerFormSurfaceId: parentForm.surfaceId,
     kind: 'draftDocumentEditor',
-    lineFields: lineFields.slice(1).map((field) => editorField(field)),
+    lineFields: lineFields
+      .slice(1)
+      .map((field) => editorField(field, longTextFields(authored))),
     lineFormSurfaceId: lineFormId,
     lineNumberFieldId: lineNumberId,
     lineQueryId: id('query', '_list'),
@@ -2090,8 +2098,8 @@ function addField(
       )
     )
       return unsupported(
-        'decimal, money, quantity, currency and long-text line fields',
-        'Line fields can be text, whole numbers, dates, yes/no or choices for now; add the field to the record type instead.',
+        'decimal, money, quantity, currency and long-text fields added to an existing line table',
+        'Declare these line fields when the line table is created; adding a field to an existing line table follows the line-table work.',
       );
   }
   const entityLocal = localOf(entityId);
@@ -2983,6 +2991,7 @@ function declareLogicalFields(
     if (!(field.type in LOGICAL_TYPES)) continue;
     const logicalType = LOGICAL_TYPES[field.type as keyof typeof LOGICAL_TYPES];
     let currencyFieldId: string | undefined;
+    let currencyVia: string[] | undefined;
     if (field.type === 'money' && field.currency?.kind === 'stored') {
       currencyFieldId = storedCurrencyField(
         authored,
@@ -2991,6 +3000,31 @@ function declareLogicalFields(
         added,
         field.currency,
       );
+      // CUSTOMIZE-6 slice 2: a line's money may read its header's currency,
+      // through the line's own parent link.
+      const parent = list(authored, 'relations').find(
+        (r) =>
+          r.ownership === 'parentScopedChild' &&
+          (r.sourceEntity as Json).targetId === entityId,
+      );
+      const onHeader = parent
+        ? storedCurrencyField(
+            authored,
+            String((parent.targetEntity as Json).targetId),
+            declarations,
+            [],
+            field.currency,
+          )
+        : undefined;
+      if (currencyFieldId && onHeader)
+        return refusal(
+          'CUSTOMIZE_DUPLICATE_LABEL',
+          `Both the line and its record have a currency field "${String(field.currency.fieldLabel)}" for "${field.label.trim()}"; name the one to read by its field ID.`,
+        );
+      if (!currencyFieldId && onHeader) {
+        currencyFieldId = onHeader;
+        currencyVia = [String(parent!.relationId)];
+      }
       if (!currencyFieldId)
         return refusal(
           'CUSTOMIZE_TARGET_NOT_FOUND',
@@ -3010,6 +3044,7 @@ function declareLogicalFields(
             : {
                 kind: 'stored',
                 fieldId: currencyFieldId!,
+                ...(currencyVia ? { via: currencyVia } : {}),
                 codes: [...STORED_MONEY_CURRENCIES],
               },
       });

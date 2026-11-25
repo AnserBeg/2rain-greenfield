@@ -92,7 +92,10 @@ import {
   normalizedBytes,
 } from '../compiler/helpers.js';
 import { compileReportFixture } from '../helpers/reports-preceding-release.js';
-import { LOGICAL_FIELD_READER } from '../../packages/canonical-model/src/logical-field.js';
+import {
+  LINE_LOGICAL_FIELD_READER,
+  LOGICAL_FIELD_READER,
+} from '../../packages/canonical-model/src/logical-field.js';
 import { datedPartyDefinition } from '../fixtures/g2/party/validation.js';
 import { compilePartyFixture } from '../fixtures/g2/party/compiler.js';
 import type { FormulaRulePayload } from '../../packages/compiler/src/formula-validation-plan.js';
@@ -2175,6 +2178,95 @@ test('release admission refuses logical field bindings or a reader floor that di
         tenantId: context.tenantId,
       }),
       { code },
+      reason,
+    );
+    stored.mock.restore();
+  }
+});
+
+test('release admission refuses a line logical release below the line rung, and the line rung without one', async (t) => {
+  // CUSTOMIZE-6 slice 2: logical fields on a line table (and a line amount
+  // read from the header currency) need the line rung at activation too.
+  const order = {
+    kind: 'addRecordType',
+    label: 'Work order',
+    companyOwnership: 'entityOwned',
+    fields: [
+      { label: 'Name', type: 'text' },
+      { label: 'Currency', type: 'currency' },
+    ],
+  };
+  const lines = {
+    kind: 'addLineTable',
+    entity: 'northstar.app:entity.custom_work_order',
+    label: 'Lines',
+    fields: [
+      { label: 'Task', type: 'text' },
+      {
+        label: 'Rate',
+        type: 'money',
+        currency: { kind: 'stored', fieldLabel: 'Currency' },
+      },
+    ],
+  };
+  const lined = await compileReportFixture([
+    { kind: 'changeSet', patches: [order, lines] },
+  ] as never);
+  const header = await compileReportFixture([order] as never);
+  const surface = PROJECTION_FAMILY_IDS.surfaceManifest;
+  const floorOf = (compiled: CompileSuccess) =>
+    compiled.bundle.releaseManifest.projections.find(
+      ({ familyId }) => familyId === surface,
+    )!.requiredRuntimeCapability.minimumVersion;
+  assert.equal(floorOf(lined.compiled), LINE_LOGICAL_FIELD_READER);
+  assert.equal(floorOf(header.compiled), LOGICAL_FIELD_READER);
+  const context = await contextFor(requestEntry(), 'session-a');
+  const pool = new pg.Pool();
+  t.after(() => pool.end());
+  t.mock.method(pool, 'connect', () => {
+    throw new Error('A disagreeing candidate reached the staging transaction');
+  });
+  const repository = new PostgresImmutableReleaseRepository(pool);
+  for (const [reason, candidate, bytes] of [
+    [
+      'a line release below the line rung',
+      rewriteProjectionPayload(
+        lined.compiled,
+        surface,
+        () => {},
+        LOGICAL_FIELD_READER,
+      ),
+      lined.normalizedDefinitionBytes,
+    ],
+    [
+      'the line rung without line fields',
+      rewriteProjectionPayload(
+        header.compiled,
+        surface,
+        () => {},
+        LINE_LOGICAL_FIELD_READER,
+      ),
+      header.normalizedDefinitionBytes,
+    ],
+  ] as const) {
+    const stored = t.mock.method(
+      repository,
+      'getAppPackageRevision',
+      async () => ({
+        ...revisionCommand(context, revisionA, bytes),
+        createdAt: '2026-11-25T00:00:00.000Z',
+      }),
+    );
+    await assert.rejects(
+      repository.stageTenantReleaseCandidate(context, {
+        appPackageRevisionId: revisionA,
+        compiledRelease: candidate,
+        createdBy: context.principalId,
+        environmentId: context.environmentId,
+        releaseId: releaseA,
+        tenantId: context.tenantId,
+      }),
+      { code: 'LOGICAL_FIELD_READER_MISMATCH' },
       reason,
     );
     stored.mock.restore();

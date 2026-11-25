@@ -228,7 +228,11 @@ const logicalKinds: Partial<Record<FieldType, string>> = {
 interface ScoredLogicalBinding {
   readonly fieldId: string;
   readonly logicalType: string;
-  readonly currency?: { readonly kind: string; readonly currencyCode?: string };
+  readonly currency?: {
+    readonly kind: string;
+    readonly currencyCode?: string;
+    readonly via?: readonly string[];
+  };
   readonly unit?: { readonly label: string };
   readonly scale?: number;
 }
@@ -257,10 +261,14 @@ export function logicalMismatch(
   if (binding?.logicalType !== kind)
     return `is ${binding?.logicalType ?? 'not a logical field'}, expected ${wanted.type}`;
   if (wanted.currency !== undefined) {
+    // CUSTOMIZE-6 slice 2: a line amount read from its header scores as
+    // "header", one read from its own record as "stored".
     const found =
       binding.currency?.kind === 'fixed'
         ? binding.currency.currencyCode
-        : binding.currency?.kind;
+        : binding.currency?.via
+          ? 'header'
+          : binding.currency?.kind;
     if (found !== wanted.currency)
       return `has currency ${String(found)}, expected ${wanted.currency}`;
   }

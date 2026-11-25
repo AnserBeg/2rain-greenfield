@@ -269,12 +269,21 @@ export function referenceLabel(
  */
 export function logicalSuffix(
   logical: CompiledLogicalField,
-  record?: SemanticRecordDto,
+  record?: { readonly values: Readonly<Record<string, unknown>> },
+  /**
+   * CUSTOMIZE-6 slice 2: the line's header, when the page holds it. A line
+   * amount whose currency the header stores reads it there; without the
+   * header it says so rather than guessing a code.
+   */
+  header?: { readonly values: Readonly<Record<string, unknown>> },
 ): string | null {
   if (logical.logicalType === 'quantity') return logical.unit?.label ?? null;
   if (logical.logicalType !== 'money' || !logical.currency) return null;
   if (logical.currency.kind === 'fixed') return logical.currency.currencyCode;
-  const stored = record?.values[logical.currency.fieldId];
+  if (logical.currency.via && !header) return '(header currency)';
+  const stored = (logical.currency.via ? header : record)?.values[
+    logical.currency.fieldId
+  ];
   if (stored === undefined || stored === null) return null;
   // Only a listed code is shown as a currency: a report sums anything else
   // as "No currency", and the list says the same.
@@ -289,6 +298,8 @@ export function displayFieldValue(
   record: SemanticRecordDto,
   fieldId: string,
   value: ImmutableJsonValue,
+  /** The line's header record, when a line is shown under it. */
+  header?: SemanticRecordDto,
 ): string {
   // A logical dateTime prints its capture in record zone (ADR-0087).
   const recorded = recordZoneText(value);
@@ -311,7 +322,7 @@ export function displayFieldValue(
     typeof value === 'string' &&
     (logical.logicalType === 'money' || logical.logicalType === 'quantity')
   ) {
-    const suffix = logicalSuffix(logical, record);
+    const suffix = logicalSuffix(logical, record, header);
     const shown =
       logical.logicalType === 'money'
         ? moneyText(value)
@@ -365,6 +376,8 @@ async function present(
    * fields, as a Task's re-check of its context requires.
    */
   absent: ReadonlySet<string> = new Set(),
+  /** CUSTOMIZE-6 slice 2: the header of a line row, when it is one. */
+  header?: SemanticRecordDto,
 ): Promise<Row> {
   const cells: Record<string, string> = {};
   for (const column of columns) {
@@ -375,7 +388,7 @@ async function present(
           ? moneyText(value)
           : related.has(column.field)
             ? text(null)
-            : displayFieldValue(view, record, column.field, value);
+            : displayFieldValue(view, record, column.field, value, header);
       continue;
     }
     let result: Awaited<ReturnType<typeof query>>;
@@ -577,7 +590,20 @@ export async function loadSurfaceComposition(
           throw new Error('The query did not apply its exact field scope.');
         for (const row of result.records)
           child.rows.push(
-            await present(view, gateways, scope, row, definition.columns),
+            await present(
+              view,
+              gateways,
+              scope,
+              row,
+              definition.columns,
+              undefined,
+              undefined,
+              // A line reads a currency its header stores from this record.
+              parent?.ownership === 'parentScopedChild' &&
+                parent.value.source === 'record'
+                ? record
+                : undefined,
+            ),
           );
         if (
           result.listCoverage.hasMore &&

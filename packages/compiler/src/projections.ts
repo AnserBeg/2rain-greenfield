@@ -19,6 +19,7 @@ import {
   RECORD_TEMPLATE_OPERATION_READER,
   hasRecordTemplateBinding,
   LOGICAL_FIELD_READER,
+  logicalFieldReaderFloor,
   type LogicalFieldBinding,
   type DateTimeBinding,
   ADDRESS_FIELD_READER,
@@ -638,7 +639,10 @@ export function lowerBaseProjectionPayloads(
       ...surface.requiredRuntimeCapability,
       minimumVersion: Math.max(
         surface.requiredRuntimeCapability.minimumVersion,
-        LOGICAL_FIELD_READER,
+        // Line tables and header-read currencies need the line rung.
+        logicalFieldReaderFloor(
+          packageRevision as Parameters<typeof logicalFieldReaderFloor>[0],
+        ) ?? LOGICAL_FIELD_READER,
       ),
     };
   }

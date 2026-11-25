@@ -3,7 +3,10 @@ import {
   RECORD_TEMPLATE_OPERATION_READER,
 } from '@north-star/canonical-model';
 import { recordTemplateDeclarationProblem } from './record-template-admission.js';
-import { logicalFieldBindingsProblem } from './logical-field-admission.js';
+import {
+  allowedTextsContractProblem,
+  logicalFieldBindingsProblem,
+} from './logical-field-admission.js';
 import { mapBindingsProblem } from './map-admission.js';
 import { popupBindingsProblem } from './popup-admission.js';
 import { boardBindingsProblem } from './board-admission.js';
@@ -949,6 +952,8 @@ function definitionFromSnapshotRows(
       surface.requiredRuntimeCapability?.minimumVersion ?? 0,
       revision,
     );
+    // The write contracts carry exactly the declared allowed values.
+    logicalProblem ??= allowedTextsContractProblem(operation.payload, revision);
   } catch {
     logicalProblem = 'invalid logical field declaration';
   }

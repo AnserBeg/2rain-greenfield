@@ -23,7 +23,7 @@
       "name": "logical-serving-floor-removed",
       "claim": "Serving refuses a logical field declaration served below its reader rung.",
       "file": "packages/postgres-provider/src/logical-field-admission.ts",
-      "original": "  if (surfaceFloor < LOGICAL_FIELD_READER)",
+      "original": "  if (surfaceFloor < floor)",
       "replacement": "  if (surfaceFloor < 0)",
       "test": {
         "files": ["test/unit/logical-field.test.ts"]
@@ -176,8 +176,8 @@
       "name": "logical-activation-floor-unchecked",
       "claim": "Activation refuses a logical declaration whose surface floor is below its rung, or the rung without one.",
       "file": "packages/postgres-provider/src/release-repository.ts",
-      "original": "    hasLogicalFields\n      ? surfaceFloor < LOGICAL_FIELD_READER\n      : surfaceFloor === LOGICAL_FIELD_READER",
-      "replacement": "    hasLogicalFields\n      ? surfaceFloor < 0\n      : surfaceFloor === LOGICAL_FIELD_READER",
+      "original": "      : surfaceFloor < logicalFloor ||",
+      "replacement": "      : surfaceFloor < 0 ||",
       "test": {
         "files": ["test/postgres/releases.test.ts"]
       },

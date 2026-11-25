@@ -203,7 +203,12 @@ export function resolveReportChoices(
     if (m.operator.kind === 'count') continue;
     const f = add(m.operator.fieldId);
     if (!f || !(f.currency || f.type === 'quantity')) return m.operator.fieldId;
-    if (f.currency?.kind === 'stored' && !add(f.currency.fieldId))
+    // A v1 body reads a stored code from the measured row only; a code read
+    // through a path (a line's header) is a line-grain v2 report's.
+    if (
+      f.currency?.kind === 'stored' &&
+      (f.currency.via !== undefined || !add(f.currency.fieldId))
+    )
       return f.currency.fieldId;
     const key = canonicalize(f.currency ?? f.unitId);
     if (partition !== undefined && partition !== key) return m.operator.fieldId;

@@ -2226,6 +2226,14 @@ export const SurfaceLauncherSchema = z.strictObject({
     .optional(),
 });
 export type SurfaceLauncher = z.infer<typeof SurfaceLauncherSchema>;
+/**
+ * CUSTOMIZE-6 slice 2: the declared to-one relations from an amount's record
+ * to the record that holds its currency field. This is REPORTS-1 slice 2's
+ * link-path encoding (`ReportViaSchema`: one or two relation IDs, absent for
+ * the record itself), kept identical so a line-grain report resolves the code
+ * through the parent link it already requires.
+ */
+export const CurrencyViaSchema = z.array(CanonicalIdSchema).min(1).max(2);
 export const ReportCurrencyBindingSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('fixed'),
@@ -2234,6 +2242,8 @@ export const ReportCurrencyBindingSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('stored'),
     fieldId: CanonicalIdSchema,
+    /** Absent: the currency field is on the amount's own record. */
+    via: CurrencyViaSchema.optional(),
     // Sales accepts EUR as well as the two currencies of the frozen scalar
     // profile. This list belongs to the source declaration on this release.
     codes: z

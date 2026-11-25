@@ -21,6 +21,12 @@ import { z } from 'zod';
  */
 // Rung 49, assigned at TRAIN-O (MIGRATION-RULE, capability rung rule).
 export const LOGICAL_FIELD_READER = 49;
+/**
+ * CUSTOMIZE-6 slice 2: logical fields on line tables, and an amount whose
+ * currency is read through a path (a line's header). PROVISIONAL rung: the
+ * next after main; the integrator assigns the final number.
+ */
+export const LINE_LOGICAL_FIELD_READER = 50;
 export const LOGICAL_FIELD_TYPES = [
   'decimal',
   'money',

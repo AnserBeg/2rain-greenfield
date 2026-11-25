@@ -89,12 +89,12 @@ const moneyCurrency = z
         fieldId: canonicalId
           .optional()
           .describe(
-            "The record type's existing currency field, by its listed field ID.",
+            "The record type's existing currency field, by its listed field ID. A line field may name its record's (header's) currency field.",
           ),
         fieldLabel: label
           .optional()
           .describe(
-            'Or the label of a currency field added in this same record type or change.',
+            "Or the label of a currency field added in this same record type or change. A line field's label is looked up on the line first, then on its record (header), so every line reads the header's currency.",
           ),
       })
       .refine(
