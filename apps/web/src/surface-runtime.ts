@@ -1,4 +1,3 @@
-import { DECIMAL_KINDS, canonicalDecimal } from './control-semantics.js';
 import { readMapSlots } from './map-view.js';
 import { reportRequest } from './grouped-report.js';
 import { reportQueryId } from '../../../packages/canonical-model/src/declared-report.js';
@@ -25,6 +24,8 @@ import {
   displayFieldValue,
   renderCompositionPrintDocument,
   taskTransportError,
+  DECIMAL_KINDS,
+  canonicalDecimal,
 } from './surface-composition.js';
 import {
   workspaceList,

@@ -3351,3 +3351,6 @@ interface CompositionResponse {
   readonly html: string;
   readonly statusCode: number;
 }
+
+/** Re-exported for the record form post (CUSTOMIZE-6), which may not import control semantics directly. */
+export { DECIMAL_KINDS, canonicalDecimal } from './control-semantics.js';
