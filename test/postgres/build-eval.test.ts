@@ -456,7 +456,8 @@ test(
       );
 
       const summary = summarize(results);
-      assert.equal(summary.ran, 10);
+      // Ten scripted cases plus CUSTOMIZE-6's two L01 runs.
+      assert.equal(summary.ran, 12);
       assert.equal(summary.repairedAfterOne, 3);
       // M01's scripted refusal, and the parser's refusal of H01's grouped
       // permission change: both refuse a request the platform can draft.
