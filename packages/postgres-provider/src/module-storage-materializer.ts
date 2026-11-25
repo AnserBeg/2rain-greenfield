@@ -1681,10 +1681,14 @@ async function createManagedTable(
       [tableName],
     );
     if (!existing.rowCount) {
-      await client.query(`GRANT TRIGGER ON ${tableName} TO north_star_module_materializer`);
+      await client.query(
+        `GRANT TRIGGER ON ${tableName} TO north_star_module_materializer`,
+      );
       await client.query(`CREATE TRIGGER record_creation AFTER INSERT ON ${tableName}
         FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation(${triggerArgumentLiteral(entity.entityId)})`);
-      await client.query(`REVOKE TRIGGER ON ${tableName} FROM north_star_module_materializer`);
+      await client.query(
+        `REVOKE TRIGGER ON ${tableName} FROM north_star_module_materializer`,
+      );
     }
   }
   for (const check of entity.checkConstraints ?? []) {

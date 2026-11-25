@@ -515,7 +515,9 @@ export async function draftPatchFromRequest<T = never>(
           options.workflowRules,
           (targets.linkTargets ?? [])
             .filter(({ companyOwned }) => companyOwned)
-            .map(({ entityId, label }) => `${entityId} (${JSON.stringify(label)})`),
+            .map(
+              ({ entityId, label }) => `${entityId} (${JSON.stringify(label)})`,
+            ),
         )}`
       : '');
   const context: DraftContext = {

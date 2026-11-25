@@ -20,7 +20,10 @@ export function workflowTriggerSource(trigger: WorkflowTrigger): {
 } {
   return typeof trigger === 'string'
     ? { eventType: RECEIPT_POSTED_TYPE, recordType: null }
-    : { eventType: RECORD_CREATED_EVENT_TYPE, recordType: trigger.recordTypeId };
+    : {
+        eventType: RECORD_CREATED_EVENT_TYPE,
+        recordType: trigger.recordTypeId,
+      };
 }
 
 interface RecordCreationCandidate {

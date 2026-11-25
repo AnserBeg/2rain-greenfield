@@ -1474,7 +1474,8 @@ export function summarize(results: readonly CaseResult[]) {
   const unsupported = ran.filter((r) => r.expected === 'unsupported');
   const hostile = ran.filter((r) => r.category === 'hostile');
   const workflows = ran.filter(
-    (r) => r.category === 'workflow-receipt' || r.category === 'workflow-record',
+    (r) =>
+      r.category === 'workflow-receipt' || r.category === 'workflow-record',
   );
   const refusals = ran.filter((r) => r.status === 'unsupported');
   const byBucket = new Map<string, { correct: number; false: number }>();

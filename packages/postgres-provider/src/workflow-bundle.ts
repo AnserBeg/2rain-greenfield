@@ -70,15 +70,11 @@ export async function verifyWorkflowBundle(
   options: SandboxRunnerOptions = {},
   trigger: WorkflowTrigger = 'goodsReceiptPosted',
 ) {
-  const sdk = generateWorkflowSdk(
-    view,
-    grants,
-    undefined,
-    undefined,
-    trigger,
-  );
+  const sdk = generateWorkflowSdk(view, grants, undefined, undefined, trigger);
   if (
-    bundle.fixtures.some(({ event }) => !fixtureEventMatchesTrigger(event, trigger))
+    bundle.fixtures.some(
+      ({ event }) => !fixtureEventMatchesTrigger(event, trigger),
+    )
   )
     throw new Error('Workflow fixture event does not match its trigger');
   const request: WorkflowVerificationRequest = {

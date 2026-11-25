@@ -71,7 +71,8 @@ export function fixtureEventMatchesTrigger(
 ): boolean {
   return typeof trigger === 'string'
     ? event.type === trigger
-    : event.type === trigger.kind && event.recordTypeId === trigger.recordTypeId;
+    : event.type === trigger.kind &&
+        event.recordTypeId === trigger.recordTypeId;
 }
 
 /** The drafter's line for each member, generated from the same table. */

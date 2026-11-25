@@ -1110,10 +1110,22 @@ test(
         [started.trust!.outboxId, started.trust!.domainEventId],
       );
       assert.ok(prefilled.length > 1, 'this command creates several lines');
-      assert.deepEqual(creations.rows.map((row) => row.record_id), prefilled.map((line) => line.recordId).sort());
-      assert.equal(new Set(creations.rows.map((row) => row.occurrence_id)).size, prefilled.length);
-      assert.ok(creations.rows.every((row) => row.record_type === `${ns}:entity.stock_count_line`
-        && row.company_id === fixture.scope && row.record_count === prefilled.length));
+      assert.deepEqual(
+        creations.rows.map((row) => row.record_id),
+        prefilled.map((line) => line.recordId).sort(),
+      );
+      assert.equal(
+        new Set(creations.rows.map((row) => row.occurrence_id)).size,
+        prefilled.length,
+      );
+      assert.ok(
+        creations.rows.every(
+          (row) =>
+            row.record_type === `${ns}:entity.stock_count_line` &&
+            row.company_id === fixture.scope &&
+            row.record_count === prefilled.length,
+        ),
+      );
 
       assert.deepEqual(
         prefilled.map((value) => value.item).sort(),

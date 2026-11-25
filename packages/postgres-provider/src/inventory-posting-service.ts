@@ -1506,7 +1506,10 @@ export class PostgresInventoryPostingService {
             ordered,
           )
         : null;
-      await client.query("SELECT set_config('north_star.creation_action', $1, true)", [this.registration.capabilityId]);
+      await client.query(
+        "SELECT set_config('north_star.creation_action', $1, true)",
+        [this.registration.capabilityId],
+      );
       await client.query('SAVEPOINT inventory_posting_write');
       let transactionRevision = -1;
       let stockCountRevision: number | null = null;

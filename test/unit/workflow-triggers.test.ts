@@ -87,14 +87,24 @@ const TRIGGER_EVAL_EXCEPTIONS: Readonly<
   Partial<Record<WorkflowTriggerMember, { since: string; owner: string }>>
 > = Object.freeze({});
 test('every workflow trigger member has generated drafter text, fixtures and an eval case', () => {
-  const members = Object.keys(WORKFLOW_TRIGGER_MEMBERS) as WorkflowTriggerMember[];
-  assert.deepEqual(members.sort(), Object.keys(WORKFLOW_TRIGGER_EVENT_FIELDS).sort());
+  const members = Object.keys(
+    WORKFLOW_TRIGGER_MEMBERS,
+  ) as WorkflowTriggerMember[];
+  assert.deepEqual(
+    members.sort(),
+    Object.keys(WORKFLOW_TRIGGER_EVENT_FIELDS).sort(),
+  );
   const lines = workflowTriggerDrafterLines([appointment]).join('\n');
-  const prompt = workflowPromptSection('declare const sdk: unknown;', [], [
-    appointment,
-  ]);
+  const prompt = workflowPromptSection(
+    'declare const sdk: unknown;',
+    [],
+    [appointment],
+  );
   const fixtures = WorkflowFixtureEventSchema.options;
-  const cases: readonly BuildCase[] = [...BUILD_CASES, ...WORKFLOW_TRIGGER_CASES];
+  const cases: readonly BuildCase[] = [
+    ...BUILD_CASES,
+    ...WORKFLOW_TRIGGER_CASES,
+  ];
   for (const member of members) {
     assert.ok(lines.includes(`"${member}"`), `${member} has a drafter line`);
     assert.ok(prompt.includes(`"${member}"`), `${member} reaches the prompt`);
@@ -103,7 +113,9 @@ test('every workflow trigger member has generated drafter text, fixtures and an 
     );
     assert.ok(fixture, `${member} has a fixture event`);
     assert.deepEqual(
-      Object.keys(fixture.shape).filter((key) => key !== 'type').sort(),
+      Object.keys(fixture.shape)
+        .filter((key) => key !== 'type')
+        .sort(),
       [...WORKFLOW_TRIGGER_EVENT_FIELDS[member]].sort(),
       `${member} fixture keys are its declared event fields`,
     );
@@ -122,7 +134,9 @@ test('every workflow trigger member has generated drafter text, fixtures and an 
 });
 
 test('the receipt member keeps its bytes, declaration and persisted source', () => {
-  const receipt = WorkflowDefinitionSchema.parse(save('goodsReceiptPosted').workflow);
+  const receipt = WorkflowDefinitionSchema.parse(
+    save('goodsReceiptPosted').workflow,
+  );
   assert.equal(
     canonicalize(receipt),
     canonicalize(save('goodsReceiptPosted').workflow),
@@ -174,7 +188,7 @@ test('a recordCreated workflow compiles at its reader rung, and only on a compan
     surface.requiredRuntimeCapability.minimumVersion,
     RECORD_CREATED_TRIGGER_READER,
   );
-  const receiptSurface = tip.bundle.releaseManifest.projections.find(
+  const receiptSurface = tip.compiled.bundle.releaseManifest.projections.find(
     (p) => p.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
   )!;
   assert.ok(
@@ -191,7 +205,10 @@ test('a recordCreated workflow compiles at its reader rung, and only on a compan
       tip: customization.serializeRelease(tip),
     });
     assert.notEqual(refused.status, 'compiled', recordTypeId);
-    assert.match(JSON.stringify(refused), new RegExp(recordTypeId.replaceAll('.', '\\.'), 'u'));
+    assert.match(
+      JSON.stringify(refused),
+      new RegExp(recordTypeId.replaceAll('.', '\\.'), 'u'),
+    );
   }
 });
 
@@ -208,8 +225,9 @@ test('recordCreated replays clean over a label rename and names a retired record
   );
   assert.notEqual(clean.status, 'replayConflict', JSON.stringify(clean));
   const retired = structuredClone(clinic);
-  (retired.entities as Json[]).find((e) => e.entityId === appointment)!.lifecycle =
-    'retired';
+  (retired.entities as Json[]).find(
+    (e) => e.entityId === appointment,
+  )!.lifecycle = 'retired';
   const conflict = replayCustomizationPatches(
     retired,
     [patch(save(recordCreated))],
@@ -230,9 +248,7 @@ test('each recordCreated eval case names a company-owned type its base creates',
     );
     const type = id(`entity.${c.expect.trigger}`);
     assert.ok(
-      targets.linkTargets?.some(
-        (t) => t.entityId === type && t.companyOwned,
-      ),
+      targets.linkTargets?.some((t) => t.entityId === type && t.companyOwned),
       `${c.id} names ${type}`,
     );
     for (const operation of c.expect.operations)

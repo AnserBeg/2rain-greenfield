@@ -1014,7 +1014,9 @@ function definitionFromSnapshotRows(
       const floor = surface.requiredRuntimeCapability?.minimumVersion ?? 0;
       if (
         floor < WORKFLOW_SURFACE_FLOOR ||
-        (workflow.workflows.some(({ trigger }) => typeof trigger !== 'string') &&
+        (workflow.workflows.some(
+          ({ trigger }) => typeof trigger !== 'string',
+        ) &&
           floor < RECORD_CREATED_TRIGGER_READER) ||
         workflow.workflows.some(
           ({ grants, sdkDigest }) =>

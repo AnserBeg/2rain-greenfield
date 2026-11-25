@@ -30,6 +30,7 @@ import { generateWorkflowSdk } from '../../packages/postgres-provider/src/workfl
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
 import { INVENTORY_WRITE_INVARIANTS } from '../../packages/postgres-provider/src/inventory-write-invariants.js';
 import { COMPANY, worldOver } from '../agent/agent-world.js';
+import { RecordCreatedTriggerSchema } from '../../packages/canonical-model/src/schemas.js';
 import {
   LINEAGE_INSTALL_VOLUME,
   withEphemeralPostgres,
@@ -38,11 +39,11 @@ import {
 const NS = 'northstar.app';
 const appointment = `${NS}:entity.custom_appointment`;
 const appointmentName = `${NS}:field.custom_appointment_name`;
-const trigger = {
+const trigger = RecordCreatedTriggerSchema.parse({
   kind: 'recordCreated',
   triggerVersion: 'v1',
   recordTypeId: appointment,
-} as const;
+});
 
 test(
   'a tenant record type starts one pinned run per created record, in its own company',
@@ -92,7 +93,7 @@ test(
           assert.ok(typeDraft.status === 'drafted', JSON.stringify(typeDraft));
           const approval = await service.approve(typeDraft.patchId);
           await service.activate(typeDraft.patchId);
-          const approver = (
+            const approver = (
             await pool.query<{ approving_human_id: string }>(
               `SELECT approving_human_id FROM platform.release_approvals
                 WHERE tenant_id = $1 AND environment_id = $2 AND activation_attempt_id = $3`,
@@ -129,13 +130,13 @@ test(
           };
           // Committed before any workflow subscribes: never fires later.
           const early = await book(COMPANY, 'Booked before the workflow');
-
+  
           const gateways = new PostgresWorkflowGateway(
             runtimePool,
             INVENTORY_WRITE_INVARIANTS,
           );
           const view = await gateways.loadView(operator);
-          const grants = { queries: [], operations: [] };
+            const grants = { queries: [], operations: [] };
           const sdk = generateWorkflowSdk(
             view,
             grants,
@@ -152,7 +153,7 @@ test(
           const fixtureEvent = {
             type: 'recordCreated' as const,
             eventId: randomUUID(),
-            recordTypeId: appointment,
+            recordTypeId: trigger.recordTypeId,
             recordId: randomUUID(),
             legalEntityId: COMPANY,
           };
@@ -199,7 +200,7 @@ test(
             workflowDraft.workflowReviewDigest,
           );
           await service.activate(workflowDraft.patchId);
-          assert.deepEqual(
+            assert.deepEqual(
             (
               await pool.query<{ binding: unknown }>(
                 `SELECT w.definition_bindings->'appointment-follow-up'->'recordType' AS binding
@@ -219,9 +220,9 @@ test(
 
           const home = await book(COMPANY, 'Check-up');
           const away = await book(otherCompany, 'Follow-up visit');
-          const consumer = new PostgresWorkflowConsumer(workerPool);
+            const consumer = new PostgresWorkflowConsumer(workerPool);
           assert.equal(await consumer.claim(scope), 2);
-          assert.equal(
+            assert.equal(
             await consumer.claim(scope),
             0,
             'a repeated poll starts no second run',
@@ -307,15 +308,11 @@ test(
     // The schema contract the consumer relies on. Before this slice the key
     // was (event, workflow), so a second record of the same command collapsed.
     await withEphemeralPostgres('workflow-start-key', async ({ pool }) => {
-      const { loadMigrations, runMigrations } = await import(
-        '../../packages/postgres-provider/src/migrations.js'
-      );
+      const { loadMigrations, runMigrations } =
+        await import('../../packages/postgres-provider/src/migrations.js');
       const client = await pool.connect();
       try {
-        await runMigrations(
-          client,
-          await loadMigrations('db/migrations'),
-        );
+        await runMigrations(client, await loadMigrations('db/migrations'));
         const indexes = (
           await client.query<{ indexdef: string }>(
             `SELECT indexdef FROM pg_indexes
@@ -337,6 +334,82 @@ test(
           ),
           'no unconditional (event, workflow) key collapses a multi-record command',
         );
+
+        // The digest of a receipt definition is the pre-slice formula; the
+        // record type of a general member is covered, so it cannot be swapped.
+        const definition = (recordType: string | null) =>
+          JSON.stringify({
+            tenant_id: randomUUID(),
+            environment_id: randomUUID(),
+            release_id: randomUUID(),
+            workflow_id: 'probe',
+            event_type: recordType
+              ? 'northstar.platform:event.record-created'
+              : 'northstar.purchasing:event.receipt_posted',
+            body_digest: 'b'.repeat(64),
+            executable_digest: 'c'.repeat(64),
+            sdk_digest: 'd'.repeat(64),
+            engine_build: 'engine',
+            host_version: 'host',
+            sdk_version: 'sdk',
+            automation_principal_id: randomUUID(),
+            authored_by: randomUUID(),
+            grants: { queries: [], operations: [] },
+            record_type: recordType,
+          });
+        const digest = async (recordType: string | null) =>
+          (
+            await client.query<{ digest: string; legacy: string }>(
+              `SELECT platform.workflow_definition_digest(d) AS digest,
+                      encode(sha256(convert_to(jsonb_build_array(
+                        d.tenant_id, d.environment_id, d.release_id, d.workflow_id, d.event_type,
+                        d.body_digest, d.executable_digest, d.sdk_digest, d.engine_build,
+                        d.host_version, d.sdk_version, d.automation_principal_id, d.authored_by,
+                        d.grants)::text, 'UTF8')), 'hex') AS legacy
+                 FROM jsonb_populate_record(NULL::platform.workflow_definitions, $1::jsonb) AS d`,
+              [definition(recordType)],
+            )
+          ).rows[0]!;
+        const receipt = await digest(null);
+        assert.equal(receipt.digest, receipt.legacy);
+        const general = await digest('northstar.app:entity.custom_appointment');
+        assert.notEqual(general.digest, general.legacy);
+
+        // An occurrence written under a creation action that no outbox row
+        // seals cannot commit; without an action nothing is recorded.
+        await client.query(`CREATE TABLE north_star_module.workflow_probe (
+          tenant_id uuid, environment_id uuid, record_id uuid, legal_entity_id uuid)`);
+        await client.query(`CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.workflow_probe
+          FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.test:entity.probe')`);
+        const insert = async (action: string | null) => {
+          const tenant = randomUUID();
+          await client.query('BEGIN');
+          await client.query(
+            `SELECT set_config('north_star.tenant_id', $1, true),
+                    set_config('north_star.environment_id', $1, true),
+                    set_config('north_star.request_id', $2, true),
+                    set_config('north_star.creation_action', $3, true)`,
+            [tenant, randomUUID(), action ?? ''],
+          );
+          await client.query(
+            `INSERT INTO north_star_module.workflow_probe
+             SELECT $1::uuid, $1::uuid, gen_random_uuid(), gen_random_uuid() FROM generate_series(1, 2)`,
+            [tenant],
+          );
+          const recorded = (
+            await client.query<{ count: number }>(
+              'SELECT count(*)::integer AS count FROM platform.record_creation_occurrences WHERE tenant_id = $1',
+              [tenant],
+            )
+          ).rows[0]!.count;
+          return { recorded, commit: () => client.query('COMMIT') };
+        };
+        const unsealed = await insert('northstar.test:operation.probe_create');
+        assert.equal(unsealed.recorded, 2, 'one occurrence per inserted row');
+        await assert.rejects(unsealed.commit(), { code: '23503' });
+        const ungoverned = await insert(null);
+        assert.equal(ungoverned.recorded, 0);
+        await ungoverned.commit();
       } finally {
         client.release();
       }
