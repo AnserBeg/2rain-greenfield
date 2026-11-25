@@ -512,7 +512,8 @@ export function replayCustomizationPatches(
         // retired presentation is carried, never validated, so it too is
         // checked by identity only: the old rules it carries never refuse.
         const identityOnly =
-          (patch.kind === 'addReportRevision' &&
+          ((patch.kind === 'addReportRevision' ||
+            patch.kind === 'addMeasureRevision') &&
             pastReports.has(patch.revisionId)) ||
           (patch.kind === 'addPresentationRevision' &&
             (pastPresentations.has(patch.revisionId) ||
@@ -522,6 +523,7 @@ export function replayCustomizationPatches(
           !layout &&
           !board &&
           patch.kind !== 'addReportRevision' &&
+          patch.kind !== 'addMeasureRevision' &&
           !identityOnly
         )
           conflicts.push(...bindings(patch, before, target));
@@ -574,13 +576,19 @@ export function replayCustomizationPatches(
           if (outcome) {
             if (board?.problem?.conflicts.length)
               conflicts.push(...board.problem.conflicts);
-            else if (patch.kind === 'addReportRevision')
+            else if (
+              patch.kind === 'addReportRevision' ||
+              patch.kind === 'addMeasureRevision'
+            )
               conflicts.push({
                 code: target.has(outcome.message)
                   ? 'INCOMPATIBLE_TYPE'
                   : 'RETIRED_TARGET',
                 subject: outcome.message,
-                expected: patch.reportId,
+                expected:
+                  patch.kind === 'addReportRevision'
+                    ? patch.reportId
+                    : patch.measureId,
                 observed: target.get(outcome.message) ?? null,
               });
             else if (

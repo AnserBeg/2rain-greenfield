@@ -10,7 +10,7 @@ import {
   type UntrustedRequestInput,
 } from './request-context.js';
 import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents.js';
-import { PRESENTATION_READER } from '../../canonical-model/src/surface-presentation-schema.js';
+import { REPORT_MEASURE_READER } from '../../canonical-model/src/declared-report-v2.js';
 import {
   WORKFLOW_PROJECTION_FAMILY,
   WORKFLOW_RUNTIME_CAPABILITY,
@@ -244,7 +244,11 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 46 reads viewport declarations and renders Map views (one rung).
     // 47 adds declared presentation: tone rules on list cells and rows,
     // column sizing and list density.
-    maximumSupportedVersion: PRESENTATION_READER,
+    // 50 reads v2 reports: calendar and age dimensions, declared to-one
+    // links and line grain, min, max, average and distinct counts, and
+    // approved measure references. 51 reads named measures (REPORTS-1 s2;
+    // provisional, 48 and 49 are held by packets in flight).
+    maximumSupportedVersion: REPORT_MEASURE_READER,
   },
 });
 

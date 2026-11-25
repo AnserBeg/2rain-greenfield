@@ -2,7 +2,11 @@ import type {
   BillingPlan,
   BillingSchedule,
 } from '../../canonical-model/src/billing.js';
-import type { ReportRevision } from '@north-star/canonical-model';
+import type {
+  MeasureRevision,
+  ReportBodyV2,
+  ReportRevision,
+} from '@north-star/canonical-model';
 import type { PopupRevision } from '../../canonical-model/src/popup-actions.js';
 import {
   baseLayout,
@@ -255,6 +259,17 @@ export function renderReleaseDiff(input: {
       );
   }
   for (const s of to.surfaces) {
+    const measure = s.measure as MeasureRevision | undefined;
+    if (
+      measure &&
+      (
+        from.surfaces.find((old) => old.surfaceId === s.surfaceId)?.measure as
+          MeasureRevision | undefined
+      )?.revisionId !== measure.revisionId
+    )
+      lines.push(
+        `${s.lifecycle === 'retired' ? 'Retires' : measure.status === 'approved' ? 'Approves' : 'Trials'} measure “${String(s.label)}” (${measure.measureId}, contract ${measure.contractDigest.slice(0, 12)}). ${describeV2(to, measure.body)} A trial confers nothing: reports bind only an approved measure, by ID and contract.`,
+      );
     const report = s.report as ReportRevision | undefined;
     if (
       report &&
@@ -264,6 +279,12 @@ export function renderReleaseDiff(input: {
       )?.revisionId !== report.revisionId
     ) {
       const { body } = report;
+      if (body.version === 'grouped-report/v2') {
+        lines.push(
+          `${s.lifecycle === 'retired' ? 'Retires' : 'Publishes'} report “${String(s.label)}”. ${describeV2(to, body)}`,
+        );
+        continue;
+      }
       lines.push(
         `${s.lifecycle === 'retired' ? 'Retires' : 'Publishes'} report “${String(s.label)}”. One row per ${entityLabel(to, body.source.entityId)}. Groups: ${body.dimensions.map((d) => d.fieldId).join(', ')}. Measures: ${body.measures.map((m) => m.label + ' (' + m.operator.kind + ')').join(', ')}. Filters: ${body.filters.map((f) => f.fieldId).join(', ') || 'none'}. Outputs: ${body.outputs.map((o) => o.kind).join(', ')}. Requires the source read and read access to each selected operand. CSV requires export authority. Access path: tenant, environment, ${body.source.scope === 'company' ? 'company, ' : ''}${body.filters
           .filter((f) => f.kind === 'dateRange')
@@ -882,4 +903,32 @@ function describeCondition(
         .map((term) => `(${describeCondition(term, label)})`)
         .join(when.kind === 'all' ? ' and ' : ' or ');
   }
+}
+
+/** The publish diff of a v2 body: grain, groups, measures, joins, filters,
+ * outputs and the grants and access path it needs. */
+function describeV2(
+  definition: { entities: readonly Record<string, unknown>[] },
+  body: ReportBodyV2,
+) {
+  const label = (id: string) =>
+    String(definition.entities.find((e) => e.entityId === id)?.label ?? id);
+  const at = (f: { fieldId: string; via?: readonly string[] | undefined }) =>
+    (f.via ? f.via.join(' › ') + ' › ' : '') + f.fieldId;
+  const dims = body.dimensions.map((d) =>
+    d.kind === 'calendar'
+      ? `${at(d)} by ${d.unit}`
+      : d.kind === 'age'
+        ? `${at(d)} age in ${d.bands.map((b) => b.label).join(', ')} (absent: ${d.absentLabel})`
+        : at(d),
+  );
+  const measures = body.measures.map((m) =>
+    m.kind === 'approved'
+      ? `approved measure ${m.measureId} at contract ${m.contractDigest.slice(0, 12)}`
+      : `${m.label} (${m.operator.kind}${'fieldId' in m.operator ? ' of ' + at(m.operator) : 'via' in m.operator ? ' of ' + m.operator.via.join(' › ') : ''})`,
+  );
+  return `One row per ${body.source.grain === 'line' ? 'line of ' : ''}${label(body.source.entityId)}. Groups: ${dims.join(', ') || 'none'}. Measures: ${measures.join(', ')}. Joins: ${body.links.map((l) => `${l.via.join(' › ')} to ${label(l.entityId)}${l.required ? ' (required parent)' : ''}`).join(', ') || 'none'}. Filters: ${body.filters.map(at).join(', ') || 'none'}. Outputs: ${body.outputs.map((o) => o.kind).join(', ')}. Requires the source read, each joined record type's read and read access to each selected operand; a hidden linked record is grouped as Restricted. Ages and periods use the company business date captured once per run. CSV requires export authority. Access path: tenant, environment, ${body.source.scope === 'company' ? 'company, ' : ''}${body.filters
+    .filter((f) => f.kind === 'dateRange')
+    .map((f) => f.fieldId + ', ')
+    .join('')}record ID.`;
 }

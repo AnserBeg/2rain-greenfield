@@ -1,6 +1,7 @@
 import { BillingPlanSchema } from '../../canonical-model/src/billing.js';
 import { MapViewRevisionSchema } from './map-revision.js';
 import { AddReportRevisionSchema } from './report-revision.js';
+import { AddMeasureRevisionSchema } from './measure-revision.js';
 import { PopupRevisionSchema } from '../../canonical-model/src/popup-actions.js';
 import { PresentationRevisionPatchSchema } from './presentation-revision.js';
 import { BoardViewRevisionSchema } from './board-revision.js';
@@ -258,6 +259,7 @@ const ChangeMemberSchema = z.discriminatedUnion('kind', [
   MapViewRevisionSchema,
   BoardViewRevisionSchema,
   AddReportRevisionSchema,
+  AddMeasureRevisionSchema,
   addRecordType,
   addField,
   addChoice,
@@ -409,6 +411,7 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'addPresentationRevision',
   'addBoardViewRevision',
   'addReportRevision',
+  'addMeasureRevision',
   'saveListView',
   'addValidation',
   'addCalculatedDisplayField',

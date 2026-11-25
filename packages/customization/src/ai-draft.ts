@@ -1,4 +1,5 @@
 import { draftReport } from './report-revision.js';
+import { draftMeasure } from './measure-revision.js';
 import { z } from 'zod';
 
 import { WorkflowDefinitionSchema } from '../../canonical-model/src/schemas.js';
@@ -663,6 +664,24 @@ function convertMember(
           report.choices,
           report.reportId,
           report.status,
+        ),
+      ];
+    }
+    case 'addMeasureRevision': {
+      const { measure } =
+        DRAFTER_SELECTION_SCHEMAS.addMeasureRevision.parse(input);
+      const target = local().reports?.find(
+        (candidate) => candidate.source.listSurfaceId === measure.listSurfaceId,
+      );
+      if (!target) throw new Error('Choose an available report source.');
+      return [
+        draftMeasure(
+          target,
+          measure.label,
+          measure.status,
+          measure.operator,
+          measure.measureId,
+          measure.filters,
         ),
       ];
     }

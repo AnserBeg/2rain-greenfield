@@ -15,6 +15,7 @@ import {
   SurfaceMapSchema,
   type SurfaceMap,
   ReportRevisionSchema,
+  MeasureRevisionSchema,
   type ReportRevision,
   type BoardPresentation,
   type SurfaceBoard,
@@ -1165,6 +1166,19 @@ function parseSurface(
     ...(archetype === 'map' ? { map: SurfaceMapSchema.parse(value.map) } : {}),
     ...(value.report
       ? { report: ReportRevisionSchema.parse(value.report) }
+      : {}),
+    // A named measure's page is its trial or approved total, read through the
+    // same grouped report reader.
+    ...(value.measure
+      ? {
+          report: ((m) => ({
+            reportId: m.measureId,
+            revisionId: m.revisionId,
+            predecessorDigest: m.predecessorDigest,
+            contractDigest: m.contractDigest,
+            body: m.body,
+          }))(MeasureRevisionSchema.parse(value.measure)),
+        }
       : {}),
     ...(archetype === 'board'
       ? {

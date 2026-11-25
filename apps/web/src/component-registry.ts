@@ -1,4 +1,7 @@
-import type { RegisteredReport } from '../../../packages/canonical-model/src/declared-report.js';
+import {
+  effectiveMeasures,
+  type RegisteredReport,
+} from '../../../packages/canonical-model/src/declared-report.js';
 import type { GroupedRow } from '@north-star/canonical-model';
 import {
   displayGroupKey,
@@ -3735,9 +3738,9 @@ export function groupedReportHtml(
     (isMoney ? cell('Currency', partitionLabel(r)) : '') +
     r.cells
       .map((c, i) => {
-        const m = report.revision.body.measures[i]!;
+        const m = effectiveMeasures(report)[i]!;
         const coverage =
-          m.operator.kind === 'sum'
+          m.operator.kind !== 'count' && m.operator.kind !== 'distinctTargets'
             ? ' <small>' +
               c.recordsWithoutMeasure +
               (c.recordsWithoutMeasure === 1
@@ -3750,8 +3753,16 @@ export function groupedReportHtml(
           '<td data-label="' +
           escapeHtml(m.label) +
           '">' +
-          escapeHtml(c.value) +
+          // Tagged absence (an empty min, max or average) is never zero.
+          escapeHtml(c.value ?? 'No value') +
           (c.unitId ? ' ' + escapeHtml(c.unitId) : '') +
+          (c.exact
+            ? ' <small>exact ' +
+              escapeHtml(c.exact.sum) +
+              ' / ' +
+              c.exact.count +
+              '</small>'
+            : '') +
           coverage +
           '</td>'
         );

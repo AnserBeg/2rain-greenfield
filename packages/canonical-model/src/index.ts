@@ -188,6 +188,20 @@ export {
   ReportBodySchema,
   ReportChoicesSchema,
   ReportRevisionSchema,
+  ReportBodyV1Schema,
+  ReportBodyV2Schema,
+  ReportFilterV2Schema,
+  MeasureRevisionSchema,
+  ReportDimensionSchema,
+  ReportOperatorSchema,
+  ReportAgeBandSchema,
+  type MeasureRevision,
+  type ReportBodyV1,
+  type ReportBodyV2,
+  type ReportDimension,
+  type ReportOperator,
+  type ReportLink,
+  type ReportAgeBand,
   type ReportBody,
   type ReportChoices,
   type ReportRevision,
@@ -195,6 +209,7 @@ export {
   type ReportCurrencyBinding,
 } from './schemas.js';
 export * from './grouped-aggregate.js';
+export * from './grouped-aggregate-v2.js';
 export * from './date-time-field.js';
 export * from './map-view.js';
 export * from './map-viewport.js';

@@ -1,6 +1,7 @@
 import {
   REPORT_EXPORT_PERMISSION,
   reportColumnPermission,
+  reportQueryId,
   type RegisteredReport,
 } from '../../canonical-model/src/declared-report.js';
 import {
@@ -311,6 +312,8 @@ export interface GroupedExecution {
   input: ReportRequest;
   maximumFacts: number;
   filterPlans: readonly QueryFilterLoweringPlan[];
+  /** v2: the issued live narrowing of each declared link target, by index. */
+  linkFilterPlans?: readonly (readonly QueryFilterLoweringPlan[])[];
   scope: LegalEntityReadScope;
   remaining: () => number;
 }
@@ -526,10 +529,32 @@ export class SemanticQueryGateway {
     const scope = await issueLegalEntityReadScope(this.currentPolicy, view, [
       company,
     ]);
+    // v2: every joined target is a dependency. Its list must still be the
+    // registered collection it was compiled against, and the reader needs its
+    // read grant as well as each target field's, even one used only to filter.
+    const linkLists = [];
+    for (const link of report.links ?? []) {
+      const target = registeredQueryFromPinnedView(view, link.queryId);
+      if (
+        !target ||
+        target.queryType !== 'list' ||
+        target.lifecycle !== 'active' ||
+        target.sourceEntityId !== link.entityId ||
+        target.permissionId !== link.readPermissionId ||
+        inspectPredicateForExecution(target.filter).outcome !== 'accepted'
+      )
+        return null;
+      linkLists.push(target);
+    }
     const permissions = [
       QUERY_BOUNDARY_PERMISSION_ID,
       list.permissionId,
       report.queryId,
+      ...linkLists.map((target) => target.permissionId),
+      // A narrowed approved measure withholds every report that binds it.
+      ...(report.measures ?? []).flatMap((m) =>
+        m.approved ? [reportQueryId(m.measureId)] : [],
+      ),
       ...report.columns.map((c) => reportColumnPermission(c.fieldId)),
       ...(exporting ? [REPORT_EXPORT_PERMISSION] : []),
     ];
@@ -560,7 +585,7 @@ export class SemanticQueryGateway {
       )
         return null;
     }
-    return { report, list, args, scope };
+    return { report, list, args, scope, linkLists };
   }
 
   async previewReport(
@@ -603,7 +628,7 @@ export class SemanticQueryGateway {
           );
           if (!authorized || !this.executor?.executeGrouped)
             return { kind: 'unavailable' };
-          const { list, report, scope, args } = authorized;
+          const { list, report, scope, args, linkLists } = authorized;
           remaining();
           if (
             !Number.isSafeInteger(req.pageSize) ||
@@ -628,10 +653,33 @@ export class SemanticQueryGateway {
                 list,
               ),
             );
+          const linkFilterPlans: QueryFilterLoweringPlan[][] = [];
+          for (const target of linkLists) {
+            const plans: QueryFilterLoweringPlan[] = [];
+            if (this.policyNarrowing)
+              plans.push(
+                parsePolicyNarrowing(
+                  await this.policyNarrowing.narrow({
+                    definition: target,
+                    view,
+                    arguments: {
+                      legalEntityId: req.company,
+                      ...(target.legalEntityScope && {
+                        [target.legalEntityScope.operand.parameterId]:
+                          req.company,
+                      }),
+                    },
+                  }),
+                  target,
+                ),
+              );
+            linkFilterPlans.push(plans);
+          }
           return await this.executor.executeGrouped({
             view,
             report,
             input: req,
+            ...(linkLists.length && { linkFilterPlans }),
             maximumFacts: Math.min(
               list.maximumResultCount,
               req.export
