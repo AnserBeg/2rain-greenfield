@@ -1,9 +1,10 @@
 # CUSTOMIZE-6 · Tenant decimal, money, quantity and long-text fields
 
 ## Slice 1 · The in-app AI adds exact numbers, amounts, measures and notes — record
-Status: packet tip ready for review on `packet/CUSTOMIZE-6-s1`. Base `origin/main` d8aad66b3 (TRAIN-L) merged once and the release files were checked rather than hand-merged (`check:app-release` and `check:demo-release` both green: first-party bytes are unchanged). Surface rung LOGICAL_FIELD_READER = 48 is **provisional**. TEMPLATE-1 also holds a provisional 48, so the integrator renumbers. No Critical path or migration is touched. Stops taken: none.
+Status: Fable review FIX applied in the one fix round (rule 14); packet tip ready for review on `packet/CUSTOMIZE-6-s1`. Base `origin/main` d8aad66b3 (TRAIN-L) merged once and the release files were checked rather than hand-merged (`check:app-release` and `check:demo-release` both green: first-party bytes are unchanged). Surface rung LOGICAL_FIELD_READER = 48 is **provisional**. TEMPLATE-1 also holds a provisional 48, so the integrator renumbers. No Critical path or migration is touched. Stops taken: none.
 
 CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/45263789868
+(The cited run was red only at the record's own CI tier check, since this line cannot exist before its run; the fix round's exact full run is in `CUSTOMIZE-6-s1b.result.txt`.)
 
 **Claims.**
 1. `addRecordType` and `addField` gain five field types, each stored as an existing canonical scalar:
@@ -11,25 +12,26 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/45263789
    - `money`: an exact decimal whose scale is the currency's minor unit, plus an entry in the record type's REPORTS-1 `reportSource.amounts` binding. The currency is either fixed (CAD or USD) or stored in a sibling `currency` field (CAD, USD or EUR), named by its ID or its label.
    - `quantity`: `quantityFieldType`, with `baseUnit` pointing to one `capability.unit_<label>` per namespace and one spelling per unit.
    - `longText`: text up to 4000 characters.
-   - `currency`: text(3) with binary collation, searchable (release verification cannot hold a 3-character value out of search; finding records by currency is wanted).
+   - `currency`: text(3), binary collation, searchable, with a generated literal validation (any of CAD, USD, EUR, exact) on its type's create and update, so `GBP` or `cad` is refused on write.
 2. An optional v6 root key, `logicalFields`, declares each field's logical kind. Without it nothing is emitted: no key, no binding, no floor.
 3. The compiler admits every declaration through `deriveLogicalFieldBindings` and projects the active bindings (scale, currency, unit) as `logicalFieldBindings` into the surface manifest. Any declaration, including one on a retired field, raises the surface floor to rung 48.
-4. Serving recomputes the bindings from the pinned revision and refuses in three cases: a disagreement, a binding without a declaration, and a floor that is understated or unexplained. Activation refuses a floor that disagrees with the declaration (`LOGICAL_FIELD_READER_MISMATCH`).
+4. Serving recomputes the bindings from the pinned revision and refuses a disagreement, a binding without a declaration, and an understated or unexplained floor. Activation refuses the same disagreement (`LOGICAL_FIELD_PROJECTION_CONTRACT_MISMATCH`) and a floor that disagrees with the declaration either way (`LOGICAL_FIELD_READER_MISMATCH`).
 5. The web shows:
-   - money with its currency, for example `1,250.00 CAD`, or the record's own stored code;
+   - money with its currency, for example `1,250.00 CAD`, or the record's stored code only when the binding lists it (otherwise `(no listed currency)`);
    - a quantity with its unit, for example `12.5 kg`;
-   - number inputs that step by scale and carry a currency or unit suffix;
-   - long text in a text area that keeps paragraphs intact;
-   - currency as a select of the codes its money fields accept. A code outside that list is flagged as unavailable and is never posted as a different value.
+   - number inputs that step by scale with a currency or unit suffix; a form post is canonicalised (`1250.00` saves as 1250);
+   - long text in a text area with a 4000 maxlength that keeps paragraphs and a leading blank line; CRLF posts as one break;
+   - currency as a select of the codes its binding carries (its money fields' codes, else all stored codes). A code outside that list is flagged unavailable, never re-posted.
+8. The approval text names each field's currency, unit and scale ("Deposit (money in CAD)", "Weight (quantity in kg, 3 decimals)").
 6. Formula validation and calculated displays type tenant money in its fixed currency, so CAD never compares with USD. Stored-currency money is refused because it has no single currency to compare in. Tenant decimals join calculated displays as unitless values.
 7. Built-in record types and line tables refuse the new kinds by name, in both the patch apply and the compiler.
 
 **Rule 12.** The drafter's tool schema carries the `scale`, `currency` and `unit` rules through `.describe()`, generated from the member schema. The guidance names the kinds. AI-BUILD-1 adds four cases: L01 rentals (CAD deposit, 4-decimal rate), L02 shipments (weight in kg), L03 clinic visits (USD fee plus notes, held out), L04 orders (total in a stored currency, held out).
 
-The scorer checks the served logical binding, its currency and its unit, not the scalar alone. No new patch kind, so the drafter-coverage gate is unchanged. No live AI spend.
+The scorer checks the served binding's kind, currency, unit and scale; a scripted L01 run in `test/postgres/build-eval.test.ts` passes a correct draft and fails a USD, two-place draft by name. No new patch kind. No live AI spend.
 
 **Rule 17.**
-- (a) Most general form: a declared logical value kind over an existing stored scalar, which carries its display facts (scale, currency source, unit) to every reader. Money is "an exact amount whose currency is fixed or read from a sibling field". That is the REPORTS-1 currency binding, so the same amount is summed per currency by reports and will serve BILLING s3 advance and arrears amounts and ACCOUNTING without rental-specific code.
+- (a) Most general form: a declared logical value kind over an existing stored scalar, which carries its display facts (scale, currency source, unit) to lists, forms, record pages, reports, formulas, calculated displays and the approval text (the assistant's catalog and the manual Customize builder do not read the bindings yet). Money is "an exact amount whose currency is fixed or read from a sibling field". That is the REPORTS-1 currency binding, so the same amount is summed per currency by reports and will serve BILLING s3 advance and arrears amounts and ACCOUNTING without rental-specific code.
 - (b) Used unchanged by:
   - every tenant record type, with lists, record pages, forms, reports, tone rules, validation rules and calculated displays;
   - rentals (deposit, rate), logistics (weight, volume), clinics (fee, notes), distribution (order total in the customer's currency), field service (hours in h) and hotels (nightly rate).
@@ -38,28 +40,27 @@ The scorer checks the served logical binding, its currency and its unit, not the
   - Line tables: line fields follow the line-table work. BILLING s3 and ACCOUNTING will hit this gap first.
   - Stored currency codes are limited to CAD, USD and EUR, the REPORTS-1 code list.
   - Stored-currency money is not comparable in formulas.
-  - An API write of an unlisted code is not refused on write. It reports as "No currency", which is visible, and the form never offers such a code.
+  - Fixed money is CAD or USD only (the minor-unit registry); EUR is stored-currency only.
+  - Unit labels are ASCII letters, digits, spaces, dots, slashes and hyphens.
+  - Plain tenant decimals cannot be summed in reports (declared reports sum amounts only).
 
-**Controls** (`test/evidence/CUSTOMIZE-6.expected-red.json`). All six were reproduced locally with `check-expected-red.sh --run`, and each reds its own assertion: serving comparator; serving floor; currency collation; compiler tenant check; money currency typing; long-text preservation.
+**Controls** (`test/evidence/CUSTOMIZE-6.expected-red.json`, reproduced with `check-expected-red.sh --run`): twelve reds, each killing its own test with its own message: serving comparator; serving floor; currency collation; compiler tenant check; money currency typing; long-text preservation; currency rule dropped; unlisted code shown; retired amount validated; approval text generic; activation bindings unchecked; activation floor unchecked. The serving loader's call is not pinned by a red: with activation checking the same function, a disagreeing release cannot be stored without breaking content addressing.
 The unit-spelling refusal and every forged-declaration refusal are pinned in `test/unit/logical-field.test.ts`.
 
-**Rule 10 proof.** With the fields active, and again after deposit (money) and weight (quantity) retire, adding a field and relabelling the list both still compile. REPORTS-1 drops a retired amount from the report source, and the logical declaration stays.
+**Rule 10 proof.** Money, its currency's reader and a quantity retire in the base; adding a field and relabelling the list AFTER the retirement still compile. The retired amounts stay in `reportSource.amounts`: report-source validation skips a retired amount field (fix round), and reports offer only live fields. The slice that adds field retirement owns dropping the amount.
 
 **Rule 13 proof.** `test/postgres/logical-fields.test.ts` runs the archived production loader at d8aad66b3 (reader 47):
-- It answers a query before the change.
-- It reproduces a feature-absent recorded chain byte for byte.
-- It refuses the declaring release by name: "requires version 48 and this runtime supports 47".
+- It answers a query before the change, reproduces a feature-absent recorded chain byte for byte, and refuses the declaring release by name: "requires version 48 and this runtime supports 47".
 
 The same test proves:
-- With two companies in one tenant, North's list shows `1,250.00 CAD`, `100.10 CAD` and `12.5 kg` and never South's row.
-- A company-scoped principal sums stored-currency freight per currency (CAD 101, USD 40), and the company check refuses South.
+- With two companies in one tenant, North's list shows `1,250.00 CAD`, `100.10 CAD` and `12.5 kg` and never South's row, also when the narrowed North principal asks for South's list. `GBP` and `cad` writes are refused by the code rule. A typed form post of `1250.00`, `12.500` and `19.90` saves canonical values and keeps a note's leading blank line.
+- A company-scoped principal sums stored-currency freight per currency as decimal text (CAD `101.00`, USD `59.90`); South returns `{kind: 'unavailable'}`.
+
+**Follow-ups.** Tenant logical fields on line tables (BILLING s3); the release-verification search-exclusion probe misfires for tenant text of max length about 3 or less (`release-verification-service.ts`, Critical); retire `catalogCurrencyByField` in favour of declared money; teach the assistant catalog and the manual Customize builder the new kinds.
 
 **Test it yourself (under ten minutes).** `corepack pnpm dev`, sign in as manager, open **Customize**, and ask the assistant: *"Track shipments with a name, gross weight in kg to three decimals, the currency the customer pays in, the freight in that currency, a CAD deposit and delivery notes."*
 1. Approve and activate the change.
-2. Add a shipment:
-   - Weight `12.5` shows `kg` beside the input, which steps by 0.001.
-   - Currency is a CAD, USD or EUR select.
-   - Notes is a text area. Enter two lines.
+2. Add a shipment: Weight `12.5` shows `kg` and steps by 0.001; Currency is a CAD, USD or EUR select; Notes is a text area (enter two lines).
 3. Save. The list reads `12.5 kg`, `1,250.00 CAD`, and the freight in the chosen currency.
 4. Reopen the record. Both lines of the notes are still there.
 
