@@ -192,7 +192,11 @@ test(
             compatibleId: compatible.releaseId,
             compatiblePatch: appointmentType,
             queryId: `${NS}:query.custom_appointment_get`,
-            args: { recordId: early },
+            args: {
+              recordId: early,
+              [`${NS}:parameter.custom_appointment_get_legal_entity_scope`]:
+                COMPANY,
+            },
             recordId: early,
             declare: async () => {
               const workflowDraft = await service.draft(
@@ -385,25 +389,24 @@ test(
             companyOwnership: 'entityOwned',
             fields: [{ label: 'Name', type: 'text' }],
           });
+          const link = (label: string, target: string) => ({
+            kind: 'addLink',
+            entity: followUp,
+            label,
+            target,
+            required: false,
+          });
+          // Links are added with their record types, in one change.
           const approval = await activate({
             kind: 'changeSet',
             patches: [
               typed('Appointment'),
               typed('Follow-up'),
               typed('Clinic note'),
+              link('Appointment', appointment),
+              link('Note', note),
             ],
           });
-          for (const [label, target] of [
-            ['Appointment', appointment],
-            ['Note', note],
-          ] as const)
-            await activate({
-              kind: 'addLink',
-              entity: followUp,
-              label,
-              target,
-              required: false,
-            });
           const approver = (
             await pool.query<{ approving_human_id: string }>(
               `SELECT approving_human_id FROM platform.release_approvals
