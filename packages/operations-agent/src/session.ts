@@ -1958,16 +1958,17 @@ export class OperationsAgentSession {
     // an edit that depends on it asks.
     for (const parent of parents.slice(0, 1)) {
       const parentId = record.relationLabels?.[parent.relationId]?.recordId;
-      const parentRecord = parentId
-        ? await readRecord(
-            this.#options.runtime,
-            view,
-            catalog,
-            parent.queryId,
-            parentId,
-            this.#options.companyId,
-          )
-        : null;
+      const parentRecord =
+        parentId && parent.queryId
+          ? await readRecord(
+              this.#options.runtime,
+              view,
+              catalog,
+              parent.queryId,
+              parentId,
+              this.#options.companyId,
+            )
+          : null;
       parentStates.set(parent.relationId, parentRecord?.values ?? null);
     }
     const evaluation = evaluateRegisteredOperationPrecondition(

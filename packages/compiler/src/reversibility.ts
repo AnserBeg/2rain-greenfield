@@ -168,10 +168,35 @@ export function deriveReversibility(
     fieldsRead(operation.precondition, gates);
   // A consumer may name a field as a reference node or as a plain id (a
   // workflow's bindings), so any string equal to a field id counts.
+  // A consumer may also name a query it is granted (a workflow reads through
+  // its granted queries, a billing plan binds one): every field that query
+  // names (selects, filters, sorts or reads) counts as read by the consumer.
+  const queries = new Map(
+    (Array.isArray(release.queries)
+      ? (release.queries as readonly { readonly queryId?: unknown }[])
+      : []
+    ).flatMap((query) =>
+      typeof query.queryId === 'string'
+        ? [[query.queryId, query] as const]
+        : [],
+    ),
+  );
   const consumed = new Set<string>();
+  const namedFields = (tree: unknown): void => {
+    if (typeof tree === 'string') {
+      if (fields.has(tree)) consumed.add(tree);
+    } else if (Array.isArray(tree)) for (const item of tree) namedFields(item);
+    else if (tree && typeof tree === 'object')
+      for (const value of Object.values(tree)) namedFields(value);
+  };
+  const expanded = new Set<string>();
   const collect = (tree: unknown): void => {
     if (typeof tree === 'string') {
       if (fields.has(tree)) consumed.add(tree);
+      else if (queries.has(tree) && !expanded.has(tree)) {
+        expanded.add(tree);
+        namedFields(queries.get(tree));
+      }
     } else if (Array.isArray(tree)) for (const item of tree) collect(item);
     else if (tree && typeof tree === 'object')
       for (const value of Object.values(tree)) collect(value);
@@ -287,9 +312,19 @@ export function deriveReversibility(
         const query =
           firstOf(parent, 'updateRecordEffect')?.readBackQueryId ??
           firstOf(parent, 'createRecordEffect')?.readBackQueryId;
-        return condition && query
-          ? [{ ...condition, relationId: relation.relationId, queryId: query }]
-          : [];
+        if (!condition) return [];
+        // A parent with a lifecycle but no read-back query cannot be read, so
+        // the class holds in no parent state (the reader asks).
+        return [
+          query
+            ? { ...condition, relationId: relation.relationId, queryId: query }
+            : {
+                ...condition,
+                stateIds: [],
+                stateLabels: [],
+                relationId: relation.relationId,
+              },
+        ];
       })
       .sort((a, b) =>
         a.relationId < b.relationId ? -1 : a.relationId > b.relationId ? 1 : 0,

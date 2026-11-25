@@ -17,6 +17,7 @@ import {
   compileApplicationRelease,
   expectedActiveReleaseFrom,
   type CompileSuccess,
+  type CompilerSemanticProfileVersion,
 } from '../../packages/compiler/src/index.js';
 import type {
   ImmutableJsonValue,
@@ -93,6 +94,53 @@ export function compiledAppView(
   return { ...loaded, principalId } as RequestRuntimeView;
 }
 
+/**
+ * The checked-in first-party head recompiled under an explicit
+ * compiler-semantic profile, against the checked-in bootstrap. Nothing it
+ * produces is recorded.
+ */
+export function compileHeadAt(
+  compilerSemanticProfileVersion: CompilerSemanticProfileVersion,
+): {
+  file: unknown;
+  normalizedDefinitionBytes: Uint8Array;
+  result: CompileSuccess;
+} {
+  const file = JSON.parse(
+    readFileSync(resolve('apps/web/release/app.compiled.json'), 'utf8'),
+  ) as unknown;
+  const parsed = parseCompiledApplication(file);
+  const head = parsed.applications.at(-1)!;
+  const normalizedDefinitionBytes = head.normalizedDefinitionBytes;
+  const definition = parseNormalizedApplicationPackageJson(
+    normalizedDefinitionBytes,
+  );
+  const result = compileApplicationRelease(
+    {
+      dependencies: [],
+      expectedActiveRelease: expectedActiveReleaseFrom(
+        parsed.bootstrap.compiled,
+      ),
+      kind: 'compilerInput',
+      limits: { ...DEFAULT_COMPILER_LIMITS },
+      normalizedDefinitionBytes,
+      profile: {
+        ...MODULE_COMPILER_PROFILE,
+        compilerSemanticProfileVersion,
+        languageVersion: definition.languageVersion,
+        normalizationProfileVersion: definition.normalizationProfileVersion,
+      },
+    },
+    readUnboundPermissionAcknowledgementFor(
+      'apps/web/release/app.authored.json',
+      definition.package.packageId,
+    ),
+  );
+  if (result.status !== 'compiled')
+    throw new Error(JSON.stringify(result.diagnostics));
+  return { file, normalizedDefinitionBytes, result };
+}
+
 let loadedV3:
   | {
       view: RequestRuntimeView;
@@ -114,38 +162,9 @@ export function compiledAppViewV3(principalId = 'test-principal'): {
   envelope: Record<string, unknown>;
 } {
   if (!loadedV3) {
-    const file = JSON.parse(
-      readFileSync(resolve('apps/web/release/app.compiled.json'), 'utf8'),
-    ) as unknown;
-    const parsed = parseCompiledApplication(file);
-    const head = parsed.applications.at(-1)!;
-    const normalizedDefinitionBytes = head.normalizedDefinitionBytes;
-    const definition = parseNormalizedApplicationPackageJson(
-      normalizedDefinitionBytes,
+    const { file, normalizedDefinitionBytes, result } = compileHeadAt(
+      COMPILER_SEMANTIC_PROFILE_V3_VERSION,
     );
-    const result = compileApplicationRelease(
-      {
-        dependencies: [],
-        expectedActiveRelease: expectedActiveReleaseFrom(
-          parsed.bootstrap.compiled,
-        ),
-        kind: 'compilerInput',
-        limits: { ...DEFAULT_COMPILER_LIMITS },
-        normalizedDefinitionBytes,
-        profile: {
-          ...MODULE_COMPILER_PROFILE,
-          compilerSemanticProfileVersion: COMPILER_SEMANTIC_PROFILE_V3_VERSION,
-          languageVersion: definition.languageVersion,
-          normalizationProfileVersion: definition.normalizationProfileVersion,
-        },
-      },
-      readUnboundPermissionAcknowledgementFor(
-        'apps/web/release/app.authored.json',
-        definition.package.packageId,
-      ),
-    );
-    if (result.status !== 'compiled')
-      throw new Error(JSON.stringify(result.diagnostics));
     const artifacts = new Map(
       result.bundle.artifacts.map((artifact) => [
         artifact.contentHash,

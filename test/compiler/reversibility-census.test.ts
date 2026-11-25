@@ -16,7 +16,12 @@ import {
   deriveReversibility,
   type ReversibilitySource,
 } from '../../packages/compiler/src/reversibility.js';
-import { compiledAppView, compiledAppViewV3 } from '../agent/compiled-view.js';
+import {
+  compileHeadAt,
+  compiledAppView,
+  compiledAppViewV3,
+} from '../agent/compiled-view.js';
+import { WorkflowDefinitionSchema } from '../../packages/canonical-model/src/schemas.js';
 import {
   ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
   COMPILER_SEMANTIC_PROFILE_V2_VERSION,
@@ -26,7 +31,12 @@ import { PASSIVE_RELEASE_MEMBERS } from '../../packages/compiler/src/reversibili
 
 const NS = 'northstar.app';
 
-function firstPartyDeclaration(extra: Record<string, unknown> = {}) {
+function firstPartyDeclaration(
+  extra: Record<string, unknown> = {},
+  editOperations: (
+    operations: Parameters<typeof deriveReversibility>[0],
+  ) => Parameters<typeof deriveReversibility>[0] = (operations) => operations,
+) {
   const view = compiledAppView();
   const release = {
     ...normalizeApplicationPackage(
@@ -38,11 +48,13 @@ function firstPartyDeclaration(extra: Record<string, unknown> = {}) {
     confirmationRequiredFor?: string[];
   };
   return deriveReversibility(
-    (
-      view.projections.operation.payload as unknown as {
-        operations: Parameters<typeof deriveReversibility>[0];
-      }
-    ).operations,
+    editOperations(
+      (
+        view.projections.operation.payload as unknown as {
+          operations: Parameters<typeof deriveReversibility>[0];
+        }
+      ).operations,
+    ),
     release as unknown as ReversibilitySource,
     new Set(agent.confirmationRequiredFor ?? []),
   );
@@ -112,7 +124,7 @@ test('the lifecycle an edit depends on comes from the release, not from a name',
   assert.equal(state('party_update'), '');
 });
 
-test('a field a workflow, rule or calculated field reads is consumed, so it is not record-only', () => {
+test('a field a rule or calculated field reads is consumed, so it is not record-only', () => {
   const name = `${NS}:field.party_name`;
   const summary = `${NS}:field.party_contact_summary`;
   const classOf = (
@@ -124,8 +136,6 @@ test('a field a workflow, rule or calculated field reads is consumed, so it is n
       .fields!.find((field) => field.fieldId === id)!;
   assert.equal(classOf(firstPartyDeclaration(), name).reach, 'record');
   for (const extra of [
-    // A workflow names the field as a plain id in its bindings.
-    { workflows: [{ trigger: { watch: [name] } }] },
     // A rule or calculated field names it as a reference.
     { formulaRules: [{ reads: { kind: 'fieldReference', targetId: name } }] },
     {
@@ -254,6 +264,93 @@ test('every release member not known to be passive is a consumer, including one 
   assert.equal(
     classOf(firstPartyDeclaration({ mapPlacements: [{ label: name }] })).reach,
     'record',
+  );
+});
+
+test('a workflow reads through its granted queries: every field a granted query names is consumed', () => {
+  // A schema-valid release workflow: it names operations and queries, never
+  // fields, and its body reads through the queries it is granted.
+  const workflow = WorkflowDefinitionSchema.parse({
+    schemaVersion: 'v6',
+    workflowId: 'after-receipt',
+    trigger: 'goodsReceiptPosted',
+    bodyDigest: 'a'.repeat(64),
+    grants: { operations: [], queries: [`${NS}:query.party_get`] },
+  });
+  const declaration = firstPartyDeclaration({ workflows: [workflow] });
+  const classOf = (operation: string, field: string) =>
+    declaration.operations
+      .find((entry) => entry.operationId === `${NS}:operation.${operation}`)!
+      .fields!.find((entry) => entry.fieldId === `${NS}:field.${field}`)!;
+  assert.equal(classOf('party_update', 'party_name').reach, 'internal');
+  assert.ok(
+    classOf('party_update', 'party_name').because.includes('readByConsumer'),
+  );
+  // A field of a type no granted query reads stays record-only.
+  assert.equal(classOf('item_update', 'item_name').reach, 'record');
+  assert.equal(
+    firstPartyDeclaration()
+      .operations.find(
+        (entry) => entry.operationId === `${NS}:operation.party_update`,
+      )!
+      .fields!.find((entry) => entry.fieldId === `${NS}:field.party_name`)!
+      .reach,
+    'record',
+  );
+});
+
+test('a parent with a lifecycle but no read-back query holds in no state', () => {
+  const parent = `${NS}:entity.stock_count`;
+  const declaration = firstPartyDeclaration({}, (operations) =>
+    operations.map((operation) =>
+      operation.effect.entity?.targetId === parent &&
+      (operation.effect.kind === 'updateRecordEffect' ||
+        operation.effect.kind === 'createRecordEffect')
+        ? (() => {
+            const { readBackQueryId: _dropped, ...rest } = operation;
+            void _dropped;
+            return rest;
+          })()
+        : operation,
+    ),
+  );
+  const line = declaration.operations.find(
+    (entry) => entry.operationId === `${NS}:operation.stock_count_line_update`,
+  )!;
+  assert.deepEqual(line.holdsWhile?.parents, [
+    {
+      relationId: `${NS}:relation.stock_count_line_session`,
+      stateFieldId: `${NS}:field.stock_count_state`,
+      stateIds: [],
+      stateLabels: [],
+    },
+  ]);
+  assert.deepEqual(parseReversibilityDeclaration(declaration), declaration);
+});
+
+test('the head compiled under the adopted v2 profile carries no declaration', () => {
+  const { result } = compileHeadAt(COMPILER_SEMANTIC_PROFILE_V2_VERSION);
+  const reference = result.bundle.releaseManifest.projections.find(
+    (projection) =>
+      projection.familyId ===
+      'northstar.compiler:projection-family.agent-discovery',
+  )!;
+  const decode = (hash: string) =>
+    JSON.parse(
+      new TextDecoder().decode(
+        result.bundle.artifacts.find((a) => a.contentHash === hash)!
+          .canonicalBytes,
+      ),
+    ) as Record<string, unknown>;
+  const payload = decode(
+    (decode(reference.artifactRoot) as { chunks: { contentHash: string }[] })
+      .chunks[0]!.contentHash,
+  );
+  assert.ok(!Object.hasOwn(payload, 'reversibility'));
+  assert.equal(
+    (reference.requiredRuntimeCapability as { minimumVersion: number })
+      .minimumVersion,
+    2,
   );
 });
 

@@ -83,8 +83,11 @@ export interface LifecycleCondition {
 export interface ParentLifecycleCondition extends LifecycleCondition {
   /** The parent-scoped child relation that names the parent. */
   readonly relationId: string;
-  /** The query that reads the parent. */
-  readonly queryId: string;
+  /**
+   * The query that reads the parent. Absent when the parent has none; the
+   * condition then names no state, so the reader asks.
+   */
+  readonly queryId?: string;
 }
 
 export interface OperationReversibility extends ReversibilityClass {
@@ -160,7 +163,7 @@ const declarationSchema = z.strictObject({
               z.strictObject({
                 ...lifecycleCondition,
                 relationId: z.string().min(1),
-                queryId: z.string().min(1),
+                queryId: z.string().min(1).optional(),
               }),
             )
             .optional(),

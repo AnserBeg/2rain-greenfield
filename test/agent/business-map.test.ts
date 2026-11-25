@@ -2329,6 +2329,57 @@ test("AI-UNDO-1 second application: a record type no capability owns follows its
   );
 });
 
+test('AI-UNDO-1: an unowned field without an exact value inverse asks, and so does a declaration this reader cannot parse', async () => {
+  const item = { [`${CLINIC}:field.item_name`]: 'Old' };
+  const noInverse = (emitted: ReversibilityDeclaration) => ({
+    ...emitted,
+    operations: emitted.operations.map((operation) =>
+      operation.operationId !== `${CLINIC}:operation.item_update`
+        ? operation
+        : {
+            ...operation,
+            fields: (operation.fields ?? []).map((field) =>
+              field.fieldId !== `${CLINIC}:field.item_name`
+                ? field
+                : {
+                    ...field,
+                    undo: 'none' as const,
+                    inverse: 'none' as const,
+                    reach: 'record' as const,
+                  },
+            ),
+          },
+    ),
+  });
+  assert.equal(
+    await clinicClass(
+      CLINIC_EDITS,
+      'item_update',
+      { name: 'Gauze' },
+      item,
+      undefined,
+      clinicView(noInverse),
+    ),
+    'needsYes',
+  );
+  const unreadable = (emitted: ReversibilityDeclaration) =>
+    ({
+      ...emitted,
+      schemaVersion: 'northstar.reversibility-declaration/v9',
+    }) as unknown as ReversibilityDeclaration;
+  assert.equal(
+    await clinicClass(
+      CLINIC_EDITS,
+      'item_update',
+      { name: 'Gauze' },
+      item,
+      undefined,
+      clinicView(unreadable),
+    ),
+    'needsYes',
+  );
+});
+
 test('AI-UNDO-1 second application: an unowned line follows the compiled parent condition', async () => {
   // Only the patient type is owned here, so the visit-check line follows the
   // release's own declaration, whose parent condition is the check's draft.
