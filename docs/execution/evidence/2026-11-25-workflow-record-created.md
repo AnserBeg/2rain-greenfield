@@ -15,11 +15,13 @@ Branch `packet/WORKFLOW-2-s4b` from main `20762dbc`. Pre-tenant. Provisional mig
 
 - (a) Most general form: a durable, transaction-bound fact "a record of type T was created in company C by command E", for every company-owned record type, first-party or tenant; `recordCreated` is one consumer of it. (b) Unchanged users: clinics (appointments), schools (absences), distributors (deliveries, stock-count lines, receipts), field service (jobs), rentals (contracts). Any later consumer (reminders, audit feeds, integrations) can read the same occurrences. (c) Narrower on purpose: only governed writers record occurrences, because a creation without a trust event is not an ADR-0073 source; shared masters without one owning company cannot trigger, because a run needs a company scope.
 
-## Controls (commit before each)
+## Controls (run after commit `7ecb9af4`, each restored)
 
-- Removing `set_config('north_star.creation_action', …)` from the trust service leaves the clinic journey with no occurrence and no start.
-- Restoring the old unconditional (event, workflow) key reds the start-key test.
-- Dropping the record-type branch from the definition digest or the approval binding reds the journey's binding assertion.
+- Restoring the unconditional (event, workflow) start key reds the start-key test alone.
+- Dropping `record_type` from the definition digest reds its digest assertion alone.
+- Removing the deferred seal key lets an unsealed occurrence commit: the "missing expected rejection" red.
+- Emptying `WORKFLOW_TRIGGER_CASES` reds the fail-closed member coverage test.
+- Not run locally: the clinic journey (seeding the composed application alone exceeded 12 minutes on this laptop). It runs in CI shard postgres-3.
 
 ## Stays narrow, and owed
 

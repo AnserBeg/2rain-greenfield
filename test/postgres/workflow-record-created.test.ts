@@ -93,7 +93,7 @@ test(
           assert.ok(typeDraft.status === 'drafted', JSON.stringify(typeDraft));
           const approval = await service.approve(typeDraft.patchId);
           await service.activate(typeDraft.patchId);
-            const approver = (
+          const approver = (
             await pool.query<{ approving_human_id: string }>(
               `SELECT approving_human_id FROM platform.release_approvals
                 WHERE tenant_id = $1 AND environment_id = $2 AND activation_attempt_id = $3`,
@@ -130,13 +130,13 @@ test(
           };
           // Committed before any workflow subscribes: never fires later.
           const early = await book(COMPANY, 'Booked before the workflow');
-  
+
           const gateways = new PostgresWorkflowGateway(
             runtimePool,
             INVENTORY_WRITE_INVARIANTS,
           );
           const view = await gateways.loadView(operator);
-            const grants = { queries: [], operations: [] };
+          const grants = { queries: [], operations: [] };
           const sdk = generateWorkflowSdk(
             view,
             grants,
@@ -200,7 +200,7 @@ test(
             workflowDraft.workflowReviewDigest,
           );
           await service.activate(workflowDraft.patchId);
-            assert.deepEqual(
+          assert.deepEqual(
             (
               await pool.query<{ binding: unknown }>(
                 `SELECT w.definition_bindings->'appointment-follow-up'->'recordType' AS binding
@@ -220,9 +220,9 @@ test(
 
           const home = await book(COMPANY, 'Check-up');
           const away = await book(otherCompany, 'Follow-up visit');
-            const consumer = new PostgresWorkflowConsumer(workerPool);
+          const consumer = new PostgresWorkflowConsumer(workerPool);
           assert.equal(await consumer.claim(scope), 2);
-            assert.equal(
+          assert.equal(
             await consumer.claim(scope),
             0,
             'a repeated poll starts no second run',
