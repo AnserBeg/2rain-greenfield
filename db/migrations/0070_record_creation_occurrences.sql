@@ -425,26 +425,15 @@ CREATE OR REPLACE FUNCTION platform.workflow_approval_worklist(requested_run uui
 RETURNS TABLE (run_id uuid, cursor integer, fence bigint, plan bytea, plan_digest text, company_id uuid)
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp
 AS $$
-  SELECT a.run_id, a.cursor, a.fence, a.plan, a.plan_digest, target_scope.company_id
-    FROM platform.workflow_pending_approvals AS a
-    JOIN platform.workflow_runs AS r USING (tenant_id, environment_id, run_id)
-    JOIN platform.workflow_definitions AS d USING (tenant_id, environment_id, release_id, workflow_id)
-    JOIN platform.workflow_instances AS i USING (tenant_id, environment_id, instance_id, workflow_id)
-    JOIN platform.active_release_pointers AS p
-      ON (p.tenant_id, p.environment_id, p.pointer_id, p.fence, p.release_id) =
-         (r.tenant_id, r.environment_id, r.pointer_id, r.execution_fence, r.release_id)
-    JOIN platform.workflow_activation_watermarks AS w
-      ON (w.tenant_id, w.environment_id, w.pointer_id, w.fence, w.release_id, w.release_root) =
-         (r.tenant_id, r.environment_id, r.pointer_id, r.execution_fence, r.release_id, r.release_root)
-    JOIN platform.workflow_activation_watermarks AS initial
-      ON (initial.tenant_id, initial.environment_id, initial.pointer_id, initial.fence, initial.release_id, initial.release_root) =
-         (r.tenant_id, r.environment_id, r.pointer_id, r.initial_fence, r.release_id, r.release_root)
-    JOIN platform.workflow_journal AS j
-      ON (j.tenant_id, j.environment_id, j.run_id, j.cursor) =
-         (a.tenant_id, a.environment_id, a.run_id, a.cursor)
-    -- The trigger source names the company: the receipt event chain, or, for a
-    -- creation instance, the verified occurrence chain (ADR-0073 A1).
-    JOIN LATERAL (
+  -- Resolve each pending approval's trigger company once, over the pending set
+  -- only, before the catalog and permission joins multiply the rows.
+  WITH source_scope AS MATERIALIZED (
+    SELECT a.run_id, a.cursor, source.company
+      FROM platform.workflow_pending_approvals AS a
+      JOIN platform.workflow_runs AS r USING (tenant_id, environment_id, run_id)
+      JOIN platform.workflow_definitions AS d USING (tenant_id, environment_id, release_id, workflow_id)
+      JOIN platform.workflow_instances AS i USING (tenant_id, environment_id, instance_id, workflow_id)
+      JOIN LATERAL (
       SELECT event.payload #>> '{legalEntityId,value}' AS company
         FROM platform.trust_domain_events AS event
         JOIN platform.trust_outbox AS source
@@ -476,11 +465,36 @@ AS $$
          AND event.payload #>> '{legalEntityId,representation}' = 'VALUE'
       UNION ALL
       SELECT created.legal_entity_id::text
-        FROM platform.workflow_record_trigger_scope(i.instance_id) AS created
+        FROM platform.workflow_record_trigger_scope(
+          CASE WHEN i.creation_occurrence_id IS NOT NULL THEN i.instance_id END) AS created
        WHERE i.creation_occurrence_id IS NOT NULL
          AND (created.release_id, created.release_content_hash, created.record_type) =
              (r.release_id, r.release_root, d.record_type)
-    ) AS source_scope ON true
+      ) AS source ON true
+     WHERE a.tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
+       AND a.environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid
+       AND (requested_run IS NULL OR a.run_id = requested_run)
+       AND a.status = 'PENDING'
+  )
+  SELECT a.run_id, a.cursor, a.fence, a.plan, a.plan_digest, target_scope.company_id
+    FROM platform.workflow_pending_approvals AS a
+    JOIN platform.workflow_runs AS r USING (tenant_id, environment_id, run_id)
+    JOIN platform.workflow_definitions AS d USING (tenant_id, environment_id, release_id, workflow_id)
+    JOIN platform.workflow_instances AS i USING (tenant_id, environment_id, instance_id, workflow_id)
+    JOIN platform.active_release_pointers AS p
+      ON (p.tenant_id, p.environment_id, p.pointer_id, p.fence, p.release_id) =
+         (r.tenant_id, r.environment_id, r.pointer_id, r.execution_fence, r.release_id)
+    JOIN platform.workflow_activation_watermarks AS w
+      ON (w.tenant_id, w.environment_id, w.pointer_id, w.fence, w.release_id, w.release_root) =
+         (r.tenant_id, r.environment_id, r.pointer_id, r.execution_fence, r.release_id, r.release_root)
+    JOIN platform.workflow_activation_watermarks AS initial
+      ON (initial.tenant_id, initial.environment_id, initial.pointer_id, initial.fence, initial.release_id, initial.release_root) =
+         (r.tenant_id, r.environment_id, r.pointer_id, r.initial_fence, r.release_id, r.release_root)
+    JOIN platform.workflow_journal AS j
+      ON (j.tenant_id, j.environment_id, j.run_id, j.cursor) =
+         (a.tenant_id, a.environment_id, a.run_id, a.cursor)
+    JOIN source_scope
+      ON (source_scope.run_id, source_scope.cursor) = (a.run_id, a.cursor)
     JOIN platform.tenant_releases AS release
       ON (release.tenant_id, release.environment_id, release.release_id, release.content_hash) =
          (r.tenant_id, r.environment_id, r.release_id, r.release_root)
@@ -602,7 +616,8 @@ RETURNS jsonb LANGUAGE sql STABLE SET search_path = pg_catalog, pg_temp AS $$
        AND invocation.policy_inputs #>> '{legalEntityId,representation}'='VALUE'
        AND invocation.policy_inputs #>> '{legalEntityId,value}'=event.payload #>> '{legalEntityId,value}'
     UNION ALL
-    SELECT created.legal_entity_id::text FROM platform.workflow_record_trigger_scope(i.instance_id) created
+    SELECT created.legal_entity_id::text FROM platform.workflow_record_trigger_scope(
+      CASE WHEN i.creation_occurrence_id IS NOT NULL THEN i.instance_id END) created
      WHERE i.creation_occurrence_id IS NOT NULL
        AND (created.release_id,created.release_content_hash,created.record_type)=(r.release_id,r.release_root,d.record_type)
   ) source_scope ON true
