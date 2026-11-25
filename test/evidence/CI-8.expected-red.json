@@ -106,7 +106,7 @@
         {
           "file": "test/architecture/test-reachability.test.ts",
           "name": "the ledger gives a helper module's nested passes to the test file that ran them (CI-8)",
-          "expected": ""
+          "expected": "TBD"
         }
       ]
     },
@@ -124,7 +124,7 @@
         {
           "file": "test/architecture/test-reachability.test.ts",
           "name": "the ledger gives a helper module's nested passes to the test file that ran them (CI-8)",
-          "expected": ""
+          "expected": "TBD"
         }
       ]
     },
@@ -142,7 +142,7 @@
         {
           "file": "test/architecture/ci-tiers.test.ts",
           "name": "a pending CI tier marker is accepted on a packet branch only (CI-8)",
-          "expected": ""
+          "expected": "TBD"
         }
       ]
     },
@@ -160,7 +160,7 @@
         {
           "file": "test/architecture/ci-tiers.test.ts",
           "name": "a pending CI tier marker is accepted on a packet branch only (CI-8)",
-          "expected": ""
+          "expected": "TBD"
         }
       ]
     },
@@ -178,7 +178,7 @@
         {
           "file": "test/architecture/ci-tiers.test.ts",
           "name": "a pending CI tier marker is accepted on a packet branch only (CI-8)",
-          "expected": ""
+          "expected": "TBD"
         }
       ]
     },
@@ -196,7 +196,7 @@
         {
           "file": "test/architecture/ci-tiers.test.ts",
           "name": "a pending CI tier marker is accepted on a packet branch only (CI-8)",
-          "expected": ""
+          "expected": "TBD"
         }
       ]
     },
@@ -214,7 +214,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "a migration without its schema snapshot is named, with the regeneration command",
-          "expected": ""
+          "expected": "TBD"
         }
       ]
     },
@@ -232,7 +232,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "a release or migration change without the replay snapshot warns with the regeneration command",
-          "expected": ""
+          "expected": "TBD"
         }
       ]
     },
@@ -250,7 +250,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "the schema-snapshot step fails on a migration alone and only warns on a release alone",
-          "expected": ""
+          "expected": "TBD"
         }
       ]
     },
@@ -268,7 +268,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "failing test names are read from TAP output",
-          "expected": ""
+          "expected": "TBD"
         }
       ]
     },
@@ -286,7 +286,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "preflight runs every check the lanes keep failing on, each with a remedy",
-          "expected": ""
+          "expected": "TBD"
         }
       ]
     },
@@ -304,7 +304,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "a changed file list that holds nothing formattable skips format and lint",
-          "expected": ""
+          "expected": "TBD"
         }
       ]
     },
@@ -322,7 +322,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "preflight runs every check the lanes keep failing on, each with a remedy",
-          "expected": ""
+          "expected": "TBD"
         }
       ]
     },
@@ -340,7 +340,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "preflight runs every check the lanes keep failing on, each with a remedy",
-          "expected": ""
+          "expected": "TBD"
         }
       ]
     },
@@ -358,7 +358,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "preflight runs every check the lanes keep failing on, each with a remedy",
-          "expected": ""
+          "expected": "TBD"
         }
       ]
     },
@@ -376,7 +376,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "preflight runs every check the lanes keep failing on, each with a remedy",
-          "expected": ""
+          "expected": "TBD"
         }
       ]
     },
@@ -394,7 +394,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "preflight runs every check the lanes keep failing on, each with a remedy",
-          "expected": ""
+          "expected": "TBD"
         }
       ]
     },
@@ -412,7 +412,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "preflight runs every check the lanes keep failing on, each with a remedy",
-          "expected": ""
+          "expected": "TBD"
         }
       ]
     },
@@ -430,7 +430,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "preflight runs every check the lanes keep failing on, each with a remedy",
-          "expected": ""
+          "expected": "TBD"
         }
       ]
     },
@@ -448,7 +448,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "preflight runs every check the lanes keep failing on, each with a remedy",
-          "expected": ""
+          "expected": "TBD"
         }
       ]
     },
@@ -466,7 +466,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "preflight runs every check the lanes keep failing on, each with a remedy",
-          "expected": ""
+          "expected": "TBD"
         }
       ]
     },
@@ -484,7 +484,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "preflight runs every check the lanes keep failing on, each with a remedy",
-          "expected": ""
+          "expected": "TBD"
         }
       ]
     },
@@ -502,7 +502,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "a stale language-coverage digest, decision or observation snapshot is named, each alone",
-          "expected": ""
+          "expected": "TBD"
         }
       ]
     },
@@ -520,7 +520,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "a stale language-coverage digest, decision or observation snapshot is named, each alone",
-          "expected": ""
+          "expected": "TBD"
         }
       ]
     },
@@ -538,7 +538,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "a stale language-coverage digest, decision or observation snapshot is named, each alone",
-          "expected": ""
+          "expected": "TBD"
         }
       ]
     }
