@@ -1,0 +1,546 @@
+{
+  "version": 1,
+  "packet": "CI-8",
+  "entries": [
+    {
+      "name": "ci8-control-checkout-shallow",
+      "claim": "Every control checkout fetches the whole history, so tests that read git history do not fail as an empty run.",
+      "file": ".github/workflows/evidence.yml",
+      "original": "          ref: ${{ needs.select-controls.outputs.head_sha }}\n          fetch-depth: 0",
+      "replacement": "          ref: ${{ needs.select-controls.outputs.head_sha }}\n          fetch-depth: 1",
+      "test": {
+        "files": ["test/architecture/evidence-on-demand.test.ts"],
+        "namePattern": "the evidence workflow is label-gated, read-only and pinned"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/evidence-on-demand.test.ts",
+          "name": "the evidence workflow is label-gated, read-only and pinned",
+          "expected": "the control checkout must use fetch-depth: 0 for every control"
+        }
+      ]
+    },
+    {
+      "name": "ci8-control-checkout-by-name",
+      "claim": "The control checkout depth does not depend on the control name.",
+      "file": ".github/workflows/evidence.yml",
+      "original": "          ref: ${{ needs.select-controls.outputs.head_sha }}\n          fetch-depth: 0",
+      "replacement": "          ref: ${{ needs.select-controls.outputs.head_sha }}\n          fetch-depth: ${{ matrix.control == 'x' && 0 || 1 }}",
+      "test": {
+        "files": ["test/architecture/evidence-on-demand.test.ts"],
+        "namePattern": "the evidence workflow is label-gated, read-only and pinned"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/evidence-on-demand.test.ts",
+          "name": "the evidence workflow is label-gated, read-only and pinned",
+          "expected": "the control checkout must use fetch-depth: 0 for every control"
+        }
+      ]
+    },
+    {
+      "name": "ci8-dispatch-wording-summary",
+      "claim": "The select summary says a dispatch input can name the controls.",
+      "file": "scripts/expected-red-on-demand.mjs",
+      "original": "(or the dispatch's controls input), at",
+      "replacement": "), at",
+      "test": {
+        "files": ["test/architecture/evidence-on-demand.test.ts"],
+        "namePattern": "the select summary and the empty-selection notice name a dispatch as well as the body"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/evidence-on-demand.test.ts",
+          "name": "the select summary and the empty-selection notice name a dispatch as well as the body",
+          "expected": "Named by the"
+        }
+      ]
+    },
+    {
+      "name": "ci8-dispatch-wording-notice",
+      "claim": "The empty-selection notice tells a dispatcher how to name controls again.",
+      "file": "scripts/expected-red-on-demand.mjs",
+      "original": "or dispatch again with `-f controls=\"<name> <name>\"`",
+      "replacement": "and re-add the label",
+      "test": {
+        "files": ["test/architecture/evidence-on-demand.test.ts"],
+        "namePattern": "the select summary and the empty-selection notice name a dispatch as well as the body"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/evidence-on-demand.test.ts",
+          "name": "the select summary and the empty-selection notice name a dispatch as well as the body",
+          "expected": "or dispatch again with"
+        }
+      ]
+    },
+    {
+      "name": "ci8-reporter-helper-not-credited",
+      "claim": "A nested result reported under a helper module is credited to the test file whose summary follows it, so the evidence counts what Node counts.",
+      "file": "test/helpers/node-reporter-core.mjs",
+      "original": "if (owner !== undefined) owned.push({ ...record, file: owner });",
+      "replacement": "if (owner === undefined) owned.push({ ...record, file: owner });",
+      "test": {
+        "files": ["test/architecture/test-reachability.test.ts"],
+        "namePattern": "the ledger gives a helper module's nested passes to the test file that ran them (CI-8)"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/test-reachability.test.ts",
+          "name": "the ledger gives a helper module's nested passes to the test file that ran them (CI-8)",
+          "expected": "the helper result is credited to the file whose summary follows it"
+        }
+      ]
+    },
+    {
+      "name": "ci8-reporter-wrapper-credited",
+      "claim": "A top-level result with no summary of its own stays Node's wrapper and earns no credit.",
+      "file": "test/helpers/node-reporter-core.mjs",
+      "original": "if (!(record.event.data.nesting > 0)) return undefined;",
+      "replacement": "",
+      "test": {
+        "files": ["test/architecture/test-reachability.test.ts"],
+        "namePattern": "the ledger gives a helper module's nested passes to the test file that ran them (CI-8)"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/test-reachability.test.ts",
+          "name": "the ledger gives a helper module's nested passes to the test file that ran them (CI-8)",
+          "expected": ""
+        }
+      ]
+    },
+    {
+      "name": "ci8-reporter-interleaved-credited",
+      "claim": "With two summary-bearing files in the same window the owner is unknown, the result stays dropped and reconciliation refuses it by name.",
+      "file": "test/helpers/node-reporter-core.mjs",
+      "original": "return interleaved ? undefined : owner;",
+      "replacement": "return owner;",
+      "test": {
+        "files": ["test/architecture/test-reachability.test.ts"],
+        "namePattern": "the ledger gives a helper module's nested passes to the test file that ran them (CI-8)"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/test-reachability.test.ts",
+          "name": "the ledger gives a helper module's nested passes to the test file that ran them (CI-8)",
+          "expected": ""
+        }
+      ]
+    },
+    {
+      "name": "ci8-pending-accepted-off-packet",
+      "claim": "The pending CI tier marker is refused outside a packet/* branch, so the train still requires the real run URL.",
+      "file": "scripts/check-record-ci-tier.mjs",
+      "original": "} else if (pending === 1 && !pendingAllowed) {",
+      "replacement": "} else if (false) {",
+      "test": {
+        "files": ["test/architecture/ci-tiers.test.ts"],
+        "namePattern": "a pending CI tier marker is accepted on a packet branch only (CI-8)"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ci-tiers.test.ts",
+          "name": "a pending CI tier marker is accepted on a packet branch only (CI-8)",
+          "expected": ""
+        }
+      ]
+    },
+    {
+      "name": "ci8-pending-refused-on-packet",
+      "claim": "The pending CI tier marker is accepted on a packet/* branch.",
+      "file": "scripts/check-record-ci-tier.mjs",
+      "original": "const pendingAllowed = /^packet\\//u.test(branch);",
+      "replacement": "const pendingAllowed = false;",
+      "test": {
+        "files": ["test/architecture/ci-tiers.test.ts"],
+        "namePattern": "a pending CI tier marker is accepted on a packet branch only (CI-8)"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ci-tiers.test.ts",
+          "name": "a pending CI tier marker is accepted on a packet branch only (CI-8)",
+          "expected": ""
+        }
+      ]
+    },
+    {
+      "name": "ci8-pending-plus-url",
+      "claim": "A pending marker beside a run URL is two declarations and fails.",
+      "file": "scripts/check-record-ci-tier.mjs",
+      "original": "if ([...body.matchAll(line)].length + pending !== 1) {",
+      "replacement": "if ([...body.matchAll(line)].length + pending < 1) {",
+      "test": {
+        "files": ["test/architecture/ci-tiers.test.ts"],
+        "namePattern": "a pending CI tier marker is accepted on a packet branch only (CI-8)"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ci-tiers.test.ts",
+          "name": "a pending CI tier marker is accepted on a packet branch only (CI-8)",
+          "expected": ""
+        }
+      ]
+    },
+    {
+      "name": "ci8-pending-loose-wording",
+      "claim": "Only the exact marker is a declaration.",
+      "file": "scripts/check-record-ci-tier.mjs",
+      "original": "const pendingLine = /^CI tier: pending (?:quick|full)$/gmu;",
+      "replacement": "const pendingLine = /^CI tier: pending/gmu;",
+      "test": {
+        "files": ["test/architecture/ci-tiers.test.ts"],
+        "namePattern": "a pending CI tier marker is accepted on a packet branch only (CI-8)"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ci-tiers.test.ts",
+          "name": "a pending CI tier marker is accepted on a packet branch only (CI-8)",
+          "expected": ""
+        }
+      ]
+    },
+    {
+      "name": "ci8-pf-migration-without-snapshot",
+      "claim": "A migration without its schema snapshot is a named failure.",
+      "file": "scripts/preflight.mjs",
+      "original": "if (migration === undefined || changed.includes('db/schema.snapshot.json')) {",
+      "replacement": "if (migration === undefined) {",
+      "test": {
+        "files": ["test/architecture/preflight.test.ts"],
+        "namePattern": "a migration without its schema snapshot is named, with the regeneration command"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/preflight.test.ts",
+          "name": "a migration without its schema snapshot is named, with the regeneration command",
+          "expected": ""
+        }
+      ]
+    },
+    {
+      "name": "ci8-pf-replay-snapshot-warning",
+      "claim": "A release or migration change without the replay snapshot warns.",
+      "file": "scripts/preflight.mjs",
+      "original": "if (lineage === undefined || changed.includes(snapshot)) return undefined;",
+      "replacement": "if (lineage === undefined) return undefined;",
+      "test": {
+        "files": ["test/architecture/preflight.test.ts"],
+        "namePattern": "a release or migration change without the replay snapshot warns with the regeneration command"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/preflight.test.ts",
+          "name": "a release or migration change without the replay snapshot warns with the regeneration command",
+          "expected": ""
+        }
+      ]
+    },
+    {
+      "name": "ci8-pf-schema-step-not-failing",
+      "claim": "The schema-snapshot step fails when a migration lacks its snapshot.",
+      "file": "scripts/preflight.mjs",
+      "original": "ok: problem === undefined,",
+      "replacement": "ok: true,",
+      "test": {
+        "files": ["test/architecture/preflight.test.ts"],
+        "namePattern": "the schema-snapshot step fails on a migration alone and only warns on a release alone"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/preflight.test.ts",
+          "name": "the schema-snapshot step fails on a migration alone and only warns on a release alone",
+          "expected": ""
+        }
+      ]
+    },
+    {
+      "name": "ci8-pf-failing-test-names",
+      "claim": "Failing tests are named from TAP output.",
+      "file": "scripts/preflight.mjs",
+      "original": "/^\\s*not ok \\d+ - (.+)$/gmu",
+      "replacement": "/^\\s*ok \\d+ - (.+)$/gmu",
+      "test": {
+        "files": ["test/architecture/preflight.test.ts"],
+        "namePattern": "failing test names are read from TAP output"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/preflight.test.ts",
+          "name": "failing test names are read from TAP output",
+          "expected": ""
+        }
+      ]
+    },
+    {
+      "name": "ci8-pf-format-not-checking",
+      "claim": "The format family runs prettier --check on the changed files.",
+      "file": "scripts/preflight.mjs",
+      "original": "        '--check',\n",
+      "replacement": "        '--version',\n",
+      "test": {
+        "files": ["test/architecture/preflight.test.ts"],
+        "namePattern": "preflight runs every check the lanes keep failing on, each with a remedy"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/preflight.test.ts",
+          "name": "preflight runs every check the lanes keep failing on, each with a remedy",
+          "expected": ""
+        }
+      ]
+    },
+    {
+      "name": "ci8-pf-lint-without-files",
+      "claim": "The lint family runs eslint on the changed files.",
+      "file": "scripts/preflight.mjs",
+      "original": "command: ['corepack', 'pnpm', 'exec', 'eslint', ...lintable],",
+      "replacement": "command: ['corepack', 'pnpm', 'exec', 'eslint'],",
+      "test": {
+        "files": ["test/architecture/preflight.test.ts"],
+        "namePattern": "a changed file list that holds nothing formattable skips format and lint"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/preflight.test.ts",
+          "name": "a changed file list that holds nothing formattable skips format and lint",
+          "expected": ""
+        }
+      ]
+    },
+    {
+      "name": "ci8-pf-typecheck-missing",
+      "claim": "The typecheck family runs the repository typecheck.",
+      "file": "scripts/preflight.mjs",
+      "original": "command: ['corepack', 'pnpm', 'typecheck'],",
+      "replacement": "command: ['corepack', 'pnpm', 'lint'],",
+      "test": {
+        "files": ["test/architecture/preflight.test.ts"],
+        "namePattern": "preflight runs every check the lanes keep failing on, each with a remedy"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/preflight.test.ts",
+          "name": "preflight runs every check the lanes keep failing on, each with a remedy",
+          "expected": ""
+        }
+      ]
+    },
+    {
+      "name": "ci8-pf-coverage-step-missing",
+      "claim": "The language-coverage family runs the digest check.",
+      "file": "scripts/preflight.mjs",
+      "original": "command: [node, ...tsx, 'test/helpers/preflight-language-coverage.ts'],",
+      "replacement": "command: [node, ...tsx, 'test/helpers/preflight-language-coverage.d.ts'],",
+      "test": {
+        "files": ["test/architecture/preflight.test.ts"],
+        "namePattern": "preflight runs every check the lanes keep failing on, each with a remedy"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/preflight.test.ts",
+          "name": "preflight runs every check the lanes keep failing on, each with a remedy",
+          "expected": ""
+        }
+      ]
+    },
+    {
+      "name": "ci8-pf-records-step-missing",
+      "claim": "The records family runs check-records.",
+      "file": "scripts/preflight.mjs",
+      "original": "command: ['bash', 'scripts/check-records.sh'],",
+      "replacement": "command: ['bash', 'scripts/check-records.sh', '--help'],",
+      "test": {
+        "files": ["test/architecture/preflight.test.ts"],
+        "namePattern": "preflight runs every check the lanes keep failing on, each with a remedy"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/preflight.test.ts",
+          "name": "preflight runs every check the lanes keep failing on, each with a remedy",
+          "expected": ""
+        }
+      ]
+    },
+    {
+      "name": "ci8-pf-app-release-step-missing",
+      "claim": "The app-release family runs check:app-release.",
+      "file": "scripts/preflight.mjs",
+      "original": "command: ['corepack', 'pnpm', 'check:app-release'],",
+      "replacement": "command: ['corepack', 'pnpm', 'check:app-releases'],",
+      "test": {
+        "files": ["test/architecture/preflight.test.ts"],
+        "namePattern": "preflight runs every check the lanes keep failing on, each with a remedy"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/preflight.test.ts",
+          "name": "preflight runs every check the lanes keep failing on, each with a remedy",
+          "expected": ""
+        }
+      ]
+    },
+    {
+      "name": "ci8-pf-expected-red-step-missing",
+      "claim": "The expected-red family validates the manifests.",
+      "file": "scripts/preflight.mjs",
+      "original": "command: ['bash', 'scripts/check-expected-red.sh'],",
+      "replacement": "command: ['bash', 'scripts/check-expected-red.sh', '--list'],",
+      "test": {
+        "files": ["test/architecture/preflight.test.ts"],
+        "namePattern": "preflight runs every check the lanes keep failing on, each with a remedy"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/preflight.test.ts",
+          "name": "preflight runs every check the lanes keep failing on, each with a remedy",
+          "expected": ""
+        }
+      ]
+    },
+    {
+      "name": "ci8-pf-hygiene-skips-more",
+      "claim": "The hygiene family skips only the one lock case.",
+      "file": "scripts/preflight.mjs",
+      "original": "['--test-skip-pattern=matrix lock and legacy-process waits'],",
+      "replacement": "['--test-skip-pattern=.'],",
+      "test": {
+        "files": ["test/architecture/preflight.test.ts"],
+        "namePattern": "preflight runs every check the lanes keep failing on, each with a remedy"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/preflight.test.ts",
+          "name": "preflight runs every check the lanes keep failing on, each with a remedy",
+          "expected": ""
+        }
+      ]
+    },
+    {
+      "name": "ci8-pf-hygiene-file-missing",
+      "claim": "The hygiene family runs the hygiene suite.",
+      "file": "scripts/preflight.mjs",
+      "original": "['test/architecture/repository-hygiene.test.ts'],",
+      "replacement": "['test/architecture/repository-hygiene-x.test.ts'],",
+      "test": {
+        "files": ["test/architecture/preflight.test.ts"],
+        "namePattern": "preflight runs every check the lanes keep failing on, each with a remedy"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/preflight.test.ts",
+          "name": "preflight runs every check the lanes keep failing on, each with a remedy",
+          "expected": ""
+        }
+      ]
+    },
+    {
+      "name": "ci8-pf-lock-observability-missing",
+      "claim": "The reachability family includes lock observability.",
+      "file": "scripts/preflight.mjs",
+      "original": "        'test/architecture/test-lock-observability.test.ts',\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/architecture/preflight.test.ts"],
+        "namePattern": "preflight runs every check the lanes keep failing on, each with a remedy"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/preflight.test.ts",
+          "name": "preflight runs every check the lanes keep failing on, each with a remedy",
+          "expected": ""
+        }
+      ]
+    },
+    {
+      "name": "ci8-pf-surface-data-binding-missing",
+      "claim": "The surface family includes data binding.",
+      "file": "scripts/preflight.mjs",
+      "original": "        'test/architecture/surface-data-binding.test.ts',\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/architecture/preflight.test.ts"],
+        "namePattern": "preflight runs every check the lanes keep failing on, each with a remedy"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/preflight.test.ts",
+          "name": "preflight runs every check the lanes keep failing on, each with a remedy",
+          "expected": ""
+        }
+      ]
+    },
+    {
+      "name": "ci8-pf-ci-tiers-missing",
+      "claim": "The ci-evidence family includes the tier pins.",
+      "file": "scripts/preflight.mjs",
+      "original": "        'test/architecture/ci-tiers.test.ts',\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/architecture/preflight.test.ts"],
+        "namePattern": "preflight runs every check the lanes keep failing on, each with a remedy"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/preflight.test.ts",
+          "name": "preflight runs every check the lanes keep failing on, each with a remedy",
+          "expected": ""
+        }
+      ]
+    },
+    {
+      "name": "ci8-pf-coverage-document-digest",
+      "claim": "A stale document ledgerDigest is named.",
+      "file": "test/helpers/preflight-language-coverage.ts",
+      "original": "if (document.ledgerDigest !== ledger.digest) {",
+      "replacement": "if (false) {",
+      "test": {
+        "files": ["test/architecture/preflight.test.ts"],
+        "namePattern": "a stale language-coverage digest, decision or observation snapshot is named, each alone"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/preflight.test.ts",
+          "name": "a stale language-coverage digest, decision or observation snapshot is named, each alone",
+          "expected": ""
+        }
+      ]
+    },
+    {
+      "name": "ci8-pf-coverage-decision-digest",
+      "claim": "A decision on an older ledger digest is named.",
+      "file": "test/helpers/preflight-language-coverage.ts",
+      "original": "(decision) => decision.ledgerDigest !== ledger.digest,",
+      "replacement": "(decision) => false,",
+      "test": {
+        "files": ["test/architecture/preflight.test.ts"],
+        "namePattern": "a stale language-coverage digest, decision or observation snapshot is named, each alone"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/preflight.test.ts",
+          "name": "a stale language-coverage digest, decision or observation snapshot is named, each alone",
+          "expected": ""
+        }
+      ]
+    },
+    {
+      "name": "ci8-pf-coverage-snapshot",
+      "claim": "A stale observationSnapshot is named, with the fresh value.",
+      "file": "test/helpers/preflight-language-coverage.ts",
+      "original": "if (JSON.stringify(document.observationSnapshot) !== JSON.stringify(fresh)) {",
+      "replacement": "if (false) {",
+      "test": {
+        "files": ["test/architecture/preflight.test.ts"],
+        "namePattern": "a stale language-coverage digest, decision or observation snapshot is named, each alone"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/preflight.test.ts",
+          "name": "a stale language-coverage digest, decision or observation snapshot is named, each alone",
+          "expected": ""
+        }
+      ]
+    }
+  ]
+}

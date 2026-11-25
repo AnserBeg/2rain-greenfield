@@ -223,3 +223,19 @@ test('a stale language-coverage digest, decision or observation snapshot is name
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('the schema-snapshot step fails on a migration alone and only warns on a release alone', () => {
+  const run = (all: string[]) => {
+    const step = steps({ base: 'x', files: [], all }).find(
+      (candidate: { id: string }) => candidate.id === 'schema-snapshot',
+    ) as { check: () => { ok: boolean; output: string } };
+    return step.check();
+  };
+  const migration = run(['db/migrations/0042_x.sql']);
+  assert.equal(migration.ok, false);
+  assert.match(migration.output, /db\/schema\.snapshot\.json did not/u);
+  const release = run(['apps/web/release/app.compiled.json']);
+  assert.equal(release.ok, true);
+  assert.match(release.output, /^WARNING: /u);
+  assert.deepEqual(run(['README.md']), { ok: true, output: '' });
+});
