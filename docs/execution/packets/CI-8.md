@@ -2,7 +2,7 @@
 
 Base `5902f0f4cc826d2e1cf1bd023409cb5eb5953f7b` (main). Tier: CI infrastructure, not Critical. No product code changed.
 
-CI tier: pending full
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/45666035414
 
 ## Rule for every lane: `pnpm preflight` is mandatory before any full-run dispatch
 
@@ -26,13 +26,13 @@ What it cannot do: it does not run PostgreSQL, browser or integration suites, so
 
 ### Pending tier marker
 
-A packet record may declare `CI tier: pending quick` or `CI tier: pending full` instead of a run URL, so a lane no longer needs a second docs-only commit after its first dispatch. `scripts/check-record-ci-tier.mjs` accepts the marker only on a `packet/*` branch (`GITHUB_HEAD_REF`, then `GITHUB_REF_NAME`, then the local branch); anywhere else (main, `candidate/*`, a detached merge) it refuses, so the integrator train still requires the real run URL. A record with the marker and a URL line is two declarations and fails. Replace the marker with the URL once the run exists; that is a docs-only change after the tested tip, as before, but no longer a precondition for dispatching.
+A packet record may declare `CI tier: pending quick` or `CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/45666035414` instead of a run URL, so a lane no longer needs a second docs-only commit after its first dispatch. `scripts/check-record-ci-tier.mjs` accepts the marker only on a `packet/*` branch (`GITHUB_HEAD_REF`, then `GITHUB_REF_NAME`, then the local branch); anywhere else (main, `candidate/*`, a detached merge) it refuses, so the integrator train still requires the real run URL. A record with the marker and a URL line is two declarations and fails. Replace the marker with the URL once the run exists; that is a docs-only change after the tested tip, as before, but no longer a precondition for dispatching.
 
 ## Items
 
-1. Evidence controls checked out one commit for most controls, so tests that read git history failed with "the mutated run executed no test". Every control checkout is now `fetch-depth: 0`, pinned in `test/architecture/evidence-on-demand.test.ts`. Proof: `gh workflow run evidence.yml --ref packet/CI-8 -f ref=f5744130f312379f835a08cee4af9e07c1b83150 -f controls=""` ran the 16 CUSTOMIZE-6 controls and all 16 were killed and restored: EVIDENCE_RUN_URL. The same 16 had all failed on run 45638929895.
+1. Evidence controls checked out one commit for most controls, so tests that read git history failed with "the mutated run executed no test". Every control checkout is now `fetch-depth: 0`, pinned in `test/architecture/evidence-on-demand.test.ts`. Proof: `gh workflow run evidence.yml --ref packet/CI-8 -f ref=f5744130f312379f835a08cee4af9e07c1b83150 -f controls=""` ran the 16 CUSTOMIZE-6 controls and all 16 were killed and restored: https://github.com/AnserBeg/2rain-greenfield/actions/runs/45644693609. The same 16 had all failed on run 45638929895.
 2. CI-7 residuals 1 to 7: modes `100644`; the dispatch wording in `expected-red-on-demand.mjs` is pinned; the CI-7 record says what CI ran and that the planner-map child exits (now true); the planner-map child calls `process.exit(1)` after the bound error; `closeFixtureApp` prints the unanswered requests by method and URL (`trackFixtureRequests`, called by all three fixtures; it prints, it does not fail); `stop()` code and signal are asserted; the inputs pin matches `inputs.` and the bracket form. Residual 7 (runner variance) needed no change: the CI-7 record already says "margin, not bound".
-3. The evidence reporter count: REPORTER_FINDING.
+3. The evidence reporter count. Cause: Node reports a subtest's `file` as the module that called `t.test`. `workflow-consumer.test.ts` calls helper `staff-decision-checks.ts`, whose four subtests therefore arrived under the helper's path, a file that never gets a summary, and the ledger dropped them as the synthetic wrapper. Node counted them under the test file's summary (14 passed), the evidence counted 10, and run 45644816431 marked a killed control failed. Fix: a nested result (nesting above 0) with no summary of its own is credited to the test file whose summary follows it, but only when no other summary-bearing file reported in the same window; a top-level result stays refused, and an ambiguous one stays dropped so reconciliation still refuses by name. Local proof: the unit case in `test/architecture/test-reachability.test.ts` reproduces the shape (own pass plus helper nested pass, then the summary) without PostgreSQL; the real file needs PostgreSQL and is proved by evidence dispatch https://github.com/AnserBeg/2rain-greenfield/actions/runs/45714097049.
 4. `pnpm preflight` and the pending marker (above).
 
 ## Rule 8 reds (each restored)
@@ -40,7 +40,7 @@ A packet record may declare `CI tier: pending quick` or `CI tier: pending full` 
 - Control checkout with a name-based `fetch-depth`, or with none: the architecture pin fails.
 - `unanswered` list emptied in `closeFixtureApp`: the unit case fails. `stop()` returning `code: 0` or `signal: null`: the fixture-process cases fail. The pin regex narrowed to `inputs.`: the bracket-form case fails. The dispatch sentence reverted: the wording pin fails. `process.exitCode = 1` back in the planner-map child: the source pin fails.
 - Pending marker: accepted on `packet/CI-8`, refused on `main`, `candidate/WORKFLOW-2` and `packets/x`; marker plus URL, and `pending soon`, refused.
-- Preflight: PREFLIGHT_REDS
+- Manifest `test/evidence/CI-8.expected-red.json`: 30 entries, all reproduced and restored (`check-expected-red.sh --run`, 30 of 30), validated by `check:expected-red`. Groups: two control-checkout depth entries (fetch-depth 1, name-based); two dispatch-wording entries; three reporter entries (helper not credited, a top-level wrapper credited, an interleaved window credited); four pending-marker entries (accepted off a packet branch, refused on a packet branch, marker plus URL, loose wording); and preflight, one entry per check: migration without snapshot, replay snapshot warning, schema step not failing, failing test names, format, lint, typecheck, language-coverage step, records, app-release, expected-red, hygiene (skip scope and file), reachability (lock observability), surface (data binding), ci-evidence (tier pins), and the three language-coverage staleness kinds (document digest, decision digest, observation snapshot), each run against a copy of the real decisions file.
 
 ## Rule 17
 
@@ -50,6 +50,6 @@ A packet record may declare `CI tier: pending quick` or `CI tier: pending full` 
 
 ## Evidence
 
-- Full run: FULL_RUN_NOTE
-- Evidence dispatch: EVIDENCE_RUN_URL (16 of 16 controls killed and restored).
+- Full run: https://github.com/AnserBeg/2rain-greenfield/actions/runs/45666035414 on tip 1c1522c1d, green in every job. Later commits add tests and the manifest only (no workflow or script change beyond the `PREFLIGHT_DECISIONS_PATH` test override in `test/helpers/preflight-language-coverage.ts`); the TRAIN-Q integration full covers them.
+- Evidence dispatches: 16 of 16 CUSTOMIZE-6 controls killed and restored, https://github.com/AnserBeg/2rain-greenfield/actions/runs/45644693609. Reporter fix on its original failing control (workflow-substituted-receipt-scope at bb7259ad): https://github.com/AnserBeg/2rain-greenfield/actions/runs/45714097049. REPORTS-1 s2 controls at d1a4282ce (full-history proof): https://github.com/AnserBeg/2rain-greenfield/actions/runs/45714105734.
 - Note on the full run: the first dispatch (45644685639) failed once on `customize-inspection.composed-application.spec.ts` (a 180 s `locator.click` timeout in the Customization rules browser runner, a spec none of this packet's fixtures serve) and, with that job missing, on executed-file reachability. GitHub's rerun endpoint answered HTTP 500 and 502 for about 40 minutes, so the whole workflow was dispatched again on the same tip (45650851098), which passed. That is the one rerun the rules allow.
