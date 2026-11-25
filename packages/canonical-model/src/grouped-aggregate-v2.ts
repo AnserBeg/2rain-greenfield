@@ -152,16 +152,37 @@ export function renderDecimal(value: bigint, scale: number): string {
     (scale ? digits.slice(0, -scale) + '.' + digits.slice(-scale) : digits)
   );
 }
-/** Half-even at the operand scale (R8); the exact ratio stays in the cell. */
-export function averageValue(sum: string, count: number, scale: number) {
+/** Minor units of the currencies a report source may bind (B1). */
+export const REPORT_MINOR_UNITS: Readonly<Record<string, number>> =
+  Object.freeze({ CAD: 2, USD: 2, EUR: 2 });
+/** R8: an average of an amount rounds at its partition's currency minor
+ * unit; anything else (and No currency) at the operand scale. */
+export function averageScale(
+  m: Pick<ReportMeasureSpec, 'scale' | 'currency'>,
+  partition: CurrencyPartition,
+) {
+  return m.currency && partition.kind === 'currency'
+    ? (REPORT_MINOR_UNITS[partition.code] ?? m.scale)
+    : m.scale;
+}
+/** Half-even (R8); the exact ratio stays in the cell. `sum` is at `scale`. */
+export function averageValue(
+  sum: string,
+  count: number,
+  scale: number,
+  displayScale = scale,
+) {
   if (count === 0) return null;
-  const total = scaled(sum, scale);
-  const n = BigInt(count);
+  const shift = displayScale - scale;
+  let total = scaled(sum, scale);
+  let n = BigInt(count);
+  if (shift >= 0) total *= 10n ** BigInt(shift);
+  else n *= 10n ** BigInt(-shift);
   let q = total / n;
   const r = total % n;
   const twice = (r < 0n ? -r : r) * 2n;
   if (twice > n || (twice === n && q % 2n !== 0n)) q += total < 0n ? -1n : 1n;
-  return renderDecimal(q, scale);
+  return renderDecimal(q, displayScale);
 }
 
 const numeric = (type: string | undefined) =>
@@ -371,7 +392,11 @@ export function evaluateReportFacts(
       }
     }
   }
-  const cell = (m: ReportMeasureSpec, acc: Acc): GroupedCell => ({
+  const cell = (
+    m: ReportMeasureSpec,
+    acc: Acc,
+    partition: CurrencyPartition,
+  ): GroupedCell => ({
     measureId: m.id,
     value:
       m.operator === 'count'
@@ -383,6 +408,7 @@ export function evaluateReportFacts(
                 renderDecimal(acc.sum, m.scale),
                 acc.present,
                 m.scale,
+                averageScale(m, partition),
               )
             : m.operator === 'min' || m.operator === 'max'
               ? acc.best === null
@@ -401,7 +427,7 @@ export function evaluateReportFacts(
     [...map.values()].map(({ keys, partition, acc }) => ({
       keys,
       partition,
-      cells: measures.map((m, i) => cell(m, acc[i]!)),
+      cells: measures.map((m, i) => cell(m, acc[i]!, partition)),
     }));
   const totalRows = render(totals).sort((a, b) =>
     comparePartitions(a.partition, b.partition),

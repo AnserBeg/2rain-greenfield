@@ -27,6 +27,8 @@ export const REPORT_ANALYSIS_READER = 50;
 /** A released named measure (trial or approved). Separable from v2 reports:
  * a measure can be released before any report binds it. */
 export const REPORT_MEASURE_READER = 51;
+/** Reader policy's group ceiling (ADR-0089 R3), checked against zero fill. */
+export const REPORT_GROUP_CEILING = 500;
 
 type FieldPath = {
   fieldId: string;
@@ -58,20 +60,47 @@ export interface ReportOfferV2 extends ReportOffer {
   readonly v1: ReportOffer | null;
 }
 
-/** The record-grain list of a link target: the first live list, by ID, whose
- * source is that type and whose own offer is admitted. */
+/** The record-grain list a NEW link is authored through: an admitted list of
+ * the target type, preferring a tenant-scoped list (the type is then
+ * tenant-shared), then a workspace List over a contextual one, then the ID.
+ * Once authored the choice is pinned in the body and only revalidated. */
 function targetList(def: ReportCatalogSource, entityId: string) {
-  return def.surfaces
+  const rank = (s: Record<string, unknown>) =>
+    (s.workspace as { membership?: string } | undefined)?.membership ===
+    'contextual'
+      ? 1
+      : 0;
+  const offers = def.surfaces
     .filter((s) => live(s) && s.archetype === 'list' && !s.report && !s.measure)
-    .map((s) => String(s.surfaceId))
-    .sort()
-    .map((id) => baseReportOffer(def, id, false))
-    .find((offer) => offer?.source.entityId === entityId);
+    .sort(
+      (a, b) =>
+        rank(a) - rank(b) ||
+        (String(a.surfaceId) < String(b.surfaceId) ? -1 : 1),
+    )
+    .map((s) => baseReportOffer(def, String(s.surfaceId), false))
+    .filter((o) => o?.source.entityId === entityId);
+  return offers.find((o) => o!.source.scope === 'tenant') ?? offers[0];
+}
+
+/** A pinned link's list must still be the live, admitted list it was authored
+ * through: same record type, query, read grant and scope. */
+function pinnedList(def: ReportCatalogSource, link: ReportLink) {
+  const offer = baseReportOffer(def, link.listSurfaceId, false);
+  return offer &&
+    offer.source.entityId === link.entityId &&
+    offer.source.queryId === link.queryId &&
+    offer.source.readPermissionId === link.readPermissionId &&
+    offer.source.scope === link.scope
+    ? offer
+    : undefined;
 }
 
 export function reportOfferV2(
   def: ReportCatalogSource,
   listSurfaceId: string,
+  // A stored body's links: their lists are revalidated, never re-derived,
+  // so adding or renaming another list cannot repoint an existing report.
+  pinned?: readonly ReportLink[],
 ): ReportOfferV2 | null {
   const base = baseReportOffer(def, listSurfaceId, true);
   if (!base) return null;
@@ -97,7 +126,11 @@ export function reportOfferV2(
           ref(r.sourceEntity) === entityId,
       )
       .sort((a, b) => (String(a.relationId) < String(b.relationId) ? -1 : 1))) {
-      const target = targetList(def, String(ref(r.targetEntity)));
+      const nextVia = [...prefix, String(r.relationId)];
+      const pin = pinned?.find((l) => pathKey(l.via) === pathKey(nextVia));
+      const target = pinned
+        ? pin && pinnedList(def, pin)
+        : targetList(def, String(ref(r.targetEntity)));
       // A tenant-scoped grain cannot scope a company-owned target.
       if (!target || (scope === 'tenant' && target.source.scope === 'company'))
         continue;
@@ -126,6 +159,9 @@ export function reportOfferV2(
     }
   };
   walk(base.source.entityId, base.source.scope, []);
+  // Fail closed: a line source is offered only with its declared parent link.
+  if (base.parentRelationId && !pinned && !links.some((l) => l.parent))
+    return null;
   const measures = def.surfaces.flatMap((s) => {
     const m = s.measure as MeasureRevision | undefined;
     return live(s) &&
@@ -239,6 +275,7 @@ export function resolveReportChoicesV2(
   if (choices.filters.filter((f) => f.kind === 'dateRange').length > 1)
     return 'Choose one indexed date range.';
   let partition: string | undefined;
+  let currency: ReportOperandV2['currency'];
   const measureOperator = (operator: ReportOperator): string | null => {
     if (operator.kind === 'count') return null;
     if (operator.kind === 'distinctTargets')
@@ -269,9 +306,13 @@ export function resolveReportChoicesV2(
     if (operator.kind === 'distinctCount') return null;
     if (f.currency?.kind === 'stored' && !add({ fieldId: f.currency.fieldId }))
       return f.currency.fieldId;
-    const key = canonicalize(f.currency ?? f.unitId ?? null);
+    // Only amounts and quantities partition a report; a plain number or a
+    // date is measured within whatever partitions the amounts define.
+    if (!f.currency && !f.unitId) return null;
+    const key = canonicalize(f.currency ?? f.unitId);
     if (partition !== undefined && partition !== key) return named(operator);
     partition = key;
+    currency = f.currency;
     return null;
   };
   for (const m of choices.measures) {
@@ -290,8 +331,36 @@ export function resolveReportChoicesV2(
     const problem = measureOperator(inner.operator);
     if (problem) return problem;
   }
-  if (offer.grain === 'line' && offer.sourceV2.parentRelationId)
-    useLink([offer.sourceV2.parentRelationId]);
+  // Typed zero rows for finite dimensions count toward the group ceiling
+  // (R8 with R3): a declaration that always fills past it is refused here.
+  const options = new Map(
+    [...offer.fields, ...offer.links.flatMap((l) => l.fields)].map((f) => [
+      operandKey(f.operand),
+      f.options?.length,
+    ]),
+  );
+  const members = choices.dimensions.map((d) =>
+    d.kind === 'age'
+      ? d.bands.length + 1
+      : d.kind === 'direct'
+        ? options.get(operandKey(d))
+        : undefined,
+  );
+  if (
+    members.length &&
+    members.every((n) => n !== undefined) &&
+    members.reduce((a, n) => a! * n!, 1)! *
+      (currency?.kind === 'stored' ? currency.codes.length + 1 : 1) >
+      REPORT_GROUP_CEILING
+  )
+    return 'These groups always exceed the 500-group ceiling; choose fewer finite groupings.';
+  if (
+    offer.grain === 'line' &&
+    (!offer.sourceV2.parentRelationId ||
+      !useLink([offer.sourceV2.parentRelationId]) ||
+      !links.get(offer.sourceV2.parentRelationId)?.required)
+  )
+    return 'A line report needs its parent record type to be readable.';
   return ReportBodyV2Schema.parse({
     version: 'grouped-report/v2',
     source: offer.sourceV2,
@@ -325,7 +394,7 @@ export function reportBindingProblemV2(
   def: ReportCatalogSource,
   body: ReportBodyV2,
 ): string | null {
-  const offer = reportOfferV2(def, body.source.listSurfaceId);
+  const offer = reportOfferV2(def, body.source.listSurfaceId, body.links);
   if (!offer || canonicalize(offer.sourceV2) !== canonicalize(body.source))
     return body.source.queryId;
   const bound = resolveReportChoicesV2(offer, {

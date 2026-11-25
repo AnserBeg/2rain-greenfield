@@ -15,6 +15,7 @@ import {
 } from '../../packages/canonical-model/src/index.js';
 import {
   DECLARED_REPORT_READER,
+  reportBindingProblem,
   type RegisteredReport,
   type ReportCatalogSource,
 } from '../../packages/canonical-model/src/declared-report.js';
@@ -561,4 +562,241 @@ test('a tenant Inspection groups by a linked Site field, counts distinct sites, 
     ]).status,
     'refused',
   );
+});
+
+test('fix round: a line source is offered only with its declared parent, and a stored line body without it is refused', () => {
+  const all = reportTargets(def as unknown as ReportCatalogSource);
+  for (const t of all.filter((t) => t.grain === 'line'))
+    assert.ok(
+      t.links.some((l) => l.parent && l.link.required),
+      t.source.listSurfaceId + ' is offered without its parent',
+    );
+  const lines = targetFor(def, ':query.customer_invoice_line_list');
+  const report = draftReport(
+    lines,
+    'Lines',
+    ReportChoicesSchema.parse({
+      grain: 'line',
+      dimensions: [{ kind: 'direct', fieldId: field(lines, '_item_id') }],
+      filters: [],
+      measures: [
+        {
+          kind: 'inline',
+          measureId: 'northstar.app:measure.custom_lines',
+          label: 'Lines',
+          operator: { kind: 'count' },
+        },
+      ],
+      outputs: [{ kind: 'table' }],
+    }),
+  );
+  assert.ok(report.body.version === 'grouped-report/v2');
+  assert.equal(
+    reportBindingProblem(def as unknown as ReportCatalogSource, report.body),
+    null,
+  );
+  assert.match(
+    String(
+      reportBindingProblem(def as unknown as ReportCatalogSource, {
+        ...report.body,
+        links: [],
+      }),
+    ),
+    /parent record type/u,
+  );
+});
+
+test('fix round: a linked report keeps its pinned list when another list of the target is added or a label changes (rule 10)', () => {
+  const applied = applyCustomizationPatches(
+    def as unknown as Record<string, unknown>,
+    [tenantTypes],
+  );
+  assert.ok(applied.status === 'applied');
+  const t = targetFor(applied.authored, ':query.custom_inspection_list');
+  const site = t.links.find((l) => l.link.entityId.endsWith('custom_site'))!;
+  const report = draftReport(
+    t,
+    'By region',
+    ReportChoicesSchema.parse({
+      dimensions: [
+        {
+          kind: 'direct',
+          fieldId: 'northstar.app:field.custom_site_region',
+          via: site.link.via,
+        },
+      ],
+      filters: [],
+      measures: [
+        {
+          kind: 'inline',
+          measureId: 'northstar.app:measure.custom_count',
+          label: 'Count',
+          operator: { kind: 'count' },
+        },
+      ],
+      outputs: [{ kind: 'table' }],
+    }),
+  );
+  const changed = structuredClone(applied.authored) as unknown as {
+    surfaces: Record<string, unknown>[];
+    fields: { fieldId: string; label: string }[];
+  };
+  const list = changed.surfaces.find(
+    (s) => s.surfaceId === site.link.listSurfaceId,
+  )!;
+  // A second List on the same query whose ID sorts first.
+  changed.surfaces.push({
+    ...structuredClone(list),
+    surfaceId: 'northstar.app:surface.aaa_site_list',
+  });
+  changed.fields.find(
+    (f) => f.fieldId === 'northstar.app:field.custom_site_region',
+  )!.label = 'Area';
+  assert.equal(
+    reportBindingProblem(
+      changed as unknown as ReportCatalogSource,
+      report.body,
+    ),
+    null,
+  );
+});
+
+test('fix round: finite zero fill past the group ceiling refuses in preview; money averages round at the minor unit; Vendor Bills age', () => {
+  const dims = (n: number) =>
+    ['_state', '_payment_terms'].slice(0, n).map((end) => ({
+      kind: 'direct' as const,
+      fieldId: field(invoices, end),
+    }));
+  const choices = (n: number) =>
+    ReportChoicesSchema.parse({
+      dimensions: [
+        {
+          kind: 'age',
+          fieldId: field(invoices, '_due_date'),
+          bands: DEFAULT_AGE_BANDS,
+          absentLabel: 'No due date',
+        },
+        ...dims(n),
+      ],
+      filters: [],
+      measures: [
+        {
+          kind: 'inline',
+          measureId: 'northstar.app:measure.custom_balance',
+          label: 'Balance',
+          operator: { kind: 'sum', fieldId: field(invoices, '_balance') },
+        },
+      ],
+      outputs: [{ kind: 'table' }],
+    });
+  assert.throws(
+    () => draftReport(invoices, 'Too wide', choices(2)),
+    /500-group ceiling/u,
+  );
+  draftReport(invoices, 'Narrow enough', choices(0));
+  const cad: ReportMeasureSpec = {
+    id: 'mean',
+    operator: 'average',
+    operand: 'v',
+    scale: 18,
+    type: 'decimal',
+    currency: { kind: 'stored', fieldId: 'c' as never, codes: ['CAD'] },
+  };
+  const r = evaluateReportFacts(
+    [],
+    [cad],
+    [
+      { v: '1.00', c: 'CAD' },
+      { v: '2.25', c: 'CAD' },
+    ],
+    asOf,
+  );
+  assert.deepEqual(
+    [r.totals[0]!.cells[0]!.value, r.totals[0]!.cells[0]!.exact],
+    ['1.62', { sum: '3.250000000000000000', count: 2 }],
+  );
+  const bills = targetFor(def, ':query.vendor_bill_list');
+  assert.equal(
+    bills.fields.find((f) => f.operand.fieldId.endsWith('_due_date'))!.operand
+      .basis,
+    'civilDate',
+  );
+  const aging = draftReport(
+    bills,
+    'Payables aging',
+    ReportChoicesSchema.parse({
+      dimensions: [
+        {
+          kind: 'age',
+          fieldId: field(bills, '_due_date'),
+          bands: DEFAULT_AGE_BANDS,
+          absentLabel: 'No due date',
+        },
+      ],
+      filters: [],
+      measures: [
+        {
+          kind: 'inline',
+          measureId: 'northstar.app:measure.custom_balance',
+          label: 'Balance',
+          operator: { kind: 'sum', fieldId: field(bills, '_balance') },
+        },
+      ],
+      outputs: [{ kind: 'table' }],
+    }),
+  );
+  assert.equal(aging.body.version, 'grouped-report/v2');
+});
+
+test('fix round: the report page names each filter input by its path, and the request reads it back', async () => {
+  const { groupedReportHtml } =
+    await import('../../apps/web/src/component-registry.js');
+  const { reportRequest } =
+    await import('../../apps/web/src/grouped-report.js');
+  const via = ['northstar.app:relation.custom_inspection_site'];
+  const pid = via.join('>') + '|northstar.app:field.custom_site_region';
+  const report = {
+    queryId: 'northstar.app:query.custom_report_x',
+    label: 'By region',
+    revision: {
+      body: {
+        version: 'grouped-report/v2',
+        dimensions: [],
+        filters: [
+          {
+            kind: 'membership',
+            fieldId: 'northstar.app:field.custom_site_region',
+            via,
+          },
+        ],
+        measures: [],
+        outputs: [{ kind: 'table' }],
+      },
+    },
+    columns: [
+      {
+        fieldId: 'northstar.app:field.custom_site_region',
+        via,
+        type: 'choice',
+        label: 'Site › Region',
+        columnName: 'region',
+        options: [{ id: 'east', label: 'East' }],
+      },
+    ],
+    measures: [],
+  } as unknown as RegisteredReport;
+  const html = groupedReportHtml(
+    report,
+    new URL('http://x/?' + new URLSearchParams({ [pid]: 'east' })),
+    'c',
+    { kind: 'narrow' },
+    false,
+  );
+  assert.ok(html.includes('name="' + pid.replaceAll('>', '&gt;') + '"'), html);
+  assert.ok(html.includes('value="east" selected'), html);
+  const url = new URL('http://x/');
+  url.searchParams.append(pid, 'east');
+  assert.deepEqual(reportRequest(report, url, 'c').parameters, {
+    [pid]: ['east'],
+  });
 });

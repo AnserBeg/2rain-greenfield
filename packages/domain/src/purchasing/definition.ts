@@ -1616,6 +1616,33 @@ function entity(
   return {
     entityId,
     kind: 'entityDefinition',
+    // REPORTS-1 s2: Vendor Bills declare the same report source as Invoices,
+    // so payables age and bucket by period on their civil dates.
+    ...(local === 'vendor_bill' && {
+      reportSource: {
+        version: 'report-source/v1',
+        amounts: [
+          'subtotal',
+          'charges',
+          'tax',
+          'total',
+          'paid_amount',
+          'credited_amount',
+          'balance',
+        ].map((name) => ({
+          fieldId: `${ids.namespace}:field.vendor_bill_${name}`,
+          currency: {
+            kind: 'stored',
+            fieldId: `${ids.namespace}:field.vendor_bill_currency`,
+            codes: ['CAD', 'USD', 'EUR'],
+          },
+        })),
+        dates: ['bill_date', 'due_date'].map((name) => ({
+          fieldId: `${ids.namespace}:field.vendor_bill_${name}`,
+          basis: 'civilDate',
+        })),
+      },
+    }),
     label,
     module: reference('moduleReference', ids.moduleId),
     orderKey,

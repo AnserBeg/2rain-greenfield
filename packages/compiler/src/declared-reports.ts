@@ -123,11 +123,27 @@ function lowerOne(
   )
     throw new Error('REPORT_SCOPE_UNAVAILABLE: ' + body.source.entityId);
   const v2 = body.version === 'grouped-report/v2';
-  const offerV2 = v2 ? reportOfferV2(def, body.source.listSurfaceId) : null;
+  const offerV2 = v2
+    ? reportOfferV2(def, body.source.listSurfaceId, body.links)
+    : null;
   const offered = v2
     ? [...offerV2!.fields, ...offerV2!.links.flatMap((l) => l.fields)]
     : reportOffer(def, body.source.listSurfaceId)!.fields;
   const links = v2 ? lowerLinks(body, entity, storage) : [];
+  // A line body always joins its declared parent as a required link.
+  if (
+    v2 &&
+    body.source.grain === 'line' &&
+    !links.some(
+      (l) =>
+        l.required &&
+        l.via.length === 1 &&
+        l.via[0] === body.source.parentRelationId,
+    )
+  )
+    throw new Error(
+      'REPORT_LINK_UNAVAILABLE: ' + (body.source.parentRelationId ?? 'parent'),
+    );
   const columns = body.operands.map((operand) => {
     const via = 'via' in operand ? operand.via : undefined;
     const owner = via

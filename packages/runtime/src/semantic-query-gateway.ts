@@ -679,7 +679,7 @@ export class SemanticQueryGateway {
             view,
             report,
             input: req,
-            ...(linkLists.length && { linkFilterPlans }),
+            ...(linkLists.length > 0 && { linkFilterPlans }),
             maximumFacts: Math.min(
               list.maximumResultCount,
               req.export

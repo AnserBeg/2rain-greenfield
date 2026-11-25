@@ -4,6 +4,7 @@ import type { GroupedExecution } from '../../runtime/src/semantic-query-gateway.
 import {
   RESTRICTED_KEY,
   averageValue,
+  averageScale,
   emptyCell,
   finishGroups,
   type CurrencyPartition,
@@ -105,6 +106,17 @@ export async function readGroupedSnapshotV2(
     }
     return sql + ` ELSE ${value} END`;
   };
+  // An equality filter compares the stored type, as the v1 reader does.
+  const typed = (o: { fieldId: string; via?: Via }, value: unknown) => {
+    const c = columnOf(o);
+    const r = raw(o);
+    if (['integer', 'decimal', 'quantity'].includes(c.type))
+      return `${r} = ${param(value)}::numeric`;
+    if (c.type === 'instant') return `${r} = ${param(value)}::timestamptz`;
+    if (c.type === 'date') return `${r} = ${param(value)}::date`;
+    if (c.type === 'boolean') return `${r} = ${param(value)}::boolean`;
+    return `${text(o)} = ${param(value)}`;
+  };
   const civilDate = (o: { fieldId: string; via?: Via }) => {
     const c = columnOf(o);
     const r = raw(o);
@@ -195,7 +207,7 @@ export async function readGroupedSnapshotV2(
         ? `${raw(f)}::text=ANY(${param(value)}::text[])`
         : folded
           ? `${text(f)} = north_star_module.nsm_unicode_case_fold_v1(${param(value)}::text) COLLATE "C"`
-          : `${text(f)} = ${param(value)}`,
+          : `${typed(f, value)}`,
     );
   }
 
@@ -324,6 +336,8 @@ export async function readGroupedSnapshotV2(
       ['sum', 'min', 'max', 'average'].includes(m.operator.kind) && {
         unitId: operands[i]!.unitId!,
       }),
+    ...(operands[i]?.currency &&
+      m.operator.kind === 'average' && { currency: operands[i]!.currency! }),
   }));
   const groups: GroupedRow[] = [];
   const totals: GroupedRow[] = [];
@@ -343,7 +357,12 @@ export async function readGroupedSnapshotV2(
           measureId: m.id,
           value:
             m.operator === 'average'
-              ? averageValue(v ?? '0', Number(r['n' + i]), m.scale)
+              ? averageValue(
+                  v ?? '0',
+                  Number(r['n' + i]),
+                  m.scale,
+                  averageScale(m, part),
+                )
               : v,
           ...(m.unitId && { unitId: m.unitId }),
           ...(m.operator === 'average' && {

@@ -9,13 +9,13 @@
       "original": "conditions.push(`g.legal_entity_id=${param(company)}::uuid`);",
       "replacement": "void 0;",
       "test": {
-        "files": ["test/postgres/report-analysis.test.ts"],
-        "namePattern": "REPORTS-1 s2"
+        "files": ["test/postgres/report-v2-provider.test.ts"],
+        "namePattern": "the v2 reader applies"
       },
       "kills": [
         {
-          "file": "test/postgres/report-analysis.test.ts",
-          "name": "REPORTS-1 s2: North ages invoices, groups by a linked Site, counts lines and distinct parents, trials a measure, and never sees South",
+          "file": "test/postgres/report-v2-provider.test.ts",
+          "name": "the v2 reader applies grain and link policy, company scope, the required parent, typed equality, zoned periods and minor-unit averages exactly as the reference",
           "expected": "Expected values to be strictly deep-equal"
         }
       ]
@@ -251,6 +251,168 @@
           "file": "test/postgres/report-admission.test.ts",
           "name": "release admission refuses an analysed report or a named measure whose release understates its reader floor",
           "expected": "Expected values to be strictly deep-equal"
+        }
+      ]
+    },
+    {
+      "name": "reports-s2-policy-link",
+      "claim": "A target hidden by its own row policy is Restricted and adds nothing to distinct counts.",
+      "file": "packages/postgres-provider/src/grouped-report-v2.ts",
+      "original": "    policy.link(i, alias, args, on);",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/report-v2-provider.test.ts"],
+        "namePattern": "the v2 reader applies"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/report-v2-provider.test.ts",
+          "name": "the v2 reader applies grain and link policy, company scope, the required parent, typed equality, zoned periods and minor-unit averages exactly as the reference",
+          "expected": "Expected values to be strictly deep-equal"
+        }
+      ]
+    },
+    {
+      "name": "reports-s2-policy-grain",
+      "claim": "The grain's live row policy removes hidden facts before grouping.",
+      "file": "packages/postgres-provider/src/grouped-report-v2.ts",
+      "original": "  policy.grain('g', args, predicates);",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/report-v2-provider.test.ts"],
+        "namePattern": "the v2 reader applies"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/report-v2-provider.test.ts",
+          "name": "the v2 reader applies grain and link policy, company scope, the required parent, typed equality, zoned periods and minor-unit averages exactly as the reference",
+          "expected": "Expected values to be strictly deep-equal"
+        }
+      ]
+    },
+    {
+      "name": "reports-s2-required-parent",
+      "claim": "A line counts only while its declared parent is admitted.",
+      "file": "packages/postgres-provider/src/grouped-report-v2.ts",
+      "original": "    if (l.required) predicates.push(`l${i}.record_id IS NOT NULL`);",
+      "replacement": "    void l;",
+      "test": {
+        "files": ["test/postgres/report-v2-provider.test.ts"],
+        "namePattern": "the v2 reader applies"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/report-v2-provider.test.ts",
+          "name": "the v2 reader applies grain and link policy, company scope, the required parent, typed equality, zoned periods and minor-unit averages exactly as the reference",
+          "expected": "Expected values to be strictly deep-equal"
+        }
+      ]
+    },
+    {
+      "name": "reports-s2-typed-equals",
+      "claim": "An equality filter on a number compares numbers, not text.",
+      "file": "packages/postgres-provider/src/grouped-report-v2.ts",
+      "original": "    if (['integer', 'decimal', 'quantity'].includes(c.type))",
+      "replacement": "    if (false)",
+      "test": {
+        "files": ["test/postgres/report-v2-provider.test.ts"],
+        "namePattern": "the v2 reader applies"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/report-v2-provider.test.ts",
+          "name": "the v2 reader applies grain and link policy, company scope, the required parent, typed equality, zoned periods and minor-unit averages exactly as the reference",
+          "expected": "Expected values to be strictly deep-equal"
+        }
+      ]
+    },
+    {
+      "name": "reports-s2-minor-unit-average",
+      "claim": "An amount's average rounds at its currency's minor unit (R8).",
+      "file": "packages/postgres-provider/src/grouped-report-v2.ts",
+      "original": "                  averageScale(m, part),",
+      "replacement": "                  m.scale,",
+      "test": {
+        "files": ["test/postgres/report-v2-provider.test.ts"],
+        "namePattern": "the v2 reader applies"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/report-v2-provider.test.ts",
+          "name": "the v2 reader applies grain and link policy, company scope, the required parent, typed equality, zoned periods and minor-unit averages exactly as the reference",
+          "expected": "Expected values to be strictly deep-equal"
+        }
+      ]
+    },
+    {
+      "name": "reports-s2-measure-grant",
+      "claim": "Narrowing an approved measure withholds every report that binds it.",
+      "file": "packages/runtime/src/semantic-query-gateway.ts",
+      "original": "        m.approved ? [reportQueryId(m.measureId)] : [],",
+      "replacement": "        [],",
+      "test": {
+        "files": ["test/postgres/report-analysis.test.ts"],
+        "namePattern": "REPORTS-1 s2"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/report-analysis.test.ts",
+          "name": "REPORTS-1 s2: North ages invoices, groups by a linked Site, counts lines and distinct parents, trials a measure, and never sees South",
+          "expected": "Expected values to be strictly deep-equal"
+        }
+      ]
+    },
+    {
+      "name": "reports-s2-line-parent-offer",
+      "claim": "A line source is offered only with its declared parent link.",
+      "file": "packages/canonical-model/src/declared-report-v2.ts",
+      "original": "  if (base.parentRelationId && !pinned && !links.some((l) => l.parent))",
+      "replacement": "  if (false)",
+      "test": {
+        "files": ["test/compiler/report-analysis.test.ts"],
+        "namePattern": "fix round: a line source"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/report-analysis.test.ts",
+          "name": "fix round: a line source is offered only with its declared parent, and a stored line body without it is refused",
+          "expected": "is offered without its parent"
+        }
+      ]
+    },
+    {
+      "name": "reports-s2-pinned-links",
+      "claim": "A stored report revalidates its pinned link lists instead of re-deriving them (rule 10).",
+      "file": "packages/canonical-model/src/declared-report-v2.ts",
+      "original": "  const offer = reportOfferV2(def, body.source.listSurfaceId, body.links);",
+      "replacement": "  const offer = reportOfferV2(def, body.source.listSurfaceId);",
+      "test": {
+        "files": ["test/compiler/report-analysis.test.ts"],
+        "namePattern": "fix round: a linked report keeps"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/report-analysis.test.ts",
+          "name": "fix round: a linked report keeps its pinned list when another list of the target is added or a label changes (rule 10)",
+          "expected": "Expected values to be strictly equal"
+        }
+      ]
+    },
+    {
+      "name": "reports-s2-group-ceiling",
+      "claim": "A declaration whose finite zero fill always exceeds the group ceiling refuses in preview.",
+      "file": "packages/canonical-model/src/declared-report-v2.ts",
+      "original": "    return 'These groups always exceed the 500-group ceiling; choose fewer finite groupings.';",
+      "replacement": "    return null as never;",
+      "test": {
+        "files": ["test/compiler/report-analysis.test.ts"],
+        "namePattern": "fix round: finite zero fill"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/report-analysis.test.ts",
+          "name": "fix round: finite zero fill past the group ceiling refuses in preview; money averages round at the minor unit; Vendor Bills age",
+          "expected": "did not match the regular expression"
         }
       ]
     }

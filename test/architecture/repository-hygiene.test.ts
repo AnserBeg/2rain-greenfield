@@ -259,6 +259,7 @@ const suiteDefinitions = [
       'test/postgres/report-analysis.test.ts',
       'test/postgres/report-company-reader.test.ts',
       'test/postgres/report-reader-bounds.test.ts',
+      'test/postgres/report-v2-provider.test.ts',
       'test/postgres/request-runtime-view.test.ts',
       'test/postgres/saved-filter.test.ts',
       'test/postgres/speed-fixes.test.ts',

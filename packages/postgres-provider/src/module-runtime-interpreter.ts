@@ -464,6 +464,9 @@ export class PostgresModuleRuntimeInterpreter
               scope ? { [scope.operand.parameterId]: input.company } : {};
             if (report.revision.body.version === 'grouped-report/v2') {
               const links = report.links ?? [];
+              // Every join carries its own issued narrowing, or none runs.
+              if ((request.linkFilterPlans?.length ?? 0) !== links.length)
+                return { kind: 'unavailable' } as const;
               const linkEntities = links.map((l) =>
                 requiredEntity(storage, l.entityId),
               );

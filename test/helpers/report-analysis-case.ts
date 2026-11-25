@@ -756,6 +756,54 @@ export const reportAnalysisCase = (archived: boolean) => async () => {
         );
         assert.deepEqual(await run(lineReport), { kind: 'unavailable' });
 
+        // Approve exactly the trialled measure, bind it from a report, then
+        // narrow the measure's own grant: the binding report is withheld.
+        const approval = draftMeasure(
+          targetOf(await targets(), 'custom_inspection_list'),
+          'Inspections counted',
+          'approved',
+          undefined,
+          trial.measureId,
+        );
+        await publish(approval);
+        const bound = draftReport(
+          targetOf(await targets(), 'custom_inspection_list'),
+          'Inspections by due month',
+          ReportChoicesSchema.parse({
+            dimensions: [
+              {
+                kind: 'calendar',
+                fieldId: `${NS}:field.custom_inspection_due`,
+                unit: 'month',
+              },
+            ],
+            filters: [],
+            measures: [
+              {
+                kind: 'approved',
+                measureId: trial.measureId,
+                contractDigest: trial.contractDigest,
+              },
+            ],
+            outputs: [{ kind: 'table' }],
+          }),
+        );
+        await publish(bound);
+        const live = () =>
+          app.runtime.entry.run({}, (view) =>
+            app.runtime.queryGateway.invokeGrouped(view, {
+              queryId: reportQueryId(bound.reportId),
+              company: north,
+              parameters: {},
+              pageSize: 50,
+            }),
+          );
+        const before = await live();
+        assert.ok(before.kind === 'page', JSON.stringify(before));
+        assert.deepEqual(cells(before.totals), [[[], ['5']]]);
+        await revoke(reportQueryId(trial.measureId));
+        assert.deepEqual(await live(), { kind: 'unavailable' });
+
         // The grouped List renders bands, Restricted and absence by label.
         const url = new URL('/', app.baseUrl);
         url.searchParams.set('surface', reportSurfaceId(aging.reportId));
