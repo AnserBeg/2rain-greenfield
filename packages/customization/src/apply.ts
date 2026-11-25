@@ -1,3 +1,11 @@
+import {
+  RecordTemplateBindingSchema,
+  templateBindingDigest,
+  templateBindingConflict,
+  recordTemplateOffers,
+  type TemplateSource,
+  type RecordTemplateBinding,
+} from '@north-star/canonical-model';
 import { applyMapRevision } from './map-revision.js';
 import {
   compilePresentation,
@@ -76,6 +84,7 @@ export type CustomizationRefusalCode =
   | 'CUSTOMIZE_TARGET_NOT_FOUND'
   | 'CUSTOMIZE_LIST_VIEW_INVALID'
   | 'CUSTOMIZE_FIELD_NOT_ON_LIST'
+  | 'CUSTOMIZE_RECORD_TEMPLATE_CONFLICT'
   | 'CUSTOMIZE_MAP_CONFLICT'
   | 'CUSTOMIZE_BOARD_CONFLICT'
   | 'CUSTOMIZE_REPORT_CONFLICT'
@@ -117,7 +126,14 @@ export function applyCustomizationPatches(
 ): CustomizationApplication {
   const authored = structuredClone(base) as Json;
   const previous: SingleCustomizationPatch[] = [];
-  const superseded = supersededBoardRevisions(patches);
+  const superseded = {
+    addBoardViewRevision: supersededBoardRevisions(patches),
+    addMapViewRevision: supersededBoardRevisions(patches),
+    addRecordTemplateBindingRevision: supersededBoardRevisions(
+      patches,
+      'addRecordTemplateBindingRevision',
+    ),
+  };
   const pastReports = supersededReports(patches);
   for (const [index, change] of patches.entries()) {
     const members = change.kind === 'changeSet' ? change.patches : [change];
@@ -137,9 +153,10 @@ export function applyCustomizationPatches(
       }
       const board =
         patch.kind === 'addBoardViewRevision' ||
+        patch.kind === 'addRecordTemplateBindingRevision' ||
         patch.kind === 'addMapViewRevision'
           ? {
-              check: superseded.has(patch.revisionId)
+              check: superseded[patch.kind].has(patch.revisionId)
                 ? ('identity' as const)
                 : origin?.differentBase
                   ? ('structural' as const)
@@ -301,6 +318,51 @@ export function applyOne(
       return addLineTable(authored, patch);
     case 'declareLifecycle':
       return declareLifecycle(authored, patch);
+    case 'addRecordTemplateBindingRevision': {
+      const source = authored as unknown as TemplateSource;
+      const form = list(authored, 'surfaces').find(
+        (s) => s.surfaceId === patch.body.formId,
+      );
+      const prior = form?.recordTemplateBinding as
+        RecordTemplateBinding | undefined;
+      const { kind, schemaVersion, ...definition } = patch;
+      if (
+        !form ||
+        (prior?.revisionId ?? null) !== patch.predecessor ||
+        patch.revisionId === patch.predecessor ||
+        previous.some(
+          (p) => p.kind === kind && p.revisionId === patch.revisionId,
+        ) ||
+        templateBindingDigest(patch.body) !== patch.resultDigest ||
+        (patch.status === 'retired' &&
+          (prior?.status !== 'active' ||
+            prior.resultDigest !== patch.resultDigest)) ||
+        new Set(patch.body.columns.map((c) => c.fieldId)).size !==
+          patch.body.columns.length
+      )
+        return refusal(
+          'CUSTOMIZE_RECORD_TEMPLATE_CONFLICT',
+          'The record template predecessor, identity or choices changed.',
+        );
+      if (patch.status === 'active' && board.check !== 'identity') {
+        const offer = recordTemplateOffers(source).find(
+          (o) => o.frame.formId === patch.body.formId,
+        );
+        const conflict = templateBindingConflict(patch, offer);
+        if (conflict) {
+          const message =
+            'The record template contract changed for ' +
+            conflict.subject +
+            '.';
+          board.problem = { message, conflicts: [conflict] };
+          return refusal('CUSTOMIZE_RECORD_TEMPLATE_CONFLICT', message);
+        }
+      }
+      void schemaVersion;
+      form.recordTemplateBinding =
+        RecordTemplateBindingSchema.parse(definition);
+      return null;
+    }
     case 'addMapViewRevision': {
       if (
         previous.some(

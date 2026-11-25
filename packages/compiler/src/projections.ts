@@ -15,6 +15,9 @@ import { compilePresentation } from '../../canonical-model/src/surface-presentat
 import { PRESENTATION_READER } from '../../canonical-model/src/surface-presentation-schema.js';
 import {
   DATE_TIME_FIELD_READER,
+  RECORD_TEMPLATE_READER,
+  RECORD_TEMPLATE_OPERATION_READER,
+  hasRecordTemplateBinding,
   type DateTimeBinding,
   ADDRESS_FIELD_READER,
   ADDRESS_MAP_READER,
@@ -288,16 +291,18 @@ export function lowerBaseProjectionPayloads(
     hasSavedListLayouts(verificationPackageRevision) ? 3 : 1,
     hasMetrics(verificationPackageRevision) ? 4 : 1,
   );
-  const operationFloor = hasBookingOperations(verificationPackageRevision)
-    ? bookingReaderFloor(verificationPackageRevision)
-    : formulaRules
-      ? requiredFormulaValidationOperationReader(
-          formulaRules.bindings.map(({ rule }) => rule),
-        )
-      : 'operationRoleNarrowings' in verificationPackageRevision &&
-          verificationPackageRevision.operationRoleNarrowings
-        ? 2
-        : 1;
+  const operationFloor = hasRecordTemplateBinding(verificationPackageRevision)
+    ? RECORD_TEMPLATE_OPERATION_READER
+    : hasBookingOperations(verificationPackageRevision)
+      ? bookingReaderFloor(verificationPackageRevision)
+      : formulaRules
+        ? requiredFormulaValidationOperationReader(
+            formulaRules.bindings.map(({ rule }) => rule),
+          )
+        : 'operationRoleNarrowings' in verificationPackageRevision &&
+            verificationPackageRevision.operationRoleNarrowings
+          ? 2
+          : 1;
   const plans = [
     plan(
       PROJECTION_FAMILY_IDS.semanticModel,
@@ -892,6 +897,13 @@ function operationCatalogPayload(
   // Only authored capability Task bindings introduce this envelope. Existing
   // record/revision-only commands retain their exact closed contracts and bytes.
   // The registered executor owns the closed scalar vocabulary inside it.
+  const templateOperations = new Set(
+    original.surfaces.flatMap((surface) =>
+      'recordTemplateBinding' in surface && surface.recordTemplateBinding
+        ? [surface.recordTemplateBinding.body.createOperationId]
+        : [],
+    ),
+  );
   const argumentOperations = new Set(
     original.surfaces
       .filter((surface) => surface.lifecycle === 'active')
@@ -985,6 +997,7 @@ function operationCatalogPayload(
               compilerSemanticProfileVersion,
               'booking' in operation ||
                 argumentOperations.has(operation.operationId),
+              templateOperations.has(operation.operationId),
             ),
             infrastructure: {
               archiveRepresentation: 'nullableArchivedAt',
@@ -1207,6 +1220,7 @@ function surfaceManifestPayload(
       ),
   );
   const surfaceFloor = Math.max(
+    hasRecordTemplateBinding(original) ? RECORD_TEMPLATE_READER : 0,
     original.surfaces.some((s) => s.archetype === 'map') ? MAP_VIEW_READER : 0,
     original.surfaces.some(
       (surface) => 'presentation' in surface && surface.presentation,
@@ -1341,6 +1355,11 @@ function surfaceManifestPayload(
               }
             : {}),
           // Labels and roles render from this release, beside the digested member.
+          ...(declared &&
+          'recordTemplateBinding' in declared &&
+          declared.recordTemplateBinding
+            ? { recordTemplateBinding: declared.recordTemplateBinding }
+            : {}),
           ...(declared && 'map' in declared && declared.map
             ? { map: declared.map }
             : {}),
@@ -2507,6 +2526,7 @@ function operationInputContract(
   storageEntity: StorageTargetPayloadV1['entities'][number] | undefined,
   compilerSemanticProfileVersion: CompilerSemanticProfileVersion,
   capabilityArguments: boolean,
+  templateCreate: boolean,
 ): unknown {
   const effectKind = operation.effect.kind;
   const capabilityRecordScope = effectKind === 'registeredCapabilityEffect';
@@ -2562,6 +2582,7 @@ function operationInputContract(
           ...(systemInput ? [systemInput.argumentKey] : []),
           'recordId',
           'relations',
+          ...(templateCreate ? ['templateLines'] : []),
           'values',
         ]
       : effectKind === 'updateRecordEffect'

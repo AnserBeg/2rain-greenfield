@@ -250,6 +250,7 @@ const suiteDefinitions = [
       'test/postgres/query-aggregate-semantics.test.ts',
       'test/postgres/query-filter-lowering.test.ts',
       'test/postgres/read-snapshot.test.ts',
+      'test/postgres/record-template-library.test.ts',
       'test/postgres/release-activation.test.ts',
       'test/postgres/release-approval.test.ts',
       'test/postgres/releases.test.ts',

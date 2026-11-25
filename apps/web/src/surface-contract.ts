@@ -5,6 +5,10 @@ import {
 import { CompiledPopupSchema } from '../../../packages/runtime/src/popup-actions.js';
 import type { CompiledPopup } from '../../../packages/canonical-model/src/popup-actions.js';
 import {
+  RecordTemplateBindingSchema,
+  type RecordTemplateBinding,
+} from '@north-star/canonical-model';
+import {
   SurfaceLayoutSchema,
   type SurfaceLayout,
 } from '../../../packages/canonical-model/src/layout.js';
@@ -324,6 +328,7 @@ export function formFieldIds(
 }
 
 export interface CompiledSurfaceDefinition {
+  readonly recordTemplateBinding?: RecordTemplateBinding;
   readonly map?: SurfaceMap;
   /** UI-CUSTOM-1: declared tones and sizing, at surface reader 47. */
   readonly presentation?: CompiledPresentation;
@@ -1162,6 +1167,13 @@ function parseSurface(
   const fields = parseSurfaceFields(value, index);
 
   return Object.freeze({
+    ...(value.recordTemplateBinding === undefined
+      ? {}
+      : {
+          recordTemplateBinding: RecordTemplateBindingSchema.parse(
+            value.recordTemplateBinding,
+          ),
+        }),
     ...(archetype === 'map' ? { map: SurfaceMapSchema.parse(value.map) } : {}),
     ...(value.report
       ? { report: ReportRevisionSchema.parse(value.report) }

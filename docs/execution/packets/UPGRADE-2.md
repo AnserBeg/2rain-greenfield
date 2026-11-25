@@ -21,7 +21,7 @@ The amended design is in force except for the policy rows, each **proposed, awai
 | A11 | 1 | **Diagnostic codes v1** retires the catch-all and pins the closed code table by test. |
 | A12 | 1 | **Diagnostic codes v1** requires all independent conflicts, dependent edits and rule-specific witness failures in one attempt. |
 | A13 | 1 (same-surface optional field), 3 (full suite), 6 (policy fixture) | **Upgrade cases and controls** covers every R10 case, immutable patch rows, exact parent and five allowlist-removal controls. |
-| A14 | 5 | **Binary admission and rollback window** defines the handshake and absolute floor, external register, required capabilities and rollback-window closure. |
+| A14 | 5 | **Binary admission and rollback window** defines the handshake and absolute floor, external register, required capabilities and rollback-window closure. Slice 5 entry condition from TEMPLATE-1 A7 (2026-11-21): the independent fleet register must retain a template-declaring tenant’s parser and reader high-water marks across pointer rollback. Attempt to deploy the preceding binary after rollback and require a named refusal. |
 | A15 | 5 | **Forward conversion and the first-tenant switch** covers stored re-read changes, parser retention, stable IDs/order/roots and both reset and CI checks. |
 | A16 | 4 | **Rollout waves** limits each view and classifies the platform header and forced-RLS member rows. |
 | A17 | 2, 4, 6 | **Human approval of a correction**, dashboard statuses and **Attribute approval** define the replacement key, four additional statuses and all three approval consumers. |

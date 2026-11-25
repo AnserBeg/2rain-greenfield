@@ -183,7 +183,8 @@ export function requestType(c: BuildCase): RequestType {
     expect.outcome === 'map' ||
     expect.outcome === 'validation' ||
     expect.outcome === 'ratePlan' ||
-    expect.outcome === 'presentation'
+    expect.outcome === 'presentation' ||
+    expect.outcome === 'templateBinding'
   )
     return 'single change';
   if (expect.types.some((t) => t.board)) return 'module + lines + board';

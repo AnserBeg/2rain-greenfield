@@ -1,3 +1,4 @@
+import { templateCreateSurface } from '../../runtime/src/record-template-library.js';
 import {
   assertWorkflowEvidence,
   persistWorkflowDefinitions,
@@ -558,6 +559,7 @@ export class PostgresReleaseVerificationService {
         declaredCapabilityVerificationRefusals(
           this.capabilityOperationExecutorFactories,
         ),
+        this.workflowVerifierPool,
       );
       return (async () => {
         try {
@@ -1560,6 +1562,7 @@ class SemanticVerificationExecutor {
       string,
       CapabilityVerificationRefusalExpectation
     >,
+    private readonly verifierPool?: Pool,
   ) {
     this.#operations = (
       view.projections.operation.payload as unknown as {
@@ -2734,6 +2737,33 @@ class SemanticVerificationExecutor {
     operation: VerificationOperationContract,
     input: Record<string, unknown>,
   ) {
+    const key = stableUuid(
+      `verification:idempotency:${this.#token(operation.operationId)}`,
+    );
+    const surface =
+      operation.effect.kind === 'createRecordEffect' &&
+      templateCreateSurface(this.view, operation.operationId);
+    if (surface) {
+      if (!this.verifierPool)
+        throw new Error(
+          'Template verification requires the verifier connection.',
+        );
+      await withWorkflowVerifierTransaction(
+        this.verifierPool,
+        this.context,
+        (client) =>
+          client.query(
+            'SELECT platform.review_record_template_probe($1,$2,$3,$4,$5)',
+            [
+              this.view.release.releaseId,
+              this.view.pointer.fence,
+              surface.surfaceId,
+              key,
+              input,
+            ],
+          ),
+      );
+    }
     const result = await this.operationGateway.invoke(
       this.view,
       {
@@ -2745,9 +2775,7 @@ class SemanticVerificationExecutor {
                 input as ImmutableJsonValue,
               )
             : null,
-        idempotencyKey: stableUuid(
-          `verification:idempotency:${this.#token(operation.operationId)}`,
-        ),
+        idempotencyKey: key,
         input,
         operationId: operation.operationId,
         schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,

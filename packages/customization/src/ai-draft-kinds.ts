@@ -1,3 +1,4 @@
+import { TemplateBindingChoicesSchema } from './record-template-binding.js';
 import { z } from 'zod';
 
 import { DISPLAY_OPERATIONS } from './calculated-display-draft.js';
@@ -201,6 +202,14 @@ export const DRAFTER_KINDS = {
     input: DRAFTER_SELECTION_SCHEMAS.addCalculatedDisplayField,
     guidance:
       'Show an exact decimal value on a record page from the calculated display targets. Include listSurfaceId only when both fields are on that list. Needs its own draft.',
+  },
+  addRecordTemplateBindingRevision: {
+    input: z.strictObject({
+      kind: z.literal('addRecordTemplateBindingRevision'),
+      templateBinding: TemplateBindingChoicesSchema,
+    }),
+    guidance:
+      'Choose a listed company-owned collection, its context and fields for a versioned record template.',
   },
   addReportRevision: {
     input: DRAFTER_SELECTION_SCHEMAS.addReportRevision,

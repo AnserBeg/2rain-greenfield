@@ -529,6 +529,10 @@ async function handleRequest(
   try {
     const submission =
       request.method === 'POST' ? await readFormSubmission(request) : null;
+    if (submission?.templateAction && !sameOriginRequest(request)) {
+      writeHtml(response, { statusCode: 403, html: '' });
+      return;
+    }
     if (
       workflowApprovals &&
       url.searchParams.has('approvals') &&

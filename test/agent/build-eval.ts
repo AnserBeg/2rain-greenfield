@@ -46,6 +46,7 @@ import { SHARED_LIST_QUERY_VERSION } from '../../packages/runtime/src/list-behav
 import { COMPANY, NS, type AgentWorld } from './agent-world.js';
 import {
   CAPABILITY_BUCKETS,
+  templateBindingMisses,
   type BuildCase,
   type CapabilityBucket,
   type FieldSpec,
@@ -1250,6 +1251,16 @@ export async function runBuildCase(
       result.behaviour = ok;
       if (!ok)
         result.reasons.push('the validation rule is not the requested one');
+    }
+    if (expect.outcome === 'templateBinding' && result.activated) {
+      const misses = templateBindingMisses(
+        expect,
+        boardsBefore,
+        await opened.service.targets(),
+      );
+      result.e2e = true;
+      result.behaviour = misses.length === 0;
+      result.reasons.push(...misses);
     }
     if (expect.outcome === 'ratePlan' && result.activated) {
       const plans = await world.runtime.entry.run(MANAGER, (view) =>
