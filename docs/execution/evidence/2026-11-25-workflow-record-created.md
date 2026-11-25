@@ -27,7 +27,7 @@ Branch `packet/WORKFLOW-2-s4b` from main `20762dbc`. Pre-tenant. Provisional mig
 ## Stays narrow, and owed
 
 - `recordTransitioned` and `scheduledOnField` (prompt names: lifecycleTransitioned, dueOnDate) and the school-absence status-change proof are the next slice.
-- The archived preceding-reader proof for rung 51 is owed at merge, against the actual preceding serving tip (rule 13).
+- Rule 13 (built): in the clinic journey the preceding binary at `20762dbc` answers a governed query on the Appointment release, whose persisted bytes equal its own compile of the recorded change, then refuses the workflow release by name (surface-manifest requires 51, supports 48). The integrator re-pins the predecessor at merge.
 - Staff Retry after a rollback joins the receipt event chain only; a `recordCreated` run that suspends on a release switch is cancel-only until the retry terms read occurrences. It fails closed.
 - Writer census (`test/architecture/record-creation-writers.test.ts`): posting-kernel movements and companion documents, settlement lines and the receipt a purchase-order approval opens do not emit yet (owed, slice 5). Seeds and projection rows are not record creations. SQL definer functions only read managed tables.
 - The stock-count fixture this proof uses starts a count with one stocked item, so N>1 on one event rests on the start-key schema test and the per-line writer call.

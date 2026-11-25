@@ -30,6 +30,7 @@ import { generateWorkflowSdk } from '../../packages/postgres-provider/src/workfl
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
 import { INVENTORY_WRITE_INVARIANTS } from '../../packages/postgres-provider/src/inventory-write-invariants.js';
 import { COMPANY, worldOver } from '../agent/agent-world.js';
+import { exerciseWorkflowTriggerReader } from '../helpers/workflow-trigger-reader.js';
 import { RecordCreatedTriggerSchema } from '../../packages/canonical-model/src/schemas.js';
 import {
   LINEAGE_INSTALL_VOLUME,
@@ -47,7 +48,7 @@ const trigger = RecordCreatedTriggerSchema.parse({
 
 test(
   'a tenant record type starts one pinned run per created record, in its own company',
-  { timeout: 900_000 },
+  { timeout: 1_500_000 },
   async () => {
     await withEphemeralPostgres(
       'workflow-record',
@@ -81,18 +82,19 @@ test(
           const world = worldOver(runtime, 'postgres');
           const service = customization.service;
 
+          const appointmentType = {
+            kind: 'addRecordType',
+            label: 'Appointment',
+            companyOwnership: 'entityOwned',
+            fields: [{ label: 'Name', type: 'text' }],
+          };
           const typeDraft = await service.draft(
-            {
-              kind: 'addRecordType',
-              label: 'Appointment',
-              companyOwnership: 'entityOwned',
-              fields: [{ label: 'Name', type: 'text' }],
-            },
+            appointmentType,
             'declarativeEditor',
           );
           assert.ok(typeDraft.status === 'drafted', JSON.stringify(typeDraft));
           const approval = await service.approve(typeDraft.patchId);
-          await service.activate(typeDraft.patchId);
+          const compatible = await service.activate(typeDraft.patchId);
           const approver = (
             await pool.query<{ approving_human_id: string }>(
               `SELECT approving_human_id FROM platform.release_approvals
@@ -178,28 +180,43 @@ test(
                 ],
               }),
           );
-          const workflowDraft = await service.draft(
-            {
-              kind: 'saveWorkflow',
-              workflow: {
-                schemaVersion: 'v6',
-                workflowId: 'appointment-follow-up',
-                trigger,
-                bodyDigest,
-                grants,
-              },
+          // Rule 13: the preceding serving binary answers a query on the
+          // Appointment release (byte-identical to its own compile of the
+          // recorded change), then refuses the workflow release by name.
+          await exerciseWorkflowTriggerReader({
+            pool,
+            databaseUrl,
+            identity: runtime.identity,
+            compatibleId: compatible.releaseId,
+            compatiblePatch: appointmentType,
+            queryId: `${NS}:query.custom_appointment_get`,
+            args: { recordId: early },
+            recordId: early,
+            declare: async () => {
+              const workflowDraft = await service.draft(
+                {
+                  kind: 'saveWorkflow',
+                  workflow: {
+                    schemaVersion: 'v6',
+                    workflowId: 'appointment-follow-up',
+                    trigger,
+                    bodyDigest,
+                    grants,
+                  },
+                },
+                'conversationalAi',
+              );
+              assert.ok(
+                workflowDraft.status === 'drafted',
+                JSON.stringify(workflowDraft),
+              );
+              await service.approve(
+                workflowDraft.patchId,
+                workflowDraft.workflowReviewDigest,
+              );
+              return (await service.activate(workflowDraft.patchId)).releaseId;
             },
-            'conversationalAi',
-          );
-          assert.ok(
-            workflowDraft.status === 'drafted',
-            JSON.stringify(workflowDraft),
-          );
-          await service.approve(
-            workflowDraft.patchId,
-            workflowDraft.workflowReviewDigest,
-          );
-          await service.activate(workflowDraft.patchId);
+          });
           assert.deepEqual(
             (
               await pool.query<{ binding: unknown }>(
