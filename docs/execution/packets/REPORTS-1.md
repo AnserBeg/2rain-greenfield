@@ -62,7 +62,7 @@ Resolved by the design read and orchestrator rulings: a report’s index on an e
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "REPORTS-1",
-  "base": "d8aad66b3e6ee6231b0580f2702c26d116f5a68c", "head": "a373c8fd194a51eee0be5667a402fe4fe126f115",
+  "base": "d8aad66b3e6ee6231b0580f2702c26d116f5a68c", "head": "464e83520daff9e1893dc2050f5287b4890f2b34",
   "changedPaths": [
     "apps/web/src/component-registry.ts", "apps/web/src/customize-report.ts", "apps/web/src/customize-screen.ts", "apps/web/src/grouped-report.ts", "apps/web/src/surface-contract.ts", "package.json", "packages/canonical-model/src/declared-report-v2.ts", "packages/canonical-model/src/declared-report.ts",
     "packages/canonical-model/src/grouped-aggregate-v2.ts", "packages/canonical-model/src/grouped-aggregate.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/schemas.ts", "packages/compiler/src/declared-reports.ts", "packages/compiler/src/projections.ts", "packages/compiler/src/storage.ts", "packages/customization/src/ai-draft-kinds.ts",
