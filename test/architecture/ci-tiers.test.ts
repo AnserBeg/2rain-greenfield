@@ -259,6 +259,62 @@ test('check-records rejects a new packet missing the tier attached to its CI run
   }
 });
 
+test('a pending CI tier marker is accepted on a packet branch only (CI-8)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ci-8-pending-'));
+  const record = join(dir, 'docs/execution/packets/new.md');
+  const script = resolve('scripts/check-record-ci-tier.mjs');
+  const run = (branch: string) => {
+    const environment = { ...process.env };
+    delete environment.GITHUB_HEAD_REF;
+    environment.GITHUB_REF_NAME = branch;
+    return spawnSync(process.execPath, [script], {
+      cwd: dir,
+      encoding: 'utf8',
+      env: environment,
+    });
+  };
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: dir });
+    execFileSync(
+      'git',
+      [
+        '-c',
+        'user.name=Fixture',
+        '-c',
+        'user.email=fixture@example.invalid',
+        'commit',
+        '--allow-empty',
+        '-qm',
+        'baseline',
+      ],
+      { cwd: dir },
+    );
+    mkdirSync(join(dir, 'docs/execution/packets'), { recursive: true });
+    writeFileSync(record, 'CI tier: pending full\n');
+    assert.equal(run('packet/CI-8').status, 0);
+    // The train still needs the real URL.
+    for (const branch of ['main', 'candidate/WORKFLOW-2', 'packets/x']) {
+      const refused = run(branch);
+      assert.equal(refused.status, 1, branch);
+      assert.match(
+        refused.stderr,
+        /"CI tier: pending" is allowed only on a packet\/\* branch/u,
+      );
+    }
+    // A pending marker plus a URL line is two declarations.
+    writeFileSync(
+      record,
+      'CI tier: pending full\nCI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/1\n',
+    );
+    assert.equal(run('packet/CI-8').status, 1);
+    // Anything but the exact marker is no declaration.
+    writeFileSync(record, 'CI tier: pending soon\n');
+    assert.equal(run('packet/CI-8').status, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('the token command requires exact full evidence for executable work and docs on red main', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ci-3-window-'));
   const repo = join(dir, 'repo');

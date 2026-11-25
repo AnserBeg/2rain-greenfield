@@ -35,6 +35,18 @@ const runLinks = (text) =>
   ) ?? [];
 const line =
   /^CI tier: (?:quick|full) https:\/\/github\.com\/AnserBeg\/2rain-greenfield\/actions\/runs\/[1-9]\d*(?:\/attempts\/[1-9]\d*)?$/gmu;
+// CI-8: a lane declares `CI tier: pending quick|full` in its first commit and
+// replaces it with the run URL when the run exists, so no second docs-only
+// commit is needed after the first dispatch. Only a packet branch may carry the
+// marker: the integrator train (candidate/*, main, a detached merge) still
+// requires the real run URL.
+const pendingLine = /^CI tier: pending (?:quick|full)$/gmu;
+const branch = (
+  process.env.GITHUB_HEAD_REF ||
+  process.env.GITHUB_REF_NAME ||
+  git('rev-parse', '--abbrev-ref', 'HEAD')
+).trim();
+const pendingAllowed = /^packet\//u.test(branch);
 for (const path of readdirSync(directory, { recursive: true }).map((path) =>
   join(directory, path),
 )) {
@@ -50,9 +62,15 @@ for (const path of readdirSync(directory, { recursive: true }).map((path) =>
     const before = new Set(runLinks(git('show', `${baseline}:${path}`)));
     if (runLinks(body).every((link) => before.has(link))) continue;
   }
-  if ([...body.matchAll(line)].length !== 1) {
+  const pending = [...body.matchAll(pendingLine)].length;
+  if ([...body.matchAll(line)].length + pending !== 1) {
     console.error(
-      `${path}: expected one "CI tier: quick|full https://github.com/AnserBeg/2rain-greenfield/actions/runs/<id>" line`,
+      `${path}: expected one "CI tier: quick|full https://github.com/AnserBeg/2rain-greenfield/actions/runs/<id>" line (or "CI tier: pending quick|full" on a packet/* branch)`,
+    );
+    process.exitCode = 1;
+  } else if (pending === 1 && !pendingAllowed) {
+    console.error(
+      `${path}: "CI tier: pending" is allowed only on a packet/* branch (this is "${branch}"); replace it with the real run URL: CI tier: <quick|full> https://github.com/AnserBeg/2rain-greenfield/actions/runs/<id>`,
     );
     process.exitCode = 1;
   }
