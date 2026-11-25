@@ -18,9 +18,11 @@ import {
   startComposedApplication,
 } from '../../apps/api/src/composition-root.js';
 import {
+  provisionLocalDemoAuthorization,
   rolePool,
   trustedContext,
 } from '../../packages/postgres-provider/src/composed-application-runtime.js';
+import { workflowAutomationPrincipal } from '../../packages/postgres-provider/src/workflow-admission.js';
 import { compileWorkflowBody } from '../../packages/postgres-provider/src/workflow-compile.js';
 import { PostgresWorkflowConsumer } from '../../packages/postgres-provider/src/workflow-consumer.js';
 import { PostgresWorkflowExecution } from '../../packages/postgres-provider/src/workflow-execution.js';
@@ -306,6 +308,534 @@ test(
             ),
           );
           assert.deepEqual(scoped.rows, [{ trigger_record_id: home }]);
+        } finally {
+          await workerPool.end();
+          await runtimePool.end();
+          await customization.close();
+          await runtime.close();
+        }
+      },
+      LINEAGE_INSTALL_VOLUME,
+    );
+  },
+);
+
+test(
+  'recordCreated runs ask for approval in their own company, link only their trigger type and never restart themselves',
+  { timeout: 1_500_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'workflow-record-rules',
+      async ({ connection, pool }) => {
+        const databaseUrl = `postgresql://postgres@${String(connection.host)}:${String(connection.port)}/postgres`;
+        const tenantSlug = 'workflow-record-rules';
+        const seeded = await startComposedApplication({
+          databaseUrl,
+          tenantSlug,
+          port: 0,
+          seedProfile: 'distributor',
+        });
+        await seeded.close();
+        const runtime = await openComposedApplicationRuntime({
+          databaseUrl,
+          tenantSlug,
+        });
+        const customization = await openCustomizeService({
+          databaseUrl,
+          tenantSlug,
+        });
+        const workerPool = rolePool(
+          databaseUrl,
+          'north_star_workflow_worker',
+          2,
+        );
+        const runtimePool = rolePool(databaseUrl, 'north_star_runtime', 4);
+        try {
+          const { tenantId, environmentId } = runtime.identity;
+          const scope = { tenant_id: tenantId, environment_id: environmentId };
+          const world = worldOver(runtime, 'postgres');
+          const service = customization.service;
+          const local = (name: string) => `${NS}:${name}`;
+          const followUp = local('entity.custom_follow_up');
+          const note = local('entity.custom_clinic_note');
+          const followCreate = local('operation.custom_follow_up_create');
+          const appointmentCreate = local(
+            'operation.custom_appointment_create',
+          );
+          const followName = local('field.custom_follow_up_name');
+          const noteName = local('field.custom_clinic_note_name');
+          const toAppointment = local('relation.custom_follow_up_appointment');
+          const toNote = local('relation.custom_follow_up_note');
+          const activate = async (patch: unknown, digest?: string) => {
+            const draft = await service.draft(
+              patch as never,
+              digest === undefined ? 'declarativeEditor' : 'conversationalAi',
+            );
+            assert.ok(draft.status === 'drafted', JSON.stringify(draft));
+            const approval = await service.approve(
+              draft.patchId,
+              ...(digest === undefined ? [] : [draft.workflowReviewDigest]),
+            );
+            await service.activate(draft.patchId);
+            return approval;
+          };
+          const typed = (label: string) => ({
+            kind: 'addRecordType',
+            label,
+            companyOwnership: 'entityOwned',
+            fields: [{ label: 'Name', type: 'text' }],
+          });
+          const approval = await activate({
+            kind: 'changeSet',
+            patches: [
+              typed('Appointment'),
+              typed('Follow-up'),
+              typed('Clinic note'),
+            ],
+          });
+          for (const [label, target] of [
+            ['Appointment', appointment],
+            ['Note', note],
+          ] as const)
+            await activate({
+              kind: 'addLink',
+              entity: followUp,
+              label,
+              target,
+              required: false,
+            });
+          const approver = (
+            await pool.query<{ approving_human_id: string }>(
+              `SELECT approving_human_id FROM platform.release_approvals
+                WHERE tenant_id = $1 AND environment_id = $2 AND activation_attempt_id = $3`,
+              [tenantId, environmentId, approval.activationAttemptId],
+            )
+          ).rows[0]!.approving_human_id;
+          const operator = await trustedContext({
+            tenantId,
+            environmentId,
+            principalId: approver,
+          });
+          const bindings = [
+            ...['create', 'read'].flatMap((action) =>
+              [
+                'custom_follow_up',
+                'custom_appointment',
+                'custom_clinic_note',
+              ].map((type) => ({
+                action,
+                permissionId: local(`permission.${type}_${action}`),
+                resourceId: local(`entity.${type}`),
+              })),
+            ),
+          ];
+          for (const workflowId of [
+            'follow-up-approval',
+            'note-link',
+            'rebook',
+          ])
+            await provisionLocalDemoAuthorization(
+              pool,
+              {
+                tenantId,
+                environmentId,
+                principalId: workflowAutomationPrincipal(
+                  tenantId,
+                  environmentId,
+                  workflowId,
+                ),
+              },
+              bindings,
+              `workflow-record-${workflowId}`,
+            );
+          await provisionLocalDemoAuthorization(
+            pool,
+            operator,
+            bindings,
+            'workflow-record-approver',
+          );
+
+          const gateways = new PostgresWorkflowGateway(
+            runtimePool,
+            INVENTORY_WRITE_INVARIANTS,
+          );
+          const view = await gateways.loadView(operator);
+          const fixtureEvent = {
+            type: 'recordCreated' as const,
+            eventId: randomUUID(),
+            recordTypeId: trigger.recordTypeId,
+            recordId: randomUUID(),
+            legalEntityId: COMPANY,
+          };
+          const readBack = {
+            outcome: 'succeeded',
+            readBack: {
+              recordId: fixtureEvent.recordId,
+              revision: 1,
+              values: {},
+            },
+          };
+          const followInput = (recordId: string, relation: string) => ({
+            recordId,
+            legalEntityId: fixtureEvent.legalEntityId,
+            values: { [followName]: 'Call back' },
+            relations: { [relation]: fixtureEvent.recordId },
+          });
+          const declare = async (
+            workflowId: string,
+            operations: string[],
+            body: string,
+            effects: { call: unknown; result: unknown }[],
+          ) => {
+            const grants = { queries: [], operations };
+            const sdk = generateWorkflowSdk(
+              view,
+              grants,
+              undefined,
+              undefined,
+              trigger,
+            );
+            const bodyDigest = await withTrustedRequestTransaction(
+              runtimePool,
+              operator,
+              (client) =>
+                storeWorkflowBundle(client, operator, {
+                  body,
+                  executable: compileWorkflowBody(body, sdk).executable,
+                  authoredBy: operator.principalId,
+                  fixtures: [{ event: fixtureEvent, effects } as never],
+                }),
+            );
+            await activate(
+              {
+                kind: 'saveWorkflow',
+                workflow: {
+                  schemaVersion: 'v6',
+                  workflowId,
+                  trigger,
+                  bodyDigest,
+                  grants,
+                },
+              },
+              '',
+            );
+          };
+          const followLiteral = (recordId: string, relation: string) =>
+            `{ recordId: ${recordId}, legalEntityId: event.legalEntityId, values: { ${JSON.stringify(followName)}: 'Call back' }, relations: { ${JSON.stringify(relation)}: event.recordId } }`;
+          await declare(
+            'follow-up-approval',
+            [followCreate],
+            `if (sdk.requestApproval('Create a follow-up', ${JSON.stringify(followCreate)}, ${followLiteral('event.recordId', toAppointment)})) sdk.operation(${JSON.stringify(followCreate)}, ${followLiteral('event.recordId', toAppointment)});`,
+            [
+              {
+                call: {
+                  kind: 'requestApproval',
+                  summary: 'Create a follow-up',
+                  operationId: followCreate,
+                  input: followInput(fixtureEvent.recordId, toAppointment),
+                },
+                result: true,
+              },
+              {
+                call: {
+                  kind: 'operation',
+                  id: followCreate,
+                  input: followInput(fixtureEvent.recordId, toAppointment),
+                },
+                result: readBack,
+              },
+            ],
+          );
+          // Links a record with the trigger's ID through a relation whose
+          // target is ANOTHER type: refused even though the ID matches.
+          await declare(
+            'note-link',
+            [followCreate],
+            `sdk.operation(${JSON.stringify(followCreate)}, ${followLiteral('event.eventId', toNote)});`,
+            [
+              {
+                call: {
+                  kind: 'operation',
+                  id: followCreate,
+                  input: followInput(fixtureEvent.eventId, toNote),
+                },
+                result: readBack,
+              },
+            ],
+          );
+          // Creates a record of its own trigger type: the creation it causes
+          // must not start this workflow again.
+          await declare(
+            'rebook',
+            [appointmentCreate],
+            `sdk.operation(${JSON.stringify(appointmentCreate)}, { recordId: event.eventId, legalEntityId: event.legalEntityId, values: { ${JSON.stringify(appointmentName)}: 'Rebooked' } });`,
+            [
+              {
+                call: {
+                  kind: 'operation',
+                  id: appointmentCreate,
+                  input: {
+                    recordId: fixtureEvent.eventId,
+                    legalEntityId: fixtureEvent.legalEntityId,
+                    values: { [appointmentName]: 'Rebooked' },
+                  },
+                },
+                result: readBack,
+              },
+            ],
+          );
+
+          const otherCompany = randomUUID();
+          await world.invoke('legal_entity_create', {
+            recordId: otherCompany,
+            values: {
+              [`${NS}:field.legal_entity_code`]: 'CLINIC-S',
+              [`${NS}:field.legal_entity_name`]: 'South clinic',
+              [`${NS}:field.legal_entity_is_default`]: false,
+              [`${NS}:field.legal_entity_status`]: `${NS}:option.legal_entity_status_active`,
+            },
+          });
+          const create = async (
+            operation: string,
+            company: string,
+            values: Record<string, string>,
+            recordId = randomUUID(),
+          ) => {
+            const result = await world.invoke(operation, {
+              recordId,
+              legalEntityId: company,
+              values,
+            });
+            assert.equal(result.outcome, 'succeeded', JSON.stringify(result));
+            return recordId;
+          };
+          // A clinic note and an appointment share one ID in the north clinic.
+          const shared = await create('custom_clinic_note_create', COMPANY, {
+            [noteName]: 'Allergy',
+          });
+          const north = await create(
+            'custom_appointment_create',
+            COMPANY,
+            { [appointmentName]: 'North visit' },
+            shared,
+          );
+          const south = await create(
+            'custom_appointment_create',
+            otherCompany,
+            {
+              [appointmentName]: 'South visit',
+            },
+          );
+          const consumer = new PostgresWorkflowConsumer(workerPool);
+          assert.equal(await consumer.claim(scope), 6);
+          const execution = new PostgresWorkflowExecution(
+            workerPool,
+            runtimePool,
+            gateways,
+          );
+          const runOf = async (workflowId: string, recordId: string) =>
+            (
+              await pool.query<{ run_id: string }>(
+                `SELECT r.run_id FROM platform.workflow_runs AS r
+                   JOIN platform.workflow_instances AS i USING (tenant_id, environment_id, instance_id, workflow_id)
+                  WHERE i.tenant_id = $1 AND i.workflow_id = $2 AND i.trigger_record_id = $3`,
+                [tenantId, workflowId, recordId],
+              )
+            ).rows[0]!.run_id;
+          const status = async (runId: string) =>
+            (
+              await pool.query<{ status: string }>(
+                'SELECT status FROM platform.workflow_runs WHERE run_id = $1',
+                [runId],
+              )
+            ).rows[0]!.status;
+          const settle = async (runId: string) => {
+            for (let step = 0; step < 4; step += 1) {
+              await execution.step(scope, runId);
+              if ((await status(runId)) !== 'RUNNABLE') break;
+            }
+            return status(runId);
+          };
+          const created = async (type: string, recordId: string) =>
+            (
+              await pool.query<{ company_id: string }>(
+                `SELECT company_id FROM platform.record_creation_occurrences
+                  WHERE tenant_id = $1 AND record_type = $2 AND record_id = $3`,
+                [tenantId, type, recordId],
+              )
+            ).rows.map((row) => row.company_id);
+
+          // F4: the link to the note that shares the ID is refused.
+          for (const recordId of [north, south]) {
+            await settle(await runOf('note-link', recordId));
+          }
+          assert.equal(
+            (
+              await pool.query<{ count: number }>(
+                `SELECT count(*)::integer AS count FROM platform.trust_action_invocations
+                  WHERE tenant_id = $1 AND action_id = $2
+                    AND failure_code = 'WORKFLOW_OPERATION_RECEIPT_LINK_REFUSED'`,
+                [tenantId, followCreate],
+              )
+            ).rows[0]!.count,
+            2,
+            'a link through a relation to another type is refused',
+          );
+
+          // F2: approval in the record's own company; approve and deny.
+          const waiting = await runOf('follow-up-approval', south);
+          assert.equal(await settle(waiting), 'WAITING');
+          const plan = (
+            await pool.query<{ fence: string; plan_digest: string }>(
+              `SELECT fence, plan_digest FROM platform.workflow_pending_approvals
+                WHERE run_id = $1 AND status = 'PENDING'`,
+              [waiting],
+            )
+          ).rows[0]!;
+          const worklist = () =>
+            withTrustedRequestTransaction(
+              runtimePool,
+              operator,
+              async (client) =>
+                (
+                  await client.query<{ run_id: string; company_id: string }>(
+                    'SELECT run_id, company_id FROM platform.workflow_approval_worklist($1)',
+                    [waiting],
+                  )
+                ).rows,
+            );
+          const decide = (
+            runId: string,
+            fence: string,
+            digest: string,
+            decision: 'APPROVED' | 'DECLINED',
+          ) =>
+            withTrustedRequestTransaction(
+              runtimePool,
+              operator,
+              async (client) =>
+                (
+                  await client.query<{ decided: boolean }>(
+                    'SELECT platform.workflow_decide_approval($1, 0, $2, $3, $4) AS decided',
+                    [runId, fence, digest, decision],
+                  )
+                ).rows[0]!.decided,
+            );
+          const membership = (company: string | null) =>
+            pool.query(
+              `UPDATE platform.current_policy_memberships SET legal_entity_id = $4
+                WHERE tenant_id = $1 AND environment_id = $2 AND principal_id = $3`,
+              [tenantId, environmentId, operator.principalId, company],
+            );
+          try {
+            await membership(COMPANY);
+            assert.deepEqual(
+              await worklist(),
+              [],
+              'a north approver sees nothing',
+            );
+            assert.equal(
+              await decide(waiting, plan.fence, plan.plan_digest, 'APPROVED'),
+              false,
+            );
+            await membership(otherCompany);
+            assert.deepEqual(await worklist(), [
+              { run_id: waiting, company_id: otherCompany },
+            ]);
+            assert.equal(
+              await decide(waiting, plan.fence, plan.plan_digest, 'APPROVED'),
+              true,
+            );
+            assert.equal(await settle(waiting), 'COMPLETED');
+            assert.deepEqual(await created(followUp, south), [otherCompany]);
+
+            const declined = await runOf('follow-up-approval', north);
+            assert.equal(await settle(declined), 'WAITING');
+            const northPlan = (
+              await pool.query<{ fence: string; plan_digest: string }>(
+                `SELECT fence, plan_digest FROM platform.workflow_pending_approvals
+                  WHERE run_id = $1 AND status = 'PENDING'`,
+                [declined],
+              )
+            ).rows[0]!;
+            await membership(COMPANY);
+            assert.equal(
+              await decide(
+                declined,
+                northPlan.fence,
+                northPlan.plan_digest,
+                'DECLINED',
+              ),
+              true,
+            );
+            assert.equal(await settle(declined), 'COMPLETED');
+            assert.deepEqual(await created(followUp, north), []);
+          } finally {
+            await membership(null);
+          }
+
+          // F5: the appointment a rebook run creates starts the other
+          // workflows one level deeper and never the rebook workflow itself.
+          const rebooks = [
+            await runOf('rebook', north),
+            await runOf('rebook', south),
+          ];
+          for (const runId of rebooks)
+            assert.equal(await settle(runId), 'COMPLETED');
+          assert.equal(await consumer.claim(scope), 4);
+          const loops = (
+            await pool.query<{ workflow_id: string; reason: string }>(
+              `SELECT workflow_id, reason FROM platform.workflow_record_start_skips
+                WHERE tenant_id = $1 ORDER BY workflow_id`,
+              [tenantId],
+            )
+          ).rows;
+          assert.deepEqual(loops, [
+            { workflow_id: 'rebook', reason: 'self-caused' },
+            { workflow_id: 'rebook', reason: 'self-caused' },
+          ]);
+          assert.deepEqual(
+            (
+              await pool.query<{ depth: number; count: number }>(
+                `SELECT causation_depth AS depth, count(*)::integer AS count
+                   FROM platform.workflow_instances
+                  WHERE tenant_id = $1 AND creation_occurrence_id IS NOT NULL
+                  GROUP BY causation_depth ORDER BY causation_depth`,
+                [tenantId],
+              )
+            ).rows,
+            [
+              { depth: 0, count: 6 },
+              { depth: 1, count: 4 },
+            ],
+          );
+
+          // F7: a creation instance a worker forges for another company has no
+          // verified scope, so it can neither dispatch nor be approved.
+          const forged = await withScopedWorker(
+            workerPool,
+            scope,
+            async (client) => {
+              await client.query(
+                `INSERT INTO platform.workflow_instances (
+                 tenant_id, environment_id, instance_id, event_id, workflow_id, legal_entity_id,
+                 trigger_principal_id, trigger_record_id, record_type, creation_occurrence_id)
+               SELECT tenant_id, environment_id, gen_random_uuid(), event_id, 'forged', $2,
+                      trigger_principal_id, trigger_record_id, record_type, creation_occurrence_id
+                 FROM platform.workflow_instances
+                WHERE workflow_id = 'follow-up-approval' AND trigger_record_id = $1`,
+                [south, COMPANY],
+              );
+              return (
+                await client.query(
+                  `SELECT s.* FROM platform.workflow_instances AS i
+                   CROSS JOIN LATERAL platform.workflow_record_trigger_scope(i.instance_id) AS s
+                  WHERE i.workflow_id = 'forged'`,
+                )
+              ).rows;
+            },
+          );
+          assert.deepEqual(forged, []);
         } finally {
           await workerPool.end();
           await runtimePool.end();

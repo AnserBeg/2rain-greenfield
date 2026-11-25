@@ -21,12 +21,16 @@ import {
 } from '../../packages/canonical-model/src/workflow-trigger-events.js';
 import { RECORD_CREATED_TRIGGER_READER } from '../../packages/canonical-model/src/workflows.js';
 import { PROJECTION_FAMILY_IDS } from '../../packages/compiler/src/index.js';
-import { workflowTriggerSource } from '../../packages/postgres-provider/src/workflow-consumer.js';
+import {
+  recordStartSkip,
+  workflowTriggerSource,
+} from '../../packages/postgres-provider/src/workflow-consumer.js';
 import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { replayCustomizationPatches } from '../../packages/customization/src/upgrade-replay.js';
 import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import {
   BUILD_CASES,
+  RECORD_TEMPLATE_CASES,
   WORKFLOW_TRIGGER_CASES,
   type BuildCase,
 } from '../agent/build-eval-cases.js';
@@ -122,9 +126,8 @@ test('every workflow trigger member has generated drafter text, fixtures and an 
     const scored = cases.some(
       (c) =>
         c.expect.outcome === 'workflow' &&
-        (member === 'goodsReceiptPosted'
-          ? c.expect.trigger === undefined
-          : c.expect.trigger !== undefined),
+        (c.expect.triggerMember ?? 'goodsReceiptPosted') === member &&
+        (member === 'goodsReceiptPosted') === (c.expect.trigger === undefined),
     );
     assert.ok(
       scored || TRIGGER_EVAL_EXCEPTIONS[member],
@@ -196,8 +199,12 @@ test('a recordCreated workflow compiles at its reader rung, and only on a compan
       RECORD_CREATED_TRIGGER_READER,
     'the first-party release, receipt workflows included, does not need the general-trigger reader',
   );
-  // A shared first-party master has no single owning company per record.
-  for (const recordTypeId of [id('entity.item')]) {
+  // A shared master has no single owning company per record; a company-owned
+  // ledger row has no create operation, so no governed writer records it.
+  for (const recordTypeId of [
+    id('entity.item'),
+    id('entity.inventory_movement'),
+  ]) {
     const refused = await customization.compileInSandbox({
       acknowledgement,
       base: clinic,
@@ -257,4 +264,34 @@ test('each recordCreated eval case names a company-owned type its base creates',
         `${c.id} grants ${operation}`,
       );
   }
+});
+
+test('eval case ids are unique across every set build-eval-run loads', () => {
+  const ids = [
+    ...BUILD_CASES,
+    ...RECORD_TEMPLATE_CASES,
+    ...WORKFLOW_TRIGGER_CASES,
+  ].map((c) => c.id);
+  assert.deepEqual(
+    ids.filter((value, index) => ids.indexOf(value) !== index),
+    [],
+  );
+});
+
+test('a run never restarts its own workflow and a chain stops after depth three', () => {
+  const person = { cause_workflow_id: null, cause_depth: null };
+  assert.equal(recordStartSkip(person, 'a'), null);
+  assert.equal(
+    recordStartSkip({ cause_workflow_id: 'a', cause_depth: 0 }, 'a'),
+    'self-caused',
+  );
+  assert.equal(
+    recordStartSkip({ cause_workflow_id: 'c', cause_depth: 2 }, 'd'),
+    null,
+    'depth three still starts',
+  );
+  assert.equal(
+    recordStartSkip({ cause_workflow_id: 'd', cause_depth: 3 }, 'e'),
+    'depth-exceeded',
+  );
 });

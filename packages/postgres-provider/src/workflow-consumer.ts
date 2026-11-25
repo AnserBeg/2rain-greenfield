@@ -358,12 +358,7 @@ async function claimRecordCreations(
       occurrence.cause_depth === null ? 0 : occurrence.cause_depth + 1;
     for (const { workflow_id, record_type } of definitions.rows) {
       if (record_type !== occurrence.record_type) continue;
-      const skip =
-        occurrence.cause_workflow_id === workflow_id
-          ? 'self-caused'
-          : depth > WORKFLOW_MAX_CAUSATION_DEPTH
-            ? 'depth-exceeded'
-            : null;
+      const skip = recordStartSkip(occurrence, workflow_id);
       if (skip) {
         await client.query(
           `INSERT INTO platform.workflow_record_start_skips (
@@ -404,6 +399,26 @@ async function claimRecordCreations(
     }
   }
   return count;
+}
+
+/**
+ * ADR-0073 A1 "Loops": a creation that a run of the same workflow caused
+ * starts nothing, and a chain deeper than three starts nothing. A write by a
+ * person has no cause and starts at depth 0.
+ */
+export function recordStartSkip(
+  cause: {
+    readonly cause_workflow_id: string | null;
+    readonly cause_depth: number | null;
+  },
+  workflowId: string,
+): 'self-caused' | 'depth-exceeded' | null {
+  const depth = cause.cause_depth === null ? 0 : cause.cause_depth + 1;
+  return cause.cause_workflow_id === workflowId
+    ? 'self-caused'
+    : depth > WORKFLOW_MAX_CAUSATION_DEPTH
+      ? 'depth-exceeded'
+      : null;
 }
 
 const UUID =
