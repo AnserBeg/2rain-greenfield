@@ -62,15 +62,15 @@ Resolved by the design read and orchestrator rulings: a report’s index on an e
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "REPORTS-1",
-  "base": "d8aad66b3e6ee6231b0580f2702c26d116f5a68c", "head": "e952938e3fa0af4f16d2033a608446f8757ddf8d",
+  "base": "d8aad66b3e6ee6231b0580f2702c26d116f5a68c", "head": "a373c8fd194a51eee0be5667a402fe4fe126f115",
   "changedPaths": [
     "apps/web/src/component-registry.ts", "apps/web/src/customize-report.ts", "apps/web/src/customize-screen.ts", "apps/web/src/grouped-report.ts", "apps/web/src/surface-contract.ts", "package.json", "packages/canonical-model/src/declared-report-v2.ts", "packages/canonical-model/src/declared-report.ts",
     "packages/canonical-model/src/grouped-aggregate-v2.ts", "packages/canonical-model/src/grouped-aggregate.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/schemas.ts", "packages/compiler/src/declared-reports.ts", "packages/compiler/src/projections.ts", "packages/compiler/src/storage.ts", "packages/customization/src/ai-draft-kinds.ts",
     "packages/customization/src/ai-draft.ts", "packages/customization/src/apply.ts", "packages/customization/src/index.ts", "packages/customization/src/measure-revision.ts", "packages/customization/src/patch.ts", "packages/customization/src/render.ts", "packages/customization/src/report-revision.ts", "packages/customization/src/upgrade-diagnostics.ts",
     "packages/customization/src/upgrade-replay.ts", "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/grouped-report-v2.ts", "packages/postgres-provider/src/grouped-report.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/release-repository.ts", "packages/postgres-provider/src/serving-gateways.ts", "packages/runtime/src/declared-report.ts",
-    "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-query-gateway.ts", "test/agent/build-bakeoff-run.ts", "test/agent/build-eval-cases.ts", "test/agent/build-eval.ts", "test/compiler/report-analysis.test.ts", "test/evidence/REPORTS-1-s2.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json",
-    "test/helpers/archived-runtime-process.ts", "test/helpers/reachability-producers.ts", "test/helpers/report-analysis-case.ts", "test/helpers/report-analysis-fixture.ts", "test/postgres/customization-validation.test.ts", "test/postgres/releases.test.ts", "test/postgres/report-analysis-reader.test.ts", "test/postgres/report-analysis.test.ts",
-    "test/postgres/request-runtime-view.test.ts", "test/unit/customization-ai-draft.test.ts", "test/unit/customization-upgrade.test.ts"
+    "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-query-gateway.ts", "test/agent/build-bakeoff-run.ts", "test/agent/build-eval-cases.ts", "test/agent/build-eval.ts", "test/architecture/repository-hygiene.test.ts", "test/compiler/report-analysis.test.ts", "test/evidence/REPORTS-1-s2.expected-red.json",
+    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/archived-runtime-process.ts", "test/helpers/reachability-producers.ts", "test/helpers/report-analysis-case.ts", "test/helpers/report-analysis-fixture.ts", "test/postgres/customization-validation.test.ts", "test/postgres/report-admission.test.ts", "test/postgres/report-analysis-reader.test.ts",
+    "test/postgres/report-analysis.test.ts", "test/postgres/request-runtime-view.test.ts", "test/unit/customization-ai-draft.test.ts", "test/unit/customization-upgrade.test.ts"
   ],
   "symbols": [{"path":"packages/canonical-model/src/declared-report-v2.ts","name":"resolveReportChoicesV2"},{"path":"packages/postgres-provider/src/grouped-report-v2.ts","name":"readGroupedSnapshotV2"},{"path":"packages/customization/src/measure-revision.ts","name":"applyMeasureRevision"}]
 }
