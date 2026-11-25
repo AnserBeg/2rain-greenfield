@@ -526,16 +526,35 @@ AS $$
       convert_from(j.canonical_bytes, 'UTF8')::jsonb AS request,
       source_scope.company AS company
     ) AS binding
-    JOIN LATERAL jsonb_array_elements(convert_from(catalog.canonical_bytes, 'UTF8')::jsonb->'operations') AS operation(value)
-      ON operation.value->>'lifecycle' = 'active'
-     AND operation.value->>'tier' = 'o0'
-     AND operation.value->>'operationId' = binding.request->>'operationId'
-    JOIN LATERAL jsonb_array_elements(convert_from(storage.canonical_bytes, 'UTF8')::jsonb->'entities') AS target(value)
-      ON target.value->>'entityId' = operation.value #>> '{effect,entity,targetId}'
+    -- Each catalog is parsed once per approval: the operation is matched
+    -- first, and the target and permission are matched through it. OFFSET 0
+    -- keeps each lookup from being flattened and reordered ahead of the
+    -- operation, which re-parsed the operation catalog for every
+    -- (permission, entity) pair.
+    CROSS JOIN LATERAL (
+      SELECT candidate.value
+        FROM jsonb_array_elements(convert_from(catalog.canonical_bytes, 'UTF8')::jsonb->'operations') AS candidate(value)
+       WHERE candidate.value->>'lifecycle' = 'active'
+         AND candidate.value->>'tier' = 'o0'
+         AND candidate.value->>'operationId' = binding.request->>'operationId'
+      OFFSET 0
+    ) AS operation
+    CROSS JOIN LATERAL (
+      SELECT candidate.value
+        FROM jsonb_array_elements(convert_from(storage.canonical_bytes, 'UTF8')::jsonb->'entities') AS candidate(value)
+       WHERE candidate.value->>'entityId' = operation.value #>> '{effect,entity,targetId}'
+      OFFSET 0
+    ) AS target
     CROSS JOIN LATERAL platform.workflow_approval_target_scope(
       a.tenant_id, a.environment_id, target.value, operation.value #>> '{effect,kind}', binding.request->'input'
     ) AS target_scope
-    CROSS JOIN LATERAL jsonb_array_elements(convert_from(revision.desired_state, 'UTF8')::jsonb->'permissions') AS permission(value)
+    CROSS JOIN LATERAL (
+      SELECT candidate.value
+        FROM jsonb_array_elements(convert_from(revision.desired_state, 'UTF8')::jsonb->'permissions') AS candidate(value)
+       WHERE candidate.value->>'permissionId' = operation.value->>'permissionId'
+         AND candidate.value->>'lifecycle' = 'active'
+      OFFSET 0
+    ) AS permission
    WHERE a.tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
      AND a.environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid
      AND (requested_run IS NULL OR a.run_id = requested_run)
