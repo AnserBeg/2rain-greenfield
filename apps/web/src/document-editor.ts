@@ -2728,6 +2728,7 @@ async function editorResponse(
                       'code' in error &&
                       [
                         'MODULE_FIELD_VALUE_INVALID',
+                        'MODULE_FIELD_VALUE_NOT_ALLOWED',
                         'MODULE_ENUM_VALUE_INVALID',
                         'MODULE_REQUIRED_FIELD_MISSING',
                       ].includes(String(error.code)))

@@ -10,6 +10,7 @@ import { LOGICAL_FIELD_READER } from '../../packages/canonical-model/src/logical
 import { ReportChoicesSchema } from '../../packages/canonical-model/src/schemas.js';
 import { reportQueryId } from '../../packages/canonical-model/src/declared-report.js';
 import { draftReport } from '../../packages/customization/src/report-revision.js';
+import { literalValidationDraft } from '../../packages/customization/src/validation-draft.js';
 import {
   compileInSandbox,
   CustomizationPatchSchema,
@@ -163,6 +164,21 @@ test(
               assert.deepEqual(step.release, historical.releases[index]);
 
             await activate(shipmentType);
+            // N3: a validation rule on the currency field drafts, approves
+            // and activates: its verification witnesses are declared codes.
+            const validation = (
+              await opened.service.targets()
+            ).validationTargets!.find(
+              (t) => t.entityId === `${ns}:entity.custom_shipment`,
+            )!;
+            await activate(
+              literalValidationDraft(validation, {
+                fieldId: field('currency'),
+                check: 'required',
+                limit: '',
+                message: 'Choose the currency.',
+              }),
+            );
             const refused = await run(archivedQuery, readInput);
             assert.deepEqual(refused, {
               outcome: 'refused',
@@ -286,7 +302,24 @@ test(
           );
           body.set(`value:${field('name')}`, 'Typed');
           body.set(`value:${field('weight')}`, '12.500');
+          // P2: a code outside the list comes back as the form, with the
+          // field's message and the typed values kept.
+          body.set(`value:${field('currency')}`, 'GBP');
+          const refusedPost = await fetch(
+            new URL(formMatch[1]!.replaceAll('&amp;', '&'), formUrl),
+            { method: 'POST', headers, body },
+          );
+          const refusedHtml = await refusedPost.text();
+          assert.equal(refusedPost.status, 422, refusedHtml.slice(-800));
+          assert.match(
+            refusedHtml,
+            /Choose CAD, USD or EUR\./u,
+            'the form lost the allowed-values message',
+          );
+          assert.match(refusedHtml, /value="Typed"/u);
+          assert.doesNotMatch(refusedHtml, /Operation refused/u);
           body.set(`value:${field('currency')}`, 'USD');
+          body.set('idempotencyKey', randomUUID());
           body.set(`value:${field('freight')}`, '19.90');
           body.set(`value:${field('deposit')}`, '1250.00');
           body.set(`value:${field('notes')}`, '\r\nFirst\r\nSecond');

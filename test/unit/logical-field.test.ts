@@ -25,6 +25,7 @@ import { parseCompiledApplication } from '../../packages/postgres-provider/src/c
 import { renderFormControl } from '../../apps/web/src/component-registry.js';
 import { logicalSuffix } from '../../apps/web/src/surface-composition.js';
 import { literalValidationDraft } from '../../packages/customization/src/validation-draft.js';
+import { compileLiteralFormulaRules } from '../../packages/compiler/src/formula-validation-plan.js';
 import { renderValueControl } from '../../apps/web/src/editor-controls.js';
 import { captureDraftFields } from '../../apps/web/src/document-editor.js';
 import type {
@@ -810,4 +811,42 @@ test('the document editor text area keeps a leading blank line, bounds its lengt
   );
   assert.deepEqual(refused, []);
   assert.equal(row.values[f('notes')], '\nFirst\nSecond');
+});
+
+test('verification witnesses for a rule on a currency field hold only its declared codes', () => {
+  const base1 = normalizeApplicationPackage(applied([shipmentType]));
+  const target = customization
+    .customizationTargets(base1)
+    .validationTargets!.find((t) => t.entityId === shipment)!;
+  const rule = literalValidationDraft(target, {
+    fieldId: f('currency'),
+    check: 'required',
+    limit: '',
+    message: 'Choose the currency.',
+  });
+  const plan = compileLiteralFormulaRules(
+    normalizeApplicationPackage(applied([shipmentType, rule])),
+  );
+  assert.ok(plan.status === 'compiled', JSON.stringify(plan));
+  const seen: unknown[] = [];
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(walk);
+    else if (value && typeof value === 'object')
+      for (const [key, inner] of Object.entries(value)) {
+        if (key === f('currency')) seen.push(inner);
+        walk(inner);
+      }
+  };
+  walk(plan.payload.witnesses);
+  assert.ok(seen.length > 0, 'no witness names the currency field');
+  for (const value of seen)
+    assert.ok(
+      value === null ||
+        (typeof value === 'object' &&
+          ['CAD', 'USD', 'EUR'].includes(
+            String((value as { value?: unknown }).value ?? value),
+          )) ||
+        ['CAD', 'USD', 'EUR'].includes(String(value)),
+      `a witness writes a value the field does not allow: ${JSON.stringify(value)}`,
+    );
 });

@@ -256,6 +256,23 @@
           "expected": "the editor text area lost its leading blank line or bound"
         }
       ]
+    },
+    {
+      "name": "logical-witness-ignores-allowed-values",
+      "claim": "Verification witnesses for a rule on a field with declared allowed values are drawn only from that list, so the rule can be approved.",
+      "file": "packages/compiler/src/formula-validation-examples.ts",
+      "original": "      if (allowed) return allowed.map((value) => ({ kind: 'text', value }));",
+      "replacement": "      if (allowed && false)\n        return allowed.map((value) => ({ kind: 'text', value }));",
+      "test": {
+        "files": ["test/unit/logical-field.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/logical-field.test.ts",
+          "name": "verification witnesses for a rule on a currency field hold only its declared codes",
+          "expected": "a witness writes a value the field does not allow"
+        }
+      ]
     }
   ]
 }
