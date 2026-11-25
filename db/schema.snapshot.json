@@ -29749,7 +29749,7 @@
       "domain": null,
       "name": "workflow_definitions_record_trigger_shape",
       "type": "c",
-      "definition": "CHECK ((event_type = 'northstar.platform:event.record-created'::text) = (record_type IS NOT NULL))",
+      "definition": "CHECK ((event_type = 'northstar.runtime:event.record-created'::text) = (record_type IS NOT NULL))",
       "deferrable": false,
       "initially_deferred": false,
       "validated": true,

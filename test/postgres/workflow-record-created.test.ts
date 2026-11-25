@@ -361,7 +361,7 @@ test(
             release_id: randomUUID(),
             workflow_id: 'probe',
             event_type: recordType
-              ? 'northstar.platform:event.record-created'
+              ? 'northstar.runtime:event.record-created'
               : 'northstar.purchasing:event.receipt_posted',
             body_digest: 'b'.repeat(64),
             executable_digest: 'c'.repeat(64),

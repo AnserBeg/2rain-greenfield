@@ -6,7 +6,7 @@ export const WORKFLOW_SURFACE_FLOOR = 29;
 export const RECORD_CREATED_TRIGGER_READER = 51;
 /** The platform event type a recordCreated definition persists. */
 export const RECORD_CREATED_EVENT_TYPE =
-  'northstar.platform:event.record-created';
+  'northstar.runtime:event.record-created';
 export const WORKFLOW_PAYLOAD_VERSION = 'northstar.workflow-payload/v1';
 export const WORKFLOW_PROJECTION_FAMILY =
   'northstar.compiler:projection-family.workflow';

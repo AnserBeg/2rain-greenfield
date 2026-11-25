@@ -88,7 +88,7 @@ REVOKE ALL ON platform.record_creation_occurrences, platform.record_creation_bat
 ALTER TABLE platform.workflow_definitions ADD COLUMN record_type text
   CHECK (record_type ~ '^[a-z][a-z0-9_.:-]{0,190}$');
 ALTER TABLE platform.workflow_definitions ADD CONSTRAINT workflow_definitions_record_trigger_shape
-  CHECK ((event_type = 'northstar.platform:event.record-created') = (record_type IS NOT NULL));
+  CHECK ((event_type = 'northstar.runtime:event.record-created') = (record_type IS NOT NULL));
 
 -- A receipt definition hashes exactly the bytes it hashed before this member.
 CREATE OR REPLACE FUNCTION platform.workflow_definition_digest(definition platform.workflow_definitions)

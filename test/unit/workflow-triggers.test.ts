@@ -152,7 +152,7 @@ test('the receipt member keeps its bytes, declaration and persisted source', () 
   const general = WorkflowDefinitionSchema.parse(save(recordCreated).workflow);
   assert.equal(workflowTriggerMember(general.trigger), 'recordCreated');
   assert.deepEqual(workflowTriggerSource(general.trigger), {
-    eventType: 'northstar.platform:event.record-created',
+    eventType: 'northstar.runtime:event.record-created',
     recordType: appointment,
   });
   assert.match(
