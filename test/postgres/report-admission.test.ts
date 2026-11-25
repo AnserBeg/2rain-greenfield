@@ -109,31 +109,30 @@ test('release admission refuses an analysed report or a named measure whose rele
   t.mock.method(pool, 'connect', () => {
     throw new Error('Understated candidate reached the staging transaction');
   });
-  // One compile carries both (shard 3 is near its limit): floor 51. At 49 the
-  // analysed-report check refuses; at 50 that check passes and the measure
-  // check refuses.
-  const { compiled, normalizedDefinitionBytes: bytes } =
-    await compileReportFixture([
-      // One ordered change set: the fixture compiles its first step only.
-      {
-        kind: 'changeSet',
-        patches: [
-          ...(reportAnalysisTypes as { patches: CustomizationPatch[] }).patches,
-          aging,
-          trial,
-        ],
-      } as CustomizationPatch,
-    ]);
-  assert.equal(
-    compiled.bundle.releaseManifest.projections.find(
-      (p) => p.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
-    )?.requiredRuntimeCapability.minimumVersion,
-    REPORT_MEASURE_READER,
-  );
-  for (const [floor, code] of [
-    [REPORT_ANALYSIS_READER - 1, 'REPORT_ANALYSIS_READER_MISMATCH'],
-    [REPORT_MEASURE_READER - 1, 'REPORT_MEASURE_READER_MISMATCH'],
+  // One release per capability, so each admission check is the only one
+  // that can refuse its understated floor.
+  for (const [patch, floor, code] of [
+    [aging, REPORT_ANALYSIS_READER - 1, 'REPORT_ANALYSIS_READER_MISMATCH'],
+    [trial, REPORT_ANALYSIS_READER - 1, 'REPORT_MEASURE_READER_MISMATCH'],
   ] as const) {
+    const { compiled, normalizedDefinitionBytes: bytes } =
+      await compileReportFixture([
+        // One ordered change set: the fixture compiles its first step only.
+        {
+          kind: 'changeSet',
+          patches: [
+            ...(reportAnalysisTypes as { patches: CustomizationPatch[] })
+              .patches,
+            patch,
+          ],
+        } as CustomizationPatch,
+      ]);
+    assert.equal(
+      compiled.bundle.releaseManifest.projections.find(
+        (p) => p.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
+      )?.requiredRuntimeCapability.minimumVersion,
+      patch === aging ? REPORT_ANALYSIS_READER : REPORT_MEASURE_READER,
+    );
     const understated = rewriteProjectionPayload(
       compiled,
       PROJECTION_FAMILY_IDS.surfaceManifest,
