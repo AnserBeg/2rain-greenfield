@@ -340,7 +340,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "preflight runs every check the lanes keep failing on, each with a remedy",
-          "expected": "TBD"
+          "expected": "preflight-language-coverage.d.ts'"
         }
       ]
     },
@@ -502,7 +502,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "a stale language-coverage digest, decision or observation snapshot is named, each alone",
-          "expected": "TBD"
+          "expected": "0 !== 1"
         }
       ]
     },
@@ -520,7 +520,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "a stale language-coverage digest, decision or observation snapshot is named, each alone",
-          "expected": "TBD"
+          "expected": "0 !== 1"
         }
       ]
     },
@@ -538,7 +538,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "a stale language-coverage digest, decision or observation snapshot is named, each alone",
-          "expected": "TBD"
+          "expected": "0 !== 1"
         }
       ]
     }
