@@ -28549,96 +28549,6 @@
   "triggers": [
     {
       "schema": "north_star_module",
-      "relation": "nsm_t_2fpuj3wnw44ruscpvxychsdos2fmpssc7a4oqz576ss2uojetpvq",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_2fpuj3wnw44ruscpvxychsdos2fmpssc7a4oqz576ss2uojetpvq FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.reservation_balance')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_2zq7ip556smyuqtop2hew4cqj3ynsy6qhfddy7uu5dv4w52qlizq",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_2zq7ip556smyuqtop2hew4cqj3ynsy6qhfddy7uu5dv4w52qlizq FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.stock_count')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_3uprwg3fyzx3cwrf23b3rf7ljoec4on65voqz6drd5qfvtqzf7ra",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_3uprwg3fyzx3cwrf23b3rf7ljoec4on65voqz6drd5qfvtqzf7ra FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.sales_order_line')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_6odhs7z4qyxsws5m4yewhtvpe3nbbdlmsxmqilhnwmymulj4l6vq",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_6odhs7z4qyxsws5m4yewhtvpe3nbbdlmsxmqilhnwmymulj4l6vq FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.goods_receipt')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_7jr22ib3d3wig3qaruai6lovfecbt3zysl7ckcnw3ceyzt74apyq",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_7jr22ib3d3wig3qaruai6lovfecbt3zysl7ckcnw3ceyzt74apyq FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.purchase_order_received')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_7zfp7uecpgflgubc5xum2lmzwm7ybt65f3c5odakwnup455yimha",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_7zfp7uecpgflgubc5xum2lmzwm7ybt65f3c5odakwnup455yimha FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.purchase_order_approval')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_abucb2xttz2hnbexibcfyz7ttzda6wbbxekizfn7t3ebtqsrfhoa",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_abucb2xttz2hnbexibcfyz7ttzda6wbbxekizfn7t3ebtqsrfhoa FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.customer_credit')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_bjmsyssx2gxgndlxt266yeeytiufxsb66hcjlkwcvk5hlscndyaa",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_bjmsyssx2gxgndlxt266yeeytiufxsb66hcjlkwcvk5hlscndyaa FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.sales_order')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_brja23tvcv6uaekvm5i4fph4ymws7ookhmajyqb2dqeh5hrjrboa",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_brja23tvcv6uaekvm5i4fph4ymws7ookhmajyqb2dqeh5hrjrboa FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.purchase_order')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_czvz2kour5jd3kagam3mdklsealx6mg7zsclahb3ht5p5ay5jzqq",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_czvz2kour5jd3kagam3mdklsealx6mg7zsclahb3ht5p5ay5jzqq FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.purchase_order_line')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
       "relation": "nsm_t_dv3lbb2vsc7qzodxdqzih4xgwdmxj4jef6zpzr72gma7gv2ivy7a",
       "name": "nsm_g_f2c672cpziwhhkplhft3je3pwgeqrlnuuabs2a63tst3ir73x7va",
       "definition": "CREATE TRIGGER nsm_g_f2c672cpziwhhkplhft3je3pwgeqrlnuuabs2a63tst3ir73x7va AFTER INSERT ON north_star_module.nsm_t_dv3lbb2vsc7qzodxdqzih4xgwdmxj4jef6zpzr72gma7gv2ivy7a FOR EACH ROW EXECUTE FUNCTION north_star_internal.reserve_inventory_movement_effect('north_star_module.nsm_t_ipzadmibr7q4oxpzxl6mpqmgun67xezijmchzquayzoygk6hnqqq')",
@@ -28666,72 +28576,9 @@
     },
     {
       "schema": "north_star_module",
-      "relation": "nsm_t_dv3lbb2vsc7qzodxdqzih4xgwdmxj4jef6zpzr72gma7gv2ivy7a",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_dv3lbb2vsc7qzodxdqzih4xgwdmxj4jef6zpzr72gma7gv2ivy7a FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.inventory_movement')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.posted_stock_balance')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_fb5hgqtv4ufbyhzhsvtsw4pdinz36wa47qbyxssuicdbvt3ezb4a",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_fb5hgqtv4ufbyhzhsvtsw4pdinz36wa47qbyxssuicdbvt3ezb4a FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.purchase_order_amendment')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_ipm7oek6o5izd7maldq2dnev25xe7ykljvdjm5hkoxomc3orwzda",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_ipm7oek6o5izd7maldq2dnev25xe7ykljvdjm5hkoxomc3orwzda FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.reservation')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
       "relation": "nsm_t_ipzadmibr7q4oxpzxl6mpqmgun67xezijmchzquayzoygk6hnqqq",
       "name": "nsm_g_6swdzhcydfk5c37wtnyxzwffgwn5kpstemastm6qcfhumrag22za",
       "definition": "CREATE TRIGGER nsm_g_6swdzhcydfk5c37wtnyxzwffgwn5kpstemastm6qcfhumrag22za BEFORE DELETE OR UPDATE ON north_star_module.nsm_t_ipzadmibr7q4oxpzxl6mpqmgun67xezijmchzquayzoygk6hnqqq FOR EACH ROW EXECUTE FUNCTION north_star_internal.reject_inventory_fact_mutation()",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_itknqkdwhe2h4oz2mev2tfwks2i73yk7kqixriqzbfjxf7o747yq",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_itknqkdwhe2h4oz2mev2tfwks2i73yk7kqixriqzbfjxf7o747yq FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.customer_payment')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_jl3sxjo3u67f2luipjhqtyggunkm7cg6jq3lrtmwh7dkthuue5oa",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_jl3sxjo3u67f2luipjhqtyggunkm7cg6jq3lrtmwh7dkthuue5oa FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.customer_invoice_line')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_jutqnn4lrjitckfvko523gwayc6d44m3xxwjuegl63xdh5nwb6jq",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_jutqnn4lrjitckfvko523gwayc6d44m3xxwjuegl63xdh5nwb6jq FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.sales_order_shipped')",
       "enabled": "O",
       "deferrable": false,
       "initially_deferred": false
@@ -28765,15 +28612,6 @@
     },
     {
       "schema": "north_star_module",
-      "relation": "nsm_t_jykrutlb7uc5rxjfzvvxgwzumgqjsjtbp7h5uk7qiankillyv75q",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_jykrutlb7uc5rxjfzvvxgwzumgqjsjtbp7h5uk7qiankillyv75q FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.inventory_movement')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
       "relation": "nsm_t_kgnpjkcrujufxck72cprbbteujf3of3i66ewzd46vobqgtq3fqnq",
       "name": "nsm_g_f2c672cpziwhhkplhft3je3pwgeqrlnuuabs2a63tst3ir73x7va",
       "definition": "CREATE TRIGGER nsm_g_f2c672cpziwhhkplhft3je3pwgeqrlnuuabs2a63tst3ir73x7va AFTER INSERT ON north_star_module.nsm_t_kgnpjkcrujufxck72cprbbteujf3of3i66ewzd46vobqgtq3fqnq FOR EACH ROW EXECUTE FUNCTION north_star_internal.reserve_inventory_movement_effect('north_star_module.nsm_t_ipzadmibr7q4oxpzxl6mpqmgun67xezijmchzquayzoygk6hnqqq')",
@@ -28795,15 +28633,6 @@
       "relation": "nsm_t_kgnpjkcrujufxck72cprbbteujf3of3i66ewzd46vobqgtq3fqnq",
       "name": "nsm_z_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
       "definition": "CREATE TRIGGER nsm_z_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa AFTER INSERT ON north_star_module.nsm_t_kgnpjkcrujufxck72cprbbteujf3of3i66ewzd46vobqgtq3fqnq FOR EACH ROW EXECUTE FUNCTION north_star_module.nsm_posted_stock_balance_v1('north_star_module.nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa', 'legal_entity_id', 'nsm_c_qi6spv6qbdes7hqtx3oswzsxmyarezpziigbcuh54jkrmeupoiga', 'nsm_c_canca4uikvhuudam3eo34x7eqqq7cilvzxbh22bw7ggyuiy7yuwq', 'nsm_c_cvdc4mahadxspmy7twbj6sojp5eqd6ehvvvs7lyu24cpnblc4ppq', 'nsm_c_2j7onp2ifygf573efmn35yg7mmvu46oc7ah4sswhkycjjx2rvpnq', 'legal_entity_id', 'nsm_c_hs3hw367fldrfmc7w3gpe4mq6627n5qoaxc7hthrmjq66e55vvna', 'nsm_c_3bemmg64f7l7buxjcqsti6m357nltwjj7tstsh3ij4b45yw3ez5q', 'nsm_c_rd4svq6s3x6grcyk2ethe4de4qnjsmaf6qepdkvtiksgysv36hdq', 'nsm_c_5silpiuxythkzlmg5q3ai4i3tte2jjduatr2k5hxcosfb2cu4zfa', 'record_id', 'revision', 'archived_at')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_kgnpjkcrujufxck72cprbbteujf3of3i66ewzd46vobqgtq3fqnq",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_kgnpjkcrujufxck72cprbbteujf3of3i66ewzd46vobqgtq3fqnq FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.inventory_movement')",
       "enabled": "O",
       "deferrable": false,
       "initially_deferred": false
@@ -28837,24 +28666,6 @@
     },
     {
       "schema": "north_star_module",
-      "relation": "nsm_t_ktdpvib7oomhgxkzzv5morfey2npfz7bbvufk2gva23k5rwla2gq",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_ktdpvib7oomhgxkzzv5morfey2npfz7bbvufk2gva23k5rwla2gq FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.inventory_movement')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_lhkpxshzhwijvw7hkm45s66zsbdkfbtfxf5ury3dzyhs2aaqzmjq",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_lhkpxshzhwijvw7hkm45s66zsbdkfbtfxf5ury3dzyhs2aaqzmjq FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.vendor_credit')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
       "relation": "nsm_t_mysjpkvgrulnwuek2hdysnuqso6omdjkgzhmb2olsab2smc6wpuq",
       "name": "nsm_g_f2c672cpziwhhkplhft3je3pwgeqrlnuuabs2a63tst3ir73x7va",
       "definition": "CREATE TRIGGER nsm_g_f2c672cpziwhhkplhft3je3pwgeqrlnuuabs2a63tst3ir73x7va AFTER INSERT ON north_star_module.nsm_t_mysjpkvgrulnwuek2hdysnuqso6omdjkgzhmb2olsab2smc6wpuq FOR EACH ROW EXECUTE FUNCTION north_star_internal.reserve_inventory_movement_effect('north_star_module.nsm_t_ipzadmibr7q4oxpzxl6mpqmgun67xezijmchzquayzoygk6hnqqq')",
@@ -28876,15 +28687,6 @@
       "relation": "nsm_t_mysjpkvgrulnwuek2hdysnuqso6omdjkgzhmb2olsab2smc6wpuq",
       "name": "nsm_z_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
       "definition": "CREATE TRIGGER nsm_z_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa AFTER INSERT ON north_star_module.nsm_t_mysjpkvgrulnwuek2hdysnuqso6omdjkgzhmb2olsab2smc6wpuq FOR EACH ROW EXECUTE FUNCTION north_star_module.nsm_posted_stock_balance_v1('north_star_module.nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa', 'legal_entity_id', 'nsm_c_qi6spv6qbdes7hqtx3oswzsxmyarezpziigbcuh54jkrmeupoiga', 'nsm_c_canca4uikvhuudam3eo34x7eqqq7cilvzxbh22bw7ggyuiy7yuwq', 'nsm_c_cvdc4mahadxspmy7twbj6sojp5eqd6ehvvvs7lyu24cpnblc4ppq', 'nsm_c_2j7onp2ifygf573efmn35yg7mmvu46oc7ah4sswhkycjjx2rvpnq', 'legal_entity_id', 'nsm_c_hs3hw367fldrfmc7w3gpe4mq6627n5qoaxc7hthrmjq66e55vvna', 'nsm_c_3bemmg64f7l7buxjcqsti6m357nltwjj7tstsh3ij4b45yw3ez5q', 'nsm_c_rd4svq6s3x6grcyk2ethe4de4qnjsmaf6qepdkvtiksgysv36hdq', 'nsm_c_5silpiuxythkzlmg5q3ai4i3tte2jjduatr2k5hxcosfb2cu4zfa', 'record_id', 'revision', 'archived_at')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_mysjpkvgrulnwuek2hdysnuqso6omdjkgzhmb2olsab2smc6wpuq",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_mysjpkvgrulnwuek2hdysnuqso6omdjkgzhmb2olsab2smc6wpuq FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.inventory_movement')",
       "enabled": "O",
       "deferrable": false,
       "initially_deferred": false
@@ -28918,78 +28720,6 @@
     },
     {
       "schema": "north_star_module",
-      "relation": "nsm_t_nir3fh6bthiwndoonwqm37omk2zmsiz5c4wbsclocsyizlvfpwzq",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_nir3fh6bthiwndoonwqm37omk2zmsiz5c4wbsclocsyizlvfpwzq FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.inventory_movement')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_nuis4esb74tkkxfb2pfdkhzhgznsx2xqwvvtbe3uvkppn6o5zhua",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_nuis4esb74tkkxfb2pfdkhzhgznsx2xqwvvtbe3uvkppn6o5zhua FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.goods_receipt_line')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_pqwzlzynoo7xiiytnyhhad3dlylwc7ikozdbafz76zvyvn3g4euq",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_pqwzlzynoo7xiiytnyhhad3dlylwc7ikozdbafz76zvyvn3g4euq FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.customer_invoice')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_q4zpsd3g3mgipuxyck2bky3byt2ps2shfdkkyjtzbqgbfiw7jwma",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_q4zpsd3g3mgipuxyck2bky3byt2ps2shfdkkyjtzbqgbfiw7jwma FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.inventory_period_lock')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_qxkxaz373vwd6oqadkx7xctz3sexkwhbcqz2ns5b3svivflmapsq",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_qxkxaz373vwd6oqadkx7xctz3sexkwhbcqz2ns5b3svivflmapsq FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.vendor_bill')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_rgvifdftwk66u42txaqdi7omso53dutmybc6nngmha7ylxzxvu7q",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_rgvifdftwk66u42txaqdi7omso53dutmybc6nngmha7ylxzxvu7q FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.shipment')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_rsidednvakpgjpmchkdcaxhj3m46u3pac6vh3wakft7ifrehyyya",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_rsidednvakpgjpmchkdcaxhj3m46u3pac6vh3wakft7ifrehyyya FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.inventory_transaction')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_s7ncwlua5e72mfw5l7shlpjkodi2pztlwsi2si5xinuqyz4tjcia",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_s7ncwlua5e72mfw5l7shlpjkodi2pztlwsi2si5xinuqyz4tjcia FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.stock_count_line')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
       "relation": "nsm_t_slxhbphakyl7qqmsbidwe5gkpjj5l4b4d52f3oho2zc6ohbvqraa",
       "name": "nsm_g_f2c672cpziwhhkplhft3je3pwgeqrlnuuabs2a63tst3ir73x7va",
       "definition": "CREATE TRIGGER nsm_g_f2c672cpziwhhkplhft3je3pwgeqrlnuuabs2a63tst3ir73x7va AFTER INSERT ON north_star_module.nsm_t_slxhbphakyl7qqmsbidwe5gkpjj5l4b4d52f3oho2zc6ohbvqraa FOR EACH ROW EXECUTE FUNCTION north_star_internal.reserve_inventory_movement_effect('north_star_module.nsm_t_ipzadmibr7q4oxpzxl6mpqmgun67xezijmchzquayzoygk6hnqqq')",
@@ -29011,24 +28741,6 @@
       "relation": "nsm_t_slxhbphakyl7qqmsbidwe5gkpjj5l4b4d52f3oho2zc6ohbvqraa",
       "name": "nsm_z_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
       "definition": "CREATE TRIGGER nsm_z_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa AFTER INSERT ON north_star_module.nsm_t_slxhbphakyl7qqmsbidwe5gkpjj5l4b4d52f3oho2zc6ohbvqraa FOR EACH ROW EXECUTE FUNCTION north_star_module.nsm_posted_stock_balance_v1('north_star_module.nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa', 'legal_entity_id', 'nsm_c_qi6spv6qbdes7hqtx3oswzsxmyarezpziigbcuh54jkrmeupoiga', 'nsm_c_canca4uikvhuudam3eo34x7eqqq7cilvzxbh22bw7ggyuiy7yuwq', 'nsm_c_cvdc4mahadxspmy7twbj6sojp5eqd6ehvvvs7lyu24cpnblc4ppq', 'nsm_c_2j7onp2ifygf573efmn35yg7mmvu46oc7ah4sswhkycjjx2rvpnq', 'legal_entity_id', 'nsm_c_hs3hw367fldrfmc7w3gpe4mq6627n5qoaxc7hthrmjq66e55vvna', 'nsm_c_3bemmg64f7l7buxjcqsti6m357nltwjj7tstsh3ij4b45yw3ez5q', 'nsm_c_rd4svq6s3x6grcyk2ethe4de4qnjsmaf6qepdkvtiksgysv36hdq', 'nsm_c_5silpiuxythkzlmg5q3ai4i3tte2jjduatr2k5hxcosfb2cu4zfa', 'record_id', 'revision', 'archived_at')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_slxhbphakyl7qqmsbidwe5gkpjj5l4b4d52f3oho2zc6ohbvqraa",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_slxhbphakyl7qqmsbidwe5gkpjj5l4b4d52f3oho2zc6ohbvqraa FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.inventory_movement')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_u7mqzv2uej5ars2bdbs7a3zt46v7vvqkjop4wsu3udes7oej4jhq",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_u7mqzv2uej5ars2bdbs7a3zt46v7vvqkjop4wsu3udes7oej4jhq FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.vendor_bill_line')",
       "enabled": "O",
       "deferrable": false,
       "initially_deferred": false
@@ -29071,33 +28783,6 @@
     },
     {
       "schema": "north_star_module",
-      "relation": "nsm_t_wwpcxa55fqy254f66ddzk2zlhblwakys5nkyqocpsjuhokmo3a7a",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_wwpcxa55fqy254f66ddzk2zlhblwakys5nkyqocpsjuhokmo3a7a FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.inventory_movement')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_xhxzcjbfxk6rxrb2bc57azjcrs5ugqrlpjdz3xokhqjsixvjze2a",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_xhxzcjbfxk6rxrb2bc57azjcrs5ugqrlpjdz3xokhqjsixvjze2a FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.vendor_payment')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_xseeyxlxqiepowtuliovsfdqqr6a57htc3hwld744tilopsblxqq",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_xseeyxlxqiepowtuliovsfdqqr6a57htc3hwld744tilopsblxqq FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.inventory_transaction_line')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
       "relation": "nsm_t_ykaenmkuqgf57envdhqm3i75bznv67upf3jce3als4uuzrxt642q",
       "name": "nsm_g_f2c672cpziwhhkplhft3je3pwgeqrlnuuabs2a63tst3ir73x7va",
       "definition": "CREATE TRIGGER nsm_g_f2c672cpziwhhkplhft3je3pwgeqrlnuuabs2a63tst3ir73x7va AFTER INSERT ON north_star_module.nsm_t_ykaenmkuqgf57envdhqm3i75bznv67upf3jce3als4uuzrxt642q FOR EACH ROW EXECUTE FUNCTION north_star_internal.reserve_inventory_movement_effect('north_star_module.nsm_t_ipzadmibr7q4oxpzxl6mpqmgun67xezijmchzquayzoygk6hnqqq')",
@@ -29119,24 +28804,6 @@
       "relation": "nsm_t_ykaenmkuqgf57envdhqm3i75bznv67upf3jce3als4uuzrxt642q",
       "name": "nsm_z_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
       "definition": "CREATE TRIGGER nsm_z_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa AFTER INSERT ON north_star_module.nsm_t_ykaenmkuqgf57envdhqm3i75bznv67upf3jce3als4uuzrxt642q FOR EACH ROW EXECUTE FUNCTION north_star_module.nsm_posted_stock_balance_v1('north_star_module.nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa', 'legal_entity_id', 'nsm_c_qi6spv6qbdes7hqtx3oswzsxmyarezpziigbcuh54jkrmeupoiga', 'nsm_c_canca4uikvhuudam3eo34x7eqqq7cilvzxbh22bw7ggyuiy7yuwq', 'nsm_c_cvdc4mahadxspmy7twbj6sojp5eqd6ehvvvs7lyu24cpnblc4ppq', 'nsm_c_2j7onp2ifygf573efmn35yg7mmvu46oc7ah4sswhkycjjx2rvpnq', 'legal_entity_id', 'nsm_c_hs3hw367fldrfmc7w3gpe4mq6627n5qoaxc7hthrmjq66e55vvna', 'nsm_c_3bemmg64f7l7buxjcqsti6m357nltwjj7tstsh3ij4b45yw3ez5q', 'nsm_c_rd4svq6s3x6grcyk2ethe4de4qnjsmaf6qepdkvtiksgysv36hdq', 'nsm_c_5silpiuxythkzlmg5q3ai4i3tte2jjduatr2k5hxcosfb2cu4zfa', 'record_id', 'revision', 'archived_at')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_ykaenmkuqgf57envdhqm3i75bznv67upf3jce3als4uuzrxt642q",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_ykaenmkuqgf57envdhqm3i75bznv67upf3jce3als4uuzrxt642q FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.inventory_movement')",
-      "enabled": "O",
-      "deferrable": false,
-      "initially_deferred": false
-    },
-    {
-      "schema": "north_star_module",
-      "relation": "nsm_t_zkeffb66r55zhaljulbj4aeoe5fupgbnhwn6qbqj5tuwzea6vs3a",
-      "name": "record_creation",
-      "definition": "CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.nsm_t_zkeffb66r55zhaljulbj4aeoe5fupgbnhwn6qbqj5tuwzea6vs3a FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.app:entity.shipment_line')",
       "enabled": "O",
       "deferrable": false,
       "initially_deferred": false

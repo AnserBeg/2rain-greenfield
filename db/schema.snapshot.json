@@ -49626,25 +49626,6 @@
     },
     {
       "schema": "north_star_internal",
-      "name": "capture_record_creation",
-      "identity_arguments": "",
-      "kind": "f",
-      "language": "plpgsql",
-      "owner": "postgres",
-      "result_type": "trigger",
-      "definition": "CREATE OR REPLACE FUNCTION north_star_internal.capture_record_creation()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$\nDECLARE action text := nullif(current_setting('north_star.creation_action', true), ''); BEGIN\n  IF action IS NULL THEN RETURN NULL; END IF;\n  IF TG_TABLE_SCHEMA <> 'north_star_module' OR\n     (NEW.tenant_id, NEW.environment_id) IS DISTINCT FROM\n     (north_star_internal.trusted_tenant_id(), north_star_internal.trusted_environment_id())\n  THEN RAISE EXCEPTION 'record creation scope changed'; END IF;\n  INSERT INTO platform.record_creation_occurrences\n    (tenant_id, environment_id, writer_xid, request_id, action_id, record_type, record_id, company_id)\n  VALUES (NEW.tenant_id, NEW.environment_id, pg_current_xact_id(),\n    nullif(current_setting('north_star.request_id', true), '')::uuid, action, TG_ARGV[0],\n    NEW.record_id, NEW.legal_entity_id);\n  RETURN NULL; END $function$\n",
-      "security_definer": true,
-      "leakproof": false,
-      "strict": false,
-      "returns_set": false,
-      "volatility": "v",
-      "parallel_safety": "u",
-      "cost": 100,
-      "estimated_rows": 0,
-      "configuration": ["search_path=pg_catalog, pg_temp"]
-    },
-    {
-      "schema": "north_star_internal",
       "name": "communication_admission_table",
       "identity_arguments": "",
       "kind": "f",
@@ -50158,6 +50139,25 @@
     },
     {
       "schema": "north_star_internal",
+      "name": "record_creations",
+      "identity_arguments": "physical_table text, identity_column text, record_type text, record_ids uuid[]",
+      "kind": "f",
+      "language": "plpgsql",
+      "owner": "postgres",
+      "result_type": "integer",
+      "definition": "CREATE OR REPLACE FUNCTION north_star_internal.record_creations(physical_table text, identity_column text, record_type text, record_ids uuid[])\n RETURNS integer\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$\nDECLARE\n  action text := nullif(current_setting('north_star.creation_action', true), '');\n  recorded integer; BEGIN\n  IF action IS NULL OR cardinality(record_ids) IS NULL THEN RETURN 0; END IF;\n  IF record_type !~ '^[a-z][a-z0-9_.:-]{0,190}$' THEN\n    RAISE EXCEPTION 'record creation type is not a canonical ID'; END IF;\n  EXECUTE format(\n    'INSERT INTO platform.record_creation_occurrences\n       (tenant_id, environment_id, writer_xid, request_id, action_id, record_type, record_id, company_id)\n     SELECT r.tenant_id, r.environment_id, pg_current_xact_id(),\n            nullif(current_setting(''north_star.request_id'', true), '''')::uuid,\n            $1, $2, r.%1$I, r.legal_entity_id\n       FROM north_star_module.%2$I AS r\n      WHERE r.tenant_id = north_star_internal.trusted_tenant_id()\n        AND r.environment_id = north_star_internal.trusted_environment_id()\n        AND r.%1$I = ANY($3)', identity_column, physical_table)\n    USING action, record_type, record_ids;\n  GET DIAGNOSTICS recorded = ROW_COUNT;\n  IF recorded <> cardinality(record_ids) THEN\n    RAISE EXCEPTION 'a claimed record creation is not stored in this scope'; END IF;\n  RETURN recorded; END $function$\n",
+      "security_definer": true,
+      "leakproof": false,
+      "strict": false,
+      "returns_set": false,
+      "volatility": "v",
+      "parallel_safety": "u",
+      "cost": 100,
+      "estimated_rows": 0,
+      "configuration": ["search_path=pg_catalog, pg_temp"]
+    },
+    {
+      "schema": "north_star_internal",
       "name": "reject_inventory_fact_mutation",
       "identity_arguments": "",
       "kind": "f",
@@ -50622,6 +50622,25 @@
       "result_type": "event_trigger",
       "definition": "CREATE OR REPLACE FUNCTION north_star_internal.witness_module_fold_function_ddl()\n RETURNS event_trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$ DECLARE\n  command_record record;\n  current_definition text;\n  witnessed_definition text; BEGIN\n  FOR command_record IN\n    SELECT command.classid, command.objid\n    FROM pg_catalog.pg_event_trigger_ddl_commands() AS command\n  LOOP\n    IF command_record.classid <> 'pg_catalog.pg_proc'::pg_catalog.regclass THEN\n      CONTINUE; END IF;\n\n    SELECT pg_catalog.pg_get_functiondef(routine.oid)\n      INTO current_definition\n      FROM pg_catalog.pg_proc AS routine\n      JOIN pg_catalog.pg_namespace AS namespace\n        ON namespace.oid = routine.pronamespace\n     WHERE routine.oid = command_record.objid\n       AND namespace.nspname = 'north_star_module'\n       AND routine.proname = 'nsm_unicode_case_fold_v1'\n       AND pg_catalog.pg_get_function_identity_arguments(routine.oid) = 'value text';\n\n    IF NOT FOUND THEN\n      CONTINUE; END IF;\n\n    INSERT INTO north_star_internal.module_fold_function_ddl_witnesses (\n      function_identity,\n      function_definition\n    ) VALUES (\n      'north_star_module.nsm_unicode_case_fold_v1(value text)',\n      current_definition\n    )\n    ON CONFLICT (function_identity) DO NOTHING;\n\n    SELECT witness.function_definition\n      INTO STRICT witnessed_definition\n      FROM north_star_internal.module_fold_function_ddl_witnesses AS witness\n     WHERE witness.function_identity =\n       'north_star_module.nsm_unicode_case_fold_v1(value text)';\n\n    IF witnessed_definition IS DISTINCT FROM current_definition THEN\n      RAISE EXCEPTION USING\n        ERRCODE = '55000',\n        MESSAGE =\n          'north_star_module.nsm_unicode_case_fold_v1(value text) is versioned and immutable',\n        HINT = 'Mint a new function name and an accounted storage transition.'; END IF; END LOOP; END;\n$function$\n",
       "security_definer": true,
+      "leakproof": false,
+      "strict": false,
+      "returns_set": false,
+      "volatility": "v",
+      "parallel_safety": "u",
+      "cost": 100,
+      "estimated_rows": 0,
+      "configuration": ["search_path=pg_catalog, pg_temp"]
+    },
+    {
+      "schema": "north_star_internal",
+      "name": "workflow_default_trigger_record",
+      "identity_arguments": "",
+      "kind": "f",
+      "language": "plpgsql",
+      "owner": "postgres",
+      "result_type": "trigger",
+      "definition": "CREATE OR REPLACE FUNCTION north_star_internal.workflow_default_trigger_record()\n RETURNS trigger\n LANGUAGE plpgsql\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$ BEGIN\n  IF NEW.trigger_record_id IS NULL AND NEW.creation_occurrence_id IS NULL THEN\n    NEW.trigger_record_id := NEW.receipt_id; END IF;\n  RETURN NEW; END $function$\n",
+      "security_definer": false,
       "leakproof": false,
       "strict": false,
       "returns_set": false,
@@ -54084,24 +54103,6 @@
     },
     {
       "schema": "north_star_internal",
-      "name": "capture_record_creation",
-      "identity_arguments": "",
-      "grantor": "postgres",
-      "grantee": "north_star_module_materializer",
-      "privilege_type": "EXECUTE",
-      "is_grantable": false
-    },
-    {
-      "schema": "north_star_internal",
-      "name": "capture_record_creation",
-      "identity_arguments": "",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "EXECUTE",
-      "is_grantable": false
-    },
-    {
-      "schema": "north_star_internal",
       "name": "communication_admission_table",
       "identity_arguments": "",
       "grantor": "postgres",
@@ -54480,6 +54481,33 @@
     },
     {
       "schema": "north_star_internal",
+      "name": "record_creations",
+      "identity_arguments": "physical_table text, identity_column text, record_type text, record_ids uuid[]",
+      "grantor": "postgres",
+      "grantee": "north_star_module_runtime",
+      "privilege_type": "EXECUTE",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_internal",
+      "name": "record_creations",
+      "identity_arguments": "physical_table text, identity_column text, record_type text, record_ids uuid[]",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "EXECUTE",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_internal",
+      "name": "record_creations",
+      "identity_arguments": "physical_table text, identity_column text, record_type text, record_ids uuid[]",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "EXECUTE",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_internal",
       "name": "reject_inventory_fact_mutation",
       "identity_arguments": "",
       "grantor": "postgres",
@@ -54760,6 +54788,15 @@
     {
       "schema": "north_star_internal",
       "name": "witness_module_fold_function_ddl",
+      "identity_arguments": "",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "EXECUTE",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_internal",
+      "name": "workflow_default_trigger_record",
       "identity_arguments": "",
       "grantor": "postgres",
       "grantee": "postgres",
@@ -58764,6 +58801,15 @@
       "relation": "workflow_event_occurrences",
       "name": "workflow_resolve_event_source",
       "definition": "CREATE TRIGGER workflow_resolve_event_source AFTER INSERT ON platform.workflow_event_occurrences FOR EACH ROW EXECUTE FUNCTION platform.workflow_resolve_event_source()",
+      "enabled": "O",
+      "deferrable": false,
+      "initially_deferred": false
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_instances",
+      "name": "workflow_default_trigger_record",
+      "definition": "CREATE TRIGGER workflow_default_trigger_record BEFORE INSERT ON platform.workflow_instances FOR EACH ROW EXECUTE FUNCTION north_star_internal.workflow_default_trigger_record()",
       "enabled": "O",
       "deferrable": false,
       "initially_deferred": false
