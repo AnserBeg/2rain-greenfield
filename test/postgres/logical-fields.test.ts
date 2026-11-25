@@ -218,19 +218,25 @@ test(
           // An unlisted or lower-case code is refused on write by the
           // currency field's own rule, never summed as "No currency".
           for (const code of ['GBP', 'cad']) {
-            const refusedWrite = await world.invoke('custom_shipment_create', {
-              recordId: randomUUID(),
-              legalEntityId: COMPANY,
-              values: {
-                [field('name')]: `Refused ${code}`,
-                [field('currency')]: code,
-                [field('freight')]: '5',
-              },
-            });
-            assert.notEqual(refusedWrite.outcome, 'succeeded', code);
+            const refusedWrite = await world
+              .invoke('custom_shipment_create', {
+                recordId: randomUUID(),
+                legalEntityId: COMPANY,
+                values: {
+                  [field('name')]: `Refused ${code}`,
+                  [field('currency')]: code,
+                  [field('freight')]: '5',
+                },
+              })
+              .then(
+                (result) => JSON.stringify(result),
+                (error: Error & { code?: string }) =>
+                  `${String(error.code)} ${error.message}`,
+              );
+            assert.doesNotMatch(refusedWrite, /"outcome":"succeeded"/u, code);
             assert.match(
-              JSON.stringify(refusedWrite),
-              /Choose CAD, USD or EUR/u,
+              refusedWrite,
+              /MODULE_VALIDATION_REFUSED Choose CAD, USD or EUR/u,
               code,
             );
           }
@@ -243,7 +249,7 @@ test(
             `${ns}:surface.custom_shipment_form`,
           );
           formUrl.searchParams.set(
-            `${ns}:parameter.custom_shipment_list_legal_entity_scope`,
+            `${ns}:parameter.custom_shipment_get_legal_entity_scope`,
             COMPANY,
           );
           const headers = {
@@ -294,13 +300,21 @@ test(
                 await app.runtime.queryGateway.invoke(view, {
                   schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
                   queryId: `${ns}:query.custom_shipment_get`,
-                  arguments: { recordId: typedId },
+                  arguments: {
+                    recordId: typedId,
+                    [`${ns}:parameter.custom_shipment_get_legal_entity_scope`]:
+                      COMPANY,
+                  },
                 })
               ).records[0]!,
           );
-          assert.equal(typed.values[field('weight')], '12.5');
-          assert.equal(typed.values[field('freight')], '19.9');
-          assert.equal(typed.values[field('deposit')], '1250');
+          // Read back at the field scale; the post itself was refused before.
+          assert.match(String(typed.values[field('weight')]), /^12\.50*$/u);
+          assert.match(String(typed.values[field('freight')]), /^19\.90*$/u);
+          assert.match(
+            String(typed.values[field('deposit')]),
+            /^1250(?:\.0+)?$/u,
+          );
           assert.equal(typed.values[field('notes')], '\nFirst\nSecond');
 
           const url = new URL(app.baseUrl);
