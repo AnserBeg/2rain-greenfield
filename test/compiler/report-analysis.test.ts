@@ -360,6 +360,22 @@ test('Invoice lines report one row per line with the invoice as required parent;
     report.body.links.map((l) => [l.via, l.required]),
     [[via, true]],
   );
+  // The header's invoice date carries no currency, so the fan-out rule alone
+  // refuses its maximum per line.
+  const invoiceDate = parent.fields.find((f) =>
+    f.operand.fieldId.endsWith('_invoice_date'),
+  )!.operand.fieldId;
+  assert.throws(
+    () =>
+      draftReport(
+        lines,
+        'Fan-out',
+        choices({ kind: 'max', fieldId: invoiceDate, via }),
+      ),
+    /would repeat once per line/u,
+  );
+  // A header balance is refused twice over: by the fan-out rule and because
+  // its currency binding is not local to the line.
   assert.throws(
     () =>
       draftReport(
