@@ -1616,8 +1616,10 @@ function entity(
   return {
     entityId,
     kind: 'entityDefinition',
-    // REPORTS-1 s2: Vendor Bills declare the same report source as Invoices,
-    // so payables age and bucket by period on their civil dates.
+    // REPORTS-1 s2: Vendor Bills declare a report source, so payables age and
+    // bucket by period. Both dates are posting instants (bill_date is stamped
+    // at post, due_date adds whole days to it), never a picked calendar date,
+    // so they are read in the working company's business calendar.
     ...(local === 'vendor_bill' && {
       reportSource: {
         version: 'report-source/v1',
@@ -1639,7 +1641,7 @@ function entity(
         })),
         dates: ['bill_date', 'due_date'].map((name) => ({
           fieldId: `${ids.namespace}:field.vendor_bill_${name}`,
-          basis: 'civilDate',
+          basis: 'instant',
         })),
       },
     }),

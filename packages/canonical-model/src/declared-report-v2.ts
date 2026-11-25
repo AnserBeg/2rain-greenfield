@@ -209,10 +209,13 @@ type LooseChoices = Omit<ReportChoices, 'dimensions'> & {
 const MEASURED_AT_GRAIN = new Set(['sum', 'average', 'min', 'max']);
 
 /** Resolve v2 choices against the offer. Returns the body, or the first ID
- * (or a sentence) the author must change. Fan-out refuses here, in preview. */
+ * (or a sentence) the author must change. Fan-out refuses here, in preview.
+ * `check` is 'authoring' when an author is choosing (the draft and its
+ * preview) and 'stored' when a saved body is revalidated on a later base. */
 export function resolveReportChoicesV2(
   offer: ReportOfferV2,
   choices: LooseChoices,
+  check: 'authoring' | 'stored',
 ): ReportBodyV2 | string {
   if ((choices.grain ?? offer.grain) !== offer.grain)
     return offer.grain === 'line'
@@ -332,7 +335,10 @@ export function resolveReportChoicesV2(
     if (problem) return problem;
   }
   // Typed zero rows for finite dimensions count toward the group ceiling
-  // (R8 with R3): a declaration that always fills past it is refused here.
+  // (R8 with R3): a declaration that always fills past it is refused while it
+  // is authored. Option counts are live, not pinned, so a stored body is never
+  // refused for them (rule 10): adding an option to a grouped choice must not
+  // break a saved report. Above the cap the reader answers "narrow" instead.
   const options = new Map(
     [...offer.fields, ...offer.links.flatMap((l) => l.fields)].map((f) => [
       operandKey(f.operand),
@@ -347,6 +353,7 @@ export function resolveReportChoicesV2(
         : undefined,
   );
   if (
+    check === 'authoring' &&
     members.length &&
     members.every((n) => n !== undefined) &&
     members.reduce((a, n) => a! * n!, 1)! *
@@ -397,13 +404,17 @@ export function reportBindingProblemV2(
   const offer = reportOfferV2(def, body.source.listSurfaceId, body.links);
   if (!offer || canonicalize(offer.sourceV2) !== canonicalize(body.source))
     return body.source.queryId;
-  const bound = resolveReportChoicesV2(offer, {
-    grain: body.source.grain,
-    dimensions: body.dimensions,
-    filters: body.filters,
-    measures: body.measures,
-    outputs: body.outputs,
-  });
+  const bound = resolveReportChoicesV2(
+    offer,
+    {
+      grain: body.source.grain,
+      dimensions: body.dimensions,
+      filters: body.filters,
+      measures: body.measures,
+      outputs: body.outputs,
+    },
+    'stored',
+  );
   if (typeof bound === 'string') return bound;
   const expected = new Map(body.operands.map((o) => [operandKey(o), o]));
   const operand =

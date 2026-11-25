@@ -71,20 +71,24 @@ export function draftMeasure(
     measureId ??
     target.source.entityId.split(':')[0] + ':measure.custom_' + randomUUID();
   const body = operator
-    ? resolveReportChoicesV2(target, {
-        grain: target.grain,
-        dimensions: [],
-        filters: filters ?? [],
-        measures: [
-          {
-            kind: 'inline',
-            measureId: id as ReportOperatorId,
-            label,
-            operator,
-          },
-        ],
-        outputs: [{ kind: 'table' }],
-      })
+    ? resolveReportChoicesV2(
+        target,
+        {
+          grain: target.grain,
+          dimensions: [],
+          filters: filters ?? [],
+          measures: [
+            {
+              kind: 'inline',
+              measureId: id as ReportOperatorId,
+              label,
+              operator,
+            },
+          ],
+          outputs: [{ kind: 'table' }],
+        },
+        'authoring',
+      )
     : previous?.revision.body;
   if (!body || typeof body === 'string')
     throw new Error(

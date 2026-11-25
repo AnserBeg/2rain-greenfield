@@ -11,6 +11,7 @@ import {
   businessDateOf,
   calendarKey,
   evaluateReportFacts,
+  type ReportDimensionSpec,
   type ReportMeasureSpec,
 } from '../../packages/canonical-model/src/index.js';
 import {
@@ -716,11 +717,6 @@ test('fix round: finite zero fill past the group ceiling refuses in preview; mon
     ['1.62', { sum: '3.250000000000000000', count: 2 }],
   );
   const bills = targetFor(def, ':query.vendor_bill_list');
-  assert.equal(
-    bills.fields.find((f) => f.operand.fieldId.endsWith('_due_date'))!.operand
-      .basis,
-    'civilDate',
-  );
   const aging = draftReport(
     bills,
     'Payables aging',
@@ -746,6 +742,214 @@ test('fix round: finite zero fill past the group ceiling refuses in preview; mon
     }),
   );
   assert.equal(aging.body.version, 'grouped-report/v2');
+});
+
+// Fix 2 (D1). Vendor Bill dates are posting instants (bill_date is stamped at
+// post; due_date adds whole days to it). A fixture at T00:00:00Z reads the same
+// under either basis, so these cases post in the local evening: in Edmonton
+// (UTC-7 in winter) 01:00Z is still the previous local day.
+test('local evening: a Vendor Bill posted in the Edmonton evening buckets by its local month and ages from its local due date', async () => {
+  const bills = targetFor(def, ':query.vendor_bill_list');
+  const billDate = field(bills, '_bill_date');
+  const dueDate = field(bills, '_due_date');
+  const report = draftReport(
+    bills,
+    'Payables by month and age',
+    ReportChoicesSchema.parse({
+      dimensions: [
+        { kind: 'calendar', fieldId: billDate, unit: 'month' },
+        {
+          kind: 'age',
+          fieldId: dueDate,
+          bands: DEFAULT_AGE_BANDS,
+          absentLabel: 'No due date',
+        },
+      ],
+      filters: [],
+      measures: [
+        {
+          kind: 'inline',
+          measureId: 'northstar.app:measure.custom_count',
+          label: 'Count',
+          operator: { kind: 'count' },
+        },
+      ],
+      outputs: [{ kind: 'table' }],
+    }),
+  );
+  assert.equal(report.body.version, 'grouped-report/v2');
+  // The compiled registration carries the declared basis to the reader; map
+  // it to reference dimensions exactly as the provider does.
+  const [registration] = registrations(await compileHead([report]));
+  const column = (fieldId: string) =>
+    registration!.columns.find((c) => c.fieldId === fieldId)!;
+  const dims = report.body.dimensions.map((d): ReportDimensionSpec => {
+    const c = column(d.fieldId);
+    return {
+      operand: d.fieldId,
+      kind: d.kind,
+      type: c.type,
+      ...(c.basis && { basis: c.basis }),
+      ...(d.kind === 'calendar' && { unit: d.unit }),
+      ...(d.kind === 'age' && { bands: d.bands }),
+    };
+  });
+  // Net 30, posted Nov 30 at 18:00 MST (Dec 1 01:00Z). The writer's due date
+  // is +30 x 24 h: Dec 31 01:00Z, which is Dec 30 in Edmonton.
+  const bill = {
+    [billDate]: '2026-12-01T01:00:00.000Z',
+    [dueDate]: '2026-12-31T01:00:00.000Z',
+  };
+  const counted = (businessDate: string) =>
+    evaluateReportFacts(dims, [count], [bill], {
+      businessDate,
+      zone: 'America/Edmonton',
+      boundary: '00:00:00',
+    })
+      .groups.filter((g) => g.cells[0]!.value === '1')
+      .map((g) => g.keys);
+  assert.deepEqual(
+    counted('2027-01-30'),
+    [['2026-11', 'd31_60']],
+    'a bill posted at 18:00 on Nov 30 in Edmonton is a November bill, and on Jan 30 its Dec 30 due date is 31 days old',
+  );
+  assert.deepEqual(
+    counted('2027-01-29'),
+    [['2026-11', 'd0_30']],
+    'one local day earlier the same bill is 30 days old',
+  );
+  assert.deepEqual(
+    [column(billDate).basis, column(dueDate).basis],
+    ['instant', 'instant'],
+    'Vendor Bill dates declare the instant basis',
+  );
+  // Knock-on (rule 17(c)): min and max read only civil dates, so they refuse.
+  for (const kind of ['min', 'max'] as const)
+    assert.throws(
+      () =>
+        draftReport(
+          bills,
+          'Earliest bill',
+          ReportChoicesSchema.parse({
+            dimensions: [{ kind: 'direct', fieldId: field(bills, '_state') }],
+            filters: [],
+            measures: [
+              {
+                kind: 'inline',
+                measureId: 'northstar.app:measure.custom_edge',
+                label: 'Edge',
+                operator: { kind, fieldId: billDate },
+              },
+            ],
+            outputs: [{ kind: 'table' }],
+          }),
+        ),
+      /Choose reportable operands/u,
+    );
+});
+
+// Fix 2 (D2, rule 10). Option counts are live, not pinned in the body, so the
+// group ceiling is an authoring check only. A saved report near the cap keeps
+// compiling and replaying when one of its grouped choices gains an option.
+test('group ceiling at authoring only: a saved report near the cap still compiles and replays clean after a grouped choice gains an option', async () => {
+  const visits = CustomizationPatchSchema.parse({
+    kind: 'addRecordType',
+    label: 'Visit',
+    companyOwnership: 'entityOwned',
+    fields: [
+      { label: 'Due', type: 'date' },
+      {
+        label: 'Kind',
+        type: 'choice',
+        options: Array.from({ length: 10 }, (_, i) => 'Kind ' + i),
+      },
+      {
+        label: 'Zone',
+        type: 'choice',
+        options: Array.from({ length: 8 }, (_, i) => 'Zone ' + i),
+      },
+    ],
+  });
+  const withVisits = applyCustomizationPatches(
+    def as unknown as Record<string, unknown>,
+    [visits],
+  );
+  assert.ok(withVisits.status === 'applied');
+  const visitTarget = (catalog: unknown) =>
+    targetFor(catalog, ':query.custom_visit_list');
+  const target = visitTarget(withVisits.authored);
+  // Six age members (five bands and No due date) x 10 kinds x 8 zones = 480,
+  // with no currency partition: within the 500-group ceiling.
+  const choices = ReportChoicesSchema.parse({
+    dimensions: [
+      {
+        kind: 'age',
+        fieldId: field(target, '_visit_due'),
+        bands: DEFAULT_AGE_BANDS,
+        absentLabel: 'No due date',
+      },
+      { kind: 'direct', fieldId: field(target, '_visit_kind') },
+      { kind: 'direct', fieldId: field(target, '_visit_zone') },
+    ],
+    filters: [],
+    measures: [
+      {
+        kind: 'inline',
+        measureId: 'northstar.app:measure.custom_count',
+        label: 'Count',
+        operator: { kind: 'count' },
+      },
+    ],
+    outputs: [{ kind: 'table' }],
+  });
+  const report = draftReport(target, 'Visits by age, kind and zone', choices);
+  // A ninth zone makes it 6 x 10 x 9 = 540.
+  const grow = CustomizationPatchSchema.parse({
+    kind: 'addChoice',
+    enumField: field(target, '_visit_zone'),
+    option: 'Zone 8',
+  });
+  const chain = [visits, report, grow];
+  const compiled = await compileHead(chain);
+  assert.ok(
+    registrations(compiled).some(
+      (r) => r.revision.revisionId === report.revisionId,
+    ),
+    'the saved report still compiles after its grouped choice gains an option',
+  );
+  // An upgrade replay onto a label-only base change is clean too.
+  const relabelled = structuredClone(def) as unknown as {
+    fields: { fieldId: string; label: string }[];
+  };
+  relabelled.fields.find((f) =>
+    f.fieldId.endsWith(':field.customer_invoice_number'),
+  )!.label = 'Invoice no.';
+  const replayed = await compileInSandbox({
+    base: relabelled as unknown as Record<string, unknown>,
+    tip: serializeRelease(app),
+    chain,
+    upgradeBaseRoot: app.compiled.releaseRoot,
+    acknowledgement: readUnboundPermissionAcknowledgementFor(
+      'apps/web/release/app.authored.json',
+      'northstar.app:package.application',
+    ),
+  });
+  assert.equal(
+    replayed.status,
+    'compiled',
+    'the saved report replays clean on a later base: ' +
+      JSON.stringify(replayed).slice(0, 600),
+  );
+  // The stored body is over the cap now; only a new draft is refused.
+  const grown = applyCustomizationPatches(
+    def as unknown as Record<string, unknown>,
+    [visits, grow],
+  );
+  assert.ok(grown.status === 'applied');
+  assert.throws(
+    () => draftReport(visitTarget(grown.authored), 'Too wide now', choices),
+    /500-group ceiling/u,
+  );
 });
 
 test('fix round: the report page names each filter input by its path, and the request reads it back', async () => {

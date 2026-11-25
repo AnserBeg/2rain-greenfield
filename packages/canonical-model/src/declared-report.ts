@@ -235,7 +235,7 @@ export function resolveAnyReportChoices(
   if (offer.v1 && isV1Shape(offer, choices)) {
     return resolveReportChoices(offer.v1, choices as V1Choices);
   }
-  return resolveReportChoicesV2(offer, choices);
+  return resolveReportChoicesV2(offer, choices, 'authoring');
 }
 
 export function resolveReportChoices(
