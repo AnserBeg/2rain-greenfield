@@ -302,6 +302,9 @@ test(
           );
           body.set(`value:${field('name')}`, 'Typed');
           body.set(`value:${field('weight')}`, '12.500');
+          body.set(`value:${field('freight')}`, '19.90');
+          body.set(`value:${field('deposit')}`, '1250.00');
+          body.set(`value:${field('notes')}`, '\r\nFirst\r\nSecond');
           // P2: a code outside the list comes back as the form, with the
           // field's message and the typed values kept.
           body.set(`value:${field('currency')}`, 'GBP');
@@ -320,9 +323,6 @@ test(
           assert.doesNotMatch(refusedHtml, /Operation refused/u);
           body.set(`value:${field('currency')}`, 'USD');
           body.set('idempotencyKey', randomUUID());
-          body.set(`value:${field('freight')}`, '19.90');
-          body.set(`value:${field('deposit')}`, '1250.00');
-          body.set(`value:${field('notes')}`, '\r\nFirst\r\nSecond');
           const posted = await fetch(
             new URL(formMatch[1]!.replaceAll('&amp;', '&'), formUrl),
             { method: 'POST', headers, body },
