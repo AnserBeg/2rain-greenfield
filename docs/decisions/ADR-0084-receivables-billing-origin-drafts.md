@@ -18,3 +18,5 @@ Under Sales ruling C, a draft invoice names an order. Posting locks the order, r
 ## Admission evidence
 
 Before slice 2 writes a draft, admit the two named capability operations on one transaction and each owner’s exact write/read-back set. Exercise failure after inner writes, authorized lost-response replay, competing keys, tampered lines at issue, and void racing payment or reissue. Check actual persisted headers, lines, coverage, exposure, trust and v2 events. Run v1 order posting (including pre-existing-line refusal), v1 event replay and Payables’ existing settlement path as compatibility controls. This decision grants neither a general operation-chaining mechanism nor a ledger. [Posting kernel admission map](../execution/packets/posting-kernel-admission.md#billing-and-receivables-transaction-admission)
+
+Related: ADR-0093.
