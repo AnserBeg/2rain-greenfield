@@ -217,6 +217,60 @@
           "expected": "Expected values to be strictly equal"
         }
       ]
+    },
+    {
+      "name": "reports-s2-analysis-admission",
+      "claim": "An internally consistent release that understates the analysed report reader is refused before its staging transaction.",
+      "file": "packages/postgres-provider/src/release-repository.ts",
+      "original": "hasAnalysis\n      ? surfaceFloor < REPORT_ANALYSIS_READER",
+      "replacement": "hasAnalysis\n      ? false",
+      "test": {
+        "files": ["test/postgres/releases.test.ts"],
+        "namePattern": "release admission refuses an analysed report"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/releases.test.ts",
+          "name": "release admission refuses an analysed report or a named measure whose release understates its reader floor",
+          "expected": "Understated candidate reached the staging transaction"
+        }
+      ]
+    },
+    {
+      "name": "reports-s2-measure-admission",
+      "claim": "An internally consistent release that understates the named measure reader is refused before its staging transaction.",
+      "file": "packages/postgres-provider/src/release-repository.ts",
+      "original": "hasMeasure\n      ? surfaceFloor < REPORT_MEASURE_READER",
+      "replacement": "hasMeasure\n      ? false",
+      "test": {
+        "files": ["test/postgres/releases.test.ts"],
+        "namePattern": "release admission refuses an analysed report"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/releases.test.ts",
+          "name": "release admission refuses an analysed report or a named measure whose release understates its reader floor",
+          "expected": "Understated candidate reached the staging transaction"
+        }
+      ]
+    },
+    {
+      "name": "reports-s2-popup-reader-floor",
+      "claim": "A released record button lifts the surface floor to the pop-up rung, so the archived 39 reader refuses it after answering a query.",
+      "file": "packages/compiler/src/projections.ts",
+      "original": "      ? POPUP_READER\n      : 0,",
+      "replacement": "      ? 0\n      : 0,",
+      "test": {
+        "files": ["test/postgres/customization-validation.test.ts"],
+        "namePattern": "the archived 39 reader answers"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/customization-validation.test.ts",
+          "name": "the archived 39 reader answers a query on the pre-REPORTS base, then refuses a released record button by name",
+          "expected": "EXPECTED_TBD"
+        }
+      ]
     }
   ]
 }
