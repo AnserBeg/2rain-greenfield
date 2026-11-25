@@ -25,7 +25,6 @@ const suiteDefinitions = [
     expectedFiles: [
       'test/unit/address-connector.test.ts',
       'test/unit/calculated-display.test.ts',
-      'test/unit/close-fixture-app.test.ts',
       'test/unit/canonical-model/diagnostic-ordering.test.ts',
       'test/unit/canonical-model/disclosure-tier.test.ts',
       'test/unit/canonical-model/field-numbering.test.ts',
@@ -37,6 +36,7 @@ const suiteDefinitions = [
       'test/unit/canonical-model/surface-list.test.ts',
       'test/unit/catalog-definition.test.ts',
       'test/unit/catalog-extras.test.ts',
+      'test/unit/close-fixture-app.test.ts',
       'test/unit/commercial-amounts.test.ts',
       'test/unit/customization-ai-draft-gates.test.ts',
       'test/unit/customization-ai-draft-slice2.test.ts',

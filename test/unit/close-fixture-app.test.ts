@@ -43,9 +43,15 @@ test('a fixture whose page holds a silent socket still stops promptly', async ()
   const { app, port } = await listening();
   const socket = await silentSocket(port);
   const started = Date.now();
-  await closeFixtureApp(app, 'test', 5_000);
-  assert.ok(Date.now() - started < 4_000, 'the stop waited on the socket');
-  socket.destroy();
+  try {
+    await closeFixtureApp(app, 'test', 5_000);
+    assert.ok(Date.now() - started < 4_000, 'the stop waited on the socket');
+  } finally {
+    // A failing case must not leave a listening server holding the runner.
+    socket.destroy();
+    app.server.closeAllConnections();
+    app.server.close();
+  }
 });
 
 test('a stop that cannot finish fails by name at its bound instead of hanging', async () => {
