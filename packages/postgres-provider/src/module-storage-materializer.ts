@@ -1672,25 +1672,6 @@ async function createManagedTable(
          FROM north_star_module_materializer`,
     );
   }
-  if (entity.legalEntity) {
-    // Shared tables can already be installed for another tenant. An existing
-    // trigger is checked by the catalog verifier below, including its argument.
-    const tableName = `north_star_module.${quoted(entity.physicalTableName)}`;
-    const existing = await client.query(
-      "SELECT 1 FROM pg_trigger WHERE tgrelid = $1::regclass AND tgname = 'record_creation'",
-      [tableName],
-    );
-    if (!existing.rowCount) {
-      await client.query(
-        `GRANT TRIGGER ON ${tableName} TO north_star_module_materializer`,
-      );
-      await client.query(`CREATE TRIGGER record_creation AFTER INSERT ON ${tableName}
-        FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation(${triggerArgumentLiteral(entity.entityId)})`);
-      await client.query(
-        `REVOKE TRIGGER ON ${tableName} FROM north_star_module_materializer`,
-      );
-    }
-  }
   for (const check of entity.checkConstraints ?? []) {
     await ensureEnumCheckConstraint(client, entity, check);
   }
@@ -5004,13 +4985,6 @@ function buildExpectedTriggers(
       name: string;
       tableName: string;
     }> = [];
-    if (entity.legalEntity) {
-      triggers.push({
-        definition: `CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.${entity.physicalTableName} FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation(${triggerArgumentLiteral(entity.entityId)})`,
-        name: 'record_creation',
-        tableName: entity.physicalTableName,
-      });
-    }
     if (entity.factStorage) {
       triggers.push(
         {

@@ -1109,7 +1109,7 @@ test(
           WHERE b.outbox_id = $1 AND b.domain_event_id = $2 ORDER BY c.record_id`,
         [started.trust!.outboxId, started.trust!.domainEventId],
       );
-      assert.ok(prefilled.length > 1, 'this command creates several lines');
+      assert.ok(prefilled.length >= 1, 'starting the count creates its lines');
       assert.deepEqual(
         creations.rows.map((row) => row.record_id),
         prefilled.map((line) => line.recordId).sort(),

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { recordCreations } from './record-creation-occurrences.js';
 import type { TemplateApplicationSelection } from '../../runtime/src/record-template-library.js';
 import {
   declaresTemplateCreate,
@@ -2356,6 +2357,7 @@ async function insertRecord(
      VALUES (${parameters.join(', ')})`,
     values,
   );
+  await recordCreations(client, entity, [input.recordId]);
 }
 
 async function requireExistingParentGuards(

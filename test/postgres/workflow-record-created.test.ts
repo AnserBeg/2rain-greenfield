@@ -379,8 +379,6 @@ test(
         // seals cannot commit; without an action nothing is recorded.
         await client.query(`CREATE TABLE north_star_module.workflow_probe (
           tenant_id uuid, environment_id uuid, record_id uuid, legal_entity_id uuid)`);
-        await client.query(`CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.workflow_probe
-          FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation('northstar.test:entity.probe')`);
         const insert = async (action: string | null) => {
           const tenant = randomUUID();
           await client.query('BEGIN');
@@ -391,10 +389,18 @@ test(
                     set_config('north_star.creation_action', $3, true)`,
             [tenant, randomUUID(), action ?? ''],
           );
+          const ids = (
+            await client.query<{ record_id: string }>(
+              `INSERT INTO north_star_module.workflow_probe
+               SELECT $1::uuid, $1::uuid, gen_random_uuid(), gen_random_uuid() FROM generate_series(1, 2)
+               RETURNING record_id`,
+              [tenant],
+            )
+          ).rows.map((row) => row.record_id);
           await client.query(
-            `INSERT INTO north_star_module.workflow_probe
-             SELECT $1::uuid, $1::uuid, gen_random_uuid(), gen_random_uuid() FROM generate_series(1, 2)`,
-            [tenant],
+            `SELECT north_star_internal.record_creations('workflow_probe', 'record_id',
+               'northstar.test:entity.probe', $1::uuid[])`,
+            [ids],
           );
           const recorded = (
             await client.query<{ count: number }>(
@@ -407,6 +413,17 @@ test(
         const unsealed = await insert('northstar.test:operation.probe_create');
         assert.equal(unsealed.recorded, 2, 'one occurrence per inserted row');
         await assert.rejects(unsealed.commit(), { code: '23503' });
+        // A claim for a record the transaction's scope does not store refuses.
+        const claimed = await insert('northstar.test:operation.probe_create');
+        assert.equal(claimed.recorded, 2);
+        await assert.rejects(
+          client.query(
+            `SELECT north_star_internal.record_creations('workflow_probe', 'record_id',
+               'northstar.test:entity.probe', ARRAY[gen_random_uuid()])`,
+          ),
+          /not stored in this scope/u,
+        );
+        await client.query('ROLLBACK');
         const ungoverned = await insert(null);
         assert.equal(ungoverned.recorded, 0);
         await ungoverned.commit();

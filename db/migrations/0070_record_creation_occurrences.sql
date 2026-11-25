@@ -26,22 +26,39 @@ ALTER TABLE platform.record_creation_batches FORCE ROW LEVEL SECURITY;
 ALTER TABLE platform.record_creation_occurrences ENABLE ROW LEVEL SECURITY;
 ALTER TABLE platform.record_creation_occurrences FORCE ROW LEVEL SECURITY;
 
-CREATE FUNCTION north_star_internal.capture_record_creation() RETURNS trigger
+-- The governed writer names each company-owned record it inserted. The company
+-- is read from the stored row, never from the caller, and a claimed record that
+-- is not stored in the caller's tenant and environment refuses the write. No
+-- managed table carries a trigger, so the managed catalog of a release without a
+-- recordCreated workflow is unchanged and an older binary still verifies it.
+CREATE FUNCTION north_star_internal.record_creations(
+  physical_table text, identity_column text, record_type text, record_ids uuid[]
+) RETURNS integer
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
-DECLARE action text := nullif(current_setting('north_star.creation_action', true), ''); BEGIN
-  IF action IS NULL THEN RETURN NULL; END IF;
-  IF TG_TABLE_SCHEMA <> 'north_star_module' OR
-     (NEW.tenant_id, NEW.environment_id) IS DISTINCT FROM
-     (north_star_internal.trusted_tenant_id(), north_star_internal.trusted_environment_id())
-  THEN RAISE EXCEPTION 'record creation scope changed'; END IF;
-  INSERT INTO platform.record_creation_occurrences
-    (tenant_id, environment_id, writer_xid, request_id, action_id, record_type, record_id, company_id)
-  VALUES (NEW.tenant_id, NEW.environment_id, pg_current_xact_id(),
-    nullif(current_setting('north_star.request_id', true), '')::uuid, action, TG_ARGV[0],
-    NEW.record_id, NEW.legal_entity_id);
-  RETURN NULL; END $$;
-REVOKE ALL ON FUNCTION north_star_internal.capture_record_creation() FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION north_star_internal.capture_record_creation() TO north_star_module_materializer;
+DECLARE
+  action text := nullif(current_setting('north_star.creation_action', true), '');
+  recorded integer; BEGIN
+  IF action IS NULL OR cardinality(record_ids) IS NULL THEN RETURN 0; END IF;
+  IF record_type !~ '^[a-z][a-z0-9_.:-]{0,190}$' THEN
+    RAISE EXCEPTION 'record creation type is not a canonical ID'; END IF;
+  EXECUTE format(
+    'INSERT INTO platform.record_creation_occurrences
+       (tenant_id, environment_id, writer_xid, request_id, action_id, record_type, record_id, company_id)
+     SELECT r.tenant_id, r.environment_id, pg_current_xact_id(),
+            nullif(current_setting(''north_star.request_id'', true), '''')::uuid,
+            $1, $2, r.%1$I, r.legal_entity_id
+       FROM north_star_module.%2$I AS r
+      WHERE r.tenant_id = north_star_internal.trusted_tenant_id()
+        AND r.environment_id = north_star_internal.trusted_environment_id()
+        AND r.%1$I = ANY($3)', identity_column, physical_table)
+    USING action, record_type, record_ids;
+  GET DIAGNOSTICS recorded = ROW_COUNT;
+  IF recorded <> cardinality(record_ids) THEN
+    RAISE EXCEPTION 'a claimed record creation is not stored in this scope'; END IF;
+  RETURN recorded; END $$;
+REVOKE ALL ON FUNCTION north_star_internal.record_creations(text, text, text, uuid[]) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION north_star_internal.record_creations(text, text, text, uuid[])
+  TO north_star_runtime, north_star_module_runtime;
 
 CREATE FUNCTION north_star_internal.seal_record_creations() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$ BEGIN
@@ -60,24 +77,6 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$ BE
 REVOKE ALL ON FUNCTION north_star_internal.seal_record_creations() FROM PUBLIC;
 CREATE TRIGGER seal_record_creations AFTER INSERT ON platform.trust_outbox
   FOR EACH ROW EXECUTE FUNCTION north_star_internal.seal_record_creations();
-
--- Existing installations share the same managed table per compiled entity.
--- Install only on relations attested by a persisted storage-target artifact.
-DO $$
-DECLARE target record; BEGIN
-  FOR target IN
-    SELECT DISTINCT entity->>'physicalTableName' AS physical, entity->>'entityId' AS id
-    FROM platform.tenant_release_projection_links p
-    JOIN platform.tenant_release_chunk_links c USING (tenant_id,environment_id,release_id,projection_instance_id)
-    JOIN platform.release_artifact_blobs b ON b.content_hash=c.chunk_hash AND b.artifact_kind='projectionChunk'
-    CROSS JOIN LATERAL jsonb_array_elements(convert_from(b.canonical_bytes,'UTF8')::jsonb->'entities') entity
-    WHERE p.projection_family_id='northstar.compiler:projection-family.storage-target'
-      AND entity ? 'legalEntity' AND entity->>'storageClass'='dedicatedTable'
-      AND to_regclass(format('north_star_module.%I',entity->>'physicalTableName')) IS NOT NULL
-    ORDER BY physical, id
-  LOOP
-    EXECUTE format('CREATE TRIGGER record_creation AFTER INSERT ON north_star_module.%I
-      FOR EACH ROW EXECUTE FUNCTION north_star_internal.capture_record_creation(%L)',target.physical,target.id); END LOOP; END $$;
 
 -- ADR-0073 A1: recordCreated is the first general trigger member. Its source
 -- is the per-record occurrence above, never worker state.
@@ -206,6 +205,16 @@ ALTER TABLE platform.workflow_instances
         AND creation_occurrence_id IS NULL AND causation_depth = 0)
       OR (outbox_id IS NULL AND receipt_id IS NULL AND record_type IS NOT NULL
         AND creation_occurrence_id IS NOT NULL)));
+-- A worker that predates this slice inserts a receipt instance without the
+-- generic column; the receipt is its trigger record.
+CREATE FUNCTION north_star_internal.workflow_default_trigger_record() RETURNS trigger
+LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$ BEGIN
+  IF NEW.trigger_record_id IS NULL AND NEW.creation_occurrence_id IS NULL THEN
+    NEW.trigger_record_id := NEW.receipt_id; END IF;
+  RETURN NEW; END $$;
+REVOKE ALL ON FUNCTION north_star_internal.workflow_default_trigger_record() FROM PUBLIC;
+CREATE TRIGGER workflow_default_trigger_record BEFORE INSERT ON platform.workflow_instances
+  FOR EACH ROW EXECUTE FUNCTION north_star_internal.workflow_default_trigger_record();
 CREATE UNIQUE INDEX workflow_instances_event_start_key
   ON platform.workflow_instances (tenant_id, environment_id, event_id, workflow_id)
   WHERE creation_occurrence_id IS NULL;
