@@ -242,11 +242,12 @@ DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_inte
 REVOKE ALL ON FUNCTION north_star_internal.template_context(uuid,uuid,jsonb,text,boolean) FROM PUBLIC;
 
 -- A stored application's linked context needs only today's read authority, no lock and no liveness.
-CREATE FUNCTION north_star_internal.template_context_read(company uuid,app jsonb,selector jsonb) RETURNS void
+-- A record stored without a context (a binding that is not required) needs none.
+CREATE FUNCTION north_star_internal.template_context_read(company uuid,app jsonb,selector jsonb,ctx text) RETURNS void
 LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp AS $$ BEGIN
-  IF selector->>'kind'='link' THEN
+  IF ctx IS NOT NULL AND selector->>'kind'='link' THEN
     PERFORM north_star_internal.communication_check_read(company,company,app,north_star_internal.communication_exact_query(app,selector->>'entityId',selector->>'getQueryId')); END IF; END $$;
-REVOKE ALL ON FUNCTION north_star_internal.template_context_read(uuid,jsonb,jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION north_star_internal.template_context_read(uuid,jsonb,jsonb,text) FROM PUBLIC;
 
 CREATE FUNCTION platform.record_template_assignment_version(company uuid,released uuid,expected_fence bigint,form text,ctx text)
 RETURNS integer LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
@@ -433,7 +434,7 @@ DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_inte
     PERFORM platform.lock_current_policy_epoch(t,e);
     IF r.applied THEN
       PERFORM north_star_internal.template_worker(company,released,r.selection->'binding',r.selection#>'{assignment,content}');
-      PERFORM north_star_internal.template_context_read(company,platform.document_app(t,e,released),r.selection#>'{binding,body,context}');
+      PERFORM north_star_internal.template_context_read(company,platform.document_app(t,e,released),r.selection#>'{binding,body,context}',r.selection->>'context');
     ELSE
       selected:=north_star_internal.template_selection(company,released,expected_fence,r.form_id,header);
       IF selected IS DISTINCT FROM r.selection THEN RAISE EXCEPTION 'template.freshPreviewRequired'; END IF; END IF; END IF;
@@ -489,7 +490,7 @@ DECLARE t uuid:=north_star_internal.trusted_tenant_id(); e uuid:=north_star_inte
   IF NOT FOUND THEN RETURN NULL; END IF;
   PERFORM north_star_internal.communication_check_read(company,company,app,north_star_internal.communication_exact_query(app,r.selection#>>'{binding,body,entityId}'));
   PERFORM north_star_internal.communication_check_read(company,company,app,north_star_internal.communication_exact_query(app,r.selection#>>'{binding,body,lineEntityId}'));
-  PERFORM north_star_internal.template_context_read(company,app,r.selection#>'{binding,body,context}');
+  PERFORM north_star_internal.template_context_read(company,app,r.selection#>'{binding,body,context}',r.selection->>'context');
   RETURN r.selection || jsonb_build_object('memberRows',r.member_rows); END $$;
 REVOKE ALL ON FUNCTION platform.record_template_application(uuid,uuid,bigint,text,uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION platform.record_template_application(uuid,uuid,bigint,text,uuid) TO north_star_runtime;

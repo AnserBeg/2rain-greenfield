@@ -1012,6 +1012,69 @@ export async function exerciseTemplateLibrary(
             [],
           );
         }
+        if (selector?.kind === 'link') {
+          // A link binding that is not required: a record created without the
+          // link stores no context, so its applied retry and its application
+          // read must not ask for read authority on the linked type (Fable
+          // check, item B). Every grant of the link's get query is revoked.
+          await activate(
+            draftTemplateBinding(
+              (await opened.service.targets()).templateBindings!,
+              { ...choices, required: false },
+            ),
+          );
+          const unlinked = { ...header, recordId: randomUUID(), relations: {} };
+          const unlinkedKey = randomUUID();
+          await prepare(unlinkedKey, unlinked);
+          const applied = await create(unlinkedKey, unlinked);
+          assert.equal(applied.outcome, 'succeeded', JSON.stringify(applied));
+          const releaseId = await run((v) =>
+            Promise.resolve(v.release.releaseId),
+          );
+          const {
+            rows: [linkQuery],
+          } = await pool.query<{ permission: string }>(
+            `SELECT q#>>'{permission,targetId}' AS permission
+          FROM platform.tenant_releases r JOIN platform.app_package_revisions d ON (r.tenant_id,r.app_package_revision_id)=(d.tenant_id,d.revision_id)
+          CROSS JOIN LATERAL jsonb_array_elements(convert_from(d.desired_state,'UTF8')::jsonb->'queries') q
+          WHERE r.release_id=$1 AND q->>'queryId'=$2`,
+            [releaseId, selector.getQueryId],
+          );
+          assert.ok(linkQuery);
+          const revoked = await pool.query<{ role_id: string }>(
+            'UPDATE platform.current_policy_permission_grants SET revoked_at=clock_timestamp() WHERE tenant_id=$1 AND environment_id=$2 AND permission_id=$3 AND revoked_at IS NULL RETURNING role_id',
+            [
+              runtime.identity.tenantId,
+              runtime.identity.environmentId,
+              linkQuery.permission,
+            ],
+          );
+          assert.ok(revoked.rowCount, 'revoke the linked type read');
+          try {
+            const retried = await create(unlinkedKey, unlinked);
+            assert.deepEqual(
+              retried.trust,
+              applied.trust,
+              'an unlinked applied retry returns its receipt without the link read',
+            );
+            assert.ok(
+              await run((v) =>
+                library.application(v, target, unlinked.recordId),
+              ),
+              'the unlinked application read needs no link read',
+            );
+          } finally {
+            await pool.query(
+              'UPDATE platform.current_policy_permission_grants SET revoked_at=NULL WHERE (tenant_id,environment_id,permission_id)=($1,$2,$3) AND role_id=ANY($4::uuid[])',
+              [
+                runtime.identity.tenantId,
+                runtime.identity.environmentId,
+                linkQuery.permission,
+                revoked.rows.map((r) => r.role_id),
+              ],
+            );
+          }
+        }
         second[index + 1]?.open();
       },
     );
