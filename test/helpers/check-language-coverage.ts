@@ -14,12 +14,8 @@ import {
   type LanguageCoverageReceipt,
   type LanguageCoverageReceiptClaim,
   type LanguageCoverageObservationSnapshot,
-  languageCoverageProducerFileKey,
 } from './language-conformance-ledger.js';
-import {
-  normalizeEvidencePath,
-  parseReachabilityEvidence,
-} from './reachability-evidence.js';
+import { creditedProducerFiles } from './language-coverage-credit.js';
 import { reachabilityProducers } from './reachability-producers.js';
 import { resolveReachabilityRunId } from './reachability-run.mjs';
 
@@ -84,7 +80,11 @@ try {
   const runId = resolveReachabilityRunId({ repositoryRoot });
   const result = evaluateLanguageCoverage({
     acceptedButUnhonoredObligationIds,
-    creditedProducerFiles: creditedProducerFiles(repositoryRoot, runId),
+    creditedProducerFiles: creditedProducerFiles(
+      repositoryRoot,
+      runId,
+      reachabilityProducers,
+    ),
     decisionObservedObligationIds,
     decisions,
     ledger,
@@ -107,49 +107,6 @@ try {
     `language coverage: FAIL\n${error instanceof Error ? error.message : String(error)}\n`,
   );
   process.exitCode = 1;
-}
-
-function creditedProducerFiles(
-  repositoryRoot: string,
-  runId: string,
-): ReadonlySet<string> {
-  const credited = new Set<string>();
-  for (const producer of reachabilityProducers) {
-    const artifactPath = resolve(repositoryRoot, producer.evidencePath);
-    if (!existsSync(artifactPath)) continue;
-    const serialized = readFileSync(artifactPath, 'utf8');
-    if (serialized.trim().length === 0) {
-      throw new Error(
-        `LANGUAGE_COVERAGE_EMPTY_REACHABILITY_EVIDENCE: ${producer.id}`,
-      );
-    }
-    const evidence = parseReachabilityEvidence(serialized, producer, runId);
-    if (!evidence.suiteSucceeded) {
-      throw new Error(
-        `LANGUAGE_COVERAGE_UNSUCCESSFUL_REACHABILITY_EVIDENCE: ${producer.id}`,
-      );
-    }
-    if (evidence.files.length === 0) {
-      throw new Error(
-        `LANGUAGE_COVERAGE_ZERO_FILE_REACHABILITY_EVIDENCE: ${producer.id}`,
-      );
-    }
-    for (const file of evidence.files) {
-      if (
-        !Number.isSafeInteger(file.realResultCount) ||
-        file.realResultCount <= 0
-      ) {
-        throw new Error(
-          `LANGUAGE_COVERAGE_INVALID_REAL_RESULT_COUNT: ${producer.id}:${String(file.realResultCount)}`,
-        );
-      }
-      const testFile = normalizeEvidencePath(repositoryRoot, file.path);
-      credited.add(
-        languageCoverageProducerFileKey({ suiteId: producer.id, testFile }),
-      );
-    }
-  }
-  return credited;
 }
 
 function readObject(path: string): Record<string, unknown> {

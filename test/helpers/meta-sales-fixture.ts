@@ -26,6 +26,9 @@ export async function withMetaSalesFixture(
     try {
       await run(await seed(app, pool));
     } finally {
+      // The browser still holds sockets when the fixture is told to stop, and
+      // `server.close` calls back only once every connection is gone.
+      app.server.closeAllConnections();
       await app.close();
     }
   });

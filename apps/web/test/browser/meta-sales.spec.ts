@@ -1,10 +1,9 @@
 import { returnToRecord, reviewTask } from './complete-task.js';
 import { SURFACE_CLIENT_SCRIPT } from '../../src/surface-client.js';
 import { test, expect } from '@playwright/test';
-import { spawn } from 'node:child_process';
-import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import { writeFile } from 'node:fs/promises';
+import { startFixtureProcess } from './fixture-process.js';
 
 test.use({ screenshot: 'only-on-failure', trace: 'retain-on-failure' });
 
@@ -443,41 +442,33 @@ for (const javaScriptEnabled of [true, false]) {
 async function withBrowserFixture(
   run: (url: string) => Promise<void>,
 ): Promise<void> {
-  const cwd = fileURLToPath(new URL('../../../../', import.meta.url));
-  const child = spawn(
-    process.execPath,
-    [
+  const fixture = await startFixtureProcess({
+    command: process.execPath,
+    args: [
       '--import',
       'tsx',
       'test/helpers/meta-sales-fixture.ts',
       '--serve',
       '--verify',
     ],
-    { cwd, stdio: ['ignore', 'pipe', 'pipe'] },
-  );
-  let output = '';
-  let readyResolve: (url: string) => void;
-  let readyReject: (error: Error) => void;
-  const ready = new Promise<string>((resolve, reject) => {
-    readyResolve = resolve;
-    readyReject = reject;
+    cwd: fileURLToPath(new URL('../../../../', import.meta.url)),
+    readyPattern: /META_SALES_URL=(.*)/u,
+    // A normal start takes seconds on CI; a slow laptop takes minutes.
+    startupMilliseconds: 240_000,
+    stopMilliseconds: 120_000,
   });
-  const exited = once(child, 'exit');
-  child.stdout.on('data', (chunk: Buffer) => {
-    output += chunk.toString();
-    const match = /META_SALES_URL=(.*)/.exec(output);
-    if (match) readyResolve(match[1]!);
-  });
-  child.stderr.on('data', (chunk: Buffer) => {
-    output += chunk.toString();
-  });
-  child.once('error', (error) => readyReject(error));
-  child.once('exit', () => readyReject(new Error(output)));
+  let failure: unknown;
   try {
-    await run(await ready);
-  } finally {
-    child.kill('SIGTERM');
-    await exited;
+    await run(fixture.url);
+  } catch (error) {
+    failure = error;
   }
-  expect(output).toContain('META_SALES_VERIFIED');
+  const stopped = await fixture.stop();
+  // The test body's own failure is never replaced by a teardown failure.
+  if (failure !== undefined) throw failure;
+  expect(
+    stopped.exited,
+    `the fixture did not exit within 120 s of SIGTERM; its output:\n${stopped.output}`,
+  ).toBe(true);
+  expect(stopped.output).toContain('META_SALES_VERIFIED');
 }

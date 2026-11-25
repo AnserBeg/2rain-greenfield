@@ -148,7 +148,12 @@ jobs:
     if: needs.select.outputs.promote == 'false'
     name: Clean install, quality, and build
     runs-on: ubuntu-24.04
-    timeout-minutes: ${{ needs.select.outputs.tier == 'quick' && 35 || 15 }}
+    # CI-7: the full tier takes about 13 minutes on a normal runner and hit the
+    # old 15-minute cap twice on main (run 45123390900, unit 6.5 minutes against
+    # a normal 4.3). 25 minutes is about 1.9 times normal. One job keeps the
+    # `quality` job id that the reachability roll-up, check-ci-results and the
+    # executed-file evidence bundle name.
+    timeout-minutes: ${{ needs.select.outputs.tier == 'quick' && 35 || 25 }}
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -295,6 +300,11 @@ jobs:
         # shard 7 21m 20s and shard 6 19m 06s; REPORTS run 44986880683 put shard
         # 3 at 29m 01s and shard 8 at 26m 41s. Shard 10 takes build-eval,
         # agent-dev-tasks and address-authority; see docs/execution/packets/CI-6.md.
+        # CI-7: shard 5 took 24m 39s on run 45551926366 (a branch that added a
+        # 441 s file to it) and shard 3 hit 30 minutes once. Shards were repacked
+        # so each file total is at most 15 minutes of measured file time (900 s):
+        # at the 1.7 times runner variance seen on date-time-field that is 25.5
+        # minutes against the 30-minute limit. See docs/execution/packets/CI-7.md.
         shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -548,6 +558,16 @@ jobs:
         uses: ./.github/actions/install-chromium
       - name: Run browser tests
         run: corepack pnpm test:browser
+      # CI-7: meta-sales.spec.ts timed out three times and left no trace to read.
+      # Playwright keeps a trace and a screenshot for a failed test; keep them.
+      - name: Retain browser failure traces
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: browser-failure-traces-${{ github.sha }}
+          path: apps/web/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Retain browser executed-file evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

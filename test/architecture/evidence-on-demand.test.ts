@@ -31,12 +31,23 @@ test('the evidence workflow is label-gated, read-only and pinned', () => {
 
   assert.match(
     workflow,
-    /^on:\n {2}pull_request:\n {4}types: \[labeled, synchronize, opened, reopened\]\n\n/mu,
+    /^on:\n {2}pull_request:\n {4}types: \[labeled, synchronize, opened, reopened\]\n {2}workflow_dispatch:\n {4}inputs:\n {6}ref:\n(?: {8}.+\n)+? {6}controls:\n(?: {8}.+\n)+\n/mu,
+    'a labelled pull request or a dispatch with a ref and a controls filter',
+  );
+  assert.match(
+    workflow,
+    /^ {6}ref:\n(?: {8}.+\n)*? {8}required: true\n/mu,
+    'a dispatch must name the ref it tests',
   );
   assert.doesNotMatch(
     workflow,
-    /^ {2}(?:push|pull_request_target|schedule|workflow_dispatch|workflow_run):/mu,
-    'only a labelled pull request may start it',
+    /^ {2}(?:push|pull_request_target|schedule|workflow_run):/mu,
+    'only a labelled pull request or a dispatch may start it',
+  );
+  // A dispatch is its own group, so lanes never cancel one another's runs.
+  assert.match(
+    workflow,
+    /^ {2}group: evidence-\$\{\{ github\.event_name == 'workflow_dispatch' && format\('dispatch-\{0\}', github\.run_id\) \|\| /mu,
   );
   assert.match(workflow, /^permissions:\n {2}contents: read$/mu);
   assert.equal(
@@ -57,12 +68,21 @@ test('the evidence workflow is label-gated, read-only and pinned', () => {
       `${action} must use a commit SHA`,
     );
   }
-  // The pull request's head, never the merge commit GitHub synthesizes: the
-  // evidence names a SHA its author can cite.
+  // The pull request's head (never the merge commit GitHub synthesizes) or the
+  // dispatch's ref, resolved once to a SHA: the evidence names a SHA its author
+  // can cite, and every control job checks out that same SHA.
+  const checkouts = [
+    ...workflow.matchAll(
+      /uses: actions\/checkout@[0-9a-f]{40} # v4\n {8}with:\n {10}ref: (.+)\n/gu,
+    ),
+  ].map((match) => match[1]);
+  assert.deepEqual(checkouts, [
+    '${{ github.event.pull_request.head.sha || inputs.ref }}',
+    '${{ needs.select-controls.outputs.head_sha }}',
+    '${{ github.event.pull_request.head.sha }}',
+  ]);
   assert.equal(
-    workflow.match(
-      /uses: actions\/checkout@[0-9a-f]{40} # v4\n {8}with:\n {10}ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}\n/gu,
-    )?.length,
+    checkouts.length,
     workflow.match(/uses: actions\/checkout@/gu)?.length,
   );
 
@@ -75,11 +95,35 @@ test('the evidence workflow is label-gated, read-only and pinned', () => {
   const control = workflowJob(workflow, 'control');
   const snapshot = workflowJob(workflow, 'regen-snapshot');
 
-  assert.ok(select.includes(labelGate('run-controls')));
+  assert.ok(
+    select.includes(
+      labelGate('run-controls').replace(
+        '    if: >-\n',
+        "    if: >-\n      github.event_name == 'workflow_dispatch' ||\n",
+      ),
+    ),
+  );
+  assert.ok(select.includes('head_sha: ${{ steps.resolve.outputs.head_sha }}'));
+  assert.ok(select.includes('run: echo "head_sha=$(git rev-parse HEAD)"'));
+  // The dispatch's controls input reaches the script through env only.
+  assert.ok(
+    select.includes(
+      `PR_BODY: "\${{ github.event_name == 'workflow_dispatch' && (inputs.controls != '' && format('controls: {0}', inputs.controls) || '') || github.event.pull_request.body }}"`,
+    ),
+  );
+  assert.ok(
+    select.includes(
+      "BASE_SHA: ${{ github.event.pull_request.base.sha || 'origin/main' }}",
+    ),
+  );
+  assert.doesNotMatch(
+    workflow,
+    /run: [^\n]*\$\{\{ *inputs\./u,
+    'a dispatch input must never be interpolated into a shell command',
+  );
   assert.ok(
     select.includes('node scripts/expected-red-on-demand.mjs select \\'),
   );
-  assert.ok(select.includes('PR_BODY: ${{ github.event.pull_request.body }}'));
 
   assert.match(control, /^ {4}needs: select-controls$/mu);
   assert.match(
