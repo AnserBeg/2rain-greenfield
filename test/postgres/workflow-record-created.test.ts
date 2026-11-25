@@ -370,6 +370,7 @@ test(
           const noteName = local('field.custom_clinic_note_name');
           const toAppointment = local('relation.custom_follow_up_appointment');
           const toNote = local('relation.custom_follow_up_note');
+          let livePatch = '';
           const activate = async (patch: unknown, digest?: string) => {
             const draft = await service.draft(
               patch as never,
@@ -381,6 +382,7 @@ test(
               ...(digest === undefined ? [] : [draft.workflowReviewDigest]),
             );
             await service.activate(draft.patchId);
+            livePatch = draft.patchId;
             return approval;
           };
           const typed = (label: string) => ({
@@ -700,7 +702,7 @@ test(
               [waiting],
             )
           ).rows[0]!;
-          const worklist = () =>
+          const worklist = (runId = waiting) =>
             withTrustedRequestTransaction(
               runtimePool,
               operator,
@@ -708,7 +710,7 @@ test(
                 (
                   await client.query<{ run_id: string; company_id: string }>(
                     'SELECT run_id, company_id FROM platform.workflow_approval_worklist($1)',
-                    [waiting],
+                    [runId],
                   )
                 ).rows,
             );
@@ -848,6 +850,65 @@ test(
             },
           );
           assert.deepEqual(forged, []);
+
+          // A wait the release switch suspends and staff Retry moves to the new
+          // fence keeps its old-fence PENDING row beside the new one; the
+          // worklist still lists the approval once, and only the fresh plan
+          // decides it.
+          const later = await create('custom_appointment_create', COMPANY, {
+            [appointmentName]: 'Later visit',
+          });
+          assert.equal(await consumer.claim(scope), 3);
+          const retried = await runOf('follow-up-approval', later);
+          assert.equal(await settle(retried), 'WAITING');
+          const pendingPlans = async () =>
+            (
+              await pool.query<{ fence: string; plan_digest: string }>(
+                `SELECT fence, plan_digest FROM platform.workflow_pending_approvals
+                  WHERE run_id = $1 AND status = 'PENDING' ORDER BY fence`,
+                [retried],
+              )
+            ).rows;
+          const [stale] = await pendingPlans();
+          assert.ok(stale);
+          const pinned = (
+            await pool.query<{ release_id: string }>(
+              'SELECT release_id FROM platform.workflow_runs WHERE run_id = $1',
+              [retried],
+            )
+          ).rows[0]!.release_id;
+          assert.equal((await service.rollback()).status, 'rolledBack');
+          const review = await service.reviewWorkflow(livePatch);
+          await service.approve(livePatch, review.workflowReviewDigest);
+          assert.equal((await service.activate(livePatch)).releaseId, pinned);
+          await execution.tick(scope);
+          assert.equal(await status(retried), 'SUSPENDED:stale-release-pin');
+          assert.deepEqual(
+            await execution.remedy(operator, [retried], 'retry'),
+            [{ runId: retried, outcome: 'retried' }],
+          );
+          assert.equal(await settle(retried), 'WAITING');
+          const plans = await pendingPlans();
+          assert.equal(plans.length, 2, JSON.stringify(plans));
+          const fresh = plans[1]!;
+          assert.notEqual(fresh.fence, stale.fence);
+          const listed = await worklist(retried);
+          assert.equal(
+            listed.length,
+            1,
+            `a staff-retried waiting approval is listed exactly once: ${JSON.stringify(listed)}`,
+          );
+          assert.deepEqual(listed, [{ run_id: retried, company_id: COMPANY }]);
+          assert.equal(
+            await decide(retried, stale.fence, stale.plan_digest, 'APPROVED'),
+            false,
+          );
+          assert.equal(
+            await decide(retried, fresh.fence, fresh.plan_digest, 'APPROVED'),
+            true,
+          );
+          assert.equal(await settle(retried), 'COMPLETED');
+          assert.deepEqual(await created(followUp, later), [COMPANY]);
         } finally {
           await workerPool.end();
           await runtimePool.end();
