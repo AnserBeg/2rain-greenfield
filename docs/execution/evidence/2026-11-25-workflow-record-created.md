@@ -37,3 +37,4 @@ Branch `packet/WORKFLOW-2-s4b` from main `20762dbc`. Pre-tenant. Provisional mig
 
 - `node --import tsx --test test/unit/workflow-triggers.test.ts` — member coverage, receipt bytes, rung 51, replay and eval bases.
 - `node --import tsx --test test/postgres/workflow-record-created.test.ts` — two appointments in two companies start two runs, an earlier one starts none, and a second poll starts nothing.
+- `node --import tsx --test test/architecture/record-creation-writers.test.ts` — every managed-table insert is classified.
