@@ -560,7 +560,7 @@ test('a currency field refuses unlisted codes on write and is searchable', () =>
     (x) => x.fieldId === f('currency'),
   )!;
   assert.equal(currency.searchable, true, 'the currency field is searchable');
-  const rule = (authored.formulaRules as Forged[]).find(
+  const rule = ((authored.formulaRules ?? []) as Forged[]).find(
     (r) => r.ruleId === `${NS}:rule.custom_shipment_currency_code`,
   )!;
   assert.ok(rule, 'the currency field carries its code rule');
