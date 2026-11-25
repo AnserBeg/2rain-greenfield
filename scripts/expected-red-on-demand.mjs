@@ -10,7 +10,7 @@
  * runners instead, one control per job.
  *
  *   select   Reads the manifests from git objects, never the working tree. A
- *            `controls: a b` line in the pull request body names exactly the
+ *            `controls: a b` line in the pull request body (or a dispatch's controls input) names exactly the
  *            controls to run. Otherwise every entry the head ADDS or CHANGES
  *            against its merge base with the pull request's base runs; an entry
  *            only moved between manifests, or only re-keyed, is unchanged.

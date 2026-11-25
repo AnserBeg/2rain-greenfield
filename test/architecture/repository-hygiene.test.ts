@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
-import { getReachabilityProducer } from '../helpers/reachability-producers.js';
+import { reachabilityProducers } from '../helpers/reachability-producers.js';
 
 const workflowPath = '.github/workflows/ci.yml';
 const packagePath = 'package.json';
@@ -36,6 +36,7 @@ const suiteDefinitions = [
       'test/unit/canonical-model/surface-list.test.ts',
       'test/unit/catalog-definition.test.ts',
       'test/unit/catalog-extras.test.ts',
+      'test/unit/close-fixture-app.test.ts',
       'test/unit/commercial-amounts.test.ts',
       'test/unit/customization-ai-draft-gates.test.ts',
       'test/unit/customization-ai-draft-slice2.test.ts',
@@ -48,10 +49,12 @@ const suiteDefinitions = [
       'test/unit/date-time-field.test.ts',
       'test/unit/dev-environment.test.ts',
       'test/unit/field-validation.test.ts',
+      'test/unit/fixture-process.test.ts',
       'test/unit/formula-validation.test.ts',
       'test/unit/inventory-definition.test.ts',
       'test/unit/inventory-valuation.test.ts',
       'test/unit/language-conformance-ledger.test.ts',
+      'test/unit/language-coverage-credit.test.ts',
       'test/unit/location-definition.test.ts',
       'test/unit/map-imagery.test.ts',
       'test/unit/module-provider-error-mappings.test.ts',
@@ -278,6 +281,7 @@ const suiteDefinitions = [
       'test:postgres:8',
       'test:postgres:9',
       'test:postgres:10',
+      'test:postgres:11',
     ],
   },
   {
@@ -464,14 +468,30 @@ test('suite commands exactly cover all independently discovered test files', () 
   }
 });
 
-test('the unit evidence manifest matches every unit test argument in execution order', () => {
+test('every script-backed node producer names exactly the test arguments of its package script, in order', () => {
   const { scripts } = JSON.parse(readFileSync(packagePath, 'utf8')) as {
     scripts: Record<string, string>;
   };
-  const unitFiles = shellTokens(scripts['test:unit']!)
-    .map((token) => token.value)
-    .filter((argument) => argument.endsWith('.test.ts'));
-  assert.deepEqual(getReachabilityProducer('unit').argv, unitFiles);
+  let checked = 0;
+  for (const producer of reachabilityProducers) {
+    if (
+      producer.runner !== 'node:test' ||
+      producer.implementation.kind !== 'script' ||
+      producer.implementation.manifestPath !== 'package.json'
+    )
+      continue;
+    const script = producer.implementation.script;
+    const files = shellTokens(scripts[script]!)
+      .map((token) => token.value)
+      .filter((argument) => argument.endsWith('.test.ts'));
+    assert.deepEqual(
+      producer.argv,
+      files,
+      `${producer.id} and package script ${script} name different files`,
+    );
+    checked += 1;
+  }
+  assert.ok(checked >= 20, `only ${String(checked)} producers were compared`);
 });
 
 test('every test-script glob is quoted before the shell can expand it', () => {
@@ -841,6 +861,7 @@ test('CI runs every scaffold gate from a frozen install', () => {
     'corepack pnpm test:postgres:8',
     'corepack pnpm test:postgres:9',
     'corepack pnpm test:postgres:10',
+    'corepack pnpm test:postgres:11',
     'corepack pnpm test:postgres:composed',
     'corepack pnpm test:postgres:commercial',
     'corepack pnpm test:postgres:sales',

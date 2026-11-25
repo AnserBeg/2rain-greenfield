@@ -28,6 +28,24 @@ gh pr edit <n> --add-label regen-snapshot
   `controls:` line.
 - GitHub runs nothing for a pull request with merge conflicts.
 
+## Asking for a run without a pull request (CI-7)
+
+A lane that opens no pull request dispatches the controls by hand. The `ref`
+input is a branch, tag or full 40-character commit SHA (a short SHA is refused), and the run resolves it to one SHA that every
+control job checks out and every cited line names. The `controls` input is a
+space-separated list of entry names; empty runs the entries the ref adds or
+changes against `origin/main`.
+
+```bash
+gh workflow run evidence.yml --ref <branch carrying the workflow> -f ref=<branch or sha> -f controls="name1 name2"
+gh run list --workflow evidence.yml --limit 3
+```
+
+A dispatch runs only the controls, never `regen-snapshot`. Each dispatch has its
+own concurrency group, so two lanes never cancel each other. GitHub accepts a
+dispatch only for a workflow file that exists on the ref it runs from, so
+until this workflow is on `main`, run it from the branch that carries it.
+
 ## Reading the result
 
 ```bash

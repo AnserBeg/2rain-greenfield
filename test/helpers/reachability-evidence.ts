@@ -174,6 +174,23 @@ export function normalizeEvidencePath(
   return normalizeSeparators(repositoryPath);
 }
 
+/**
+ * Evidence that is well formed but does not belong to the current run or to
+ * the producer as it is defined now: a leftover file from an earlier run, or
+ * one written before a shard list changed. Callers that need to tell the owner
+ * to regenerate it catch this class; the message is unchanged.
+ */
+export class StaleReachabilityEvidenceError extends Error {
+  constructor(
+    message: string,
+    readonly producerId: string,
+    readonly kind: 'run' | 'argv',
+  ) {
+    super(message);
+    this.name = 'StaleReachabilityEvidenceError';
+  }
+}
+
 export function parseReachabilityEvidence(
   serialized: string,
   producer: ReachabilityProducer,
@@ -199,8 +216,10 @@ export function parseReachabilityEvidence(
     throw new Error(`Missing reachability run token from ${producer.id}`);
   }
   if (value.runId !== currentRunId) {
-    throw new Error(
+    throw new StaleReachabilityEvidenceError(
       `Stale reachability evidence for ${producer.id}: expected run ${currentRunId}, received ${value.runId}`,
+      producer.id,
+      'run',
     );
   }
   if (
@@ -210,8 +229,10 @@ export function parseReachabilityEvidence(
     throw new Error(`Invalid observed argv from ${producer.id}`);
   }
   if (!sameArguments(value.argv, producer.argv)) {
-    throw new Error(
+    throw new StaleReachabilityEvidenceError(
       `Observed argv mismatch for ${producer.id}: expected ${JSON.stringify(producer.argv)}, received ${JSON.stringify(value.argv)}`,
+      producer.id,
+      'argv',
     );
   }
   if (
