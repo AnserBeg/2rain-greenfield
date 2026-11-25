@@ -199,10 +199,11 @@ export function recordTemplateOffers(
       const kind = column.shape.fieldType.safeParse(type.kind);
       if (!kind.success) return [];
       // The option set is not pinned (rule 10, most general form): each
-      // template revision pins its own choice IDs and meanings, and applying a
-      // revision that names a removed option refuses by name in the stored
-      // worker (template.invalidChoice / template.invalidDefault). Adding a
-      // choice to a bound column therefore strands no template or assignment.
+      // template revision pins its own choice IDs and meanings, so adding a
+      // choice to a bound column strands no template or assignment. Review and
+      // publish refuse a removed option (template.invalidChoice /
+      // template.invalidDefault); refusing it at apply, with its removal
+      // witness, is owed in slice 2 (orchestrator ruling).
       const { options, ...fieldContract } = type;
       void options;
       return [

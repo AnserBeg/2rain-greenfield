@@ -58,7 +58,7 @@
     },
     {
       "name": "template-application-company",
-      "claim": "A worker limited to one company is refused, by the company-scoped read authority alone, a template application that company B created for its own parent; without it B's application is returned.",
+      "claim": "A worker limited to one company is refused, by the company-scoped read authority, another company's application read for a known parent ID; without it that read answers nothing instead of refusing.",
       "file": "db/migrations/0069_record_template_library.sql",
       "original": "IF NOT north_star_internal.address_member(company) OR NOT platform.document_granted(company::text,replace(form,':surface.',':permission.template_read_'),form)",
       "replacement": "IF false",
