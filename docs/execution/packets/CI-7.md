@@ -61,7 +61,26 @@ This is not a retry. If a stall returns, the report names the stage and the trac
 
 ## The full run
 
-@FULLRUN@
+Run 45612048822 passed every job on attempt 1, on tested tip `4b2f3fcc956a`. It was dispatched once; the previous version's run (45566322600) was on the stale base and is superseded.
+
+| Job | Time |
+|---|---:|
+| Quality | 12m 58s |
+| Shard 1 | 10m 36s |
+| Shard 2 | 13m 16s |
+| Shard 3 | 15m 10s |
+| Shard 4 | 12m 44s |
+| Shard 5 | 18m 18s |
+| Shard 6 | 13m 36s |
+| Shard 7 | 14m 59s |
+| Shard 8 | 14m 34s |
+| Shard 9 | 19m 11s |
+| Shard 10 | 12m 06s |
+| Shard 11 | 19m 43s |
+| Browser runner | 10m 28s |
+| Customization browser runner | 21m 46s |
+
+The slowest PostgreSQL shard is 19m 43s (shard 11, 793 s of median file time, so this runner was about 1.5 times the median; shard 9, `date-time-field` alone, took 19m 11s against 692 s). The slowest job overall is the Customization browser runner at 21m 46s of its 30-minute limit (26m 27s on main run 45562713263), which this packet does not touch and which is the next job to look at. On main run 45562713263 shard 1 took 23m 59s and shard 2 25m 08s; they are 10m 36s and 13m 16s here. The first version of this record said shard 1 carried two minutes of non-file work; it carries 24 s (schema check 13 s, locale probe 11 s), and its test step took 866 s on the measuring run and 1151 s on the first CI-7 full run, so the measuring run was a fast one.
 
 ## Evidence
 
