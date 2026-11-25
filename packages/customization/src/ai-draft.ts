@@ -255,6 +255,30 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
         existing: target.reports
           .filter((r) => r.lifecycle === 'active')
           .map((r) => ({ id: r.revision.reportId, label: r.label })),
+        // REPORTS-1 slice 2, generated from the same offer the compiler checks.
+        grain: target.grain,
+        links: target.links.map((l) => ({
+          via: l.link.via,
+          label: l.label,
+          parent: l.parent,
+          fields: l.fields.map((f) => ({
+            fieldId: f.operand.fieldId,
+            label: f.label,
+            type: f.operand.type,
+          })),
+        })),
+        approvedMeasures: target.measures.map((m) => ({
+          measureId: m.measureId,
+          contractDigest: m.contractDigest,
+          label: m.label,
+        })),
+        namedMeasures: target.namedMeasures
+          .filter((m) => m.lifecycle === 'active')
+          .map((m) => ({
+            measureId: m.revision.measureId,
+            label: m.label,
+            status: m.revision.status,
+          })),
       }),
     ),
     ...(targets.presentation?.length

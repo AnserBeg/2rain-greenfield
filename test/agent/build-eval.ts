@@ -1352,6 +1352,55 @@ export async function runBuildCase(
         if (!found) result.reasons.push('no new board view on the list');
       }
     }
+    if (expect.outcome === 'report') {
+      if (result.activated) {
+        const after = await opened.service.targets();
+        const target = (after.reports ?? []).find((t) =>
+          localOf(t.source.listSurfaceId).startsWith(expect.list),
+        );
+        const had = new Set(
+          (boardsBefore.reports ?? []).flatMap((t) => [
+            ...t.reports.map((r) => r.revision.revisionId),
+            ...t.namedMeasures.map((m) => m.revision.revisionId),
+          ]),
+        );
+        const operators = (body: {
+          measures: readonly { kind: string; operator?: { kind: string } }[];
+        }) =>
+          body.measures.flatMap((m) =>
+            m.kind === 'inline' && m.operator ? [m.operator.kind] : [],
+          );
+        const found = expect.measure
+          ? !!target?.namedMeasures.some(
+              (m) =>
+                m.lifecycle === 'active' &&
+                !had.has(m.revision.revisionId) &&
+                nameMatches(expect.label, slug(m.label)) &&
+                expect.operators.every((o) =>
+                  operators(m.revision.body).includes(o),
+                ),
+            )
+          : !!target?.reports.some(
+              (r) =>
+                r.lifecycle === 'active' &&
+                !had.has(r.revision.revisionId) &&
+                nameMatches(expect.label, slug(r.label)) &&
+                (!expect.grain ||
+                  (r.revision.body.version === 'grouped-report/v2' &&
+                    r.revision.body.source.grain === expect.grain)) &&
+                (expect.dimensions ?? []).every((d) =>
+                  r.revision.body.dimensions.some((x) => x.kind === d),
+                ) &&
+                expect.operators.every((o) =>
+                  operators(r.revision.body).includes(o),
+                ),
+            );
+        result.e2e = found;
+        result.behaviour = found;
+        if (!found)
+          result.reasons.push('no new report or measure as requested');
+      }
+    }
     if (expect.outcome === 'map') {
       if (result.activated) {
         const after = await opened.service.targets();

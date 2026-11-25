@@ -352,6 +352,19 @@ const cases = {
     subject: reportOperand,
     code: 'RETIRED_TARGET',
   },
+  // REPORTS-1 s2: a named measure replays like a report, by stable operand.
+  addMeasureRevision: {
+    source: extended,
+    conflict: missingReportOperand,
+    change: customization.draftMeasure(
+      equipmentReports(extended),
+      'Statuses',
+      'trial',
+      { kind: 'distinctCount', fieldId: reportOperand as never },
+    ),
+    subject: reportOperand,
+    code: 'RETIRED_TARGET',
+  },
   addPopupActionRevision: {
     source: extended,
     conflict: base,
@@ -688,7 +701,7 @@ for (const [kind, example] of Object.entries<ReplayCase>(cases)) {
     const compatible = structuredClone(source);
     declaration(compatible, 'fields', 'fieldId', itemSku).label =
       'Stock identifier';
-    if (kind === 'addReportRevision')
+    if (kind === 'addReportRevision' || kind === 'addMeasureRevision')
       declaration(compatible, 'fields', 'fieldId', reportOperand).label =
         'Equipment condition';
     const result = await customization.compileInSandbox({

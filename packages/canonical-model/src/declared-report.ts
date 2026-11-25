@@ -121,7 +121,7 @@ export function baseReportOffer(
   if (
     !live(list) ||
     list.archetype !== 'list' ||
-    !list.list ||
+    (!list.list && !lines) ||
     list.report ||
     list.measure
   )
@@ -150,6 +150,8 @@ export function baseReportOffer(
         ref(r.sourceEntity) === entity.entityId,
     ) ?? [];
   if (parents.length > (lines ? 1 : 0)) return null;
+  // A line collection need not be a declared List; a record source must be.
+  if (!list.list && !parents.length) return null;
   const scope = query.legalEntityScope as
     { cardinality: string; operand: { parameterId: string } } | undefined;
   if (scope && scope.cardinality !== 'exactlyOne') return null;
