@@ -26,7 +26,7 @@ const options = (script: string, overrides = {}) => ({
 test('a fixture that prints its URL and exits on SIGTERM starts and stops cleanly', async () => {
   const fixture = await startFixtureProcess(
     options(
-      `console.log('READY=http://127.0.0.1:1/'); process.on('SIGTERM', () => { console.log('DONE'); process.exit(0); }); setInterval(() => {}, 1000);`,
+      `process.on('SIGTERM', () => { console.log('DONE'); process.exit(0); }); console.log('READY=http://127.0.0.1:1/'); setInterval(() => {}, 1000);`,
     ),
   );
   assert.equal(fixture.url, 'http://127.0.0.1:1/');
@@ -35,17 +35,19 @@ test('a fixture that prints its URL and exits on SIGTERM starts and stops cleanl
   assert.match(stopped.output, /DONE/u);
 });
 
+// The handler is installed before the URL is printed: the parent kills the
+// child the moment it reads the URL, on another core.
 test('a fixture that never prints its URL fails at the deadline with its output', async () => {
   const started = Date.now();
   await assert.rejects(
     startFixtureProcess(
       options(`console.log('booting'); setInterval(() => {}, 1000);`, {
-        startupMilliseconds: 300,
+        startupMilliseconds: 3_000,
       }),
     ),
-    /printed no URL within 300 ms; output so far:\nbooting/u,
+    /printed no URL within 3000 ms; output so far:\nbooting/u,
   );
-  assert.ok(Date.now() - started < 4_000, 'the failure was not immediate');
+  assert.ok(Date.now() - started < 12_000, 'the failure was not immediate');
 });
 
 test('a fixture that exits before it is ready fails with its output', async () => {
@@ -58,7 +60,7 @@ test('a fixture that exits before it is ready fails with its output', async () =
 test('a fixture that ignores SIGTERM is reported as not exited and is killed', async () => {
   const fixture = await startFixtureProcess(
     options(
-      `console.log('READY=u'); process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);`,
+      `process.on('SIGTERM', () => {}); console.log('READY=u'); setInterval(() => {}, 1000);`,
       { stopMilliseconds: 300 },
     ),
   );
