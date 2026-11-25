@@ -1018,9 +1018,11 @@ export async function exerciseTemplateLibrary(
     first[0]!.open();
     await Promise.race([declared.opened, Promise.all(runs)]);
     assert.equal(bindings.length, kinds.length);
-    // The declaring release also carries a validation rule (Fable finding 1):
-    // it must compile and activate, the rule must still refuse a bad write,
-    // and phase 2's template creates must still apply under it.
+    // A validation rule joins the declaring release (Fable finding 1): the
+    // release with both must compile and activate, the rule must still refuse
+    // a bad write, and phase 2's template creates must still apply under it.
+    // Validation needs its own draft, so it activates right after the
+    // bindings and before phase 2.
     const price = ns + 'field.item_price_cad';
     const ruleMessage = 'Enter a price of at least $10.';
     const validation = literalValidationDraft(
@@ -1031,9 +1033,9 @@ export async function exerciseTemplateLibrary(
     );
     await exercisePrecedingReader({
       ...reader!,
-      declare: () =>
-        activate({ kind: 'changeSet', patches: [...bindings, validation] }),
+      declare: () => activate({ kind: 'changeSet', patches: bindings }),
     });
+    await activate(validation);
     second[0]!.open();
     await Promise.all(runs);
     await assert.rejects(
