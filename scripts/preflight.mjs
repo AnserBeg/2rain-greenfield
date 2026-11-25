@@ -14,6 +14,8 @@
  * reds are absent, so the hour-long run is not spent on one of them.
  */
 import { spawn, spawnSync } from 'node:child_process';
+import console from 'node:console';
+import process from 'node:process';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -228,6 +230,20 @@ export function failedTestNames(output) {
   );
 }
 
+/** The failing part of a step's output: each `not ok` block for test runs, else the last 60 lines. */
+export function excerpt(output, tests) {
+  const lines = output.split('\n');
+  const last = lines.slice(-60).join('\n');
+  if (!tests) return last;
+  const blocks = [];
+  lines.forEach((line, index) => {
+    if (/^\s*not ok \d+ - /u.test(line)) {
+      blocks.push(lines.slice(index, index + 18).join('\n'));
+    }
+  });
+  return blocks.length > 0 ? blocks.join('\n...\n') : last;
+}
+
 async function main() {
   const started = Date.now();
   const changed = changedFiles();
@@ -260,7 +276,7 @@ async function main() {
       continue;
     }
     failed += 1;
-    const tail = result.output.split('\n').slice(-60).join('\n');
+    const tail = excerpt(result.output, step.namedFailures === true);
     const names = step.namedFailures ? failedTestNames(result.output) : [];
     console.log(`\n=== PREFLIGHT FAILED: ${step.id} - ${step.title}`);
     if (names.length > 0) {

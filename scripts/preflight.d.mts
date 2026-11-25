@@ -20,3 +20,4 @@ export function steps(changed: {
   files: string[];
   all: string[];
 }): PreflightStep[];
+export function excerpt(output: string, tests: boolean): string;
