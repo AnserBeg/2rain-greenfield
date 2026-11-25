@@ -90,6 +90,7 @@ const suiteDefinitions = [
       'test/compiler/publish-path-breadth-envelope.test.ts',
       'test/compiler/relation-target-projection.test.ts',
       'test/compiler/report-company-access.test.ts',
+      'test/compiler/reversibility-census.test.ts',
     ],
     script: 'test:compiler',
   },

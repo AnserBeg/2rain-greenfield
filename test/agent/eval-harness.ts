@@ -18,6 +18,7 @@
  * and, per task, an append-only JSONL run record (one line per model call or
  * tool call, appended in call order).
  */
+import { firstPartyImmediateEdits } from '../../packages/domain/src/app/immediate-edits.js';
 import { appendFile, mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -275,6 +276,7 @@ async function main(): Promise<void> {
             effort: route?.effort ?? args.effort,
           });
           const session = new OperationsAgentSession({
+            immediateEdits: firstPartyImmediateEdits(),
             // The panel's act-then-undo (a host option since the end review X6).
             autoApproveReversible: true,
             runtime: world.runtime,

@@ -1,3 +1,4 @@
+import { firstPartyImmediateEdits } from '../../packages/domain/src/app/immediate-edits.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
@@ -134,6 +135,7 @@ test(
             message,
           });
           const agent = new OperationsAgentSession({
+            immediateEdits: firstPartyImmediateEdits(),
             runtime: app.runtime,
             companyId: COMPANY,
             personHeaders: { cookie: 'northstar-demo-actor=manager' },
@@ -565,6 +567,7 @@ test(
                   ).rows[0].count,
                 );
               const assistant = new OperationsAgentSession({
+                immediateEdits: firstPartyImmediateEdits(),
                 runtime: app.runtime,
                 companyId: COMPANY,
                 personHeaders: { cookie: 'northstar-demo-actor=buyer' },

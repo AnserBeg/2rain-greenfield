@@ -960,3 +960,43 @@ function waitForProcessMarker(
     });
   });
 }
+
+/**
+ * AI-UNDO-1: the assistant's act-or-ask policy names no record type, field,
+ * namespace or state suffix. It reads the owning capability's declaration
+ * (and, later, the release's reversibility declaration) instead.
+ */
+const RISK_NAME_PATTERNS: readonly RegExp[] = [
+  /northstar\.[a-z]+:/u,
+  /:(?:field|entity|operation|option|state)\./u,
+  /_(?:state|status|draft|lifecycle)\b/u,
+  /parentEditApprovals/u,
+];
+
+function riskNameFindings(source: string): string[] {
+  const code = source
+    .replace(/\/\*[\s\S]*?\*\//gu, '')
+    .replace(/(^|[^:])\/\/.*$/gmu, '$1');
+  return RISK_NAME_PATTERNS.filter((pattern) => pattern.test(code)).map(
+    (pattern) => pattern.source,
+  );
+}
+
+test('AI-UNDO-1: the assistant risk policy and its session check name no record type, field or state', () => {
+  const risk = readFileSync('packages/operations-agent/src/risk.ts', 'utf8');
+  const session = readFileSync(
+    'packages/operations-agent/src/session.ts',
+    'utf8',
+  );
+  const start = session.indexOf('function writeRisk(');
+  assert.ok(start > 0, 'writeRisk is where the session judges a write');
+  const end = session.indexOf('\n}\n', start);
+  assert.deepEqual(riskNameFindings(risk), []);
+  assert.deepEqual(riskNameFindings(session.slice(start, end)), []);
+  assert.doesNotMatch(session, /parentEditApprovals/u);
+  // The scan sees a planted first-party name.
+  assert.deepEqual(
+    riskNameFindings("const hold = 'northstar.app:field.party_credit_hold';"),
+    [RISK_NAME_PATTERNS[0]!.source, RISK_NAME_PATTERNS[1]!.source],
+  );
+});

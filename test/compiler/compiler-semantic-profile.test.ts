@@ -14,6 +14,7 @@ import {
   ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
   COMPILER_SEMANTIC_PROFILE_V1_VERSION,
   COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+  COMPILER_SEMANTIC_PROFILE_V3_VERSION,
   COMPILER_SEMANTIC_PROFILE_VERSION,
   DEFAULT_COMPILER_LIMITS,
   DEFAULT_COMPILER_PROFILE,
@@ -78,13 +79,15 @@ test('cutting compiler-semantic profile v1 leaves v0 output byte-identical', () 
   // constant moved the default profile from v1 to v2 and would have moved every
   // recorded release root -- a loud, unmissable red.
   //
-  // Adoption consumed that. Measured at this commit: compiler-semantic readable
-  // is [v0, v1, v2] with v2 adopted, and language readable is
-  // [v0-experimental, v1..v5] with v5 adopted. BOTH axes now have adopted ==
-  // last-readable, so `.at(-1)` is behaviourally indistinguishable from the
-  // adopted constant EVERYWHERE, and the `adoption-selector-seam` row's owed
-  // red -- the `.at(-1)!` mutation -- currently cannot be made to fire against
-  // production at all.
+  // Adoption consumed that, at the time: compiler-semantic readable was
+  // [v0, v1, v2] with v2 adopted, so `.at(-1)` matched the adopted constant.
+  //
+  // AI-UNDO-1 RE-ARMED IT. It cut v3 without adopting it, so the
+  // compiler-semantic axis is again [v0, v1, v2, v3] with v2 adopted.
+  // Substituting `.at(-1)` for the adopted constant would now compile every
+  // default release under v3: the agent-discovery chunk gains the
+  // reversibility key and check:app-release goes red. The language axis
+  // ([v0-experimental, v1..v5], v5 adopted) is still adopted == last.
   //
   // The separate selector proof below still carries EXACTLY the weight its own
   // comment claims, no more: `selectAdoptedProfileVersion` is genuinely proven
@@ -93,8 +96,8 @@ test('cutting compiler-semantic profile v1 leaves v0 output byte-identical', () 
   // did, is that production is BUILT by that function rather than by an inlined
   // rule that happens to agree -- "the default profile is the selector applied
   // to the live axes" is an equality between two expressions that cannot
-  // disagree while adoption is last. It arms the moment either axis cuts
-  // without adopting, and until then it is structural.
+  // disagree while adoption is last. It armed when v3 was cut without being
+  // adopted (AI-UNDO-1).
   //
   // This is `adoption-selector-seam`'s subject, not this packet's, and this
   // packet did not repair it. It is recorded here because a row saying "gates
@@ -117,6 +120,8 @@ test('cutting compiler-semantic profile v1 leaves v0 output byte-identical', () 
       COMPILER_SEMANTIC_PROFILE_VERSION,
       COMPILER_SEMANTIC_PROFILE_V1_VERSION,
       COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+      // Cut, not adopted, by AI-UNDO-1 (the reversibility key).
+      COMPILER_SEMANTIC_PROFILE_V3_VERSION,
     ],
   );
   assert.ok(

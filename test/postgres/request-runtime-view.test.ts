@@ -25,6 +25,8 @@ import {
   REPORT_SOURCE_READER,
 } from '../../packages/canonical-model/src/constants.js';
 import { BOARD_READER } from '../../packages/canonical-model/src/board.js';
+import { REVERSIBILITY_AGENT_READER } from '../../packages/canonical-model/src/reversibility.js';
+import { compiledAppViewV3 } from '../agent/compiled-view.js';
 import { startComposedApplication } from '../../apps/api/src/composition-root.js';
 import { STOCK_COUNT_PRECEDING_READER } from '../helpers/application-before-stock-count-workflow.js';
 import {
@@ -273,6 +275,166 @@ test(
           }
         } finally {
           await currentApp.close();
+        }
+      },
+    );
+  },
+);
+
+// AI-UNDO-1: the main this slice merged (d8aad66b3, after ff43eb02e). Its
+// serving binary reads agent discovery up to 4.
+const AI_UNDO_PRECEDING_READER = 'd8aad66b3e6ee6231b0580f2702c26d116f5a68c';
+
+test(
+  'AI-UNDO-1: the archived pre-merge reader serves its own release and refuses a v3 reversibility release by agent-discovery floor 5',
+  { timeout: 900_000 },
+  async () => {
+    const releasePath = 'apps/web/release/app.compiled.json';
+    const old = JSON.parse(
+      (
+        await execFileAsync(
+          'git',
+          ['show', `${AI_UNDO_PRECEDING_READER}:${releasePath}`],
+          { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+        )
+      ).stdout,
+    );
+    // The checked-in head compiled under the cut, unadopted v3 profile: the
+    // release that adopting v3 will ship. The adopted head itself is
+    // unchanged, so main's reader keeps serving it.
+    const shipped = compiledAppViewV3().envelope as unknown as {
+      application: {
+        releaseRoot: string;
+        normalizedDefinitionBytesBase64: string;
+        artifacts: { contentHash: string; canonicalBytesBase64: string }[];
+        releaseManifest: {
+          projections: {
+            familyId: string;
+            requiredRuntimeCapability: { minimumVersion: number };
+          }[];
+        };
+      };
+    };
+    const head = shipped.application;
+    assert.equal(
+      head.releaseManifest.projections.find(
+        (projection) =>
+          projection.familyId === PROJECTION_FAMILY_IDS.agentDiscovery,
+      )?.requiredRuntimeCapability.minimumVersion,
+      REVERSIBILITY_AGENT_READER,
+    );
+    // ADR-0066: a re-baseline leaves no transition from the predecessor, so
+    // the predecessor and the new head are installed for separate tenants.
+    await withEphemeralPostgres(
+      'reversibility-reader',
+      async ({ connection, pool }) => {
+        const databaseUrl = `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`;
+        const priorApp = await startComposedApplication({
+          compiledApplication: old,
+          databaseUrl,
+          port: 0,
+          tenantSlug: 'reversibility-prior',
+        });
+        try {
+          const currentApp = await startComposedApplication({
+            compiledApplication: shipped,
+            databaseUrl,
+            port: 0,
+            tenantSlug: 'reversibility-current',
+          });
+          try {
+            // The new head's rows are persisted byte for byte.
+            const [row] = (
+              await pool.query<{
+                desired_state: Buffer;
+                artifacts: Record<string, string>;
+              }>(
+                `SELECT r.desired_state, (
+          SELECT jsonb_object_agg(b.content_hash, encode(b.canonical_bytes, 'base64'))
+            FROM platform.release_artifact_blobs b
+           WHERE b.content_hash = t.content_hash OR EXISTS (
+             SELECT FROM platform.tenant_release_artifact_links l
+              WHERE l.tenant_id = t.tenant_id AND l.environment_id = t.environment_id
+                AND l.release_id = t.release_id AND l.content_hash = b.content_hash
+                AND l.artifact_kind = b.artifact_kind)
+        ) AS artifacts
+          FROM platform.tenant_releases t
+          JOIN platform.app_package_revisions r
+            ON r.tenant_id = t.tenant_id AND r.revision_id = t.app_package_revision_id
+         WHERE t.tenant_id = $1 AND t.environment_id = $2 AND t.content_hash = $3`,
+                [
+                  currentApp.runtime.identity.tenantId,
+                  currentApp.runtime.identity.environmentId,
+                  head.releaseRoot,
+                ],
+              )
+            ).rows;
+            assert.ok(row, 'the new head is persisted');
+            assert.deepEqual(
+              row.desired_state,
+              Buffer.from(head.normalizedDefinitionBytesBase64, 'base64'),
+            );
+            assert.deepEqual(
+              Object.fromEntries(
+                Object.entries(row.artifacts).map(([hash, bytes]) => [
+                  hash,
+                  Buffer.from(bytes, 'base64'),
+                ]),
+              ),
+              Object.fromEntries(
+                head.artifacts.map((artifact) => [
+                  artifact.contentHash,
+                  Buffer.from(artifact.canonicalBytesBase64, 'base64'),
+                ]),
+              ),
+            );
+            const item = '71000000-0000-4000-8000-000000000011';
+            const request = {
+              databaseUrl,
+              queryId: 'northstar.app:query.item_get',
+              args: { includeArchived: false, recordId: item },
+            };
+            await withArchivedCustomizationRuntime(
+              AI_UNDO_PRECEDING_READER,
+              async (run) => {
+                const served = (await run(archivedStockCountQuery, {
+                  ...request,
+                  identity: priorApp.runtime.identity,
+                })) as {
+                  outcome: string;
+                  root?: string;
+                  records?: { recordId: string }[];
+                };
+                assert.equal(served.outcome, 'queried', JSON.stringify(served));
+                assert.equal(
+                  served.root,
+                  (old.application ?? old.applications.at(-1)).releaseRoot,
+                );
+                assert.deepEqual(
+                  served.records?.map((record) => record.recordId),
+                  [item],
+                );
+                const refused = (await run(archivedStockCountQuery, {
+                  ...request,
+                  identity: currentApp.runtime.identity,
+                })) as { outcome: string; code?: string; message?: string };
+                assert.equal(refused.outcome, 'refused');
+                assert.equal(
+                  refused.code,
+                  'UNSUPPORTED_RUNTIME_CAPABILITY',
+                  JSON.stringify(refused),
+                );
+                assert.match(
+                  refused.message ?? '',
+                  /northstar\.runtime:capability\.agent-discovery requires version 5 and this runtime supports 4/u,
+                );
+              },
+            );
+          } finally {
+            await currentApp.close();
+          }
+        } finally {
+          await priorApp.close();
         }
       },
     );
