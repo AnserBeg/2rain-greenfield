@@ -92,7 +92,10 @@ export function assertWorkflowTriggers(
   storagePayload: unknown,
   operationsPayload: unknown,
 ): boolean {
-  const admitted = workflowTriggerRecordTypes(storagePayload, operationsPayload);
+  const admitted = workflowTriggerRecordTypes(
+    storagePayload,
+    operationsPayload,
+  );
   let general = false;
   for (const { trigger } of workflows) {
     if (typeof trigger === 'string') continue;
