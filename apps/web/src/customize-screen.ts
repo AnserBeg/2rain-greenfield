@@ -2100,4 +2100,3 @@ function mapSubmission(
     s.lifecycle === 'retired',
   );
 }
-

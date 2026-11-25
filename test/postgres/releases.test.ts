@@ -2119,7 +2119,7 @@ test('release admission refuses an analysed report or a named measure whose rele
   );
   assert.ok(applied.status === 'applied');
   const target = reportTargets(
-    applied.authored as Parameters<typeof reportTargets>[0],
+    applied.authored as unknown as Parameters<typeof reportTargets>[0],
   ).find((r) => r.source.queryId.endsWith(':query.custom_inspection_list'))!;
   const aging = draftReport(
     target,
