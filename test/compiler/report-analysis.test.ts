@@ -857,6 +857,7 @@ test('group ceiling at authoring only: a saved report near the cap still compile
     label: 'Visit',
     companyOwnership: 'entityOwned',
     fields: [
+      { label: 'Name', type: 'text' },
       { label: 'Due', type: 'date' },
       {
         label: 'Kind',
