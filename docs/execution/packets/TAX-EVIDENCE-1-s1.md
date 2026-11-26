@@ -2,7 +2,7 @@
 
 Status: built on packet/TAX-EVIDENCE-1-s1 (base main 8014e43f1). Tier: **Critical** (money, migration, grant SQL; rule 18). Stops: none.
 Design: CALENDAR-TAX design note part B s1 plus the Fable design read's binding amendments T1-T7. Migration `0071_tax_catalog.sql` is provisional; the integrator renumbers.
-CI tier: pending full
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/45841982614
 
 ## Claims
 1. Codes are tenant-shared. A rate change is a new version whose `effective_from` is strictly after the latest (setter), one per code per day (UNIQUE), never updated or deleted (trigger) (T4). No future-only rule.
@@ -49,7 +49,7 @@ CI tier: pending full
 - Privileges: no-table-grant, forced-rls, function-execute.
 - Review and confirm: release-fence, review-single-use, review-digest, review-principal, review-size, confirm-live-grant, code-write-grant, registration-write-grant.
 - Authority: shared-code-tenant-wide (T2), company-scope (two companies in one tenant; 4 kills), registration-company-stored, company-live-review, company-live-confirm, writer-read-committed (2 kills), registration-ends-once.
-- Evidence: pending.
+- Evidence: all 38 killed as declared and restored green at 145af7926 (https://github.com/AnserBeg/2rain-greenfield/actions/runs/45834386448).
 
 ## Rules 10, 12
 No Customize member in s1; s4 adds `declareTaxableAmount`.
