@@ -53,6 +53,10 @@ const tenantIndependentV1TableAuthorities: ReadonlyMap<
   ['platform.ledger_currencies', 'shared-immutable-catalog'],
   ['platform.release_activation_write_guard', 'kernel-integrity-witness'],
   ['platform.release_artifact_blobs', 'shared-immutable-content'],
+  ['platform.tax_jurisdictions', 'shared-immutable-catalog'],
+  ['platform.tax_starter_codes', 'shared-immutable-catalog'],
+  ['platform.tax_starter_components', 'shared-immutable-catalog'],
+  ['platform.tax_starter_rates', 'shared-immutable-catalog'],
   ['platform.trust_immutable_write_guard', 'kernel-integrity-witness'],
 ]);
 

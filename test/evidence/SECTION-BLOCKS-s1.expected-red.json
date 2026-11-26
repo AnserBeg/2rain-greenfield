@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "packet": "SECTION-BLOCKS-s1",
+  "entries": [
+    {
+      "name": "section-blocks-s1-golden-catches-a-page-change",
+      "claim": "A change to what the purchase order, sales order or shipment page renders (here the shipment page's packed-lines heading) is caught by the golden-render parity test.",
+      "file": "packages/domain/src/sales/workspace.ts",
+      "original": "label: 'Packed lines',",
+      "replacement": "label: 'Packed line',",
+      "test": {
+        "files": ["test/integration/surface-data-binding.test.ts"],
+        "namePattern": "SECTION-BLOCKS-s1"
+      },
+      "kills": [
+        {
+          "file": "test/integration/surface-data-binding.test.ts",
+          "name": "SECTION-BLOCKS-s1: the purchase order, sales order and shipment pages and their command responses render byte-identically to the recorded goldens",
+          "expected": "a change to these pages or to a command response from them must be deliberate"
+        }
+      ]
+    },
+    {
+      "name": "section-blocks-s1-golden-catches-a-link-panel-change",
+      "claim": "A change to the receipt page's Receiving actions panel, which the application extension still serves, is caught by the same golden render.",
+      "file": "apps/web/src/receiving-section.ts",
+      "original": "<h2>Receiving actions</h2>",
+      "replacement": "<h2>Receiving action</h2>",
+      "test": {
+        "files": ["test/integration/surface-data-binding.test.ts"],
+        "namePattern": "SECTION-BLOCKS-s1"
+      },
+      "kills": [
+        {
+          "file": "test/integration/surface-data-binding.test.ts",
+          "name": "SECTION-BLOCKS-s1: the purchase order, sales order and shipment pages and their command responses render byte-identically to the recorded goldens",
+          "expected": "a change to these pages or to a command response from them must be deliberate"
+        }
+      ]
+    }
+  ]
+}

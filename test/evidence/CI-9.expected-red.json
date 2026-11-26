@@ -1,0 +1,150 @@
+{
+  "version": 1,
+  "packet": "CI-9",
+  "entries": [
+    {
+      "name": "ci9-shard-budget-never-fires",
+      "claim": "A PostgreSQL shard whose recorded per-file estimates sum past the budget is refused by name.",
+      "file": "test/helpers/postgres-shard-budget.ts",
+      "original": ".filter(({ seconds }) => seconds > estimates.budgetSeconds)",
+      "replacement": ".filter(({ seconds }) => seconds > estimates.budgetSeconds + 1000000)",
+      "test": {
+        "files": ["test/architecture/test-reachability.test.ts"],
+        "namePattern": "a shard whose recorded estimates sum past the budget is refused by name"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/test-reachability.test.ts",
+          "name": "a shard whose recorded estimates sum past the budget is refused by name",
+          "expected": "only the overloaded shard is refused"
+        }
+      ]
+    },
+    {
+      "name": "ci9-shard-budget-unrecorded-file-free",
+      "claim": "A test/postgres file with no recorded estimate counts the stated default, never zero, so a new file cannot hide in a full shard.",
+      "file": "test/helpers/postgres-shard-budget.ts",
+      "original": "estimates.files[file] ?? estimates.unrecordedFileSeconds",
+      "replacement": "estimates.files[file] ?? 0",
+      "test": {
+        "files": ["test/architecture/test-reachability.test.ts"],
+        "namePattern": "a shard whose recorded estimates sum past the budget is refused by name"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/test-reachability.test.ts",
+          "name": "a shard whose recorded estimates sum past the budget is refused by name",
+          "expected": "0 !== 90"
+        }
+      ]
+    },
+    {
+      "name": "ci9-shard-budget-real-layout",
+      "claim": "The checked-in shard layout is measured against the recorded budget, so a layout over it fails.",
+      "file": "test/helpers/postgres-shard-estimates.json",
+      "original": "\"budgetSeconds\": 1100,",
+      "replacement": "\"budgetSeconds\": 900,",
+      "test": {
+        "files": ["test/architecture/test-reachability.test.ts"],
+        "namePattern": "no general PostgreSQL shard is estimated over its time budget"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/test-reachability.test.ts",
+          "name": "no general PostgreSQL shard is estimated over its time budget",
+          "expected": "over the 900 s budget"
+        }
+      ]
+    },
+    {
+      "name": "ci9-snapshots-no-regeneration",
+      "claim": "The snapshots-mode job regenerates db/schema.snapshot.json with its documented command, not a stand-in.",
+      "file": ".github/workflows/evidence.yml",
+      "original": "run: node --import tsx test/helpers/regenerate-schema-snapshot.ts",
+      "replacement": "run: 'true'",
+      "test": {
+        "files": ["test/architecture/evidence-on-demand.test.ts"],
+        "namePattern": "the evidence workflow is label-gated, read-only and pinned"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/evidence-on-demand.test.ts",
+          "name": "the evidence workflow is label-gated, read-only and pinned",
+          "expected": "the schema snapshot is regenerated with its documented command"
+        }
+      ]
+    },
+    {
+      "name": "ci9-snapshots-upload-one-file",
+      "claim": "The snapshots-mode job uploads both regenerated files.",
+      "file": ".github/workflows/evidence.yml",
+      "original": "            db/schema.snapshot.json\n            test/postgres/fresh-tenant-full-replay-schema.snapshot.json\n",
+      "replacement": "            db/schema.snapshot.json\n",
+      "test": {
+        "files": ["test/architecture/evidence-on-demand.test.ts"],
+        "namePattern": "the evidence workflow is label-gated, read-only and pinned"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/evidence-on-demand.test.ts",
+          "name": "the evidence workflow is label-gated, read-only and pinned",
+          "expected": "both regenerated files are uploaded"
+        }
+      ]
+    },
+    {
+      "name": "ci9-snapshots-runs-without-mode",
+      "claim": "The snapshots-mode job runs only when the dispatch asks for snapshots.",
+      "file": ".github/workflows/evidence.yml",
+      "original": "    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'snapshots'\n",
+      "replacement": "    if: github.event_name == 'workflow_dispatch' && inputs.mode != 'x'\n",
+      "test": {
+        "files": ["test/architecture/evidence-on-demand.test.ts"],
+        "namePattern": "the evidence workflow is label-gated, read-only and pinned"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/evidence-on-demand.test.ts",
+          "name": "the evidence workflow is label-gated, read-only and pinned",
+          "expected": "the snapshot job runs only for a dispatch in snapshots mode"
+        }
+      ]
+    },
+    {
+      "name": "ci9-snapshots-pushes",
+      "claim": "The snapshots-mode job never pushes or commits.",
+      "file": ".github/workflows/evidence.yml",
+      "original": "echo \"- $line\" >>\"$GITHUB_STEP_SUMMARY\"\n",
+      "replacement": "echo \"- $line\" >>\"$GITHUB_STEP_SUMMARY\"; git push origin HEAD\n",
+      "test": {
+        "files": ["test/architecture/evidence-on-demand.test.ts"],
+        "namePattern": "the evidence workflow is label-gated, read-only and pinned"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/evidence-on-demand.test.ts",
+          "name": "the evidence workflow is label-gated, read-only and pinned",
+          "expected": "the snapshot job must never push, commit or publish"
+        }
+      ]
+    },
+    {
+      "name": "ci9-shard-estimate-table-drift",
+      "claim": "The estimates table names exactly the files the shards run, so a new or renamed postgres test cannot hide behind the default.",
+      "file": "test/helpers/postgres-shard-estimates.json",
+      "original": "\"test/postgres/address-authority.test.ts\": 145,",
+      "replacement": "\"test/postgres/address-authority-gone.test.ts\": 145,",
+      "test": {
+        "files": ["test/architecture/test-reachability.test.ts"],
+        "namePattern": "no general PostgreSQL shard is estimated over its time budget"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/test-reachability.test.ts",
+          "name": "no general PostgreSQL shard is estimated over its time budget",
+          "expected": "has no recorded estimate in test/helpers/postgres-shard-estimates.json"
+        }
+      ]
+    }
+  ]
+}

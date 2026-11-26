@@ -1,12 +1,18 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 
 import {
   checkModulePressLaw,
   formatModulePressLaw,
+  isNameLawRule,
+  lowerNameLawBaseline,
+  type ModulePressLawResult,
   type ModulePressLawViolation,
+  type NameLawBaseline,
 } from '../../packages/dev-tooling/src/module-press-law.js';
 import {
   createArchitectureFixture,
@@ -135,30 +141,6 @@ const routedPressLawDebt: readonly RoutedPressLawDebt[] = [
     'purchasing',
     'purchase_order_amendment_get',
     "'purchase_order_amendment_get',",
-  ),
-  routedIdentityDebt(
-    'apps/web/src/receiving-section.ts',
-    'purchasing',
-    'goods_receipt_get',
-    "['goods_receipt_form', 'goods_receipt_get'],",
-  ),
-  routedIdentityDebt(
-    'apps/web/src/receiving-section.ts',
-    'purchasing',
-    'goods_receipt_list',
-    "['goods_receipt_list', 'goods_receipt_list'],",
-  ),
-  routedIdentityDebt(
-    'apps/web/src/receiving-section.ts',
-    'purchasing',
-    'goods_receipt_list',
-    "['goods_receipt_list', 'goods_receipt_list'],",
-  ),
-  routedIdentityDebt(
-    'apps/web/src/receiving-section.ts',
-    'purchasing',
-    'goods_receipt_list',
-    "return `<section class=\"panel data-panel\" data-receiving-progress><h2>Receiving</h2><p><a href=\"${link('goods_receipt_form')}\">Create goods receipt</a> · <a href=\"${link('goods_receipt_list')}\">View receipts and corrections</a></p><p>Receive against a released order. Close only when every active line has zero remaining. Reopen before receiving, correcting or amending a closed order.</p><table><thead><tr><th>Order line</th><th>Ordered</th><th>Received</th><th>Remaining</th></tr></thead><tbody>${section.lines.map((line) => `<tr data-order-line=\"${escapeHtml(line.recordId)}\"><td><a href=\"${link('purchase_order_line_detail', line.recordId)}\">${escapeHtml(line.item)}</a></td><td>${escapeHtml(line.ordered)}</td><td>${escapeHtml(line.received)}</td><td>${escapeHtml(line.remaining)}</td></tr>`).join('')}</tbody></table>${section.lines.length === 0 ? '<p>No active order lines.</p>' : ''}<p>Corrections append compensating movements; they never edit the original receipt. If a correction would make historical stock negative, correct the erroneous outbound movement first, or use the stock-count process if the discrepancy is physical.</p></section>`;",
   ),
   {
     file: 'packages/compiler/src/conformance.ts',
@@ -1690,5 +1672,745 @@ test('consolidated guard detects role-first module glue filenames', () => {
     ]);
   } finally {
     removeArchitectureFixture(root);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GUARD-WIDEN: the first-party name law. Tests whose names start with
+// "GUARD-WIDEN" are the packet's rule 8 set: one red per layer plus the real
+// tree. test/evidence/GUARD-WIDEN.expected-red.json runs exactly that set and
+// requires each layer's mutation to kill its own red and nothing else in it.
+// ---------------------------------------------------------------------------
+
+const firstPartyRelease = {
+  capabilityRequirements: [{ capabilityId: 'acme.app:capability.fulfillment' }],
+  entities: [
+    { entityId: 'acme.app:entity.sales_order' },
+    { entityId: 'acme.app:entity.item' },
+    { entityId: 'acme.app:entity.legal_entity' },
+  ],
+  fields: [
+    { fieldId: 'acme.app:field.sales_order_number' },
+    { fieldId: 'acme.app:field.legal_entity_name' },
+  ],
+  modules: [{ moduleId: 'acme.app:module.sales' }],
+  operations: [{ operationId: 'acme.app:operation.sales_order_close' }],
+  package: { namespace: 'acme.app' },
+  queries: [{ queryId: 'acme.app:query.sales_order_list' }],
+};
+
+const nameLawPolicy = {
+  excluded: [],
+  externalNames: [],
+  moduleWords: ['receiving'],
+  ordinaryWords: ['item', 'sales'],
+  platformOwned: [{ name: 'legal_entity', reason: 'platform dimension' }],
+  requiredNames: ['sales_order'],
+  scope: ['packages/postgres-provider/src', 'db/migrations'],
+  version: 1,
+  vocabularySources: ['apps/web/release/app.authored.json'],
+};
+
+const enginesManifest = {
+  engines: [
+    {
+      adr: null,
+      businesses: ['rental', 'clinic', 'hotel'],
+      files: ['packages/postgres-provider/src/booking-engine.ts'],
+      id: 'booking',
+      names: ['booking'],
+      nameScope: 'exclusive',
+    },
+    {
+      adr: null,
+      businesses: ['rental', 'storage', 'subscription'],
+      files: ['packages/postgres-provider/src/billing-engine.ts'],
+      id: 'billing',
+      names: ['billing'],
+      nameScope: 'exclusive',
+    },
+    {
+      adr: null,
+      businesses: ['rental', 'distribution', 'clinic'],
+      files: [],
+      id: 'workflow',
+      names: ['workflow'],
+      nameScope: 'engines-only',
+    },
+  ],
+  version: 1,
+};
+
+function nameLawFixture(
+  files: Record<string, string>,
+  baselineFiles: NameLawBaseline['files'] = {},
+): string {
+  return createArchitectureFixture({
+    'apps/web/release/app.authored.json': JSON.stringify(firstPartyRelease),
+    'db/migrations/0000_fixture.sql': 'SELECT 1;\n',
+    'packages/postgres-provider/src/billing-engine.ts':
+      'export const engine = 1;\n',
+    'packages/postgres-provider/src/booking-engine.ts':
+      'export const engine = 1;\n',
+    'test/architecture/engines.manifest.json': JSON.stringify(enginesManifest),
+    'test/architecture/first-party-names.baseline.json': JSON.stringify({
+      files: baselineFiles,
+      measuredOn: 'fixture',
+      version: 1,
+    }),
+    'test/architecture/first-party-names.policy.json':
+      JSON.stringify(nameLawPolicy),
+    ...files,
+  });
+}
+
+function nameLawViolations(
+  result: ModulePressLawResult,
+): ModulePressLawViolation[] {
+  return result.violations.filter((violation) =>
+    isNameLawRule(violation.ruleId),
+  );
+}
+
+function withNameLawFixture<T>(
+  files: Record<string, string>,
+  observe: (result: ModulePressLawResult) => T,
+  baselineFiles?: NameLawBaseline['files'],
+): T {
+  const root = nameLawFixture(files, baselineFiles);
+  try {
+    return observe(checkModulePressLaw(root));
+  } finally {
+    removeArchitectureFixture(root);
+  }
+}
+
+const genericFile = 'packages/postgres-provider/src/generic.ts';
+
+function nameLawRow(
+  names: Record<string, number>,
+): NameLawBaseline['files'][string] {
+  return { cluster: 'C8', expires: '2099-01-01', names, owner: 'FIXTURE' };
+}
+
+test('GUARD-WIDEN: the real tree reads the release vocabulary and holds its baseline', () => {
+  const result = checkModulePressLaw(process.cwd());
+  assert.equal(result.nameLaw.active, true, 'the name law did not run');
+  for (const name of [
+    'purchase_order',
+    'sales_order',
+    'shipment',
+    'stock_count',
+    'customer_invoice',
+    'vendor_bill',
+  ]) {
+    assert.ok(
+      result.nameLaw.vocabulary.includes(name),
+      `the release vocabulary lacks ${name}`,
+    );
+  }
+  assert.ok(result.nameLaw.filesRead > 0, 'the name law read no files');
+  assert.deepEqual(
+    nameLawViolations(result).map(
+      (violation) =>
+        `${violation.file}:${String(violation.line)} [${violation.ruleId}] ${violation.message}`,
+    ),
+    [],
+    'the real tree breaks the first-party name baseline; convert the code, never raise the baseline',
+  );
+});
+
+test('GUARD-WIDEN red: a new first-party name in a generic file', () => {
+  withNameLawFixture(
+    { [genericFile]: "export const id = 'sales_order';\n" },
+    (result) => {
+      assert.deepEqual(
+        nameLawViolations(result),
+        [
+          {
+            file: genericFile,
+            line: 1,
+            message:
+              'generic code names first-party entity sales_order (name:sales_order x1, not in the baseline)',
+            moduleDirectory: null,
+            ruleId: 'PRESS011_FIRST_PARTY_NAME',
+          },
+        ],
+        'a new first-party name in a generic file must be refused by PRESS011',
+      );
+    },
+  );
+});
+
+test('GUARD-WIDEN red: a new first-party field name in a generic file', () => {
+  withNameLawFixture(
+    { [genericFile]: "export const column = 'sales_order_number';\n" },
+    (result) => {
+      assert.deepEqual(
+        nameLawViolations(result),
+        [
+          {
+            file: genericFile,
+            line: 1,
+            message:
+              'generic code names first-party field sales_order_number (field:sales_order_number x1, not in the baseline)',
+            moduleDirectory: null,
+            ruleId: 'PRESS012_FIRST_PARTY_FIELD',
+          },
+        ],
+        'a new first-party field name in a generic file must be refused by PRESS012',
+      );
+    },
+  );
+});
+
+test('GUARD-WIDEN red: a new import from packages/domain in a generic file', () => {
+  withNameLawFixture(
+    {
+      [genericFile]:
+        "import { terms } from '../../domain/src/widget/terms.js';\nexport const value = terms;\n",
+    },
+    (result) => {
+      assert.deepEqual(
+        nameLawViolations(result),
+        [
+          {
+            file: genericFile,
+            line: 1,
+            message:
+              'generic code imports terms from packages/domain/src/widget/terms (import:packages/domain/src/widget/terms#terms x1, not in the baseline)',
+            moduleDirectory: null,
+            ruleId: 'PRESS013_DOMAIN_IMPORT',
+          },
+        ],
+        'a new import from packages/domain must be refused by PRESS013',
+      );
+    },
+  );
+});
+
+test('GUARD-WIDEN red: one engine naming another', () => {
+  withNameLawFixture(
+    {
+      'packages/postgres-provider/src/billing-engine.ts':
+        "export const source = 'booking';\n",
+    },
+    (result) => {
+      assert.deepEqual(
+        nameLawViolations(result),
+        [
+          {
+            file: 'packages/postgres-provider/src/billing-engine.ts',
+            line: 1,
+            message:
+              'engine billing names engine booking (engine:booking x1, not in the baseline)',
+            moduleDirectory: null,
+            ruleId: 'PRESS014_ENGINE_NAME',
+          },
+        ],
+        'one engine naming another must be refused by PRESS014',
+      );
+    },
+  );
+});
+
+test('GUARD-WIDEN red: a count above its baseline allowance', () => {
+  withNameLawFixture(
+    {
+      [genericFile]:
+        "export const first = 'booking';\nexport const second = 'booking';\n",
+    },
+    (result) => {
+      assert.deepEqual(
+        nameLawViolations(result),
+        [
+          {
+            file: genericFile,
+            line: 1,
+            message:
+              'engine:booking rose from 1 to 2; the baseline only shrinks',
+            moduleDirectory: null,
+            ruleId: 'PRESS015_BASELINE_RISE',
+          },
+        ],
+        'a count above its baseline allowance must be refused by PRESS015',
+      );
+    },
+    { [genericFile]: nameLawRow({ 'engine:booking': 1 }) },
+  );
+});
+
+test('GUARD-WIDEN red: a new kebab-named file or directory', () => {
+  const probe =
+    'packages/postgres-provider/src/sales-order/sales-order-probe.ts';
+  withNameLawFixture({ [probe]: 'export const ok = true;\n' }, (result) => {
+    assert.deepEqual(
+      nameLawViolations(result),
+      [
+        {
+          file: probe,
+          line: 1,
+          message:
+            'generic code names first-party entity sales_order (name:sales_order x2, not in the baseline)',
+          moduleDirectory: null,
+          ruleId: 'PRESS011_FIRST_PARTY_NAME',
+        },
+      ],
+      'a kebab-named file or directory must be refused by PRESS011',
+    );
+  });
+});
+
+test('GUARD-WIDEN red: a new kebab spelling in a string', () => {
+  withNameLawFixture(
+    { [genericFile]: "export const id = 'sales-order';\n" },
+    (result) => {
+      assert.deepEqual(
+        nameLawViolations(result).map((violation) => violation.message),
+        [
+          'generic code names first-party entity sales_order (name:sales_order x1, not in the baseline)',
+        ],
+        'a kebab spelling in a string must be refused by PRESS011',
+      );
+    },
+  );
+});
+
+test('GUARD-WIDEN red: a statically concatenated first-party name', () => {
+  withNameLawFixture(
+    { [genericFile]: "export const id = 'sales' + '_order';\n" },
+    (result) => {
+      assert.deepEqual(
+        nameLawViolations(result).map((violation) => violation.message),
+        [
+          'generic code names first-party entity sales_order (name:sales_order x1, not in the baseline)',
+        ],
+        'a statically concatenated name must be refused by PRESS011',
+      );
+    },
+  );
+});
+
+test('GUARD-WIDEN red: widening a baselined domain import', () => {
+  withNameLawFixture(
+    {
+      [genericFile]:
+        "import { terms, rates } from '@north-star/domain/widget/terms';\nexport const value = [terms, rates];\n",
+    },
+    (result) => {
+      assert.deepEqual(
+        nameLawViolations(result).map((violation) => violation.message),
+        [
+          'generic code imports rates from @north-star/domain/widget/terms (import:@north-star/domain/widget/terms#rates x1, not in the baseline)',
+        ],
+        'a binding added to a baselined domain import must be refused by PRESS013',
+      );
+    },
+    {
+      [genericFile]: nameLawRow({
+        'import:@north-star/domain/widget/terms#terms': 1,
+      }),
+    },
+  );
+});
+
+test('GUARD-WIDEN red: an unclassified source root', () => {
+  withNameLawFixture(
+    { 'packages/zz-new/src/index.ts': 'export const ok = true;\n' },
+    (result) => {
+      assert.deepEqual(
+        nameLawViolations(result).map((violation) => violation.message),
+        [
+          'packages/zz-new/src is neither in the name-law scope nor excluded; classify it in the policy',
+        ],
+        'a source root in neither the scope nor the excluded list must be refused by PRESS010',
+      );
+    },
+  );
+});
+
+const appliedMigration = 'db/migrations/0071_applied.sql';
+const appliedMigrationSql = "SELECT 'acme.app:role.sales_order';\n";
+
+function frozenMigrationRow(
+  sql: string,
+  names: Record<string, number>,
+): NameLawBaseline['files'][string] {
+  return {
+    cluster: 'history',
+    expires: null,
+    names,
+    owner: 'HISTORY',
+    sha256: createHash('sha256').update(sql).digest('hex'),
+  };
+}
+
+test('GUARD-WIDEN red: an edited frozen migration', () => {
+  withNameLawFixture(
+    {
+      [appliedMigration]: appliedMigrationSql.replace('SELECT', 'SELECT 1, '),
+    },
+    (result) => {
+      assert.deepEqual(
+        nameLawViolations(result).map((violation) => [
+          violation.ruleId,
+          violation.message,
+        ]),
+        [
+          [
+            'PRESS010_NAME_LAW_INPUT',
+            `frozen migration row ${appliedMigration} no longer matches its checksum; an applied migration never changes`,
+          ],
+        ],
+        'a frozen migration row must refuse a file that is not the applied bytes',
+      );
+    },
+    {
+      [appliedMigration]: frozenMigrationRow(appliedMigrationSql, {
+        'name:sales_order': 1,
+      }),
+    },
+  );
+});
+
+test('name law observes snake, camel, Pascal, plural and endsWith spellings', () => {
+  withNameLawFixture(
+    {
+      [genericFile]: [
+        "const a = operationId.endsWith(':operation.sales_order_close');",
+        'const salesOrders = [];',
+        'class SalesOrderReader {}',
+        "const b = 'SALES_ORDER_LIST';",
+      ].join('\n'),
+    },
+    (result) => {
+      assert.deepEqual(result.nameLaw.observations, {
+        [genericFile]: {
+          'name:sales_order': 2,
+          'name:sales_order_close': 1,
+          'name:sales_order_list': 1,
+        },
+      });
+    },
+  );
+});
+
+test('name law matches an ordinary word only in ID position', () => {
+  withNameLawFixture(
+    {
+      [genericFile]: [
+        'const item = 1;',
+        "const sales = 'sales';",
+        "const entity = 'acme.app:entity.item';",
+        "const module = 'acme.sales';",
+      ].join('\n'),
+    },
+    (result) => {
+      assert.deepEqual(result.nameLaw.observations, {
+        [genericFile]: { 'name:item': 1, 'name:sales': 1 },
+      });
+    },
+  );
+});
+
+test('name law counts a file named for a module and ignores comments', () => {
+  withNameLawFixture(
+    {
+      'packages/postgres-provider/src/receiving-helper.ts': [
+        '// sales_order is only mentioned here',
+        '/* and here: sales_order_number */',
+        'export const ok = true;',
+      ].join('\n'),
+      'db/migrations/0001_x.sql': "-- sales_order\nSELECT 'ok';\n",
+    },
+    (result) => {
+      assert.deepEqual(
+        nameLawViolations(result).map((violation) => [
+          violation.file,
+          violation.line,
+          violation.ruleId,
+        ]),
+        [
+          [
+            'packages/postgres-provider/src/receiving-helper.ts',
+            1,
+            'PRESS011_FIRST_PARTY_NAME',
+          ],
+        ],
+      );
+    },
+  );
+});
+
+test('name law refuses an exclusive engine in generic code and admits an engines-only one', () => {
+  withNameLawFixture(
+    {
+      [genericFile]:
+        "export const kind = 'workflow';\nexport const charge = 'billing';\n",
+    },
+    (result) => {
+      assert.deepEqual(
+        nameLawViolations(result).map((violation) => violation.message),
+        [
+          'generic code names engine billing outside its own files (engine:billing x1, not in the baseline)',
+        ],
+      );
+    },
+  );
+});
+
+test('name law leaves platform-owned vocabulary to the platform', () => {
+  withNameLawFixture(
+    {
+      [genericFile]:
+        "export const scope = 'legal_entity';\nexport const label = 'legal_entity_name';\n",
+    },
+    (result) => {
+      assert.deepEqual(result.nameLaw.observations, {});
+    },
+  );
+});
+
+test('name law passes a fall and the lowering only ever lowers', () => {
+  const baselineFiles = {
+    [genericFile]: nameLawRow({ 'name:sales_order': 3, 'name:item': 1 }),
+  };
+  withNameLawFixture(
+    { [genericFile]: "export const id = 'sales_order';\n" },
+    (result) => {
+      assert.deepEqual(nameLawViolations(result), []);
+      assert.deepEqual(
+        result.nameLaw.slack.map((row) => [
+          row.key,
+          row.baseline,
+          row.observed,
+        ]),
+        [
+          ['name:item', 1, 0],
+          ['name:sales_order', 3, 1],
+        ],
+      );
+      const baseline = {
+        files: baselineFiles,
+        measuredOn: 'fixture',
+        version: 1 as const,
+      };
+      assert.deepEqual(
+        lowerNameLawBaseline(baseline, result.nameLaw.observations).files,
+        { [genericFile]: nameLawRow({ 'name:sales_order': 1 }) },
+      );
+      assert.throws(
+        () =>
+          lowerNameLawBaseline(baseline, {
+            [genericFile]: { 'name:sales_order': 4 },
+          }),
+        /the baseline is never raised/u,
+      );
+    },
+    baselineFiles,
+  );
+});
+
+test('name law: a frozen migration row admits its exact bytes and nothing new', () => {
+  withNameLawFixture(
+    {
+      [appliedMigration]: appliedMigrationSql,
+      'db/migrations/0072_new.sql': "SELECT 'acme.app:role.sales_order';\n",
+    },
+    (result) => {
+      assert.deepEqual(
+        nameLawViolations(result).map((violation) => [
+          violation.file,
+          violation.ruleId,
+        ]),
+        [['db/migrations/0072_new.sql', 'PRESS011_FIRST_PARTY_NAME']],
+      );
+    },
+    {
+      [appliedMigration]: frozenMigrationRow(appliedMigrationSql, {
+        'name:sales_order': 1,
+      }),
+    },
+  );
+  for (const [file, row, expected] of [
+    [
+      appliedMigration,
+      nameLawRow({ 'name:sales_order': 1 }),
+      /a migration row, and only a migration row, is owned by HISTORY/u,
+    ],
+    [
+      genericFile,
+      { ...nameLawRow({ 'name:sales_order': 1 }), owner: 'HISTORY' },
+      /a migration row, and only a migration row, is owned by HISTORY/u,
+    ],
+    [
+      appliedMigration,
+      {
+        ...frozenMigrationRow(appliedMigrationSql, { 'name:sales_order': 1 }),
+        expires: '2099-01-01',
+      },
+      /a frozen migration row has no expiry and carries the file's sha256/u,
+    ],
+  ] as const) {
+    withNameLawFixture(
+      { [appliedMigration]: appliedMigrationSql },
+      (result) => {
+        const messages = nameLawViolations(result).map(
+          (violation) => violation.message,
+        );
+        assert.equal(messages.length, 1, messages.join('\n'));
+        assert.match(messages[0] ?? '', expected);
+      },
+      { [file]: row },
+    );
+  }
+});
+
+test('name law fails closed on a missing scope root or an empty scope', () => {
+  for (const [scope, message] of [
+    [
+      [...nameLawPolicy.scope, 'packages/renamed/src'],
+      'name-law scope root packages/renamed/src does not exist',
+    ],
+    [[], 'the name-law scope is empty'],
+  ] as const) {
+    withNameLawFixture(
+      {
+        'test/architecture/first-party-names.policy.json': JSON.stringify({
+          ...nameLawPolicy,
+          scope,
+        }),
+      },
+      (result) => {
+        assert.deepEqual(
+          nameLawViolations(result).map((violation) => [
+            violation.ruleId,
+            violation.message,
+          ]),
+          [['PRESS010_NAME_LAW_INPUT', message]],
+        );
+      },
+    );
+  }
+});
+
+test('name law counts every imported binding, including backtick dynamic imports', () => {
+  withNameLawFixture(
+    {
+      [genericFile]: [
+        "import d, * as all from '../../domain/src/widget/terms.js';",
+        "export * from '../../domain/src/widget/rates.js';",
+        'const later = await import(`@north-star/domain/widget/terms`);',
+      ].join('\n'),
+    },
+    (result) => {
+      assert.deepEqual(result.nameLaw.observations, {
+        [genericFile]: {
+          'import:@north-star/domain/widget/terms#import()': 1,
+          'import:packages/domain/src/widget/rates#*': 1,
+          'import:packages/domain/src/widget/terms#*': 1,
+          'import:packages/domain/src/widget/terms#default': 1,
+        },
+      });
+    },
+  );
+});
+
+test('name law refuses a missing input or a vocabulary without its required names', () => {
+  const root = nameLawFixture({});
+  try {
+    rmSync(join(root, 'test/architecture/first-party-names.baseline.json'));
+    assert.deepEqual(
+      nameLawViolations(checkModulePressLaw(root)).map((v) => v.message),
+      [
+        'name law input test/architecture/first-party-names.baseline.json is missing',
+      ],
+    );
+  } finally {
+    removeArchitectureFixture(root);
+  }
+  withNameLawFixture(
+    {
+      'test/architecture/first-party-names.policy.json': JSON.stringify({
+        ...nameLawPolicy,
+        requiredNames: ['sales_order', 'vendor_bill'],
+      }),
+    },
+    (result) => {
+      assert.deepEqual(
+        nameLawViolations(result).map((violation) => violation.ruleId),
+        ['PRESS010_NAME_LAW_INPUT'],
+      );
+    },
+  );
+});
+
+test('name law: guard:lower-baseline refuses a rise or a moved file and writes nothing, and lowers a fall', () => {
+  const cli = join(
+    process.cwd(),
+    'packages/dev-tooling/src/lower-first-party-baseline.ts',
+  );
+  const baselinePath = 'test/architecture/first-party-names.baseline.json';
+  const run = (root: string) =>
+    spawnSync(process.execPath, ['--import', 'tsx', cli, '--root', root], {
+      encoding: 'utf8',
+    });
+
+  const rising = nameLawFixture(
+    {
+      [genericFile]:
+        "export const a = 'sales_order';\nexport const b = 'sales_order';\n",
+    },
+    { [genericFile]: nameLawRow({ 'name:sales_order': 1 }) },
+  );
+  try {
+    const before = readFileSync(join(rising, baselinePath), 'utf8');
+    const result = run(rising);
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /refused/u);
+    assert.match(result.stderr, /PRESS015_BASELINE_RISE/u);
+    assert.equal(readFileSync(join(rising, baselinePath), 'utf8'), before);
+  } finally {
+    removeArchitectureFixture(rising);
+  }
+
+  const moved = nameLawFixture(
+    {
+      'scripts/moved/generic.ts': "export const a = 'sales_order';\n",
+    },
+    { [genericFile]: nameLawRow({ 'name:sales_order': 1 }) },
+  );
+  try {
+    const before = readFileSync(join(moved, baselinePath), 'utf8');
+    const result = run(moved);
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /a move is re-measured deliberately/u);
+    assert.equal(readFileSync(join(moved, baselinePath), 'utf8'), before);
+  } finally {
+    removeArchitectureFixture(moved);
+  }
+
+  const falling = nameLawFixture(
+    { [genericFile]: "export const a = 'sales_order';\n" },
+    {
+      [genericFile]: nameLawRow({ 'name:sales_order': 2 }),
+      'packages/postgres-provider/src/gone.ts': nameLawRow({
+        'name:sales_order': 1,
+      }),
+    },
+  );
+  try {
+    const result = run(falling);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(
+      JSON.parse(readFileSync(join(falling, baselinePath), 'utf8')),
+      {
+        version: 1,
+        measuredOn: 'fixture',
+        files: { [genericFile]: nameLawRow({ 'name:sales_order': 1 }) },
+      },
+    );
+  } finally {
+    removeArchitectureFixture(falling);
   }
 });

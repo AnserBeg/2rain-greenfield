@@ -5,7 +5,7 @@
     {
       "name": "ledger-balanced-definer",
       "claim": "The deferred balance check runs as its owner, so a write committed as the runtime role is not refused at COMMIT (review R5).",
-      "file": "db/migrations/0072_ledger_books_by_hand.sql",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "ALTER FUNCTION north_star_internal.ledger_entry_balanced() SECURITY DEFINER SET search_path = pg_catalog, pg_temp;",
       "replacement": "ALTER FUNCTION north_star_internal.ledger_entry_balanced() SECURITY INVOKER SET search_path = pg_catalog, pg_temp;",
       "test": {
@@ -22,7 +22,7 @@
     {
       "name": "ledger-instant-offset",
       "claim": "An instant without Z or a numeric offset is refused, never read in the session time zone (review R2).",
-      "file": "db/migrations/0072_ledger_books_by_hand.sql",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "IF date_basis ? 'instant' AND (jsonb_typeof(date_basis->'instant') IS DISTINCT FROM 'string'",
       "replacement": "IF false AND date_basis ? 'instant' AND (jsonb_typeof(date_basis->'instant') IS DISTINCT FROM 'string'",
       "test": {
@@ -73,7 +73,7 @@
     {
       "name": "ledger-entry-tripwire",
       "claim": "A second writer call in one transaction refuses by name instead of risking the R4 deadlock.",
-      "file": "db/migrations/0072_ledger_books_by_hand.sql",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "IF current_setting('north_star.ledger_entry_written', true) = 'yes' THEN",
       "replacement": "IF false AND current_setting('north_star.ledger_entry_written', true) = 'yes' THEN",
       "test": {
@@ -95,7 +95,7 @@
     {
       "name": "ledger-line-read-lock",
       "claim": "The writer's per-line account read holds the account FOR SHARE, so a deactivation cannot commit under it (review R6).",
-      "file": "db/migrations/0072_ledger_books_by_hand.sql",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "\n      FOR SHARE OF a;",
       "replacement": ";",
       "test": {
@@ -112,7 +112,7 @@
     {
       "name": "ledger-books-start-locked",
       "claim": "Books start never moves once the company has an entry.",
-      "file": "db/migrations/0072_ledger_books_by_hand.sql",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "IF EXISTS (SELECT FROM platform.ledger_entries x WHERE (x.tenant_id, x.environment_id, x.company_id) = (t, e, company)) THEN",
       "replacement": "IF false AND EXISTS (SELECT FROM platform.ledger_entries x WHERE (x.tenant_id, x.environment_id, x.company_id) = (t, e, company)) THEN",
       "test": {
@@ -129,7 +129,7 @@
     {
       "name": "ledger-grant-input",
       "claim": "An apply consumes only the grant attested for its exact input.",
-      "file": "db/migrations/0072_ledger_books_by_hand.sql",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "\n     OR g.input IS DISTINCT FROM input THEN",
       "replacement": " THEN",
       "test": {
@@ -146,7 +146,7 @@
     {
       "name": "ledger-grant-spent",
       "claim": "An attested grant is consumed once.",
-      "file": "db/migrations/0072_ledger_books_by_hand.sql",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "IF g.consumed_at IS NOT NULL THEN RAISE EXCEPTION 'ledger.approvalSpent'; END IF;",
       "replacement": "NULL;",
       "test": {
@@ -163,7 +163,7 @@
     {
       "name": "ledger-op-company-scope",
       "claim": "A company-scoped principal is refused on another company of the same tenant.",
-      "file": "db/migrations/0072_ledger_books_by_hand.sql",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "AND (m.legal_entity_id IS NULL OR m.legal_entity_id = company)",
       "replacement": "AND true",
       "test": {
@@ -180,7 +180,7 @@
     {
       "name": "ledger-op-company-master",
       "claim": "A company is a live record of the released legal-entity master (behind it, a company that is not one has no stored revision, so the revision check refuses too).",
-      "file": "db/migrations/0072_ledger_books_by_hand.sql",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "  IF revision IS NULL THEN RAISE EXCEPTION 'ledger.unavailable'; END IF; END $$;",
       "replacement": "  IF false THEN RAISE EXCEPTION 'ledger.unavailable'; END IF; END $$$$;",
       "test": {
@@ -197,7 +197,7 @@
     {
       "name": "ledger-op-write-permission",
       "claim": "A books change needs the write permission, never a read.",
-      "file": "db/migrations/0072_ledger_books_by_hand.sql",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "IF NOT north_star_internal.ledger_may(company, 'northstar.ledger:permission.books_configure', 'northstar.ledger:capability.books')",
       "replacement": "IF NOT (north_star_internal.ledger_may(company, 'northstar.ledger:permission.books_configure', 'northstar.ledger:capability.books') OR north_star_internal.ledger_may(company, 'northstar.ledger:permission.journal_read', 'northstar.ledger:capability.journal'))",
       "test": {
@@ -214,7 +214,7 @@
     {
       "name": "ledger-op-fence",
       "claim": "A grant attested under an earlier release fence never applies.",
-      "file": "db/migrations/0072_ledger_books_by_hand.sql",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "WHERE (p.tenant_id, p.environment_id, p.release_id, p.fence) = (tenant, environment, released, expected_fence) FOR SHARE;",
       "replacement": "WHERE (p.tenant_id, p.environment_id, p.release_id) = (tenant, environment, released) FOR SHARE;",
       "test": {
@@ -231,7 +231,7 @@
     {
       "name": "ledger-op-prior",
       "claim": "Books start replaces only the value the person expected.",
-      "file": "db/migrations/0072_ledger_books_by_hand.sql",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "IF to_char(prior, 'YYYY-MM-DD') IS DISTINCT FROM nullif(args->>'expectedPrior', '') THEN",
       "replacement": "IF false THEN",
       "test": {
@@ -248,7 +248,7 @@
     {
       "name": "ledger-op-execute",
       "claim": "Only the issuer attests and only north_star_runtime applies; no one runs the internal functions.",
-      "file": "db/migrations/0072_ledger_books_by_hand.sql",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "GRANT EXECUTE ON FUNCTION platform.ledger_apply_books_start(uuid,uuid,bigint,text,uuid,text,text,jsonb)\n  TO north_star_runtime;\n",
       "replacement": "GRANT EXECUTE ON FUNCTION platform.ledger_apply_books_start(uuid,uuid,bigint,text,uuid,text,text,jsonb)\n  TO north_star_runtime;\nGRANT EXECUTE ON FUNCTION north_star_internal.ledger_consume_grant(uuid,text,uuid,bigint,text,uuid,jsonb,text) TO north_star_runtime;\n",
       "test": {
@@ -265,7 +265,7 @@
     {
       "name": "ledger-grant-receipt",
       "claim": "A consumed grant never commits without a trust receipt that names its facts.",
-      "file": "db/migrations/0072_ledger_books_by_hand.sql",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "    RAISE EXCEPTION 'ledger.receiptUnverified'; END IF;",
       "replacement": "    NULL; END IF;",
       "test": {
@@ -302,7 +302,7 @@
     {
       "name": "ledger-grant-principal",
       "claim": "An apply consumes only a grant attested for its own principal (trust read amendment 3).",
-      "file": "db/migrations/0072_ledger_books_by_hand.sql",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "\n     OR g.principal_id IS DISTINCT FROM nullif(current_setting('north_star.principal_id', true), '')::uuid",
       "replacement": "",
       "test": {
@@ -319,7 +319,7 @@
     {
       "name": "ledger-grant-operation",
       "claim": "An apply consumes only a grant attested for its own operation (trust read amendment 3).",
-      "file": "db/migrations/0072_ledger_books_by_hand.sql",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "\n     OR g.operation_id IS DISTINCT FROM operation",
       "replacement": "",
       "test": {
@@ -336,7 +336,7 @@
     {
       "name": "ledger-grant-request-key",
       "claim": "An apply consumes only a grant attested for its own request key (trust read amendment 3).",
-      "file": "db/migrations/0072_ledger_books_by_hand.sql",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "\n     OR g.request_key IS DISTINCT FROM request_key",
       "replacement": "",
       "test": {
@@ -353,7 +353,7 @@
     {
       "name": "ledger-grant-channel",
       "claim": "An apply consumes only a grant attested for its own channel (trust read amendment 3).",
-      "file": "db/migrations/0072_ledger_books_by_hand.sql",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "\n     OR g.channel IS DISTINCT FROM channel",
       "replacement": "",
       "test": {
@@ -370,7 +370,7 @@
     {
       "name": "ledger-grant-release",
       "claim": "An apply consumes only a grant attested for its own release (trust read amendment 3).",
-      "file": "db/migrations/0072_ledger_books_by_hand.sql",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "\n     OR g.release_id IS DISTINCT FROM released",
       "replacement": "",
       "test": {
@@ -387,7 +387,7 @@
     {
       "name": "ledger-grant-capability",
       "claim": "Each apply consumes under its own capability constant, so a grant attested for one ledger capability never applies in another (trust read amendment 4).",
-      "file": "db/migrations/0072_ledger_books_by_hand.sql",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "\n     OR g.capability_id IS DISTINCT FROM capability",
       "replacement": "",
       "test": {
@@ -404,7 +404,7 @@
     {
       "name": "ledger-grant-expiry",
       "claim": "An unconsumed grant is refused 15 minutes after its attestation (trust read amendment 5).",
-      "file": "db/migrations/0072_ledger_books_by_hand.sql",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "IF g.attested_at < clock_timestamp() - interval '15 minutes' THEN",
       "replacement": "IF false THEN",
       "test": {
@@ -421,7 +421,7 @@
     {
       "name": "ledger-op-revision",
       "claim": "The person's expectedRevision is compared with the company record under its FOR SHARE (trust read amendment 6).",
-      "file": "db/migrations/0072_ledger_books_by_hand.sql",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "IF stored IS DISTINCT FROM (input->>'expectedRevision')::bigint THEN",
       "replacement": "IF false THEN",
       "test": {
@@ -438,7 +438,7 @@
     {
       "name": "ledger-op-policy",
       "claim": "The apply refuses unless the gateway decided under the policy epoch it holds locked (trust read amendment 7).",
-      "file": "db/migrations/0072_ledger_books_by_hand.sql",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "IF policy_version IS DISTINCT FROM 'northstar.current-policy/' || locked THEN",
       "replacement": "IF false THEN",
       "test": {
@@ -455,7 +455,7 @@
     {
       "name": "ledger-receipt-action",
       "claim": "The receipt check at commit refuses a trust receipt of another operation than the grant's (trust read amendment 2).",
-      "file": "db/migrations/0072_ledger_books_by_hand.sql",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "\n        AND i.action_id = NEW.operation_id",
       "replacement": "",
       "test": {
@@ -472,7 +472,7 @@
     {
       "name": "ledger-receipt-channel",
       "claim": "The receipt check at commit refuses a trust receipt of another channel than the grant's (trust read amendment 2).",
-      "file": "db/migrations/0072_ledger_books_by_hand.sql",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "\n        AND i.channel = NEW.channel",
       "replacement": "",
       "test": {
@@ -489,7 +489,7 @@
     {
       "name": "ledger-receipt-human",
       "claim": "The receipt check at commit refuses a trust receipt of another approving human than the grant's (trust read amendment 2).",
-      "file": "db/migrations/0072_ledger_books_by_hand.sql",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "\n        AND NEW.human_id = coalesce(i.approving_human_id,\n              CASE WHEN i.execution_principal_kind = 'HUMAN' THEN i.execution_principal_id END)",
       "replacement": "",
       "test": {
@@ -506,7 +506,7 @@
     {
       "name": "ledger-receipt-record",
       "claim": "The receipt check at commit refuses a trust receipt of another company record than the grant's (trust read amendment 2).",
-      "file": "db/migrations/0072_ledger_books_by_hand.sql",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "\n        AND d.record_id = NEW.input->>'recordId') THEN",
       "replacement": ") THEN",
       "test": {
@@ -557,7 +557,7 @@
     {
       "name": "ledger-op-permission",
       "claim": "The books-start operation permission alone never starts books: the ledger checks its own grant (delta read amendment 10, first direction).",
-      "file": "db/migrations/0072_ledger_books_by_hand.sql",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "IF NOT north_star_internal.ledger_may(company, 'northstar.ledger:permission.books_configure', 'northstar.ledger:capability.books')",
       "replacement": "IF false AND NOT north_star_internal.ledger_may(company, 'northstar.ledger:permission.books_configure', 'northstar.ledger:capability.books')",
       "test": {
