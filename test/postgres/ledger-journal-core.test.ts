@@ -76,6 +76,9 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
         user: 'north_star_runtime',
         max: 2,
       });
+      // The ephemeral pool holds four connections, all taken by the sessions
+      // below; a test that needs a fifth borrows this one.
+      const spare = new pg.Pool({ ...connection, max: 1 });
       const session = async () => {
         const client = await pool.connect();
         sessions.push(client);
@@ -1087,7 +1090,12 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
               // for the writer, or the writer posts to an inactive account.
               const c = await company();
               const x = randomUUID();
-              const w4 = await session();
+              const w4 = await spare.connect();
+              sessions.push(w4);
+              await w4.query(
+                "SELECT set_config('north_star.tenant_id',$1,false),set_config('north_star.environment_id',$2,false)",
+                [tenant, environment],
+              );
               await manual(w1, c, '2026-02-05', pair(c.bank, c.revenue));
               await w4.query('BEGIN');
               await w3.query('BEGIN');
@@ -1333,6 +1341,7 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
       } finally {
         for (const client of sessions) client.release();
         await runtime.end();
+        await spare.end();
       }
     },
   );
