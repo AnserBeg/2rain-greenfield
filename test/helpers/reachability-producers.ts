@@ -57,6 +57,7 @@ export const reachabilityProducers = [
     'test/unit/inventory-valuation.test.ts',
     'test/unit/language-conformance-ledger.test.ts',
     'test/unit/language-coverage-credit.test.ts',
+    'test/unit/line-logical-field.test.ts',
     'test/unit/location-definition.test.ts',
     'test/unit/logical-field.test.ts',
     'test/unit/module-provider-error-mappings.test.ts',
@@ -132,7 +133,7 @@ export const reachabilityProducers = [
     'test/postgres/locations.test.ts',
   ]),
   nodeProducer('postgres-3', 'postgres', 'test:postgres:3', [
-    'test/postgres/{!(address-authority|address-connector|agent-dev-tasks|agent-tasks|billing-terms|board-policy|booking-serving|boot-capabilities|build-eval|commercial-totals|composed-application|counter-sale|customer-credit|customization|customization-display|customization-formulas|customization-governed-reads|customization-inspection|customization-live|customization-validation|customization-world|date-time-field|declared-list|document-attachments|document-numbering|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-stock-counts|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|locations|module-storage-transition|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|period-lock-commands|planner-map|price-lists|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|record-template-library|replenishment|report-admission|report-analysis|report-analysis-reader|report-company-reader|report-v2-provider|request-runtime-view|stock-serializer|workflow-consumer|workflow-record-created),*/**/*}.test.ts',
+    'test/postgres/{!(address-authority|address-connector|agent-dev-tasks|agent-tasks|billing-terms|board-policy|booking-serving|boot-capabilities|build-eval|commercial-totals|composed-application|counter-sale|customer-credit|customization|customization-display|customization-formulas|customization-governed-reads|customization-inspection|customization-live|customization-validation|customization-world|date-time-field|declared-list|document-attachments|document-numbering|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-stock-counts|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|line-logical-fields|locations|module-storage-transition|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|period-lock-commands|planner-map|price-lists|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|record-template-library|replenishment|report-admission|report-analysis|report-analysis-reader|report-company-reader|report-v2-provider|request-runtime-view|stock-serializer|workflow-consumer|workflow-record-created),*/**/*}.test.ts',
   ]),
   nodeProducer('postgres-4', 'postgres', 'test:postgres:4', [
     'test/postgres/customization-governed-reads.test.ts',
@@ -174,6 +175,7 @@ export const reachabilityProducers = [
     'test/postgres/customization-formulas.test.ts',
     'test/postgres/declared-list.test.ts',
     'test/postgres/document-numbering.test.ts',
+    'test/postgres/line-logical-fields.test.ts',
     'test/postgres/module-storage-transition.test.ts',
   ]),
   nodeProducer('postgres-12', 'postgres', 'test:postgres:12', [

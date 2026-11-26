@@ -6,8 +6,15 @@ import {
   REPORT_MEASURE_READER,
 } from '../../canonical-model/src/declared-report-v2.js';
 import { PRESENTATION_READER } from '../../canonical-model/src/surface-presentation-schema.js';
-import { LOGICAL_FIELD_READER } from '../../canonical-model/src/logical-field.js';
-import { logicalFieldBindingsProblem } from './logical-field-admission.js';
+import {
+  LINE_LOGICAL_FIELD_READER,
+  LOGICAL_FIELD_READER,
+} from '../../canonical-model/src/logical-field.js';
+import { logicalFieldReaderFloor } from '../../canonical-model/src/logical-field-bindings.js';
+import {
+  allowedTextsContractProblem,
+  logicalFieldBindingsProblem,
+} from './logical-field-admission.js';
 import { presentationDeclarationProblem } from './presentation-admission.js';
 import {
   hasMapDeclaration,
@@ -728,14 +735,26 @@ function verifyCompiledRelease(
   const hasLogicalFields =
     isRecord(layoutDefinition) &&
     Object.hasOwn(layoutDefinition, 'logicalFields');
+  // Slice 2: line tables and header-read currencies need the line rung, and
+  // that rung without them is unexplained.
+  const logicalFloor = hasLogicalFields
+    ? (logicalFieldReaderFloor(
+        layoutDefinition as Parameters<typeof logicalFieldReaderFloor>[0],
+      ) ?? LOGICAL_FIELD_READER)
+    : null;
   if (
-    hasLogicalFields
-      ? surfaceFloor < LOGICAL_FIELD_READER
-      : surfaceFloor === LOGICAL_FIELD_READER
+    logicalFloor === null
+      ? surfaceFloor === LOGICAL_FIELD_READER ||
+        surfaceFloor === LINE_LOGICAL_FIELD_READER
+      : surfaceFloor < logicalFloor ||
+        (logicalFloor === LOGICAL_FIELD_READER &&
+          surfaceFloor === LINE_LOGICAL_FIELD_READER)
   )
     throw integrity(
       'LOGICAL_FIELD_READER_MISMATCH',
-      'Declared logical fields and the surface reader floor disagree.',
+      logicalFloor === LINE_LOGICAL_FIELD_READER
+        ? 'Declared line logical fields and the surface reader floor disagree.'
+        : 'Declared logical fields and the surface reader floor disagree.',
     );
   const reportInputs = new Map<string, unknown>();
   const sourceTerms = (value: unknown, activeOnly: boolean) => {
@@ -962,6 +981,15 @@ function verifyCompiledRelease(
           'booking operations disagree with the released declarations',
         );
       }
+      const allowedProblem =
+        reference.familyId === PROJECTION_FAMILY_IDS.operationCatalog
+          ? allowedTextsContractProblem(catalog, revision.desiredState)
+          : null;
+      if (allowedProblem)
+        throw integrity(
+          'LOGICAL_FIELD_PROJECTION_CONTRACT_MISMATCH',
+          allowedProblem,
+        );
     }
     if (
       reference.familyId === PROJECTION_FAMILY_IDS.surfaceManifest &&

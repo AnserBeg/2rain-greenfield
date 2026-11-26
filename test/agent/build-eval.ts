@@ -232,7 +232,11 @@ const logicalKinds: Partial<Record<FieldType, string>> = {
 interface ScoredLogicalBinding {
   readonly fieldId: string;
   readonly logicalType: string;
-  readonly currency?: { readonly kind: string; readonly currencyCode?: string };
+  readonly currency?: {
+    readonly kind: string;
+    readonly currencyCode?: string;
+    readonly via?: readonly string[];
+  };
   readonly unit?: { readonly label: string };
   readonly scale?: number;
 }
@@ -261,10 +265,14 @@ export function logicalMismatch(
   if (binding?.logicalType !== kind)
     return `is ${binding?.logicalType ?? 'not a logical field'}, expected ${wanted.type}`;
   if (wanted.currency !== undefined) {
+    // CUSTOMIZE-6 slice 2: a line amount read from its header scores as
+    // "header", one read from its own record as "stored".
     const found =
       binding.currency?.kind === 'fixed'
         ? binding.currency.currencyCode
-        : binding.currency?.kind;
+        : binding.currency?.via
+          ? 'header'
+          : binding.currency?.kind;
     if (found !== wanted.currency)
       return `has currency ${String(found)}, expected ${wanted.currency}`;
   }
@@ -693,17 +701,24 @@ export async function scoreModule(
     if (spec.lines && !lines) miss(`${label}: no line table`);
     if (lines?.inputContract && (spec.lines || !createOp(before, lineLocal))) {
       const parent = `${NS}:relation.${lineLocal}_parent`;
-      for (const wanted of spec.lines?.fields ?? [])
-        if (
-          !lines.inputContract.fields.some(
-            (f) =>
-              nameMatches(
-                wanted.names,
-                localOf(f.fieldId).slice(lineLocal.length + 1),
-              ) && fieldKinds[wanted.type].includes(f.fieldKind),
-          )
-        )
+      for (const wanted of spec.lines?.fields ?? []) {
+        const found = lines.inputContract.fields.find(
+          (f) =>
+            nameMatches(
+              wanted.names,
+              localOf(f.fieldId).slice(lineLocal.length + 1),
+            ) && fieldKinds[wanted.type].includes(f.fieldKind),
+        );
+        if (!found) {
           miss(`${label}: line field "${wanted.names[0]!}" missing`);
+          continue;
+        }
+        // CUSTOMIZE-6 slice 2: a line field's logical kind, currency (fixed,
+        // stored on the line, or read from the header), unit and scale.
+        const mismatch = logicalMismatch(wanted, logical.get(found.fieldId));
+        if (mismatch)
+          miss(`${label}: line field "${wanted.names[0]!}" ${mismatch}`);
+      }
       try {
         const line = await createRecord(world, after, lineLocal, {
           [parent]: recordId,

@@ -9,9 +9,9 @@ import {
   type TrustedRequestContext,
   type UntrustedRequestInput,
 } from './request-context.js';
-import { REPORT_MEASURE_READER } from '../../canonical-model/src/declared-report-v2.js';
 import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents.js';
 import { REVERSIBILITY_AGENT_READER } from '../../canonical-model/src/reversibility.js';
+import { LINE_LOGICAL_FIELD_READER } from '../../canonical-model/src/logical-field.js';
 import {
   WORKFLOW_PROJECTION_FAMILY,
   WORKFLOW_RUNTIME_CAPABILITY,
@@ -256,7 +256,9 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // links and line grain, min, max, average and distinct counts, and
     // approved measure references. 52 reads named measures (REPORTS-1 s2,
     // assigned at its main-compat merge).
-    maximumSupportedVersion: REPORT_MEASURE_READER,
+    // 53 reads logical fields on line tables and an amount whose currency
+    // is read from the line header (CUSTOMIZE-6 s2; assigned at TRAIN-S).
+    maximumSupportedVersion: LINE_LOGICAL_FIELD_READER,
   },
 });
 

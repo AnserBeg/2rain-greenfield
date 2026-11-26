@@ -20,6 +20,7 @@ import {
 } from '@north-star/canonical-model';
 import { arrangeableLayoutFields } from './layout-revision.js';
 import {
+  currencyHolderEntity,
   deriveLogicalFieldBindings,
   type LogicalFieldBinding,
 } from '../../canonical-model/src/logical-field-bindings.js';
@@ -865,10 +866,27 @@ function describeField(field: Json, to?: DiffDefinition): string {
         return `${label} (decimal, ${places(logical.scale)}${required})`;
       case 'money': {
         const currency = logical.currency;
+        // CUSTOMIZE-6 slice 2: a line amount may read its header's currency.
+        const holder =
+          currency?.kind === 'stored' && currency.via
+            ? (
+                to as unknown as {
+                  entities?: { entityId: string; label?: unknown }[];
+                }
+              ).entities?.find(
+                (e) =>
+                  e.entityId ===
+                  currencyHolderEntity(
+                    to as unknown as Parameters<typeof currencyHolderEntity>[0],
+                    String((field.entity as Json).targetId),
+                    currency.via,
+                  ),
+              )
+            : undefined;
         const where =
           currency?.kind === 'fixed'
             ? currency.currencyCode
-            : `the record's ${String(
+            : `${holder ? `the ${String(holder.label)}` : 'the record'}'s ${String(
                 to!.fields.find((f) => f.fieldId === currency?.fieldId)
                   ?.label ?? 'currency',
               )} (${(currency?.kind === 'stored' ? currency.codes : []).join(', ')})`;

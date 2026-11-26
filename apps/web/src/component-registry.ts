@@ -2651,6 +2651,16 @@ export function renderFormControl(
     readonly name?: string;
     readonly attributes?: string;
     readonly describedBy?: string;
+    /**
+     * CUSTOMIZE-6: the values a money field's stored currency is read from
+     * -- the record itself, and a line's header -- so the suffix names it.
+     */
+    readonly currencyRecord?: {
+      readonly values: Readonly<Record<string, unknown>>;
+    };
+    readonly currencyHeader?: {
+      readonly values: Readonly<Record<string, unknown>>;
+    };
   } = {},
 ): RenderedFormControl {
   const name =
@@ -2706,7 +2716,11 @@ export function renderFormControl(
     if (logical?.scale !== undefined) {
       const step =
         logical.scale === 0 ? '1' : `0.${'0'.repeat(logical.scale - 1)}1`;
-      const suffix = logicalSuffix(logical);
+      const suffix = logicalSuffix(
+        logical,
+        control.currencyRecord,
+        control.currencyHeader,
+      );
       return `<input type="number" inputmode="decimal" step="${step}"${kind} name="${name}" value="${current}" autocomplete="off" data-logical-field="${logical.logicalType}">${suffix ? ` <span class="field-unit" data-field-unit>${escapeHtml(suffix)}</span>` : ''}`;
     }
     switch (field.kind) {

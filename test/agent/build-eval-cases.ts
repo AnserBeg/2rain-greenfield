@@ -1376,6 +1376,64 @@ export const BUILD_CASES: readonly BuildCase[] = [
       ],
     },
   },
+  // CUSTOMIZE-6 slice 2 (rule 12): the same kinds on line tables, with a
+  // line amount in its header's currency (field service) and fixed-currency
+  // invoice lines (distribution). Written by hand before any run.
+  {
+    id: 'L05',
+    split: 'dev',
+    category: 'module',
+    request:
+      "Track work orders with a name and the currency the customer is billed in (CAD, USD or EUR). Each work order has lines: the task, the hours worked to two decimals, an hourly rate in the work order's currency, and notes for the line.",
+    expect: {
+      outcome: 'module',
+      allowedKinds: MODULE,
+      types: [
+        {
+          names: ['work order', 'order'],
+          fields: [currency('currency', 'billing currency')],
+          lines: {
+            fields: [
+              text('task'),
+              quantity(
+                ['h', 'hour', 'hours', 'hr'],
+                2,
+                'hours',
+                'hours worked',
+              ),
+              money('header', 'hourly rate', 'rate'),
+              longText('notes', 'line notes'),
+            ],
+          },
+        },
+      ],
+    },
+  },
+  {
+    id: 'L06',
+    split: 'test',
+    category: 'module',
+    request:
+      'Invoices with a customer name and line items: a description, a whole-number quantity, the amount in Canadian dollars, and a discount percent with two decimals.',
+    expect: {
+      outcome: 'module',
+      allowedKinds: MODULE,
+      types: [
+        {
+          names: ['invoice'],
+          fields: [text('customer', 'customer name')],
+          lines: {
+            fields: [
+              text('description'),
+              number('quantity', 'qty'),
+              money('CAD', 'amount', 'line amount'),
+              decimal(2, 'discount percent', 'discount'),
+            ],
+          },
+        },
+      ],
+    },
+  },
 ];
 
 /**
