@@ -179,6 +179,20 @@ export function createNodeResultLedger() {
       }
       return owned;
     },
+    /** Results the ledger did not credit, for a mismatch report: where they came from and why they were left out. */
+    dropped() {
+      const kept = new Set(this.selected().map((record) => record.sequence));
+      return pending
+        .filter((record) => !kept.has(record.sequence))
+        .map((record) => ({
+          file: record.file,
+          name: String(record.event.data.name),
+          nesting: Number(record.event.data.nesting),
+          type: record.event.type,
+          sequence: record.sequence,
+          ownFileSummary: summaries.has(record.file),
+        }));
+    },
     /** Selected minus skip/todo — what earns reachability credit. */
     credited() {
       return this.selected().filter(

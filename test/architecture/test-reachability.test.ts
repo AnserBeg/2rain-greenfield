@@ -198,6 +198,13 @@ test("the ledger gives a helper module's nested passes to the test file that ran
   const orphan = createNodeResultLedger();
   orphan.observe(result('from the helper', helper, 1));
   assert.deepEqual(orphan.selected(), []);
+  // A mismatch report names what was left out and where it came from.
+  assert.deepEqual(
+    orphan
+      .dropped()
+      .map((record) => [record.name, record.file, record.nesting]),
+    [['from the helper', helper, 1]],
+  );
 });
 
 test('filtered commands cannot produce evidence', () => {
