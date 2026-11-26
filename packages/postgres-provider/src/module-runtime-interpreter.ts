@@ -230,6 +230,8 @@ interface RawRecord {
   recordId: string;
   /** The target record ids of the relations a get was asked to state. */
   relationTargets?: Readonly<Record<string, string | null>>;
+  /** ADR-0094: a get's on-read totals, read in the record's statement. */
+  rollupValues?: Readonly<Record<string, string | null>>;
   revision: number;
   values: Readonly<Record<string, ImmutableJsonValue>>;
 }
@@ -3133,6 +3135,12 @@ async function executeQueryOnClient(
     definition.queryType === 'list' && list
       ? searchChildrenPlan(storage, entity, list)
       : null;
+  // ADR-0094: a get's authorized on-read totals; their lines join the
+  // verified read entities, so the totals read under the request's scope.
+  const rollupPlans =
+    definition.queryType === 'get' && 'rollups' in request
+      ? rollupReadPlans(storage, entity, definition, request.rollups)
+      : [];
   let readScope = await verifyLegalEntityReadScope(
     client,
     snapshot,
@@ -3145,6 +3153,7 @@ async function executeQueryOnClient(
       ...(progressPlan?.supply?.entities ?? []),
       ...(figuresPlan?.entities ?? []),
       ...(searchChildPlans ?? []).map((plan) => plan.child),
+      ...rollupPlans.map((plan) => plan.lines),
     ],
   );
   const companyListScope =
@@ -3201,16 +3210,21 @@ async function executeQueryOnClient(
         filterPlans,
         readScope,
         targets,
+        rollupPlans,
       );
       records = record ? [record] : [];
       return queryResult(
         definition.queryId,
         records.length === 1 ? 'exact' : 'not-found',
         records.map((entry) =>
-          withRelationTargets(
-            toDto(entity, entry, definition.selections),
+          withRollups(
+            withRelationTargets(
+              toDto(entity, entry, definition.selections),
+              entry,
+              targets,
+            ),
             entry,
-            targets,
+            'rollups' in request ? request.rollups : undefined,
           ),
         ),
         null,
@@ -7176,6 +7190,7 @@ async function loadScopedRawRecord(
   filterPlans: readonly QueryFilterLoweringPlan[],
   readScope: VerifiedLegalEntityReadScope | null,
   relationTargets: readonly RelationTargetPlan[] = [],
+  rollups: readonly RollupReadPlan[] = [],
 ): Promise<RawRecord | null> {
   const values: unknown[] = [];
   const predicates = archivePredicate(entity, includeArchived);
@@ -7184,18 +7199,24 @@ async function loadScopedRawRecord(
     `${quoted(entity.recordIdentity.column)} = ${parameter(values, recordId)}`,
   );
   appendQueryFilterPredicates(entity, filterPlans, values, predicates);
+  // ADR-0094: each total is computed in the same statement as its record,
+  // so both read one snapshot.
+  const expressions = rollups.map((plan, index) =>
+    rollupExpression(entity, plan, index, readScope, values),
+  );
   const result = await client.query<QueryResultRow>(
     selectSql(
       entity,
       predicates,
       'LIMIT 1',
       relationTargets.map((target) => target.column),
+      expressions,
     ),
     values,
   );
   const row = result.rows[0];
   if (!row) return null;
-  const record = rawRecord(entity, row);
+  const record = withRollupValues(rawRecord(entity, row), rollups, row);
   // The stated targets are read in the same statement as the record itself.
   return relationTargets.length
     ? Object.freeze({
@@ -7284,6 +7305,10 @@ function selectSql(
   predicates: readonly string[],
   suffix: string,
   extraColumns: readonly string[] = [],
+  // ADR-0094: computed columns (a get's on-read totals). They read the
+  // record through ROLLUP_RECORD_ALIAS; without them the statement is
+  // unchanged.
+  extraExpressions: readonly string[] = [],
 ): string {
   const names = new Set([
     entity.recordIdentity.column,
@@ -7311,10 +7336,138 @@ function selectSql(
     names.add(column);
     columns.push(quoted(column));
   }
+  columns.push(...extraExpressions);
   return `SELECT ${columns.join(', ')}
-            FROM north_star_module.${quoted(entity.physicalTableName)}
+            FROM north_star_module.${quoted(entity.physicalTableName)}${
+              extraExpressions.length
+                ? ` AS ${quoted(ROLLUP_RECORD_ALIAS)}`
+                : ''
+            }
            WHERE ${predicates.length > 0 ? predicates.join(' AND ') : 'true'}
            ${suffix}`;
+}
+
+const ROLLUP_RECORD_ALIAS = 'rollup_record';
+
+interface RollupReadPlan {
+  readonly fieldId: string;
+  readonly lines: StorageEntity;
+  readonly parentColumn: string;
+  readonly aggregandColumn: string;
+  readonly precision: number;
+  readonly scale: number;
+}
+
+/**
+ * The authorized totals of a get, resolved against the PINNED storage: each
+ * sums one stored column of its lines over one parent-scoped relation of the
+ * queried record. Anything else is refused by name rather than read.
+ */
+function rollupReadPlans(
+  storage: StorageTargetPayloadV1,
+  entity: StorageEntity,
+  definition: SemanticQueryExecutionRequest['definition'],
+  authorized: SemanticQueryExecutionRequest['rollups'],
+): readonly RollupReadPlan[] {
+  if (!definition.rollups?.length || !authorized) return [];
+  const allowed = new Set(authorized.authorized);
+  return definition.rollups
+    .filter((rollup) => allowed.has(rollup.fieldId))
+    .map((rollup) => {
+      const relation = storage.relations.find(
+        (candidate) =>
+          candidate.relationId === rollup.relationId &&
+          candidate.sourceEntityId === rollup.lineEntityId &&
+          candidate.targetEntityId === entity.entityId &&
+          candidate.ownership === 'parentScopedChild',
+      );
+      const lines = relation && requiredEntity(storage, rollup.lineEntityId);
+      const aggregand = lines?.columns.find(
+        (column) => column.canonicalFieldId === rollup.aggregandFieldId,
+      );
+      if (!relation || !lines || !aggregand)
+        throw failure(
+          'MODULE_QUERY_CONTRACT_INVALID',
+          'a total must sum a stored field of the lines of a parent-scoped relation',
+          rollup.fieldId,
+        );
+      return Object.freeze({
+        fieldId: rollup.fieldId,
+        lines,
+        parentColumn: relation.relationColumn.physicalName,
+        aggregandColumn: aggregand.physicalName,
+        precision: rollup.precision,
+        scale: rollup.scale,
+      });
+    });
+}
+
+/**
+ * F5-a obligations 2-4: the sum of the record's LIVE lines, in its tenant,
+ * environment and company and under the request's verified company scope;
+ * a typed zero over no lines; and ABSENT when any live line's amount is
+ * absent (never a partial sum, unlike List figures' coalesce).
+ */
+function rollupExpression(
+  record: StorageEntity,
+  plan: RollupReadPlan,
+  index: number,
+  readScope: VerifiedLegalEntityReadScope | null,
+  values: unknown[],
+): string {
+  const line = `rollup_line_${String(index)}`;
+  const amount = qualified(line, plan.aggregandColumn);
+  return `(SELECT CASE WHEN count(*) = count(${amount}) THEN coalesce(sum(${amount}), 0) END
+         FROM north_star_module.${quoted(plan.lines.physicalTableName)} AS ${quoted(line)}
+        WHERE ${qualified(line, 'tenant_id')} = ${qualified(ROLLUP_RECORD_ALIAS, 'tenant_id')}
+          AND ${qualified(line, 'environment_id')} = ${qualified(ROLLUP_RECORD_ALIAS, 'environment_id')}
+          AND ${qualified(line, plan.parentColumn)} = ${qualified(ROLLUP_RECORD_ALIAS, record.recordIdentity.column)}
+          AND ${qualified(line, plan.lines.archive.archivedAtColumn)} IS NULL${sameCompanySql(line, plan.lines, ROLLUP_RECORD_ALIAS, record)}${legalEntityReadScopeJoinConjunction(plan.lines, readScope, values, line)})::text AS ${quoted(`rollup_total_${String(index)}`)}`;
+}
+
+function withRollupValues(
+  record: RawRecord,
+  rollups: readonly RollupReadPlan[],
+  row: QueryResultRow,
+): RawRecord {
+  if (!rollups.length) return record;
+  const totals = Object.fromEntries(
+    rollups.map((plan, index) => {
+      const value = row[`rollup_total_${String(index)}`];
+      if (value === null || value === undefined) return [plan.fieldId, null];
+      const text = String(value);
+      const whole = text.replace(/^-/u, '').split('.')[0]!.replace(/^0+/u, '');
+      // Obligation 5: a total that does not fit its declared precision is
+      // refused by name, never shown truncated.
+      if (whole.length > plan.precision - plan.scale)
+        throw failure(
+          'MODULE_ROLLUP_VALUE_OVERFLOW',
+          'the total does not fit its declared precision',
+          plan.fieldId,
+        );
+      return [plan.fieldId, text];
+    }),
+  );
+  return Object.freeze({ ...record, rollupValues: Object.freeze(totals) });
+}
+
+/** The get's totals: a value, absent (`null`), or withheld (named). */
+function withRollups(
+  dto: SemanticRecordDto,
+  record: RawRecord,
+  rollups: SemanticQueryExecutionRequest['rollups'],
+): SemanticRecordDto {
+  if (!rollups) return dto;
+  const values = { ...dto.values };
+  for (const fieldId of rollups.authorized)
+    values[fieldId] = record.rollupValues?.[fieldId] ?? null;
+  return Object.freeze({
+    ...dto,
+    values: Object.freeze(values),
+    ...(rollups.withheld.length
+      ? { withheldFieldIds: Object.freeze([...rollups.withheld]) }
+      : {}),
+  });
 }
 
 function rawFieldSelection(

@@ -133,6 +133,12 @@ export interface SemanticRecordDto {
   >;
   readonly revision: number;
   readonly values: Readonly<Record<string, ImmutableJsonValue>>;
+  /**
+   * ADR-0094: on-read totals the reader may not read. A total has three
+   * states: a value, absent (`null` in `values`), and withheld (named here,
+   * absent from `values`). Emitted only when something is withheld.
+   */
+  readonly withheldFieldIds?: readonly string[];
 }
 
 export interface SemanticQueryResultEnvelope {
@@ -287,6 +293,8 @@ export interface SemanticQueryExecutionRequest {
   readonly legalEntityReadScope: LegalEntityReadScope | null;
   readonly list: AuthorizedSharedListRequest | null;
   readonly parameterValues: Readonly<Record<string, ImmutableJsonValue>>;
+  /** ADR-0094: a get's on-read totals, authorized or withheld per request. */
+  readonly rollups?: AuthorizedRollups;
   readonly view: IssuedRequestRuntimeView;
 }
 
@@ -976,6 +984,22 @@ export class SemanticQueryGateway {
       await this.#recordDenied(view, request.queryId, error.policyVersion);
       throw new SemanticQueryPolicyDeniedError(request.queryId, view);
     }
+    const rollups =
+      definition.queryType === 'get'
+        ? await authorizeRollups(
+            this.currentPolicy,
+            view,
+            definition,
+            declaredScope && scopeSelection
+              ? {
+                  members: scopeSelection,
+                  parameterId: declaredScope.operand.parameterId,
+                }
+              : null,
+            this.policyNarrowing !== undefined && this.policyNarrowing !== null,
+            this.observePredicateReceipt,
+          )
+        : undefined;
     let result: SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope;
     if (definition.queryType === 'aggregate') {
       if (!this.executor.executeAggregate) {
@@ -1013,6 +1037,7 @@ export class SemanticQueryGateway {
           legalEntityReadScope,
           list,
           parameterValues,
+          ...(rollups ? { rollups } : {}),
           view,
         }),
       );
@@ -1195,6 +1220,158 @@ export class MalformedLegalEntityScopeArgumentError extends Error {
     super(`legal-entity scope argument for query ${queryId} is ${reason}`);
     this.reason = reason;
   }
+}
+
+/**
+ * ADR-0094 obligation 4 (amendment 9): the ONE dependent-read authorization.
+ * A read of rows that another query depends on -- a List figure, a get's
+ * on-read total -- is decided once per query and request under the dependent
+ * query's own permission, for the fields and relations it reads and the
+ * companies the reader asked for. It RETURNS its decision: a List figure
+ * throws on a denial, while a total is withheld and its record still answered.
+ * A dependent query that is not an active direct list selecting the fields
+ * is a contract error, never a silent read.
+ */
+export async function authorizeDependentRead(
+  currentPolicy: CurrentPolicyGateway,
+  view: IssuedRequestRuntimeView,
+  queryId: string,
+  read: {
+    readonly fieldIds: ReadonlySet<string>;
+    readonly relationIds: ReadonlySet<string>;
+    readonly label: boolean;
+  },
+  scope: {
+    readonly members: readonly string[];
+    readonly parameterId: string;
+  } | null,
+  kind:
+    | 'registeredSemanticListFiguresPolicyInput'
+    | 'registeredSemanticDependentReadPolicyInput',
+  observePredicateReceipt:
+    ((receipt: PredicateKernelReceipt) => void) | undefined,
+): Promise<{
+  readonly decision: 'ALLOW' | 'DENY';
+  readonly policyVersion: string;
+  readonly predicateAccepted: boolean;
+  readonly sourceEntityId: string;
+}> {
+  const dependent = registeredQueryFromPinnedView(view, queryId);
+  if (
+    !dependent ||
+    dependent.lifecycle !== 'active' ||
+    dependent.tier !== 'q0' ||
+    dependent.queryType !== 'list' ||
+    dependent.readModel !== undefined ||
+    (read.label && dependent.legalEntityScope !== undefined) ||
+    ![...read.fieldIds].every((fieldId) =>
+      dependent.selections.some((selection) => selection.fieldId === fieldId),
+    )
+  ) {
+    throw new SharedListContractError(
+      'LIST_FIELD_NOT_AUTHORIZED',
+      kind === 'registeredSemanticListFiguresPolicyInput'
+        ? 'list figures must read selected fields of active pinned list queries'
+        : 'a dependent read must read selected fields of an active pinned list query',
+      queryId,
+    );
+  }
+  const decision = await authorizeCurrentPolicy(
+    currentPolicy,
+    view,
+    dependent.permissionId,
+    Object.freeze({
+      arguments: Object.freeze({
+        fieldIds: Object.freeze([...read.fieldIds].sort()),
+        relationIds: Object.freeze([...read.relationIds].sort()),
+        ...(scope && dependent.legalEntityScope !== undefined
+          ? { [scope.parameterId]: Object.freeze([...scope.members]) }
+          : {}),
+      }),
+      kind,
+      queryId: dependent.queryId,
+      requestId: view.requestId,
+      schemaVersion: QUERY_POLICY_INPUT_VERSION,
+    }),
+  );
+  if (decision.decision === 'DENY')
+    return {
+      decision: 'DENY',
+      policyVersion: decision.policyVersion,
+      predicateAccepted: false,
+      sourceEntityId: dependent.sourceEntityId,
+    };
+  const predicateReceipt = inspectPredicateForExecution(dependent.filter);
+  observePredicateReceiptSafely(observePredicateReceipt, predicateReceipt);
+  return {
+    decision: 'ALLOW',
+    policyVersion: decision.policyVersion,
+    predicateAccepted: predicateReceipt.outcome === 'accepted',
+    sourceEntityId: dependent.sourceEntityId,
+  };
+}
+
+/**
+ * A get's on-read totals (ADR-0094), each authorized through the shared
+ * dependent read under its lines' list query. A total is withheld -- and its
+ * record still answered -- when that read is denied, when the lines' query
+ * filter is not one the provider executes, or when any policy narrowing
+ * applies to the reader (owner Q4).
+ */
+async function authorizeRollups(
+  currentPolicy: CurrentPolicyGateway,
+  view: IssuedRequestRuntimeView,
+  definition: RegisteredQueryDefinition,
+  scope: {
+    readonly members: readonly string[];
+    readonly parameterId: string;
+  } | null,
+  narrowed: boolean,
+  observePredicateReceipt:
+    ((receipt: PredicateKernelReceipt) => void) | undefined,
+): Promise<AuthorizedRollups | undefined> {
+  if (!definition.rollups?.length) return undefined;
+  const authorized: string[] = [];
+  const withheld: string[] = [];
+  for (const rollup of definition.rollups) {
+    if (narrowed) {
+      withheld.push(rollup.fieldId);
+      continue;
+    }
+    const read = await authorizeDependentRead(
+      currentPolicy,
+      view,
+      rollup.lineQueryId,
+      {
+        fieldIds: new Set([rollup.aggregandFieldId]),
+        relationIds: new Set([rollup.relationId]),
+        label: false,
+      },
+      scope,
+      'registeredSemanticDependentReadPolicyInput',
+      observePredicateReceipt,
+    );
+    if (read.sourceEntityId !== rollup.lineEntityId)
+      throw new SharedListContractError(
+        'LIST_FIELD_NOT_AUTHORIZED',
+        'a total is read under a list query of its own lines',
+        rollup.lineQueryId,
+      );
+    (read.decision === 'ALLOW' && read.predicateAccepted
+      ? authorized
+      : withheld
+    ).push(rollup.fieldId);
+  }
+  return Object.freeze({
+    authorized: Object.freeze(authorized),
+    withheld: Object.freeze(withheld),
+  });
+}
+
+/** Which of a get's on-read totals the reader may read (ADR-0094). */
+export interface AuthorizedRollups {
+  readonly authorized: readonly string[];
+  readonly withheld: readonly string[];
 }
 
 async function authorizeSharedListProjection(
@@ -1437,50 +1614,21 @@ async function authorizeSharedListProjection(
     }
     const entityIds: Record<string, string> = {};
     for (const [queryId, read] of reads) {
-      const figured = registeredQueryFromPinnedView(view, queryId);
-      if (
-        !figured ||
-        figured.lifecycle !== 'active' ||
-        figured.tier !== 'q0' ||
-        figured.queryType !== 'list' ||
-        figured.readModel !== undefined ||
-        (read.label && figured.legalEntityScope !== undefined) ||
-        ![...read.fieldIds].every((fieldId) =>
-          figured.selections.some((selection) => selection.fieldId === fieldId),
-        )
-      ) {
-        throw new SharedListContractError(
-          'LIST_FIELD_NOT_AUTHORIZED',
-          'list figures must read selected fields of active pinned list queries',
-          queryId,
-        );
-      }
-      const decision = await authorizeCurrentPolicy(
+      const authorized = await authorizeDependentRead(
         currentPolicy,
         view,
-        figured.permissionId,
-        Object.freeze({
-          arguments: Object.freeze({
-            fieldIds: Object.freeze([...read.fieldIds].sort()),
-            relationIds: Object.freeze([...read.relationIds].sort()),
-            ...(scope && figured.legalEntityScope !== undefined
-              ? { [scope.parameterId]: Object.freeze([...scope.members]) }
-              : {}),
-          }),
-          kind: 'registeredSemanticListFiguresPolicyInput',
-          queryId: figured.queryId,
-          requestId: view.requestId,
-          schemaVersion: QUERY_POLICY_INPUT_VERSION,
-        }),
+        queryId,
+        read,
+        scope,
+        'registeredSemanticListFiguresPolicyInput',
+        observePredicateReceipt,
       );
-      if (decision.decision === 'DENY') {
-        await recordDenied(figured.queryId, decision.policyVersion);
-        throw new SemanticQueryPolicyDeniedError(figured.queryId, view);
+      if (authorized.decision === 'DENY') {
+        await recordDenied(queryId, authorized.policyVersion);
+        throw new SemanticQueryPolicyDeniedError(queryId, view);
       }
-      const predicateReceipt = inspectPredicateForExecution(figured.filter);
-      observePredicateReceiptSafely(observePredicateReceipt, predicateReceipt);
-      if (predicateReceipt.outcome !== 'accepted') return null;
-      entityIds[figured.queryId] = figured.sourceEntityId;
+      if (!authorized.predicateAccepted) return null;
+      entityIds[queryId] = authorized.sourceEntityId;
     }
     figures = Object.freeze({
       entityIds: Object.freeze(entityIds),

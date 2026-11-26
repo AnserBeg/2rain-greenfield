@@ -197,25 +197,32 @@ export const currencyCreateOnly = {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type Authored = Record<string, any>;
 
-let applied: Authored | undefined;
+const applied = new Map<string, Authored>();
 let bindings: readonly unknown[] = [];
-/** The first-party base with the two patches applied, as a tenant builds it. */
-export function patchedAuthored(): Authored {
-  if (!applied) {
+/**
+ * The first-party base with the two patches applied, as a tenant builds it.
+ * `shared`: the contract and its lines are shared by every company.
+ */
+export function patchedAuthored(shared = false): Authored {
+  const key = shared ? 'shared' : 'owned';
+  if (!applied.has(key)) {
     const base = JSON.parse(
       readFileSync(resolve('apps/web/release/app.authored.json'), 'utf8'),
     ) as Record<string, unknown>;
     const result = customization.applyCustomizationPatches(
       base,
-      [contractType, lineTable].map((patch) =>
-        customization.CustomizationPatchSchema.parse(patch),
-      ),
+      [
+        shared
+          ? { ...contractType, companyOwnership: 'tenantShared' }
+          : contractType,
+        lineTable,
+      ].map((patch) => customization.CustomizationPatchSchema.parse(patch)),
     );
     assert.ok(result.status === 'applied', JSON.stringify(result));
-    applied = result.authored as Authored;
+    applied.set(key, result.authored as Authored);
     bindings = result.permissionBindings;
   }
-  return structuredClone(applied);
+  return structuredClone(applied.get(key)!);
 }
 
 /**
@@ -246,11 +253,28 @@ export interface RentalOptions {
   readonly rollup?: boolean;
   readonly derive?: boolean;
   readonly createOnly?: boolean;
+  /** Contract and lines shared by every company. */
+  readonly shared?: boolean;
+  /** A line validation that reads the contract through its parent link. */
+  readonly pathValidation?: boolean;
 }
+
+/** A line's item may not repeat its contract's name (read through the parent). */
+export const itemNotContractName = rule(
+  'item_not_contract_name',
+  l('item'),
+  'An item cannot repeat the contract name.',
+  comparison(field(l('item')), 'notEqual', {
+    kind: 'path',
+    schemaVersion: 'v6',
+    fieldId: h('name'),
+    relationIds: [PARENT],
+  }),
+);
 
 /** The patched package with the ADR-0094 declarations injected. */
 export function rentalContractAuthored(options: RentalOptions = {}): Authored {
-  const authored = patchedAuthored();
+  const authored = patchedAuthored(options.shared === true);
   if (options.createOnly !== false)
     authored.createOnlyFields = [currencyCreateOnly];
   if (options.derive !== false) authored.derivedDecimals = [amountDerivation];
@@ -260,6 +284,11 @@ export function rentalContractAuthored(options: RentalOptions = {}): Authored {
     authored.formulaRules = [
       ...((authored.formulaRules as unknown[] | undefined) ?? []),
       ...operandValidations,
+    ];
+  if (options.pathValidation)
+    authored.formulaRules = [
+      ...((authored.formulaRules as unknown[] | undefined) ?? []),
+      itemNotContractName,
     ];
   return authored;
 }
