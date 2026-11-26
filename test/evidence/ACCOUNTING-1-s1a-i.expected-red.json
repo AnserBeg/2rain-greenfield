@@ -537,10 +537,10 @@
     },
     {
       "name": "ledger-account-lock",
-      "claim": "A writer takes its account rows FOR SHARE, so it re-reads a deactivation it waited for.",
+      "claim": "A writer reads its account rows under a share lock (the ascending lock and, since review R6, the per-line read), so it waits for a deactivation and re-reads it. Either lock alone holds the re-read, so the control removes both.",
       "file": "db/migrations/0072_ledger_books_by_hand.sql",
-      "original": "ORDER BY a.account_id FOR SHARE;",
-      "replacement": "ORDER BY a.account_id;",
+      "original": "    ORDER BY a.account_id FOR SHARE;\n  FOR line, n IN SELECT value, ordinality FROM jsonb_array_elements(lines) WITH ORDINALITY LOOP\n    account := (line->>'accountId')::uuid;\n    SELECT a.kind_role_id, a.active, r.role_class, r.control_subledger_id INTO acct\n      FROM platform.ledger_accounts a JOIN platform.ledger_core_roles r ON r.role_id = a.kind_role_id\n      WHERE (a.tenant_id, a.environment_id, a.company_id, a.account_id) = (t, e, company, account)\n      FOR SHARE OF a;",
+      "replacement": "    ORDER BY a.account_id;\n  FOR line, n IN SELECT value, ordinality FROM jsonb_array_elements(lines) WITH ORDINALITY LOOP\n    account := (line->>'accountId')::uuid;\n    SELECT a.kind_role_id, a.active, r.role_class, r.control_subledger_id INTO acct\n      FROM platform.ledger_accounts a JOIN platform.ledger_core_roles r ON r.role_id = a.kind_role_id\n      WHERE (a.tenant_id, a.environment_id, a.company_id, a.account_id) = (t, e, company, account);",
       "test": {
         "files": ["test/postgres/ledger-journal-core.test.ts"]
       },
@@ -548,7 +548,12 @@
         {
           "file": "test/postgres/ledger-journal-core.test.ts",
           "name": "a writer waiting on a deactivation re-reads the account and refuses",
-          "expected": "a writer posted to an account deactivated while it waited: admitted"
+          "expected": "a writer posted to an account deactivated while it waited: admitted|the second session never waited on a lock"
+        },
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "an account created while a writer waits is held by its line read (R6)",
+          "expected": "the second session never waited on a lock|a deactivation committed under an uncommitted writer.s line"
         }
       ]
     },
