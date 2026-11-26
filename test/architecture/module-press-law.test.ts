@@ -142,30 +142,6 @@ const routedPressLawDebt: readonly RoutedPressLawDebt[] = [
     'purchase_order_amendment_get',
     "'purchase_order_amendment_get',",
   ),
-  routedIdentityDebt(
-    'apps/web/src/receiving-section.ts',
-    'purchasing',
-    'goods_receipt_get',
-    "['goods_receipt_form', 'goods_receipt_get'],",
-  ),
-  routedIdentityDebt(
-    'apps/web/src/receiving-section.ts',
-    'purchasing',
-    'goods_receipt_list',
-    "['goods_receipt_list', 'goods_receipt_list'],",
-  ),
-  routedIdentityDebt(
-    'apps/web/src/receiving-section.ts',
-    'purchasing',
-    'goods_receipt_list',
-    "['goods_receipt_list', 'goods_receipt_list'],",
-  ),
-  routedIdentityDebt(
-    'apps/web/src/receiving-section.ts',
-    'purchasing',
-    'goods_receipt_list',
-    "return `<section class=\"panel data-panel\" data-receiving-progress><h2>Receiving</h2><p><a href=\"${link('goods_receipt_form')}\">Create goods receipt</a> · <a href=\"${link('goods_receipt_list')}\">View receipts and corrections</a></p><p>Receive against a released order. Close only when every active line has zero remaining. Reopen before receiving, correcting or amending a closed order.</p><table><thead><tr><th>Order line</th><th>Ordered</th><th>Received</th><th>Remaining</th></tr></thead><tbody>${section.lines.map((line) => `<tr data-order-line=\"${escapeHtml(line.recordId)}\"><td><a href=\"${link('purchase_order_line_detail', line.recordId)}\">${escapeHtml(line.item)}</a></td><td>${escapeHtml(line.ordered)}</td><td>${escapeHtml(line.received)}</td><td>${escapeHtml(line.remaining)}</td></tr>`).join('')}</tbody></table>${section.lines.length === 0 ? '<p>No active order lines.</p>' : ''}<p>Corrections append compensating movements; they never edit the original receipt. If a correction would make historical stock negative, correct the erroneous outbound movement first, or use the stock-count process if the discrepancy is physical.</p></section>`;",
-  ),
   {
     file: 'packages/compiler/src/conformance.ts',
     message: 'generic press references inventory identity northstar.inventory',

@@ -110,10 +110,7 @@ import type { RegisteredCapabilityOperationExecutionRequest } from '../../packag
 import { SemanticQueryGateway } from '../../packages/runtime/src/semantic-query-gateway.js';
 import { PostgresInventoryReconciliationService } from '../../packages/postgres-provider/src/inventory-reconciliation-service.js';
 import { renderSurfaceRuntimeWithData } from '../../apps/web/src/surface-runtime.js';
-import {
-  loadReceivingSection,
-  RECEIVING_SURFACE_RUNTIME_EXTENSION,
-} from '../../apps/web/src/receiving-section.js';
+import { RECEIVING_SURFACE_RUNTIME_EXTENSION } from '../../apps/web/src/receiving-section.js';
 import {
   RECEIVING_CAPABILITY_ID,
   receiptBinding,
@@ -3335,28 +3332,6 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
       'receipt correction uses the real operation gateway and registered executor',
     );
     assert.equal(Number(await received()), 7);
-    await entry.run({ headers: {} }, async (view) => {
-      const order = await queryGateway.invoke(view, {
-        schemaVersion: 'northstar.semantic-query-request/v1',
-        queryId: 'northstar.app:query.purchase_order_get',
-        arguments: {
-          recordId: orderId,
-          'northstar.app:parameter.purchase_order_get_legal_entity_scope':
-            legalReject,
-        },
-      });
-      assert.ok(order.records[0]);
-      const progress = await loadReceivingSection(
-        view,
-        queryGateway,
-        order.records[0],
-        legalReject,
-      );
-      assert.deepEqual(
-        progress.lines.map((row) => [row.ordered, row.received, row.remaining]),
-        [['10', '7', '3']],
-      );
-    });
     const orderPage = await entry.run({ headers: {} }, (view) =>
       renderSurfaceRuntimeWithData(
         view,
@@ -3379,6 +3354,18 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
       orderPage.html,
       /<td[^>]*data-column-label="Ordered"[^>]*>10<\/td>/u,
       'the selected order line retains its exact ordered quantity',
+    );
+    // Ordered 10, received 7, open 3: the lines the page itself reads, from
+    // the same projection the removed hand-built loader read.
+    const lineCell = (label: string) =>
+      new RegExp(
+        `<td[^>]*data-column-label="${label}"[^>]*>([^<]*)</td>`,
+        'u',
+      ).exec(orderPage.html)?.[1];
+    assert.deepEqual(
+      ['Ordered', 'Received', 'Open'].map(lineCell),
+      ['10', '7', '3'],
+      'the composed purchase order lines state ordered, received and open',
     );
     assert.match(orderPage.html, /Receive this line/u);
     assert.match(orderPage.html, /Receive this line without cost/u);
