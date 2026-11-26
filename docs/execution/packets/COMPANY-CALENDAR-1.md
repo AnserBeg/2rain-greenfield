@@ -11,14 +11,17 @@ CI tier: pending full
 - `inventory_business_period(t, at)` is re-bodied as the resolver with company null; signature, STABLE, definer, search path, grants, scope check, both error names and DETAIL, arithmetic and NULL-in-NULL-out are unchanged (C3). `ledger_business_day(company, instant)` changes only its last line: it resolves the entry's stored company (C6).
 - C1: the new tables are authoritative; `inventory_tenant_calendars` is a frozen mirror (UPDATE, DELETE and TRUNCATE refuse); provisioning writes both stores in one transaction through `business_calendar_put` (granted to no one, READ COMMITTED guard, one row FOR UPDATE, future-business-day rule); a tenant default keeps one version while the mirror exists. The six test writes (the design read counted five; 1a-i's ledger test is the sixth) go through `test/helpers/business-calendar-seed.ts`.
 - C2: overrides at provisioning are deferred to slice 2; the conflict branch is unchanged. Overrides are proved with rows the test inserts as owner.
-- C5: no UPDATE or DELETE runs at migration time; an override starting at `-infinity` is refused in SQL once its company has a ledger company row or a stock posting configuration.
+- C5: no UPDATE or DELETE runs at migration time; an override starting at `-infinity` is refused in SQL once its company has a ledger company row or a stock posting configuration. Ruling R1 (orchestrator, adopted): that guard naming two engines' tables is admitted for slice 1; the slice 2 design replaces it with a form that names no engine.
+- The backfill runs under `LOCK TABLE platform.inventory_tenant_calendars IN SHARE ROW EXCLUSIVE MODE`, so a provisioning call on the old body cannot commit a mirror row after the copy (Fable review finding 1).
+- Error name: an undeclared tenant now gets `calendar.undeclared` from `ledger_business_day` (it was `INVENTORY_TENANT_CALENDAR_UNDECLARED` through the old body); no code or test keys on either name on that path. `inventory_business_period` keeps its 0033 name.
+- Ruling R2 (adopted): company validity is not checked in slice 1, where no path writes a company-keyed calendar; it is required in slices 2 and 3.
 - C7: `platform.business_calendar_read(company)` ships with its isolation red (EXECUTE for `north_star_runtime` only; membership tenant-wide or scoped to that company).
 
 ## Test it yourself
 
 | Slice | Try it | Expected observation |
 | --- | --- | --- |
-| 1 | `node --import tsx --test test/postgres/business-calendar.test.ts` (PostgreSQL), then `bash scripts/check-expected-red.sh --run calendar-company-branch`. | 16 tests pass. Company B (Winnipeg override) is on 2026-04-01 at 05:30Z while company A (Vancouver default) is on 03-31, through `business_day` and `ledger_business_day`. The control drops the company branch and the three override tests fail as declared. |
+| 1 | `node --import tsx --test test/postgres/business-calendar.test.ts` (PostgreSQL), then `bash scripts/check-expected-red.sh --run calendar-company-branch`. | 22 tests pass. Company B (Winnipeg override) is on 2026-04-01 at 05:30Z while company A (Vancouver default) is on 03-31, through `business_day` and `ledger_business_day`. The control drops the company branch and the three override tests fail as declared. |
 
 ## Discriminating proofs (rule 8)
 
@@ -26,10 +29,12 @@ Controls in [`COMPANY-CALENDAR-1-s1.expected-red.json`](../../../test/evidence/C
 
 ## Evidence
 
-- Controls on GitHub (evidence dispatch): 16 of 17 green on `d8546ba6` (run 45862315140), `calendar-backfill-verbatim` green on `94b8ee95` (run 45855675343, its restored run also executed the CI-only preceding-reader proof), `calendar-no-utc-default` re-proved green (run 45864149796) after its replacement text lost a `$$` (the runner's string replace turns `$$` into `$`).
+- Controls on GitHub (evidence dispatch): 15 of the 16 dispatched green on `d8546ba6` (run 45862315140), `calendar-backfill-verbatim` green on `94b8ee95` (run 45855675343, its restored run also executed the CI-only preceding-reader proof), `calendar-no-utc-default` re-proved green (run 45864149796) after its replacement text lost a `$$` (the runner's string replace turns `$$` into `$`).
 - `db/schema.snapshot.json` is CI-9 snapshot mode output (run 45855665619), not a hand patch; the fresh-tenant snapshot it regenerated is byte-identical to the committed one.
 - GUARD-WIDEN name law (eabdb9408's guard on this tip and on main): identical hits, none from this packet.
 - Rule 13, no rung: `business-calendar-reader.test.ts` runs the actual preceding binary (main `b6668f05`) on the migrated database; it answers the booking usage query and its grouped-report horizon gives the same business day as the resolver. The upgrade test digests every pre-existing table before and after the migration (byte-identical) and a booking after the upgrade freezes the same calendar JSON.
+
+Fix round (Fable review FIX): one red per check — the controls file now holds 37 entries, adding the posting-configuration arm, version number and start order, the default's unbounded first version, the calendars append-only trigger, the business-period undeclared refusal, business_day's NULL instant, the future-day rule split into its two clauses, the setter's scope and zone refusals, both revoked predicates, and one control per table CHECK (tested with triggers off so each CHECK stands alone).
 
 ## Rule 17
 

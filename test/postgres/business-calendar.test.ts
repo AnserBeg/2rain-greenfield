@@ -289,6 +289,10 @@ test('calendar versions and calendars are append-only', async () => {
       'a version was deleted',
     ],
     [
+      'UPDATE platform.business_calendars SET created_at = created_at WHERE tenant_id=$1',
+      'a calendar was rewritten',
+    ],
+    [
       'DELETE FROM platform.business_calendars WHERE tenant_id=$1',
       'a calendar was deleted',
     ],
@@ -589,5 +593,196 @@ test("a principal scoped to company A is refused company B's calendar", async ()
     }
   } finally {
     await runtime.end();
+  }
+});
+
+test('an override cannot start unbounded once its company has a stock posting configuration', async () => {
+  const scope = await tenant('UTC');
+  const company = randomUUID();
+  await (
+    await admin()
+  ).query(
+    `SELECT platform.provision_inventory_scope($1,$2,$3,'CAL','CAL','UTC','00:00',$4,1::smallint,'reject',0,'codeAndNarrative','codeOnly','codeAndNarrative','codeAndNarrative','codeAndNarrative',NULL,NULL,NULL,NULL,NULL)`,
+    [scope.id, scope.environment, company, 'a'.repeat(64)],
+  );
+  await assert.rejects(
+    override(scope, company, [['-infinity', 'America/Winnipeg', '00:00']]),
+    { message: 'calendar.overrideBackdated' },
+    'an override re-dated a company with stock facts',
+  );
+});
+
+test('calendar versions append in number and start order', async () => {
+  const scope = await tenant('UTC');
+  const calendar = await override(scope, randomUUID(), [
+    ['2026-01-01T06:00Z', 'America/Winnipeg', '00:00'],
+  ]);
+  const insert = (version: number, from: string) =>
+    one(
+      "INSERT INTO platform.business_calendar_versions(tenant_id,calendar_id,version,effective_from,time_zone,business_day_boundary) VALUES ($1,$2,$3,$4,'UTC','00:00')",
+      [scope.id, calendar, version, from],
+    );
+  await assert.rejects(
+    insert(3, '2026-06-01T00:00Z'),
+    { message: 'calendar.versionOutOfOrder' },
+    'a version number was skipped',
+  );
+  await assert.rejects(
+    insert(2, '2025-06-01T00:00Z'),
+    { message: 'calendar.versionOutOfOrder' },
+    'a version started before its predecessor',
+  );
+});
+
+test("a tenant default's first version starts unbounded", async () => {
+  const scope = await tenant(null);
+  const pool = await admin();
+  await pool.query(
+    'INSERT INTO platform.business_calendars(calendar_id,tenant_id) VALUES ($1,$1)',
+    [scope.id],
+  );
+  await assert.rejects(
+    pool.query(
+      "INSERT INTO platform.business_calendar_versions(tenant_id,calendar_id,version,effective_from,time_zone,business_day_boundary) VALUES ($1,$1,1,'2026-01-01T00:00Z','UTC','00:00')",
+      [scope.id],
+    ),
+    { message: 'calendar.defaultStartsUnbounded' },
+    'a tenant default started at a finite instant',
+  );
+});
+
+test('the calendar setter refuses a mismatched scope and an unknown zone', async () => {
+  const scope = await tenant('UTC');
+  const { tomorrow } = await one<{ tomorrow: string }>(
+    "SELECT ((date_trunc('day', now() AT TIME ZONE 'UTC') + interval '1 day') AT TIME ZONE 'UTC')::text AS tomorrow",
+  );
+  await assert.rejects(
+    put(scope, null, tomorrow),
+    { message: 'calendar.scopeInvalid' },
+    'the setter accepted a mismatched scope',
+  );
+  await assert.rejects(
+    put(scope, randomUUID(), tomorrow, 'Mars/Olympus_Mons'),
+    { message: 'calendar.timeZoneUnknown' },
+    'the setter accepted an unknown time zone',
+  );
+});
+
+test('a revoked membership or a revoked role reads no calendar', async () => {
+  const scope = await tenant('UTC');
+  const company = randomUUID();
+  const pool = await admin();
+  const grant = async (roleRevoked: boolean, membershipRevoked: boolean) => {
+    const [principal, role] = [randomUUID(), randomUUID()];
+    await pool.query(
+      `INSERT INTO platform.current_policy_roles(tenant_id,environment_id,role_id,role_key,revoked_at)
+       VALUES ($1,$2,$3,$5, CASE WHEN $4 THEN now() END)`,
+      [scope.id, scope.environment, role, roleRevoked, `calendar-${role}`],
+    );
+    await pool.query(
+      `INSERT INTO platform.current_policy_memberships(tenant_id,environment_id,membership_id,principal_id,role_id,legal_entity_id,revoked_at)
+       VALUES ($1,$2,gen_random_uuid(),$3,$4,NULL, CASE WHEN $5 THEN now() END)`,
+      [scope.id, scope.environment, principal, role, membershipRevoked],
+    );
+    return principal;
+  };
+  const cases = [
+    [await grant(false, true), 'a revoked membership read a calendar'],
+    [await grant(true, false), 'a revoked role read a calendar'],
+  ] as const;
+  const runtime = new pg.Pool({
+    ...(await database).connection,
+    user: 'north_star_runtime',
+    max: 1,
+  });
+  try {
+    for (const [principal, label] of cases) {
+      const client = await runtime.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(
+          "SELECT set_config('north_star.tenant_id',$1,true),set_config('north_star.environment_id',$2,true),set_config('north_star.principal_id',$3,true)",
+          [scope.id, scope.environment, principal],
+        );
+        await assert.rejects(
+          client.query('SELECT * FROM platform.business_calendar_read($1)', [
+            company,
+          ]),
+          { message: 'calendar.readUnavailable' },
+          label,
+        );
+      } finally {
+        await client.query('ROLLBACK');
+        client.release();
+      }
+    }
+  } finally {
+    await runtime.end();
+  }
+});
+
+test('each calendar table CHECK refuses its own violation', async () => {
+  const scope = await tenant(null);
+  const client = await (await admin()).connect();
+  const version = (column: string, value: string) =>
+    `INSERT INTO platform.business_calendar_versions(tenant_id,calendar_id,version,effective_from,time_zone,business_day_boundary,week_start,fiscal_year_start_month)
+     SELECT $1, gen_random_uuid(), v.version, v.effective_from, v.time_zone, '00:00', v.week_start, v.fiscal_year_start_month
+       FROM (SELECT 2 AS version, '2026-01-01T00:00Z'::timestamptz AS effective_from, 'UTC'::text AS time_zone,
+                    1::smallint AS week_start, 1::smallint AS fiscal_year_start_month) AS base,
+            LATERAL (SELECT ${column === 'version' ? value : 'base.version'} AS version,
+                            ${column === 'effective_from' ? value : 'base.effective_from'} AS effective_from,
+                            ${column === 'time_zone' ? value : 'base.time_zone'} AS time_zone,
+                            ${column === 'week_start' ? value : 'base.week_start'} AS week_start,
+                            ${column === 'fiscal_year_start_month' ? value : 'base.fiscal_year_start_month'} AS fiscal_year_start_month) AS v`;
+  // Triggers are off, so each insert meets only the table's own CHECKs.
+  const cases = [
+    [
+      'INSERT INTO platform.business_calendars(calendar_id,tenant_id,environment_id) VALUES ($1,$1,$2)',
+      [scope.id, scope.environment],
+      'a calendar with an environment and no company was stored',
+    ],
+    [
+      'INSERT INTO platform.business_calendars(calendar_id,tenant_id) VALUES (gen_random_uuid(),$1)',
+      [scope.id],
+      "a tenant default's id differs from its tenant",
+    ],
+    [version('version', '0'), [scope.id], 'a version numbered zero was stored'],
+    [
+      version('effective_from', "'infinity'::timestamptz"),
+      [scope.id],
+      'a version starting at infinity was stored',
+    ],
+    [
+      version('effective_from', "'-infinity'::timestamptz"),
+      [scope.id],
+      'a second version starting unbounded was stored',
+    ],
+    [version('time_zone', "' '::text"), [scope.id], 'a blank zone was stored'],
+    [
+      version('week_start', '8::smallint'),
+      [scope.id],
+      'a week start outside 1-7 was stored',
+    ],
+    [
+      version('fiscal_year_start_month', '13::smallint'),
+      [scope.id],
+      'a fiscal month outside 1-12 was stored',
+    ],
+  ] as const;
+  try {
+    await client.query('BEGIN');
+    await client.query("SET LOCAL session_replication_role = 'replica'");
+    for (const [sql, values, label] of cases) {
+      await client.query('SAVEPOINT check_case');
+      await assert.rejects(
+        client.query(sql, [...values]),
+        { code: '23514' },
+        label,
+      );
+      await client.query('ROLLBACK TO SAVEPOINT check_case');
+    }
+  } finally {
+    await client.query('ROLLBACK');
+    client.release();
   }
 });

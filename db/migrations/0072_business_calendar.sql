@@ -60,7 +60,10 @@ CREATE TABLE platform.business_calendar_versions (
 
 -- Backfill: each tenant default copies the mirror row verbatim, starting at
 -- -infinity, recorded when the mirror row was created. No pg_timezone_names
--- check applies to these rows.
+-- check applies to these rows. The lock holds off a provisioning call running
+-- the old body until this migration commits, so no mirror row lands after the
+-- copy and stays without a default.
+LOCK TABLE platform.inventory_tenant_calendars IN SHARE ROW EXCLUSIVE MODE;
 INSERT INTO platform.business_calendars (calendar_id, tenant_id, created_at)
   SELECT mirror.tenant_id, mirror.tenant_id, mirror.created_at
     FROM platform.inventory_tenant_calendars AS mirror;
