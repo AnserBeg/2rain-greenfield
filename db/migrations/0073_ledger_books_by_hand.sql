@@ -481,8 +481,7 @@ DECLARE tenant uuid := north_star_internal.trusted_tenant_id(); environment uuid
     RAISE EXCEPTION 'ledger.priorChanged'; END IF;
   IF NOT EXISTS (SELECT FROM platform.ledger_core_roles r WHERE r.role_id = kind_id) THEN
     RAISE EXCEPTION 'ledger.unknownAccountKind'; END IF;
-  account := coalesce(was.account_id, gen_random_uuid());
-  BEGIN
+  account := coalesce(was.account_id, gen_random_uuid()); BEGIN
     PERFORM north_star_internal.ledger_put_account(company, account, args->>'code', kind_id, args->>'label',
       args->>'active' = 'yes');
   EXCEPTION WHEN unique_violation THEN RAISE EXCEPTION 'ledger.priorChanged'; END;
