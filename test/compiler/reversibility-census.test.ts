@@ -181,19 +181,21 @@ test('a release compiled under the cut v3 profile emits the declaration the rele
 
 test('profile v3 is v2 plus the reversibility key and nothing else', () => {
   const { view, compiled } = compiledAppViewV3();
-  const file = JSON.parse(
-    readFileSync('apps/web/release/app.compiled.json', 'utf8'),
-  ) as {
-    application: {
-      releaseManifest: {
-        projections: {
-          familyId: string;
-          artifactRoot: string;
-          requiredRuntimeCapability?: unknown;
-        }[];
-      };
+  type Application = {
+    releaseManifest: {
+      projections: {
+        familyId: string;
+        artifactRoot: string;
+        requiredRuntimeCapability?: unknown;
+      }[];
     };
   };
+  const file = JSON.parse(
+    readFileSync('apps/web/release/app.compiled.json', 'utf8'),
+  ) as { applications?: Application[]; application?: Application };
+  // The checked-in release may be a v2 lineage: compare with its head entry,
+  // the one compiled from today's authored package.
+  const head = (file.applications?.at(-1) ?? file.application)!;
   const agentFamily = 'northstar.compiler:projection-family.agent-discovery';
   const roots = (
     projections: readonly { familyId: string; artifactRoot: string }[],
@@ -205,7 +207,7 @@ test('profile v3 is v2 plus the reversibility key and nothing else', () => {
     );
   assert.deepEqual(
     roots(compiled.bundle.releaseManifest.projections),
-    roots(file.application.releaseManifest.projections),
+    roots(head.releaseManifest.projections),
   );
   const { reversibility, ...rest } = view.projections.agent.payload as Record<
     string,
@@ -226,20 +228,23 @@ test('the adopted v2 release carries no declaration and keeps its agent-discover
       'reversibility',
     ),
   );
-  const file = JSON.parse(
-    readFileSync('apps/web/release/app.compiled.json', 'utf8'),
-  ) as {
-    application: {
-      releaseManifest: {
-        projections: { familyId: string; requiredRuntimeCapability: unknown }[];
-      };
+  type Application = {
+    releaseManifest: {
+      projections: { familyId: string; requiredRuntimeCapability: unknown }[];
     };
   };
-  assert.deepEqual(agentCapability(file.application.releaseManifest), {
-    capabilityId: 'northstar.runtime:capability.agent-discovery',
-    // Today: assistant confirmations (2); main's floor, unchanged.
-    minimumVersion: 2,
-  });
+  const file = JSON.parse(
+    readFileSync('apps/web/release/app.compiled.json', 'utf8'),
+  ) as { applications?: Application[]; application?: Application };
+  // Every lineage entry is an adopted v2 release: none carries v3's floor.
+  const entries = file.applications ?? [file.application!];
+  assert.ok(entries.length > 0);
+  for (const entry of entries)
+    assert.deepEqual(agentCapability(entry.releaseManifest), {
+      capabilityId: 'northstar.runtime:capability.agent-discovery',
+      // Today: assistant confirmations (2); main's floor, unchanged.
+      minimumVersion: 2,
+    });
 });
 
 test('every release member not known to be passive is a consumer, including one a later language adds', () => {

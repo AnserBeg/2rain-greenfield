@@ -308,20 +308,23 @@ test(
     // The checked-in head compiled under the cut, unadopted v3 profile: the
     // release that adopting v3 will ship. The adopted head itself is
     // unchanged, so main's reader keeps serving it.
-    const shipped = compiledAppViewV3().envelope as unknown as {
-      application: {
-        releaseRoot: string;
-        normalizedDefinitionBytesBase64: string;
-        artifacts: { contentHash: string; canonicalBytesBase64: string }[];
-        releaseManifest: {
-          projections: {
-            familyId: string;
-            requiredRuntimeCapability: { minimumVersion: number };
-          }[];
-        };
+    type ShippedRelease = {
+      releaseRoot: string;
+      normalizedDefinitionBytesBase64: string;
+      artifacts: { contentHash: string; canonicalBytesBase64: string }[];
+      releaseManifest: {
+        projections: {
+          familyId: string;
+          requiredRuntimeCapability: { minimumVersion: number };
+        }[];
       };
     };
-    const head = shipped.application;
+    const shipped = compiledAppViewV3().envelope as unknown as {
+      applications?: ShippedRelease[];
+      application?: ShippedRelease;
+    };
+    // The checked-in release may be a v2 lineage: its last entry is the head.
+    const head = (shipped.applications?.at(-1) ?? shipped.application)!;
     assert.equal(
       head.releaseManifest.projections.find(
         (projection) =>
