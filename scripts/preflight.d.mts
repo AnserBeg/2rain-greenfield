@@ -11,6 +11,7 @@ export function changedFiles(): {
   base: string;
   files: string[];
   all: string[];
+  error?: string;
 };
 export function migrationSnapshotProblem(changed: string[]): string | undefined;
 export function replaySnapshotWarning(changed: string[]): string | undefined;
@@ -19,5 +20,6 @@ export function steps(changed: {
   base: string;
   files: string[];
   all: string[];
+  error?: string;
 }): PreflightStep[];
 export function excerpt(output: string, tests: boolean): string;

@@ -82,6 +82,7 @@ test('preflight runs every check the lanes keep failing on, each with a remedy',
   assert.deepEqual(
     list.map((step) => step.id),
     [
+      'base',
       'format',
       'lint',
       'typecheck',
@@ -92,6 +93,7 @@ test('preflight runs every check the lanes keep failing on, each with a remedy',
       'expected-red',
       'hygiene',
       'reachability',
+      'lock-observability',
       'surface',
       'ci-evidence',
     ],
@@ -133,7 +135,10 @@ test('preflight runs every check the lanes keep failing on, each with a remedy',
   const commandOf = (id: string) => commands.get(id) ?? '';
   assert.match(commandOf('format'), /prettier --check a\.ts$/u);
   assert.match(commandOf('typecheck'), /pnpm typecheck$/u);
-  assert.match(commandOf('reachability'), /test-lock-observability\.test\.ts/u);
+  assert.match(
+    commandOf('lock-observability'),
+    /test-lock-observability\.test\.ts/u,
+  );
   assert.match(commandOf('surface'), /surface-data-binding\.test\.ts/u);
   for (const pin of ['evidence-on-demand', 'ci-tiers', 'preflight']) {
     assert.match(
@@ -238,4 +243,45 @@ test('the schema-snapshot step fails on a migration alone and only warns on a re
   assert.equal(release.ok, true);
   assert.match(release.output, /^WARNING: /u);
   assert.deepEqual(run(['README.md']), { ok: true, output: '' });
+});
+
+test('a base that cannot be found is a failed step with a remedy, not a silent skip', () => {
+  const list = steps({
+    base: 'main',
+    files: [],
+    all: [],
+    error: 'neither origin/main nor main exists in this repository',
+  }) as unknown as {
+    id: string;
+    remedy: string;
+    check: () => { ok: boolean; output: string };
+  }[];
+  const base = list.find((step) => step.id === 'base');
+  assert.ok(base);
+  const result = base.check();
+  assert.equal(result.ok, false);
+  assert.match(result.output, /neither origin\/main nor main/u);
+  assert.match(base.remedy, /git fetch origin main/u);
+  // With a base the same step passes.
+  const found = steps({ base: 'abc', files: [], all: [] }) as unknown as {
+    id: string;
+    check: () => { ok: boolean };
+  }[];
+  assert.equal(found.find((step) => step.id === 'base')?.check().ok, true);
+});
+
+test('changedFiles reports a missing base', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ci-8-nobase-'));
+  const previous = process.cwd();
+  try {
+    spawnSync('git', ['init', '-q', '-b', 'topic'], { cwd: dir });
+    process.chdir(dir);
+    const { changedFiles } = await import('../../scripts/preflight.mjs');
+    const result = changedFiles() as { files: string[]; error?: string };
+    assert.deepEqual(result.files, []);
+    assert.match(result.error ?? '', /neither origin\/main nor main/u);
+  } finally {
+    process.chdir(previous);
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

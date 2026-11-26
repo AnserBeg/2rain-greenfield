@@ -35,6 +35,15 @@ export interface NodeResultLedger {
     readonly event: NodeResultEvent;
     readonly file: string;
   }>;
+  /** Results the ledger did not credit, with where they came from, for a mismatch report. */
+  dropped(): ReadonlyArray<{
+    readonly file: string;
+    readonly name: string;
+    readonly nesting: number;
+    readonly type: string;
+    readonly sequence: number;
+    readonly ownFileSummary: boolean;
+  }>;
   /** Per-file counts Node itself reported, for reconciliation. */
   summaries(): ReadonlyMap<string, Partial<NodeResultCounts>>;
 }

@@ -27,21 +27,54 @@ export function git(...args) {
   return result.status === 0 ? result.stdout : '';
 }
 
-/** Files this branch changes against main, committed or not, that still exist. */
+function gitStrict(...args) {
+  const result = spawnSync('git', args, { encoding: 'utf8' });
+  if (result.status !== 0) {
+    throw new Error(
+      `git ${args.join(' ')} failed${result.stderr ? `: ${result.stderr.trim()}` : ''}`,
+    );
+  }
+  return result.stdout;
+}
+
+/**
+ * Files this branch changes against main, committed or not, that still exist.
+ * A base that cannot be found is reported in `error` (preflight fails by name),
+ * never as an empty change list that silently skips format and lint.
+ */
 export function changedFiles() {
-  const mainRef = git('rev-parse', '--verify', '--quiet', 'origin/main').trim()
-    ? 'origin/main'
-    : 'main';
-  const base = git('merge-base', mainRef, 'HEAD').trim() || mainRef;
-  const names = new Set([
-    ...git('diff', '--name-only', '--diff-filter=d', base).split('\n'),
-    ...git('ls-files', '--others', '--exclude-standard').split('\n'),
-  ]);
-  return {
-    base,
-    files: [...names].filter((name) => name !== '' && existsSync(name)).sort(),
-    all: [...names].filter((name) => name !== '').sort(),
-  };
+  try {
+    const mainRef = ['origin/main', 'main'].find(
+      (ref) =>
+        spawnSync('git', ['rev-parse', '--verify', '--quiet', ref], {
+          encoding: 'utf8',
+        }).status === 0,
+    );
+    if (mainRef === undefined) {
+      throw new Error('neither origin/main nor main exists in this repository');
+    }
+    const base = gitStrict('merge-base', mainRef, 'HEAD').trim();
+    if (base === '')
+      throw new Error(`no merge base between ${mainRef} and HEAD`);
+    const names = new Set([
+      ...gitStrict('diff', '--name-only', '--diff-filter=d', base).split('\n'),
+      ...gitStrict('ls-files', '--others', '--exclude-standard').split('\n'),
+    ]);
+    return {
+      base,
+      files: [...names]
+        .filter((name) => name !== '' && existsSync(name))
+        .sort(),
+      all: [...names].filter((name) => name !== '').sort(),
+    };
+  } catch (error) {
+    return {
+      base: 'main',
+      files: [],
+      all: [],
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 /** Pure: a migration changed and the schema snapshot did not. */
@@ -86,7 +119,7 @@ const tsx = ['--import', 'tsx'];
 /**
  * Every step: how to run it and what to do when it fails.
  *
- * @param {{ base: string, files: string[], all: string[] }} changed
+ * @param {{ base: string, files: string[], all: string[], error?: string }} changed
  * @returns {Step[]}
  */
 export function steps(changed) {
@@ -100,6 +133,16 @@ export function steps(changed) {
     namedFailures: true,
   });
   return [
+    {
+      id: 'base',
+      title: 'the branch base (origin/main or main) can be found',
+      check: () => ({
+        ok: changed.error === undefined,
+        output: changed.error ?? '',
+      }),
+      remedy:
+        'git fetch origin main (or create a local main branch); without a base preflight cannot tell which files this branch changes, so it cannot check format, lint or the snapshot rules',
+    },
     {
       id: 'format',
       title: 'prettier on changed files',
@@ -180,12 +223,15 @@ export function steps(changed) {
     ),
     architecture(
       'reachability',
-      'reachability producers and lock observability',
-      [
-        'test/architecture/test-reachability.test.ts',
-        'test/architecture/test-lock-observability.test.ts',
-      ],
+      'reachability producers',
+      ['test/architecture/test-reachability.test.ts'],
       'package.json and test/helpers/reachability-producers.ts must name the same files in the same order for every producer; add the file in both',
+    ),
+    architecture(
+      'lock-observability',
+      'test lock observability',
+      ['test/architecture/test-lock-observability.test.ts'],
+      'the shared test lock registry (scripts/test-lock-registry.mjs, scripts/run-with-test-lock.mjs) or its observability test changed: fix the registry or the case named above. If it failed with a process state other than Z it is a race in the test setup, so run it again alone before changing anything',
     ),
     architecture(
       'surface',

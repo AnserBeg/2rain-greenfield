@@ -26,7 +26,7 @@ What it cannot do: it does not run PostgreSQL, browser or integration suites, so
 
 ### Pending tier marker
 
-A packet record may declare `CI tier: pending quick` or `CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/45666035414` instead of a run URL, so a lane no longer needs a second docs-only commit after its first dispatch. `scripts/check-record-ci-tier.mjs` accepts the marker only on a `packet/*` branch (`GITHUB_HEAD_REF`, then `GITHUB_REF_NAME`, then the local branch); anywhere else (main, `candidate/*`, a detached merge) it refuses, so the integrator train still requires the real run URL. A record with the marker and a URL line is two declarations and fails. Replace the marker with the URL once the run exists; that is a docs-only change after the tested tip, as before, but no longer a precondition for dispatching.
+A packet record may declare `CI tier: pending quick` or `CI tier: pending full` instead of a run URL, so a lane no longer needs a second docs-only commit after its first dispatch. `scripts/check-record-ci-tier.mjs` accepts the marker only on a `packet/*` branch (`GITHUB_HEAD_REF`, then `GITHUB_REF_NAME`, then the local branch); anywhere else (main, `candidate/*`, a detached merge) it refuses, so the integrator train still requires the real run URL. A record with the marker and a URL line is two declarations and fails. Replace the marker with the URL once the run exists; that is a docs-only change after the tested tip, as before, but no longer a precondition for dispatching.
 
 ## Items
 

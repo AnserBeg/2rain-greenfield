@@ -436,10 +436,10 @@
     },
     {
       "name": "ci8-pf-lock-observability-missing",
-      "claim": "The reachability family includes lock observability.",
+      "claim": "Lock observability is its own preflight step.",
       "file": "scripts/preflight.mjs",
-      "original": "        'test/architecture/test-lock-observability.test.ts',\n",
-      "replacement": "",
+      "original": "      'lock-observability',\n      'test lock observability',\n      ['test/architecture/test-lock-observability.test.ts'],",
+      "replacement": "      'lock-observability',\n      'test lock observability',\n      ['test/architecture/test-lock-observability-x.test.ts'],",
       "test": {
         "files": ["test/architecture/preflight.test.ts"],
         "namePattern": "preflight runs every check the lanes keep failing on, each with a remedy"
@@ -448,7 +448,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "preflight runs every check the lanes keep failing on, each with a remedy",
-          "expected": "--test test/architecture/test-reachability.test.ts'"
+          "expected": "test-lock-observability-x.test.ts"
         }
       ]
     },
@@ -539,6 +539,42 @@
           "file": "test/architecture/preflight.test.ts",
           "name": "a stale language-coverage digest, decision or observation snapshot is named, each alone",
           "expected": "0 !== 1"
+        }
+      ]
+    },
+    {
+      "name": "ci8-pf-base-not-found-passes",
+      "claim": "A base that cannot be found fails the base step instead of passing with no files.",
+      "file": "scripts/preflight.mjs",
+      "original": "        ok: changed.error === undefined,",
+      "replacement": "        ok: true,",
+      "test": {
+        "files": ["test/architecture/preflight.test.ts"],
+        "namePattern": "a base that cannot be found is a failed step with a remedy"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/preflight.test.ts",
+          "name": "a base that cannot be found is a failed step with a remedy, not a silent skip",
+          "expected": "true !== false"
+        }
+      ]
+    },
+    {
+      "name": "ci8-pf-base-error-swallowed",
+      "claim": "A missing main ref is reported as an error, not an empty change list.",
+      "file": "scripts/preflight.mjs",
+      "original": "      throw new Error('neither origin/main nor main exists in this repository');",
+      "replacement": "      return { base: 'main', files: [], all: [] };",
+      "test": {
+        "files": ["test/architecture/preflight.test.ts"],
+        "namePattern": "changedFiles reports a missing base"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/preflight.test.ts",
+          "name": "changedFiles reports a missing base",
+          "expected": "neither origin/main nor main"
         }
       ]
     }

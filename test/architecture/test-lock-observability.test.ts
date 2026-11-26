@@ -1466,6 +1466,18 @@ async function startZombie() {
   const pidLine = await readLine(parent.stdout);
   const zombiePid = Number(pidLine.trim());
   assert.ok(Number.isSafeInteger(zombiePid) && zombiePid > 0, pidLine);
+  // The parent reports the pid straight after fork(), before the child has
+  // exited: wait until it is a zombie, not a running process.
+  const deadline = Date.now() + 5000;
+  while (readProcessState(zombiePid) !== 'Z') {
+    if (Date.now() > deadline) {
+      parent.kill('SIGKILL');
+      assert.fail(
+        `the forked child ${String(zombiePid)} did not become a zombie within 5 s (state ${readProcessState(zombiePid)})`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
   return {
     zombiePid,
     stop: async () => {
