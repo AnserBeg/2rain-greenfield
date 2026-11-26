@@ -84,6 +84,9 @@ continues. Mechanics: `mission-cadence`.
 `packages/postgres-provider/src/release-verification-service.ts`
 `packages/platform-runtime/src/trust/**`
 `db/migrations/**`
+`test/architecture/first-party-names.baseline.json`
+`test/architecture/first-party-names.policy.json`
+`test/architecture/engines.manifest.json`
 <!-- end-critical-pathspecs -->
 
 - **A read is owed** — one fresh-naive Codex arm the orchestrator launches over

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "about": "GUARD-WIDEN name law: generic code never names a declared application's vocabulary. Read by packages/dev-tooling/src/module-press-law.ts (PRESS010-PRESS015).",
+  "about": "GUARD-WIDEN name law: generic code never names a declared application's vocabulary. Read by packages/dev-tooling/src/module-press-law.ts (PRESS010-PRESS015). Every packages/*/src and apps/*/src must be in scope or excluded (PRESS010 otherwise). A Critical pathspec (AGENTS.md).",
   "vocabularySources": ["apps/web/release/app.authored.json"],
   "requiredNames": [
     "purchase_order",
@@ -19,7 +19,19 @@
     "packages/customization/src",
     "packages/operations-agent/src",
     "apps/web/src",
-    "db/migrations"
+    "db/migrations",
+    "packages/observability/src",
+    "apps/api/src"
+  ],
+  "excluded": [
+    {
+      "path": "packages/domain/src",
+      "reason": "The first-party declarations themselves (audit class A1); the vocabulary lives here by design. PRESS003-005 police its contents."
+    },
+    {
+      "path": "packages/dev-tooling/src",
+      "reason": "Repository tooling and architecture guards, never shipped; a guard has to name what it checks."
+    }
   ],
   "moduleWords": ["receiving", "fulfillment", "payables", "receivables"],
   "ordinaryWords": [

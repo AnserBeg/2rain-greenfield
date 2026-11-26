@@ -1060,6 +1060,7 @@ export interface NameLawBaseline {
 }
 
 interface NameLawPolicy {
+  readonly excluded: readonly string[];
   readonly externalNames: readonly {
     readonly file: string;
     readonly name: string;
@@ -1210,17 +1211,33 @@ function checkNameLaw(
     policy.externalNames.map((entry) => `${entry.file}\u0000${entry.name}`),
   );
   const observed = new Map<string, Map<string, ObservedKey>>();
+  if (policy.scope.length === 0) {
+    return refuse(NAME_LAW_POLICY_PATH, 'the name-law scope is empty');
+  }
+  for (const directory of policy.scope) {
+    if (!existsSync(join(root, directory))) {
+      return refuse(
+        NAME_LAW_POLICY_PATH,
+        `name-law scope root ${directory} does not exist`,
+      );
+    }
+  }
+  const unclassified = unclassifiedSourceRoots(root, policy);
+  if (unclassified.length > 0) {
+    return refuse(
+      NAME_LAW_POLICY_PATH,
+      `${unclassified.join(', ')} is neither in the name-law scope nor excluded; classify it in the policy`,
+    );
+  }
   const files = policy.scope
-    .flatMap((directory) => {
-      const path = join(root, directory);
-      return existsSync(path) ? nameLawFilesBelow(path) : [];
-    })
+    .flatMap((directory) => nameLawFilesBelow(join(root, directory)))
     .sort();
   for (const file of files) {
     scanned.add(file);
     const repoPath = normalizePath(relative(root, file));
     const source = readFileSync(file, 'utf8');
-    const text = withoutComments(source, repoPath);
+    const sourceFile = parseScriptSource(source, repoPath);
+    const text = withoutComments(source, sourceFile);
     const owner = owners.get(repoPath);
     const keys = new Map<string, ObservedKey>();
     const observe = (
@@ -1247,9 +1264,27 @@ function checkNameLaw(
     const pathText = repoPath
       .slice(scopeRoot === undefined ? 0 : scopeRoot.length + 1)
       .replace(/\.[a-z]+$/u, '')
-      .replaceAll(/[/.-]/gu, ' ');
+      .replaceAll(/[/.]/gu, ' ')
+      .replaceAll('-', '_');
+    // A static string construction owns its literal tokens: its completed
+    // value (or each statically known run) is matched instead, so
+    // 'purchase' + '_order' is one purchase_order and nothing is counted twice.
+    const constructions = staticallyConstructedStrings(source, repoPath);
     const hits = [
-      ...nameHits(text, vocabulary, true),
+      ...nameHits(text, vocabulary, true).filter(
+        (hit) =>
+          !constructions.some((construction) =>
+            construction.literalRanges.some(
+              (range) => hit.index >= range.start && hit.index < range.end,
+            ),
+          ),
+      ),
+      ...constructions.flatMap((construction) =>
+        nameHits(construction.value, vocabulary, true).map((hit) => ({
+          ...hit,
+          index: construction.index,
+        })),
+      ),
       ...nameHits(pathText, vocabulary, false).map((hit) => ({
         ...hit,
         index: -1,
@@ -1266,12 +1301,12 @@ function checkNameLaw(
         observation.message,
       );
     }
-    for (const imported of domainImports(text, repoPath)) {
+    for (const imported of domainImports(sourceFile, repoPath)) {
       observe(
-        `import:${imported.target}`,
+        `import:${imported.target}#${imported.binding}`,
         imported.index,
         'PRESS013_DOMAIN_IMPORT',
-        `generic code imports ${imported.target} from packages/domain`,
+        `generic code imports ${imported.binding} from ${imported.target}`,
       );
     }
     if (keys.size > 0) observed.set(repoPath, keys);
@@ -1513,7 +1548,9 @@ function nameHits(
     `(?::[a-z_]+\\.|\\b(?:${vocabulary.idPrefixes.map(escapeRegExp).join('|') || '(?!)'})\\.)$`,
     'u',
   );
-  for (const token of text.matchAll(/[A-Za-z0-9_]+/gu)) {
+  // A token continues across '-' so kebab spellings (purchase-order) are one
+  // name, as in file names and CSS-style strings.
+  for (const token of text.matchAll(/[A-Za-z0-9_]+(?:-[A-Za-z0-9_]+)*/gu)) {
     const words = identifierWords(token[0]);
     const tokenInIdPosition =
       allowIdPosition &&
@@ -1571,52 +1608,164 @@ function identifierWords(token: string): string[] {
   return token
     .replaceAll(/([a-z0-9])([A-Z])/gu, '$1 $2')
     .replaceAll(/([A-Z]+)([A-Z][a-z])/gu, '$1 $2')
-    .split(/[\s_]+/u)
+    .split(/[\s_-]+/u)
     .filter(Boolean)
     .map((word) => word.toLowerCase());
 }
 
+interface DomainImport {
+  readonly binding: string;
+  readonly index: number;
+  readonly target: string;
+}
+
+/**
+ * One observation per imported binding, so widening a baselined import
+ * (`{ a }` to `{ a, b }`) is a new row. A namespace or `export *` is `*`, a
+ * default import `default`, a side-effect import `side-effect`, and a dynamic
+ * `import()` or `require()` (quoted or backtick) `import()` / `require()`.
+ */
 function domainImports(
-  text: string,
+  sourceFile: ts.SourceFile | undefined,
   repoPath: string,
-): { readonly index: number; readonly target: string }[] {
-  const imports: { index: number; target: string }[] = [];
-  for (const match of text.matchAll(
-    /\b(?:from|import|require)\s*\(?\s*(['"])([^'"\n]+)\1/gu,
-  )) {
-    const specifier = match[2] ?? '';
-    let target: string | undefined;
+): DomainImport[] {
+  if (sourceFile === undefined) return [];
+  const imports: DomainImport[] = [];
+  const targetOf = (specifier: string): string | undefined => {
     if (
       specifier === '@north-star/domain' ||
       specifier.startsWith('@north-star/domain/')
     ) {
-      target = specifier;
-    } else if (specifier.startsWith('.')) {
-      const resolved = normalizePath(
-        join(repoPath.split('/').slice(0, -1).join('/'), specifier),
-      );
-      if (resolved.startsWith('packages/domain/')) {
-        target = resolved.replace(/\.[a-z]+$/u, '');
-      }
+      return specifier;
     }
-    if (target !== undefined) imports.push({ index: match.index, target });
-  }
+    if (!specifier.startsWith('.')) return undefined;
+    const resolved = normalizePath(
+      join(repoPath.split('/').slice(0, -1).join('/'), specifier),
+    );
+    return resolved.startsWith('packages/domain/')
+      ? resolved.replace(/\.[a-z]+$/u, '')
+      : undefined;
+  };
+  const record = (
+    node: ts.Node,
+    specifier: ts.Node | undefined,
+    bindings: readonly string[],
+  ): void => {
+    if (
+      specifier === undefined ||
+      !(
+        ts.isStringLiteral(specifier) ||
+        ts.isNoSubstitutionTemplateLiteral(specifier)
+      )
+    ) {
+      return;
+    }
+    const target = targetOf(specifier.text);
+    if (target === undefined) return;
+    const index = node.getStart(sourceFile);
+    for (const binding of bindings) imports.push({ binding, index, target });
+  };
+  const visit = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node)) {
+      const clause = node.importClause;
+      const bindings: string[] = [];
+      if (clause === undefined) bindings.push('side-effect');
+      if (clause?.name) bindings.push('default');
+      const named = clause?.namedBindings;
+      if (named && ts.isNamespaceImport(named)) bindings.push('*');
+      if (named && ts.isNamedImports(named)) {
+        for (const element of named.elements) {
+          bindings.push((element.propertyName ?? element.name).text);
+        }
+      }
+      record(node, node.moduleSpecifier, bindings);
+    } else if (ts.isExportDeclaration(node)) {
+      const clause = node.exportClause;
+      record(
+        node,
+        node.moduleSpecifier,
+        clause && ts.isNamedExports(clause)
+          ? clause.elements.map(
+              (element) => (element.propertyName ?? element.name).text,
+            )
+          : ['*'],
+      );
+    } else if (
+      ts.isImportEqualsDeclaration(node) &&
+      ts.isExternalModuleReference(node.moduleReference)
+    ) {
+      record(node, node.moduleReference.expression, ['require()']);
+    } else if (ts.isCallExpression(node)) {
+      if (node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+        record(node, node.arguments[0], ['import()']);
+      } else if (
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === 'require'
+      ) {
+        record(node, node.arguments[0], ['require()']);
+      }
+    } else if (
+      ts.isImportTypeNode(node) &&
+      ts.isLiteralTypeNode(node.argument)
+    ) {
+      record(node, node.argument.literal, ['import()']);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
   return imports;
 }
 
-function withoutComments(source: string, repoPath: string): string {
-  if (extname(repoPath) === '.sql') {
+function parseScriptSource(
+  source: string,
+  repoPath: string,
+): ts.SourceFile | undefined {
+  if (!staticStringSourceExtensions.has(extname(repoPath))) return undefined;
+  return ts.createSourceFile(
+    repoPath,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    scriptKind(repoPath),
+  );
+}
+
+/**
+ * Every `packages/<name>/src` and `apps/<name>/src` is classified: in the
+ * scope, or excluded with a reason. A new package is refused until it is.
+ */
+function unclassifiedSourceRoots(
+  root: string,
+  policy: NameLawPolicy,
+): string[] {
+  const classified = new Set([...policy.scope, ...policy.excluded]);
+  const unclassified: string[] = [];
+  for (const parent of ['apps', 'packages']) {
+    const directory = join(root, parent);
+    if (!existsSync(directory)) continue;
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const candidate = `${parent}/${entry.name}/src`;
+      if (
+        entry.isDirectory() &&
+        existsSync(join(root, candidate)) &&
+        !classified.has(candidate)
+      ) {
+        unclassified.push(candidate);
+      }
+    }
+  }
+  return unclassified.toSorted();
+}
+
+function withoutComments(
+  source: string,
+  sourceFile: ts.SourceFile | undefined,
+): string {
+  if (sourceFile === undefined) {
     return source
       .replaceAll(/\/\*[\s\S]*?\*\//gu, blank)
       .replaceAll(/--[^\n]*/gu, blank);
   }
-  const sourceFile = ts.createSourceFile(
-    repoPath,
-    source,
-    ts.ScriptTarget.Latest,
-    false,
-    scriptKind(repoPath),
-  );
   const ranges = new Map<number, number>();
   const collect = (position: number): void => {
     for (const range of [
@@ -1705,6 +1854,9 @@ function parsePolicy(value: unknown): NameLawPolicy {
     });
   };
   return {
+    excluded: named('excluded', ['path', 'reason']).map(
+      (row) => row.path ?? '',
+    ),
     externalNames: named('externalNames', ['file', 'name', 'reason']).map(
       (row) => ({ file: row.file ?? '', name: row.name ?? '' }),
     ),

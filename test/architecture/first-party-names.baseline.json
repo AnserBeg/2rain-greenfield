@@ -1,7 +1,66 @@
 {
   "version": 1,
-  "measuredOn": "origin/main e112d58ff799912d7b743d5eb7fbd79f796c5318",
+  "measuredOn": "origin/main e112d58ff799912d7b743d5eb7fbd79f796c5318 (re-measured in the GUARD-WIDEN fix round)",
   "files": {
+    "apps/api/src/agent-cli.ts": {
+      "owner": "AGENT-CATALOG",
+      "cluster": "C10",
+      "expires": "2027-03-31",
+      "names": {
+        "import:packages/domain/src/app/immediate-edits#firstPartyImmediateEdits": 1
+      }
+    },
+    "apps/api/src/composition-root.ts": {
+      "owner": "DOMAIN-PROFILE",
+      "cluster": "A2",
+      "expires": "2027-03-31",
+      "names": {
+        "engine:booking": 3,
+        "field:purchasing_settings_key": 1,
+        "field:purchasing_settings_require_approval": 1,
+        "import:packages/domain/src/app/immediate-edits#firstPartyImmediateEdits": 1,
+        "import:packages/domain/src/app/seed#composedApplicationSeed": 1,
+        "import:packages/domain/src/app/seed#ComposedApplicationSeedProfile": 1,
+        "import:packages/domain/src/app/seed#DISTRIBUTOR_COMPANY_NAME": 1,
+        "name:purchase_order": 3,
+        "name:purchasing_settings_create": 1
+      }
+    },
+    "apps/api/src/erp-capabilities.ts": {
+      "owner": "DOMAIN-PROFILE",
+      "cluster": "A2",
+      "expires": "2027-03-31",
+      "names": {
+        "engine:billing": 3,
+        "engine:booking": 3,
+        "name:fulfillment": 3,
+        "name:payables": 3,
+        "name:purchase_order_approval": 3,
+        "name:receivables": 3,
+        "name:receiving": 3
+      }
+    },
+    "apps/api/src/main.ts": {
+      "owner": "UNASSIGNED",
+      "cluster": "unclassified",
+      "expires": "2027-03-31",
+      "names": {
+        "import:packages/domain/src/app/builder#APPLICATION_IDS": 1
+      }
+    },
+    "apps/api/src/measure-page.ts": {
+      "owner": "UNASSIGNED",
+      "cluster": "unclassified",
+      "expires": "2027-03-31",
+      "names": {
+        "name:commercial_purchase_order_get": 1,
+        "name:party_role": 1,
+        "name:purchase_order": 2,
+        "name:purchase_order_line": 1,
+        "name:purchase_order_release": 1,
+        "name:receiving": 1
+      }
+    },
     "apps/web/src/component-registry.ts": {
       "owner": "SECTION-BLOCKS",
       "cluster": "C11",
@@ -12,7 +71,7 @@
         "name:receiving": 15,
         "name:reservation_list": 1,
         "name:sales_order": 8,
-        "name:sales_order_line": 1,
+        "name:sales_order_line": 3,
         "name:shipment": 7,
         "name:shipment_list": 1
       }
@@ -48,7 +107,8 @@
         "name:purchase_order_line_get": 1,
         "name:purchase_order_list": 2,
         "name:purchase_order_received": 3,
-        "name:receiving": 27
+        "name:receiving": 27,
+        "name:stock_count": 1
       }
     },
     "apps/web/src/sales-section.ts": {
@@ -390,7 +450,7 @@
         "name:item_alias": 2,
         "name:party_address": 2,
         "name:party_role": 2,
-        "name:posted_stock_balance": 15,
+        "name:posted_stock_balance": 16,
         "name:posting": 3,
         "name:price_list": 3,
         "name:price_list_assignment": 2,
@@ -402,13 +462,13 @@
         "name:purchase_order_received": 6,
         "name:purchasing_settings": 1,
         "name:reopen_period": 4,
-        "name:reservation_balance": 4,
+        "name:reservation_balance": 5,
         "name:sales_order": 4,
         "name:sales_order_line": 6,
         "name:sales_order_shipped": 6,
         "name:shipment": 7,
         "name:shipment_line": 4,
-        "name:stock_count": 39,
+        "name:stock_count": 45,
         "name:stock_count_line": 16,
         "name:tax_code": 1,
         "name:vendor_bill": 5,
@@ -492,10 +552,10 @@
       "cluster": "C10",
       "expires": "2027-03-31",
       "names": {
-        "import:packages/domain/src/app/capability-children": 1,
-        "import:packages/domain/src/app/record-references": 1,
-        "import:packages/domain/src/purchasing/approval-arguments": 1,
-        "import:packages/domain/src/purchasing/approvals": 1,
+        "import:packages/domain/src/app/capability-children#capabilityChildren": 1,
+        "import:packages/domain/src/app/record-references#referenceTargets": 1,
+        "import:packages/domain/src/purchasing/approval-arguments#effectiveApprovalArguments": 1,
+        "import:packages/domain/src/purchasing/approvals#PO_APPROVAL_CAPABILITY_ID": 1,
         "name:purchasing": 2,
         "name:shipment": 1
       }
@@ -506,7 +566,7 @@
       "expires": "2027-03-31",
       "names": {
         "engine:booking": 33,
-        "import:packages/domain/src/billing/fraction": 1
+        "import:packages/domain/src/billing/fraction#decimal": 1
       }
     },
     "packages/postgres-provider/src/billing-quote.ts": {
@@ -515,9 +575,10 @@
       "expires": "2027-03-31",
       "names": {
         "engine:booking": 16,
-        "import:packages/domain/src/billing/arrears": 1,
-        "import:packages/domain/src/billing/quote": 1,
-        "import:packages/domain/src/billing/terms": 1
+        "import:packages/domain/src/billing/arrears#dueArrearsCycle": 1,
+        "import:packages/domain/src/billing/arrears#reviewArrearsCharges": 1,
+        "import:packages/domain/src/billing/quote#quoteBillingService": 1,
+        "import:packages/domain/src/billing/terms#compileRatePlan": 1
       }
     },
     "packages/postgres-provider/src/billing-terms.ts": {
@@ -525,7 +586,9 @@
       "cluster": "C12",
       "expires": "2027-03-31",
       "names": {
-        "import:packages/domain/src/billing/terms": 1,
+        "import:packages/domain/src/billing/terms#compileRatePlan": 1,
+        "import:packages/domain/src/billing/terms#digest": 1,
+        "import:packages/domain/src/billing/terms#publishRateTable": 1,
         "name:fulfillment": 5
       }
     },
@@ -558,14 +621,15 @@
         "field:vendor_bill_line_quantity": 1,
         "field:vendor_bill_number": 1,
         "field:vendor_bill_state": 2,
-        "import:packages/domain/src/sales/workspace": 1,
+        "import:packages/domain/src/sales/workspace#COMMERCIAL_READ_MODEL_BINDINGS": 1,
         "name:customer_credit": 2,
         "name:customer_invoice": 2,
         "name:customer_invoice_line": 2,
         "name:fulfillment": 3,
+        "name:goods_receipt": 1,
         "name:price_list": 3,
-        "name:purchase_order": 5,
-        "name:purchase_order_approval": 3,
+        "name:purchase_order": 7,
+        "name:purchase_order_approval": 4,
         "name:purchasing": 1,
         "name:sales_order": 1,
         "name:tax_code": 5,
@@ -591,7 +655,7 @@
         "field:party_credit_hold": 1,
         "field:party_credit_limit": 1,
         "field:party_default_currency": 2,
-        "import:packages/domain/src/sales/workspace": 1,
+        "import:packages/domain/src/sales/workspace#CREDIT_READ_MODEL_OUTPUTS": 1,
         "name:customer_credit": 2,
         "name:customer_invoice": 2,
         "name:sales_order": 3,
@@ -625,7 +689,7 @@
       "cluster": "C9",
       "expires": "2027-03-31",
       "names": {
-        "import:packages/domain/src/purchasing/receipt-posted-event": 1,
+        "import:packages/domain/src/purchasing/receipt-posted-event#RECEIPT_POSTED_EVENT": 1,
         "name:purchasing": 1
       }
     },
@@ -728,7 +792,8 @@
         "field:sales_order_line_line_number": 1,
         "field:sales_order_line_ordered_quantity": 1,
         "field:sales_order_shipped_shipped_quantity": 1,
-        "import:packages/domain/src/sales/workspace": 1,
+        "import:packages/domain/src/sales/workspace#FULFILLMENT_READ_MODEL_BINDINGS": 1,
+        "import:packages/domain/src/sales/workspace#SALES_SHORTAGE_STATES": 1,
         "name:fulfillment": 26,
         "name:reservation": 1,
         "name:sales_order": 2,
@@ -776,7 +841,7 @@
         "field:purchase_order_line_ordered_quantity": 1,
         "field:purchase_order_received_received_quantity": 3,
         "field:purchase_order_received_unit_id": 3,
-        "name:goods_receipt": 13,
+        "name:goods_receipt": 14,
         "name:goods_receipt_line": 9,
         "name:inventory_movement": 1,
         "name:purchase_order": 3,
@@ -798,7 +863,7 @@
         "field:stock_count_line_item_id": 1,
         "field:stock_count_location_id": 1,
         "field:stock_count_state": 5,
-        "import:packages/domain/src/inventory/workspace": 1,
+        "import:packages/domain/src/inventory/workspace#INVENTORY_READ_MODEL_BINDINGS": 1,
         "name:stock_count_line": 2
       }
     },
@@ -834,7 +899,7 @@
         "name:inventory_transaction": 2,
         "name:inventory_transaction_line": 1,
         "name:posted_stock_balance": 1,
-        "name:stock_count": 20
+        "name:stock_count": 21
       }
     },
     "packages/postgres-provider/src/inventory-posting-error.ts": {
@@ -938,17 +1003,17 @@
         "field:stock_count_reason_narrative": 5,
         "field:stock_count_recorded_at": 6,
         "field:stock_count_state": 15,
-        "import:packages/domain/src/inventory/contracts": 1,
+        "import:packages/domain/src/inventory/contracts#INVENTORY_CONTRACT_V1": 1,
         "name:fulfillment": 365,
-        "name:goods_receipt": 32,
+        "name:goods_receipt": 33,
         "name:goods_receipt_line": 2,
-        "name:inventory": 3,
+        "name:inventory": 1,
         "name:inventory_movement": 12,
         "name:inventory_period_lock": 1,
         "name:inventory_transaction": 14,
         "name:inventory_transaction_line": 8,
         "name:party_role": 7,
-        "name:posted_stock_balance": 26,
+        "name:posted_stock_balance": 27,
         "name:posting": 1,
         "name:purchase_order_received": 3,
         "name:receiving": 11,
@@ -959,7 +1024,7 @@
         "name:sales_order_shipped": 4,
         "name:shipment": 169,
         "name:shipment_line": 44,
-        "name:stock_count": 292,
+        "name:stock_count": 308,
         "name:stock_count_line": 157
       }
     },
@@ -1002,7 +1067,7 @@
         "field:posted_stock_balance_posted_quantity": 1,
         "field:posted_stock_balance_unit_id": 1,
         "name:fulfillment": 13,
-        "name:goods_receipt": 2,
+        "name:goods_receipt": 3,
         "name:inventory": 1,
         "name:inventory_movement": 1,
         "name:inventory_transaction": 3,
@@ -1010,7 +1075,8 @@
         "name:posted_stock_balance": 42,
         "name:receiving": 4,
         "name:reservation_balance": 2,
-        "name:sales_order_shipped": 4
+        "name:sales_order_shipped": 4,
+        "name:stock_count": 1
       }
     },
     "packages/postgres-provider/src/inventory-shipment-cost.ts": {
@@ -1040,8 +1106,11 @@
         "field:shipment_state": 1,
         "field:vendor_bill_number": 1,
         "field:vendor_bill_state": 1,
-        "import:packages/domain/src/inventory/valuation": 1,
-        "import:packages/domain/src/sales/workspace": 1,
+        "import:packages/domain/src/inventory/valuation#VALUATION_INVOICE_BINDING": 1,
+        "import:packages/domain/src/inventory/valuation#VALUATION_ITEM_BINDING": 1,
+        "import:packages/domain/src/inventory/valuation#VALUATION_SHIPMENT_BINDING": 1,
+        "import:packages/domain/src/inventory/valuation#VALUATION_SHIPMENT_LINE_BINDING": 1,
+        "import:packages/domain/src/sales/workspace#COMMERCIAL_READ_MODEL_BINDINGS": 1,
         "name:customer_invoice": 7,
         "name:customer_invoice_line": 7,
         "name:goods_receipt": 8,
@@ -1072,7 +1141,7 @@
       "names": {
         "field:stock_count_counting_mode": 1,
         "field:stock_count_state": 2,
-        "name:stock_count": 6
+        "name:stock_count": 7
       }
     },
     "packages/postgres-provider/src/module-storage-materializer.ts": {
@@ -1091,7 +1160,7 @@
         "name:fulfillment": 10,
         "name:inventory_movement": 3,
         "name:inventory_period_lock": 2,
-        "name:posted_stock_balance": 70,
+        "name:posted_stock_balance": 72,
         "name:purchase_order_received": 2,
         "name:reservation_balance": 2,
         "name:sales_order_shipped": 2
@@ -1124,11 +1193,14 @@
       "names": {
         "field:inventory_transaction_state": 1,
         "field:purchase_order_approval_state": 1,
-        "import:packages/domain/src/purchasing/approval-arguments": 1,
-        "import:packages/domain/src/purchasing/approvals": 1,
-        "name:purchase_order": 6,
+        "import:packages/domain/src/purchasing/approval-arguments#approvalAction": 1,
+        "import:packages/domain/src/purchasing/approval-arguments#ApprovalAction": 1,
+        "import:packages/domain/src/purchasing/approval-arguments#checkApprovalArguments": 1,
+        "import:packages/domain/src/purchasing/approvals#PO_APPROVAL_CAPABILITY_ID": 1,
+        "name:goods_receipt": 1,
+        "name:purchase_order": 11,
         "name:purchase_order_amendment": 8,
-        "name:purchase_order_approval": 10,
+        "name:purchase_order_approval": 13,
         "name:purchase_order_line": 2,
         "name:purchasing": 3,
         "name:purchasing_settings": 1,
@@ -1140,10 +1212,10 @@
       "cluster": "C3",
       "expires": "2027-03-31",
       "names": {
-        "import:packages/domain/src/purchasing/approvals": 1,
+        "import:packages/domain/src/purchasing/approvals#purchaseOrderRevisionImage": 1,
         "name:purchase_order": 3,
-        "name:purchase_order_amendment": 1,
-        "name:purchase_order_approval": 1,
+        "name:purchase_order_amendment": 2,
+        "name:purchase_order_approval": 2,
         "name:purchasing": 1
       }
     },
@@ -1155,6 +1227,7 @@
         "field:inventory_transaction_state": 2,
         "field:purchase_order_line_ordered_quantity": 2,
         "field:vendor_bill_state": 3,
+        "name:goods_receipt": 1,
         "name:payables": 1,
         "name:purchase_order": 6,
         "name:purchase_order_line": 3,
@@ -1206,7 +1279,7 @@
         "field:inventory_movement_unit_id": 4,
         "field:purchase_order_received_received_quantity": 4,
         "field:purchase_order_received_unit_id": 4,
-        "name:goods_receipt": 4,
+        "name:goods_receipt": 5,
         "name:goods_receipt_line": 6,
         "name:purchase_order_line": 2,
         "name:purchase_order_received": 4
@@ -1219,7 +1292,7 @@
       "names": {
         "field:goods_receipt_kind": 1,
         "field:goods_receipt_line_cost_status": 1,
-        "name:goods_receipt": 7,
+        "name:goods_receipt": 8,
         "name:goods_receipt_line": 3,
         "name:goods_receipt_post": 2,
         "name:purchase_order": 1,
@@ -1238,6 +1311,7 @@
         "field:purchase_order_amendment_close_remainder": 1,
         "field:purchase_order_amendment_line_revision": 1,
         "field:purchase_order_amendment_quantity": 1,
+        "name:goods_receipt": 1,
         "name:purchase_order": 2,
         "name:purchase_order_amendment": 2,
         "name:purchase_order_line": 1,
@@ -1256,7 +1330,7 @@
         "field:inventory_movement_source_line": 1,
         "field:inventory_movement_source_type": 1,
         "field:purchase_order_line_line_number": 1,
-        "import:packages/domain/src/purchasing/workspace": 1,
+        "import:packages/domain/src/purchasing/workspace#RECEIVING_READ_MODEL_BINDINGS": 1,
         "name:fulfillment": 7,
         "name:goods_receipt": 1,
         "name:goods_receipt_line": 3,
@@ -1289,9 +1363,10 @@
       "names": {
         "engine:billing": 6,
         "engine:booking": 5,
-        "import:packages/domain/src/inventory/valuation": 1,
-        "import:packages/domain/src/sales/definition": 1,
+        "import:packages/domain/src/inventory/valuation#VALUATION_CAPABILITY_ID": 1,
+        "import:packages/domain/src/sales/definition#COMMERCIAL_CAPABILITY_ID": 1,
         "name:fulfillment": 6,
+        "name:goods_receipt": 1,
         "name:receiving": 5
       }
     },
@@ -1300,7 +1375,7 @@
       "cluster": "C4",
       "expires": "2027-03-31",
       "names": {
-        "engine:stock-posting": 23,
+        "engine:stock-posting": 24,
         "field:inventory_transaction_state": 4,
         "name:tax_code": 9
       }
@@ -1337,7 +1412,7 @@
         "field:stock_count_state": 7,
         "name:inventory": 1,
         "name:inventory_movement": 1,
-        "name:stock_count": 51,
+        "name:stock_count": 53,
         "name:stock_count_line": 9
       }
     },
@@ -1346,7 +1421,7 @@
       "cluster": "C9",
       "expires": "2027-03-31",
       "names": {
-        "import:packages/domain/src/purchasing/receipt-posted-event": 1,
+        "import:packages/domain/src/purchasing/receipt-posted-event#RECEIPT_POSTED_EVENT": 1,
         "name:purchasing": 1
       }
     },
@@ -1355,7 +1430,7 @@
       "cluster": "C9",
       "expires": "2027-03-31",
       "names": {
-        "import:packages/domain/src/purchasing/receipt-posted-event": 1,
+        "import:packages/domain/src/purchasing/receipt-posted-event#RECEIPT_POSTED_EVENT": 1,
         "name:goods_receipt": 1,
         "name:purchasing": 1
       }
