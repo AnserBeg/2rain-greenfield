@@ -1,0 +1,99 @@
+name: Regenerate schema snapshots
+
+# CI-9. Lanes may not run a local PostgreSQL, so a migration or release change
+# used to mean hand-patching the schema snapshots. A dispatch of this workflow
+# applies the migrations on the pinned PostgreSQL image, regenerates both
+# snapshots with the documented commands, says whether each differs from the
+# committed file, and uploads the regenerated files as an artifact.
+#
+#   gh workflow run schema-snapshots.yml --ref <branch carrying the workflow> -f ref=<branch or full commit sha>
+#
+# It never pushes and never commits: the token is read-only. The lane downloads
+# the artifact and commits the files itself (docs/execution/evidence-on-demand.md).
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or full 40-character commit SHA whose schema snapshots are regenerated
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+# Every dispatch is its own group, so two lanes never cancel each other.
+concurrency:
+  group: schema-snapshots-${{ github.run_id }}
+  cancel-in-progress: false
+
+env:
+  CI: '1'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  regenerate:
+    name: Regenerate db/schema.snapshot.json and the fresh-tenant replay snapshot
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out the commit under test
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      # Resolved once, so the artifact and every printed line name one commit
+      # even when `ref` was a branch that moves.
+      - name: Resolve the commit under test
+        id: resolve
+        run: echo "head_sha=$(git rev-parse HEAD)" >>"$GITHUB_OUTPUT"
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install frozen dependencies
+        run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      # Two-space JSON first, then Prettier: the generator does both.
+      - name: Regenerate db/schema.snapshot.json against PostgreSQL
+        run: node --import tsx test/helpers/regenerate-schema-snapshot.ts
+      - name: Regenerate the fresh-tenant full-replay snapshot against PostgreSQL
+        run: node --import tsx test/helpers/generate-fresh-tenant-full-replay-schema.ts
+      - name: Say whether each snapshot differs from the committed file
+        env:
+          HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
+        run: |
+          short="${HEAD_SHA:0:12}"
+          {
+            echo '### Regenerated schema snapshots'
+            echo
+            echo "Commit \`$HEAD_SHA\`. Artifact: \`schema-snapshots-$HEAD_SHA\`"
+            echo
+          } >>"$GITHUB_STEP_SUMMARY"
+          for snapshot in db/schema.snapshot.json test/postgres/fresh-tenant-full-replay-schema.snapshot.json; do
+            if ! git cat-file -e "HEAD:$snapshot" 2>/dev/null; then
+              line="$snapshot: NEW, none is committed at $short; download the artifact and commit it."
+            elif git diff --quiet -- "$snapshot"; then
+              line="$snapshot: IDENTICAL to the file committed at $short; nothing to commit."
+            else
+              counts="$(git diff --numstat -- "$snapshot" | awk '{ print "+" $1 " -" $2 " lines" }')"
+              line="$snapshot: DIFFERS from the file committed at $short ($counts); download the artifact and commit it."
+              git --no-pager diff -- "$snapshot" | sed -n '1,200p'
+            fi
+            echo "$line"
+            echo "::notice title=schema snapshot::$line"
+            echo "- $line" >>"$GITHUB_STEP_SUMMARY"
+          done
+      - name: Retain the regenerated snapshots
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: schema-snapshots-${{ steps.resolve.outputs.head_sha }}
+          path: |
+            db/schema.snapshot.json
+            test/postgres/fresh-tenant-full-replay-schema.snapshot.json
+          if-no-files-found: error
+          retention-days: 7

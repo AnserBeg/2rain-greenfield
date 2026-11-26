@@ -507,6 +507,85 @@ test('a control counts only when the log shows its red and its restored green', 
   }
 });
 
+test('the schema-snapshots workflow regenerates both snapshots, uploads them and never writes', () => {
+  const workflow = readFileSync(
+    '.github/workflows/schema-snapshots.yml',
+    'utf8',
+  );
+
+  assert.match(
+    workflow,
+    /^on:\n {2}workflow_dispatch:\n {4}inputs:\n {6}ref:\n(?: {8}.+\n)*? {8}required: true\n/mu,
+    'a dispatch must name the ref it regenerates',
+  );
+  assert.doesNotMatch(
+    workflow,
+    /^ {2}(?:push|pull_request|pull_request_target|schedule|workflow_run):/mu,
+    'only a dispatch may start it',
+  );
+  assert.match(workflow, /^permissions:\n {2}contents: read$/mu);
+  assert.equal(
+    workflow.match(/^\s*permissions:/gmu)?.length,
+    1,
+    'no job may widen the token',
+  );
+  assert.doesNotMatch(
+    workflow,
+    /:\s*write\b/u,
+    'the token must stay read-only',
+  );
+  assert.doesNotMatch(
+    workflow,
+    /\bgit\s+(?:push|commit|add|tag|config)\b|\bgh\s+(?:pr|api|release)\b/u,
+    'the workflow must never push, commit or publish',
+  );
+  assert.match(
+    workflow,
+    /^ {2}group: schema-snapshots-\$\{\{ github\.run_id \}\}$/mu,
+    'every dispatch is its own group',
+  );
+  for (const [, action, ref] of workflow.matchAll(
+    /^\s*(?:-\s+)?uses:\s*([^@\s]+)@(\S+)/gmu,
+  )) {
+    assert.match(
+      ref ?? '',
+      /^[0-9a-f]{40}$/u,
+      `${action} must use a commit SHA`,
+    );
+  }
+  // The dispatch input reaches the checkout only, never a shell line.
+  assert.deepEqual(
+    inputUseLines(workflow).map((line) => line.trim()),
+    ['ref: ${{ inputs.ref }}'],
+  );
+  assert.ok(
+    workflow.includes(
+      'run: node --import tsx test/helpers/regenerate-schema-snapshot.ts',
+    ),
+    'the schema snapshot is regenerated with its documented command',
+  );
+  assert.ok(
+    workflow.includes(
+      'run: node --import tsx test/helpers/generate-fresh-tenant-full-replay-schema.ts',
+    ),
+    'the replay snapshot is regenerated with its documented command',
+  );
+  assert.match(workflow, /fetch-depth: 0\n/u);
+  assert.ok(
+    workflow.includes(
+      'name: schema-snapshots-${{ steps.resolve.outputs.head_sha }}',
+    ),
+  );
+  assert.ok(
+    workflow.includes(
+      '            db/schema.snapshot.json\n            test/postgres/fresh-tenant-full-replay-schema.snapshot.json\n',
+    ),
+    'both regenerated files are uploaded',
+  );
+  assert.ok(workflow.includes('IDENTICAL to the file committed at'));
+  assert.ok(workflow.includes('DIFFERS from the file committed at'));
+});
+
 function labelGate(label: string): string {
   return [
     '    if: >-',

@@ -55,6 +55,42 @@
           "expected": "over the 900 s budget"
         }
       ]
+    },
+    {
+      "name": "ci9-snapshots-token-write",
+      "claim": "The snapshot regeneration workflow holds a read-only token, so it can never push.",
+      "file": ".github/workflows/schema-snapshots.yml",
+      "original": "permissions:\n  contents: read\n\n# Every dispatch",
+      "replacement": "permissions:\n  contents: write\n\n# Every dispatch",
+      "test": {
+        "files": ["test/architecture/evidence-on-demand.test.ts"],
+        "namePattern": "the schema-snapshots workflow regenerates both snapshots, uploads them and never writes"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/evidence-on-demand.test.ts",
+          "name": "the schema-snapshots workflow regenerates both snapshots, uploads them and never writes",
+          "expected": "the token must stay read-only"
+        }
+      ]
+    },
+    {
+      "name": "ci9-snapshots-no-regeneration",
+      "claim": "The workflow regenerates db/schema.snapshot.json with its documented command, not a stand-in.",
+      "file": ".github/workflows/schema-snapshots.yml",
+      "original": "run: node --import tsx test/helpers/regenerate-schema-snapshot.ts",
+      "replacement": "run: 'true'",
+      "test": {
+        "files": ["test/architecture/evidence-on-demand.test.ts"],
+        "namePattern": "the schema-snapshots workflow regenerates both snapshots, uploads them and never writes"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/evidence-on-demand.test.ts",
+          "name": "the schema-snapshots workflow regenerates both snapshots, uploads them and never writes",
+          "expected": "the schema snapshot is regenerated with its documented command"
+        }
+      ]
     }
   ]
 }
