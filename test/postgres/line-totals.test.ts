@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 
-import type { Pool } from 'pg';
+import { escapeIdentifier, type Pool } from 'pg';
 
 import {
   registeredSemanticQueryFromPinnedView,
@@ -44,6 +44,35 @@ const outcome = (promise: Promise<{ outcome: string }>) =>
     (error: Error & { code?: string }) =>
       `${String(error.code)} ${error.message}`,
   );
+
+/** The module table holding one record (physical names are hashed). */
+async function tableHolding(pool: Pool, recordId: string): Promise<string> {
+  const tables = await pool.query<{ table_name: string }>(
+    `SELECT table_name FROM information_schema.columns
+      WHERE table_schema = 'north_star_module' AND column_name = 'record_id'`,
+  );
+  for (const { table_name } of tables.rows) {
+    const hit = await pool.query(
+      `SELECT 1 FROM north_star_module.${escapeIdentifier(table_name)} WHERE record_id = $1`,
+      [recordId],
+    );
+    if (hit.rowCount) return table_name;
+  }
+  throw new Error(`no module table holds ${recordId}`);
+}
+
+/** Wait until at least `count` sessions of this database wait on a lock. */
+async function lockWaiters(pool: Pool, count: number): Promise<void> {
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    const waiting = await pool.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM pg_stat_activity
+        WHERE datname = current_database() AND wait_event_type = 'Lock'`,
+    );
+    if ((waiting.rows[0]?.n ?? 0) >= count) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`fewer than ${String(count)} sessions waited on a lock`);
+}
 
 async function withRental(
   label: string,
@@ -405,7 +434,7 @@ test(
         pathValidation: true,
         maximumLines: 3,
       },
-      async (world) => {
+      async (world, pool) => {
         const { contract, line, lifecycle, read } = arrange(world, true);
         const full = await contract();
         const lines = [];
@@ -459,26 +488,46 @@ test(
           );
         }
 
-        // A shared line's update and its archive, concurrently, never
-        // deadlock: both lock the line before the header.
-        for (let round = 0; round < 6; round += 1) {
-          const header = await contract();
-          const created = await line(header.recordId, {
-            days: '2',
-            daily_rate: '5',
-          });
-          assert.equal(created.outcome, 'succeeded');
-          const record = created.readBack!;
-          const raced = await Promise.all([
-            outcome(lifecycle('update', record, { daily_rate: '6' })),
-            outcome(lifecycle('archive', record)),
-          ]);
-          assert.doesNotMatch(
-            raced.join('\n'),
-            /40P01|deadlock/u,
-            `a shared update and an archive of one line deadlocked: ${raced.join(' | ')}`,
+        // A shared line's update and its archive never deadlock: both lock
+        // the line before the header. Made deterministic: a third session
+        // holds the line FOR SHARE, the update queues for the line first, the
+        // archive second, and then the line is released. Had the archive
+        // taken the header first, the update would hold the line and wait on
+        // the header while the archive held the header and waited on the line.
+        const header = await contract();
+        const created = await line(header.recordId, {
+          days: '2',
+          daily_rate: '5',
+        });
+        assert.equal(created.outcome, 'succeeded');
+        const record = created.readBack!;
+        const table = await tableHolding(pool, record.recordId);
+        const holder = await pool.connect();
+        let settled: string[];
+        try {
+          await holder.query('BEGIN');
+          await holder.query(
+            `SELECT 1 FROM north_star_module.${escapeIdentifier(table)} WHERE record_id = $1 FOR SHARE`,
+            [record.recordId],
           );
+          const updating = outcome(
+            lifecycle('update', record, { daily_rate: '6' }),
+          );
+          await lockWaiters(pool, 1);
+          const archiving = outcome(lifecycle('archive', record));
+          await lockWaiters(pool, 2);
+          await holder.query('COMMIT');
+          settled = await Promise.all([updating, archiving]);
+        } finally {
+          holder.release();
         }
+        assert.doesNotMatch(
+          settled.join('\n'),
+          /40P01|deadlock/u,
+          `a shared update and an archive of one line deadlocked: ${settled.join(' | ')}`,
+        );
+        assert.match(settled[0]!, /"outcome":"succeeded"/u, settled[0]);
+
         // The operands verification wrote (one) fit; the amount is derived
         // from what a caller sends.
         assert.equal(
