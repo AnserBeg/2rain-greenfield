@@ -1,6 +1,8 @@
 import {
   BILLING_CALCULATION_VERSION,
   BILLING_CYCLE_CALCULATION,
+  BILLING_RULES_CALCULATION,
+  hasBillingRules,
   type BillingPlan,
 } from '../../../canonical-model/src/billing.js';
 import {
@@ -114,7 +116,8 @@ const legacyCalculation = 'northstar.billing-calculation/v1';
 type CalculationVersion =
   | typeof legacyCalculation
   | typeof BILLING_CALCULATION_VERSION
-  | typeof BILLING_CYCLE_CALCULATION;
+  | typeof BILLING_CYCLE_CALCULATION
+  | typeof BILLING_RULES_CALCULATION;
 
 function termPin(at: number, selection: ReturnType<typeof selectTable>) {
   const { publishedAt, ...table } = selection.table;
@@ -131,7 +134,14 @@ export function quoteBillingService(
   planInput: unknown,
   evidenceInput: unknown,
 ) {
-  return calculate(planInput, evidenceInput);
+  return calculate(
+    planInput,
+    evidenceInput,
+    undefined,
+    hasBillingRules(planInput)
+      ? BILLING_RULES_CALCULATION
+      : BILLING_CALCULATION_VERSION,
+  );
 }
 
 export function quoteBillingCycle(
@@ -143,7 +153,9 @@ export function quoteBillingCycle(
     plan,
     { ...evidence, coverageThrough: through },
     undefined,
-    BILLING_CYCLE_CALCULATION,
+    hasBillingRules(plan)
+      ? BILLING_RULES_CALCULATION
+      : BILLING_CYCLE_CALCULATION,
   );
 }
 export function replayBillingQuote(
@@ -190,11 +202,17 @@ function calculate(
   const anchor = instant(e.anchor),
     asOf = instant(e.asOf),
     serviceEnd = e.serviceEnd === null ? null : instant(e.serviceEnd);
+  // Calculation v4 rates the rule keys in either mode; a plan without them
+  // keeps the version it was first quoted under.
+  const cycle = e.coverageThrough !== undefined;
   if (
-    (algorithm === BILLING_CYCLE_CALCULATION) !==
-    (e.coverageThrough !== undefined)
+    algorithm === BILLING_RULES_CALCULATION
+      ? false
+      : (algorithm === BILLING_CYCLE_CALCULATION) !== cycle
   )
     throw new Error('Billing cycle requires its coverage boundary');
+  if (hasBillingRules(plan) !== (algorithm === BILLING_RULES_CALCULATION))
+    throw new Error('Billing rate rules require calculation v4');
   const coverageThrough = e.coverageThrough ? instant(e.coverageThrough) : asOf;
   if (coverageThrough > asOf)
     throw new Error('Billing coverage is not delivered');
@@ -235,7 +253,7 @@ function calculate(
     throw new Error('Prior allocation requires pinned billing terms');
   if (
     e.periodMeter &&
-    (algorithm !== BILLING_CYCLE_CALCULATION ||
+    (!cycle ||
       e.basis !== 'usageOnly' ||
       e.usage.length ||
       e.pauses.length ||

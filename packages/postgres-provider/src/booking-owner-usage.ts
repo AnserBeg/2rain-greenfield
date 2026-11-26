@@ -10,6 +10,7 @@ import {
 } from '../../runtime/src/request-runtime-view.js';
 import type { SemanticQueryReadModelExecutor } from '../../runtime/src/semantic-query-gateway.js';
 import { withTrustedRequestRead } from './request-context.js';
+import { registerServiceUseFence } from './service-use-fence.js';
 
 const cursor = z.string().regex(/^(0|[1-9][0-9]{0,18})$/u);
 const window = z.strictObject({
@@ -98,3 +99,33 @@ export async function bookingOwnerCursorFence(
   ]);
   return rows[0]!.result;
 }
+
+/** Booking's half of the service-use protocol fence. A consolidated writer
+ * takes all endpoint record locks first; Booking locks the whole set of
+ * cursors in its canonical order in this single call. */
+registerServiceUseFence(
+  BOOKING_USAGE_BINDING,
+  async (client, releaseId, fence, owners) => {
+    const key = (entity: string, id: string) => JSON.stringify([entity, id]);
+    const expected = new Map(
+      owners.map((o) => [key(o.entityId, o.recordId), o.cursor]),
+    );
+    if (expected.size !== owners.length)
+      throw new Error('Duplicate service-use owner');
+    const current = await bookingOwnerCursorFence(
+      client,
+      releaseId,
+      fence,
+      owners.map(({ queryId, recordId }) => ({ queryId, recordId })),
+    );
+    if (
+      current.schemaVersion !== 'booking.ownerCursorFence/v1' ||
+      current.owners.length !== expected.size ||
+      current.owners.some((row) => {
+        const id = key(row.ownerRef.entityId, row.ownerRef.recordId);
+        return expected.get(id) !== row.cursor || !expected.delete(id);
+      })
+    )
+      throw new Error('Stale service-use cursor');
+  },
+);

@@ -7,10 +7,12 @@ import pg, { type PoolClient } from 'pg';
 import { AuthenticatedRequestEntryAdapter } from '../../packages/runtime/src/request-context.js';
 import { withIdempotentTransaction } from '../../packages/postgres-provider/src/request-context.js';
 import {
-  billingBookingUsage,
-  fenceBillingBookingOwners,
-} from '../../packages/postgres-provider/src/billing-booking-usage.js';
+  BOOKING_USAGE_BINDING,
+  bookingServiceUse,
+} from '../../packages/canonical-model/src/booking.js';
+import { serviceUseCoverage } from '../../packages/domain/src/billing/service-use.js';
 import { bookingOwnerCursorFence } from '../../packages/postgres-provider/src/booking-owner-usage.js';
+import { serviceUseFence } from '../../packages/postgres-provider/src/service-use-fence.js';
 
 import {
   loadMigrations,
@@ -2609,13 +2611,18 @@ test('booking commitment writer', async (t) => {
               day + 'T18:00Z',
             ],
           );
-          const usage = billingBookingUsage(
-            snapshot.rows[0].usage,
-            source,
-            'example.booking:slot.visit',
+          const usage = serviceUseCoverage(
+            {
+              snapshot: bookingServiceUse(snapshot.rows[0].usage),
+              subjectId: 'example.booking:slot.visit',
+              owner: source,
+            },
             'each',
             day + 'T18:00Z',
           );
+          const fenceBillingBookingOwners = serviceUseFence(
+            BOOKING_USAGE_BINDING,
+          )!;
           assert.deepEqual(
             usage.bands[0]?.intervals.map((i) => [i.start, i.end]),
             [[day + 'T17:00:00.000Z', day + 'T18:00:00.000Z']],
@@ -2629,7 +2636,7 @@ test('booking commitment writer', async (t) => {
             fenceBillingBookingOwners(left, release, activeFence, [
               { ...observed, cursor: '3' },
             ]),
-            /Stale billing booking cursor/,
+            /Stale service-use cursor/,
           );
         },
       );

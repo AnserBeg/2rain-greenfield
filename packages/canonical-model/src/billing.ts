@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { SERVICE_USE_PROTOCOL } from './service-evidence.js';
+import { canonicalize } from './canonicalize.js';
 
 export const BILLING_CALCULATION_VERSION = 'northstar.billing-calculation/v2';
 export const BILLING_READER = 30;
@@ -6,6 +8,12 @@ export const BILLING_INTERVAL_READER = 36;
 export const BILLING_ALLOCATION_READER = 41;
 export const BILLING_ARREARS_READER = 45;
 export const BILLING_CYCLE_CALCULATION = 'northstar.billing-calculation/v3';
+/** Rate rules (combination, per-rate partials, a cap as a multiple of a
+ * rate, per-quantity fees, record quantities, early return) and the
+ * service-use evidence source. A plan that declares none of them keeps v2/v3
+ * and its earlier reader. Provisional: renumbered at merge. */
+export const BILLING_RULES_READER = 54;
+export const BILLING_RULES_CALCULATION = 'northstar.billing-calculation/v4';
 export const BILLING_QUOTE_CAPABILITY = 'northstar.billing:capability.quote';
 export const BILLING_TERMS_CAPABILITY = 'northstar.billing:capability.terms';
 export const billingPeriods = [
@@ -130,10 +138,19 @@ export const BillingPlanSchema = z
               openingInstantFieldId: id,
               closingInstantFieldId: id,
             }),
+            // Persisted at reader 45 before the protocol existed. Read through
+            // the replay rule below, never rewritten: rate tables are keyed
+            // by the plan digest.
             z.strictObject({
               kind: z.literal('bookingActuals'),
               queryId: id,
               slotId: id,
+            }),
+            z.strictObject({
+              kind: z.literal('evidenceQuery'),
+              queryId: id,
+              protocol: z.literal(SERVICE_USE_PROTOCOL),
+              subjectId: id,
             }),
           ])
           .optional(),
@@ -259,3 +276,113 @@ export const BillingListAssignmentSchema = z
     (a) => !a.effectiveEnd || a.effectiveEnd > a.effectiveFrom,
     'Invalid list assignment interval',
   );
+
+type ArrearsSource = NonNullable<
+  NonNullable<AuthoredBillingPlan['bindings']>['arrearsSource']
+>;
+export type BillingEvidenceQuery = Extract<
+  ArrearsSource,
+  { kind: 'evidenceQuery' }
+>;
+
+/** The service-use evidence source a plan reads, if any. Replay rule: the
+ * provider-named declaration persisted at reader 45 reads as the service-use
+ * protocol with its slot as the subject, so its bytes, digest, reader and
+ * calculation stay what they were. */
+export function billingEvidenceQuery(
+  source: ArrearsSource | undefined,
+): BillingEvidenceQuery | undefined {
+  if (
+    !source ||
+    source.kind === 'agreedInterval' ||
+    source.kind === 'periodMeter'
+  )
+    return undefined;
+  if (source.kind === 'evidenceQuery') return source;
+  return {
+    kind: 'evidenceQuery',
+    queryId: source.queryId,
+    protocol: SERVICE_USE_PROTOCOL,
+    subjectId: source.slotId,
+  };
+}
+
+/** Whether a plan declares anything that needs calculation v4 and the rules
+ * reader. Absent keys keep every earlier plan's bytes and floor. It reads the
+ * stored JSON shape, so the release loader can ask it before parsing. */
+export function hasBillingRules(plan: unknown): boolean {
+  const record = (v: unknown): v is Record<string, unknown> =>
+    typeof v === 'object' && v !== null && !Array.isArray(v);
+  if (!record(plan)) return false;
+  const bindings = record(plan.bindings) ? plan.bindings : {};
+  const source = record(bindings.arrearsSource) ? bindings.arrearsSource : {};
+  return source.kind === 'evidenceQuery';
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** The calculation version and reader floor a set of stored plans requires.
+ * `calculation` is undefined when no plan binds an agreed interval. */
+export function billingReleaseTerms(plans: unknown) {
+  const list = Array.isArray(plans) ? plans : [];
+  const bound = (key: string) =>
+    list.some((p) => isRecord(p) && isRecord(p.bindings) && p.bindings[key]);
+  const agreed = bound('agreedInterval');
+  const arrears = bound('arrearsSource');
+  const rules = list.some(hasBillingRules);
+  return {
+    agreed,
+    calculation: !agreed
+      ? undefined
+      : rules
+        ? BILLING_RULES_CALCULATION
+        : arrears
+          ? BILLING_CYCLE_CALCULATION
+          : BILLING_CALCULATION_VERSION,
+    floor: rules
+      ? BILLING_RULES_READER
+      : arrears
+        ? BILLING_ARREARS_READER
+        : agreed
+          ? BILLING_ALLOCATION_READER
+          : BILLING_READER,
+  };
+}
+
+/** The release loader's admission of billing (BILLING_PLAN_MISMATCH): the
+ * surface carries exactly the declared plans, the calculation version they
+ * need, and a reader floor at least theirs; a release without plans never
+ * claims a billing reader. A surface floor below the allocation reader with
+ * no calculation version is the interval reader. */
+export function billingReleaseMismatch(
+  declared: unknown,
+  payload: Record<string, unknown>,
+  surfaceFloor: number,
+): boolean {
+  const terms = billingReleaseTerms(declared);
+  const hasCalculation = Object.hasOwn(payload, 'billingCalculationVersion');
+  const floor =
+    terms.floor === BILLING_ALLOCATION_READER && !hasCalculation
+      ? BILLING_INTERVAL_READER
+      : terms.floor;
+  return (
+    canonicalize(payload.billingPlans ?? null) !==
+      canonicalize(declared ?? null) ||
+    (hasCalculation &&
+      (!terms.agreed ||
+        payload.billingCalculationVersion !== terms.calculation)) ||
+    (terms.agreed &&
+      surfaceFloor >= BILLING_ALLOCATION_READER &&
+      !hasCalculation) ||
+    (Boolean(declared) && surfaceFloor < floor) ||
+    (!declared &&
+      [
+        BILLING_READER,
+        BILLING_INTERVAL_READER,
+        BILLING_ALLOCATION_READER,
+        BILLING_ARREARS_READER,
+        BILLING_RULES_READER,
+      ].includes(surfaceFloor))
+  );
+}

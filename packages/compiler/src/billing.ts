@@ -1,12 +1,10 @@
 import type { VersionedNormalizedApplicationPackage } from '@north-star/canonical-model';
 import {
-  BOOKING_USAGE_BINDING,
-  BOOKING_USAGE_CAPABILITY,
-} from '../../canonical-model/src/booking.js';
-import {
   BILLING_QUOTE_CAPABILITY,
   BILLING_TERMS_CAPABILITY,
+  billingEvidenceQuery,
 } from '../../canonical-model/src/billing.js';
+import { serviceUseProvider } from '../../canonical-model/src/service-evidence.js';
 
 // Quote declarations can be compiled before sources attach. A live binding
 // must resolve every dependency to a scoped, permissioned release member.
@@ -78,29 +76,24 @@ export function billingBindingProblem(
       )
         return 'BILLING_METER_SOURCE_REQUIRED';
     }
-    if (arrears?.kind === 'bookingActuals') {
-      const usage = def.queries.find((q) => q.queryId === arrears.queryId);
-      const declaredSlot = def.operations.some(
-        (op) =>
-          op.lifecycle === 'active' &&
-          'booking' in op &&
-          op.booking &&
-          op.booking.slotId === arrears.slotId &&
-          op.booking.ownerEntity === source?.sourceEntity.targetId &&
-          op.booking.fulfilmentMode === 'tracked' &&
-          op.booking.unit === p.serviceUnit &&
-          op.booking.scale <= 9,
-      );
+    const evidence = billingEvidenceQuery(arrears);
+    if (evidence) {
+      // Any read model that implements the declared service-use protocol can
+      // supply actual use. The protocol's provider checks its own subject.
+      const usage = def.queries.find((q) => q.queryId === evidence.queryId);
+      const model = usage && 'readModel' in usage ? usage.readModel : null;
+      const provider = serviceUseProvider(model?.binding);
       if (
-        !declaredSlot ||
-        usage?.queryType !== 'get' ||
+        !usage ||
+        !model ||
+        !provider ||
+        usage.queryType !== 'get' ||
         usage.legalEntityScope?.cardinality !== 'exactlyOne' ||
-        usage.readModel?.capability.targetId !== BOOKING_USAGE_CAPABILITY ||
-        usage.readModel.binding !== BOOKING_USAGE_BINDING ||
-        usage.readModel.queries.owner?.targetId !== source?.queryId ||
-        usage.sourceEntity.targetId !== source?.sourceEntity.targetId
+        model.queries.owner?.targetId !== source?.queryId ||
+        usage.sourceEntity.targetId !== source?.sourceEntity.targetId ||
+        provider.subjectProblem(def, usage, evidence.subjectId, p.serviceUnit)
       )
-        return 'BILLING_BOOKING_SOURCE_REQUIRED';
+        return 'BILLING_EVIDENCE_SOURCE_REQUIRED';
     }
     const interval = b.agreedInterval;
     // The plan declares which source field holds each commercial role. The

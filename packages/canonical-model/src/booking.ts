@@ -1,5 +1,11 @@
 import { z } from 'zod';
 import type { VersionedNormalizedApplicationPackage } from './schemas.js';
+import {
+  registerServiceUseProvider,
+  SERVICE_USE_SNAPSHOT_VERSION,
+  type ServiceUseProvider,
+  type ServiceUseSnapshot,
+} from './service-evidence.js';
 
 export const BOOKING_CAPABILITY = 'northstar.booking:capability.commitments';
 export const BOOKING_USAGE_CAPABILITY =
@@ -335,3 +341,113 @@ export function bookingCatalogTerms(value: unknown): [unknown, unknown][] {
       : [],
   );
 }
+
+// ---- Booking implements the service-use evidence protocol ----
+
+/** Booking stamps its decision clock in microseconds. The protocol carries
+ * whole milliseconds, so every instant is truncated toward the past. The
+ * truncation is monotone: Booking's no-overlap and pause-inside-use rules
+ * still hold, and a sub-millisecond span becomes empty. */
+export function truncateBookingInstant(value: string) {
+  return new Date(value.replace(/(\.\d{3})\d+/u, '$1')).toISOString();
+}
+const effectiveInstant = z.iso
+  .datetime({ offset: true })
+  .transform(truncateBookingInstant);
+const ownerUsage = z.object({
+  schemaVersion: z.literal('booking.ownerUsage/v1'),
+  ownerRef: z.object({ entityId: z.string(), recordId: z.string() }),
+  ownerScope: z.object({ kind: z.literal('company'), companyId: z.string() }),
+  asOf: effectiveInstant,
+  cursor: z.string().regex(/^(0|[1-9]\d*)$/u),
+  highWater: z.string(),
+  hasMore: z.literal(false),
+  changes: z.array(z.never()),
+  bookings: z.array(
+    z.object({
+      bookingId: z.string(),
+      slotId: z.string(),
+      fulfilmentMode: z.string(),
+      unit: z.string(),
+    }),
+  ),
+  evidence: z.array(
+    z.object({
+      id: z.string(),
+      bookingId: z.string(),
+      revision: z.int().positive(),
+      kind: z.enum(['use', 'pause', 'assignment', 'attendance']),
+      voided: z.boolean(),
+      effectiveStart: z.string(),
+      effectiveEnd: z.string().nullable(),
+      quantity: z.string().nullable(),
+      unit: z.string().nullable(),
+    }),
+  ),
+});
+
+/** One engagement per booking. Each booking carries only its own unvoided
+ * use and pause facts (a fact of another booking never joins it); assignment
+ * and attendance facts are not use. A tracked booking reports actual use. */
+export function bookingServiceUse(value: unknown): ServiceUseSnapshot {
+  const usage = ownerUsage.parse(value);
+  const facts = (bookingId: string, kind: 'use' | 'pause') =>
+    usage.evidence.filter(
+      (r) => r.bookingId === bookingId && !r.voided && r.kind === kind,
+    );
+  const span = (r: (typeof usage.evidence)[number]) => ({
+    id: r.id,
+    revision: String(r.revision),
+    start: effectiveInstant.parse(r.effectiveStart),
+    end:
+      r.effectiveEnd === null ? null : effectiveInstant.parse(r.effectiveEnd),
+  });
+  return {
+    schemaVersion: SERVICE_USE_SNAPSHOT_VERSION,
+    owner: { ...usage.ownerRef, companyId: usage.ownerScope.companyId },
+    asOf: usage.asOf,
+    cursor: usage.cursor,
+    complete: usage.cursor === usage.highWater,
+    engagements: usage.bookings.map((b) => ({
+      id: b.bookingId,
+      subjectId: b.slotId,
+      mode: b.fulfilmentMode === 'tracked' ? 'actual' : 'planned',
+      unit: b.unit,
+      legs: facts(b.bookingId, 'use').map((r) => ({
+        ...span(r),
+        quantity: r.quantity,
+        unit: r.unit,
+      })),
+      pauses: facts(b.bookingId, 'pause').map(span),
+    })),
+  };
+}
+
+const bookingServiceUseProvider: ServiceUseProvider = {
+  binding: BOOKING_USAGE_BINDING,
+  resultKey: 'usage',
+  // A subject is a tracked slot whose owner is the queried record type and
+  // whose unit is the consumer's, at a scale the protocol's quantities carry.
+  subjectProblem(pkg, query, subjectId, unit) {
+    if (
+      !('readModel' in query) ||
+      query.readModel?.capability.targetId !== BOOKING_USAGE_CAPABILITY
+    )
+      return 'booking.usageCapabilityRequired';
+    const declared = pkg.operations.some(
+      (op) =>
+        op.lifecycle === 'active' &&
+        'booking' in op &&
+        op.booking &&
+        op.booking.slotId === subjectId &&
+        op.booking.ownerEntity === query.sourceEntity.targetId &&
+        op.booking.fulfilmentMode === 'tracked' &&
+        op.booking.unit === unit &&
+        op.booking.scale <= 9,
+    );
+    return declared ? undefined : 'booking.trackedSlotRequired';
+  },
+  window: (from, until) => ({ usage: { from, until } }),
+  decode: bookingServiceUse,
+};
+registerServiceUseProvider(bookingServiceUseProvider);

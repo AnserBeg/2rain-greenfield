@@ -66,7 +66,7 @@ import {
 } from '../helpers/customization-fixture.js';
 import { withOrderEntryFixture } from '../helpers/order-entry-fixture.js';
 import { DECLARED_REPORT_READER } from '../../packages/canonical-model/src/declared-report.js';
-import { truncateBookingInstant } from '../../packages/postgres-provider/src/billing-booking-usage.js';
+import { truncateBookingInstant } from '../../packages/canonical-model/src/booking.js';
 import type { ImmutableJsonValue } from '../../packages/runtime/src/request-runtime-view.js';
 import {
   archivedBillingBase,
@@ -515,7 +515,7 @@ function release(mode: FixtureMode = 'bound', base?: BillingFixtureBase) {
     assert.ok(
       compiled.status !== 'compiled' &&
         compiled.diagnostics.some(
-          (d) => d.rule === 'BILLING_BOOKING_SOURCE_REQUIRED',
+          (d) => d.rule === 'BILLING_EVIDENCE_SOURCE_REQUIRED',
         ),
       JSON.stringify(compiled.diagnostics),
     );

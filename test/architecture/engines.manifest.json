@@ -36,7 +36,6 @@
       ],
       "adr": "docs/decisions/ADR-0083-period-and-usage-billing.md",
       "files": [
-        "packages/postgres-provider/src/billing-booking-usage.ts",
         "packages/postgres-provider/src/billing-quote.ts",
         "packages/postgres-provider/src/billing-terms.ts",
         "packages/canonical-model/src/billing.ts",

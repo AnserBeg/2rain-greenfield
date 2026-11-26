@@ -1,8 +1,11 @@
 import type { PoolClient } from 'pg';
 import {
-  billingBookingUsage,
-  fenceBillingBookingOwners,
-} from '../../packages/postgres-provider/src/billing-booking-usage.js';
+  BOOKING_USAGE_BINDING,
+  bookingServiceUse,
+} from '../../packages/canonical-model/src/booking.js';
+import { serviceUseCoverage } from '../../packages/domain/src/billing/service-use.js';
+import '../../packages/postgres-provider/src/booking-owner-usage.js';
+import { serviceUseFence } from '../../packages/postgres-provider/src/service-use-fence.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
@@ -919,7 +922,11 @@ test('three businesses review net charge lines through the same closed-cycle cal
     ],
   };
   const read = (input: unknown) =>
-    billingBookingUsage(input, owner, 'equipment', 'each', hire.asOf);
+    serviceUseCoverage(
+      { snapshot: bookingServiceUse(input), subjectId: 'equipment', owner },
+      'each',
+      hire.asOf,
+    );
   Object.assign(hire, read(snapshot));
   const meter = evidence(usagePlan, 10, { price: '1.50', allowance: '10' });
   meter.basis = 'usageOnly';
@@ -960,9 +967,12 @@ test('three businesses review net charge lines through the same closed-cycle cal
   );
   assert.throws(
     () => read({ ...snapshot, highWater: '10' }),
-    /Incomplete booking/,
+    /Incomplete service-use/,
   );
-  assert.throws(() => read({ ...snapshot, asOf: start }), /Incomplete booking/);
+  assert.throws(
+    () => read({ ...snapshot, asOf: start }),
+    /Incomplete service-use/,
+  );
   for (const ownerRef of [
     { ...owner, entityId: 'foreign' },
     { ...owner, recordId: 'other' },
@@ -1060,6 +1070,7 @@ test('three businesses review net charge lines through the same closed-cycle cal
 });
 
 test('the billing consumer fences all owners in one call and checks identities and cursors', async () => {
+  const fenceBillingBookingOwners = serviceUseFence(BOOKING_USAGE_BINDING)!;
   const owners = [
     { queryId: 'one', entityId: 'visit', recordId: 'a', cursor: '2' },
     { queryId: 'two', entityId: 'account', recordId: 'b', cursor: '7' },
@@ -1100,7 +1111,7 @@ test('the billing consumer fences all owners in one call and checks identities a
   await fenceBillingBookingOwners(client, 'release', 4, owners);
   await assert.rejects(
     fenceBillingBookingOwners(client, 'release', 4, [owners[0]!, owners[0]!]),
-    /Duplicate billing booking owner/,
+    /Duplicate service-use owner/,
   );
   assert.equal(calls, 1);
   for (const incorrect of [
@@ -1115,7 +1126,7 @@ test('the billing consumer fences all owners in one call and checks identities a
     observed = incorrect;
     await assert.rejects(
       fenceBillingBookingOwners(client, 'release', 4, owners),
-      /Stale billing booking cursor/,
+      /Stale service-use cursor/,
     );
   }
 });
