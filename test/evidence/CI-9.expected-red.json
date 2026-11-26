@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "packet": "CI-9",
+  "entries": [
+    {
+      "name": "ci9-shard-budget-never-fires",
+      "claim": "A PostgreSQL shard whose recorded per-file estimates sum past the budget is refused by name.",
+      "file": "test/helpers/postgres-shard-budget.ts",
+      "original": ".filter(({ seconds }) => seconds > estimates.budgetSeconds)",
+      "replacement": ".filter(({ seconds }) => seconds > estimates.budgetSeconds + 1000000)",
+      "test": {
+        "files": ["test/architecture/test-reachability.test.ts"],
+        "namePattern": "a shard whose recorded estimates sum past the budget is refused by name"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/test-reachability.test.ts",
+          "name": "a shard whose recorded estimates sum past the budget is refused by name",
+          "expected": "only the overloaded shard is refused"
+        }
+      ]
+    },
+    {
+      "name": "ci9-shard-budget-unrecorded-file-free",
+      "claim": "A test/postgres file with no recorded estimate counts the stated default, never zero, so a new file cannot hide in a full shard.",
+      "file": "test/helpers/postgres-shard-budget.ts",
+      "original": "estimates.files[file] ?? estimates.unrecordedFileSeconds",
+      "replacement": "estimates.files[file] ?? 0",
+      "test": {
+        "files": ["test/architecture/test-reachability.test.ts"],
+        "namePattern": "a shard whose recorded estimates sum past the budget is refused by name"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/test-reachability.test.ts",
+          "name": "a shard whose recorded estimates sum past the budget is refused by name",
+          "expected": "0 !== 90"
+        }
+      ]
+    },
+    {
+      "name": "ci9-shard-budget-real-layout",
+      "claim": "The checked-in shard layout is measured against the recorded budget, so a layout over it fails.",
+      "file": "test/helpers/postgres-shard-estimates.json",
+      "original": "\"budgetSeconds\": 1100,",
+      "replacement": "\"budgetSeconds\": 900,",
+      "test": {
+        "files": ["test/architecture/test-reachability.test.ts"],
+        "namePattern": "no general PostgreSQL shard is estimated over its time budget"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/test-reachability.test.ts",
+          "name": "no general PostgreSQL shard is estimated over its time budget",
+          "expected": "over the 900 s budget"
+        }
+      ]
+    }
+  ]
+}
