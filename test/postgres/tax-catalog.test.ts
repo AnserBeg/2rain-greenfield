@@ -133,8 +133,8 @@ async function world(t: TestContext) {
       const seedTenant = async (scope: Scope, releases: string[]) => {
         const revision = randomUUID();
         await admin.query(
-          "INSERT INTO platform.tenants(id,slug) VALUES ($1,'tax-'||left($1::text,8))",
-          [scope.tenant],
+          'INSERT INTO platform.tenants(id,slug) VALUES ($1,$2)',
+          [scope.tenant, `tax-${scope.tenant}`],
         );
         await admin.query(
           "INSERT INTO platform.environments(tenant_id,id,slug) VALUES ($1,$2,'tax')",
