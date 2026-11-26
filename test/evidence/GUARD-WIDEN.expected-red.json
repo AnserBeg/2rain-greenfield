@@ -129,8 +129,8 @@
       "name": "guard-widen-kebab-text-off",
       "claim": "A kebab spelling of a first-party name in a string is refused (F1, text).",
       "file": "packages/dev-tooling/src/module-press-law.ts",
-      "original": "/[A-Za-z0-9_]+(?:-[A-Za-z0-9_]+)*/gu",
-      "replacement": "/[A-Za-z0-9_]+/gu",
+      "original": ".split(/[\\s_-]+/u)",
+      "replacement": ".split(/[\\s_]+/u)",
       "test": {
         "files": ["test/architecture/module-press-law.test.ts"],
         "namePattern": "^GUARD-WIDEN"
