@@ -55,15 +55,9 @@ import {
 } from '../../../packages/canonical-model/src/surface-presentation.js';
 import type { CompiledPresentation } from '../../../packages/canonical-model/src/schemas.js';
 import {
-  renderReceivingSection,
   renderReceivingNavigation,
   type ReceivingNavigation,
-  type ReceivingSection,
 } from './receiving-section.js';
-import type {
-  SalesOrderSection,
-  ShipmentPackingDocument,
-} from './sales-section.js';
 import { sharedListView } from './list-runtime.js';
 import {
   renderLauncherAction,
@@ -222,13 +216,10 @@ export type SurfaceDataRenderState =
       readonly addressLayout?: LayoutBody;
       readonly addressMaps?: Readonly<Record<string, string>>;
       readonly documentsSection?: string;
-      readonly receiving?: ReceivingSection;
       readonly receivingNavigation?: ReceivingNavigation;
       readonly composition?: CompositionData;
       readonly popupButtons?: string;
       readonly compositionTask?: string;
-      readonly salesOrder?: SalesOrderSection;
-      readonly packingDocument?: ShipmentPackingDocument;
       readonly result?: SemanticQueryResultEnvelope;
       readonly declaredList?: DeclaredListRenderData;
       readonly status: 'READY';
@@ -1570,7 +1561,7 @@ function renderSections(context: SurfaceComponentContext): string {
       slotPanel(
         context,
         record
-          ? `${data.status === 'READY' && data.receiving ? renderReceivingSection(data.receiving) : ''}${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${data.status === 'READY' && data.salesOrder ? renderSalesOrderSection(data.salesOrder) : ''}${data.status === 'READY' && data.packingDocument ? renderPackingDocument(data.packingDocument) : ''}${layout ? layout.sections.map((section) => renderLayoutDetailSection(context, section, record, undefined, maps?.[section.id])).join('') : `<section class="panel data-panel" data-data-state="exact"><details class="record-section-group" open><summary><h2>Details</h2></summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(labels.get(fieldId) ?? fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${recordFieldValue(context, record, fieldId)}</dd></div>`).join('')}</dl></details></section>`}`
+          ? `${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${layout ? layout.sections.map((section) => renderLayoutDetailSection(context, section, record, undefined, maps?.[section.id])).join('') : `<section class="panel data-panel" data-data-state="exact"><details class="record-section-group" open><summary><h2>Details</h2></summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(labels.get(fieldId) ?? fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${recordFieldValue(context, record, fieldId)}</dd></div>`).join('')}</dl></details></section>`}`
           : dataDiagnostic('QUERY_NOT_FOUND'),
         'sections-slot',
       ) + documents
@@ -1603,40 +1594,6 @@ function renderSections(context: SurfaceComponentContext): string {
     `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div>${relationContent.freeze}<form id="surface-record-form" method="post" action="${escapeHtml(surfaceHref(context.surface, undefined, false, context))}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${context.surface.layouts?.some((l) => l.body.mode === (record ? 'edit' : 'create')) ? '' : relationContent.controls}${renderFormFields(context, operation, record)}</div></form></section>`,
     'sections-slot',
   );
-}
-
-function renderSalesOrderSection(section: SalesOrderSection): string {
-  const link = (local: string, recordId?: string) => {
-    const parameters = new URLSearchParams({
-      surface: `${section.namespace}:surface.${local}`,
-      [section.scopeParameterIds[local]!]: section.legalEntityId,
-    });
-    if (recordId) parameters.set('record', recordId);
-    return escapeHtml(`/?${parameters}`);
-  };
-  const rows = section.lines
-    .map(
-      (line) =>
-        `<tr data-sales-order-line="${escapeHtml(line.recordId)}"><td><a href="${link('sales_order_line_detail', line.recordId)}">${escapeHtml(line.lineNumber)}</a></td><td>${escapeHtml(line.item)}</td><td>${escapeHtml(line.quantity)}</td><td>${escapeHtml(line.reservationCoverage)}</td><td>${escapeHtml(line.netShipped)}</td><td>${escapeHtml(line.openToShip)}</td><td>${escapeHtml(line.unit)}</td><td>${escapeHtml(line.unitPrice)}</td></tr>`,
-    )
-    .join('');
-  const stock = section.stock
-    .map(
-      (row) =>
-        `<tr data-stock-identity="${escapeHtml(`${row.item}:${row.location}`)}"><td>${escapeHtml(row.item)}</td><td>${escapeHtml(row.location)}</td><td>${escapeHtml(row.onHand)}</td><td>${escapeHtml(row.reserved)}</td><td>${escapeHtml(row.available)}</td></tr>`,
-    )
-    .join('');
-  return `<section class="panel data-panel" data-sales-order-lines><h2>Fulfillment</h2><p><a href="${link('reservation_form')}">Create reservation</a> · <a href="${link('reservation_list')}">View reservations</a> · <a href="${link('shipment_form')}">Create shipment</a> · <a href="${link('shipment_list')}">View shipments and corrections</a></p><p>Reserve a manually selected item, location and exact quantity. Shortages are refused. Ship only against selected live reservations; allocation and unreserved shipping are not available.</p><table><thead><tr><th>Line</th><th>Item</th><th>Ordered</th><th>Reservation coverage</th><th>Net shipped</th><th>Open to ship</th><th>Unit</th><th>Unit price</th></tr></thead><tbody>${rows}</tbody></table>${section.lines.length === 0 ? '<p>No active order lines.</p>' : ''}<h3>Stock coverage</h3><table><thead><tr><th>Item</th><th>Location</th><th>On hand</th><th>Reserved</th><th>Available</th></tr></thead><tbody>${stock}</tbody></table>${section.stock.length === 0 ? '<p>Create a reservation to show its selected stock identity.</p>' : ''}<p>Corrections append compensating movements. A released reservation is never silently resurrected; create a new reservation if more stock must be committed.</p></section>`;
-}
-
-function renderPackingDocument(document: ShipmentPackingDocument): string {
-  const rows = document.lines
-    .map(
-      (line) =>
-        `<tr><td>${escapeHtml(line.lineNumber)}</td><td>${escapeHtml(line.item)}</td><td>${escapeHtml(line.quantity)}</td><td>${escapeHtml(line.unit)}</td></tr>`,
-    )
-    .join('');
-  return `<section class="panel data-panel packing-document" data-packing-document><div class="panel__heading"><div><h2>Packing document ${escapeHtml(document.shipmentNumber)}</h2><p>Printable committed shipment facts</p></div></div><dl class="key-fact-grid"><div><dt>Sales order</dt><dd>${escapeHtml(document.orderId)}</dd></div><div><dt>Ship-from location</dt><dd>${escapeHtml(document.location)}</dd></div><div><dt>Shipped at</dt><dd>${escapeHtml(document.effectiveAt)}</dd></div><div><dt>External reference</dt><dd>${escapeHtml(document.externalReference)}</dd></div></dl><table><thead><tr><th>Line</th><th>Item</th><th>Quantity</th><th>Unit</th></tr></thead><tbody>${rows}</tbody></table><p class="print-guidance">Use the browser print command to print or save this packing document.</p></section>`;
 }
 
 type FormAdmissionDecision =

@@ -5,7 +5,7 @@ import test from 'node:test';
 import type pg from 'pg';
 
 import { startComposedApplication } from '../../apps/api/src/composition-root.js';
-import { loadShipmentPackingDocument } from '../../apps/web/src/sales-section.js';
+import { loadSurfaceComposition } from '../../apps/web/src/surface-composition.js';
 import {
   fulfillmentBinding,
   fulfillmentColumn,
@@ -15,8 +15,14 @@ import {
   quoteFulfillmentIdentifier as q,
 } from '../../packages/postgres-provider/src/fulfillment.js';
 import { SEMANTIC_OPERATION_REQUEST_VERSION } from '../../packages/runtime/src/semantic-operation-gateway.js';
-import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../packages/runtime/src/semantic-query-gateway.js';
-import type { ImmutableJsonValue } from '../../packages/runtime/src/request-runtime-view.js';
+import {
+  SEMANTIC_QUERY_REQUEST_VERSION,
+  type SemanticRecordDto,
+} from '../../packages/runtime/src/semantic-query-gateway.js';
+import {
+  readCompiledSurfaceManifest,
+  type ImmutableJsonValue,
+} from '../../packages/runtime/src/request-runtime-view.js';
 import { governedStorageTarget } from '../helpers/governed-storage-target.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 
@@ -231,10 +237,9 @@ async function assertInterleavedArchiveKeepsEveryCommittedLine(
 ): Promise<void> {
   const runtime = application.runtime;
   let firstPage = true;
-  const document = await runtime.entry.run(
+  const lineNumbers = await runtime.entry.run(
     { headers: { authorization: 'local' } },
     async (view) => {
-      const shipment = await readShipmentDto(application, view, shipmentId);
       // Deterministic interleaving: the unrelated draft line is archived after
       // the first page has been read and before the next query runs. No sleep,
       // no retry -- the seam is the gateway call itself.
@@ -243,7 +248,11 @@ async function assertInterleavedArchiveKeepsEveryCommittedLine(
           ...args: Parameters<typeof runtime.queryGateway.invoke>
         ) => {
           const result = await runtime.queryGateway.invoke(...args);
-          if (firstPage) {
+          if (
+            firstPage &&
+            (args[1] as { queryId?: string }).queryId ===
+              `${ns}:query.shipment_line_list`
+          ) {
             firstPage = false;
             await invoke(
               `${ns}:operation.shipment_line_archive`,
@@ -254,17 +263,11 @@ async function assertInterleavedArchiveKeepsEveryCommittedLine(
           return result;
         },
       } as unknown as typeof runtime.queryGateway;
-      return loadShipmentPackingDocument(
-        view,
-        gateway,
-        shipment,
-        legalEntityId,
-      );
+      return packedLineNumbers(application, view, shipmentId, gateway);
     },
   );
-  assert.ok(document, 'a posted shipment renders a packing document');
   assert.deepEqual(
-    document.lines.map((line) => line.lineNumber).toSorted(),
+    lineNumbers.toSorted(),
     ['1', '2'],
     'both committed lines survive an unrelated archive between pages',
   );
@@ -290,24 +293,18 @@ async function assertMultiPageTargetRetrievesCompletely(
     );
   }
   const runtime = application.runtime;
-  const document = await runtime.entry.run(
+  const lineNumbers = await runtime.entry.run(
     { headers: { authorization: 'local' } },
     async (view) =>
-      loadShipmentPackingDocument(
-        view,
-        runtime.queryGateway,
-        await readShipmentDto(application, view, wide),
-        legalEntityId,
-      ),
+      packedLineNumbers(application, view, wide, runtime.queryGateway),
   );
-  assert.ok(document);
   assert.equal(
-    document.lines.length,
+    lineNumbers.length,
     total,
     'a target spanning more than one page is retrieved completely',
   );
   assert.equal(
-    new Set(document.lines.map((line) => line.lineNumber)).size,
+    new Set(lineNumbers).size,
     total,
     'every line appears exactly once across the pages',
   );
@@ -388,6 +385,50 @@ function listLines(
   }>;
 }
 
+/**
+ * The packed lines the shipment page reads: the general dataset loader's
+ * exact parent-scoped, echo-checked, paged read of the packing lines dataset.
+ * A dataset that did not load completely (a refused scope echo, an incomplete
+ * page chain) is a failed dataset, never a shorter list.
+ */
+async function packedLineNumbers(
+  application: Application,
+  view: Parameters<Application['runtime']['queryGateway']['invoke']>[0],
+  shipmentId: string,
+  queryGateway: Application['runtime']['queryGateway'],
+): Promise<string[]> {
+  const runtime = application.runtime;
+  const surface = readCompiledSurfaceManifest(view).surfaces.find(
+    (candidate) => candidate.surfaceId === `${ns}:surface.shipment_detail`,
+  );
+  assert.ok(surface?.composition, 'the shipment page is composed');
+  const data = await loadSurfaceComposition(
+    view,
+    surface,
+    await readShipmentDto(application, view, shipmentId),
+    `/?${new URLSearchParams({
+      surface: surface.surfaceId,
+      record: shipmentId,
+      [`${ns}:parameter.shipment_get_legal_entity_scope`]: legalEntityId,
+    })}`,
+    legalEntityId,
+    {
+      queryGateway,
+      operationGateway: runtime.operationGateway,
+      operationMediation: runtime.operationMediation,
+    },
+  );
+  const lines = data.children.find(
+    (child) =>
+      child.definition.query.targetId === `${ns}:query.shipment_line_list`,
+  );
+  assert.ok(lines, 'the packing lines dataset is declared');
+  assert.equal(lines.status, 'ready', 'the packing lines dataset loaded');
+  return lines.rows.map((row) =>
+    String(row.record.values[`${ns}:field.shipment_line_line_number`]),
+  );
+}
+
 async function readShipmentDto(
   application: Application,
   view: Parameters<Application['runtime']['queryGateway']['invoke']>[0],
@@ -403,7 +444,7 @@ async function readShipmentDto(
   } as never)) as { records: readonly unknown[] };
   const record = result.records[0];
   assert.ok(record, 'the seeded shipment reads back');
-  return record as Parameters<typeof loadShipmentPackingDocument>[2];
+  return record as SemanticRecordDto;
 }
 
 async function readLine(
