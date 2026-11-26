@@ -668,8 +668,7 @@ test('shared gate holders coexist and exclude an exclusive gate', async () => {
         String(error.stderr).includes('TEST_GATE_LOCK_BUSY'),
     );
   } finally {
-    holder.stdin.end();
-    const [exitCode] = (await once(holder, 'exit')) as [number | null];
+    const exitCode = await releaseHolder(holder);
     assert.equal(exitCode, 0, holderError);
   }
 
@@ -724,8 +723,7 @@ test('matrix lock and legacy-process waits fail busy at their bounded deadline',
       );
     })
     .finally(async () => {
-      holder.stdin.end();
-      const [exitCode] = (await once(holder, 'exit')) as [number | null];
+      const exitCode = await releaseHolder(holder);
       assert.equal(exitCode, 0);
       rmSync(lockPath, { force: true });
     })
@@ -1004,6 +1002,33 @@ function waitForKernelLockWait(
       }
     }, 10);
   });
+}
+
+/**
+ * Ends a lock holder's stdin and waits for it to exit. A holder that already
+ * exited is not waited for again, and one still alive after a bounded wait is
+ * sent SIGTERM (its exit code is then not 0, so the caller's assertion names
+ * it) instead of hanging the runner.
+ */
+async function releaseHolder(
+  holder: ReturnType<typeof spawn>,
+): Promise<number | null> {
+  if (holder.exitCode !== null || holder.signalCode !== null) {
+    return holder.exitCode;
+  }
+  const exited = once(holder, 'exit');
+  holder.stdin?.end();
+  const bound = setTimeout(() => {
+    if (holder.exitCode === null && holder.signalCode === null) {
+      holder.kill('SIGTERM');
+    }
+  }, 10_000);
+  try {
+    const [exitCode] = (await exited) as [number | null];
+    return exitCode;
+  } finally {
+    clearTimeout(bound);
+  }
 }
 
 function waitForProcessClose(

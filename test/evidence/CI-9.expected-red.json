@@ -127,6 +127,24 @@
           "expected": "the snapshot job must never push, commit or publish"
         }
       ]
+    },
+    {
+      "name": "ci9-shard-estimate-table-drift",
+      "claim": "The estimates table names exactly the files the shards run, so a new or renamed postgres test cannot hide behind the default.",
+      "file": "test/helpers/postgres-shard-estimates.json",
+      "original": "\"test/postgres/address-authority.test.ts\": 145,",
+      "replacement": "\"test/postgres/address-authority-gone.test.ts\": 145,",
+      "test": {
+        "files": ["test/architecture/test-reachability.test.ts"],
+        "namePattern": "no general PostgreSQL shard is estimated over its time budget"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/test-reachability.test.ts",
+          "name": "no general PostgreSQL shard is estimated over its time budget",
+          "expected": "has no recorded estimate in test/helpers/postgres-shard-estimates.json"
+        }
+      ]
     }
   ]
 }

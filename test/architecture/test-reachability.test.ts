@@ -565,6 +565,26 @@ test('no general PostgreSQL shard is estimated over its time budget', () => {
     [...layout.values()].every((files) => files.length > 0),
     'a shard selected no file',
   );
+  // The 120 s default belongs to the pure helper. The real layout must record
+  // every file, and no record may name a file that is gone, so the table cannot
+  // drift from the tree.
+  const placed = new Set([...layout.values()].flat());
+  const unrecorded = [...placed].filter(
+    (file) => postgresShardEstimates.files[file] === undefined,
+  );
+  assert.deepEqual(
+    unrecorded,
+    [],
+    'a file in shards 1-12 has no recorded estimate in test/helpers/postgres-shard-estimates.json',
+  );
+  const stale = Object.keys(postgresShardEstimates.files).filter(
+    (file) => !placed.has(file),
+  );
+  assert.deepEqual(
+    stale,
+    [],
+    'an estimate in test/helpers/postgres-shard-estimates.json names a file no shard runs',
+  );
   assert.deepEqual(shardsOverBudget(layout, postgresShardEstimates), []);
 });
 

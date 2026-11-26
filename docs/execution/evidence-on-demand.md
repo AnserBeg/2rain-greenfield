@@ -184,7 +184,7 @@ push first.
 ## PostgreSQL shard time budget (CI-9)
 
 `test/helpers/postgres-shard-estimates.json` records an estimated CI time per
-`test/postgres` file (the median of two or three CI observations) and a budget for the
+`test/postgres` file (the median of two or three full runs) and a budget for the
 sum of one shard. `test/architecture/test-reachability.test.ts` (the `reachability`
 step of `pnpm preflight`) fails by shard name when a shard's files sum past the
 budget. A file with no recorded estimate counts the stated default, never zero.
