@@ -4,6 +4,10 @@ Branch `packet/WORKFLOW-2-s4b` from main `20762dbc`. Pre-tenant. Provisional mig
 
 **Apply condition (pre-tenant re-baseline).** 0070 validates the new `workflow_instances` source check over existing rows, and updates on that table are rule-blocked. It applies only to a database that stores no workflow instance yet; a database with instances is re-baselined (ADR-0066).
 
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/45735183699
+
+Run 45735183699 on `d66446fa` is red. Attempt 1: every PostgreSQL job passed. workflow-consumer took 458 s (900 s bound), and its approval subtests took 11 / 3 / 4 s. workflow-record-created's two journeys took 159 s and 284 s, and the retried-wait case passed. Shard 1 took 883 s and shard 3 took 29.6 minutes. One browser test failed when its fixture did not stop after SIGTERM (`table-behavior.spec.ts:174`), and executed-file reachability failed as a consequence. Attempt 2 (a whole rerun): shard 3 hit its 30-minute job timeout on a slower runner before reaching this file, so the run was cancelled.
+
 ## Claims
 
 1. **Owner ruling 2026-11-21, built.** A governed writer names each company-owned record it inserts through `north_star_internal.record_creations`. The function matches the record in its own company (tenant, environment, company, ID), takes the company from the stored row and refuses, by name, a record its company does not store, a creation outside a governed write and a creation after the seal. The writer's own outbox insert seals the occurrences into one batch on its domain event; a deferred key refuses an unsealed occurrence at commit. Emitting writers: the generic interpreter create (every form, API, assistant and workflow create, first-party or tenant), stock-count lines, posting-kernel companion transactions and lines, settlement lines and purchase-order approval records. A first design with a trigger on every managed table was refused by the preceding binary (`CATALOG_DRIFT`, CI 45608668180); the managed catalog is unchanged.
