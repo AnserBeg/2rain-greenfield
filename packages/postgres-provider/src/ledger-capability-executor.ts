@@ -17,6 +17,7 @@ import type {
   PostgresCapabilityOperationExecutorContext,
   PostgresCapabilityOperationExecutorFactory,
 } from './capability-operation-executor-factory.js';
+import type { CurrentPolicyPermissionBinding } from './current-policy.js';
 import { PostgresTrustService } from './trust/postgres-trust-service.js';
 
 /**
@@ -31,6 +32,27 @@ import { PostgresTrustService } from './trust/postgres-trust-service.js';
 export const LEDGER_BOOKS_START_CAPABILITY =
   'northstar.ledger:capability.ledger_books_start';
 
+/**
+ * The ledger's own permissions, checked in its SQL (`ledger_may`), as policy
+ * bindings. A role granted an operation that reaches a ledger capability
+ * receives that capability's grants in the same pass (`engineGrants`).
+ * books_configure: books start (0072 `ledger_operation_access`).
+ * journal_read: the journal reads (0071), reached by no operation until the
+ * read queries of slice 1a-iv. journal_post has no SQL check yet; its binding
+ * is born with the post.
+ */
+export const LEDGER_BOOKS_CONFIGURE_GRANT = Object.freeze({
+  action: 'configure',
+  permissionId: 'northstar.ledger:permission.books_configure',
+  resourceId: 'northstar.ledger:capability.books',
+} as const satisfies CurrentPolicyPermissionBinding);
+
+export const LEDGER_JOURNAL_READ_GRANT = Object.freeze({
+  action: 'read',
+  permissionId: 'northstar.ledger:permission.journal_read',
+  resourceId: 'northstar.ledger:capability.journal',
+} as const satisfies CurrentPolicyPermissionBinding);
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const object = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -39,12 +61,14 @@ interface LedgerAction {
   readonly capabilityId: string;
   readonly apply: string;
   readonly argumentKeys: readonly string[];
+  readonly engineGrants: readonly CurrentPolicyPermissionBinding[];
 }
 
 const BOOKS_START: LedgerAction = Object.freeze({
   capabilityId: LEDGER_BOOKS_START_CAPABILITY,
   apply: 'platform.ledger_apply_books_start',
   argumentKeys: Object.freeze(['date', 'expectedPrior']),
+  engineGrants: Object.freeze([LEDGER_BOOKS_CONFIGURE_GRANT]),
 });
 
 function refused(reason = 'ledger.invalidOperation'): never {
@@ -118,7 +142,6 @@ class LedgerCapabilityExecutor implements RegisteredCapabilityOperationExecutor 
     )
       return refused();
     const company = String(request.input.recordId);
-    const revision = Number(request.input.expectedRevision);
     // The person's confirmation: the gateway grant, verified here and attested
     // for the ledger, which consumes it inside the apply.
     const grant = this.service.verifyConfirmation?.(
@@ -136,9 +159,10 @@ class LedgerCapabilityExecutor implements RegisteredCapabilityOperationExecutor 
     if (!this.service.approvalPool || !grant || !human)
       return refused('ledger.approvalRequired');
     await this.service.approvalPool.query(
-      'SELECT platform.ledger_attest_approval($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
+      'SELECT platform.ledger_attest_approval($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',
       [
         grant,
+        this.capabilityId,
         request.context.tenantId,
         request.context.environmentId,
         request.context.principalId,
@@ -155,7 +179,7 @@ class LedgerCapabilityExecutor implements RegisteredCapabilityOperationExecutor 
       this.service.pool,
     ).executeIdempotentAcceptedMutation<{
       readonly recordId: string;
-      readonly applied: Readonly<Record<string, unknown>>;
+      readonly applied: AppliedFacts;
     }>(
       request.context,
       actor,
@@ -167,21 +191,24 @@ class LedgerCapabilityExecutor implements RegisteredCapabilityOperationExecutor 
         releaseId: request.view.release.releaseId,
       },
       async (client) => {
-        const applied = (
-          await client.query<{ result: Record<string, unknown> }>(
-            `SELECT ${this.action.apply}($1,$2,$3,$4,$5,$6,$7) AS result`,
-            [
-              grant,
-              request.view.release.releaseId,
-              request.view.pointer.fence,
-              request.definition.operationId,
-              request.idempotencyKey,
-              request.channel,
-              JSON.stringify(request.input),
-            ],
-          )
-        ).rows[0]!.result;
-        const invocationId = String(applied.invocationId);
+        const applied = appliedFacts(
+          (
+            await client.query<{ result: unknown }>(
+              `SELECT ${this.action.apply}($1,$2,$3,$4,$5,$6,$7,$8) AS result`,
+              [
+                grant,
+                request.view.release.releaseId,
+                request.view.pointer.fence,
+                request.definition.operationId,
+                request.idempotencyKey,
+                request.channel,
+                request.policyVersion,
+                JSON.stringify(request.input),
+              ],
+            )
+          ).rows[0]?.result,
+        );
+        const invocationId = applied.invocationId;
         const metadata = {
           legalEntityId: {
             classification: 'INTERNAL' as const,
@@ -207,7 +234,9 @@ class LedgerCapabilityExecutor implements RegisteredCapabilityOperationExecutor 
             policy: {
               decision: 'ALLOW' as const,
               evaluatorVersion: request.policyEvaluatorVersion,
-              policyVersion: request.policyVersion,
+              // The epoch the apply held locked; it refused unless the
+              // gateway decided under the same one.
+              policyVersion: applied.policyVersion,
               relevantInputs: metadata,
               schemaVersion: POLICY_DECISION_EVIDENCE_VERSION,
             },
@@ -215,18 +244,15 @@ class LedgerCapabilityExecutor implements RegisteredCapabilityOperationExecutor 
               changeDocumentId: randomUUID(),
               recordId: company,
               recordType: request.readBackDefinition.sourceEntityId,
-              revision,
-              changes: Object.entries(applied)
-                .filter(([key]) => key !== 'invocationId' && key !== 'company')
-                .map(([key, value]) => ({
-                  classification: 'INTERNAL' as const,
-                  fieldId: `northstar.ledger.fact.${key}`,
-                  oldState: { state: 'ABSENT' as const },
-                  newState:
-                    value === null
-                      ? { state: 'ABSENT' as const }
-                      : { state: 'VALUE' as const, value: String(value) },
-                })),
+              // The company record's revision as the apply read it, under
+              // its lock, equal to the one the person confirmed against.
+              revision: applied.revision,
+              changes: applied.changes.map((change) => ({
+                classification: 'INTERNAL' as const,
+                fieldId: `northstar.ledger.fact.${change.fact}`,
+                oldState: factState(change.old),
+                newState: factState(change.new),
+              })),
             },
             event: {
               eventId: randomUUID(),
@@ -273,11 +299,52 @@ class LedgerCapabilityExecutor implements RegisteredCapabilityOperationExecutor 
   }
 }
 
+interface AppliedFacts {
+  readonly invocationId: string;
+  readonly policyVersion: string;
+  readonly revision: number;
+  readonly changes: readonly {
+    readonly fact: string;
+    readonly old: string | null;
+    readonly new: string | null;
+  }[];
+}
+
+/** The apply's result, refused unless it has exactly the evidence shape. */
+function appliedFacts(value: unknown): AppliedFacts {
+  const fact = (change: unknown) =>
+    object(change) &&
+    typeof change.fact === 'string' &&
+    /^[a-z][A-Za-z0-9]*$/u.test(change.fact) &&
+    (change.old === null || typeof change.old === 'string') &&
+    (change.new === null || typeof change.new === 'string');
+  if (
+    !object(value) ||
+    typeof value.invocationId !== 'string' ||
+    !UUID.test(value.invocationId) ||
+    typeof value.policyVersion !== 'string' ||
+    typeof value.revision !== 'number' ||
+    !Number.isSafeInteger(value.revision) ||
+    value.revision < 1 ||
+    !Array.isArray(value.changes) ||
+    value.changes.length === 0 ||
+    !value.changes.every(fact)
+  )
+    throw new Error('ledger apply returned an unexpected result');
+  return value as unknown as AppliedFacts;
+}
+
+const factState = (value: string | null) =>
+  value === null
+    ? { state: 'ABSENT' as const }
+    : { state: 'VALUE' as const, value };
+
 const ledgerFactory = (
   action: LedgerAction,
 ): PostgresCapabilityOperationExecutorFactory =>
   Object.freeze({
     capabilityId: action.capabilityId,
+    engineGrants: action.engineGrants,
     singleUseConfirmation: true,
     verificationRefusal: {
       code: 'SEMANTIC_OPERATION_INPUT_INVALID',

@@ -198,12 +198,17 @@ CREATE TABLE platform.ledger_chart_starter_accounts (
 
 -- An attested human confirmation, consumed once by the matching apply. The
 -- same match columns as the booking engine's grants, in the ledger's own table
--- (rule 19). Immutable except the one consumption, which records the minted
--- trust invocation ID.
+-- (rule 19), plus the ledger capability it was attested for: each apply
+-- consumes under its own capability constant, never a caller's. Immutable
+-- except the one consumption, which records the minted trust invocation ID.
+-- Rows are kept forever, consumed or not, as the record of what a person
+-- confirmed; an unconsumed grant stops being usable after 15 minutes (see the
+-- consume). A purge of expired unconsumed rows is queued, not built.
 CREATE TABLE platform.ledger_approval_grants (
   tenant_id uuid NOT NULL,
   environment_id uuid NOT NULL,
   grant_id uuid NOT NULL,
+  capability_id text NOT NULL CHECK (capability_id ~ '^northstar\.ledger:capability\.[a-z][a-z0-9_]*$'),
   principal_id uuid NOT NULL,
   human_id uuid NOT NULL,
   release_id uuid NOT NULL,
@@ -233,14 +238,26 @@ CREATE TRIGGER ledger_approval_grants_no_truncate BEFORE TRUNCATE ON platform.le
   FOR EACH STATEMENT EXECUTE FUNCTION north_star_internal.ledger_grant_immutable();
 
 -- The receipt, verified in SQL at commit: the consumed grant's invocation is a
--- successful trust invocation of the same operation, principal and release.
+-- successful trust invocation of the same operation, principal, release and
+-- channel, approved by the same human (its approving human, or its executing
+-- principal when that is the human), whose change document is of the grant's
+-- company record. The runtime role can insert trust rows, so every fact the
+-- grant binds is re-read here, as the booking engine's SQL trust rows do.
 -- Definer, because a deferred trigger runs as the role current at COMMIT.
 CREATE FUNCTION north_star_internal.ledger_grant_receipt() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$ BEGIN
   IF NEW.invocation_id IS NOT NULL AND NOT EXISTS (SELECT FROM platform.trust_action_invocations i
+      JOIN platform.trust_business_change_documents d
+        ON (d.tenant_id, d.environment_id, d.change_document_id, d.invocation_id) =
+           (i.tenant_id, i.environment_id, i.change_document_id, i.invocation_id)
       WHERE (i.tenant_id, i.environment_id, i.invocation_id) = (NEW.tenant_id, NEW.environment_id, NEW.invocation_id)
-        AND i.action_id = NEW.operation_id AND i.execution_principal_id = NEW.principal_id
-        AND i.release_id = NEW.release_id AND i.outcome = 'SUCCEEDED') THEN
+        AND i.action_id = NEW.operation_id
+        AND i.execution_principal_id = NEW.principal_id
+        AND i.release_id = NEW.release_id AND i.outcome = 'SUCCEEDED'
+        AND i.channel = NEW.channel
+        AND NEW.human_id = coalesce(i.approving_human_id,
+              CASE WHEN i.execution_principal_kind = 'HUMAN' THEN i.execution_principal_id END)
+        AND d.record_id = NEW.input->>'recordId') THEN
     RAISE EXCEPTION 'ledger.receiptUnverified'; END IF;
   RETURN NULL; END $$;
 CREATE CONSTRAINT TRIGGER ledger_approval_grants_receipt AFTER UPDATE ON platform.ledger_approval_grants
@@ -249,30 +266,41 @@ CREATE CONSTRAINT TRIGGER ledger_approval_grants_receipt AFTER UPDATE ON platfor
 -- Attestation, by the approval-issuer role only, after the executor verified
 -- the gateway's confirmation grant. The issuer pool has no request context, so
 -- the scope comes as arguments; the apply re-checks it against the trusted one.
-CREATE FUNCTION platform.ledger_attest_approval(grant_key uuid, t uuid, e uuid, principal uuid, human uuid,
-  released uuid, fence bigint, operation text, request_key uuid, input jsonb, channel text)
+CREATE FUNCTION platform.ledger_attest_approval(grant_key uuid, capability text, t uuid, e uuid, principal uuid,
+  human uuid, released uuid, fence bigint, operation text, request_key uuid, input jsonb, channel text)
 RETURNS void LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
-  INSERT INTO platform.ledger_approval_grants (tenant_id, environment_id, grant_id, principal_id, human_id, release_id,
-      fence, operation_id, request_key, input, channel)
-    VALUES (t, e, grant_key, principal, human, released, fence, operation, request_key, input, channel)
+  INSERT INTO platform.ledger_approval_grants (tenant_id, environment_id, grant_id, capability_id, principal_id, human_id,
+      release_id, fence, operation_id, request_key, input, channel)
+    VALUES (t, e, grant_key, capability, principal, human, released, fence, operation, request_key, input, channel)
     ON CONFLICT (grant_id) DO NOTHING
 $$;
 
 -- Consume the grant that matches this exact request, once. Lock position 0.
-CREATE FUNCTION north_star_internal.ledger_consume_grant(grant_key uuid, released uuid, expected_fence bigint,
-  operation text, request_key uuid, input jsonb, channel text) RETURNS uuid
+-- `capability` is the calling apply's own constant. One comparison per line:
+-- each has its own red. An unconsumed grant is usable for 15 minutes after its
+-- attestation. The gateway's signed confirmation carries no lifetime of its
+-- own (it dies with the process key), so this is the only time bound; 15
+-- minutes covers a person confirming a form, and a later attempt confirms
+-- again.
+CREATE FUNCTION north_star_internal.ledger_consume_grant(grant_key uuid, capability text, released uuid,
+  expected_fence bigint, operation text, request_key uuid, input jsonb, channel text) RETURNS uuid
 LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp AS $$
 DECLARE g platform.ledger_approval_grants; invocation uuid := gen_random_uuid(); BEGIN
   SELECT * INTO g FROM platform.ledger_approval_grants a
     WHERE (a.tenant_id, a.environment_id, a.grant_id) =
           (north_star_internal.trusted_tenant_id(), north_star_internal.trusted_environment_id(), grant_key) FOR UPDATE;
   IF NOT FOUND
+     OR g.capability_id IS DISTINCT FROM capability
      OR g.principal_id IS DISTINCT FROM nullif(current_setting('north_star.principal_id', true), '')::uuid
-     OR (g.release_id, g.fence, g.operation_id, g.request_key, g.channel) IS DISTINCT FROM
-        (released, expected_fence, operation, request_key, channel)
+     OR g.release_id IS DISTINCT FROM released
+     OR g.fence IS DISTINCT FROM expected_fence
+     OR g.operation_id IS DISTINCT FROM operation
+     OR g.request_key IS DISTINCT FROM request_key
+     OR g.channel IS DISTINCT FROM channel
      OR g.input IS DISTINCT FROM input THEN
     RAISE EXCEPTION 'ledger.approvalRequired'; END IF;
   IF g.consumed_at IS NOT NULL THEN RAISE EXCEPTION 'ledger.approvalSpent'; END IF;
+  IF g.attested_at < clock_timestamp() - interval '15 minutes' THEN RAISE EXCEPTION 'ledger.approvalExpired'; END IF;
   UPDATE platform.ledger_approval_grants a SET consumed_at = clock_timestamp(), invocation_id = invocation
     WHERE (a.tenant_id, a.environment_id, a.grant_id) = (g.tenant_id, g.environment_id, g.grant_id);
   RETURN invocation; END $$;
@@ -294,22 +322,25 @@ $$;
 
 -- A company is a live record of the released legal-entity master (ADR-0015),
 -- found by its storage-plan marker, never by an entity name: unarchived, in the
--- declared active status, FOR SHARE when the caller writes. A release without
--- the master refuses by name (fail closed).
-CREATE FUNCTION north_star_internal.ledger_company_live(company uuid, locking boolean) RETURNS boolean
+-- declared active status, FOR SHARE when the caller writes. Returns the
+-- record's stored optimistic revision (its column from the same plan), or
+-- null when it is not a live company. A release without the master refuses by
+-- name (fail closed).
+CREATE FUNCTION north_star_internal.ledger_company_live(company uuid, locking boolean) RETURNS bigint
 LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp AS $$
-DECLARE master jsonb; stored uuid; BEGIN
-  IF company IS NULL THEN RETURN false; END IF; BEGIN
+DECLARE master jsonb; stored bigint; BEGIN
+  IF company IS NULL THEN RETURN NULL; END IF; BEGIN
     SELECT v INTO STRICT master FROM jsonb_array_elements(north_star_internal.ledger_release_storage()->'entities') v
       WHERE v ? 'legalEntityMaster';
   EXCEPTION WHEN no_data_found OR too_many_rows THEN RAISE EXCEPTION 'ledger.companyRegistryUnavailable'; END;
-  EXECUTE format('SELECT record_id FROM north_star_module.%I WHERE tenant_id = $1 AND environment_id = $2 AND record_id = $3'
+  EXECUTE format('SELECT %I FROM north_star_module.%I WHERE tenant_id = $1 AND environment_id = $2 AND record_id = $3'
       ' AND archived_at IS NULL AND %I = $4 %s',
-      master->>'physicalTableName', master#>>'{legalEntityMaster,fieldColumns,status}',
+      master#>>'{optimisticRevision,column}', master->>'physicalTableName',
+      master#>>'{legalEntityMaster,fieldColumns,status}',
       CASE WHEN locking THEN 'FOR SHARE' ELSE '' END)
     INTO stored USING north_star_internal.trusted_tenant_id(), north_star_internal.trusted_environment_id(), company,
       master#>>'{legalEntityMaster,activeStatusValue}';
-  RETURN stored IS NOT NULL; END $$;
+  RETURN stored; END $$;
 
 -- The ledger-owned permission predicate: the trusted principal holds the
 -- permission on the resource through a live membership that is unscoped or
@@ -329,9 +360,11 @@ $$;
 
 -- Fence, then authority, then the company: "not yours" and "not there" are one
 -- refusal (ledger.unavailable). Writing holds the pointer, the epoch and the
--- master row FOR SHARE until commit.
-CREATE FUNCTION north_star_internal.ledger_operation_access(company uuid, released uuid, expected_fence bigint, writing boolean)
-RETURNS void LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp AS $$
+-- master row FOR SHARE until commit. Returns the locked policy epoch (when
+-- writing) and the company record's stored revision, read under that lock.
+CREATE FUNCTION north_star_internal.ledger_operation_access(company uuid, released uuid, expected_fence bigint,
+  writing boolean, OUT policy_epoch text, OUT revision bigint)
+LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp AS $$
 DECLARE tenant uuid := north_star_internal.trusted_tenant_id(); environment uuid := north_star_internal.trusted_environment_id(); BEGIN
   IF writing THEN
     PERFORM FROM platform.active_release_pointers p
@@ -340,32 +373,46 @@ DECLARE tenant uuid := north_star_internal.trusted_tenant_id(); environment uuid
     PERFORM FROM platform.active_release_pointers p
       WHERE (p.tenant_id, p.environment_id, p.release_id, p.fence) = (tenant, environment, released, expected_fence); END IF;
   IF NOT FOUND THEN RAISE EXCEPTION 'ledger.staleRelease'; END IF;
-  IF writing THEN PERFORM platform.lock_current_policy_epoch(tenant, environment); END IF;
+  IF writing THEN policy_epoch := platform.lock_current_policy_epoch(tenant, environment); END IF;
   IF NOT north_star_internal.ledger_may(company, 'northstar.ledger:permission.books_configure', 'northstar.ledger:capability.books')
     THEN RAISE EXCEPTION 'ledger.unavailable'; END IF;
-  IF NOT north_star_internal.ledger_company_live(company, writing) THEN RAISE EXCEPTION 'ledger.unavailable'; END IF; END $$;
+  revision := north_star_internal.ledger_company_live(company, writing);
+  IF revision IS NULL THEN RAISE EXCEPTION 'ledger.unavailable'; END IF; END $$;
 
 -- Books start, on the company's legal-entity record. The arguments carry the
 -- date and the books start the person expects to replace (expectedPrior; a
 -- missing, null or empty one means "none yet", which is what a Task input left
 -- blank sends); a different stored value refuses by name. The company row
--- is provisioned only here, after the master check.
+-- is provisioned only here, after the master check. `policy_version` is the
+-- version the gateway decided under; the apply refuses unless it is the epoch
+-- it now holds locked. The person's expectedRevision is compared with the
+-- company record under its FOR SHARE. The result carries the changed facts
+-- with their old and new values, the locked policy version and the stored
+-- revision, which the trust writer records as the change.
 CREATE FUNCTION platform.ledger_apply_books_start(grant_key uuid, released uuid, expected_fence bigint,
-  operation text, request_key uuid, channel text, input jsonb) RETURNS jsonb
+  operation text, request_key uuid, channel text, policy_version text, input jsonb) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE tenant uuid := north_star_internal.trusted_tenant_id(); environment uuid := north_star_internal.trusted_environment_id();
-  args jsonb := input->'arguments'; company uuid; day date; prior date; invocation uuid; BEGIN
+  args jsonb := input->'arguments'; company uuid; day date; prior date; invocation uuid; locked text; stored bigint; BEGIN
   PERFORM north_star_internal.ledger_require_writer();
   IF jsonb_typeof(input) IS DISTINCT FROM 'object' OR input - 'recordId' - 'expectedRevision' - 'arguments' <> '{}'
      OR coalesce(input->>'recordId', '') !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+     OR jsonb_typeof(input->'expectedRevision') IS DISTINCT FROM 'number'
+     OR (input->>'expectedRevision') !~ '^[1-9][0-9]{0,17}$'
      OR jsonb_typeof(args) IS DISTINCT FROM 'object' OR args - 'date' - 'expectedPrior' <> '{}'
      OR coalesce(jsonb_typeof(args->'expectedPrior'), 'null') NOT IN ('null', 'string') THEN
     RAISE EXCEPTION 'ledger.invalidOperation'; END IF;
   company := (input->>'recordId')::uuid;
   day := north_star_internal.ledger_civil_date(args->>'date');
   IF day IS NULL THEN RAISE EXCEPTION 'ledger.invalidOperation'; END IF;
-  invocation := north_star_internal.ledger_consume_grant(grant_key, released, expected_fence, operation, request_key, input, channel);
-  PERFORM north_star_internal.ledger_operation_access(company, released, expected_fence, true);
+  invocation := north_star_internal.ledger_consume_grant(grant_key, 'northstar.ledger:capability.ledger_books_start',
+    released, expected_fence, operation, request_key, input, channel);
+  SELECT a.policy_epoch, a.revision INTO locked, stored
+    FROM north_star_internal.ledger_operation_access(company, released, expected_fence, true) a;
+  IF policy_version IS DISTINCT FROM 'northstar.current-policy/' || locked THEN
+    RAISE EXCEPTION 'ledger.stalePolicy'; END IF;
+  IF stored IS DISTINCT FROM (input->>'expectedRevision')::bigint THEN
+    RAISE EXCEPTION 'ledger.staleRevision'; END IF;
   PERFORM north_star_internal.ledger_provision_company(company);
   -- Lock 3, FOR UPDATE: the books-start setter takes the same row again.
   SELECT c.books_start INTO prior FROM platform.ledger_companies c
@@ -373,8 +420,9 @@ DECLARE tenant uuid := north_star_internal.trusted_tenant_id(); environment uuid
   IF to_char(prior, 'YYYY-MM-DD') IS DISTINCT FROM nullif(args->>'expectedPrior', '') THEN
     RAISE EXCEPTION 'ledger.priorChanged'; END IF;
   PERFORM north_star_internal.ledger_set_books_start(company, day);
-  RETURN jsonb_build_object('invocationId', invocation, 'company', company, 'booksStart', to_char(day, 'YYYY-MM-DD'),
-    'prior', to_char(prior, 'YYYY-MM-DD')); END $$;
+  RETURN jsonb_build_object('invocationId', invocation, 'policyVersion', 'northstar.current-policy/' || locked,
+    'revision', stored, 'changes', jsonb_build_array(jsonb_build_object('fact', 'booksStart',
+      'old', to_char(prior, 'YYYY-MM-DD'), 'new', to_char(day, 'YYYY-MM-DD')))); END $$;
 
 DO $access$ DECLARE routine text; BEGIN
   REVOKE ALL ON platform.ledger_chart_starter_accounts FROM PUBLIC;
@@ -386,11 +434,11 @@ DO $access$ DECLARE routine text; BEGIN
       'north_star_internal.ledger_release_storage()', 'north_star_internal.ledger_company_live(uuid,boolean)',
       'north_star_internal.ledger_may(uuid,text,text)',
       'north_star_internal.ledger_operation_access(uuid,uuid,bigint,boolean)',
-      'north_star_internal.ledger_consume_grant(uuid,uuid,bigint,text,uuid,jsonb,text)',
-      'platform.ledger_attest_approval(uuid,uuid,uuid,uuid,uuid,uuid,bigint,text,uuid,jsonb,text)',
-      'platform.ledger_apply_books_start(uuid,uuid,bigint,text,uuid,text,jsonb)'] LOOP
+      'north_star_internal.ledger_consume_grant(uuid,text,uuid,bigint,text,uuid,jsonb,text)',
+      'platform.ledger_attest_approval(uuid,text,uuid,uuid,uuid,uuid,uuid,bigint,text,uuid,jsonb,text)',
+      'platform.ledger_apply_books_start(uuid,uuid,bigint,text,uuid,text,text,jsonb)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC', routine); END LOOP; END $access$;
-GRANT EXECUTE ON FUNCTION platform.ledger_attest_approval(uuid,uuid,uuid,uuid,uuid,uuid,bigint,text,uuid,jsonb,text)
+GRANT EXECUTE ON FUNCTION platform.ledger_attest_approval(uuid,text,uuid,uuid,uuid,uuid,uuid,bigint,text,uuid,jsonb,text)
   TO north_star_approval_issuer;
-GRANT EXECUTE ON FUNCTION platform.ledger_apply_books_start(uuid,uuid,bigint,text,uuid,text,jsonb)
+GRANT EXECUTE ON FUNCTION platform.ledger_apply_books_start(uuid,uuid,bigint,text,uuid,text,text,jsonb)
   TO north_star_runtime;

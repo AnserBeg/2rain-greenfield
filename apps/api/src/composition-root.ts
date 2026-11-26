@@ -444,14 +444,12 @@ export async function openComposedApplicationRuntime(
           new URL('../../web/release/app.authored.json', import.meta.url)
             .pathname,
           'northstar.app:package.application',
-          options.compiledApplication
-            ? canonicalAuthoredProjection(
-                parseNormalizedApplicationPackageJson(
-                  parseCompiledApplication(compiledApplication).application
-                    .normalizedDefinitionBytes,
-                ),
-              )
-            : null,
+          canonicalAuthoredProjection(
+            parseNormalizedApplicationPackageJson(
+              parseCompiledApplication(compiledApplication).application
+                .normalizedDefinitionBytes,
+            ),
+          ),
         );
       },
       get firstPartyAuthored() {
@@ -487,32 +485,29 @@ export async function openComposedApplicationRuntime(
 }
 
 /**
- * The checked-in permission acknowledgement for the first party a runtime
- * serves. The binary's own release declares exactly what the checked-in
- * bindings name, so it is read as is. A release handed in from elsewhere (an
- * earlier one) is narrowed to the permissions it declares, as the release
- * build narrows it for each recorded revision: a permission bound after that
- * release is not its own, so it is neither stale there nor unbound.
+ * The checked-in permission acknowledgement, narrowed to the permissions the
+ * served first-party release declares. This is the release build's own rule
+ * for every recorded revision (`narrowAcknowledgementToDeclared`, which only
+ * removes entries): a permission bound after a release is not that release's,
+ * so it is neither stale there nor unbound. It applies to whichever release is
+ * served, with no branch on who handed it in. For the binary's own release it
+ * is the identity (every acknowledged permission is declared there, or the
+ * release build refuses), so production serving is unchanged; an earlier
+ * release (a recorded base, an archived reader) gets its own census.
  */
 function servedAcknowledgement(
   authoredPath: string,
   packageId: string,
-  served: Readonly<Record<string, unknown>> | null,
+  served: Readonly<Record<string, unknown>>,
 ) {
-  const acknowledgement = readUnboundPermissionAcknowledgementFor(
-    authoredPath,
-    packageId,
+  return narrowAcknowledgementToDeclared(
+    readUnboundPermissionAcknowledgementFor(authoredPath, packageId),
+    new Set(
+      (served.permissions as readonly { readonly permissionId: string }[]).map(
+        (permission) => permission.permissionId,
+      ),
+    ),
   );
-  return served
-    ? narrowAcknowledgementToDeclared(
-        acknowledgement,
-        new Set(
-          (
-            served.permissions as readonly { readonly permissionId: string }[]
-          ).map((permission) => permission.permissionId),
-        ),
-      )
-    : acknowledgement;
 }
 
 /** Tenant customization over the database the composed runtime serves. */
@@ -548,7 +543,7 @@ export async function openCustomizeService(
     acknowledgement: servedAcknowledgement(
       authoredPath,
       String((firstPartyAuthored.package as Record<string, unknown>).packageId),
-      options.compiledApplication ? firstPartyAuthored : null,
+      firstPartyAuthored,
     ),
     ...(options.sandboxWallClockMilliseconds
       ? {
