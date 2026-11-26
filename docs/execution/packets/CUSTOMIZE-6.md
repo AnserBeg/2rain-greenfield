@@ -3,7 +3,7 @@
 ## Slice 1 · The in-app AI adds exact numbers, amounts, measures and notes — record
 Status: Fable review FIX applied in the fix round, the targeted checks' N1/N2 and then N3 (production) with P2/P3a in later rounds (rule 14); packet tip ready for review on `packet/CUSTOMIZE-6-s1`. Base `origin/main` d8aad66b3 (TRAIN-L) merged once and the release files were checked rather than hand-merged (`check:app-release` and `check:demo-release` both green: first-party bytes are unchanged). Surface rung LOGICAL_FIELD_READER = 49, assigned at TRAIN-O (TEMPLATE-1 holds 48). No migration. One Critical path is touched: `release-verification-service.ts` (3 lines: a field with declared allowed values is probed with one of them). Stops taken: none.
 
-CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/45561787239
+Slice 1 exact full CI (green, on bc06dcf46): https://github.com/AnserBeg/2rain-greenfield/actions/runs/45561787239
 (The cited run is the green exact full on bc06dcf46, before the final round; the final tip's exact full run is in `CUSTOMIZE-6-s1b.result.txt`, since this line cannot name a run on its own commit.)
 
 **Claims.**
@@ -67,7 +67,8 @@ The same test proves:
 ## Slice 2 · The same kinds on line tables, with line money in the header currency — record
 Status: built to the approved design note (option i, `CUSTOMIZE-6-s2.result.txt`); awaiting its independent review. Branch `packet/CUSTOMIZE-6-s2`, cut from `origin/main` 54e8ef7c2 (TRAIN-O). Surface rung LINE_LOGICAL_FIELD_READER = 50 is PROVISIONAL: REPORTS-1 s2 takes 50 and 51 and WORKFLOW-2 takes 52 in TRAIN-Q, so the integrator assigns the final number (likely 53). No migration. No Critical path touched. Stops taken: one named narrowing, adding these kinds to an EXISTING line table (below), reported to the orchestrator.
 
-Full CI: dispatched on the pushed tip; its URL and status are recorded in `CUSTOMIZE-6-s2.result.txt` (this file cannot name a run on its own commit).
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/45769940052
+(Green exact full on 982b6bebb, the slice-2 code and record tip; this line itself is recorded in the next, docs-only commit.)
 
 **Claims.**
 1. `addLineTable` admits decimal, money, quantity, long-text and currency line fields on a tenant record type, declared through the same `logicalFields` key as slice 1. The compiler no longer refuses a tenant line table; first-party record types are still refused by name.
