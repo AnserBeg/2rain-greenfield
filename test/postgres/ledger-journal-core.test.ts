@@ -996,13 +996,13 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
             },
           );
           await t.test(
-            'HAZARD R4: two writer calls in one transaction can deadlock (fixed before slice 1b)',
+            'a second writer call in one transaction refuses by name (R4 tripwire)',
             async () => {
-              // This pins a known hazard, not a guarantee (review R4). "Counter
-              // last" is per writer call: T1's first entry holds the counter,
-              // T2 holds balance row Y and waits on the counter, and T1's
-              // second entry asks for Y. Until the 1b fix, no caller makes two
-              // writer calls in one transaction. The fix inverts this test.
+              // Review R4: "counter last" is per writer call. T1's first entry
+              // holds the counter, T2 holds balance row Y and waits on the
+              // counter, and T1's second entry asks for Y. Without the
+              // tripwire the two deadlock; with it T1's second call refuses
+              // by name before it takes any lock.
               const c = await company();
               await w1.query('BEGIN');
               await w2.query('BEGIN');
@@ -1016,24 +1016,126 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
                 const t1Second = settled(
                   manual(w1, c, '2026-02-10', pair(c.bank, c.cash)),
                 );
-                // The victim's transaction keeps its locks until it rolls
-                // back, so the survivor finishes only after that ROLLBACK.
-                const victim = await Promise.race([
-                  t1Second.then(() => w1),
-                  t2.then(() => w2),
+                // Whichever settles first holds its locks until it rolls
+                // back, so the other finishes only after that ROLLBACK.
+                const first = await Promise.race([
+                  t1Second.then((outcome) => ({ outcome, session: w1 })),
+                  t2.then((outcome) => ({ outcome, session: w2 })),
                 ]);
-                await victim.query('ROLLBACK');
+                await first.session.query('ROLLBACK');
                 const outcomes = await Promise.all([t1Second, t2]);
-                assert.equal(
-                  outcomes.filter((outcome) =>
-                    /deadlock detected/u.test(outcome),
-                  ).length,
-                  1,
-                  `the R4 hazard no longer deadlocks; invert this test: ${outcomes.join(' | ')}`,
+                assert.match(
+                  outcomes[0],
+                  /ledger\.oneEntryPerTransaction/u,
+                  `a second writer call in one transaction was not refused by name: ${outcomes.join(' | ')}`,
                 );
+                assert.equal(outcomes[1], 'admitted');
               } finally {
                 await w1.query('ROLLBACK').catch(() => undefined);
                 await w2.query('ROLLBACK').catch(() => undefined);
+              }
+            },
+          );
+          await t.test(
+            'the R4 tripwire outlives the writer SET clause and clears on savepoint rollback',
+            async () => {
+              const c = await company();
+              await w1.query('BEGIN');
+              try {
+                await w1.query('SAVEPOINT first_entry');
+                await manual(w1, c, '2026-02-10');
+                await w1.query('ROLLBACK TO SAVEPOINT first_entry');
+                // The rolled-back call left no marker and no locks.
+                await manual(w1, c, '2026-02-11');
+                await assert.rejects(
+                  manual(w1, c, '2026-02-12'),
+                  /ledger\.oneEntryPerTransaction/u,
+                  'a second writer call in one transaction was admitted',
+                );
+              } finally {
+                await w1.query('ROLLBACK').catch(() => undefined);
+              }
+            },
+          );
+          await t.test(
+            'an account created while a writer waits is held by its line read (R6)',
+            async () => {
+              // Review R6. The writer waits on account Y (bank), held by a
+              // relabel; meanwhile account X is created and committed, so the
+              // ascending account lock never sees X and only the per-line read
+              // can hold it. The writer then waits on Y's balance row, before
+              // any foreign-key check touches X. A deactivation of X must wait
+              // for the writer, or the writer posts to an inactive account.
+              const c = await company();
+              const x = randomUUID();
+              const w4 = await session();
+              await manual(w1, c, '2026-02-05', pair(c.bank, c.revenue));
+              await w4.query('BEGIN');
+              await w3.query('BEGIN');
+              try {
+                await w4.query(
+                  'SELECT FROM platform.ledger_balances WHERE company_id=$1 AND account_id=$2 FOR UPDATE',
+                  [c.id, c.bank],
+                );
+                await w3.query(
+                  "SELECT north_star_internal.ledger_put_account($1,$2,'1010',$3,'Bank relabelled',true)",
+                  [c.id, c.bank, role('cash')],
+                );
+                const writerBlocked = await waitUntilBlocked(w1);
+                await w1.query('BEGIN');
+                const writer = settled(
+                  manual(w1, c, '2026-02-10', [
+                    { accountId: c.bank, side: 'D', amount: 500 },
+                    { accountId: x, side: 'C', amount: 500 },
+                  ]),
+                );
+                await writerBlocked();
+                await admin.query(
+                  "SELECT north_star_internal.ledger_put_account($1,$2,'4100',$3,'New revenue',true)",
+                  [c.id, x, role('revenue')],
+                );
+                await w3.query('COMMIT');
+                // Now waiting on the bank balance row, past the line read.
+                await writerBlocked();
+                const pid = (
+                  await w2.query<{ pid: number }>(
+                    'SELECT pg_backend_pid() AS pid',
+                  )
+                ).rows[0]!.pid;
+                let finished: string | undefined;
+                const deactivation = settled(
+                  w2.query(
+                    "SELECT north_star_internal.ledger_put_account($1,$2,'4100',$3,'New revenue',false)",
+                    [c.id, x, role('revenue')],
+                  ),
+                ).then((outcome) => (finished = outcome));
+                let waiting = false;
+                for (
+                  let attempt = 0;
+                  attempt < 400 && !waiting && finished === undefined;
+                  attempt++
+                ) {
+                  waiting = (
+                    await admin.query<{ waiting: boolean }>(
+                      'SELECT cardinality(pg_blocking_pids($1)) > 0 AS waiting',
+                      [pid],
+                    )
+                  ).rows[0]!.waiting;
+                  if (!waiting)
+                    await new Promise((resolve) => setTimeout(resolve, 25));
+                }
+                await w4.query('COMMIT');
+                const outcome = await writer;
+                await w1.query('COMMIT');
+                await deactivation;
+                assert.ok(
+                  waiting,
+                  `a deactivation committed under an uncommitted writer's line: ${String(finished)}; the writer: ${outcome}`,
+                );
+              } finally {
+                await w4.query('ROLLBACK').catch(() => undefined);
+                await w3.query('ROLLBACK').catch(() => undefined);
+                await w1.query('ROLLBACK').catch(() => undefined);
               }
             },
           );

@@ -21,10 +21,22 @@
 -- commit would be refused. The check now runs as its owner, like the writer.
 ALTER FUNCTION north_star_internal.ledger_entry_balanced() SECURITY DEFINER SET search_path = pg_catalog, pg_temp;
 
--- Review R2. The writer as in the journal-core migration, plus one refusal: an
--- instant must be RFC 3339 text with Z or a numeric offset. Text without one
--- is read in the session time zone, a hidden zone input; a zone name or a
--- special value such as 'now' is refused too.
+-- The writer as in the journal-core migration, with three changes.
+-- Review R2: an instant must be RFC 3339 text with Z or a numeric offset. Text
+-- without one is read in the session time zone, a hidden zone input; a zone
+-- name or a special value such as 'now' is refused too.
+-- Review R6: the per-line account read takes the row FOR SHARE, so an account
+-- created and committed after the ascending account lock is held too, and a
+-- deactivation cannot commit under this writer. Share locks form no cycle.
+-- Review R4 tripwire: a second writer call in one transaction refuses by name
+-- (ledger.oneEntryPerTransaction). The marker is a transaction-local setting;
+-- the function's own SET clause saves and restores only search_path, so the
+-- marker outlives the call, and a savepoint rollback clears it together with
+-- the locks taken after the savepoint. Any role can reset a placeholder
+-- setting, the same trust level as north_star.tenant_id; a deadlock aborts a
+-- transaction and never writes wrong money, so a tripwire is proportionate.
+-- The real protection: the writer is granted to no one and every operation
+-- makes one call.
 CREATE OR REPLACE FUNCTION north_star_internal.ledger_write_entry(
   company uuid, kind text, date_basis jsonb, currency text, lines jsonb, provenance jsonb
 ) RETURNS uuid LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
@@ -37,6 +49,10 @@ DECLARE
   entry_day date; entry_month date; entry_no bigint; digest text;
   line jsonb; n bigint; account uuid; line_role text; line_class text; acct record; accepted jsonb := '[]'; BEGIN
   PERFORM north_star_internal.ledger_require_writer();
+  -- R4 tripwire, before lock 3: one writer call per transaction (see header).
+  IF current_setting('north_star.ledger_entry_written', true) = 'yes' THEN
+    RAISE EXCEPTION 'ledger.oneEntryPerTransaction'; END IF;
+  PERFORM set_config('north_star.ledger_entry_written', 'yes', true);
   IF kind IS NULL OR kind NOT IN ('posting','recognition','repost','reclass','opening','manual')
      OR jsonb_typeof(lines) IS DISTINCT FROM 'array' OR jsonb_typeof(date_basis) IS DISTINCT FROM 'object'
      OR jsonb_typeof(coalesce(provenance, '{}')) <> 'object'
@@ -69,7 +85,8 @@ DECLARE
     account := (line->>'accountId')::uuid;
     SELECT a.kind_role_id, a.active, r.role_class, r.control_subledger_id INTO acct
       FROM platform.ledger_accounts a JOIN platform.ledger_core_roles r ON r.role_id = a.kind_role_id
-      WHERE (a.tenant_id, a.environment_id, a.company_id, a.account_id) = (t, e, company, account);
+      WHERE (a.tenant_id, a.environment_id, a.company_id, a.account_id) = (t, e, company, account)
+      FOR SHARE OF a;
     IF NOT FOUND THEN RAISE EXCEPTION 'ledger.accountUnavailable'; END IF;
     IF NOT acct.active THEN RAISE EXCEPTION 'ledger.accountInactive'; END IF;
     IF kind IN ('manual','opening') THEN

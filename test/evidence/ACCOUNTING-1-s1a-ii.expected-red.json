@@ -69,6 +69,45 @@
           "expected": "ledger SQL outside the resolver contains a call of the date function"
         }
       ]
+    },
+    {
+      "name": "ledger-entry-tripwire",
+      "claim": "A second writer call in one transaction refuses by name instead of risking the R4 deadlock.",
+      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "original": "IF current_setting('north_star.ledger_entry_written', true) = 'yes' THEN",
+      "replacement": "IF false AND current_setting('north_star.ledger_entry_written', true) = 'yes' THEN",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "a second writer call in one transaction refuses by name (R4 tripwire)",
+          "expected": "a second writer call in one transaction was not refused by name"
+        },
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "the R4 tripwire outlives the writer SET clause and clears on savepoint rollback",
+          "expected": "Missing expected rejection: a second writer call in one transaction was admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-line-read-lock",
+      "claim": "The writer's per-line account read holds the account FOR SHARE, so a deactivation cannot commit under it (review R6).",
+      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "original": "\n      FOR SHARE OF a;",
+      "replacement": ";",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "an account created while a writer waits is held by its line read (R6)",
+          "expected": "a deactivation committed under an uncommitted writer's line: admitted"
+        }
+      ]
     }
   ]
 }

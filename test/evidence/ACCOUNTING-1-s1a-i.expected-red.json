@@ -300,8 +300,8 @@
       "name": "ledger-writer-account-company",
       "claim": "The writer resolves accounts inside the entry's company only.",
       "file": "db/migrations/0071_ledger_books_by_hand.sql",
-      "original": "WHERE (a.tenant_id, a.environment_id, a.company_id, a.account_id) = (t, e, company, account);",
-      "replacement": "WHERE (a.tenant_id, a.environment_id, a.account_id) = (t, e, account);",
+      "original": "WHERE (a.tenant_id, a.environment_id, a.company_id, a.account_id) = (t, e, company, account)\n      FOR SHARE OF a;",
+      "replacement": "WHERE (a.tenant_id, a.environment_id, a.account_id) = (t, e, account)\n      FOR SHARE OF a;",
       "test": {
         "files": ["test/postgres/ledger-journal-core.test.ts"]
       },
