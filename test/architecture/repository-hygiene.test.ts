@@ -631,9 +631,10 @@ test('shared gate holders coexist and exclude an exclusive gate', async () => {
   holder.stderr.on('data', (chunk: string) => {
     holderError += chunk;
   });
-  await waitForOutput(holder.stdout, 'LOCK_READY');
-
   try {
+    // Inside the try so a holder that was slow to start (or never did) is
+    // still released by the finally below instead of hanging the runner.
+    await waitForOutput(holder.stdout, 'LOCK_READY');
     const sharedOutput = execFileSync(
       process.execPath,
       [
@@ -932,7 +933,11 @@ function containsGlob(value: string): boolean {
 function waitForOutput(
   stream: NodeJS.ReadableStream,
   expected: string,
-  timeoutMilliseconds = 5_000,
+  // Only a backstop against a holder that never starts: the wait resolves on
+  // the event itself, so an idle machine pays nothing for the generous bound
+  // and a loaded one (a child node process can take over 5 s to start at a
+  // load average near 20) is not mistaken for a broken lock.
+  timeoutMilliseconds = 60_000,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     let output = '';
