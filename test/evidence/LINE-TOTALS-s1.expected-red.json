@@ -561,6 +561,222 @@
       ]
     },
     {
+      "name": "line-totals-s1-total-absent",
+      "claim": "One unpriced live line makes the total absent, never a partial sum.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "THEN coalesce(sum(${amount}), 0) END",
+      "replacement": "THEN coalesce(sum(${amount}), 0) ELSE coalesce(sum(${amount}), 0) END",
+      "test": {
+        "files": ["test/postgres/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 total: the header get reads the sum of its live lines, absent with an unpriced line, per company, and withheld without the line read$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 total: the header get reads the sum of its live lines, absent with an unpriced line, per company, and withheld without the line read",
+          "expected": "an unpriced line did not make the total absent"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-total-archived",
+      "claim": "The total sums live lines only: an archived line is left out.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "          AND ${qualified(line, plan.lines.archive.archivedAtColumn)} IS NULL${sameCompanySql(",
+      "replacement": "          AND true${sameCompanySql(",
+      "test": {
+        "files": ["test/postgres/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 total: the header get reads the sum of its live lines, absent with an unpriced line, per company, and withheld without the line read$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 total: the header get reads the sum of its live lines, absent with an unpriced line, per company, and withheld without the line read",
+          "expected": "an archived line was counted in the total"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-total-parent-join",
+      "claim": "The total sums the lines of its own record only.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "          AND ${qualified(line, plan.parentColumn)} = ${qualified(ROLLUP_RECORD_ALIAS, record.recordIdentity.column)}\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 total: the header get reads the sum of its live lines, absent with an unpriced line, per company, and withheld without the line read$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 total: the header get reads the sum of its live lines, absent with an unpriced line, per company, and withheld without the line read",
+          "expected": "the total counted another record's lines or missed its own"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-total-withheld",
+      "claim": "A total over lines the reader may not read is withheld and the header still answered.",
+      "file": "packages/runtime/src/semantic-query-gateway.ts",
+      "original": "    (read.decision === 'ALLOW' && read.predicateAccepted",
+      "replacement": "    (true",
+      "test": {
+        "files": ["test/postgres/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 total: the header get reads the sum of its live lines, absent with an unpriced line, per company, and withheld without the line read$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 total: the header get reads the sum of its live lines, absent with an unpriced line, per company, and withheld without the line read",
+          "expected": "a total over lines the reader cannot see was not withheld"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-maximum-create",
+      "claim": "Line N+1 is refused by name on create, counted on live lines under the header lock.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "    if (Number(live.rows[0]?.lines ?? 0) >= maximumLines)",
+      "replacement": "    if (false)",
+      "test": {
+        "files": ["test/postgres/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 maximum: a shared contract with unconstrained operands verifies, refuses line N+1 on create and restore, and its concurrent line writes serialize without deadlock$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 maximum: a shared contract with unconstrained operands verifies, refuses line N+1 on create and restore, and its concurrent line writes serialize without deadlock",
+          "expected": "line N\\+1 was accepted on create"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-maximum-restore",
+      "claim": "A restore is counted like a create, so restoring line N+1 is refused.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "    if (kind !== 'createRecordEffect' && kind !== 'restoreRecordEffect')",
+      "replacement": "    if (kind !== 'createRecordEffect')",
+      "test": {
+        "files": ["test/postgres/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 maximum: a shared contract with unconstrained operands verifies, refuses line N+1 on create and restore, and its concurrent line writes serialize without deadlock$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 maximum: a shared contract with unconstrained operands verifies, refuses line N+1 on create and restore, and its concurrent line writes serialize without deadlock",
+          "expected": "a restore past the maximum was accepted"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-header-lock-serializes",
+      "claim": "The header lock is FOR NO KEY UPDATE, so two creates at max-1 serialize and one is refused.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "        FOR NO KEY UPDATE`,\n      [parentId],",
+      "replacement": "        FOR SHARE`,\n      [parentId],",
+      "test": {
+        "files": ["test/postgres/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 maximum: a shared contract with unconstrained operands verifies, refuses line N+1 on create and restore, and its concurrent line writes serialize without deadlock$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 maximum: a shared contract with unconstrained operands verifies, refuses line N+1 on create and restore, and its concurrent line writes serialize without deadlock",
+          "expected": "two concurrent creates at max-1 did not serialize"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-shared-line-before-header",
+      "claim": "A shared archive locks its line before the header, so a concurrent update of that line never deadlocks.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "          FOR NO KEY UPDATE`,\n        [input.recordId],",
+      "replacement": "`,\n        [input.recordId],",
+      "test": {
+        "files": ["test/postgres/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 maximum: a shared contract with unconstrained operands verifies, refuses line N+1 on create and restore, and its concurrent line writes serialize without deadlock$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 maximum: a shared contract with unconstrained operands verifies, refuses line N+1 on create and restore, and its concurrent line writes serialize without deadlock",
+          "expected": "a shared update and an archive of one line deadlocked"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-verification-operands",
+      "claim": "Release verification writes operands that fit the derived target, so a declaring release with unconstrained operands verifies.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "          : operands.has(field.fieldId)",
+      "replacement": "          : false && operands.has(field.fieldId)",
+      "test": {
+        "files": ["test/postgres/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 maximum: a shared contract with unconstrained operands verifies, refuses line N+1 on create and restore, and its concurrent line writes serialize without deadlock$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 maximum: a shared contract with unconstrained operands verifies, refuses line N+1 on create and restore, and its concurrent line writes serialize without deadlock",
+          "expected": "a declaring release failed to install"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-editor-create-only",
+      "claim": "The editor never sends a create-only field on a saved row, so a saved document saves.",
+      "file": "apps/web/src/document-editor.ts",
+      "original": "  const createOnly = new Set(saved ? (operation.createOnlyFieldIds ?? []) : []);",
+      "replacement": "  const createOnly = new Set<string>();",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 editor: a saved document saves with its create-only currency frozen and never sent$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 editor: a saved document saves with its create-only currency frozen and never sent",
+          "expected": "Editor field unavailable"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-editor-derived",
+      "claim": "The editor never sends a derived value.",
+      "file": "apps/web/src/document-editor.ts",
+      "original": "  const derived = new Set(operation.derivedFields?.map((f) => f.fieldId));",
+      "replacement": "  const derived = new Set<string>();",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 editor: a derived line amount is shown, never sent$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 editor: a derived line amount is shown, never sent",
+          "expected": "Editor field unavailable"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-editor-fail-closed",
+      "claim": "A field missing from the update contract without the marker still throws.",
+      "file": "apps/web/src/document-editor.ts",
+      "original": "    if (!allowed.has(field.fieldId))\n      throw new Error('Editor field unavailable');\n    return true;",
+      "replacement": "    return true;",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 editor: a field missing from the update contract WITHOUT the marker still throws \\(fail-closed\\)$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 editor: a field missing from the update contract WITHOUT the marker still throws (fail-closed)",
+          "expected": "an unmarked missing field was silently skipped"
+        }
+      ]
+    },
+    {
       "name": "diag-line-totals-derive",
       "claim": "TEMPORARY diagnostic (removed before review).",
       "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",

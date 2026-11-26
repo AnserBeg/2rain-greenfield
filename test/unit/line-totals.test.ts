@@ -17,6 +17,7 @@ import {
   type DerivedTerm,
 } from '../../packages/canonical-model/src/line-totals.js';
 import { PROJECTION_FAMILY_IDS } from '../../packages/compiler/src/protocol.js';
+import { editorFieldsToSave } from '../../apps/web/src/document-editor.js';
 import {
   AMOUNT,
   amountDerivation,
@@ -595,5 +596,88 @@ test('LINE-TOTALS-s1 compiler: money compared with zero alone raises the operati
     () => compileRental(nonZero),
     /CANON_VALIDATION_BINDING_UNSUPPORTED/u,
     'a non-zero bound on stored-currency money was admitted',
+  );
+});
+
+// ---------------------------------------------------------------------------
+// The document editor's save (ADR-0094 Contract 3)
+// ---------------------------------------------------------------------------
+
+/** The operation binding the editor reads, from a compiled input contract. */
+function editorOperation(contract: Record<string, unknown>) {
+  const fields = contract.fields as { fieldId: string; writable: boolean }[];
+  const writable = contract.writableFieldIds as string[];
+  return {
+    inputFields: fields.filter(
+      (field) => field.writable && writable.includes(field.fieldId),
+    ),
+    ...(contract.derivedFields
+      ? { derivedFields: contract.derivedFields as { fieldId: string }[] }
+      : {}),
+    ...(contract.createOnlyFieldIds
+      ? { createOnlyFieldIds: contract.createOnlyFieldIds as string[] }
+      : {}),
+  };
+}
+const ids = (fields: readonly { fieldId: string }[]) =>
+  fields.map(({ fieldId }) => fieldId);
+
+test('LINE-TOTALS-s1 editor: a saved document saves with its create-only currency frozen and never sent', () => {
+  const release = compiled(rentalContractAuthored());
+  const header = [{ fieldId: h('name') }, { fieldId: h('currency') }];
+  const update = editorOperation(contractOf(release, 'update'));
+  assert.deepEqual(
+    ids(editorFieldsToSave(header, update, true)),
+    [h('name')],
+    'a saved document with a create-only currency could not be saved',
+  );
+  // On create the currency is offered and sent.
+  assert.deepEqual(
+    ids(
+      editorFieldsToSave(
+        header,
+        editorOperation(contractOf(release, 'create')),
+        false,
+      ),
+    ),
+    [h('name'), h('currency')],
+  );
+});
+
+test('LINE-TOTALS-s1 editor: a derived line amount is shown, never sent', () => {
+  const release = compiled(rentalContractAuthored());
+  const lineFields = [
+    'line_number',
+    'item',
+    'days',
+    'daily_rate',
+    'discount',
+    'amount',
+  ].map((local) => ({ fieldId: l(local) }));
+  for (const [local, saved] of [
+    ['lines_create', false],
+    ['lines_update', true],
+  ] as const)
+    assert.ok(
+      !ids(
+        editorFieldsToSave(
+          lineFields,
+          editorOperation(contractOf(release, local)),
+          saved,
+        ),
+      ).includes(AMOUNT),
+      `the editor sent the derived amount on ${local}`,
+    );
+});
+
+test('LINE-TOTALS-s1 editor: a field missing from the update contract WITHOUT the marker still throws (fail-closed)', () => {
+  const release = compiled(rentalContractAuthored());
+  const header = [{ fieldId: h('name') }, { fieldId: h('currency') }];
+  const unmarked = editorOperation(contractOf(release, 'update'));
+  delete (unmarked as { createOnlyFieldIds?: string[] }).createOnlyFieldIds;
+  assert.throws(
+    () => editorFieldsToSave(header, unmarked, true),
+    /Editor field unavailable/u,
+    'an unmarked missing field was silently skipped',
   );
 });

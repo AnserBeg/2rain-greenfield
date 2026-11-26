@@ -2392,8 +2392,26 @@ class SemanticVerificationExecutor {
     const arranged = this.#arrangedRecord(entityId, operation, input);
     const created = await this.#invokeOperation(operation, input);
     const registered = this.#createdRecords.push(arranged) - 1;
+    // ADR-0094: a derived value is not in the input either; the probes that
+    // read it use the value the create derived and stored.
+    const derived = operation.inputContract.derivedFields ?? [];
+    let base = arranged;
+    if (derived.length) {
+      const readBack = isRecord(created.readBack) ? created.readBack : null;
+      const stored = isRecord(readBack?.values) ? readBack.values : {};
+      base = Object.freeze({
+        ...arranged,
+        values: Object.freeze({
+          ...arranged.values,
+          ...Object.fromEntries(
+            derived.map(({ fieldId }) => [fieldId, stored[fieldId] ?? null]),
+          ),
+        }),
+      });
+      this.#createdRecords[registered] = base;
+    }
     const assignedFields = operation.inputContract.assignedFields ?? [];
-    if (assignedFields.length === 0) return arranged;
+    if (assignedFields.length === 0) return base;
     // A server-assigned number is not in the input; the probes that search,
     // resolve or compare it use the value the create stored.
     const assignedValues: Record<string, string> = {};
@@ -2407,8 +2425,8 @@ class SemanticVerificationExecutor {
       assignedValues[assigned.fieldId] = value;
     }
     const record = Object.freeze({
-      ...arranged,
-      values: Object.freeze({ ...arranged.values, ...assignedValues }),
+      ...base,
+      values: Object.freeze({ ...base.values, ...assignedValues }),
     });
     this.#createdRecords[registered] = record;
     return record;

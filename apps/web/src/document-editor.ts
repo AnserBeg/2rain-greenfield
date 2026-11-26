@@ -1998,17 +1998,42 @@ async function editorResponse(
     {
       compiled: Map<string, CompiledSurfaceField>;
       inputs: Map<string, CompiledSurfaceInputField>;
+      readOnly: (
+        fieldId: string,
+        saved: boolean,
+      ) => CompiledSurfaceInputField | undefined;
     }
   >();
   const shape = (surfaceId: string) => {
     let known = shapes.get(surfaceId);
     if (!known) {
       const target = surfaceFor(surfaces, surfaceId);
+      const inputs = inputsOf(surfaceId);
+      // Read from the bindings directly: a surface without an update (or a
+      // create) still renders exactly as before.
+      const bound = readCompiledSurfaceDataBinding(view, target).operations;
+      const derived = new Map(
+        bound
+          .filter((value) => value.intent === 'create')
+          .flatMap((value) => value.derivedFields ?? [])
+          .map((value) => [value.fieldId, value]),
+      );
+      let createOnly: ReadonlySet<string> | undefined;
       known = {
         compiled: new Map(
           (target.fields ?? []).map((value) => [value.fieldId, value]),
         ),
-        inputs: inputsOf(surfaceId),
+        inputs,
+        readOnly: (fieldId, saved) => {
+          if (derived.has(fieldId)) return derived.get(fieldId);
+          if (!saved) return undefined;
+          createOnly ??= new Set(
+            bound
+              .filter((value) => value.intent === 'update')
+              .flatMap((value) => value.createOnlyFieldIds ?? []),
+          );
+          return createOnly.has(fieldId) ? inputs.get(fieldId) : undefined;
+        },
       };
       shapes.set(surfaceId, known);
     }
@@ -2048,15 +2073,19 @@ async function editorResponse(
     accessibleName: string | null,
     focus: string | null,
   ) => {
-    const { compiled, inputs } = shape(surfaceId);
-    const input = inputs.get(field.fieldId);
+    const { compiled, inputs, readOnly } = shape(surfaceId);
+    // ADR-0094: a derived value is shown read-only; a create-only field is
+    // read-only on a saved row. Any other field the create does not offer
+    // still refuses.
+    const fixed = readOnly(field.fieldId, draft.record !== null);
+    const input = inputs.get(field.fieldId) ?? fixed;
     if (!input) throw new Error('Editor field unavailable');
     return {
       row: draft,
       field,
       compiled: compiled.get(field.fieldId),
       input,
-      frozen: locked,
+      frozen: locked || fixed !== undefined,
       index,
       accessibleName,
       focus,
@@ -3419,6 +3448,34 @@ function headerRelationInputs(
   );
 }
 
+/**
+ * ADR-0094: the editor fields one row's save writes. A field the server
+ * derives is never sent; on a saved row a field the update contract names
+ * create-only is never sent. Any other field the operation does not offer
+ * still refuses ("Editor field unavailable"): absence alone is never read as
+ * permission, so the fail-closed guard stays.
+ */
+export function editorFieldsToSave<F extends { readonly fieldId: string }>(
+  fields: readonly F[],
+  operation: {
+    readonly inputFields: readonly { readonly fieldId: string }[] | null;
+    readonly derivedFields?: readonly { readonly fieldId: string }[];
+    readonly createOnlyFieldIds?: readonly string[];
+  },
+  saved: boolean,
+): readonly F[] {
+  const allowed = new Set(operation.inputFields?.map((f) => f.fieldId));
+  const derived = new Set(operation.derivedFields?.map((f) => f.fieldId));
+  const createOnly = new Set(saved ? (operation.createOnlyFieldIds ?? []) : []);
+  return fields.filter((field) => {
+    if (derived.has(field.fieldId) || createOnly.has(field.fieldId))
+      return false;
+    if (!allowed.has(field.fieldId))
+      throw new Error('Editor field unavailable');
+    return true;
+  });
+}
+
 function plan(
   view: RequestRuntimeView,
   surfaces: readonly CompiledSurfaceDefinition[],
@@ -3446,9 +3503,10 @@ function plan(
       operation.inputFields?.map((field) => [field.fieldId, field]),
     );
     const values: Values = {};
-    for (const field of row.removed ? [] : fields) {
-      if (!allowed.has(field.fieldId))
-        throw new Error('Editor field unavailable');
+    const written = row.removed
+      ? []
+      : editorFieldsToSave(fields, operation, row.record !== null);
+    for (const field of written) {
       let value = row.values[field.fieldId] ?? null;
       if (allowed.get(field.fieldId)!.required && value === null)
         throw new Error('Required editor field absent');
@@ -3512,7 +3570,7 @@ function plan(
     if (
       row.record &&
       !row.removed &&
-      fields.every((field) =>
+      written.every((field) =>
         sameValue(
           allowed.get(field.fieldId)!.kind,
           row.record!.values[field.fieldId],

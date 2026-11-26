@@ -470,7 +470,7 @@ test(
 
           // Two concurrent creates at maximum - 1 under a parent-path
           // validation: exactly one is refused by name, and none deadlocks.
-          for (let round = 0; round < 3; round += 1) {
+          for (let round = 0; round < 6; round += 1) {
             const header = await contract();
             for (let index = 0; index < 2; index += 1)
               assert.equal(
@@ -494,7 +494,7 @@ test(
 
           // A shared line's update and its archive, concurrently, never
           // deadlock: both lock the line before the header.
-          for (let round = 0; round < 3; round += 1) {
+          for (let round = 0; round < 6; round += 1) {
             const header = await contract();
             const created = await line(header.recordId, {
               days: '2',

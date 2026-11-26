@@ -438,6 +438,13 @@ export interface CompiledSurfaceOperationBinding {
    * adopted before it can write a boolean.
    */
   readonly inputFields: readonly CompiledSurfaceInputField[] | null;
+  /**
+   * ADR-0094: fields the server derives on this write (shown read-only, never
+   * sent) and, on an update, fields fixed at creation (shown read-only on a
+   * saved row, never sent). Present only when the contract names them.
+   */
+  readonly derivedFields?: readonly CompiledSurfaceInputField[];
+  readonly createOnlyFieldIds?: readonly string[];
   readonly intent: SurfaceOperationIntent;
   readonly label: string;
   readonly operationId: string;
@@ -713,6 +720,12 @@ function bindSurfaceData(
         capabilityId: operation.capabilityId,
         confirmation: operation.confirmation,
         inputFields: operation.inputFields,
+        ...(operation.derivedFields
+          ? { derivedFields: operation.derivedFields }
+          : {}),
+        ...(operation.createOnlyFieldIds
+          ? { createOnlyFieldIds: operation.createOnlyFieldIds }
+          : {}),
         intent: operation.intent,
         label: operation.label ?? operationLabel(operation.operationId),
         operationId: operation.operationId,
@@ -1506,6 +1519,8 @@ function parseOperationBinding(value: RegisteredOperationDefinition): {
   readonly confirmation: RegisteredOperationDefinition['confirmation'];
   readonly entityId: string | null;
   readonly inputFields: readonly CompiledSurfaceInputField[] | null;
+  readonly derivedFields?: readonly CompiledSurfaceInputField[];
+  readonly createOnlyFieldIds?: readonly string[];
   readonly intent: SurfaceOperationIntent;
   readonly label: string | null;
   readonly lifecycle: RegisteredOperationDefinition['lifecycle'];
@@ -1555,6 +1570,28 @@ function parseOperationBinding(value: RegisteredOperationDefinition): {
                 }),
               ),
           ),
+    // ADR-0094: a derived value is shown read-only at its target's scale.
+    ...(value.inputContract?.derivedFields?.length
+      ? {
+          derivedFields: Object.freeze(
+            value.inputContract.derivedFields.map((field) =>
+              Object.freeze({
+                fieldId: field.fieldId,
+                kind: 'exactDecimalFieldType' as const,
+                bounds: Object.freeze({
+                  maximumLength: null,
+                  precision: field.precision,
+                  scale: field.scale,
+                }),
+                required: false,
+              }),
+            ),
+          ),
+        }
+      : {}),
+    ...(value.inputContract?.createOnlyFieldIds?.length
+      ? { createOnlyFieldIds: value.inputContract.createOnlyFieldIds }
+      : {}),
     intent,
     lifecycle: value.lifecycle,
     operationId: value.operationId,
