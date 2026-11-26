@@ -97,7 +97,7 @@
       "claim": "The snapshots-mode job runs only when the dispatch asks for snapshots.",
       "file": ".github/workflows/evidence.yml",
       "original": "    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'snapshots'\n",
-      "replacement": "    if: github.event_name == 'workflow_dispatch'\n",
+      "replacement": "    if: github.event_name == 'workflow_dispatch' && inputs.mode != 'x'\n",
       "test": {
         "files": ["test/architecture/evidence-on-demand.test.ts"],
         "namePattern": "the evidence workflow is label-gated, read-only and pinned"
