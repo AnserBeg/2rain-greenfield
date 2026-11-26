@@ -16,7 +16,9 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/45850267
 - Full run on tip 365ad04e5, green in every job: https://github.com/AnserBeg/2rain-greenfield/actions/runs/45850267888. PostgreSQL shard job wall seconds: 1 948, 2 967, 3 629, 4 803, 5 829, 6 851, 7 1038, 8 890, 9 1188, 10 961, 11 896, 12 1080 (the TRAIN-S attempt 1 maximum was 1533 s). Shard 9 (date-time-field plus logical-fields) is only 12 s under 1200. One earlier dispatch (45849758052, tip d74e7b9a8) was cancelled: the standalone snapshot workflow could not be dispatched from a branch, so the job became a mode of evidence.yml.
 - Snapshots mode dispatched on the tip: https://github.com/AnserBeg/2rain-greenfield/actions/runs/45850273838 (success; both files IDENTICAL to the committed ones; artifact `schema-snapshots-365ad04e58ec4f025b9c448470d4976ea9d2f99e` holds `db/schema.snapshot.json` and `test/postgres/fresh-tenant-full-replay-schema.snapshot.json`).
 
-## Rule 8 reds (manifest `test/evidence/CI-9.expected-red.json`, 7 entries, each killed and restored locally)
+- Fix round (Fable FIX): the real-layout test now requires every file in shards 1-12 to have a recorded estimate and no estimate to name a missing file (red `ci9-shard-estimate-table-drift`, the 8th entry); the hygiene holder releases skip the exit wait when the holder already exited and SIGTERM after 10 s. Default-mode evidence dispatch on tip dea5d111f proves all 8 CI-9 reds and the edited select-controls gate: https://github.com/AnserBeg/2rain-greenfield/actions/runs/45855116128 (success, 8 of 8 killed and restored). Only test files changed after the full run, so it was not repeated.
+
+## Rule 8 reds (manifest `test/evidence/CI-9.expected-red.json`, 8 entries, each killed and restored locally)
 
 Budget never fires; unrecorded file counts zero; real layout against a lowered budget; snapshot job regenerates with a stand-in; uploads one file; runs without the snapshots mode; pushes. The hygiene wait change has no red (a timing bound; the 5 s original was the defect).
 
