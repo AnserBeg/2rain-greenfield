@@ -279,8 +279,7 @@ $$;
 CREATE FUNCTION north_star_internal.ledger_company_live(company uuid, locking boolean) RETURNS boolean
 LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp AS $$
 DECLARE master jsonb; stored uuid; BEGIN
-  IF company IS NULL THEN RETURN false; END IF;
-  BEGIN
+  IF company IS NULL THEN RETURN false; END IF; BEGIN
     SELECT v INTO STRICT master FROM jsonb_array_elements(north_star_internal.ledger_release_storage()->'entities') v
       WHERE v ? 'legalEntityMaster';
   EXCEPTION WHEN no_data_found OR too_many_rows THEN RAISE EXCEPTION 'ledger.companyRegistryUnavailable'; END;
@@ -346,8 +345,7 @@ DECLARE tenant uuid := north_star_internal.trusted_tenant_id(); environment uuid
     IF EXISTS (SELECT FROM platform.ledger_entries x WHERE (x.tenant_id, x.environment_id, x.company_id) = (tenant, environment, company)) THEN
       RAISE EXCEPTION 'ledger.booksStartLocked'; END IF;
     RETURN jsonb_build_object('input', input, 'labels', '{}'::jsonb, 'terms', jsonb_build_object('operation', operation,
-      'company', company, 'date', to_char(day, 'YYYY-MM-DD'), 'prior', to_char(books.books_start, 'YYYY-MM-DD')));
-  END IF;
+      'company', company, 'date', to_char(day, 'YYYY-MM-DD'), 'prior', to_char(books.books_start, 'YYYY-MM-DD'))); END IF;
   IF books.books_start IS NULL THEN RAISE EXCEPTION 'ledger.booksNotStarted'; END IF;
   IF operation = 'putAccount' THEN
     IF input - 'accountId' - 'create' - 'code' - 'kind' - 'label' - 'active' <> '{}'
@@ -371,8 +369,7 @@ DECLARE tenant uuid := north_star_internal.trusted_tenant_id(); environment uuid
         AND a.account_code = input->>'code' AND a.account_id <> account) THEN RAISE EXCEPTION 'ledger.accountCodeTaken'; END IF;
     RETURN jsonb_build_object('input', input, 'labels', jsonb_build_object('label', input->'label'),
       'terms', jsonb_build_object('operation', operation, 'company', company, 'accountId', account,
-        'create', input->'create', 'code', input->'code', 'kind', input->'kind', 'active', input->'active'));
-  END IF;
+        'create', input->'create', 'code', input->'code', 'kind', input->'kind', 'active', input->'active')); END IF;
   IF operation = 'setUpChart' THEN
     IF input - 'starterId' - 'starterVersion' - 'jurisdictions' - 'accountIds' <> '{}'
        OR jsonb_typeof(input->'starterId') IS DISTINCT FROM 'string'
@@ -404,13 +401,11 @@ DECLARE tenant uuid := north_star_internal.trusted_tenant_id(); environment uuid
         IF NOT ids ? row_.account_code THEN RAISE EXCEPTION 'ledger.reviewStale'; END IF;
         accounts := accounts || jsonb_build_array(jsonb_build_object('code', row_.account_code, 'kind', row_.kind_role_id,
           'accountId', ids->row_.account_code, 'existing', false));
-        labels := labels || jsonb_build_object(row_.account_code, row_.default_label); END IF;
-    END LOOP;
+        labels := labels || jsonb_build_object(row_.account_code, row_.default_label); END IF; END LOOP;
     input := jsonb_set(input, '{accountIds}', ids);
     RETURN jsonb_build_object('input', input, 'labels', labels, 'terms', jsonb_build_object('operation', operation,
       'company', company, 'starterId', input->'starterId', 'starterVersion', input->'starterVersion',
-      'jurisdictions', chosen, 'accounts', accounts));
-  END IF;
+      'jurisdictions', chosen, 'accounts', accounts)); END IF;
   RAISE EXCEPTION 'ledger.invalidOperation'; END $$;
 
 -- Review: nothing changes but one immutable review row.
@@ -457,8 +452,7 @@ DECLARE tenant uuid := north_star_internal.trusted_tenant_id(); environment uuid
   IF derived->'terms' IS DISTINCT FROM r.terms THEN RAISE EXCEPTION 'ledger.reviewStale'; END IF;
   UPDATE platform.ledger_operation_reviews v SET consumed_at = clock_timestamp(), receipt_id = receipt
     WHERE (v.tenant_id, v.environment_id, v.review_id) = (tenant, environment, review) AND v.consumed_at IS NULL;
-  IF NOT FOUND THEN RAISE EXCEPTION 'ledger.reviewConsumed'; END IF;
-  BEGIN
+  IF NOT FOUND THEN RAISE EXCEPTION 'ledger.reviewConsumed'; END IF; BEGIN
     IF r.operation = 'booksStart' THEN
       PERFORM north_star_internal.ledger_set_books_start(r.company_id,
         north_star_internal.ledger_civil_date(r.terms->>'date'));
