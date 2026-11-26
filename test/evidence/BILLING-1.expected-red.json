@@ -273,24 +273,6 @@
       ]
     },
     {
-      "name": "billing-rules-calculation-gate",
-      "claim": "Rule keys, and only rule keys, run under calculation v4.",
-      "file": "packages/domain/src/billing/quote.ts",
-      "original": "  if (hasBillingRules(plan) !== (algorithm === BILLING_RULES_CALCULATION))",
-      "replacement": "  if (false)",
-      "test": {
-        "files": ["test/integration/billing-rules.test.ts"],
-        "namePattern": "^rule keys, and only rule keys, select calculation v4 and the rules reader$"
-      },
-      "kills": [
-        {
-          "file": "test/integration/billing-rules.test.ts",
-          "name": "rule keys, and only rule keys, select calculation v4 and the rules reader",
-          "expected": "Billing replay digest mismatch"
-        }
-      ]
-    },
-    {
       "name": "billing-per-quantity",
       "claim": "A per-quantity fee multiplies by the service's commercial quantity (5 seats x fee).",
       "file": "packages/domain/src/billing/quote.ts",
@@ -773,6 +755,96 @@
           "file": "test/unit/customization-ai-draft-slice2.test.ts",
           "name": "the drafter sees every variant of a discriminated union (oneOf), so rate rules are draftable",
           "expected": "\\{rule: \"ladder\", capAtNextTier: true\\|false\\}"
+        }
+      ]
+    },
+    {
+      "name": "billing-rules-version-selection",
+      "claim": "A plan with a rule key is quoted under calculation v4, and calculate refuses it under any other version.",
+      "file": "packages/domain/src/billing/quote.ts",
+      "original": "    hasBillingRules(planInput)",
+      "replacement": "    false",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B1: each combination rule prices 3, 10 and 13 days at 20 a day or 100 a week$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B1: each combination rule prices 3, 10 and 13 days at 20 a day or 100 a week",
+          "expected": "Billing rate rules require calculation v4"
+        }
+      ]
+    },
+    {
+      "name": "billing-snapshot-schema",
+      "claim": "Billing holds every provider's snapshot to the service-use protocol shape where it consumes it.",
+      "file": "packages/domain/src/billing/arrears.ts",
+      "original": "    snapshot: ServiceUseSnapshotSchema.parse(input.snapshot),",
+      "replacement": "    snapshot: input.snapshot,",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^the service\\-use protocol shape is enforced where Billing consumes it$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "the service-use protocol shape is enforced where Billing consumes it",
+          "expected": "Missing expected exception: an undeclared key"
+        }
+      ]
+    },
+    {
+      "name": "billing-agreed-quantity",
+      "claim": "The agreed band reads the bound record quantity field (B7), not a fixed 1.",
+      "file": "packages/postgres-provider/src/billing-quote.ts",
+      "original": "  if (quantityFieldId === undefined) return '1';",
+      "replacement": "  return '1';",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B7: the agreed band reads the record quantity field, 1 when none is bound$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B7: the agreed band reads the record quantity field, 1 when none is bound",
+          "expected": "'1' !== '5'"
+        }
+      ]
+    },
+    {
+      "name": "billing-quote-grant-dedicated",
+      "claim": "No other active query reads under the quote grant.",
+      "file": "packages/compiler/src/billing.ts",
+      "original": "          q.queryId !== b.quoteQueryId &&",
+      "replacement": "          false &&",
+      "test": {
+        "files": ["test/postgres/billing-terms.test.ts"],
+        "namePattern": "^the quote and terms permissions are bound by their declared role, not by name$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/billing-terms.test.ts",
+          "name": "the quote and terms permissions are bound by their declared role, not by name",
+          "expected": "no other query reads under the quote grant"
+        }
+      ]
+    },
+    {
+      "name": "billing-terms-grant-dedicated",
+      "claim": "No operation outside the plan's three terms writes holds the terms grant.",
+      "file": "packages/compiler/src/billing.ts",
+      "original": "          !writes.includes(o.operationId) &&",
+      "replacement": "          false &&",
+      "test": {
+        "files": ["test/postgres/billing-terms.test.ts"],
+        "namePattern": "^the quote and terms permissions are bound by their declared role, not by name$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/billing-terms.test.ts",
+          "name": "the quote and terms permissions are bound by their declared role, not by name",
+          "expected": "no operation outside the terms writes holds the terms grant"
         }
       ]
     }

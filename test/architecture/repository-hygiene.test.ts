@@ -228,6 +228,7 @@ const suiteDefinitions = [
       'test/postgres/booking-commitments.test.ts',
       'test/postgres/booking-serving.test.ts',
       'test/postgres/boot-capabilities.test.ts',
+      'test/postgres/build-eval-rate-plans.test.ts',
       'test/postgres/build-eval.test.ts',
       'test/postgres/catalog-extras.test.ts',
       'test/postgres/catalog-runtime.test.ts',
