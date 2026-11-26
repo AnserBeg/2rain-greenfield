@@ -10,6 +10,7 @@ export const UPGRADE_PATCH_KINDS: ReadonlySet<string> = new Set([
   'addBoardViewRevision',
   'addRecordTemplateBindingRevision',
   'addReportRevision',
+  'addMeasureRevision',
   'addPopupActionRevision',
   'addPresentationRevision',
   'addRecordType',

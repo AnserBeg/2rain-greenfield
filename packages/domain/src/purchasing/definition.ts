@@ -1616,6 +1616,35 @@ function entity(
   return {
     entityId,
     kind: 'entityDefinition',
+    // REPORTS-1 s2: Vendor Bills declare a report source, so payables age and
+    // bucket by period. Both dates are posting instants (bill_date is stamped
+    // at post, due_date adds whole days to it), never a picked calendar date,
+    // so they are read in the working company's business calendar.
+    ...(local === 'vendor_bill' && {
+      reportSource: {
+        version: 'report-source/v1',
+        amounts: [
+          'subtotal',
+          'charges',
+          'tax',
+          'total',
+          'paid_amount',
+          'credited_amount',
+          'balance',
+        ].map((name) => ({
+          fieldId: `${ids.namespace}:field.vendor_bill_${name}`,
+          currency: {
+            kind: 'stored',
+            fieldId: `${ids.namespace}:field.vendor_bill_currency`,
+            codes: ['CAD', 'USD', 'EUR'],
+          },
+        })),
+        dates: ['bill_date', 'due_date'].map((name) => ({
+          fieldId: `${ids.namespace}:field.vendor_bill_${name}`,
+          basis: 'instant',
+        })),
+      },
+    }),
     label,
     module: reference('moduleReference', ids.moduleId),
     orderKey,

@@ -41,6 +41,7 @@ export async function activeReportCompany(
 export async function reportHorizon(
   client: PoolClient,
   tenantId: string,
+  at?: Date,
 ): Promise<ReportHorizon> {
   const { rows } = await client.query<{
     instant: Date;
@@ -49,10 +50,12 @@ export async function reportHorizon(
     boundary: string;
   }>(
     `
-    SELECT transaction_timestamp() AS instant,time_zone AS zone,business_day_boundary::text AS boundary,
-      to_char((transaction_timestamp() AT TIME ZONE time_zone) - (business_day_boundary - time '00:00'), 'YYYY-MM-DD') AS day
-    FROM platform.inventory_tenant_calendars WHERE tenant_id=$1`,
-    [tenantId],
+    SELECT clock.at AS instant,time_zone AS zone,business_day_boundary::text AS boundary,
+      to_char((clock.at AT TIME ZONE time_zone) - (business_day_boundary - time '00:00'), 'YYYY-MM-DD') AS day
+    FROM platform.inventory_tenant_calendars,
+      LATERAL (SELECT COALESCE($2::timestamptz, transaction_timestamp()) AS at) clock
+    WHERE tenant_id=$1`,
+    [tenantId, at?.toISOString() ?? null],
   );
   const row = rows[0];
   if (!row) throw new Error('Report calendar unavailable');
@@ -100,6 +103,8 @@ export async function readGroupedSnapshot(
 ): Promise<ReportSnapshot | { kind: 'narrow' | 'unavailable' }> {
   const { report, view, input, scope } = request;
   const { body } = report.revision;
+  if (body.version !== 'grouped-report/v1')
+    throw new Error('A v2 report reads through readGroupedSnapshotV2');
   const { table, index, keys } = report.accessPath;
   if (
     entity.physicalTableName !== table ||

@@ -6,6 +6,7 @@
  * name, through its own production loader.
  */
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import type pg from 'pg';
 
 import {
@@ -23,6 +24,23 @@ import { assertPersisted } from './record-template-reader.js';
 // The preceding main tip when the slice merged (TRAIN-Q, e112d58f, reader 49).
 export const workflowTriggerPredecessor =
   'e112d58ff799912d7b743d5eb7fbd79f796c5318';
+
+/** The predecessor's checked-in release. The proof compares a persisted tenant
+ * release with the archived compile of the same change, so the database
+ * installs the first-party release that tree shipped (TRAIN-Q: REPORTS-1 s2
+ * appended a first-party lineage entry, and a fresh install activates the
+ * tip). Every opener on that database passes it. */
+export const workflowTriggerPredecessorRelease = (): unknown =>
+  JSON.parse(
+    execFileSync(
+      'git',
+      [
+        'show',
+        workflowTriggerPredecessor + ':apps/web/release/app.compiled.json',
+      ],
+      { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+    ),
+  );
 
 /** The preceding binary's request path, issuing one governed query. */
 const probe = `

@@ -14,6 +14,7 @@ import {
 import { type PopupRevision } from '../../canonical-model/src/popup-actions.js';
 import type { ReplayOrigin } from './upgrade-diagnostics.js';
 import { applyReportRevision, supersededReports } from './report-revision.js';
+import { applyMeasureRevision } from './measure-revision.js';
 import type { ReportCatalogSource } from '../../canonical-model/src/declared-report.js';
 import {
   applyBoardRevision,
@@ -173,7 +174,9 @@ export function applyCustomizationPatches(
         previous,
         layoutReplay,
         board,
-        patch.kind === 'addReportRevision' && pastReports.has(patch.revisionId),
+        (patch.kind === 'addReportRevision' ||
+          patch.kind === 'addMeasureRevision') &&
+          pastReports.has(patch.revisionId),
       );
       if (outcome) return Object.freeze({ ...outcome, patchIndex: index });
       previous.push(patch);
@@ -401,6 +404,25 @@ export function applyOne(
           'This report revision ID has already been used.',
         );
       const problem = applyReportRevision(
+        authored as unknown as ReportCatalogSource & { surfaces: Json[] },
+        patch,
+        identityOnly,
+      );
+      return problem ? refusal('CUSTOMIZE_REPORT_CONFLICT', problem) : null;
+    }
+    case 'addMeasureRevision': {
+      if (
+        previous.some(
+          (p) =>
+            p.kind === 'addMeasureRevision' &&
+            p.revisionId === patch.revisionId,
+        )
+      )
+        return refusal(
+          'CUSTOMIZE_REPORT_CONFLICT',
+          'This measure revision ID has already been used.',
+        );
+      const problem = applyMeasureRevision(
         authored as unknown as ReportCatalogSource & { surfaces: Json[] },
         patch,
         identityOnly,

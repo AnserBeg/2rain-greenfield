@@ -1,4 +1,7 @@
-import type { RegisteredReport } from '../../../packages/canonical-model/src/declared-report.js';
+import {
+  filterParameterId,
+  type RegisteredReport,
+} from '../../../packages/canonical-model/src/declared-report.js';
 import {
   REPORT_READER_POLICY,
   type ReportRequest,
@@ -11,7 +14,7 @@ export function reportRequest(
 ): ReportRequest {
   const parameters: Record<string, ReportRequest['parameters'][string]> = {};
   for (const filter of report.revision.body.filters) {
-    const id = filter.fieldId;
+    const id = filterParameterId(filter);
     if (filter.kind === 'dateRange') {
       const from = url.searchParams.get(id + '.from') ?? '';
       const until = url.searchParams.get(id + '.until') ?? '';

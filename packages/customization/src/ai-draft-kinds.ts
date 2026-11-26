@@ -13,6 +13,7 @@ import { MAP_VIEW_DRAFTER_GUIDANCE, MapDraftSchema } from './map-revision.js';
 import { PopupCommandSchema } from './popup-revision.js';
 import { PresentationDraftSchema } from './presentation-revision.js';
 import { ReportDraftSchema } from './report-revision.js';
+import { MeasureDraftSchema } from './measure-revision.js';
 import { VALIDATION_COMPARISONS } from './validation-draft.js';
 import { WorkflowDraftSchema } from './workflow-draft.js';
 
@@ -58,6 +59,10 @@ export const DRAFTER_SELECTION_SCHEMAS = {
   addReportRevision: z.strictObject({
     kind: z.literal('addReportRevision'),
     report: ReportDraftSchema,
+  }),
+  addMeasureRevision: z.strictObject({
+    kind: z.literal('addMeasureRevision'),
+    measure: MeasureDraftSchema,
   }),
   addValidation: z.strictObject({
     kind: z.literal('addValidation'),
@@ -214,7 +219,12 @@ export const DRAFTER_KINDS = {
   addReportRevision: {
     input: DRAFTER_SELECTION_SCHEMAS.addReportRevision,
     guidance:
-      'Group a listed report source by its offered field IDs and count records or sum an offered measure. Enable CSV only when requested. Use a listed active report ID when editing or retiring it.',
+      'Group a listed report source by its offered field IDs and count records or sum an offered measure. Enable CSV only when requested. Use a listed active report ID when editing or retiring it. A calendar dimension groups an offered date by day, week (Monday) or month; an age dimension puts the days from the business date back to an offered date into ordered, contiguous bands (first band open below, last open above) with an absentLabel such as "No due date". A field of a linked record is chosen by its offered fieldId and via (the relation IDs listed for it). On a line source (grain line), count lines, or count distinct parents with distinctTargets via the parent relation; never sum, average, min or max a field reached through via. min, max and average take an offered number or date of the source itself; distinctCount takes any offered field. Bind an approved named measure with kind approved, its measureId and contractDigest.',
+  },
+  addMeasureRevision: {
+    input: DRAFTER_SELECTION_SCHEMAS.addMeasureRevision,
+    guidance:
+      'A reusable named measure on a listed report source, such as "Invoiced rent": one operator over an offered field, optionally with filters. Draft status trial first; the owner approves the trialled measure later with status approved and the same measureId and no operator. Retire with status retired. Needs its own draft.',
   },
   addPresentationRevision: {
     input: PresentationDraftSchema,

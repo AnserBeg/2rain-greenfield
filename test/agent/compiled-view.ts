@@ -111,6 +111,9 @@ export function compileHeadAt(
   ) as unknown;
   const parsed = parseCompiledApplication(file);
   const head = parsed.applications.at(-1)!;
+  // The head's own predecessor: the entry before it in a v2 lineage, else the
+  // bootstrap. Its storage transition is compiled from that release.
+  const predecessor = parsed.applications.at(-2) ?? parsed.bootstrap;
   const normalizedDefinitionBytes = head.normalizedDefinitionBytes;
   const definition = parseNormalizedApplicationPackageJson(
     normalizedDefinitionBytes,
@@ -118,9 +121,7 @@ export function compileHeadAt(
   const result = compileApplicationRelease(
     {
       dependencies: [],
-      expectedActiveRelease: expectedActiveReleaseFrom(
-        parsed.bootstrap.compiled,
-      ),
+      expectedActiveRelease: expectedActiveReleaseFrom(predecessor.compiled),
       kind: 'compilerInput',
       limits: { ...DEFAULT_COMPILER_LIMITS },
       normalizedDefinitionBytes,
@@ -158,7 +159,8 @@ let loadedV3:
 export function compiledAppViewV3(principalId = 'test-principal'): {
   view: RequestRuntimeView;
   compiled: CompileSuccess;
-  /** The checked-in envelope with its head replaced by the v3 release. */
+  /** The checked-in envelope with its head replaced by the v3 release (the
+   * last lineage entry of a v2 envelope, or a v1 envelope's application). */
   envelope: Record<string, unknown>;
 } {
   if (!loadedV3) {
@@ -188,15 +190,23 @@ export function compiledAppViewV3(principalId = 'test-principal'): {
         payload: decode(manifest.chunks[0]!.contentHash) as ImmutableJsonValue,
       };
     };
+    const v3Head = serializeRelease({
+      compiled: result,
+      normalizedDefinitionBytes,
+    } as Parameters<typeof serializeRelease>[0]);
+    const checkedIn = file as Record<string, unknown> & {
+      applications?: unknown[];
+    };
     loadedV3 = {
       compiled: result,
-      envelope: {
-        ...(file as Record<string, unknown>),
-        application: serializeRelease({
-          compiled: result,
-          normalizedDefinitionBytes,
-        } as Parameters<typeof serializeRelease>[0]),
-      },
+      // A v2 lineage replaces its last entry; a v1 envelope its application.
+      // Setting `application` on a lineage would be ignored by the runtime.
+      envelope: checkedIn.applications
+        ? {
+            ...checkedIn,
+            applications: [...checkedIn.applications.slice(0, -1), v3Head],
+          }
+        : { ...checkedIn, application: v3Head },
       view: {
         projections: {
           agent: projection('agent-discovery'),

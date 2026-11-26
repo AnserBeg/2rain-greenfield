@@ -260,7 +260,9 @@ function publishedReports(candidate: ParsedRelease, patch: CustomizationPatch) {
     members.flatMap((member) =>
       member.kind === 'addReportRevision' && member.status === 'active'
         ? [member.reportId]
-        : [],
+        : member.kind === 'addMeasureRevision' && member.status !== 'retired'
+          ? [member.measureId]
+          : [],
     ),
   );
   if (!ids.size) return [];
@@ -2314,7 +2316,9 @@ export class PostgresCustomizationService {
       // actual keys and readiness again after approval, before switching releases.
       if (
         'kind' in record &&
-        (record.kind === 'addReportRevision' || record.kind === 'changeSet')
+        (record.kind === 'addReportRevision' ||
+          record.kind === 'addMeasureRevision' ||
+          record.kind === 'changeSet')
       ) {
         const [patch] = await this.#readPatches(context, [record]);
         const problem = await previewReportIndexes(

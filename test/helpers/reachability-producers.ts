@@ -95,6 +95,7 @@ export const reachabilityProducers = [
     'test/compiler/relation-target-projection.test.ts',
     'test/compiler/reversibility-census.test.ts',
     'test/compiler/report-company-access.test.ts',
+    'test/compiler/report-analysis.test.ts',
   ]),
   nodeProducer('performance', 'performance', 'test:performance', [
     'test/compiler/performance-budget.test.ts',
@@ -124,13 +125,14 @@ export const reachabilityProducers = [
   nodeProducer('postgres-1', 'postgres', 'test:postgres:1', [
     'test/postgres/workflow-consumer.test.ts',
     'test/postgres/address-connector.test.ts',
+    'test/postgres/report-analysis-reader.test.ts',
   ]),
   nodeProducer('postgres-2', 'postgres', 'test:postgres:2', [
     'test/postgres/customization.test.ts',
     'test/postgres/locations.test.ts',
   ]),
   nodeProducer('postgres-3', 'postgres', 'test:postgres:3', [
-    'test/postgres/{!(address-authority|address-connector|agent-dev-tasks|agent-tasks|billing-terms|board-policy|booking-serving|boot-capabilities|build-eval|commercial-totals|composed-application|counter-sale|customer-credit|customization|customization-display|customization-formulas|customization-governed-reads|customization-inspection|customization-live|customization-validation|customization-world|date-time-field|declared-list|document-attachments|document-numbering|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-stock-counts|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|locations|module-storage-transition|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|period-lock-commands|planner-map|price-lists|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|record-template-library|replenishment|report-company-reader|request-runtime-view|stock-serializer|workflow-consumer|workflow-record-created),*/**/*}.test.ts',
+    'test/postgres/{!(address-authority|address-connector|agent-dev-tasks|agent-tasks|billing-terms|board-policy|booking-serving|boot-capabilities|build-eval|commercial-totals|composed-application|counter-sale|customer-credit|customization|customization-display|customization-formulas|customization-governed-reads|customization-inspection|customization-live|customization-validation|customization-world|date-time-field|declared-list|document-attachments|document-numbering|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-stock-counts|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|locations|module-storage-transition|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|period-lock-commands|planner-map|price-lists|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|record-template-library|replenishment|report-admission|report-analysis|report-analysis-reader|report-company-reader|report-v2-provider|request-runtime-view|stock-serializer|workflow-consumer|workflow-record-created),*/**/*}.test.ts',
   ]),
   nodeProducer('postgres-4', 'postgres', 'test:postgres:4', [
     'test/postgres/customization-governed-reads.test.ts',
@@ -162,6 +164,8 @@ export const reachabilityProducers = [
   nodeProducer('postgres-10', 'postgres', 'test:postgres:10', [
     'test/postgres/build-eval.test.ts',
     'test/postgres/planner-map.test.ts',
+    'test/postgres/report-admission.test.ts',
+    'test/postgres/report-v2-provider.test.ts',
   ]),
   nodeProducer('postgres-11', 'postgres', 'test:postgres:11', [
     'test/postgres/address-authority.test.ts',
@@ -173,6 +177,7 @@ export const reachabilityProducers = [
     'test/postgres/module-storage-transition.test.ts',
   ]),
   nodeProducer('postgres-12', 'postgres', 'test:postgres:12', [
+    'test/postgres/report-analysis.test.ts',
     'test/postgres/workflow-record-created.test.ts',
   ]),
   nodeProducer(

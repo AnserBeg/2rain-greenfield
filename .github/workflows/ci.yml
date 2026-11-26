@@ -306,8 +306,8 @@ jobs:
         # 900 s of measured file time (median of three runs). The slowest observed
         # runner was 1.84 times (CI-6), so 900 s is 27.6 minutes against the
         # 30-minute limit: a margin, not a bound. See docs/execution/packets/CI-7.md.
-        # TRAIN-Q (owner approved): shard 12 holds workflow-record-created
-        # (about 455 s), which fit in no other shard under 900 s.
+        # TRAIN-Q (owner approved): shard 12 holds report-analysis and
+        # workflow-record-created (about 825 s), which fit in no other shard.
         shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
