@@ -1,3 +1,4 @@
+import { templateCreateSurface } from '../../runtime/src/record-template-library.js';
 import {
   assertWorkflowEvidence,
   persistWorkflowDefinitions,
@@ -14,7 +15,10 @@ import {
   WorkflowProjectionSchema,
   type WorkflowDefinition,
 } from '../../canonical-model/src/schemas.js';
-import { WORKFLOW_SURFACE_FLOOR } from '../../canonical-model/src/workflows.js';
+import {
+  RECORD_CREATED_TRIGGER_READER,
+  WORKFLOW_SURFACE_FLOOR,
+} from '../../canonical-model/src/workflows.js';
 import { workflowSdkBindingDigest } from '@north-star/compiler';
 import { createHash, randomUUID } from 'node:crypto';
 
@@ -558,6 +562,7 @@ export class PostgresReleaseVerificationService {
         declaredCapabilityVerificationRefusals(
           this.capabilityOperationExecutorFactories,
         ),
+        this.workflowVerifierPool,
       );
       return (async () => {
         try {
@@ -869,6 +874,8 @@ export function releaseVerificationBinding(
     );
     if (
       surfaceFloor < WORKFLOW_SURFACE_FLOOR ||
+      (workflows.some(({ trigger }) => typeof trigger !== 'string') &&
+        surfaceFloor < RECORD_CREATED_TRIGGER_READER) ||
       workflows.some(
         ({ grants, sdkDigest }) =>
           workflowSdkBindingDigest(grants, operations, queries) !== sdkDigest,
@@ -1205,6 +1212,8 @@ interface VerificationFieldContract {
     readonly scale: number | null;
   };
   readonly enumOptionIds: readonly string[];
+  /** CUSTOMIZE-6: declared allowed values of a text field. */
+  readonly allowedTexts?: readonly string[];
   readonly fieldId: string;
   readonly fieldKind: string;
   readonly normalization: string;
@@ -1560,6 +1569,7 @@ class SemanticVerificationExecutor {
       string,
       CapabilityVerificationRefusalExpectation
     >,
+    private readonly verifierPool?: Pool,
   ) {
     this.#operations = (
       view.projections.operation.payload as unknown as {
@@ -2734,6 +2744,33 @@ class SemanticVerificationExecutor {
     operation: VerificationOperationContract,
     input: Record<string, unknown>,
   ) {
+    const key = stableUuid(
+      `verification:idempotency:${this.#token(operation.operationId)}`,
+    );
+    const surface =
+      operation.effect.kind === 'createRecordEffect' &&
+      templateCreateSurface(this.view, operation.operationId);
+    if (surface) {
+      if (!this.verifierPool)
+        throw new Error(
+          'Template verification requires the verifier connection.',
+        );
+      await withWorkflowVerifierTransaction(
+        this.verifierPool,
+        this.context,
+        (client) =>
+          client.query(
+            'SELECT platform.review_record_template_probe($1,$2,$3,$4,$5)',
+            [
+              this.view.release.releaseId,
+              this.view.pointer.fence,
+              surface.surfaceId,
+              key,
+              input,
+            ],
+          ),
+      );
+    }
     const result = await this.operationGateway.invoke(
       this.view,
       {
@@ -2745,9 +2782,7 @@ class SemanticVerificationExecutor {
                 input as ImmutableJsonValue,
               )
             : null,
-        idempotencyKey: stableUuid(
-          `verification:idempotency:${this.#token(operation.operationId)}`,
-        ),
+        idempotencyKey: key,
         input,
         operationId: operation.operationId,
         schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
@@ -3298,6 +3333,8 @@ function verificationFieldValue(
         ? '2026-01-01T12:34:56.000Z'
         : '2026-01-01T12:34:56.000';
     case 'textFieldType': {
+      // CUSTOMIZE-6: a field with declared allowed values is probed with one.
+      if (field.allowedTexts?.length) return field.allowedTexts[0]!;
       const value = `V-${createHash('sha256')
         .update(token, 'utf8')
         .update(Uint8Array.of(0))

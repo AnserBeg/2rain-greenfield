@@ -1,3 +1,4 @@
+import type { RecordTemplateLibrary } from '../../runtime/src/record-template-library.js';
 import {
   releaseDiffBinding,
   type ReleaseDiffBinding,
@@ -210,6 +211,7 @@ export interface ComposedApplicationRuntime {
   readonly customizationUpgrade: UpgradePreparation | null;
   readonly activeReleaseId: MintedUuid;
   readonly entry: AuthenticatedRequestRuntimeEntryAdapter;
+  readonly recordTemplates: RecordTemplateLibrary;
   readonly addresses: AddressGateway;
   readonly documents: DocumentGateway | null;
   readonly freshTenantInstallEvidence: FreshTenantInstallEvidence | null;
@@ -458,6 +460,7 @@ export async function createComposedApplicationRuntime(
       queryGateway,
       policy,
       addresses,
+      recordTemplates,
       documents,
     } = composeServingGateways(
       runtimePool,
@@ -501,6 +504,7 @@ export async function createComposedApplicationRuntime(
       },
       entry,
       addresses,
+      recordTemplates,
       documents,
       freshTenantInstallEvidence,
       identity: identities.runtime,
@@ -1111,6 +1115,9 @@ export async function provisionLocalDemoReleaseAuthorization(
     bindings.filter(
       (binding) =>
         binding !== ADDRESS_CONNECTOR_CONFIGURE_BINDING &&
+        !/:permission\.template_(?:publish|assign|disclose)_/u.test(
+          binding.permissionId,
+        ) &&
         !binding.permissionId.endsWith(':permission.purchase_order_approve') &&
         !/:permission\.purchasing_settings_(?:create|update|archive|restore)$/u.test(
           binding.permissionId,

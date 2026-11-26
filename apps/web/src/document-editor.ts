@@ -82,6 +82,7 @@ type DraftRow = {
 };
 type SaveStep = {
   label: string;
+  templateReview?: string;
   operation: CompiledSurfaceOperationBinding;
   input: Values;
   key: string;
@@ -2508,12 +2509,22 @@ async function editorResponse(
           const headerInputs = inputsOf(definition.headerFormSurfaceId);
           const lineInputs = inputsOf(definition.lineFormSurfaceId);
           const refusedLabels = [
-            ...capture(buffer.header, headerFields, headerInputs, submission),
+            ...captureDraftFields(
+              buffer.header,
+              headerFields,
+              headerInputs,
+              submission,
+            ),
           ];
           for (const line of buffer.lines)
             if (!line.removed)
               refusedLabels.push(
-                ...capture(line, definition.lineFields, lineInputs, submission),
+                ...captureDraftFields(
+                  line,
+                  definition.lineFields,
+                  lineInputs,
+                  submission,
+                ),
               );
           if (refusedLabels.length) {
             refused = true;
@@ -2636,7 +2647,45 @@ async function editorResponse(
                 buffer.focus = found[0]!.control;
                 statusCode = 422;
               } else {
-                buffer.pending = plan(view, surfaces, buffer);
+                const pending = plan(view, surfaces, buffer);
+                const form = surfaces.find(
+                  (s) => s.surfaceId === definition.headerFormSurfaceId,
+                );
+                const header = pending.find(
+                  (step) => step.row === buffer.header,
+                );
+                if (
+                  !buffer.header.record &&
+                  form?.recordTemplateBinding?.status === 'active' &&
+                  header
+                ) {
+                  if (!gateways.recordTemplates)
+                    throw new Error('Template review is unavailable.');
+                  const lines = pending.filter((step) => step !== header);
+                  if (lines.length)
+                    header.input.templateLines = lines.map((step) => ({
+                      recordId: step.input.recordId!,
+                      values: step.input.values!,
+                    }));
+                  const selection =
+                    await gateways.recordTemplates.prepareCreate(
+                      view,
+                      form.surfaceId,
+                      header.key,
+                      header.input,
+                    );
+                  const assignment = selection.assignment;
+                  header.templateReview = assignment
+                    ? assignment.content.label +
+                      ' · revision ' +
+                      assignment.version +
+                      ' · ' +
+                      assignment.content.members
+                        .map((m) => m.caption)
+                        .join(', ')
+                    : 'No assigned template';
+                  buffer.pending = [header];
+                } else buffer.pending = pending;
                 if (buffer.saveThen)
                   buffer.saveThen.requested =
                     submission.draftAction === 'saveThen';
@@ -2648,7 +2697,12 @@ async function editorResponse(
               (step) =>
                 step.operation.confirmation === 'humanRequired' && !step.done,
             );
-            if (removal && submission.draftAction !== 'confirm') {
+            const review = buffer.pending.find(
+              (step) => step.templateReview && !step.done,
+            );
+            if (review && submission.draftAction !== 'confirm') {
+              buffer.notice = '<p>' + h(review.templateReview!) + '</p>';
+            } else if (removal && submission.draftAction !== 'confirm') {
               for (const step of buffer.pending)
                 if (
                   step.operation.confirmation === 'humanRequired' &&
@@ -2718,6 +2772,7 @@ async function editorResponse(
                       'code' in error &&
                       [
                         'MODULE_FIELD_VALUE_INVALID',
+                        'MODULE_FIELD_VALUE_NOT_ALLOWED',
                         'MODULE_ENUM_VALUE_INVALID',
                         'MODULE_REQUIRED_FIELD_MISSING',
                       ].includes(String(error.code)))
@@ -3122,7 +3177,7 @@ async function editorResponse(
       }
     }
     const commands = buffer.pending
-      ? `<button form="draft-editor-form" name="draftAction" value="${buffer.pending.some((step) => step.grant && !step.done) ? 'confirm' : 'retry'}">${buffer.pending.some((step) => step.grant && !step.done) ? 'Confirm removal and save' : 'Retry save'}</button>`
+      ? `<button form="draft-editor-form" name="draftAction" value="${buffer.pending.some((step) => (step.grant || step.templateReview) && !step.done) ? 'confirm' : 'retry'}">${buffer.pending.some((step) => (step.grant || step.templateReview) && !step.done) ? (buffer.pending.some((step) => step.templateReview) ? 'Create from reviewed template' : 'Confirm removal and save') : 'Retry save'}</button>`
       : saveThenOffered
         ? `<button form="draft-editor-form" class="secondary-action" name="draftAction" value="save">Save draft</button><button form="draft-editor-form" name="draftAction" value="saveThen">${h(definition.saveThen!.label)}</button>`
         : '<button form="draft-editor-form" name="draftAction" value="save">Save draft</button>';
@@ -3186,7 +3241,8 @@ function reconcileCompletedRemovals(
  * a stale or altered form cannot introduce a value the editor never offered.
  * Returns the labels of refused fields.
  */
-function capture(
+/** Reads submitted draft values into a row (exported for tests). */
+export function captureDraftFields(
   row: DraftRow,
   fields: SurfaceDocumentEditor['headerFields'],
   inputs: ReadonlyMap<string, CompiledSurfaceInputField>,
@@ -3224,7 +3280,10 @@ function capture(
     const decimal = DECIMAL_KINDS.includes(kind)
       ? canonicalDecimal(value)
       : null;
-    row.values[field.fieldId] = value === '' ? null : (decimal ?? value);
+    // A text area posts CRLF; one line break is one character (CUSTOMIZE-6).
+    const typed =
+      kind === 'textFieldType' ? value.replace(/\r\n?/gu, '\n') : value;
+    row.values[field.fieldId] = typed === '' ? null : (decimal ?? typed);
   }
   return refused;
 }

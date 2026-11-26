@@ -6,12 +6,19 @@ import {
   REPORT_MEASURE_READER,
 } from '../../canonical-model/src/declared-report-v2.js';
 import { PRESENTATION_READER } from '../../canonical-model/src/surface-presentation-schema.js';
+import { LOGICAL_FIELD_READER } from '../../canonical-model/src/logical-field.js';
+import { logicalFieldBindingsProblem } from './logical-field-admission.js';
 import { presentationDeclarationProblem } from './presentation-admission.js';
 import {
   hasMapDeclaration,
   mapDeclarationProblem,
   mapBindingsProblem,
 } from './map-admission.js';
+import {
+  hasRecordTemplateBinding,
+  RECORD_TEMPLATE_OPERATION_READER,
+} from '@north-star/canonical-model';
+import { recordTemplateDeclarationProblem } from './record-template-admission.js';
 import {
   BILLING_ALLOCATION_READER,
   BILLING_ARREARS_READER,
@@ -716,6 +723,20 @@ function verifyCompiledRelease(
       'PRESENTATION_READER_MISMATCH',
       'Declared presentation and the surface reader floor disagree.',
     );
+  // CUSTOMIZE-6: logical field declarations and their reader floor agree
+  // both ways (a declaration is a key older readers strict-parse).
+  const hasLogicalFields =
+    isRecord(layoutDefinition) &&
+    Object.hasOwn(layoutDefinition, 'logicalFields');
+  if (
+    hasLogicalFields
+      ? surfaceFloor < LOGICAL_FIELD_READER
+      : surfaceFloor === LOGICAL_FIELD_READER
+  )
+    throw integrity(
+      'LOGICAL_FIELD_READER_MISMATCH',
+      'Declared logical fields and the surface reader floor disagree.',
+    );
   const reportInputs = new Map<string, unknown>();
   const sourceTerms = (value: unknown, activeOnly: boolean) => {
     if (!isRecord(value) || !Array.isArray(value.entities)) return [];
@@ -950,6 +971,16 @@ function verifyCompiledRelease(
         projectionPayloadBytes[0]!,
         'PROJECTION_CHUNK_NOT_CANONICAL',
       );
+      const logicalProblem = logicalFieldBindingsProblem(
+        payload,
+        reference.requiredRuntimeCapability.minimumVersion,
+        revision.desiredState,
+      );
+      if (logicalProblem)
+        throw integrity(
+          'LOGICAL_FIELD_PROJECTION_CONTRACT_MISMATCH',
+          logicalProblem,
+        );
       const presentationProblem = presentationDeclarationProblem(
         layoutDefinition,
         payload,
@@ -1004,6 +1035,11 @@ function verifyCompiledRelease(
           'The billing plan or reader floor disagrees with the release.',
         );
       const problem =
+        recordTemplateDeclarationProblem(
+          layoutDefinition,
+          payload,
+          reference.requiredRuntimeCapability.minimumVersion,
+        ) ??
         mapDeclarationProblem(layoutDefinition, payload) ??
         boardDeclarationProblem(
           layoutDefinition,
@@ -1216,11 +1252,13 @@ function verifyFormulaProjectionReference(
   const reference = references[0];
   if (
     references.length !== Number(Boolean(declaring)) ||
-    (hasBookingOperations(normalized)
-      ? operationFloor !== bookingReaderFloor(normalized)
-      : rules.length
-        ? operationFloor !== requiredFormulaValidationOperationReader(rules)
-        : operationFloor >= LITERAL_VALIDATION_OPERATION_READER) ||
+    (hasRecordTemplateBinding(normalized)
+      ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
+      : hasBookingOperations(normalized)
+        ? operationFloor !== bookingReaderFloor(normalized)
+        : rules.length
+          ? operationFloor !== requiredFormulaValidationOperationReader(rules)
+          : operationFloor >= LITERAL_VALIDATION_OPERATION_READER) ||
     // The query floor is the highest catalog feature present.
     (declaresOptionalReadModelDependency(
       isRecord(normalized) ? normalized.queries : undefined,

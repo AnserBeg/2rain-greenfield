@@ -1,3 +1,4 @@
+import type { RecordTemplateBinding } from '@north-star/canonical-model';
 import type {
   BillingPlan,
   BillingSchedule,
@@ -18,6 +19,10 @@ import {
   type BoardSource,
 } from '@north-star/canonical-model';
 import { arrangeableLayoutFields } from './layout-revision.js';
+import {
+  deriveLogicalFieldBindings,
+  type LogicalFieldBinding,
+} from '../../canonical-model/src/logical-field-bindings.js';
 import { createHash } from 'node:crypto';
 
 import type { CalculatedDisplayField } from '@north-star/canonical-model';
@@ -184,6 +189,53 @@ export function renderReleaseDiff(input: {
         },
       ),
     );
+  for (const form of to.surfaces) {
+    const binding = form.recordTemplateBinding as
+      RecordTemplateBinding | undefined;
+    const old = from.surfaces.find((s) => s.surfaceId === form.surfaceId)
+      ?.recordTemplateBinding as typeof binding;
+    if (!binding || binding.revisionId === old?.revisionId) continue;
+    const { body } = binding;
+    const label = (id: string) =>
+      String(
+        [...to.fields, ...(to.relations ?? [])].find(
+          (f) => f.fieldId === id || f.relationId === id,
+        )?.label ?? id,
+      );
+    const selector =
+      body.context.kind === 'choice'
+        ? label(body.context.fieldId)
+        : body.context.kind === 'link'
+          ? label(body.context.relationId)
+          : 'entire record type';
+    lines.push(
+      binding.status === 'retired'
+        ? 'Retires the record template binding on ' +
+            entityLabel(to, body.entityId) +
+            '.'
+        : 'Enables ' +
+            (body.required ? 'required' : 'optional') +
+            ' templates on ' +
+            entityLabel(to, body.entityId) +
+            ' by ' +
+            selector +
+            '. Uses ' +
+            body.columns
+              .map(
+                (c) =>
+                  label(c.fieldId) +
+                  (c.audienceValues
+                    ? ' (defaults limited to ' +
+                      c.audienceValues.join(', ') +
+                      ')'
+                    : c.copyEligible
+                      ? ' (copy permitted)'
+                      : ' (answer only)'),
+              )
+              .join(', ') +
+            '.',
+    );
+  }
   const beforeTemplates = activeTemplates(from);
   const afterTemplates = activeTemplates(to);
   for (const [templateId, revision] of afterTemplates) {
@@ -440,7 +492,7 @@ export function renderReleaseDiff(input: {
         ? `New line table "${label}" on ${entityLabel(to, parent)}:`
         : `New record type "${label}" with ${String(fields.length)} field${fields.length === 1 ? '' : 's'}:`,
     );
-    for (const field of fields) lines.push(`  - ${describeField(field)}`);
+    for (const field of fields) lines.push(`  - ${describeField(field, to)}`);
     if (ownership === 'entityOwned')
       lines.push('  Each record belongs to one company.');
     if (ownership === 'tenantShared')
@@ -507,7 +559,7 @@ export function renderReleaseDiff(input: {
     const entityId = String((field.entity as Json).targetId);
     if (newEntities.has(entityId)) continue;
     lines.push(
-      `New field on ${entityLabel(to, entityId)}: ${describeField(field)}.`,
+      `New field on ${entityLabel(to, entityId)}: ${describeField(field, to)}.`,
     );
   }
 
@@ -800,9 +852,38 @@ export function renderedDiffDigest(text: string): string {
     .digest('hex');
 }
 
-function describeField(field: Json): string {
+function describeField(field: Json, to?: DiffDefinition): string {
   const fieldType = field.fieldType as Json;
   const required = field.presence === 'required' ? ', required' : '';
+  const logical = to ? logicalBindingsOf(to).get(String(field.fieldId)) : null;
+  if (logical) {
+    const label = String(field.label);
+    const places = (scale: number | undefined) =>
+      `${String(scale ?? 0)} decimal${scale === 1 ? '' : 's'}`;
+    switch (logical.logicalType) {
+      case 'decimal':
+        return `${label} (decimal, ${places(logical.scale)}${required})`;
+      case 'money': {
+        const currency = logical.currency;
+        const where =
+          currency?.kind === 'fixed'
+            ? currency.currencyCode
+            : `the record's ${String(
+                to!.fields.find((f) => f.fieldId === currency?.fieldId)
+                  ?.label ?? 'currency',
+              )} (${(currency?.kind === 'stored' ? currency.codes : []).join(', ')})`;
+        return `${label} (money in ${where}${required})`;
+      }
+      case 'quantity':
+        return `${label} (quantity in ${String(logical.unit?.label)}, ${places(logical.scale)}${required})`;
+      case 'longText':
+        return `${label} (long text${required})`;
+      case 'text':
+        return `${label} (one of ${(logical.allowedValues ?? []).join(', ')}${required})`;
+      case 'currencyCode':
+        return `${label} (currency: one of ${(logical.allowedValues ?? []).join(', ')}${required})`;
+    }
+  }
   switch (fieldType.kind) {
     case 'textFieldType':
       return `${String(field.label)} (text${required})`;
@@ -819,6 +900,28 @@ function describeField(field: Json): string {
     default:
       return `${String(field.label)} (${String(fieldType.kind)}${required})`;
   }
+}
+
+const logicalByDefinition = new WeakMap<
+  object,
+  ReadonlyMap<string, LogicalFieldBinding>
+>();
+/** The definition's logical field bindings, or none when it declares none. */
+function logicalBindingsOf(
+  to: DiffDefinition,
+): ReadonlyMap<string, LogicalFieldBinding> {
+  const known = logicalByDefinition.get(to);
+  if (known) return known;
+  const outcome = deriveLogicalFieldBindings(
+    to as unknown as Parameters<typeof deriveLogicalFieldBindings>[0],
+  );
+  const map = new Map(
+    outcome.status === 'bound'
+      ? outcome.bindings.map((b) => [String(b.fieldId), b] as const)
+      : [],
+  );
+  logicalByDefinition.set(to, map);
+  return map;
 }
 
 function optionLabels(field: Json): string[] {

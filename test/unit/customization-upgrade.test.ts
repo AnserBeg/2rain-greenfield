@@ -1,3 +1,9 @@
+import { DRAFTER_EXCEPTIONS } from '../../packages/customization/src/ai-draft-kinds.js';
+import {
+  RECORD_TEMPLATE_CASES,
+  templateBindingMisses,
+} from '../agent/build-eval-cases.js';
+import { TemplateBindingChoicesSchema } from '../../packages/customization/src/record-template-binding.js';
 import {
   popupCommand,
   popupOptionId,
@@ -17,6 +23,7 @@ import {
   type SurfaceLayout,
 } from '../../packages/canonical-model/src/index.js';
 import { VALIDATION_NODE_VERSION } from '../../packages/canonical-model/src/formula-validation.js';
+import { RECORD_TEMPLATE_OPERATION_READER } from '../../packages/canonical-model/src/record-template.js';
 import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 
@@ -312,6 +319,27 @@ function appendOption(target: Base, optionId: string, label: string) {
   };
   type.options.push({ ...type.options[0], optionId, label, orderKey: 90 });
 }
+const collectionBase = applied(extended, [
+  {
+    kind: 'addLineTable',
+    entity: equipment,
+    label: 'Steps',
+    fields: [
+      { label: 'Step', type: 'text' },
+      { label: 'Copies', type: 'number' },
+    ],
+  },
+]);
+const collection = customization
+  .customizationTargets(normalizeApplicationPackage(collectionBase))
+  .templateBindings!.find((o) => o.frame.entityId === equipment)!;
+const copies = collection.columns.find((c) => c.label === 'Copies')!.fieldId;
+const changedCopies = structuredClone(collectionBase);
+declaration(changedCopies, 'fields', 'fieldId', copies).fieldType = {
+  kind: 'textFieldType',
+  schemaVersion: 'v6',
+  maximumLength: 240,
+};
 const reportOperand = id('field.custom_equipment_status');
 const missingReportOperand = structuredClone(extended);
 missingReportOperand.fields = (missingReportOperand.fields as Base[]).filter(
@@ -338,6 +366,22 @@ const equipmentPresentation = customization.presentationMember(
   },
 );
 const cases = {
+  addRecordTemplateBindingRevision: {
+    source: collectionBase,
+    conflict: changedCopies,
+    subject: copies,
+    code: 'INCOMPATIBLE_TYPE',
+    change: customization.draftTemplateBinding([collection], {
+      formId: collection.frame.formId,
+      lifecycle: 'active',
+      required: true,
+      contextId: null,
+      fields: collection.columns.map((c) => ({
+        fieldId: c.fieldId,
+        copyEligible: true,
+      })),
+    }),
+  },
   addPresentationRevision: {
     source: extended,
     conflict: missingReportOperand,
@@ -620,6 +664,248 @@ test('an active or retired template never blocks editing its record type', async
         ),
       );
     }
+});
+test('record template bindings reproduce their authoring root and survive independent edits in both states', async () => {
+  const active = cases.addRecordTemplateBindingRevision.change;
+  const retired = customization.draftTemplateBinding(
+    [{ ...collection, previous: active }],
+    {
+      formId: collection.frame.formId,
+      contextId: null,
+      required: true,
+      lifecycle: 'retired',
+      fields: active.body.columns.map(({ fieldId, copyEligible }) => ({
+        fieldId,
+        copyEligible,
+      })),
+    },
+  );
+  const arrange = {
+    kind: 'arrangeLayout',
+    surface: id('surface.custom_equipment_list'),
+    relabel: [{ field: id('field.custom_equipment_name'), label: 'Tool' }],
+  };
+  const rebased = structuredClone(collectionBase);
+  declaration(rebased, 'fields', 'fieldId', copies).label = 'Number of copies';
+  for (const state of [[active], [active, retired]]) {
+    const chain = [...state, field, arrange].map(patch);
+    const build = (base: Base, upgrade: boolean) =>
+      customization.compileInSandbox({
+        acknowledgement,
+        base,
+        chain,
+        tip: customization.serializeRelease(tip),
+        ...(upgrade && {
+          upgradeBaseRoot: tip.compiled.releaseRoot,
+          origins: chain.map((_, i) => ({
+            patchId: String(i + 1),
+            differentBase: base !== collectionBase,
+            ...(i === 0 && { parent: collectionBase }),
+          })),
+        }),
+      });
+    const authored = await build(collectionBase, false),
+      reproduced = await customization.compileInSandbox({
+        acknowledgement,
+        base: structuredClone(collectionBase),
+        chain: chain.map((m) => patch(JSON.parse(JSON.stringify(m)))),
+        tip: customization.serializeRelease(tip),
+      });
+    assert.ok(
+      authored.status === 'compiled' && reproduced.status === 'compiled',
+      JSON.stringify([
+        authored.status === 'compiled' ? null : authored,
+        reproduced.status === 'compiled' ? null : reproduced,
+      ]).slice(0, 2500),
+    );
+    if (state.length === 1) {
+      const proposal = await customization.draftPatchFromRequest(
+        {
+          modelId: 'template-builder-parity',
+          next: async ({ tools }) => ({
+            text: '',
+            toolCalls: [
+              {
+                id: 'binding',
+                name: tools[0]!.name,
+                input: {
+                  kind: active.kind,
+                  templateBinding: {
+                    formId: active.body.formId,
+                    contextId: null,
+                    required: true,
+                    lifecycle: 'active',
+                    fields: active.body.columns.map(
+                      ({ fieldId, copyEligible }) => ({
+                        fieldId,
+                        copyEligible,
+                      }),
+                    ),
+                  },
+                },
+              },
+            ],
+          }),
+        },
+        'Use reviewed templates for the steps in this collection.',
+        customization.customizationTargets(
+          normalizeApplicationPackage(collectionBase),
+        ),
+      );
+      assert.ok(proposal.status === 'parsed');
+      const english = await customization.compileInSandbox({
+        acknowledgement,
+        base: collectionBase,
+        chain: [proposal.patch],
+        tip: customization.serializeRelease(tip),
+      });
+      assert.ok(english.status === 'compiled');
+      assert.equal(
+        english.steps[0]!.rendered.text,
+        authored.steps[0]!.rendered.text,
+      );
+    }
+    assert.equal(
+      authored.steps.at(-1)!.release.releaseRoot,
+      reproduced.steps.at(-1)!.release.releaseRoot,
+    );
+    const moved = await build(rebased, true);
+    assert.ok(
+      moved.status === 'compiled',
+      JSON.stringify(moved.status === 'compiled' ? null : moved),
+    );
+  }
+});
+test('rule 10: a new choice on a bound choice column compiles with the binding active and retired', async () => {
+  const resultsBase = applied(extended, [
+    {
+      kind: 'addLineTable',
+      entity: equipment,
+      label: 'Results',
+      fields: [
+        { label: 'Caption', type: 'text' },
+        { label: 'Result', type: 'choice', options: ['Pass', 'Fail', 'N/A'] },
+      ],
+    },
+  ]);
+  const offer = customization
+    .customizationTargets(normalizeApplicationPackage(resultsBase))
+    .templateBindings!.find((o) => o.frame.entityId === equipment)!;
+  const result = offer.columns.find((c) => c.label === 'Result')!.fieldId;
+  const choices = (lifecycle: 'active' | 'retired') => ({
+    formId: offer.frame.formId,
+    lifecycle,
+    required: true,
+    contextId: null,
+    fields: offer.columns.map((c) => ({
+      fieldId: c.fieldId,
+      copyEligible: true,
+    })),
+  });
+  const active = customization.draftTemplateBinding([offer], choices('active'));
+  const retired = customization.draftTemplateBinding(
+    [{ ...offer, previous: active }],
+    choices('retired'),
+  );
+  const addChoice = {
+    kind: 'addChoice',
+    enumField: result,
+    option: 'Deferred',
+  };
+  for (const state of [[active], [active, retired]]) {
+    const compiled = await customization.compileInSandbox({
+      acknowledgement,
+      base: resultsBase,
+      chain: [...state, addChoice].map(patch),
+      tip: customization.serializeRelease(tip),
+    });
+    assert.ok(
+      compiled.status === 'compiled',
+      `${state.length === 1 ? 'active' : 'retired'}: ${JSON.stringify(compiled.status === 'compiled' ? null : compiled).slice(0, 1500)}`,
+    );
+  }
+  // The binding still matches its offer after the choice: nothing to re-review.
+  const after = customization
+    .customizationTargets(
+      normalizeApplicationPackage(applied(resultsBase, [active, addChoice])),
+    )
+    .templateBindings!.find((o) => o.frame.entityId === equipment)!;
+  assert.deepEqual(
+    after.columns.map((c) => c.contract),
+    offer.columns.map((c) => c.contract),
+  );
+});
+test('a record template binding compiles beside a validation rule in either order, and after it retires', async () => {
+  const active = cases.addRecordTemplateBindingRevision.change;
+  const retired = customization.draftTemplateBinding(
+    [{ ...collection, previous: active }],
+    {
+      formId: collection.frame.formId,
+      contextId: null,
+      required: true,
+      lifecycle: 'retired',
+      fields: active.body.columns.map(({ fieldId, copyEligible }) => ({
+        fieldId,
+        copyEligible,
+      })),
+    },
+  );
+  // The template operation reader (7) claims the validation readers below it.
+  for (const [label, chain] of [
+    ['[rule, binding]', [rule, active]],
+    ['[binding, rule]', [active, rule]],
+    ['[binding, retired binding, rule]', [active, retired, rule]],
+  ] as const) {
+    const result = await customization.compileInSandbox({
+      acknowledgement,
+      base: collectionBase,
+      chain: chain.map(patch),
+      tip: customization.serializeRelease(tip),
+    });
+    assert.ok(
+      result.status === 'compiled',
+      `${label}: ${JSON.stringify(result.status === 'compiled' ? null : result).slice(0, 1500)}`,
+    );
+    const manifest = result.steps.at(-1)!.release.releaseManifest as {
+      projections: {
+        familyId: string;
+        requiredRuntimeCapability: { minimumVersion: number };
+      }[];
+    };
+    const operation = manifest.projections.find((p) =>
+      p.familyId.endsWith('operation-catalog'),
+    )!;
+    assert.equal(
+      operation.requiredRuntimeCapability.minimumVersion,
+      RECORD_TEMPLATE_OPERATION_READER,
+      label,
+    );
+  }
+});
+test('the Customize tool admits the parsed vocabulary and declares template selections from their schema', () => {
+  const schema = customization.draftingToolInputSchema() as {
+    properties: {
+      kind: { enum: string[] };
+      patches: { items: { properties: { kind: { enum: string[] } } } };
+      templateBinding: unknown;
+    };
+  };
+  assert.deepEqual(
+    schema.properties.kind.enum.filter((k) => k !== 'unsupported').sort(),
+    customization.CUSTOMIZATION_PATCH_KINDS.filter(
+      (k) => !(k in DRAFTER_EXCEPTIONS),
+    ).sort(),
+  );
+  assert.deepEqual(
+    [...schema.properties.patches.items.properties.kind.enum].sort(),
+    customization.CUSTOMIZATION_CHANGE_MEMBER_KINDS.filter(
+      (k) => !(k in DRAFTER_EXCEPTIONS),
+    ).sort(),
+  );
+  assert.deepEqual(
+    (schema.properties.templateBinding as { properties: unknown }).properties,
+    TemplateBindingChoicesSchema.toJSONSchema().properties,
+  );
 });
 test('upgrade replay admission and its named cases cover the independently parsed vocabulary', () => {
   const admitted = [...customization.UPGRADE_PATCH_KINDS].sort();
@@ -1359,6 +1645,88 @@ test('a refused report redacts protected evidence on either side, its issue and 
   assert.ok(
     historical.report.findings.every((f) => f.subject === 'Restricted field'),
   );
+});
+
+test('the record template eval cases score a drafted binding in three businesses and fail a wrong one', async () => {
+  assert.deepEqual(
+    RECORD_TEMPLATE_CASES.map((c) => c.id),
+    ['R01', 'R02', 'R03'],
+  );
+  const local = (v: string) => v.slice(v.indexOf('.', v.indexOf(':')) + 1);
+  for (const c of RECORD_TEMPLATE_CASES) {
+    const expect = c.expect;
+    assert.ok(expect.outcome === 'templateBinding');
+    const source = applied(base, [...(c.base ?? [])]);
+    const before = customization.customizationTargets(
+      normalizeApplicationPackage(source),
+    );
+    const offer = before.templateBindings!.find((o) =>
+      local(o.frame.formId).startsWith(expect.form),
+    );
+    assert.ok(offer, c.id + ' offers its collection');
+    const selector = offer.contexts.find(
+      ({ selector: s }) =>
+        (s.kind === 'choice'
+          ? local(s.fieldId)
+          : s.kind === 'link'
+            ? local(s.relationId)
+            : null) === expect.context,
+    )?.selector;
+    assert.ok(selector, c.id + ' offers its context');
+    const choices = (required: boolean, contextId: string | null) => ({
+      formId: offer.frame.formId,
+      contextId,
+      required,
+      lifecycle: 'active' as const,
+      fields: offer.columns.map((col) => ({
+        fieldId: col.fieldId,
+        copyEligible: true,
+      })),
+    });
+    const score = async (input: ReturnType<typeof choices>) => {
+      const drafted = await customization.draftPatchFromRequest(
+        {
+          modelId: 'template-eval-scripted',
+          next: async ({ tools }) => ({
+            text: '',
+            toolCalls: [
+              {
+                id: 'binding',
+                name: tools[0]!.name,
+                input: {
+                  kind: 'addRecordTemplateBindingRevision',
+                  templateBinding: input,
+                },
+              },
+            ],
+          }),
+        },
+        c.request,
+        before,
+      );
+      assert.ok(drafted.status === 'parsed', JSON.stringify(drafted));
+      const after = customization.customizationTargets(
+        normalizeApplicationPackage(applied(source, [drafted.patch])),
+      );
+      return templateBindingMisses(expect, before, after);
+    };
+    const contextId =
+      selector.kind === 'choice'
+        ? selector.fieldId
+        : selector.kind === 'link'
+          ? selector.relationId
+          : null;
+    assert.deepEqual(await score(choices(expect.required, contextId)), []);
+    assert.deepEqual(await score(choices(!expect.required, contextId)), [
+      expect.required ? 'binding is optional' : 'binding is required',
+    ]);
+    assert.deepEqual(await score(choices(expect.required, null)), [
+      `assigned by null, expected ${String(expect.context)}`,
+    ]);
+    assert.deepEqual(templateBindingMisses(expect, before, before), [
+      'no active template binding on the form',
+    ]);
+  }
 });
 
 test('a retired presentation revision is replayed by identity only, so the old rules it carries never refuse an upgrade', () => {

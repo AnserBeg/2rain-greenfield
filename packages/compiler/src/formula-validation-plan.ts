@@ -125,12 +125,31 @@ export function compileLiteralFormulaRules(
     byEntity.set(rule.targetId, entityBindings);
   }
 
+  // CUSTOMIZE-6: a field's declared allowed values bound its witnesses, so
+  // verification never writes a value the write contract refuses.
+  const allowedTexts = new Map(
+    (
+      (
+        revision as {
+          logicalFields?: readonly {
+            fieldId: string;
+            allowedValues?: readonly string[];
+          }[];
+        }
+      ).logicalFields ?? []
+    ).flatMap((declaration) =>
+      declaration.allowedValues
+        ? [[declaration.fieldId, declaration.allowedValues] as const]
+        : [],
+    ),
+  );
   const witnesses: ProvedWitnesses[] = [];
   for (const entityBindings of byEntity.values()) {
     const rows = synthesizeLiteralRows(
       entityBindings,
       revision.fields,
       VERIFICATION_BUSINESS_DATE,
+      allowedTexts,
     );
     const ids = [
       ...new Set(entityBindings.flatMap(({ rule }) => rule.boundOperationIds)),
@@ -145,6 +164,7 @@ export function compileLiteralFormulaRules(
       entityBindings,
       revision.fields,
       VERIFICATION_BUSINESS_DATE,
+      allowedTexts,
     );
     const fixtures = entityBindings.some(({ paths }) => paths?.length)
       ? related

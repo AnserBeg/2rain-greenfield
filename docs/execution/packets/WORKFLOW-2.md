@@ -15,7 +15,8 @@ Slices 1, 3 and 4 integrated at `aecd42967bf7524ae4f3c4f54eaca2350e3dc8fa`. Pre-
 ## Remaining slices
 
 - Slice 2 belongs to **AI-BUILD-1 slice 2**, including the generic repair loop, costs and evals. These slices add no Customize member and change no compiled chunk or stored definition shape.
-- Slice 4a is built on the packet branch. Its scoped run budgets and scheduled worker registration support distribution, clinics and schools. The three trigger members follow its Critical merge, with their drafter, eval, replay, scope and reader proofs. [Source audit, owner ruling and operator checks](../evidence/2026-11-21-workflow-trigger-source-audit.md)
+- Slice 4a merged in TRAIN-F. Its scoped run budgets and scheduled worker registration support distribution, clinics and schools. [Source audit, owner ruling and operator checks](../evidence/2026-11-21-workflow-trigger-source-audit.md)
+- Slice 4b (packet/WORKFLOW-2-s4b) adds the per-record creation writer and the `recordCreated` member, migration 0070 and rung 50 (assigned at TRAIN-Q). `recordTransitioned` and `scheduledOnField` remain open. [Slice 4b record](../evidence/2026-11-25-workflow-record-created.md)
 - Slice 8 owns live per-step process isolation and the pre-tenant OS user/container and network boundary. The engine policy also requires a named owner and deputy before the first tenant. [Engine patch policy](../../operations/engine-patch-policy.md)
 
 ## Gates and controls

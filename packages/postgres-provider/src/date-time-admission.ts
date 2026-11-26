@@ -31,6 +31,7 @@ export function declaredDateTimeFields(bytes: Uint8Array) {
       );
   }
   return {
+    definition,
     active: active.sort((a, b) =>
       a.fieldId < b.fieldId ? -1 : a.fieldId > b.fieldId ? 1 : 0,
     ),

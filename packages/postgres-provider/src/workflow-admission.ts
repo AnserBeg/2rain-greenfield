@@ -10,7 +10,7 @@ import type { Pool, PoolClient } from 'pg';
 
 import type { WorkflowDefinition } from '../../canonical-model/src/schemas.js';
 import { readWorkflowBundle, verifyWorkflowBundle } from './workflow-bundle.js';
-import { RECEIPT_POSTED_TYPE } from './workflow-consumer.js';
+import { workflowTriggerSource } from './workflow-consumer.js';
 import {
   sha256,
   WORKFLOW_ENGINE_BUILD,
@@ -111,7 +111,13 @@ export async function verifyWorkflowDefinitions(
       context,
       binding.bodyDigest,
     );
-    const compiled = await verifyWorkflowBundle(view, binding.grants, bundle);
+    const compiled = await verifyWorkflowBundle(
+      view,
+      binding.grants,
+      bundle,
+      undefined,
+      binding.trigger,
+    );
     if (compiled.executable !== bundle.executable)
       throw new Error('Workflow executable does not match the pinned bundle');
     verified.push({
@@ -146,6 +152,7 @@ export async function persistWorkflowDefinitions(
     sdkDeclarationDigest,
   } of verified) {
     const executableDigest = sha256(executable);
+    const source = workflowTriggerSource(binding.trigger);
     const principal = workflowAutomationPrincipal(
       context.tenantId,
       context.environmentId,
@@ -155,10 +162,11 @@ export async function persistWorkflowDefinitions(
       `INSERT INTO platform.workflow_definitions (
         tenant_id, environment_id, release_id, workflow_id, event_type,
         body_digest, executable, executable_digest, sdk_digest, engine_build,
-        host_version, sdk_version, automation_principal_id, authored_by, grants
+        host_version, sdk_version, automation_principal_id, authored_by, grants,
+        record_type
       ) SELECT $1::uuid, $2::uuid, $3::uuid, $4::text, $5::text, $6::text,
                $7::bytea, $8::text, $9::text, $10::text, $11::text, $12::text,
-               $13::uuid, $14::uuid, $15::jsonb
+               $13::uuid, $14::uuid, $15::jsonb, $16::text
         WHERE NOT EXISTS (
           SELECT 1 FROM platform.workflow_definitions
            WHERE (tenant_id, environment_id, release_id, workflow_id) = ($1, $2, $3, $4)
@@ -166,7 +174,7 @@ export async function persistWorkflowDefinitions(
       [
         ...scope,
         binding.workflowId,
-        RECEIPT_POSTED_TYPE,
+        source.eventType,
         binding.bodyDigest,
         executable,
         executableDigest,
@@ -177,6 +185,7 @@ export async function persistWorkflowDefinitions(
         principal,
         author,
         JSON.stringify(binding.grants),
+        source.recordType,
       ],
     );
     // Only the verifier's connection can read the authoritative digest.
@@ -186,11 +195,12 @@ export async function persistWorkflowDefinitions(
         FROM platform.workflow_definitions AS d
        WHERE (tenant_id, environment_id, release_id, workflow_id) = ($1, $2, $3, $4)
          AND (event_type, body_digest, executable_digest, sdk_digest, engine_build, host_version, sdk_version, automation_principal_id, authored_by, grants) =
-             ($5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb)`,
+             ($5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb)
+         AND record_type IS NOT DISTINCT FROM $15::text`,
       [
         ...scope,
         binding.workflowId,
-        RECEIPT_POSTED_TYPE,
+        source.eventType,
         binding.bodyDigest,
         executableDigest,
         sdkDeclarationDigest,
@@ -200,6 +210,7 @@ export async function persistWorkflowDefinitions(
         principal,
         author,
         JSON.stringify(binding.grants),
+        source.recordType,
       ],
     );
     if (!rows[0])
@@ -252,6 +263,7 @@ export async function assertWorkflowEvidence(
   const { rows } = await client.query<{
     workflow_id: string;
     event_type: string;
+    record_type: string | null;
     body_digest: string;
     executable_digest: string;
     sdk_digest: string;
@@ -259,7 +271,7 @@ export async function assertWorkflowEvidence(
     result_bytes: Buffer;
     matches: boolean;
   }>(
-    `SELECT e.workflow_id, d.body_digest, d.event_type, d.executable_digest, d.sdk_digest, d.grants,
+    `SELECT e.workflow_id, d.body_digest, d.event_type, d.record_type, d.executable_digest, d.sdk_digest, d.grants,
        e.result_bytes, e.binding_digest = platform.workflow_definition_digest(d) AS matches
      FROM platform.workflow_verification_evidence e
      JOIN platform.workflow_definitions d
@@ -276,7 +288,8 @@ export async function assertWorkflowEvidence(
       return (
         !row?.matches ||
         row.body_digest !== binding.bodyDigest ||
-        row.event_type !== RECEIPT_POSTED_TYPE ||
+        row.event_type !== workflowTriggerSource(binding.trigger).eventType ||
+        row.record_type !== workflowTriggerSource(binding.trigger).recordType ||
         canonicalize(row.grants) !== canonicalize(binding.grants) ||
         !row.result_bytes.equals(
           workflowEvidenceBytes(binding, row.executable_digest, row.sdk_digest),

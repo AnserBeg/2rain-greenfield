@@ -78,8 +78,8 @@
       "name": "board-v2-superseded-revision-bound",
       "claim": "On replay only the last revision of each Board surface checks bindings, so a retired or rebound Board replays on a base that removed what the first revision bound.",
       "file": "packages/customization/src/upgrade-replay.ts",
-      "original": "                check: (superseded.has(patch.revisionId)\n",
-      "replacement": "                check: (superseded.has(patch.revisionId) && false\n",
+      "original": "                check: (superseded[patch.kind].has(patch.revisionId)\n",
+      "replacement": "                check: (superseded[patch.kind].has(patch.revisionId) && false\n",
       "test": {
         "files": ["test/unit/customization-board.test.ts"],
         "namePattern": "rebound"

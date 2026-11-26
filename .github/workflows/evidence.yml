@@ -10,18 +10,35 @@ name: Evidence on demand
 # A `labeled` event runs only the job for the label just added. A push, an open
 # or a reopen runs the jobs for every label the pull request carries. How to ask
 # for a run and cite it: docs/execution/evidence-on-demand.md.
+#
+# CI-7: a lane that opens no pull request dispatches the controls by hand
+# (`gh workflow run evidence.yml -f ref=<branch or full commit sha> -f controls="a b"`). A
+# dispatch runs only run-controls, on the commit the `ref` input names, and
+# every dispatch keeps its own concurrency group so lanes never cancel each
+# other. regen-snapshot stays pull-request only.
 on:
   pull_request:
     types: [labeled, synchronize, opened, reopened]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or full 40-character commit SHA whose expected-red controls run
+        type: string
+        required: true
+      controls:
+        description: Control names separated by spaces; empty runs the entries the ref adds or changes against origin/main
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: read
 
 # One run per pull request and trigger: a push cancels the previous push's run,
 # re-adding a label cancels that label's previous run, and an unrelated label
-# cancels nothing.
+# cancels nothing. A dispatch is its own group and is never cancelled.
 concurrency:
-  group: evidence-${{ github.event.pull_request.number }}-${{ github.event.action == 'labeled' && github.event.label.name || 'head' }}
+  group: evidence-${{ github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || format('{0}-{1}', github.event.pull_request.number, github.event.action == 'labeled' && github.event.label.name || 'head') }}
   cancel-in-progress: true
 
 env:
@@ -35,6 +52,7 @@ jobs:
   select-controls:
     name: Select expected-red controls
     if: >-
+      github.event_name == 'workflow_dispatch' ||
       (github.event.action == 'labeled' && github.event.label.name == 'run-controls') ||
       (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-controls'))
     runs-on: ubuntu-24.04
@@ -42,25 +60,34 @@ jobs:
     outputs:
       names: ${{ steps.select.outputs.names }}
       count: ${{ steps.select.outputs.count }}
+      head_sha: ${{ steps.resolve.outputs.head_sha }}
     steps:
-      - name: Check out the pull request head
+      - name: Check out the commit under test
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || inputs.ref }}
           fetch-depth: 0
           persist-credentials: false
+      # Resolved once, so every control job and every cited line names the same
+      # commit even when `ref` was a branch that moves.
+      - name: Resolve the commit under test
+        id: resolve
+        run: echo "head_sha=$(git rev-parse HEAD)" >>"$GITHUB_OUTPUT"
       - name: Set up pinned Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .node-version
       # A `controls: a b` line in the body names exactly the controls to run;
-      # otherwise every manifest entry the head adds or changes runs.
-      - name: Select the controls this pull request adds, changes or names
+      # otherwise every manifest entry the head adds or changes runs. A dispatch
+      # has no body: its `controls` input becomes that line, and without it the
+      # base is origin/main. The input reaches the script through the
+      # environment only, and the script accepts nothing but entry names.
+      - name: Select the controls this run adds, changes or names
         id: select
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || 'origin/main' }}
+          HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
+          PR_BODY: "${{ github.event_name == 'workflow_dispatch' && (inputs.controls != '' && format('controls: {0}', inputs.controls) || '') || github.event.pull_request.body }}"
         run: |
           node scripts/expected-red-on-demand.mjs select \
             --base "$BASE_SHA" \
@@ -80,11 +107,11 @@ jobs:
       matrix:
         control: ${{ fromJSON(needs.select-controls.outputs.names) }}
     steps:
-      - name: Check out the pull request head
+      - name: Check out the commit under test
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: ${{ (matrix.control == 'validation-refusal-does-not-veto' || matrix.control == 'validation-related-row-read-ignored' || matrix.control == 'late-address-response' || matrix.control == 'shared-record-company-pin' || matrix.control == 'address-map-placement-reader-floor' || startsWith(matrix.control, 'generated-pdf-') || startsWith(matrix.control, 'documents-')) && '0' || '1' }}
+          ref: ${{ needs.select-controls.outputs.head_sha }}
+          fetch-depth: ${{ (matrix.control == 'validation-refusal-does-not-veto' || matrix.control == 'validation-related-row-read-ignored' || matrix.control == 'late-address-response' || matrix.control == 'shared-record-company-pin' || matrix.control == 'address-map-placement-reader-floor' || startsWith(matrix.control, 'generated-pdf-') || startsWith(matrix.control, 'documents-') || startsWith(matrix.control, 'template-') || startsWith(matrix.control, 'archived-')) && '0' || '1' }}
           persist-credentials: false
       - name: Set up pinned Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -118,7 +145,7 @@ jobs:
         if: success() || failure()
         env:
           CONTROL: ${{ matrix.control }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_SHA: ${{ needs.select-controls.outputs.head_sha }}
         run: |
           status="$(cat "$RUNNER_TEMP/expected-red.status" 2>/dev/null || echo none)"
           node scripts/expected-red-on-demand.mjs outcome \

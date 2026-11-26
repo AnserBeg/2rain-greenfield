@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
-import { getReachabilityProducer } from '../helpers/reachability-producers.js';
+import { reachabilityProducers } from '../helpers/reachability-producers.js';
 
 const workflowPath = '.github/workflows/ci.yml';
 const packagePath = 'package.json';
@@ -36,6 +36,7 @@ const suiteDefinitions = [
       'test/unit/canonical-model/surface-list.test.ts',
       'test/unit/catalog-definition.test.ts',
       'test/unit/catalog-extras.test.ts',
+      'test/unit/close-fixture-app.test.ts',
       'test/unit/commercial-amounts.test.ts',
       'test/unit/customization-ai-draft-gates.test.ts',
       'test/unit/customization-ai-draft-slice2.test.ts',
@@ -48,11 +49,14 @@ const suiteDefinitions = [
       'test/unit/date-time-field.test.ts',
       'test/unit/dev-environment.test.ts',
       'test/unit/field-validation.test.ts',
+      'test/unit/fixture-process.test.ts',
       'test/unit/formula-validation.test.ts',
       'test/unit/inventory-definition.test.ts',
       'test/unit/inventory-valuation.test.ts',
       'test/unit/language-conformance-ledger.test.ts',
+      'test/unit/language-coverage-credit.test.ts',
       'test/unit/location-definition.test.ts',
+      'test/unit/logical-field.test.ts',
       'test/unit/map-imagery.test.ts',
       'test/unit/module-provider-error-mappings.test.ts',
       'test/unit/observability.test.ts',
@@ -67,6 +71,7 @@ const suiteDefinitions = [
       'test/unit/surface-assets.test.ts',
       'test/unit/surface-presentation.test.ts',
       'test/unit/web-surface-hex-literal-ratchet.test.ts',
+      'test/unit/workflow-triggers.test.ts',
       'test/unit/workspace-contract.test.ts',
     ],
     script: 'test:unit',
@@ -91,6 +96,7 @@ const suiteDefinitions = [
       'test/compiler/relation-target-projection.test.ts',
       'test/compiler/report-analysis.test.ts',
       'test/compiler/report-company-access.test.ts',
+      'test/compiler/reversibility-census.test.ts',
     ],
     script: 'test:compiler',
   },
@@ -143,6 +149,7 @@ const suiteDefinitions = [
       'test/architecture/module-press-law.test.ts',
       'test/architecture/pilot-identity-boundary.test.ts',
       'test/architecture/record-claim-fidelity.test.ts',
+      'test/architecture/record-creation-writers.test.ts',
       'test/architecture/release-activation-boundary.test.ts',
       'test/architecture/release-persistence-boundary.test.ts',
       'test/architecture/repository-hygiene.test.ts',
@@ -237,6 +244,7 @@ const suiteDefinitions = [
       'test/postgres/document-templates.test.ts',
       'test/postgres/location-runtime.test.ts',
       'test/postgres/locations.test.ts',
+      'test/postgres/logical-fields.test.ts',
       'test/postgres/migrations.test.ts',
       'test/postgres/module-index-conformance.test.ts',
       'test/postgres/module-runtime.test.ts',
@@ -251,6 +259,7 @@ const suiteDefinitions = [
       'test/postgres/query-aggregate-semantics.test.ts',
       'test/postgres/query-filter-lowering.test.ts',
       'test/postgres/read-snapshot.test.ts',
+      'test/postgres/record-template-library.test.ts',
       'test/postgres/release-activation.test.ts',
       'test/postgres/release-approval.test.ts',
       'test/postgres/releases.test.ts',
@@ -269,6 +278,7 @@ const suiteDefinitions = [
       'test/postgres/tenant-isolation.test.ts',
       'test/postgres/trust-substrate.test.ts',
       'test/postgres/workflow-consumer.test.ts',
+      'test/postgres/workflow-record-created.test.ts',
     ],
     scripts: [
       'test:postgres:1',
@@ -281,6 +291,8 @@ const suiteDefinitions = [
       'test:postgres:8',
       'test:postgres:9',
       'test:postgres:10',
+      'test:postgres:11',
+      'test:postgres:12',
     ],
   },
   {
@@ -467,14 +479,30 @@ test('suite commands exactly cover all independently discovered test files', () 
   }
 });
 
-test('the unit evidence manifest matches every unit test argument in execution order', () => {
+test('every script-backed node producer names exactly the test arguments of its package script, in order', () => {
   const { scripts } = JSON.parse(readFileSync(packagePath, 'utf8')) as {
     scripts: Record<string, string>;
   };
-  const unitFiles = shellTokens(scripts['test:unit']!)
-    .map((token) => token.value)
-    .filter((argument) => argument.endsWith('.test.ts'));
-  assert.deepEqual(getReachabilityProducer('unit').argv, unitFiles);
+  let checked = 0;
+  for (const producer of reachabilityProducers) {
+    if (
+      producer.runner !== 'node:test' ||
+      producer.implementation.kind !== 'script' ||
+      producer.implementation.manifestPath !== 'package.json'
+    )
+      continue;
+    const script = producer.implementation.script;
+    const files = shellTokens(scripts[script]!)
+      .map((token) => token.value)
+      .filter((argument) => argument.endsWith('.test.ts'));
+    assert.deepEqual(
+      producer.argv,
+      files,
+      `${producer.id} and package script ${script} name different files`,
+    );
+    checked += 1;
+  }
+  assert.ok(checked >= 20, `only ${String(checked)} producers were compared`);
 });
 
 test('every test-script glob is quoted before the shell can expand it', () => {
@@ -844,6 +872,8 @@ test('CI runs every scaffold gate from a frozen install', () => {
     'corepack pnpm test:postgres:8',
     'corepack pnpm test:postgres:9',
     'corepack pnpm test:postgres:10',
+    'corepack pnpm test:postgres:11',
+    'corepack pnpm test:postgres:12',
     'corepack pnpm test:postgres:composed',
     'corepack pnpm test:postgres:commercial',
     'corepack pnpm test:postgres:sales',

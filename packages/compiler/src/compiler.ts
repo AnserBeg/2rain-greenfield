@@ -6,6 +6,7 @@ import {
 } from '@north-star/canonical-model';
 import { compileAddressBindings } from './address.js';
 import { compileDateTimeFields } from './date-time.js';
+import { compileLogicalFields } from './logical-fields.js';
 import {
   BOOKING_USAGE_QUERY_READER,
   hasBookingUsage,
@@ -49,9 +50,16 @@ import {
 } from './conformance.js';
 import { compilerDiagnostic, finalizeDiagnostics } from './diagnostics.js';
 import { billingBindingProblem } from './billing.js';
-import { WorkflowGrantBindingError } from './workflows.js';
+import {
+  WorkflowGrantBindingError,
+  WorkflowTriggerBindingError,
+} from './workflows.js';
 import { compileDocuments } from './documents.js';
 import { requiredFormulaValidationOperationReader } from '../../canonical-model/src/formula-validation-reader.js';
+import {
+  hasRecordTemplateBinding,
+  RECORD_TEMPLATE_OPERATION_READER,
+} from '../../canonical-model/src/record-template.js';
 import { compileCalculatedDisplayFields } from './calculated-display-plan.js';
 import {
   compileLiteralFormulaRules,
@@ -89,6 +97,7 @@ import {
   CHUNKING_SCHEME_VERSION,
   COMPILER_ATTESTATION_VERSION,
   COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+  compilerSemanticProfileAtLeast,
   COMPILER_VERSION,
   SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS,
   HASH_ALGORITHM,
@@ -465,6 +474,23 @@ function compileApplicationInternal(
       maximumDiagnostics,
     );
   }
+  const logical = compileLogicalFields(packageRevision);
+  if (logical && 'message' in logical) {
+    return failure(
+      [
+        {
+          ...compilerDiagnostic(
+            'COMPILER_TYPE_INVALID',
+            'typeCheck',
+            logical.path,
+            logical.subjectId,
+          ),
+          rule: logical.message,
+        },
+      ],
+      maximumDiagnostics,
+    );
+  }
   const billingProblem = billingBindingProblem(packageRevision);
   if (billingProblem)
     return failure(
@@ -569,12 +595,28 @@ function compileApplicationInternal(
       documents?.payload,
       address?.payload,
       dateTime?.payload,
+      logical?.payload,
     ),
     packageRevision,
   );
   try {
     appendWorkflowProjection(basePlans, packageRevision);
   } catch (error) {
+    if (error instanceof WorkflowTriggerBindingError)
+      return failure(
+        [
+          {
+            ...compilerDiagnostic(
+              'COMPILER_TYPE_INVALID',
+              'typeCheck',
+              '$.workflows',
+              error.recordTypeId,
+            ),
+            rule: 'Workflow trigger names a stored record type with one owning company.',
+          },
+        ],
+        maximumDiagnostics,
+      );
     if (!(error instanceof WorkflowGrantBindingError)) throw error;
     return failure(
       [
@@ -895,7 +937,12 @@ function validateDisclosureTierEmission(
   packageRevision: VersionedNormalizedApplicationPackage,
   compilerSemanticProfileVersion: CompilerSemanticProfileVersion,
 ): CompilerDiagnostic[] {
-  if (compilerSemanticProfileVersion === COMPILER_SEMANTIC_PROFILE_V2_VERSION) {
+  if (
+    compilerSemanticProfileAtLeast(
+      compilerSemanticProfileVersion,
+      COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+    )
+  ) {
     return [];
   }
   return packageRevision.surfaces.flatMap((surface) =>
@@ -2350,11 +2397,15 @@ function verifyCompleteness(
   if (
     ruleProjection.length !==
       Number(Boolean(declaredRules || declaredDisplays)) ||
-    (hasBookingOperations(packageRevision)
-      ? operationFloor !== bookingReaderFloor(packageRevision)
-      : declaredRules &&
-        operationFloor !==
-          requiredFormulaValidationOperationReader(declaredRules)) ||
+    // The record template reader is the highest operation floor; it claims
+    // the Booking and validation readers below it (projections.ts).
+    (hasRecordTemplateBinding(packageRevision)
+      ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
+      : hasBookingOperations(packageRevision)
+        ? operationFloor !== bookingReaderFloor(packageRevision)
+        : declaredRules &&
+          operationFloor !==
+            requiredFormulaValidationOperationReader(declaredRules)) ||
     // The query floor is the highest catalog feature present, so a lower
     // feature's floor is exact only when no higher feature rides the catalog.
     (hasBookingUsage(packageRevision) ||

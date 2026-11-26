@@ -6,6 +6,7 @@
  * harness's own end-state checks under the customized release, and again after
  * the rollback.
  */
+import { firstPartyImmediateEdits } from '../../packages/domain/src/app/immediate-edits.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -808,6 +809,7 @@ async function runTask(world: AgentWorld, id: number): Promise<void> {
   const context = await task.arrange(world);
   const before = await snapshot(world);
   const session = new OperationsAgentSession({
+    immediateEdits: firstPartyImmediateEdits(),
     approve: () => Promise.resolve(true),
     companyId: COMPANY,
     personHeaders: { cookie: 'northstar-demo-actor=buyer' },

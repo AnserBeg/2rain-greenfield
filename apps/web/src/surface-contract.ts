@@ -1,9 +1,17 @@
 import {
+  LogicalFieldBindingSchema,
+  type LogicalFieldBinding,
+} from '../../../packages/canonical-model/src/logical-field-bindings.js';
+import {
   CompiledPresentationSchema,
   type CompiledPresentation,
 } from '../../../packages/canonical-model/src/schemas.js';
 import { CompiledPopupSchema } from '../../../packages/runtime/src/popup-actions.js';
 import type { CompiledPopup } from '../../../packages/canonical-model/src/popup-actions.js';
+import {
+  RecordTemplateBindingSchema,
+  type RecordTemplateBinding,
+} from '@north-star/canonical-model';
 import {
   SurfaceLayoutSchema,
   type SurfaceLayout,
@@ -193,6 +201,43 @@ export interface CompiledFieldTemporal {
 interface CompiledFieldCommon {
   readonly fieldId: string;
   readonly required: boolean;
+  /** CUSTOMIZE-6: the field's logical kind, scale, currency and unit (rung 49). */
+  readonly logical?: CompiledLogicalField;
+}
+
+/**
+ * A logical field as the surface manifest binds it, with the codes a
+ * currency field offers: the codes of every stored money field reading it.
+ */
+export type CompiledLogicalField = LogicalFieldBinding & {
+  readonly currencyCodes?: readonly string[];
+};
+
+/** Reads the manifest's logical field bindings, refusing any it cannot parse. */
+function parseLogicalFieldBindings(
+  payload: Record<string, unknown>,
+): ReadonlyMap<string, CompiledLogicalField> {
+  if (!Object.hasOwn(payload, 'logicalFieldBindings')) return new Map();
+  const parsed = LogicalFieldBindingSchema.array().safeParse(
+    payload.logicalFieldBindings,
+  );
+  if (!parsed.success)
+    throw new SurfaceProjectionError(
+      'INVALID_SURFACE_MANIFEST',
+      'compiled surface projection has invalid logical field bindings',
+    );
+  return new Map(
+    parsed.data.map((binding) => [
+      binding.fieldId,
+      Object.freeze({
+        ...binding,
+        // A field with declared allowed values offers exactly those.
+        ...(binding.allowedValues && {
+          currencyCodes: Object.freeze([...(binding.allowedValues ?? [])]),
+        }),
+      }),
+    ]),
+  );
 }
 
 /**
@@ -325,6 +370,7 @@ export function formFieldIds(
 }
 
 export interface CompiledSurfaceDefinition {
+  readonly recordTemplateBinding?: RecordTemplateBinding;
   readonly map?: SurfaceMap;
   /** UI-CUSTOM-1: declared tones and sizing, at surface reader 47. */
   readonly presentation?: CompiledPresentation;
@@ -930,8 +976,9 @@ function parseCompiledSurfaceManifest(
   }
 
   const seenSurfaceIds = new Set<string>();
+  const logical = parseLogicalFieldBindings(payload);
   const surfaces = payload.surfaces.map((value, index) => {
-    const surface = parseSurface(value, index);
+    const surface = parseSurface(value, index, logical);
     if (seenSurfaceIds.has(surface.surfaceId)) {
       throw new SurfaceProjectionError(
         'DUPLICATE_SURFACE_ID',
@@ -1120,6 +1167,7 @@ function invalidNavigation(message: string): SurfaceProjectionError {
 function parseSurface(
   value: unknown,
   index: number,
+  logical: ReadonlyMap<string, CompiledLogicalField> = new Map(),
 ): CompiledSurfaceDefinition {
   if (!isRecord(value)) invalidSurface(index);
   const archetype = value.archetype;
@@ -1160,9 +1208,16 @@ function parseSurface(
     return parsed;
   });
 
-  const fields = parseSurfaceFields(value, index);
+  const fields = parseSurfaceFields(value, index, logical);
 
   return Object.freeze({
+    ...(value.recordTemplateBinding === undefined
+      ? {}
+      : {
+          recordTemplateBinding: RecordTemplateBindingSchema.parse(
+            value.recordTemplateBinding,
+          ),
+        }),
     ...(archetype === 'map' ? { map: SurfaceMapSchema.parse(value.map) } : {}),
     ...(value.report
       ? { report: ReportRevisionSchema.parse(value.report) }
@@ -1269,6 +1324,7 @@ function invalidField(message: string): SurfaceProjectionError {
 function parseSurfaceFields(
   value: Record<string, unknown>,
   surfaceIndex: number,
+  logical: ReadonlyMap<string, CompiledLogicalField>,
 ): readonly CompiledSurfaceField[] | undefined {
   // Absence is a state, not a default. Under every profile that does not emit
   // per-field kinds the key is not there at all; `Object.hasOwn` keeps that
@@ -1279,9 +1335,11 @@ function parseSurfaceFields(
       `compiled surface ${surfaceIndex} declares a non-array field list`,
     );
   }
-  const fields = value.fields.map((entry, fieldIndex) =>
-    parseSurfaceField(entry, surfaceIndex, fieldIndex),
-  );
+  const fields = value.fields.map((entry, fieldIndex) => {
+    const field = parseSurfaceField(entry, surfaceIndex, fieldIndex);
+    const binding = logical.get(field.fieldId);
+    return binding ? Object.freeze({ ...field, logical: binding }) : field;
+  });
   const fieldIds = value.fieldIds as readonly string[];
   if (
     fields.length !== fieldIds.length ||

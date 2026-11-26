@@ -16,6 +16,8 @@ import type { WorkflowVerificationRequest } from './workflow-draft-worker.js';
 import { sha256 } from './workflow-execution.js';
 import { MAXIMUM_WORKFLOW_SOURCE_BYTES } from './workflow-isolate.js';
 import { generateWorkflowSdk, type WorkflowGrants } from './workflow-sdk.js';
+import type { WorkflowTrigger } from '../../canonical-model/src/schemas.js';
+import { fixtureEventMatchesTrigger } from '../../canonical-model/src/workflow-trigger-events.js';
 
 export async function storeWorkflowBundle(
   client: PoolClient,
@@ -66,8 +68,15 @@ export async function verifyWorkflowBundle(
   grants: WorkflowGrants,
   bundle: Pick<WorkflowBodyBundle, 'body' | 'fixtures'>,
   options: SandboxRunnerOptions = {},
+  trigger: WorkflowTrigger = 'goodsReceiptPosted',
 ) {
-  const sdk = generateWorkflowSdk(view, grants);
+  const sdk = generateWorkflowSdk(view, grants, undefined, undefined, trigger);
+  if (
+    bundle.fixtures.some(
+      ({ event }) => !fixtureEventMatchesTrigger(event, trigger),
+    )
+  )
+    throw new Error('Workflow fixture event does not match its trigger');
   const request: WorkflowVerificationRequest = {
     body: bundle.body,
     declarations: sdk.declarations,
@@ -125,11 +134,21 @@ export async function verifyWorkflowBundle(
 /** Check the effective retained body, including unexercised branches, before an upgrade is staged. */
 export async function verifyRetainedWorkflow(
   view: RequestRuntimeView,
-  workflow: { workflowId: string; grants: WorkflowGrants },
+  workflow: {
+    workflowId: string;
+    grants: WorkflowGrants;
+    trigger?: WorkflowTrigger;
+  },
   bundle: WorkflowBodyBundle,
 ) {
   try {
-    await verifyWorkflowBundle(view, workflow.grants, bundle);
+    await verifyWorkflowBundle(
+      view,
+      workflow.grants,
+      bundle,
+      undefined,
+      workflow.trigger,
+    );
     return null;
   } catch (error) {
     return error instanceof RemovedWorkflowAction

@@ -1,5 +1,5 @@
 import {
-  BOOKING_FULFILMENT_READER,
+  RECORD_TEMPLATE_OPERATION_READER,
   CONNECTOR_FAMILY,
   OPTIONAL_DEPENDENCY_QUERY_READER,
 } from '@north-star/canonical-model';
@@ -9,8 +9,9 @@ import {
   type TrustedRequestContext,
   type UntrustedRequestInput,
 } from './request-context.js';
-import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents.js';
 import { REPORT_MEASURE_READER } from '../../canonical-model/src/declared-report-v2.js';
+import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents.js';
+import { REVERSIBILITY_AGENT_READER } from '../../canonical-model/src/reversibility.js';
 import {
   WORKFLOW_PROJECTION_FAMILY,
   WORKFLOW_RUNTIME_CAPABILITY,
@@ -178,7 +179,9 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
   }),
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.agent]: {
     capabilityId: 'northstar.runtime:capability.agent-discovery',
-    maximumSupportedVersion: 4,
+    // 2 assistant confirmation declarations, 3 saved list layouts, 4 metric
+    // cards, 5 the reversibility declaration (AI-UNDO-1).
+    maximumSupportedVersion: REVERSIBILITY_AGENT_READER,
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.catalog]: {
     capabilityId: 'northstar.runtime:capability.semantic-model',
@@ -186,7 +189,7 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.operation]: {
     capabilityId: 'northstar.runtime:capability.operation-catalog',
-    maximumSupportedVersion: BOOKING_FULFILMENT_READER,
+    maximumSupportedVersion: RECORD_TEMPLATE_OPERATION_READER,
   },
   [REQUEST_RUNTIME_FORMULA_RULE_FAMILY]: {
     capabilityId: 'northstar.runtime:capability.formula-rule',
@@ -244,10 +247,15 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 46 reads viewport declarations and renders Map views (one rung).
     // 47 adds declared presentation: tone rules on list cells and rows,
     // column sizing and list density.
-    // 50 reads v2 reports: calendar and age dimensions, declared to-one
+    // 48 applies versioned record templates at create (assigned at TRAIN-M).
+    // 49 reads declared logical value kinds: decimal, money, quantity, long
+    // text and currency code (assigned at TRAIN-O).
+    // 50 reads general workflow trigger members (ADR-0073 A1; WORKFLOW-2,
+    // assigned at TRAIN-Q).
+    // 51 reads v2 reports: calendar and age dimensions, declared to-one
     // links and line grain, min, max, average and distinct counts, and
-    // approved measure references. 51 reads named measures (REPORTS-1 s2;
-    // provisional, 48 and 49 are held by packets in flight).
+    // approved measure references. 52 reads named measures (REPORTS-1 s2,
+    // assigned at its main-compat merge).
     maximumSupportedVersion: REPORT_MEASURE_READER,
   },
 });

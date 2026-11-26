@@ -6,6 +6,7 @@ import {
   startComposedApplication,
   COMPOSED_APPLICATION_INVENTORY_SCOPE,
 } from '../../apps/api/src/composition-root.js';
+import { closeFixtureApp } from './close-fixture-app.js';
 import { withEphemeralPostgres } from './postgres.js';
 import {
   parsePinnedOperationCatalog,
@@ -26,7 +27,7 @@ export async function withMetaSalesFixture(
     try {
       await run(await seed(app, pool));
     } finally {
-      await app.close();
+      await closeFixtureApp(app, 'meta-sales');
     }
   });
 }

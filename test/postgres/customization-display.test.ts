@@ -1,3 +1,4 @@
+import { firstPartyImmediateEdits } from '../../packages/domain/src/app/immediate-edits.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
@@ -149,6 +150,7 @@ test(
           const absent = await issue('MARGIN-ABSENT', randomUUID());
           assert.equal(absent.readBack?.values[fieldId], null);
           const agent = new OperationsAgentSession({
+            immediateEdits: firstPartyImmediateEdits(),
             runtime: app.runtime,
             companyId: COMPANY,
             personHeaders,

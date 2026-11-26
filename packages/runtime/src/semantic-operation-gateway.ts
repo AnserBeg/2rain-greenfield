@@ -162,6 +162,8 @@ export interface RegisteredOperationInputContract {
     };
     readonly classification: 'INTERNAL' | 'PUBLIC';
     readonly enumOptionIds: readonly string[];
+    /** CUSTOMIZE-6: a text field's declared allowed values, when it has them. */
+    readonly allowedTexts?: readonly string[];
     readonly fieldId: string;
     readonly fieldKind:
       | 'addressFieldType'
@@ -1968,6 +1970,7 @@ function assertOperationInputContract(
     assertExactKeys(
       field,
       [
+        ...(Object.hasOwn(field, 'allowedTexts') ? ['allowedTexts'] : []),
         'bounds',
         'classification',
         'enumOptionIds',
@@ -1980,6 +1983,16 @@ function assertOperationInputContract(
       ],
       invalid,
     );
+    if (
+      Object.hasOwn(field, 'allowedTexts') &&
+      (field.fieldKind !== 'textFieldType' ||
+        !Array.isArray(field.allowedTexts) ||
+        field.allowedTexts.length === 0 ||
+        !field.allowedTexts.every(
+          (entry) => typeof entry === 'string' && entry !== '',
+        ))
+    )
+      throw invalid('pinned field allowed values have an invalid shape');
     assertCanonicalId(field.fieldId, 'inputContract.fields.fieldId', invalid);
     if (
       !isRecord(field.bounds) ||

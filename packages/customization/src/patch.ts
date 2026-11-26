@@ -1,3 +1,4 @@
+import { TemplateBindingPatchSchema } from './record-template-binding.js';
 import { BillingPlanSchema } from '../../canonical-model/src/billing.js';
 import { MapViewRevisionSchema } from './map-revision.js';
 import { AddReportRevisionSchema } from './report-revision.js';
@@ -8,6 +9,10 @@ import { BoardViewRevisionSchema } from './board-revision.js';
 import { LayoutRevisionSchema } from './layout-revision.js';
 import {
   COMPANY_ACCESS_INDEX,
+  CURRENCY_MINOR_UNITS_V0,
+  STORED_CURRENCY_CODES,
+  LOGICAL_DECIMAL_MAXIMUM_SCALE,
+  UnitLabelSchema,
   DATE_TIME_PATCH_VERSION,
   DateTimeZoneSourceSchema,
   CalculatedDisplayFieldDefinitionSchema,
@@ -56,15 +61,77 @@ export const CUSTOM_FIELD_TYPES = [
   'date',
   'yesNo',
   'choice',
+  // CUSTOMIZE-6: exact decimals, money, quantities and paragraphs.
+  'decimal',
+  'money',
+  'quantity',
+  'longText',
+  'currency',
 ] as const;
 export type CustomFieldType = (typeof CUSTOM_FIELD_TYPES)[number];
+/** The currencies a stored money field accepts (the REPORTS-1 binding). */
+export const STORED_MONEY_CURRENCIES = STORED_CURRENCY_CODES;
+/** A fixed currency has a registered minor unit, which is the field's scale. */
+export const FIXED_MONEY_CURRENCIES = Object.keys(CURRENCY_MINOR_UNITS_V0) as [
+  keyof typeof CURRENCY_MINOR_UNITS_V0,
+];
+
+const moneyCurrency = z
+  .discriminatedUnion('kind', [
+    z.strictObject({
+      kind: z.literal('fixed'),
+      code: z
+        .enum(FIXED_MONEY_CURRENCIES)
+        .describe('The one currency every amount of this field is in.'),
+    }),
+    z
+      .strictObject({
+        kind: z.literal('stored'),
+        fieldId: canonicalId
+          .optional()
+          .describe(
+            "The record type's existing currency field, by its listed field ID.",
+          ),
+        fieldLabel: label
+          .optional()
+          .describe(
+            'Or the label of a currency field added in this same record type or change.',
+          ),
+      })
+      .refine(
+        (stored) =>
+          (stored.fieldId === undefined) !== (stored.fieldLabel === undefined),
+        'a stored currency names its currency field by fieldId or fieldLabel, not both',
+      ),
+  ])
+  .describe(
+    "A money field's currency: fixed (one code) or stored (each record's own currency field, CAD, USD or EUR).",
+  );
 
 export const CustomFieldSchema = z
   .strictObject({
     label,
-    type: z.enum(CUSTOM_FIELD_TYPES),
+    type: z
+      .enum(CUSTOM_FIELD_TYPES)
+      .describe(
+        'text is one line; longText is paragraphs; number is a whole number; decimal is an exact number with a scale; money is an exact amount with a currency; quantity is an exact amount in a unit; currency is a three-letter currency code (CAD, USD or EUR) that a stored money field reads.',
+      ),
     required: z.boolean().optional(),
     options: z.array(label).min(1).max(20).optional(),
+    scale: z
+      .int()
+      .min(0)
+      .max(LOGICAL_DECIMAL_MAXIMUM_SCALE)
+      .optional()
+      .describe(
+        'Required for type decimal or quantity, and only for them: digits after the decimal point.',
+      ),
+    currency: moneyCurrency
+      .optional()
+      .describe('Required for type money, and only for it.'),
+    unit: UnitLabelSchema.optional().describe(
+      'Required for type quantity, and only for it: the unit as people write it, such as kg, h, m3 or pallet.',
+    ),
   })
   .superRefine((field, context) => {
     if (field.type === 'choice' && !field.options) {
@@ -81,6 +148,33 @@ export const CustomFieldSchema = z
         path: ['options'],
       });
     }
+    const scaled = field.type === 'decimal' || field.type === 'quantity';
+    if (scaled !== (field.scale !== undefined))
+      context.addIssue({
+        code: 'custom',
+        message: scaled
+          ? 'a decimal or quantity field declares its scale'
+          : 'only a decimal or quantity field has a scale',
+        path: ['scale'],
+      });
+    if ((field.type === 'money') !== (field.currency !== undefined))
+      context.addIssue({
+        code: 'custom',
+        message:
+          field.type === 'money'
+            ? 'a money field declares its currency'
+            : 'only a money field has a currency',
+        path: ['currency'],
+      });
+    if ((field.type === 'quantity') !== (field.unit !== undefined))
+      context.addIssue({
+        code: 'custom',
+        message:
+          field.type === 'quantity'
+            ? 'a quantity field declares its unit'
+            : 'only a quantity field has a unit',
+        path: ['unit'],
+      });
   });
 export type CustomField = z.infer<typeof CustomFieldSchema>;
 
@@ -258,6 +352,7 @@ const ChangeMemberSchema = z.discriminatedUnion('kind', [
   }),
   MapViewRevisionSchema,
   BoardViewRevisionSchema,
+  TemplateBindingPatchSchema,
   AddReportRevisionSchema,
   AddMeasureRevisionSchema,
   addRecordType,
@@ -410,6 +505,7 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'addPopupActionRevision',
   'addPresentationRevision',
   'addBoardViewRevision',
+  'addRecordTemplateBindingRevision',
   'addReportRevision',
   'addMeasureRevision',
   'saveListView',

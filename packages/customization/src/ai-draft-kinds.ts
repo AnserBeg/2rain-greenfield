@@ -1,3 +1,4 @@
+import { TemplateBindingChoicesSchema } from './record-template-binding.js';
 import { z } from 'zod';
 
 import { DISPLAY_OPERATIONS } from './calculated-display-draft.js';
@@ -155,13 +156,13 @@ export const DRAFTER_KINDS = {
     input: member('addRecordType'),
     hidden: ['companyAccessIndex'],
     guidance:
-      'A new kind of record with its own list, page and form. The first field is its name and must be type "text". number is a whole number; a choice field lists its options. Use companyOwnership "entityOwned" for company-scoped documents or for links to a company-owned target. A later member of the same change set refers to it as northstar.app:entity.custom_<label in lowercase, punctuation and spaces replaced by underscores>.',
+      'A new kind of record with its own list, page and form. The first field is its name and must be type "text". A choice field lists its options. Field types: number is a whole number; decimal is an exact number with a scale (digits after the point); money is an amount with a currency, either fixed (one code for every record, such as a CAD deposit) or stored (each record names its own: add a field of type currency and point the money field at it by fieldLabel); quantity is an exact amount in a unit with a scale (weight in kg, hours in h); longText is notes or a description in paragraphs. These kinds are for your own record types, not built-in ones or line tables. Use companyOwnership "entityOwned" for company-scoped documents or for links to a company-owned target. A later member of the same change set refers to it as northstar.app:entity.custom_<label in lowercase, punctuation and spaces replaced by underscores>.',
   },
   addField: {
     input: member('addField'),
     hidden: ['screens'],
     guidance:
-      'A new field on an existing record type, or on one created earlier in the change set. entity is a record type ID listed below.',
+      'A new field on an existing record type, or on one created earlier in the change set. entity is a record type ID listed below. Field types: number is a whole number; decimal is an exact number with a scale (digits after the point); money is an amount with a currency, either fixed (one code for every record, such as a CAD deposit) or stored (each record names its own: add a field of type currency and point the money field at it by fieldLabel); quantity is an exact amount in a unit with a scale (weight in kg, hours in h); longText is notes or a description in paragraphs. These kinds are for your own record types, not built-in ones or line tables.',
   },
   addChoice: {
     input: member('addChoice'),
@@ -206,6 +207,14 @@ export const DRAFTER_KINDS = {
     input: DRAFTER_SELECTION_SCHEMAS.addCalculatedDisplayField,
     guidance:
       'Show an exact decimal value on a record page from the calculated display targets. Include listSurfaceId only when both fields are on that list. Needs its own draft.',
+  },
+  addRecordTemplateBindingRevision: {
+    input: z.strictObject({
+      kind: z.literal('addRecordTemplateBindingRevision'),
+      templateBinding: TemplateBindingChoicesSchema,
+    }),
+    guidance:
+      'Choose a listed company-owned collection, its context and fields for a versioned record template.',
   },
   addReportRevision: {
     input: DRAFTER_SELECTION_SCHEMAS.addReportRevision,
@@ -282,7 +291,7 @@ export const DRAFTER_KINDS = {
   saveWorkflow: {
     input: WorkflowDraftSchema,
     guidance:
-      'An automation that runs when goods are received, written as a TypeScript function body with fixtures. Only when receipt workflow declarations are given below.',
+      'An automation that runs when its trigger fires (a posted goods receipt, or a record of a listed type being created), written as a TypeScript function body with fixtures. Only when workflow declarations are given below.',
   },
   changeSet: {
     input: z.strictObject({

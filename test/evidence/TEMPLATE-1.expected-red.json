@@ -1,0 +1,140 @@
+{
+  "version": 1,
+  "packet": "TEMPLATE-1",
+  "entries": [
+    {
+      "name": "template-verifier-probe",
+      "claim": "Release verification creates its sample of a template-bound record only through the independent verifier review, so a declaring release cannot activate without it.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "    if (surface) {",
+      "replacement": "    if (surface && false) {",
+      "test": {
+        "files": ["test/postgres/record-template-library.test.ts"],
+        "namePattern": "^publish and assign company templates for inspections, print tickets and school enrolments$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/record-template-library.test.ts",
+          "name": "publish and assign company templates for inspections, print tickets and school enrolments",
+          "expected": "Creation from this record template requires a current reviewed application."
+        }
+      ]
+    },
+    {
+      "name": "template-fresh-preview",
+      "claim": "A preview reviewed before the assignment changed cannot create a record from the old selection.",
+      "file": "db/migrations/0069_record_template_library.sql",
+      "original": "IF selected IS DISTINCT FROM r.selection THEN RAISE EXCEPTION 'template.freshPreviewRequired'; END IF;",
+      "replacement": "NULL;",
+      "test": {
+        "files": ["test/postgres/record-template-library.test.ts"],
+        "namePattern": "^publish and assign company templates for inspections, print tickets and school enrolments$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/record-template-library.test.ts",
+          "name": "publish and assign company templates for inspections, print tickets and school enrolments",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    },
+    {
+      "name": "template-changed-request",
+      "claim": "A create under a reviewed key that no create has used, with a payload changed after the preview, refuses by name instead of applying the reviewed template; the operation layer holds no receipt for that key, so only the template review can refuse it.",
+      "file": "db/migrations/0069_record_template_library.sql",
+      "original": "IF r.input_digest<>encode(sha256(convert_to(header::text,'UTF8')),'hex') OR r.probe<>verification THEN",
+      "replacement": "IF r.probe<>verification THEN",
+      "test": {
+        "files": ["test/postgres/record-template-library.test.ts"],
+        "namePattern": "^publish and assign company templates for inspections, print tickets and school enrolments$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/record-template-library.test.ts",
+          "name": "publish and assign company templates for inspections, print tickets and school enrolments",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    },
+    {
+      "name": "template-application-company",
+      "claim": "A worker limited to one company is refused, by the company-scoped read authority, another company's application read for a known parent ID; without it that read answers nothing instead of refusing.",
+      "file": "db/migrations/0069_record_template_library.sql",
+      "original": "IF NOT north_star_internal.address_member(company) OR NOT platform.document_granted(company::text,replace(form,':surface.',':permission.template_read_'),form)",
+      "replacement": "IF false",
+      "test": {
+        "files": ["test/postgres/record-template-library.test.ts"],
+        "namePattern": "^publish and assign company templates for inspections, print tickets and school enrolments$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/record-template-library.test.ts",
+          "name": "publish and assign company templates for inspections, print tickets and school enrolments",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    },
+    {
+      "name": "archived-probe-ledger-level",
+      "claim": "An archived tree's Customize service opens a database migrated past it only because the probe presents the ledger at that tree's own level; without the bridge its migrate() refuses the later migration by name.",
+      "file": "test/helpers/archived-runtime-process.ts",
+      "original": "      const restore = databaseUrl\n",
+      "replacement": "      const restore = false\n",
+      "test": {
+        "files": ["test/postgres/customization-inspection.test.ts"],
+        "namePattern": "^one inspection change activates linked records and owned lines, and an assistant transition needs a yes$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/customization-inspection.test.ts",
+          "name": "one inspection change activates linked records and owned lines, and an assistant transition needs a yes",
+          "expected": "MigrationDriftError"
+        }
+      ]
+    },
+    {
+      "name": "template-application-stored-company",
+      "claim": "The application read finds a stored application only in the company it was created in, so a company A lookup of a company B parent answers nothing.",
+      "file": "db/migrations/0069_record_template_library.sql",
+      "original": "WHERE (c.tenant_id,c.environment_id,c.company_id,c.form_id,c.parent_id)=(t,e,company,form,parent)\n    AND c.applied AND NOT c.probe;",
+      "replacement": "WHERE (c.tenant_id,c.environment_id,c.form_id,c.parent_id)=(t,e,form,parent)\n    AND c.applied AND NOT c.probe;",
+      "test": {
+        "files": ["test/postgres/record-template-library.test.ts"],
+        "namePattern": "^publish and assign company templates for inspections, print tickets and school enrolments$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/record-template-library.test.ts",
+          "name": "publish and assign company templates for inspections, print tickets and school enrolments",
+          "expected": "a company A lookup finds no application for a company B parent"
+        }
+      ]
+    },
+    {
+      "name": "template-operation-floor-beside-rules",
+      "claim": "The compiler accepts the template operation reader as the floor of a release that also declares a validation rule or a Booking operation.",
+      "file": "packages/compiler/src/compiler.ts",
+      "original": "    (hasRecordTemplateBinding(packageRevision)\n",
+      "replacement": "    (false\n",
+      "test": {
+        "files": [
+          "test/unit/customization-upgrade.test.ts",
+          "test/compiler/booking-commitments.test.ts"
+        ],
+        "namePattern": "^(a record template binding compiles beside a validation rule in either order, and after it retires|a record template binding compiles beside a booking operation at the template operation reader)$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/customization-upgrade.test.ts",
+          "name": "a record template binding compiles beside a validation rule in either order, and after it retires",
+          "expected": "COMPILER_PROJECTION_INVARIANT_FAILED"
+        },
+        {
+          "file": "test/compiler/booking-commitments.test.ts",
+          "name": "a record template binding compiles beside a booking operation at the template operation reader",
+          "expected": "COMPILER_PROJECTION_INVARIANT_FAILED"
+        }
+      ]
+    }
+  ]
+}

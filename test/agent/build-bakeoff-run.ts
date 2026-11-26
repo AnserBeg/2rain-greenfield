@@ -184,6 +184,7 @@ export function requestType(c: BuildCase): RequestType {
     expect.outcome === 'validation' ||
     expect.outcome === 'ratePlan' ||
     expect.outcome === 'presentation' ||
+    expect.outcome === 'templateBinding' ||
     expect.outcome === 'report'
   )
     return 'single change';

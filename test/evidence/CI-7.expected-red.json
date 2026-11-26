@@ -1,0 +1,97 @@
+{
+  "version": 1,
+  "packet": "CI-7",
+  "entries": [
+    {
+      "name": "ci7-stale-evidence-not-named",
+      "claim": "Reachability evidence from another run or an older producer definition fails check:language-coverage by name, with the producer, the evidence file and the remedy.",
+      "file": "test/helpers/language-coverage-credit.ts",
+      "original": "if (error instanceof StaleReachabilityEvidenceError) {",
+      "replacement": "if (false) {",
+      "test": {
+        "files": ["test/unit/language-coverage-credit.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/language-coverage-credit.test.ts",
+          "name": "evidence written under an older file list is stale, named, and says how to regenerate it",
+          "expected": "LANGUAGE_COVERAGE_STALE_REACHABILITY_EVIDENCE"
+        },
+        {
+          "file": "test/unit/language-coverage-credit.test.ts",
+          "name": "evidence from another run is stale in the same words",
+          "expected": "LANGUAGE_COVERAGE_STALE_REACHABILITY_EVIDENCE"
+        }
+      ]
+    },
+    {
+      "name": "ci7-fixture-ignores-sigterm",
+      "claim": "A browser fixture child that ignores SIGTERM is reported as not exited, so a teardown stall fails by name with the child output instead of a bare test timeout.",
+      "file": "apps/web/test/browser/fixture-process.ts",
+      "original": "exited: !stalled,",
+      "replacement": "exited: true,",
+      "test": {
+        "files": ["test/unit/fixture-process.test.ts"],
+        "namePattern": "a fixture that ignores SIGTERM is reported as not exited"
+      },
+      "kills": [
+        {
+          "file": "test/unit/fixture-process.test.ts",
+          "name": "a fixture that ignores SIGTERM is reported as not exited and is killed",
+          "expected": "true !== false"
+        }
+      ]
+    },
+    {
+      "name": "ci7-run-mismatch-not-stale-class",
+      "claim": "A run-id mismatch is reported as stale evidence, not as a bare error.",
+      "file": "test/helpers/reachability-evidence.ts",
+      "original": "throw new StaleReachabilityEvidenceError(\n      `Stale reachability evidence",
+      "replacement": "throw new Error(\n      `Stale reachability evidence",
+      "test": {
+        "files": ["test/unit/language-coverage-credit.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/language-coverage-credit.test.ts",
+          "name": "evidence from another run is stale in the same words",
+          "expected": "LANGUAGE_COVERAGE_STALE_REACHABILITY_EVIDENCE"
+        }
+      ]
+    },
+    {
+      "name": "ci7-argv-mismatch-not-stale-class",
+      "claim": "An argv mismatch is reported as stale evidence, not as a bare error.",
+      "file": "test/helpers/reachability-evidence.ts",
+      "original": "throw new StaleReachabilityEvidenceError(\n      `Observed argv mismatch",
+      "replacement": "throw new Error(\n      `Observed argv mismatch",
+      "test": {
+        "files": ["test/unit/language-coverage-credit.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/language-coverage-credit.test.ts",
+          "name": "evidence written under an older file list is stale, named, and says how to regenerate it",
+          "expected": "LANGUAGE_COVERAGE_STALE_REACHABILITY_EVIDENCE"
+        }
+      ]
+    },
+    {
+      "name": "ci7-silent-socket-blocks-stop",
+      "claim": "A fixture stop closes sockets that connected and sent nothing, so the stop returns.",
+      "file": "test/helpers/close-fixture-app.ts",
+      "original": "app.server.closeAllConnections();",
+      "replacement": "void 0;",
+      "test": {
+        "files": ["test/unit/close-fixture-app.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/close-fixture-app.test.ts",
+          "name": "a fixture whose page holds a silent socket still stops promptly",
+          "expected": "did not close within"
+        }
+      ]
+    }
+  ]
+}

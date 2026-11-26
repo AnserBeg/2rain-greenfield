@@ -160,10 +160,84 @@ export function retypedFormulaRule(
   return null;
 }
 
+/**
+ * What a revision's logical field declarations say about one exact decimal
+ * (CUSTOMIZE-6): a tenant decimal, or money in one fixed currency, or money
+ * whose currency each record stores. Absent for any other field, so a
+ * revision without declarations reads exactly as before.
+ */
+export type LogicalDecimal =
+  | { readonly logicalType: 'decimal' }
+  | { readonly logicalType: 'money'; readonly currency: string | null };
+export interface LogicalTypeRevision {
+  readonly logicalFields?: readonly unknown[] | undefined;
+  readonly entities: readonly unknown[];
+}
+const logicalDecimalsByRevision = new WeakMap<
+  object,
+  ReadonlyMap<string, LogicalDecimal>
+>();
+export function logicalDecimals(
+  revision: LogicalTypeRevision | undefined,
+): ReadonlyMap<string, LogicalDecimal> {
+  if (!revision?.logicalFields) return new Map();
+  const known = logicalDecimalsByRevision.get(revision);
+  if (known) return known;
+  const amounts = new Map<string, string | null>();
+  for (const entity of revision.entities as {
+    reportSource?: {
+      amounts?: readonly {
+        fieldId: string;
+        currency: { kind: string; currencyCode?: string };
+      }[];
+    };
+  }[])
+    for (const amount of entity.reportSource?.amounts ?? [])
+      amounts.set(
+        amount.fieldId,
+        amount.currency.kind === 'fixed'
+          ? (amount.currency.currencyCode ?? null)
+          : null,
+      );
+  const out = new Map<string, LogicalDecimal>();
+  for (const declaration of revision.logicalFields as {
+    fieldId: string;
+    logicalType: string;
+  }[]) {
+    if (declaration.logicalType === 'decimal')
+      out.set(declaration.fieldId, { logicalType: 'decimal' });
+    else if (declaration.logicalType === 'money')
+      out.set(declaration.fieldId, {
+        logicalType: 'money',
+        currency: amounts.get(declaration.fieldId) ?? null,
+      });
+  }
+  logicalDecimalsByRevision.set(revision, out);
+  return out;
+}
+
 export function formulaFieldType(
-  field: Pick<Field, 'fieldType'>,
+  field: Pick<Field, 'fieldType'> & { readonly fieldId?: string },
+  revision?: LogicalTypeRevision,
 ): FormulaValidationFieldType | null {
   const type = field.fieldType;
+  // A tenant money field compares in its one fixed currency; one whose
+  // currency each record stores has no single currency to compare in.
+  const logical =
+    type.kind === 'exactDecimalFieldType' && field.fieldId !== undefined
+      ? logicalDecimals(revision).get(field.fieldId)
+      : undefined;
+  if (logical?.logicalType === 'money') {
+    if (logical.currency === null || type.kind !== 'exactDecimalFieldType')
+      return null;
+    return {
+      kind: 'decimal',
+      precision: type.precision,
+      scale: type.scale,
+      currency: logical.currency,
+      unit: null,
+    };
+  }
   switch (type.kind) {
     case 'addressFieldType':
       return { kind: 'address' };
@@ -272,7 +346,7 @@ export function bindLiteralValidation(
       field &&
       (dateTimeFieldIds.has(field.fieldId)
         ? ({ kind: 'dateTime' } as const)
-        : formulaFieldType(field));
+        : formulaFieldType(field, revision));
     if (!type || (operand.select === 'textLength' && type.kind !== 'text'))
       return null;
     dependencies.set(operand.fieldId, type);
@@ -329,7 +403,7 @@ export function bindLiteralValidation(
             rule.targetId,
             revision,
           );
-          const right = resolved && formulaFieldType(resolved.field);
+          const right = resolved && formulaFieldType(resolved.field, revision);
           if (!resolved || !right || !sameType(left, right))
             return 'Choose a visible field of the same type, currency and unit through one declared relation.';
           const { field, reader, relation } = resolved;

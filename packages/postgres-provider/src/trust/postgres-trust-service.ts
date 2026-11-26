@@ -151,6 +151,10 @@ export class PostgresTrustService {
 
     return withTrustedRequestTransaction(this.pool, context, async (client) => {
       await assertPinnedRelease(client, context, prepared);
+      await client.query(
+        "SELECT set_config('north_star.creation_action', $1, true)",
+        [prepared.actionId],
+      );
       const mutationResult = await mutate(client);
       return persistAcceptedEvidence(
         client,
@@ -172,6 +176,10 @@ export class PostgresTrustService {
     mutate: IdempotentBusinessMutation<TMutationResult>,
     serializeBeforeIdempotency?: BusinessMutation<void>,
     authorizeBeforeReplay?: BusinessMutation<void>,
+    readReplay?: (
+      client: PoolClient,
+      stored: TMutationResult,
+    ) => Promise<TMutationResult>,
   ): Promise<AcceptedMutationReceipt<TMutationResult>> {
     assertExecutionAuthority(context, actorEnvelope);
     validateIdempotencyBinding(binding);
@@ -208,12 +216,18 @@ export class PostgresTrustService {
           correlationId: existing.correlation_id,
           domainEventId: existing.domain_event_id,
           invocationId: existing.invocation_id,
-          mutationResult: existing.mutation_result,
+          mutationResult: readReplay
+            ? await readReplay(client, existing.mutation_result)
+            : existing.mutation_result,
           outboxId: existing.outbox_id,
           recordedAt: existing.recorded_at.toISOString(),
         });
       }
       await assertPinnedRelease(client, context, binding);
+      await client.query(
+        "SELECT set_config('north_star.creation_action', $1, true)",
+        [binding.actionId],
+      );
       const attempted = await mutate(client);
       assertCommandMatchesIdempotencyBinding(attempted.command, binding);
       const prepared = prepareInvocation(attempted.command, 'SUCCEEDED');

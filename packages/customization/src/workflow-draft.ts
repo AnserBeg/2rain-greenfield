@@ -1,13 +1,9 @@
 import { z } from 'zod';
 import { WorkflowDefinitionSchema } from '../../canonical-model/src/schemas.js';
+import { WorkflowFixtureEventSchema } from '../../canonical-model/src/workflow-trigger-events.js';
 
 const fixture = z.strictObject({
-  event: z.strictObject({
-    type: z.literal('goodsReceiptPosted'),
-    eventId: z.uuid(),
-    receiptId: z.uuid(),
-    legalEntityId: z.uuid(),
-  }),
+  event: WorkflowFixtureEventSchema,
   effects: z
     .array(z.strictObject({ call: z.json(), result: z.json() }))
     .max(64),

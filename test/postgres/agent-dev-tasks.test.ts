@@ -6,6 +6,7 @@
  * to write nothing. Reference scripts show the rule passing correct work for
  * a reversible create and update and for the customized record type.
  */
+import { firstPartyImmediateEdits } from '../../packages/domain/src/app/immediate-edits.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -182,6 +183,7 @@ test(
             const context = await task.arrange(world);
             const before = await snapshot(world);
             const session = new OperationsAgentSession({
+              immediateEdits: firstPartyImmediateEdits(),
               // The panel's act-then-undo (a host option since the end review X6).
               autoApproveReversible: true,
               runtime: world.runtime,

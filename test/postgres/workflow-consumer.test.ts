@@ -1,3 +1,4 @@
+import { firstPartyImmediateEdits } from '../../packages/domain/src/app/immediate-edits.js';
 import { LEGACY_WORKFLOW_SDK_VERSION } from '../../packages/postgres-provider/src/workflow-sdk-version.js';
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -534,7 +535,7 @@ test(
                   async dispatch(pin, call, key) {
                     dispatchScope = {
                       companyId: pin.legal_entity_id,
-                      receiptId: pin.receipt_id,
+                      receiptId: pin.trigger_record_id,
                     };
                     return gateways.dispatch(pin, call, key);
                   },
@@ -1962,6 +1963,7 @@ async function postReceipt(world: AgentWorld): Promise<void> {
   const task = TASKS.find(({ id }) => id === 5)!;
   const context = await task.arrange(world);
   const session = new OperationsAgentSession({
+    immediateEdits: firstPartyImmediateEdits(),
     approve: () => Promise.resolve(true),
     companyId: COMPANY,
     personHeaders: { cookie: 'northstar-demo-actor=buyer' },

@@ -166,7 +166,7 @@ export const reportAnalysisCase = (archived: boolean) => async () => {
             message:
               'runtime capability northstar.runtime:capability.surface-manifest requires version ' +
               minimumVersion +
-              ' and this runtime supports 47',
+              ' and this runtime supports 50',
           });
           if (older)
             assert.equal(

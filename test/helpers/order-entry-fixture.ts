@@ -1,3 +1,4 @@
+import { closeFixtureApp } from './close-fixture-app.js';
 import {
   seedInventoryValuation,
   seedInventoryShipmentValuation,
@@ -65,7 +66,7 @@ export async function withOrderEntryFixture(
     try {
       await run(await seed(app, pool, lookupVolume, orderVolume));
     } finally {
-      await app.close();
+      await closeFixtureApp(app, 'order-entry');
     }
   });
 }

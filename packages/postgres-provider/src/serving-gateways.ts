@@ -1,3 +1,7 @@
+import {
+  PostgresRecordTemplateLibrary,
+  templatePermissionBindings,
+} from './record-template-library.js';
 import { MAP_VIEWPORT_READ_BINDING } from './current-policy.js';
 import type { ReportLimits } from '../../runtime/src/declared-report.js';
 import {
@@ -294,6 +298,7 @@ export function composeServingGateways(
     queryGateway,
     operationMediation,
     addresses,
+    recordTemplates: new PostgresRecordTemplateLibrary(runtimePool),
     documents,
   };
 }
@@ -752,6 +757,7 @@ export function releasePolicyBindings(
         ]
       : []),
     ...currentPolicyBindingsFromPermissions(definition.permissions),
+    ...templatePermissionBindings(definition.surfaces),
     ...(definition.surfaces.some(
       (s) => s.archetype === 'map' && s.lifecycle === 'active',
     )

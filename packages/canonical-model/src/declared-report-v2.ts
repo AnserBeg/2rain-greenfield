@@ -22,11 +22,12 @@ const live = (row: Row | undefined): row is Row =>
 
 /** REPORTS-1 slice 2: surface reader rung for v2 report bodies (calendar and
  * age dimensions, declared links and line grain, min/max/average/distinct and
- * approved measure references). Provisional; renumbered at the merge. */
-export const REPORT_ANALYSIS_READER = 50;
+ * approved measure references). Assigned at the main-compat merge (50 is
+ * WORKFLOW-2's record-created trigger reader). */
+export const REPORT_ANALYSIS_READER = 51;
 /** A released named measure (trial or approved). Separable from v2 reports:
  * a measure can be released before any report binds it. */
-export const REPORT_MEASURE_READER = 51;
+export const REPORT_MEASURE_READER = 52;
 /** Reader policy's group ceiling (ADR-0089 R3), checked against zero fill. */
 export const REPORT_GROUP_CEILING = 500;
 

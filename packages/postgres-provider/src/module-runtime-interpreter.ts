@@ -1,3 +1,10 @@
+import { z } from 'zod';
+import { recordCreations } from './record-creation-occurrences.js';
+import type { TemplateApplicationSelection } from '../../runtime/src/record-template-library.js';
+import {
+  declaresTemplateCreate,
+  templateCreateSurface,
+} from '../../runtime/src/record-template-library.js';
 import type { GroupedExecution } from '../../runtime/src/semantic-query-gateway.js';
 import {
   trustedContextForRequestRuntimeView,
@@ -119,6 +126,7 @@ import type {
   SemanticOperationResultEnvelope,
 } from '../../runtime/src/semantic-operation-gateway.js';
 import {
+  parsePinnedOperationCatalog,
   SEMANTIC_OPERATION_RESULT_VERSION,
   evaluateRegisteredOperationPrecondition,
 } from '../../runtime/src/semantic-operation-gateway.js';
@@ -814,272 +822,487 @@ export class PostgresModuleRuntimeInterpreter
       parsedInput,
     );
     const actor = await this.actorIssuer.issue(request.context);
-    const receipt = await this.#trust.executeIdempotentAcceptedMutation(
-      request.context,
-      actor,
-      Object.freeze({
-        actionId: request.definition.operationId,
-        idempotencyKey: request.idempotencyKey,
-        inputDigest: request.inputDigest,
-        releaseContentHash: request.view.release.contentHash,
-        releaseId: request.view.release.releaseId,
-      }),
-      async (client) => {
-        if (request.channel === 'WORKFLOW')
-          await assertWorkflowWriteFence(client, request, this.#workflowRunId);
-        if (
-          authorizedValidationReads.size &&
-          this.#documentNumbers !== 'verificationSentinel' &&
-          (await lockedPolicyVersion(client, request)) !== request.policyVersion
-        )
-          authorizedValidationReads.clear();
-        const currentStorage = await this.#loadPinnedStorageTarget(
-          client,
-          request,
-        );
-        const currentEntity = requiredEntity(
-          currentStorage,
-          request.definition.effect.entity.targetId,
-        );
-        assertOperationSystemInputStorageContract(
-          request.definition,
-          currentEntity,
-          parsedInput,
-        );
-        const disagreement = dateTimeStorageDisagreement(
-          request.view.projections.operation.payload,
-          currentStorage,
-          currentStorage.retiredDateTimeFields,
-        );
-        if (disagreement)
-          throw failure(
-            'MODULE_STORAGE_TARGET_MALFORMED',
-            'dateTime bindings and storage disagree',
-            disagreement,
+    const creating =
+      request.definition.effect.kind === 'createRecordEffect' &&
+      !!parsedInput.systemInput;
+    const surface = creating
+      ? templateCreateSurface(request.view, request.definition.operationId)
+      : undefined;
+    const verifier = this.#documentNumbers === 'verificationSentinel';
+    const args = [
+      request.view.release.releaseId,
+      request.view.pointer.fence,
+      request.definition.operationId,
+      request.idempotencyKey,
+      request.input,
+      verifier,
+    ];
+    let selection:
+      (TemplateApplicationSelection & { applied: boolean }) | null = null;
+    const receipt =
+      await this.#trust.executeIdempotentAcceptedMutation<SemanticRecordDto | null>(
+        request.context,
+        actor,
+        Object.freeze({
+          actionId: request.definition.operationId,
+          idempotencyKey: request.idempotencyKey,
+          inputDigest: request.inputDigest,
+          releaseContentHash: request.view.release.contentHash,
+          releaseId: request.view.release.releaseId,
+        }),
+        async (client) => {
+          if (request.channel === 'WORKFLOW')
+            await assertWorkflowWriteFence(
+              client,
+              request,
+              this.#workflowRunId,
+            );
+          if (
+            authorizedValidationReads.size &&
+            this.#documentNumbers !== 'verificationSentinel' &&
+            (await lockedPolicyVersion(client, request)) !==
+              request.policyVersion
+          )
+            authorizedValidationReads.clear();
+          const currentStorage = await this.#loadPinnedStorageTarget(
+            client,
+            request,
           );
-        // ADR-0087: the business calendar is read as the runtime login role,
-        // inside this write, only when a logical dateTime value is entered.
-        const touchesDateTime = Object.entries(parsedInput.patch).some(
-          ([fieldId, value]) =>
-            value !== null && dateTimeCheck(currentEntity, fieldId),
-        );
-        const calendar = touchesDateTime
-          ? await readBusinessCalendar(client)
-          : null;
-        const accepted = await withModuleRuntimeRole(client, async () => {
-          try {
-            await requireActiveCreateLegalEntity(
-              client,
-              currentStorage,
-              currentEntity,
-              request.definition,
-              parsedInput,
+          const currentEntity = requiredEntity(
+            currentStorage,
+            request.definition.effect.entity.targetId,
+          );
+          assertOperationSystemInputStorageContract(
+            request.definition,
+            currentEntity,
+            parsedInput,
+          );
+          const disagreement = dateTimeStorageDisagreement(
+            request.view.projections.operation.payload,
+            currentStorage,
+            currentStorage.retiredDateTimeFields,
+          );
+          if (disagreement)
+            throw failure(
+              'MODULE_STORAGE_TARGET_MALFORMED',
+              'dateTime bindings and storage disagree',
+              disagreement,
             );
-            // Assigned before the change is prepared, so the change document
-            // records the number the record is created with.
-            const assigned = await assignDocumentNumbers(
-              client,
-              currentEntity,
-              request.definition,
-              parsedInput,
-              this.#documentNumbers,
-            );
-            const numbered = touchesDateTime
-              ? await resolveDateTimeInput(
-                  client,
-                  currentEntity,
-                  currentStorage,
-                  request.definition.effect.kind,
-                  assigned,
-                  calendar,
-                  request.dateTimeWorkingCompany ?? null,
-                )
-              : rejectStrayDateTimeValues(currentEntity, assigned);
-            // The host assigns a new field revision inside the idempotent write.
-            // Retrying the operation returns the original revision through its receipt.
-            const addressInputs = currentEntity.columns.filter(
-              (c) =>
-                numbered.patch[c.canonicalFieldId] != null &&
-                hasAddress(currentEntity, c.canonicalFieldId),
-            );
-            const prior =
-              addressInputs.length &&
-              request.definition.effect.kind === 'updateRecordEffect'
-                ? await loadRawRecord(
+          // ADR-0087: the business calendar is read as the runtime login role,
+          // inside this write, only when a logical dateTime value is entered.
+          const touchesDateTime = Object.entries(parsedInput.patch).some(
+            ([fieldId, value]) =>
+              value !== null && dateTimeCheck(currentEntity, fieldId),
+          );
+          const calendar = touchesDateTime
+            ? await readBusinessCalendar(client)
+            : null;
+          const accepted = await withModuleRuntimeRole(client, async () => {
+            try {
+              await requireActiveCreateLegalEntity(
+                client,
+                currentStorage,
+                currentEntity,
+                request.definition,
+                parsedInput,
+              );
+              // Assigned before the change is prepared, so the change document
+              // records the number the record is created with.
+              const assigned = await assignDocumentNumbers(
+                client,
+                currentEntity,
+                request.definition,
+                parsedInput,
+                this.#documentNumbers,
+              );
+              const numbered = touchesDateTime
+                ? await resolveDateTimeInput(
                     client,
                     currentEntity,
-                    numbered.recordId,
-                    false,
-                    [],
-                    true,
+                    currentStorage,
+                    request.definition.effect.kind,
+                    assigned,
+                    calendar,
+                    request.dateTimeWorkingCompany ?? null,
                   )
-                : null;
-            const requests = addressInputs.map((c) => {
-              const { locateFor, ...value } = AddressWriteSchema.parse(
-                numbered.patch[c.canonicalFieldId],
+                : rejectStrayDateTimeValues(currentEntity, assigned);
+              // The host assigns a new field revision inside the idempotent write.
+              // Retrying the operation returns the original revision through its receipt.
+              const addressInputs = currentEntity.columns.filter(
+                (c) =>
+                  numbered.patch[c.canonicalFieldId] != null &&
+                  hasAddress(currentEntity, c.canonicalFieldId),
               );
-              const old = SavedAddressSchema.safeParse(
-                prior?.values[c.canonicalFieldId],
-              ).data;
-              if (old) {
-                const { revision, ...existing } = old;
-                if (canonicalize(existing) === canonicalize(value))
-                  return {
-                    fieldId: c.canonicalFieldId,
-                    value: { ...value, revision },
-                  };
-              }
-              return {
-                fieldId: c.canonicalFieldId,
-                locateFor,
-                value: { ...value, revision: randomUUID() },
-              };
-            });
-            const input = requests.length
-              ? {
-                  ...numbered,
-                  patch: {
-                    ...numbered.patch,
-                    ...Object.fromEntries(
-                      requests.map((r) => [r.fieldId, addressJson(r.value)]),
-                    ),
-                  },
-                }
-              : numbered;
-            const preparation = await prepareMutation(
-              client,
-              request,
-              currentStorage,
-              currentEntity,
-              input,
-              this.#documentNumbers === 'verificationSentinel',
-              authorizedValidationReads,
-              this.#boundWriteInvariants(currentStorage),
-            );
-            const ids = {
-              changeDocumentId: randomUUID(),
-              correlationId: randomUUID(),
-              eventId: randomUUID(),
-              invocationId: randomUUID(),
-              outboxId: randomUUID(),
-            };
-            const mutationResult = await executeMutationOnClient(
-              client,
-              currentStorage,
-              currentEntity,
-              request,
-              expandDateTimeInputs(
-                currentEntity,
-                expandAddressInputs(currentEntity, input),
-              ),
-              request.readBackDefinition.selections,
-            );
-            return Object.freeze({
-              addresses: requests.filter((r) => !r.value.pin),
-              owner:
-                requests.length && currentEntity.legalEntity
-                  ? await readRecordCompany(
+              const prior =
+                addressInputs.length &&
+                request.definition.effect.kind === 'updateRecordEffect'
+                  ? await loadRawRecord(
                       client,
                       currentEntity,
-                      input.recordId,
+                      numbered.recordId,
+                      false,
+                      [],
+                      true,
                     )
-                  : null,
-              outboxId: ids.outboxId,
-              command: acceptedCommand(
-                { ...request, policyVersion },
-                preparation,
-                ids,
-              ),
-              mutationResult,
-            });
-          } catch (error) {
-            throw translateModuleProviderError(
-              error,
-              currentStorage,
-              currentEntity.entityId,
-              this.#providerErrorMappings,
-            );
-          }
-        });
-        if (
-          request.channel === 'UI' &&
-          this.#documentNumbers !== 'verificationSentinel'
-        ) {
-          for (const address of accepted.addresses) {
-            const selection = address.locateFor;
-            if (
-              selection &&
-              (!accepted.owner || selection.companyId === accepted.owner)
-            )
-              await enqueueAddress(
+                  : null;
+              const requests = addressInputs.map((c) => {
+                const { locateFor, ...value } = AddressWriteSchema.parse(
+                  numbered.patch[c.canonicalFieldId],
+                );
+                const old = SavedAddressSchema.safeParse(
+                  prior?.values[c.canonicalFieldId],
+                ).data;
+                if (old) {
+                  const { revision, ...existing } = old;
+                  if (canonicalize(existing) === canonicalize(value))
+                    return {
+                      fieldId: c.canonicalFieldId,
+                      value: { ...value, revision },
+                    };
+                }
+                return {
+                  fieldId: c.canonicalFieldId,
+                  locateFor,
+                  value: { ...value, revision: randomUUID() },
+                };
+              });
+              const input = requests.length
+                ? {
+                    ...numbered,
+                    patch: {
+                      ...numbered.patch,
+                      ...Object.fromEntries(
+                        requests.map((r) => [r.fieldId, addressJson(r.value)]),
+                      ),
+                    },
+                  }
+                : numbered;
+              const preparation = await prepareMutation(
                 client,
-                request.view,
-                selection.companyId,
+                request,
+                currentStorage,
+                currentEntity,
+                input,
+                this.#documentNumbers === 'verificationSentinel',
+                authorizedValidationReads,
+                this.#boundWriteInvariants(currentStorage),
+              );
+              const ids = {
+                changeDocumentId: randomUUID(),
+                correlationId: randomUUID(),
+                eventId: randomUUID(),
+                invocationId: randomUUID(),
+                outboxId: randomUUID(),
+              };
+              const mutationResult = await executeMutationOnClient(
+                client,
+                currentStorage,
+                currentEntity,
+                request,
+                expandDateTimeInputs(
+                  currentEntity,
+                  expandAddressInputs(currentEntity, input),
+                ),
+                request.readBackDefinition.selections,
+              );
+              const memberRows: Record<string, string> = {};
+              if (selection && surface) {
+                const body = selection.binding.body;
+                const line = requiredEntity(currentStorage, body.lineEntityId);
+                const create = parsePinnedOperationCatalog(
+                  request.view.projections.operation.payload,
+                ).find(
+                  (op) =>
+                    op.effect.kind === 'createRecordEffect' &&
+                    op.effect.entity.targetId === line.entityId,
+                );
+                if (
+                  !create ||
+                  create.effect.kind !== 'createRecordEffect' ||
+                  !('inputContract' in create)
+                )
+                  throw failure(
+                    'MODULE_SEMANTIC_CONTRACT_UNSUPPORTED',
+                    'The declared template line create is unavailable.',
+                    body.lineEntityId,
+                  );
+                let ordinal = 0;
+                for (const member of selection.assignment?.content.members ??
+                  []) {
+                  if (member.kind === 'section') continue;
+                  const id = randomUUID();
+                  const seed = parseMutationInput(
+                    create as RegisteredRecordOperationDefinition,
+                    {
+                      legalEntityId: parsedInput.systemInput!.value,
+                      recordId: id,
+                      relations: {
+                        [body.parentRelationId]: parsedInput.recordId,
+                      },
+                      values: {
+                        ...member.cells,
+                        [surface.documentEditor.lineNumberFieldId]: String(
+                          ++ordinal,
+                        ),
+                      },
+                    },
+                  );
+                  await prepareMutation(
+                    client,
+                    {
+                      ...request,
+                      definition: create as RegisteredRecordOperationDefinition,
+                    },
+                    currentStorage,
+                    line,
+                    seed,
+                    verifier,
+                    new Set(),
+                    this.#boundWriteInvariants(currentStorage),
+                  );
+                  await insertRecord(
+                    client,
+                    currentStorage,
+                    line,
+                    seed,
+                    request.parentGuards,
+                  );
+                  memberRows[member.key] = id;
+                }
+                const initial = requireRecord(
+                  request.input,
+                  'operation input',
+                ).templateLines;
+                if (initial !== undefined) {
+                  const lines = z
+                    .array(
+                      z.strictObject({
+                        recordId: z.uuid(),
+                        values: z.record(
+                          z.string(),
+                          z.union([z.string(), z.boolean(), z.null()]),
+                        ),
+                      }),
+                    )
+                    .max(100)
+                    .parse(initial);
+                  for (const row of lines) {
+                    const seed = parseMutationInput(
+                      create as RegisteredRecordOperationDefinition,
+                      {
+                        recordId: row.recordId,
+                        legalEntityId: parsedInput.systemInput!.value,
+                        relations: {
+                          [body.parentRelationId]: parsedInput.recordId,
+                        },
+                        values: {
+                          ...row.values,
+                          [surface.documentEditor.lineNumberFieldId]: String(
+                            ++ordinal,
+                          ),
+                        },
+                      },
+                    );
+                    await prepareMutation(
+                      client,
+                      {
+                        ...request,
+                        definition:
+                          create as RegisteredRecordOperationDefinition,
+                      },
+                      currentStorage,
+                      line,
+                      seed,
+                      verifier,
+                      new Set(),
+                      this.#boundWriteInvariants(currentStorage),
+                    );
+                    await insertRecord(
+                      client,
+                      currentStorage,
+                      line,
+                      seed,
+                      request.parentGuards,
+                    );
+                  }
+                }
+              }
+              return Object.freeze({
+                memberRows,
+                addresses: requests.filter((r) => !r.value.pin),
+                owner:
+                  requests.length && currentEntity.legalEntity
+                    ? await readRecordCompany(
+                        client,
+                        currentEntity,
+                        input.recordId,
+                      )
+                    : null,
+                outboxId: ids.outboxId,
+                command: acceptedCommand(
+                  { ...request, policyVersion },
+                  preparation,
+                  ids,
+                  // ADR-0073 A1: a write a workflow run commits names the run
+                  // as its causation, taken from the run row, never the script.
+                  this.#workflowRunId ?? null,
+                ),
+                mutationResult,
+              });
+            } catch (error) {
+              throw translateModuleProviderError(
+                error,
+                currentStorage,
                 currentEntity.entityId,
-                parsedInput.recordId,
-                address.fieldId,
-                address.value.revision,
-                accepted.outboxId,
-                selection.installationId,
-                addressScalars(address.value).sourceDigest!,
+                this.#providerErrorMappings,
+              );
+            }
+          });
+          if (selection)
+            await client.query(
+              'SELECT platform.finish_record_template_create($1,$2,$3,$4,$5,$6,$7)',
+              [...args, accepted.memberRows],
+            );
+          if (
+            request.channel === 'UI' &&
+            this.#documentNumbers !== 'verificationSentinel'
+          ) {
+            for (const address of accepted.addresses) {
+              const selection = address.locateFor;
+              if (
+                selection &&
+                (!accepted.owner || selection.companyId === accepted.owner)
+              )
+                await enqueueAddress(
+                  client,
+                  request.view,
+                  selection.companyId,
+                  currentEntity.entityId,
+                  parsedInput.recordId,
+                  address.fieldId,
+                  address.value.revision,
+                  accepted.outboxId,
+                  selection.installationId,
+                  addressScalars(address.value).sourceDigest!,
+                );
+            }
+          }
+          return {
+            command: accepted.command,
+            mutationResult: accepted.mutationResult,
+          };
+        },
+        request.definition.effect.kind === 'archiveRecordEffect'
+          ? async (client) => {
+              await client.query(
+                'SELECT platform.lock_record_allocations($1,$2)',
+                [
+                  request.definition.effect.entity.targetId,
+                  parsedInput.recordId,
+                ],
+              );
+            }
+          : undefined,
+        async (client) => {
+          if (
+            creating &&
+            (surface ||
+              requireRecord(request.input, 'operation input').templateLines !==
+                undefined ||
+              (!verifier &&
+                declaresTemplateCreate(
+                  request.view,
+                  request.definition.operationId,
+                )))
+          ) {
+            selection = (
+              await client.query<{
+                selection:
+                  (TemplateApplicationSelection & { applied: boolean }) | null;
+              }>(
+                'SELECT platform.open_record_template_create($1,$2,$3,$4,$5,$6) AS selection',
+                args,
+              )
+            ).rows[0]!.selection;
+            if (
+              (requireRecord(request.input, 'operation input').templateLines !==
+                undefined &&
+                !selection) ||
+              (surface && !selection) ||
+              (selection &&
+                !selection.applied &&
+                selection.binding.revisionId !==
+                  surface?.recordTemplateBinding.revisionId)
+            )
+              throw failure(
+                'MODULE_SEMANTIC_CONTRACT_UNSUPPORTED',
+                'Creation from this record template requires a current reviewed application.',
+                request.definition.operationId,
               );
           }
-        }
-        return {
-          command: accepted.command,
-          mutationResult: accepted.mutationResult,
-        };
-      },
-      request.definition.effect.kind === 'archiveRecordEffect'
-        ? async (client) => {
-            await client.query(
-              'SELECT platform.lock_record_allocations($1,$2)',
-              [request.definition.effect.entity.targetId, parsedInput.recordId],
-            );
+          if (
+            !authorize &&
+            request.definition.effect.kind === 'createRecordEffect'
+          )
+            return;
+          const storage = await this.#loadPinnedStorageTarget(client, request);
+          const entity = requiredEntity(
+            storage,
+            request.definition.effect.entity.targetId,
+          );
+          if (!authorize) {
+            if (entity.legalEntity)
+              throw failure(
+                'MODULE_RECORD_COMPANY_AUTHORIZATION_REQUIRED',
+                'mutating a company-owned record requires owner authorization',
+                entity.entityId,
+              );
+            return;
           }
-        : undefined,
-      async (client) => {
-        if (
-          !authorize &&
-          request.definition.effect.kind === 'createRecordEffect'
-        )
-          return;
-        const storage = await this.#loadPinnedStorageTarget(client, request);
-        const entity = requiredEntity(
-          storage,
-          request.definition.effect.entity.targetId,
-        );
-        if (!authorize) {
-          if (entity.legalEntity)
-            throw failure(
-              'MODULE_RECORD_COMPANY_AUTHORIZATION_REQUIRED',
-              'mutating a company-owned record requires owner authorization',
-              entity.entityId,
+          const owner = entity.legalEntity
+            ? await withModuleRuntimeRole(client, () =>
+                readRecordCompany(client, entity, parsedInput.recordId),
+              )
+            : null;
+          policyVersion = await withRecordCompanyPolicyClient(
+            this.pool,
+            client,
+            request.context,
+            () => authorize(owner),
+          );
+        },
+        async (client, stored) => {
+          if (!selection?.applied) return stored;
+          const storage = await this.#loadPinnedStorageTarget(client, request);
+          const entity = requiredEntity(
+            storage,
+            request.definition.effect.entity.targetId,
+          );
+          return withModuleRuntimeRole(client, async () => {
+            const current = await loadRawRecord(
+              client,
+              entity,
+              parsedInput.recordId,
+              true,
+              [],
             );
-          return;
-        }
-        const owner = entity.legalEntity
-          ? await withModuleRuntimeRole(client, () =>
-              readRecordCompany(client, entity, parsedInput.recordId),
-            )
-          : null;
-        policyVersion = await withRecordCompanyPolicyClient(
-          this.pool,
-          client,
-          request.context,
-          () => authorize(owner),
-        );
-      },
-    );
+            return current
+              ? toDto(entity, current, request.readBackDefinition.selections)
+              : null;
+          });
+        },
+      );
     return Object.freeze({
       kind: 'semanticOperationResult',
       operationId: request.definition.operationId,
       outcome: 'succeeded',
-      readBack: withCalculatedDisplay(
-        request.view,
-        request.readBackDefinition,
-        receipt.mutationResult,
-      ),
+      readBack:
+        receipt.mutationResult &&
+        withCalculatedDisplay(
+          request.view,
+          request.readBackDefinition,
+          receipt.mutationResult,
+        ),
       schemaVersion: SEMANTIC_OPERATION_RESULT_VERSION,
       trust: Object.freeze({
         changeDocumentId: receipt.changeDocumentId,
@@ -1741,6 +1964,7 @@ function acceptedCommand(
     invocationId: string;
     outboxId: string;
   },
+  causationId: string | null,
 ): AcceptedMutationCommand {
   const metadata: EvidenceMetadataInput = Object.freeze({
     operationId: classified('INTERNAL', request.definition.operationId),
@@ -1748,7 +1972,7 @@ function acceptedCommand(
   });
   return Object.freeze({
     actionId: request.definition.operationId,
-    causationId: null,
+    causationId,
     change: Object.freeze({
       changeDocumentId: ids.changeDocumentId,
       changes: preparation.changes,
@@ -2184,6 +2408,20 @@ async function insertRecord(
      VALUES (${parameters.join(', ')})`,
     values,
   );
+  if (entity.legalEntity) {
+    // The company the row was written with, as stored by this insert.
+    const slot = parameters[columns.indexOf(entity.legalEntity.column)];
+    const company = slot?.match(/^\$(\d+)$/u)
+      ? values[Number(slot.slice(1)) - 1]
+      : undefined;
+    if (typeof company !== 'string')
+      throw failure(
+        'MODULE_STORAGE_COLUMN_AUTHORITY_CONFLICT',
+        'a company-owned create names no company',
+        entity.entityId,
+      );
+    await recordCreations(client, entity, company, [input.recordId]);
+  }
 }
 
 async function requireExistingParentGuards(
@@ -7546,6 +7784,17 @@ function validateFieldValue(
         typeof value === 'string' &&
         (field.bounds.maximumLength === null ||
           [...value].length <= field.bounds.maximumLength);
+      // A declared allowed-values list is exact and case-sensitive.
+      if (
+        valid &&
+        field.allowedTexts &&
+        !field.allowedTexts.includes(value as string)
+      )
+        throw failure(
+          'MODULE_FIELD_VALUE_NOT_ALLOWED',
+          `Choose ${allowedText(field.allowedTexts)}.`,
+          field.fieldId,
+        );
       break;
     case 'enumFieldType':
       valid = typeof value === 'string' && field.enumOptionIds.includes(value);
@@ -7592,6 +7841,13 @@ function validateFieldValue(
       field.fieldId,
     );
   }
+}
+
+/** "CAD, USD or EUR": the allowed values as a person reads them. */
+function allowedText(values: readonly string[]): string {
+  return values.length === 1
+    ? values[0]!
+    : `${values.slice(0, -1).join(', ')} or ${values.at(-1)!}`;
 }
 
 function decimalFits(

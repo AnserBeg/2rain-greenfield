@@ -1,3 +1,4 @@
+import { LONG_TEXT_MAXIMUM_LENGTH } from '../../../packages/canonical-model/src/logical-field.js';
 import {
   effectiveMeasures,
   filterParameterId,
@@ -34,6 +35,7 @@ import {
   renderCompositionHeader,
   renderCompositionProgression,
   displayFieldValue,
+  logicalSuffix,
   type CompositionData,
 } from './surface-composition.js';
 import { randomUUID } from 'node:crypto';
@@ -2682,7 +2684,31 @@ export function renderFormControl(
   }
   const current = renderInputValue(renderedValue);
   const kind = ` data-field-kind="${field.kind}"${describedBy}${extra}`;
+  const logical = field.logical;
   const html = (() => {
+    // CUSTOMIZE-6: paragraphs in a text area, a currency code from the codes
+    // its money fields accept, and a scaled number with its currency or unit.
+    if (logical?.logicalType === 'longText')
+      // The newline after the start tag keeps a leading blank line: HTML
+      // drops the first newline of a text area's content.
+      return `<textarea${kind} name="${name}" rows="4" maxlength="${String(LONG_TEXT_MAXIMUM_LENGTH)}" data-logical-field="longText">\n${current}</textarea>`;
+    if (logical?.currencyCodes)
+      return renderEnumControl(
+        (logical.currencyCodes ?? []).map((code) => ({
+          label: code,
+          optionId: code,
+        })),
+        name,
+        kind,
+        index,
+        renderedValue,
+      );
+    if (logical?.scale !== undefined) {
+      const step =
+        logical.scale === 0 ? '1' : `0.${'0'.repeat(logical.scale - 1)}1`;
+      const suffix = logicalSuffix(logical);
+      return `<input type="number" inputmode="decimal" step="${step}"${kind} name="${name}" value="${current}" autocomplete="off" data-logical-field="${logical.logicalType}">${suffix ? ` <span class="field-unit" data-field-unit>${escapeHtml(suffix)}</span>` : ''}`;
+    }
     switch (field.kind) {
       case 'addressFieldType':
         return renderAddressField(name, renderedValue, kind);
@@ -2779,6 +2805,15 @@ function typedControlPreservesValue(
         AddressInputSchema.safeParse(value).success
       );
     case 'textFieldType':
+      // A text area carries paragraphs whole; a currency code only one it offers.
+      if (field.logical?.logicalType === 'longText')
+        return typeof value === 'string';
+      if (field.logical?.currencyCodes)
+        return (
+          typeof value === 'string' &&
+          (field.logical.currencyCodes ?? []).includes(value)
+        );
+      return oneLineInputPreservesValue(value);
     case 'dateTimeFieldType':
       return oneLineInputPreservesValue(value);
   }

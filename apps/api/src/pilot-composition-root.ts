@@ -73,6 +73,7 @@ export async function createPilotApplication(options: {
       operationMediation,
       policy,
       documents,
+      recordTemplates,
     } = composeServingGateways(
       pool,
       evidence,
@@ -113,6 +114,7 @@ export async function createPilotApplication(options: {
         queryGateway,
         operationGateway,
         operationMediation,
+        recordTemplates,
         ...(documents ? { documents } : {}),
         applicationExtension: COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION,
       },

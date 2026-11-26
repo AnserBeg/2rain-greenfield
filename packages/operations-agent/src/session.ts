@@ -1,3 +1,4 @@
+import { templateCreateSurface } from '../../runtime/src/record-template-library.js';
 import {
   availablePopups,
   CompiledPopupSchema,
@@ -64,10 +65,8 @@ import {
 } from './business-words.js';
 import { operationRisk, type OperationRisk, type RiskClass } from './risk.js';
 import { capabilityChildren } from '../../domain/src/app/capability-children.js';
-import {
-  parentEditApprovals,
-  referenceTargets,
-} from '../../domain/src/app/record-references.js';
+import { referenceTargets } from '../../domain/src/app/record-references.js';
+import type { ImmediateEditDeclaration } from '../../canonical-model/src/reversibility.js';
 import { PO_APPROVAL_CAPABILITY_ID } from '../../domain/src/purchasing/approvals.js';
 import { effectiveApprovalArguments } from '../../domain/src/purchasing/approval-arguments.js';
 import { asData, type OperationsAgentToolId } from './tools.js';
@@ -75,7 +74,8 @@ import { asData, type OperationsAgentToolId } from './tools.js';
 export type AgentRuntime = Pick<
   ComposedApplicationRuntime,
   'entry' | 'operationGateway' | 'operationMediation' | 'queryGateway'
->;
+> &
+  Partial<Pick<ComposedApplicationRuntime, 'recordTemplates'>>;
 
 export interface PlanForApproval {
   readonly planId: string;
@@ -119,6 +119,11 @@ export interface OperationsAgentSessionOptions {
    * host that offers Undo. Off by default: the plan is asked like any other.
    */
   readonly autoApproveReversible?: boolean;
+  /**
+   * Which fields of the record types each capability owns may change at once
+   * (AI-UNDO-1), supplied at product assembly. A field no owner declares asks.
+   */
+  readonly immediateEdits: readonly ImmediateEditDeclaration[];
   readonly mintId?: () => string;
   /** Upper bound on one tool result's serialized size, in characters. */
   readonly maximumResultCharacters?: number;
@@ -181,6 +186,7 @@ export type UndoOutcome =
 type StepRef = string | { readonly fromStep: number };
 
 interface PlanStep {
+  readonly templateRequest?: { key: string; label: string };
   readonly step: number;
   readonly operation: RegisteredOperationDefinition;
   readonly entity: string;
@@ -1621,6 +1627,40 @@ export class OperationsAgentSession {
           ...step,
           ...(await this.#noun(view, catalog, words, step)),
         };
+      for (const [index, step] of steps.entries()) {
+        const surface =
+          effectKind(step.operation) === 'createRecordEffect' &&
+          templateCreateSurface(view, step.operation.operationId);
+        if (!surface) continue;
+        if (!this.#options.runtime.recordTemplates)
+          throw new ToolInputError('Template review is unavailable.');
+        const key = this.#mint();
+        const selected =
+          await this.#options.runtime.recordTemplates.prepareCreate(
+            view,
+            surface.surfaceId,
+            key,
+            {
+              recordId: resolveRef(step.recordId, []),
+              legalEntityId: this.#options.companyId,
+              values: resolveRefs(step.values ?? {}, []),
+              relations: resolveRefs(step.relations ?? {}, []),
+            },
+          );
+        steps[index] = {
+          ...step,
+          templateRequest: {
+            key,
+            label: selected.assignment
+              ? selected.assignment.content.label +
+                ' · ' +
+                selected.assignment.content.members
+                  .map((m) => m.caption)
+                  .join(', ')
+              : 'No assigned template',
+          },
+        };
+      }
       const release = releaseOf(view);
       const digest = planDigest(steps, release, this.#options.companyId);
       const only = steps.length === 1 ? steps[0] : undefined;
@@ -1664,13 +1704,15 @@ export class OperationsAgentSession {
                 referenceTargets.has(fieldId) ? 'reference' : fieldKind,
               ]),
           ),
-          effect: businessEffect(
-            words,
-            step.operation,
-            step.entity,
-            step.noun ?? null,
-            step.values ?? {},
-          ),
+          effect:
+            (step.templateRequest ? step.templateRequest.label + ' · ' : '') +
+            businessEffect(
+              words,
+              step.operation,
+              step.entity,
+              step.noun ?? null,
+              step.values ?? {},
+            ),
           target: refText(step.recordId),
           targetLabel: step.targetLabel ?? null,
           confirmation: step.operation.confirmation,
@@ -1878,7 +1920,7 @@ export class OperationsAgentSession {
       risk: writeRisk(
         catalog,
         operation,
-        prefix,
+        this.#options.immediateEdits,
         { ...values, ...patch },
         null,
       ),
@@ -1927,7 +1969,11 @@ export class OperationsAgentSession {
         check: 'lookup required',
         refused: `${where}: the target record ${target} did not come from a lookup for ${localName(entity)}.`,
       };
-    const parentEditApproval = parentEditApprovals.get(entity);
+    // The owner's declaration names any parent whose lifecycle state the
+    // edit's Undo depends on (AI-UNDO-1); the record read carries its link.
+    const parents = (base.risk.holdsWhile ?? []).flatMap(
+      (condition) => condition.parents ?? [],
+    );
     const record = await readRecord(
       this.#options.runtime,
       view,
@@ -1936,33 +1982,33 @@ export class OperationsAgentSession {
       target,
       this.#options.companyId,
       false,
-      parentEditApproval?.relationId,
+      parents[0]?.relationId,
     );
     if (!record)
       throw new ToolInputError(
         `${where}: no ${localName(entity)} ${target} is visible to the person`,
       );
     this.#identities.set(`${entity}/${target}`, 'exact');
-    let parentApprovalReason: string | undefined;
-    if (parentEditApproval) {
-      const parent =
-        record.relationLabels?.[parentEditApproval.relationId]?.recordId;
-      const parentState = parent
-        ? await readRecord(
-            this.#options.runtime,
-            view,
-            catalog,
-            parentEditApproval.queryId,
-            parent,
-            this.#options.companyId,
-          )
-        : null;
-      if (
-        parentState?.values[parentEditApproval.stateFieldId] !==
-        parentEditApproval.reversibleStateId
-      ) {
-        parentApprovalReason = parentEditApproval.reason;
-      }
+    const parentStates = new Map<
+      string,
+      Readonly<Record<string, ImmutableJsonValue>> | null
+    >();
+    // One parent is read (the first declared); any other stays unknown, so
+    // an edit that depends on it asks.
+    for (const parent of parents.slice(0, 1)) {
+      const parentId = record.relationLabels?.[parent.relationId]?.recordId;
+      const parentRecord =
+        parentId && parent.queryId
+          ? await readRecord(
+              this.#options.runtime,
+              view,
+              catalog,
+              parent.queryId,
+              parentId,
+              this.#options.companyId,
+            )
+          : null;
+      parentStates.set(parent.relationId, parentRecord?.values ?? null);
     }
     const evaluation = evaluateRegisteredOperationPrecondition(
       operation.precondition,
@@ -1975,18 +2021,14 @@ export class OperationsAgentSession {
         ...(effectKind(operation) === 'registeredCapabilityEffect'
           ? { children: await this.#children(view, catalog, operation, target) }
           : {}),
-        risk: parentApprovalReason
-          ? {
-              riskClass: 'needsYes',
-              reason: parentApprovalReason,
-            }
-          : writeRisk(
-              catalog,
-              operation,
-              prefix,
-              { ...values, ...patch },
-              record.values,
-            ),
+        risk: writeRisk(
+          catalog,
+          operation,
+          this.#options.immediateEdits,
+          { ...values, ...patch },
+          record.values,
+          parentStates,
+        ),
         recordId: target,
         // Undo pins the revision the agent's write left; otherwise the
         // revision read now.
@@ -2185,7 +2227,8 @@ export class OperationsAgentSession {
               schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
               operationId: step.operation.operationId,
               input: operationInput,
-              idempotencyKey: derivedKey(planId, key, step.step),
+              idempotencyKey:
+                step.templateRequest?.key ?? derivedKey(planId, key, step.step),
               confirmationGrant:
                 step.operation.confirmation === 'humanRequired'
                   ? this.#options.runtime.operationMediation.issueConfirmationGrant(
@@ -2492,53 +2535,46 @@ function screenFacts(
 
 /**
  * The risk of a create or update given what it writes and, for an update,
- * the record it changes (end review X5). On top of the operation's own
- * class (`operationRisk`):
- * - any written choice field named `..._state` or `..._status` is a state
- *   write: it needs a yes whenever the value changes and either the old or
- *   the new value is not the field's first option (for a create, whenever
- *   the value is not the first option);
- * - operationRisk enforces the release's setup field and entity declarations.
+ * the record it changes (end review X5; AI-UNDO-1). On top of the
+ * operation's own class (`operationRisk`, which reads the owning capability's
+ * declaration): an update's Undo holds only while its record, and each
+ * declared parent, is in the lifecycle state the declaration names. No state
+ * field or state is recognised by its name.
  */
 function writeRisk(
   catalog: PinnedCatalog,
   operation: RegisteredOperationDefinition,
-  prefix: string,
+  immediateEdits: readonly ImmediateEditDeclaration[],
   written: Readonly<Record<string, ImmutableJsonValue>>,
   current: Readonly<Record<string, ImmutableJsonValue>> | null,
+  parentStates: ReadonlyMap<
+    string,
+    Readonly<Record<string, ImmutableJsonValue>> | null
+  > = new Map(),
 ): OperationRisk {
-  const catalogRisk = operationRisk(catalog, operation, Object.keys(written));
-  if (catalogRisk.riskClass !== 'reversible') return catalogRisk;
-  for (const field of operation.inputContract?.fields ?? []) {
-    const name = localName(field.fieldId);
-    if (
-      current &&
-      name.endsWith('_state') &&
-      field.enumOptionIds[0]?.endsWith('_draft') &&
-      current[field.fieldId] !== field.enumOptionIds[0]
-    )
-      return {
-        riskClass: 'needsYes',
-        reason: 'Editing a document outside draft needs your OK.',
-      };
-    if (
-      !/_(?:state|status)$/u.test(name) ||
-      field.enumOptionIds.length === 0 ||
-      !(field.fieldId in written)
-    )
-      continue;
-    const next = written[field.fieldId] ?? null;
-    const first = field.enumOptionIds[0];
-    const before = current ? (current[field.fieldId] ?? null) : null;
-    const changes = current ? next !== before : next !== null;
-    if (changes && (next !== first || (current !== null && before !== first)))
-      return {
-        riskClass: 'needsYes',
-        reason: `This changes its ${(name.startsWith(`${prefix}_`)
-          ? name.slice(prefix.length + 1)
-          : name
-        ).replaceAll('_', ' ')}, so it needs your OK.`,
-      };
+  const catalogRisk = operationRisk(
+    catalog,
+    operation,
+    Object.keys(written),
+    immediateEdits,
+  );
+  if (catalogRisk.riskClass !== 'reversible' || !current) return catalogRisk;
+  const outside = (state: { readonly stateLabels: readonly string[] }) => ({
+    riskClass: 'needsYes' as const,
+    reason: `Editing this outside ${state.stateLabels.join(' or ').toLowerCase()} needs your OK.`,
+  });
+  for (const condition of catalogRisk.holdsWhile ?? []) {
+    const state = condition.state;
+    if (state && !state.stateIds.includes(String(current[state.stateFieldId])))
+      return outside(state);
+    for (const parent of condition.parents ?? []) {
+      const values = parentStates.get(parent.relationId);
+      if (
+        !values ||
+        !parent.stateIds.includes(String(values[parent.stateFieldId]))
+      )
+        return outside(parent);
+    }
   }
   return catalogRisk;
 }

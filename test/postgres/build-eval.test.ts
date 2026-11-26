@@ -281,6 +281,37 @@ test(
         },
       );
 
+      // CUSTOMIZE-6 (rule 12): the logical-field scorer reads the SERVED
+      // binding: a correct draft passes, and USD money or a two-place rate
+      // where the request said CAD and four places fails by name.
+      const rental = (deposit: string, scale: number) => ({
+        kind: 'addRecordType',
+        label: 'Equipment rental',
+        companyOwnership: 'entityOwned',
+        fields: [
+          { label: 'Contract', type: 'text' },
+          {
+            label: 'Security deposit',
+            type: 'money',
+            currency: { kind: 'fixed', code: deposit },
+          },
+          { label: 'Daily rate', type: 'decimal', scale },
+        ],
+      });
+      await t.test(
+        'a correct logical-field draft passes; the wrong currency or scale fails by name',
+        async () => {
+          const right = await run('L01', [draft(rental('CAD', 4))]);
+          assert.deepEqual(right.reasons, []);
+          assert.equal(right.behaviour, true);
+          const wrong = await run('L01', [draft(rental('USD', 2))]);
+          assert.equal(wrong.behaviour, false);
+          const reasons = wrong.reasons.join('; ');
+          assert.match(reasons, /has currency USD, expected CAD/u);
+          assert.match(reasons, /has scale 2, expected 4/u);
+        },
+      );
+
       await t.test(
         'a correct refusal is credited with its capability',
         async () => {
@@ -425,7 +456,8 @@ test(
       );
 
       const summary = summarize(results);
-      assert.equal(summary.ran, 10);
+      // Ten scripted cases plus CUSTOMIZE-6's two L01 runs.
+      assert.equal(summary.ran, 12);
       assert.equal(summary.repairedAfterOne, 3);
       // M01's scripted refusal, and the parser's refusal of H01's grouped
       // permission change: both refuse a request the platform can draft.

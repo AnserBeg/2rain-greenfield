@@ -5,6 +5,10 @@ import {
 } from './presentation-revision.js';
 import { reportTargets, type ReportTarget } from './report-revision.js';
 import {
+  recordTemplateOffers,
+  type RecordTemplateOffer,
+} from '@north-star/canonical-model';
+import {
   popupOptions,
   type PopupOption,
 } from '../../canonical-model/src/popup-actions.js';
@@ -66,6 +70,7 @@ export interface CustomizationTargets {
   readonly reports?: readonly ReportTarget[];
   readonly popupActions?: readonly PopupOption[];
   readonly documentTemplateTargets?: readonly DocumentTemplateTarget[];
+  readonly templateBindings?: readonly RecordTemplateOffer[];
   readonly boards?: readonly BoardTarget[];
   readonly layouts?: readonly LayoutTarget[];
   readonly documentTargets?: readonly {
@@ -81,6 +86,8 @@ export interface CustomizationTargets {
   readonly calculatedDisplayTargets?: readonly CalculatedDisplayTarget[];
   readonly validationTargets?: readonly LiteralValidationTarget[];
   readonly workflowSdk?: string;
+  /** Record types whose creations the release's create operations record (ADR-0073 A1). */
+  readonly workflowRecordTypeIds?: readonly string[];
   readonly linkTargets?: readonly {
     readonly entityId: string;
     readonly label: string;
@@ -344,6 +351,7 @@ export function customizationTargets(definition: {
               return [];
             const valueType = formulaFieldType(
               field as Parameters<typeof formulaFieldType>[0],
+              definition as unknown as Parameters<typeof formulaFieldType>[1],
             );
             return valueType
               ? [
@@ -380,7 +388,14 @@ export function customizationTargets(definition: {
                     typeof resolveValidationPath
                   >[2],
                 );
-                const valueType = path && formulaFieldType(path.field);
+                const valueType =
+                  path &&
+                  formulaFieldType(
+                    path.field,
+                    definition as unknown as Parameters<
+                      typeof formulaFieldType
+                    >[1],
+                  );
                 if (!path || !valueType) return [];
                 const relationLabel = (
                   relationId.split(':relation.')[1] ?? relationId
@@ -465,6 +480,7 @@ export function customizationTargets(definition: {
           return [];
         const valueType = displayTypeForField(
           field as Parameters<typeof displayTypeForField>[0],
+          definition as unknown as Parameters<typeof displayTypeForField>[1],
         );
         return valueType
           ? [
@@ -710,6 +726,7 @@ export function customizationTargets(definition: {
         }))
         .sort((left, right) => left.label.localeCompare(right.label)),
     }),
+    templateBindings: recordTemplateOffers(definition),
     maps: mapTargets(definition),
     presentation: presentationTargets(
       definition as unknown as Parameters<typeof presentationTargets>[0],

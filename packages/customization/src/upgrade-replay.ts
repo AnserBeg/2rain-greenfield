@@ -411,7 +411,14 @@ export function replayCustomizationPatches(
   const failedLayouts = new Map<string, EditLocation>();
   const applied: SingleCustomizationPatch[] = [];
   const historical: SingleCustomizationPatch[] = [];
-  const superseded = supersededBoardRevisions(chain);
+  const superseded = {
+    addBoardViewRevision: supersededBoardRevisions(chain),
+    addMapViewRevision: supersededBoardRevisions(chain),
+    addRecordTemplateBindingRevision: supersededBoardRevisions(
+      chain,
+      'addRecordTemplateBindingRevision',
+    ),
+  };
   const pastReports = supersededReports(chain);
   const pastPresentations = supersededPresentations(chain);
   for (const [patchIndex, change] of chain.entries()) {
@@ -497,9 +504,10 @@ export function replayCustomizationPatches(
         // revision of each Board surface (ADR-0086 items 4 and 5).
         const board =
           patch.kind === 'addBoardViewRevision' ||
+          patch.kind === 'addRecordTemplateBindingRevision' ||
           patch.kind === 'addMapViewRevision'
             ? {
-                check: (superseded.has(patch.revisionId)
+                check: (superseded[patch.kind].has(patch.revisionId)
                   ? 'identity'
                   : origin?.differentBase === false
                     ? 'authoring'

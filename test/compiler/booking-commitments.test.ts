@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import * as customization from '../../packages/customization/src/index.js';
+import { normalizeApplicationPackage } from '../../packages/canonical-model/src/index.js';
+import { RECORD_TEMPLATE_OPERATION_READER } from '../../packages/canonical-model/src/record-template.js';
 import {
   BOOKING_CAPABILITY,
   BOOKING_OPERATION_READER,
@@ -32,7 +35,7 @@ test(
     ),
 );
 
-test('an authored booking operation compiles to the pinned gateway contract and demands its operation reader', () => {
+function bookingSource() {
   const source = composedApplicationDefinition();
   const ops = source.operations as Record<string, unknown>[];
   const capabilityRequirements = source.capabilityRequirements as Record<
@@ -92,6 +95,31 @@ test('an authored booking operation compiles to the pinned gateway contract and 
     },
     booking: binding,
   };
+  return {
+    source,
+    ops,
+    capabilityRequirements,
+    capability,
+    owner,
+    read,
+    operation,
+    operationId,
+    binding,
+  };
+}
+
+test('an authored booking operation compiles to the pinned gateway contract and demands its operation reader', () => {
+  const {
+    source,
+    ops,
+    capabilityRequirements,
+    capability,
+    owner,
+    read,
+    operation,
+    operationId,
+    binding,
+  } = bookingSource();
   const input = (op: typeof operation & { permission?: unknown }) =>
     compilerInput(
       normalizedBytes({
@@ -138,5 +166,80 @@ test('an authored booking operation compiles to the pinned gateway contract and 
   assert.equal(
     compileApplication(input({ ...operation, confirmation: 'none' })).status,
     'failed',
+  );
+});
+
+test('a record template binding compiles beside a booking operation at the template operation reader', () => {
+  const { source, ops, capabilityRequirements, capability, operation } =
+    bookingSource();
+  const booked = {
+    ...source,
+    capabilityRequirements: [
+      ...capabilityRequirements,
+      { ...capability, capabilityId: BOOKING_CAPABILITY },
+    ],
+    operations: [...ops, operation],
+  } as Record<string, unknown>;
+  const changes = (base: Record<string, unknown>, list: unknown[]) => {
+    const result = customization.applyCustomizationPatches(
+      base,
+      list.map((c) => customization.CustomizationPatchSchema.parse(c)),
+    );
+    assert.ok(result.status === 'applied', JSON.stringify(result));
+    return result.authored as Record<string, unknown>;
+  };
+  const entity = 'northstar.app:entity.custom_inspection';
+  const withLines = changes(booked, [
+    {
+      kind: 'addRecordType',
+      label: 'Inspection',
+      companyOwnership: 'entityOwned',
+      fields: [{ label: 'Name', type: 'text', required: true }],
+    },
+    {
+      kind: 'addLineTable',
+      entity,
+      label: 'Steps',
+      fields: [{ label: 'Step', type: 'text' }],
+    },
+  ]);
+  const offer = customization
+    .customizationTargets(normalizeApplicationPackage(withLines))
+    .templateBindings!.find((o) => o.frame.entityId === entity)!;
+  const bound = changes(withLines, [
+    customization.draftTemplateBinding([offer], {
+      formId: offer.frame.formId,
+      lifecycle: 'active',
+      required: false,
+      contextId: null,
+      fields: offer.columns.map((c) => ({
+        fieldId: c.fieldId,
+        copyEligible: true,
+      })),
+    }),
+  ]);
+  // Compiled directly as a first-party package: the floor check is the subject,
+  // not the tenant sandbox gate.
+  const firstParty = {
+    ...bound,
+    package: {
+      ...(bound.package as object),
+      provenance: (booked.package as { provenance: unknown }).provenance,
+    },
+  };
+  const compiled = mustCompile(compilerInput(normalizedBytes(firstParty)));
+  const ref = compiled.bundle.releaseManifest.projections.find(
+    (p) => p.familyId === PROJECTION_FAMILY_IDS.operationCatalog,
+  )!;
+  assert.equal(
+    ref.requiredRuntimeCapability.minimumVersion,
+    RECORD_TEMPLATE_OPERATION_READER,
+  );
+  assert.ok(
+    projectionPayload<{ operations: { booking?: unknown }[] }>(
+      compiled,
+      PROJECTION_FAMILY_IDS.operationCatalog,
+    ).operations.some((op) => op.booking),
+    'the booking operation is still in the catalog',
   );
 });

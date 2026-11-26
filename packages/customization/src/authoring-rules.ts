@@ -37,6 +37,9 @@ export const AUTHORING_RULES: Readonly<
   CUSTOMIZE_FIELD_NOT_ON_LIST: [
     'A list keeps at least one visible column and its record title; arrange only the columns listed for that list.',
   ],
+  CUSTOMIZE_RECORD_TEMPLATE_CONFLICT: [
+    'A record template selects a listed collection, its declared context and compatible fields, including every required column.',
+  ],
   CUSTOMIZE_BOARD_CONFLICT: [
     "A board groups a list by its record type's lifecycle: choose stages from that lifecycle, moves between the chosen stages and at most three facts.",
   ],

@@ -30,7 +30,11 @@ import {
 } from '../../packages/operations-agent/src/index.js';
 import { compileWorkflowBody } from '../../packages/postgres-provider/src/workflow-compile.js';
 import { InMemoryWorkflowRun } from '../../packages/postgres-provider/src/workflow-run.js';
-import { generateWorkflowSdk } from '../../packages/postgres-provider/src/workflow-sdk.js';
+import {
+  generateWorkflowSdk,
+  type WorkflowEvent,
+} from '../../packages/postgres-provider/src/workflow-sdk.js';
+import { WorkflowTriggerSchema } from '../../packages/canonical-model/src/schemas.js';
 import type { ImmutableJsonValue } from '../../packages/runtime/src/request-runtime-view.js';
 import {
   parsePinnedOperationCatalog,
@@ -46,6 +50,7 @@ import { SHARED_LIST_QUERY_VERSION } from '../../packages/runtime/src/list-behav
 import { COMPANY, NS, type AgentWorld } from './agent-world.js';
 import {
   CAPABILITY_BUCKETS,
+  templateBindingMisses,
   type BuildCase,
   type CapabilityBucket,
   type FieldSpec,
@@ -208,7 +213,72 @@ const fieldKinds: Record<FieldType, readonly string[]> = {
   yesNo: ['booleanFieldType'],
   choice: ['enumFieldType'],
   address: ['addressFieldType'],
+  decimal: ['exactDecimalFieldType'],
+  money: ['exactDecimalFieldType'],
+  quantity: ['quantityFieldType'],
+  longText: ['textFieldType'],
+  currency: ['textFieldType'],
 };
+
+/** The logical kind a scored field type must be bound to (CUSTOMIZE-6). */
+const logicalKinds: Partial<Record<FieldType, string>> = {
+  decimal: 'decimal',
+  money: 'money',
+  quantity: 'quantity',
+  longText: 'longText',
+  currency: 'currencyCode',
+};
+
+interface ScoredLogicalBinding {
+  readonly fieldId: string;
+  readonly logicalType: string;
+  readonly currency?: { readonly kind: string; readonly currencyCode?: string };
+  readonly unit?: { readonly label: string };
+  readonly scale?: number;
+}
+
+/** The served surface manifest's logical field bindings, by field ID. */
+async function logicalBindings(
+  world: AgentWorld,
+): Promise<ReadonlyMap<string, ScoredLogicalBinding>> {
+  return world.runtime.entry.run(MANAGER, (view) => {
+    const payload = view.projections.surface.payload as {
+      logicalFieldBindings?: readonly ScoredLogicalBinding[];
+    };
+    return new Map(
+      (payload.logicalFieldBindings ?? []).map((b) => [b.fieldId, b]),
+    );
+  });
+}
+
+/** Why a found field does not have the logical facts its spec asks for. */
+export function logicalMismatch(
+  wanted: FieldSpec,
+  binding: ScoredLogicalBinding | undefined,
+): string | null {
+  const kind = logicalKinds[wanted.type];
+  if (!kind) return null;
+  if (binding?.logicalType !== kind)
+    return `is ${binding?.logicalType ?? 'not a logical field'}, expected ${wanted.type}`;
+  if (wanted.currency !== undefined) {
+    const found =
+      binding.currency?.kind === 'fixed'
+        ? binding.currency.currencyCode
+        : binding.currency?.kind;
+    if (found !== wanted.currency)
+      return `has currency ${String(found)}, expected ${wanted.currency}`;
+  }
+  if (wanted.scale !== undefined && binding.scale !== wanted.scale)
+    return `has scale ${String(binding.scale)}, expected ${String(wanted.scale)}`;
+  if (
+    wanted.unit &&
+    !wanted.unit.some(
+      (unit) => unit.toLowerCase() === binding.unit?.label.toLowerCase(),
+    )
+  )
+    return `has unit ${String(binding.unit?.label)}, expected ${wanted.unit[0]!}`;
+  return null;
+}
 
 /** An alias matches an id suffix when the slugs are equal or one contains the other. */
 export function nameMatches(aliases: readonly string[], suffix: string) {
@@ -295,6 +365,8 @@ function valueFor(
     case 'quantityFieldType':
       return '7';
     case 'textFieldType': {
+      // A three-character text is a currency code a money field may read.
+      if (field.bounds.maximumLength === 3) return 'CAD';
       const text = `Eval ${localOf(field.fieldId).slice(-24)}`;
       return field.bounds.maximumLength
         ? text.slice(0, field.bounds.maximumLength)
@@ -463,6 +535,7 @@ export async function scoreModule(
   },
 ): Promise<Score> {
   const after = await catalog(world);
+  const logical = await logicalBindings(world);
   const created = newEntities(before, after);
   const reasons: string[] = [];
   let e2e = true;
@@ -523,6 +596,10 @@ export async function scoreModule(
         miss(
           `${label}: field "${wanted.names[0]!}" is ${found.fieldKind}, expected ${wanted.type}`,
         );
+      else {
+        const mismatch = logicalMismatch(wanted, logical.get(found.fieldId));
+        if (mismatch) miss(`${label}: field "${wanted.names[0]!}" ${mismatch}`);
+      }
       for (const option of wanted.options ?? [])
         if (!found.enumOptionIds.some((id) => nameMatches(option, localOf(id))))
           miss(
@@ -750,6 +827,7 @@ async function updateExisting(
 
 interface DraftedWorkflow {
   readonly body: string;
+  readonly trigger?: unknown;
   readonly grants: {
     readonly operations: readonly string[];
     readonly queries: readonly string[];
@@ -768,9 +846,19 @@ export async function scoreWorkflow(
   expected: {
     operations: readonly string[];
     calls: readonly WorkflowCallSpec[];
+    trigger?: string;
   },
 ): Promise<Score & { overGranted: boolean }> {
   const reasons: string[] = [];
+  const trigger = drafted.trigger ?? 'goodsReceiptPosted';
+  const recordType =
+    typeof trigger === 'object' && trigger !== null
+      ? String((trigger as { recordTypeId?: unknown }).recordTypeId)
+      : null;
+  if ((expected.trigger ?? null) !== (recordType && localOf(recordType)))
+    reasons.push(
+      `trigger ${recordType ? localOf(recordType) : String(trigger)}; expected ${expected.trigger ?? 'goodsReceiptPosted'}`,
+    );
   const granted = drafted.grants.operations.map(localOf).sort();
   const wanted = [...expected.operations].sort();
   if (JSON.stringify(granted) !== JSON.stringify(wanted))
@@ -781,12 +869,21 @@ export async function scoreWorkflow(
     reasons.push(
       `query grants ${drafted.grants.queries.map(localOf).join(', ')}`,
     );
-  const event = {
-    type: 'goodsReceiptPosted' as const,
-    eventId: randomUUID(),
-    receiptId: randomUUID(),
-    legalEntityId: COMPANY,
-  };
+  const triggerRecordId = randomUUID();
+  const event: WorkflowEvent = recordType
+    ? {
+        type: 'recordCreated',
+        eventId: randomUUID(),
+        recordTypeId: recordType,
+        recordId: triggerRecordId,
+        legalEntityId: COMPANY,
+      }
+    : {
+        type: 'goodsReceiptPosted',
+        eventId: randomUUID(),
+        receiptId: triggerRecordId,
+        legalEntityId: COMPANY,
+      };
   const calls: {
     kind: string;
     id?: string;
@@ -799,7 +896,13 @@ export async function scoreWorkflow(
     const compiled = await world.runtime.entry.run(MANAGER, (view) =>
       compileWorkflowBody(
         drafted.body,
-        generateWorkflowSdk(view, drafted.grants),
+        generateWorkflowSdk(
+          view,
+          drafted.grants,
+          undefined,
+          undefined,
+          WorkflowTriggerSchema.parse(trigger),
+        ),
       ),
     );
     const run = new InMemoryWorkflowRun(compiled, event);
@@ -821,7 +924,7 @@ export async function scoreWorkflow(
   for (const spec of expected.calls) {
     const at = calls
       .slice(cursor)
-      .findIndex((call) => callMatches(call, spec, event.receiptId));
+      .findIndex((call) => callMatches(call, spec, triggerRecordId));
     if (at < 0) {
       reasons.push(
         `expected call ${spec.kind}${spec.operation ? ` ${spec.operation}` : ''}${spec.milliseconds ? ` ${String(spec.milliseconds)} ms` : ''} not made in order`,
@@ -1196,7 +1299,13 @@ export async function runBuildCase(
     }
     if (expect.outcome === 'workflow') {
       const input = accepted as
-        | { workflow?: { grants?: DraftedWorkflow['grants'] }; body?: unknown }
+        | {
+            workflow?: {
+              grants?: DraftedWorkflow['grants'];
+              trigger?: unknown;
+            };
+            body?: unknown;
+          }
         | undefined;
       if (
         result.activated &&
@@ -1205,7 +1314,11 @@ export async function runBuildCase(
       ) {
         const score = await scoreWorkflow(
           world,
-          { body: input.body, grants: input.workflow.grants },
+          {
+            body: input.body,
+            grants: input.workflow.grants,
+            trigger: input.workflow.trigger,
+          },
           expect,
         );
         result.e2e = score.e2e;
@@ -1250,6 +1363,16 @@ export async function runBuildCase(
       result.behaviour = ok;
       if (!ok)
         result.reasons.push('the validation rule is not the requested one');
+    }
+    if (expect.outcome === 'templateBinding' && result.activated) {
+      const misses = templateBindingMisses(
+        expect,
+        boardsBefore,
+        await opened.service.targets(),
+      );
+      result.e2e = true;
+      result.behaviour = misses.length === 0;
+      result.reasons.push(...misses);
     }
     if (expect.outcome === 'ratePlan' && result.activated) {
       const plans = await world.runtime.entry.run(MANAGER, (view) =>
@@ -1471,7 +1594,10 @@ export function summarize(results: readonly CaseResult[]) {
   const drafts = ran.filter((r) => r.expected !== 'unsupported');
   const unsupported = ran.filter((r) => r.expected === 'unsupported');
   const hostile = ran.filter((r) => r.category === 'hostile');
-  const workflows = ran.filter((r) => r.category === 'workflow-receipt');
+  const workflows = ran.filter(
+    (r) =>
+      r.category === 'workflow-receipt' || r.category === 'workflow-record',
+  );
   const refusals = ran.filter((r) => r.status === 'unsupported');
   const byBucket = new Map<string, { correct: number; false: number }>();
   for (const r of refusals) {

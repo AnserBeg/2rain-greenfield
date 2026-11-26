@@ -1,3 +1,4 @@
+import { draftRecordTemplateContent } from '../../../packages/customization/src/record-template-content-draft.js';
 import { CAPABILITY_EXECUTOR_FACTORIES } from './erp-capabilities.js';
 import { localDemoActor } from '../../../packages/runtime/src/local-demo-actor.js';
 import {
@@ -55,6 +56,7 @@ import {
   DISTRIBUTOR_COMPANY_NAME,
   type ComposedApplicationSeedProfile,
 } from '../../../packages/domain/src/app/seed.js';
+import { firstPartyImmediateEdits } from '../../../packages/domain/src/app/immediate-edits.js';
 import { readUnboundPermissionAcknowledgementFor } from '../../web/scripts/unbound-permission-acknowledgement.js';
 
 export interface ComposedApplicationServerOptions {
@@ -210,6 +212,7 @@ export async function startComposedApplication(
     assistant =
       runtime.identityMode === 'LOCAL_DEMO'
         ? createAssistantEndpoint({
+            immediateEdits: firstPartyImmediateEdits(),
             runtime,
             // The page's company, proved through the person's workspace
             // entry as the page proves it (end review X9).
@@ -289,6 +292,13 @@ export async function startComposedApplication(
       {
         applicationExtension: COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION,
         addresses: runtime.addresses,
+        recordTemplates: runtime.recordTemplates,
+        draftRecordTemplate: async (binding, request) =>
+          draftRecordTemplateContent(
+            await configuredDraftingModel(options.draftingProvider),
+            binding,
+            request,
+          ),
         ...(runtime.documents ? { documents: runtime.documents } : {}),
         operationGateway: runtime.operationGateway,
         operationMediation: runtime.operationMediation,
@@ -516,19 +526,7 @@ export async function openCustomizeService(
         ),
       ) as unknown),
     databaseUrl: options.databaseUrl,
-    draftingModel: async () =>
-      draftingModelFrom(
-        options.draftingProvider
-          ? await options.draftingProvider()
-          : anthropicModel({
-              effort: 'medium',
-              key: await loadModelKey('anthropic'),
-              maxTokens: 8_000,
-              modelId:
-                process.env.NORTH_STAR_CUSTOMIZE_MODEL ??
-                DEFAULT_ANTHROPIC_MODEL,
-            }),
-      ),
+    draftingModel: () => configuredDraftingModel(options.draftingProvider),
     firstPartyAuthored,
     localDemoIdentity: true,
     migrationsDirectory: new URL('../../../db/migrations/', import.meta.url)
@@ -544,6 +542,22 @@ export async function openCustomizeService(
  * It passes tool definitions to the provider unchanged; only its tool-name
  * type is narrowed to the agent's five, so the drafting tool is handed through.
  */
+async function configuredDraftingModel(
+  provider: ComposedApplicationServerOptions['draftingProvider'],
+) {
+  return draftingModelFrom(
+    provider
+      ? await provider()
+      : anthropicModel({
+          effort: 'medium',
+          key: await loadModelKey('anthropic'),
+          maxTokens: 8_000,
+          modelId:
+            process.env.NORTH_STAR_CUSTOMIZE_MODEL ?? DEFAULT_ANTHROPIC_MODEL,
+        }),
+  );
+}
+
 function draftingModelFrom(
   provider: ModelAdapter,
 ): NonNullable<

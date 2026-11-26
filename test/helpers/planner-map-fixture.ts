@@ -1,3 +1,4 @@
+import { closeFixtureApp } from './close-fixture-app.js';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { randomUUID } from 'node:crypto';
@@ -133,7 +134,7 @@ async function serve() {
         await once(process.stdin, 'end');
       } finally {
         await opened.close();
-        await app.close();
+        await closeFixtureApp(app, 'planner-map');
       }
     },
     LINEAGE_INSTALL_VOLUME,
