@@ -633,11 +633,12 @@ test('a v1 report never reads a currency through a path', () => {
   const result = resolveReportChoices(
     offer as never,
     {
-      dimensions: [{ fieldId: l('task') }],
+      dimensions: [{ kind: 'direct', fieldId: l('task') }],
       filters: [],
       measures: [
         {
-          measureId: 'm1',
+          kind: 'inline',
+          measureId: `${NS}:measure.custom_rate`,
           label: 'Rate',
           operator: { kind: 'sum', fieldId: l('rate') },
         },
