@@ -6,6 +6,7 @@
  * record and test/evidence/CUSTOMIZE-6-s2.expected-red.json list them).
  */
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import test from 'node:test';
 
@@ -191,13 +192,19 @@ test('the currency path is REPORTS-1 slice 2 link-path encoding: one or two rela
   );
 });
 
-test('a line table holds every logical kind; line money reads a fixed, a line or a header currency', async () => {
-  const authored = applied([orderType, lineTable]);
-  const source = (authored.entities as Forged[]).find(
-    (e) => e.entityId === lines,
-  )!.reportSource;
+test('Customize writes a line amount in the header currency with the parent-link path', () => {
+  const result = customization.applyCustomizationPatches(
+    base,
+    [orderType, lineTable].map(patch),
+  );
+  const amounts =
+    result.status === 'applied'
+      ? (result.authored.entities as Forged[]).find(
+          (e) => e.entityId === lines,
+        )!.reportSource.amounts
+      : result.status;
   assert.deepEqual(
-    source.amounts,
+    amounts,
     [
       {
         fieldId: l('rate'),
@@ -220,7 +227,10 @@ test('a line table holds every logical kind; line money reads a fixed, a line or
     ],
     'a line amount lost its header currency path',
   );
-  const editor = (authored.surfaces as Forged[]).find(
+});
+
+test('a line long-text field is edited in a text area', () => {
+  const editor = (applied([orderType, lineTable]).surfaces as Forged[]).find(
     (s) => s.surfaceId === `${NS}:surface.custom_work_order_form`,
   )!.documentEditor;
   assert.deepEqual(
@@ -229,6 +239,9 @@ test('a line table holds every logical kind; line money reads a fixed, a line or
     { kind: 'multiline' },
     'a line long-text field is not a text area',
   );
+});
+
+test('a line table holds every logical kind; line money reads a fixed, a line or a header currency', async () => {
   const { surface, operation } = released(
     await compileFrom(base, [orderType, lineTable]),
   );
@@ -274,7 +287,11 @@ test('a currency label on both the line and its header is refused as ambiguous',
       },
     ].map(patch),
   );
-  assert.notEqual(result.status, 'applied');
+  assert.notEqual(
+    result.status,
+    'applied',
+    'an ambiguous currency label was resolved',
+  );
   assert.match(JSON.stringify(result), /name the one to read by its field ID/u);
 });
 
@@ -291,6 +308,68 @@ test('the report source refuses a currency path that is not the line parent link
     refusalOf(() => normalizeApplicationPackage(authored)),
     /A stored currency path must be the line's own parent link/u,
     'a two-hop currency path was admitted',
+  );
+});
+
+/** The bindings of a normalized line definition after `forge` edits it. */
+function derivedAfter(forge: (definition: Forged) => void) {
+  const forged = structuredClone(
+    normalizeApplicationPackage(applied([orderType, lineTable])),
+  ) as unknown as Forged;
+  forge(forged);
+  return deriveLogicalFieldBindings(
+    forged as Parameters<typeof deriveLogicalFieldBindings>[0],
+  );
+}
+const relation = (definition: Forged) =>
+  (definition.relations as Forged[]).find((r) => r.relationId === parentLink)!;
+const pathRefusal = /reads a declared currency field of the line's header/u;
+
+test('a reference link from the line is not a currency path', () => {
+  const outcome = derivedAfter((definition) => {
+    const link = structuredClone(relation(definition));
+    link.relationId = `${NS}:relation.custom_work_order_lines_site`;
+    link.ownership = 'reference';
+    (definition.relations as Forged[]).push(link);
+    (definition.entities as Forged[])
+      .find((e) => e.entityId === lines)!
+      .reportSource.amounts.find(
+        (a: Forged) => a.fieldId === l('rate'),
+      ).currency.via = [link.relationId];
+  });
+  assert.equal(outcome.status, 'refused', 'a reference link was admitted');
+  assert.match((outcome as { message: string }).message, pathRefusal);
+});
+
+test("a parent link from another record type is not the line's currency path", () => {
+  const outcome = derivedAfter((definition) => {
+    relation(definition).sourceEntity.targetId = order;
+  });
+  assert.equal(
+    outcome.status,
+    'refused',
+    'a path from another record type was admitted',
+  );
+  assert.match((outcome as { message: string }).message, pathRefusal);
+});
+
+test('a retired parent link is not a currency path', () => {
+  const outcome = derivedAfter((definition) => {
+    relation(definition).lifecycle = 'retired';
+  });
+  assert.equal(outcome.status, 'refused', 'a retired parent link was admitted');
+  assert.match((outcome as { message: string }).message, pathRefusal);
+});
+
+test('only a declared money field reads its currency through a path', () => {
+  const authored = applied([orderType, lineTable]);
+  authored.logicalFields = (authored.logicalFields as Forged[]).filter(
+    (d) => d.fieldId !== l('rate'),
+  );
+  assert.match(
+    refusalOf(() => normalizeApplicationPackage(authored)),
+    /A currency read through a path belongs to a declared money field/u,
+    'an undeclared amount read its currency through a path',
   );
 });
 
@@ -345,20 +424,70 @@ test('a retired currency field of another record type is not skipped as bound', 
   );
 });
 
-test('the line rung: line declarations and header-read currencies need it, nothing else does', () => {
-  const lined = normalizeApplicationPackage(applied([orderType, lineTable]));
-  const headerOnly = normalizeApplicationPackage(applied([orderType]));
-  const floor = (def: unknown) =>
-    logicalFieldReaderFloor(
-      def as Parameters<typeof logicalFieldReaderFloor>[0],
-    );
+const floorOf = (def: unknown) =>
+  logicalFieldReaderFloor(def as Parameters<typeof logicalFieldReaderFloor>[0]);
+
+test('the line rung: line declarations raise the floor, nothing else does', () => {
+  // A line table with a quantity alone: a line declaration, no path.
+  const plainLines = normalizeApplicationPackage(
+    applied([
+      orderType,
+      {
+        ...lineTable,
+        fields: [
+          { label: 'Task', type: 'text' },
+          { label: 'Hours', type: 'quantity', scale: 2, unit: 'h' },
+        ],
+      },
+    ]),
+  );
   assert.equal(
-    floor(lined),
+    floorOf(plainLines),
     LINE_LOGICAL_FIELD_READER,
     'a line declaration did not raise the floor',
   );
-  assert.equal(floor(headerOnly), LOGICAL_FIELD_READER);
-  assert.equal(floor(normalizeApplicationPackage(base)), null);
+  assert.equal(
+    floorOf(normalizeApplicationPackage(applied([orderType, lineTable]))),
+    LINE_LOGICAL_FIELD_READER,
+  );
+  assert.equal(
+    floorOf(normalizeApplicationPackage(applied([orderType]))),
+    LOGICAL_FIELD_READER,
+  );
+  assert.equal(floorOf(normalizeApplicationPackage(base)), null);
+});
+
+test('a forged path-read currency raises the floor without a line declaration', () => {
+  // A forged revision whose header amount reads through a path, with no line
+  // declaration, still asks for the line rung.
+  const forged = structuredClone(
+    normalizeApplicationPackage(applied([orderType])),
+  ) as unknown as Forged;
+  (forged.entities as Forged[]).find(
+    (e) => e.entityId === order,
+  )!.reportSource = {
+    amounts: [
+      {
+        fieldId: h('deposit'),
+        currency: {
+          kind: 'stored',
+          fieldId: h('currency'),
+          via: [parentLink],
+          codes: ['CAD'],
+        },
+      },
+    ],
+  };
+  assert.equal(
+    floorOf(forged),
+    LINE_LOGICAL_FIELD_READER,
+    'a path-read currency did not raise the floor',
+  );
+});
+
+test('serving refuses line logical fields below the line rung, and the line rung without them', () => {
+  const lined = normalizeApplicationPackage(applied([orderType, lineTable]));
+  const headerOnly = normalizeApplicationPackage(applied([orderType]));
   const derived = deriveLogicalFieldBindings(
     lined as unknown as Parameters<typeof deriveLogicalFieldBindings>[0],
   );
@@ -476,6 +605,18 @@ test('a v1 report never reads a currency through a path', () => {
     label: 'Lines',
     fields: [
       { operand: amount, label: 'Rate' },
+      // Present on the offer, so only the path refuses.
+      {
+        operand: {
+          fieldId: h('currency'),
+          type: 'text',
+          maximumLength: 3,
+          collation: 'binary',
+          presence: 'optional',
+          classification: 'internal',
+        },
+        label: 'Currency',
+      },
       {
         operand: {
           fieldId: l('task'),
@@ -591,6 +732,9 @@ test("a line amount shows its header's currency, and says so without the header"
     logicalSuffix(viaHeader, line, { values: { [h('currency')]: 'GBP' } }),
     '(no listed currency)',
   );
+});
+
+test("the editor's line cell reads its header's currency", () => {
   const html = renderValueControl({
     row: { id: 'line-1', values: { [l('rate')]: '95.5' } },
     field: { fieldId: l('rate'), label: 'Rate' },
@@ -661,36 +805,85 @@ test('the drafter is told a line money field may read its header currency', () =
   assert.match(kinds, /line money field in the header currency/u);
 });
 
+const later = [
+  {
+    kind: 'addField',
+    entity: order,
+    field: { label: 'Site', type: 'text' },
+  },
+  {
+    kind: 'arrangeLayout',
+    surface: `${NS}:surface.custom_work_order_list`,
+    relabel: [{ field: h('name'), label: 'Order' }],
+  },
+  {
+    kind: 'arrangeLayout',
+    surface: `${NS}:surface.custom_work_order_lines_list`,
+    relabel: [{ field: l('task'), label: 'Job' }],
+  },
+];
+/** The authored line definition with these fields retired in the base. */
+function retiring(...ids: string[]): Forged {
+  const retired = structuredClone(applied([orderType, lineTable]));
+  for (const id of ids)
+    (retired.fields as Forged[]).find((x) => x.fieldId === id)!.lifecycle =
+      'retired';
+  return retired;
+}
+/** The compile's surface, or a red naming what refused a later compile. */
+function compiledLater(result: customization.SandboxResponse, what: string) {
+  assert.equal(
+    result.status,
+    'compiled',
+    `${what} refused a later compile: ${JSON.stringify(result).slice(0, 600)}`,
+  );
+  return released(result).surface;
+}
+
+test('rule 10: with line money active, adding a field and arranging both lists compile', async () => {
+  const surface = compiledLater(
+    await compileFrom(applied([orderType, lineTable]), later),
+    'an active line amount',
+  );
+  assert.equal(surface.floor, LINE_LOGICAL_FIELD_READER);
+});
+
+test('rule 10: a retired header currency leaves its line amounts bound, and later compiles still pass', async () => {
+  // The header currency retires while the line rate reading it stays live.
+  const surface = compiledLater(
+    await compileFrom(retiring(h('currency')), later),
+    'a retired header currency',
+  );
+  const ids = (surface.payload.logicalFieldBindings as Forged[]).map(
+    (b) => b.fieldId,
+  );
+  assert.equal(ids.includes(h('currency')), false);
+  assert.ok(ids.includes(l('rate')), 'the line rate lost its binding');
+});
+
+test('rule 10: a retired line currency leaves its line amounts bound, and later compiles still pass', async () => {
+  const surface = compiledLater(
+    await compileFrom(retiring(l('line_currency')), later),
+    'a retired line currency',
+  );
+  const ids = (surface.payload.logicalFieldBindings as Forged[]).map(
+    (b) => b.fieldId,
+  );
+  assert.ok(ids.includes(l('duty')), 'the line duty lost its binding');
+});
+
 test('rule 10: after line money, its header currency and a line quantity retire, adding a field and arranging both lists still compile', async () => {
-  const later = [
-    {
-      kind: 'addField',
-      entity: order,
-      field: { label: 'Site', type: 'text' },
-    },
-    {
-      kind: 'arrangeLayout',
-      surface: `${NS}:surface.custom_work_order_list`,
-      relabel: [{ field: h('name'), label: 'Order' }],
-    },
-    {
-      kind: 'arrangeLayout',
-      surface: `${NS}:surface.custom_work_order_lines_list`,
-      relabel: [{ field: l('task'), label: 'Job' }],
-    },
-  ];
-  released(await compileFrom(applied([orderType, lineTable]), later));
-  const retiredBase = structuredClone(applied([orderType, lineTable]));
-  for (const id of [
+  const retiredBase = retiring(
     l('rate'),
     h('currency'),
     l('hours'),
     l('duty'),
     l('line_currency'),
-  ])
-    (retiredBase.fields as Forged[]).find((x) => x.fieldId === id)!.lifecycle =
-      'retired';
-  const { surface } = released(await compileFrom(retiredBase, later));
+  );
+  const surface = compiledLater(
+    await compileFrom(retiredBase, later),
+    'retired line fields',
+  );
   const ids = (surface.payload.logicalFieldBindings as Forged[]).map(
     (b) => b.fieldId,
   );
@@ -702,4 +895,31 @@ test('rule 10: after line money, its header currency and a line quantity retire,
     normalizeApplicationPackage(retiredBase).entities as Forged[]
   ).find((e) => e.entityId === lines)!.reportSource;
   assert.equal(source.amounts.length, 3);
+});
+
+test('rule 10: a label-only base change replays the later changes clean, active and retired', async () => {
+  for (const ids of [[], [l('rate'), h('currency')]]) {
+    const relabelled = retiring(...ids);
+    // Labels only: the bindings name fields by ID.
+    (relabelled.fields as Forged[]).find(
+      (x) => x.fieldId === h('currency'),
+    )!.label = 'Billing currency';
+    (relabelled.fields as Forged[]).find(
+      (x) => x.fieldId === l('rate'),
+    )!.label = 'Hourly rate';
+    const changes = later.map(patch);
+    const result = await customization.compileInSandbox({
+      acknowledgement,
+      base: relabelled,
+      chain: changes,
+      tip: customization.serializeRelease(tip),
+      upgradeBaseRoot: customization.serializeRelease(tip).releaseRoot,
+      origins: changes.map((_, i) => ({
+        patchId: randomUUID(),
+        differentBase: true,
+        ...(i === 0 && { parent: applied([orderType, lineTable]) }),
+      })),
+    });
+    compiledLater(result, `a label-only base change (${ids.length} retired)`);
+  }
 });

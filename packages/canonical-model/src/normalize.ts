@@ -1421,6 +1421,18 @@ function validateReportSources(
             "A stored currency path must be the line's own parent link.",
           );
         } else if (
+          currency.via &&
+          !(revision.logicalFields ?? []).some(
+            (d) => d.fieldId === fieldId && d.logicalType === 'money',
+          )
+        ) {
+          // A path is the line rung's: only a declared money field carries
+          // one, so the reader floor always sees it.
+          invalid(
+            fieldId,
+            'A currency read through a path belongs to a declared money field.',
+          );
+        } else if (
           holderField?.entity.targetId === holder &&
           holderField.lifecycle === 'retired'
         ) {

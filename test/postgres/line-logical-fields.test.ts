@@ -121,7 +121,7 @@ test(
   async () => {
     await withEphemeralPostgres(
       'line-logical-fields',
-      async ({ connection }) => {
+      async ({ connection, pool }) => {
         const options = {
           databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
           tenantSlug: 'line-logical-fields',
@@ -279,7 +279,48 @@ test(
             );
           }
 
-          // The work order's page lists its lines with the header's code.
+          // Narrow every principal of this tenant and environment to North,
+          // so from here the company check alone refuses South (MIGRATION-RULE
+          // finding 2: two companies in one tenant, a company-scoped principal).
+          const { tenantId, environmentId } = app.runtime.identity;
+          const narrowed = await pool.query(
+            'UPDATE platform.current_policy_memberships SET legal_entity_id=$3 WHERE (tenant_id,environment_id)=($1,$2) AND legal_entity_id IS NULL AND revoked_at IS NULL',
+            [tenantId, environmentId, COMPANY],
+          );
+          assert.ok(narrowed.rowCount);
+
+          // Writing: the North principal still adds a line to North's order,
+          // and cannot add one to South's, whichever company it names, so no
+          // North line ever reads South's currency.
+          const northLine = await createLine(COMPANY, north, {
+            number: '3',
+            task: 'Narrowed North line',
+            rate: '10',
+          });
+          assert.equal(
+            northLine.outcome,
+            'succeeded',
+            JSON.stringify(northLine),
+          );
+          for (const company of [south, COMPANY]) {
+            const crossedWrite = await createLine(company, southern, {
+              number: '4',
+              task: 'Crossed line',
+              rate: '1',
+            }).then(
+              (result) => JSON.stringify(result),
+              (error: Error & { code?: string }) =>
+                `${String(error.code)} ${error.message}`,
+            );
+            assert.doesNotMatch(
+              crossedWrite,
+              /"outcome":"succeeded"/u,
+              `a North line was written under South's order (${company})`,
+            );
+          }
+
+          // Reading: the work order's page lists its lines with the header's
+          // code, and only North's.
           const page = async (company: string, recordId: string) => {
             const url = new URL('/', app.baseUrl);
             url.searchParams.set(
@@ -308,8 +349,10 @@ test(
           assert.match(shown.html, />1\.5 h</u);
           assert.doesNotMatch(shown.html, /Southern sentinel/u);
           assert.doesNotMatch(shown.html, /9,999\.00/u);
-          // The North viewer asking for South's order sees none of its lines.
-          const crossed = await page(COMPANY, southern);
+          // The narrowed North principal asking for South's order in South's
+          // own scope sees none of its lines.
+          const crossed = await page(south, southern);
+          assert.notEqual(crossed.status, 200, crossed.html.slice(0, 600));
           assert.doesNotMatch(crossed.html, /Southern sentinel/u);
           assert.doesNotMatch(crossed.html, /9,999\.00/u);
         } finally {

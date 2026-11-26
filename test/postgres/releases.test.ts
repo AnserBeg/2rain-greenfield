@@ -2273,6 +2273,62 @@ test('release admission refuses a line logical release below the line rung, and 
   }
 });
 
+test('release admission refuses a write contract whose allowed values disagree with the declaration', async (t) => {
+  // CUSTOMIZE-6 slice 2 (slice-1 follow-up): activation compares every write
+  // contract's allowedTexts with the field's declared allowed values.
+  const declaring = await compileReportFixture([
+    {
+      kind: 'addRecordType',
+      label: 'Work order',
+      companyOwnership: 'entityOwned',
+      fields: [
+        { label: 'Name', type: 'text' },
+        { label: 'Currency', type: 'currency' },
+      ],
+    },
+  ] as never);
+  const currency = 'northstar.app:field.custom_work_order_currency';
+  const candidate = rewriteProjectionPayload(
+    declaring.compiled,
+    PROJECTION_FAMILY_IDS.operationCatalog,
+    (payload) => {
+      let widened = 0;
+      for (const operation of payload.operations as {
+        inputContract?: { fields?: Record<string, unknown>[] };
+      }[])
+        for (const field of operation.inputContract?.fields ?? [])
+          if (field.fieldId === currency) {
+            field.allowedTexts = ['CAD', 'USD', 'GBP'];
+            widened += 1;
+          }
+      assert.ok(widened > 0, 'no write contract carries the currency');
+    },
+  );
+  const context = await contextFor(requestEntry(), 'session-a');
+  const pool = new pg.Pool();
+  t.after(() => pool.end());
+  t.mock.method(pool, 'connect', () => {
+    throw new Error('A widened contract reached the staging transaction');
+  });
+  const repository = new PostgresImmutableReleaseRepository(pool);
+  t.mock.method(repository, 'getAppPackageRevision', async () => ({
+    ...revisionCommand(context, revisionA, declaring.normalizedDefinitionBytes),
+    createdAt: '2026-11-25T00:00:00.000Z',
+  }));
+  await assert.rejects(
+    repository.stageTenantReleaseCandidate(context, {
+      appPackageRevisionId: revisionA,
+      compiledRelease: candidate,
+      createdBy: context.principalId,
+      environmentId: context.environmentId,
+      releaseId: releaseA,
+      tenantId: context.tenantId,
+    }),
+    { code: 'LOGICAL_FIELD_PROJECTION_CONTRACT_MISMATCH' },
+    'a widened write contract was admitted',
+  );
+});
+
 test('release admission requires the formula projection and its mandatory reader only on a declaring revision', async (t) => {
   const authored = parseVersionedAuthoredApplicationPackageJson(
     readFileSync('apps/web/release/app.authored.json'),

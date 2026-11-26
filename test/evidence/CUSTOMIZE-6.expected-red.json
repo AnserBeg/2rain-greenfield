@@ -162,7 +162,8 @@
       "original": "      if (logicalProblem)",
       "replacement": "      if (false)",
       "test": {
-        "files": ["test/postgres/releases.test.ts"]
+        "files": ["test/postgres/releases.test.ts"],
+        "namePattern": "^release admission refuses logical field bindings or a reader floor that disagree with the declaration$"
       },
       "kills": [
         {
@@ -179,7 +180,8 @@
       "original": "      : surfaceFloor < logicalFloor ||",
       "replacement": "      : surfaceFloor < 0 ||",
       "test": {
-        "files": ["test/postgres/releases.test.ts"]
+        "files": ["test/postgres/releases.test.ts"],
+        "namePattern": "^release admission refuses logical field bindings or a reader floor that disagree with the declaration$"
       },
       "kills": [
         {
