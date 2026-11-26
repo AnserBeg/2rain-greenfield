@@ -936,13 +936,13 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
                 "SELECT north_star_internal.ledger_set_closed_through($1,'2026-03-31')",
                 [a2.id],
               );
-              await manual(w1, b2, '2026-03-15');
+              await manual(w1, a2, '2026-04-02');
               await assert.rejects(
                 manual(w1, a2, '2026-03-15'),
                 /ledger\.closedBooks/u,
                 'a closed company admitted an entry',
               );
-              await manual(w1, a2, '2026-04-02');
+              await manual(w1, b2, '2026-03-15');
               const numbers = await admin.query<{
                 company_id: string;
                 entry_number: string;

@@ -160,7 +160,7 @@
       "claim": "Entries and lines refuse update, delete and truncate for every role, the owner included.",
       "file": "db/migrations/0070_ledger_journal_core.sql",
       "original": "RAISE EXCEPTION 'ledger.appendOnly'; END $$;",
-      "replacement": "RETURN NULL; END $$;",
+      "replacement": "RETURN NULL; END $$$$;",
       "test": {
         "files": ["test/postgres/ledger-journal-core.test.ts"]
       },
@@ -309,7 +309,7 @@
         {
           "file": "test/postgres/ledger-journal-core.test.ts",
           "name": "the writer refuses another company's account",
-          "expected": "violates foreign key constraint"
+          "expected": "company A's entry reached company B's account"
         }
       ]
     },
@@ -430,7 +430,7 @@
       "claim": "An instant is dated by the company business calendar, never its UTC date.",
       "file": "db/migrations/0070_ledger_journal_core.sql",
       "original": "RETURN north_star_internal.inventory_business_period(t, instant); END $$;",
-      "replacement": "RETURN (instant AT TIME ZONE 'UTC')::date; END $$;",
+      "replacement": "RETURN (instant AT TIME ZONE 'UTC')::date; END $$$$;",
       "test": {
         "files": [
           "test/postgres/ledger-journal-core.test.ts",
@@ -610,7 +610,7 @@
       "claim": "A line page never exceeds its size.",
       "file": "db/migrations/0070_ledger_journal_core.sql",
       "original": "    LIMIT page_size; END $$;",
-      "replacement": "    ; END $$;",
+      "replacement": "    ; END $$$$;",
       "test": {
         "files": ["test/postgres/ledger-journal-core.test.ts"],
         "namePattern": "^ledger company isolation$"
