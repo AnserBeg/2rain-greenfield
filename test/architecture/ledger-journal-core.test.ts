@@ -91,7 +91,7 @@ test('accounting dates come only from the company business-day resolver', () => 
     [/AT\s+TIME\s+ZONE/iu, 'a zone conversion'],
     [/::\s*date\b/iu, 'a cast to date'],
     [/\bCAST\s*\([\s\S]*?\bAS\s+date\s*\)/iu, 'a CAST to date'],
-    [/\bdate\s*\(/iu, 'a date() call'],
+    [/\bdate\s*\(/iu, 'a call of the date function'],
     [/\bcurrent_date\b|\blocaltimestamp\b|\bnow\(\)/iu, 'a server-clock date'],
     [
       /inventory_business_period|inventory_tenant_calendars/u,
