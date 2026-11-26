@@ -140,8 +140,8 @@
       "name": "calendar-no-utc-default",
       "claim": "An undeclared calendar refuses; nothing answers for it, UTC or otherwise.",
       "file": "db/migrations/0072_business_calendar.sql",
-      "original": "  IF NOT FOUND THEN\n    RAISE EXCEPTION 'calendar.undeclared'\n      USING ERRCODE = 'P0001', DETAIL = format('tenantId=%s', requested_tenant_id); END IF;\n  RETURN north_star_internal.business_day_of(declared_zone, declared_boundary, requested_at); END $$;",
-      "replacement": "  IF false THEN\n    RAISE EXCEPTION 'calendar.undeclared'\n      USING ERRCODE = 'P0001', DETAIL = format('tenantId=%s', requested_tenant_id); END IF;\n  RETURN north_star_internal.business_day_of(declared_zone, declared_boundary, requested_at); END $$;",
+      "original": "  IF NOT FOUND THEN\n    RAISE EXCEPTION 'calendar.undeclared'\n      USING ERRCODE = 'P0001', DETAIL = format('tenantId=%s', requested_tenant_id); END IF;\n  RETURN north_star_internal.business_day_of(declared_zone, declared_boundary, requested_at);",
+      "replacement": "  IF false THEN\n    RAISE EXCEPTION 'calendar.undeclared'\n      USING ERRCODE = 'P0001', DETAIL = format('tenantId=%s', requested_tenant_id); END IF;\n  RETURN north_star_internal.business_day_of(declared_zone, declared_boundary, requested_at);",
       "test": {
         "files": ["test/postgres/business-calendar.test.ts"]
       },
