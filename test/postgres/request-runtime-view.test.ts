@@ -618,7 +618,7 @@ test('the capability comparison binds the family to its capability, then compare
   // capability on one side alone reds here rather than in production.
   assert.deepEqual(SUPPORTED_RUNTIME_CAPABILITIES[surface], {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
-    maximumSupportedVersion: RECORD_CREATED_TRIGGER_READER,
+    maximumSupportedVersion: REPORT_MEASURE_READER,
   });
 });
 
@@ -1252,7 +1252,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
               ],
               {
                 capabilityId: 'northstar.runtime:capability.surface-manifest',
-                maximumSupportedVersion: RECORD_CREATED_TRIGGER_READER,
+                maximumSupportedVersion: REPORT_MEASURE_READER,
               },
             );
           },
@@ -1277,7 +1277,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
               new RegExp(
-                `requires version 999 and this runtime supports ${RECORD_CREATED_TRIGGER_READER}`,
+                `requires version 999 and this runtime supports ${REPORT_MEASURE_READER}`,
               ),
             );
           },
@@ -1308,7 +1308,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
               new RegExp(
-                `requires version 999 and this runtime supports ${RECORD_CREATED_TRIGGER_READER}`,
+                `requires version 999 and this runtime supports ${REPORT_MEASURE_READER}`,
               ),
             );
           },
