@@ -70,11 +70,15 @@ import {
 import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../canonical-model/src/surface-workspace.js';
 import type { compileDocuments } from './documents.js';
 import {
+  RECORD_CREATED_TRIGGER_READER,
   WORKFLOW_PAYLOAD_VERSION,
   WORKFLOW_RUNTIME_CAPABILITY,
   WORKFLOW_SURFACE_FLOOR,
 } from '../../canonical-model/src/workflows.js';
-import { workflowSdkBindingDigest } from './workflows.js';
+import {
+  assertWorkflowTriggers,
+  workflowSdkBindingDigest,
+} from './workflows.js';
 import { hasStockCountWorkflow } from './conformance.js';
 
 import {
@@ -711,11 +715,19 @@ export function appendWorkflowProjection(
   const surface = plans.find(
     ({ familyId }) => familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
   )!;
+  const generalTrigger = assertWorkflowTriggers(
+    revision.workflows,
+    plans.find(
+      ({ familyId }) => familyId === PROJECTION_FAMILY_IDS.storageTarget,
+    )?.payload,
+    operations,
+  );
   surface.requiredRuntimeCapability = {
     ...surface.requiredRuntimeCapability,
     minimumVersion: Math.max(
       surface.requiredRuntimeCapability.minimumVersion,
       WORKFLOW_SURFACE_FLOOR,
+      generalTrigger ? RECORD_CREATED_TRIGGER_READER : 0,
     ),
   };
   plans.push(

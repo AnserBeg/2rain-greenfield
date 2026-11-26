@@ -4,6 +4,7 @@ import { draftMeasure } from './measure-revision.js';
 import { z } from 'zod';
 
 import { WorkflowDefinitionSchema } from '../../canonical-model/src/schemas.js';
+import { workflowTriggerDrafterLines } from '../../canonical-model/src/workflow-trigger-events.js';
 import {
   DRAFTER_SELECTION_SCHEMAS,
   drafterKindLines,
@@ -509,12 +510,14 @@ export function boundedDiagnostics(issues: readonly string[]): string[] {
 export function workflowPromptSection(
   sdk: string,
   rules: readonly string[] = [],
+  recordTypes: readonly string[] = [],
 ): string {
   return [
-    'For a receipt workflow use saveWorkflow with workflow {schemaVersion:"v6", workflowId, trigger:"goodsReceiptPosted", grants:{operations,queries}}, a TypeScript body and fixtures.',
+    'For a workflow use saveWorkflow with workflow {schemaVersion:"v6", workflowId, trigger, grants:{operations,queries}}, a TypeScript body and fixtures. The trigger is one of these members:',
+    ...workflowTriggerDrafterLines(recordTypes).map((line) => `- ${line}`),
     `workflowId matches ${WORKFLOW_ID_PATTERN}: lowercase letters, digits and hyphens, starting with a letter (no underscores).`,
     ...rules,
-    'Each fixture has an event {type:"goodsReceiptPosted", eventId, receiptId, legalEntityId} (UUIDs) and effects in execution order {call, result}. Use the exact canonical IDs in these SDK declarations and declare only the calls the body makes. Sleep uses milliseconds (up to 90 days) and yields null. For requests to wait for an external event, return unsupported with missingCapability "durable external-event waits (named gap)". requestApproval yields a boolean. Never call operations or read live records to test a draft.',
+    'Each fixture has the trigger\'s event and effects in execution order {call, result}. Use the exact canonical IDs in these SDK declarations and declare only the calls the body makes. Sleep uses milliseconds (up to 90 days) and yields null. For requests to wait for an external event, return unsupported with missingCapability "durable external-event waits (named gap)". requestApproval yields a boolean. Never call operations or read live records to test a draft.',
     sdk,
   ].join('\n');
 }
@@ -532,7 +535,19 @@ export async function draftPatchFromRequest<T = never>(
   const system =
     draftingSystemPrompt(targets) +
     (targets.workflowSdk
-      ? `\n${workflowPromptSection(targets.workflowSdk, options.workflowRules)}`
+      ? `\n${workflowPromptSection(
+          targets.workflowSdk,
+          options.workflowRules,
+          (targets.linkTargets ?? [])
+            .filter(
+              ({ companyOwned, entityId }) =>
+                companyOwned &&
+                (targets.workflowRecordTypeIds ?? []).includes(entityId),
+            )
+            .map(
+              ({ entityId, label }) => `${entityId} (${JSON.stringify(label)})`,
+            ),
+        )}`
       : '');
   const context: DraftContext = {
     targetsAfter: options.definition

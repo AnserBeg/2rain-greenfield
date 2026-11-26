@@ -80,7 +80,12 @@ export const PAGE_BUDGETS: Readonly<Record<PageBudgetName, PageBudget>> =
     // decision on Confirm's write path is now read live in its own transaction.
     // Then +5 statements: its page's queues, read after the posting in its
     // read-back snapshot (orchestrator ruling).
-    'task: confirm': budget([21, 292, 17, 17], [0, 0, 0, 75]),
+    // WORKFLOW-2 slice 4b: +7 statements. Each governed write transaction
+    // names its creation action (+3), each generic create records its
+    // occurrence (+2), and the posting kernel records its companion
+    // transaction and line (+2), for the per-record occurrence writer
+    // (ADR-0073 A1 owner ruling). Measured by CI 45624214462 and 45637187547.
+    'task: confirm': budget([21, 299, 17, 17], [0, 0, 0, 75]),
   });
 
 /**

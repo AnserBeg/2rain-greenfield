@@ -17,6 +17,10 @@ import type {
 import type { Pool, PoolClient } from 'pg';
 
 import { RECEIPT_POSTED_EVENT } from '../../domain/src/purchasing/receipt-posted-event.js';
+import {
+  CanonicalIdSchema,
+  type WorkflowTrigger,
+} from '../../canonical-model/src/schemas.js';
 import { withTrustedRequestTransaction } from './request-context.js';
 import {
   lockWorkflowPointer,
@@ -56,14 +60,19 @@ interface WorkflowUnattendedProof {
   readonly tierBIntersections: readonly string[];
 }
 
-interface ReceiptScope {
+/**
+ * The trigger scope a run acts in, re-derived from the source rows on every
+ * load: the receipt event chain, or one record-creation occurrence chain.
+ */
+interface TriggerScope {
   readonly trigger_principal_id: string;
   readonly legal_entity_id: string;
-  readonly receipt_id: string;
+  readonly trigger_record_id: string;
+  readonly record_type: string | null;
   readonly event_id: string;
 }
 
-export interface WorkflowRunPin extends WorkflowScope, ReceiptScope {
+export interface WorkflowRunPin extends WorkflowScope, TriggerScope {
   readonly run_id: string;
   readonly instance_id: string;
   readonly pointer_id: string;
@@ -84,8 +93,9 @@ export interface WorkflowRunPin extends WorkflowScope, ReceiptScope {
   ][];
 }
 
-interface Run extends Omit<WorkflowRunPin, keyof ReceiptScope> {
-  readonly receipt_scope: ReceiptScope | null;
+interface Run extends Omit<WorkflowRunPin, keyof TriggerScope> {
+  readonly trigger_scope: TriggerScope | null;
+  readonly definition_record_type: string | null;
   readonly retry_authorized: boolean;
   readonly workflow_id: string;
   readonly status:
@@ -257,7 +267,7 @@ export class PostgresWorkflowExecution {
     const snapshot = await this.#snapshot(scope, runId);
     if (!snapshot || snapshot.run.status !== 'RUNNABLE') return;
     const { run, journal } = snapshot;
-    const scopedRun = run.receipt_scope && { ...run, ...run.receipt_scope };
+    const scopedRun = run.trigger_scope && { ...run, ...run.trigger_scope };
     const pending = run.retry_authorized ? pendingDispatch(run, journal) : null;
     const recovered = pending && (await this.#readReceipt(pending));
     const attempts: string[] = [];
@@ -425,7 +435,7 @@ export class PostgresWorkflowExecution {
   }
 
   async #dispatch(
-    dispatch: Dispatch & { readonly run: Run & ReceiptScope },
+    dispatch: Dispatch & { readonly run: Run & TriggerScope },
     journal: Journal,
   ): Promise<void> {
     const { run, call, idempotencyKey } = dispatch;
@@ -662,7 +672,7 @@ export class PostgresWorkflowExecution {
     );
   }
 
-  async #replay(run: Run & ReceiptScope, journal: Journal, attempts: string[]) {
+  async #replay(run: Run & TriggerScope, journal: Journal, attempts: string[]) {
     try {
       if (!run.verified_digest)
         throw new WorkflowEffectRefusal('unverified-definition');
@@ -681,23 +691,43 @@ export class PostgresWorkflowExecution {
       try {
         if (!supportsWorkflowSdk(run.sdk_version))
           throw new Error('Unsupported workflow SDK pin');
-        sdk = generateWorkflowSdk(view, run.grants, run.sdk_version);
+        sdk = generateWorkflowSdk(
+          view,
+          run.grants,
+          run.sdk_version,
+          false,
+          runTrigger(run),
+        );
         if (
           run.sdk_version === LEGACY_WORKFLOW_SDK_VERSION &&
           sha256(sdk.declarations) !== run.sdk_digest
         )
-          sdk = generateWorkflowSdk(view, run.grants, run.sdk_version, true);
+          sdk = generateWorkflowSdk(
+            view,
+            run.grants,
+            run.sdk_version,
+            true,
+            runTrigger(run),
+          );
       } catch (cause) {
         throw new WorkflowEffectRefusal('unavailable-sdk-artifact', { cause });
       }
       if (sha256(sdk.declarations) !== run.sdk_digest)
         throw new WorkflowEffectRefusal('unavailable-sdk-artifact');
-      const event: WorkflowEvent = {
-        type: 'goodsReceiptPosted',
-        eventId: run.event_id,
-        legalEntityId: run.legal_entity_id,
-        receiptId: run.receipt_id,
-      };
+      const event: WorkflowEvent = run.record_type
+        ? {
+            type: 'recordCreated',
+            eventId: run.event_id,
+            recordTypeId: run.record_type,
+            recordId: run.trigger_record_id,
+            legalEntityId: run.legal_entity_id,
+          }
+        : {
+            type: 'goodsReceiptPosted',
+            eventId: run.event_id,
+            legalEntityId: run.legal_entity_id,
+            receiptId: run.trigger_record_id,
+          };
       const workflow = { executable: run.executable.toString(), sdk };
       const base = new InMemoryWorkflowRun(workflow, event);
       const decision = await retryWorkflowStep(
@@ -855,6 +885,16 @@ async function persistEffectResult(
   return true;
 }
 
+function runTrigger(run: Pick<Run, 'definition_record_type'>): WorkflowTrigger {
+  return run.definition_record_type
+    ? {
+        kind: 'recordCreated',
+        triggerVersion: 'v1',
+        recordTypeId: CanonicalIdSchema.parse(run.definition_record_type),
+      }
+    : 'goodsReceiptPosted';
+}
+
 async function loadRun(
   client: PoolClient,
   scope: WorkflowScope,
@@ -865,15 +905,22 @@ async function loadRun(
   return (
     (
       await client.query<Run>(
-        `SELECT r.*, d.executable, d.sdk_digest, d.grants, d.engine_build, d.host_version, d.sdk_version,
+        `SELECT r.*, d.record_type AS definition_record_type, d.executable, d.sdk_digest, d.grants, d.engine_build, d.host_version, d.sdk_version,
              d.automation_principal_id,
              (r.execution_fence = r.initial_fence OR retry.fence IS NOT NULL) AS retry_authorized,
              CASE WHEN change.record_id IS NOT NULL THEN jsonb_build_object(
                'legal_entity_id', event.payload #>> '{legalEntityId,value}',
-               'receipt_id', change.record_id,
+               'trigger_record_id', change.record_id,
+               'record_type', NULL,
                'event_id', event.domain_event_id,
                'trigger_principal_id', change.execution_principal_id
-             ) END AS receipt_scope,
+             ) WHEN created.trigger_record_id IS NOT NULL THEN jsonb_build_object(
+               'legal_entity_id', created.legal_entity_id,
+               'trigger_record_id', created.trigger_record_id,
+               'record_type', created.record_type,
+               'event_id', created.event_id,
+               'trigger_principal_id', created.trigger_principal_id
+             ) END AS trigger_scope,
              w.approver_id, w.approver_grants,
              CASE WHEN w.verified_approval_binding AND active.verified_approval_binding
                     AND w.definition_bindings->d.workflow_id->>'digest' = platform.workflow_definition_digest(d)
@@ -902,6 +949,9 @@ async function loadRun(
          AND (change.release_id, change.release_content_hash, change.action_id) =
              (event.release_id, event.release_content_hash, event.action_id)
          AND change.record_type = $7
+        LEFT JOIN LATERAL platform.workflow_record_trigger_scope(i.instance_id) AS created
+          ON (created.release_id, created.release_content_hash, created.record_type) =
+             (r.release_id, r.release_root, d.record_type)
         JOIN platform.workflow_activation_watermarks AS w
           ON w.tenant_id = r.tenant_id AND w.environment_id = r.environment_id
          AND w.pointer_id = r.pointer_id AND w.fence = r.initial_fence

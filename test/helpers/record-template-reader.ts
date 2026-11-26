@@ -94,7 +94,7 @@ function releaseDifference(
   });
 }
 
-async function assertPersisted(
+export async function assertPersisted(
   pool: pg.Pool,
   releaseId: string,
   archived: SerializedRelease,

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { recordCreations } from './record-creation-occurrences.js';
 import type { TemplateApplicationSelection } from '../../runtime/src/record-template-library.js';
 import {
   declaresTemplateCreate,
@@ -1142,6 +1143,9 @@ export class PostgresModuleRuntimeInterpreter
                   { ...request, policyVersion },
                   preparation,
                   ids,
+                  // ADR-0073 A1: a write a workflow run commits names the run
+                  // as its causation, taken from the run row, never the script.
+                  this.#workflowRunId ?? null,
                 ),
                 mutationResult,
               });
@@ -1960,6 +1964,7 @@ function acceptedCommand(
     invocationId: string;
     outboxId: string;
   },
+  causationId: string | null,
 ): AcceptedMutationCommand {
   const metadata: EvidenceMetadataInput = Object.freeze({
     operationId: classified('INTERNAL', request.definition.operationId),
@@ -1967,7 +1972,7 @@ function acceptedCommand(
   });
   return Object.freeze({
     actionId: request.definition.operationId,
-    causationId: null,
+    causationId,
     change: Object.freeze({
       changeDocumentId: ids.changeDocumentId,
       changes: preparation.changes,
@@ -2403,6 +2408,20 @@ async function insertRecord(
      VALUES (${parameters.join(', ')})`,
     values,
   );
+  if (entity.legalEntity) {
+    // The company the row was written with, as stored by this insert.
+    const slot = parameters[columns.indexOf(entity.legalEntity.column)];
+    const company = slot?.match(/^\$(\d+)$/u)
+      ? values[Number(slot.slice(1)) - 1]
+      : undefined;
+    if (typeof company !== 'string')
+      throw failure(
+        'MODULE_STORAGE_COLUMN_AUTHORITY_CONFLICT',
+        'a company-owned create names no company',
+        entity.entityId,
+      );
+    await recordCreations(client, entity, company, [input.recordId]);
+  }
 }
 
 async function requireExistingParentGuards(

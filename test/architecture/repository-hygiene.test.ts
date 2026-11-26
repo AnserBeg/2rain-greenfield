@@ -71,6 +71,7 @@ const suiteDefinitions = [
       'test/unit/surface-assets.test.ts',
       'test/unit/surface-presentation.test.ts',
       'test/unit/web-surface-hex-literal-ratchet.test.ts',
+      'test/unit/workflow-triggers.test.ts',
       'test/unit/workspace-contract.test.ts',
     ],
     script: 'test:unit',
@@ -148,6 +149,7 @@ const suiteDefinitions = [
       'test/architecture/module-press-law.test.ts',
       'test/architecture/pilot-identity-boundary.test.ts',
       'test/architecture/record-claim-fidelity.test.ts',
+      'test/architecture/record-creation-writers.test.ts',
       'test/architecture/release-activation-boundary.test.ts',
       'test/architecture/release-persistence-boundary.test.ts',
       'test/architecture/repository-hygiene.test.ts',
@@ -276,6 +278,7 @@ const suiteDefinitions = [
       'test/postgres/tenant-isolation.test.ts',
       'test/postgres/trust-substrate.test.ts',
       'test/postgres/workflow-consumer.test.ts',
+      'test/postgres/workflow-record-created.test.ts',
     ],
     scripts: [
       'test:postgres:1',

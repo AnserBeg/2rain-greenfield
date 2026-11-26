@@ -15,6 +15,7 @@ import {
   BILLING_INTERVAL_READER,
 } from '../../packages/canonical-model/src/billing.js';
 import { RECORD_TEMPLATE_READER } from '../../packages/canonical-model/src/record-template.js';
+import { RECORD_CREATED_TRIGGER_READER } from '../../packages/canonical-model/src/workflows.js';
 import { MAP_VIEW_READER } from '../../packages/canonical-model/src/map-view.js';
 import { DATE_TIME_FIELD_READER } from '../../packages/canonical-model/src/date-time-field.js';
 import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../packages/canonical-model/src/surface-workspace.js';
@@ -553,6 +554,7 @@ test('the capability comparison binds the family to its capability, then compare
     LOGICAL_FIELD_READER,
     REPORT_ANALYSIS_READER,
     REPORT_MEASURE_READER,
+    RECORD_CREATED_TRIGGER_READER,
   ];
   // Each capability owns its own rung: a renumbering collision at a merge
   // would let one feature's floor stand in for another's.
@@ -613,7 +615,7 @@ test('the capability comparison binds the family to its capability, then compare
   // capability on one side alone reds here rather than in production.
   assert.deepEqual(SUPPORTED_RUNTIME_CAPABILITIES[surface], {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
-    maximumSupportedVersion: REPORT_MEASURE_READER,
+    maximumSupportedVersion: RECORD_CREATED_TRIGGER_READER,
   });
 });
 
@@ -1247,7 +1249,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
               ],
               {
                 capabilityId: 'northstar.runtime:capability.surface-manifest',
-                maximumSupportedVersion: REPORT_MEASURE_READER,
+                maximumSupportedVersion: RECORD_CREATED_TRIGGER_READER,
               },
             );
           },
@@ -1272,7 +1274,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
               new RegExp(
-                `requires version 999 and this runtime supports ${REPORT_MEASURE_READER}`,
+                `requires version 999 and this runtime supports ${RECORD_CREATED_TRIGGER_READER}`,
               ),
             );
           },
@@ -1303,7 +1305,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
               new RegExp(
-                `requires version 999 and this runtime supports ${REPORT_MEASURE_READER}`,
+                `requires version 999 and this runtime supports ${RECORD_CREATED_TRIGGER_READER}`,
               ),
             );
           },

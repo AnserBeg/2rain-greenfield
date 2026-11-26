@@ -291,7 +291,7 @@ export const DRAFTER_KINDS = {
   saveWorkflow: {
     input: WorkflowDraftSchema,
     guidance:
-      'An automation that runs when goods are received, written as a TypeScript function body with fixtures. Only when receipt workflow declarations are given below.',
+      'An automation that runs when its trigger fires (a posted goods receipt, or a record of a listed type being created), written as a TypeScript function body with fixtures. Only when workflow declarations are given below.',
   },
   changeSet: {
     input: z.strictObject({

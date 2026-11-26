@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "packet": "WORKFLOW-2",
+  "entries": [
+    {
+      "name": "workflow-worklist-retried-wait-fence",
+      "claim": "The approval worklist resolves each pending approval's trigger company only at the run's current fence, so a waiting approval that staff Retry moved to a new fence is listed once, not once per PENDING fence row.",
+      "file": "db/migrations/0070_record_creation_occurrences.sql",
+      "original": "       AND a.fence = r.execution_fence\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/workflow-record-created.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-record-created.test.ts",
+          "name": "recordCreated runs ask for approval in their own company, link only their trigger type and never restart themselves",
+          "expected": "a staff-retried waiting approval is listed exactly once"
+        }
+      ]
+    }
+  ]
+}
