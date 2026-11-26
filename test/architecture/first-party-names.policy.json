@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "about": "GUARD-WIDEN name law: generic code never names a declared application's vocabulary. Read by packages/dev-tooling/src/module-press-law.ts (PRESS010-PRESS015).",
+  "vocabularySources": ["apps/web/release/app.authored.json"],
+  "requiredNames": [
+    "purchase_order",
+    "sales_order",
+    "shipment",
+    "stock_count",
+    "customer_invoice",
+    "vendor_bill"
+  ],
+  "scope": [
+    "packages/postgres-provider/src",
+    "packages/runtime/src",
+    "packages/platform-runtime/src",
+    "packages/compiler/src",
+    "packages/canonical-model/src",
+    "packages/customization/src",
+    "packages/operations-agent/src",
+    "apps/web/src",
+    "db/migrations"
+  ],
+  "moduleWords": ["receiving", "fulfillment", "payables", "receivables"],
+  "ordinaryWords": [
+    "catalog",
+    "commercial",
+    "inventory",
+    "item",
+    "ledger",
+    "location",
+    "party",
+    "posting",
+    "reservation",
+    "sales",
+    "valuation"
+  ],
+  "platformOwned": [
+    {
+      "name": "legal_entity",
+      "reason": "ADR-0015 makes the legal entity (company) the platform's business scoping dimension; every generic layer scopes by it, so it is platform vocabulary, not an application's."
+    }
+  ],
+  "externalNames": [
+    {
+      "file": "packages/postgres-provider/src/address-provider.ts",
+      "name": "location_type",
+      "reason": "The geocoding provider's own response key (geometry.location_type), not the first-party Location field."
+    }
+  ]
+}

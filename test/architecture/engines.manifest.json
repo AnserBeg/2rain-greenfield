@@ -1,0 +1,143 @@
+{
+  "version": 1,
+  "about": "GUARD-WIDEN engines manifest. An engine's own name is allowed only in the files it owns here; one engine naming another is PRESS014. Adding an engine, or a file to an engine, is a reviewed row. nameScope exclusive: generic code may not name the engine at all (rule 16 names booking and billing). nameScope engines-only: the name is platform vocabulary in generic code, and only the cross-engine rule applies.",
+  "engines": [
+    {
+      "id": "booking",
+      "names": ["booking"],
+      "nameScope": "exclusive",
+      "businesses": [
+        "equipment rental",
+        "clinic appointments",
+        "hotel rooms",
+        "field service crews"
+      ],
+      "adr": "docs/decisions/ADR-0082-booking-over-time.md",
+      "files": [
+        "packages/postgres-provider/src/booking-capability-executor.ts",
+        "packages/postgres-provider/src/booking-owner-usage.ts",
+        "packages/canonical-model/src/booking.ts",
+        "db/migrations/0050_booking_commitments.sql",
+        "db/migrations/0053_booking_authority.sql",
+        "db/migrations/0056_booking_lock_order.sql",
+        "db/migrations/0059_booking_fulfilment.sql",
+        "db/migrations/0062_booking_recovery.sql"
+      ]
+    },
+    {
+      "id": "billing",
+      "names": ["billing"],
+      "nameScope": "exclusive",
+      "businesses": [
+        "equipment rental",
+        "storage",
+        "subscriptions",
+        "service contracts"
+      ],
+      "adr": "docs/decisions/ADR-0083-period-and-usage-billing.md",
+      "files": [
+        "packages/postgres-provider/src/billing-booking-usage.ts",
+        "packages/postgres-provider/src/billing-quote.ts",
+        "packages/postgres-provider/src/billing-terms.ts",
+        "packages/canonical-model/src/billing.ts",
+        "packages/canonical-model/src/billing-evidence.ts",
+        "packages/canonical-model/src/billing-normalization.ts",
+        "packages/compiler/src/billing.ts",
+        "db/migrations/0051_billing_rate_tables.sql",
+        "db/migrations/0057_billing_publication.sql",
+        "db/migrations/0068_billing_publication_xid.sql"
+      ]
+    },
+    {
+      "id": "stock-posting",
+      "names": ["inventory_posting", "stock_posting"],
+      "nameScope": "engines-only",
+      "businesses": [
+        "distribution",
+        "retail",
+        "manufacturing",
+        "equipment rental"
+      ],
+      "adr": "docs/decisions/ADR-0026-inventory-posting-capability.md",
+      "files": [
+        "packages/postgres-provider/src/inventory-posting-service.ts",
+        "packages/postgres-provider/src/inventory-posting-capability-executor.ts",
+        "packages/postgres-provider/src/inventory-posting-error.ts",
+        "packages/postgres-provider/src/inventory-reconciliation-service.ts",
+        "packages/postgres-provider/src/inventory-valuation.ts",
+        "db/migrations/0015_inventory_storage_foundation.sql",
+        "db/migrations/0016_inventory_posting_receipt_digest_version.sql",
+        "db/migrations/0017_inventory_stock_count_receipt_digest_version.sql",
+        "db/migrations/0019_inventory_release_provenance_and_partition_null_safety.sql",
+        "db/migrations/0023_inventory_stock_count_companion_digest_version.sql",
+        "db/migrations/0026_inventory_projection_discrepancies.sql"
+      ]
+    },
+    {
+      "id": "settlement",
+      "names": ["settlement"],
+      "nameScope": "engines-only",
+      "businesses": ["distribution", "field service", "professional services"],
+      "adr": null,
+      "adrNote": "No ADR of its own. ADR-0083 and ADR-0084 cite settlement-capability-executor.ts as the shared Receivables and Payables writer.",
+      "files": [
+        "packages/postgres-provider/src/settlement-capability-executor.ts",
+        "packages/postgres-provider/src/commercial-amounts.ts"
+      ]
+    },
+    {
+      "id": "workflow",
+      "names": ["workflow"],
+      "nameScope": "engines-only",
+      "businesses": [
+        "equipment rental",
+        "distribution",
+        "clinics",
+        "field service"
+      ],
+      "adr": "docs/decisions/ADR-0073-workflow-isolate-and-authority.md",
+      "files": [
+        "apps/web/src/workflow-approvals.ts",
+        "db/migrations/0036_workflow_substrate.sql",
+        "db/migrations/0038_workflow_review_fixes.sql",
+        "db/migrations/0041_workflow_authority.sql",
+        "db/migrations/0043_workflow_approval_scope.sql",
+        "db/migrations/0046_workflow_approval_target_scope.sql",
+        "db/migrations/0054_workflow_retry_authority.sql",
+        "db/migrations/0067_workflow_start_limits.sql",
+        "packages/canonical-model/src/workflows.ts",
+        "packages/compiler/src/workflow-dependencies.ts",
+        "packages/compiler/src/workflows.ts",
+        "packages/customization/src/workflow-draft.ts",
+        "packages/postgres-provider/src/workflow-admission.ts",
+        "packages/postgres-provider/src/workflow-bundle.ts",
+        "packages/postgres-provider/src/workflow-compile.ts",
+        "packages/postgres-provider/src/workflow-consumer.ts",
+        "packages/postgres-provider/src/workflow-draft-worker.ts",
+        "packages/postgres-provider/src/workflow-execution.ts",
+        "packages/postgres-provider/src/workflow-gateway.ts",
+        "packages/postgres-provider/src/workflow-isolate-worker.ts",
+        "packages/postgres-provider/src/workflow-isolate.ts",
+        "packages/postgres-provider/src/workflow-review.ts",
+        "packages/postgres-provider/src/workflow-run.ts",
+        "packages/postgres-provider/src/workflow-sdk-version.ts",
+        "packages/postgres-provider/src/workflow-sdk.ts",
+        "packages/postgres-provider/src/workflow-verification.ts",
+        "packages/postgres-provider/src/workflow-worker.ts"
+      ]
+    },
+    {
+      "id": "ledger",
+      "names": ["ledger", "general_ledger", "subledger"],
+      "nameScope": "engines-only",
+      "businesses": [
+        "distribution",
+        "equipment rental",
+        "professional services"
+      ],
+      "adr": "docs/decisions/ADR-0093-ledger-and-posting-rules.md",
+      "adrNote": "ACCOUNTING-1 s0 landed the ADR only, so the ledger owns no files yet. 'ledger' alone is ordinary English (the stock ledger, ledger styles), so it counts only in ID position (northstar.ledger).",
+      "files": []
+    }
+  ]
+}

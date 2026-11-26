@@ -1,0 +1,1380 @@
+{
+  "version": 1,
+  "measuredOn": "origin/main e112d58ff799912d7b743d5eb7fbd79f796c5318",
+  "files": {
+    "apps/web/src/component-registry.ts": {
+      "owner": "SECTION-BLOCKS",
+      "cluster": "C11",
+      "expires": "2027-03-31",
+      "names": {
+        "field:shipment_number": 1,
+        "name:fulfillment": 1,
+        "name:receiving": 15,
+        "name:reservation_list": 1,
+        "name:sales_order": 8,
+        "name:sales_order_line": 1,
+        "name:shipment": 7,
+        "name:shipment_list": 1
+      }
+    },
+    "apps/web/src/customize-screen.ts": {
+      "owner": "UNASSIGNED",
+      "cluster": "unclassified",
+      "expires": "2027-03-31",
+      "names": {
+        "name:purchase_order": 1
+      }
+    },
+    "apps/web/src/receiving-section.ts": {
+      "owner": "SECTION-BLOCKS",
+      "cluster": "C11",
+      "expires": "2027-03-31",
+      "names": {
+        "field:purchase_order_line_item_id": 2,
+        "field:purchase_order_line_ordered_quantity": 1,
+        "field:purchase_order_number": 1,
+        "field:purchase_order_received_received_quantity": 1,
+        "name:commercial_purchase_order_list": 1,
+        "name:goods_receipt": 6,
+        "name:goods_receipt_get": 1,
+        "name:goods_receipt_line": 1,
+        "name:goods_receipt_line_get": 1,
+        "name:goods_receipt_line_list": 2,
+        "name:goods_receipt_list": 3,
+        "name:purchase_order": 3,
+        "name:purchase_order_amendment": 1,
+        "name:purchase_order_amendment_get": 1,
+        "name:purchase_order_line": 8,
+        "name:purchase_order_line_get": 1,
+        "name:purchase_order_list": 2,
+        "name:purchase_order_received": 3,
+        "name:receiving": 27
+      }
+    },
+    "apps/web/src/sales-section.ts": {
+      "owner": "SECTION-BLOCKS",
+      "cluster": "C11",
+      "expires": "2027-03-31",
+      "names": {
+        "field:posted_stock_balance_item_id": 1,
+        "field:posted_stock_balance_location_id": 1,
+        "field:posted_stock_balance_posted_quantity": 1,
+        "field:reservation_balance_remaining_quantity": 2,
+        "field:reservation_item_id": 1,
+        "field:reservation_location_id": 1,
+        "field:reservation_number": 1,
+        "field:sales_order_line_item_id": 3,
+        "field:sales_order_line_line_number": 1,
+        "field:sales_order_line_ordered_quantity": 1,
+        "field:sales_order_line_unit_id": 1,
+        "field:sales_order_line_unit_price": 2,
+        "field:sales_order_number": 1,
+        "field:sales_order_shipped_shipped_quantity": 1,
+        "field:shipment_effective_at": 1,
+        "field:shipment_external_reference": 2,
+        "field:shipment_line_item_id": 1,
+        "field:shipment_line_line_number": 1,
+        "field:shipment_line_quantity": 1,
+        "field:shipment_line_unit_id": 1,
+        "field:shipment_location_id": 1,
+        "field:shipment_number": 5,
+        "field:shipment_state": 2,
+        "name:fulfillment": 4,
+        "name:posted_stock_balance": 1,
+        "name:receiving": 6,
+        "name:reservation": 2,
+        "name:reservation_balance": 7,
+        "name:reservation_get": 1,
+        "name:reservation_list": 3,
+        "name:sales_order": 7,
+        "name:sales_order_line": 4,
+        "name:sales_order_line_get": 1,
+        "name:sales_order_line_list": 4,
+        "name:sales_order_list": 1,
+        "name:sales_order_shipped": 3,
+        "name:shipment": 23,
+        "name:shipment_get": 1,
+        "name:shipment_line": 1,
+        "name:shipment_line_list": 1,
+        "name:shipment_list": 3
+      }
+    },
+    "apps/web/src/surface-composition.ts": {
+      "owner": "SECTION-BLOCKS",
+      "cluster": "C11",
+      "expires": "2027-03-31",
+      "names": {
+        "field:location_status": 4
+      }
+    },
+    "db/migrations/0015_inventory_storage_foundation.sql": {
+      "owner": "HISTORY",
+      "cluster": "history",
+      "expires": null,
+      "names": {
+        "name:inventory_movement": 8,
+        "name:inventory_period_lock": 6
+      }
+    },
+    "db/migrations/0017_inventory_stock_count_receipt_digest_version.sql": {
+      "owner": "HISTORY",
+      "cluster": "history",
+      "expires": null,
+      "names": {
+        "name:stock_count": 1
+      }
+    },
+    "db/migrations/0020_semantic_aggregate_anchors.sql": {
+      "owner": "HISTORY",
+      "cluster": "history",
+      "expires": null,
+      "names": {
+        "name:inventory_movement": 4
+      }
+    },
+    "db/migrations/0023_inventory_stock_count_companion_digest_version.sql": {
+      "owner": "HISTORY",
+      "cluster": "history",
+      "expires": null,
+      "names": {
+        "name:stock_count": 1
+      }
+    },
+    "db/migrations/0028_sale_fulfillment.sql": {
+      "owner": "HISTORY",
+      "cluster": "history",
+      "expires": null,
+      "names": {
+        "name:fulfillment": 4
+      }
+    },
+    "db/migrations/0033_definer_search_paths.sql": {
+      "owner": "HISTORY",
+      "cluster": "history",
+      "expires": null,
+      "names": {
+        "name:inventory_movement": 1,
+        "name:inventory_period_lock": 4
+      }
+    },
+    "db/migrations/0050_booking_commitments.sql": {
+      "owner": "HISTORY",
+      "cluster": "history",
+      "expires": null,
+      "names": {
+        "engine:workflow": 3
+      }
+    },
+    "db/migrations/0053_booking_authority.sql": {
+      "owner": "HISTORY",
+      "cluster": "history",
+      "expires": null,
+      "names": {
+        "engine:workflow": 1
+      }
+    },
+    "db/migrations/0057_billing_publication.sql": {
+      "owner": "HISTORY",
+      "cluster": "history",
+      "expires": null,
+      "names": {
+        "name:price_list": 1
+      }
+    },
+    "db/migrations/0059_booking_fulfilment.sql": {
+      "owner": "HISTORY",
+      "cluster": "history",
+      "expires": null,
+      "names": {
+        "engine:workflow": 3
+      }
+    },
+    "db/migrations/0062_booking_recovery.sql": {
+      "owner": "HISTORY",
+      "cluster": "history",
+      "expires": null,
+      "names": {
+        "engine:workflow": 1
+      }
+    },
+    "db/migrations/0063_communication_threads.sql": {
+      "owner": "HISTORY",
+      "cluster": "history",
+      "expires": null,
+      "names": {
+        "engine:booking": 7
+      }
+    },
+    "db/migrations/0069_record_template_library.sql": {
+      "owner": "HISTORY",
+      "cluster": "history",
+      "expires": null,
+      "names": {
+        "engine:booking": 1
+      }
+    },
+    "packages/canonical-model/src/billing.ts": {
+      "owner": "GENERALIZE-1",
+      "cluster": "C12",
+      "expires": "2027-03-31",
+      "names": {
+        "engine:booking": 1,
+        "name:price_list": 1
+      }
+    },
+    "packages/canonical-model/src/calculated-display-bindings.ts": {
+      "owner": "GENERALIZE-1",
+      "cluster": "C8",
+      "expires": "2027-03-31",
+      "names": {
+        "field:item_price_cad": 1,
+        "field:item_price_eur": 1,
+        "field:item_price_usd": 1,
+        "field:item_standard_cost_cad": 1,
+        "field:item_standard_cost_eur": 1,
+        "field:item_standard_cost_usd": 1
+      }
+    },
+    "packages/canonical-model/src/document-template-schema.ts": {
+      "owner": "GENERALIZE-1",
+      "cluster": "C8",
+      "expires": "2027-03-31",
+      "names": {
+        "name:purchase_order": 1
+      }
+    },
+    "packages/canonical-model/src/index.ts": {
+      "owner": "GENERALIZE-1",
+      "cluster": "C8",
+      "expires": "2027-03-31",
+      "names": {
+        "engine:booking": 1
+      }
+    },
+    "packages/canonical-model/src/layout.ts": {
+      "owner": "GENERALIZE-1",
+      "cluster": "C8",
+      "expires": "2027-03-31",
+      "names": {
+        "field:item_base_unit": 1,
+        "name:purchase_order": 1,
+        "name:sales_order": 1
+      }
+    },
+    "packages/canonical-model/src/normalize.ts": {
+      "owner": "GENERALIZE-1",
+      "cluster": "C8",
+      "expires": "2027-03-31",
+      "names": {
+        "engine:billing": 6
+      }
+    },
+    "packages/canonical-model/src/popup-actions.ts": {
+      "owner": "UNASSIGNED",
+      "cluster": "unclassified",
+      "expires": "2027-03-31",
+      "names": {
+        "field:item_base_unit": 1
+      }
+    },
+    "packages/canonical-model/src/schemas.ts": {
+      "owner": "GENERALIZE-1",
+      "cluster": "C8",
+      "expires": "2027-03-31",
+      "names": {
+        "engine:billing": 6,
+        "engine:booking": 6,
+        "field:location_status": 1,
+        "name:goods_receipt": 1
+      }
+    },
+    "packages/canonical-model/src/surface-composition.ts": {
+      "owner": "SECTION-BLOCKS",
+      "cluster": "C11",
+      "expires": "2027-03-31",
+      "names": {
+        "field:location_status": 5
+      }
+    },
+    "packages/canonical-model/src/surface-launcher.ts": {
+      "owner": "UNASSIGNED",
+      "cluster": "unclassified",
+      "expires": "2027-03-31",
+      "names": {
+        "name:inventory": 1
+      }
+    },
+    "packages/compiler/src/billing.ts": {
+      "owner": "GENERALIZE-1",
+      "cluster": "C12",
+      "expires": "2027-03-31",
+      "names": {
+        "engine:booking": 14
+      }
+    },
+    "packages/compiler/src/compiler.ts": {
+      "owner": "GENERALIZE-1",
+      "cluster": "C8",
+      "expires": "2027-03-31",
+      "names": {
+        "engine:billing": 7,
+        "engine:booking": 22
+      }
+    },
+    "packages/compiler/src/conformance.ts": {
+      "owner": "DOMAIN-PROFILE",
+      "cluster": "C8",
+      "expires": "2027-03-31",
+      "names": {
+        "field:inventory_movement_actor_id": 1,
+        "field:inventory_movement_effective_at": 2,
+        "field:inventory_movement_item_id": 3,
+        "field:inventory_movement_location_id": 3,
+        "field:inventory_movement_posting_role": 2,
+        "field:inventory_movement_quantity_delta": 1,
+        "field:inventory_movement_reason_code": 1,
+        "field:inventory_movement_reason_narrative": 1,
+        "field:inventory_movement_recorded_at": 4,
+        "field:inventory_movement_reversal_of_movement_id": 1,
+        "field:inventory_movement_source_id": 2,
+        "field:inventory_movement_source_line": 2,
+        "field:inventory_movement_source_revision": 2,
+        "field:inventory_movement_source_type": 2,
+        "field:inventory_movement_stock_dimension_set_version": 3,
+        "field:inventory_movement_unit_id": 2,
+        "field:inventory_transaction_line_from_location_id": 1,
+        "field:inventory_transaction_line_item_id": 1,
+        "field:inventory_transaction_line_to_location_id": 1,
+        "field:item_base_unit": 3,
+        "field:posted_stock_balance_item_id": 1,
+        "field:posted_stock_balance_location_id": 1,
+        "field:posted_stock_balance_posted_quantity": 3,
+        "field:posted_stock_balance_unit_id": 3,
+        "field:purchase_order_received_received_quantity": 1,
+        "field:purchase_order_received_unit_id": 1,
+        "field:reservation_balance_remaining_quantity": 1,
+        "field:reservation_balance_unit_id": 1,
+        "field:sales_order_shipped_shipped_quantity": 1,
+        "field:sales_order_shipped_unit_id": 1,
+        "field:stock_count_actor_id": 1,
+        "field:stock_count_count_type": 6,
+        "field:stock_count_counted_at": 1,
+        "field:stock_count_counting_mode": 4,
+        "field:stock_count_kind": 4,
+        "field:stock_count_line_counted_quantity": 1,
+        "field:stock_count_line_expected_quantity": 1,
+        "field:stock_count_line_item_id": 2,
+        "field:stock_count_line_line_number": 1,
+        "field:stock_count_line_physical_quantity": 2,
+        "field:stock_count_line_reversal_of_movement_id": 1,
+        "field:stock_count_line_unit_id": 1,
+        "field:stock_count_line_variance_quantity": 1,
+        "field:stock_count_location_id": 2,
+        "field:stock_count_number": 1,
+        "field:stock_count_reason_code": 1,
+        "field:stock_count_reason_narrative": 1,
+        "field:stock_count_recorded_at": 1,
+        "field:stock_count_state": 14,
+        "name:advance_period_lock": 4,
+        "name:customer_credit": 2,
+        "name:customer_invoice": 5,
+        "name:customer_invoice_line": 3,
+        "name:customer_payment": 2,
+        "name:goods_receipt": 5,
+        "name:goods_receipt_line": 3,
+        "name:inventory": 10,
+        "name:inventory_movement": 94,
+        "name:inventory_period_lock": 11,
+        "name:inventory_transaction": 8,
+        "name:inventory_transaction_line": 11,
+        "name:item_alias": 2,
+        "name:party_address": 2,
+        "name:party_role": 2,
+        "name:posted_stock_balance": 15,
+        "name:posting": 3,
+        "name:price_list": 3,
+        "name:price_list_assignment": 2,
+        "name:price_list_entry": 2,
+        "name:purchase_order": 5,
+        "name:purchase_order_amendment": 2,
+        "name:purchase_order_approval": 2,
+        "name:purchase_order_line": 6,
+        "name:purchase_order_received": 6,
+        "name:purchasing_settings": 1,
+        "name:reopen_period": 4,
+        "name:reservation_balance": 4,
+        "name:sales_order": 4,
+        "name:sales_order_line": 6,
+        "name:sales_order_shipped": 6,
+        "name:shipment": 7,
+        "name:shipment_line": 4,
+        "name:stock_count": 39,
+        "name:stock_count_line": 16,
+        "name:tax_code": 1,
+        "name:vendor_bill": 5,
+        "name:vendor_bill_line": 3,
+        "name:vendor_credit": 2,
+        "name:vendor_payment": 2
+      }
+    },
+    "packages/compiler/src/projections.ts": {
+      "owner": "GENERALIZE-1",
+      "cluster": "C8",
+      "expires": "2027-03-31",
+      "names": {
+        "engine:billing": 18,
+        "engine:booking": 9,
+        "name:stock_count": 4
+      }
+    },
+    "packages/compiler/src/storage.ts": {
+      "owner": "DOMAIN-PROFILE",
+      "cluster": "C8",
+      "expires": "2027-03-31",
+      "names": {
+        "field:inventory_period_lock_closed_through": 1,
+        "name:inventory_movement": 2,
+        "name:inventory_period_lock": 4
+      }
+    },
+    "packages/customization/src/ai-draft.ts": {
+      "owner": "GENERALIZE-1",
+      "cluster": "C8",
+      "expires": "2027-03-31",
+      "names": {
+        "name:goods_receipt": 2
+      }
+    },
+    "packages/customization/src/apply.ts": {
+      "owner": "GENERALIZE-1",
+      "cluster": "C8",
+      "expires": "2027-03-31",
+      "names": {
+        "engine:billing": 3,
+        "name:inventory": 1,
+        "name:standard_surface_content": 3
+      }
+    },
+    "packages/customization/src/patch.ts": {
+      "owner": "GENERALIZE-1",
+      "cluster": "C8",
+      "expires": "2027-03-31",
+      "names": {
+        "engine:billing": 4
+      }
+    },
+    "packages/customization/src/render.ts": {
+      "owner": "GENERALIZE-1",
+      "cluster": "C8",
+      "expires": "2027-03-31",
+      "names": {
+        "engine:billing": 15
+      }
+    },
+    "packages/customization/src/targets.ts": {
+      "owner": "UNASSIGNED",
+      "cluster": "unclassified",
+      "expires": "2027-03-31",
+      "names": {
+        "name:inventory": 1
+      }
+    },
+    "packages/customization/src/workflow-draft.ts": {
+      "owner": "WORKFLOW-2",
+      "cluster": "C9",
+      "expires": "2027-03-31",
+      "names": {
+        "name:goods_receipt": 1
+      }
+    },
+    "packages/operations-agent/src/session.ts": {
+      "owner": "AGENT-CATALOG",
+      "cluster": "C10",
+      "expires": "2027-03-31",
+      "names": {
+        "import:packages/domain/src/app/capability-children": 1,
+        "import:packages/domain/src/app/record-references": 1,
+        "import:packages/domain/src/purchasing/approval-arguments": 1,
+        "import:packages/domain/src/purchasing/approvals": 1,
+        "name:purchasing": 2,
+        "name:shipment": 1
+      }
+    },
+    "packages/postgres-provider/src/billing-booking-usage.ts": {
+      "owner": "GENERALIZE-1",
+      "cluster": "C12",
+      "expires": "2027-03-31",
+      "names": {
+        "engine:booking": 33,
+        "import:packages/domain/src/billing/fraction": 1
+      }
+    },
+    "packages/postgres-provider/src/billing-quote.ts": {
+      "owner": "GENERALIZE-1",
+      "cluster": "C12",
+      "expires": "2027-03-31",
+      "names": {
+        "engine:booking": 16,
+        "import:packages/domain/src/billing/arrears": 1,
+        "import:packages/domain/src/billing/quote": 1,
+        "import:packages/domain/src/billing/terms": 1
+      }
+    },
+    "packages/postgres-provider/src/billing-terms.ts": {
+      "owner": "GENERALIZE-1",
+      "cluster": "C12",
+      "expires": "2027-03-31",
+      "names": {
+        "import:packages/domain/src/billing/terms": 1,
+        "name:fulfillment": 5
+      }
+    },
+    "packages/postgres-provider/src/booking-capability-executor.ts": {
+      "owner": "GENERALIZE-1",
+      "cluster": "C12",
+      "expires": "2027-03-31",
+      "names": {
+        "engine:workflow": 1
+      }
+    },
+    "packages/postgres-provider/src/commercial-read-model.ts": {
+      "owner": "LINE-TOTALS",
+      "cluster": "C5",
+      "expires": "2027-03-31",
+      "names": {
+        "field:purchase_order_approval_kind": 1,
+        "field:purchase_order_approval_revision_digest": 1,
+        "field:purchase_order_approval_state": 2,
+        "field:purchase_order_line_ordered_quantity": 1,
+        "field:purchase_order_received_received_quantity": 1,
+        "field:purchasing_settings_key": 2,
+        "field:purchasing_settings_require_approval": 1,
+        "field:sales_order_currency": 1,
+        "field:sales_order_customer_party_id": 1,
+        "field:sales_order_line_list_price": 1,
+        "field:sales_order_line_price_list_id": 1,
+        "field:sales_order_line_unit_price": 1,
+        "field:sales_order_shipped_shipped_quantity": 1,
+        "field:vendor_bill_line_quantity": 1,
+        "field:vendor_bill_number": 1,
+        "field:vendor_bill_state": 2,
+        "import:packages/domain/src/sales/workspace": 1,
+        "name:customer_credit": 2,
+        "name:customer_invoice": 2,
+        "name:customer_invoice_line": 2,
+        "name:fulfillment": 3,
+        "name:price_list": 3,
+        "name:purchase_order": 5,
+        "name:purchase_order_approval": 3,
+        "name:purchasing": 1,
+        "name:sales_order": 1,
+        "name:tax_code": 5,
+        "name:vendor_bill": 2,
+        "name:vendor_bill_line": 4
+      }
+    },
+    "packages/postgres-provider/src/composed-application-runtime.ts": {
+      "owner": "GENERALIZE-1",
+      "cluster": "C8",
+      "expires": "2027-03-31",
+      "names": {
+        "name:purchase_order": 1,
+        "name:purchasing_settings": 1
+      }
+    },
+    "packages/postgres-provider/src/credit-read-model.ts": {
+      "owner": "OPEN-ITEM-1",
+      "cluster": "C4",
+      "expires": "2027-03-31",
+      "names": {
+        "field:customer_invoice_state": 2,
+        "field:party_credit_hold": 1,
+        "field:party_credit_limit": 1,
+        "field:party_default_currency": 2,
+        "import:packages/domain/src/sales/workspace": 1,
+        "name:customer_credit": 2,
+        "name:customer_invoice": 2,
+        "name:sales_order": 3,
+        "name:sales_order_line": 2,
+        "name:tax_code": 5
+      }
+    },
+    "packages/postgres-provider/src/current-policy.ts": {
+      "owner": "STOCK-POSTING-RULES",
+      "cluster": "C2",
+      "expires": "2027-03-31",
+      "names": {
+        "name:goods_receipt": 7,
+        "name:goods_receipt_archive": 1,
+        "name:goods_receipt_create": 1,
+        "name:goods_receipt_line": 6,
+        "name:goods_receipt_line_archive": 1,
+        "name:goods_receipt_line_create": 1,
+        "name:goods_receipt_line_restore": 1,
+        "name:goods_receipt_line_update": 1,
+        "name:goods_receipt_post": 1,
+        "name:goods_receipt_restore": 1,
+        "name:goods_receipt_update": 1,
+        "name:purchase_order_line": 1,
+        "name:purchase_order_line_amend": 1,
+        "name:purchase_order_received": 2
+      }
+    },
+    "packages/postgres-provider/src/customization-service.ts": {
+      "owner": "WORKFLOW-2",
+      "cluster": "C9",
+      "expires": "2027-03-31",
+      "names": {
+        "import:packages/domain/src/purchasing/receipt-posted-event": 1,
+        "name:purchasing": 1
+      }
+    },
+    "packages/postgres-provider/src/fulfillment-capability-executor.ts": {
+      "owner": "STOCK-POSTING-RULES",
+      "cluster": "C1",
+      "expires": "2027-03-31",
+      "names": {
+        "field:inventory_transaction_state": 2,
+        "field:reservation_item_id": 1,
+        "field:reservation_location_id": 1,
+        "field:shipment_kind": 1,
+        "field:shipment_number": 1,
+        "name:fulfillment": 65,
+        "name:reservation_release": 2,
+        "name:reservation_reserve": 2,
+        "name:sales_order_cancel": 2,
+        "name:sales_order_close": 2,
+        "name:shipment": 24,
+        "name:shipment_line": 11,
+        "name:shipment_post": 3
+      }
+    },
+    "packages/postgres-provider/src/fulfillment-lifecycle.ts": {
+      "owner": "LIFECYCLE-GUARDS",
+      "cluster": "C1",
+      "expires": "2027-03-31",
+      "names": {
+        "field:inventory_movement_quantity_delta": 1,
+        "field:inventory_movement_source_line": 1,
+        "field:inventory_movement_source_type": 1,
+        "field:inventory_transaction_state": 2,
+        "field:item_base_unit": 1,
+        "field:party_role_kind": 2,
+        "field:party_role_status": 2,
+        "field:posted_stock_balance_item_id": 1,
+        "field:posted_stock_balance_location_id": 1,
+        "field:posted_stock_balance_posted_quantity": 1,
+        "field:reservation_balance_remaining_quantity": 4,
+        "field:reservation_balance_unit_id": 4,
+        "field:reservation_item_id": 2,
+        "field:reservation_location_id": 2,
+        "field:reservation_quantity": 2,
+        "field:reservation_reason": 1,
+        "field:reservation_state": 25,
+        "field:reservation_unit_id": 3,
+        "field:sales_order_customer_party_id": 1,
+        "field:sales_order_line_item_id": 1,
+        "field:sales_order_line_ordered_quantity": 2,
+        "field:sales_order_line_unit_id": 1,
+        "field:sales_order_shipped_shipped_quantity": 1,
+        "name:fulfillment": 195,
+        "name:party_role": 7,
+        "name:reservation_balance": 6,
+        "name:sales_order": 4,
+        "name:sales_order_line": 4,
+        "name:sales_order_shipped": 1,
+        "name:shipment": 2,
+        "name:shipment_line": 4
+      }
+    },
+    "packages/postgres-provider/src/fulfillment-projections.ts": {
+      "owner": "PROGRESS-QTY",
+      "cluster": "C1/C2",
+      "expires": "2027-03-31",
+      "names": {
+        "field:inventory_movement_posting_role": 2,
+        "field:inventory_movement_quantity_delta": 2,
+        "field:inventory_movement_source_line": 2,
+        "field:inventory_movement_source_type": 2,
+        "field:inventory_movement_unit_id": 2,
+        "field:reservation_balance_remaining_quantity": 2,
+        "field:reservation_balance_unit_id": 2,
+        "field:reservation_quantity": 2,
+        "field:reservation_state": 5,
+        "field:reservation_unit_id": 2,
+        "field:sales_order_shipped_shipped_quantity": 2,
+        "field:sales_order_shipped_unit_id": 2,
+        "name:fulfillment": 85,
+        "name:reservation_balance": 6,
+        "name:sales_order_shipped": 2,
+        "name:shipment": 4,
+        "name:shipment_line": 3
+      }
+    },
+    "packages/postgres-provider/src/fulfillment-read-model.ts": {
+      "owner": "STOCK-POSTING-RULES",
+      "cluster": "C1",
+      "expires": "2027-03-31",
+      "names": {
+        "field:location_status": 2,
+        "field:posted_stock_balance_item_id": 3,
+        "field:posted_stock_balance_location_id": 3,
+        "field:posted_stock_balance_posted_quantity": 3,
+        "field:reservation_balance_remaining_quantity": 1,
+        "field:reservation_item_id": 3,
+        "field:reservation_location_id": 3,
+        "field:reservation_state": 2,
+        "field:sales_order_line_item_id": 1,
+        "field:sales_order_line_line_number": 1,
+        "field:sales_order_line_ordered_quantity": 1,
+        "field:sales_order_shipped_shipped_quantity": 1,
+        "import:packages/domain/src/sales/workspace": 1,
+        "name:fulfillment": 26,
+        "name:reservation": 1,
+        "name:sales_order": 2,
+        "name:sales_order_line": 1
+      }
+    },
+    "packages/postgres-provider/src/fulfillment.ts": {
+      "owner": "STOCK-POSTING-RULES",
+      "cluster": "C1",
+      "expires": "2027-03-31",
+      "names": {
+        "field:shipment_number": 1,
+        "name:fulfillment": 32,
+        "name:inventory_movement": 1,
+        "name:party_role": 3,
+        "name:posted_stock_balance": 1,
+        "name:reservation_balance": 3,
+        "name:sales": 1,
+        "name:sales_order": 1,
+        "name:sales_order_line": 1,
+        "name:sales_order_shipped": 1,
+        "name:shipment": 9,
+        "name:shipment_line": 7
+      }
+    },
+    "packages/postgres-provider/src/goods-receipt.ts": {
+      "owner": "STOCK-POSTING-RULES",
+      "cluster": "C2",
+      "expires": "2027-03-31",
+      "names": {
+        "field:goods_receipt_effective_at": 1,
+        "field:goods_receipt_kind": 1,
+        "field:goods_receipt_line_cost_status": 1,
+        "field:goods_receipt_line_line_number": 1,
+        "field:goods_receipt_line_quantity": 1,
+        "field:goods_receipt_line_unit_cost": 1,
+        "field:goods_receipt_state": 4,
+        "field:inventory_movement_quantity_delta": 1,
+        "field:inventory_movement_source_id": 1,
+        "field:inventory_movement_source_line": 1,
+        "field:inventory_movement_source_type": 1,
+        "field:inventory_movement_unit_id": 2,
+        "field:inventory_transaction_state": 6,
+        "field:purchase_order_line_item_id": 1,
+        "field:purchase_order_line_ordered_quantity": 1,
+        "field:purchase_order_received_received_quantity": 3,
+        "field:purchase_order_received_unit_id": 3,
+        "name:goods_receipt": 13,
+        "name:goods_receipt_line": 9,
+        "name:inventory_movement": 1,
+        "name:purchase_order": 3,
+        "name:purchase_order_line": 2,
+        "name:purchase_order_received": 2,
+        "name:purchasing": 1,
+        "name:receiving": 4
+      }
+    },
+    "packages/postgres-provider/src/inventory-count-read-model.ts": {
+      "owner": "COUNT-SNAPSHOT",
+      "cluster": "C6",
+      "expires": "2027-03-31",
+      "names": {
+        "field:posted_stock_balance_item_id": 1,
+        "field:posted_stock_balance_location_id": 1,
+        "field:posted_stock_balance_posted_quantity": 1,
+        "field:stock_count_counting_mode": 2,
+        "field:stock_count_line_item_id": 1,
+        "field:stock_count_location_id": 1,
+        "field:stock_count_state": 5,
+        "import:packages/domain/src/inventory/workspace": 1,
+        "name:stock_count_line": 2
+      }
+    },
+    "packages/postgres-provider/src/inventory-landed-cost.ts": {
+      "owner": "COSTING",
+      "cluster": "C7",
+      "expires": "2027-03-31",
+      "names": {
+        "name:goods_receipt": 2
+      }
+    },
+    "packages/postgres-provider/src/inventory-posting-capability-executor.ts": {
+      "owner": "STOCK-POSTING-RULES",
+      "cluster": "B3",
+      "expires": "2027-03-31",
+      "names": {
+        "field:inventory_transaction_effective_at": 2,
+        "field:inventory_transaction_line_from_location_id": 1,
+        "field:inventory_transaction_line_item_id": 1,
+        "field:inventory_transaction_line_line_number": 1,
+        "field:inventory_transaction_line_quantity": 1,
+        "field:inventory_transaction_line_to_location_id": 1,
+        "field:inventory_transaction_line_unit_id": 1,
+        "field:inventory_transaction_reason_code": 2,
+        "field:inventory_transaction_reason_narrative": 2,
+        "field:inventory_transaction_source_id": 2,
+        "field:inventory_transaction_source_type": 2,
+        "field:inventory_transaction_state": 1,
+        "field:inventory_transaction_type": 4,
+        "field:posted_stock_balance_item_id": 1,
+        "field:posted_stock_balance_location_id": 1,
+        "field:posted_stock_balance_posted_quantity": 1,
+        "name:inventory_transaction": 2,
+        "name:inventory_transaction_line": 1,
+        "name:posted_stock_balance": 1,
+        "name:stock_count": 20
+      }
+    },
+    "packages/postgres-provider/src/inventory-posting-error.ts": {
+      "owner": "STOCK-POSTING-RULES",
+      "cluster": "B3",
+      "expires": "2027-03-31",
+      "names": {
+        "field:inventory_transaction_state": 1,
+        "field:reservation_state": 1,
+        "name:fulfillment": 7,
+        "name:payables": 9,
+        "name:receivables": 9,
+        "name:shipment": 1
+      }
+    },
+    "packages/postgres-provider/src/inventory-posting-service.ts": {
+      "owner": "STOCK-POSTING-RULES",
+      "cluster": "B3",
+      "expires": "2027-03-31",
+      "names": {
+        "engine:workflow": 1,
+        "field:goods_receipt_state": 6,
+        "field:inventory_movement_actor_id": 3,
+        "field:inventory_movement_effective_at": 6,
+        "field:inventory_movement_item_id": 10,
+        "field:inventory_movement_location_id": 10,
+        "field:inventory_movement_posting_role": 6,
+        "field:inventory_movement_quantity_delta": 15,
+        "field:inventory_movement_reason_code": 4,
+        "field:inventory_movement_reason_narrative": 4,
+        "field:inventory_movement_recorded_at": 4,
+        "field:inventory_movement_reversal_of_movement_id": 4,
+        "field:inventory_movement_source_id": 7,
+        "field:inventory_movement_source_line": 10,
+        "field:inventory_movement_source_revision": 4,
+        "field:inventory_movement_source_type": 10,
+        "field:inventory_movement_stock_dimension_set_version": 4,
+        "field:inventory_movement_unit_id": 11,
+        "field:inventory_transaction_actor_id": 4,
+        "field:inventory_transaction_effective_at": 6,
+        "field:inventory_transaction_line_from_location_id": 2,
+        "field:inventory_transaction_line_item_id": 2,
+        "field:inventory_transaction_line_line_number": 2,
+        "field:inventory_transaction_line_quantity": 2,
+        "field:inventory_transaction_line_to_location_id": 2,
+        "field:inventory_transaction_line_unit_id": 2,
+        "field:inventory_transaction_number": 4,
+        "field:inventory_transaction_reason_code": 6,
+        "field:inventory_transaction_reason_narrative": 6,
+        "field:inventory_transaction_recorded_at": 4,
+        "field:inventory_transaction_source_id": 6,
+        "field:inventory_transaction_source_type": 6,
+        "field:inventory_transaction_state": 15,
+        "field:inventory_transaction_type": 2,
+        "field:item_base_unit": 4,
+        "field:party_role_kind": 2,
+        "field:party_role_status": 2,
+        "field:posted_stock_balance_item_id": 1,
+        "field:posted_stock_balance_location_id": 1,
+        "field:posted_stock_balance_posted_quantity": 1,
+        "field:posted_stock_balance_unit_id": 1,
+        "field:purchase_order_received_received_quantity": 1,
+        "field:purchase_order_received_unit_id": 1,
+        "field:reservation_balance_remaining_quantity": 4,
+        "field:reservation_balance_unit_id": 4,
+        "field:reservation_item_id": 2,
+        "field:reservation_location_id": 2,
+        "field:reservation_quantity": 4,
+        "field:reservation_state": 19,
+        "field:reservation_unit_id": 3,
+        "field:sales_order_customer_party_id": 1,
+        "field:sales_order_line_item_id": 1,
+        "field:sales_order_line_ordered_quantity": 1,
+        "field:sales_order_line_unit_id": 1,
+        "field:sales_order_shipped_shipped_quantity": 4,
+        "field:sales_order_shipped_unit_id": 4,
+        "field:shipment_effective_at": 1,
+        "field:shipment_kind": 4,
+        "field:shipment_line_item_id": 1,
+        "field:shipment_line_quantity": 1,
+        "field:shipment_line_reversal_of_movement_id": 1,
+        "field:shipment_line_unit_id": 1,
+        "field:shipment_number": 4,
+        "field:shipment_state": 8,
+        "field:stock_count_actor_id": 1,
+        "field:stock_count_count_type": 1,
+        "field:stock_count_counted_at": 5,
+        "field:stock_count_counting_mode": 1,
+        "field:stock_count_kind": 22,
+        "field:stock_count_line_counted_quantity": 1,
+        "field:stock_count_line_expected_quantity": 1,
+        "field:stock_count_line_item_id": 1,
+        "field:stock_count_line_line_number": 7,
+        "field:stock_count_line_physical_quantity": 1,
+        "field:stock_count_line_reversal_of_movement_id": 1,
+        "field:stock_count_line_unit_id": 1,
+        "field:stock_count_line_variance_quantity": 1,
+        "field:stock_count_location_id": 1,
+        "field:stock_count_number": 1,
+        "field:stock_count_reason_code": 5,
+        "field:stock_count_reason_narrative": 5,
+        "field:stock_count_recorded_at": 6,
+        "field:stock_count_state": 15,
+        "import:packages/domain/src/inventory/contracts": 1,
+        "name:fulfillment": 365,
+        "name:goods_receipt": 32,
+        "name:goods_receipt_line": 2,
+        "name:inventory": 3,
+        "name:inventory_movement": 12,
+        "name:inventory_period_lock": 1,
+        "name:inventory_transaction": 14,
+        "name:inventory_transaction_line": 8,
+        "name:party_role": 7,
+        "name:posted_stock_balance": 26,
+        "name:posting": 1,
+        "name:purchase_order_received": 3,
+        "name:receiving": 11,
+        "name:reservation": 2,
+        "name:reservation_balance": 18,
+        "name:sales_order": 4,
+        "name:sales_order_line": 1,
+        "name:sales_order_shipped": 4,
+        "name:shipment": 169,
+        "name:shipment_line": 44,
+        "name:stock_count": 292,
+        "name:stock_count_line": 157
+      }
+    },
+    "packages/postgres-provider/src/inventory-reconciliation-service.ts": {
+      "owner": "STOCK-POSTING-RULES",
+      "cluster": "B3",
+      "expires": "2027-03-31",
+      "names": {
+        "field:inventory_movement_actor_id": 1,
+        "field:inventory_movement_effective_at": 3,
+        "field:inventory_movement_item_id": 5,
+        "field:inventory_movement_location_id": 5,
+        "field:inventory_movement_posting_role": 3,
+        "field:inventory_movement_quantity_delta": 2,
+        "field:inventory_movement_reason_code": 2,
+        "field:inventory_movement_reason_narrative": 2,
+        "field:inventory_movement_recorded_at": 2,
+        "field:inventory_movement_reversal_of_movement_id": 1,
+        "field:inventory_movement_source_id": 2,
+        "field:inventory_movement_source_line": 2,
+        "field:inventory_movement_source_revision": 1,
+        "field:inventory_movement_source_type": 2,
+        "field:inventory_movement_stock_dimension_set_version": 1,
+        "field:inventory_movement_unit_id": 4,
+        "field:inventory_transaction_effective_at": 1,
+        "field:inventory_transaction_line_from_location_id": 1,
+        "field:inventory_transaction_line_item_id": 1,
+        "field:inventory_transaction_line_line_number": 1,
+        "field:inventory_transaction_line_quantity": 1,
+        "field:inventory_transaction_line_to_location_id": 1,
+        "field:inventory_transaction_line_unit_id": 1,
+        "field:inventory_transaction_reason_code": 1,
+        "field:inventory_transaction_reason_narrative": 1,
+        "field:inventory_transaction_source_id": 1,
+        "field:inventory_transaction_source_type": 1,
+        "field:inventory_transaction_state": 2,
+        "field:inventory_transaction_type": 2,
+        "field:posted_stock_balance_item_id": 1,
+        "field:posted_stock_balance_location_id": 1,
+        "field:posted_stock_balance_posted_quantity": 1,
+        "field:posted_stock_balance_unit_id": 1,
+        "name:fulfillment": 13,
+        "name:goods_receipt": 2,
+        "name:inventory": 1,
+        "name:inventory_movement": 1,
+        "name:inventory_transaction": 3,
+        "name:inventory_transaction_line": 2,
+        "name:posted_stock_balance": 42,
+        "name:receiving": 4,
+        "name:reservation_balance": 2,
+        "name:sales_order_shipped": 4
+      }
+    },
+    "packages/postgres-provider/src/inventory-shipment-cost.ts": {
+      "owner": "COSTING",
+      "cluster": "C7",
+      "expires": "2027-03-31",
+      "names": {
+        "name:shipment": 12,
+        "name:shipment_line": 3
+      }
+    },
+    "packages/postgres-provider/src/inventory-valuation-read-model.ts": {
+      "owner": "COSTING",
+      "cluster": "C7",
+      "expires": "2027-03-31",
+      "names": {
+        "field:customer_invoice_number": 1,
+        "field:customer_invoice_state": 1,
+        "field:goods_receipt_line_cost_status": 1,
+        "field:goods_receipt_number": 1,
+        "field:goods_receipt_state": 1,
+        "field:purchase_order_line_line_number": 2,
+        "field:purchase_order_number": 3,
+        "field:sales_order_line_line_number": 2,
+        "field:sales_order_number": 3,
+        "field:shipment_number": 1,
+        "field:shipment_state": 1,
+        "field:vendor_bill_number": 1,
+        "field:vendor_bill_state": 1,
+        "import:packages/domain/src/inventory/valuation": 1,
+        "import:packages/domain/src/sales/workspace": 1,
+        "name:customer_invoice": 7,
+        "name:customer_invoice_line": 7,
+        "name:goods_receipt": 8,
+        "name:goods_receipt_line": 15,
+        "name:inventory_movement": 4,
+        "name:purchase_order": 3,
+        "name:purchase_order_line": 7,
+        "name:sales_order": 4,
+        "name:sales_order_line": 9,
+        "name:shipment": 23,
+        "name:shipment_line": 11,
+        "name:vendor_bill": 9,
+        "name:vendor_bill_line": 9
+      }
+    },
+    "packages/postgres-provider/src/inventory-valuation.ts": {
+      "owner": "STOCK-POSTING-RULES",
+      "cluster": "B3",
+      "expires": "2027-03-31",
+      "names": {
+        "name:goods_receipt": 1
+      }
+    },
+    "packages/postgres-provider/src/inventory-write-invariants.ts": {
+      "owner": "COUNT-SNAPSHOT",
+      "cluster": "C6",
+      "expires": "2027-03-31",
+      "names": {
+        "field:stock_count_counting_mode": 1,
+        "field:stock_count_state": 2,
+        "name:stock_count": 6
+      }
+    },
+    "packages/postgres-provider/src/module-storage-materializer.ts": {
+      "owner": "DOMAIN-PROFILE",
+      "cluster": "C8",
+      "expires": "2027-03-31",
+      "names": {
+        "field:inventory_movement_item_id": 1,
+        "field:inventory_movement_location_id": 1,
+        "field:inventory_movement_quantity_delta": 1,
+        "field:inventory_movement_unit_id": 1,
+        "field:posted_stock_balance_item_id": 1,
+        "field:posted_stock_balance_location_id": 1,
+        "field:posted_stock_balance_posted_quantity": 1,
+        "field:posted_stock_balance_unit_id": 1,
+        "name:fulfillment": 10,
+        "name:inventory_movement": 3,
+        "name:inventory_period_lock": 2,
+        "name:posted_stock_balance": 70,
+        "name:purchase_order_received": 2,
+        "name:reservation_balance": 2,
+        "name:sales_order_shipped": 2
+      }
+    },
+    "packages/postgres-provider/src/payables-capability-executor.ts": {
+      "owner": "OPEN-ITEM-1",
+      "cluster": "C4",
+      "expires": "2027-03-31",
+      "names": {
+        "name:payables": 23,
+        "name:purchase_order": 1,
+        "name:purchase_order_line": 2,
+        "name:purchase_order_received": 2,
+        "name:purchasing": 1,
+        "name:vendor_bill": 2,
+        "name:vendor_bill_line": 3,
+        "name:vendor_bill_post": 1,
+        "name:vendor_bill_void": 1,
+        "name:vendor_credit": 2,
+        "name:vendor_credit_post": 1,
+        "name:vendor_payment": 2,
+        "name:vendor_payment_post": 1
+      }
+    },
+    "packages/postgres-provider/src/purchase-order-approval-executor.ts": {
+      "owner": "APPROVAL-ROUTING",
+      "cluster": "C3",
+      "expires": "2027-03-31",
+      "names": {
+        "field:inventory_transaction_state": 1,
+        "field:purchase_order_approval_state": 1,
+        "import:packages/domain/src/purchasing/approval-arguments": 1,
+        "import:packages/domain/src/purchasing/approvals": 1,
+        "name:purchase_order": 6,
+        "name:purchase_order_amendment": 8,
+        "name:purchase_order_approval": 10,
+        "name:purchase_order_line": 2,
+        "name:purchasing": 3,
+        "name:purchasing_settings": 1,
+        "name:receiving": 1
+      }
+    },
+    "packages/postgres-provider/src/purchase-order-approval.ts": {
+      "owner": "APPROVAL-ROUTING",
+      "cluster": "C3",
+      "expires": "2027-03-31",
+      "names": {
+        "import:packages/domain/src/purchasing/approvals": 1,
+        "name:purchase_order": 3,
+        "name:purchase_order_amendment": 1,
+        "name:purchase_order_approval": 1,
+        "name:purchasing": 1
+      }
+    },
+    "packages/postgres-provider/src/purchasing-order-lifecycle.ts": {
+      "owner": "LIFECYCLE-GUARDS",
+      "cluster": "C2",
+      "expires": "2027-03-31",
+      "names": {
+        "field:inventory_transaction_state": 2,
+        "field:purchase_order_line_ordered_quantity": 2,
+        "field:vendor_bill_state": 3,
+        "name:payables": 1,
+        "name:purchase_order": 6,
+        "name:purchase_order_line": 3,
+        "name:purchasing": 1,
+        "name:vendor_bill": 2
+      }
+    },
+    "packages/postgres-provider/src/receivables-capability-executor.ts": {
+      "owner": "OPEN-ITEM-1",
+      "cluster": "C4",
+      "expires": "2027-03-31",
+      "names": {
+        "field:party_credit_hold": 1,
+        "field:party_credit_limit": 1,
+        "field:party_default_currency": 1,
+        "name:customer_credit": 2,
+        "name:customer_credit_post": 1,
+        "name:customer_invoice": 2,
+        "name:customer_invoice_line": 3,
+        "name:customer_invoice_post": 1,
+        "name:customer_invoice_void": 1,
+        "name:customer_payment": 2,
+        "name:customer_payment_post": 1,
+        "name:receivables": 24,
+        "name:sales": 1,
+        "name:sales_order": 1,
+        "name:sales_order_line": 2,
+        "name:sales_order_release": 1,
+        "name:sales_order_reopen": 1,
+        "name:sales_order_shipped": 2
+      }
+    },
+    "packages/postgres-provider/src/received-quantity-projection.ts": {
+      "owner": "PROGRESS-QTY",
+      "cluster": "C1/C2",
+      "expires": "2027-03-31",
+      "names": {
+        "field:goods_receipt_kind": 1,
+        "field:goods_receipt_line_item_id": 2,
+        "field:goods_receipt_line_quantity": 2,
+        "field:goods_receipt_line_unit_id": 2,
+        "field:goods_receipt_state": 4,
+        "field:inventory_movement_item_id": 2,
+        "field:inventory_movement_posting_role": 4,
+        "field:inventory_movement_quantity_delta": 3,
+        "field:inventory_movement_source_id": 2,
+        "field:inventory_movement_source_line": 2,
+        "field:inventory_movement_source_type": 2,
+        "field:inventory_movement_unit_id": 4,
+        "field:purchase_order_received_received_quantity": 4,
+        "field:purchase_order_received_unit_id": 4,
+        "name:goods_receipt": 4,
+        "name:goods_receipt_line": 6,
+        "name:purchase_order_line": 2,
+        "name:purchase_order_received": 4
+      }
+    },
+    "packages/postgres-provider/src/receiving-capability-executor.ts": {
+      "owner": "STOCK-POSTING-RULES",
+      "cluster": "C2",
+      "expires": "2027-03-31",
+      "names": {
+        "field:goods_receipt_kind": 1,
+        "field:goods_receipt_line_cost_status": 1,
+        "name:goods_receipt": 7,
+        "name:goods_receipt_line": 3,
+        "name:goods_receipt_post": 2,
+        "name:purchase_order": 1,
+        "name:purchase_order_cancel": 1,
+        "name:purchase_order_close": 1,
+        "name:purchase_order_line_amend": 2,
+        "name:purchase_order_reopen": 1,
+        "name:receiving": 23
+      }
+    },
+    "packages/postgres-provider/src/receiving-order-capability.ts": {
+      "owner": "STOCK-POSTING-RULES",
+      "cluster": "C2",
+      "expires": "2027-03-31",
+      "names": {
+        "field:purchase_order_amendment_close_remainder": 1,
+        "field:purchase_order_amendment_line_revision": 1,
+        "field:purchase_order_amendment_quantity": 1,
+        "name:purchase_order": 2,
+        "name:purchase_order_amendment": 2,
+        "name:purchase_order_line": 1,
+        "name:purchasing": 2,
+        "name:receiving": 2
+      }
+    },
+    "packages/postgres-provider/src/receiving-read-model.ts": {
+      "owner": "STOCK-POSTING-RULES",
+      "cluster": "C2",
+      "expires": "2027-03-31",
+      "names": {
+        "field:inventory_movement_quantity_delta": 2,
+        "field:inventory_movement_reversal_of_movement_id": 1,
+        "field:inventory_movement_source_id": 1,
+        "field:inventory_movement_source_line": 1,
+        "field:inventory_movement_source_type": 1,
+        "field:purchase_order_line_line_number": 1,
+        "import:packages/domain/src/purchasing/workspace": 1,
+        "name:fulfillment": 7,
+        "name:goods_receipt": 1,
+        "name:goods_receipt_line": 3,
+        "name:purchase_order_line_list": 1,
+        "name:purchasing": 1,
+        "name:receiving": 9
+      }
+    },
+    "packages/postgres-provider/src/release-repository.ts": {
+      "owner": "GENERALIZE-1",
+      "cluster": "C8",
+      "expires": "2027-03-31",
+      "names": {
+        "engine:billing": 45,
+        "engine:booking": 16
+      }
+    },
+    "packages/postgres-provider/src/request-runtime-view-service.ts": {
+      "owner": "GENERALIZE-1",
+      "cluster": "C8",
+      "expires": "2027-03-31",
+      "names": {
+        "engine:booking": 18
+      }
+    },
+    "packages/postgres-provider/src/serving-gateways.ts": {
+      "owner": "GENERALIZE-1",
+      "cluster": "C8",
+      "expires": "2027-03-31",
+      "names": {
+        "engine:billing": 6,
+        "engine:booking": 5,
+        "import:packages/domain/src/inventory/valuation": 1,
+        "import:packages/domain/src/sales/definition": 1,
+        "name:fulfillment": 6,
+        "name:receiving": 5
+      }
+    },
+    "packages/postgres-provider/src/settlement-capability-executor.ts": {
+      "owner": "OPEN-ITEM-1",
+      "cluster": "C4",
+      "expires": "2027-03-31",
+      "names": {
+        "engine:stock-posting": 23,
+        "field:inventory_transaction_state": 4,
+        "name:tax_code": 9
+      }
+    },
+    "packages/postgres-provider/src/stock-count-route.ts": {
+      "owner": "COUNT-SNAPSHOT",
+      "cluster": "C6",
+      "expires": "2027-03-31",
+      "names": {
+        "field:inventory_movement_effective_at": 1,
+        "field:inventory_movement_item_id": 1,
+        "field:inventory_movement_location_id": 1,
+        "field:inventory_movement_quantity_delta": 1,
+        "field:inventory_movement_source_id": 1,
+        "field:inventory_movement_source_line": 1,
+        "field:inventory_movement_source_type": 1,
+        "field:inventory_movement_unit_id": 1,
+        "field:inventory_transaction_state": 4,
+        "field:stock_count_count_type": 4,
+        "field:stock_count_counted_at": 2,
+        "field:stock_count_counting_mode": 1,
+        "field:stock_count_kind": 4,
+        "field:stock_count_line_counted_quantity": 1,
+        "field:stock_count_line_expected_quantity": 1,
+        "field:stock_count_line_item_id": 1,
+        "field:stock_count_line_line_number": 1,
+        "field:stock_count_line_physical_quantity": 2,
+        "field:stock_count_line_reversal_of_movement_id": 1,
+        "field:stock_count_line_unit_id": 1,
+        "field:stock_count_line_variance_quantity": 1,
+        "field:stock_count_location_id": 1,
+        "field:stock_count_reason_code": 1,
+        "field:stock_count_reason_narrative": 1,
+        "field:stock_count_state": 7,
+        "name:inventory": 1,
+        "name:inventory_movement": 1,
+        "name:stock_count": 51,
+        "name:stock_count_line": 9
+      }
+    },
+    "packages/postgres-provider/src/workflow-consumer.ts": {
+      "owner": "WORKFLOW-2",
+      "cluster": "C9",
+      "expires": "2027-03-31",
+      "names": {
+        "import:packages/domain/src/purchasing/receipt-posted-event": 1,
+        "name:purchasing": 1
+      }
+    },
+    "packages/postgres-provider/src/workflow-execution.ts": {
+      "owner": "WORKFLOW-2",
+      "cluster": "C9",
+      "expires": "2027-03-31",
+      "names": {
+        "import:packages/domain/src/purchasing/receipt-posted-event": 1,
+        "name:goods_receipt": 1,
+        "name:purchasing": 1
+      }
+    },
+    "packages/postgres-provider/src/workflow-sdk.ts": {
+      "owner": "WORKFLOW-2",
+      "cluster": "C9",
+      "expires": "2027-03-31",
+      "names": {
+        "name:goods_receipt": 3
+      }
+    },
+    "packages/runtime/src/semantic-operation-gateway.ts": {
+      "owner": "GENERALIZE-1",
+      "cluster": "C8",
+      "expires": "2027-03-31",
+      "names": {
+        "engine:booking": 12
+      }
+    }
+  }
+}
