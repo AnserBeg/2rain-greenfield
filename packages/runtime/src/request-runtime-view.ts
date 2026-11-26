@@ -11,7 +11,7 @@ import {
 } from './request-context.js';
 import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents.js';
 import { REVERSIBILITY_AGENT_READER } from '../../canonical-model/src/reversibility.js';
-import { LOGICAL_FIELD_READER } from '../../canonical-model/src/logical-field.js';
+import { REPORT_MEASURE_READER } from '../../canonical-model/src/declared-report-v2.js';
 import {
   WORKFLOW_PROJECTION_FAMILY,
   WORKFLOW_RUNTIME_CAPABILITY,
@@ -250,7 +250,11 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 48 applies versioned record templates at create (assigned at TRAIN-M).
     // 49 reads declared logical value kinds: decimal, money, quantity, long
     // text and currency code (assigned at TRAIN-O).
-    maximumSupportedVersion: LOGICAL_FIELD_READER,
+    // 50 reads v2 reports: calendar and age dimensions, declared to-one
+    // links and line grain, min, max, average and distinct counts, and
+    // approved measure references. 51 reads named measures (REPORTS-1 s2,
+    // assigned at TRAIN-Q).
+    maximumSupportedVersion: REPORT_MEASURE_READER,
   },
 });
 

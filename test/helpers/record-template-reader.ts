@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
@@ -19,6 +20,19 @@ import {
 
 // Update to the actual immediately preceding serving tip when the train is integrated.
 const preceding = 'd8aad66b3e6ee6231b0580f2702c26d116f5a68c';
+
+/** The preceding tree's checked-in release. The proof compares persisted
+ * first-party and tenant bytes with the archived compile, so the database
+ * installs the release that tree shipped (TRAIN-Q: REPORTS-1 s2 appended a
+ * first-party lineage entry, and a fresh install activates the tip). */
+export const precedingCompiledApplication = (): unknown =>
+  JSON.parse(
+    execFileSync(
+      'git',
+      ['show', preceding + ':apps/web/release/app.compiled.json'],
+      { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+    ),
+  );
 
 // Names what differs when a persisted release root disagrees with the
 // archived compile: the normalized-definition paths and the artifacts held by

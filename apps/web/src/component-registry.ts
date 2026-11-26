@@ -1,5 +1,10 @@
 import { LONG_TEXT_MAXIMUM_LENGTH } from '../../../packages/canonical-model/src/logical-field.js';
-import type { RegisteredReport } from '../../../packages/canonical-model/src/declared-report.js';
+import {
+  effectiveMeasures,
+  filterParameterId,
+  reportColumnFor,
+  type RegisteredReport,
+} from '../../../packages/canonical-model/src/declared-report.js';
 import type { GroupedRow } from '@north-star/canonical-model';
 import {
   displayGroupKey,
@@ -3658,8 +3663,10 @@ export function groupedReportHtml(
   for (const key of ['after', 'export', 'result']) base.delete(key);
   const href = (params: URLSearchParams) =>
     '/?' + escapeHtml(params.toString());
+  // A filter's parameter is named by its path and field, as the request reads it.
   const filters = report.revision.body.filters.map((f) => {
-    const field = report.columns.find((c) => c.fieldId === f.fieldId)!;
+    const field = reportColumnFor(report, f)!;
+    const pid = filterParameterId(f);
     const input = (id: string, label: string, type: string) =>
       '<label>' +
       escapeHtml(label) +
@@ -3675,8 +3682,8 @@ export function groupedReportHtml(
         '<fieldset><legend>' +
         escapeHtml(field.label) +
         '</legend>' +
-        input(f.fieldId + '.from', 'From', 'date') +
-        input(f.fieldId + '.until', 'Before', 'date') +
+        input(pid + '.from', 'From', 'date') +
+        input(pid + '.until', 'Before', 'date') +
         '</fieldset>'
       );
     if (field.options)
@@ -3684,7 +3691,7 @@ export function groupedReportHtml(
         '<label>' +
         escapeHtml(field.label) +
         ' <select name="' +
-        escapeHtml(f.fieldId) +
+        escapeHtml(pid) +
         '"' +
         (f.kind === 'membership' ? ' multiple' : '') +
         '><option value="">All</option>' +
@@ -3694,7 +3701,7 @@ export function groupedReportHtml(
               '<option value="' +
               escapeHtml(o.id) +
               '"' +
-              (base.getAll(f.fieldId).includes(o.id) ? ' selected' : '') +
+              (base.getAll(pid).includes(o.id) ? ' selected' : '') +
               '>' +
               escapeHtml(o.label) +
               '</option>',
@@ -3702,13 +3709,13 @@ export function groupedReportHtml(
           .join('') +
         '</select></label>'
       );
-    return input(f.fieldId, field.label, 'text');
+    return input(pid, field.label, 'text');
   });
   const filterFields = new Set(
     report.revision.body.filters.flatMap((f) => [
-      f.fieldId,
-      f.fieldId + '.from',
-      f.fieldId + '.until',
+      filterParameterId(f),
+      filterParameterId(f) + '.from',
+      filterParameterId(f) + '.until',
     ]),
   );
   const hidden = [...base]
@@ -3770,9 +3777,9 @@ export function groupedReportHtml(
     (isMoney ? cell('Currency', partitionLabel(r)) : '') +
     r.cells
       .map((c, i) => {
-        const m = report.revision.body.measures[i]!;
+        const m = effectiveMeasures(report)[i]!;
         const coverage =
-          m.operator.kind === 'sum'
+          m.operator.kind !== 'count' && m.operator.kind !== 'distinctTargets'
             ? ' <small>' +
               c.recordsWithoutMeasure +
               (c.recordsWithoutMeasure === 1
@@ -3785,8 +3792,16 @@ export function groupedReportHtml(
           '<td data-label="' +
           escapeHtml(m.label) +
           '">' +
-          escapeHtml(c.value) +
+          // Tagged absence (an empty min, max or average) is never zero.
+          escapeHtml(c.value ?? 'No value') +
           (c.unitId ? ' ' + escapeHtml(c.unitId) : '') +
+          (c.exact
+            ? ' <small>exact ' +
+              escapeHtml(c.exact.sum) +
+              ' / ' +
+              c.exact.count +
+              '</small>'
+            : '') +
           coverage +
           '</td>'
         );

@@ -22,6 +22,10 @@ import { DECLARED_REPORT_READER } from '../../packages/canonical-model/src/decla
 import { PRESENTATION_READER } from '../../packages/canonical-model/src/surface-presentation-schema.js';
 import { LOGICAL_FIELD_READER } from '../../packages/canonical-model/src/logical-field.js';
 import {
+  REPORT_ANALYSIS_READER,
+  REPORT_MEASURE_READER,
+} from '../../packages/canonical-model/src/declared-report-v2.js';
+import {
   COMPANY_ACCESS_INDEX_READER,
   REPORT_SOURCE_READER,
 } from '../../packages/canonical-model/src/constants.js';
@@ -547,7 +551,16 @@ test('the capability comparison binds the family to its capability, then compare
     PRESENTATION_READER,
     RECORD_TEMPLATE_READER,
     LOGICAL_FIELD_READER,
+    REPORT_ANALYSIS_READER,
+    REPORT_MEASURE_READER,
   ];
+  // Each capability owns its own rung: a renumbering collision at a merge
+  // would let one feature's floor stand in for another's.
+  assert.equal(
+    new Set(surfaceFloors).size,
+    surfaceFloors.length,
+    'two capabilities share a surface rung',
+  );
   for (const reader of surfaceFloors) {
     for (const floor of surfaceFloors) {
       const refusal = unsupportedRuntimeCapability(
@@ -600,7 +613,7 @@ test('the capability comparison binds the family to its capability, then compare
   // capability on one side alone reds here rather than in production.
   assert.deepEqual(SUPPORTED_RUNTIME_CAPABILITIES[surface], {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
-    maximumSupportedVersion: LOGICAL_FIELD_READER,
+    maximumSupportedVersion: REPORT_MEASURE_READER,
   });
 });
 
@@ -1234,7 +1247,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
               ],
               {
                 capabilityId: 'northstar.runtime:capability.surface-manifest',
-                maximumSupportedVersion: LOGICAL_FIELD_READER,
+                maximumSupportedVersion: REPORT_MEASURE_READER,
               },
             );
           },
@@ -1259,7 +1272,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
               new RegExp(
-                `requires version 999 and this runtime supports ${LOGICAL_FIELD_READER}`,
+                `requires version 999 and this runtime supports ${REPORT_MEASURE_READER}`,
               ),
             );
           },
@@ -1290,7 +1303,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
               new RegExp(
-                `requires version 999 and this runtime supports ${LOGICAL_FIELD_READER}`,
+                `requires version 999 and this runtime supports ${REPORT_MEASURE_READER}`,
               ),
             );
           },

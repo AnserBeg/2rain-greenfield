@@ -14,10 +14,17 @@ export interface GroupedMeasure {
 
 export interface GroupedCell {
   readonly measureId: string;
-  readonly value: string;
+  /** null is tagged absence (an empty min, max or average). */
+  readonly value: string | null;
   readonly unitId?: string;
+  /** An average keeps its exact sum and count of present inputs. */
+  readonly exact?: { readonly sum: string; readonly count: number };
   readonly recordsWithoutMeasure: number;
 }
+
+/** A group key: a typed value, absence (Unspecified) or one Restricted group
+ * for targets the reader may not see (ADR-0089 R7). */
+export type GroupKey = string | null | { readonly restricted: true };
 
 export type CurrencyPartition =
   | { kind: 'unitless' }
@@ -25,7 +32,7 @@ export type CurrencyPartition =
   | { kind: 'currency'; code: string };
 
 export interface GroupedRow {
-  readonly keys: readonly (string | null)[];
+  readonly keys: readonly GroupKey[];
   readonly partition: CurrencyPartition;
   readonly cells: readonly GroupedCell[];
 }

@@ -1,5 +1,6 @@
 import { draftTemplateBinding } from './record-template-binding.js';
 import { draftReport } from './report-revision.js';
+import { draftMeasure } from './measure-revision.js';
 import { z } from 'zod';
 
 import { WorkflowDefinitionSchema } from '../../canonical-model/src/schemas.js';
@@ -268,6 +269,30 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
         existing: target.reports
           .filter((r) => r.lifecycle === 'active')
           .map((r) => ({ id: r.revision.reportId, label: r.label })),
+        // REPORTS-1 slice 2, generated from the same offer the compiler checks.
+        grain: target.grain,
+        links: target.links.map((l) => ({
+          via: l.link.via,
+          label: l.label,
+          parent: l.parent,
+          fields: l.fields.map((f) => ({
+            fieldId: f.operand.fieldId,
+            label: f.label,
+            type: f.operand.type,
+          })),
+        })),
+        approvedMeasures: target.measures.map((m) => ({
+          measureId: m.measureId,
+          contractDigest: m.contractDigest,
+          label: m.label,
+        })),
+        namedMeasures: target.namedMeasures
+          .filter((m) => m.lifecycle === 'active')
+          .map((m) => ({
+            measureId: m.revision.measureId,
+            label: m.label,
+            status: m.revision.status,
+          })),
       }),
     ),
     ...(targets.presentation?.length
@@ -684,6 +709,24 @@ function convertMember(
           report.choices,
           report.reportId,
           report.status,
+        ),
+      ];
+    }
+    case 'addMeasureRevision': {
+      const { measure } =
+        DRAFTER_SELECTION_SCHEMAS.addMeasureRevision.parse(input);
+      const target = local().reports?.find(
+        (candidate) => candidate.source.listSurfaceId === measure.listSurfaceId,
+      );
+      if (!target) throw new Error('Choose an available report source.');
+      return [
+        draftMeasure(
+          target,
+          measure.label,
+          measure.status,
+          measure.operator,
+          measure.measureId,
+          measure.filters,
         ),
       ];
     }

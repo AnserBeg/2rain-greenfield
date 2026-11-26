@@ -262,6 +262,10 @@ try {
 `;
 
 export const reportsPredecessor = '5710c05ae2529b742bf15f8f484c75c0b3930180';
+// REPORTS-1 slice 2: the serving binary on main immediately before the slice
+// merged (TRAIN-Q, main e112d58f, rung 49).
+export const reportsAnalysisPredecessor =
+  'e112d58ff799912d7b743d5eb7fbd79f796c5318';
 
 // Produce genuine pre-index change sets for witnesses isolating earlier reader floors.
 export async function draftBeforeCompanyAccessIndex(
