@@ -26,7 +26,8 @@ import { withEphemeralPostgres } from '../helpers/postgres.js';
 
 const ns = 'northstar.app';
 const legalEntityId = '74000000-0000-4000-8000-000000000001';
-const itemId = 'ITEM-PACK-001';
+// A real item: the packing lines dataset reads each line's item label.
+const itemId = '20000000-0000-4000-8000-000000000001';
 const locationId = 'LOC-PACK-001';
 const unitId = 'EA';
 
@@ -128,6 +129,16 @@ async function scenario(
         runtime.operationMediation.issueInvocation(view, 'UI'),
       ),
     );
+
+  await invoke(`${ns}:operation.item_create`, {
+    recordId: itemId,
+    relations: {},
+    values: {
+      [`${ns}:field.item_name`]: 'Packing item',
+      [`${ns}:field.item_sku`]: 'PACK-001',
+      [`${ns}:field.item_base_unit`]: unitId,
+    },
+  });
 
   await assertParentGuardHoldsForPostedShipments(
     invoke,
