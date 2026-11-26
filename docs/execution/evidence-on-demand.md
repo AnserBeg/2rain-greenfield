@@ -41,7 +41,7 @@ gh workflow run evidence.yml --ref <branch carrying the workflow> -f ref=<branch
 gh run list --workflow evidence.yml --limit 3
 ```
 
-A dispatch runs only the controls, never `regen-snapshot`. Each dispatch has its
+Unless `-f mode=snapshots` is given (CI-9, below), a dispatch runs only the controls, never `regen-snapshot`. Each dispatch has its
 own concurrency group, so two lanes never cancel each other. GitHub accepts a
 dispatch only for a workflow file that exists on the ref it runs from, so
 until this workflow is on `main`, run it from the branch that carries it.
@@ -160,8 +160,8 @@ executed no test". `test/architecture/evidence-on-demand.test.ts` pins it.
 ## Regenerating the schema snapshots without PostgreSQL (CI-9)
 
 A lane has no local PostgreSQL, so it does not hand-patch `db/schema.snapshot.json`
-or the fresh-tenant replay snapshot. `.github/workflows/schema-snapshots.yml` (dispatch
-only, read-only token, never pushes or commits) checks out the `ref`, applies the
+or the fresh-tenant replay snapshot. `.github/workflows/evidence.yml` dispatched with
+`-f mode=snapshots` (a dispatch runs only that job; read-only token, never pushes or commits) checks out the `ref`, applies the
 migrations on the pinned PostgreSQL image, regenerates both files with their
 documented commands (`test/helpers/regenerate-schema-snapshot.ts`, which also runs
 Prettier, then `test/helpers/generate-fresh-tenant-full-replay-schema.ts`), prints and
@@ -169,8 +169,8 @@ annotates whether each is IDENTICAL to or DIFFERS from the committed file, and
 uploads both as the artifact `schema-snapshots-<full sha>` (kept 7 days).
 
 ```bash
-gh workflow run schema-snapshots.yml --ref <branch that carries the workflow> -f ref=<your branch or full sha>
-gh run list --workflow schema-snapshots.yml --limit 3
+gh workflow run evidence.yml --ref <branch that carries the workflow> -f mode=snapshots -f ref=<your branch or full sha>
+gh run list --workflow evidence.yml --limit 3
 gh run download <run-id> -n schema-snapshots-<full sha> -D "$dir"
 cp "$dir/db/schema.snapshot.json" db/
 cp "$dir/test/postgres/fresh-tenant-full-replay-schema.snapshot.json" test/postgres/

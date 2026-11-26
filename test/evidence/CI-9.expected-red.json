@@ -57,38 +57,74 @@
       ]
     },
     {
-      "name": "ci9-snapshots-token-write",
-      "claim": "The snapshot regeneration workflow holds a read-only token, so it can never push.",
-      "file": ".github/workflows/schema-snapshots.yml",
-      "original": "permissions:\n  contents: read\n\n# Every dispatch",
-      "replacement": "permissions:\n  contents: write\n\n# Every dispatch",
-      "test": {
-        "files": ["test/architecture/evidence-on-demand.test.ts"],
-        "namePattern": "the schema-snapshots workflow regenerates both snapshots, uploads them and never writes"
-      },
-      "kills": [
-        {
-          "file": "test/architecture/evidence-on-demand.test.ts",
-          "name": "the schema-snapshots workflow regenerates both snapshots, uploads them and never writes",
-          "expected": "the token must stay read-only"
-        }
-      ]
-    },
-    {
       "name": "ci9-snapshots-no-regeneration",
-      "claim": "The workflow regenerates db/schema.snapshot.json with its documented command, not a stand-in.",
-      "file": ".github/workflows/schema-snapshots.yml",
+      "claim": "The snapshots-mode job regenerates db/schema.snapshot.json with its documented command, not a stand-in.",
+      "file": ".github/workflows/evidence.yml",
       "original": "run: node --import tsx test/helpers/regenerate-schema-snapshot.ts",
       "replacement": "run: 'true'",
       "test": {
         "files": ["test/architecture/evidence-on-demand.test.ts"],
-        "namePattern": "the schema-snapshots workflow regenerates both snapshots, uploads them and never writes"
+        "namePattern": "the evidence workflow is label-gated, read-only and pinned"
       },
       "kills": [
         {
           "file": "test/architecture/evidence-on-demand.test.ts",
-          "name": "the schema-snapshots workflow regenerates both snapshots, uploads them and never writes",
+          "name": "the evidence workflow is label-gated, read-only and pinned",
           "expected": "the schema snapshot is regenerated with its documented command"
+        }
+      ]
+    },
+    {
+      "name": "ci9-snapshots-upload-one-file",
+      "claim": "The snapshots-mode job uploads both regenerated files.",
+      "file": ".github/workflows/evidence.yml",
+      "original": "            db/schema.snapshot.json\n            test/postgres/fresh-tenant-full-replay-schema.snapshot.json\n",
+      "replacement": "            db/schema.snapshot.json\n",
+      "test": {
+        "files": ["test/architecture/evidence-on-demand.test.ts"],
+        "namePattern": "the evidence workflow is label-gated, read-only and pinned"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/evidence-on-demand.test.ts",
+          "name": "the evidence workflow is label-gated, read-only and pinned",
+          "expected": "both regenerated files are uploaded"
+        }
+      ]
+    },
+    {
+      "name": "ci9-snapshots-runs-without-mode",
+      "claim": "The snapshots-mode job runs only when the dispatch asks for snapshots.",
+      "file": ".github/workflows/evidence.yml",
+      "original": "    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'snapshots'\n",
+      "replacement": "    if: github.event_name == 'workflow_dispatch'\n",
+      "test": {
+        "files": ["test/architecture/evidence-on-demand.test.ts"],
+        "namePattern": "the evidence workflow is label-gated, read-only and pinned"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/evidence-on-demand.test.ts",
+          "name": "the evidence workflow is label-gated, read-only and pinned",
+          "expected": "the snapshot job runs only for a dispatch in snapshots mode"
+        }
+      ]
+    },
+    {
+      "name": "ci9-snapshots-pushes",
+      "claim": "The snapshots-mode job never pushes or commits.",
+      "file": ".github/workflows/evidence.yml",
+      "original": "echo \"- $line\" >>\"$GITHUB_STEP_SUMMARY\"\n",
+      "replacement": "echo \"- $line\" >>\"$GITHUB_STEP_SUMMARY\"; git push origin HEAD\n",
+      "test": {
+        "files": ["test/architecture/evidence-on-demand.test.ts"],
+        "namePattern": "the evidence workflow is label-gated, read-only and pinned"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/evidence-on-demand.test.ts",
+          "name": "the evidence workflow is label-gated, read-only and pinned",
+          "expected": "the snapshot job must never push, commit or publish"
         }
       ]
     }
