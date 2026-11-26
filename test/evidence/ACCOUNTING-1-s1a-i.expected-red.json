@@ -1,0 +1,662 @@
+{
+  "version": 1,
+  "packet": "ACCOUNTING-1-s1a-i",
+  "entries": [
+    {
+      "name": "ledger-balance-sum",
+      "claim": "An entry whose debits and credits differ never commits.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "IF debits <> credits THEN RAISE EXCEPTION 'ledger.unbalanced'; END IF;",
+      "replacement": "IF false AND debits <> credits THEN RAISE EXCEPTION 'ledger.unbalanced'; END IF;",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "storage refuses an unbalanced entry at commit",
+          "expected": "Missing expected rejection: an unbalanced entry committed"
+        }
+      ]
+    },
+    {
+      "name": "ledger-line-count",
+      "claim": "An entry with fewer than two lines never commits.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "IF line_count < 2 THEN",
+      "replacement": "IF line_count < 0 THEN",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "storage refuses an entry with no lines at commit",
+          "expected": "Missing expected rejection: an entry with no lines committed"
+        }
+      ]
+    },
+    {
+      "name": "ledger-entry-side-trigger",
+      "claim": "The entry-side deferred trigger catches an entry no line trigger sees.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "CREATE CONSTRAINT TRIGGER ledger_entries_balanced AFTER INSERT ON platform.ledger_entries",
+      "replacement": "CREATE CONSTRAINT TRIGGER ledger_entries_balanced AFTER DELETE ON platform.ledger_entries",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "storage refuses an entry with no lines at commit",
+          "expected": "Missing expected rejection: an entry with no lines committed"
+        }
+      ]
+    },
+    {
+      "name": "ledger-entry-currency-fk",
+      "claim": "Every line carries its entry's one currency.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "CONSTRAINT ledger_lines_entry_currency FOREIGN KEY (tenant_id, environment_id, entry_id, company_id, currency_code)\n    REFERENCES platform.ledger_entries (tenant_id, environment_id, entry_id, company_id, currency_code),",
+      "replacement": "CONSTRAINT ledger_lines_entry_currency FOREIGN KEY (tenant_id, environment_id, entry_id)\n    REFERENCES platform.ledger_entries (tenant_id, environment_id, entry_id),",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "storage refuses a line in another currency than its entry",
+          "expected": "Missing expected rejection: a USD line joined a CAD entry"
+        }
+      ]
+    },
+    {
+      "name": "ledger-amount-positive",
+      "claim": "Every stored amount is a positive count of minor units.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "CONSTRAINT ledger_lines_amount_positive CHECK (amount > 0)",
+      "replacement": "CONSTRAINT ledger_lines_amount_positive CHECK (amount > 0 OR amount <= 0)",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "storage refuses a zero or negative amount",
+          "expected": "Missing expected rejection: a non-positive amount was stored"
+        }
+      ]
+    },
+    {
+      "name": "ledger-account-company-fk",
+      "claim": "A line's account belongs to its entry's company in storage.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": ",\n  CONSTRAINT ledger_lines_account_company FOREIGN KEY (tenant_id, environment_id, company_id, account_id)\n    REFERENCES platform.ledger_accounts (tenant_id, environment_id, company_id, account_id)",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "storage refuses another company's account on an entry",
+          "expected": "Missing expected rejection: company A's entry stored company B's account"
+        }
+      ]
+    },
+    {
+      "name": "ledger-counterparty-reserved",
+      "claim": "The reserved counterparty column stays null in v1.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "CHECK (counterparty_party_id IS NULL)",
+      "replacement": "CHECK (counterparty_party_id IS NULL OR true)",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "storage refuses a counterparty on a line",
+          "expected": "Missing expected rejection: a reserved counterparty was stored"
+        }
+      ]
+    },
+    {
+      "name": "ledger-dimension-reserved",
+      "claim": "The reserved dimension-set column stays null in v1.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "CHECK (dimension_set_id IS NULL)",
+      "replacement": "CHECK (dimension_set_id IS NULL OR true)",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "storage refuses a dimension set on a line",
+          "expected": "Missing expected rejection: a reserved dimension set was stored"
+        }
+      ]
+    },
+    {
+      "name": "ledger-kind-shape",
+      "claim": "A posting entry names its source; an operation entry names its receipt and ordinal.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "CONSTRAINT ledger_entries_kind_shape CHECK (",
+      "replacement": "CONSTRAINT ledger_entries_kind_shape CHECK (true OR ",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "storage refuses a posting entry without its source",
+          "expected": "Missing expected rejection: a posting entry without a source was stored"
+        }
+      ]
+    },
+    {
+      "name": "ledger-append-only",
+      "claim": "Entries and lines refuse update, delete and truncate for every role, the owner included.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "RAISE EXCEPTION 'ledger.appendOnly'; END $$;",
+      "replacement": "RETURN NULL; END $$;",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "entries and lines refuse update, delete and truncate even for the owner",
+          "expected": "Missing expected rejection: the owner ran: UPDATE platform\\.ledger_entries"
+        }
+      ]
+    },
+    {
+      "name": "ledger-no-table-grant",
+      "claim": "No non-owner role holds a privilege on a ledger table.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "GRANT EXECUTE ON FUNCTION platform.ledger_read_lines(uuid,date,date,bigint,integer,integer),",
+      "replacement": "GRANT UPDATE ON platform.ledger_entries TO north_star_runtime;\nGRANT EXECUTE ON FUNCTION platform.ledger_read_lines(uuid,date,date,bigint,integer,integer),",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "no non-owner role holds a ledger table privilege and RLS is forced",
+          "expected": "a non-owner role holds a ledger table privilege"
+        }
+      ]
+    },
+    {
+      "name": "ledger-forced-rls",
+      "claim": "Every tenant ledger table forces row-level security.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "'ALTER TABLE platform.%I FORCE ROW LEVEL SECURITY'",
+      "replacement": "'ALTER TABLE platform.%I NO FORCE ROW LEVEL SECURITY'",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "no non-owner role holds a ledger table privilege and RLS is forced",
+          "expected": "a tenant ledger table does not force row-level security"
+        }
+      ]
+    },
+    {
+      "name": "ledger-internal-execute",
+      "claim": "No role but the owner executes the internal writer and setters.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "  platform.ledger_read_balances(uuid,date,date) TO north_star_runtime;",
+      "replacement": "  platform.ledger_read_balances(uuid,date,date) TO north_star_runtime;\nGRANT EXECUTE ON FUNCTION north_star_internal.ledger_write_entry(uuid,text,jsonb,text,jsonb,jsonb) TO north_star_runtime;",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "only north_star_runtime executes the two reads and no one the internal functions",
+          "expected": "a ledger function is executable beyond its grant"
+        }
+      ]
+    },
+    {
+      "name": "ledger-role-from-account",
+      "claim": "A person-entered line's role is the stored account kind, never caller input.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "line_role := acct.kind_role_id;",
+      "replacement": "line_role := coalesce(line->>'roleId', acct.kind_role_id);",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "a manual journal posts with roles copied from the stored accounts",
+          "expected": "a manual line took its role from caller input"
+        }
+      ]
+    },
+    {
+      "name": "ledger-control-refusal",
+      "claim": "A manual or opening line never reaches a control-role account.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "IF acct.control_subledger_id IS NOT NULL THEN RAISE",
+      "replacement": "IF false AND acct.control_subledger_id IS NOT NULL THEN RAISE",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "a manual line on a control-role account is refused",
+          "expected": "Missing expected rejection: a manual line posted to a control-role account"
+        }
+      ]
+    },
+    {
+      "name": "ledger-role-misfit",
+      "claim": "A source leg's role class fits its account's class.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "IF line_class IS DISTINCT FROM acct.role_class THEN",
+      "replacement": "IF false AND line_class IS DISTINCT FROM acct.role_class THEN",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "a posting line whose role class misfits the account is refused",
+          "expected": "Missing expected rejection: a revenue leg posted to a cash account"
+        }
+      ]
+    },
+    {
+      "name": "ledger-inactive-account",
+      "claim": "An inactive account is refused at entry.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "IF NOT acct.active THEN",
+      "replacement": "IF false AND NOT acct.active THEN",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "an inactive account is refused at entry",
+          "expected": "Missing expected rejection: an entry posted to an inactive account"
+        },
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "a writer waiting on a deactivation re-reads the account and refuses",
+          "expected": "Missing expected rejection: a writer posted to an account deactivated while it waited"
+        }
+      ]
+    },
+    {
+      "name": "ledger-writer-account-company",
+      "claim": "The writer resolves accounts inside the entry's company only.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "WHERE (a.tenant_id, a.environment_id, a.company_id, a.account_id) = (t, e, company, account);",
+      "replacement": "WHERE (a.tenant_id, a.environment_id, a.account_id) = (t, e, account);",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "the writer refuses another company's account",
+          "expected": "violates foreign key constraint"
+        }
+      ]
+    },
+    {
+      "name": "ledger-account-kind-fixed",
+      "claim": "An account's kind never changes.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "IF prior.kind_role_id IS DISTINCT FROM kind THEN",
+      "replacement": "IF false AND prior.kind_role_id IS DISTINCT FROM kind THEN",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "an account kind never changes",
+          "expected": "Missing expected rejection: an account changed its kind"
+        }
+      ]
+    },
+    {
+      "name": "ledger-books-not-started",
+      "claim": "No entry posts while books start is unset.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "IF period.books_start IS NULL THEN",
+      "replacement": "IF false AND period.books_start IS NULL THEN",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "no entry posts before books start is set",
+          "expected": "Missing expected rejection: an entry posted with no books start"
+        }
+      ]
+    },
+    {
+      "name": "ledger-closed-through-boundary",
+      "claim": "The closed-through date itself is closed.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "entry_day <= period.closed_through",
+      "replacement": "entry_day < period.closed_through",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "closed-through refuses its own date and admits the next day",
+          "expected": "Missing expected rejection: an entry posted on the closed-through date"
+        },
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "an instant is dated by the company calendar, not the UTC date",
+          "expected": "Missing expected rejection: an instant was dated by its UTC date into closed books"
+        },
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "a writer waiting on a close re-reads closed-through and refuses",
+          "expected": "Missing expected rejection: a writer posted into a period closed while it waited"
+        }
+      ]
+    },
+    {
+      "name": "ledger-books-start",
+      "claim": "A manual entry before books start is refused.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "IF entry_day < period.books_start AND kind <> 'opening' THEN",
+      "replacement": "IF false AND entry_day < period.books_start AND kind <> 'opening' THEN",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "a manual entry before books start is refused",
+          "expected": "Missing expected rejection: a manual entry predates books start"
+        }
+      ]
+    },
+    {
+      "name": "ledger-opening-exception",
+      "claim": "Only an opening entry may predate books start.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "AND kind <> 'opening' THEN RAISE",
+      "replacement": "AND kind <> 'no-such-kind' THEN RAISE",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "an opening entry may predate books start",
+          "expected": "ledger\\.beforeBooksStart"
+        }
+      ]
+    },
+    {
+      "name": "ledger-civil-basis-kinds",
+      "claim": "A caller-typed civil date is admitted only for person-entered kinds.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "ELSIF date_basis ? 'civil' AND kind IN ('manual','opening') THEN",
+      "replacement": "ELSIF date_basis ? 'civil' THEN",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "a source kind refuses a civil date basis",
+          "expected": "Missing expected rejection: a posting entry took a caller-typed civil date"
+        }
+      ]
+    },
+    {
+      "name": "ledger-company-calendar",
+      "claim": "An instant is dated by the company business calendar, never its UTC date.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "RETURN north_star_internal.inventory_business_period(t, instant); END $$;",
+      "replacement": "RETURN (instant AT TIME ZONE 'UTC')::date; END $$;",
+      "test": {
+        "files": [
+          "test/postgres/ledger-journal-core.test.ts",
+          "test/architecture/ledger-journal-core.test.ts"
+        ]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "an instant is dated by the company calendar, not the UTC date",
+          "expected": "Missing expected rejection: an instant was dated by its UTC date into closed books"
+        },
+        {
+          "file": "test/architecture/ledger-journal-core.test.ts",
+          "name": "accounting dates come only from the company business-day resolver",
+          "expected": "the resolver converts by itself"
+        }
+      ]
+    },
+    {
+      "name": "ledger-projection-assertion",
+      "claim": "A balance row that drifts from its lines refuses the next write.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "RAISE EXCEPTION 'ledger.projectionMismatch'; END IF;",
+      "replacement": "NULL; END IF;",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "a projection row that drifts from its lines refuses the next write",
+          "expected": "Missing expected rejection: a write committed over a drifted projection"
+        }
+      ]
+    },
+    {
+      "name": "ledger-isolation-guard",
+      "claim": "Writers and setters run only under READ COMMITTED.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "IF current_setting('transaction_isolation') <> 'read committed' THEN",
+      "replacement": "IF false THEN",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "the writer refuses any isolation but READ COMMITTED",
+          "expected": "Missing expected rejection: the writer ran under REPEATABLE READ"
+        }
+      ]
+    },
+    {
+      "name": "ledger-posting-key-nulls",
+      "claim": "Two posters racing on one source version commit one entry, with null recognized-through.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "NULLS NOT DISTINCT WHERE entry_kind IN ('posting','recognition');",
+      "replacement": "WHERE entry_kind IN ('posting','recognition');",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "two posters racing on one source version commit one entry",
+          "expected": "Missing expected rejection: a raced duplicate posting was admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-operation-key",
+      "claim": "Two operations racing on one receipt and ordinal commit one entry.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "NULLS NOT DISTINCT WHERE entry_kind IN ('repost','reclass','manual','opening');",
+      "replacement": "NULLS NOT DISTINCT WHERE false;",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "two operations racing on one receipt and ordinal commit one entry",
+          "expected": "Missing expected rejection: a raced duplicate operation entry was admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-close-lock",
+      "claim": "A writer takes the closed-through row FOR SHARE, so it re-reads a close it waited for.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "WHERE (tenant_id, environment_id, company_id) = (t, e, company) FOR SHARE;",
+      "replacement": "WHERE (tenant_id, environment_id, company_id) = (t, e, company);",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "a writer waiting on a close re-reads closed-through and refuses",
+          "expected": "Missing expected rejection: a writer posted into a period closed while it waited"
+        }
+      ]
+    },
+    {
+      "name": "ledger-account-lock",
+      "claim": "A writer takes its account rows FOR SHARE, so it re-reads a deactivation it waited for.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "ORDER BY a.account_id FOR SHARE;",
+      "replacement": "ORDER BY a.account_id;",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "a writer waiting on a deactivation re-reads the account and refuses",
+          "expected": "Missing expected rejection: a writer posted to an account deactivated while it waited"
+        }
+      ]
+    },
+    {
+      "name": "ledger-balance-lock-order",
+      "claim": "Balance rows are locked in ascending key order, so two writers never deadlock.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "ORDER BY (a->>'accountId')::uuid",
+      "replacement": "ORDER BY min((a->>'n')::integer)",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "writers lock balance rows in ascending order and never deadlock",
+          "expected": "a writer failed on lock order: deadlock detected"
+        }
+      ]
+    },
+    {
+      "name": "ledger-period-company",
+      "claim": "A company's closed-through row is found by its company, so closing one never refuses another.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "WHERE (tenant_id, environment_id, company_id) = (t, e, company) FOR SHARE;",
+      "replacement": "WHERE (tenant_id, environment_id) = (t, e) ORDER BY closed_through IS NULL, company_id FOR SHARE;",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"],
+        "namePattern": "^ledger company isolation$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "closing one company never refuses another in the same tenant",
+          "expected": "ledger\\.closedBooks"
+        }
+      ]
+    },
+    {
+      "name": "ledger-read-company-scope",
+      "claim": "A company-scoped principal reads only its own company.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "(m.legal_entity_id IS NULL OR m.legal_entity_id = company)",
+      "replacement": "(m.legal_entity_id IS NULL OR m.legal_entity_id IS NOT NULL)",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"],
+        "namePattern": "^ledger company isolation$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "a company-scoped principal reads only its own company",
+          "expected": "Missing expected rejection: a principal scoped to company A read company B's lines"
+        }
+      ]
+    },
+    {
+      "name": "ledger-read-page-limit",
+      "claim": "A line page never exceeds its size.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "    LIMIT page_size; END $$;",
+      "replacement": "    ; END $$;",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"],
+        "namePattern": "^ledger company isolation$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "a line page is bounded and continues by keyset",
+          "expected": "a line page exceeded its size"
+        }
+      ]
+    },
+    {
+      "name": "ledger-read-page-size",
+      "claim": "A line page holds at most 500 lines.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "page_size NOT BETWEEN 1 AND 500",
+      "replacement": "page_size NOT BETWEEN 1 AND 5000",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"],
+        "namePattern": "^ledger company isolation$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "a line page is bounded and continues by keyset",
+          "expected": "Missing expected rejection: a page above 500 lines was served"
+        }
+      ]
+    },
+    {
+      "name": "ledger-core-role-pin",
+      "claim": "The 30 core role IDs, classes and normal sides match ADR-0093 section 3.",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "('northstar.ledger:role.bank_fees','expense','D',NULL),",
+      "replacement": "('northstar.ledger:role.bank_charges','expense','D',NULL),",
+      "test": {
+        "files": ["test/architecture/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ledger-journal-core.test.ts",
+          "name": "the core role list is pinned to ADR-0093 section 3 and never renamed or reclassed",
+          "expected": "the seeded core roles differ from ADR-0093 section 3"
+        }
+      ]
+    }
+  ]
+}
