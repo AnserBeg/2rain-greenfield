@@ -30,9 +30,9 @@ test('the checked manifest classifies every current table exactly once', () => {
   const tables = enumerateTenantTablesFromSnapshot(loadSnapshot());
   const verified = verifyTenantCompleteness(manifest, tables);
 
-  assert.equal(verified.tableCount, 139);
-  assert.equal(verified.tenantScopedCount, 127);
-  assert.equal(verified.tenantIndependentCount, 12);
+  assert.equal(verified.tableCount, 141);
+  assert.equal(verified.tenantScopedCount, 128);
+  assert.equal(verified.tenantIndependentCount, 13);
   assert.equal(
     verified.classifications.find(
       ({ schema, table }) => schema === 'platform' && table === 'tenants',

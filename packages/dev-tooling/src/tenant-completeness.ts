@@ -48,6 +48,7 @@ const tenantIndependentV1TableAuthorities: ReadonlyMap<
   ['north_star_internal.schema_migrations', 'migration-history'],
   ['north_star_internal.staff_store_mode', 'kernel-integrity-witness'],
   ['platform.immutable_release_write_guard', 'kernel-integrity-witness'],
+  ['platform.ledger_chart_starter_accounts', 'shared-immutable-catalog'],
   ['platform.ledger_core_roles', 'shared-immutable-catalog'],
   ['platform.ledger_currencies', 'shared-immutable-catalog'],
   ['platform.release_activation_write_guard', 'kernel-integrity-witness'],

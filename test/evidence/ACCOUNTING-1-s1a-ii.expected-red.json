@@ -108,6 +108,203 @@
           "expected": "a deactivation committed under an uncommitted writer's line: admitted"
         }
       ]
+    },
+    {
+      "name": "ledger-books-start-locked",
+      "claim": "Books start never moves once the company has an entry.",
+      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "original": "IF EXISTS (SELECT FROM platform.ledger_entries x WHERE (x.tenant_id, x.environment_id, x.company_id) = (t, e, company)) THEN",
+      "replacement": "IF false AND EXISTS (SELECT FROM platform.ledger_entries x WHERE (x.tenant_id, x.environment_id, x.company_id) = (t, e, company)) THEN",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "books start never moves once the company has an entry",
+          "expected": "Missing expected rejection: books start moved after an entry was posted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-op-digest",
+      "claim": "A confirm carries the exact digest of its review.",
+      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "original": "IF reviewed_digest IS DISTINCT FROM r.digest THEN",
+      "replacement": "IF false AND reviewed_digest IS DISTINCT FROM r.digest THEN",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "books start is confirmed only with the exact digest of its review",
+          "expected": "a confirm with another digest was admitted: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-op-consumed-once",
+      "claim": "A review is consumed once, in the confirming statement, for all three operations that write no entry.",
+      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "original": "AND v.consumed_at IS NULL;",
+      "replacement": ";",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "books start is confirmed only with the exact digest of its review",
+          "expected": "a consumed books-start review was confirmed again"
+        },
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "set up chart adds the starter accounts of the chosen jurisdictions once",
+          "expected": "a consumed chart review was confirmed again"
+        },
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "put account mints the account ID and never changes a kind",
+          "expected": "a consumed account review was confirmed again"
+        }
+      ]
+    },
+    {
+      "name": "ledger-op-company-scope",
+      "claim": "A company-scoped principal is refused on another company of the same tenant.",
+      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "original": "AND (m.legal_entity_id IS NULL OR m.legal_entity_id = company)",
+      "replacement": "AND true",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a principal scoped to one company is refused on another company of the tenant",
+          "expected": "a principal scoped to company A reviewed company B: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-op-company-master",
+      "claim": "A company is a live record of the released legal-entity master.",
+      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "original": "IF NOT north_star_internal.ledger_company_live(company, writing) THEN",
+      "replacement": "IF false AND NOT north_star_internal.ledger_company_live(company, writing) THEN",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a company must be a live record of the released legal-entity master",
+          "expected": "an unscoped member started books for a company that does not exist: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-op-write-permission",
+      "claim": "A books change needs the write permission, never a read.",
+      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "original": "IF NOT north_star_internal.ledger_may(company, 'northstar.ledger:permission.books_configure', 'northstar.ledger:capability.books')",
+      "replacement": "IF NOT (north_star_internal.ledger_may(company, 'northstar.ledger:permission.books_configure', 'northstar.ledger:capability.books') OR north_star_internal.ledger_may(company, 'northstar.ledger:permission.journal_read', 'northstar.ledger:capability.journal'))",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a read permission never authorizes a books change",
+          "expected": "a journal reader changed the chart: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-op-chart-kind",
+      "claim": "A starter code held by an account of another kind refuses the chart.",
+      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "original": "IF row_.existing_kind IS DISTINCT FROM row_.kind_role_id THEN RAISE EXCEPTION 'ledger.chartKindConflict'; END IF;",
+      "replacement": "NULL;",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a starter code held by an account of another kind refuses the chart",
+          "expected": "Missing expected rejection: a starter account was kept under another kind"
+        }
+      ]
+    },
+    {
+      "name": "ledger-op-stale",
+      "claim": "Confirm re-derives the terms under its locks and refuses a stale review.",
+      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "original": "IF derived->'terms' IS DISTINCT FROM r.terms THEN RAISE EXCEPTION 'ledger.reviewStale'; END IF;",
+      "replacement": "NULL;",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "confirm re-derives its terms under the locks and refuses a stale review",
+          "expected": "a stale review was confirmed: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-op-review-immutable",
+      "claim": "A review's terms never change, even while it is consumed.",
+      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "original": "OR (to_jsonb(NEW) - 'consumed_at' - 'receipt_id') <> (to_jsonb(OLD) - 'consumed_at' - 'receipt_id') THEN",
+      "replacement": "OR false THEN",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a review's terms never change, even while it is consumed",
+          "expected": "Missing expected rejection: a review's terms changed"
+        }
+      ]
+    },
+    {
+      "name": "ledger-op-fence",
+      "claim": "A review never confirms after the release switched away and back.",
+      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "original": "WHERE (p.tenant_id, p.environment_id, p.release_id, p.fence) = (tenant, environment, released, expected_fence) FOR SHARE;",
+      "replacement": "WHERE (p.tenant_id, p.environment_id, p.release_id) = (tenant, environment, released) FOR SHARE;",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a review never confirms across a release switch and back",
+          "expected": "a review confirmed across a release switch: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-op-execute",
+      "claim": "Only north_star_runtime executes review and confirm; no one the internal operation functions.",
+      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "original": "  TO north_star_runtime;\n",
+      "replacement": "  TO north_star_runtime;\nGRANT EXECUTE ON FUNCTION north_star_internal.ledger_operation_terms(uuid,text,jsonb,boolean) TO north_star_runtime;\n",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "only north_star_runtime executes review and confirm",
+          "expected": "a ledger operation function is executable beyond its grant"
+        }
+      ]
     }
   ]
 }

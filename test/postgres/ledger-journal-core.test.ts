@@ -19,17 +19,21 @@ import { withEphemeralPostgres } from '../helpers/postgres.js';
 const role = (name: string) => `northstar.ledger:role.${name}`;
 const READ_PERMISSION = 'northstar.ledger:permission.journal_read';
 const READ_RESOURCE = 'northstar.ledger:capability.journal';
-const TABLES = [
+const GLOBAL_TABLES = [
   'ledger_currencies',
   'ledger_core_roles',
+  'ledger_chart_starter_accounts',
+];
+const TENANT_TABLES = [
   'ledger_companies',
   'ledger_entry_counters',
   'ledger_accounts',
   'ledger_entries',
   'ledger_lines',
   'ledger_balances',
+  'ledger_operation_reviews',
 ];
-const TENANT_TABLES = TABLES.slice(2);
+const TABLES = [...GLOBAL_TABLES, ...TENANT_TABLES];
 const READS = [
   'platform.ledger_read_lines(uuid,date,date,bigint,integer,integer)',
   'platform.ledger_read_balances(uuid,date,date)',
@@ -631,6 +635,21 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
               'an account changed its kind',
             );
           });
+          await t.test(
+            'books start never moves once the company has an entry',
+            async () => {
+              const c = await company();
+              await manual(w1, c, '2026-02-10');
+              await assert.rejects(
+                admin.query(
+                  "SELECT north_star_internal.ledger_set_books_start($1,'2026-03-01')",
+                  [c.id],
+                ),
+                /ledger\.booksStartLocked/u,
+                'books start moved after an entry was posted',
+              );
+            },
+          );
           await t.test('no entry posts before books start is set', async () => {
             const c = await company(null);
             await assert.rejects(
