@@ -252,13 +252,11 @@ DECLARE calendar uuid; next_version integer; prior_zone text; prior_boundary tim
     start_day := north_star_internal.business_day_of(prior_zone, prior_boundary, requested_effective_from);
     IF ((start_day + prior_boundary) AT TIME ZONE prior_zone) IS DISTINCT FROM requested_effective_from
        OR start_day <= north_star_internal.business_day_of(prior_zone, prior_boundary, transaction_timestamp()) THEN
-      RAISE EXCEPTION 'calendar.changeNotFutureDayStart'; END IF;
-  END IF;
+      RAISE EXCEPTION 'calendar.changeNotFutureDayStart'; END IF; END IF;
   IF calendar IS NULL THEN
     calendar := CASE WHEN requested_company_id IS NULL THEN requested_tenant_id ELSE gen_random_uuid() END;
     INSERT INTO platform.business_calendars (calendar_id, tenant_id, environment_id, company_id)
-      VALUES (calendar, requested_tenant_id, requested_environment_id, requested_company_id);
-  END IF;
+      VALUES (calendar, requested_tenant_id, requested_environment_id, requested_company_id); END IF;
   SELECT coalesce(max(version.version), 0) + 1 INTO next_version
     FROM platform.business_calendar_versions AS version WHERE version.calendar_id = calendar;
   INSERT INTO platform.business_calendar_versions (

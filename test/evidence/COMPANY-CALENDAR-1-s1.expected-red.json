@@ -123,8 +123,8 @@
       "name": "calendar-provision-both-stores",
       "claim": "Provisioning writes the authoritative default and the mirror in one transaction.",
       "file": "db/migrations/0072_business_calendar.sql",
-      "original": "    PERFORM north_star_internal.business_calendar_put(\n      requested_tenant_id, NULL, NULL, '-infinity'::timestamptz,\n      requested_time_zone, requested_business_day_boundary, 1::smallint, 1::smallint\n    ); END IF;",
-      "replacement": "    END IF;",
+      "original": "      requested_business_day_boundary\n    );\n    PERFORM north_star_internal.business_calendar_put(\n      requested_tenant_id, NULL, NULL, '-infinity'::timestamptz,\n      requested_time_zone, requested_business_day_boundary, 1::smallint, 1::smallint\n    ); END IF;",
+      "replacement": "      requested_business_day_boundary\n    ); END IF;",
       "test": {
         "files": ["test/postgres/business-calendar.test.ts"]
       },
@@ -291,6 +291,23 @@
           "file": "test/postgres/business-calendar.test.ts",
           "name": "a principal scoped to company A is refused company B's calendar",
           "expected": "Missing expected rejection: a principal scoped to company A read company B's calendar"
+        }
+      ]
+    },
+    {
+      "name": "calendar-backfill-verbatim",
+      "claim": "The backfill copies each mirror row verbatim, recorded when the mirror row was created.",
+      "file": "db/migrations/0072_business_calendar.sql",
+      "original": "         mirror.business_day_boundary, mirror.created_at\n    FROM platform.inventory_tenant_calendars AS mirror;",
+      "replacement": "         mirror.business_day_boundary, transaction_timestamp()\n    FROM platform.inventory_tenant_calendars AS mirror;",
+      "test": {
+        "files": ["test/postgres/business-calendar-reader.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar-reader.test.ts",
+          "name": "upgrading to the calendar resolver leaves every stored row byte-identical",
+          "expected": "a tenant default differs from its mirror row"
         }
       ]
     }
