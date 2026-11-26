@@ -2585,7 +2585,11 @@ class SemanticVerificationExecutor {
     // keeps the derivation inside its target. Generic decimals carry up to
     // nine integer digits, and two of them overflow a scale-2, precision-18
     // amount in most arrangements. A validation's own witness still wins.
-    const operands = derivedOperandIds(operation.inputContract.derivedFields);
+    const operands = derivedOperandValues(
+      operation.inputContract.derivedFields,
+      writable,
+      token,
+    );
     const values = Object.fromEntries(
       writable.map((field) => [
         field.fieldId,
@@ -2596,7 +2600,7 @@ class SemanticVerificationExecutor {
               inputOverrides[field.fieldId],
             )
           : operands.has(field.fieldId)
-            ? DERIVED_OPERAND_VALUE
+            ? operands.get(field.fieldId)
             : verificationFieldValue(field, token, storageEntity),
       ]),
     );
@@ -3469,25 +3473,66 @@ function verificationNumericValue(fieldId: string, token: string): string {
 }
 
 /**
- * The value release verification writes into every operand of a derived
- * value (ADR-0094 amendment 4). One is exact at every scale and fits every
- * precision, and any product, sum or difference of ones and the declaration's
- * own literals stays as small as the declaration itself.
+ * The values release verification writes into the operands of a derived
+ * value (ADR-0094 amendment 4). Each is small and token-distinct: one digit
+ * and one decimal place (`4.7`) when the operand has a scale, so no sentinel
+ * text can contain it (the search probes look for it as a substring), or a
+ * four-digit whole number at scale 0. Every derivation is bounded with all its
+ * operands at their largest such magnitude; if that bound does not fit the
+ * target, its operands get `1`, which keeps any product, sum or difference as
+ * small as the declaration's own literals.
  */
-const DERIVED_OPERAND_VALUE = '1';
-
-function derivedOperandIds(
+function derivedOperandValues(
   derived: readonly CompiledDerivedField[] | undefined,
-): ReadonlySet<string> {
-  const out = new Set<string>();
-  const visit = (term: CompiledDerivedField['expression']): void => {
-    if (term.kind === 'field') out.add(term.fieldId);
-    else if (term.kind === 'arithmetic') {
-      visit(term.left);
-      visit(term.right);
-    }
+  fields: readonly VerificationFieldContract[],
+  token: string,
+): ReadonlyMap<string, string> {
+  const out = new Map<string, string>();
+  if (!derived?.length) return out;
+  const scaleOf = (fieldId: string) =>
+    fields.find((field) => field.fieldId === fieldId)?.bounds.scale ?? 0;
+  const digest = (fieldId: string) =>
+    createHash('sha256')
+      .update(token, 'utf8')
+      .update(Uint8Array.of(0))
+      .update(fieldId, 'utf8')
+      .digest();
+  const candidate = (fieldId: string) => {
+    const bytes = digest(fieldId);
+    return scaleOf(fieldId) > 0
+      ? `${String((bytes[0]! % 9) + 1)}.${String((bytes[1]! % 9) + 1)}`
+      : String(1000 + (bytes.readUInt16BE(0) % 9000));
   };
-  for (const field of derived ?? []) visit(field.expression);
+  const largest = (fieldId: string) => (scaleOf(fieldId) > 0 ? 10 : 10_000);
+  const bound = (term: CompiledDerivedField['expression']): number => {
+    if (term.kind === 'field') return largest(term.fieldId);
+    if (term.kind === 'decimalLiteral') return Math.abs(Number(term.value));
+    const left = bound(term.left);
+    const right = bound(term.right);
+    return term.operator === 'multiply' ? left * right : left + right;
+  };
+  const operandsOf = (
+    term: CompiledDerivedField['expression'],
+    into: Set<string>,
+  ): Set<string> => {
+    if (term.kind === 'field') into.add(term.fieldId);
+    else if (term.kind === 'arithmetic') {
+      operandsOf(term.left, into);
+      operandsOf(term.right, into);
+    }
+    return into;
+  };
+  const fallback = new Set<string>();
+  for (const field of derived) {
+    const operands = operandsOf(field.expression, new Set());
+    const fits =
+      bound(field.expression) < 10 ** (field.precision - field.scale);
+    for (const fieldId of operands) {
+      if (!fits) fallback.add(fieldId);
+      out.set(fieldId, candidate(fieldId));
+    }
+  }
+  for (const fieldId of fallback) out.set(fieldId, '1');
   return out;
 }
 

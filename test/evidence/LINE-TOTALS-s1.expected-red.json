@@ -640,7 +640,7 @@
       "replacement": "    if (false)",
       "test": {
         "files": ["test/postgres/line-totals.test.ts"],
-        "namePattern": "^LINE-TOTALS-s1 maximum: a shared contract with unconstrained operands verifies, refuses line N+1 on create and restore, and its concurrent line writes serialize without deadlock$"
+        "namePattern": "^LINE-TOTALS-s1 maximum: a shared contract with unconstrained operands verifies, refuses line N\\+1 on create and restore, and its concurrent line writes serialize without deadlock$"
       },
       "kills": [
         {
@@ -658,7 +658,7 @@
       "replacement": "    if (kind !== 'createRecordEffect')",
       "test": {
         "files": ["test/postgres/line-totals.test.ts"],
-        "namePattern": "^LINE-TOTALS-s1 maximum: a shared contract with unconstrained operands verifies, refuses line N+1 on create and restore, and its concurrent line writes serialize without deadlock$"
+        "namePattern": "^LINE-TOTALS-s1 maximum: a shared contract with unconstrained operands verifies, refuses line N\\+1 on create and restore, and its concurrent line writes serialize without deadlock$"
       },
       "kills": [
         {
@@ -676,7 +676,7 @@
       "replacement": "        FOR SHARE`,\n      [parentId],",
       "test": {
         "files": ["test/postgres/line-totals.test.ts"],
-        "namePattern": "^LINE-TOTALS-s1 maximum: a shared contract with unconstrained operands verifies, refuses line N+1 on create and restore, and its concurrent line writes serialize without deadlock$"
+        "namePattern": "^LINE-TOTALS-s1 maximum: a shared contract with unconstrained operands verifies, refuses line N\\+1 on create and restore, and its concurrent line writes serialize without deadlock$"
       },
       "kills": [
         {
@@ -694,7 +694,7 @@
       "replacement": "`,\n        [input.recordId],",
       "test": {
         "files": ["test/postgres/line-totals.test.ts"],
-        "namePattern": "^LINE-TOTALS-s1 maximum: a shared contract with unconstrained operands verifies, refuses line N+1 on create and restore, and its concurrent line writes serialize without deadlock$"
+        "namePattern": "^LINE-TOTALS-s1 maximum: a shared contract with unconstrained operands verifies, refuses line N\\+1 on create and restore, and its concurrent line writes serialize without deadlock$"
       },
       "kills": [
         {
@@ -712,7 +712,7 @@
       "replacement": "          : false && operands.has(field.fieldId)",
       "test": {
         "files": ["test/postgres/line-totals.test.ts"],
-        "namePattern": "^LINE-TOTALS-s1 maximum: a shared contract with unconstrained operands verifies, refuses line N+1 on create and restore, and its concurrent line writes serialize without deadlock$"
+        "namePattern": "^LINE-TOTALS-s1 maximum: a shared contract with unconstrained operands verifies, refuses line N\\+1 on create and restore, and its concurrent line writes serialize without deadlock$"
       },
       "kills": [
         {
