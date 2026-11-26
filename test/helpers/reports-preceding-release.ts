@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
+import {
+  narrowAcknowledgementToDeclared,
+  readUnboundPermissionAcknowledgementFor,
+} from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import {
   compileInSandbox,
   parseSerializedRelease,
@@ -20,13 +23,30 @@ export const readReportsPredecessor = (file: string) =>
     }),
   );
 
+/**
+ * Today's acknowledgement for an archived first-party base: narrowed to the
+ * permissions that base declares, as the release build narrows it for each
+ * recorded revision. A permission bound after the base was archived is not
+ * the base's, so it is neither stale there nor unbound.
+ */
+export function acknowledgementForBase(base: Record<string, unknown>) {
+  return narrowAcknowledgementToDeclared(
+    readUnboundPermissionAcknowledgementFor(
+      'apps/web/release/app.authored.json',
+      'northstar.app:package.application',
+    ),
+    new Set(
+      (base.permissions as readonly { readonly permissionId: string }[]).map(
+        (permission) => permission.permissionId,
+      ),
+    ),
+  );
+}
+
 export async function compileReportFixture(chain: CustomizationPatch[]) {
   const path = 'apps/web/release/app.authored.json';
   const result = await compileInSandbox({
-    acknowledgement: readUnboundPermissionAcknowledgementFor(
-      path,
-      'northstar.app:package.application',
-    ),
+    acknowledgement: acknowledgementForBase(readReportsPredecessor(path)),
     base: readReportsPredecessor(path),
     tip: serializeRelease(
       parseCompiledApplication(

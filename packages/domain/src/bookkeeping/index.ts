@@ -5,3 +5,7 @@ export {
   bookkeepingModuleDefinition,
   type BookkeepingCompanyRecord,
 } from './definition.js';
+export {
+  bookkeepingCompanyWorkspace,
+  type BookkeepingCompanyColumn,
+} from './workspace.js';

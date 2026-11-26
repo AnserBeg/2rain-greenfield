@@ -323,6 +323,25 @@ test(
             },
           );
           await t.test(
+            'a blank or missing expectedPrior means no books start yet, as a Task left blank sends',
+            async () => {
+              for (const args of [
+                { date: '2026-01-01', expectedPrior: '' },
+                { date: '2026-01-01' },
+              ]) {
+                const fence = (await pointer()).fence;
+                const call = { who: scopedA, company: COMPANY, fence };
+                const input = { ...inputOf(call), arguments: args };
+                const attested = await attest(call, input);
+                const outcome = await as(scopedA, async (client) => {
+                  await client.query('BEGIN');
+                  return settled(apply(client, call, attested, input));
+                });
+                assert.equal(outcome, 'admitted', JSON.stringify(args));
+              }
+            },
+          );
+          await t.test(
             'only the issuer attests and only north_star_runtime applies',
             async () => {
               const { rows } = await pool.query<{ entry: string }>(

@@ -57,7 +57,10 @@ import {
   type ComposedApplicationSeedProfile,
 } from '../../../packages/domain/src/app/seed.js';
 import { firstPartyImmediateEdits } from '../../../packages/domain/src/app/immediate-edits.js';
-import { readUnboundPermissionAcknowledgementFor } from '../../web/scripts/unbound-permission-acknowledgement.js';
+import {
+  narrowAcknowledgementToDeclared,
+  readUnboundPermissionAcknowledgementFor,
+} from '../../web/scripts/unbound-permission-acknowledgement.js';
 
 export interface ComposedApplicationServerOptions {
   /**
@@ -437,10 +440,18 @@ export async function openComposedApplicationRuntime(
     },
     customization: {
       get acknowledgement() {
-        return readUnboundPermissionAcknowledgementFor(
+        return servedAcknowledgement(
           new URL('../../web/release/app.authored.json', import.meta.url)
             .pathname,
           'northstar.app:package.application',
+          options.compiledApplication
+            ? canonicalAuthoredProjection(
+                parseNormalizedApplicationPackageJson(
+                  parseCompiledApplication(compiledApplication).application
+                    .normalizedDefinitionBytes,
+                ),
+              )
+            : null,
         );
       },
       get firstPartyAuthored() {
@@ -475,6 +486,35 @@ export async function openComposedApplicationRuntime(
   });
 }
 
+/**
+ * The checked-in permission acknowledgement for the first party a runtime
+ * serves. The binary's own release declares exactly what the checked-in
+ * bindings name, so it is read as is. A release handed in from elsewhere (an
+ * earlier one) is narrowed to the permissions it declares, as the release
+ * build narrows it for each recorded revision: a permission bound after that
+ * release is not its own, so it is neither stale there nor unbound.
+ */
+function servedAcknowledgement(
+  authoredPath: string,
+  packageId: string,
+  served: Readonly<Record<string, unknown>> | null,
+) {
+  const acknowledgement = readUnboundPermissionAcknowledgementFor(
+    authoredPath,
+    packageId,
+  );
+  return served
+    ? narrowAcknowledgementToDeclared(
+        acknowledgement,
+        new Set(
+          (
+            served.permissions as readonly { readonly permissionId: string }[]
+          ).map((permission) => permission.permissionId),
+        ),
+      )
+    : acknowledgement;
+}
+
 /** Tenant customization over the database the composed runtime serves. */
 export async function openCustomizeService(
   options: Pick<
@@ -505,9 +545,10 @@ export async function openCustomizeService(
         unknown
       >);
   return openCustomizationService({
-    acknowledgement: readUnboundPermissionAcknowledgementFor(
+    acknowledgement: servedAcknowledgement(
       authoredPath,
       String((firstPartyAuthored.package as Record<string, unknown>).packageId),
+      options.compiledApplication ? firstPartyAuthored : null,
     ),
     ...(options.sandboxWallClockMilliseconds
       ? {

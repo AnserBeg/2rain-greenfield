@@ -232,7 +232,7 @@
       "name": "ledger-op-prior",
       "claim": "Books start replaces only the value the person expected.",
       "file": "db/migrations/0072_ledger_books_by_hand.sql",
-      "original": "IF coalesce(to_jsonb(to_char(prior, 'YYYY-MM-DD')), 'null'::jsonb) IS DISTINCT FROM args->'expectedPrior' THEN",
+      "original": "IF to_char(prior, 'YYYY-MM-DD') IS DISTINCT FROM nullif(args->>'expectedPrior', '') THEN",
       "replacement": "IF false THEN",
       "test": {
         "files": ["test/postgres/ledger-books-by-hand.test.ts"]

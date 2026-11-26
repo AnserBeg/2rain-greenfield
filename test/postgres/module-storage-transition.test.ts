@@ -13,6 +13,7 @@ import {
   APPLICATION_NAMESPACE,
   composedApplicationDefinition,
 } from '../../packages/domain/src/app/builder.js';
+import { bookkeepingModuleDefinition } from '../../packages/domain/src/bookkeeping/definition.js';
 import { catalogModuleDefinition } from '../../packages/domain/src/catalog/definition.js';
 import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/definition.js';
 import { purchasingModuleDefinition } from '../../packages/domain/src/purchasing/definition.js';
@@ -6070,7 +6071,16 @@ function composedApplicationWithoutInventoryForTransition(): Record<
 > {
   const application = withoutModuleForTransition(
     withoutModuleForTransition(
-      structuredClone(inventoryOwnedModuleDefinition()),
+      // Books (ACCOUNTING-1 1a-ii) acts on Inventory's legal-entity record,
+      // so it goes with Inventory.
+      withoutModuleForTransition(
+        structuredClone(inventoryOwnedModuleDefinition()),
+        bookkeepingModuleDefinition(APPLICATION_NAMESPACE, {
+          entityId: `${APPLICATION_NAMESPACE}:entity.legal_entity`,
+          getQueryId: `${APPLICATION_NAMESPACE}:query.legal_entity_get`,
+        }),
+        'bookkeeping_books',
+      ),
       // As the product application composes it, commercial terms and
       // payables included, so none of its purchase order fields or bill
       // documents outlives the removal.

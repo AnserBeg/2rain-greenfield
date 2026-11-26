@@ -375,8 +375,9 @@ DECLARE tenant uuid := north_star_internal.trusted_tenant_id(); environment uuid
   IF NOT north_star_internal.ledger_company_live(company, writing) THEN RAISE EXCEPTION 'ledger.unavailable'; END IF; END $$;
 
 -- Books start, on the company's legal-entity record. The arguments carry the
--- date and the books start the person expects to replace (expectedPrior, null
--- before the first); a different stored value refuses by name. The company row
+-- date and the books start the person expects to replace (expectedPrior; a
+-- missing, null or empty one means "none yet", which is what a Task input left
+-- blank sends); a different stored value refuses by name. The company row
 -- is provisioned only here, after the master check.
 CREATE FUNCTION platform.ledger_apply_books_start(grant_key uuid, released uuid, expected_fence bigint,
   operation text, request_key uuid, channel text, input jsonb) RETURNS jsonb
@@ -386,8 +387,8 @@ DECLARE tenant uuid := north_star_internal.trusted_tenant_id(); environment uuid
   PERFORM north_star_internal.ledger_require_writer();
   IF jsonb_typeof(input) IS DISTINCT FROM 'object' OR input - 'recordId' - 'expectedRevision' - 'arguments' <> '{}'
      OR coalesce(input->>'recordId', '') !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-     OR jsonb_typeof(args) IS DISTINCT FROM 'object' OR args - 'date' - 'expectedPrior' <> '{}' OR NOT args ? 'expectedPrior'
-     OR jsonb_typeof(args->'expectedPrior') NOT IN ('null', 'string') THEN
+     OR jsonb_typeof(args) IS DISTINCT FROM 'object' OR args - 'date' - 'expectedPrior' <> '{}'
+     OR coalesce(jsonb_typeof(args->'expectedPrior'), 'null') NOT IN ('null', 'string') THEN
     RAISE EXCEPTION 'ledger.invalidOperation'; END IF;
   company := (input->>'recordId')::uuid;
   day := north_star_internal.ledger_civil_date(args->>'date');
@@ -398,7 +399,7 @@ DECLARE tenant uuid := north_star_internal.trusted_tenant_id(); environment uuid
   -- Lock 3, FOR UPDATE: the books-start setter takes the same row again.
   SELECT c.books_start INTO prior FROM platform.ledger_companies c
     WHERE (c.tenant_id, c.environment_id, c.company_id) = (tenant, environment, company) FOR UPDATE;
-  IF coalesce(to_jsonb(to_char(prior, 'YYYY-MM-DD')), 'null'::jsonb) IS DISTINCT FROM args->'expectedPrior' THEN
+  IF to_char(prior, 'YYYY-MM-DD') IS DISTINCT FROM nullif(args->>'expectedPrior', '') THEN
     RAISE EXCEPTION 'ledger.priorChanged'; END IF;
   PERFORM north_star_internal.ledger_set_books_start(company, day);
   RETURN jsonb_build_object('invocationId', invocation, 'company', company, 'booksStart', to_char(day, 'YYYY-MM-DD'),

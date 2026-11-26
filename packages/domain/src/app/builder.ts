@@ -11,6 +11,7 @@ import {
   packingWorkspace,
 } from '../sales/workspace.js';
 import { bookkeepingModuleDefinition } from '../bookkeeping/definition.js';
+import { bookkeepingCompanyWorkspace } from '../bookkeeping/workspace.js';
 import { catalogModuleDefinition } from '../catalog/definition.js';
 import { priceListWorkspace } from '../catalog/workspace.js';
 import { inventoryModuleDefinition } from '../inventory/definition.js';
@@ -159,6 +160,7 @@ const COMPOSED_MODULE_ICONS: Readonly<Record<string, string>> = Object.freeze({
   party: 'users',
   catalog: 'box',
   location: 'location',
+  bookkeeping: 'calculator',
 });
 
 /**
@@ -239,6 +241,24 @@ const RECORD_COMPOSITIONS: Readonly<
   location_detail: locationWorkspace,
   // The period lock's Close and Reopen commands (WAREHOUSE-MODE).
   inventory_period_lock_detail: periodLockWorkspace,
+  // A company's facts and its books-start command (ACCOUNTING-1 1a-ii): the
+  // legal-entity record Inventory declares, with Books' ledger Task.
+  legal_entity_detail: (namespace: string) =>
+    bookkeepingCompanyWorkspace(namespace, {
+      title: { field: `${namespace}:field.legal_entity_name`, label: 'Name' },
+      facts: [
+        { field: `${namespace}:field.legal_entity_code`, label: 'Code' },
+        { field: `${namespace}:field.legal_entity_status`, label: 'Status' },
+        {
+          field: `${namespace}:field.legal_entity_is_default`,
+          label: 'Default entity',
+        },
+        {
+          field: `${namespace}:field.legal_entity_reorder_point_percent`,
+          label: 'Reorder point % of reorder up to',
+        },
+      ],
+    }),
 });
 
 /**

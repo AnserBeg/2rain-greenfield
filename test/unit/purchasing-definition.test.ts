@@ -1355,11 +1355,20 @@ test('the composed application derives its modules from an ordered registry', ()
     'party',
     'catalog',
     'location',
+    'bookkeeping',
   ]);
   assert.equal(composed.modules.length, COMPOSED_MODULE_NAMES.length);
   assert.deepEqual(
     composed.modules.map((module) => module.label),
-    ['Sales', 'Purchasing', 'Stock', 'Contacts', 'Catalog', 'Locations'],
+    [
+      'Sales',
+      'Purchasing',
+      'Stock',
+      'Contacts',
+      'Catalog',
+      'Locations',
+      'Books',
+    ],
   );
   // `orderKey` is derived from registry POSITION, which is what makes order the
   // only thing the registry has to declare.
@@ -1379,7 +1388,15 @@ test('Purchasing and Sales lead the business navigation within budget', () => {
   const composed = composedApplicationDefinition() as unknown as AuthoredShape;
   assert.deepEqual(
     composed.modules.map((module) => module.label),
-    ['Sales', 'Purchasing', 'Stock', 'Contacts', 'Catalog', 'Locations'],
+    [
+      'Sales',
+      'Purchasing',
+      'Stock',
+      'Contacts',
+      'Catalog',
+      'Locations',
+      'Books',
+    ],
   );
 
   const navigation = surfaceManifest(compile(composed)).navigation;

@@ -123,3 +123,79 @@ test('accounting dates come only from the company business-day resolver', () => 
     'the writer dates an instant without the resolver',
   );
 });
+
+// Slice 1a-ii: the person's form for books start is a Task on the company's
+// record page, and only a Task that binds `arguments` admits them into the
+// operation's compiled contract (the gateway refuses any other key).
+test('the released books-start Task binds the operation arguments its contract admits', () => {
+  const release = JSON.parse(
+    readFileSync('apps/web/release/app.compiled.json', 'utf8'),
+  ) as {
+    applications: {
+      artifacts: { domainTag: string; canonicalBytesBase64: string }[];
+    }[];
+  };
+  const chunks = release.applications
+    .at(-1)!
+    .artifacts.map(
+      (artifact) =>
+        [
+          artifact.domainTag,
+          JSON.parse(
+            Buffer.from(artifact.canonicalBytesBase64, 'base64').toString(),
+          ) as Record<string, unknown>,
+        ] as const,
+    );
+  const operation = 'northstar.app:operation.bookkeeping_books_start_set';
+  const declared = chunks
+    .filter(([tag]) => tag.endsWith('projection-family.operation-catalog'))
+    .flatMap(
+      ([, chunk]) =>
+        (chunk.operations ?? []) as {
+          operationId: string;
+          confirmation: string;
+          inputContract: { closedArgumentKeys: string[] };
+        }[],
+    )
+    .find((candidate) => candidate.operationId === operation);
+  assert.ok(declared, 'books start is not in the released operation catalog');
+  assert.equal(declared.confirmation, 'humanRequired');
+  assert.deepEqual(declared.inputContract.closedArgumentKeys, [
+    'arguments',
+    'expectedRevision',
+    'recordId',
+  ]);
+  const page = chunks
+    .filter(([tag]) => tag.endsWith('projection-family.surface-manifest'))
+    .flatMap(
+      ([, chunk]) =>
+        (chunk.surfaces ?? []) as {
+          surfaceId: string;
+          composition?: {
+            actions: {
+              steps: {
+                operation: { targetId: string };
+                bindings: { path: string[] }[];
+              }[];
+            }[];
+          };
+        }[],
+    )
+    .find(
+      (surface) =>
+        surface.surfaceId === 'northstar.app:surface.legal_entity_detail',
+    );
+  const step = page?.composition?.actions
+    .flatMap((action) => action.steps)
+    .find((candidate) => candidate.operation.targetId === operation);
+  assert.ok(step, 'the company page offers no books-start Task');
+  assert.deepEqual(
+    step.bindings.map((binding) => binding.path.join('.')).sort(),
+    [
+      'arguments.date',
+      'arguments.expectedPrior',
+      'expectedRevision',
+      'recordId',
+    ],
+  );
+});
