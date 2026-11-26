@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { extname, join, relative, resolve } from 'node:path';
 import ts from 'typescript';
@@ -1051,6 +1052,21 @@ export interface NameLawBaselineFile {
   readonly expires: string | null;
   readonly names: Readonly<Record<string, number>>;
   readonly owner: string;
+  /** Frozen migration rows only: the applied file's sha256. */
+  readonly sha256?: string;
+}
+
+/**
+ * An applied migration can never change, so its row is frozen rather than
+ * owned by a conversion packet: owner HISTORY, no expiry, pinned to the
+ * file's checksum. A frozen row admits only those exact bytes; a NEW
+ * migration has no row, so a first-party name in it is still refused.
+ */
+export const FROZEN_MIGRATION_OWNER = 'HISTORY';
+const migrationDirectory = 'db/migrations/';
+
+export function fileSha256(path: string): string {
+  return createHash('sha256').update(readFileSync(path)).digest('hex');
 }
 
 export interface NameLawBaseline {
@@ -1310,6 +1326,21 @@ function checkNameLaw(
       );
     }
     if (keys.size > 0) observed.set(repoPath, keys);
+  }
+
+  for (const [file, row] of Object.entries(baseline.files)) {
+    const path = join(root, file);
+    if (row.sha256 === undefined || !existsSync(path)) continue;
+    if (fileSha256(path) !== row.sha256) {
+      add(
+        violations,
+        file,
+        1,
+        'PRESS010_NAME_LAW_INPUT',
+        null,
+        `frozen migration row ${file} no longer matches its checksum; an applied migration never changes`,
+      );
+    }
   }
 
   const slack: NameLawSlack[] = [];
@@ -1953,11 +1984,34 @@ export function parseNameLawBaseline(value: unknown): NameLawBaseline {
       }
       names[key] = count as number;
     }
+    const migration = file.startsWith(migrationDirectory);
+    const frozen = entry.owner === FROZEN_MIGRATION_OWNER;
+    if (migration !== frozen) {
+      throw new Error(
+        `baseline ${file}: a migration row, and only a migration row, is owned by ${FROZEN_MIGRATION_OWNER}`,
+      );
+    }
+    if (
+      frozen &&
+      (entry.expires !== null ||
+        typeof entry.sha256 !== 'string' ||
+        !/^[0-9a-f]{64}$/u.test(entry.sha256))
+    ) {
+      throw new Error(
+        `baseline ${file}: a frozen migration row has no expiry and carries the file's sha256`,
+      );
+    }
+    if (!frozen && entry.sha256 !== undefined) {
+      throw new Error(
+        `baseline ${file}: only a frozen migration row has a sha256`,
+      );
+    }
     files[file] = {
       cluster: entry.cluster,
       expires: entry.expires,
       names,
       owner: entry.owner,
+      ...(frozen ? { sha256: entry.sha256 as string } : {}),
     };
   }
   return { files, measuredOn: baseline.measuredOn, version: 1 };
@@ -2002,6 +2056,7 @@ export function lowerNameLawBaseline(
         owner: row.owner,
         cluster: row.cluster,
         expires: row.expires,
+        ...(row.sha256 === undefined ? {} : { sha256: row.sha256 }),
         names,
       };
     }

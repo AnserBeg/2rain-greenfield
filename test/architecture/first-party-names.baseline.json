@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "measuredOn": "origin/main e112d58ff799912d7b743d5eb7fbd79f796c5318 (re-measured in the GUARD-WIDEN fix round)",
+  "measuredOn": "origin/main b6668f052 merged into packet/GUARD-WIDEN (MAIN-COMPAT re-measure; first measured on e112d58ff)",
   "files": {
     "apps/api/src/agent-cli.ts": {
       "owner": "AGENT-CATALOG",
@@ -171,6 +171,7 @@
       "owner": "HISTORY",
       "cluster": "history",
       "expires": null,
+      "sha256": "c2c9e7c2fe6d677561cbac053d411475edf0854ff358ae4cff474a706909af7f",
       "names": {
         "name:inventory_movement": 8,
         "name:inventory_period_lock": 6
@@ -180,6 +181,7 @@
       "owner": "HISTORY",
       "cluster": "history",
       "expires": null,
+      "sha256": "057ac8415a4a517b239f144be334884b978298d6befb0fc55159548a4650bc97",
       "names": {
         "name:stock_count": 1
       }
@@ -188,6 +190,7 @@
       "owner": "HISTORY",
       "cluster": "history",
       "expires": null,
+      "sha256": "679860e0fd15be2f15f987ec8d23b72a06bbe969cafd5d09d91468f665786ff4",
       "names": {
         "name:inventory_movement": 4
       }
@@ -196,6 +199,7 @@
       "owner": "HISTORY",
       "cluster": "history",
       "expires": null,
+      "sha256": "f6fa8fb103c88505e9d2250897221ea5049c3e8409e12962f0a939fe64ba83ae",
       "names": {
         "name:stock_count": 1
       }
@@ -204,6 +208,7 @@
       "owner": "HISTORY",
       "cluster": "history",
       "expires": null,
+      "sha256": "2ab8f2ee9c959c7b2bd137d28e722d5c328825f4f2a637406e90ff3eeca3b616",
       "names": {
         "name:fulfillment": 4
       }
@@ -212,6 +217,7 @@
       "owner": "HISTORY",
       "cluster": "history",
       "expires": null,
+      "sha256": "d8ef0272b00f89dca3266de142c113c83bec3b8a6ac7bb5f749e27cffc499dba",
       "names": {
         "name:inventory_movement": 1,
         "name:inventory_period_lock": 4
@@ -221,6 +227,7 @@
       "owner": "HISTORY",
       "cluster": "history",
       "expires": null,
+      "sha256": "a01e6376dc0065b253e29a7df9d0c98af3d378db492de0c006eb3ad2928c965d",
       "names": {
         "engine:workflow": 3
       }
@@ -229,6 +236,7 @@
       "owner": "HISTORY",
       "cluster": "history",
       "expires": null,
+      "sha256": "12b013bf61516366ae089774e9c46be2dc177acae877806dd6159ff5a04d675c",
       "names": {
         "engine:workflow": 1
       }
@@ -237,6 +245,7 @@
       "owner": "HISTORY",
       "cluster": "history",
       "expires": null,
+      "sha256": "503848878017eef0622eeb97212e509164c04f05c8275a4a979b5f0b15f28606",
       "names": {
         "name:price_list": 1
       }
@@ -245,6 +254,7 @@
       "owner": "HISTORY",
       "cluster": "history",
       "expires": null,
+      "sha256": "a7bd29f099088b90d1ed80d95ca43a8cf75fe1aa2adb049c5662ba4823fd3ce3",
       "names": {
         "engine:workflow": 3
       }
@@ -253,6 +263,7 @@
       "owner": "HISTORY",
       "cluster": "history",
       "expires": null,
+      "sha256": "6aaafcd3ce90587e17dbb02199c22cce43280f4fb90d504402e7731eb626469d",
       "names": {
         "engine:workflow": 1
       }
@@ -261,6 +272,7 @@
       "owner": "HISTORY",
       "cluster": "history",
       "expires": null,
+      "sha256": "912ada41b7504b12711ef8ce7460b27368e6de475ed3b3db5ce573d5b2107187",
       "names": {
         "engine:booking": 7
       }
@@ -269,8 +281,19 @@
       "owner": "HISTORY",
       "cluster": "history",
       "expires": null,
+      "sha256": "8c7744ae20f7a3deb7cbc1469c4b1bf30af3a71a402c8c51fb7527ef2f9ccefe",
       "names": {
         "engine:booking": 1
+      }
+    },
+    "db/migrations/0071_ledger_journal_core.sql": {
+      "owner": "HISTORY",
+      "cluster": "history",
+      "expires": null,
+      "sha256": "3526a327153e37e43031270ffc1811d04237fda6cd100e39157878b6355a8060",
+      "names": {
+        "name:customer_credit": 1,
+        "name:inventory": 1
       }
     },
     "packages/canonical-model/src/billing.ts": {
@@ -345,7 +368,7 @@
         "engine:billing": 6,
         "engine:booking": 6,
         "field:location_status": 1,
-        "name:goods_receipt": 1
+        "name:goods_receipt": 3
       }
     },
     "packages/canonical-model/src/surface-composition.ts": {
@@ -362,6 +385,14 @@
       "expires": "2027-03-31",
       "names": {
         "name:inventory": 1
+      }
+    },
+    "packages/canonical-model/src/workflow-trigger-events.ts": {
+      "owner": "WORKFLOW-2",
+      "cluster": "C9",
+      "expires": "2027-03-31",
+      "names": {
+        "name:goods_receipt": 5
       }
     },
     "packages/compiler/src/billing.ts": {
@@ -497,14 +528,6 @@
         "name:inventory_period_lock": 4
       }
     },
-    "packages/customization/src/ai-draft.ts": {
-      "owner": "GENERALIZE-1",
-      "cluster": "C8",
-      "expires": "2027-03-31",
-      "names": {
-        "name:goods_receipt": 2
-      }
-    },
     "packages/customization/src/apply.ts": {
       "owner": "GENERALIZE-1",
       "cluster": "C8",
@@ -537,14 +560,6 @@
       "expires": "2027-03-31",
       "names": {
         "name:inventory": 1
-      }
-    },
-    "packages/customization/src/workflow-draft.ts": {
-      "owner": "WORKFLOW-2",
-      "cluster": "C9",
-      "expires": "2027-03-31",
-      "names": {
-        "name:goods_receipt": 1
       }
     },
     "packages/operations-agent/src/session.ts": {
@@ -1416,6 +1431,22 @@
         "name:stock_count_line": 9
       }
     },
+    "packages/postgres-provider/src/workflow-bundle.ts": {
+      "owner": "WORKFLOW-2",
+      "cluster": "C9",
+      "expires": "2027-03-31",
+      "names": {
+        "name:goods_receipt": 1
+      }
+    },
+    "packages/postgres-provider/src/workflow-compile.ts": {
+      "owner": "WORKFLOW-2",
+      "cluster": "C9",
+      "expires": "2027-03-31",
+      "names": {
+        "name:goods_receipt": 1
+      }
+    },
     "packages/postgres-provider/src/workflow-consumer.ts": {
       "owner": "WORKFLOW-2",
       "cluster": "C9",
@@ -1431,7 +1462,7 @@
       "expires": "2027-03-31",
       "names": {
         "import:packages/domain/src/purchasing/receipt-posted-event#RECEIPT_POSTED_EVENT": 1,
-        "name:goods_receipt": 1,
+        "name:goods_receipt": 2,
         "name:purchasing": 1
       }
     },
@@ -1440,7 +1471,7 @@
       "cluster": "C9",
       "expires": "2027-03-31",
       "names": {
-        "name:goods_receipt": 3
+        "name:goods_receipt": 4
       }
     },
     "packages/runtime/src/semantic-operation-gateway.ts": {

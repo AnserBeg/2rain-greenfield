@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -2051,6 +2052,50 @@ test('GUARD-WIDEN red: an unclassified source root', () => {
   );
 });
 
+const appliedMigration = 'db/migrations/0071_applied.sql';
+const appliedMigrationSql = "SELECT 'acme.app:role.sales_order';\n";
+
+function frozenMigrationRow(
+  sql: string,
+  names: Record<string, number>,
+): NameLawBaseline['files'][string] {
+  return {
+    cluster: 'history',
+    expires: null,
+    names,
+    owner: 'HISTORY',
+    sha256: createHash('sha256').update(sql).digest('hex'),
+  };
+}
+
+test('GUARD-WIDEN red: an edited frozen migration', () => {
+  withNameLawFixture(
+    {
+      [appliedMigration]: appliedMigrationSql.replace('SELECT', 'SELECT 1, '),
+    },
+    (result) => {
+      assert.deepEqual(
+        nameLawViolations(result).map((violation) => [
+          violation.ruleId,
+          violation.message,
+        ]),
+        [
+          [
+            'PRESS010_NAME_LAW_INPUT',
+            `frozen migration row ${appliedMigration} no longer matches its checksum; an applied migration never changes`,
+          ],
+        ],
+        'a frozen migration row must refuse a file that is not the applied bytes',
+      );
+    },
+    {
+      [appliedMigration]: frozenMigrationRow(appliedMigrationSql, {
+        'name:sales_order': 1,
+      }),
+    },
+  );
+});
+
 test('name law observes snake, camel, Pascal, plural and endsWith spellings', () => {
   withNameLawFixture(
     {
@@ -2187,6 +2232,61 @@ test('name law passes a fall and the lowering only ever lowers', () => {
     },
     baselineFiles,
   );
+});
+
+test('name law: a frozen migration row admits its exact bytes and nothing new', () => {
+  withNameLawFixture(
+    {
+      [appliedMigration]: appliedMigrationSql,
+      'db/migrations/0072_new.sql': "SELECT 'acme.app:role.sales_order';\n",
+    },
+    (result) => {
+      assert.deepEqual(
+        nameLawViolations(result).map((violation) => [
+          violation.file,
+          violation.ruleId,
+        ]),
+        [['db/migrations/0072_new.sql', 'PRESS011_FIRST_PARTY_NAME']],
+      );
+    },
+    {
+      [appliedMigration]: frozenMigrationRow(appliedMigrationSql, {
+        'name:sales_order': 1,
+      }),
+    },
+  );
+  for (const [file, row, expected] of [
+    [
+      appliedMigration,
+      nameLawRow({ 'name:sales_order': 1 }),
+      /a migration row, and only a migration row, is owned by HISTORY/u,
+    ],
+    [
+      genericFile,
+      { ...nameLawRow({ 'name:sales_order': 1 }), owner: 'HISTORY' },
+      /a migration row, and only a migration row, is owned by HISTORY/u,
+    ],
+    [
+      appliedMigration,
+      {
+        ...frozenMigrationRow(appliedMigrationSql, { 'name:sales_order': 1 }),
+        expires: '2099-01-01',
+      },
+      /a frozen migration row has no expiry and carries the file's sha256/u,
+    ],
+  ] as const) {
+    withNameLawFixture(
+      { [appliedMigration]: appliedMigrationSql },
+      (result) => {
+        const messages = nameLawViolations(result).map(
+          (violation) => violation.message,
+        );
+        assert.equal(messages.length, 1, messages.join('\n'));
+        assert.match(messages[0] ?? '', expected);
+      },
+      { [file]: row },
+    );
+  }
 });
 
 test('name law fails closed on a missing scope root or an empty scope', () => {
