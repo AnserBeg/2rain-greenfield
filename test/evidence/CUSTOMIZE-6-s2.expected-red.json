@@ -402,6 +402,23 @@
           "expected": "the line rung without line fields"
         }
       ]
+    },
+    {
+      "name": "line-editor-header-not-passed",
+      "claim": "The document editor hands each line row its header, so a line amount's suffix is the header's code on the running server.",
+      "file": "apps/web/src/document-editor.ts",
+      "original": "      header: draft.id === buffer.header.id ? undefined : buffer.header,",
+      "replacement": "      header: undefined,",
+      "test": {
+        "files": ["test/postgres/line-logical-fields.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/line-logical-fields.test.ts",
+          "name": "line money in its header currency, quantities and notes serve per company, refuse unlisted codes, and the preceding reader refuses the line change by name",
+          "expected": "the editor's line rates lost their header's currency"
+        }
+      ]
     }
   ]
 }
