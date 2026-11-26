@@ -198,4 +198,44 @@ test('the released books-start Task binds the operation arguments its contract a
       'recordId',
     ],
   );
+  // Putting an account: the same contract, its six arguments bound by its Task.
+  const accountPut = 'northstar.app:operation.bookkeeping_account_put';
+  const putDeclared = chunks
+    .filter(([tag]) => tag.endsWith('projection-family.operation-catalog'))
+    .flatMap(
+      ([, chunk]) =>
+        (chunk.operations ?? []) as {
+          operationId: string;
+          confirmation: string;
+          inputContract: { closedArgumentKeys: string[] };
+        }[],
+    )
+    .find((candidate) => candidate.operationId === accountPut);
+  assert.ok(
+    putDeclared,
+    'account put is not in the released operation catalog',
+  );
+  assert.equal(putDeclared.confirmation, 'humanRequired');
+  assert.deepEqual(putDeclared.inputContract.closedArgumentKeys, [
+    'arguments',
+    'expectedRevision',
+    'recordId',
+  ]);
+  const putStep = page?.composition?.actions
+    .flatMap((action) => action.steps)
+    .find((candidate) => candidate.operation.targetId === accountPut);
+  assert.ok(putStep, 'the company page offers no account-put Task');
+  assert.deepEqual(
+    putStep.bindings.map((binding) => binding.path.join('.')).sort(),
+    [
+      'arguments.active',
+      'arguments.code',
+      'arguments.expectedActive',
+      'arguments.expectedLabel',
+      'arguments.kind',
+      'arguments.label',
+      'expectedRevision',
+      'recordId',
+    ],
+  );
 });
