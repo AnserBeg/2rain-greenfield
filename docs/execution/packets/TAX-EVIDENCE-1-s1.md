@@ -49,7 +49,7 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/45870654
 - Privileges: no-table-grant, forced-rls, function-execute.
 - Review and confirm: release-fence, review-single-use, review-digest, review-principal, review-size, confirm-live-grant, code-write-grant, registration-write-grant.
 - Authority: shared-code-tenant-wide (T2), company-scope (two companies in one tenant; 4 kills), registration-company-stored, company-live-review, company-live-confirm, writer-read-committed (2 kills), registration-ends-once.
-- Evidence: pending (rename round).
+- Evidence: all 38 killed as declared and restored green at 9c61f92ab (https://github.com/AnserBeg/2rain-greenfield/actions/runs/45870090664).
 
 ## Rules 10, 12
 No Customize member in s1; s4 adds `declareTaxableAmount`.
