@@ -104,6 +104,7 @@ export function composeServingGateways(
     readonly localDemoIdentity?: true;
     readonly monotonicMilliseconds?: () => number;
     readonly reportLimits?: Partial<Omit<ReportLimits, 'deadlineMs'>>;
+    readonly reportClock?: () => Date;
   },
   documentOptions?: {
     scanner?: DocumentScanner | undefined;
@@ -120,6 +121,7 @@ export function composeServingGateways(
       undefined,
       {
         ...(options.reportLimits && { reportLimits: options.reportLimits }),
+        ...(options.reportClock && { reportClock: options.reportClock }),
         validationReadPolicy: async (releaseId) =>
           (await servingFor(releaseId)).policy,
         writeInvariants: options.writeInvariants,
@@ -707,21 +709,32 @@ export function releasePolicyBindings(
   documents: boolean,
 ) {
   const definition = parseNormalizedApplicationPackageJson(definitionBytes);
+  // A named measure is granted like a report: its own aggregate permission
+  // and read access to each operand.
+  const declared = (s: (typeof definition.surfaces)[number]) =>
+    s.lifecycle !== 'active'
+      ? undefined
+      : 'report' in s && s.report
+        ? { id: s.report.reportId, body: s.report.body }
+        : 'measure' in s && s.measure
+          ? { id: s.measure.measureId, body: s.measure.body }
+          : undefined;
   return [
     ...(definition.languageVersion === 'v6' &&
-    definition.surfaces.some((s) => s.report && s.lifecycle === 'active')
+    definition.surfaces.some((s) => declared(s))
       ? [
-          ...definition.surfaces.flatMap((s) =>
-            s.lifecycle === 'active' && s.report
+          ...definition.surfaces.flatMap((s) => {
+            const d = declared(s);
+            return d
               ? [
                   {
                     action: 'aggregate',
-                    permissionId: reportQueryId(s.report.reportId),
-                    resourceId: s.report.reportId,
+                    permissionId: reportQueryId(d.id),
+                    resourceId: d.id,
                   },
                 ]
-              : [],
-          ),
+              : [];
+          }),
           {
             action: 'export',
             permissionId: REPORT_EXPORT_PERMISSION,
@@ -729,10 +742,11 @@ export function releasePolicyBindings(
           },
           ...[
             ...new Set(
-              definition.surfaces.flatMap((s) =>
-                s.lifecycle === 'active' && s.report
-                  ? s.report.body.operands.map((o) => o.fieldId)
-                  : [],
+              definition.surfaces.flatMap(
+                (s) =>
+                  declared(s)?.body.operands.map(
+                    (o: { fieldId: string }) => o.fieldId,
+                  ) ?? [],
               ),
             ),
           ].map((fieldId) => ({

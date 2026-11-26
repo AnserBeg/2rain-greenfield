@@ -5,7 +5,7 @@
     {
       "name": "ledger-balanced-definer",
       "claim": "The deferred balance check runs as its owner, so a write committed as the runtime role is not refused at COMMIT (review R5).",
-      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "file": "db/migrations/0072_ledger_books_by_hand.sql",
       "original": "ALTER FUNCTION north_star_internal.ledger_entry_balanced() SECURITY DEFINER SET search_path = pg_catalog, pg_temp;",
       "replacement": "ALTER FUNCTION north_star_internal.ledger_entry_balanced() SECURITY INVOKER SET search_path = pg_catalog, pg_temp;",
       "test": {
@@ -22,7 +22,7 @@
     {
       "name": "ledger-instant-offset",
       "claim": "An instant without Z or a numeric offset is refused, never read in the session time zone (review R2).",
-      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "file": "db/migrations/0072_ledger_books_by_hand.sql",
       "original": "IF date_basis ? 'instant' AND (jsonb_typeof(date_basis->'instant') IS DISTINCT FROM 'string'",
       "replacement": "IF false AND date_basis ? 'instant' AND (jsonb_typeof(date_basis->'instant') IS DISTINCT FROM 'string'",
       "test": {
@@ -39,7 +39,7 @@
     {
       "name": "ledger-date-pin-cast",
       "claim": "The structural date pin catches CAST(x AS date) outside the resolver (review R3).",
-      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "file": "db/migrations/0071_ledger_journal_core.sql",
       "original": "RETURN make_date(substr(civil, 1, 4)::integer, substr(civil, 6, 2)::integer, substr(civil, 9, 2)::integer); END $$;",
       "replacement": "RETURN CAST(civil AS date); END $$$$;",
       "test": {
@@ -56,7 +56,7 @@
     {
       "name": "ledger-date-pin-call",
       "claim": "The structural date pin catches date(x) outside the resolver (review R3).",
-      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "file": "db/migrations/0071_ledger_journal_core.sql",
       "original": "RETURN make_date(substr(civil, 1, 4)::integer, substr(civil, 6, 2)::integer, substr(civil, 9, 2)::integer); END $$;",
       "replacement": "RETURN date(civil); END $$$$;",
       "test": {
@@ -73,7 +73,7 @@
     {
       "name": "ledger-entry-tripwire",
       "claim": "A second writer call in one transaction refuses by name instead of risking the R4 deadlock.",
-      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "file": "db/migrations/0072_ledger_books_by_hand.sql",
       "original": "IF current_setting('north_star.ledger_entry_written', true) = 'yes' THEN",
       "replacement": "IF false AND current_setting('north_star.ledger_entry_written', true) = 'yes' THEN",
       "test": {
@@ -95,7 +95,7 @@
     {
       "name": "ledger-line-read-lock",
       "claim": "The writer's per-line account read holds the account FOR SHARE, so a deactivation cannot commit under it (review R6).",
-      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "file": "db/migrations/0072_ledger_books_by_hand.sql",
       "original": "\n      FOR SHARE OF a;",
       "replacement": ";",
       "test": {
@@ -112,7 +112,7 @@
     {
       "name": "ledger-books-start-locked",
       "claim": "Books start never moves once the company has an entry.",
-      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "file": "db/migrations/0072_ledger_books_by_hand.sql",
       "original": "IF EXISTS (SELECT FROM platform.ledger_entries x WHERE (x.tenant_id, x.environment_id, x.company_id) = (t, e, company)) THEN",
       "replacement": "IF false AND EXISTS (SELECT FROM platform.ledger_entries x WHERE (x.tenant_id, x.environment_id, x.company_id) = (t, e, company)) THEN",
       "test": {
@@ -129,7 +129,7 @@
     {
       "name": "ledger-grant-input",
       "claim": "An apply consumes only the grant attested for its exact input.",
-      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "file": "db/migrations/0072_ledger_books_by_hand.sql",
       "original": "\n     OR g.input IS DISTINCT FROM input THEN",
       "replacement": " THEN",
       "test": {
@@ -146,7 +146,7 @@
     {
       "name": "ledger-grant-spent",
       "claim": "An attested grant is consumed once.",
-      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "file": "db/migrations/0072_ledger_books_by_hand.sql",
       "original": "IF g.consumed_at IS NOT NULL THEN RAISE EXCEPTION 'ledger.approvalSpent'; END IF;",
       "replacement": "NULL;",
       "test": {
@@ -163,7 +163,7 @@
     {
       "name": "ledger-op-company-scope",
       "claim": "A company-scoped principal is refused on another company of the same tenant.",
-      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "file": "db/migrations/0072_ledger_books_by_hand.sql",
       "original": "AND (m.legal_entity_id IS NULL OR m.legal_entity_id = company)",
       "replacement": "AND true",
       "test": {
@@ -180,7 +180,7 @@
     {
       "name": "ledger-op-company-master",
       "claim": "A company is a live record of the released legal-entity master.",
-      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "file": "db/migrations/0072_ledger_books_by_hand.sql",
       "original": "IF NOT north_star_internal.ledger_company_live(company, writing) THEN",
       "replacement": "IF false AND NOT north_star_internal.ledger_company_live(company, writing) THEN",
       "test": {
@@ -197,7 +197,7 @@
     {
       "name": "ledger-op-write-permission",
       "claim": "A books change needs the write permission, never a read.",
-      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "file": "db/migrations/0072_ledger_books_by_hand.sql",
       "original": "IF NOT north_star_internal.ledger_may(company, 'northstar.ledger:permission.books_configure', 'northstar.ledger:capability.books')",
       "replacement": "IF NOT (north_star_internal.ledger_may(company, 'northstar.ledger:permission.books_configure', 'northstar.ledger:capability.books') OR north_star_internal.ledger_may(company, 'northstar.ledger:permission.journal_read', 'northstar.ledger:capability.journal'))",
       "test": {
@@ -214,7 +214,7 @@
     {
       "name": "ledger-op-fence",
       "claim": "A grant attested under an earlier release fence never applies.",
-      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "file": "db/migrations/0072_ledger_books_by_hand.sql",
       "original": "WHERE (p.tenant_id, p.environment_id, p.release_id, p.fence) = (tenant, environment, released, expected_fence) FOR SHARE;",
       "replacement": "WHERE (p.tenant_id, p.environment_id, p.release_id) = (tenant, environment, released) FOR SHARE;",
       "test": {
@@ -231,7 +231,7 @@
     {
       "name": "ledger-op-prior",
       "claim": "Books start replaces only the value the person expected.",
-      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "file": "db/migrations/0072_ledger_books_by_hand.sql",
       "original": "IF coalesce(to_jsonb(to_char(prior, 'YYYY-MM-DD')), 'null'::jsonb) IS DISTINCT FROM args->'expectedPrior' THEN",
       "replacement": "IF false THEN",
       "test": {
@@ -248,7 +248,7 @@
     {
       "name": "ledger-op-execute",
       "claim": "Only the issuer attests and only north_star_runtime applies; no one runs the internal functions.",
-      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "file": "db/migrations/0072_ledger_books_by_hand.sql",
       "original": "GRANT EXECUTE ON FUNCTION platform.ledger_apply_books_start(uuid,uuid,bigint,text,uuid,text,jsonb)\n  TO north_star_runtime;\n",
       "replacement": "GRANT EXECUTE ON FUNCTION platform.ledger_apply_books_start(uuid,uuid,bigint,text,uuid,text,jsonb)\n  TO north_star_runtime;\nGRANT EXECUTE ON FUNCTION north_star_internal.ledger_consume_grant(uuid,uuid,bigint,text,uuid,jsonb,text) TO north_star_runtime;\n",
       "test": {
@@ -265,7 +265,7 @@
     {
       "name": "ledger-grant-receipt",
       "claim": "A consumed grant never commits without its trust receipt.",
-      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "file": "db/migrations/0072_ledger_books_by_hand.sql",
       "original": "    RAISE EXCEPTION 'ledger.receiptUnverified'; END IF;",
       "replacement": "    NULL; END IF;",
       "test": {

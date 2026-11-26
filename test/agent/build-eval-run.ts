@@ -37,6 +37,7 @@ import { withAgentWorlds } from './agent-world.js';
 import {
   BUILD_CASES,
   RECORD_TEMPLATE_CASES,
+  WORKFLOW_TRIGGER_CASES,
   type BuildCase,
 } from './build-eval-cases.js';
 import { DRAFTING_TOOL } from '../../packages/customization/src/index.js';
@@ -117,7 +118,10 @@ async function main(): Promise<void> {
   const wanted = args.cases?.split(',').map((id) => id.trim());
   // In the order given by --cases, so a stratified subset can finish first.
   // Dated sets outside the 40 run only when named by --cases.
-  const cases = [...BUILD_CASES, ...(wanted ? RECORD_TEMPLATE_CASES : [])]
+  const cases = [
+    ...BUILD_CASES,
+    ...(wanted ? [...RECORD_TEMPLATE_CASES, ...WORKFLOW_TRIGGER_CASES] : []),
+  ]
     .filter(
       (c) =>
         (args.split === 'all' || c.split === args.split) &&

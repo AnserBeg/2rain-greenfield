@@ -616,3 +616,162 @@ test('the drafter binds a grouped Invoice balance from the generated report sche
   );
   assert.notEqual(invalid.status, 'parsed');
 });
+
+test('the drafter emits v2 reports and named measures from the generated schema: an aging report, a line report with distinct invoices, and a measure trial', async () => {
+  const application = normalizeApplicationPackage(
+    JSON.parse(readFileSync('apps/web/release/app.authored.json', 'utf8')),
+  );
+  const options = customizationTargets(application);
+  const invoices = options.reports!.find((r) =>
+    r.source.queryId.endsWith(':query.customer_invoice_list'),
+  )!;
+  const lines = options.reports!.find((r) =>
+    r.source.queryId.endsWith(':query.customer_invoice_line_list'),
+  )!;
+  const due = 'northstar.app:field.customer_invoice_due_date';
+  const balance = 'northstar.app:field.customer_invoice_balance';
+  const parent = lines.links.find((l) => l.parent)!.link.via;
+  const draft = async (toolInput: unknown) => {
+    const seen: { system: string; toolNames: string[]; turns: number }[] = [];
+    const result = await draftPatchFromRequest(
+      scripted([{ toolInput }], seen),
+      'Report it.',
+      options,
+    );
+    return { result, seen };
+  };
+  const aging = await draft({
+    kind: 'addReportRevision',
+    report: {
+      listSurfaceId: invoices.source.listSurfaceId,
+      label: 'Aging',
+      status: 'active',
+      choices: {
+        dimensions: [
+          {
+            kind: 'age',
+            fieldId: due,
+            absentLabel: 'No due date',
+            bands: [
+              {
+                bandId: 'not_due',
+                label: 'Not yet due',
+                from: null,
+                through: -1,
+              },
+              { bandId: 'd0_30', label: '0–30', from: 0, through: 30 },
+              { bandId: 'd31', label: '31+', from: 31, through: null },
+            ],
+          },
+        ],
+        filters: [],
+        measures: [
+          {
+            kind: 'inline',
+            measureId: 'northstar.app:measure.custom_balance',
+            label: 'Balance',
+            operator: { kind: 'sum', fieldId: balance },
+          },
+        ],
+        outputs: [{ kind: 'table' }],
+      },
+    },
+  });
+  assert.ok(
+    aging.result.status === 'parsed' &&
+      aging.result.patch.kind === 'addReportRevision',
+    JSON.stringify(aging.result),
+  );
+  assert.equal(aging.result.patch.version, 'report-revision/v2');
+  // The prompt lists the offered links, grain and named measures it may bind.
+  assert.ok(aging.seen[0]!.system.includes('"grain":"line"'));
+  assert.ok(aging.seen[0]!.system.includes(JSON.stringify(parent)));
+  const line = await draft({
+    kind: 'addReportRevision',
+    report: {
+      listSurfaceId: lines.source.listSurfaceId,
+      label: 'Lines by item',
+      status: 'active',
+      choices: {
+        grain: 'line',
+        dimensions: [
+          {
+            kind: 'direct',
+            fieldId: 'northstar.app:field.customer_invoice_line_item_id',
+          },
+        ],
+        filters: [],
+        measures: [
+          {
+            kind: 'inline',
+            measureId: 'northstar.app:measure.custom_lines',
+            label: 'Lines',
+            operator: { kind: 'count' },
+          },
+          {
+            kind: 'inline',
+            measureId: 'northstar.app:measure.custom_invoices',
+            label: 'Invoices',
+            operator: { kind: 'distinctTargets', via: parent },
+          },
+        ],
+        outputs: [{ kind: 'table' }],
+      },
+    },
+  });
+  assert.equal(line.result.status, 'parsed', JSON.stringify(line.result));
+  // Fan-out is refused before any patch exists.
+  const fanOut = await draft({
+    kind: 'addReportRevision',
+    report: {
+      listSurfaceId: lines.source.listSurfaceId,
+      label: 'Balance per line',
+      status: 'active',
+      choices: {
+        grain: 'line',
+        dimensions: [
+          {
+            kind: 'direct',
+            fieldId: 'northstar.app:field.customer_invoice_line_item_id',
+          },
+        ],
+        filters: [],
+        measures: [
+          {
+            kind: 'inline',
+            measureId: 'northstar.app:measure.custom_balance',
+            label: 'Balance',
+            operator: { kind: 'sum', fieldId: balance, via: parent },
+          },
+        ],
+        outputs: [{ kind: 'table' }],
+      },
+    },
+  });
+  assert.notEqual(fanOut.result.status, 'parsed');
+  const measure = await draft({
+    kind: 'addMeasureRevision',
+    measure: {
+      listSurfaceId: invoices.source.listSurfaceId,
+      label: 'Invoiced amount',
+      status: 'trial',
+      operator: {
+        kind: 'sum',
+        fieldId: 'northstar.app:field.customer_invoice_total',
+      },
+    },
+  });
+  assert.ok(
+    measure.result.status === 'parsed' &&
+      measure.result.patch.kind === 'addMeasureRevision',
+    JSON.stringify(measure.result),
+  );
+  assert.equal(measure.result.patch.status, 'trial');
+  const { describeDrafterKind } =
+    await import('../../packages/customization/src/ai-draft-kinds.js');
+  assert.ok(
+    DRAFTING_TOOL.description.includes(
+      describeDrafterKind('addMeasureRevision'),
+    ),
+  );
+});

@@ -8,8 +8,15 @@ import {
   canonicalize,
   GROUPED_RESULT_VERSION,
   type GroupedRow,
+  type GroupKey,
 } from '@north-star/canonical-model';
-import type { RegisteredReport } from '../../canonical-model/src/declared-report.js';
+import {
+  effectiveMeasures,
+  reportColumnFor,
+  reportDimensionLabel,
+  filterParameterId,
+  type RegisteredReport,
+} from '../../canonical-model/src/declared-report.js';
 import type { RequestRuntimeView } from './request-runtime-view.js';
 
 export function registeredReportFromPinnedView(
@@ -112,14 +119,20 @@ export const partitionLabel = (r: GroupedRow) =>
 export function displayGroupKey(
   report: RegisteredReport,
   i: number,
-  value: string | null,
+  value: GroupKey,
 ) {
-  const field = report.columns.find(
-    (c) => c.fieldId === report.revision.body.dimensions[i]?.fieldId,
-  );
+  const dim = report.revision.body.dimensions[i];
+  if (value !== null && typeof value === 'object') return 'Restricted';
+  if (dim?.kind === 'age')
+    return value === null
+      ? dim.absentLabel
+      : (dim.bands.find((b) => b.bandId === value)?.label ?? value);
+  const field = dim && reportColumnFor(report, dim);
   return value === null
     ? 'Unspecified'
-    : (field?.options?.find((o) => o.id === value)?.label ?? value);
+    : dim?.kind === 'calendar'
+      ? value
+      : (field?.options?.find((o) => o.id === value)?.label ?? value);
 }
 function csvCell(value: string, numeric = false) {
   const text =
@@ -136,9 +149,8 @@ export function reportCsv(
   company: string,
 ) {
   const { body } = report.revision;
-  const labels = body.dimensions.map(
-    (d) => report.columns.find((c) => c.fieldId === d.fieldId)!.label,
-  );
+  const measures = effectiveMeasures(report);
+  const labels = body.dimensions.map((_, i) => reportDimensionLabel(report, i));
   const prefix = [
     'Row',
     'Company',
@@ -151,10 +163,14 @@ export function reportCsv(
     ...prefix,
     ...labels,
     'Currency',
-    ...body.measures.flatMap((m) => [
+    ...measures.flatMap((m) => [
       m.label,
       'Unit',
       'Records without ' + m.label,
+      // v2 only: an average carries its exact ratio as evidence.
+      ...(m.operator.kind === 'average'
+        ? [m.label + ' exact sum', m.label + ' exact count']
+        : []),
     ]),
   ];
   const row = (kind: string, r: GroupedRow) => {
@@ -172,9 +188,12 @@ export function reportCsv(
     return [
       ...[...context, ...keys, partitionLabel(r)].map((v) => csvCell(v)),
       ...r.cells.flatMap((c) => [
-        csvCell(c.value, true),
+        csvCell(c.value ?? '', true),
         csvCell(c.unitId ?? ''),
         csvCell(String(c.recordsWithoutMeasure), true),
+        ...(c.exact
+          ? [csvCell(c.exact.sum, true), csvCell(String(c.exact.count), true)]
+          : []),
       ]),
     ].join(',');
   };
@@ -193,14 +212,22 @@ export function reportPage(
   snapshot: ReportSnapshot,
   limits: ReportLimits,
 ): ReportPage | { kind: 'narrow' | 'refresh' } {
-  const dimensionLabels = report.revision.body.dimensions.map(
-    (d) => report.columns.find((c) => c.fieldId === d.fieldId)!.label,
+  const dimensionLabels = report.revision.body.dimensions.map((_, i) =>
+    reportDimensionLabel(report, i),
   );
   const dimensionTypes = report.revision.body.dimensions.map((d) => {
-    const field = report.columns.find((c) => c.fieldId === d.fieldId)!;
-    return field.basis === 'civilDate' ? 'date' : field.type;
+    const field = reportColumnFor(report, d)!;
+    return d.kind === 'age'
+      ? 'choice'
+      : d.kind === 'calendar'
+        ? d.unit === 'month'
+          ? 'text'
+          : 'date'
+        : field.basis === 'civilDate'
+          ? 'date'
+          : field.type;
   });
-  const measureLabels = report.revision.body.measures.map((m) => m.label);
+  const measureLabels = effectiveMeasures(report).map((m) => m.label);
   const result = {
     groups: snapshot.groups,
     totals: snapshot.totals,
@@ -282,8 +309,8 @@ export function validReportParameters(
     Number.isFinite(Date.parse(value)) &&
     new Date(value).toISOString().slice(0, 10) === value;
   return Object.entries(req.parameters).every(([id, value]) => {
-    const filter = declarations.find((f) => f.fieldId === id);
-    const field = report.columns.find((f) => f.fieldId === id);
+    const filter = declarations.find((f) => filterParameterId(f) === id);
+    const field = filter && reportColumnFor(report, filter);
     if (!field || !filter) return false;
     if (filter.kind === 'dateRange')
       return (

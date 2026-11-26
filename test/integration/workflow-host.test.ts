@@ -296,7 +296,7 @@ test('a changed request or early exit quarantines the run and survives restorati
     },
   ] as const;
   for (const { prefix, reason, cursor } of cases) {
-    const run = new InMemoryWorkflowRun(workflow, event, {
+    const run: InMemoryWorkflowRun = new InMemoryWorkflowRun(workflow, event, {
       ...baseline,
       prefix,
     });
@@ -354,7 +354,7 @@ test('invalid JSON and repeated dispatch cannot publish a request', async () => 
     `sdk.query(${JSON.stringify(queryId)}, { get recordId() { return event.receiptId; } });`,
     'sdk.sleep(-0);',
   ]) {
-    const run = new InMemoryWorkflowRun(raw(body), event);
+    const run: InMemoryWorkflowRun = new InMemoryWorkflowRun(raw(body), event);
     await assert.rejects(run.step(), /invalid or repeated call/);
     assert.equal(run.snapshot().pending, null);
   }

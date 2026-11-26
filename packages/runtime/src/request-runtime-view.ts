@@ -11,7 +11,7 @@ import {
 } from './request-context.js';
 import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents.js';
 import { REVERSIBILITY_AGENT_READER } from '../../canonical-model/src/reversibility.js';
-import { LOGICAL_FIELD_READER } from '../../canonical-model/src/logical-field.js';
+import { LINE_LOGICAL_FIELD_READER } from '../../canonical-model/src/logical-field.js';
 import {
   WORKFLOW_PROJECTION_FAMILY,
   WORKFLOW_RUNTIME_CAPABILITY,
@@ -250,7 +250,15 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 48 applies versioned record templates at create (assigned at TRAIN-M).
     // 49 reads declared logical value kinds: decimal, money, quantity, long
     // text and currency code (assigned at TRAIN-O).
-    maximumSupportedVersion: LOGICAL_FIELD_READER,
+    // 50 reads general workflow trigger members (ADR-0073 A1; WORKFLOW-2,
+    // assigned at TRAIN-Q).
+    // 51 reads v2 reports: calendar and age dimensions, declared to-one
+    // links and line grain, min, max, average and distinct counts, and
+    // approved measure references. 52 reads named measures (REPORTS-1 s2,
+    // assigned at its main-compat merge).
+    // 53 reads logical fields on line tables and an amount whose currency
+    // is read from the line header (CUSTOMIZE-6 s2; assigned at TRAIN-S).
+    maximumSupportedVersion: LINE_LOGICAL_FIELD_READER,
   },
 });
 

@@ -3,6 +3,7 @@ export interface NodeResultEvent {
   readonly data: {
     readonly name?: unknown;
     readonly file?: unknown;
+    readonly nesting?: unknown;
     readonly skip?: unknown;
     readonly todo?: unknown;
     readonly counts?: { readonly tests?: unknown };
@@ -28,6 +29,20 @@ export interface NodeResultLedger {
   credited(): ReadonlyArray<{
     readonly event: NodeResultEvent;
     readonly file: string;
+  }>;
+  /** Everything the run selected, skipped and todo included. */
+  selected(): ReadonlyArray<{
+    readonly event: NodeResultEvent;
+    readonly file: string;
+  }>;
+  /** Results the ledger did not credit, with where they came from, for a mismatch report. */
+  dropped(): ReadonlyArray<{
+    readonly file: string;
+    readonly name: string;
+    readonly nesting: number;
+    readonly type: string;
+    readonly sequence: number;
+    readonly ownFileSummary: boolean;
   }>;
   /** Per-file counts Node itself reported, for reconciliation. */
   summaries(): ReadonlyMap<string, Partial<NodeResultCounts>>;

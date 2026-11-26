@@ -30,7 +30,11 @@ import {
 } from '../../packages/operations-agent/src/index.js';
 import { compileWorkflowBody } from '../../packages/postgres-provider/src/workflow-compile.js';
 import { InMemoryWorkflowRun } from '../../packages/postgres-provider/src/workflow-run.js';
-import { generateWorkflowSdk } from '../../packages/postgres-provider/src/workflow-sdk.js';
+import {
+  generateWorkflowSdk,
+  type WorkflowEvent,
+} from '../../packages/postgres-provider/src/workflow-sdk.js';
+import { WorkflowTriggerSchema } from '../../packages/canonical-model/src/schemas.js';
 import type { ImmutableJsonValue } from '../../packages/runtime/src/request-runtime-view.js';
 import {
   parsePinnedOperationCatalog,
@@ -228,7 +232,11 @@ const logicalKinds: Partial<Record<FieldType, string>> = {
 interface ScoredLogicalBinding {
   readonly fieldId: string;
   readonly logicalType: string;
-  readonly currency?: { readonly kind: string; readonly currencyCode?: string };
+  readonly currency?: {
+    readonly kind: string;
+    readonly currencyCode?: string;
+    readonly via?: readonly string[];
+  };
   readonly unit?: { readonly label: string };
   readonly scale?: number;
 }
@@ -257,10 +265,14 @@ export function logicalMismatch(
   if (binding?.logicalType !== kind)
     return `is ${binding?.logicalType ?? 'not a logical field'}, expected ${wanted.type}`;
   if (wanted.currency !== undefined) {
+    // CUSTOMIZE-6 slice 2: a line amount read from its header scores as
+    // "header", one read from its own record as "stored".
     const found =
       binding.currency?.kind === 'fixed'
         ? binding.currency.currencyCode
-        : binding.currency?.kind;
+        : binding.currency?.via
+          ? 'header'
+          : binding.currency?.kind;
     if (found !== wanted.currency)
       return `has currency ${String(found)}, expected ${wanted.currency}`;
   }
@@ -689,17 +701,24 @@ export async function scoreModule(
     if (spec.lines && !lines) miss(`${label}: no line table`);
     if (lines?.inputContract && (spec.lines || !createOp(before, lineLocal))) {
       const parent = `${NS}:relation.${lineLocal}_parent`;
-      for (const wanted of spec.lines?.fields ?? [])
-        if (
-          !lines.inputContract.fields.some(
-            (f) =>
-              nameMatches(
-                wanted.names,
-                localOf(f.fieldId).slice(lineLocal.length + 1),
-              ) && fieldKinds[wanted.type].includes(f.fieldKind),
-          )
-        )
+      for (const wanted of spec.lines?.fields ?? []) {
+        const found = lines.inputContract.fields.find(
+          (f) =>
+            nameMatches(
+              wanted.names,
+              localOf(f.fieldId).slice(lineLocal.length + 1),
+            ) && fieldKinds[wanted.type].includes(f.fieldKind),
+        );
+        if (!found) {
           miss(`${label}: line field "${wanted.names[0]!}" missing`);
+          continue;
+        }
+        // CUSTOMIZE-6 slice 2: a line field's logical kind, currency (fixed,
+        // stored on the line, or read from the header), unit and scale.
+        const mismatch = logicalMismatch(wanted, logical.get(found.fieldId));
+        if (mismatch)
+          miss(`${label}: line field "${wanted.names[0]!}" ${mismatch}`);
+      }
       try {
         const line = await createRecord(world, after, lineLocal, {
           [parent]: recordId,
@@ -823,6 +842,7 @@ async function updateExisting(
 
 interface DraftedWorkflow {
   readonly body: string;
+  readonly trigger?: unknown;
   readonly grants: {
     readonly operations: readonly string[];
     readonly queries: readonly string[];
@@ -841,9 +861,19 @@ export async function scoreWorkflow(
   expected: {
     operations: readonly string[];
     calls: readonly WorkflowCallSpec[];
+    trigger?: string;
   },
 ): Promise<Score & { overGranted: boolean }> {
   const reasons: string[] = [];
+  const trigger = drafted.trigger ?? 'goodsReceiptPosted';
+  const recordType =
+    typeof trigger === 'object' && trigger !== null
+      ? String((trigger as { recordTypeId?: unknown }).recordTypeId)
+      : null;
+  if ((expected.trigger ?? null) !== (recordType && localOf(recordType)))
+    reasons.push(
+      `trigger ${recordType ? localOf(recordType) : String(trigger)}; expected ${expected.trigger ?? 'goodsReceiptPosted'}`,
+    );
   const granted = drafted.grants.operations.map(localOf).sort();
   const wanted = [...expected.operations].sort();
   if (JSON.stringify(granted) !== JSON.stringify(wanted))
@@ -854,12 +884,21 @@ export async function scoreWorkflow(
     reasons.push(
       `query grants ${drafted.grants.queries.map(localOf).join(', ')}`,
     );
-  const event = {
-    type: 'goodsReceiptPosted' as const,
-    eventId: randomUUID(),
-    receiptId: randomUUID(),
-    legalEntityId: COMPANY,
-  };
+  const triggerRecordId = randomUUID();
+  const event: WorkflowEvent = recordType
+    ? {
+        type: 'recordCreated',
+        eventId: randomUUID(),
+        recordTypeId: recordType,
+        recordId: triggerRecordId,
+        legalEntityId: COMPANY,
+      }
+    : {
+        type: 'goodsReceiptPosted',
+        eventId: randomUUID(),
+        receiptId: triggerRecordId,
+        legalEntityId: COMPANY,
+      };
   const calls: {
     kind: string;
     id?: string;
@@ -872,7 +911,13 @@ export async function scoreWorkflow(
     const compiled = await world.runtime.entry.run(MANAGER, (view) =>
       compileWorkflowBody(
         drafted.body,
-        generateWorkflowSdk(view, drafted.grants),
+        generateWorkflowSdk(
+          view,
+          drafted.grants,
+          undefined,
+          undefined,
+          WorkflowTriggerSchema.parse(trigger),
+        ),
       ),
     );
     const run = new InMemoryWorkflowRun(compiled, event);
@@ -894,7 +939,7 @@ export async function scoreWorkflow(
   for (const spec of expected.calls) {
     const at = calls
       .slice(cursor)
-      .findIndex((call) => callMatches(call, spec, event.receiptId));
+      .findIndex((call) => callMatches(call, spec, triggerRecordId));
     if (at < 0) {
       reasons.push(
         `expected call ${spec.kind}${spec.operation ? ` ${spec.operation}` : ''}${spec.milliseconds ? ` ${String(spec.milliseconds)} ms` : ''} not made in order`,
@@ -1269,7 +1314,13 @@ export async function runBuildCase(
     }
     if (expect.outcome === 'workflow') {
       const input = accepted as
-        | { workflow?: { grants?: DraftedWorkflow['grants'] }; body?: unknown }
+        | {
+            workflow?: {
+              grants?: DraftedWorkflow['grants'];
+              trigger?: unknown;
+            };
+            body?: unknown;
+          }
         | undefined;
       if (
         result.activated &&
@@ -1278,7 +1329,11 @@ export async function runBuildCase(
       ) {
         const score = await scoreWorkflow(
           world,
-          { body: input.body, grants: input.workflow.grants },
+          {
+            body: input.body,
+            grants: input.workflow.grants,
+            trigger: input.workflow.trigger,
+          },
           expect,
         );
         result.e2e = score.e2e;
@@ -1435,6 +1490,55 @@ export async function runBuildCase(
         if (!found) result.reasons.push('no new board view on the list');
       }
     }
+    if (expect.outcome === 'report') {
+      if (result.activated) {
+        const after = await opened.service.targets();
+        const target = (after.reports ?? []).find((t) =>
+          localOf(t.source.listSurfaceId).startsWith(expect.list),
+        );
+        const had = new Set(
+          (boardsBefore.reports ?? []).flatMap((t) => [
+            ...t.reports.map((r) => r.revision.revisionId),
+            ...t.namedMeasures.map((m) => m.revision.revisionId),
+          ]),
+        );
+        const operators = (body: {
+          measures: readonly { kind: string; operator?: { kind: string } }[];
+        }) =>
+          body.measures.flatMap((m) =>
+            m.kind === 'inline' && m.operator ? [m.operator.kind] : [],
+          );
+        const found = expect.measure
+          ? !!target?.namedMeasures.some(
+              (m) =>
+                m.lifecycle === 'active' &&
+                !had.has(m.revision.revisionId) &&
+                nameMatches(expect.label, slug(m.label)) &&
+                expect.operators.every((o) =>
+                  operators(m.revision.body).includes(o),
+                ),
+            )
+          : !!target?.reports.some(
+              (r) =>
+                r.lifecycle === 'active' &&
+                !had.has(r.revision.revisionId) &&
+                nameMatches(expect.label, slug(r.label)) &&
+                (!expect.grain ||
+                  (r.revision.body.version === 'grouped-report/v2' &&
+                    r.revision.body.source.grain === expect.grain)) &&
+                (expect.dimensions ?? []).every((d) =>
+                  r.revision.body.dimensions.some((x) => x.kind === d),
+                ) &&
+                expect.operators.every((o) =>
+                  operators(r.revision.body).includes(o),
+                ),
+            );
+        result.e2e = found;
+        result.behaviour = found;
+        if (!found)
+          result.reasons.push('no new report or measure as requested');
+      }
+    }
     if (expect.outcome === 'map') {
       if (result.activated) {
         const after = await opened.service.targets();
@@ -1505,7 +1609,10 @@ export function summarize(results: readonly CaseResult[]) {
   const drafts = ran.filter((r) => r.expected !== 'unsupported');
   const unsupported = ran.filter((r) => r.expected === 'unsupported');
   const hostile = ran.filter((r) => r.category === 'hostile');
-  const workflows = ran.filter((r) => r.category === 'workflow-receipt');
+  const workflows = ran.filter(
+    (r) =>
+      r.category === 'workflow-receipt' || r.category === 'workflow-record',
+  );
   const refusals = ran.filter((r) => r.status === 'unsupported');
   const byBucket = new Map<string, { correct: number; false: number }>();
   for (const r of refusals) {

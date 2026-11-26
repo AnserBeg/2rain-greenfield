@@ -95,6 +95,7 @@ export function measureSuiteRun(test, { root, scratch, label }) {
         : undefined;
   const evidence = readEvidence(evidencePath);
   return {
+    dropped: evidence.dropped,
     files: evidence.files,
     output: `${result.stdout ?? ''}\n${result.stderr ?? ''}`,
     results: evidence.results,
@@ -109,11 +110,12 @@ export function measureSuiteRun(test, { root, scratch, label }) {
  * results and refused by the caller rather than silently tolerated.
  */
 function readEvidence(evidencePath) {
-  const empty = { files: [], results: [] };
+  const empty = { dropped: [], files: [], results: [] };
   if (!existsSync(evidencePath)) return empty;
   try {
     const parsed = JSON.parse(readFileSync(evidencePath, 'utf8'));
     return {
+      dropped: Array.isArray(parsed?.dropped) ? parsed.dropped : [],
       files: Array.isArray(parsed?.files) ? parsed.files : [],
       results: Array.isArray(parsed?.results) ? parsed.results : [],
     };

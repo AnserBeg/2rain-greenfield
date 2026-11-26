@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
+import { recordCreations } from './record-creation-occurrences.js';
 import type { StorageTargetPayloadV1 } from '@north-star/compiler';
 import type { PoolClient } from 'pg';
 import type { ImmutableJsonValue } from '@north-star/runtime/request-runtime-view';
@@ -962,11 +963,12 @@ async function insertLine(
     l.reversal,
     binding.lineSessionColumn,
   ];
+  const recordId = randomUUID();
   const values = [
     request.context.tenantId,
     request.context.environmentId,
     count.legalEntityId,
-    randomUUID(),
+    recordId,
     1,
     Number(line.lineNumber),
     line.itemId,
@@ -986,6 +988,7 @@ async function insertLine(
   if (inserted.rowCount !== 1) {
     throw inputError('a count line was not written');
   }
+  await recordCreations(client, binding.line, count.legalEntityId, [recordId]);
 }
 
 async function updateLine(

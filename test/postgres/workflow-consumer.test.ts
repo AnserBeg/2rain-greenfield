@@ -535,7 +535,7 @@ test(
                   async dispatch(pin, call, key) {
                     dispatchScope = {
                       companyId: pin.legal_entity_id,
-                      receiptId: pin.receipt_id,
+                      receiptId: pin.trigger_record_id,
                     };
                     return gateways.dispatch(pin, call, key);
                   },

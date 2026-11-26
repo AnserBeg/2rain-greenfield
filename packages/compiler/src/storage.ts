@@ -894,13 +894,11 @@ export function lowerStorageTargetV1(
       if ('companyAccessIndex' in entity && entity.companyAccessIndex)
         retainReportKey([...businessKeyScopeColumns, 'record_id']);
       for (const surface of packageRevision.surfaces) {
-        if (
-          !('report' in surface) ||
-          !surface.report ||
-          surface.lifecycle === 'retired'
-        )
-          continue;
-        const { body } = surface.report as ReportRevision;
+        const declared =
+          ('report' in surface && surface.report) ||
+          ('measure' in surface && surface.measure);
+        if (!declared || surface.lifecycle === 'retired') continue;
+        const { body } = declared as ReportRevision;
         if (body.source.entityId !== entity.entityId) continue;
         const date = body.filters.find((f) => f.kind === 'dateRange');
         const dateColumn =

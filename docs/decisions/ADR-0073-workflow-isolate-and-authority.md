@@ -432,6 +432,19 @@ has a stable identity linked to the committed trust event. The occurrences and
 the records commit or roll back together. Every eligible creation must be
 observable by a subscription on its record type.
 
+**As built in slice 4b (2026-11-25).** A governed writer names each
+company-owned record it inserts through one definer function that reads the
+company from the stored row, while the trust service or the posting kernel holds
+the transaction's creation action; the writer's own outbox insert seals them into
+one batch linked to its domain event, and a deferred key refuses an unsealed
+occurrence at commit. A trigger on every managed table was tried and refused: it
+changed the managed catalog, which the preceding binary verifies. The `recordCreated` member persists `{kind, triggerVersion: 'v1',
+recordTypeId}`: a node's `schemaVersion` is the package language version
+(`CANON_VERSION_MIXED`), so the member's own version is `triggerVersion`. The
+start key for a creation is (occurrence, workflow), so one command that creates
+N records starts N runs; the receipt keeps (event, workflow). The script's
+event is `TriggerEvent`, generated with the record type as a literal.
+
 **Exactly-once firing, and the occurrence key.** The existing unique start key
 (tenant, environment, source event, stable workflow identity) stays the
 mechanism. What changes is what the "source event" is for each member:
