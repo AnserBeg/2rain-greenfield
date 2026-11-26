@@ -196,6 +196,24 @@
           "expected": "a source root in neither the scope nor the excluded list must be refused by PRESS010"
         }
       ]
+    },
+    {
+      "name": "guard-widen-frozen-migration-off",
+      "claim": "A frozen migration row admits only the applied file's exact bytes; a changed migration is refused (PRESS010).",
+      "file": "packages/dev-tooling/src/module-press-law.ts",
+      "original": "if (fileSha256(path) !== row.sha256) {",
+      "replacement": "if (false) {",
+      "test": {
+        "files": ["test/architecture/module-press-law.test.ts"],
+        "namePattern": "^GUARD-WIDEN"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/module-press-law.test.ts",
+          "name": "GUARD-WIDEN red: an edited frozen migration",
+          "expected": "a frozen migration row must refuse a file that is not the applied bytes"
+        }
+      ]
     }
   ]
 }
