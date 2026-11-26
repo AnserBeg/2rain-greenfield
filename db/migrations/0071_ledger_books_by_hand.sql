@@ -165,14 +165,19 @@ DECLARE t uuid := north_star_internal.trusted_tenant_id(); e uuid := north_star_
     WHERE (tenant_id, environment_id, company_id) = (t, e, company); END $$;
 
 -- ---------------------------------------------------------------------------
--- Slice 1a-ii: the scalar confirmation-class operations (books start, set up
--- chart, put account). A person reviews, then confirms; the confirm is bound to
--- the active release fence and the exact digest of the review's terms.
--- Lock order, ahead of the journal order (ADR-0093 section 6): the review row
+-- Slice 1a-ii: the confirmation-class ledger operations (ruling A, 2026-11-26).
+-- A person confirms through the Semantic Operation gateway. Its humanRequired
+-- grant binds the exact input, release, fence, principal, target record and
+-- expected revision. The executor verifies that grant and attests it here
+-- through the approval-issuer role. Each apply definer then consumes the
+-- matching grant once, in its own transaction, and mints the trust invocation
+-- ID that the general trust writer records in the same transaction. A deferred
+-- check verifies that receipt at commit.
+-- Lock order, ahead of the journal order (ADR-0093 section 6): the grant row
 -- FOR UPDATE; the active release pointer FOR SHARE; the policy epoch FOR SHARE;
--- the company's legal-entity master row FOR SHARE; then lock 3, the company
--- row (FOR UPDATE for books start only, FOR SHARE otherwise); then account rows,
--- created in account-code order, so two charts cannot cycle on the code index.
+-- the company's legal-entity master row FOR SHARE; then lock 3, the company row
+-- (FOR UPDATE for books start only, FOR SHARE otherwise); then account rows in
+-- account-code order, so two charts cannot cycle on the code index.
 
 -- The starter chart as data (ADR-0093 section 3, owner N2). A row carries an
 -- ISO 3166 jurisdiction tag (a country, or a subdivision such as CA-BC), so a
@@ -220,42 +225,86 @@ INSERT INTO platform.ledger_chart_starter_accounts
   ('northstar.ledger:starter.canada', 1, '6900', 'northstar.ledger:role.other_expense', 'Other expenses', 'CA'),
   ('northstar.ledger:starter.canada', 1, '6950', 'northstar.ledger:role.rounding_difference', 'Rounding differences', 'CA');
 
--- One review per operation a person is about to confirm. Immutable except the
--- one consumed marker, which also links the gateway's trust invocation. No
--- foreign key to ledger_companies: a books-start review precedes provisioning.
-CREATE TABLE platform.ledger_operation_reviews (
+-- An attested human confirmation, consumed once by the matching apply. The
+-- same match columns as the booking engine's grants, in the ledger's own table
+-- (rule 19). Immutable except the one consumption, which records the minted
+-- trust invocation ID.
+CREATE TABLE platform.ledger_approval_grants (
   tenant_id uuid NOT NULL,
   environment_id uuid NOT NULL,
-  review_id uuid NOT NULL,
+  grant_id uuid NOT NULL,
   principal_id uuid NOT NULL,
-  company_id uuid NOT NULL,
+  human_id uuid NOT NULL,
   release_id uuid NOT NULL,
   fence bigint NOT NULL,
-  operation text NOT NULL CHECK (operation IN ('booksStart','setUpChart','putAccount')),
+  operation_id text NOT NULL,
+  request_key uuid NOT NULL,
   input jsonb NOT NULL,
-  terms jsonb NOT NULL,
-  labels jsonb NOT NULL,
-  digest text NOT NULL CHECK (digest ~ '^[0-9a-f]{64}$'),
-  reviewed_at timestamptz NOT NULL,
+  channel text NOT NULL,
+  attested_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   consumed_at timestamptz,
-  receipt_id uuid,
-  PRIMARY KEY (tenant_id, environment_id, review_id),
-  CHECK ((consumed_at IS NULL) = (receipt_id IS NULL)),
-  FOREIGN KEY (tenant_id, environment_id) REFERENCES platform.environments (tenant_id, id),
-  FOREIGN KEY (tenant_id, environment_id, receipt_id)
-    REFERENCES platform.trust_action_invocations (tenant_id, environment_id, invocation_id) DEFERRABLE INITIALLY DEFERRED
+  invocation_id uuid,
+  PRIMARY KEY (tenant_id, environment_id, grant_id),
+  UNIQUE (grant_id),
+  CHECK ((consumed_at IS NULL) = (invocation_id IS NULL)),
+  FOREIGN KEY (tenant_id, environment_id) REFERENCES platform.environments (tenant_id, id)
 );
-CREATE FUNCTION north_star_internal.ledger_review_immutable() RETURNS trigger
+CREATE FUNCTION north_star_internal.ledger_grant_immutable() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$ BEGIN
-  IF TG_OP <> 'UPDATE' THEN RAISE EXCEPTION 'ledger.reviewImmutable'; END IF;
+  IF TG_OP <> 'UPDATE' THEN RAISE EXCEPTION 'ledger.grantImmutable'; END IF;
   IF OLD.consumed_at IS NOT NULL OR NEW.consumed_at IS NULL
-     OR (to_jsonb(NEW) - 'consumed_at' - 'receipt_id') <> (to_jsonb(OLD) - 'consumed_at' - 'receipt_id') THEN
-    RAISE EXCEPTION 'ledger.reviewImmutable'; END IF;
+     OR (to_jsonb(NEW) - 'consumed_at' - 'invocation_id') <> (to_jsonb(OLD) - 'consumed_at' - 'invocation_id') THEN
+    RAISE EXCEPTION 'ledger.grantImmutable'; END IF;
   RETURN NEW; END $$;
-CREATE TRIGGER ledger_operation_reviews_immutable BEFORE UPDATE OR DELETE ON platform.ledger_operation_reviews
-  FOR EACH ROW EXECUTE FUNCTION north_star_internal.ledger_review_immutable();
-CREATE TRIGGER ledger_operation_reviews_no_truncate BEFORE TRUNCATE ON platform.ledger_operation_reviews
-  FOR EACH STATEMENT EXECUTE FUNCTION north_star_internal.ledger_review_immutable();
+CREATE TRIGGER ledger_approval_grants_immutable BEFORE UPDATE OR DELETE ON platform.ledger_approval_grants
+  FOR EACH ROW EXECUTE FUNCTION north_star_internal.ledger_grant_immutable();
+CREATE TRIGGER ledger_approval_grants_no_truncate BEFORE TRUNCATE ON platform.ledger_approval_grants
+  FOR EACH STATEMENT EXECUTE FUNCTION north_star_internal.ledger_grant_immutable();
+
+-- The receipt, verified in SQL at commit: the consumed grant's invocation is a
+-- successful trust invocation of the same operation, principal and release.
+-- Definer, because a deferred trigger runs as the role current at COMMIT.
+CREATE FUNCTION north_star_internal.ledger_grant_receipt() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$ BEGIN
+  IF NEW.invocation_id IS NOT NULL AND NOT EXISTS (SELECT FROM platform.trust_action_invocations i
+      WHERE (i.tenant_id, i.environment_id, i.invocation_id) = (NEW.tenant_id, NEW.environment_id, NEW.invocation_id)
+        AND i.action_id = NEW.operation_id AND i.execution_principal_id = NEW.principal_id
+        AND i.release_id = NEW.release_id AND i.outcome = 'SUCCEEDED') THEN
+    RAISE EXCEPTION 'ledger.receiptUnverified'; END IF;
+  RETURN NULL; END $$;
+CREATE CONSTRAINT TRIGGER ledger_approval_grants_receipt AFTER UPDATE ON platform.ledger_approval_grants
+  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION north_star_internal.ledger_grant_receipt();
+
+-- Attestation, by the approval-issuer role only, after the executor verified
+-- the gateway's confirmation grant. The issuer pool has no request context, so
+-- the scope comes as arguments; the apply re-checks it against the trusted one.
+CREATE FUNCTION platform.ledger_attest_approval(grant_key uuid, t uuid, e uuid, principal uuid, human uuid,
+  released uuid, fence bigint, operation text, request_key uuid, input jsonb, channel text)
+RETURNS void LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+  INSERT INTO platform.ledger_approval_grants (tenant_id, environment_id, grant_id, principal_id, human_id, release_id,
+      fence, operation_id, request_key, input, channel)
+    VALUES (t, e, grant_key, principal, human, released, fence, operation, request_key, input, channel)
+    ON CONFLICT (grant_id) DO NOTHING
+$$;
+
+-- Consume the grant that matches this exact request, once. Lock position 0.
+CREATE FUNCTION north_star_internal.ledger_consume_grant(grant_key uuid, released uuid, expected_fence bigint,
+  operation text, request_key uuid, input jsonb, channel text) RETURNS uuid
+LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp AS $$
+DECLARE g platform.ledger_approval_grants; invocation uuid := gen_random_uuid(); BEGIN
+  SELECT * INTO g FROM platform.ledger_approval_grants a
+    WHERE (a.tenant_id, a.environment_id, a.grant_id) =
+          (north_star_internal.trusted_tenant_id(), north_star_internal.trusted_environment_id(), grant_key) FOR UPDATE;
+  IF NOT FOUND
+     OR g.principal_id IS DISTINCT FROM nullif(current_setting('north_star.principal_id', true), '')::uuid
+     OR (g.release_id, g.fence, g.operation_id, g.request_key, g.channel) IS DISTINCT FROM
+        (released, expected_fence, operation, request_key, channel)
+     OR g.input IS DISTINCT FROM input THEN
+    RAISE EXCEPTION 'ledger.approvalRequired'; END IF;
+  IF g.consumed_at IS NOT NULL THEN RAISE EXCEPTION 'ledger.approvalSpent'; END IF;
+  UPDATE platform.ledger_approval_grants a SET consumed_at = clock_timestamp(), invocation_id = invocation
+    WHERE (a.tenant_id, a.environment_id, a.grant_id) = (g.tenant_id, g.environment_id, g.grant_id);
+  RETURN invocation; END $$;
 
 -- The released storage plan of the active pointer: a ledger-owned reader of the
 -- same chunk other engines read, so ledger SQL names no other engine (rule 19).
@@ -325,160 +374,51 @@ DECLARE tenant uuid := north_star_internal.trusted_tenant_id(); environment uuid
     THEN RAISE EXCEPTION 'ledger.unavailable'; END IF;
   IF NOT north_star_internal.ledger_company_live(company, writing) THEN RAISE EXCEPTION 'ledger.unavailable'; END IF; END $$;
 
--- The terms a person confirms, derived from the input and the stored state.
--- Review mints the new account IDs into the input (never caller-supplied on
--- create); confirm re-derives from the stored input and must get the same
--- terms. Terms hold IDs, codes, kinds, dates and flags only; labels never enter
--- the digest.
-CREATE FUNCTION north_star_internal.ledger_operation_terms(company uuid, operation text, input jsonb, minting boolean)
-RETURNS jsonb LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp AS $$
+-- Books start, on the company's legal-entity record. The arguments carry the
+-- date and the books start the person expects to replace (expectedPrior, null
+-- before the first); a different stored value refuses by name. The company row
+-- is provisioned only here, after the master check.
+CREATE FUNCTION platform.ledger_apply_books_start(grant_key uuid, released uuid, expected_fence bigint,
+  operation text, request_key uuid, channel text, input jsonb) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE tenant uuid := north_star_internal.trusted_tenant_id(); environment uuid := north_star_internal.trusted_environment_id();
-  books platform.ledger_companies; day date; account uuid; prior platform.ledger_accounts; ids jsonb; chosen jsonb;
-  accounts jsonb := '[]'; labels jsonb := '{}'; row_ record; BEGIN
-  IF jsonb_typeof(input) IS DISTINCT FROM 'object' THEN RAISE EXCEPTION 'ledger.invalidOperation'; END IF;
-  SELECT * INTO books FROM platform.ledger_companies c
-    WHERE (c.tenant_id, c.environment_id, c.company_id) = (tenant, environment, company);
-  IF operation = 'booksStart' THEN
-    IF input - 'date' <> '{}' THEN RAISE EXCEPTION 'ledger.invalidOperation'; END IF;
-    day := north_star_internal.ledger_civil_date(input->>'date');
-    IF day IS NULL THEN RAISE EXCEPTION 'ledger.invalidOperation'; END IF;
-    IF EXISTS (SELECT FROM platform.ledger_entries x WHERE (x.tenant_id, x.environment_id, x.company_id) = (tenant, environment, company)) THEN
-      RAISE EXCEPTION 'ledger.booksStartLocked'; END IF;
-    RETURN jsonb_build_object('input', input, 'labels', '{}'::jsonb, 'terms', jsonb_build_object('operation', operation,
-      'company', company, 'date', to_char(day, 'YYYY-MM-DD'), 'prior', to_char(books.books_start, 'YYYY-MM-DD'))); END IF;
-  IF books.books_start IS NULL THEN RAISE EXCEPTION 'ledger.booksNotStarted'; END IF;
-  IF operation = 'putAccount' THEN
-    IF input - 'accountId' - 'create' - 'code' - 'kind' - 'label' - 'active' <> '{}'
-       OR jsonb_typeof(input->'code') IS DISTINCT FROM 'string' OR jsonb_typeof(input->'kind') IS DISTINCT FROM 'string'
-       OR jsonb_typeof(input->'label') IS DISTINCT FROM 'string' OR jsonb_typeof(input->'active') IS DISTINCT FROM 'boolean'
-       OR (input ? 'accountId' AND coalesce(input->>'accountId', '') !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
-       OR NOT EXISTS (SELECT FROM platform.ledger_core_roles r WHERE r.role_id = input->>'kind') THEN
-      RAISE EXCEPTION 'ledger.invalidOperation'; END IF;
-    IF minting THEN
-      IF input ? 'create' THEN RAISE EXCEPTION 'ledger.invalidOperation'; END IF;
-      input := input || CASE WHEN input ? 'accountId' THEN jsonb_build_object('create', false)
-        ELSE jsonb_build_object('accountId', gen_random_uuid(), 'create', true) END; END IF;
-    account := (input->>'accountId')::uuid;
-    SELECT * INTO prior FROM platform.ledger_accounts a
-      WHERE (a.tenant_id, a.environment_id, a.company_id, a.account_id) = (tenant, environment, company, account);
-    IF (input->'create' = 'true') = FOUND THEN
-      IF input->'create' = 'true' THEN RAISE EXCEPTION 'ledger.reviewStale'; END IF;
-      RAISE EXCEPTION 'ledger.unavailable'; END IF;
-    IF FOUND AND prior.kind_role_id IS DISTINCT FROM input->>'kind' THEN RAISE EXCEPTION 'ledger.accountKindFixed'; END IF;
-    IF EXISTS (SELECT FROM platform.ledger_accounts a WHERE (a.tenant_id, a.environment_id, a.company_id) = (tenant, environment, company)
-        AND a.account_code = input->>'code' AND a.account_id <> account) THEN RAISE EXCEPTION 'ledger.accountCodeTaken'; END IF;
-    RETURN jsonb_build_object('input', input, 'labels', jsonb_build_object('label', input->'label'),
-      'terms', jsonb_build_object('operation', operation, 'company', company, 'accountId', account,
-        'create', input->'create', 'code', input->'code', 'kind', input->'kind', 'active', input->'active')); END IF;
-  IF operation = 'setUpChart' THEN
-    IF input - 'starterId' - 'starterVersion' - 'jurisdictions' - 'accountIds' <> '{}'
-       OR jsonb_typeof(input->'starterId') IS DISTINCT FROM 'string'
-       OR coalesce(input->>'starterVersion', '') !~ '^[1-9][0-9]{0,8}$'
-       OR jsonb_typeof(input->'jurisdictions') IS DISTINCT FROM 'array' OR jsonb_array_length(input->'jurisdictions') = 0
-       OR EXISTS (SELECT FROM jsonb_array_elements(input->'jurisdictions') j
-         WHERE NOT EXISTS (SELECT FROM platform.ledger_chart_starter_accounts s WHERE s.starter_id = input->>'starterId'
-           AND s.starter_version = (input->>'starterVersion')::integer AND to_jsonb(s.jurisdiction) = j))
-       OR (SELECT count(DISTINCT j) <> count(*) FROM jsonb_array_elements(input->'jurisdictions') j) THEN
-      RAISE EXCEPTION 'ledger.invalidOperation'; END IF;
-    IF minting THEN
-      IF input ? 'accountIds' THEN RAISE EXCEPTION 'ledger.invalidOperation'; END IF;
-      input := input || jsonb_build_object('accountIds', '{}'::jsonb); END IF;
-    ids := input->'accountIds';
-    SELECT jsonb_agg(j ORDER BY j::text) INTO chosen FROM jsonb_array_elements(input->'jurisdictions') j;
-    FOR row_ IN SELECT s.account_code, s.kind_role_id, s.default_label, a.account_id AS existing, a.kind_role_id AS existing_kind
-        FROM platform.ledger_chart_starter_accounts s
-        LEFT JOIN platform.ledger_accounts a ON (a.tenant_id, a.environment_id, a.company_id, a.account_code) =
-          (tenant, environment, company, s.account_code)
-        WHERE s.starter_id = input->>'starterId' AND s.starter_version = (input->>'starterVersion')::integer
-          AND to_jsonb(s.jurisdiction) IN (SELECT j FROM jsonb_array_elements(input->'jurisdictions') j)
-        ORDER BY s.account_code LOOP
-      IF row_.existing IS NOT NULL THEN
-        IF row_.existing_kind IS DISTINCT FROM row_.kind_role_id THEN RAISE EXCEPTION 'ledger.chartKindConflict'; END IF;
-        accounts := accounts || jsonb_build_array(jsonb_build_object('code', row_.account_code, 'kind', row_.kind_role_id,
-          'accountId', row_.existing, 'existing', true));
-      ELSE
-        IF minting THEN ids := ids || jsonb_build_object(row_.account_code, gen_random_uuid()); END IF;
-        IF NOT ids ? row_.account_code THEN RAISE EXCEPTION 'ledger.reviewStale'; END IF;
-        accounts := accounts || jsonb_build_array(jsonb_build_object('code', row_.account_code, 'kind', row_.kind_role_id,
-          'accountId', ids->row_.account_code, 'existing', false));
-        labels := labels || jsonb_build_object(row_.account_code, row_.default_label); END IF; END LOOP;
-    input := jsonb_set(input, '{accountIds}', ids);
-    RETURN jsonb_build_object('input', input, 'labels', labels, 'terms', jsonb_build_object('operation', operation,
-      'company', company, 'starterId', input->'starterId', 'starterVersion', input->'starterVersion',
-      'jurisdictions', chosen, 'accounts', accounts)); END IF;
-  RAISE EXCEPTION 'ledger.invalidOperation'; END $$;
-
--- Review: nothing changes but one immutable review row.
-CREATE FUNCTION platform.ledger_review(company uuid, released uuid, expected_fence bigint, operation text, input jsonb)
-RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
-DECLARE tenant uuid := north_star_internal.trusted_tenant_id(); environment uuid := north_star_internal.trusted_environment_id();
-  principal uuid := nullif(current_setting('north_star.principal_id', true), '')::uuid;
-  derived jsonb; review uuid := gen_random_uuid(); digest text; BEGIN
-  IF tenant IS NULL OR environment IS NULL OR principal IS NULL THEN RAISE EXCEPTION 'ledger.unavailable'; END IF;
-  PERFORM north_star_internal.ledger_operation_access(company, released, expected_fence, false);
-  derived := north_star_internal.ledger_operation_terms(company, operation, input, true);
-  digest := encode(sha256(convert_to((derived->'terms')::text, 'UTF8')), 'hex');
-  INSERT INTO platform.ledger_operation_reviews (tenant_id, environment_id, review_id, principal_id, company_id, release_id,
-      fence, operation, input, terms, labels, digest, reviewed_at)
-    VALUES (tenant, environment, review, principal, company, released, expected_fence, operation, derived->'input',
-      derived->'terms', derived->'labels', digest, clock_timestamp());
-  RETURN jsonb_build_object('reviewId', review, 'digest', digest, 'terms', derived->'terms', 'labels', derived->'labels'); END $$;
-
--- Confirm: the reviewing principal, the exact digest, the same fence, today's
--- authority and company, and terms re-derived under the locks; the review is
--- consumed once, in this transaction, linked to the gateway's trust invocation.
-CREATE FUNCTION platform.ledger_confirm(review uuid, reviewed_digest text, receipt uuid)
-RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
-DECLARE tenant uuid := north_star_internal.trusted_tenant_id(); environment uuid := north_star_internal.trusted_environment_id();
-  principal uuid := nullif(current_setting('north_star.principal_id', true), '')::uuid;
-  r platform.ledger_operation_reviews; derived jsonb; books platform.ledger_companies; item jsonb; BEGIN
+  args jsonb := input->'arguments'; company uuid; day date; prior date; invocation uuid; BEGIN
   PERFORM north_star_internal.ledger_require_writer();
-  SELECT * INTO r FROM platform.ledger_operation_reviews v
-    WHERE (v.tenant_id, v.environment_id, v.review_id) = (tenant, environment, review) FOR UPDATE;
-  IF NOT FOUND OR r.principal_id IS DISTINCT FROM principal THEN RAISE EXCEPTION 'ledger.unavailable'; END IF;
-  IF r.consumed_at IS NOT NULL THEN RAISE EXCEPTION 'ledger.reviewConsumed'; END IF;
-  IF reviewed_digest IS DISTINCT FROM r.digest THEN RAISE EXCEPTION 'ledger.digestMismatch'; END IF;
-  IF receipt IS NULL THEN RAISE EXCEPTION 'ledger.invalidOperation'; END IF;
-  PERFORM north_star_internal.ledger_operation_access(r.company_id, r.release_id, r.fence, true);
-  -- Lock 3: the company row, before the terms are re-derived.
-  IF r.operation = 'booksStart' THEN
-    PERFORM north_star_internal.ledger_provision_company(r.company_id);
-    SELECT * INTO books FROM platform.ledger_companies c
-      WHERE (c.tenant_id, c.environment_id, c.company_id) = (tenant, environment, r.company_id) FOR UPDATE;
-  ELSE
-    SELECT * INTO books FROM platform.ledger_companies c
-      WHERE (c.tenant_id, c.environment_id, c.company_id) = (tenant, environment, r.company_id) FOR SHARE; END IF;
-  derived := north_star_internal.ledger_operation_terms(r.company_id, r.operation, r.input, false);
-  IF derived->'terms' IS DISTINCT FROM r.terms THEN RAISE EXCEPTION 'ledger.reviewStale'; END IF;
-  UPDATE platform.ledger_operation_reviews v SET consumed_at = clock_timestamp(), receipt_id = receipt
-    WHERE (v.tenant_id, v.environment_id, v.review_id) = (tenant, environment, review) AND v.consumed_at IS NULL;
-  IF NOT FOUND THEN RAISE EXCEPTION 'ledger.reviewConsumed'; END IF; BEGIN
-    IF r.operation = 'booksStart' THEN
-      PERFORM north_star_internal.ledger_set_books_start(r.company_id,
-        north_star_internal.ledger_civil_date(r.terms->>'date'));
-    ELSIF r.operation = 'putAccount' THEN
-      PERFORM north_star_internal.ledger_put_account(r.company_id, (r.terms->>'accountId')::uuid, r.terms->>'code',
-        r.terms->>'kind', r.labels->>'label', (r.terms->>'active')::boolean);
-    ELSE
-      -- New accounts only, in account-code order; existing ones are untouched.
-      FOR item IN SELECT value FROM jsonb_array_elements(r.terms->'accounts') ORDER BY value->>'code' LOOP
-        IF item->'existing' = 'false' THEN
-          PERFORM north_star_internal.ledger_put_account(r.company_id, (item->>'accountId')::uuid, item->>'code',
-            item->>'kind', r.labels->>(item->>'code'), true); END IF; END LOOP; END IF;
-  EXCEPTION WHEN unique_violation THEN RAISE EXCEPTION 'ledger.reviewStale'; END;
-  RETURN jsonb_build_object('reviewId', review, 'operation', r.operation, 'terms', r.terms); END $$;
+  IF jsonb_typeof(input) IS DISTINCT FROM 'object' OR input - 'recordId' - 'expectedRevision' - 'arguments' <> '{}'
+     OR coalesce(input->>'recordId', '') !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+     OR jsonb_typeof(args) IS DISTINCT FROM 'object' OR args - 'date' - 'expectedPrior' <> '{}' OR NOT args ? 'expectedPrior'
+     OR jsonb_typeof(args->'expectedPrior') NOT IN ('null', 'string') THEN
+    RAISE EXCEPTION 'ledger.invalidOperation'; END IF;
+  company := (input->>'recordId')::uuid;
+  day := north_star_internal.ledger_civil_date(args->>'date');
+  IF day IS NULL THEN RAISE EXCEPTION 'ledger.invalidOperation'; END IF;
+  invocation := north_star_internal.ledger_consume_grant(grant_key, released, expected_fence, operation, request_key, input, channel);
+  PERFORM north_star_internal.ledger_operation_access(company, released, expected_fence, true);
+  PERFORM north_star_internal.ledger_provision_company(company);
+  -- Lock 3, FOR UPDATE: the books-start setter takes the same row again.
+  SELECT c.books_start INTO prior FROM platform.ledger_companies c
+    WHERE (c.tenant_id, c.environment_id, c.company_id) = (tenant, environment, company) FOR UPDATE;
+  IF coalesce(to_jsonb(to_char(prior, 'YYYY-MM-DD')), 'null'::jsonb) IS DISTINCT FROM args->'expectedPrior' THEN
+    RAISE EXCEPTION 'ledger.priorChanged'; END IF;
+  PERFORM north_star_internal.ledger_set_books_start(company, day);
+  RETURN jsonb_build_object('invocationId', invocation, 'company', company, 'booksStart', to_char(day, 'YYYY-MM-DD'),
+    'prior', to_char(prior, 'YYYY-MM-DD')); END $$;
 
 DO $access$ DECLARE routine text; BEGIN
   REVOKE ALL ON platform.ledger_chart_starter_accounts FROM PUBLIC;
-  REVOKE ALL ON platform.ledger_operation_reviews FROM PUBLIC;
-  ALTER TABLE platform.ledger_operation_reviews ENABLE ROW LEVEL SECURITY;
-  ALTER TABLE platform.ledger_operation_reviews FORCE ROW LEVEL SECURITY;
+  REVOKE ALL ON platform.ledger_approval_grants FROM PUBLIC;
+  ALTER TABLE platform.ledger_approval_grants ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE platform.ledger_approval_grants FORCE ROW LEVEL SECURITY;
   FOREACH routine IN ARRAY ARRAY[
-      'north_star_internal.ledger_review_immutable()', 'north_star_internal.ledger_release_storage()',
-      'north_star_internal.ledger_company_live(uuid,boolean)', 'north_star_internal.ledger_may(uuid,text,text)',
+      'north_star_internal.ledger_grant_immutable()', 'north_star_internal.ledger_grant_receipt()',
+      'north_star_internal.ledger_release_storage()', 'north_star_internal.ledger_company_live(uuid,boolean)',
+      'north_star_internal.ledger_may(uuid,text,text)',
       'north_star_internal.ledger_operation_access(uuid,uuid,bigint,boolean)',
-      'north_star_internal.ledger_operation_terms(uuid,text,jsonb,boolean)',
-      'platform.ledger_review(uuid,uuid,bigint,text,jsonb)', 'platform.ledger_confirm(uuid,text,uuid)'] LOOP
+      'north_star_internal.ledger_consume_grant(uuid,uuid,bigint,text,uuid,jsonb,text)',
+      'platform.ledger_attest_approval(uuid,uuid,uuid,uuid,uuid,uuid,bigint,text,uuid,jsonb,text)',
+      'platform.ledger_apply_books_start(uuid,uuid,bigint,text,uuid,text,jsonb)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC', routine); END LOOP; END $access$;
-GRANT EXECUTE ON FUNCTION platform.ledger_review(uuid,uuid,bigint,text,jsonb), platform.ledger_confirm(uuid,text,uuid)
+GRANT EXECUTE ON FUNCTION platform.ledger_attest_approval(uuid,uuid,uuid,uuid,uuid,uuid,bigint,text,uuid,jsonb,text)
+  TO north_star_approval_issuer;
+GRANT EXECUTE ON FUNCTION platform.ledger_apply_books_start(uuid,uuid,bigint,text,uuid,text,jsonb)
   TO north_star_runtime;

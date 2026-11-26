@@ -4,21 +4,24 @@ import test from 'node:test';
 import pg, { type PoolClient } from 'pg';
 
 import { startComposedApplication } from '../../apps/api/src/composition-root.js';
+import { SEMANTIC_OPERATION_REQUEST_VERSION } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import { COMPANY, worldOver } from '../agent/agent-world.js';
 import {
   LINEAGE_INSTALL_VOLUME,
   withEphemeralPostgres,
 } from '../helpers/postgres.js';
 
-// ACCOUNTING-1 slice 1a-ii: the scalar confirmation-class operations (books
-// start, set up chart, put account) in a composed application, so a company is
-// a live record of the released legal-entity master. Two companies share ONE
-// tenant and environment; principals are company-scoped or unscoped. Every
-// call is made as north_star_runtime through platform.ledger_review and
-// platform.ledger_confirm.
+// ACCOUNTING-1 slice 1a-ii, ruling A: a ledger operation is confirmed through
+// the Semantic Operation gateway; the executor attests the verified grant as
+// north_star_approval_issuer and the apply definer consumes it once. Here the
+// thinnest path, books start, in a composed application, so a company is a
+// live record of the released legal-entity master. Two companies share ONE
+// tenant and environment. The SQL reds attest a valid grant themselves and
+// call the apply as north_star_runtime, so each refusal dies alone in SQL;
+// one test drives the whole path through the gateway.
 
 const NS = 'northstar.app:';
-const role = (name: string) => `northstar.ledger:role.${name}`;
+const BOOKS_START = `${NS}operation.bookkeeping_books_start_set`;
 const BOOKS = [
   'northstar.ledger:permission.books_configure',
   'northstar.ledger:capability.books',
@@ -27,19 +30,9 @@ const READ = [
   'northstar.ledger:permission.journal_read',
   'northstar.ledger:capability.journal',
 ] as const;
-const STARTER = {
-  starterId: 'northstar.ledger:starter.canada',
-  starterVersion: 1,
-};
-
-interface Reviewed {
-  reviewId: string;
-  digest: string;
-  terms: Record<string, unknown>;
-}
 
 test(
-  'ledger books by hand: books start, chart and accounts, confirmed against the release fence',
+  'ledger books by hand: books start through the gateway, attested and consumed once',
   { timeout: 1_200_000 },
   async (t) => {
     await withEphemeralPostgres(
@@ -57,10 +50,15 @@ test(
           user: 'north_star_runtime',
           max: 3,
         });
+        const issuer = new pg.Pool({
+          ...c,
+          user: 'north_star_approval_issuer',
+          max: 1,
+        });
         try {
           const world = worldOver(
             app.runtime,
-            c.database,
+            tenantSlug,
             databaseUrl,
             tenantSlug,
           );
@@ -77,59 +75,93 @@ test(
             },
           });
           assert.equal(created.outcome, 'succeeded', JSON.stringify(created));
-          const pointer = (
-            await pool.query<{
-              tenant: string;
-              environment: string;
-              release: string;
-              fence: string;
-            }>(
-              `SELECT p.tenant_id AS tenant, p.environment_id AS environment, p.release_id AS release, p.fence::text AS fence
+          const { tenant, environment } = (
+            await pool.query<{ tenant: string; environment: string }>(
+              `SELECT p.tenant_id AS tenant, p.environment_id AS environment
                  FROM platform.active_release_pointers p JOIN platform.tenants tn ON tn.id = p.tenant_id
                 WHERE tn.slug = $1`,
               [tenantSlug],
             )
           ).rows[0]!;
-          const { tenant, environment } = pointer;
-          // Any committed trust invocation of this tenant stands in for the
-          // gateway's: the review only links to it.
-          const receipt = (
-            await pool.query<{ id: string }>(
-              'SELECT invocation_id AS id FROM platform.trust_action_invocations WHERE (tenant_id, environment_id) = ($1,$2) LIMIT 1',
-              [tenant, environment],
-            )
-          ).rows[0]!.id;
+          const pointer = async () =>
+            (
+              await pool.query<{ release: string; fence: string }>(
+                'SELECT release_id AS release, fence::text AS fence FROM platform.active_release_pointers WHERE (tenant_id, environment_id) = ($1,$2)',
+                [tenant, environment],
+              )
+            ).rows[0]!;
 
-          const principal = async (
+          const policyRole = async (
             grants: readonly (readonly [string, string])[],
-            company: string | null,
           ) => {
-            const id = randomUUID(),
-              policyRole = randomUUID();
+            const id = randomUUID();
             await pool.query(
               'INSERT INTO platform.current_policy_roles(tenant_id,environment_id,role_id,role_key) VALUES ($1,$2,$3,$4)',
-              [
-                tenant,
-                environment,
-                policyRole,
-                `ledger_${policyRole.slice(0, 8)}`,
-              ],
+              [tenant, environment, id, `ledger_${id.slice(0, 8)}`],
             );
             for (const [permission, resource] of grants)
               await pool.query(
                 'INSERT INTO platform.current_policy_permission_grants(tenant_id,environment_id,role_id,permission_id,resource_id) VALUES ($1,$2,$3,$4,$5)',
-                [tenant, environment, policyRole, permission, resource],
+                [tenant, environment, id, permission, resource],
               );
-            await pool.query(
-              'INSERT INTO platform.current_policy_memberships(tenant_id,environment_id,membership_id,principal_id,role_id,legal_entity_id) VALUES ($1,$2,gen_random_uuid(),$3,$4,$5)',
-              [tenant, environment, id, policyRole, company],
-            );
             return id;
           };
-          const scopedA = await principal([BOOKS], COMPANY);
-          const unscoped = await principal([BOOKS], null);
-          const reader = await principal([READ], null);
+          const member = async (
+            principal: string,
+            role: string,
+            company: string | null,
+          ) =>
+            pool.query(
+              'INSERT INTO platform.current_policy_memberships(tenant_id,environment_id,membership_id,principal_id,role_id,legal_entity_id) VALUES ($1,$2,gen_random_uuid(),$3,$4,$5)',
+              [tenant, environment, principal, role, company],
+            );
+          const books = await policyRole([BOOKS]);
+          const reading = await policyRole([READ]);
+          const scopedA = randomUUID(),
+            unscoped = randomUUID(),
+            reader = randomUUID();
+          await member(scopedA, books, COMPANY);
+          await member(unscoped, books, null);
+          await member(reader, reading, null);
 
+          interface Call {
+            who: string;
+            company: string;
+            date?: string;
+            expectedPrior?: string | null;
+            fence?: string;
+          }
+          const inputOf = (call: Call) => ({
+            arguments: {
+              date: call.date ?? '2026-01-01',
+              expectedPrior: call.expectedPrior ?? null,
+            },
+            expectedRevision: 1,
+            recordId: call.company,
+          });
+          /** Attests a grant for exactly this request, as the issuer role. */
+          const attest = async (call: Call, input: object = inputOf(call)) => {
+            const current = await pointer();
+            const grant = randomUUID(),
+              key = randomUUID();
+            await issuer.query(
+              'SELECT platform.ledger_attest_approval($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
+              [
+                grant,
+                tenant,
+                environment,
+                call.who,
+                call.who,
+                current.release,
+                call.fence ?? current.fence,
+                BOOKS_START,
+                key,
+                JSON.stringify(input),
+                'UI',
+              ],
+            );
+            return { grant, key, release: current.release };
+          };
           const as = async <T>(
             who: string,
             work: (client: PoolClient) => Promise<T>,
@@ -142,52 +174,39 @@ test(
               );
               return await work(client);
             } finally {
+              await client.query('ROLLBACK').catch(() => undefined);
               client.release();
             }
           };
-          const fence = async () =>
-            (
-              await pool.query<{ release: string; fence: string }>(
-                'SELECT release_id AS release, fence::text AS fence FROM platform.active_release_pointers WHERE (tenant_id, environment_id) = ($1,$2)',
-                [tenant, environment],
-              )
-            ).rows[0]!;
-          const review = async (
-            who: string,
-            company: string,
-            operation: string,
-            input: object,
-          ): Promise<Reviewed> => {
-            const current = await fence();
-            return as(
-              who,
-              async (client) =>
-                (
-                  await client.query<{ r: Reviewed }>(
-                    'SELECT platform.ledger_review($1,$2,$3,$4,$5) AS r',
-                    [
-                      company,
-                      current.release,
-                      current.fence,
-                      operation,
-                      JSON.stringify(input),
-                    ],
-                  )
-                ).rows[0]!.r,
-            );
-          };
-          const confirm = (
-            who: string,
-            reviewed: Reviewed,
-            digest = reviewed.digest,
+          const apply = (
+            client: PoolClient,
+            call: Call,
+            attested: { grant: string; key: string; release: string },
+            input: object = inputOf(call),
           ) =>
-            as(who, async (client) => {
-              await client.query('SELECT platform.ledger_confirm($1,$2,$3)', [
-                reviewed.reviewId,
-                digest,
-                receipt,
-              ]);
+            client.query(
+              'SELECT platform.ledger_apply_books_start($1,$2,$3,$4,$5,$6,$7)',
+              [
+                attested.grant,
+                attested.release,
+                call.fence ?? undefined,
+                BOOKS_START,
+                attested.key,
+                'UI',
+                JSON.stringify(input),
+              ],
+            );
+          /** One attested apply inside a transaction that is rolled back. */
+          const tryApply = async (call: Call, input?: object) => {
+            const fence = call.fence ?? (await pointer()).fence;
+            const attested = await attest({ ...call, fence });
+            return as(call.who, async (client) => {
+              await client.query('BEGIN');
+              return settled(
+                apply(client, { ...call, fence }, attested, input),
+              );
             });
+          };
           /** The refusal text, or "admitted", so a red names what happened. */
           const settled = (pending: Promise<unknown>) =>
             pending.then(
@@ -201,65 +220,59 @@ test(
                 [tenant, environment, company],
               )
             ).rows[0]?.day ?? null;
-          const codes = async (company: string) =>
-            (
-              await pool.query<{ code: string }>(
-                'SELECT account_code AS code FROM platform.ledger_accounts WHERE (tenant_id, environment_id, company_id) = ($1,$2,$3) ORDER BY 1',
-                [tenant, environment, company],
-              )
-            ).rows.map((row) => row.code);
 
           await t.test(
-            'books start is confirmed only with the exact digest of its review',
+            'an attested request applies, and only the exact request it was attested for',
             async () => {
-              const reviewed = await review(scopedA, COMPANY, 'booksStart', {
-                date: '2026-01-01',
+              const call = { who: scopedA, company: COMPANY };
+              assert.equal(await tryApply(call), 'admitted');
+              const other = await tryApply(call, {
+                ...inputOf(call),
+                arguments: { date: '2026-02-01', expectedPrior: null },
               });
-              assert.deepEqual(reviewed.terms, {
-                company: COMPANY,
-                date: '2026-01-01',
-                operation: 'booksStart',
-                prior: null,
-              });
-              const wrong = await settled(
-                confirm(scopedA, reviewed, '0'.repeat(64)),
-              );
               assert.match(
-                wrong,
-                /ledger\.digestMismatch/u,
-                `a confirm with another digest was admitted: ${wrong}`,
-              );
-              await confirm(scopedA, reviewed);
-              assert.equal(await booksStart(COMPANY), '2026-01-01');
-              const again = await settled(confirm(scopedA, reviewed));
-              assert.match(
-                again,
-                /ledger\.reviewConsumed/u,
-                `a consumed books-start review was confirmed again: ${again}`,
+                other,
+                /ledger\.approvalRequired/u,
+                `an apply ran on a grant attested for another input: ${other}`,
               );
             },
           );
+          await t.test('an attested grant is consumed once', async () => {
+            const call = { who: scopedA, company: COMPANY };
+            const fence = (await pointer()).fence;
+            const attested = await attest({ ...call, fence });
+            const second = await as(scopedA, async (client) => {
+              await client.query('BEGIN');
+              await apply(client, { ...call, fence }, attested);
+              return settled(apply(client, { ...call, fence }, attested));
+            });
+            assert.match(
+              second,
+              /ledger\.approvalSpent/u,
+              `a consumed grant applied again: ${second}`,
+            );
+          });
           await t.test(
             'a principal scoped to one company is refused on another company of the tenant',
             async () => {
-              const outcome = await settled(
-                review(scopedA, companyB, 'booksStart', { date: '2026-01-01' }),
-              );
+              const outcome = await tryApply({
+                who: scopedA,
+                company: companyB,
+              });
               assert.match(
                 outcome,
                 /ledger\.unavailable/u,
-                `a principal scoped to company A reviewed company B: ${outcome}`,
+                `a principal scoped to company A started company B's books: ${outcome}`,
               );
             },
           );
           await t.test(
             'a company must be a live record of the released legal-entity master',
             async () => {
-              const outcome = await settled(
-                review(unscoped, randomUUID(), 'booksStart', {
-                  date: '2026-01-01',
-                }),
-              );
+              const outcome = await tryApply({
+                who: unscoped,
+                company: randomUUID(),
+              });
               assert.match(
                 outcome,
                 /ledger\.unavailable/u,
@@ -270,190 +283,47 @@ test(
           await t.test(
             'a read permission never authorizes a books change',
             async () => {
-              const outcome = await settled(
-                review(reader, COMPANY, 'putAccount', {
-                  code: '1020',
-                  kind: role('cash'),
-                  label: 'Petty cash',
-                  active: true,
-                }),
-              );
+              const outcome = await tryApply({ who: reader, company: COMPANY });
               assert.match(
                 outcome,
                 /ledger\.unavailable/u,
-                `a journal reader changed the chart: ${outcome}`,
+                `a journal reader started books: ${outcome}`,
               );
             },
           );
           await t.test(
-            'set up chart adds the starter accounts of the chosen jurisdictions once',
+            'a grant attested under an earlier release fence never applies',
             async () => {
-              const reviewed = await review(scopedA, COMPANY, 'setUpChart', {
-                ...STARTER,
-                jurisdictions: ['CA-BC', 'CA'],
+              const stale = String(BigInt((await pointer()).fence) - 1n);
+              const outcome = await tryApply({
+                who: scopedA,
+                company: COMPANY,
+                fence: stale,
               });
-              await confirm(scopedA, reviewed);
-              const first = await codes(COMPANY);
-              assert.equal(first.length, 26);
-              assert.ok(first.includes('2210') && !first.includes('2220'));
-              const again = await settled(confirm(scopedA, reviewed));
-              assert.match(
-                again,
-                /ledger\.reviewConsumed/u,
-                `a consumed chart review was confirmed again: ${again}`,
-              );
-              await confirm(
-                scopedA,
-                await review(scopedA, COMPANY, 'setUpChart', {
-                  ...STARTER,
-                  jurisdictions: ['CA', 'CA-SK'],
-                }),
-              );
-              const second = await codes(COMPANY);
-              assert.equal(
-                second.length,
-                27,
-                'a reapplied starter duplicated accounts',
-              );
-              assert.ok(second.includes('2220'));
-            },
-          );
-          await t.test(
-            'put account mints the account ID and never changes a kind',
-            async () => {
-              const smuggled = await settled(
-                review(scopedA, COMPANY, 'putAccount', {
-                  create: true,
-                  accountId: randomUUID(),
-                  code: '1020',
-                  kind: role('cash'),
-                  label: 'Petty cash',
-                  active: true,
-                }),
-              );
-              assert.match(smuggled, /ledger\.invalidOperation/u);
-              const reviewed = await review(scopedA, COMPANY, 'putAccount', {
-                code: '1020',
-                kind: role('cash'),
-                label: 'Petty cash',
-                active: true,
-              });
-              assert.equal(reviewed.terms.create, true);
-              await confirm(scopedA, reviewed);
-              const accountId = String(reviewed.terms.accountId);
-              const again = await settled(confirm(scopedA, reviewed));
-              assert.match(
-                again,
-                /ledger\.reviewConsumed/u,
-                `a consumed account review was confirmed again: ${again}`,
-              );
-              await confirm(
-                scopedA,
-                await review(scopedA, COMPANY, 'putAccount', {
-                  accountId,
-                  code: '1020',
-                  kind: role('cash'),
-                  label: 'Petty cash box',
-                  active: false,
-                }),
-              );
-              const kind = await settled(
-                review(scopedA, COMPANY, 'putAccount', {
-                  accountId,
-                  code: '1020',
-                  kind: role('expense'),
-                  label: 'Petty cash box',
-                  active: false,
-                }),
-              );
-              assert.match(kind, /ledger\.accountKindFixed/u);
-            },
-          );
-          await t.test(
-            'chart and put account refuse a company whose books have not started',
-            async () => {
-              const outcome = await settled(
-                review(unscoped, companyB, 'setUpChart', {
-                  ...STARTER,
-                  jurisdictions: ['CA'],
-                }),
-              );
-              assert.match(outcome, /ledger\.booksNotStarted/u);
-            },
-          );
-          await t.test(
-            'confirm re-derives its terms under the locks and refuses a stale review',
-            async () => {
-              const stale = await review(unscoped, companyB, 'booksStart', {
-                date: '2026-02-01',
-              });
-              await confirm(
-                unscoped,
-                await review(unscoped, companyB, 'booksStart', {
-                  date: '2026-03-01',
-                }),
-              );
-              const outcome = await settled(confirm(unscoped, stale));
               assert.match(
                 outcome,
-                /ledger\.reviewStale/u,
-                `a stale review was confirmed: ${outcome}`,
-              );
-              assert.equal(await booksStart(companyB), '2026-03-01');
-            },
-          );
-          await t.test(
-            'a starter code held by an account of another kind refuses the chart',
-            async () => {
-              await confirm(
-                unscoped,
-                await review(unscoped, companyB, 'putAccount', {
-                  code: '6000',
-                  kind: role('other_expense'),
-                  label: 'Sundry',
-                  active: true,
-                }),
-              );
-              await assert.rejects(
-                review(unscoped, companyB, 'setUpChart', {
-                  ...STARTER,
-                  jurisdictions: ['CA'],
-                }),
-                /ledger\.chartKindConflict/u,
-                'a starter account was kept under another kind',
+                /ledger\.staleRelease/u,
+                `a grant applied under a moved release fence: ${outcome}`,
               );
             },
           );
           await t.test(
-            "a review's terms never change, even while it is consumed",
+            'books start replaces only the value the person expected',
             async () => {
-              const reviewed = await review(unscoped, companyB, 'putAccount', {
-                code: '1030',
-                kind: role('cash'),
-                label: 'Till',
-                active: true,
+              const outcome = await tryApply({
+                who: scopedA,
+                company: COMPANY,
+                expectedPrior: '2025-01-01',
               });
-              await assert.rejects(
-                pool.query(
-                  `UPDATE platform.ledger_operation_reviews SET consumed_at = clock_timestamp(), receipt_id = $2,
-                     terms = jsonb_set(terms, '{code}', '"9999"') WHERE review_id = $1`,
-                  [reviewed.reviewId, receipt],
-                ),
-                /ledger\.reviewImmutable/u,
-                "a review's terms changed",
-              );
-              await assert.rejects(
-                pool.query(
-                  'DELETE FROM platform.ledger_operation_reviews WHERE review_id = $1',
-                  [reviewed.reviewId],
-                ),
-                /ledger\.reviewImmutable/u,
-                'a review was deleted',
+              assert.match(
+                outcome,
+                /ledger\.priorChanged/u,
+                `books start replaced a value the person did not see: ${outcome}`,
               );
             },
           );
           await t.test(
-            'only north_star_runtime executes review and confirm',
+            'only the issuer attests and only north_star_runtime applies',
             async () => {
               const { rows } = await pool.query<{ entry: string }>(
                 `SELECT r.rolname || ' ' || f AS entry FROM pg_roles r CROSS JOIN unnest($1::text[]) f
@@ -461,63 +331,99 @@ test(
                     AND has_function_privilege(r.oid, f::regprocedure, 'EXECUTE') ORDER BY 1`,
                 [
                   [
-                    'platform.ledger_review(uuid,uuid,bigint,text,jsonb)',
-                    'platform.ledger_confirm(uuid,text,uuid)',
-                    'north_star_internal.ledger_operation_terms(uuid,text,jsonb,boolean)',
+                    'platform.ledger_attest_approval(uuid,uuid,uuid,uuid,uuid,uuid,bigint,text,uuid,jsonb,text)',
+                    'platform.ledger_apply_books_start(uuid,uuid,bigint,text,uuid,text,jsonb)',
+                    'north_star_internal.ledger_consume_grant(uuid,uuid,bigint,text,uuid,jsonb,text)',
                     'north_star_internal.ledger_operation_access(uuid,uuid,bigint,boolean)',
                     'north_star_internal.ledger_company_live(uuid,boolean)',
                     'north_star_internal.ledger_may(uuid,text,text)',
                     'north_star_internal.ledger_release_storage()',
-                    'north_star_internal.ledger_review_immutable()',
+                    'north_star_internal.ledger_grant_immutable()',
+                    'north_star_internal.ledger_grant_receipt()',
                   ],
                 ],
               );
               assert.deepEqual(
                 rows.map((row) => row.entry),
                 [
-                  'north_star_runtime platform.ledger_confirm(uuid,text,uuid)',
-                  'north_star_runtime platform.ledger_review(uuid,uuid,bigint,text,jsonb)',
+                  'north_star_approval_issuer platform.ledger_attest_approval(uuid,uuid,uuid,uuid,uuid,uuid,bigint,text,uuid,jsonb,text)',
+                  'north_star_runtime platform.ledger_apply_books_start(uuid,uuid,bigint,text,uuid,text,jsonb)',
                 ],
                 'a ledger operation function is executable beyond its grant',
               );
             },
           );
-          // Last: it moves the active pointer's fence.
           await t.test(
-            'a review never confirms across a release switch and back',
+            'the gateway confirms books start end to end and records its trust receipt',
             async () => {
-              const reviewed = await review(scopedA, COMPANY, 'putAccount', {
-                code: '1040',
-                kind: role('cash'),
-                label: 'Float',
-                active: true,
-              });
-              // A switch away and back leaves the same release under a fence
-              // two higher. The activation kernel's swap guard is bypassed
-              // here only to reach that end state without two activations.
-              const client = await pool.connect();
-              try {
+              const local = { headers: { authorization: 'local' } };
+              const principal = await app.runtime.entry.run(local, (view) =>
+                Promise.resolve(view.principalId),
+              );
+              await member(principal, books, COMPANY);
+              const outcome = await app.runtime.entry.run(
+                local,
+                async (view) => {
+                  const input = {
+                    arguments: { date: '2026-01-01', expectedPrior: null },
+                    expectedRevision: 1,
+                    recordId: COMPANY,
+                  };
+                  return app.runtime.operationGateway.invoke(
+                    view,
+                    {
+                      confirmationGrant:
+                        app.runtime.operationMediation.issueConfirmationGrant(
+                          view,
+                          BOOKS_START,
+                          input,
+                        ),
+                      idempotencyKey: randomUUID(),
+                      input,
+                      operationId: BOOKS_START,
+                      schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+                    },
+                    app.runtime.operationMediation.issueInvocation(view, 'UI'),
+                  );
+                },
+              );
+              assert.equal(
+                outcome.outcome,
+                'succeeded',
+                JSON.stringify(outcome),
+              );
+              assert.equal(await booksStart(COMPANY), '2026-01-01');
+              const receipt = await pool.query<{ ok: boolean }>(
+                `SELECT EXISTS (SELECT FROM platform.ledger_approval_grants g JOIN platform.trust_action_invocations i
+                   ON (i.tenant_id, i.environment_id, i.invocation_id) = (g.tenant_id, g.environment_id, g.invocation_id)
+                  WHERE g.operation_id = $1 AND i.action_id = $1 AND i.outcome = 'SUCCEEDED') AS ok`,
+                [BOOKS_START],
+              );
+              assert.equal(receipt.rows[0]!.ok, true);
+            },
+          );
+          // Last: under its control a commit without a receipt would succeed
+          // and start company B's books.
+          await t.test(
+            'a consumed grant never commits without its trust receipt',
+            async () => {
+              const call = { who: unscoped, company: companyB };
+              const fence = (await pointer()).fence;
+              const attested = await attest({ ...call, fence });
+              const outcome = await as(unscoped, async (client) => {
                 await client.query('BEGIN');
-                await client.query(
-                  "SET LOCAL session_replication_role = 'replica'",
-                );
-                await client.query(
-                  'UPDATE platform.active_release_pointers SET fence = fence + 2 WHERE (tenant_id, environment_id) = ($1,$2)',
-                  [tenant, environment],
-                );
-                await client.query('COMMIT');
-              } finally {
-                client.release();
-              }
-              const outcome = await settled(confirm(scopedA, reviewed));
+                await apply(client, { ...call, fence }, attested);
+                return settled(client.query('COMMIT'));
+              });
               assert.match(
                 outcome,
-                /ledger\.staleRelease/u,
-                `a review confirmed across a release switch: ${outcome}`,
+                /ledger\.receiptUnverified/u,
+                `a consumed grant committed with no trust receipt: ${outcome}`,
               );
             },
           );
         } finally {
+          await issuer.end();
           await runtime.end();
           await app.close();
         }

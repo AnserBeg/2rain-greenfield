@@ -31,7 +31,7 @@ const TENANT_TABLES = [
   'ledger_entries',
   'ledger_lines',
   'ledger_balances',
-  'ledger_operation_reviews',
+  'ledger_approval_grants',
 ];
 const TABLES = [...GLOBAL_TABLES, ...TENANT_TABLES];
 const READS = [

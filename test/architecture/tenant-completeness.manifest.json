@@ -858,7 +858,7 @@
     },
     {
       "schema": "platform",
-      "table": "ledger_operation_reviews",
+      "table": "ledger_approval_grants",
       "classification": "tenant-scoped",
       "tenantColumn": "tenant_id"
     }
