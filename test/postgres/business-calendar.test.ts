@@ -5,7 +5,6 @@ import test, { after, before } from 'node:test';
 import pg from 'pg';
 
 import {
-  captureSchemaSnapshot,
   loadMigrations,
   runMigrations,
 } from '../../packages/postgres-provider/src/migrations.js';
@@ -51,9 +50,10 @@ async function tenant(timeZone: string | null, boundary = '00:00') {
   const id = randomUUID(),
     environment = randomUUID();
   const pool = await admin();
-  await pool.query("INSERT INTO platform.tenants(id,slug) VALUES ($1,'cal')", [
-    id,
-  ]);
+  await pool.query(
+    'INSERT INTO platform.tenants(id,slug) VALUES ($1,$1::text)',
+    [id],
+  );
   await pool.query(
     "INSERT INTO platform.environments(tenant_id,id,slug) VALUES ($1,$2,'cal')",
     [id, environment],
@@ -103,44 +103,6 @@ const put = (
     'SELECT north_star_internal.business_calendar_put($1,$2,$3,$4,$5,$6,1::smallint,1::smallint) AS version',
     [scope.id, scope.environment, company, from, zone, '00:00'],
   );
-
-test('schema snapshot drift, printed for the hand patch (temporary)', async () => {
-  const client = await (await admin()).connect();
-  try {
-    const actual = (await captureSchemaSnapshot(client)) as unknown as Record<
-      string,
-      unknown
-    >;
-    const expected = JSON.parse(
-      await readFile('db/schema.snapshot.json', 'utf8'),
-    ) as Record<string, unknown>;
-    for (const key of Object.keys(actual)) {
-      const now = actual[key],
-        was = expected[key];
-      if (!Array.isArray(now) || !Array.isArray(was)) {
-        if (JSON.stringify(now) !== JSON.stringify(was))
-          console.log('SNAPSHOT-SCALAR', key, JSON.stringify(now));
-        continue;
-      }
-      const wasSet = new Set(was.map((entry) => JSON.stringify(entry)));
-      const nowSet = new Set(now.map((entry) => JSON.stringify(entry)));
-      now.forEach((entry, index) => {
-        const text = JSON.stringify(entry);
-        if (!wasSet.has(text)) console.log('SNAPSHOT-ADD', key, index, text);
-      });
-      was.forEach((entry, index) => {
-        const text = JSON.stringify(entry);
-        if (!nowSet.has(text)) console.log('SNAPSHOT-DEL', key, index, text);
-      });
-    }
-    console.log(
-      'SNAPSHOT-EQUAL',
-      JSON.stringify(actual) === JSON.stringify(expected),
-    );
-  } finally {
-    client.release();
-  }
-});
 
 test('business period is unchanged by the calendar resolver', async () => {
   const pool = await admin();

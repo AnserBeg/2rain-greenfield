@@ -18,7 +18,7 @@ CI tier: pending full
 
 | Slice | Try it | Expected observation |
 | --- | --- | --- |
-| 1 | `node --import tsx --test test/postgres/business-calendar.test.ts` (PostgreSQL), then `bash scripts/check-expected-red.sh --run calendar-company-branch`. | 17 tests pass. Company B (Winnipeg override) is on 2026-04-01 at 05:30Z while company A (Vancouver default) is on 03-31, through `business_day` and `ledger_business_day`. The control drops the company branch and the three override tests fail as declared. |
+| 1 | `node --import tsx --test test/postgres/business-calendar.test.ts` (PostgreSQL), then `bash scripts/check-expected-red.sh --run calendar-company-branch`. | 16 tests pass. Company B (Winnipeg override) is on 2026-04-01 at 05:30Z while company A (Vancouver default) is on 03-31, through `business_day` and `ledger_business_day`. The control drops the company branch and the three override tests fail as declared. |
 
 ## Discriminating proofs (rule 8)
 
