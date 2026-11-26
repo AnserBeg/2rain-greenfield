@@ -24,6 +24,13 @@ CI tier: pending full
 
 Controls in [`COMPANY-CALENDAR-1-s1.expected-red.json`](../../../test/evidence/COMPANY-CALENDAR-1-s1.expected-red.json), one per check: arithmetic flip (differential), company branch, effective-from predicate, default fallback, versions append-only, mirror frozen, provisioning both stores, no UTC default, session scope, NULL instant, setter READ COMMITTED, future business day, single default version, backdated override, no runtime grant, company-scoped read. Identity: the existing calendar tests run unmodified (inventory-storage, module-storage-transition, inventory-backup-restore); the nine fresh-tenant CHECKs are untouched (snapshot unchanged); a differential test compares the 0033 body, installed verbatim, with the new one over five zones, four boundaries, both 2026 DST changes, year end, a second-grid midnight, ±infinity and NULL.
 
+## Evidence
+
+- Controls on GitHub (evidence dispatch): 16 of 17 green on `d8546ba6` (run 45862315140), `calendar-backfill-verbatim` green on `94b8ee95` (run 45855675343, its restored run also executed the CI-only preceding-reader proof), `calendar-no-utc-default` re-proved green (run 45864149796) after its replacement text lost a `$$` (the runner's string replace turns `$$` into `$`).
+- `db/schema.snapshot.json` is CI-9 snapshot mode output (run 45855665619), not a hand patch; the fresh-tenant snapshot it regenerated is byte-identical to the committed one.
+- GUARD-WIDEN name law (eabdb9408's guard on this tip and on main): identical hits, none from this packet.
+- Rule 13, no rung: `business-calendar-reader.test.ts` runs the actual preceding binary (main `b6668f05`) on the migrated database; it answers the booking usage query and its grouped-report horizon gives the same business day as the resolver. The upgrade test digests every pre-existing table before and after the migration (byte-identical) and a booking after the upgrade freezes the same calendar JSON.
+
 ## Rule 17
 
 (a) One business calendar per owning scope, resolved deterministically from (scope, instant), append-only and effective-dated, so a past instant never moves. (b) Used unchanged by stock periods, ledger dates, and in slices 2-3 bookings, reports, date-time capture and reminders; it serves rentals (off-hire and invoice days), distribution (stock periods across provinces), clinics and hotels (a 04:00 night audit) and field service (dispatch day). (c) Narrower: fiscal years are months only; week start and fiscal month are stored but read by nobody until slice 3; working time is a separate block (WORKING-TIME-1).
