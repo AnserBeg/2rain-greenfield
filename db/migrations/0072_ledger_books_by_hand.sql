@@ -192,38 +192,9 @@ CREATE TABLE platform.ledger_chart_starter_accounts (
   jurisdiction text NOT NULL CHECK (jurisdiction ~ '^[A-Z]{2}(-[A-Z0-9]{1,3})?$'),
   PRIMARY KEY (starter_id, starter_version, account_code)
 );
--- Canada, GST plus PST (BC, SK) and RST (MB). Rates and recoverability are
--- tax-lane data; a company relabels, adds or deactivates accounts afterwards.
-INSERT INTO platform.ledger_chart_starter_accounts
-    (starter_id, starter_version, account_code, kind_role_id, default_label, jurisdiction) VALUES
-  ('northstar.ledger:starter.canada', 1, '1000', 'northstar.ledger:role.cash', 'Cash', 'CA'),
-  ('northstar.ledger:starter.canada', 1, '1010', 'northstar.ledger:role.cash', 'Bank account', 'CA'),
-  ('northstar.ledger:starter.canada', 1, '1050', 'northstar.ledger:role.undeposited_funds', 'Undeposited funds', 'CA'),
-  ('northstar.ledger:starter.canada', 1, '1200', 'northstar.ledger:role.receivable', 'Accounts receivable', 'CA'),
-  ('northstar.ledger:starter.canada', 1, '1300', 'northstar.ledger:role.tax_recoverable', 'GST recoverable (input tax credits)', 'CA'),
-  ('northstar.ledger:starter.canada', 1, '1400', 'northstar.ledger:role.prepaid_expense', 'Prepaid expenses', 'CA'),
-  ('northstar.ledger:starter.canada', 1, '1500', 'northstar.ledger:role.inventory_asset', 'Inventory', 'CA'),
-  ('northstar.ledger:starter.canada', 1, '1700', 'northstar.ledger:role.fixed_asset', 'Equipment', 'CA'),
-  ('northstar.ledger:starter.canada', 1, '2000', 'northstar.ledger:role.payable', 'Accounts payable', 'CA'),
-  ('northstar.ledger:starter.canada', 1, '2100', 'northstar.ledger:role.accrued_liability', 'Accrued liabilities', 'CA'),
-  ('northstar.ledger:starter.canada', 1, '2200', 'northstar.ledger:role.tax_payable', 'GST payable', 'CA'),
-  ('northstar.ledger:starter.canada', 1, '2210', 'northstar.ledger:role.tax_payable', 'PST payable (British Columbia)', 'CA-BC'),
-  ('northstar.ledger:starter.canada', 1, '2220', 'northstar.ledger:role.tax_payable', 'PST payable (Saskatchewan)', 'CA-SK'),
-  ('northstar.ledger:starter.canada', 1, '2230', 'northstar.ledger:role.tax_payable', 'RST payable (Manitoba)', 'CA-MB'),
-  ('northstar.ledger:starter.canada', 1, '2300', 'northstar.ledger:role.customer_deposits', 'Customer deposits', 'CA'),
-  ('northstar.ledger:starter.canada', 1, '2400', 'northstar.ledger:role.deferred_revenue', 'Deferred revenue', 'CA'),
-  ('northstar.ledger:starter.canada', 1, '2700', 'northstar.ledger:role.loan', 'Loans payable', 'CA'),
-  ('northstar.ledger:starter.canada', 1, '3000', 'northstar.ledger:role.owner_equity', 'Owner''s equity', 'CA'),
-  ('northstar.ledger:starter.canada', 1, '3100', 'northstar.ledger:role.retained_earnings', 'Retained earnings', 'CA'),
-  ('northstar.ledger:starter.canada', 1, '3900', 'northstar.ledger:role.opening_balance', 'Opening balance equity', 'CA'),
-  ('northstar.ledger:starter.canada', 1, '4000', 'northstar.ledger:role.revenue', 'Sales revenue', 'CA'),
-  ('northstar.ledger:starter.canada', 1, '4500', 'northstar.ledger:role.other_income', 'Other income', 'CA'),
-  ('northstar.ledger:starter.canada', 1, '4900', 'northstar.ledger:role.discounts_given', 'Sales discounts', 'CA'),
-  ('northstar.ledger:starter.canada', 1, '5000', 'northstar.ledger:role.cost_of_sales', 'Cost of sales', 'CA'),
-  ('northstar.ledger:starter.canada', 1, '6000', 'northstar.ledger:role.expense', 'General expenses', 'CA'),
-  ('northstar.ledger:starter.canada', 1, '6100', 'northstar.ledger:role.bank_fees', 'Bank fees', 'CA'),
-  ('northstar.ledger:starter.canada', 1, '6900', 'northstar.ledger:role.other_expense', 'Other expenses', 'CA'),
-  ('northstar.ledger:starter.canada', 1, '6950', 'northstar.ledger:role.rounding_difference', 'Rounding differences', 'CA');
+-- The rows (a Canadian starter) arrive with the set-up-chart operation, once
+-- the name law settles ratified role IDs (GUARD-WIDEN, orchestrator ruling
+-- 2026-11-26); books start needs none.
 
 -- An attested human confirmation, consumed once by the matching apply. The
 -- same match columns as the booking engine's grants, in the ledger's own table
