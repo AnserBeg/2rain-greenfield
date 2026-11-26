@@ -785,6 +785,7 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
                   postingLines(c),
                   provenance,
                 );
+                second.catch(() => undefined); // handled at creation (review R1)
                 await blocked();
                 await w1.query('COMMIT');
                 await assert.rejects(
@@ -829,6 +830,7 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
                   pair(c.cash, c.revenue),
                   receipt,
                 );
+                second.catch(() => undefined); // handled at creation (review R1)
                 await blocked();
                 await w1.query('COMMIT');
                 await assert.rejects(
@@ -853,10 +855,10 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
                   [c.id],
                 );
                 const blocked = await waitUntilBlocked(w2);
-                const writer = manual(w2, c, '2026-03-31');
+                const writer = settled(manual(w2, c, '2026-03-31'));
                 await blocked();
                 await w1.query('COMMIT');
-                const outcome = await settled(writer);
+                const outcome = await writer;
                 assert.match(
                   outcome,
                   /ledger\.closedBooks/u,
@@ -878,15 +880,12 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
                   [c.id, c.bank, role('cash')],
                 );
                 const blocked = await waitUntilBlocked(w2);
-                const writer = manual(
-                  w2,
-                  c,
-                  '2026-02-10',
-                  pair(c.bank, c.revenue),
+                const writer = settled(
+                  manual(w2, c, '2026-02-10', pair(c.bank, c.revenue)),
                 );
                 await blocked();
                 await w1.query('COMMIT');
-                const outcome = await settled(writer);
+                const outcome = await writer;
                 assert.match(
                   outcome,
                   /ledger\.accountInactive/u,
@@ -911,6 +910,7 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
                 );
                 const firstBlocked = await waitUntilBlocked(w1);
                 const first = manual(w1, c, '2026-02-11', pair(low!, high!, 7));
+                first.catch(() => undefined); // handled at creation (review R1)
                 await firstBlocked();
                 const secondBlocked = await waitUntilBlocked(w2);
                 const second = manual(
@@ -919,6 +919,7 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
                   '2026-02-12',
                   pair(high!, low!, 9),
                 );
+                second.catch(() => undefined);
                 await secondBlocked();
                 await w3.query('COMMIT');
                 const outcomes = await Promise.allSettled([first, second]);
