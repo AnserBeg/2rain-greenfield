@@ -455,7 +455,7 @@
         {
           "file": "test/postgres/tax-catalog.test.ts",
           "name": "a registration named by ID ignores a company in the proposal",
-          "expected": "tax\\.invalidRegistration"
+          "expected": "a proposal's company overrode the stored registration's"
         }
       ]
     },
@@ -511,7 +511,7 @@
         {
           "file": "test/postgres/tax-catalog.test.ts",
           "name": "a registration named by ID ignores a company in the proposal",
-          "expected": "tax\\.invalidRegistration"
+          "expected": "a proposal's company overrode the stored registration's"
         }
       ]
     },
