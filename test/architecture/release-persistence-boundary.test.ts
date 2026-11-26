@@ -106,6 +106,7 @@ test('migration owns one immutable RLS release schema with no blob hash oracle',
     '0069_record_template_library.sql',
     '0070_record_creation_occurrences.sql',
     '0071_ledger_journal_core.sql',
+    '0072_business_calendar.sql',
   ]);
 
   const migration = read(
