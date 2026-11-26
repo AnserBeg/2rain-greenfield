@@ -53,8 +53,8 @@ test('the evidence workflow is label-gated, read-only and pinned', () => {
 
   assert.match(
     workflow,
-    /^on:\n {2}pull_request:\n {4}types: \[labeled, synchronize, opened, reopened\]\n {2}workflow_dispatch:\n {4}inputs:\n {6}ref:\n(?: {8}.+\n)+? {6}controls:\n(?: {8}.+\n)+\n/mu,
-    'a labelled pull request or a dispatch with a ref and a controls filter',
+    /^on:\n {2}pull_request:\n {4}types: \[labeled, synchronize, opened, reopened\]\n {2}workflow_dispatch:\n {4}inputs:\n {6}ref:\n(?: {8}.+\n)+? {6}controls:\n(?: {8}.+\n)+ {6}mode:\n(?: {8}.+\n)+\n/mu,
+    'a labelled pull request or a dispatch with a ref, a controls filter and a mode',
   );
   assert.match(
     workflow,
@@ -102,6 +102,7 @@ test('the evidence workflow is label-gated, read-only and pinned', () => {
     '${{ github.event.pull_request.head.sha || inputs.ref }}',
     '${{ needs.select-controls.outputs.head_sha }}',
     '${{ github.event.pull_request.head.sha }}',
+    '${{ inputs.ref }}',
   ]);
   assert.equal(
     checkouts.length,
@@ -112,16 +113,18 @@ test('the evidence workflow is label-gated, read-only and pinned', () => {
     'select-controls',
     'control',
     'regen-snapshot',
+    'snapshot-dispatch',
   ]);
   const select = workflowJob(workflow, 'select-controls');
   const control = workflowJob(workflow, 'control');
   const snapshot = workflowJob(workflow, 'regen-snapshot');
+  const snapshotDispatch = workflowJob(workflow, 'snapshot-dispatch');
 
   assert.ok(
     select.includes(
       labelGate('run-controls').replace(
         '    if: >-\n',
-        "    if: >-\n      github.event_name == 'workflow_dispatch' ||\n",
+        "    if: >-\n      (github.event_name == 'workflow_dispatch' && inputs.mode == 'controls') ||\n",
       ),
     ),
   );
@@ -138,11 +141,18 @@ test('the evidence workflow is label-gated, read-only and pinned', () => {
       "BASE_SHA: ${{ github.event.pull_request.base.sha || 'origin/main' }}",
     ),
   );
-  // A dispatch input appears only as the select checkout's ref and inside the
-  // PR_BODY expression: never in a `run:` block, a `--base` or an `echo`.
+  // A dispatch input appears only as a checkout's ref, inside the PR_BODY
+  // expression and in the two mode conditions: never in a `run:` block, a
+  // `--base` or an `echo`.
   assert.deepEqual(
     inputUseLines(workflow).map((line) => line.trim().split(':')[0]),
-    ['ref', 'PR_BODY'],
+    [
+      "(github.event_name == 'workflow_dispatch' && inputs.mode == 'controls') ||",
+      'ref',
+      'PR_BODY',
+      'if',
+      'ref',
+    ],
   );
   // The cited SHA is the resolved commit, never github.sha (on a dispatch that
   // is the tip of the branch the workflow ran from, not the commit tested).
@@ -212,6 +222,49 @@ test('the evidence workflow is label-gated, read-only and pinned', () => {
     snapshot.includes(
       'path: test/postgres/fresh-tenant-full-replay-schema.snapshot.json',
     ),
+  );
+
+  // CI-9: a dispatch in snapshots mode regenerates both snapshots for the ref,
+  // reports each against the committed file, uploads them and never writes.
+  assert.match(
+    snapshotDispatch,
+    /^ {4}if: github\.event_name == 'workflow_dispatch' && inputs\.mode == 'snapshots'$/mu,
+    'the snapshot job runs only for a dispatch in snapshots mode',
+  );
+  assert.match(snapshotDispatch, /^ {4}timeout-minutes: 30$/mu);
+  assert.match(
+    snapshotDispatch,
+    /ref: \$\{\{ inputs\.ref \}\}\n {10}fetch-depth: 0\n/u,
+  );
+  assert.ok(
+    snapshotDispatch.includes(
+      'run: node --import tsx test/helpers/regenerate-schema-snapshot.ts',
+    ),
+    'the schema snapshot is regenerated with its documented command',
+  );
+  assert.ok(
+    snapshotDispatch.includes(
+      'run: node --import tsx test/helpers/generate-fresh-tenant-full-replay-schema.ts',
+    ),
+    'the replay snapshot is regenerated with its documented command',
+  );
+  assert.ok(
+    snapshotDispatch.includes(
+      'name: schema-snapshots-${{ steps.resolve.outputs.head_sha }}',
+    ),
+  );
+  assert.ok(
+    snapshotDispatch.includes(
+      '            db/schema.snapshot.json\n            test/postgres/fresh-tenant-full-replay-schema.snapshot.json\n',
+    ),
+    'both regenerated files are uploaded',
+  );
+  assert.ok(snapshotDispatch.includes('IDENTICAL to the file committed at'));
+  assert.ok(snapshotDispatch.includes('DIFFERS from the file committed at'));
+  assert.doesNotMatch(
+    snapshotDispatch,
+    /\bgit\s+(?:push|commit|add|tag|config)\b|\bgh\s+(?:pr|api|release)\b/u,
+    'the snapshot job must never push, commit or publish',
   );
 });
 

@@ -15,14 +15,21 @@ name: Evidence on demand
 # (`gh workflow run evidence.yml -f ref=<branch or full commit sha> -f controls="a b"`). A
 # dispatch runs only run-controls, on the commit the `ref` input names, and
 # every dispatch keeps its own concurrency group so lanes never cancel each
-# other. regen-snapshot stays pull-request only.
+# other.
+#
+# CI-9: `-f mode=snapshots` makes the dispatch run only snapshot-dispatch: it
+# applies the migrations on the pinned PostgreSQL image, regenerates
+# db/schema.snapshot.json and the fresh-tenant full-replay snapshot for the ref,
+# says whether each differs from the committed file, and uploads both as the
+# artifact schema-snapshots-<full sha>. It never pushes or commits. The label
+# job regen-snapshot stays pull-request only.
 on:
   pull_request:
     types: [labeled, synchronize, opened, reopened]
   workflow_dispatch:
     inputs:
       ref:
-        description: Branch, tag or full 40-character commit SHA whose expected-red controls run
+        description: Branch, tag or full 40-character commit SHA the run tests (its controls, or its schema snapshots)
         type: string
         required: true
       controls:
@@ -30,6 +37,11 @@ on:
         type: string
         required: false
         default: ''
+      mode:
+        description: controls runs the expected-red controls; snapshots regenerates the schema snapshots and uploads them
+        type: choice
+        options: [controls, snapshots]
+        default: controls
 
 permissions:
   contents: read
@@ -52,7 +64,7 @@ jobs:
   select-controls:
     name: Select expected-red controls
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'controls') ||
       (github.event.action == 'labeled' && github.event.label.name == 'run-controls') ||
       (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-controls'))
     runs-on: ubuntu-24.04
@@ -212,5 +224,70 @@ jobs:
         with:
           name: full-replay-schema-snapshot-${{ github.event.pull_request.head.sha }}
           path: test/postgres/fresh-tenant-full-replay-schema.snapshot.json
+          if-no-files-found: error
+          retention-days: 7
+
+  snapshot-dispatch:
+    name: Regenerate the schema snapshots for a ref
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'snapshots'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out the commit under test
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      # Resolved once, so the artifact and every printed line name one commit
+      # even when `ref` was a branch that moves.
+      - name: Resolve the commit under test
+        id: resolve
+        run: echo "head_sha=$(git rev-parse HEAD)" >>"$GITHUB_OUTPUT"
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install frozen dependencies
+        run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      # Two-space JSON first, then Prettier: the generator does both.
+      - name: Regenerate db/schema.snapshot.json against PostgreSQL
+        run: node --import tsx test/helpers/regenerate-schema-snapshot.ts
+      - name: Regenerate the fresh-tenant full-replay snapshot against PostgreSQL
+        run: node --import tsx test/helpers/generate-fresh-tenant-full-replay-schema.ts
+      - name: Say whether each snapshot differs from the committed file
+        env:
+          HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
+        run: |
+          short="${HEAD_SHA:0:12}"
+          {
+            echo '### Regenerated schema snapshots'
+            echo
+            echo "Commit \`$HEAD_SHA\`. Artifact: \`schema-snapshots-$HEAD_SHA\`"
+            echo
+          } >>"$GITHUB_STEP_SUMMARY"
+          for snapshot in db/schema.snapshot.json test/postgres/fresh-tenant-full-replay-schema.snapshot.json; do
+            if ! git cat-file -e "HEAD:$snapshot" 2>/dev/null; then
+              line="$snapshot: NEW, none is committed at $short; download the artifact and commit it."
+            elif git diff --quiet -- "$snapshot"; then
+              line="$snapshot: IDENTICAL to the file committed at $short; nothing to commit."
+            else
+              counts="$(git diff --numstat -- "$snapshot" | awk '{ print "+" $1 " -" $2 " lines" }')"
+              line="$snapshot: DIFFERS from the file committed at $short ($counts); download the artifact and commit it."
+              git --no-pager diff -- "$snapshot" | sed -n '1,200p'
+            fi
+            echo "$line"
+            echo "::notice title=schema snapshot::$line"
+            echo "- $line" >>"$GITHUB_STEP_SUMMARY"
+          done
+      - name: Retain the regenerated snapshots
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: schema-snapshots-${{ steps.resolve.outputs.head_sha }}
+          path: |
+            db/schema.snapshot.json
+            test/postgres/fresh-tenant-full-replay-schema.snapshot.json
           if-no-files-found: error
           retention-days: 7
