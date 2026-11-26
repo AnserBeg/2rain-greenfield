@@ -12,6 +12,7 @@ import pg from 'pg';
 import {
   BILLING_ARREARS_READER,
   BILLING_ALLOCATION_READER,
+  BILLING_RULES_READER,
   BILLING_INTERVAL_READER,
 } from '../../packages/canonical-model/src/billing.js';
 import { RECORD_TEMPLATE_READER } from '../../packages/canonical-model/src/record-template.js';
@@ -562,6 +563,7 @@ test('the capability comparison binds the family to its capability, then compare
     REPORT_ANALYSIS_READER,
     REPORT_MEASURE_READER,
     LINE_LOGICAL_FIELD_READER,
+    BILLING_RULES_READER,
   ];
   // Each capability owns its own rung: a renumbering collision at a merge
   // would let one feature's floor stand in for another's.
@@ -622,7 +624,7 @@ test('the capability comparison binds the family to its capability, then compare
   // capability on one side alone reds here rather than in production.
   assert.deepEqual(SUPPORTED_RUNTIME_CAPABILITIES[surface], {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
-    maximumSupportedVersion: LINE_LOGICAL_FIELD_READER,
+    maximumSupportedVersion: BILLING_RULES_READER,
   });
 });
 
@@ -1256,7 +1258,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
               ],
               {
                 capabilityId: 'northstar.runtime:capability.surface-manifest',
-                maximumSupportedVersion: LINE_LOGICAL_FIELD_READER,
+                maximumSupportedVersion: BILLING_RULES_READER,
               },
             );
           },
@@ -1281,7 +1283,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
               new RegExp(
-                `requires version 999 and this runtime supports ${LINE_LOGICAL_FIELD_READER}`,
+                `requires version 999 and this runtime supports ${BILLING_RULES_READER}`,
               ),
             );
           },
@@ -1312,7 +1314,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
               new RegExp(
-                `requires version 999 and this runtime supports ${LINE_LOGICAL_FIELD_READER}`,
+                `requires version 999 and this runtime supports ${BILLING_RULES_READER}`,
               ),
             );
           },
