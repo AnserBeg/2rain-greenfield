@@ -44,6 +44,7 @@ import {
   LINEAGE_INSTALL_VOLUME,
   withEphemeralPostgres,
 } from '../helpers/postgres.js';
+import { seedBusinessCalendar } from '../helpers/business-calendar-seed.js';
 
 test(
   'literal validation checks changed values, keeps old records and refuses an older serving reader',
@@ -188,13 +189,15 @@ test('live date validation uses the tenant business period under the module role
       const { tenantId } = runtime.contexts.a;
       // Put the tenant boundary twelve hours from now, on the previous
       // UTC day. This keeps both sample dates stable throughout the test.
-      await runtime.adminPool.query(
-        `INSERT INTO platform.inventory_tenant_calendars
-           (tenant_id,time_zone,business_day_boundary)
-         VALUES ($1, 'Etc/GMT+12', (transaction_timestamp() AT TIME ZONE 'UTC')::time)
-         ON CONFLICT (tenant_id) DO UPDATE SET time_zone=EXCLUDED.time_zone,business_day_boundary=EXCLUDED.business_day_boundary`,
-        [tenantId],
-      );
+      await seedBusinessCalendar(runtime.adminPool, {
+        tenantId,
+        timeZone: 'Etc/GMT+12',
+        boundary: (
+          await runtime.adminPool.query<{ boundary: string }>(
+            "SELECT ((transaction_timestamp() AT TIME ZONE 'UTC')::time)::text AS boundary",
+          )
+        ).rows[0]!.boundary,
+      });
       const {
         rows: [dates],
       } = await runtime.adminPool.query<{ today: string; tomorrow: string }>(

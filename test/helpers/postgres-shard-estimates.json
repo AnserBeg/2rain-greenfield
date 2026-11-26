@@ -14,6 +14,8 @@
     "test/postgres/booking-serving.test.ts": 201,
     "test/postgres/boot-capabilities.test.ts": 141,
     "test/postgres/build-eval.test.ts": 724,
+    "test/postgres/business-calendar-reader.test.ts": 55,
+    "test/postgres/business-calendar.test.ts": 12,
     "test/postgres/catalog-extras.test.ts": 71,
     "test/postgres/catalog-runtime.test.ts": 6,
     "test/postgres/communication-threads.test.ts": 5,
