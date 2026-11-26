@@ -2,7 +2,10 @@ import {
   displayArithmeticType,
   type DisplayDecimalType,
 } from './calculated-display.js';
-import { logicalDecimals } from './formula-validation-bindings.js';
+import {
+  logicalDecimals,
+  zeroComparesStoredMoney,
+} from './formula-validation-bindings.js';
 import type { VersionedNormalizedApplicationPackage } from './schemas.js';
 
 /**
@@ -1061,5 +1064,29 @@ export function bindLineTotals(
       ),
       declared: true,
     },
+  };
+}
+
+/**
+ * Which reader floors a definition's ADR-0094 declarations raise: the
+ * operation catalog's (a derived decimal, a create-only field, a totalled
+ * relation's maximum and header lock, or the money-against-zero comparison)
+ * and the query catalog's (a get's on-read rollup). One function, read by the
+ * compiler's invariant, release registration and the runtime view load.
+ * `null` when the declarations do not bind.
+ */
+export function lineTotalsReaderFloors(
+  definition: VersionedNormalizedApplicationPackage,
+): { readonly operation: boolean; readonly query: boolean } | null {
+  const bound = bindLineTotals(definition);
+  if (bound.status !== 'bound') return null;
+  const { binding } = bound;
+  return {
+    operation:
+      binding.derived.size > 0 ||
+      binding.createOnly.size > 0 ||
+      binding.totalled.size > 0 ||
+      zeroComparesStoredMoney(definition),
+    query: binding.rollups.size > 0,
   };
 }

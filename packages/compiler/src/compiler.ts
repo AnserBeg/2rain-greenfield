@@ -63,10 +63,10 @@ import {
 import { compileCalculatedDisplayFields } from './calculated-display-plan.js';
 import {
   bindLineTotals,
+  lineTotalsReaderFloors,
   LINE_TOTALS_OPERATION_READER,
   ROLLUP_QUERY_READER,
 } from '../../canonical-model/src/line-totals.js';
-import { zeroComparesStoredMoney } from '../../canonical-model/src/formula-validation-bindings.js';
 import { lineTotalsOf } from './projections.js';
 import {
   compileLiteralFormulaRules,
@@ -2945,11 +2945,5 @@ function compare(left: string, right: string): number {
 function lineTotalsRaiseOperationFloor(
   revision: VersionedNormalizedApplicationPackage,
 ): boolean {
-  const bound = lineTotalsOf(revision);
-  return (
-    bound.derived.size > 0 ||
-    bound.createOnly.size > 0 ||
-    bound.totalled.size > 0 ||
-    zeroComparesStoredMoney(revision)
-  );
+  return lineTotalsReaderFloors(revision)?.operation ?? false;
 }

@@ -1,9 +1,8 @@
 import {
-  bindLineTotals,
+  lineTotalsReaderFloors,
   LINE_TOTALS_OPERATION_READER,
   ROLLUP_QUERY_READER,
 } from '../../canonical-model/src/line-totals.js';
-import { zeroComparesStoredMoney } from '../../canonical-model/src/formula-validation-bindings.js';
 import type { StorageTargetPayloadV1 } from '../../compiler/src/storage.js';
 import { lowerDeclaredReports } from '../../compiler/src/declared-reports.js';
 import { DECLARED_REPORT_READER } from '../../canonical-model/src/declared-report.js';
@@ -1908,20 +1907,12 @@ function integrity(
 /** Which floors a revision's ADR-0094 declarations raise. */
 function lineTotalsFloors(
   definition: ReturnType<typeof parseNormalizedApplicationPackageJson>,
-): {
-  readonly operation: boolean;
-  readonly query: boolean;
-} {
-  const bound = bindLineTotals(definition);
-  if (bound.status !== 'bound')
-    throw integrity('FORMULA_PROJECTION_CONTRACT_MISMATCH', bound.message);
-  const { binding } = bound;
-  return {
-    operation:
-      binding.derived.size > 0 ||
-      binding.createOnly.size > 0 ||
-      binding.totalled.size > 0 ||
-      zeroComparesStoredMoney(definition),
-    query: binding.rollups.size > 0,
-  };
+): { readonly operation: boolean; readonly query: boolean } {
+  const floors = lineTotalsReaderFloors(definition);
+  if (!floors)
+    throw integrity(
+      'FORMULA_PROJECTION_CONTRACT_MISMATCH',
+      'release declares line totals that do not bind',
+    );
+  return floors;
 }
