@@ -1,8 +1,8 @@
 # TAX-EVIDENCE-1-s1 — the tax catalog: jurisdictions, codes with append-only dated versions, company registrations, a Canadian starter as data
 
-Status: built on packet/TAX-EVIDENCE-1-s1 (base main 8014e43f1). Tier: **Critical** (money, migration, grant SQL; rule 18). Stops: none.
+Status: built on packet/TAX-EVIDENCE-1-s1 (base main 8014e43f1; main 358d84c57 merged). Tier: **Critical** (money, migration, grant SQL; rule 18). Stops: none.
 Design: CALENDAR-TAX design note part B s1 plus the Fable design read's binding amendments T1-T7. Migration `0072_tax_catalog.sql` is provisional; the integrator renumbers.
-CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/45841982614
+CI tier: pending full
 
 ## Claims
 1. Codes are tenant-shared. A rate change is a new version whose `effective_from` is strictly after the latest (setter), one per code per day (UNIQUE), never updated or deleted (trigger) (T4). No future-only rule.
@@ -30,7 +30,7 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/45841982
   - The permissions are fixed platform IDs on `northstar.tax:capability.tax_catalog`. Unlike the address connector, they have no `CurrentPolicyPermissionBinding` or TS caller yet, so no real tenant can hold them (fail-closed); s2 adds both and re-asks the rung question.
   - The operations are SQL review and confirm, so no parsed chunk gains a key. The design read's rung assumed declared operations.
 - The confirmation shape follows migration 0069's review-then-confirm, so ledger 1a-ii can reuse it or say why not.
-- GUARD-WIDEN was not run. A token scan of the migration against the 723 names in app.authored.json finds only the ordinary words catalog and sales (statute text). Table names avoid `tax_code` by design.
+- Rename (orchestrator ruling, held out of TRAIN-T): GUARD-WIDEN's real guard found the module word `catalog` 4 times in the IDs, so they are now `capability.tax_catalog`, `permission.tax_catalog_write` and `permission.tax_catalog_read`; nothing else changed. The real guard (874c680) now reports zero hits. Main merged at 358d84c57; migration renumbered to 0072.
 - T7: the `engines.manifest.json` tax row waits for GUARD-WIDEN; if this packet merges first, the row rides along with that train.
 - Gap: nothing calls `tax_provision_starter` yet. There is no tenant-provisioning flow beyond the local demo; wiring it in is the first follow-up.
 - Narrower: the code read is unbounded (an admin-curated catalog). Review ride-alongs b-h are s2's first task.
@@ -49,7 +49,7 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/45841982
 - Privileges: no-table-grant, forced-rls, function-execute.
 - Review and confirm: release-fence, review-single-use, review-digest, review-principal, review-size, confirm-live-grant, code-write-grant, registration-write-grant.
 - Authority: shared-code-tenant-wide (T2), company-scope (two companies in one tenant; 4 kills), registration-company-stored, company-live-review, company-live-confirm, writer-read-committed (2 kills), registration-ends-once.
-- Evidence: all 38 killed as declared and restored green at 145af7926 (https://github.com/AnserBeg/2rain-greenfield/actions/runs/45834386448).
+- Evidence: pending (rename round).
 
 ## Rules 10, 12
 No Customize member in s1; s4 adds `declareTaxableAmount`.
@@ -68,8 +68,8 @@ With Docker: `node --import tsx --test test/postgres/tax-catalog.test.ts`. Expec
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "TAX-EVIDENCE-1-s1",
-  "base": "8014e43f1524ad834afd9235203227a9c9b19140",
-  "head": "f800e65cb90f2db46ca646b44a50442de6afedd3",
+  "base": "358d84c5774fc127b1d32e4448908863122b2f6b",
+  "head": "b2768e5a462ed830d3f0fb246139b55d9908910b",
   "changedPaths": ["db/migrations/0072_tax_catalog.sql", "db/schema.snapshot.json", "packages/dev-tooling/src/tenant-completeness.ts", "test/architecture/release-persistence-boundary.test.ts", "test/architecture/repository-hygiene.test.ts", "test/architecture/tenant-completeness.manifest.json", "test/architecture/tenant-completeness.test.ts", "test/evidence/TAX-EVIDENCE-1-s1.expected-red.json", "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts", "test/postgres/tax-catalog.test.ts", "test/postgres/trust-substrate.test.ts"],
   "symbols": [{"path": "packages/dev-tooling/src/tenant-completeness.ts", "name": "tenantIndependentV1TableAuthorities"}]
 }
