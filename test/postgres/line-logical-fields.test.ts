@@ -302,7 +302,12 @@ test(
             'succeeded',
             JSON.stringify(northLine),
           );
-          for (const company of [south, COMPANY]) {
+          // Naming South, the company policy refuses; naming North under
+          // South's order, the parent relation contract refuses.
+          for (const [company, code] of [
+            [south, 'SEMANTIC_OPERATION_POLICY_DENIED'],
+            [COMPANY, 'MODULE_RELATION_VIOLATION'],
+          ] as const) {
             const crossedWrite = await createLine(company, southern, {
               number: '4',
               task: 'Crossed line',
@@ -312,9 +317,9 @@ test(
               (error: Error & { code?: string }) =>
                 `${String(error.code)} ${error.message}`,
             );
-            assert.doesNotMatch(
+            assert.match(
               crossedWrite,
-              /"outcome":"succeeded"/u,
+              new RegExp(`^${code} `, 'u'),
               `a North line was written under South's order (${company})`,
             );
           }
@@ -349,6 +354,39 @@ test(
           assert.match(shown.html, />1\.5 h</u);
           assert.doesNotMatch(shown.html, /Southern sentinel/u);
           assert.doesNotMatch(shown.html, /9,999\.00/u);
+          // The document editor on North's order: each line rate's suffix is
+          // the header's code, and the header currency re-renders the lines.
+          const editorUrl = new URL('/', app.baseUrl);
+          editorUrl.searchParams.set(
+            'surface',
+            `${ns}:surface.custom_work_order_form`,
+          );
+          editorUrl.searchParams.set('record', north);
+          editorUrl.searchParams.set(
+            `${ns}:parameter.custom_work_order_get_legal_entity_scope`,
+            COMPANY,
+          );
+          const editor = await fetch(editorUrl, {
+            headers: { cookie: 'northstar-demo-actor=manager' },
+          });
+          const editorHtml = await editor.text();
+          assert.equal(editor.status, 200, editorHtml.slice(0, 600));
+          // Header fields carry no USD suffix (the deposit is fixed CAD) and
+          // the fee is fixed CAD, so each USD suffix is a line rate's.
+          // Three North lines carry a rate.
+          const usd = editorHtml.match(/data-field-unit>USD<\/span>/gu) ?? [];
+          assert.ok(
+            usd.length >= 3,
+            `the editor's line rates lost their header's currency (${String(usd.length)} USD suffixes)`,
+          );
+          assert.doesNotMatch(editorHtml, /\(header currency\)/u);
+          // Only the header currency is a line source on this type.
+          assert.match(
+            editorHtml,
+            /data-line-source/u,
+            'the header currency is not a line source in the editor',
+          );
+
           // The narrowed North principal asking for South's order in South's
           // own scope sees none of its lines.
           const crossed = await page(south, southern);
