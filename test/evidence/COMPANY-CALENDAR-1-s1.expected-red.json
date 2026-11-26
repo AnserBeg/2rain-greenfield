@@ -138,10 +138,10 @@
     },
     {
       "name": "calendar-no-utc-default",
-      "claim": "An undeclared calendar refuses; nothing defaults to UTC.",
+      "claim": "An undeclared calendar refuses; nothing answers for it, UTC or otherwise.",
       "file": "db/migrations/0072_business_calendar.sql",
       "original": "  IF NOT FOUND THEN\n    RAISE EXCEPTION 'calendar.undeclared'\n      USING ERRCODE = 'P0001', DETAIL = format('tenantId=%s', requested_tenant_id); END IF;\n  RETURN north_star_internal.business_day_of(declared_zone, declared_boundary, requested_at); END $$;",
-      "replacement": "  RETURN north_star_internal.business_day_of(coalesce(declared_zone, 'UTC'), coalesce(declared_boundary, '00:00'), requested_at); END $$;",
+      "replacement": "  IF false THEN\n    RAISE EXCEPTION 'calendar.undeclared'\n      USING ERRCODE = 'P0001', DETAIL = format('tenantId=%s', requested_tenant_id); END IF;\n  RETURN north_star_internal.business_day_of(declared_zone, declared_boundary, requested_at); END $$;",
       "test": {
         "files": ["test/postgres/business-calendar.test.ts"]
       },
@@ -150,11 +150,6 @@
           "file": "test/postgres/business-calendar.test.ts",
           "name": "an undeclared calendar refuses with no UTC default",
           "expected": "Missing expected rejection: an undeclared calendar dated an instant"
-        },
-        {
-          "file": "test/postgres/business-calendar.test.ts",
-          "name": "a calendar change starts a future business day",
-          "expected": "probe-unknown-reason"
         }
       ]
     },
