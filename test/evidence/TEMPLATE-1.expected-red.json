@@ -114,8 +114,8 @@
       "name": "template-operation-floor-beside-rules",
       "claim": "The compiler accepts the template operation reader as the floor of a release that also declares a validation rule or a Booking operation.",
       "file": "packages/compiler/src/compiler.ts",
-      "original": "    (hasRecordTemplateBinding(packageRevision)\n",
-      "replacement": "    (false\n",
+      "original": "      : hasRecordTemplateBinding(packageRevision)\n",
+      "replacement": "      : false\n",
       "test": {
         "files": [
           "test/unit/customization-upgrade.test.ts",

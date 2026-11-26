@@ -27,7 +27,7 @@ import {
   LINES,
   NS,
   patchedAuthored,
-  rateNonNegative,
+  rateNonNegative as rateRule,
   rentalContractAuthored,
   TOTAL,
   totalRollup,
@@ -55,6 +55,8 @@ const field = (
   ...extra,
 });
 const amountExpression = amountDerivation.expression as DerivedTerm;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const rateNonNegative = rateRule as any;
 
 test('LINE-TOTALS-s1 evaluator: 1.5 x 0.33 = 0.495 stores 0.50, rounded half away from zero', () => {
   const outcome = evaluateDerivedField(field(op('multiply', f('a'), f('b'))), {
