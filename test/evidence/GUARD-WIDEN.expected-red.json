@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "packet": "GUARD-WIDEN",
+  "entries": [
+    {
+      "name": "guard-widen-name-layer-off",
+      "claim": "A first-party entity, module, operation, query or capability name newly written in a generic file is refused (PRESS011).",
+      "file": "packages/dev-tooling/src/module-press-law.ts",
+      "original": "      return 'name';",
+      "replacement": "      return undefined;",
+      "test": {
+        "files": ["test/architecture/module-press-law.test.ts"],
+        "namePattern": "^GUARD-WIDEN"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/module-press-law.test.ts",
+          "name": "GUARD-WIDEN red: a new first-party name in a generic file",
+          "expected": "a new first-party name in a generic file must be refused by PRESS011"
+        }
+      ]
+    },
+    {
+      "name": "guard-widen-field-layer-off",
+      "claim": "A first-party field name newly written in a generic file is refused (PRESS012).",
+      "file": "packages/dev-tooling/src/module-press-law.ts",
+      "original": "    case 'field':\n      return 'field';",
+      "replacement": "    case 'field':\n      return undefined;",
+      "test": {
+        "files": ["test/architecture/module-press-law.test.ts"],
+        "namePattern": "^GUARD-WIDEN"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/module-press-law.test.ts",
+          "name": "GUARD-WIDEN red: a new first-party field name in a generic file",
+          "expected": "a new first-party field name in a generic file must be refused by PRESS012"
+        }
+      ]
+    },
+    {
+      "name": "guard-widen-domain-import-off",
+      "claim": "A new import from packages/domain in a generic file is refused (PRESS013).",
+      "file": "packages/dev-tooling/src/module-press-law.ts",
+      "original": "domainImports(text, repoPath)",
+      "replacement": "domainImports('', repoPath)",
+      "test": {
+        "files": ["test/architecture/module-press-law.test.ts"],
+        "namePattern": "^GUARD-WIDEN"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/module-press-law.test.ts",
+          "name": "GUARD-WIDEN red: a new import from packages/domain in a generic file",
+          "expected": "a new import from packages/domain must be refused by PRESS013"
+        }
+      ]
+    },
+    {
+      "name": "guard-widen-cross-engine-off",
+      "claim": "One engine naming another inside its own files is refused (PRESS014).",
+      "file": "packages/dev-tooling/src/module-press-law.ts",
+      "original": "  if (owner !== undefined) return false;",
+      "replacement": "  if (owner !== undefined) return true;",
+      "test": {
+        "files": ["test/architecture/module-press-law.test.ts"],
+        "namePattern": "^GUARD-WIDEN"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/module-press-law.test.ts",
+          "name": "GUARD-WIDEN red: one engine naming another",
+          "expected": "one engine naming another must be refused by PRESS014"
+        }
+      ]
+    },
+    {
+      "name": "guard-widen-baseline-rise-off",
+      "claim": "A count above its baseline allowance is refused; the baseline only shrinks (PRESS015).",
+      "file": "packages/dev-tooling/src/module-press-law.ts",
+      "original": "} else if (observation.count > allowance) {",
+      "replacement": "} else if (false) {",
+      "test": {
+        "files": ["test/architecture/module-press-law.test.ts"],
+        "namePattern": "^GUARD-WIDEN"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/module-press-law.test.ts",
+          "name": "GUARD-WIDEN red: a count above its baseline allowance",
+          "expected": "a count above its baseline allowance must be refused by PRESS015"
+        }
+      ]
+    }
+  ]
+}
