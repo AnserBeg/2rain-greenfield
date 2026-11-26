@@ -27,6 +27,7 @@ import {
   l,
   LINES,
   NS,
+  PARENT,
   patchedAuthored,
   rateNonNegative as rateRule,
   rentalContractAuthored,
@@ -679,5 +680,27 @@ test('LINE-TOTALS-s1 editor: a field missing from the update contract WITHOUT th
     () => editorFieldsToSave(header, unmarked, true),
     /Editor field unavailable/u,
     'an unmarked missing field was silently skipped',
+  );
+});
+
+test('LINE-TOTALS-s1 binder: a totalled relation that a record template fills refuses a maximum below the template bound', () => {
+  // A record template creates up to 100 members plus 100 entered lines; its
+  // content is tenant data, so the compiler refuses on that bound.
+  const normalized = structuredClone(
+    normalizeApplicationPackage(rentalContractAuthored({ maximumLines: 199 })),
+  ) as unknown as Authored;
+  normalized.surfaces = [
+    ...normalized.surfaces,
+    {
+      surfaceId: `${NS}:surface.custom_rental_contract_template_probe`,
+      lifecycle: 'active',
+      recordTemplateBinding: { body: { parentRelationId: PARENT } },
+    },
+  ];
+  const bound = bindLineTotals(normalized as never);
+  assert.equal(
+    bound.status === 'refused' && bound.message,
+    'A record template can create up to 200 lines, more than this line maximum.',
+    'a template larger than the line maximum was admitted',
   );
 });

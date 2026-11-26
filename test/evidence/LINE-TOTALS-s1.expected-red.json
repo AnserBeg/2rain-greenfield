@@ -7,7 +7,7 @@
       "claim": "A line create derives its stored amount before the write, read back by a plain GET.",
       "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
       "original": "  if (!derived?.length) return { input, overflow: null };",
-      "replacement": "  if (derived) return { input, overflow: null };",
+      "replacement": "  if (true) return { input, overflow: null };",
       "test": {
         "files": ["test/postgres/line-totals.test.ts"],
         "namePattern": "^LINE-TOTALS-s1 derive: a line stores its rounded amount on create and update, refuses a sent amount, and the header currency is create-only$"
@@ -777,56 +777,20 @@
       ]
     },
     {
-      "name": "diag-line-totals-derive",
-      "claim": "TEMPORARY diagnostic (removed before review).",
-      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
-      "original": "  if (!derived?.length) return { input, overflow: null };",
-      "replacement": "  if (derived) return { input, overflow: null };",
-      "test": {
-        "files": ["test/postgres/line-totals.test.ts"],
-        "namePattern": "^LINE-TOTALS-s1 derive"
-      },
-      "kills": [
-        {
-          "file": "test/postgres/line-totals.test.ts",
-          "name": "LINE-TOTALS-s1 derive: a line stores its rounded amount on create and update, refuses a sent amount, and the header currency is create-only",
-          "expected": "never"
-        }
-      ]
-    },
-    {
-      "name": "diag-line-totals-total",
-      "claim": "TEMPORARY diagnostic (removed before review).",
-      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
-      "original": "THEN coalesce(sum(${amount}), 0) END",
-      "replacement": "THEN coalesce(sum(${amount}), 1) END",
-      "test": {
-        "files": ["test/postgres/line-totals.test.ts"],
-        "namePattern": "^LINE-TOTALS-s1 total"
-      },
-      "kills": [
-        {
-          "file": "test/postgres/line-totals.test.ts",
-          "name": "LINE-TOTALS-s1 total: the header get reads the sum of its live lines, absent with an unpriced line, per company, and withheld without the line read",
-          "expected": "never"
-        }
-      ]
-    },
-    {
-      "name": "diag-line-totals-maximum",
-      "claim": "TEMPORARY diagnostic (removed before review).",
-      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
-      "original": "    if (Number(live.rows[0]?.lines ?? 0) >= maximumLines)",
+      "name": "line-totals-s1-template-maximum",
+      "claim": "A totalled relation a record template fills refuses a maximum below the template bound (200).",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "    if (templated && declaration.maximumLines < 200)",
       "replacement": "    if (false)",
       "test": {
-        "files": ["test/postgres/line-totals.test.ts"],
-        "namePattern": "^LINE-TOTALS-s1 maximum"
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 binder: a totalled relation that a record template fills refuses a maximum below the template bound$"
       },
       "kills": [
         {
-          "file": "test/postgres/line-totals.test.ts",
-          "name": "LINE-TOTALS-s1 maximum: a shared contract with unconstrained operands verifies, refuses line N+1 on create and restore, and its concurrent line writes serialize without deadlock",
-          "expected": "never"
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 binder: a totalled relation that a record template fills refuses a maximum below the template bound",
+          "expected": "a template larger than the line maximum was admitted"
         }
       ]
     }
