@@ -238,4 +238,23 @@ test('the released books-start Task binds the operation arguments its contract a
       'recordId',
     ],
   );
+  // Setting up a chart: its three arguments bound by its Task.
+  const chartStep = page?.composition?.actions
+    .flatMap((action) => action.steps)
+    .find(
+      (candidate) =>
+        candidate.operation.targetId ===
+        'northstar.app:operation.bookkeeping_chart_setup',
+    );
+  assert.ok(chartStep, 'the company page offers no chart-setup Task');
+  assert.deepEqual(
+    chartStep.bindings.map((binding) => binding.path.join('.')).sort(),
+    [
+      'arguments.jurisdiction',
+      'arguments.starter',
+      'arguments.version',
+      'expectedRevision',
+      'recordId',
+    ],
+  );
 });

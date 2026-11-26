@@ -71,6 +71,8 @@ const reads: Record<string, readonly ChildRead[]> = {
   bookkeeping_books_start_set: [],
   // Putting an account acts on the company record alone (1a-ii).
   bookkeeping_account_put: [],
+  // Setting up a chart acts on the company record alone (1a-ii).
+  bookkeeping_chart_setup: [],
 };
 export function capabilityChildren(operation: string): readonly ChildRead[] {
   const declared = reads[operation];

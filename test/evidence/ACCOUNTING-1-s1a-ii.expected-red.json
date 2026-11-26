@@ -213,6 +213,11 @@
           "file": "test/postgres/ledger-books-by-hand.test.ts",
           "name": "a read permission never authorizes an account put",
           "expected": "a journal reader put an account: admitted"
+        },
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a read permission never authorizes a chart setup",
+          "expected": "a journal reader set up a chart: admitted"
         }
       ]
     },
@@ -306,6 +311,11 @@
           "file": "test/postgres/ledger-books-by-hand.test.ts",
           "name": "a consumed account-put grant never commits without its trust receipt",
           "expected": "a consumed account-put grant committed with no trust receipt: admitted"
+        },
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a consumed chart-setup grant never commits without its trust receipt",
+          "expected": "a consumed chart-setup grant committed with no trust receipt: admitted"
         }
       ]
     },
@@ -413,6 +423,11 @@
           "file": "test/postgres/ledger-books-by-hand.test.ts",
           "name": "a grant attested for another ledger capability never applies in an account put",
           "expected": "an account put consumed a grant attested for books start: admitted"
+        },
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a grant attested for another ledger capability never applies in a chart setup",
+          "expected": "a chart setup consumed a grant attested for account put: admitted"
         }
       ]
     },
@@ -554,6 +569,11 @@
           "file": "test/postgres/ledger-books-by-hand.test.ts",
           "name": "a role granted account put receives the ledger permission it needs, and an account put commits with its evidence",
           "expected": "an account put through the gateway was refused: ledger.unavailable"
+        },
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a role granted chart setup receives the ledger permission it needs, and a chart setup commits with its evidence",
+          "expected": "a chart setup through the gateway was refused: ledger.unavailable"
         }
       ]
     },
@@ -603,6 +623,11 @@
           "file": "test/postgres/ledger-books-by-hand.test.ts",
           "name": "a read permission never authorizes an account put",
           "expected": "a journal reader put an account: admitted"
+        },
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a read permission never authorizes a chart setup",
+          "expected": "a journal reader set up a chart: admitted"
         }
       ]
     },
@@ -731,6 +756,142 @@
       "file": "db/migrations/0073_ledger_books_by_hand.sql",
       "original": "GRANT EXECUTE ON FUNCTION platform.ledger_apply_account_put(uuid,uuid,bigint,text,uuid,text,text,jsonb)\n  TO north_star_runtime;",
       "replacement": "GRANT EXECUTE ON FUNCTION platform.ledger_apply_account_put(uuid,uuid,bigint,text,uuid,text,text,jsonb)\n  TO north_star_runtime, PUBLIC;",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "only the issuer attests and only north_star_runtime applies",
+          "expected": "a ledger operation function is executable beyond its grant"
+        }
+      ]
+    },
+    {
+      "name": "ledger-chart-capability",
+      "claim": "The chart setup consumes under its own capability constant, never the grant's: a grant attested for account put never applies in it (skeleton check note a).",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
+      "original": "invocation := north_star_internal.ledger_consume_grant(grant_key, 'northstar.ledger:capability.ledger_chart_setup',",
+      "replacement": "invocation := north_star_internal.ledger_consume_grant(grant_key, (SELECT g.capability_id FROM platform.ledger_approval_grants g WHERE g.grant_id = grant_key),",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a grant attested for another ledger capability never applies in a chart setup",
+          "expected": "a chart setup consumed a grant attested for account put: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-chart-access",
+      "claim": "The chart setup runs the access checks (fence, ledger permission, live company); without them a journal reader sets up a chart.",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
+      "original": "    FROM north_star_internal.ledger_operation_access(company, released, expected_fence, true) chart_access;",
+      "replacement": "    FROM (SELECT platform.lock_current_policy_epoch(tenant, environment) AS policy_epoch, north_star_internal.ledger_company_live(company, true) AS revision) chart_access;",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a read permission never authorizes a chart setup",
+          "expected": "a journal reader set up a chart: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-chart-revision",
+      "claim": "The chart setup compares the person's expectedRevision with the company record under its FOR SHARE.",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
+      "original": "IF chart_revision IS DISTINCT FROM (input->>'expectedRevision')::bigint THEN",
+      "replacement": "IF false THEN",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a chart setup against another company revision never applies",
+          "expected": "a chart setup applied against a company revision it was not confirmed on: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-chart-policy",
+      "claim": "The chart setup refuses unless the gateway decided under the policy epoch it holds locked.",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
+      "original": "IF policy_version IS DISTINCT FROM 'northstar.current-policy/' || chart_epoch THEN",
+      "replacement": "IF false THEN",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a chart setup decided under a policy version that has since moved never applies",
+          "expected": "a chart setup applied under a policy version that had moved: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-chart-code-taken",
+      "claim": "A starter code the company already uses refuses the whole chart by name, never as a raw unique violation.",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
+      "original": "EXCEPTION WHEN unique_violation THEN RAISE EXCEPTION 'ledger.chartCodeTaken'; END;",
+      "replacement": "EXCEPTION WHEN unique_violation THEN RAISE; END;",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a chart setup never overwrites an account: a starter code in use refuses the whole chart",
+          "expected": "a chart setup over an account in use was not refused by name: duplicate key value"
+        }
+      ]
+    },
+    {
+      "name": "ledger-chart-books-started",
+      "claim": "A chart setup before books start refuses by name, never by a raw foreign key.",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
+      "original": "  IF NOT FOUND THEN RAISE EXCEPTION 'ledger.chartBeforeBooksStart'; END IF;",
+      "replacement": "  IF false THEN RAISE EXCEPTION 'ledger.chartBeforeBooksStart'; END IF;",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a chart setup before books start refuses by name",
+          "expected": "a chart setup before books start was not refused by name: insert or update on table"
+        }
+      ]
+    },
+    {
+      "name": "ledger-chart-starter",
+      "claim": "A starter, version and jurisdiction with no rows refuses by name rather than adding nothing.",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
+      "original": "    RAISE EXCEPTION 'ledger.unknownStarter'; END IF;",
+      "replacement": "    NULL; END IF;",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "an unknown starter or jurisdiction refuses by name",
+          "expected": "an unknown starter was not refused by name: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-chart-execute",
+      "claim": "Only north_star_runtime may execute the chart setup.",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
+      "original": "GRANT EXECUTE ON FUNCTION platform.ledger_apply_chart_setup(uuid,uuid,bigint,text,uuid,text,text,jsonb)\n  TO north_star_runtime;",
+      "replacement": "GRANT EXECUTE ON FUNCTION platform.ledger_apply_chart_setup(uuid,uuid,bigint,text,uuid,text,text,jsonb)\n  TO north_star_runtime, PUBLIC;",
       "test": {
         "files": ["test/postgres/ledger-books-by-hand.test.ts"]
       },

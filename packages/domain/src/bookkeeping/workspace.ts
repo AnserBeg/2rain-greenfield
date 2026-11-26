@@ -8,7 +8,8 @@ export interface BookkeepingCompanyColumn {
  * The company's record page with the ledger's books-start command
  * (ACCOUNTING-1 slice 1a-ii). The company is the legal-entity record another
  * module declares; this composition only shows the facts its owner names and
- * adds the ledger's Tasks, "Set books start" and "Put account", whose inputs
+ * adds the ledger's Tasks, "Set books start", "Put account" and "Set up
+ * chart", whose inputs
  * are the operations' `arguments`. The person types the books start they expect to replace
  * (empty the first time): there is no ledger read model yet, so a different
  * stored value is refused by name rather than shown (1a-iv adds the read).
@@ -104,6 +105,7 @@ export function bookkeepingCompanyWorkspace(
         ],
       },
       accountPutAction(id),
+      chartSetupAction(id),
     ],
   };
 }
@@ -175,6 +177,61 @@ function accountPutAction(id: (kind: string, name: string) => string) {
             value: {
               source: 'input',
               inputId: id('input', `bookkeeping_account_put_${name}`),
+            },
+          })),
+        ],
+      },
+    ],
+  };
+}
+
+/**
+ * "Set up chart": add a starter's accounts to the company's chart, for the
+ * country or province chosen. It only adds accounts; a starter code already
+ * in use refuses the whole chart by name.
+ */
+function chartSetupAction(id: (kind: string, name: string) => string) {
+  const inputs = [
+    ['starter', 'Starter (canada)'],
+    ['version', 'Starter version (1)'],
+    ['jurisdiction', 'Country or province (CA, or CA-BC, CA-SK, CA-MB)'],
+  ] as const;
+  return {
+    actionId: id('action', 'bookkeeping_chart_setup'),
+    label: 'Set up chart',
+    description:
+      'Add the starter accounts for this company: the country rows, plus the province rows when a province is chosen. Accounts it would add must not already exist.',
+    orderKey: 30,
+    conditions: [],
+    inputs: inputs.map(([name, label], index) => ({
+      inputId: id('input', `bookkeeping_chart_setup_${name}`),
+      label,
+      orderKey: (index + 1) * 10,
+      type: 'text',
+      required: true,
+    })),
+    steps: [
+      {
+        stepId: id('step', 'bookkeeping_chart_setup'),
+        operation: {
+          kind: 'operationReference',
+          schemaVersion: 'v6',
+          targetId: id('operation', 'bookkeeping_chart_setup'),
+        },
+        bindings: [
+          {
+            path: ['recordId'],
+            value: { source: 'record', field: 'recordId' },
+          },
+          {
+            path: ['expectedRevision'],
+            value: { source: 'record', field: 'revision' },
+          },
+          ...inputs.map(([name]) => ({
+            path: ['arguments', name],
+            value: {
+              source: 'input',
+              inputId: id('input', `bookkeeping_chart_setup_${name}`),
             },
           })),
         ],

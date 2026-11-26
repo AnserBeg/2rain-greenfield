@@ -12,6 +12,8 @@ export const LEDGER_BOOKS_START_CAPABILITY_ID =
   'northstar.ledger:capability.ledger_books_start' as const;
 export const LEDGER_ACCOUNT_PUT_CAPABILITY_ID =
   'northstar.ledger:capability.ledger_account_put' as const;
+export const LEDGER_CHART_SETUP_CAPABILITY_ID =
+  'northstar.ledger:capability.ledger_chart_setup' as const;
 
 const reference = (kind: string, targetId: string) => ({
   kind,
@@ -33,11 +35,13 @@ function ids(namespace: string) {
     operationIds: {
       accountPut: `${namespace}:operation.bookkeeping_account_put`,
       booksStart: `${namespace}:operation.bookkeeping_books_start_set`,
+      chartSetup: `${namespace}:operation.bookkeeping_chart_setup`,
     },
     packageId: `${namespace}:package.bookkeeping_books`,
     permissionIds: {
       accountPut: `${namespace}:permission.bookkeeping_account_put`,
       booksStart: `${namespace}:permission.bookkeeping_books_start_set`,
+      chartSetup: `${namespace}:permission.bookkeeping_chart_setup`,
     },
   } as const;
 }
@@ -83,8 +87,8 @@ const standardSurfaceCapability = (namespace: string) => ({
 /**
  * ACCOUNTING-1 slice 1a-ii: books by hand. The confirmation-class ledger
  * operations act on a company, the released legal-entity record; the ledger
- * engine owns their storage and refusals (ADR-0093): books start and putting
- * an account.
+ * engine owns their storage and refusals (ADR-0093): books start, putting an
+ * account and setting up a chart from a starter.
  */
 export function bookkeepingModuleDefinition(
   namespace: string,
@@ -128,6 +132,7 @@ export function bookkeepingModuleDefinition(
       ...[
         LEDGER_BOOKS_START_CAPABILITY_ID,
         LEDGER_ACCOUNT_PUT_CAPABILITY_ID,
+        LEDGER_CHART_SETUP_CAPABILITY_ID,
       ].map(ledgerCapability),
     ],
     entities: [],
@@ -165,6 +170,12 @@ export function bookkeepingModuleDefinition(
         LEDGER_ACCOUNT_PUT_CAPABILITY_ID,
         definitionIds.permissionIds.accountPut,
       ),
+      ledgerOperation(
+        definitionIds.operationIds.chartSetup,
+        'Set up chart',
+        LEDGER_CHART_SETUP_CAPABILITY_ID,
+        definitionIds.permissionIds.chartSetup,
+      ),
     ],
     package: {
       kind: 'packageDefinition',
@@ -180,6 +191,7 @@ export function bookkeepingModuleDefinition(
         'Set books start',
       ),
       ledgerPermission(definitionIds.permissionIds.accountPut, 'Put account'),
+      ledgerPermission(definitionIds.permissionIds.chartSetup, 'Set up chart'),
     ],
     queries: [],
     relations: [],

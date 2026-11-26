@@ -570,6 +570,7 @@ test(
                     'platform.ledger_attest_approval(uuid,text,uuid,uuid,uuid,uuid,uuid,bigint,text,uuid,jsonb,text)',
                     'platform.ledger_apply_books_start(uuid,uuid,bigint,text,uuid,text,text,jsonb)',
                     'platform.ledger_apply_account_put(uuid,uuid,bigint,text,uuid,text,text,jsonb)',
+                    'platform.ledger_apply_chart_setup(uuid,uuid,bigint,text,uuid,text,text,jsonb)',
                     'north_star_internal.ledger_consume_grant(uuid,text,uuid,bigint,text,uuid,jsonb,text)',
                     'north_star_internal.ledger_operation_access(uuid,uuid,bigint,boolean)',
                     'north_star_internal.ledger_company_live(uuid,boolean)',
@@ -586,6 +587,7 @@ test(
                   'north_star_approval_issuer platform.ledger_attest_approval(uuid,text,uuid,uuid,uuid,uuid,uuid,bigint,text,uuid,jsonb,text)',
                   'north_star_runtime platform.ledger_apply_account_put(uuid,uuid,bigint,text,uuid,text,text,jsonb)',
                   'north_star_runtime platform.ledger_apply_books_start(uuid,uuid,bigint,text,uuid,text,text,jsonb)',
+                  'north_star_runtime platform.ledger_apply_chart_setup(uuid,uuid,bigint,text,uuid,text,text,jsonb)',
                 ],
                 'a ledger operation function is executable beyond its grant',
               );
@@ -1132,6 +1134,315 @@ test(
                 outcome,
                 /ledger\.receiptUnverified/u,
                 `a consumed account-put grant committed with no trust receipt: ${outcome}`,
+              );
+            },
+          );
+
+          // Setting up a chart (1a-ii). Companies D and E have books started by
+          // a fixture row and no accounts; company C's seeded account 1000 is
+          // a starter code. SQL tests on D roll back, the gateway test commits
+          // on E, and the receipt test on D runs last.
+          const startedCompany = async (name: string, code: string) => {
+            const id = randomUUID();
+            const made = await world.invoke('legal_entity_create', {
+              recordId: id,
+              relations: {},
+              values: {
+                [NS + 'field.legal_entity_name']: name,
+                [NS + 'field.legal_entity_code']: code,
+                [NS + 'field.legal_entity_is_default']: false,
+                [NS + 'field.legal_entity_status']:
+                  NS + 'option.legal_entity_status_active',
+              },
+            });
+            assert.equal(made.outcome, 'succeeded', JSON.stringify(made));
+            await pool.query(
+              "INSERT INTO platform.ledger_companies (tenant_id, environment_id, company_id, books_start) VALUES ($1,$2,$3,'2026-01-01')",
+              [tenant, environment, id],
+            );
+            await pool.query(
+              'INSERT INTO platform.ledger_entry_counters (tenant_id, environment_id, company_id) VALUES ($1,$2,$3)',
+              [tenant, environment, id],
+            );
+            return id;
+          };
+          const companyD = await startedCompany('Fourth company', 'LEDGERD');
+          const companyE = await startedCompany('Fifth company', 'LEDGERE');
+          const CHART_SETUP = `${NS}operation.bookkeeping_chart_setup`;
+          const CHART_CAPABILITY =
+            'northstar.ledger:capability.ledger_chart_setup';
+          interface ChartCall {
+            who: string;
+            company: string;
+            starter?: string;
+            jurisdiction?: string;
+            revision?: number;
+          }
+          const chartInputOf = async (call: ChartCall) => ({
+            arguments: {
+              starter: call.starter ?? 'canada',
+              version: '1',
+              jurisdiction: call.jurisdiction ?? 'CA-BC',
+            },
+            expectedRevision: call.revision ?? (await revisionOf(call.company)),
+            recordId: call.company,
+          });
+          const applyChart = (
+            client: PoolClient,
+            grant: string,
+            facts: Facts,
+            input: object,
+          ) =>
+            client.query<{ result: { changes: { fact: string }[] } }>(
+              'SELECT platform.ledger_apply_chart_setup($1,$2,$3,$4,$5,$6,$7,$8) AS result',
+              [
+                grant,
+                facts.release,
+                facts.fence,
+                facts.operation,
+                facts.key,
+                facts.channel,
+                facts.policy,
+                JSON.stringify(input),
+              ],
+            );
+          const chartFacts = async (call: ChartCall) => ({
+            ...(await factsOf({ who: call.who, company: call.company })),
+            capability: CHART_CAPABILITY,
+            operation: CHART_SETUP,
+          });
+          /** One attested chart setup, rolled back: the fact names or the refusal. */
+          const tryChart = async (
+            call: ChartCall,
+            change: {
+              attested?: Partial<Facts>;
+              applied?: Partial<Facts>;
+            } = {},
+          ) => {
+            const facts = await chartFacts(call);
+            const input = await chartInputOf(call);
+            const grant = randomUUID();
+            await attest(grant, { ...facts, ...change.attested }, input);
+            return as(call.who, async (client) => {
+              await client.query('BEGIN');
+              return applyChart(
+                client,
+                grant,
+                { ...facts, ...change.applied },
+                input,
+              ).then(
+                (result) => result.rows[0]!.result.changes.map((c) => c.fact),
+                (error: unknown) => String((error as Error).message),
+              );
+            });
+          };
+          const chartOutcome = (result: unknown) =>
+            typeof result === 'string' ? result : 'admitted';
+
+          await t.test(
+            'a chart setup adds the starter accounts of the chosen province',
+            async () => {
+              const facts = await tryChart({
+                who: unscoped,
+                company: companyD,
+              });
+              assert.ok(Array.isArray(facts), String(facts));
+              assert.equal(facts[0], 'chartStarter');
+              assert.ok(facts.includes('account1000'), 'the country rows');
+              assert.ok(facts.includes('account2110'), 'the BC row');
+              assert.ok(!facts.includes('account2120'), 'not the SK row');
+              assert.ok(!facts.includes('account2130'), 'not the MB row');
+            },
+          );
+          await t.test(
+            'a chart setup never overwrites an account: a starter code in use refuses the whole chart',
+            async () => {
+              const outcome = chartOutcome(
+                await tryChart({ who: unscoped, company: companyC }),
+              );
+              assert.match(
+                outcome,
+                /ledger\.chartCodeTaken/u,
+                `a chart setup over an account in use was not refused by name: ${outcome}`,
+              );
+            },
+          );
+          await t.test(
+            'a grant attested for another ledger capability never applies in a chart setup',
+            async () => {
+              const outcome = chartOutcome(
+                await tryChart(
+                  { who: unscoped, company: companyD },
+                  { attested: { capability: ACCOUNT_PUT_CAPABILITY } },
+                ),
+              );
+              assert.match(
+                outcome,
+                /ledger\.approvalRequired/u,
+                `a chart setup consumed a grant attested for account put: ${outcome}`,
+              );
+            },
+          );
+          await t.test(
+            'a read permission never authorizes a chart setup',
+            async () => {
+              const outcome = chartOutcome(
+                await tryChart({ who: reader, company: companyD }),
+              );
+              assert.match(
+                outcome,
+                /ledger\.unavailable/u,
+                `a journal reader set up a chart: ${outcome}`,
+              );
+            },
+          );
+          await t.test(
+            'a chart setup against another company revision never applies',
+            async () => {
+              const outcome = chartOutcome(
+                await tryChart({
+                  who: unscoped,
+                  company: companyD,
+                  revision: (await revisionOf(companyD)) + 1,
+                }),
+              );
+              assert.match(
+                outcome,
+                /ledger\.staleRevision/u,
+                `a chart setup applied against a company revision it was not confirmed on: ${outcome}`,
+              );
+            },
+          );
+          await t.test(
+            'a chart setup decided under a policy version that has since moved never applies',
+            async () => {
+              const outcome = chartOutcome(
+                await tryChart(
+                  { who: unscoped, company: companyD },
+                  { applied: { policy: 'northstar.current-policy/987654321' } },
+                ),
+              );
+              assert.match(
+                outcome,
+                /ledger\.stalePolicy/u,
+                `a chart setup applied under a policy version that had moved: ${outcome}`,
+              );
+            },
+          );
+          await t.test(
+            'a chart setup before books start refuses by name',
+            async () => {
+              const outcome = chartOutcome(
+                await tryChart({ who: unscoped, company: companyB }),
+              );
+              assert.match(
+                outcome,
+                /ledger\.chartBeforeBooksStart/u,
+                `a chart setup before books start was not refused by name: ${outcome}`,
+              );
+            },
+          );
+          await t.test(
+            'an unknown starter or jurisdiction refuses by name',
+            async () => {
+              const outcome = chartOutcome(
+                await tryChart({
+                  who: unscoped,
+                  company: companyD,
+                  jurisdiction: 'ZZ',
+                }),
+              );
+              assert.match(
+                outcome,
+                /ledger\.unknownStarter/u,
+                `an unknown starter was not refused by name: ${outcome}`,
+              );
+            },
+          );
+          await t.test(
+            'a role granted chart setup receives the ledger permission it needs, and a chart setup commits with its evidence',
+            async () => {
+              const input = await chartInputOf({
+                who: unscoped,
+                company: companyE,
+                jurisdiction: 'CA',
+              });
+              const outcome = await app.runtime.entry
+                .run(local, (view) =>
+                  app.runtime.operationGateway.invoke(
+                    view,
+                    {
+                      confirmationGrant:
+                        app.runtime.operationMediation.issueConfirmationGrant(
+                          view,
+                          CHART_SETUP,
+                          input,
+                        ),
+                      idempotencyKey: randomUUID(),
+                      input,
+                      operationId: CHART_SETUP,
+                      schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+                    },
+                    app.runtime.operationMediation.issueInvocation(view, 'UI'),
+                  ),
+                )
+                .then(
+                  (result) =>
+                    result.outcome === 'succeeded'
+                      ? 'succeeded'
+                      : `${result.outcome} ${String(result.unsupportedReason)}`,
+                  (error: unknown) =>
+                    `${String((error as Error).message)} ${String((error as { code?: unknown }).code)}`,
+                );
+              assert.equal(
+                outcome,
+                'succeeded',
+                `a chart setup through the gateway was refused: ${outcome}`,
+              );
+              const { rows } = await pool.query<{
+                starter: string | null;
+                accounts: string;
+              }>(
+                `SELECT (SELECT c->'newState'->>'value' FROM jsonb_array_elements(d.changes) c
+                          WHERE c->>'fieldId' = 'northstar.ledger.fact.chartStarter') AS starter,
+                        (SELECT count(*) FROM platform.ledger_accounts a
+                          WHERE (a.tenant_id, a.environment_id, a.company_id) = ($1,$2,$4))::text AS accounts
+                   FROM platform.ledger_approval_grants g
+                   JOIN platform.trust_action_invocations i
+                     ON (i.tenant_id, i.environment_id, i.invocation_id) = (g.tenant_id, g.environment_id, g.invocation_id)
+                   JOIN platform.trust_business_change_documents d
+                     ON (d.tenant_id, d.environment_id, d.change_document_id) = (i.tenant_id, i.environment_id, i.change_document_id)
+                  WHERE (g.tenant_id, g.environment_id, g.operation_id) = ($1,$2,$3) AND d.record_id = $4`,
+                [tenant, environment, CHART_SETUP, companyE],
+              );
+              assert.deepEqual(
+                rows[0],
+                {
+                  starter: 'northstar.ledger:starter.canada@1 CA',
+                  accounts: '29',
+                },
+                'the chart setup receipt does not record the starter it applied',
+              );
+            },
+          );
+          // Last of the chart setups: under its control the commit succeeds.
+          await t.test(
+            'a consumed chart-setup grant never commits without its trust receipt',
+            async () => {
+              const call = { who: unscoped, company: companyD };
+              const facts = await chartFacts(call);
+              const input = await chartInputOf(call);
+              const grant = randomUUID();
+              await attest(grant, facts, input);
+              const outcome = await as(unscoped, async (client) => {
+                await client.query('BEGIN');
+                await applyChart(client, grant, facts, input);
+                return settled(client.query('COMMIT'));
+              });
+              assert.match(
+                outcome,
+                /ledger\.receiptUnverified/u,
+                `a consumed chart-setup grant committed with no trust receipt: ${outcome}`,
               );
             },
           );

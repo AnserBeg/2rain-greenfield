@@ -14,6 +14,11 @@
       },
       {
         "action": "transition",
+        "permissionId": "northstar.app:permission.bookkeeping_chart_setup",
+        "resource": "northstar.app:entity.legal_entity"
+      },
+      {
+        "action": "transition",
         "permissionId": "northstar.app:permission.purchase_order_approve",
         "resource": "northstar.app:entity.purchase_order_approval"
       },

@@ -327,8 +327,8 @@ function assertPeriodLockComposition(
 }
 
 /**
- * The company page (ACCOUNTING-1 1a-ii): Books adds its books-start and
- * account-put Tasks to Inventory's legal-entity record, binding only the
+ * The company page (ACCOUNTING-1 1a-ii): Books adds its books-start,
+ * account-put and chart-setup Tasks to Inventory's legal-entity record, binding only the
  * record, its revision and the operations' `arguments`; it adds no rows and only the slots
  * that render it.
  */
@@ -379,8 +379,20 @@ function assertCompanyBooksComposition(
           ],
         ],
       ],
+      [
+        [
+          id('operation', 'bookkeeping_chart_setup'),
+          [
+            ['recordId', 'record'],
+            ['expectedRevision', 'record'],
+            ['arguments.starter', 'input'],
+            ['arguments.version', 'input'],
+            ['arguments.jurisdiction', 'input'],
+          ],
+        ],
+      ],
     ],
-    "the company page's only commands are Books' books start and account put",
+    "the company page's only commands are Books' books start, account put and chart setup",
   );
   const original = source.slots as Value[];
   const slotId = `${String(source.surfaceId).replace(':surface.', ':slot.')}`;

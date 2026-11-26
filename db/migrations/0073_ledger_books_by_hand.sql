@@ -192,9 +192,45 @@ CREATE TABLE platform.ledger_chart_starter_accounts (
   jurisdiction text NOT NULL CHECK (jurisdiction ~ '^[A-Z]{2}(-[A-Z0-9]{1,3})?$'),
   PRIMARY KEY (starter_id, starter_version, account_code)
 );
--- The rows (a Canadian starter) arrive with the set-up-chart operation, once
--- the name law settles ratified role IDs (GUARD-WIDEN, orchestrator ruling
--- 2026-11-26); books start needs none.
+-- The Canadian starter, version 1 (owner N2): GST everywhere in Canada, PST for
+-- BC and SK, RST for MB. Two ratified roles have no starter row: inventory_asset
+-- (no inventory value in v1, owner ruling) and customer_credit (a customer
+-- control role that manual lines refuse; its account arrives with the first
+-- slice that posts customer credits, 1b). The operator adds either with
+-- putAccount.
+INSERT INTO platform.ledger_chart_starter_accounts (starter_id, starter_version, account_code, kind_role_id, default_label, jurisdiction) VALUES
+  ('northstar.ledger:starter.canada', 1, '1000', 'northstar.ledger:role.cash', 'Cash on hand', 'CA'),
+  ('northstar.ledger:starter.canada', 1, '1010', 'northstar.ledger:role.cash', 'Bank', 'CA'),
+  ('northstar.ledger:starter.canada', 1, '1050', 'northstar.ledger:role.undeposited_funds', 'Undeposited funds', 'CA'),
+  ('northstar.ledger:starter.canada', 1, '1100', 'northstar.ledger:role.receivable', 'Accounts receivable', 'CA'),
+  ('northstar.ledger:starter.canada', 1, '1300', 'northstar.ledger:role.tax_recoverable', 'GST recoverable', 'CA'),
+  ('northstar.ledger:starter.canada', 1, '1400', 'northstar.ledger:role.prepaid_expense', 'Prepaid expenses', 'CA'),
+  ('northstar.ledger:starter.canada', 1, '1500', 'northstar.ledger:role.fixed_asset', 'Equipment', 'CA'),
+  ('northstar.ledger:starter.canada', 1, '1600', 'northstar.ledger:role.supplier_prepayments', 'Prepayments to suppliers', 'CA'),
+  ('northstar.ledger:starter.canada', 1, '1650', 'northstar.ledger:role.supplier_credit', 'Credits from suppliers', 'CA'),
+  ('northstar.ledger:starter.canada', 1, '1900', 'northstar.ledger:role.other_current_asset', 'Other current assets', 'CA'),
+  ('northstar.ledger:starter.canada', 1, '1950', 'northstar.ledger:role.currency_clearing', 'Currency clearing', 'CA'),
+  ('northstar.ledger:starter.canada', 1, '2000', 'northstar.ledger:role.payable', 'Accounts payable', 'CA'),
+  ('northstar.ledger:starter.canada', 1, '2100', 'northstar.ledger:role.tax_payable', 'GST payable', 'CA'),
+  ('northstar.ledger:starter.canada', 1, '2110', 'northstar.ledger:role.tax_payable', 'PST payable (BC)', 'CA-BC'),
+  ('northstar.ledger:starter.canada', 1, '2120', 'northstar.ledger:role.tax_payable', 'PST payable (SK)', 'CA-SK'),
+  ('northstar.ledger:starter.canada', 1, '2130', 'northstar.ledger:role.tax_payable', 'RST payable (MB)', 'CA-MB'),
+  ('northstar.ledger:starter.canada', 1, '2200', 'northstar.ledger:role.deferred_revenue', 'Deferred revenue', 'CA'),
+  ('northstar.ledger:starter.canada', 1, '2300', 'northstar.ledger:role.customer_deposits', 'Customer deposits', 'CA'),
+  ('northstar.ledger:starter.canada', 1, '2400', 'northstar.ledger:role.accrued_liability', 'Accrued liabilities', 'CA'),
+  ('northstar.ledger:starter.canada', 1, '2500', 'northstar.ledger:role.other_current_liability', 'Other current liabilities', 'CA'),
+  ('northstar.ledger:starter.canada', 1, '2700', 'northstar.ledger:role.loan', 'Loans', 'CA'),
+  ('northstar.ledger:starter.canada', 1, '3000', 'northstar.ledger:role.owner_equity', 'Owner equity', 'CA'),
+  ('northstar.ledger:starter.canada', 1, '3100', 'northstar.ledger:role.retained_earnings', 'Retained earnings', 'CA'),
+  ('northstar.ledger:starter.canada', 1, '3900', 'northstar.ledger:role.opening_balance', 'Opening balance equity', 'CA'),
+  ('northstar.ledger:starter.canada', 1, '4000', 'northstar.ledger:role.revenue', 'Revenue', 'CA'),
+  ('northstar.ledger:starter.canada', 1, '4500', 'northstar.ledger:role.other_income', 'Other income', 'CA'),
+  ('northstar.ledger:starter.canada', 1, '4900', 'northstar.ledger:role.discounts_given', 'Discounts given', 'CA'),
+  ('northstar.ledger:starter.canada', 1, '5000', 'northstar.ledger:role.cost_of_sales', 'Cost of sales', 'CA'),
+  ('northstar.ledger:starter.canada', 1, '6000', 'northstar.ledger:role.expense', 'Operating expenses', 'CA'),
+  ('northstar.ledger:starter.canada', 1, '6100', 'northstar.ledger:role.bank_fees', 'Bank fees', 'CA'),
+  ('northstar.ledger:starter.canada', 1, '6900', 'northstar.ledger:role.other_expense', 'Other expenses', 'CA'),
+  ('northstar.ledger:starter.canada', 1, '6990', 'northstar.ledger:role.rounding_difference', 'Rounding differences', 'CA');
 
 -- An attested human confirmation, consumed once by the matching apply. The
 -- same match columns as the booking engine's grants, in the ledger's own table
@@ -498,6 +534,69 @@ DECLARE tenant uuid := north_star_internal.trusted_tenant_id(); environment uuid
         'old', CASE WHEN was.active THEN 'yes' WHEN NOT was.active THEN 'no' END,
         'new', CASE WHEN put_row.active THEN 'yes' ELSE 'no' END))); END $$;
 
+-- Set up a company's chart from a starter: put every starter account of the
+-- chosen jurisdiction through the same internal setter as putAccount, in
+-- account-code order. A row tagged with a country applies to every subdivision
+-- of it, so 'CA-BC' takes the Canadian rows and the BC rows. The chart only
+-- adds accounts under new IDs: a starter code the company already uses meets
+-- the code's unique key and refuses the whole chart by name
+-- (ledger.chartCodeTaken), so a stale confirmation cannot overwrite an account. Account IDs are generated here. It copies books
+-- start's gate in its own words: its own capability constant, the access
+-- checks, the policy compare and the revision compare; the receipt is the
+-- grant table's deferred check. Lock 3 (the company row) FOR SHARE, then the
+-- starter codes in code order, so two charts cannot cycle on the code index.
+CREATE FUNCTION platform.ledger_apply_chart_setup(grant_key uuid, released uuid, expected_fence bigint,
+  operation text, request_key uuid, channel text, policy_version text, input jsonb) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+DECLARE tenant uuid := north_star_internal.trusted_tenant_id(); environment uuid := north_star_internal.trusted_environment_id();
+  args jsonb := input->'arguments'; company uuid; invocation uuid; chart_epoch text; chart_revision bigint;
+  chosen text; place text; starter_row record; account uuid; facts jsonb := '[]'; BEGIN
+  PERFORM north_star_internal.ledger_require_writer();
+  IF jsonb_typeof(input) IS DISTINCT FROM 'object' OR input - 'recordId' - 'expectedRevision' - 'arguments' <> '{}'
+     OR coalesce(input->>'recordId', '') !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+     OR jsonb_typeof(input->'expectedRevision') IS DISTINCT FROM 'number'
+     OR (input->>'expectedRevision') !~ '^[1-9][0-9]{0,17}$'
+     OR jsonb_typeof(args) IS DISTINCT FROM 'object' OR args - 'starter' - 'version' - 'jurisdiction' <> '{}'
+     OR coalesce(args->>'starter', '') !~ '^[a-z][a-z0-9_]*$'
+     OR coalesce(args->>'version', '') !~ '^[1-9][0-9]{0,8}$'
+     OR coalesce(args->>'jurisdiction', '') !~ '^[A-Z]{2}(-[A-Z0-9]{1,3})?$' THEN
+    RAISE EXCEPTION 'ledger.invalidOperation'; END IF;
+  company := (input->>'recordId')::uuid;
+  chosen := 'northstar.ledger:starter.' || (args->>'starter');
+  place := args->>'jurisdiction';
+  invocation := north_star_internal.ledger_consume_grant(grant_key, 'northstar.ledger:capability.ledger_chart_setup',
+    released, expected_fence, operation, request_key, input, channel);
+  SELECT chart_access.policy_epoch, chart_access.revision INTO chart_epoch, chart_revision
+    FROM north_star_internal.ledger_operation_access(company, released, expected_fence, true) chart_access;
+  IF policy_version IS DISTINCT FROM 'northstar.current-policy/' || chart_epoch THEN
+    RAISE EXCEPTION 'ledger.stalePolicy'; END IF;
+  IF chart_revision IS DISTINCT FROM (input->>'expectedRevision')::bigint THEN
+    RAISE EXCEPTION 'ledger.staleRevision'; END IF;
+  -- Lock 3, FOR SHARE: the books must have started.
+  PERFORM FROM platform.ledger_companies c
+    WHERE (c.tenant_id, c.environment_id, c.company_id) = (tenant, environment, company)
+      AND c.books_start IS NOT NULL FOR SHARE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'ledger.chartBeforeBooksStart'; END IF;
+  IF NOT EXISTS (SELECT FROM platform.ledger_chart_starter_accounts r
+      WHERE (r.starter_id, r.starter_version) = (chosen, (args->>'version')::integer)
+        AND r.jurisdiction IN (place, split_part(place, '-', 1))) THEN
+    RAISE EXCEPTION 'ledger.unknownStarter'; END IF;
+  FOR starter_row IN SELECT r.account_code, r.kind_role_id, r.default_label FROM platform.ledger_chart_starter_accounts r
+      WHERE (r.starter_id, r.starter_version) = (chosen, (args->>'version')::integer)
+        AND r.jurisdiction IN (place, split_part(place, '-', 1))
+      ORDER BY r.account_code LOOP
+    account := gen_random_uuid(); BEGIN
+      PERFORM north_star_internal.ledger_put_account(company, account, starter_row.account_code, starter_row.kind_role_id,
+        starter_row.default_label, true);
+    EXCEPTION WHEN unique_violation THEN RAISE EXCEPTION 'ledger.chartCodeTaken'; END;
+    facts := facts || (SELECT jsonb_build_array(jsonb_build_object('fact', 'account' || a.account_code, 'old', NULL,
+        'new', a.account_id::text || ' ' || a.kind_role_id))
+      FROM platform.ledger_accounts a
+      WHERE (a.tenant_id, a.environment_id, a.company_id, a.account_id) = (tenant, environment, company, account)); END LOOP;
+  RETURN jsonb_build_object('invocationId', invocation, 'policyVersion', 'northstar.current-policy/' || chart_epoch,
+    'revision', chart_revision, 'changes', jsonb_build_array(jsonb_build_object('fact', 'chartStarter', 'old', NULL,
+      'new', chosen || '@' || (args->>'version') || ' ' || place)) || facts); END $$;
+
 DO $access$ DECLARE routine text; BEGIN
   REVOKE ALL ON platform.ledger_chart_starter_accounts FROM PUBLIC;
   REVOKE ALL ON platform.ledger_approval_grants FROM PUBLIC;
@@ -511,11 +610,14 @@ DO $access$ DECLARE routine text; BEGIN
       'north_star_internal.ledger_consume_grant(uuid,text,uuid,bigint,text,uuid,jsonb,text)',
       'platform.ledger_attest_approval(uuid,text,uuid,uuid,uuid,uuid,uuid,bigint,text,uuid,jsonb,text)',
       'platform.ledger_apply_books_start(uuid,uuid,bigint,text,uuid,text,text,jsonb)',
-      'platform.ledger_apply_account_put(uuid,uuid,bigint,text,uuid,text,text,jsonb)'] LOOP
+      'platform.ledger_apply_account_put(uuid,uuid,bigint,text,uuid,text,text,jsonb)',
+      'platform.ledger_apply_chart_setup(uuid,uuid,bigint,text,uuid,text,text,jsonb)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC', routine); END LOOP; END $access$;
 GRANT EXECUTE ON FUNCTION platform.ledger_attest_approval(uuid,text,uuid,uuid,uuid,uuid,uuid,bigint,text,uuid,jsonb,text)
   TO north_star_approval_issuer;
 GRANT EXECUTE ON FUNCTION platform.ledger_apply_books_start(uuid,uuid,bigint,text,uuid,text,text,jsonb)
   TO north_star_runtime;
 GRANT EXECUTE ON FUNCTION platform.ledger_apply_account_put(uuid,uuid,bigint,text,uuid,text,text,jsonb)
+  TO north_star_runtime;
+GRANT EXECUTE ON FUNCTION platform.ledger_apply_chart_setup(uuid,uuid,bigint,text,uuid,text,text,jsonb)
   TO north_star_runtime;
