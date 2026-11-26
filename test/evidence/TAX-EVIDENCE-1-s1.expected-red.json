@@ -451,6 +451,11 @@
           "file": "test/postgres/tax-catalog.test.ts",
           "name": "ending a registration takes its company from the stored row",
           "expected": "Missing expected rejection: a principal scoped to company A ended company C's registration"
+        },
+        {
+          "file": "test/postgres/tax-catalog.test.ts",
+          "name": "a registration named by ID ignores a company in the proposal",
+          "expected": "tax\\.invalidRegistration"
         }
       ]
     },
@@ -490,6 +495,57 @@
           "file": "test/postgres/tax-catalog.test.ts",
           "name": "a registration ends once",
           "expected": "Missing expected rejection: an ended registration was ended again"
+        }
+      ]
+    },
+    {
+      "name": "tax-registration-company-stored",
+      "claim": "A registration named by ID takes its company from the stored row, never from the proposal.",
+      "file": "db/migrations/0071_tax_catalog.sql",
+      "original": "  IF proposal ? 'registrationId' THEN",
+      "replacement": "  IF proposal ? 'registrationId' AND NOT proposal ? 'companyId' THEN",
+      "test": {
+        "files": ["test/postgres/tax-catalog.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/tax-catalog.test.ts",
+          "name": "a registration named by ID ignores a company in the proposal",
+          "expected": "tax\\.invalidRegistration"
+        }
+      ]
+    },
+    {
+      "name": "tax-confirm-live-grant",
+      "claim": "The write grant is re-checked at confirm, so a grant revoked after the review refuses.",
+      "file": "db/migrations/0071_tax_catalog.sql",
+      "original": "  IF NOT north_star_internal.tax_may_write(r.action, r.proposal) THEN",
+      "replacement": "  IF false THEN",
+      "test": {
+        "files": ["test/postgres/tax-catalog.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/tax-catalog.test.ts",
+          "name": "a grant revoked after the review refuses the confirm",
+          "expected": "Missing expected rejection: a review was confirmed after its grant was revoked"
+        }
+      ]
+    },
+    {
+      "name": "tax-review-size",
+      "claim": "A reviewed proposal is at most 16 KiB.",
+      "file": "db/migrations/0071_tax_catalog.sql",
+      "original": "octet_length(proposal::text) <= 16384",
+      "replacement": "octet_length(proposal::text) <= 1048576",
+      "test": {
+        "files": ["test/postgres/tax-catalog.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/tax-catalog.test.ts",
+          "name": "a review larger than 16 KiB is refused",
+          "expected": "Missing expected rejection: an oversized proposal was reviewed"
         }
       ]
     }

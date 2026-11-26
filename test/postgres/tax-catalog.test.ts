@@ -46,6 +46,7 @@ const OWNER_FUNCTIONS = [
   'north_star_internal.tax_append_only()',
   'north_star_internal.tax_require_writer()',
   'north_star_internal.tax_granted(uuid,text,text)',
+  'north_star_internal.tax_may_write(text,jsonb)',
   'north_star_internal.tax_put_code(uuid,uuid,jsonb,uuid)',
   'north_star_internal.tax_put_registration(uuid,uuid,jsonb,uuid)',
   'platform.tax_provision_starter(uuid,uuid,text[])',
@@ -112,6 +113,7 @@ async function world(t: TestContext) {
       releaseB = randomUUID();
     const writer = randomUUID(),
       writer2 = randomUUID(),
+      revoked = randomUUID(),
       reader = randomUUID(),
       scopedA = randomUUID(),
       otherTenant = randomUUID();
@@ -200,6 +202,7 @@ async function world(t: TestContext) {
       ]);
       await member(a, writer, adminRole, null);
       await member(a, writer2, adminRole, null);
+      await member(a, revoked, adminRole, null);
       await member(a, reader, readerRole, null);
       // Every grant, but through a membership scoped to company A only.
       await member(a, scopedA, adminRole, companyA);
@@ -980,6 +983,58 @@ async function world(t: TestContext) {
           );
         },
       );
+      await t.test(
+        'a registration named by ID ignores a company in the proposal',
+        async () => {
+          const created = await change(
+            writer,
+            'putRegistration',
+            registration(companyC, 'ca-sk'),
+          );
+          await assert.rejects(
+            change(scopedA, 'putRegistration', {
+              registrationId: created.registrationId,
+              companyId: companyA,
+              effectiveTo: '2026-12-31',
+            }),
+            /tax\.writeDenied/u,
+            "a proposal's company overrode the stored registration's",
+          );
+        },
+      );
+      await t.test(
+        'a grant revoked after the review refuses the confirm',
+        async () => {
+          await assert.rejects(
+            as(revoked, async (client) => {
+              const reviewed = await review(
+                client,
+                'putCode',
+                codeProposal('REVOKED'),
+              );
+              await admin.query(
+                'UPDATE platform.current_policy_memberships SET revoked_at = now() WHERE (tenant_id,environment_id,principal_id)=($1,$2,$3)',
+                [a.tenant, a.environment, revoked],
+              );
+              return confirm(client, reviewed);
+            }),
+            /tax\.writeDenied/u,
+            'a review was confirmed after its grant was revoked',
+          );
+        },
+      );
+      await t.test('a review larger than 16 KiB is refused', async () => {
+        await assert.rejects(
+          as(writer, (client) =>
+            review(client, 'putCode', {
+              ...codeProposal('LARGE'),
+              label: 'x'.repeat(20000),
+            }),
+          ),
+          /tax\.unavailable/u,
+          'an oversized proposal was reviewed',
+        );
+      });
       await t.test('a registration ends once', async () => {
         const created = await change(
           writer,

@@ -271,6 +271,7 @@ const suiteDefinitions = [
       'test/postgres/staff-signin.test.ts',
       'test/postgres/storage-payload-family.test.ts',
       'test/postgres/table-behavior.test.ts',
+      'test/postgres/tax-catalog.test.ts',
       'test/postgres/tenant-isolation.test.ts',
       'test/postgres/trust-substrate.test.ts',
       'test/postgres/workflow-consumer.test.ts',

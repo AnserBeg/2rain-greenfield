@@ -197,7 +197,7 @@ CREATE FUNCTION north_star_internal.tax_put_code(t uuid, e uuid, proposal jsonb,
 LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp AS $$
 DECLARE
   spec jsonb := proposal->'version'; code_key text := proposal->>'code';
-  held_code platform.tax_catalog_codes; created boolean; latest date; start_day date; next_version integer; item jsonb;
+  held_code platform.tax_catalog_codes; created boolean; latest date; start_day date; next_version integer; part jsonb;
   held platform.tax_components; BEGIN
   PERFORM north_star_internal.tax_require_writer();
   IF (jsonb_typeof(proposal) = 'object' AND proposal - 'code' - 'label' - 'active' - 'version' = '{}'::jsonb
@@ -227,24 +227,24 @@ DECLARE
     next_version := held_code.latest_version + 1;
     INSERT INTO platform.tax_catalog_versions(tenant_id, environment_id, code_id, version, effective_from, receipt_id)
       VALUES (t, e, held_code.code_id, next_version, start_day, receipt);
-    FOR item IN SELECT value FROM jsonb_array_elements(spec->'components') ORDER BY value->>'componentId' LOOP
-      IF (jsonb_typeof(item) = 'object'
-          AND item - 'componentId' - 'jurisdictionId' - 'label' - 'ratePercent' - 'recoverablePercent' = '{}'::jsonb
-          AND jsonb_typeof(item->'componentId') = 'string' AND jsonb_typeof(item->'jurisdictionId') = 'string'
-          AND jsonb_typeof(item->'label') = 'string'
-          AND jsonb_typeof(item->'ratePercent') = 'string' AND item->>'ratePercent' ~ '^[0-9]{1,3}(\.[0-9]{1,6})?$'
-          AND jsonb_typeof(item->'recoverablePercent') = 'string'
-          AND item->>'recoverablePercent' ~ '^[0-9]{1,3}(\.[0-9]{1,6})?$') IS NOT TRUE
+    FOR part IN SELECT value FROM jsonb_array_elements(spec->'components') ORDER BY value->>'componentId' LOOP
+      IF (jsonb_typeof(part) = 'object'
+          AND part - 'componentId' - 'jurisdictionId' - 'label' - 'ratePercent' - 'recoverablePercent' = '{}'::jsonb
+          AND jsonb_typeof(part->'componentId') = 'string' AND jsonb_typeof(part->'jurisdictionId') = 'string'
+          AND jsonb_typeof(part->'label') = 'string'
+          AND jsonb_typeof(part->'ratePercent') = 'string' AND part->>'ratePercent' ~ '^[0-9]{1,3}(\.[0-9]{1,6})?$'
+          AND jsonb_typeof(part->'recoverablePercent') = 'string'
+          AND part->>'recoverablePercent' ~ '^[0-9]{1,3}(\.[0-9]{1,6})?$') IS NOT TRUE
         THEN RAISE EXCEPTION 'tax.invalidComponent'; END IF;
       INSERT INTO platform.tax_components(tenant_id, environment_id, component_id, jurisdiction_id, label)
-        VALUES (t, e, item->>'componentId', item->>'jurisdictionId', btrim(item->>'label')) ON CONFLICT DO NOTHING;
+        VALUES (t, e, part->>'componentId', part->>'jurisdictionId', btrim(part->>'label')) ON CONFLICT DO NOTHING;
       SELECT * INTO STRICT held FROM platform.tax_components
-        WHERE (tenant_id, environment_id, component_id) = (t, e, item->>'componentId');
-      IF held.jurisdiction_id <> item->>'jurisdictionId' THEN RAISE EXCEPTION 'tax.componentJurisdiction'; END IF;
+        WHERE (tenant_id, environment_id, component_id) = (t, e, part->>'componentId');
+      IF held.jurisdiction_id <> part->>'jurisdictionId' THEN RAISE EXCEPTION 'tax.componentJurisdiction'; END IF;
       INSERT INTO platform.tax_catalog_version_components(tenant_id, environment_id, code_id, version, component_id,
           rate_percent, recoverable_percent)
-        VALUES (t, e, held_code.code_id, next_version, held.component_id, (item->>'ratePercent')::numeric,
-          (item->>'recoverablePercent')::numeric); END LOOP;
+        VALUES (t, e, held_code.code_id, next_version, held.component_id, (part->>'ratePercent')::numeric,
+          (part->>'recoverablePercent')::numeric); END LOOP;
     UPDATE platform.tax_catalog_codes SET latest_version = next_version
       WHERE (tenant_id, environment_id, code_id) = (t, e, held_code.code_id); END IF;
   RETURN jsonb_build_object('codeId', held_code.code_id, 'version', next_version); END $$;
@@ -307,19 +307,40 @@ DECLARE starter record; version record; receipt uuid; applied integer := 0; BEGI
     applied := applied + 1; END LOOP;
   RETURN applied; END $$;
 
+-- The live WRITE authority for one reviewed action, used by review and again
+-- by confirm. A registration named by ID takes its company from the stored row,
+-- never from the proposal; a new registration's company is the one it names.
+CREATE FUNCTION north_star_internal.tax_may_write(requested_action text, proposal jsonb) RETURNS boolean
+LANGUAGE plpgsql STABLE SET search_path = pg_catalog, pg_temp AS $$
+DECLARE company uuid; BEGIN
+  IF requested_action = 'putCode' THEN
+    RETURN north_star_internal.tax_granted(NULL, 'northstar.tax:permission.catalog_write', 'tenant'); END IF;
+  IF proposal ? 'registrationId' THEN
+    IF pg_input_is_valid(proposal->>'registrationId', 'uuid') THEN
+      SELECT g.company_id INTO company FROM platform.tax_registrations g
+        WHERE (g.tenant_id, g.environment_id, g.registration_id) = (north_star_internal.trusted_tenant_id(),
+          north_star_internal.trusted_environment_id(), (proposal->>'registrationId')::uuid); END IF;
+  ELSIF pg_input_is_valid(proposal->>'companyId', 'uuid') THEN company := (proposal->>'companyId')::uuid; END IF;
+  RETURN company IS NOT NULL
+    AND north_star_internal.tax_granted(company, 'northstar.tax:permission.registration_write', 'company'); END $$;
+
 -- A confirmation-class change, step 1: record exactly what the principal saw,
--- bound to the active release and fence it was reviewed under.
+-- bound to the active release and fence it was reviewed under. Only a principal
+-- who could confirm it may record it, and a proposal is at most 16 KiB.
 CREATE FUNCTION platform.tax_review(released uuid, expected_fence bigint, requested_action text, proposal jsonb) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE
   t uuid := north_star_internal.trusted_tenant_id(); e uuid := north_star_internal.trusted_environment_id();
   p uuid := nullif(current_setting('north_star.principal_id', true), '')::uuid;
   review uuid := gen_random_uuid(); digest text; BEGIN
-  IF t IS NULL OR e IS NULL OR p IS NULL OR requested_action NOT IN ('putCode', 'putRegistration')
-     OR jsonb_typeof(proposal) <> 'object' THEN RAISE EXCEPTION 'tax.unavailable'; END IF;
+  IF (t IS NOT NULL AND e IS NOT NULL AND p IS NOT NULL AND requested_action IN ('putCode', 'putRegistration')
+      AND jsonb_typeof(proposal) = 'object' AND octet_length(proposal::text) <= 16384) IS NOT TRUE
+    THEN RAISE EXCEPTION 'tax.unavailable'; END IF;
   PERFORM FROM platform.active_release_pointers
     WHERE (tenant_id, environment_id, release_id, fence) = (t, e, released, expected_fence);
   IF NOT FOUND THEN RAISE EXCEPTION 'tax.staleRelease'; END IF;
+  IF NOT north_star_internal.tax_may_write(requested_action, proposal) THEN
+    RAISE EXCEPTION 'tax.writeDenied' USING ERRCODE = '42501'; END IF;
   digest := encode(sha256(convert_to(requested_action || chr(10) || proposal::text, 'UTF8')), 'hex');
   INSERT INTO platform.tax_catalog_reviews(tenant_id, environment_id, review_id, principal_id, release_id, fence,
       action, proposal, digest)
@@ -327,14 +348,14 @@ DECLARE
   RETURN jsonb_build_object('reviewId', review, 'digest', digest, 'action', requested_action, 'proposal', proposal); END $$;
 
 -- Step 2: confirm the reviewed digest. The release and fence must still be
--- active, the WRITE grant live now, and the review unused. Company authority
--- comes from the stored registration when one is named.
+-- active, the review unused, and the WRITE grant live NOW (a grant revoked after
+-- the review refuses).
 CREATE FUNCTION platform.tax_confirm(review uuid, reviewed_digest text) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE
   t uuid := north_star_internal.trusted_tenant_id(); e uuid := north_star_internal.trusted_environment_id();
   p uuid := nullif(current_setting('north_star.principal_id', true), '')::uuid;
-  r platform.tax_catalog_reviews; company uuid; allowed boolean; receipt uuid := gen_random_uuid(); BEGIN
+  r platform.tax_catalog_reviews; receipt uuid := gen_random_uuid(); BEGIN
   SELECT * INTO r FROM platform.tax_catalog_reviews
     WHERE (tenant_id, environment_id, review_id, principal_id) = (t, e, review, p);
   IF NOT FOUND OR r.digest IS DISTINCT FROM reviewed_digest THEN RAISE EXCEPTION 'tax.reviewUnavailable'; END IF;
@@ -345,16 +366,11 @@ DECLARE
   SELECT * INTO r FROM platform.tax_catalog_reviews
     WHERE (tenant_id, environment_id, review_id) = (t, e, review) AND consumed_at IS NULL FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'tax.reviewUnavailable'; END IF;
-  IF r.action = 'putCode' THEN
-    allowed := north_star_internal.tax_granted(NULL, 'northstar.tax:permission.catalog_write', 'tenant');
-  ELSE
-    IF r.proposal ? 'registrationId' AND pg_input_is_valid(r.proposal->>'registrationId', 'uuid') THEN
-      SELECT g.company_id INTO company FROM platform.tax_registrations g
-        WHERE (g.tenant_id, g.environment_id, g.registration_id) = (t, e, (r.proposal->>'registrationId')::uuid) FOR UPDATE;
-    ELSIF pg_input_is_valid(r.proposal->>'companyId', 'uuid') THEN company := (r.proposal->>'companyId')::uuid; END IF;
-    allowed := company IS NOT NULL
-      AND north_star_internal.tax_granted(company, 'northstar.tax:permission.registration_write', 'company'); END IF;
-  IF NOT allowed THEN RAISE EXCEPTION 'tax.writeDenied' USING ERRCODE = '42501'; END IF;
+  IF r.proposal ? 'registrationId' AND pg_input_is_valid(r.proposal->>'registrationId', 'uuid') THEN
+    PERFORM FROM platform.tax_registrations g
+      WHERE (g.tenant_id, g.environment_id, g.registration_id) = (t, e, (r.proposal->>'registrationId')::uuid) FOR UPDATE; END IF;
+  IF NOT north_star_internal.tax_may_write(r.action, r.proposal) THEN
+    RAISE EXCEPTION 'tax.writeDenied' USING ERRCODE = '42501'; END IF;
   UPDATE platform.tax_catalog_reviews SET consumed_at = clock_timestamp()
     WHERE (tenant_id, environment_id, review_id) = (t, e, review);
   INSERT INTO platform.tax_catalog_receipts(tenant_id, environment_id, receipt_id, principal_id, release_id, fence,
@@ -430,7 +446,8 @@ DO $access$ DECLARE tab text; routine text; BEGIN
     EXECUTE format('ALTER TABLE platform.%I ENABLE ROW LEVEL SECURITY', tab);
     EXECUTE format('ALTER TABLE platform.%I FORCE ROW LEVEL SECURITY', tab); END LOOP;
   FOREACH routine IN ARRAY ARRAY['north_star_internal.tax_append_only()', 'north_star_internal.tax_require_writer()',
-      'north_star_internal.tax_granted(uuid,text,text)', 'north_star_internal.tax_put_code(uuid,uuid,jsonb,uuid)',
+      'north_star_internal.tax_granted(uuid,text,text)', 'north_star_internal.tax_may_write(text,jsonb)',
+      'north_star_internal.tax_put_code(uuid,uuid,jsonb,uuid)',
       'north_star_internal.tax_put_registration(uuid,uuid,jsonb,uuid)', 'platform.tax_provision_starter(uuid,uuid,text[])',
       'platform.tax_review(uuid,bigint,text,jsonb)', 'platform.tax_confirm(uuid,text)', 'platform.tax_read_codes(date)',
       'platform.tax_read_code(uuid,date)', 'platform.tax_read_registrations(uuid)'] LOOP
