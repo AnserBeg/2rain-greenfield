@@ -424,6 +424,81 @@ DECLARE tenant uuid := north_star_internal.trusted_tenant_id(); environment uuid
     'revision', stored, 'changes', jsonb_build_array(jsonb_build_object('fact', 'booksStart',
       'old', to_char(prior, 'YYYY-MM-DD'), 'new', to_char(day, 'YYYY-MM-DD')))); END $$;
 
+-- Put one account of a company's chart (ADR-0093 section 3), on the company's
+-- legal-entity record. The account is named by its code within the company; a
+-- new code creates an account whose ID is generated here, never the caller's.
+-- `kind` is a core role's local name and is fixed once the account exists.
+-- The person states the account facts they expect to replace
+-- (expectedLabel, expectedActive; both empty for a new code), compared under
+-- the account's row lock: the company revision does not move when an account
+-- changes, so this compare is what stops a stale confirmation. It copies
+-- books start's gate in its own words: its own capability constant, the
+-- access checks, the policy compare and the revision compare; the receipt is
+-- the grant table's deferred check. Lock 3 (the company row) FOR SHARE, then
+-- the account row FOR UPDATE. An account needs started books.
+CREATE FUNCTION platform.ledger_apply_account_put(grant_key uuid, released uuid, expected_fence bigint,
+  operation text, request_key uuid, channel text, policy_version text, input jsonb) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+DECLARE tenant uuid := north_star_internal.trusted_tenant_id(); environment uuid := north_star_internal.trusted_environment_id();
+  args jsonb := input->'arguments'; company uuid; invocation uuid; put_epoch text; put_revision bigint; kind_id text;
+  was platform.ledger_accounts; put_row platform.ledger_accounts; account uuid; BEGIN
+  PERFORM north_star_internal.ledger_require_writer();
+  IF jsonb_typeof(input) IS DISTINCT FROM 'object' OR input - 'recordId' - 'expectedRevision' - 'arguments' <> '{}'
+     OR coalesce(input->>'recordId', '') !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+     OR jsonb_typeof(input->'expectedRevision') IS DISTINCT FROM 'number'
+     OR (input->>'expectedRevision') !~ '^[1-9][0-9]{0,17}$'
+     OR jsonb_typeof(args) IS DISTINCT FROM 'object'
+     OR args - 'code' - 'kind' - 'label' - 'active' - 'expectedLabel' - 'expectedActive' <> '{}'
+     OR jsonb_typeof(args->'code') IS DISTINCT FROM 'string' OR btrim(args->>'code') <> args->>'code'
+     OR args->>'code' = '' OR length(args->>'code') > 32
+     OR jsonb_typeof(args->'kind') IS DISTINCT FROM 'string' OR args->>'kind' !~ '^[a-z][a-z_]*$'
+     OR jsonb_typeof(args->'label') IS DISTINCT FROM 'string' OR btrim(args->>'label') = ''
+     OR length(args->>'label') > 200
+     OR coalesce(args->>'active', '') NOT IN ('yes', 'no')
+     OR coalesce(jsonb_typeof(args->'expectedLabel'), 'null') NOT IN ('null', 'string')
+     OR coalesce(jsonb_typeof(args->'expectedActive'), 'null') NOT IN ('null', 'string') THEN
+    RAISE EXCEPTION 'ledger.invalidOperation'; END IF;
+  company := (input->>'recordId')::uuid;
+  kind_id := 'northstar.ledger:role.' || (args->>'kind');
+  invocation := north_star_internal.ledger_consume_grant(grant_key, 'northstar.ledger:capability.ledger_account_put',
+    released, expected_fence, operation, request_key, input, channel);
+  SELECT put_access.policy_epoch, put_access.revision INTO put_epoch, put_revision
+    FROM north_star_internal.ledger_operation_access(company, released, expected_fence, true) put_access;
+  IF policy_version IS DISTINCT FROM 'northstar.current-policy/' || put_epoch THEN
+    RAISE EXCEPTION 'ledger.stalePolicy'; END IF;
+  IF put_revision IS DISTINCT FROM (input->>'expectedRevision')::bigint THEN
+    RAISE EXCEPTION 'ledger.staleRevision'; END IF;
+  -- Lock 3, FOR SHARE: the books must have started.
+  PERFORM FROM platform.ledger_companies c
+    WHERE (c.tenant_id, c.environment_id, c.company_id) = (tenant, environment, company) AND c.books_start IS NOT NULL
+    FOR SHARE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'ledger.booksNotStarted'; END IF;
+  SELECT * INTO was FROM platform.ledger_accounts a
+    WHERE (a.tenant_id, a.environment_id, a.company_id, a.account_code) = (tenant, environment, company, args->>'code')
+    FOR UPDATE;
+  IF (was.label, CASE WHEN was.active THEN 'yes' WHEN NOT was.active THEN 'no' END)
+       IS DISTINCT FROM (nullif(args->>'expectedLabel', ''), nullif(args->>'expectedActive', '')) THEN
+    RAISE EXCEPTION 'ledger.priorChanged'; END IF;
+  IF NOT EXISTS (SELECT FROM platform.ledger_core_roles r WHERE r.role_id = kind_id) THEN
+    RAISE EXCEPTION 'ledger.unknownAccountKind'; END IF;
+  account := coalesce(was.account_id, gen_random_uuid());
+  BEGIN
+    PERFORM north_star_internal.ledger_put_account(company, account, args->>'code', kind_id, args->>'label',
+      args->>'active' = 'yes');
+  EXCEPTION WHEN unique_violation THEN RAISE EXCEPTION 'ledger.priorChanged'; END;
+  -- The facts as stored, read under the row lock this transaction now holds.
+  SELECT * INTO put_row FROM platform.ledger_accounts a
+    WHERE (a.tenant_id, a.environment_id, a.company_id, a.account_id) = (tenant, environment, company, account);
+  RETURN jsonb_build_object('invocationId', invocation, 'policyVersion', 'northstar.current-policy/' || put_epoch,
+    'revision', put_revision, 'changes', jsonb_build_array(
+      jsonb_build_object('fact', 'accountId', 'old', was.account_id::text, 'new', put_row.account_id::text),
+      jsonb_build_object('fact', 'accountCode', 'old', was.account_code, 'new', put_row.account_code),
+      jsonb_build_object('fact', 'accountKind', 'old', was.kind_role_id, 'new', put_row.kind_role_id),
+      jsonb_build_object('fact', 'accountLabel', 'old', was.label, 'new', put_row.label),
+      jsonb_build_object('fact', 'accountActive',
+        'old', CASE WHEN was.active THEN 'yes' WHEN NOT was.active THEN 'no' END,
+        'new', CASE WHEN put_row.active THEN 'yes' ELSE 'no' END))); END $$;
+
 DO $access$ DECLARE routine text; BEGIN
   REVOKE ALL ON platform.ledger_chart_starter_accounts FROM PUBLIC;
   REVOKE ALL ON platform.ledger_approval_grants FROM PUBLIC;
@@ -436,9 +511,12 @@ DO $access$ DECLARE routine text; BEGIN
       'north_star_internal.ledger_operation_access(uuid,uuid,bigint,boolean)',
       'north_star_internal.ledger_consume_grant(uuid,text,uuid,bigint,text,uuid,jsonb,text)',
       'platform.ledger_attest_approval(uuid,text,uuid,uuid,uuid,uuid,uuid,bigint,text,uuid,jsonb,text)',
-      'platform.ledger_apply_books_start(uuid,uuid,bigint,text,uuid,text,text,jsonb)'] LOOP
+      'platform.ledger_apply_books_start(uuid,uuid,bigint,text,uuid,text,text,jsonb)',
+      'platform.ledger_apply_account_put(uuid,uuid,bigint,text,uuid,text,text,jsonb)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC', routine); END LOOP; END $access$;
 GRANT EXECUTE ON FUNCTION platform.ledger_attest_approval(uuid,text,uuid,uuid,uuid,uuid,uuid,bigint,text,uuid,jsonb,text)
   TO north_star_approval_issuer;
 GRANT EXECUTE ON FUNCTION platform.ledger_apply_books_start(uuid,uuid,bigint,text,uuid,text,text,jsonb)
+  TO north_star_runtime;
+GRANT EXECUTE ON FUNCTION platform.ledger_apply_account_put(uuid,uuid,bigint,text,uuid,text,text,jsonb)
   TO north_star_runtime;

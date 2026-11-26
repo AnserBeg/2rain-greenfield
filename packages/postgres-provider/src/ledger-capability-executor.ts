@@ -31,12 +31,15 @@ import { PostgresTrustService } from './trust/postgres-trust-service.js';
  */
 export const LEDGER_BOOKS_START_CAPABILITY =
   'northstar.ledger:capability.ledger_books_start';
+export const LEDGER_ACCOUNT_PUT_CAPABILITY =
+  'northstar.ledger:capability.ledger_account_put';
 
 /**
  * The ledger's own permissions, checked in its SQL (`ledger_may`), as policy
  * bindings. A role granted an operation that reaches a ledger capability
  * receives that capability's grants in the same pass (`engineGrants`).
- * books_configure: books start (0072 `ledger_operation_access`).
+ * books_configure: books start and account put (0073
+ * `ledger_operation_access`).
  * journal_read: the journal reads (0071), reached by no operation until the
  * read queries of slice 1a-iv. journal_post has no SQL check yet; its binding
  * is born with the post.
@@ -68,6 +71,20 @@ const BOOKS_START: LedgerAction = Object.freeze({
   capabilityId: LEDGER_BOOKS_START_CAPABILITY,
   apply: 'platform.ledger_apply_books_start',
   argumentKeys: Object.freeze(['date', 'expectedPrior']),
+  engineGrants: Object.freeze([LEDGER_BOOKS_CONFIGURE_GRANT]),
+});
+
+const ACCOUNT_PUT: LedgerAction = Object.freeze({
+  capabilityId: LEDGER_ACCOUNT_PUT_CAPABILITY,
+  apply: 'platform.ledger_apply_account_put',
+  argumentKeys: Object.freeze([
+    'code',
+    'kind',
+    'label',
+    'active',
+    'expectedLabel',
+    'expectedActive',
+  ]),
   engineGrants: Object.freeze([LEDGER_BOOKS_CONFIGURE_GRANT]),
 });
 
@@ -355,4 +372,4 @@ const ledgerFactory = (
   });
 
 export const LEDGER_CAPABILITY_EXECUTOR_FACTORIES: readonly PostgresCapabilityOperationExecutorFactory[] =
-  Object.freeze([ledgerFactory(BOOKS_START)]);
+  Object.freeze([ledgerFactory(BOOKS_START), ledgerFactory(ACCOUNT_PUT)]);

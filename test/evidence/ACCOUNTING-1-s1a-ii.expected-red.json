@@ -208,6 +208,11 @@
           "file": "test/postgres/ledger-books-by-hand.test.ts",
           "name": "a read permission never authorizes a books change",
           "expected": "a journal reader started books: admitted"
+        },
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a read permission never authorizes an account put",
+          "expected": "a journal reader put an account: admitted"
         }
       ]
     },
@@ -296,6 +301,11 @@
           "file": "test/postgres/ledger-books-by-hand.test.ts",
           "name": "a receipt of another company record never verifies the grant",
           "expected": "a receipt of another company record verified the grant: admitted"
+        },
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a consumed account-put grant never commits without its trust receipt",
+          "expected": "a consumed account-put grant committed with no trust receipt: admitted"
         }
       ]
     },
@@ -398,6 +408,11 @@
           "file": "test/postgres/ledger-books-by-hand.test.ts",
           "name": "a grant attested for another ledger capability never applies in books start",
           "expected": "books start consumed a grant attested for the post: admitted"
+        },
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a grant attested for another ledger capability never applies in an account put",
+          "expected": "an account put consumed a grant attested for books start: admitted"
         }
       ]
     },
@@ -534,6 +549,11 @@
           "file": "test/postgres/ledger-books-by-hand.test.ts",
           "name": "a role granted books start receives the ledger permission it needs, and books start commits with its evidence",
           "expected": "books start through the gateway was refused: ledger.unavailable"
+        },
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a role granted account put receives the ledger permission it needs, and an account put commits with its evidence",
+          "expected": "an account put through the gateway was refused: ledger.unavailable"
         }
       ]
     },
@@ -578,6 +598,147 @@
           "file": "test/postgres/ledger-books-by-hand.test.ts",
           "name": "a read permission never authorizes a books change",
           "expected": "a journal reader started books: admitted"
+        },
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a read permission never authorizes an account put",
+          "expected": "a journal reader put an account: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-put-capability",
+      "claim": "The account put consumes under its own capability constant, never the grant's: a grant attested for books start never applies in it (skeleton check note a).",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
+      "original": "invocation := north_star_internal.ledger_consume_grant(grant_key, 'northstar.ledger:capability.ledger_account_put',",
+      "replacement": "invocation := north_star_internal.ledger_consume_grant(grant_key, (SELECT g.capability_id FROM platform.ledger_approval_grants g WHERE g.grant_id = grant_key),",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a grant attested for another ledger capability never applies in an account put",
+          "expected": "an account put consumed a grant attested for books start: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-put-access",
+      "claim": "The account put runs the access checks (fence, ledger permission, live company); without them a journal reader puts an account.",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
+      "original": "    FROM north_star_internal.ledger_operation_access(company, released, expected_fence, true) put_access;",
+      "replacement": "    FROM (SELECT platform.lock_current_policy_epoch(tenant, environment) AS policy_epoch, north_star_internal.ledger_company_live(company, true) AS revision) put_access;",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "a read permission never authorizes an account put",
+          "expected": "a journal reader put an account: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-put-revision",
+      "claim": "The account put compares the person's expectedRevision with the company record under its FOR SHARE.",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
+      "original": "IF put_revision IS DISTINCT FROM (input->>'expectedRevision')::bigint THEN",
+      "replacement": "IF false THEN",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "an account put against another company revision never applies",
+          "expected": "an account put applied against a company revision it was not confirmed on: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-put-policy",
+      "claim": "The account put refuses unless the gateway decided under the policy epoch it holds locked.",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
+      "original": "IF policy_version IS DISTINCT FROM 'northstar.current-policy/' || put_epoch THEN",
+      "replacement": "IF false THEN",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "an account put decided under a policy version that has since moved never applies",
+          "expected": "an account put applied under a policy version that had moved: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-put-prior",
+      "claim": "The account put replaces only the account facts the person expected, compared under the account row lock.",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
+      "original": "  IF (was.label, CASE WHEN was.active",
+      "replacement": "  IF false AND (was.label, CASE WHEN was.active",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "an account put replaces only the account the person expected",
+          "expected": "an account put replaced an account the person did not expect: admitted"
+        }
+      ]
+    },
+    {
+      "name": "ledger-put-books-started",
+      "claim": "An account put before books start refuses by name, never by a raw foreign key.",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
+      "original": "  IF NOT FOUND THEN RAISE EXCEPTION 'ledger.booksNotStarted'; END IF;",
+      "replacement": "  IF false THEN RAISE EXCEPTION 'ledger.booksNotStarted'; END IF;",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "an account put before books start refuses by name",
+          "expected": "an account put before books start was not refused by name: insert or update on table"
+        }
+      ]
+    },
+    {
+      "name": "ledger-put-kind",
+      "claim": "An account of a kind that is not a core role refuses by name, never by a raw foreign key.",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
+      "original": "    RAISE EXCEPTION 'ledger.unknownAccountKind'; END IF;",
+      "replacement": "    NULL; END IF;",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "an account put of an unknown kind refuses by name",
+          "expected": "an account of an unknown kind was not refused by name: insert or update on table"
+        }
+      ]
+    },
+    {
+      "name": "ledger-put-execute",
+      "claim": "Only north_star_runtime may execute the account put.",
+      "file": "db/migrations/0073_ledger_books_by_hand.sql",
+      "original": "GRANT EXECUTE ON FUNCTION platform.ledger_apply_account_put(uuid,uuid,bigint,text,uuid,text,text,jsonb)\n  TO north_star_runtime;",
+      "replacement": "GRANT EXECUTE ON FUNCTION platform.ledger_apply_account_put(uuid,uuid,bigint,text,uuid,text,text,jsonb)\n  TO north_star_runtime, PUBLIC;",
+      "test": {
+        "files": ["test/postgres/ledger-books-by-hand.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-books-by-hand.test.ts",
+          "name": "only the issuer attests and only north_star_runtime applies",
+          "expected": "a ledger operation function is executable beyond its grant"
         }
       ]
     }

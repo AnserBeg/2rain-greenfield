@@ -569,6 +569,7 @@ test(
                   [
                     'platform.ledger_attest_approval(uuid,text,uuid,uuid,uuid,uuid,uuid,bigint,text,uuid,jsonb,text)',
                     'platform.ledger_apply_books_start(uuid,uuid,bigint,text,uuid,text,text,jsonb)',
+                    'platform.ledger_apply_account_put(uuid,uuid,bigint,text,uuid,text,text,jsonb)',
                     'north_star_internal.ledger_consume_grant(uuid,text,uuid,bigint,text,uuid,jsonb,text)',
                     'north_star_internal.ledger_operation_access(uuid,uuid,bigint,boolean)',
                     'north_star_internal.ledger_company_live(uuid,boolean)',
@@ -583,6 +584,7 @@ test(
                 rows.map((row) => row.entry),
                 [
                   'north_star_approval_issuer platform.ledger_attest_approval(uuid,text,uuid,uuid,uuid,uuid,uuid,bigint,text,uuid,jsonb,text)',
+                  'north_star_runtime platform.ledger_apply_account_put(uuid,uuid,bigint,text,uuid,text,text,jsonb)',
                   'north_star_runtime platform.ledger_apply_books_start(uuid,uuid,bigint,text,uuid,text,text,jsonb)',
                 ],
                 'a ledger operation function is executable beyond its grant',
@@ -740,6 +742,396 @@ test(
                 outcome,
                 /SEMANTIC_OPERATION_POLICY_DENIED/u,
                 `a role without the books-start permission started books: ${outcome}`,
+              );
+            },
+          );
+
+          // Putting an account (1a-ii). Company C's books are started by a
+          // fixture row, not by books start, so no books-start control can
+          // change what these tests see; one account (code 1000) is seeded the
+          // same way. Every SQL test rolls back; only the gateway test commits
+          // (code 1200).
+          const companyC = randomUUID();
+          const createdC = await world.invoke('legal_entity_create', {
+            recordId: companyC,
+            relations: {},
+            values: {
+              [NS + 'field.legal_entity_name']: 'Third company',
+              [NS + 'field.legal_entity_code']: 'LEDGERC',
+              [NS + 'field.legal_entity_is_default']: false,
+              [NS + 'field.legal_entity_status']:
+                NS + 'option.legal_entity_status_active',
+            },
+          });
+          assert.equal(createdC.outcome, 'succeeded', JSON.stringify(createdC));
+          await pool.query(
+            `INSERT INTO platform.ledger_companies (tenant_id, environment_id, company_id, books_start)
+               VALUES ($1,$2,$3,'2026-01-01');
+             INSERT INTO platform.ledger_entry_counters (tenant_id, environment_id, company_id) VALUES ($1,$2,$3);
+             INSERT INTO platform.ledger_accounts (tenant_id, environment_id, company_id, account_id, account_code, kind_role_id, active, label)
+               VALUES ($1,$2,$3,gen_random_uuid(),'1000','northstar.ledger:role.cash',true,'Bank');`.replaceAll(
+              /\$([123])/gu,
+              (_, n: string) =>
+                `'${[tenant, environment, companyC][Number(n) - 1]}'::uuid`,
+            ),
+          );
+          const ACCOUNT_PUT = `${NS}operation.bookkeeping_account_put`;
+          const ACCOUNT_PUT_CAPABILITY =
+            'northstar.ledger:capability.ledger_account_put';
+          interface PutCall {
+            who: string;
+            company: string;
+            code?: string;
+            label?: string;
+            active?: string;
+            expectedLabel?: string | null;
+            expectedActive?: string | null;
+            revision?: number;
+          }
+          const putInputOf = async (call: PutCall) => ({
+            arguments: {
+              code: call.code ?? '1100',
+              kind: 'cash',
+              label: call.label ?? 'Petty cash',
+              active: call.active ?? 'yes',
+              expectedLabel: call.expectedLabel ?? null,
+              expectedActive: call.expectedActive ?? null,
+            },
+            expectedRevision: call.revision ?? (await revisionOf(call.company)),
+            recordId: call.company,
+          });
+          const applyPut = (
+            client: PoolClient,
+            grant: string,
+            facts: Facts,
+            input: object,
+          ) =>
+            client.query<{
+              result: {
+                invocationId: string;
+                changes: {
+                  fact: string;
+                  old: string | null;
+                  new: string | null;
+                }[];
+              };
+            }>(
+              'SELECT platform.ledger_apply_account_put($1,$2,$3,$4,$5,$6,$7,$8) AS result',
+              [
+                grant,
+                facts.release,
+                facts.fence,
+                facts.operation,
+                facts.key,
+                facts.channel,
+                facts.policy,
+                JSON.stringify(input),
+              ],
+            );
+          /** One attested account put, rolled back: the result or the refusal. */
+          const tryPut = async (
+            call: PutCall,
+            change: {
+              attested?: Partial<Facts>;
+              applied?: Partial<Facts>;
+            } = {},
+          ) => {
+            const facts = {
+              ...(await factsOf({ who: call.who, company: call.company })),
+              capability: ACCOUNT_PUT_CAPABILITY,
+              operation: ACCOUNT_PUT,
+            };
+            const input = await putInputOf(call);
+            const grant = randomUUID();
+            await attest(grant, { ...facts, ...change.attested }, input);
+            return as(call.who, async (client) => {
+              await client.query('BEGIN');
+              return applyPut(
+                client,
+                grant,
+                { ...facts, ...change.applied },
+                input,
+              ).then(
+                (result) => result.rows[0]!.result,
+                (error: unknown) => String((error as Error).message),
+              );
+            });
+          };
+          const outcomeOf = (result: unknown) =>
+            typeof result === 'string' ? result : 'admitted';
+
+          await t.test(
+            'an account put creates an account under a generated ID and changes the account the person expected',
+            async () => {
+              const created = await tryPut({
+                who: unscoped,
+                company: companyC,
+              });
+              assert.equal(typeof created, 'object', String(created));
+              const changes = (
+                created as {
+                  changes: {
+                    fact: string;
+                    old: string | null;
+                    new: string | null;
+                  }[];
+                }
+              ).changes;
+              const fact = (name: string) =>
+                changes.find((c) => c.fact === name);
+              assert.equal(fact('accountId')?.old, null);
+              assert.match(String(fact('accountId')?.new), /^[0-9a-f-]{36}$/u);
+              assert.deepEqual(fact('accountKind'), {
+                fact: 'accountKind',
+                old: null,
+                new: 'northstar.ledger:role.cash',
+              });
+              const renamed = await tryPut({
+                who: unscoped,
+                company: companyC,
+                code: '1000',
+                label: 'Main bank',
+                active: 'no',
+                expectedLabel: 'Bank',
+                expectedActive: 'yes',
+              });
+              assert.equal(typeof renamed, 'object', String(renamed));
+              const renamedChanges = (
+                renamed as {
+                  changes: {
+                    fact: string;
+                    old: string | null;
+                    new: string | null;
+                  }[];
+                }
+              ).changes;
+              assert.deepEqual(
+                renamedChanges.filter((c) =>
+                  ['accountLabel', 'accountActive'].includes(c.fact),
+                ),
+                [
+                  { fact: 'accountLabel', old: 'Bank', new: 'Main bank' },
+                  { fact: 'accountActive', old: 'yes', new: 'no' },
+                ],
+              );
+            },
+          );
+          await t.test(
+            'an account put replaces only the account the person expected',
+            async () => {
+              const outcome = outcomeOf(
+                await tryPut({
+                  who: unscoped,
+                  company: companyC,
+                  code: '1000',
+                  label: 'Main bank',
+                  expectedLabel: 'Cash box',
+                  expectedActive: 'yes',
+                }),
+              );
+              assert.match(
+                outcome,
+                /ledger\.priorChanged/u,
+                `an account put replaced an account the person did not expect: ${outcome}`,
+              );
+            },
+          );
+          await t.test(
+            'a grant attested for another ledger capability never applies in an account put',
+            async () => {
+              const outcome = outcomeOf(
+                await tryPut(
+                  { who: unscoped, company: companyC },
+                  { attested: { capability: CAPABILITY } },
+                ),
+              );
+              assert.match(
+                outcome,
+                /ledger\.approvalRequired/u,
+                `an account put consumed a grant attested for books start: ${outcome}`,
+              );
+            },
+          );
+          await t.test(
+            'a read permission never authorizes an account put',
+            async () => {
+              const outcome = outcomeOf(
+                await tryPut({ who: reader, company: companyC }),
+              );
+              assert.match(
+                outcome,
+                /ledger\.unavailable/u,
+                `a journal reader put an account: ${outcome}`,
+              );
+            },
+          );
+          await t.test(
+            'an account put against another company revision never applies',
+            async () => {
+              const outcome = outcomeOf(
+                await tryPut({
+                  who: unscoped,
+                  company: companyC,
+                  revision: (await revisionOf(companyC)) + 1,
+                }),
+              );
+              assert.match(
+                outcome,
+                /ledger\.staleRevision/u,
+                `an account put applied against a company revision it was not confirmed on: ${outcome}`,
+              );
+            },
+          );
+          await t.test(
+            'an account put decided under a policy version that has since moved never applies',
+            async () => {
+              const outcome = outcomeOf(
+                await tryPut(
+                  { who: unscoped, company: companyC },
+                  { applied: { policy: 'northstar.current-policy/987654321' } },
+                ),
+              );
+              assert.match(
+                outcome,
+                /ledger\.stalePolicy/u,
+                `an account put applied under a policy version that had moved: ${outcome}`,
+              );
+            },
+          );
+          await t.test(
+            'an account put before books start refuses by name',
+            async () => {
+              const outcome = outcomeOf(
+                await tryPut({ who: unscoped, company: companyB }),
+              );
+              assert.match(
+                outcome,
+                /ledger\.booksNotStarted/u,
+                `an account put before books start was not refused by name: ${outcome}`,
+              );
+            },
+          );
+          await t.test(
+            'an account put of an unknown kind refuses by name',
+            async () => {
+              const facts = {
+                ...(await factsOf({ who: unscoped, company: companyC })),
+                capability: ACCOUNT_PUT_CAPABILITY,
+                operation: ACCOUNT_PUT,
+              };
+              const input = await putInputOf({
+                who: unscoped,
+                company: companyC,
+              });
+              input.arguments.kind = 'no_such_kind';
+              const grant = randomUUID();
+              await attest(grant, facts, input);
+              const outcome = await as(unscoped, async (client) => {
+                await client.query('BEGIN');
+                return settled(applyPut(client, grant, facts, input));
+              });
+              assert.match(
+                outcome,
+                /ledger\.unknownAccountKind/u,
+                `an account of an unknown kind was not refused by name: ${outcome}`,
+              );
+            },
+          );
+          await t.test(
+            'a role granted account put receives the ledger permission it needs, and an account put commits with its evidence',
+            async () => {
+              const input = {
+                arguments: {
+                  code: '1200',
+                  kind: 'cash',
+                  label: 'Savings',
+                  active: 'yes',
+                  expectedLabel: null,
+                  expectedActive: null,
+                },
+                expectedRevision: await revisionOf(companyC),
+                recordId: companyC,
+              };
+              const outcome = await app.runtime.entry
+                .run(local, (view) =>
+                  app.runtime.operationGateway.invoke(
+                    view,
+                    {
+                      confirmationGrant:
+                        app.runtime.operationMediation.issueConfirmationGrant(
+                          view,
+                          ACCOUNT_PUT,
+                          input,
+                        ),
+                      idempotencyKey: randomUUID(),
+                      input,
+                      operationId: ACCOUNT_PUT,
+                      schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+                    },
+                    app.runtime.operationMediation.issueInvocation(view, 'UI'),
+                  ),
+                )
+                .then(
+                  (result) =>
+                    result.outcome === 'succeeded'
+                      ? 'succeeded'
+                      : `${result.outcome} ${String(result.unsupportedReason)}`,
+                  (error: unknown) =>
+                    `${String((error as Error).message)} ${String((error as { code?: unknown }).code)}`,
+                );
+              assert.equal(
+                outcome,
+                'succeeded',
+                `an account put through the gateway was refused: ${outcome}`,
+              );
+              const { rows } = await pool.query<{
+                facts: Record<string, string>;
+              }>(
+                `SELECT jsonb_object_agg(c->>'fieldId', c->'newState'->>'value') AS facts
+                   FROM platform.ledger_approval_grants g
+                   JOIN platform.trust_action_invocations i
+                     ON (i.tenant_id, i.environment_id, i.invocation_id) = (g.tenant_id, g.environment_id, g.invocation_id)
+                   JOIN platform.trust_business_change_documents d
+                     ON (d.tenant_id, d.environment_id, d.change_document_id) = (i.tenant_id, i.environment_id, i.change_document_id)
+                   CROSS JOIN jsonb_array_elements(d.changes) c
+                  WHERE (g.tenant_id, g.environment_id, g.operation_id) = ($1,$2,$3) AND d.record_id = $4`,
+                [tenant, environment, ACCOUNT_PUT, companyC],
+              );
+              assert.deepEqual(
+                [
+                  rows[0]?.facts['northstar.ledger.fact.accountCode'],
+                  rows[0]?.facts['northstar.ledger.fact.accountLabel'],
+                ],
+                ['1200', 'Savings'],
+                'the account put receipt does not record the account it created',
+              );
+            },
+          );
+          // Last of the account puts: under its control the commit succeeds.
+          await t.test(
+            'a consumed account-put grant never commits without its trust receipt',
+            async () => {
+              const facts = {
+                ...(await factsOf({ who: unscoped, company: companyC })),
+                capability: ACCOUNT_PUT_CAPABILITY,
+                operation: ACCOUNT_PUT,
+              };
+              const input = await putInputOf({
+                who: unscoped,
+                company: companyC,
+                code: '1900',
+              });
+              const grant = randomUUID();
+              await attest(grant, facts, input);
+              const outcome = await as(unscoped, async (client) => {
+                await client.query('BEGIN');
+                await applyPut(client, grant, facts, input);
+                return settled(client.query('COMMIT'));
+              });
+              assert.match(
+                outcome,
+                /ledger\.receiptUnverified/u,
+                `a consumed account-put grant committed with no trust receipt: ${outcome}`,
               );
             },
           );
