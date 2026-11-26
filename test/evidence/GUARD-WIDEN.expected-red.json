@@ -40,10 +40,10 @@
     },
     {
       "name": "guard-widen-domain-import-off",
-      "claim": "A new import from packages/domain in a generic file is refused (PRESS013).",
+      "claim": "A new relative import into packages/domain in a generic file is refused (PRESS013).",
       "file": "packages/dev-tooling/src/module-press-law.ts",
-      "original": "domainImports(text, repoPath)",
-      "replacement": "domainImports('', repoPath)",
+      "original": "    return resolved.startsWith('packages/domain/')\n      ? resolved.replace(/\\.[a-z]+$/u, '')\n      : undefined;",
+      "replacement": "    return undefined;",
       "test": {
         "files": ["test/architecture/module-press-law.test.ts"],
         "namePattern": "^GUARD-WIDEN"
@@ -89,6 +89,96 @@
           "file": "test/architecture/module-press-law.test.ts",
           "name": "GUARD-WIDEN red: a count above its baseline allowance",
           "expected": "a count above its baseline allowance must be refused by PRESS015"
+        }
+      ]
+    },
+    {
+      "name": "guard-widen-kebab-path-off",
+      "claim": "A file or directory named in kebab case for a first-party name is refused (F1, paths).",
+      "file": "packages/dev-tooling/src/module-press-law.ts",
+      "original": ".replaceAll('-', '_');",
+      "replacement": ".replaceAll('-', ' ');",
+      "test": {
+        "files": ["test/architecture/module-press-law.test.ts"],
+        "namePattern": "^GUARD-WIDEN"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/module-press-law.test.ts",
+          "name": "GUARD-WIDEN red: a new kebab-named file or directory",
+          "expected": "a kebab-named file or directory must be refused by PRESS011"
+        }
+      ]
+    },
+    {
+      "name": "guard-widen-kebab-text-off",
+      "claim": "A kebab spelling of a first-party name in a string is refused (F1, text).",
+      "file": "packages/dev-tooling/src/module-press-law.ts",
+      "original": "/[A-Za-z0-9_]+(?:-[A-Za-z0-9_]+)*/gu",
+      "replacement": "/[A-Za-z0-9_]+/gu",
+      "test": {
+        "files": ["test/architecture/module-press-law.test.ts"],
+        "namePattern": "^GUARD-WIDEN"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/module-press-law.test.ts",
+          "name": "GUARD-WIDEN red: a new kebab spelling in a string",
+          "expected": "a kebab spelling in a string must be refused by PRESS011"
+        }
+      ]
+    },
+    {
+      "name": "guard-widen-construction-off",
+      "claim": "A statically concatenated first-party name is refused (F2).",
+      "file": "packages/dev-tooling/src/module-press-law.ts",
+      "original": "nameHits(construction.value, vocabulary, true)",
+      "replacement": "nameHits('', vocabulary, true)",
+      "test": {
+        "files": ["test/architecture/module-press-law.test.ts"],
+        "namePattern": "^GUARD-WIDEN"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/module-press-law.test.ts",
+          "name": "GUARD-WIDEN red: a statically concatenated first-party name",
+          "expected": "a statically concatenated name must be refused by PRESS011"
+        }
+      ]
+    },
+    {
+      "name": "guard-widen-import-binding-off",
+      "claim": "A binding added to a baselined domain import is refused; imports are counted per binding (F3).",
+      "file": "packages/dev-tooling/src/module-press-law.ts",
+      "original": "for (const element of named.elements) {",
+      "replacement": "for (const element of named.elements.slice(0, 1)) {",
+      "test": {
+        "files": ["test/architecture/module-press-law.test.ts"],
+        "namePattern": "^GUARD-WIDEN"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/module-press-law.test.ts",
+          "name": "GUARD-WIDEN red: widening a baselined domain import",
+          "expected": "a binding added to a baselined domain import must be refused by PRESS013"
+        }
+      ]
+    },
+    {
+      "name": "guard-widen-unclassified-root-off",
+      "claim": "A packages/*/src or apps/*/src in neither the scope nor the excluded list is refused (F4).",
+      "file": "packages/dev-tooling/src/module-press-law.ts",
+      "original": "if (unclassified.length > 0) {",
+      "replacement": "if (false) {",
+      "test": {
+        "files": ["test/architecture/module-press-law.test.ts"],
+        "namePattern": "^GUARD-WIDEN"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/module-press-law.test.ts",
+          "name": "GUARD-WIDEN red: an unclassified source root",
+          "expected": "a source root in neither the scope nor the excluded list must be refused by PRESS010"
         }
       ]
     }
