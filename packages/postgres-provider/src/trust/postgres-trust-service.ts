@@ -151,6 +151,10 @@ export class PostgresTrustService {
 
     return withTrustedRequestTransaction(this.pool, context, async (client) => {
       await assertPinnedRelease(client, context, prepared);
+      await client.query(
+        "SELECT set_config('north_star.creation_action', $1, true)",
+        [prepared.actionId],
+      );
       const mutationResult = await mutate(client);
       return persistAcceptedEvidence(
         client,
@@ -220,6 +224,10 @@ export class PostgresTrustService {
         });
       }
       await assertPinnedRelease(client, context, binding);
+      await client.query(
+        "SELECT set_config('north_star.creation_action', $1, true)",
+        [binding.actionId],
+      );
       const attempted = await mutate(client);
       assertCommandMatchesIdempotencyBinding(attempted.command, binding);
       const prepared = prepareInvocation(attempted.command, 'SUCCEEDED');

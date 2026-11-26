@@ -24,25 +24,36 @@ import {
   requiredSearchText,
   requiredUuid,
 } from './module-runtime-interpreter.js';
+import type { WorkflowTrigger } from '../../canonical-model/src/schemas.js';
+import { workflowEventDeclaration } from '../../canonical-model/src/workflow-trigger-events.js';
 
 export interface WorkflowGrants {
   readonly queries: readonly string[];
   readonly operations: readonly string[];
 }
 
-export interface WorkflowEvent {
-  readonly type: 'goodsReceiptPosted';
-  readonly eventId: string;
-  readonly receiptId: string;
-  readonly legalEntityId: string;
-}
+/** Generated per member from WORKFLOW_TRIGGER_EVENT_FIELDS (ADR-0073 A1). */
+export type WorkflowEvent =
+  | {
+      readonly type: 'goodsReceiptPosted';
+      readonly eventId: string;
+      readonly receiptId: string;
+      readonly legalEntityId: string;
+    }
+  | {
+      readonly type: 'recordCreated';
+      readonly eventId: string;
+      readonly recordTypeId: string;
+      readonly recordId: string;
+      readonly legalEntityId: string;
+    };
 
 export type WorkflowCall =
   | { readonly kind: 'now' }
   | { readonly kind: 'sleep'; readonly milliseconds: number }
   | {
       readonly kind: 'waitForEvent';
-      readonly eventType: WorkflowEvent['type'];
+      readonly eventType: 'goodsReceiptPosted';
       readonly timeoutMs: number;
     }
   | { readonly kind: 'requestApproval'; readonly summary: string }
@@ -72,7 +83,10 @@ export function generateWorkflowSdk(
   grants: WorkflowGrants,
   version: WorkflowSdk['version'] = WORKFLOW_SDK_VERSION,
   legacyApproval = false,
+  trigger: WorkflowTrigger = 'goodsReceiptPosted',
 ): WorkflowSdk {
+  if (typeof trigger !== 'string' && version === LEGACY_WORKFLOW_SDK_VERSION)
+    throw new Error('A general workflow trigger needs the current SDK');
   assertRequestRuntimeView(view);
   const queries = new Map(
     grants.queries.map((id) => {
@@ -109,7 +123,7 @@ export function generateWorkflowSdk(
     : [...operations.values()].map(approvalDeclaration).join('\n');
   const declarations = `
     type Json = null | boolean | number | string | readonly Json[] | { readonly [key: string]: Json };
-    type ReceiptEvent = Readonly<{ type: 'goodsReceiptPosted'; eventId: string; receiptId: string; legalEntityId: string }>;
+    ${workflowEventDeclaration(trigger)}
     type RecordResult = Readonly<{ recordId: string; revision: number; values: Readonly<Record<string, Json>> }>;
     interface WorkflowSdk {
       now(): string;

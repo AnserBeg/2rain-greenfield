@@ -179,6 +179,10 @@ north_star_workflow_worker	platform.workflow_pending_approvals	SELECT	*	Advance 
 north_star_workflow_worker	platform.workflow_receipt_scan_positions	INSERT	*	Advance and recover durable workflow executions on the worker connection.
 north_star_workflow_worker	platform.workflow_receipt_scan_positions	SELECT	*	Advance and recover durable workflow executions on the worker connection.
 north_star_workflow_worker	platform.workflow_receipt_scan_positions	UPDATE	fence,next_outbox_id,pointer_id	Advance and recover durable workflow executions on the worker connection.
+north_star_workflow_worker	platform.workflow_record_dispositions	INSERT	*	Record one recordCreated disposition or audited loop skip per creation occurrence on the worker connection (ADR-0073 A1).
+north_star_workflow_worker	platform.workflow_record_dispositions	SELECT	*	Record one recordCreated disposition or audited loop skip per creation occurrence on the worker connection (ADR-0073 A1).
+north_star_workflow_worker	platform.workflow_record_start_skips	INSERT	*	Record one recordCreated disposition or audited loop skip per creation occurrence on the worker connection (ADR-0073 A1).
+north_star_workflow_worker	platform.workflow_record_start_skips	SELECT	*	Record one recordCreated disposition or audited loop skip per creation occurrence on the worker connection (ADR-0073 A1).
 north_star_workflow_worker	platform.workflow_retry_decisions	SELECT	*	Validate a recorded human Retry before replay or effect dispatch.
 north_star_workflow_worker	platform.workflow_runs	INSERT	*	Advance and recover durable workflow executions on the worker connection.
 north_star_workflow_worker	platform.workflow_runs	SELECT	*	Advance and recover durable workflow executions on the worker connection.

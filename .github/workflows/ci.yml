@@ -306,7 +306,9 @@ jobs:
         # 900 s of measured file time (median of three runs). The slowest observed
         # runner was 1.84 times (CI-6), so 900 s is 27.6 minutes against the
         # 30-minute limit: a margin, not a bound. See docs/execution/packets/CI-7.md.
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        # TRAIN-Q (owner approved): shard 12 holds workflow-record-created
+        # (about 455 s), which fit in no other shard under 900 s.
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -364,6 +366,9 @@ jobs:
       - name: Run PostgreSQL shard 11
         if: matrix.shard == 11
         run: corepack pnpm test:postgres:11
+      - name: Run PostgreSQL shard 12
+        if: matrix.shard == 12
+        run: corepack pnpm test:postgres:12
       - name: Run non-C locale determinism probe
         if: matrix.shard == 1
         run: corepack pnpm test:locale

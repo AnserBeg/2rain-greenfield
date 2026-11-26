@@ -1313,6 +1313,8 @@ export class PostgresCustomizationService {
             view,
             workflow.grants,
             bundle,
+            undefined,
+            workflow.trigger,
           );
           digest = await withTrustedRequestTransaction(
             this.connection.runtimePool,
@@ -1374,6 +1376,20 @@ export class PostgresCustomizationService {
           ? {
               workflowSdk: generateWorkflowSdk(view, { queries, operations })
                 .declarations,
+              // The same create-operation rule the compiler admits by.
+              workflowRecordTypeIds: parsePinnedOperationCatalog(
+                view.projections.operation.payload,
+              )
+                .filter(
+                  (operation) =>
+                    operation.lifecycle === 'active' &&
+                    operation.effect.kind === 'createRecordEffect',
+                )
+                .map((operation) =>
+                  'entity' in operation.effect
+                    ? operation.effect.entity.targetId
+                    : '',
+                ),
             }
           : {}),
       },
@@ -1413,13 +1429,14 @@ export class PostgresCustomizationService {
           await client.query<{
             workflowId: string;
             eventType: string;
+            recordType: string | null;
             body: string;
             grants: {
               queries: readonly string[];
               operations: readonly string[];
             };
           }>(
-            `SELECT d.workflow_id AS "workflowId", d.event_type AS "eventType",
+            `SELECT d.workflow_id AS "workflowId", d.event_type AS "eventType", d.record_type AS "recordType",
                   convert_from(b.bundle, 'UTF8')::jsonb->>'body' AS body, d.grants
              FROM platform.release_activation_verification_receipts AS v
              JOIN platform.release_activation_swap_receipts AS s
@@ -1457,12 +1474,14 @@ export class PostgresCustomizationService {
           )
         ).rows,
     );
-    return workflows.map(({ eventType, ...workflow }) => ({
+    return workflows.map(({ eventType, recordType, ...workflow }) => ({
       ...workflow,
       trigger:
         eventType === RECEIPT_POSTED_EVENT.eventType
           ? RECEIPT_POSTED_EVENT.label
-          : eventType,
+          : recordType
+            ? `Record created: ${recordType}`
+            : eventType,
     }));
   }
 
@@ -1923,7 +1942,13 @@ export class PostgresCustomizationService {
       context,
       (client) => readWorkflowBundle(client, context, workflow.bodyDigest),
     );
-    const verified = await verifyWorkflowBundle(view, workflow.grants, bundle);
+    const verified = await verifyWorkflowBundle(
+      view,
+      workflow.grants,
+      bundle,
+      undefined,
+      workflow.trigger,
+    );
     if (verified.executable !== bundle.executable)
       throw new Error('Workflow executable does not match the pinned bundle');
     const definition = parseNormalizedApplicationPackageJson(

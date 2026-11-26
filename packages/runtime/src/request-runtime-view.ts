@@ -9,9 +9,9 @@ import {
   type TrustedRequestContext,
   type UntrustedRequestInput,
 } from './request-context.js';
+import { RECORD_CREATED_TRIGGER_READER } from '../../canonical-model/src/workflows.js';
 import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents.js';
 import { REVERSIBILITY_AGENT_READER } from '../../canonical-model/src/reversibility.js';
-import { LOGICAL_FIELD_READER } from '../../canonical-model/src/logical-field.js';
 import {
   WORKFLOW_PROJECTION_FAMILY,
   WORKFLOW_RUNTIME_CAPABILITY,
@@ -250,7 +250,9 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 48 applies versioned record templates at create (assigned at TRAIN-M).
     // 49 reads declared logical value kinds: decimal, money, quantity, long
     // text and currency code (assigned at TRAIN-O).
-    maximumSupportedVersion: LOGICAL_FIELD_READER,
+    // 50 reads general workflow trigger members (ADR-0073 A1; WORKFLOW-2,
+    // assigned at TRAIN-Q).
+    maximumSupportedVersion: RECORD_CREATED_TRIGGER_READER,
   },
 });
 
