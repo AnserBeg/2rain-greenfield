@@ -139,6 +139,11 @@ New platform tables in `db/migrations` (number taken at merge per MIGRATION-RULE
   **The one entry writer, used by the poster and every operation**, takes the company closed-through row FOR SHARE and
   refuses any accounting date on or before closed-through, and any date before books start except kind `opening`
   (rule-8 red test per refusal). So manual, opening, re-post and reclass entries cannot bypass close.
+- **Implementation note (slice 1a-i, 2026-11-25, rulings R7a and A3).** One currency per entry and the entry's own
+  company are composite foreign keys, and positivity is a check; the deferred trigger keeps at least two lines and
+  debits equal credits. Each is stricter than the trigger wording and has its own red. Both §6 keys are partial unique
+  indexes (posting kinds; operation kinds) with exactly the stated columns and `NULLS NOT DISTINCT`, so one kind's
+  null columns never collide on the other kind's key; the partial predicate is part of the unchangeable key shape.
 - **Alongside:** posted position per (company, record, rule, role, qualifier, currency, account), held queue, chart,
   map, closed-through date, books-start date and the balance projection (§9).
 
@@ -205,6 +210,10 @@ versions, shown as "waiting on held version n", until cleared. A re-post or free
 - **Lock order:** (company, record, rule) ascending; the record; the company closed-through row FOR SHARE; balance
   rows ascending; the per-company entry-number counter row last. Close takes only the closed-through row FOR UPDATE.
   READ COMMITTED writers carry the isolation guard. Tests use two companies in one tenant, company-scoped principal.
+  **Amended 2026-11-25 (slice 1a-i, ruling R4):** the full order is (company, record, rule) ascending; the record; the
+  company closed-through row FOR SHARE; the company account-map row (slice 1a-iii); the entry's account rows ascending
+  FOR SHARE; balance rows ascending, upserted in key order including rows that do not exist yet; the counter row last.
+  Close, books start, provisioning and an account edit each lock one row FOR UPDATE and nothing else.
 - **Holds, never drops.** All 15 reasons, classified:
   - *Input-derived (superseded by a later version):* unbalanced, unsupported currency, unrepresentable amount, source
     unreadable, tax evidence missing, rule ended, date moves across books start, predates rule.

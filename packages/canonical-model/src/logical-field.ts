@@ -21,6 +21,12 @@ import { z } from 'zod';
  */
 // Rung 49, assigned at TRAIN-O (MIGRATION-RULE, capability rung rule).
 export const LOGICAL_FIELD_READER = 49;
+/**
+ * CUSTOMIZE-6 slice 2: logical fields on line tables, and an amount whose
+ * currency is read through a path (a line's header). Rung 53, assigned at
+ * TRAIN-S (after WORKFLOW-2's 50 and REPORTS-1 s2's 51 and 52).
+ */
+export const LINE_LOGICAL_FIELD_READER = 53;
 export const LOGICAL_FIELD_TYPES = [
   'decimal',
   'money',

@@ -13,6 +13,7 @@ import { MAP_VIEW_DRAFTER_GUIDANCE, MapDraftSchema } from './map-revision.js';
 import { PopupCommandSchema } from './popup-revision.js';
 import { PresentationDraftSchema } from './presentation-revision.js';
 import { ReportDraftSchema } from './report-revision.js';
+import { MeasureDraftSchema } from './measure-revision.js';
 import { VALIDATION_COMPARISONS } from './validation-draft.js';
 import { WorkflowDraftSchema } from './workflow-draft.js';
 
@@ -58,6 +59,10 @@ export const DRAFTER_SELECTION_SCHEMAS = {
   addReportRevision: z.strictObject({
     kind: z.literal('addReportRevision'),
     report: ReportDraftSchema,
+  }),
+  addMeasureRevision: z.strictObject({
+    kind: z.literal('addMeasureRevision'),
+    measure: MeasureDraftSchema,
   }),
   addValidation: z.strictObject({
     kind: z.literal('addValidation'),
@@ -151,13 +156,13 @@ export const DRAFTER_KINDS = {
     input: member('addRecordType'),
     hidden: ['companyAccessIndex'],
     guidance:
-      'A new kind of record with its own list, page and form. The first field is its name and must be type "text". A choice field lists its options. Field types: number is a whole number; decimal is an exact number with a scale (digits after the point); money is an amount with a currency, either fixed (one code for every record, such as a CAD deposit) or stored (each record names its own: add a field of type currency and point the money field at it by fieldLabel); quantity is an exact amount in a unit with a scale (weight in kg, hours in h); longText is notes or a description in paragraphs. These kinds are for your own record types, not built-in ones or line tables. Use companyOwnership "entityOwned" for company-scoped documents or for links to a company-owned target. A later member of the same change set refers to it as northstar.app:entity.custom_<label in lowercase, punctuation and spaces replaced by underscores>.',
+      'A new kind of record with its own list, page and form. The first field is its name and must be type "text". A choice field lists its options. Field types: number is a whole number; decimal is an exact number with a scale (digits after the point); money is an amount with a currency, either fixed (one code for every record, such as a CAD deposit) or stored (each record names its own: add a field of type currency and point the money field at it by fieldLabel); quantity is an exact amount in a unit with a scale (weight in kg, hours in h); longText is notes or a description in paragraphs. These kinds are for your own record types and their line tables, not built-in ones; on a line table declare them when the line table is created. Use companyOwnership "entityOwned" for company-scoped documents or for links to a company-owned target. A later member of the same change set refers to it as northstar.app:entity.custom_<label in lowercase, punctuation and spaces replaced by underscores>.',
   },
   addField: {
     input: member('addField'),
     hidden: ['screens'],
     guidance:
-      'A new field on an existing record type, or on one created earlier in the change set. entity is a record type ID listed below. Field types: number is a whole number; decimal is an exact number with a scale (digits after the point); money is an amount with a currency, either fixed (one code for every record, such as a CAD deposit) or stored (each record names its own: add a field of type currency and point the money field at it by fieldLabel); quantity is an exact amount in a unit with a scale (weight in kg, hours in h); longText is notes or a description in paragraphs. These kinds are for your own record types, not built-in ones or line tables.',
+      'A new field on an existing record type, or on one created earlier in the change set. entity is a record type ID listed below. Field types: number is a whole number; decimal is an exact number with a scale (digits after the point); money is an amount with a currency, either fixed (one code for every record, such as a CAD deposit) or stored (each record names its own: add a field of type currency and point the money field at it by fieldLabel); quantity is an exact amount in a unit with a scale (weight in kg, hours in h); longText is notes or a description in paragraphs. These kinds are for your own record types and their line tables, not built-in ones; on a line table declare them when the line table is created.',
   },
   addChoice: {
     input: member('addChoice'),
@@ -166,7 +171,7 @@ export const DRAFTER_KINDS = {
   addLineTable: {
     input: member('addLineTable'),
     guidance:
-      'One child collection on a tenant record type, edited with the header. Include a text field naming a row.',
+      'One child collection on a tenant record type, edited with the header. Include a text field naming a row. Line fields may be decimal, money, quantity, longText or currency, like record fields; a line money field in the header currency is stored with fieldLabel naming the record (header) currency field, so every line of one record shares its currency.',
   },
   addLink: {
     input: member('addLink'),
@@ -214,7 +219,12 @@ export const DRAFTER_KINDS = {
   addReportRevision: {
     input: DRAFTER_SELECTION_SCHEMAS.addReportRevision,
     guidance:
-      'Group a listed report source by its offered field IDs and count records or sum an offered measure. Enable CSV only when requested. Use a listed active report ID when editing or retiring it.',
+      'Group a listed report source by its offered field IDs and count records or sum an offered measure. Enable CSV only when requested. Use a listed active report ID when editing or retiring it. A calendar dimension groups an offered date by day, week (Monday) or month; an age dimension puts the days from the business date back to an offered date into ordered, contiguous bands (first band open below, last open above) with an absentLabel such as "No due date". A field of a linked record is chosen by its offered fieldId and via (the relation IDs listed for it). On a line source (grain line), count lines, or count distinct parents with distinctTargets via the parent relation; never sum, average, min or max a field reached through via. min, max and average take an offered number or date of the source itself; distinctCount takes any offered field. Bind an approved named measure with kind approved, its measureId and contractDigest.',
+  },
+  addMeasureRevision: {
+    input: DRAFTER_SELECTION_SCHEMAS.addMeasureRevision,
+    guidance:
+      'A reusable named measure on a listed report source, such as "Invoiced rent": one operator over an offered field, optionally with filters. Draft status trial first; the owner approves the trialled measure later with status approved and the same measureId and no operator. Retire with status retired. Needs its own draft.',
   },
   addPresentationRevision: {
     input: PresentationDraftSchema,

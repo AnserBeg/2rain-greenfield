@@ -1,5 +1,10 @@
 import { LONG_TEXT_MAXIMUM_LENGTH } from '../../../packages/canonical-model/src/logical-field.js';
-import type { RegisteredReport } from '../../../packages/canonical-model/src/declared-report.js';
+import {
+  effectiveMeasures,
+  filterParameterId,
+  reportColumnFor,
+  type RegisteredReport,
+} from '../../../packages/canonical-model/src/declared-report.js';
 import type { GroupedRow } from '@north-star/canonical-model';
 import {
   displayGroupKey,
@@ -55,15 +60,9 @@ import {
 } from '../../../packages/canonical-model/src/surface-presentation.js';
 import type { CompiledPresentation } from '../../../packages/canonical-model/src/schemas.js';
 import {
-  renderReceivingSection,
   renderReceivingNavigation,
   type ReceivingNavigation,
-  type ReceivingSection,
 } from './receiving-section.js';
-import type {
-  SalesOrderSection,
-  ShipmentPackingDocument,
-} from './sales-section.js';
 import { sharedListView } from './list-runtime.js';
 import {
   renderLauncherAction,
@@ -222,13 +221,10 @@ export type SurfaceDataRenderState =
       readonly addressLayout?: LayoutBody;
       readonly addressMaps?: Readonly<Record<string, string>>;
       readonly documentsSection?: string;
-      readonly receiving?: ReceivingSection;
       readonly receivingNavigation?: ReceivingNavigation;
       readonly composition?: CompositionData;
       readonly popupButtons?: string;
       readonly compositionTask?: string;
-      readonly salesOrder?: SalesOrderSection;
-      readonly packingDocument?: ShipmentPackingDocument;
       readonly result?: SemanticQueryResultEnvelope;
       readonly declaredList?: DeclaredListRenderData;
       readonly status: 'READY';
@@ -1570,7 +1566,7 @@ function renderSections(context: SurfaceComponentContext): string {
       slotPanel(
         context,
         record
-          ? `${data.status === 'READY' && data.receiving ? renderReceivingSection(data.receiving) : ''}${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${data.status === 'READY' && data.salesOrder ? renderSalesOrderSection(data.salesOrder) : ''}${data.status === 'READY' && data.packingDocument ? renderPackingDocument(data.packingDocument) : ''}${layout ? layout.sections.map((section) => renderLayoutDetailSection(context, section, record, undefined, maps?.[section.id])).join('') : `<section class="panel data-panel" data-data-state="exact"><details class="record-section-group" open><summary><h2>Details</h2></summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(labels.get(fieldId) ?? fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${recordFieldValue(context, record, fieldId)}</dd></div>`).join('')}</dl></details></section>`}`
+          ? `${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${layout ? layout.sections.map((section) => renderLayoutDetailSection(context, section, record, undefined, maps?.[section.id])).join('') : `<section class="panel data-panel" data-data-state="exact"><details class="record-section-group" open><summary><h2>Details</h2></summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(labels.get(fieldId) ?? fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${recordFieldValue(context, record, fieldId)}</dd></div>`).join('')}</dl></details></section>`}`
           : dataDiagnostic('QUERY_NOT_FOUND'),
         'sections-slot',
       ) + documents
@@ -1603,40 +1599,6 @@ function renderSections(context: SurfaceComponentContext): string {
     `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div>${relationContent.freeze}<form id="surface-record-form" method="post" action="${escapeHtml(surfaceHref(context.surface, undefined, false, context))}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${context.surface.layouts?.some((l) => l.body.mode === (record ? 'edit' : 'create')) ? '' : relationContent.controls}${renderFormFields(context, operation, record)}</div></form></section>`,
     'sections-slot',
   );
-}
-
-function renderSalesOrderSection(section: SalesOrderSection): string {
-  const link = (local: string, recordId?: string) => {
-    const parameters = new URLSearchParams({
-      surface: `${section.namespace}:surface.${local}`,
-      [section.scopeParameterIds[local]!]: section.legalEntityId,
-    });
-    if (recordId) parameters.set('record', recordId);
-    return escapeHtml(`/?${parameters}`);
-  };
-  const rows = section.lines
-    .map(
-      (line) =>
-        `<tr data-sales-order-line="${escapeHtml(line.recordId)}"><td><a href="${link('sales_order_line_detail', line.recordId)}">${escapeHtml(line.lineNumber)}</a></td><td>${escapeHtml(line.item)}</td><td>${escapeHtml(line.quantity)}</td><td>${escapeHtml(line.reservationCoverage)}</td><td>${escapeHtml(line.netShipped)}</td><td>${escapeHtml(line.openToShip)}</td><td>${escapeHtml(line.unit)}</td><td>${escapeHtml(line.unitPrice)}</td></tr>`,
-    )
-    .join('');
-  const stock = section.stock
-    .map(
-      (row) =>
-        `<tr data-stock-identity="${escapeHtml(`${row.item}:${row.location}`)}"><td>${escapeHtml(row.item)}</td><td>${escapeHtml(row.location)}</td><td>${escapeHtml(row.onHand)}</td><td>${escapeHtml(row.reserved)}</td><td>${escapeHtml(row.available)}</td></tr>`,
-    )
-    .join('');
-  return `<section class="panel data-panel" data-sales-order-lines><h2>Fulfillment</h2><p><a href="${link('reservation_form')}">Create reservation</a> · <a href="${link('reservation_list')}">View reservations</a> · <a href="${link('shipment_form')}">Create shipment</a> · <a href="${link('shipment_list')}">View shipments and corrections</a></p><p>Reserve a manually selected item, location and exact quantity. Shortages are refused. Ship only against selected live reservations; allocation and unreserved shipping are not available.</p><table><thead><tr><th>Line</th><th>Item</th><th>Ordered</th><th>Reservation coverage</th><th>Net shipped</th><th>Open to ship</th><th>Unit</th><th>Unit price</th></tr></thead><tbody>${rows}</tbody></table>${section.lines.length === 0 ? '<p>No active order lines.</p>' : ''}<h3>Stock coverage</h3><table><thead><tr><th>Item</th><th>Location</th><th>On hand</th><th>Reserved</th><th>Available</th></tr></thead><tbody>${stock}</tbody></table>${section.stock.length === 0 ? '<p>Create a reservation to show its selected stock identity.</p>' : ''}<p>Corrections append compensating movements. A released reservation is never silently resurrected; create a new reservation if more stock must be committed.</p></section>`;
-}
-
-function renderPackingDocument(document: ShipmentPackingDocument): string {
-  const rows = document.lines
-    .map(
-      (line) =>
-        `<tr><td>${escapeHtml(line.lineNumber)}</td><td>${escapeHtml(line.item)}</td><td>${escapeHtml(line.quantity)}</td><td>${escapeHtml(line.unit)}</td></tr>`,
-    )
-    .join('');
-  return `<section class="panel data-panel packing-document" data-packing-document><div class="panel__heading"><div><h2>Packing document ${escapeHtml(document.shipmentNumber)}</h2><p>Printable committed shipment facts</p></div></div><dl class="key-fact-grid"><div><dt>Sales order</dt><dd>${escapeHtml(document.orderId)}</dd></div><div><dt>Ship-from location</dt><dd>${escapeHtml(document.location)}</dd></div><div><dt>Shipped at</dt><dd>${escapeHtml(document.effectiveAt)}</dd></div><div><dt>External reference</dt><dd>${escapeHtml(document.externalReference)}</dd></div></dl><table><thead><tr><th>Line</th><th>Item</th><th>Quantity</th><th>Unit</th></tr></thead><tbody>${rows}</tbody></table><p class="print-guidance">Use the browser print command to print or save this packing document.</p></section>`;
 }
 
 type FormAdmissionDecision =
@@ -2646,6 +2608,16 @@ export function renderFormControl(
     readonly name?: string;
     readonly attributes?: string;
     readonly describedBy?: string;
+    /**
+     * CUSTOMIZE-6: the values a money field's stored currency is read from
+     * -- the record itself, and a line's header -- so the suffix names it.
+     */
+    readonly currencyRecord?: {
+      readonly values: Readonly<Record<string, unknown>>;
+    };
+    readonly currencyHeader?: {
+      readonly values: Readonly<Record<string, unknown>>;
+    };
   } = {},
 ): RenderedFormControl {
   const name =
@@ -2701,7 +2673,11 @@ export function renderFormControl(
     if (logical?.scale !== undefined) {
       const step =
         logical.scale === 0 ? '1' : `0.${'0'.repeat(logical.scale - 1)}1`;
-      const suffix = logicalSuffix(logical);
+      const suffix = logicalSuffix(
+        logical,
+        control.currencyRecord,
+        control.currencyHeader,
+      );
       return `<input type="number" inputmode="decimal" step="${step}"${kind} name="${name}" value="${current}" autocomplete="off" data-logical-field="${logical.logicalType}">${suffix ? ` <span class="field-unit" data-field-unit>${escapeHtml(suffix)}</span>` : ''}`;
     }
     switch (field.kind) {
@@ -3658,8 +3634,10 @@ export function groupedReportHtml(
   for (const key of ['after', 'export', 'result']) base.delete(key);
   const href = (params: URLSearchParams) =>
     '/?' + escapeHtml(params.toString());
+  // A filter's parameter is named by its path and field, as the request reads it.
   const filters = report.revision.body.filters.map((f) => {
-    const field = report.columns.find((c) => c.fieldId === f.fieldId)!;
+    const field = reportColumnFor(report, f)!;
+    const pid = filterParameterId(f);
     const input = (id: string, label: string, type: string) =>
       '<label>' +
       escapeHtml(label) +
@@ -3675,8 +3653,8 @@ export function groupedReportHtml(
         '<fieldset><legend>' +
         escapeHtml(field.label) +
         '</legend>' +
-        input(f.fieldId + '.from', 'From', 'date') +
-        input(f.fieldId + '.until', 'Before', 'date') +
+        input(pid + '.from', 'From', 'date') +
+        input(pid + '.until', 'Before', 'date') +
         '</fieldset>'
       );
     if (field.options)
@@ -3684,7 +3662,7 @@ export function groupedReportHtml(
         '<label>' +
         escapeHtml(field.label) +
         ' <select name="' +
-        escapeHtml(f.fieldId) +
+        escapeHtml(pid) +
         '"' +
         (f.kind === 'membership' ? ' multiple' : '') +
         '><option value="">All</option>' +
@@ -3694,7 +3672,7 @@ export function groupedReportHtml(
               '<option value="' +
               escapeHtml(o.id) +
               '"' +
-              (base.getAll(f.fieldId).includes(o.id) ? ' selected' : '') +
+              (base.getAll(pid).includes(o.id) ? ' selected' : '') +
               '>' +
               escapeHtml(o.label) +
               '</option>',
@@ -3702,13 +3680,13 @@ export function groupedReportHtml(
           .join('') +
         '</select></label>'
       );
-    return input(f.fieldId, field.label, 'text');
+    return input(pid, field.label, 'text');
   });
   const filterFields = new Set(
     report.revision.body.filters.flatMap((f) => [
-      f.fieldId,
-      f.fieldId + '.from',
-      f.fieldId + '.until',
+      filterParameterId(f),
+      filterParameterId(f) + '.from',
+      filterParameterId(f) + '.until',
     ]),
   );
   const hidden = [...base]
@@ -3770,9 +3748,9 @@ export function groupedReportHtml(
     (isMoney ? cell('Currency', partitionLabel(r)) : '') +
     r.cells
       .map((c, i) => {
-        const m = report.revision.body.measures[i]!;
+        const m = effectiveMeasures(report)[i]!;
         const coverage =
-          m.operator.kind === 'sum'
+          m.operator.kind !== 'count' && m.operator.kind !== 'distinctTargets'
             ? ' <small>' +
               c.recordsWithoutMeasure +
               (c.recordsWithoutMeasure === 1
@@ -3785,8 +3763,16 @@ export function groupedReportHtml(
           '<td data-label="' +
           escapeHtml(m.label) +
           '">' +
-          escapeHtml(c.value) +
+          // Tagged absence (an empty min, max or average) is never zero.
+          escapeHtml(c.value ?? 'No value') +
           (c.unitId ? ' ' + escapeHtml(c.unitId) : '') +
+          (c.exact
+            ? ' <small>exact ' +
+              escapeHtml(c.exact.sum) +
+              ' / ' +
+              c.exact.count +
+              '</small>'
+            : '') +
           coverage +
           '</td>'
         );

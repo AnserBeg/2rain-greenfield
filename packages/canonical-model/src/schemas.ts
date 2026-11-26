@@ -2226,6 +2226,14 @@ export const SurfaceLauncherSchema = z.strictObject({
     .optional(),
 });
 export type SurfaceLauncher = z.infer<typeof SurfaceLauncherSchema>;
+/**
+ * CUSTOMIZE-6 slice 2: the declared to-one relations from an amount's record
+ * to the record that holds its currency field. This is REPORTS-1 slice 2's
+ * link-path encoding (`ReportViaSchema`: one or two relation IDs, absent for
+ * the record itself), kept identical so a line-grain report resolves the code
+ * through the parent link it already requires.
+ */
+export const CurrencyViaSchema = z.array(CanonicalIdSchema).min(1).max(2);
 export const ReportCurrencyBindingSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('fixed'),
@@ -2234,6 +2242,8 @@ export const ReportCurrencyBindingSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('stored'),
     fieldId: CanonicalIdSchema,
+    /** Absent: the currency field is on the amount's own record. */
+    via: CurrencyViaSchema.optional(),
     // Sales accepts EUR as well as the two currencies of the frozen scalar
     // profile. This list belongs to the source declaration on this release.
     codes: z
@@ -2275,7 +2285,17 @@ const reportOperator = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('count') }),
   z.strictObject({ kind: z.literal('sum'), fieldId: CanonicalIdSchema }),
 ]);
-export const ReportChoicesSchema = z.strictObject({
+const reportOutputs = z
+  .array(
+    z.discriminatedUnion('kind', [
+      z.strictObject({ kind: z.literal('table') }),
+      z.strictObject({ kind: z.literal('csv') }),
+    ]),
+  )
+  .min(1)
+  .max(2);
+// Slice 1 choices. A v1 body keeps exactly this shape and its bytes.
+const ReportChoicesV1Schema = z.strictObject({
   dimensions: z
     .array(
       z.discriminatedUnion('kind', [
@@ -2301,17 +2321,9 @@ export const ReportChoicesSchema = z.strictObject({
     )
     .min(1)
     .max(8),
-  outputs: z
-    .array(
-      z.discriminatedUnion('kind', [
-        z.strictObject({ kind: z.literal('table') }),
-        z.strictObject({ kind: z.literal('csv') }),
-      ]),
-    )
-    .min(1)
-    .max(2),
+  outputs: reportOutputs,
 });
-export const ReportBodySchema = ReportChoicesSchema.extend({
+export const ReportBodyV1Schema = ReportChoicesV1Schema.extend({
   version: z.literal('grouped-report/v1'),
   source: z.discriminatedUnion('kind', [
     z.strictObject({
@@ -2326,6 +2338,112 @@ export const ReportBodySchema = ReportChoicesSchema.extend({
   ]),
   operands: z.array(reportField).max(64),
 });
+
+// REPORTS-1 slice 2 (ADR-0089 R5): every new variant rides a bumped body
+// version. A path names declared to-one relations from the grain record, at
+// most two (ADR-0089, "How a run is bounded").
+export const ReportViaSchema = z.array(CanonicalIdSchema).min(1).max(2);
+const fieldPath = {
+  fieldId: CanonicalIdSchema,
+  via: ReportViaSchema.optional(),
+};
+const ageDay = z.int().min(-36_600).max(36_600).nullable();
+export const ReportAgeBandSchema = z.strictObject({
+  bandId: z.string().regex(/^[a-z][a-z0-9_]{0,31}$/u),
+  label: LabelSchema,
+  // Inclusive civil-day edges; null is open-ended. Order, gaps and overlap
+  // are validated when a report is resolved.
+  from: ageDay,
+  through: ageDay,
+});
+export const ReportDimensionSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('direct'), ...fieldPath }),
+  z.strictObject({
+    kind: z.literal('calendar'),
+    ...fieldPath,
+    unit: z.enum(['day', 'week', 'month']),
+  }),
+  z.strictObject({
+    kind: z.literal('age'),
+    ...fieldPath,
+    bands: z.array(ReportAgeBandSchema).min(2).max(12),
+    absentLabel: LabelSchema,
+  }),
+]);
+export const ReportFilterV2Schema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('equals'), ...fieldPath }),
+  z.strictObject({ kind: z.literal('membership'), ...fieldPath }),
+  z.strictObject({ kind: z.literal('dateRange'), fieldId: CanonicalIdSchema }),
+]);
+export const ReportOperatorSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('count') }),
+  z.strictObject({ kind: z.literal('sum'), ...fieldPath }),
+  z.strictObject({ kind: z.literal('min'), ...fieldPath }),
+  z.strictObject({ kind: z.literal('max'), ...fieldPath }),
+  z.strictObject({ kind: z.literal('average'), ...fieldPath }),
+  z.strictObject({ kind: z.literal('distinctCount'), ...fieldPath }),
+  // Distinct canonical identities of the record a to-one path reaches, such
+  // as invoices at line grain.
+  z.strictObject({ kind: z.literal('distinctTargets'), via: ReportViaSchema }),
+]);
+const reportMeasureV2 = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('inline'),
+    measureId: CanonicalIdSchema,
+    label: LabelSchema,
+    operator: ReportOperatorSchema,
+  }),
+  // An approved named measure, bound by stable ID and contract revision.
+  z.strictObject({
+    kind: z.literal('approved'),
+    measureId: CanonicalIdSchema,
+    contractDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+  }),
+]);
+/** Author choices. A slice-1 shape resolves to its byte-identical v1 body. */
+export const ReportChoicesSchema = z.strictObject({
+  grain: z.enum(['record', 'line']).optional(),
+  dimensions: z.array(ReportDimensionSchema).min(1).max(4),
+  filters: z.array(ReportFilterV2Schema).max(16),
+  measures: z.array(reportMeasureV2).min(1).max(8),
+  outputs: reportOutputs,
+});
+export const ReportLinkSchema = z.strictObject({
+  via: ReportViaSchema,
+  entityId: CanonicalIdSchema,
+  listSurfaceId: CanonicalIdSchema,
+  queryId: CanonicalIdSchema,
+  readPermissionId: CanonicalIdSchema,
+  scope: z.enum(['company', 'tenant']),
+  // A line's declared parent must be admitted for the line to count.
+  required: z.boolean(),
+});
+export const ReportBodyV2Schema = z.strictObject({
+  version: z.literal('grouped-report/v2'),
+  source: z.strictObject({
+    kind: z.literal('generatedCollection'),
+    grain: z.enum(['record', 'line']),
+    listSurfaceId: CanonicalIdSchema,
+    queryId: CanonicalIdSchema,
+    entityId: CanonicalIdSchema,
+    readPermissionId: CanonicalIdSchema,
+    scope: z.enum(['company', 'tenant']),
+    parentRelationId: CanonicalIdSchema.optional(),
+  }),
+  // A named measure's body has no dimensions; a report has one to four.
+  dimensions: z.array(ReportDimensionSchema).max(4),
+  filters: z.array(ReportFilterV2Schema).max(16),
+  measures: z.array(reportMeasureV2).min(1).max(8),
+  outputs: reportOutputs,
+  links: z.array(ReportLinkSchema).max(4),
+  operands: z
+    .array(reportField.extend({ via: ReportViaSchema.optional() }))
+    .max(64),
+});
+export const ReportBodySchema = z.discriminatedUnion('version', [
+  ReportBodyV1Schema,
+  ReportBodyV2Schema,
+]);
 export const ReportRevisionSchema = z.strictObject({
   reportId: CanonicalIdSchema,
   revisionId: z.uuid(),
@@ -2336,6 +2454,25 @@ export const ReportRevisionSchema = z.strictObject({
   contractDigest: z.string().regex(/^[a-f0-9]{64}$/u),
   body: ReportBodySchema,
 });
+/** A reusable named measure: trialled on authorized data, then approved. */
+export const MeasureRevisionSchema = z.strictObject({
+  measureId: CanonicalIdSchema,
+  revisionId: z.uuid(),
+  predecessorDigest: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/u)
+    .nullable(),
+  contractDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+  status: z.enum(['trial', 'approved']),
+  body: ReportBodyV2Schema,
+});
+export type MeasureRevision = z.infer<typeof MeasureRevisionSchema>;
+export type ReportBodyV1 = z.infer<typeof ReportBodyV1Schema>;
+export type ReportBodyV2 = z.infer<typeof ReportBodyV2Schema>;
+export type ReportDimension = z.infer<typeof ReportDimensionSchema>;
+export type ReportOperator = z.infer<typeof ReportOperatorSchema>;
+export type ReportLink = z.infer<typeof ReportLinkSchema>;
+export type ReportAgeBand = z.infer<typeof ReportAgeBandSchema>;
 export type ReportBody = z.infer<typeof ReportBodySchema>;
 export type ReportChoices = z.infer<typeof ReportChoicesSchema>;
 export type ReportRevision = z.infer<typeof ReportRevisionSchema>;
@@ -2359,6 +2496,7 @@ export type CompiledPresentation = z.infer<typeof CompiledPresentationSchema>;
 const normalizedV6SurfaceDefinition = normalizedSurfaceDefinition.extend({
   presentation: SurfacePresentationRevisionSchema.optional(),
   report: ReportRevisionSchema.optional(),
+  measure: MeasureRevisionSchema.optional(),
   popupActions: z.array(PopupRevisionSchema).min(1).optional(),
   board: SurfaceBoardSchema.optional(),
   recordTemplateBinding: RecordTemplateBindingSchema.optional(),

@@ -181,6 +181,11 @@ interface RenderContext {
    */
   readonly lineSource?: boolean;
   /**
+   * CUSTOMIZE-6 slice 2: the header of a line row, whose stored currency a
+   * line amount is in.
+   */
+  readonly header?: EditorRow | undefined;
+  /**
    * How a derived value reads when it names a record, such as the price list
    * that priced a line: that record's label, read under current authority.
    */
@@ -251,6 +256,8 @@ export function renderValueControl(context: RenderContext): string {
     {
       name,
       attributes: shared,
+      currencyRecord: row,
+      ...(context.header ? { currencyHeader: context.header } : {}),
     },
   );
   if (!control.storedValueUnavailable) return `${control.html}${error.html}`;

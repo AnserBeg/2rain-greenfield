@@ -5,7 +5,7 @@
     {
       "name": "tax-starter-pinned",
       "claim": "The starter rates are exactly the reviewed Canadian table.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "('GST-PST-BC', '2013-04-01', 'ca-bc.pst', 7, 0,",
       "replacement": "('GST-PST-BC', '2013-04-01', 'ca-bc.pst', 8, 0,",
       "test": {
@@ -22,7 +22,7 @@
     {
       "name": "tax-starter-never-overwrites",
       "claim": "Re-applying the starter changes nothing and never touches a code the tenant has.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "CONTINUE WHEN EXISTS (SELECT FROM platform.tax_catalog_codes c\n      WHERE (c.tenant_id, c.environment_id, c.code) = (t, e, starter.code));",
       "replacement": "CONTINUE WHEN false;",
       "test": {
@@ -39,7 +39,7 @@
     {
       "name": "tax-read-codes-at-date",
       "claim": "The codes offered on a day carry the version in force that day.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "AND w.effective_from <= at ORDER BY",
       "replacement": "ORDER BY",
       "test": {
@@ -56,7 +56,7 @@
     {
       "name": "tax-read-code-at-date",
       "claim": "One code read on a day carries its version in force that day.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": " AND v.effective_from <= at\n",
       "replacement": "\n",
       "test": {
@@ -73,7 +73,7 @@
     {
       "name": "tax-read-codes-inactive",
       "claim": "An inactive code is never offered.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "WHERE c.tenant_id = t AND c.environment_id = e AND c.active",
       "replacement": "WHERE c.tenant_id = t AND c.environment_id = e",
       "test": {
@@ -90,7 +90,7 @@
     {
       "name": "tax-read-code-inactive",
       "claim": "An inactive code refuses an exact read.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "IF NOT held.active THEN RAISE EXCEPTION 'tax.codeInactive'; END IF;",
       "replacement": "",
       "test": {
@@ -107,7 +107,7 @@
     {
       "name": "tax-read-codes-tenant",
       "claim": "Another tenant reads none of these codes.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "WHERE c.tenant_id = t AND c.environment_id = e AND c.active",
       "replacement": "WHERE c.active",
       "test": {
@@ -124,7 +124,7 @@
     {
       "name": "tax-read-registrations-tenant",
       "claim": "Another tenant reads none of these registrations.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "WHERE g.tenant_id = north_star_internal.trusted_tenant_id() AND g.environment_id = north_star_internal.trusted_environment_id()\n      AND g.company_id = company",
       "replacement": "WHERE g.company_id = company",
       "test": {
@@ -141,7 +141,7 @@
     {
       "name": "tax-version-strictly-increasing",
       "claim": "A version must start after the latest version of its code.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "IF latest IS NOT NULL AND start_day <= latest THEN",
       "replacement": "IF false AND latest IS NOT NULL AND start_day <= latest THEN",
       "test": {
@@ -158,7 +158,7 @@
     {
       "name": "tax-version-one-per-day",
       "claim": "Storage holds at most one version of a code per day.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "  CONSTRAINT tax_catalog_versions_one_per_day UNIQUE (tenant_id, environment_id, code_id, effective_from),\n",
       "replacement": "",
       "test": {
@@ -175,7 +175,7 @@
     {
       "name": "tax-version-append-only",
       "claim": "A stored version never changes.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "CREATE TRIGGER tax_catalog_versions_append_only BEFORE UPDATE OR DELETE OR TRUNCATE",
       "replacement": "CREATE TRIGGER tax_catalog_versions_append_only BEFORE TRUNCATE",
       "test": {
@@ -192,7 +192,7 @@
     {
       "name": "tax-rate-range",
       "claim": "A component rate is between 0 and 100 percent.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "CHECK (rate_percent >= 0 AND rate_percent <= 100)",
       "replacement": "CHECK (rate_percent >= 0 AND rate_percent <= 1000)",
       "test": {
@@ -209,7 +209,7 @@
     {
       "name": "tax-recoverable-range",
       "claim": "A recoverable share is between 0 and 100 percent.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "CHECK (recoverable_percent >= 0 AND recoverable_percent <= 100)",
       "replacement": "CHECK (recoverable_percent >= 0 AND recoverable_percent <= 1000)",
       "test": {
@@ -226,7 +226,7 @@
     {
       "name": "tax-registration-no-overlap",
       "claim": "A company has at most one registration in force per jurisdiction on any day.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "  CONSTRAINT tax_registrations_no_overlap EXCLUDE USING gist (\n    tenant_id WITH =, environment_id WITH =, company_id WITH =, jurisdiction_id WITH =,\n    daterange(effective_from, effective_to, '[)') WITH &&),\n",
       "replacement": "",
       "test": {
@@ -243,7 +243,7 @@
     {
       "name": "tax-registration-range",
       "claim": "A registration ends after it starts.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "  CONSTRAINT tax_registrations_range CHECK (effective_to IS NULL OR effective_to > effective_from),\n",
       "replacement": "",
       "test": {
@@ -260,7 +260,7 @@
     {
       "name": "tax-no-table-grant",
       "claim": "No non-owner role holds a privilege on a tax table.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "EXECUTE format('REVOKE ALL ON platform.%I FROM PUBLIC, north_star_runtime', tab);",
       "replacement": "EXECUTE format('GRANT SELECT ON platform.%I TO north_star_runtime', tab);",
       "test": {
@@ -277,7 +277,7 @@
     {
       "name": "tax-forced-rls",
       "claim": "Every tenant tax table forces row-level security.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "EXECUTE format('ALTER TABLE platform.%I FORCE ROW LEVEL SECURITY', tab);",
       "replacement": "EXECUTE format('ALTER TABLE platform.%I NO FORCE ROW LEVEL SECURITY', tab);",
       "test": {
@@ -294,7 +294,7 @@
     {
       "name": "tax-function-execute",
       "claim": "Only north_star_runtime executes the five platform functions; no one executes the setters.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC', routine);",
       "replacement": "EXECUTE format('COMMENT ON FUNCTION %s IS NULL', routine);",
       "test": {
@@ -311,7 +311,7 @@
     {
       "name": "tax-release-fence",
       "claim": "A review is bound to the release AND fence it was reviewed under.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "WHERE (tenant_id, environment_id, release_id, fence) = (t, e, r.release_id, r.fence) FOR SHARE;",
       "replacement": "WHERE (tenant_id, environment_id, release_id) = (t, e, r.release_id) FOR SHARE;",
       "test": {
@@ -328,7 +328,7 @@
     {
       "name": "tax-review-single-use",
       "claim": "A review is confirmed at most once.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "AND consumed_at IS NULL FOR UPDATE;",
       "replacement": "FOR UPDATE;",
       "test": {
@@ -345,7 +345,7 @@
     {
       "name": "tax-review-digest",
       "claim": "A confirm applies only the exact digest that was reviewed.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "IF NOT FOUND OR r.digest IS DISTINCT FROM reviewed_digest THEN",
       "replacement": "IF NOT FOUND THEN",
       "test": {
@@ -362,7 +362,7 @@
     {
       "name": "tax-review-principal",
       "claim": "Only the reviewing principal confirms a review.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "WHERE (tenant_id, environment_id, review_id, principal_id) = (t, e, review, p);",
       "replacement": "WHERE (tenant_id, environment_id, review_id) = (t, e, review);",
       "test": {
@@ -379,7 +379,7 @@
     {
       "name": "tax-code-write-grant",
       "claim": "A code change needs the catalog WRITE grant, not the read grant.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "tax_granted(NULL, 'northstar.tax:permission.tax_catalog_write', 'tenant')",
       "replacement": "tax_granted(NULL, 'northstar.tax:permission.tax_catalog_read', 'tenant')",
       "test": {
@@ -396,7 +396,7 @@
     {
       "name": "tax-registration-write-grant",
       "claim": "A registration needs the registration WRITE grant, not the read grant.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "tax_granted(company, 'northstar.tax:permission.registration_write', 'company')",
       "replacement": "tax_granted(company, 'northstar.tax:permission.registration_read', 'company')",
       "test": {
@@ -413,7 +413,7 @@
     {
       "name": "tax-shared-code-tenant-wide",
       "claim": "Only a tenant-wide membership changes a tenant-shared code (T2).",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "WHEN 'tenant' THEN m.legal_entity_id IS NULL",
       "replacement": "WHEN 'tenant' THEN true",
       "test": {
@@ -430,7 +430,7 @@
     {
       "name": "tax-company-scope",
       "claim": "A company-scoped principal reads and writes only its own company, the company taken from the stored row.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "ELSE (m.legal_entity_id IS NULL OR m.legal_entity_id = company) END)",
       "replacement": "ELSE true END)",
       "test": {
@@ -462,7 +462,7 @@
     {
       "name": "tax-writer-read-committed",
       "claim": "Catalog and registration writers run only under READ COMMITTED.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "IF current_setting('transaction_isolation') <> 'read committed' THEN",
       "replacement": "IF false THEN",
       "test": {
@@ -484,7 +484,7 @@
     {
       "name": "tax-registration-ends-once",
       "claim": "An ended registration cannot be ended again.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": " AND effective_to IS NULL\n      RETURNING registration_id INTO chosen;",
       "replacement": "\n      RETURNING registration_id INTO chosen;",
       "test": {
@@ -501,7 +501,7 @@
     {
       "name": "tax-registration-company-stored",
       "claim": "A registration named by ID takes its company from the stored row, never from the proposal.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "  IF proposal ? 'registrationId' THEN",
       "replacement": "  IF proposal ? 'registrationId' AND NOT proposal ? 'companyId' THEN",
       "test": {
@@ -518,7 +518,7 @@
     {
       "name": "tax-confirm-live-grant",
       "claim": "The write grant is re-checked at confirm, so a grant revoked after the review refuses.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "  IF NOT north_star_internal.tax_may_write(r.action, r.proposal) THEN",
       "replacement": "  IF false THEN",
       "test": {
@@ -535,7 +535,7 @@
     {
       "name": "tax-review-size",
       "claim": "A reviewed proposal is at most 16 KiB.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "octet_length(proposal::text) <= 16384",
       "replacement": "octet_length(proposal::text) <= 1048576",
       "test": {
@@ -552,7 +552,7 @@
     {
       "name": "tax-read-codes-grant",
       "claim": "Reading the codes needs the catalog read grant.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "IF at IS NULL OR NOT north_star_internal.tax_granted(NULL, 'northstar.tax:permission.tax_catalog_read', 'any') THEN",
       "replacement": "IF at IS NULL THEN",
       "test": {
@@ -569,7 +569,7 @@
     {
       "name": "tax-read-code-grant",
       "claim": "Reading one code needs the catalog read grant.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "IF NOT north_star_internal.tax_granted(NULL, 'northstar.tax:permission.tax_catalog_read', 'any') OR at IS NULL THEN",
       "replacement": "IF at IS NULL THEN",
       "test": {
@@ -586,7 +586,7 @@
     {
       "name": "tax-read-registrations-grant",
       "claim": "Reading registrations needs the registration read grant, not only a membership covering the company.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "NOT north_star_internal.tax_granted(company, 'northstar.tax:permission.registration_read', 'company')",
       "replacement": "NOT EXISTS (SELECT FROM platform.current_policy_memberships m WHERE (m.tenant_id, m.environment_id, m.principal_id) = (north_star_internal.trusted_tenant_id(), north_star_internal.trusted_environment_id(), nullif(current_setting('north_star.principal_id', true), '')::uuid) AND m.revoked_at IS NULL AND (m.legal_entity_id IS NULL OR m.legal_entity_id = company))",
       "test": {
@@ -603,7 +603,7 @@
     {
       "name": "tax-company-live-review",
       "claim": "A registration for a company that is not a live legal entity is refused at review.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "  IF requested_action = 'putRegistration' AND NOT proposal ? 'registrationId'\n     AND NOT north_star_internal.tax_company_live((proposal->>'companyId')::uuid, false) THEN\n    RAISE EXCEPTION 'tax.companyUnavailable'; END IF;\n",
       "replacement": "",
       "test": {
@@ -620,7 +620,7 @@
     {
       "name": "tax-company-live-confirm",
       "claim": "A company archived after the review refuses the registration at confirm (share-locked until commit).",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "  IF NOT north_star_internal.tax_company_live((proposal->>'companyId')::uuid, true) THEN\n    RAISE EXCEPTION 'tax.companyUnavailable'; END IF;\n",
       "replacement": "",
       "test": {
@@ -637,7 +637,7 @@
     {
       "name": "tax-registration-date-iso",
       "claim": "A registration end must be an ISO calendar date, so \"infinity\" is refused by name.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "        AND proposal->>'effectiveTo' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'\n        AND pg_input_is_valid(proposal->>'effectiveTo', 'date')) IS NOT TRUE THEN RAISE EXCEPTION 'tax.invalidRegistration'; END IF;",
       "replacement": "        AND pg_input_is_valid(proposal->>'effectiveTo', 'date')) IS NOT TRUE THEN RAISE EXCEPTION 'tax.invalidRegistration'; END IF;",
       "test": {
@@ -654,7 +654,7 @@
     {
       "name": "tax-registration-finite",
       "claim": "Storage never holds an infinite registration date.",
-      "file": "db/migrations/0071_tax_catalog.sql",
+      "file": "db/migrations/0072_tax_catalog.sql",
       "original": "  CONSTRAINT tax_registrations_finite CHECK (isfinite(effective_from) AND (effective_to IS NULL OR isfinite(effective_to))),\n",
       "replacement": "",
       "test": {

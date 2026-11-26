@@ -1,7 +1,7 @@
 # TAX-EVIDENCE-1-s1 — the tax catalog: jurisdictions, codes with append-only dated versions, company registrations, a Canadian starter as data
 
 Status: built on packet/TAX-EVIDENCE-1-s1 (base main 8014e43f1). Tier: **Critical** (money, migration, grant SQL; rule 18). Stops: none.
-Design: CALENDAR-TAX design note part B s1 plus the Fable design read's binding amendments T1-T7. Migration `0071_tax_catalog.sql` is provisional; the integrator renumbers.
+Design: CALENDAR-TAX design note part B s1 plus the Fable design read's binding amendments T1-T7. Migration `0072_tax_catalog.sql` is provisional; the integrator renumbers.
 CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/45841982614
 
 ## Claims
@@ -70,7 +70,7 @@ With Docker: `node --import tsx --test test/postgres/tax-catalog.test.ts`. Expec
   "packet": "TAX-EVIDENCE-1-s1",
   "base": "8014e43f1524ad834afd9235203227a9c9b19140",
   "head": "f800e65cb90f2db46ca646b44a50442de6afedd3",
-  "changedPaths": ["db/migrations/0071_tax_catalog.sql", "db/schema.snapshot.json", "packages/dev-tooling/src/tenant-completeness.ts", "test/architecture/release-persistence-boundary.test.ts", "test/architecture/repository-hygiene.test.ts", "test/architecture/tenant-completeness.manifest.json", "test/architecture/tenant-completeness.test.ts", "test/evidence/TAX-EVIDENCE-1-s1.expected-red.json", "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts", "test/postgres/tax-catalog.test.ts", "test/postgres/trust-substrate.test.ts"],
+  "changedPaths": ["db/migrations/0072_tax_catalog.sql", "db/schema.snapshot.json", "packages/dev-tooling/src/tenant-completeness.ts", "test/architecture/release-persistence-boundary.test.ts", "test/architecture/repository-hygiene.test.ts", "test/architecture/tenant-completeness.manifest.json", "test/architecture/tenant-completeness.test.ts", "test/evidence/TAX-EVIDENCE-1-s1.expected-red.json", "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts", "test/postgres/tax-catalog.test.ts", "test/postgres/trust-substrate.test.ts"],
   "symbols": [{"path": "packages/dev-tooling/src/tenant-completeness.ts", "name": "tenantIndependentV1TableAuthorities"}]
 }
 ```

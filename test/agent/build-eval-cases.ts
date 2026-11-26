@@ -169,6 +169,21 @@ export type Expectation =
       /** The list surface local the map view is on starts with this. */
       readonly list: string;
       readonly label: readonly string[];
+    }
+  | {
+      /** REPORTS-1 slice 2: a grouped report, or a named measure. */
+      readonly outcome: 'report';
+      /** The report source list surface local starts with this. */
+      readonly list: string;
+      readonly label: readonly string[];
+      /** Dimension kinds the new report must use, in any order. */
+      readonly dimensions?: readonly ('direct' | 'calendar' | 'age')[];
+      /** Operator kinds its measures must include. */
+      readonly operators: readonly string[];
+      /** A named measure (trial) instead of a report. */
+      readonly measure?: true;
+      /** The report must be one row per line. */
+      readonly grain?: 'line';
     };
 
 export type Category =
@@ -1361,6 +1376,64 @@ export const BUILD_CASES: readonly BuildCase[] = [
       ],
     },
   },
+  // CUSTOMIZE-6 slice 2 (rule 12): the same kinds on line tables, with a
+  // line amount in its header's currency (field service) and fixed-currency
+  // invoice lines (distribution). Written by hand before any run.
+  {
+    id: 'L05',
+    split: 'dev',
+    category: 'module',
+    request:
+      "Track work orders with a name and the currency the customer is billed in (CAD, USD or EUR). Each work order has lines: the task, the hours worked to two decimals, an hourly rate in the work order's currency, and notes for the line.",
+    expect: {
+      outcome: 'module',
+      allowedKinds: MODULE,
+      types: [
+        {
+          names: ['work order', 'order'],
+          fields: [currency('currency', 'billing currency')],
+          lines: {
+            fields: [
+              text('task'),
+              quantity(
+                ['h', 'hour', 'hours', 'hr'],
+                2,
+                'hours',
+                'hours worked',
+              ),
+              money('header', 'hourly rate', 'rate'),
+              longText('notes', 'line notes'),
+            ],
+          },
+        },
+      ],
+    },
+  },
+  {
+    id: 'L06',
+    split: 'test',
+    category: 'module',
+    request:
+      'Invoices with a customer name and line items: a description, a whole-number quantity, the amount in Canadian dollars, and a discount percent with two decimals.',
+    expect: {
+      outcome: 'module',
+      allowedKinds: MODULE,
+      types: [
+        {
+          names: ['invoice'],
+          fields: [text('customer', 'customer name')],
+          lines: {
+            fields: [
+              text('description'),
+              number('quantity', 'qty'),
+              money('CAD', 'amount', 'line amount'),
+              decimal(2, 'discount percent', 'discount'),
+            ],
+          },
+        },
+      ],
+    },
+  },
 ];
 
 /**
@@ -1553,6 +1626,95 @@ export const RECORD_TEMPLATE_CASES: readonly BuildCase[] = [
  * before any run, and NOT part of the 40 scored in AI-BUILD-1 slice 2; run
  * them with `--cases P01,P02` once added to BUILD_CASES by a later slice.
  */
+export const REPORT_FOLLOWUP_CASES: readonly BuildCase[] = [
+  // Written by hand before any run, from the request text and ADR-0089.
+  {
+    id: 'R01',
+    split: 'dev',
+    category: 'follow-up',
+    request:
+      'Show invoice balances by how overdue they are: not yet due, 0 to 30, 31 to 60, 61 to 90 and over 90 days.',
+    expect: {
+      outcome: 'report',
+      list: 'customer_invoice_list',
+      label: ['aging', 'overdue', 'balance', 'invoice'],
+      dimensions: ['age'],
+      operators: ['sum'],
+    },
+  },
+  {
+    id: 'R02',
+    split: 'test',
+    category: 'follow-up',
+    request:
+      'How many invoices did we issue each month? Let me download the table.',
+    expect: {
+      outcome: 'report',
+      list: 'customer_invoice_list',
+      label: ['month', 'invoice', 'issued'],
+      dimensions: ['calendar'],
+      operators: ['count'],
+    },
+  },
+  {
+    id: 'R03',
+    split: 'dev',
+    category: 'follow-up',
+    request:
+      'Count invoice lines by item and how many different invoices each item appears on.',
+    expect: {
+      outcome: 'report',
+      list: 'customer_invoice_line_list',
+      label: ['item', 'line', 'invoice'],
+      dimensions: ['direct'],
+      operators: ['count', 'distinctTargets'],
+      grain: 'line',
+    },
+  },
+  {
+    id: 'R04',
+    split: 'test',
+    category: 'follow-up',
+    request:
+      'For each customer, what is the smallest, largest and average invoice total?',
+    expect: {
+      outcome: 'report',
+      list: 'customer_invoice_list',
+      label: ['customer', 'invoice', 'total'],
+      dimensions: ['direct'],
+      operators: ['min', 'max', 'average'],
+    },
+  },
+  {
+    id: 'R05',
+    split: 'dev',
+    category: 'follow-up',
+    request:
+      'Define an "Invoiced amount" measure that totals invoice totals, so I can try it before we approve it for other reports.',
+    expect: {
+      outcome: 'report',
+      list: 'customer_invoice_list',
+      label: ['invoiced amount', 'invoiced'],
+      operators: ['sum'],
+      measure: true,
+    },
+  },
+  {
+    id: 'R06',
+    split: 'test',
+    category: 'follow-up',
+    request:
+      'I want one agreed number for how many customers we billed. Set it up as a measure we can trial first.',
+    expect: {
+      outcome: 'report',
+      list: 'customer_invoice_list',
+      label: ['customers', 'billed', 'customer'],
+      operators: ['distinctCount'],
+      measure: true,
+    },
+  },
+];
+
 export const MAP_FOLLOWUP_CASES: readonly BuildCase[] = [
   {
     id: 'P01',
@@ -1799,6 +1961,8 @@ export function scoredKinds(c: BuildCase): readonly string[] {
   if (e.outcome === 'map') return ['addMapViewRevision'];
   if (e.outcome === 'templateBinding')
     return ['addRecordTemplateBindingRevision'];
+  if (e.outcome === 'report')
+    return [e.measure ? 'addMeasureRevision' : 'addReportRevision'];
   if (e.outcome === 'validation') return ['addValidation'];
   // B01-B03 score one activated rate-plan structure (build-eval: kinds[0]).
   if (e.outcome === 'ratePlan') return ['addRatePlanVersion'];
@@ -1856,9 +2020,19 @@ export const EVAL_CASE_EXCEPTIONS: Readonly<Record<string, EvalCaseException>> =
       'Only the hostile probe H01 names it, as a kind that must not be drafted.',
     ),
     unNarrowPermission: noCase('No request removes an action restriction.'),
-    addReportRevision: noCase(
-      'REPORTS merged drafter support on 2026-11-22 without a BUILD_CASES case (rule 12 owed).',
-    ),
+    // Rule 12 debt handed back to its owner (AI-RELY-1 s1 review, item 5).
+    addReportRevision: {
+      since: '2026-11-22',
+      owner: 'REPORTS-1 slice 3',
+      reason:
+        'R01-R04 are written (REPORT_FOLLOWUP_CASES) but not yet in BUILD_CASES; they need a capped live run.',
+    },
+    addMeasureRevision: {
+      since: '2026-11-25',
+      owner: 'REPORTS-1 slice 3',
+      reason:
+        'R05-R06 are written (REPORT_FOLLOWUP_CASES) but not yet in BUILD_CASES; they need a capped live run.',
+    },
     addMapViewRevision: {
       since: '2026-11-22',
       owner: 'PLANNER-1 slice 2',

@@ -32,7 +32,10 @@ import { generateWorkflowSdk } from '../../packages/postgres-provider/src/workfl
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
 import { INVENTORY_WRITE_INVARIANTS } from '../../packages/postgres-provider/src/inventory-write-invariants.js';
 import { COMPANY, worldOver } from '../agent/agent-world.js';
-import { exerciseWorkflowTriggerReader } from '../helpers/workflow-trigger-reader.js';
+import {
+  exerciseWorkflowTriggerReader,
+  workflowTriggerPredecessorRelease,
+} from '../helpers/workflow-trigger-reader.js';
 import { RecordCreatedTriggerSchema } from '../../packages/canonical-model/src/schemas.js';
 import {
   LINEAGE_INSTALL_VOLUME,
@@ -57,9 +60,11 @@ test(
       async ({ connection, pool }) => {
         const databaseUrl = `postgresql://postgres@${String(connection.host)}:${String(connection.port)}/postgres`;
         const tenantSlug = 'workflow-record';
+        const compiledApplication = workflowTriggerPredecessorRelease();
         const seeded = await startComposedApplication({
           databaseUrl,
           tenantSlug,
+          compiledApplication,
           port: 0,
           seedProfile: 'distributor',
         });
@@ -67,10 +72,12 @@ test(
         const runtime = await openComposedApplicationRuntime({
           databaseUrl,
           tenantSlug,
+          compiledApplication,
         });
         const customization = await openCustomizeService({
           databaseUrl,
           tenantSlug,
+          compiledApplication,
         });
         const workerPool = rolePool(
           databaseUrl,

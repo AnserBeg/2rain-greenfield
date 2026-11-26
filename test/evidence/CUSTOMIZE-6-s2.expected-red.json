@@ -1,0 +1,442 @@
+{
+  "version": 1,
+  "packet": "CUSTOMIZE-6-s2",
+  "entries": [
+    {
+      "name": "line-currency-path-not-parent",
+      "claim": "A stored currency path is one relation: the line's own parent link.",
+      "file": "packages/canonical-model/src/logical-field-bindings.ts",
+      "original": "  if (via.length !== 1) return null;",
+      "replacement": "  if (via.length > 2) return null;",
+      "test": {
+        "files": ["test/unit/line-logical-field.test.ts"],
+        "namePattern": "^the report source refuses a currency path that is not the line parent link$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-logical-field.test.ts",
+          "name": "the report source refuses a currency path that is not the line parent link",
+          "expected": "a two-hop currency path was admitted"
+        }
+      ]
+    },
+    {
+      "name": "line-currency-path-reference-link",
+      "claim": "A reference link from the line is never a currency path (a link can be repointed).",
+      "file": "packages/canonical-model/src/logical-field-bindings.ts",
+      "original": "    parent.ownership === 'parentScopedChild' &&",
+      "replacement": "    true &&",
+      "test": {
+        "files": ["test/unit/line-logical-field.test.ts"],
+        "namePattern": "^a reference link from the line is not a currency path$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-logical-field.test.ts",
+          "name": "a reference link from the line is not a currency path",
+          "expected": "a reference link was admitted"
+        }
+      ]
+    },
+    {
+      "name": "line-currency-path-foreign-source",
+      "claim": "A currency path starts at the amount's own record type.",
+      "file": "packages/canonical-model/src/logical-field-bindings.ts",
+      "original": "    parent.sourceEntity.targetId === entityId",
+      "replacement": "    true",
+      "test": {
+        "files": ["test/unit/line-logical-field.test.ts"],
+        "namePattern": "^a parent link from another record type is not the line's currency path$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-logical-field.test.ts",
+          "name": "a parent link from another record type is not the line's currency path",
+          "expected": "a path from another record type was admitted"
+        }
+      ]
+    },
+    {
+      "name": "line-currency-path-retired-link",
+      "claim": "A retired parent link is not a currency path.",
+      "file": "packages/canonical-model/src/logical-field-bindings.ts",
+      "original": "    (parent.lifecycle ?? 'active') === 'active' &&",
+      "replacement": "    true &&",
+      "test": {
+        "files": ["test/unit/line-logical-field.test.ts"],
+        "namePattern": "^a retired parent link is not a currency path$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-logical-field.test.ts",
+          "name": "a retired parent link is not a currency path",
+          "expected": "a retired parent link was admitted"
+        }
+      ]
+    },
+    {
+      "name": "line-header-currency-undeclared",
+      "claim": "A line amount read through the path reads a declared currency field of the header.",
+      "file": "packages/canonical-model/src/logical-field-bindings.ts",
+      "original": "            !(definition.logicalFields ?? []).some(",
+      "replacement": "            false && !(definition.logicalFields ?? []).some(",
+      "test": {
+        "files": ["test/unit/line-logical-field.test.ts"],
+        "namePattern": "^a header currency read through the path must be a declared currency field of the header$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-logical-field.test.ts",
+          "name": "a header currency read through the path must be a declared currency field of the header",
+          "expected": "an undeclared header currency was bound"
+        }
+      ]
+    },
+    {
+      "name": "line-path-amount-undeclared",
+      "claim": "Only a declared money field reads its currency through a path, so the reader floor always sees a path.",
+      "file": "packages/canonical-model/src/normalize.ts",
+      "original": "          currency.via &&\n          !(revision.logicalFields ?? []).some(",
+      "replacement": "          false &&\n          !(revision.logicalFields ?? []).some(",
+      "test": {
+        "files": ["test/unit/line-logical-field.test.ts"],
+        "namePattern": "^only a declared money field reads its currency through a path$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-logical-field.test.ts",
+          "name": "only a declared money field reads its currency through a path",
+          "expected": "an undeclared amount read its currency through a path"
+        }
+      ]
+    },
+    {
+      "name": "line-retired-currency-any-type",
+      "claim": "Only the holding record type's own retired currency field stays bound unvalidated (slice-1 follow-up).",
+      "file": "packages/canonical-model/src/normalize.ts",
+      "original": "          holderField?.entity.targetId === holder &&\n          holderField.lifecycle === 'retired'",
+      "replacement": "          holderField?.lifecycle === 'retired'",
+      "test": {
+        "files": ["test/unit/line-logical-field.test.ts"],
+        "namePattern": "^a retired currency field of another record type is not skipped as bound$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-logical-field.test.ts",
+          "name": "a retired currency field of another record type is not skipped as bound",
+          "expected": "another record type's retired currency was skipped"
+        }
+      ]
+    },
+    {
+      "name": "line-retired-currency-validated",
+      "claim": "A retired currency field, on the header or the line, leaves its amounts bound and later compiles pass (rule 10).",
+      "file": "packages/canonical-model/src/normalize.ts",
+      "original": "          holderField?.entity.targetId === holder &&\n          holderField.lifecycle === 'retired'",
+      "replacement": "          false &&\n          holderField.lifecycle === 'retired'",
+      "test": {
+        "files": ["test/unit/line-logical-field.test.ts"],
+        "namePattern": "^rule 10: a retired header currency leaves its line amounts bound, and later compiles still pass$|^rule 10: a retired line currency leaves its line amounts bound, and later compiles still pass$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-logical-field.test.ts",
+          "name": "rule 10: a retired header currency leaves its line amounts bound, and later compiles still pass",
+          "expected": "a retired header currency refused a later compile"
+        },
+        {
+          "file": "test/unit/line-logical-field.test.ts",
+          "name": "rule 10: a retired line currency leaves its line amounts bound, and later compiles still pass",
+          "expected": "a retired line currency refused a later compile"
+        }
+      ]
+    },
+    {
+      "name": "line-floor-line-declaration-ignored",
+      "claim": "A logical field on a line table raises the floor to the line rung.",
+      "file": "packages/canonical-model/src/logical-field-bindings.ts",
+      "original": "  return onLine || throughPath\n",
+      "replacement": "  return throughPath\n",
+      "test": {
+        "files": ["test/unit/line-logical-field.test.ts"],
+        "namePattern": "^the line rung: line declarations raise the floor, nothing else does$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-logical-field.test.ts",
+          "name": "the line rung: line declarations raise the floor, nothing else does",
+          "expected": "a line declaration did not raise the floor"
+        }
+      ]
+    },
+    {
+      "name": "line-floor-path-ignored",
+      "claim": "An amount read through a path raises the floor to the line rung, even in a forged revision.",
+      "file": "packages/canonical-model/src/logical-field-bindings.ts",
+      "original": "  return onLine || throughPath\n",
+      "replacement": "  return onLine\n",
+      "test": {
+        "files": ["test/unit/line-logical-field.test.ts"],
+        "namePattern": "^a forged path-read currency raises the floor without a line declaration$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-logical-field.test.ts",
+          "name": "a forged path-read currency raises the floor without a line declaration",
+          "expected": "a path-read currency did not raise the floor"
+        }
+      ]
+    },
+    {
+      "name": "line-rung-unexplained",
+      "claim": "Serving refuses the line rung on a release without line logical fields.",
+      "file": "packages/postgres-provider/src/logical-field-admission.ts",
+      "original": "    floor === LOGICAL_FIELD_READER &&\n    surfaceFloor === LINE_LOGICAL_FIELD_READER",
+      "replacement": "    false &&\n    surfaceFloor === LINE_LOGICAL_FIELD_READER",
+      "test": {
+        "files": ["test/unit/line-logical-field.test.ts"],
+        "namePattern": "^serving refuses line logical fields below the line rung, and the line rung without them$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-logical-field.test.ts",
+          "name": "serving refuses line logical fields below the line rung, and the line rung without them",
+          "expected": "an unexplained line rung was served"
+        }
+      ]
+    },
+    {
+      "name": "line-allowed-texts-contract-unchecked",
+      "claim": "Admission refuses a write contract whose allowedTexts differ from the field's declared allowed values (slice-1 follow-up).",
+      "file": "packages/postgres-provider/src/logical-field-admission.ts",
+      "original": "        canonicalize(carried ?? null) !==",
+      "replacement": "        false && canonicalize(carried ?? null) !==",
+      "test": {
+        "files": ["test/unit/line-logical-field.test.ts"],
+        "namePattern": "^the write contracts must carry exactly the declared allowed values$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-logical-field.test.ts",
+          "name": "the write contracts must carry exactly the declared allowed values",
+          "expected": "a contract without its declared codes was admitted"
+        }
+      ]
+    },
+    {
+      "name": "line-allowed-texts-activation-unchecked",
+      "claim": "Activation runs the write-contract allowed-values comparison.",
+      "file": "packages/postgres-provider/src/release-repository.ts",
+      "original": "          ? allowedTextsContractProblem(catalog, revision.desiredState)",
+      "replacement": "          ? null",
+      "test": {
+        "files": ["test/postgres/releases.test.ts"],
+        "namePattern": "^release admission refuses a write contract whose allowed values disagree with the declaration$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/releases.test.ts",
+          "name": "release admission refuses a write contract whose allowed values disagree with the declaration",
+          "expected": "a widened write contract was admitted"
+        }
+      ]
+    },
+    {
+      "name": "line-header-suffix-ignored",
+      "claim": "A line amount shows the currency its header stores, never its own row's.",
+      "file": "apps/web/src/surface-composition.ts",
+      "original": "  const stored = (logical.currency.via ? header : record)?.values[",
+      "replacement": "  const stored = (logical.currency.via ? record : record)?.values[",
+      "test": {
+        "files": ["test/unit/line-logical-field.test.ts"],
+        "namePattern": "^a line amount shows its header's currency, and says so without the header$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-logical-field.test.ts",
+          "name": "a line amount shows its header's currency, and says so without the header",
+          "expected": "a line amount ignored its header's currency"
+        }
+      ]
+    },
+    {
+      "name": "line-editor-header-dropped",
+      "claim": "The document editor's line cell reads its header's currency.",
+      "file": "apps/web/src/editor-controls.ts",
+      "original": "      ...(context.header ? { currencyHeader: context.header } : {}),",
+      "replacement": "      ...{},",
+      "test": {
+        "files": ["test/unit/line-logical-field.test.ts"],
+        "namePattern": "^the editor's line cell reads its header's currency$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-logical-field.test.ts",
+          "name": "the editor's line cell reads its header's currency",
+          "expected": "the editor line cell lost its header currency"
+        }
+      ]
+    },
+    {
+      "name": "line-source-not-joined",
+      "claim": "The header currency a line amount reads is a line source, so a changed code re-renders the lines.",
+      "file": "apps/web/src/document-editor.ts",
+      "original": "    logical?.currency?.kind === 'stored' && logical.currency.via",
+      "replacement": "    false",
+      "test": {
+        "files": ["test/unit/line-logical-field.test.ts"],
+        "namePattern": "^the editor refreshes lines when the header currency they read changes$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-logical-field.test.ts",
+          "name": "the editor refreshes lines when the header currency they read changes",
+          "expected": "the header currency is not a line source"
+        }
+      ]
+    },
+    {
+      "name": "line-v1-report-reads-path",
+      "claim": "A v1 report body never reads a currency through a path (that is a line-grain report).",
+      "file": "packages/canonical-model/src/declared-report.ts",
+      "original": "      (f.currency.via !== undefined || !add(f.currency.fieldId))",
+      "replacement": "      !add(f.currency.fieldId)",
+      "test": {
+        "files": ["test/unit/line-logical-field.test.ts"],
+        "namePattern": "^a v1 report never reads a currency through a path$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-logical-field.test.ts",
+          "name": "a v1 report never reads a currency through a path",
+          "expected": "a v1 body read a header currency"
+        }
+      ]
+    },
+    {
+      "name": "line-header-path-not-written",
+      "claim": "Customize writes a line amount's header currency with the parent-link path.",
+      "file": "packages/customization/src/apply.ts",
+      "original": "        currencyVia = [String(parent!.relationId)];",
+      "replacement": "        currencyVia = undefined;",
+      "test": {
+        "files": ["test/unit/line-logical-field.test.ts"],
+        "namePattern": "^Customize writes a line amount in the header currency with the parent-link path$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-logical-field.test.ts",
+          "name": "Customize writes a line amount in the header currency with the parent-link path",
+          "expected": "a line amount lost its header currency path"
+        }
+      ]
+    },
+    {
+      "name": "line-ambiguous-currency-label",
+      "claim": "A currency label on both the line and its header is refused, never resolved silently.",
+      "file": "packages/customization/src/apply.ts",
+      "original": "      if (currencyFieldId && onHeader)",
+      "replacement": "      if (false && onHeader)",
+      "test": {
+        "files": ["test/unit/line-logical-field.test.ts"],
+        "namePattern": "^a currency label on both the line and its header is refused as ambiguous$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-logical-field.test.ts",
+          "name": "a currency label on both the line and its header is refused as ambiguous",
+          "expected": "an ambiguous currency label was resolved"
+        }
+      ]
+    },
+    {
+      "name": "line-long-text-not-multiline",
+      "claim": "A line long-text field is edited in a text area.",
+      "file": "packages/customization/src/apply.ts",
+      "original": "      .map((field) => editorField(field, longTextFields(authored))),",
+      "replacement": "      .map((field) => editorField(field)),",
+      "test": {
+        "files": ["test/unit/line-logical-field.test.ts"],
+        "namePattern": "^a line long-text field is edited in a text area$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-logical-field.test.ts",
+          "name": "a line long-text field is edited in a text area",
+          "expected": "a line long-text field is not a text area"
+        }
+      ]
+    },
+    {
+      "name": "line-approval-text-generic",
+      "claim": "The approval text names the header whose currency a line amount is in.",
+      "file": "packages/customization/src/render.ts",
+      "original": "            : `${holder ? `the ${String(holder.label)}` : 'the record'}'s ${String(",
+      "replacement": "            : `${'the record'}'s ${String(",
+      "test": {
+        "files": ["test/unit/line-logical-field.test.ts"],
+        "namePattern": "^the approval text names the header's currency for a line amount$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-logical-field.test.ts",
+          "name": "the approval text names the header's currency for a line amount",
+          "expected": "the approval text lacks .Rate .money in the Work order's Currency"
+        }
+      ]
+    },
+    {
+      "name": "line-activation-rung-unexplained",
+      "claim": "Activation refuses the line rung on a release without line logical fields.",
+      "file": "packages/postgres-provider/src/release-repository.ts",
+      "original": "        (logicalFloor === LOGICAL_FIELD_READER &&\n          surfaceFloor === LINE_LOGICAL_FIELD_READER)",
+      "replacement": "        (false &&\n          surfaceFloor === LINE_LOGICAL_FIELD_READER)",
+      "test": {
+        "files": ["test/postgres/releases.test.ts"],
+        "namePattern": "^release admission refuses a line logical release below the line rung, and the line rung without one$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/releases.test.ts",
+          "name": "release admission refuses a line logical release below the line rung, and the line rung without one",
+          "expected": "the line rung without line fields"
+        }
+      ]
+    },
+    {
+      "name": "line-editor-header-not-passed",
+      "claim": "The document editor hands each line row its header, so a line amount's suffix is the header's code on the running server.",
+      "file": "apps/web/src/document-editor.ts",
+      "original": "      header: draft.id === buffer.header.id ? undefined : buffer.header,",
+      "replacement": "      header: undefined,",
+      "test": {
+        "files": ["test/postgres/line-logical-fields.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/line-logical-fields.test.ts",
+          "name": "line money in its header currency, quantities and notes serve per company, refuse unlisted codes, and the preceding reader refuses the line change by name",
+          "expected": "the editor's line rates lost their header's currency"
+        }
+      ]
+    },
+    {
+      "name": "line-currency-not-searchable",
+      "claim": "A line currency field is searchable, so release verification can approve a line table holding one.",
+      "file": "packages/customization/src/apply.ts",
+      "original": "      searchable: index === nameIndex + 1 || field.type === 'currency',",
+      "replacement": "      searchable: index === nameIndex + 1,",
+      "test": {
+        "files": ["test/unit/line-logical-field.test.ts"],
+        "namePattern": "^a line currency field is searchable, like a record currency field$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-logical-field.test.ts",
+          "name": "a line currency field is searchable, like a record currency field",
+          "expected": "a line currency field is held out of search"
+        }
+      ]
+    }
+  ]
+}

@@ -308,6 +308,8 @@ test('built-in record types, line tables and a missing currency field are named 
     ]),
     /built-in record types/u,
   );
+  // Slice 2: a line table declares these kinds when it is created; adding
+  // one to an existing line table stays a named gap.
   assert.match(
     refused([
       shipmentType,
@@ -315,13 +317,15 @@ test('built-in record types, line tables and a missing currency field are named 
         kind: 'addLineTable',
         entity: shipment,
         label: 'Packages',
-        fields: [
-          { label: 'Label', type: 'text' },
-          { label: 'Mass', type: 'quantity', scale: 1, unit: 'kg' },
-        ],
+        fields: [{ label: 'Label', type: 'text' }],
+      },
+      {
+        kind: 'addField',
+        entity: `${NS}:entity.custom_shipment_lines`,
+        field: { label: 'Mass', type: 'quantity', scale: 1, unit: 'kg' },
       },
     ]),
-    /line fields/u,
+    /added to an existing line table/u,
   );
   assert.match(
     refused([

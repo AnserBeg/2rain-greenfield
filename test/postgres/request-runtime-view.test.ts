@@ -21,7 +21,14 @@ import { DATE_TIME_FIELD_READER } from '../../packages/canonical-model/src/date-
 import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../packages/canonical-model/src/surface-workspace.js';
 import { DECLARED_REPORT_READER } from '../../packages/canonical-model/src/declared-report.js';
 import { PRESENTATION_READER } from '../../packages/canonical-model/src/surface-presentation-schema.js';
-import { LOGICAL_FIELD_READER } from '../../packages/canonical-model/src/logical-field.js';
+import {
+  LINE_LOGICAL_FIELD_READER,
+  LOGICAL_FIELD_READER,
+} from '../../packages/canonical-model/src/logical-field.js';
+import {
+  REPORT_ANALYSIS_READER,
+  REPORT_MEASURE_READER,
+} from '../../packages/canonical-model/src/declared-report-v2.js';
 import {
   COMPANY_ACCESS_INDEX_READER,
   REPORT_SOURCE_READER,
@@ -304,20 +311,23 @@ test(
     // The checked-in head compiled under the cut, unadopted v3 profile: the
     // release that adopting v3 will ship. The adopted head itself is
     // unchanged, so main's reader keeps serving it.
-    const shipped = compiledAppViewV3().envelope as unknown as {
-      application: {
-        releaseRoot: string;
-        normalizedDefinitionBytesBase64: string;
-        artifacts: { contentHash: string; canonicalBytesBase64: string }[];
-        releaseManifest: {
-          projections: {
-            familyId: string;
-            requiredRuntimeCapability: { minimumVersion: number };
-          }[];
-        };
+    type ShippedRelease = {
+      releaseRoot: string;
+      normalizedDefinitionBytesBase64: string;
+      artifacts: { contentHash: string; canonicalBytesBase64: string }[];
+      releaseManifest: {
+        projections: {
+          familyId: string;
+          requiredRuntimeCapability: { minimumVersion: number };
+        }[];
       };
     };
-    const head = shipped.application;
+    const shipped = compiledAppViewV3().envelope as unknown as {
+      applications?: ShippedRelease[];
+      application?: ShippedRelease;
+    };
+    // The checked-in release may be a v2 lineage: its last entry is the head.
+    const head = (shipped.applications?.at(-1) ?? shipped.application)!;
     assert.equal(
       head.releaseManifest.projections.find(
         (projection) =>
@@ -549,7 +559,17 @@ test('the capability comparison binds the family to its capability, then compare
     RECORD_TEMPLATE_READER,
     LOGICAL_FIELD_READER,
     RECORD_CREATED_TRIGGER_READER,
+    REPORT_ANALYSIS_READER,
+    REPORT_MEASURE_READER,
+    LINE_LOGICAL_FIELD_READER,
   ];
+  // Each capability owns its own rung: a renumbering collision at a merge
+  // would let one feature's floor stand in for another's.
+  assert.equal(
+    new Set(surfaceFloors).size,
+    surfaceFloors.length,
+    'two capabilities share a surface rung',
+  );
   for (const reader of surfaceFloors) {
     for (const floor of surfaceFloors) {
       const refusal = unsupportedRuntimeCapability(
@@ -602,7 +622,7 @@ test('the capability comparison binds the family to its capability, then compare
   // capability on one side alone reds here rather than in production.
   assert.deepEqual(SUPPORTED_RUNTIME_CAPABILITIES[surface], {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
-    maximumSupportedVersion: RECORD_CREATED_TRIGGER_READER,
+    maximumSupportedVersion: LINE_LOGICAL_FIELD_READER,
   });
 });
 
@@ -1236,7 +1256,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
               ],
               {
                 capabilityId: 'northstar.runtime:capability.surface-manifest',
-                maximumSupportedVersion: RECORD_CREATED_TRIGGER_READER,
+                maximumSupportedVersion: LINE_LOGICAL_FIELD_READER,
               },
             );
           },
@@ -1261,7 +1281,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
               new RegExp(
-                `requires version 999 and this runtime supports ${RECORD_CREATED_TRIGGER_READER}`,
+                `requires version 999 and this runtime supports ${LINE_LOGICAL_FIELD_READER}`,
               ),
             );
           },
@@ -1292,7 +1312,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
               new RegExp(
-                `requires version 999 and this runtime supports ${RECORD_CREATED_TRIGGER_READER}`,
+                `requires version 999 and this runtime supports ${LINE_LOGICAL_FIELD_READER}`,
               ),
             );
           },

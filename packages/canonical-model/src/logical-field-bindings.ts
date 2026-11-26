@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
 import {
+  LINE_LOGICAL_FIELD_READER,
+  LOGICAL_FIELD_READER,
   STORED_CURRENCY_CODES,
   AllowedValuesSchema,
   LOGICAL_FIELD_TYPES,
@@ -55,6 +57,84 @@ interface DefinitionView {
     readonly collation?: string;
     readonly fieldType: Readonly<Record<string, unknown>>;
   }[];
+  readonly relations?: readonly RelationView[];
+}
+
+interface RelationView {
+  readonly relationId: string;
+  readonly ownership?: string;
+  readonly lifecycle?: string;
+  readonly sourceEntity: { readonly targetId: string };
+  readonly targetEntity: { readonly targetId: string };
+}
+
+/** Whether a record type is a line table: the child of a parent-scoped relation. */
+export function isLineEntity(
+  definition: { readonly relations?: readonly RelationView[] },
+  entityId: string,
+): boolean {
+  return (definition.relations ?? []).some(
+    (r) =>
+      r.ownership === 'parentScopedChild' &&
+      r.sourceEntity.targetId === entityId,
+  );
+}
+
+/**
+ * CUSTOMIZE-6 slice 2: the record type holding a stored amount's currency
+ * field. No path is the amount's own record type (slice 1). The one path
+ * admitted is the line's own parent link, so a line amount reads the header's
+ * currency: a header is fixed for a line's life, while a reference link could
+ * be repointed and silently re-currency stored amounts. Anything else is null.
+ */
+export function currencyHolderEntity(
+  definition: { readonly relations?: readonly RelationView[] },
+  entityId: string,
+  via: readonly string[] | undefined,
+): string | null {
+  if (via === undefined) return entityId;
+  if (via.length !== 1) return null;
+  const parent = (definition.relations ?? []).find(
+    (r) => r.relationId === via[0],
+  );
+  return parent &&
+    parent.ownership === 'parentScopedChild' &&
+    (parent.lifecycle ?? 'active') === 'active' &&
+    parent.sourceEntity.targetId === entityId
+    ? parent.targetEntity.targetId
+    : null;
+}
+
+/**
+ * The surface reader floor a definition's logical fields need: none without
+ * the key; LINE_LOGICAL_FIELD_READER when any declaration (retired included)
+ * is on a line table or any amount reads its currency through a path, since
+ * an older reader would serve those without their meaning; otherwise
+ * LOGICAL_FIELD_READER.
+ */
+export function logicalFieldReaderFloor(definition: {
+  readonly logicalFields?: readonly unknown[] | undefined;
+  readonly relations?: readonly RelationView[];
+  readonly entities?: readonly {
+    readonly reportSource?: {
+      readonly amounts?: readonly { readonly currency: unknown }[];
+    };
+  }[];
+}): number | null {
+  if (!definition.logicalFields) return null;
+  const onLine = definition.logicalFields.some((raw) => {
+    const entityId = (raw as { entityId?: unknown } | null)?.entityId;
+    return typeof entityId === 'string' && isLineEntity(definition, entityId);
+  });
+  const throughPath = (definition.entities ?? []).some((entity) =>
+    (entity.reportSource?.amounts ?? []).some(
+      (amount) =>
+        (amount.currency as { via?: unknown } | null)?.via !== undefined,
+    ),
+  );
+  return onLine || throughPath
+    ? LINE_LOGICAL_FIELD_READER
+    : LOGICAL_FIELD_READER;
 }
 
 export type LogicalFieldOutcome =
@@ -114,6 +194,28 @@ export function deriveLogicalFieldBindings(
           return refuse(
             'money stores an exact decimal bound to a currency in the record type report source.',
           );
+        // A currency read through a path names a declared currency field of
+        // the header that path reaches (CUSTOMIZE-6 slice 2).
+        if (amount.currency.kind === 'stored' && amount.currency.via) {
+          const holder = currencyHolderEntity(
+            definition,
+            entity.entityId,
+            amount.currency.via,
+          );
+          const fieldId = amount.currency.fieldId;
+          if (
+            holder === null ||
+            !(definition.logicalFields ?? []).some(
+              (d) =>
+                (d as { fieldId?: unknown }).fieldId === fieldId &&
+                (d as { entityId?: unknown }).entityId === holder &&
+                (d as { logicalType?: unknown }).logicalType === 'currencyCode',
+            )
+          )
+            return refuse(
+              "money read through a path reads a declared currency field of the line's header.",
+            );
+        }
         bindings.push({ ...base, scale: scale!, currency: amount.currency });
         break;
       case 'quantity': {

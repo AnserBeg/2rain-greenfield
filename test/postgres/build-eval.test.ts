@@ -312,6 +312,57 @@ test(
         },
       );
 
+      // CUSTOMIZE-6 slice 2 (rule 12): a line rate in the work order's
+      // currency passes; one in a currency the line stores itself fails.
+      const workOrder = (rate: unknown, extra: unknown[] = []) => ({
+        kind: 'changeSet',
+        patches: [
+          {
+            kind: 'addRecordType',
+            label: 'Work order',
+            companyOwnership: 'entityOwned',
+            fields: [
+              { label: 'Name', type: 'text' },
+              { label: 'Currency', type: 'currency' },
+            ],
+          },
+          {
+            kind: 'addLineTable',
+            entity: `${NS}:entity.custom_work_order`,
+            label: 'Lines',
+            fields: [
+              { label: 'Task', type: 'text' },
+              { label: 'Hours', type: 'quantity', scale: 2, unit: 'h' },
+              ...extra,
+              { label: 'Hourly rate', type: 'money', currency: rate },
+              { label: 'Notes', type: 'longText' },
+            ],
+          },
+        ],
+      });
+      await t.test(
+        'a line rate in the header currency passes; a line-stored currency fails by name',
+        async () => {
+          const right = await run('L05', [
+            draft(workOrder({ kind: 'stored', fieldLabel: 'Currency' })),
+          ]);
+          assert.deepEqual(right.reasons, []);
+          assert.equal(right.behaviour, true);
+          const wrong = await run('L05', [
+            draft(
+              workOrder({ kind: 'stored', fieldLabel: 'Line currency' }, [
+                { label: 'Line currency', type: 'currency' },
+              ]),
+            ),
+          ]);
+          assert.equal(wrong.behaviour, false);
+          assert.match(
+            wrong.reasons.join('; '),
+            /has currency stored, expected header/u,
+          );
+        },
+      );
+
       await t.test(
         'a correct refusal is credited with its capability',
         async () => {
@@ -456,8 +507,8 @@ test(
       );
 
       const summary = summarize(results);
-      // Ten scripted cases plus CUSTOMIZE-6's two L01 runs.
-      assert.equal(summary.ran, 12);
+      // Ten scripted cases plus CUSTOMIZE-6's two L01 and two L05 runs.
+      assert.equal(summary.ran, 14);
       assert.equal(summary.repairedAfterOne, 3);
       // M01's scripted refusal, and the parser's refusal of H01's grouped
       // permission change: both refuse a request the platform can draft.

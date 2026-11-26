@@ -1,9 +1,20 @@
 import type { StorageTargetPayloadV1 } from '../../compiler/src/storage.js';
 import { lowerDeclaredReports } from '../../compiler/src/declared-reports.js';
 import { DECLARED_REPORT_READER } from '../../canonical-model/src/declared-report.js';
+import {
+  REPORT_ANALYSIS_READER,
+  REPORT_MEASURE_READER,
+} from '../../canonical-model/src/declared-report-v2.js';
 import { PRESENTATION_READER } from '../../canonical-model/src/surface-presentation-schema.js';
-import { LOGICAL_FIELD_READER } from '../../canonical-model/src/logical-field.js';
-import { logicalFieldBindingsProblem } from './logical-field-admission.js';
+import {
+  LINE_LOGICAL_FIELD_READER,
+  LOGICAL_FIELD_READER,
+} from '../../canonical-model/src/logical-field.js';
+import { logicalFieldReaderFloor } from '../../canonical-model/src/logical-field-bindings.js';
+import {
+  allowedTextsContractProblem,
+  logicalFieldBindingsProblem,
+} from './logical-field-admission.js';
 import { presentationDeclarationProblem } from './presentation-admission.js';
 import {
   hasMapDeclaration,
@@ -659,7 +670,9 @@ function verifyCompiledRelease(
   const hasReports =
     isRecord(layoutDefinition) &&
     Array.isArray(layoutDefinition.surfaces) &&
-    layoutDefinition.surfaces.some((s: unknown) => isRecord(s) && s.report);
+    layoutDefinition.surfaces.some(
+      (s: unknown) => isRecord(s) && (s.report || s.measure),
+    );
   if (
     hasReports
       ? surfaceFloor < DECLARED_REPORT_READER
@@ -668,6 +681,38 @@ function verifyCompiledRelease(
     throw integrity(
       'REPORT_READER_MISMATCH',
       'Declared reports and the surface reader floor disagree.',
+    );
+  // REPORTS-1 slice 2: v2 report bodies and named measures agree with their
+  // own rungs both ways, like the slice-1 floors above.
+  const declaredSurfaces: unknown[] =
+    isRecord(layoutDefinition) && Array.isArray(layoutDefinition.surfaces)
+      ? layoutDefinition.surfaces
+      : [];
+  const hasAnalysis = declaredSurfaces.some(
+    (s) =>
+      isRecord(s) &&
+      isRecord(s.report) &&
+      isRecord(s.report.body) &&
+      s.report.body.version === 'grouped-report/v2',
+  );
+  if (
+    hasAnalysis
+      ? surfaceFloor < REPORT_ANALYSIS_READER
+      : surfaceFloor === REPORT_ANALYSIS_READER
+  )
+    throw integrity(
+      'REPORT_ANALYSIS_READER_MISMATCH',
+      'Analysed reports and the surface reader floor disagree.',
+    );
+  const hasMeasure = declaredSurfaces.some((s) => isRecord(s) && s.measure);
+  if (
+    hasMeasure
+      ? surfaceFloor < REPORT_MEASURE_READER
+      : surfaceFloor === REPORT_MEASURE_READER
+  )
+    throw integrity(
+      'REPORT_MEASURE_READER_MISMATCH',
+      'Named measures and the surface reader floor disagree.',
     );
   // UI-CUSTOM-1: declared presentation and its reader floor agree both ways.
   const hasPresentation =
@@ -690,14 +735,26 @@ function verifyCompiledRelease(
   const hasLogicalFields =
     isRecord(layoutDefinition) &&
     Object.hasOwn(layoutDefinition, 'logicalFields');
+  // Slice 2: line tables and header-read currencies need the line rung, and
+  // that rung without them is unexplained.
+  const logicalFloor = hasLogicalFields
+    ? (logicalFieldReaderFloor(
+        layoutDefinition as Parameters<typeof logicalFieldReaderFloor>[0],
+      ) ?? LOGICAL_FIELD_READER)
+    : null;
   if (
-    hasLogicalFields
-      ? surfaceFloor < LOGICAL_FIELD_READER
-      : surfaceFloor === LOGICAL_FIELD_READER
+    logicalFloor === null
+      ? surfaceFloor === LOGICAL_FIELD_READER ||
+        surfaceFloor === LINE_LOGICAL_FIELD_READER
+      : surfaceFloor < logicalFloor ||
+        (logicalFloor === LOGICAL_FIELD_READER &&
+          surfaceFloor === LINE_LOGICAL_FIELD_READER)
   )
     throw integrity(
       'LOGICAL_FIELD_READER_MISMATCH',
-      'Declared logical fields and the surface reader floor disagree.',
+      logicalFloor === LINE_LOGICAL_FIELD_READER
+        ? 'Declared line logical fields and the surface reader floor disagree.'
+        : 'Declared logical fields and the surface reader floor disagree.',
     );
   const reportInputs = new Map<string, unknown>();
   const sourceTerms = (value: unknown, activeOnly: boolean) => {
@@ -872,7 +929,9 @@ function verifyCompiledRelease(
       else if (
         Object.hasOwn(payload, 'groupedReports') ||
         (Array.isArray(payload.surfaces) &&
-          payload.surfaces.some((s: unknown) => isRecord(s) && s.report))
+          payload.surfaces.some(
+            (s: unknown) => isRecord(s) && (s.report || s.measure),
+          ))
       )
         throw integrity(
           'REPORT_DECLARATION_MISMATCH',
@@ -922,6 +981,15 @@ function verifyCompiledRelease(
           'booking operations disagree with the released declarations',
         );
       }
+      const allowedProblem =
+        reference.familyId === PROJECTION_FAMILY_IDS.operationCatalog
+          ? allowedTextsContractProblem(catalog, revision.desiredState)
+          : null;
+      if (allowedProblem)
+        throw integrity(
+          'LOGICAL_FIELD_PROJECTION_CONTRACT_MISMATCH',
+          allowedProblem,
+        );
     }
     if (
       reference.familyId === PROJECTION_FAMILY_IDS.surfaceManifest &&
@@ -1102,10 +1170,12 @@ function verifyCompiledRelease(
     }
     const surfaceTerms = (surfaces: unknown) =>
       Array.isArray(surfaces)
-        ? surfaces.flatMap((s: unknown) =>
+        ? surfaces.flatMap((s: unknown): Record<string, unknown>[] =>
             isRecord(s) && s.report
               ? [{ surfaceId: s.surfaceId, report: s.report }]
-              : [],
+              : isRecord(s) && s.measure
+                ? [{ surfaceId: s.surfaceId, measure: s.measure }]
+                : [],
           )
         : [];
     if (

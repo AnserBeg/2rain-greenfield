@@ -13,14 +13,21 @@ import { literalValidationDraft } from '../../packages/customization/src/validat
 import type { RecordTemplateContent } from '../../packages/canonical-model/src/record-template-content.js';
 import type { RequestRuntimeView } from '../../packages/runtime/src/request-runtime-view.js';
 import { raceFirstAssignmentWithRetirement } from './record-template-locks.js';
-import { exercisePrecedingReader } from './record-template-reader.js';
+import {
+  exercisePrecedingReader,
+  precedingCompiledApplication,
+} from './record-template-reader.js';
 import { COMPANY, worldOver } from '../agent/agent-world.js';
 
 export async function exerciseTemplateLibrary(
   databaseUrl: string,
   pool: pg.Pool,
 ) {
-  const options = { databaseUrl, tenantSlug: 'template-library' };
+  const options = {
+    databaseUrl,
+    tenantSlug: 'template-library',
+    compiledApplication: precedingCompiledApplication(),
+  };
   const app = await startComposedApplication({ ...options, port: 0 });
   const opened = await openCustomizeService(options);
   const { runtime } = app,
