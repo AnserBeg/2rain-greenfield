@@ -107,11 +107,14 @@ jobs:
       matrix:
         control: ${{ fromJSON(needs.select-controls.outputs.names) }}
     steps:
+      # Whole history for every control (CI-8): tests read it (`git show
+      # SHA:file`, archived worktrees, readReportsPredecessor), and with one
+      # commit they fail as "the mutated run executed no test".
       - name: Check out the commit under test
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ needs.select-controls.outputs.head_sha }}
-          fetch-depth: ${{ (matrix.control == 'validation-refusal-does-not-veto' || matrix.control == 'validation-related-row-read-ignored' || matrix.control == 'late-address-response' || matrix.control == 'shared-record-company-pin' || matrix.control == 'address-map-placement-reader-floor' || startsWith(matrix.control, 'generated-pdf-') || startsWith(matrix.control, 'documents-') || startsWith(matrix.control, 'template-') || startsWith(matrix.control, 'archived-')) && '0' || '1' }}
+          fetch-depth: 0
           persist-credentials: false
       - name: Set up pinned Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4

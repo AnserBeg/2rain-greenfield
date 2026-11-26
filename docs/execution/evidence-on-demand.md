@@ -149,3 +149,10 @@ failed quick passes on rerun. Pending full or unclassified runs require exact fu
 evidence too. If main advances, rebuild on current main. If the train is red,
 identify the packet that owns the failing job, drop it and rebuild the rest
 from current main with a fresh full run. Watch the main push through completion.
+
+## Full history for every control (CI-8)
+
+Every control job checks out the whole history (`fetch-depth: 0`), whatever its
+name. Tests read history (`git show SHA:file`, archived worktrees, the reports
+predecessor), and from a one-commit checkout they fail as "the mutated run
+executed no test". `test/architecture/evidence-on-demand.test.ts` pins it.

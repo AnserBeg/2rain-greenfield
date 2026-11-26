@@ -144,6 +144,69 @@ test('the result ledger refuses synthetic results by provenance, not by name', (
   );
 });
 
+test("the ledger gives a helper module's nested passes to the test file that ran them (CI-8)", () => {
+  // Measured on workflow-consumer.test.ts: four subtests opened by a helper
+  // report `file` as the helper, with nesting 1, and Node counts them under the
+  // test file's summary (passed 14 against 10 reported).
+  const file = resolve('test/example.test.ts');
+  const other = resolve('test/other.test.ts');
+  const helper = resolve('test/helpers/helper.ts');
+  const result = (name: string, path: string, nesting: number) => ({
+    type: 'test:pass' as const,
+    data: { name, file: path, nesting, details: { type: 'test' } },
+  });
+  const summary = (path: string) => ({
+    type: 'test:summary' as const,
+    data: {
+      file: path,
+      counts: { tests: 1, passed: 1, failed: 0, cancelled: 0 },
+    },
+  });
+
+  const owned = createNodeResultLedger();
+  owned.observe(result('own', file, 0));
+  owned.observe(result('from the helper', helper, 1));
+  owned.observe(summary(file));
+  assert.deepEqual(
+    owned.selected().map((record) => [record.event.data.name, record.file]),
+    [
+      ['own', file],
+      ['from the helper', file],
+    ],
+    'the helper result is credited to the file whose summary follows it',
+  );
+
+  // A top-level result with no summary is still the file wrapper.
+  const wrapper = createNodeResultLedger();
+  wrapper.observe(result('wrapper', helper, 0));
+  wrapper.observe(summary(file));
+  assert.deepEqual(wrapper.selected(), []);
+
+  // Two summary-bearing files in the same window: the owner cannot be known.
+  const interleaved = createNodeResultLedger();
+  interleaved.observe(result('a', file, 0));
+  interleaved.observe(result('b', other, 0));
+  interleaved.observe(result('from the helper', helper, 1));
+  interleaved.observe(summary(file));
+  interleaved.observe(summary(other));
+  assert.deepEqual(
+    interleaved.selected().map((record) => record.event.data.name),
+    ['a', 'b'],
+  );
+
+  // Nothing after it: no owner.
+  const orphan = createNodeResultLedger();
+  orphan.observe(result('from the helper', helper, 1));
+  assert.deepEqual(orphan.selected(), []);
+  // A mismatch report names what was left out and where it came from.
+  assert.deepEqual(
+    orphan
+      .dropped()
+      .map((record) => [record.name, record.file, record.nesting]),
+    [['from the helper', helper, 1]],
+  );
+});
+
 test('filtered commands cannot produce evidence', () => {
   const producer = getReachabilityProducer('unit');
   assert.throws(

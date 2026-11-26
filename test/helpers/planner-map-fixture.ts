@@ -1,4 +1,4 @@
-import { closeFixtureApp } from './close-fixture-app.js';
+import { closeFixtureApp, trackFixtureRequests } from './close-fixture-app.js';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { randomUUID } from 'node:crypto';
@@ -84,6 +84,7 @@ async function serve() {
       };
       const app = await startComposedApplication({ ...options, port: 0 }),
         opened = await openCustomizeService(options);
+      trackFixtureRequests(app.server);
       try {
         await activateMapFixtureChange(opened.service, stopSetup);
         const map = await fixtureMapRevision(opened.service);
@@ -143,5 +144,7 @@ async function serve() {
 if (process.argv.includes('--serve'))
   void serve().catch((error) => {
     console.error(error);
-    process.exitCode = 1;
+    // exit, not exitCode: the child holds stdin and would stay alive after a
+    // bound error from closeFixtureApp (CI-8).
+    process.exit(1);
   });

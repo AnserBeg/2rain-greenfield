@@ -147,6 +147,7 @@ const suiteDefinitions = [
       'test/architecture/module-conformance-runtime.test.ts',
       'test/architecture/module-press-law.test.ts',
       'test/architecture/pilot-identity-boundary.test.ts',
+      'test/architecture/preflight.test.ts',
       'test/architecture/record-claim-fidelity.test.ts',
       'test/architecture/record-creation-writers.test.ts',
       'test/architecture/release-activation-boundary.test.ts',

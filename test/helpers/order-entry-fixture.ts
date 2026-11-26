@@ -1,4 +1,4 @@
-import { closeFixtureApp } from './close-fixture-app.js';
+import { closeFixtureApp, trackFixtureRequests } from './close-fixture-app.js';
 import {
   seedInventoryValuation,
   seedInventoryShipmentValuation,
@@ -63,6 +63,7 @@ export async function withOrderEntryFixture(
         ? { purchaseOrdersRequireApproval: true as const }
         : {}),
     });
+    trackFixtureRequests(app.server);
     try {
       await run(await seed(app, pool, lookupVolume, orderVolume));
     } finally {

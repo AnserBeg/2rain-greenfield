@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "tsc --project tsconfig.build.json",
+    "preflight": "node scripts/preflight.mjs",
     "check:app-release": "node --import tsx apps/web/scripts/compile-app-release.ts --check",
     "check:boundaries": "node --import tsx packages/dev-tooling/src/check-boundaries.ts",
     "check:language-coverage": "node --import tsx test/helpers/check-language-coverage.ts",

@@ -55,7 +55,7 @@ What changed:
 - `apps/web/test/browser/fixture-process.ts` starts and stops the meta-sales child with deadlines (240 s to start, 120 s to stop, then SIGKILL), and `stop()` returns the exit code and signal. The spec asserts a clean exit (`code 0`, no signal), and a `try`/`finally` makes the body's failure propagate by language rule.
 - A failed browser job uploads Playwright's trace and screenshot.
 
-Why 23 unbounded waits remain. The specs that use `order-entry-fixture.ts` and `planner-map-fixture.ts` still wait on the child without a deadline; rewriting 23 specs is outside this packet. The fixture-side bound is what applies to them: the fixture's own `closeFixtureApp` fails by name after 60 s, so the child exits with a message instead of staying alive. A later packet can move those specs to `fixture-process.ts`.
+Why 23 unbounded waits remain. The specs that use `order-entry-fixture.ts` and `planner-map-fixture.ts` still wait on the child without a deadline; rewriting 23 specs is outside this packet. The fixture-side bound is what applies to them: the fixture's own `closeFixtureApp` fails by name after 60 s, so the meta-sales and order-entry children exit with a message (an unhandled rejection, exit 1). The planner-map child only set an exit code and could stay alive after the bound error; CI-8 makes it exit. A later packet can move those specs to `fixture-process.ts`.
 
 This is not a retry. If a stall returns, the report names the stage and the trace is attached. **The cause is probable, not proven.**
 
@@ -84,7 +84,7 @@ The slowest PostgreSQL shard is 19m 43s (shard 11, 793 s of median file time, so
 
 ## Evidence
 
-- Local at the tested tip: the new unit files pass (`fixture-process` 4, `close-fixture-app` 2, `language-coverage-credit` 5); `test:architecture`, format, lint, typecheck and `check:expected-red` pass; `check-record-ci-tier` and the record-claim gate pass.
+- Local at the tested tip: the new unit files pass (`fixture-process` 4, `close-fixture-app` 2, `language-coverage-credit` 5); format, lint, typecheck, `check:expected-red`, `check-record-ci-tier` and the record-claim gate pass. A full local `test:architecture` run could not be completed on the laptop; CI ran it green in the full run's quality step (143 s).
 - The first dispatch on the old tip (45565977878) failed `ci7-fixture-ignores-sigterm` because of a race in the new unit test (the handler was installed after the URL was printed); fixed and rerun before the first full run.
 - The shard timings above are medians of the three runs named in claim 2.
 
@@ -97,7 +97,7 @@ The slowest PostgreSQL shard is 19m 43s (shard 11, 793 s of median file time, so
 
 ## Rule 17
 
-- Most general form: one measured rule for shard size (900 s of median file time), one `quality` job id, one dispatch that takes any ref and any control names, one error class for evidence from another run or definition, one `closeFixtureApp` for every browser fixture that serves an application.
+- Most general form: one measured rule for shard size (900 s of median file time), one `quality` job id, one dispatch that takes any ref and any control names, one error class for evidence from another run or definition, one `closeFixtureApp` for every browser fixture that serves an application. (CI-8 note: the control checkout kept a name-based `fetch-depth` list, so controls that read git history failed with "the mutated run executed no test"; CI-8 makes every control checkout full-history.)
 - Used unchanged: the exactly-one-shard and suite-coverage tests, the reachability roll-up, `scripts/expected-red-on-demand.mjs`, `check-expected-red.sh`.
 - Narrower, and why: the repack is a snapshot of medians and no check reads timings, so a file that grows can push a shard back up without anything going red. The failure-trace upload is on the `browser` job only. `regen-snapshot` stays pull-request only. The bounded stop in `fixture-process.ts` serves one spec; the other 23 specs keep an unbounded wait on the child and rely on the fixture-side bound (see above).
 
