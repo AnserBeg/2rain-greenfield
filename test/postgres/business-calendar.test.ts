@@ -50,10 +50,10 @@ async function tenant(timeZone: string | null, boundary = '00:00') {
   const id = randomUUID(),
     environment = randomUUID();
   const pool = await admin();
-  await pool.query(
-    'INSERT INTO platform.tenants(id,slug) VALUES ($1,$1::text)',
-    [id],
-  );
+  await pool.query('INSERT INTO platform.tenants(id,slug) VALUES ($1,$2)', [
+    id,
+    `cal-${id}`,
+  ]);
   await pool.query(
     "INSERT INTO platform.environments(tenant_id,id,slug) VALUES ($1,$2,'cal')",
     [id, environment],
