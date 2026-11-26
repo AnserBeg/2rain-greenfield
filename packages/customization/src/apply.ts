@@ -1604,7 +1604,9 @@ function addLineTable(
     fieldDefinition(namespace, entityId, `${local}_${slug(field.label)}`, {
       ...field,
       orderKey: (index + 1) * 10,
-      searchable: index === nameIndex + 1,
+      // A line currency code is searchable, as on a record (addRecordType):
+      // a 3-character value cannot be held out of search.
+      searchable: index === nameIndex + 1 || field.type === 'currency',
     }),
   );
   push(authored, 'entities', {

@@ -419,6 +419,24 @@
           "expected": "the editor's line rates lost their header's currency"
         }
       ]
+    },
+    {
+      "name": "line-currency-not-searchable",
+      "claim": "A line currency field is searchable, so release verification can approve a line table holding one.",
+      "file": "packages/customization/src/apply.ts",
+      "original": "      searchable: index === nameIndex + 1 || field.type === 'currency',",
+      "replacement": "      searchable: index === nameIndex + 1,",
+      "test": {
+        "files": ["test/unit/line-logical-field.test.ts"],
+        "namePattern": "^a line currency field is searchable, like a record currency field$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-logical-field.test.ts",
+          "name": "a line currency field is searchable, like a record currency field",
+          "expected": "a line currency field is held out of search"
+        }
+      ]
     }
   ]
 }

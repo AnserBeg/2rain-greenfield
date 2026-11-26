@@ -241,6 +241,19 @@ test('a line long-text field is edited in a text area', () => {
   );
 });
 
+test('a line currency field is searchable, like a record currency field', () => {
+  // Release verification cannot hold a 3-character value out of search, so
+  // a non-searchable line currency fails approval.
+  const field = (applied([orderType, lineTable]).fields as Forged[]).find(
+    (x) => x.fieldId === l('line_currency'),
+  )!;
+  assert.equal(
+    field.searchable,
+    true,
+    'a line currency field is held out of search',
+  );
+});
+
 test('a line table holds every logical kind; line money reads a fixed, a line or a header currency', async () => {
   const { surface, operation } = released(
     await compileFrom(base, [orderType, lineTable]),
