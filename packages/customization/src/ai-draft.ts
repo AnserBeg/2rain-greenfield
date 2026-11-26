@@ -1,8 +1,10 @@
 import { draftTemplateBinding } from './record-template-binding.js';
 import { draftReport } from './report-revision.js';
+import { draftMeasure } from './measure-revision.js';
 import { z } from 'zod';
 
 import { WorkflowDefinitionSchema } from '../../canonical-model/src/schemas.js';
+import { workflowTriggerDrafterLines } from '../../canonical-model/src/workflow-trigger-events.js';
 import {
   DRAFTER_SELECTION_SCHEMAS,
   drafterKindLines,
@@ -268,6 +270,30 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
         existing: target.reports
           .filter((r) => r.lifecycle === 'active')
           .map((r) => ({ id: r.revision.reportId, label: r.label })),
+        // REPORTS-1 slice 2, generated from the same offer the compiler checks.
+        grain: target.grain,
+        links: target.links.map((l) => ({
+          via: l.link.via,
+          label: l.label,
+          parent: l.parent,
+          fields: l.fields.map((f) => ({
+            fieldId: f.operand.fieldId,
+            label: f.label,
+            type: f.operand.type,
+          })),
+        })),
+        approvedMeasures: target.measures.map((m) => ({
+          measureId: m.measureId,
+          contractDigest: m.contractDigest,
+          label: m.label,
+        })),
+        namedMeasures: target.namedMeasures
+          .filter((m) => m.lifecycle === 'active')
+          .map((m) => ({
+            measureId: m.revision.measureId,
+            label: m.label,
+            status: m.revision.status,
+          })),
       }),
     ),
     ...(targets.presentation?.length
@@ -484,12 +510,14 @@ export function boundedDiagnostics(issues: readonly string[]): string[] {
 export function workflowPromptSection(
   sdk: string,
   rules: readonly string[] = [],
+  recordTypes: readonly string[] = [],
 ): string {
   return [
-    'For a receipt workflow use saveWorkflow with workflow {schemaVersion:"v6", workflowId, trigger:"goodsReceiptPosted", grants:{operations,queries}}, a TypeScript body and fixtures.',
+    'For a workflow use saveWorkflow with workflow {schemaVersion:"v6", workflowId, trigger, grants:{operations,queries}}, a TypeScript body and fixtures. The trigger is one of these members:',
+    ...workflowTriggerDrafterLines(recordTypes).map((line) => `- ${line}`),
     `workflowId matches ${WORKFLOW_ID_PATTERN}: lowercase letters, digits and hyphens, starting with a letter (no underscores).`,
     ...rules,
-    'Each fixture has an event {type:"goodsReceiptPosted", eventId, receiptId, legalEntityId} (UUIDs) and effects in execution order {call, result}. Use the exact canonical IDs in these SDK declarations and declare only the calls the body makes. Sleep uses milliseconds (up to 90 days) and yields null. For requests to wait for an external event, return unsupported with missingCapability "durable external-event waits (named gap)". requestApproval yields a boolean. Never call operations or read live records to test a draft.',
+    'Each fixture has the trigger\'s event and effects in execution order {call, result}. Use the exact canonical IDs in these SDK declarations and declare only the calls the body makes. Sleep uses milliseconds (up to 90 days) and yields null. For requests to wait for an external event, return unsupported with missingCapability "durable external-event waits (named gap)". requestApproval yields a boolean. Never call operations or read live records to test a draft.',
     sdk,
   ].join('\n');
 }
@@ -507,7 +535,19 @@ export async function draftPatchFromRequest<T = never>(
   const system =
     draftingSystemPrompt(targets) +
     (targets.workflowSdk
-      ? `\n${workflowPromptSection(targets.workflowSdk, options.workflowRules)}`
+      ? `\n${workflowPromptSection(
+          targets.workflowSdk,
+          options.workflowRules,
+          (targets.linkTargets ?? [])
+            .filter(
+              ({ companyOwned, entityId }) =>
+                companyOwned &&
+                (targets.workflowRecordTypeIds ?? []).includes(entityId),
+            )
+            .map(
+              ({ entityId, label }) => `${entityId} (${JSON.stringify(label)})`,
+            ),
+        )}`
       : '');
   const context: DraftContext = {
     targetsAfter: options.definition
@@ -684,6 +724,24 @@ function convertMember(
           report.choices,
           report.reportId,
           report.status,
+        ),
+      ];
+    }
+    case 'addMeasureRevision': {
+      const { measure } =
+        DRAFTER_SELECTION_SCHEMAS.addMeasureRevision.parse(input);
+      const target = local().reports?.find(
+        (candidate) => candidate.source.listSurfaceId === measure.listSurfaceId,
+      );
+      if (!target) throw new Error('Choose an available report source.');
+      return [
+        draftMeasure(
+          target,
+          measure.label,
+          measure.status,
+          measure.operator,
+          measure.measureId,
+          measure.filters,
         ),
       ];
     }

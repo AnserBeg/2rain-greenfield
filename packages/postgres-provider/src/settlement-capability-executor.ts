@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { recordCreations } from './record-creation-occurrences.js';
 import type { PoolClient } from 'pg';
 import {
   PROJECTION_FAMILY_IDS,
@@ -1061,7 +1062,8 @@ class SettlementCapabilityExecutor implements RegisteredCapabilityOperationExecu
     // Line records, written with the document they belong to.
     const documentLineField = (name: string) =>
       column(b.line, `${spec.entities.line}_${name}`);
-    for (const [index, line] of lines.entries())
+    for (const [index, line] of lines.entries()) {
+      const lineId = randomUUID();
       await client.query(
         `INSERT INTO ${table(b.line)}
           (tenant_id,environment_id,${quote(b.line.legalEntity!.column)},record_id,revision,archived_at,
@@ -1076,7 +1078,7 @@ class SettlementCapabilityExecutor implements RegisteredCapabilityOperationExecu
         [
           ...scope,
           le,
-          randomUUID(),
+          lineId,
           prepared.recordId,
           String(line.orderLine.record_id),
           index + 1,
@@ -1093,6 +1095,8 @@ class SettlementCapabilityExecutor implements RegisteredCapabilityOperationExecu
           formatCents(line.amounts.taxCents),
         ],
       );
+      await recordCreations(client, b.line, String(le), [lineId]);
+    }
     const terms = orderField('payment_terms');
     const termsLocal =
       typeof terms === 'string'

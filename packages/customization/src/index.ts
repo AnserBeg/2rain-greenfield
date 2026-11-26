@@ -19,6 +19,12 @@ export {
   ReportDraftSchema,
   type ReportTarget,
 } from './report-revision.js';
+export {
+  draftMeasure,
+  MeasureDraftSchema,
+  measureSurfaceId,
+  type MeasurePatch,
+} from './measure-revision.js';
 export * from './ai-draft-kinds.js';
 export * from './authoring-rules.js';
 export * from './field-member-draft.js';

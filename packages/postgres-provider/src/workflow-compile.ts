@@ -53,12 +53,22 @@ export const WORKFLOW_BODY_SIGNATURE =
   'function run(sdk: WorkflowSdk, event: ReceiptEvent): void' as const;
 
 /**
+ * The event parameter's type is the one the SDK declarations generate for the
+ * trigger member (ADR-0073 A1). The receipt signature is unchanged.
+ */
+export function workflowBodySignature(declarations: string): string {
+  return /^\s*type TriggerEvent = /mu.test(declarations)
+    ? 'function run(sdk: WorkflowSdk, event: TriggerEvent): void'
+    : WORKFLOW_BODY_SIGNATURE;
+}
+
+/**
  * The rules this compiler and its lint enforce, stated to the AI drafter
  * (AI-BUILD-1 slice 2), generated from the same signature and ban list.
  */
 export function workflowAuthoringRules(): readonly string[] {
   return [
-    `body is ONLY the statements inside \`${WORKFLOW_BODY_SIGNATURE} { ... }\`: no function wrapper, no export or import, no async or await, and no return value (it returns void). Use sdk and event directly.`,
+    `body is ONLY the statements inside \`${WORKFLOW_BODY_SIGNATURE} { ... }\` (for any trigger other than goodsReceiptPosted the event parameter is a TriggerEvent): no function wrapper, no export or import, no async or await, and no return value (it returns void). Use sdk and event directly.`,
     `The body must not use these names: ${[...forbiddenNames].join(', ')}. Use sdk.now() for the time.`,
     'The body type-checks under strict TypeScript against the SDK declarations below; fixtures replay the body twice and must list exactly the calls it makes, in order, with exactly the inputs it passes.',
     `Each fixture effect's call has exactly these keys: ${Object.entries(
@@ -80,7 +90,7 @@ export function compileWorkflowBody(body: string, sdk: WorkflowSdk) {
   }
   const fileName = '/workflow.ts';
   const sdkFileName = '/workflow-sdk.d.ts';
-  const prefix = `${WORKFLOW_BODY_SIGNATURE} {\n`;
+  const prefix = `${workflowBodySignature(sdk.declarations)} {\n`;
   const source = `${prefix}${body}\n}`;
   const options: ts.CompilerOptions = {
     target: ts.ScriptTarget.ES2022,

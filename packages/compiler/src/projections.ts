@@ -1,6 +1,10 @@
 import { lowerDeclaredReports } from './declared-reports.js';
 import { DECLARED_REPORT_READER } from '../../canonical-model/src/declared-report.js';
 import {
+  REPORT_ANALYSIS_READER,
+  REPORT_MEASURE_READER,
+} from '../../canonical-model/src/declared-report-v2.js';
+import {
   BILLING_READER,
   BILLING_ALLOCATION_READER,
   BILLING_ARREARS_READER,
@@ -19,6 +23,7 @@ import {
   RECORD_TEMPLATE_OPERATION_READER,
   hasRecordTemplateBinding,
   LOGICAL_FIELD_READER,
+  logicalFieldReaderFloor,
   type LogicalFieldBinding,
   type DateTimeBinding,
   ADDRESS_FIELD_READER,
@@ -66,11 +71,15 @@ import {
 import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../canonical-model/src/surface-workspace.js';
 import type { compileDocuments } from './documents.js';
 import {
+  RECORD_CREATED_TRIGGER_READER,
   WORKFLOW_PAYLOAD_VERSION,
   WORKFLOW_RUNTIME_CAPABILITY,
   WORKFLOW_SURFACE_FLOOR,
 } from '../../canonical-model/src/workflows.js';
-import { workflowSdkBindingDigest } from './workflows.js';
+import {
+  assertWorkflowTriggers,
+  workflowSdkBindingDigest,
+} from './workflows.js';
 import { hasStockCountWorkflow } from './conformance.js';
 
 import {
@@ -453,18 +462,33 @@ export function lowerBaseProjectionPayloads(
   if (
     verificationPackageRevision.languageVersion === 'v6' &&
     currentStorageTarget &&
-    verificationPackageRevision.surfaces.some((s) => s.report)
+    verificationPackageRevision.surfaces.some(
+      (s) => s.report || ('measure' in s && s.measure),
+    )
   ) {
     const registrations = lowerDeclaredReports(
       verificationPackageRevision,
       currentStorageTarget,
+    );
+    // REPORTS-1 slice 2: a v2 report body and a named measure each need
+    // their own reader. Retired revisions stay in the stored definition, which
+    // older readers strict-parse, so lifecycle does not lower the floor.
+    const surfaces = verificationPackageRevision.surfaces;
+    const reportFloor = Math.max(
+      DECLARED_REPORT_READER,
+      surfaces.some((s) => s.report?.body.version === 'grouped-report/v2')
+        ? REPORT_ANALYSIS_READER
+        : 0,
+      surfaces.some((s) => 'measure' in s && s.measure)
+        ? REPORT_MEASURE_READER
+        : 0,
     );
     for (const projection of plans) {
       if (projection.familyId === PROJECTION_FAMILY_IDS.surfaceManifest) {
         projection.requiredRuntimeCapability = {
           ...projection.requiredRuntimeCapability,
           minimumVersion: Math.max(
-            DECLARED_REPORT_READER,
+            reportFloor,
             projection.requiredRuntimeCapability.minimumVersion,
           ),
         };
@@ -638,7 +662,10 @@ export function lowerBaseProjectionPayloads(
       ...surface.requiredRuntimeCapability,
       minimumVersion: Math.max(
         surface.requiredRuntimeCapability.minimumVersion,
-        LOGICAL_FIELD_READER,
+        // Line tables and header-read currencies need the line rung.
+        logicalFieldReaderFloor(
+          packageRevision as Parameters<typeof logicalFieldReaderFloor>[0],
+        ) ?? LOGICAL_FIELD_READER,
       ),
     };
   }
@@ -692,11 +719,19 @@ export function appendWorkflowProjection(
   const surface = plans.find(
     ({ familyId }) => familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
   )!;
+  const generalTrigger = assertWorkflowTriggers(
+    revision.workflows,
+    plans.find(
+      ({ familyId }) => familyId === PROJECTION_FAMILY_IDS.storageTarget,
+    )?.payload,
+    operations,
+  );
   surface.requiredRuntimeCapability = {
     ...surface.requiredRuntimeCapability,
     minimumVersion: Math.max(
       surface.requiredRuntimeCapability.minimumVersion,
       WORKFLOW_SURFACE_FLOOR,
+      generalTrigger ? RECORD_CREATED_TRIGGER_READER : 0,
     ),
   };
   plans.push(
@@ -1474,6 +1509,9 @@ function surfaceManifestPayload(
             : {}),
           ...(declared && 'report' in declared && declared.report
             ? { report: declared.report }
+            : {}),
+          ...(declared && 'measure' in declared && declared.measure
+            ? { measure: declared.measure }
             : {}),
           ...(declared && 'board' in declared && declared.board
             ? {

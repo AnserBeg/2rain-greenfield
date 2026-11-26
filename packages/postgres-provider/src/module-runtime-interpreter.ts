@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { recordCreations } from './record-creation-occurrences.js';
 import type { TemplateApplicationSelection } from '../../runtime/src/record-template-library.js';
 import {
   declaresTemplateCreate,
@@ -21,7 +22,9 @@ import {
   activeReportCompany,
   readGroupedSnapshot,
   reportHorizon,
+  reportIndexReady,
 } from './grouped-report.js';
+import { readGroupedSnapshotV2 } from './grouped-report-v2.js';
 import { withReadSnapshot } from './request-context.js';
 import {
   mapPageBinding,
@@ -310,6 +313,8 @@ export class PostgresModuleRuntimeInterpreter
   >();
   readonly #trust: PostgresTrustService;
   readonly #reportLimits: ReportLimits;
+  // Tests inject the instant a run captures; production reads the database clock.
+  readonly #reportClock: (() => Date) | undefined;
   readonly #documentNumbers: DocumentNumberMode;
   readonly #workflowRunId: string | undefined;
   readonly #validationReadPolicy:
@@ -330,6 +335,7 @@ export class PostgresModuleRuntimeInterpreter
       | undefined = undefined,
     options: {
       readonly reportLimits?: Partial<Omit<ReportLimits, 'deadlineMs'>>;
+      readonly reportClock?: () => Date;
       readonly documentNumbers?: DocumentNumberMode;
       readonly workflowRunId?: string;
       readonly validationReadPolicy?: (
@@ -344,6 +350,7 @@ export class PostgresModuleRuntimeInterpreter
     } = {},
   ) {
     this.#reportLimits = { ...REPORT_READER_POLICY, ...options.reportLimits };
+    this.#reportClock = options.reportClock;
     for (const [k, value] of Object.entries(this.#reportLimits))
       if (
         !Number.isSafeInteger(value) ||
@@ -445,7 +452,11 @@ export class PostgresModuleRuntimeInterpreter
             storage,
             report.revision.body.source.entityId,
           );
-          const horizon = await reportHorizon(client, view.tenantId);
+          const horizon = await reportHorizon(
+            client,
+            view.tenantId,
+            this.#reportClock?.(),
+          );
           return withModuleRuntimeRole(client, async () => {
             if (
               !(await activeReportCompany(
@@ -457,6 +468,47 @@ export class PostgresModuleRuntimeInterpreter
               ))
             )
               return { kind: 'unavailable' } as const;
+            const scoped = (scope: typeof report.legalEntityScope) =>
+              scope ? { [scope.operand.parameterId]: input.company } : {};
+            if (report.revision.body.version === 'grouped-report/v2') {
+              const links = report.links ?? [];
+              // Every join carries its own issued narrowing, or none runs.
+              if ((request.linkFilterPlans?.length ?? 0) !== links.length)
+                return { kind: 'unavailable' } as const;
+              const linkEntities = links.map((l) =>
+                requiredEntity(storage, l.entityId),
+              );
+              return readGroupedSnapshotV2(
+                client,
+                entity,
+                linkEntities,
+                request,
+                horizon,
+                {
+                  grain: (alias, values, predicates) =>
+                    appendQueryFilterPredicates(
+                      entity,
+                      request.filterPlans,
+                      values,
+                      predicates,
+                      alias,
+                      scoped(report.legalEntityScope),
+                    ),
+                  link: (i, alias, values, predicates) =>
+                    appendQueryFilterPredicates(
+                      linkEntities[i]!,
+                      request.linkFilterPlans?.[i] ?? [],
+                      values,
+                      predicates,
+                      alias,
+                      scoped(links[i]!.legalEntityScope),
+                    ),
+                },
+                limits,
+                (table, index, keys) =>
+                  reportIndexReady(client, table, index, keys),
+              );
+            }
             return readGroupedSnapshot(
               client,
               entity,
@@ -1091,6 +1143,9 @@ export class PostgresModuleRuntimeInterpreter
                   { ...request, policyVersion },
                   preparation,
                   ids,
+                  // ADR-0073 A1: a write a workflow run commits names the run
+                  // as its causation, taken from the run row, never the script.
+                  this.#workflowRunId ?? null,
                 ),
                 mutationResult,
               });
@@ -1909,6 +1964,7 @@ function acceptedCommand(
     invocationId: string;
     outboxId: string;
   },
+  causationId: string | null,
 ): AcceptedMutationCommand {
   const metadata: EvidenceMetadataInput = Object.freeze({
     operationId: classified('INTERNAL', request.definition.operationId),
@@ -1916,7 +1972,7 @@ function acceptedCommand(
   });
   return Object.freeze({
     actionId: request.definition.operationId,
-    causationId: null,
+    causationId,
     change: Object.freeze({
       changeDocumentId: ids.changeDocumentId,
       changes: preparation.changes,
@@ -2352,6 +2408,20 @@ async function insertRecord(
      VALUES (${parameters.join(', ')})`,
     values,
   );
+  if (entity.legalEntity) {
+    // The company the row was written with, as stored by this insert.
+    const slot = parameters[columns.indexOf(entity.legalEntity.column)];
+    const company = slot?.match(/^\$(\d+)$/u)
+      ? values[Number(slot.slice(1)) - 1]
+      : undefined;
+    if (typeof company !== 'string')
+      throw failure(
+        'MODULE_STORAGE_COLUMN_AUTHORITY_CONFLICT',
+        'a company-owned create names no company',
+        entity.entityId,
+      );
+    await recordCreations(client, entity, company, [input.recordId]);
+  }
 }
 
 async function requireExistingParentGuards(

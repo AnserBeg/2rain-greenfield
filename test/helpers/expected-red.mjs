@@ -791,7 +791,7 @@ function assertEvidenceReconciles(entry, measured, root, phase) {
         skipped: summary.skipped,
         todo: summary.todo,
       },
-      `${entry.name}: the ${phase} evidence for ${file} does not reconcile with Node's own counts`,
+      `${entry.name}: the ${phase} evidence for ${file} does not reconcile with Node's own counts. Results the ledger left out (${String((measured.dropped ?? []).length)}): ${JSON.stringify((measured.dropped ?? []).slice(0, 40).map((record) => `${record.type} n${String(record.nesting)} ${String(record.file).split('/').slice(-2).join('/')} own-summary=${String(record.ownFileSummary)} #${String(record.sequence)} ${record.name}`))}. Summaries: ${JSON.stringify(measured.files.map((summary) => String(summary.file).split('/').slice(-2).join('/')))}`,
     );
   }
 }

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { recordCreations } from './record-creation-occurrences.js';
 import type { PoolClient } from 'pg';
 import {
   PROJECTION_FAMILY_IDS,
@@ -260,6 +261,7 @@ class PurchaseOrderApprovalExecutor implements RegisteredCapabilityOperationExec
       ],
     );
     if (result.rows.length !== 1) conflict('Approval request was not stored');
+    await recordCreations(client, entity, legalEntityId, [recordId]);
     return result.rows[0]!;
   }
   async #apply(client: PoolClient, request: ExecutionRequest, p: Prepared) {

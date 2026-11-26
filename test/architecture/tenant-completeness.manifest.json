@@ -1,7 +1,7 @@
 {
   "schemaVersion": "northstar.tenant-completeness-manifest/v1",
   "tenantIndependentDefinition": "A table is tenant-independent only when its rows represent a database-wide kernel mechanism or immutable content deliberately shared across tenants; business records are never tenant-independent, and absence of a tenant column is not evidence.",
-  "expectedTableCount": 131,
+  "expectedTableCount": 143,
   "tables": [
     {
       "schema": "north_star_internal",
@@ -796,6 +796,80 @@
     {
       "schema": "platform",
       "table": "record_template_audit",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "record_creation_batches",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "record_creation_occurrences",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "workflow_record_dispositions",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "workflow_record_start_skips",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "ledger_currencies",
+      "classification": "tenant-independent",
+      "reasonCode": "shared-immutable-catalog",
+      "reason": "The pinned ISO 4217 minor-unit exponent per currency code, changed only by migration; a journal line's currency foreign key fixes how many decimals its integer amount means for every tenant alike."
+    },
+    {
+      "schema": "platform",
+      "table": "ledger_core_roles",
+      "classification": "tenant-independent",
+      "reasonCode": "shared-immutable-catalog",
+      "reason": "The owner-ratified core account-role vocabulary of ADR-0093 (permanent IDs, classes, normal sides and control subledgers), changed only by migration; tenant roles live in tenant-scoped storage."
+    },
+    {
+      "schema": "platform",
+      "table": "ledger_companies",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "ledger_entry_counters",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "ledger_accounts",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "ledger_entries",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "ledger_lines",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "ledger_balances",
       "classification": "tenant-scoped",
       "tenantColumn": "tenant_id"
     }

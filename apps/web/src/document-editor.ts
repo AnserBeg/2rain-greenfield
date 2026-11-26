@@ -24,6 +24,7 @@ import type {
 import {
   readCompiledSurfaceDataBinding,
   readCompiledSurfaceManifest,
+  type CompiledLogicalField,
   type CompiledSurfaceDefinition,
   type CompiledSurfaceField,
   type CompiledSurfaceInputField,
@@ -188,6 +189,19 @@ async function getRecord(
   if (result.outcome !== 'exact' || result.records.length !== 1)
     throw new Error('Document unavailable');
   return result.records[0]!;
+}
+/**
+ * CUSTOMIZE-6 slice 2: the header currency fields line amounts read (a
+ * stored currency reached through the line's parent link).
+ */
+export function headerCurrencyFieldIds(
+  lineFields: readonly { readonly logical?: CompiledLogicalField }[],
+): string[] {
+  return lineFields.flatMap(({ logical }) =>
+    logical?.currency?.kind === 'stored' && logical.currency.via
+      ? [logical.currency.fieldId]
+      : [],
+  );
 }
 function surfaceFor(
   surfaces: readonly CompiledSurfaceDefinition[],
@@ -994,15 +1008,20 @@ async function editorResponse(
       : []),
   ];
   /** Header values, not pickers, that priced lines read (the currency). */
-  const lineSourceIds = new Set(
-    definition.lineFields
+  const lineSourceIds = new Set([
+    ...definition.lineFields
       .flatMap((field) => lineDependsOn(field))
       .filter(
         (fieldId) =>
           !definition.headerFields.find((value) => value.fieldId === fieldId)
             ?.reference,
       ),
-  );
+    // CUSTOMIZE-6 slice 2: the header currency line amounts are in, so a
+    // code changed before saving re-renders the lines' suffix.
+    ...headerCurrencyFieldIds(
+      surfaceFor(surfaces, definition.lineFormSurfaceId).fields ?? [],
+    ),
+  ]);
   /**
    * Whether the page shows a line-source value this draft has not seen yet,
    * such as a currency changed but not saved: an in-place answer would price
@@ -2044,6 +2063,8 @@ async function editorResponse(
       error: buffer.errors.get(controlId(draft.id, field.fieldId)) ?? null,
       lineSource:
         draft.id === buffer.header.id && lineSourceIds.has(field.fieldId),
+      // A line amount reads the currency its header stores.
+      header: draft.id === buffer.header.id ? undefined : buffer.header,
     };
   };
   const referenceContext = async (

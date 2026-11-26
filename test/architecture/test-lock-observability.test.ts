@@ -1164,7 +1164,7 @@ function governedScripts(): readonly (readonly [string, string])[] {
   // individually leased, CI-invoked scripts. Its outer lease spans their children.
   assert.equal(
     manifest.scripts?.['test:postgres'],
-    "node scripts/run-with-test-lock.mjs exclusive -- bash -c 'corepack pnpm test:postgres:1 && corepack pnpm test:postgres:2 && corepack pnpm test:postgres:3 && corepack pnpm test:postgres:4 && corepack pnpm test:postgres:5 && corepack pnpm test:postgres:6 && corepack pnpm test:postgres:7 && corepack pnpm test:postgres:8 && corepack pnpm test:postgres:9 && corepack pnpm test:postgres:10 && corepack pnpm test:postgres:11'",
+    "node scripts/run-with-test-lock.mjs exclusive -- bash -c 'corepack pnpm test:postgres:1 && corepack pnpm test:postgres:2 && corepack pnpm test:postgres:3 && corepack pnpm test:postgres:4 && corepack pnpm test:postgres:5 && corepack pnpm test:postgres:6 && corepack pnpm test:postgres:7 && corepack pnpm test:postgres:8 && corepack pnpm test:postgres:9 && corepack pnpm test:postgres:10 && corepack pnpm test:postgres:11 && corepack pnpm test:postgres:12'",
   );
   assert.equal(
     manifest.scripts?.['test:postgres:inventory'],
@@ -1466,6 +1466,18 @@ async function startZombie() {
   const pidLine = await readLine(parent.stdout);
   const zombiePid = Number(pidLine.trim());
   assert.ok(Number.isSafeInteger(zombiePid) && zombiePid > 0, pidLine);
+  // The parent reports the pid straight after fork(), before the child has
+  // exited: wait until it is a zombie, not a running process.
+  const deadline = Date.now() + 5000;
+  while (readProcessState(zombiePid) !== 'Z') {
+    if (Date.now() > deadline) {
+      parent.kill('SIGKILL');
+      assert.fail(
+        `the forked child ${String(zombiePid)} did not become a zombie within 5 s (state ${readProcessState(zombiePid)})`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
   return {
     zombiePid,
     stop: async () => {

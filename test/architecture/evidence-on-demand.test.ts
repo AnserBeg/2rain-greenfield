@@ -26,6 +26,28 @@ import test from 'node:test';
 const workflowPath = '.github/workflows/evidence.yml';
 const script = resolve('scripts/expected-red-on-demand.mjs');
 
+/** Lines that use a dispatch input: `inputs.x` or the bracket form `inputs['x']`. */
+function inputUseLines(workflow: string): string[] {
+  return workflow
+    .split('\n')
+    .filter((line) => /\binputs\s*(?:\.|\[)/u.test(line));
+}
+
+test('the input pin sees the bracket form and a run line', () => {
+  const clean = '          ref: ${{ inputs.ref }}\n';
+  assert.equal(inputUseLines(clean).length, 1);
+  assert.equal(
+    inputUseLines(`${clean}        run: echo "\${{ inputs['controls'] }}"\n`)
+      .length,
+    2,
+  );
+  assert.equal(
+    inputUseLines(`${clean}        run: echo "\${{ inputs [ 'controls' ] }}"\n`)
+      .length,
+    2,
+  );
+});
+
 test('the evidence workflow is label-gated, read-only and pinned', () => {
   const workflow = readFileSync(workflowPath, 'utf8');
 
@@ -119,10 +141,7 @@ test('the evidence workflow is label-gated, read-only and pinned', () => {
   // A dispatch input appears only as the select checkout's ref and inside the
   // PR_BODY expression: never in a `run:` block, a `--base` or an `echo`.
   assert.deepEqual(
-    workflow
-      .split('\n')
-      .filter((line) => line.includes('inputs.'))
-      .map((line) => line.trim().split(':')[0]),
+    inputUseLines(workflow).map((line) => line.trim().split(':')[0]),
     ['ref', 'PR_BODY'],
   );
   // The cited SHA is the resolved commit, never github.sha (on a dispatch that
@@ -141,6 +160,16 @@ test('the evidence workflow is label-gated, read-only and pinned', () => {
   assert.ok(
     select.includes('node scripts/expected-red-on-demand.mjs select \\'),
   );
+
+  // CI-8: tests read git history, and a control that reads it from a one-commit
+  // checkout fails as "the mutated run executed no test". Every control checks
+  // out the whole history, whatever its name.
+  assert.match(
+    control,
+    /uses: actions\/checkout@[0-9a-f]{40} # v4\n {8}with:\n {10}ref: \$\{\{ needs\.select-controls\.outputs\.head_sha \}\}\n {10}fetch-depth: 0\n/u,
+    'the control checkout must use fetch-depth: 0 for every control',
+  );
+  assert.doesNotMatch(control, /fetch-depth: \$\{\{/u);
 
   assert.match(control, /^ {4}needs: select-controls$/mu);
   assert.match(
@@ -282,6 +311,39 @@ test('controls are the entries the head adds or changes since the merge base', (
     assert.match(
       none.stdout,
       /^::warning title=expected-red selection::run-controls selected no control/mu,
+    );
+  } finally {
+    sandbox.remove();
+  }
+});
+
+test('the select summary and the empty-selection notice name a dispatch as well as the body', () => {
+  const source = readFileSync(script, 'utf8');
+  for (const sentence of [
+    "Named by the \\`controls:\\` line of the pull request body (or the dispatch's controls input), at",
+    'or dispatch again with `-f controls="<name> <name>"`',
+    "in the pull request body or the dispatch\\'s controls input.",
+    'the controls text (pull request body or dispatch input) has',
+  ]) {
+    assert.ok(source.includes(sentence), sentence);
+  }
+  // The summary a dispatch sees, run for real on a scratch repository.
+  const sandbox = createSandbox();
+  try {
+    const head = sandbox.commit('head', {
+      'test/evidence/alpha.expected-red.json': manifest([
+        { name: 'kept', original: 'a', replacement: 'b' },
+      ]),
+    });
+    const summary = join(sandbox.root, 'dispatch-summary');
+    const named = runScript(['select', '--head', head, '--summary', summary], {
+      body: 'controls: kept',
+      cwd: sandbox.root,
+    });
+    assert.equal(named.status, 0, named.stderr);
+    assert.match(
+      readFileSync(summary, 'utf8'),
+      /Named by the `controls:` line of the pull request body \(or the dispatch's controls input\)/u,
     );
   } finally {
     sandbox.remove();

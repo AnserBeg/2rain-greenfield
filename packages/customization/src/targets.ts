@@ -86,6 +86,8 @@ export interface CustomizationTargets {
   readonly calculatedDisplayTargets?: readonly CalculatedDisplayTarget[];
   readonly validationTargets?: readonly LiteralValidationTarget[];
   readonly workflowSdk?: string;
+  /** Record types whose creations the release's create operations record (ADR-0073 A1). */
+  readonly workflowRecordTypeIds?: readonly string[];
   readonly linkTargets?: readonly {
     readonly entityId: string;
     readonly label: string;

@@ -74,5 +74,5 @@ export default async function* expectedRedReporter(source) {
     todo: Number(counts.todo ?? 0),
   }));
 
-  yield `${JSON.stringify({ files, results, version: 3 }, undefined, 2)}\n`;
+  yield `${JSON.stringify({ dropped: ledger.dropped(), files, results, version: 3 }, undefined, 2)}\n`;
 }

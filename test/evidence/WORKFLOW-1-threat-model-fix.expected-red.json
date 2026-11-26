@@ -62,8 +62,8 @@
       "name": "workflow-substituted-receipt-scope",
       "claim": "Dispatch and the committed write use the scope of the source receipt event.",
       "file": "packages/postgres-provider/src/workflow-execution.ts",
-      "original": "               'legal_entity_id', event.payload #>> '{legalEntityId,value}',\n               'receipt_id', change.record_id,",
-      "replacement": "               'legal_entity_id', i.legal_entity_id,\n               'receipt_id', i.receipt_id,",
+      "original": "               'legal_entity_id', event.payload #>> '{legalEntityId,value}',\n               'trigger_record_id', change.record_id,",
+      "replacement": "               'legal_entity_id', i.legal_entity_id,\n               'trigger_record_id', i.trigger_record_id,",
       "test": {
         "files": ["test/postgres/workflow-consumer.test.ts"]
       },

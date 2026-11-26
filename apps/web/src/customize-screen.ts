@@ -1,4 +1,13 @@
-import { reportSubmission } from './customize-report.js';
+import {
+  allFields,
+  at,
+  dimensionChoices,
+  measureChoices,
+  measureSubmission,
+  pick,
+  reportSubmission,
+  same,
+} from './customize-report.js';
 import type { ReportTarget } from '@north-star/customization';
 import {
   popupCommand,
@@ -397,45 +406,52 @@ export async function renderCustomizeScreen(
                       (await loadTargets()).templateBindings ?? [],
                       submission,
                     )
-                  : submission.kind === 'addPopupActionRevision'
-                    ? popupSubmission(
-                        (await loadTargets()).popupActions ?? [],
+                  : submission.kind === 'addMeasureRevision'
+                    ? measureSubmission(
+                        (await loadTargets()).reports ?? [],
                         submission,
                       )
-                    : submission.kind === 'addDocumentTemplateRevision'
-                      ? templatePatchFromForm(
+                    : submission.kind === 'addPopupActionRevision'
+                      ? popupSubmission(
+                          (await loadTargets()).popupActions ?? [],
                           submission,
-                          (await loadTargets()).documentTemplateTargets?.find(
-                            ({ entityId }) => entityId === submission.entity,
-                          ),
                         )
-                      : submission.kind === 'addBoardViewRevision'
-                        ? boardSubmission(
-                            (await loadTargets()).boards ?? [],
+                      : submission.kind === 'addDocumentTemplateRevision'
+                        ? templatePatchFromForm(
                             submission,
+                            (await loadTargets()).documentTemplateTargets?.find(
+                              ({ entityId }) => entityId === submission.entity,
+                            ),
                           )
-                        : submission.kind === 'addLayoutRevision'
-                          ? layoutSubmission(
-                              (await loadTargets()).layouts ?? [],
+                        : submission.kind === 'addBoardViewRevision'
+                          ? boardSubmission(
+                              (await loadTargets()).boards ?? [],
                               submission,
                             )
-                          : patchFromForm(
-                              submission,
-                              submission.kind === 'addValidation'
-                                ? (await loadTargets()).validationTargets?.find(
-                                    ({ entityId }) =>
-                                      entityId === submission.entity,
-                                  )
-                                : undefined,
-                              submission.kind === 'addCalculatedDisplayField'
-                                ? (
-                                    await loadTargets()
-                                  ).calculatedDisplayTargets?.find(
-                                    ({ recordSurfaceId }) =>
-                                      recordSurfaceId === submission.surface,
-                                  )
-                                : undefined,
-                            ),
+                          : submission.kind === 'addLayoutRevision'
+                            ? layoutSubmission(
+                                (await loadTargets()).layouts ?? [],
+                                submission,
+                              )
+                            : patchFromForm(
+                                submission,
+                                submission.kind === 'addValidation'
+                                  ? (
+                                      await loadTargets()
+                                    ).validationTargets?.find(
+                                      ({ entityId }) =>
+                                        entityId === submission.entity,
+                                    )
+                                  : undefined,
+                                submission.kind === 'addCalculatedDisplayField'
+                                  ? (
+                                      await loadTargets()
+                                    ).calculatedDisplayTargets?.find(
+                                      ({ recordSurfaceId }) =>
+                                        recordSurfaceId === submission.surface,
+                                    )
+                                  : undefined,
+                              ),
             'visualBuilder',
             undefined,
             actor,
@@ -2154,8 +2170,8 @@ function mapSubmission(
 
 const hidden = (name: string, value: string) =>
   `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`;
-const option = (id: string, label: string, selected: boolean) =>
-  `<option value="${escapeHtml(id)}"${selected ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+const option = (value: string, label: string, selected: boolean) =>
+  `<option value="${escapeHtml(value)}"${selected ? ' selected' : ''}>${escapeHtml(label)}</option>`;
 
 function reportEditor(target: ReportTarget, reportId: string | null) {
   const previous = target.reports.find(
@@ -2170,26 +2186,59 @@ function reportEditor(target: ReportTarget, reportId: string | null) {
         `<a href="/?${escapeHtml(new URLSearchParams({ customize: '', report: target.source.listSurfaceId, editReport: r.revision.reportId }).toString())}">${escapeHtml(r.label)}</a>`,
     )
     .join(' ');
-  const groups = Array.from(
-    { length: 4 },
-    (_, i) =>
-      `<label>Group ${i + 1}<select name="group${i}">${option('', 'Choose a field', false)}${target.fields.map((f) => option(f.operand.fieldId, f.label, f.operand.fieldId === body?.dimensions[i]?.fieldId)).join('')}</select></label>`,
-  ).join('');
-  const filters = target.fields
+  const ageDim = body?.dimensions.find((d) => d.kind === 'age');
+  const edges = ageDim
+    ? ageDim.bands
+        .slice(1, -1)
+        .map((b) => String(b.through))
+        .join(',')
+    : '30,60,90';
+  const dims = dimensionChoices(target, edges);
+  const groups = Array.from({ length: 4 }, (_, i) => {
+    const chosen = body?.dimensions[i]
+      ? dims.find((d) => same(d.value, body.dimensions[i]))
+      : undefined;
+    return `<label>Group ${i + 1}<select name="group${i}">${option('', 'Choose a field', !chosen)}${dims.map((d) => option(JSON.stringify(d.value), d.label, d === chosen)).join('')}</select></label>`;
+  }).join('');
+  const filters = allFields(target)
     .map((f) => {
-      const selected = body?.filters.find(
-        (c) => c.fieldId === f.operand.fieldId,
+      const selected = body?.filters.find((c) =>
+        same(
+          'via' in c && c.via
+            ? { fieldId: c.fieldId, via: c.via }
+            : { fieldId: c.fieldId },
+          at(f),
+        ),
       )?.kind;
-      return `<label>${escapeHtml(f.label)}<select name="filter:${escapeHtml(f.operand.fieldId)}">${option('', 'None', !selected)}${option('equals', 'Equals', selected === 'equals')}${f.operand.type === 'choice' ? option('membership', 'One of', selected === 'membership') : ''}${f.operand.basis ? option('dateRange', 'Date range', selected === 'dateRange') : ''}</select></label>`;
+      const name = 'filter:' + JSON.stringify(at(f));
+      return `<label>${escapeHtml(f.label)}<select name="${escapeHtml(name)}">${option('', 'None', !selected)}${option('equals', 'Equals', selected === 'equals')}${f.operand.type === 'choice' ? option('membership', 'One of', selected === 'membership') : ''}${f.operand.basis && !f.operand.via ? option('dateRange', 'Date range', selected === 'dateRange') : ''}</select></label>`;
     })
     .join('');
-  const sums = target.fields.filter(
-    (f) => f.operand.currency || f.operand.unitId,
+  const measures = measureChoices(target);
+  const chosen = new Set(
+    body
+      ? body.measures.flatMap((m) => {
+          const c = pick(measures, m);
+          return c ? [c] : [];
+        })
+      : [measures[0]],
   );
-  const chosen = (id: string) =>
-    !!body?.measures.some(
-      (m) => m.operator.kind === 'sum' && m.operator.fieldId === id,
-    );
-  const count = !body || body.measures.some((m) => m.operator.kind === 'count');
-  return `<h1>${previous ? 'Edit report' : 'Add report'}</h1>${existing && '<nav aria-label="Reports">' + existing + '</nav>'}<form method="post">${hidden('action', 'draft')}${hidden('kind', 'addReportRevision')}${hidden('surface', target.source.listSurfaceId)}${hidden('reportId', reportId ?? '')}${hidden('prior', previous?.revision.revisionId ?? '')}<label>Report name <input name="label" value="${escapeHtml(previous?.label ?? '')}" required maxlength="240"></label><fieldset><legend>Group by</legend>${groups}</fieldset><fieldset><legend>Measures</legend><label><input type="checkbox" name="count"${count ? ' checked' : ''}>Count records</label>${sums.map((f) => `<label><input type="checkbox" name="sum:${escapeHtml(f.operand.fieldId)}"${chosen(f.operand.fieldId) ? ' checked' : ''}>Sum ${escapeHtml(f.label)}</label>`).join('')}</fieldset><details><summary>Filter parameters</summary>${filters}</details><label><input type="checkbox" name="csv"${!body || body.outputs.some((o) => o.kind === 'csv') ? ' checked' : ''}>Allow audited CSV</label><button name="status" value="active">Draft report</button>${previous ? '<button name="status" value="retired">Draft retirement</button>' : ''}</form>`;
+  const grain =
+    target.grain === 'line' ? 'One row per line' : 'One row per record';
+  return `<h1>${previous ? 'Edit report' : 'Add report'}</h1>${existing && '<nav aria-label="Reports">' + existing + '</nav>'}<form method="post">${hidden('action', 'draft')}${hidden('kind', 'addReportRevision')}${hidden('surface', target.source.listSurfaceId)}${hidden('reportId', reportId ?? '')}${hidden('prior', previous?.revision.revisionId ?? '')}<p>${escapeHtml(grain)}</p><label>Report name <input name="label" value="${escapeHtml(previous?.label ?? '')}" required maxlength="240"></label><fieldset><legend>Group by</legend>${groups}<label>Age band edges in days <input name="ageEdges" value="${escapeHtml(edges)}" maxlength="80"></label></fieldset><fieldset><legend>Measures</legend>${measures.map((m, i) => `<label><input type="checkbox" name="measure${i}" value="${escapeHtml(JSON.stringify(m.value))}"${chosen.has(m) ? ' checked' : ''}>${escapeHtml(m.label)}</label>`).join('')}</fieldset><details><summary>Filter parameters</summary>${filters}</details><label><input type="checkbox" name="csv"${!body || body.outputs.some((o) => o.kind === 'csv') ? ' checked' : ''}>Allow audited CSV</label><button name="status" value="active">Draft report</button>${previous ? '<button name="status" value="retired">Draft retirement</button>' : ''}</form>${measureEditor(target)}`;
+}
+
+/** Trial a named measure on authorized data, then approve exactly that. */
+function measureEditor(target: ReportTarget) {
+  const operators = measureChoices(target).filter(
+    (m) => m.value.kind === 'inline',
+  );
+  const current = target.namedMeasures
+    .filter((m) => m.lifecycle === 'active')
+    .map(
+      (m) =>
+        `<li>${escapeHtml(m.label)} · ${m.revision.status === 'approved' ? 'approved' : 'trial'}<form method="post">${hidden('action', 'draft')}${hidden('kind', 'addMeasureRevision')}${hidden('surface', target.source.listSurfaceId)}${hidden('measureId', m.revision.measureId)}${hidden('prior', m.revision.revisionId)}${hidden('label', m.label)}${m.revision.status === 'trial' ? '<button name="status" value="approved">Approve this measure</button>' : ''}<button name="status" value="retired">Retire</button></form></li>`,
+    )
+    .join('');
+  return `<section aria-label="Named measures"><h2>Named measures</h2>${current && '<ul>' + current + '</ul>'}<form method="post">${hidden('action', 'draft')}${hidden('kind', 'addMeasureRevision')}${hidden('surface', target.source.listSurfaceId)}<label>Measure name <input name="label" required maxlength="240"></label><label>Calculation<select name="operator">${operators.map((m) => option(JSON.stringify(m.value.operator), m.label, false)).join('')}</select></label><button name="status" value="trial">Draft a trial</button></form></section>`;
 }
