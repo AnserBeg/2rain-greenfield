@@ -523,7 +523,11 @@ test('the schema-snapshots workflow regenerates both snapshots, uploads them and
     /^ {2}(?:push|pull_request|pull_request_target|schedule|workflow_run):/mu,
     'only a dispatch may start it',
   );
-  assert.match(workflow, /^permissions:\n {2}contents: read$/mu);
+  assert.match(
+    workflow,
+    /^permissions:\n {2}contents: read$/mu,
+    'the token must stay read-only',
+  );
   assert.equal(
     workflow.match(/^\s*permissions:/gmu)?.length,
     1,
