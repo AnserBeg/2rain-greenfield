@@ -19,10 +19,8 @@ import {
   SEMANTIC_QUERY_REQUEST_VERSION,
   type SemanticRecordDto,
 } from '../../packages/runtime/src/semantic-query-gateway.js';
-import {
-  readCompiledSurfaceManifest,
-  type ImmutableJsonValue,
-} from '../../packages/runtime/src/request-runtime-view.js';
+import type { ImmutableJsonValue } from '../../packages/runtime/src/request-runtime-view.js';
+import { readCompiledSurfaceManifest } from '../../apps/web/src/surface-contract.js';
 import { governedStorageTarget } from '../helpers/governed-storage-target.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 

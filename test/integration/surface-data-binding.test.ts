@@ -16077,10 +16077,8 @@ test('a tenant record button opens, reviews its bound field, and submits one ord
  * command mints), timestamps and the clock; the file is committed beside this
  * test and regenerated only with SECTION_BLOCKS_GOLDEN_WRITE=1.
  */
-const SECTION_BLOCKS_GOLDEN = new URL(
-  '../fixtures/section-blocks-s1/golden-renders.json',
-  import.meta.url,
-);
+const SECTION_BLOCKS_GOLDEN =
+  'test/fixtures/section-blocks-s1/golden-renders.json';
 async function sectionBlocksRenders(): Promise<Record<string, string>> {
   const f = await orderEntryWitness();
   const ns = f.ns;
