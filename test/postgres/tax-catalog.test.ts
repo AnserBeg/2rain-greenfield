@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import test, { type TestContext } from 'node:test';
 import pg, { type PoolClient } from 'pg';
 
@@ -47,11 +47,31 @@ const OWNER_FUNCTIONS = [
   'north_star_internal.tax_require_writer()',
   'north_star_internal.tax_granted(uuid,text,text)',
   'north_star_internal.tax_may_write(text,jsonb)',
+  'north_star_internal.tax_company_live(uuid,boolean)',
   'north_star_internal.tax_put_code(uuid,uuid,jsonb,uuid)',
   'north_star_internal.tax_put_registration(uuid,uuid,jsonb,uuid)',
   'platform.tax_provision_starter(uuid,uuid,text[])',
 ];
 const PROVINCES = ['ca', 'ca-bc', 'ca-sk', 'ca-mb'];
+// A storage plan whose one legalEntityMaster entity is the test company table.
+const STORAGE_PAYLOAD = JSON.stringify({
+  kind: 'storageTargetPayload',
+  entities: [
+    {
+      entityId: 'example.tax:entity.company',
+      lifecycle: 'active',
+      physicalTableName: 'test_tax_companies',
+      legalEntityMaster: {
+        fieldColumns: { status: 'company_status' },
+        activeStatusValue: 'active',
+      },
+    },
+  ],
+});
+const sha256 = (text: string) =>
+  createHash('sha256').update(text, 'utf8').digest('hex');
+const STORAGE_CHUNK = sha256(STORAGE_PAYLOAD);
+const STORAGE_MANIFEST = sha256('tax-storage-target-manifest');
 
 interface Scope {
   tenant: string;
@@ -119,7 +139,12 @@ async function world(t: TestContext) {
       otherTenant = randomUUID();
     const companyA = randomUUID(),
       companyB = randomUUID(),
-      companyC = randomUUID();
+      companyC = randomUUID(),
+      companyD = randomUUID(),
+      companyE = randomUUID(),
+      companyF = randomUUID(),
+      companyG = randomUUID(),
+      outsider = randomUUID();
     const runtime = new pg.Pool({
       ...connection,
       user: 'north_star_runtime',
@@ -158,6 +183,30 @@ async function world(t: TestContext) {
                gen_random_uuid(),$5)`,
             [scope.tenant, scope.environment, release, revision, writer],
           );
+        // Each release's storage plan marks the company table legalEntityMaster.
+        for (const release of releases) {
+          await admin.query(
+            `INSERT INTO platform.tenant_release_artifact_links VALUES ($1,$2,$3,$4,'projectionManifest'),($1,$2,$3,$5,'projectionChunk')`,
+            [
+              scope.tenant,
+              scope.environment,
+              release,
+              STORAGE_MANIFEST,
+              STORAGE_CHUNK,
+            ],
+          );
+          await admin.query(
+            `INSERT INTO platform.tenant_release_projection_links(tenant_id,environment_id,release_id,projection_instance_id,
+               projection_family_id,projection_manifest_hash)
+             VALUES ($1,$2,$3,'storage-target','northstar.compiler:projection-family.storage-target',$4)`,
+            [scope.tenant, scope.environment, release, STORAGE_MANIFEST],
+          );
+          await admin.query(
+            `INSERT INTO platform.tenant_release_chunk_links(tenant_id,environment_id,release_id,projection_instance_id,chunk_id,chunk_hash)
+             VALUES ($1,$2,$3,'storage-target','payload',$4)`,
+            [scope.tenant, scope.environment, release, STORAGE_CHUNK],
+          );
+        }
         await admin.query(
           'UPDATE platform.active_release_pointers SET release_id=$3,fence=fence+1 WHERE tenant_id=$1 AND environment_id=$2',
           [scope.tenant, scope.environment, releases[0]],
@@ -187,6 +236,16 @@ async function world(t: TestContext) {
           [scope.tenant, scope.environment, principal, roleId, company],
         );
 
+      await admin.query(
+        `INSERT INTO platform.release_artifact_blobs VALUES
+           ($1,'projectionManifest','storage-target','application/vnd.northstar.canonical+json',convert_to('{}','UTF8'),2),
+           ($2,'projectionChunk','storage-target','application/vnd.northstar.canonical+json',convert_to($3::text,'UTF8'),octet_length($3::text))`,
+        [STORAGE_MANIFEST, STORAGE_CHUNK, STORAGE_PAYLOAD],
+      );
+      await admin.query(
+        `CREATE TABLE north_star_module.test_tax_companies (tenant_id uuid NOT NULL, environment_id uuid NOT NULL,
+           record_id uuid PRIMARY KEY, company_status text NOT NULL, archived_at timestamptz)`,
+      );
       await seedTenant(a, [releaseA, alternateA]);
       await seedTenant(b, [releaseB]);
       const everything = [
@@ -212,6 +271,21 @@ async function world(t: TestContext) {
         await role(b, 'tax-admin', everything),
         null,
       );
+      // A tenant-wide member whose role holds no tax grant.
+      await member(a, outsider, await role(a, 'no-tax', []), null);
+      for (const company of [
+        companyA,
+        companyB,
+        companyC,
+        companyD,
+        companyE,
+        companyF,
+        companyG,
+      ])
+        await admin.query(
+          "INSERT INTO north_star_module.test_tax_companies VALUES ($1,$2,$3,'active',NULL)",
+          [a.tenant, a.environment, company],
+        );
 
       const provision = async (scope: Scope = a) =>
         Number(
@@ -862,7 +936,7 @@ async function world(t: TestContext) {
       });
       await t.test('a read grant cannot confirm a registration', async () => {
         await assert.rejects(
-          change(reader, 'putRegistration', registration(randomUUID())),
+          change(reader, 'putRegistration', registration(companyF)),
           /tax\.writeDenied/u,
           'a read grant registered a company',
         );
@@ -901,11 +975,7 @@ async function world(t: TestContext) {
               await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
               return confirm(
                 client,
-                await review(
-                  client,
-                  'putRegistration',
-                  registration(randomUUID()),
-                ),
+                await review(client, 'putRegistration', registration(companyD)),
               );
             }),
             /tax\.requiresReadCommitted/u,
@@ -1035,11 +1105,121 @@ async function world(t: TestContext) {
           'an oversized proposal was reviewed',
         );
       });
+      await t.test(
+        'a member without the read grant is refused the codes',
+        async () => {
+          await assert.rejects(
+            as(outsider, (client) =>
+              client.query('SELECT * FROM platform.tax_read_codes($1)', [
+                '2026-03-01',
+              ]),
+            ),
+            /tax\.readUnavailable/u,
+            'a member without the read grant read the codes',
+          );
+        },
+      );
+      await t.test(
+        'a member without the read grant is refused one code',
+        async () => {
+          const id = await codeId('GST');
+          await assert.rejects(
+            as(outsider, (client) =>
+              client.query(
+                "SELECT * FROM platform.tax_read_code($1,'2026-03-01')",
+                [id],
+              ),
+            ),
+            /tax\.readUnavailable/u,
+            'a member without the read grant read one code',
+          );
+        },
+      );
+      await t.test(
+        'a member without the read grant is refused the registrations',
+        async () => {
+          await assert.rejects(
+            as(outsider, (client) =>
+              client.query(
+                'SELECT * FROM platform.tax_read_registrations($1)',
+                [companyA],
+              ),
+            ),
+            /tax\.readUnavailable/u,
+            'a member without the read grant read the registrations',
+          );
+        },
+      );
+      await t.test(
+        'a registration for a company that is not a live legal entity is refused at review',
+        async () => {
+          await assert.rejects(
+            as(writer, (client) =>
+              review(client, 'putRegistration', registration(randomUUID())),
+            ),
+            /tax\.companyUnavailable/u,
+            'a registration for an unknown company was reviewed',
+          );
+        },
+      );
+      await t.test(
+        'a company archived after the review refuses the confirm',
+        async () => {
+          await assert.rejects(
+            as(writer, async (client) => {
+              const reviewed = await review(
+                client,
+                'putRegistration',
+                registration(companyG, 'ca'),
+              );
+              await admin.query(
+                'UPDATE north_star_module.test_tax_companies SET archived_at = now() WHERE record_id = $1',
+                [companyG],
+              );
+              return confirm(client, reviewed);
+            }),
+            /tax\.companyUnavailable/u,
+            'a registration for an archived company was confirmed',
+          );
+        },
+      );
+      await t.test('an end date of infinity is refused', async () => {
+        const created = await change(
+          writer,
+          'putRegistration',
+          registration(companyC, 'ca'),
+        );
+        await assert.rejects(
+          change(writer, 'putRegistration', {
+            registrationId: created.registrationId,
+            effectiveTo: 'infinity',
+          }),
+          /tax\.invalidRegistration/u,
+          'an infinite registration end was accepted',
+        );
+      });
+      await t.test(
+        'storage refuses an infinite registration date',
+        async () => {
+          await assert.rejects(
+            anyReceipt().then((receipt) =>
+              owner(
+                `INSERT INTO platform.tax_registrations(tenant_id,environment_id,registration_id,company_id,jurisdiction_id,
+                   registration_number,effective_from,effective_to,receipt_id)
+                 VALUES ($1,$2,gen_random_uuid(),$3,'ca-mb','M-9','2026-05-01','infinity',$4)`,
+                [a.tenant, a.environment, randomUUID(), receipt],
+              ),
+            ),
+            /tax_registrations_finite/u,
+            'an infinite registration date was stored',
+          );
+        },
+      );
       await t.test('a registration ends once', async () => {
         const created = await change(
           writer,
           'putRegistration',
-          registration(randomUUID(), 'ca-sk'),
+          registration(companyE, 'ca-sk'),
         );
         const end = (day: string) =>
           change(writer, 'putRegistration', {

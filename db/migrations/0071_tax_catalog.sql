@@ -136,6 +136,7 @@ CREATE TABLE platform.tax_registrations (
   receipt_id uuid NOT NULL,
   PRIMARY KEY (tenant_id, environment_id, registration_id),
   CONSTRAINT tax_registrations_range CHECK (effective_to IS NULL OR effective_to > effective_from),
+  CONSTRAINT tax_registrations_finite CHECK (isfinite(effective_from) AND (effective_to IS NULL OR isfinite(effective_to))),
   CONSTRAINT tax_registrations_no_overlap EXCLUDE USING gist (
     tenant_id WITH =, environment_id WITH =, company_id WITH =, jurisdiction_id WITH =,
     daterange(effective_from, effective_to, '[)') WITH &&),
@@ -188,6 +189,31 @@ LANGUAGE sql STABLE SET search_path = pg_catalog, pg_temp AS $$
         WHEN 'tenant' THEN m.legal_entity_id IS NULL
         ELSE (m.legal_entity_id IS NULL OR m.legal_entity_id = company) END)
 $$;
+
+-- Whether a company is a live legal entity (ADR-0015): an unarchived row of
+-- the entity the ACTIVE release marks legalEntityMaster, in its active status.
+-- Resolved by the marker in the storage-target projection, never by name.
+CREATE FUNCTION north_star_internal.tax_company_live(company uuid, lock_row boolean) RETURNS boolean
+LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp AS $$
+DECLARE t uuid := north_star_internal.trusted_tenant_id(); e uuid := north_star_internal.trusted_environment_id();
+  masters jsonb; master jsonb; stored uuid; BEGIN
+  IF company IS NULL THEN RETURN false; END IF;
+  SELECT jsonb_agg(v) INTO masters FROM jsonb_array_elements((
+    SELECT convert_from(blob.canonical_bytes, 'UTF8')::jsonb
+      FROM platform.active_release_pointers p
+      JOIN platform.tenant_release_projection_links projection USING (tenant_id, environment_id, release_id)
+      JOIN platform.tenant_release_chunk_links chunk USING (tenant_id, environment_id, release_id, projection_instance_id)
+      JOIN platform.release_artifact_blobs blob ON blob.content_hash = chunk.chunk_hash AND blob.artifact_kind = 'projectionChunk'
+     WHERE (p.tenant_id, p.environment_id) = (t, e)
+       AND projection.projection_family_id = 'northstar.compiler:projection-family.storage-target')->'entities') v
+    WHERE v ? 'legalEntityMaster';
+  IF jsonb_array_length(coalesce(masters, '[]'::jsonb)) <> 1 THEN RETURN false; END IF;
+  master := masters->0;
+  EXECUTE format('SELECT record_id FROM north_star_module.%I WHERE tenant_id = $1 AND environment_id = $2 AND record_id = $3
+      AND archived_at IS NULL AND %I = $4 %s', master->>'physicalTableName',
+      master#>>'{legalEntityMaster,fieldColumns,status}', CASE WHEN lock_row THEN 'FOR SHARE' ELSE '' END)
+    INTO stored USING t, e, company, master#>>'{legalEntityMaster,activeStatusValue}';
+  RETURN stored IS NOT NULL; END $$;
 
 -- T3/T4: create a code or append a version. Granted to no one. The caller
 -- supplies the trusted scope and a receipt it has already written.
@@ -259,6 +285,7 @@ DECLARE chosen uuid; BEGIN
   IF jsonb_typeof(proposal) = 'object' AND proposal ? 'registrationId' THEN
     IF (proposal - 'registrationId' - 'effectiveTo' = '{}'::jsonb AND jsonb_typeof(proposal->'effectiveTo') = 'string'
         AND pg_input_is_valid(proposal->>'registrationId', 'uuid')
+        AND proposal->>'effectiveTo' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
         AND pg_input_is_valid(proposal->>'effectiveTo', 'date')) IS NOT TRUE THEN RAISE EXCEPTION 'tax.invalidRegistration'; END IF;
     UPDATE platform.tax_registrations SET effective_to = (proposal->>'effectiveTo')::date, receipt_id = receipt
       WHERE (tenant_id, environment_id, registration_id) = (t, e, (proposal->>'registrationId')::uuid) AND effective_to IS NULL
@@ -269,9 +296,15 @@ DECLARE chosen uuid; BEGIN
       AND proposal - 'companyId' - 'jurisdictionId' - 'registrationNumber' - 'effectiveFrom' - 'effectiveTo' = '{}'::jsonb
       AND pg_input_is_valid(proposal->>'companyId', 'uuid') AND jsonb_typeof(proposal->'jurisdictionId') = 'string'
       AND jsonb_typeof(proposal->'registrationNumber') = 'string'
+      AND jsonb_typeof(proposal->'effectiveFrom') = 'string' AND proposal->>'effectiveFrom' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
       AND pg_input_is_valid(proposal->>'effectiveFrom', 'date')
-      AND (NOT proposal ? 'effectiveTo' OR pg_input_is_valid(proposal->>'effectiveTo', 'date'))) IS NOT TRUE
+      AND (NOT proposal ? 'effectiveTo' OR (jsonb_typeof(proposal->'effectiveTo') = 'string'
+        AND proposal->>'effectiveTo' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' AND pg_input_is_valid(proposal->>'effectiveTo', 'date')))) IS NOT TRUE
     THEN RAISE EXCEPTION 'tax.invalidRegistration'; END IF;
+  -- The company must be a live legal entity of the active release, share-locked
+  -- until commit (taken after the pointer, epoch and review locks).
+  IF NOT north_star_internal.tax_company_live((proposal->>'companyId')::uuid, true) THEN
+    RAISE EXCEPTION 'tax.companyUnavailable'; END IF;
   chosen := gen_random_uuid();
   INSERT INTO platform.tax_registrations(tenant_id, environment_id, registration_id, company_id, jurisdiction_id,
       registration_number, effective_from, effective_to, receipt_id)
@@ -341,6 +374,9 @@ DECLARE
   IF NOT FOUND THEN RAISE EXCEPTION 'tax.staleRelease'; END IF;
   IF NOT north_star_internal.tax_may_write(requested_action, proposal) THEN
     RAISE EXCEPTION 'tax.writeDenied' USING ERRCODE = '42501'; END IF;
+  IF requested_action = 'putRegistration' AND NOT proposal ? 'registrationId'
+     AND NOT north_star_internal.tax_company_live((proposal->>'companyId')::uuid, false) THEN
+    RAISE EXCEPTION 'tax.companyUnavailable'; END IF;
   digest := encode(sha256(convert_to(requested_action || chr(10) || proposal::text, 'UTF8')), 'hex');
   INSERT INTO platform.tax_catalog_reviews(tenant_id, environment_id, review_id, principal_id, release_id, fence,
       action, proposal, digest)
@@ -408,7 +444,7 @@ RETURNS TABLE (code_id uuid, code text, label text, version integer, effective_f
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE t uuid := north_star_internal.trusted_tenant_id(); e uuid := north_star_internal.trusted_environment_id();
   held platform.tax_catalog_codes; BEGIN
-  IF at IS NULL OR NOT north_star_internal.tax_granted(NULL, 'northstar.tax:permission.catalog_read', 'any') THEN
+  IF NOT north_star_internal.tax_granted(NULL, 'northstar.tax:permission.catalog_read', 'any') OR at IS NULL THEN
     RAISE EXCEPTION 'tax.readUnavailable' USING ERRCODE = '42501'; END IF;
   SELECT * INTO held FROM platform.tax_catalog_codes c WHERE (c.tenant_id, c.environment_id, c.code_id) = (t, e, chosen);
   IF NOT FOUND THEN RAISE EXCEPTION 'tax.codeUnavailable'; END IF;
@@ -447,6 +483,7 @@ DO $access$ DECLARE tab text; routine text; BEGIN
     EXECUTE format('ALTER TABLE platform.%I FORCE ROW LEVEL SECURITY', tab); END LOOP;
   FOREACH routine IN ARRAY ARRAY['north_star_internal.tax_append_only()', 'north_star_internal.tax_require_writer()',
       'north_star_internal.tax_granted(uuid,text,text)', 'north_star_internal.tax_may_write(text,jsonb)',
+      'north_star_internal.tax_company_live(uuid,boolean)',
       'north_star_internal.tax_put_code(uuid,uuid,jsonb,uuid)',
       'north_star_internal.tax_put_registration(uuid,uuid,jsonb,uuid)', 'platform.tax_provision_starter(uuid,uuid,text[])',
       'platform.tax_review(uuid,bigint,text,jsonb)', 'platform.tax_confirm(uuid,text)', 'platform.tax_read_codes(date)',

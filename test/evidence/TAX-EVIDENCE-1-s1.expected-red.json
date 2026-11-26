@@ -548,6 +548,125 @@
           "expected": "Missing expected rejection: an oversized proposal was reviewed"
         }
       ]
+    },
+    {
+      "name": "tax-read-codes-grant",
+      "claim": "Reading the codes needs the catalog read grant.",
+      "file": "db/migrations/0071_tax_catalog.sql",
+      "original": "IF at IS NULL OR NOT north_star_internal.tax_granted(NULL, 'northstar.tax:permission.catalog_read', 'any') THEN",
+      "replacement": "IF at IS NULL THEN",
+      "test": {
+        "files": ["test/postgres/tax-catalog.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/tax-catalog.test.ts",
+          "name": "a member without the read grant is refused the codes",
+          "expected": "Missing expected rejection: a member without the read grant read the codes"
+        }
+      ]
+    },
+    {
+      "name": "tax-read-code-grant",
+      "claim": "Reading one code needs the catalog read grant.",
+      "file": "db/migrations/0071_tax_catalog.sql",
+      "original": "IF NOT north_star_internal.tax_granted(NULL, 'northstar.tax:permission.catalog_read', 'any') OR at IS NULL THEN",
+      "replacement": "IF at IS NULL THEN",
+      "test": {
+        "files": ["test/postgres/tax-catalog.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/tax-catalog.test.ts",
+          "name": "a member without the read grant is refused one code",
+          "expected": "Missing expected rejection: a member without the read grant read one code"
+        }
+      ]
+    },
+    {
+      "name": "tax-read-registrations-grant",
+      "claim": "Reading registrations needs the registration read grant, not only a membership covering the company.",
+      "file": "db/migrations/0071_tax_catalog.sql",
+      "original": "NOT north_star_internal.tax_granted(company, 'northstar.tax:permission.registration_read', 'company')",
+      "replacement": "NOT EXISTS (SELECT FROM platform.current_policy_memberships m WHERE (m.tenant_id, m.environment_id, m.principal_id) = (north_star_internal.trusted_tenant_id(), north_star_internal.trusted_environment_id(), nullif(current_setting('north_star.principal_id', true), '')::uuid) AND m.revoked_at IS NULL AND (m.legal_entity_id IS NULL OR m.legal_entity_id = company))",
+      "test": {
+        "files": ["test/postgres/tax-catalog.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/tax-catalog.test.ts",
+          "name": "a member without the read grant is refused the registrations",
+          "expected": "Missing expected rejection: a member without the read grant read the registrations"
+        }
+      ]
+    },
+    {
+      "name": "tax-company-live-review",
+      "claim": "A registration for a company that is not a live legal entity is refused at review.",
+      "file": "db/migrations/0071_tax_catalog.sql",
+      "original": "  IF requested_action = 'putRegistration' AND NOT proposal ? 'registrationId'\n     AND NOT north_star_internal.tax_company_live((proposal->>'companyId')::uuid, false) THEN\n    RAISE EXCEPTION 'tax.companyUnavailable'; END IF;\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/tax-catalog.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/tax-catalog.test.ts",
+          "name": "a registration for a company that is not a live legal entity is refused at review",
+          "expected": "Missing expected rejection: a registration for an unknown company was reviewed"
+        }
+      ]
+    },
+    {
+      "name": "tax-company-live-confirm",
+      "claim": "A company archived after the review refuses the registration at confirm (share-locked until commit).",
+      "file": "db/migrations/0071_tax_catalog.sql",
+      "original": "  IF NOT north_star_internal.tax_company_live((proposal->>'companyId')::uuid, true) THEN\n    RAISE EXCEPTION 'tax.companyUnavailable'; END IF;\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/tax-catalog.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/tax-catalog.test.ts",
+          "name": "a company archived after the review refuses the confirm",
+          "expected": "Missing expected rejection: a registration for an archived company was confirmed"
+        }
+      ]
+    },
+    {
+      "name": "tax-registration-date-iso",
+      "claim": "A registration end must be an ISO calendar date, so \"infinity\" is refused by name.",
+      "file": "db/migrations/0071_tax_catalog.sql",
+      "original": "        AND proposal->>'effectiveTo' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'\n        AND pg_input_is_valid(proposal->>'effectiveTo', 'date')) IS NOT TRUE THEN RAISE EXCEPTION 'tax.invalidRegistration'; END IF;",
+      "replacement": "        AND pg_input_is_valid(proposal->>'effectiveTo', 'date')) IS NOT TRUE THEN RAISE EXCEPTION 'tax.invalidRegistration'; END IF;",
+      "test": {
+        "files": ["test/postgres/tax-catalog.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/tax-catalog.test.ts",
+          "name": "an end date of infinity is refused",
+          "expected": "an infinite registration end was accepted"
+        }
+      ]
+    },
+    {
+      "name": "tax-registration-finite",
+      "claim": "Storage never holds an infinite registration date.",
+      "file": "db/migrations/0071_tax_catalog.sql",
+      "original": "  CONSTRAINT tax_registrations_finite CHECK (isfinite(effective_from) AND (effective_to IS NULL OR isfinite(effective_to))),\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/tax-catalog.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/tax-catalog.test.ts",
+          "name": "storage refuses an infinite registration date",
+          "expected": "Missing expected rejection: an infinite registration date was stored"
+        }
+      ]
     }
   ]
 }
