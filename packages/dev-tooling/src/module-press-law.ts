@@ -1844,9 +1844,17 @@ export function lowerNameLawBaseline(
         .filter(([, count]) => count > 0)
         .toSorted(([left], [right]) => left.localeCompare(right)),
     );
-    if (Object.keys(names).length > 0) files[file] = { ...row, names };
+    if (Object.keys(names).length > 0) {
+      // The committed key order, so a lowering diff shows only counts.
+      files[file] = {
+        owner: row.owner,
+        cluster: row.cluster,
+        expires: row.expires,
+        names,
+      };
+    }
   }
-  return { ...baseline, files };
+  return { version: 1, measuredOn: baseline.measuredOn, files };
 }
 
 function formatNameLaw(result: NameLawResult): string[] {
