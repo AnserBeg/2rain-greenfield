@@ -39,6 +39,29 @@ export function billingBindingProblem(
               f.entity.targetId === q.sourceEntity.targetId,
           )
         : undefined;
+    // Permissions are bound by their declared role, never by name: the quote
+    // reads the billed record type under its own read grant (not the source
+    // query's), and the three terms writes share one write grant on the terms
+    // record type that is not a read.
+    const declared = (permissionId: string) =>
+      def.permissions.find(
+        (a) => a.permissionId === permissionId && a.lifecycle === 'active',
+      );
+    const quotePermission = (permissionId: string) =>
+      declared(permissionId)?.action === 'read' &&
+      declared(permissionId)?.resource.targetId ===
+        source?.sourceEntity.targetId &&
+      permissionId !== source?.permission.targetId;
+    const termsPermissionId = def.operations.find(
+      (o) => o.operationId === b.publishOperationId,
+    )?.permission.targetId;
+    const termsPermission = (permissionId: string) =>
+      permissionId === termsPermissionId &&
+      ['create', 'update', 'transition'].includes(
+        declared(permissionId)?.action ?? 'read',
+      ) &&
+      declared(permissionId)?.resource.targetId ===
+        terms?.sourceEntity.targetId;
     const arrears = b.arrearsSource;
     if (arrears?.kind === 'periodMeter') {
       const boundFields = [
@@ -107,9 +130,28 @@ export function billingBindingProblem(
         ? field.fieldType
         : undefined;
     };
+    // B7: a bound record quantity is a required exact number on the billed
+    // record, in the service unit when it carries one.
+    const quantityProblem = (fieldId: string | undefined) => {
+      if (fieldId === undefined) return false;
+      const field = selectedField(source, fieldId);
+      const type = field?.fieldType;
+      return (
+        field?.presence !== 'required' ||
+        !(
+          type?.kind === 'integerFieldType' ||
+          ((type?.kind === 'exactDecimalFieldType' ||
+            (type?.kind === 'quantityFieldType' &&
+              type.baseUnit.targetId === p.serviceUnit)) &&
+            type.scale <= 9 &&
+            type.precision - type.scale <= 18)
+        )
+      );
+    };
     if (
       b.evidenceFieldId ||
       !interval ||
+      quantityProblem(interval.quantityFieldId) ||
       interval.customerFieldId === interval.currencyFieldId ||
       !roleField(interval.customerFieldId) ||
       roleField(interval.currencyFieldId)?.maximumLength !== 3 ||
@@ -134,8 +176,7 @@ export function billingBindingProblem(
       publishers.has(b.publishOperationId) ||
       outer.lifecycle !== 'active' ||
       outer.legalEntityScope?.cardinality !== 'exactlyOne' ||
-      outer.permission.targetId !==
-        def.package.namespace + ':permission.billing_quote' ||
+      !quotePermission(outer.permission.targetId) ||
       model?.capability.targetId !== BILLING_QUOTE_CAPABILITY ||
       model.queries.evidence?.targetId !== b.evidenceQueryId ||
       !model.resultFields.explanation ||
@@ -152,8 +193,7 @@ export function billingBindingProblem(
           op?.effect.kind !== 'registeredCapabilityEffect' ||
           op.effect.capability.targetId !== BILLING_TERMS_CAPABILITY ||
           op.lifecycle !== 'active' ||
-          op.permission.targetId !==
-            def.package.namespace + ':permission.billing_publish_terms' ||
+          !termsPermission(op.permission.targetId) ||
           op.readBack.targetId !== terms?.queryId
         );
       })

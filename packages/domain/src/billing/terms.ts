@@ -8,6 +8,7 @@ import {
 } from '../../../canonical-model/src/billing.js';
 import { instant } from './calendar.js';
 import { decimal } from './fraction.js';
+import { capValue } from './cover.js';
 
 export const digest = (v: unknown) => canonicalizeAndHash(v).contentHash;
 export function compileRatePlan(input: unknown) {
@@ -38,7 +39,7 @@ export function publishRateTable(plan: BillingPlan, input: unknown) {
       c.kind === 'time' &&
       c.minimumMoney &&
       c.cap &&
-      decimal(t.values[c.minimumMoney]!).compare(decimal(t.values[c.cap]!)) > 0
+      decimal(t.values[c.minimumMoney]!).compare(capValue(c, t.values)!) > 0
     )
       throw new Error('Billing minimum exceeds cap');
   return { table: t, digest: digest(t) };

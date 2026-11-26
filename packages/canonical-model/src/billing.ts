@@ -61,8 +61,34 @@ const component = z.discriminatedUnion('kind', [
       .strictObject({ period, count: z.int().min(1).max(744) })
       .optional(),
     minimumScope: z.enum(['perEnrollment', 'perPricingWindow']).optional(),
-    cap: id.optional(),
+    // A money slot, or a whole multiple of an offered rate ("2 x weekly").
+    cap: z
+      .union([
+        id,
+        z.strictObject({ rate: period, times: z.int().min(1).max(1000) }),
+      ])
+      .optional(),
     partialTime: z.enum(['wholeStarted', 'prorateShortestTail']).optional(),
+    // How offered rates combine to cover a pricing window's active time.
+    // Absent is bestPrice, the least exact price of any cover (calculation
+    // v2/v3 behaviour). ladder fills whole blocks from the longest rate down;
+    // capAtNextTier never lets the shorter rates exceed one more block of the
+    // rate above. prorate charges the longest rate one whole block of which
+    // fits, pro rata for the whole active time.
+    combination: z
+      .discriminatedUnion('rule', [
+        z.strictObject({ rule: z.literal('bestPrice') }),
+        z.strictObject({
+          rule: z.literal('ladder'),
+          capAtNextTier: z.boolean(),
+        }),
+        z.strictObject({ rule: z.literal('prorate') }),
+      ])
+      .optional(),
+    // Per offered rate: is a final, partly used block charged whole or pro
+    // rata? Absent rates are whole under bestPrice and ladder, and pro rata
+    // under prorate.
+    partial: z.partialRecord(period, z.enum(['whole', 'prorate'])).optional(),
   }),
   z.strictObject({
     ...common,
@@ -70,6 +96,8 @@ const component = z.discriminatedUnion('kind', [
     base: z.literal('enrollment'),
     stage: z.literal('afterCapBeforeTax'),
     amount: id,
+    // The amount is per unit of the service's one commercial quantity.
+    perQuantity: z.literal(true).optional(),
     occurrence: z.discriminatedUnion('kind', [
       z.strictObject({
         kind: z.literal('oneOff'),
@@ -123,6 +151,8 @@ export const BillingPlanSchema = z
             currencyFieldId: id,
             startFieldId: id,
             endFieldId: id,
+            // A required number on the billed record: its commercial quantity.
+            quantityFieldId: id.optional(),
             zone: z.string().min(1).max(100),
           })
           .optional(),
@@ -151,6 +181,19 @@ export const BillingPlanSchema = z
               queryId: id,
               protocol: z.literal(SERVICE_USE_PROTOCOL),
               subjectId: id,
+              // Absent keeps calculation v3: the agreed end still closes the
+              // service and only use inside it is rated. agreedEnd bills the
+              // agreed interval in full; actualEnd ends the service at the
+              // last return. A minimum term in periods from service start is
+              // billed even when use ends sooner.
+              earlyReturn: z
+                .strictObject({
+                  bill: z.enum(['agreedEnd', 'actualEnd']),
+                  minimumTerm: z
+                    .strictObject({ period, count: z.int().min(1).max(744) })
+                    .optional(),
+                })
+                .optional(),
             }),
           ])
           .optional(),
@@ -211,7 +254,16 @@ export const BillingPlanSchema = z
         if (!Object.keys(c.rates).length) issue('Missing time offer');
         for (const ref of Object.values(c.rates)) check(ref);
         if (c.minimumMoney) check(c.minimumMoney);
-        if (c.cap) check(c.cap);
+        if (typeof c.cap === 'string') check(c.cap);
+        else if (c.cap && !c.rates[c.cap.rate])
+          issue('A cap multiple must name an offered rate');
+        if (Object.keys(c.partial ?? {}).some((p) => !(p in c.rates)))
+          issue('A partial rule must name an offered rate');
+        if (
+          c.partialTime === 'prorateShortestTail' &&
+          (c.combination || c.partial)
+        )
+          issue('partialTime is replaced by partial under a combination');
       } else if (c.kind === 'fixed') check(c.amount);
       else {
         check(c.overageRate);
@@ -316,7 +368,22 @@ export function hasBillingRules(plan: unknown): boolean {
   if (!record(plan)) return false;
   const bindings = record(plan.bindings) ? plan.bindings : {};
   const source = record(bindings.arrearsSource) ? bindings.arrearsSource : {};
-  return source.kind === 'evidenceQuery';
+  const interval = record(bindings.agreedInterval)
+    ? bindings.agreedInterval
+    : {};
+  const components = Array.isArray(plan.components) ? plan.components : [];
+  return (
+    source.kind === 'evidenceQuery' ||
+    interval.quantityFieldId !== undefined ||
+    components.some(
+      (c) =>
+        record(c) &&
+        (c.combination !== undefined ||
+          c.partial !== undefined ||
+          record(c.cap) ||
+          c.perQuantity !== undefined),
+    )
+  );
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>

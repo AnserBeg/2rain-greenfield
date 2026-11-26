@@ -1,6 +1,16 @@
-import type { BillingPlan } from '../../../canonical-model/src/billing.js';
+import type {
+  BillingPeriod,
+  BillingPlan,
+} from '../../../canonical-model/src/billing.js';
 import type { BillingQuoteEvidence } from '../../../canonical-model/src/billing-evidence.js';
-import { BillingCalendar, instant, iso } from './calendar.js';
+import {
+  BillingCalendar,
+  hourMs,
+  instant,
+  iso,
+  monthShift,
+} from './calendar.js';
+import { periodDays } from './cover.js';
 import { occurrences } from './occurrences.js';
 import { quoteBillingCycle } from './quote.js';
 import { digest } from './terms.js';
@@ -49,18 +59,22 @@ export function reviewArrearsCharges(
   evidence: BillingQuoteEvidence,
   use?: ServiceUseInput,
 ) {
-  if (use)
+  if (use) {
+    const term = use.earlyReturn?.minimumTerm;
     evidence.serviceEnd = serviceUseEnd(
       use.snapshot,
       use.subjectId,
       evidence.serviceEnd,
+      use.earlyReturn,
+      term && minimumTermEnd(evidence, term),
     );
+  }
   const cycle = dueArrearsCycle(plan, evidence);
   if (!cycle) return { status: 'notDue' as const };
   if (use)
     Object.assign(
       evidence,
-      serviceUseCoverage(use, plan.serviceUnit, cycle.end),
+      serviceUseCoverage(use, plan.serviceUnit, cycle.end, evidence.serviceEnd),
     );
   const quote = quoteBillingCycle(plan, evidence, cycle.end);
   return {
@@ -73,4 +87,19 @@ export function reviewArrearsCharges(
       resultDigest: quote.resultDigest,
     }),
   };
+}
+
+/** The end of a minimum term counted in periods from service start, on the
+ * same civil calendar as the pricing windows (months clamp from the original
+ * day; a day is one local day at the anchor's wall time). */
+function minimumTermEnd(
+  evidence: Pick<BillingQuoteEvidence, 'anchor' | 'zone'>,
+  term: { period: BillingPeriod; count: number },
+) {
+  const anchor = instant(evidence.anchor);
+  if (term.period === 'hour') return anchor + term.count * hourMs;
+  const calendar = new BillingCalendar(anchor, evidence.zone);
+  return term.period === 'month'
+    ? calendar.resolve(monthShift(calendar.wallAnchor, term.count))
+    : calendar.day(term.count * periodDays(term.period, 0));
 }

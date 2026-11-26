@@ -20,8 +20,9 @@ import {
   type Span,
 } from './calendar.js';
 import {
-  bestCover,
+  capValue,
   durationFloor,
+  priceCover,
   timeline,
   type CoverBlock,
 } from './cover.js';
@@ -370,8 +371,8 @@ function calculate(
         if (!segments.length) continue;
         const t = terms(w.start).table,
           values = t.values;
-        const cover = bestCover(segments, w.monthDays, c, values, budget);
-        const cap = c.cap ? decimal(values[c.cap]!) : null;
+        const cover = priceCover(segments, w.monthDays, c, values, budget);
+        const cap = capValue(c, values);
         const floor: Fraction =
           c.minimumScope === 'perEnrollment' && enrollmentFloor !== null
             ? zero
@@ -429,6 +430,15 @@ function calculate(
   for (const c of plan.components) {
     if (c.kind === 'fixed') {
       const fee = c.occurrence;
+      // A per-quantity fee multiplies by the service's one commercial
+      // quantity (seats, desks, units from the source). Several quantity
+      // bands would need a quantity per instant, so they refuse.
+      if (c.perQuantity && coverage.bands.length !== 1)
+        throw new Error('A per-quantity fee requires one commercial quantity');
+      const quantity = c.perQuantity ? coverage.bands[0]!.quantity : one;
+      const perQuantity = c.perQuantity
+        ? { quantity: quantity.toString() }
+        : {};
       if (fee.kind === 'oneOff') {
         const period = fee.at === 'serviceStart' ? cycles[0] : cycles.at(-1);
         if (!period || (fee.at === 'serviceEnd' && through !== serviceEnd))
@@ -439,8 +449,15 @@ function calculate(
           occurrenceId(fee.at),
           period.start,
           period.end,
-          decimal(t.values[c.amount]!),
-          [{ rateVersion: t.version, at: fee.at, rate: t.values[c.amount] }],
+          decimal(t.values[c.amount]!).times(quantity),
+          [
+            {
+              rateVersion: t.version,
+              at: fee.at,
+              rate: t.values[c.amount],
+              ...perQuantity,
+            },
+          ],
         );
         continue;
       }
@@ -464,7 +481,7 @@ function calculate(
           occurrenceId('fee', iso(o.fullStart)),
           o.start,
           o.end,
-          decimal(t.values[c.amount]!).times(fraction),
+          decimal(t.values[c.amount]!).times(fraction).times(quantity),
           [
             {
               rateVersion: t.version,
@@ -472,6 +489,7 @@ function calculate(
               eligibleMs: ms,
               basisMs: o.fullEnd - o.fullStart,
               fraction: fraction.toString(),
+              ...perQuantity,
             },
           ],
         );

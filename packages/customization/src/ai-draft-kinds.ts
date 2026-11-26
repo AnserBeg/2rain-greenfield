@@ -150,7 +150,7 @@ export const DRAFTER_KINDS = {
   addRatePlanVersion: {
     input: member('addRatePlanVersion'),
     guidance:
-      'Declare reusable period or usage pricing structure with named price slots. Choose a stable plan ID and version. Prices are published separately. Source attachment, invoice generation and issuing require their own capabilities.',
+      'Declare reusable period or usage pricing structure with named price slots. Choose a stable plan ID and version. Prices are published separately. Source attachment, invoice generation and issuing require their own capabilities. With more than one time rate, state the combination the business uses: prorate charges the longest rate that fits pro rata (10 days at a weekly rate is 10/7 weeks), ladder charges whole longer blocks then shorter ones (capAtNextTier: never more than one more longer block), bestPrice the cheapest cover. A cap can be a multiple of a rate ({rate, times}). A fee charged per seat, desk or unit sets perQuantity.',
   },
   addRecordType: {
     input: member('addRecordType'),
@@ -375,8 +375,11 @@ function typeText(node: Json): string {
   if (node.format === 'uuid') return 'UUID';
   if (Array.isArray(node.enum))
     return node.enum.map((value) => JSON.stringify(value)).join('|');
-  if (Array.isArray(node.anyOf))
-    return (node.anyOf as Json[]).map(typeText).join(' or ');
+  // A discriminated union (schedules, slots, components, combination rules)
+  // renders oneOf, so the drafter sees each variant's keys, not "value".
+  for (const variants of [node.anyOf, node.oneOf])
+    if (Array.isArray(variants))
+      return (variants as Json[]).map(typeText).join(' or ');
   switch (node.type) {
     case 'string': {
       if (

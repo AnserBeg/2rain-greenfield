@@ -1,4 +1,5 @@
 import type { BillingQuoteEvidence } from '../../../canonical-model/src/billing-evidence.js';
+import type { BillingEvidenceQuery } from '../../../canonical-model/src/billing.js';
 import type { ServiceUseSnapshot } from '../../../canonical-model/src/service-evidence.js';
 import { decimal } from './fraction.js';
 
@@ -10,7 +11,9 @@ export interface ServiceUseInput {
     readonly recordId: string;
     readonly companyId: string;
   };
+  readonly earlyReturn?: BillingEvidenceQuery['earlyReturn'];
 }
+type EarlyReturn = NonNullable<ServiceUseInput['earlyReturn']>;
 
 /** Actual use sets the service end (ADR-0083, calculation v3). A live use
  * leg keeps the service open, so cycles continue through the review instant.
@@ -22,6 +25,8 @@ export function serviceUseEnd(
   snapshot: ServiceUseSnapshot,
   subjectId: string,
   agreedEnd: string | null,
+  earlyReturn?: EarlyReturn,
+  termEnd?: number,
 ) {
   const engagements = snapshot.engagements.filter(
     (e) => e.subjectId === subjectId,
@@ -34,6 +39,15 @@ export function serviceUseEnd(
     if (leg.end === null) return null;
     returned = Math.max(returned, Date.parse(leg.end));
   }
+  // A declared early-return rule (B9): actualEnd ends the service at the last
+  // return, agreedEnd at the later of that and the agreed end; a minimum term
+  // holds either open until it has elapsed.
+  if (earlyReturn) {
+    const ends = [returned, termEnd ?? returned];
+    if (earlyReturn.bill === 'agreedEnd' && agreedEnd !== null)
+      ends.push(Date.parse(agreedEnd));
+    return new Date(Math.max(...ends)).toISOString();
+  }
   return new Date(
     agreedEnd === null ? returned : Math.max(returned, Date.parse(agreedEnd)),
   ).toISOString();
@@ -42,9 +56,10 @@ export function serviceUseEnd(
 /** The actual coverage of one engagement through a closed cycle: one band
  * with one commercial quantity, its use legs and its pauses. */
 export function serviceUseCoverage(
-  { snapshot, subjectId, owner }: ServiceUseInput,
+  { snapshot, subjectId, owner, earlyReturn }: ServiceUseInput,
   unit: string,
   cycleEnd: string,
+  serviceEnd?: string | null,
 ) {
   if (
     snapshot.owner.entityId !== owner.entityId ||
@@ -86,12 +101,29 @@ export function serviceUseCoverage(
     start: r.start,
     end: r.end,
   });
+  // Under a declared early-return rule the time from the last return to the
+  // service end (the agreed end, or the minimum term) is committed coverage:
+  // it is charged like use once it has elapsed, never before (arrears).
+  const intervals = legs.map(interval);
+  const lastReturn = legs.every((r) => r.end !== null)
+    ? Math.max(...legs.map((r) => Date.parse(r.end!)))
+    : null;
+  if (
+    earlyReturn &&
+    serviceEnd &&
+    lastReturn !== null &&
+    Date.parse(serviceEnd) > lastReturn
+  )
+    intervals.push({
+      id: JSON.stringify(['committed', bandId]),
+      revision: snapshot.cursor,
+      start: new Date(lastReturn).toISOString(),
+      end: serviceEnd,
+    });
   return {
     basis: 'actual',
     cursor: snapshot.cursor,
-    bands: [
-      { id: bandId, quantity: bandQuantity, intervals: legs.map(interval) },
-    ],
+    bands: [{ id: bandId, quantity: bandQuantity, intervals }],
     pauses: pauses.map((r) => ({ ...interval(r), bandId })),
   } satisfies Pick<
     BillingQuoteEvidence,

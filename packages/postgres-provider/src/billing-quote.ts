@@ -114,6 +114,11 @@ export function billingQuoteReadModel(
       currency = row.values[fields.currencyFieldId],
       anchor = row.values[fields.startFieldId],
       end = row.values[fields.endFieldId];
+    // B7: the record's own quantity (seats, desks, units) when the plan binds
+    // one; the evidence schema checks it is an exact nonnegative decimal.
+    const quantity = fields.quantityFieldId
+      ? row.values[fields.quantityFieldId]
+      : '1';
     // Both reads attest the same revision, company and commercial identity.
     if (
       typeof customerId !== 'string' ||
@@ -122,7 +127,8 @@ export function billingQuoteReadModel(
       base.values[fields.customerFieldId] !== customerId ||
       base.values[fields.currencyFieldId] !== currency ||
       typeof anchor !== 'string' ||
-      (typeof end !== 'string' && !(b.arrearsSource && end === null))
+      (typeof end !== 'string' && !(b.arrearsSource && end === null)) ||
+      (typeof quantity !== 'string' && typeof quantity !== 'number')
     )
       throw new Error(
         'Billing source identity, currency or interval disagrees',
@@ -184,7 +190,7 @@ export function billingQuoteReadModel(
       bands: [
         {
           id: row.recordId,
-          quantity: '1',
+          quantity: String(quantity),
           intervals: [{ id: row.recordId, revision, start: anchor, end }],
         },
       ],
@@ -352,6 +358,7 @@ async function readServiceUseArrearsCycle(
   const review = reviewArrearsCharges(plan, evidence, {
     snapshot,
     subjectId: source.subjectId,
+    ...(source.earlyReturn && { earlyReturn: source.earlyReturn }),
     owner: {
       entityId: owner.entityId,
       recordId: owner.recordId,

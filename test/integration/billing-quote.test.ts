@@ -47,7 +47,11 @@ function plan(
   for (const c of components) {
     const money =
       c.kind === 'time'
-        ? [...Object.values(c.rates), c.cap, c.minimumMoney]
+        ? [
+            ...Object.values(c.rates),
+            typeof c.cap === 'string' ? c.cap : undefined,
+            c.minimumMoney,
+          ]
         : c.kind === 'fixed'
           ? [c.amount]
           : [c.overageRate];
