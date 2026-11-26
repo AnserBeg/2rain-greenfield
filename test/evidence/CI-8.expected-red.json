@@ -574,7 +574,7 @@
         {
           "file": "test/architecture/preflight.test.ts",
           "name": "changedFiles reports a missing base",
-          "expected": "neither origin/main nor main"
+          "expected": "did not match the regular expression"
         }
       ]
     }
