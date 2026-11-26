@@ -1,3 +1,9 @@
+import {
+  bindLineTotals,
+  LINE_TOTALS_OPERATION_READER,
+  ROLLUP_QUERY_READER,
+} from '../../canonical-model/src/line-totals.js';
+import { zeroComparesStoredMoney } from '../../canonical-model/src/formula-validation-bindings.js';
 import type { StorageTargetPayloadV1 } from '../../compiler/src/storage.js';
 import { lowerDeclaredReports } from '../../compiler/src/declared-reports.js';
 import { DECLARED_REPORT_READER } from '../../canonical-model/src/declared-report.js';
@@ -1278,25 +1284,39 @@ function verifyFormulaProjectionReference(
   const operationFloor = floorOf(PROJECTION_FAMILY_IDS.operationCatalog);
   const queryFloor = floorOf(PROJECTION_FAMILY_IDS.queryCatalog);
   const reference = references[0];
+  // ADR-0094: the line-totals readers are the highest floors present.
+  const lineTotals =
+    isRecord(normalized) &&
+    ['derivedDecimals', 'rollups', 'createOnlyFields', 'formulaRules'].some(
+      (key) => Object.hasOwn(normalized, key),
+    )
+      ? lineTotalsFloors(
+          parseNormalizedApplicationPackageJson(revision.desiredState),
+        )
+      : { operation: false, query: false };
   if (
     references.length !== Number(Boolean(declaring)) ||
-    (hasRecordTemplateBinding(normalized)
-      ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
-      : hasBookingOperations(normalized)
-        ? operationFloor !== bookingReaderFloor(normalized)
-        : rules.length
-          ? operationFloor !== requiredFormulaValidationOperationReader(rules)
-          : operationFloor >= LITERAL_VALIDATION_OPERATION_READER) ||
+    (lineTotals.operation
+      ? operationFloor !== LINE_TOTALS_OPERATION_READER
+      : hasRecordTemplateBinding(normalized)
+        ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
+        : hasBookingOperations(normalized)
+          ? operationFloor !== bookingReaderFloor(normalized)
+          : rules.length
+            ? operationFloor !== requiredFormulaValidationOperationReader(rules)
+            : operationFloor >= LITERAL_VALIDATION_OPERATION_READER) ||
     // The query floor is the highest catalog feature present.
-    (declaresOptionalReadModelDependency(
-      isRecord(normalized) ? normalized.queries : undefined,
-    )
-      ? queryFloor !== OPTIONAL_DEPENDENCY_QUERY_READER
-      : hasBookingUsage(normalized)
-        ? queryFloor !== BOOKING_USAGE_QUERY_READER
-        : displays.length
-          ? queryFloor !== CALCULATED_DISPLAY_QUERY_READER
-          : queryFloor >= CALCULATED_DISPLAY_QUERY_READER) ||
+    (lineTotals.query
+      ? queryFloor !== ROLLUP_QUERY_READER
+      : declaresOptionalReadModelDependency(
+            isRecord(normalized) ? normalized.queries : undefined,
+          )
+        ? queryFloor !== OPTIONAL_DEPENDENCY_QUERY_READER
+        : hasBookingUsage(normalized)
+          ? queryFloor !== BOOKING_USAGE_QUERY_READER
+          : displays.length
+            ? queryFloor !== CALCULATED_DISPLAY_QUERY_READER
+            : queryFloor >= CALCULATED_DISPLAY_QUERY_READER) ||
     (declaring &&
       (reference?.instanceId !==
         `${declaring.package.namespace}:projection.formula-rule` ||
@@ -1883,4 +1903,25 @@ function integrity(
   message: string,
 ): ReleasePersistenceIntegrityError {
   return new ReleasePersistenceIntegrityError(code, message);
+}
+
+/** Which floors a revision's ADR-0094 declarations raise. */
+function lineTotalsFloors(
+  definition: ReturnType<typeof parseNormalizedApplicationPackageJson>,
+): {
+  readonly operation: boolean;
+  readonly query: boolean;
+} {
+  const bound = bindLineTotals(definition);
+  if (bound.status !== 'bound')
+    throw integrity('FORMULA_PROJECTION_CONTRACT_MISMATCH', bound.message);
+  const { binding } = bound;
+  return {
+    operation:
+      binding.derived.size > 0 ||
+      binding.createOnly.size > 0 ||
+      binding.totalled.size > 0 ||
+      zeroComparesStoredMoney(definition),
+    query: binding.rollups.size > 0,
+  };
 }

@@ -1,0 +1,564 @@
+{
+  "version": 1,
+  "packet": "LINE-TOTALS-s1",
+  "entries": [
+    {
+      "name": "line-totals-s1-derive-on-create",
+      "claim": "A line create derives its stored amount before the write, read back by a plain GET.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "  if (!derived?.length) return { input, overflow: null };",
+      "replacement": "  if (derived) return { input, overflow: null };",
+      "test": {
+        "files": ["test/postgres/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 derive: a line stores its rounded amount on create and update, refuses a sent amount, and the header currency is create-only$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 derive: a line stores its rounded amount on create and update, refuses a sent amount, and the header currency is create-only",
+          "expected": "a line create did not derive its amount"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-update-merge",
+      "claim": "An update derives from the locked prior row merged with the patch, so a rate-only update recomputes.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "    ? { ...prior.values, ...input.patch }",
+      "replacement": "    ? { ...input.patch }",
+      "test": {
+        "files": ["test/postgres/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 derive: a line stores its rounded amount on create and update, refuses a sent amount, and the header currency is create-only$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 derive: a line stores its rounded amount on create and update, refuses a sent amount, and the header currency is create-only",
+          "expected": "a rate-only update did not recompute the amount from the stored days"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-strip-derived-input",
+      "claim": "A derived amount leaves every writable input, so a caller-sent amount is refused by name.",
+      "file": "packages/compiler/src/projections.ts",
+      "original": "      !derivedIds.has(field.fieldId) &&",
+      "replacement": "      true &&",
+      "test": {
+        "files": ["test/postgres/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 derive: a line stores its rounded amount on create and update, refuses a sent amount, and the header currency is create-only$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 derive: a line stores its rounded amount on create and update, refuses a sent amount, and the header currency is create-only",
+          "expected": "a caller-sent derived amount was accepted"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-overflow-by-name",
+      "claim": "An amount that does not fit its field is refused by name, never as SQLSTATE 22003.",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "  if (magnitude >= 10n ** BigInt(field.precision)) return { kind: 'overflow' };",
+      "replacement": "  if (false) return { kind: 'overflow' };",
+      "test": {
+        "files": ["test/postgres/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 derive: a line stores its rounded amount on create and update, refuses a sent amount, and the header currency is create-only$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 derive: a line stores its rounded amount on create and update, refuses a sent amount, and the header currency is create-only",
+          "expected": "an overflowing derived amount was not refused by name"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-discount-validation",
+      "claim": "The declared discount range (Q2) is what refuses a 150% discount.",
+      "file": "test/helpers/line-totals-fixture.ts",
+      "original": "      comparison(field(l('discount')), 'lessThanOrEqual', decimal('100')),",
+      "replacement": "      comparison(field(l('discount')), 'lessThanOrEqual', decimal('1000')),",
+      "test": {
+        "files": ["test/postgres/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 derive: a line stores its rounded amount on create and update, refuses a sent amount, and the header currency is create-only$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 derive: a line stores its rounded amount on create and update, refuses a sent amount, and the header currency is create-only",
+          "expected": "a 150% discount was accepted"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-rate-zero-validation",
+      "claim": "The stored-currency rate compared with zero is what refuses a negative rate.",
+      "file": "test/helpers/line-totals-fixture.ts",
+      "original": "export const operandValidations = [discountRange, daysNonNegative, rateNonNegative];",
+      "replacement": "export const operandValidations = [discountRange, daysNonNegative];",
+      "test": {
+        "files": ["test/postgres/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 derive: a line stores its rounded amount on create and update, refuses a sent amount, and the header currency is create-only$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 derive: a line stores its rounded amount on create and update, refuses a sent amount, and the header currency is create-only",
+          "expected": "a negative stored-currency rate was accepted"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-create-only-update",
+      "claim": "A create-only currency leaves the update input, so an update naming it is refused by name.",
+      "file": "packages/compiler/src/projections.ts",
+      "original": "    effectKind === 'updateRecordEffect' ? (lineTotals.createOnly ?? []) : [],",
+      "replacement": "    [] as string[],",
+      "test": {
+        "files": ["test/postgres/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 derive: a line stores its rounded amount on create and update, refuses a sent amount, and the header currency is create-only$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 derive: a line stores its rounded amount on create and update, refuses a sent amount, and the header currency is create-only",
+          "expected": "a create-only currency was changed on update"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-round-half-away",
+      "claim": "The evaluator rounds a half-way amount away from zero (0.495 to 0.50).",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "  if ((magnitude % divisor) * 2n >= divisor) quotient += 1n;",
+      "replacement": "  if ((magnitude % divisor) * 2n > divisor) quotient += 1n;",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 evaluator: 1\\.5 x 0\\.33 = 0\\.495 stores 0\\.50, rounded half away from zero$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 evaluator: 1.5 x 0.33 = 0.495 stores 0.50, rounded half away from zero",
+          "expected": "a half-way amount was not rounded away from zero"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-round-negative",
+      "claim": "A negative half-way amount rounds away from zero too (-0.125 to -0.13).",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "  return negative ? -quotient : quotient;",
+      "replacement": "  return negative ? -(quotient - ((magnitude % divisor) * 2n >= divisor ? 1n : 0n)) : quotient;",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 evaluator: -0\\.125 stores -0\\.13, away from zero on the negative side$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 evaluator: -0.125 stores -0.13, away from zero on the negative side",
+          "expected": "a negative half-way amount was not rounded away from zero"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-subtract",
+      "claim": "Intermediate subtraction is exact: 1 x 10.00 x (1 - 12.5 x 0.01) = 8.75.",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "          coefficient: term.operator === 'add' ? a + b : a - b,",
+      "replacement": "          coefficient: a + b,",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 evaluator: 1 x 10\\.00 x \\(1 - 12\\.5 x 0\\.01\\) = 8\\.75$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 evaluator: 1 x 10.00 x (1 - 12.5 x 0.01) = 8.75",
+          "expected": "the discount term was not subtracted exactly"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-absent-as",
+      "claim": "A declared absence default prices a blank operand (the blank discount).",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "      raw === null || raw === undefined ? field.absentAs?.[fieldId] : raw;",
+      "replacement": "      raw === null || raw === undefined ? undefined : raw;",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 evaluator: a blank discount is priced by absentAs, and an absent operand makes the amount absent$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 evaluator: a blank discount is priced by absentAs, and an absent operand makes the amount absent",
+          "expected": "a blank discount was not priced by its absence default"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-overflow-evaluator",
+      "claim": "The evaluator refuses an amount whose integer part does not fit the target precision.",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "  if (magnitude >= 10n ** BigInt(field.precision)) return { kind: 'overflow' };",
+      "replacement": "  if (false) return { kind: 'overflow' };",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 evaluator: an amount whose integer part does not fit the target precision overflows by name$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 evaluator: an amount whose integer part does not fit the target precision overflows by name",
+          "expected": "an overflowing amount was not refused"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-money-times-money",
+      "claim": "Money times money refuses at compile.",
+      "file": "packages/canonical-model/src/calculated-display.ts",
+      "original": "    if ((left.currency && right.currency) || (left.unit && right.unit))",
+      "replacement": "    if (left.unit && right.unit)",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 binder: money times money refuses$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 binder: money times money refuses",
+          "expected": "money times money was admitted"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-unit-times-unit",
+      "claim": "A quantity with a unit times a quantity with a unit refuses at compile.",
+      "file": "packages/canonical-model/src/calculated-display.ts",
+      "original": "    if ((left.currency && right.currency) || (left.unit && right.unit))",
+      "replacement": "    if (left.currency && right.currency)",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 binder: a quantity with a unit times a quantity with a unit refuses$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 binder: a quantity with a unit times a quantity with a unit refuses",
+          "expected": "a quantity times a quantity was admitted"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-currency-binding",
+      "claim": "A derivation must read its currency through the same field as its target.",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "    if (resultType.currency !== targetType.currency)",
+      "replacement": "    if (false)",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 binder: a fixed-USD price under a header-currency amount refuses$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 binder: a fixed-USD price under a header-currency amount refuses",
+          "expected": "a fixed-currency price was admitted under a header-currency amount"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-no-chaining-derived",
+      "claim": "An operand that is another derived value refuses at compile.",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "      if (derivedTargets.has(operand) || rollupFields.has(operand))",
+      "replacement": "      if (rollupFields.has(operand))",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 binder: an operand that is another derived value or a total refuses \\(no chaining\\)$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 binder: an operand that is another derived value or a total refuses (no chaining)",
+          "expected": "a derived operand was admitted"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-no-chaining-total",
+      "claim": "An operand that is a total refuses at compile.",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "      if (derivedTargets.has(operand) || rollupFields.has(operand))",
+      "replacement": "      if (derivedTargets.has(operand))",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 binder: an operand that is another derived value or a total refuses \\(no chaining\\)$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 binder: an operand that is another derived value or a total refuses (no chaining)",
+          "expected": "a total operand was admitted"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-currency-create-only",
+      "claim": "A header currency a derived value binds must be declared create-only.",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "      !createOnlyIds.has(stored.fieldId) ||",
+      "replacement": "      false ||",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 binder: a header currency that is not create-only refuses$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 binder: a header currency that is not create-only refuses",
+          "expected": "a currency that is not create-only was admitted"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-currency-required",
+      "claim": "A header currency a derived value binds must be required.",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "      currency.presence !== 'required'",
+      "replacement": "      false",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 binder: a header currency that is not required refuses$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 binder: a header currency that is not required refuses",
+          "expected": "an optional currency was admitted"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-total-currency-through-relation",
+      "claim": "A total's amounts read their currency from the totalled record through the totalled relation.",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "      stored &&\n      (stored.via.length !== 1 ||",
+      "replacement": "      false &&\n      (stored.via.length !== 1 ||",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 binder: a total over amounts in a currency other than its header refuses$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 binder: a total over amounts in a currency other than its header refuses",
+          "expected": "a total over amounts in another currency was admitted"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-optional-target",
+      "claim": "A derived target must be optional.",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "    if (target.presence === 'required')",
+      "replacement": "    if (false)",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 binder: a required derived target refuses$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 binder: a required derived target refuses",
+          "expected": "a required derived target was admitted"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-depth",
+      "claim": "A derivation is at most four levels deep.",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "    if (termDepth(declaration.expression) > MAXIMUM_DERIVED_DEPTH)",
+      "replacement": "    if (false)",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 binder: a derivation nested deeper than four levels refuses$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 binder: a derivation nested deeper than four levels refuses",
+          "expected": "a derivation deeper than four levels was admitted"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-validation-watching-derived",
+      "claim": "A validation watching a derived value refuses at compile.",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "      if (derivedTargets.has(fieldId))",
+      "replacement": "      if (false)",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 binder: a validation watching a derived value refuses$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 binder: a validation watching a derived value refuses",
+          "expected": "a validation watching a derived value was admitted"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-stored-total-not-yet",
+      "claim": "A stored total refuses in slice 1 with a named not-yet diagnostic.",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "    if (declaration.materialize === 'stored')",
+      "replacement": "    if (false)",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 binder: a stored total refuses with slice 1's not-yet diagnostic$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 binder: a stored total refuses with slice 1's not-yet diagnostic",
+          "expected": "a stored total was admitted in slice 1"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-same-ownership",
+      "claim": "A total and its lines have the same company ownership.",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "    if (ownership(entities.get(declaration.entityId)) !== ownership(lineEntity))",
+      "replacement": "    if (false)",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 binder: a total whose record and lines differ in company ownership refuses$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 binder: a total whose record and lines differ in company ownership refuses",
+          "expected": "a total over lines of another company ownership was admitted"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-total-precision",
+      "claim": "A total holds at most 38 digits.",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "    if (precision > MAXIMUM_ROLLUP_PRECISION)",
+      "replacement": "    if (false)",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 binder: a total wider than 38 digits refuses$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 binder: a total wider than 38 digits refuses",
+          "expected": "a total wider than 38 digits was admitted"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-create-only-numbered",
+      "claim": "Create-only refuses on a numbered field.",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "    if (numbered(field))",
+      "replacement": "    if (false)",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 binder: create-only is refused on a numbered field, a derived value and a total$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 binder: create-only is refused on a numbered field, a derived value and a total",
+          "expected": "create-only was admitted on a numbered field"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-create-only-derived",
+      "claim": "Create-only refuses on a derived value.",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "    if (derivedTargets.has(declaration.fieldId))",
+      "replacement": "    if (false)",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 binder: create-only is refused on a numbered field, a derived value and a total$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 binder: create-only is refused on a numbered field, a derived value and a total",
+          "expected": "create-only was admitted on a derived value"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-create-only-total",
+      "claim": "Create-only refuses on a total.",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "    if (rollupFields.has(declaration.fieldId))",
+      "replacement": "    if (false)",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 binder: create-only is refused on a numbered field, a derived value and a total$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 binder: create-only is refused on a numbered field, a derived value and a total",
+          "expected": "create-only was admitted on a total"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-zero-only",
+      "claim": "Stored-currency money compares against the literal zero only.",
+      "file": "packages/canonical-model/src/formula-validation-bindings.ts",
+      "original": "    right.scalar.value !== '0' ||",
+      "replacement": "    false ||",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 compiler: money compared with zero alone raises the operation floor; a non-zero bound still refuses$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 compiler: money compared with zero alone raises the operation floor; a non-zero bound still refuses",
+          "expected": "a non-zero bound on stored-currency money was admitted"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-zero-floor",
+      "claim": "A zero comparison alone raises the operation floor (the compiler invariant refuses a lower one).",
+      "file": "packages/compiler/src/projections.ts",
+      "original": "    zeroComparesStoredMoney(verificationPackageRevision)",
+      "replacement": "    false",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 compiler: money compared with zero alone raises the operation floor; a non-zero bound still refuses$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 compiler: money compared with zero alone raises the operation floor; a non-zero bound still refuses",
+          "expected": "COMPILER_PROJECTION_INVARIANT_FAILED"
+        }
+      ]
+    }
+  ]
+}

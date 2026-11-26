@@ -36,6 +36,7 @@ import {
 } from './constants.js';
 import { calculatedDisplayFieldSchema } from './calculated-display-schema.js';
 import { formulaValidationRuleSchema } from './formula-validation-schema.js';
+import { lineTotalsSchemas } from './line-totals-schema.js';
 import { LEGAL_ENTITY_SCOPE_CONTRACT_V1 } from './legal-entity-scope-kernel.js';
 
 const nodeVersion = z.enum(SUPPORTED_LANGUAGE_VERSIONS);
@@ -3154,6 +3155,13 @@ const calculatedDisplayFields = z
   .max(128)
   .optional();
 
+// ADR-0094: derived stored decimals, line rollups and create-only fields.
+const lineTotals = lineTotalsSchemas(
+  CanonicalIdSchema,
+  LabelSchema,
+  CanonicalSignedDecimalStringSchema,
+);
+
 const formulaRules = z
   .array(FormulaValidationRuleDefinitionSchema)
   .min(1)
@@ -3341,6 +3349,7 @@ const v6NormalizedShape = {
   workflows,
   formulaRules,
   calculatedDisplayFields,
+  ...lineTotals,
   operationRoleNarrowings,
   queries: z.array(normalizedV6QueryDefinition),
   languageVersion: v6NodeVersion,
@@ -3490,6 +3499,7 @@ const v6AuthoredShape = {
   workflows,
   formulaRules,
   calculatedDisplayFields,
+  ...lineTotals,
   operationRoleNarrowings,
   queries: z.array(authoredV6QueryDefinition),
   languageVersion: v6NodeVersion,

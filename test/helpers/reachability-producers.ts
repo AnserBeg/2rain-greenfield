@@ -58,6 +58,7 @@ export const reachabilityProducers = [
     'test/unit/language-conformance-ledger.test.ts',
     'test/unit/language-coverage-credit.test.ts',
     'test/unit/line-logical-field.test.ts',
+    'test/unit/line-totals.test.ts',
     'test/unit/location-definition.test.ts',
     'test/unit/logical-field.test.ts',
     'test/unit/module-provider-error-mappings.test.ts',

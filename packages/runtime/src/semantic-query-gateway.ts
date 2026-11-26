@@ -1,4 +1,8 @@
 import {
+  parseCompiledRollups,
+  type CompiledRollup,
+} from '../../canonical-model/src/line-totals.js';
+import {
   REPORT_EXPORT_PERMISSION,
   reportColumnPermission,
   reportQueryId,
@@ -230,6 +234,8 @@ export interface RegisteredQueryDefinition extends RegisteredQueryDefinitionBase
   /** The most rows one declared export statement returns; absent = no export. */
   readonly exportMaximumResultCount?: number;
   readonly listSumFields?: readonly string[];
+  /** ADR-0094: the get's on-read totals (query catalog reader 7). */
+  readonly rollups?: readonly CompiledRollup[];
   readonly readModel?: QueryReadModel;
   readonly parameters?: readonly RegisteredQueryParameterDefinition[];
   readonly infrastructure?: {
@@ -1963,10 +1969,12 @@ function parseQueryDefinition(
   const hasExportMaximum =
     !aggregate && Object.hasOwn(value, 'exportMaximumResultCount');
   const hasSumFields = !aggregate && Object.hasOwn(value, 'listSumFields');
+  const hasRollups = !aggregate && Object.hasOwn(value, 'rollups');
   assertExactKeys(
     value,
     [
       ...expectedKeys,
+      ...(hasRollups ? ['rollups'] : []),
       ...(hasExportMaximum ? ['exportMaximumResultCount'] : []),
       ...(hasSumFields ? ['listSumFields'] : []),
       ...(Object.hasOwn(value, 'readModel') ? ['readModel'] : []),
@@ -2034,6 +2042,15 @@ function parseQueryDefinition(
     for (const field of value.listSumFields)
       assertCanonicalId(field, 'list sum field id', invalid);
   }
+  // ADR-0094: a get's on-read totals, each over one totalled relation.
+  if (
+    hasRollups &&
+    (value.queryType !== 'get' ||
+      value.tier !== 'q0' ||
+      value.readModel !== undefined ||
+      parseCompiledRollups(value.rollups) === null)
+  )
+    throw invalid('pinned rollups require a direct get query');
   if (hasLegalEntityScope) {
     assertLegalEntityScopeContract(value.legalEntityScope, value, invalid);
   }

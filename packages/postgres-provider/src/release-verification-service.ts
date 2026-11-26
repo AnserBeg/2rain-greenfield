@@ -1,3 +1,4 @@
+import type { CompiledDerivedField } from '../../canonical-model/src/line-totals.js';
 import { templateCreateSurface } from '../../runtime/src/record-template-library.js';
 import {
   assertWorkflowEvidence,
@@ -1244,6 +1245,8 @@ interface VerificationOperationContract {
     /** A create's server-assigned document numbers: never a caller's input. */
     readonly assignedFields?: readonly { readonly fieldId: string }[];
     readonly fields: readonly VerificationFieldContract[];
+    /** ADR-0094: derived targets the server computes; never an input. */
+    readonly derivedFields?: readonly CompiledDerivedField[];
     readonly relationInputs: readonly {
       readonly relationId: string;
       readonly required: boolean;
@@ -2560,6 +2563,11 @@ class SemanticVerificationExecutor {
         `A fixture override cannot be supplied to ${operation.operationId}.`,
       );
     const storageEntity = this.#requiredStorageEntity(entityId);
+    // ADR-0094 amendment 4: an operand of a derived value gets a value that
+    // keeps the derivation inside its target. Generic decimals carry up to
+    // nine integer digits, and two of them overflow a scale-2, precision-18
+    // amount in most arrangements. A validation's own witness still wins.
+    const operands = derivedOperandIds(operation.inputContract.derivedFields);
     const values = Object.fromEntries(
       writable.map((field) => [
         field.fieldId,
@@ -2569,7 +2577,9 @@ class SemanticVerificationExecutor {
               field.fieldId,
               inputOverrides[field.fieldId],
             )
-          : verificationFieldValue(field, token, storageEntity),
+          : operands.has(field.fieldId)
+            ? DERIVED_OPERAND_VALUE
+            : verificationFieldValue(field, token, storageEntity),
       ]),
     );
     const fieldOriginRelations = this.#relations.filter(
@@ -3438,6 +3448,29 @@ function verificationNumericValue(fieldId: string, token: string): string {
     .digest('hex')
     .slice(0, 12);
   return BigInt(`0x${hex}`).toString(10);
+}
+
+/**
+ * The value release verification writes into every operand of a derived
+ * value (ADR-0094 amendment 4). One is exact at every scale and fits every
+ * precision, and any product, sum or difference of ones and the declaration's
+ * own literals stays as small as the declaration itself.
+ */
+const DERIVED_OPERAND_VALUE = '1';
+
+function derivedOperandIds(
+  derived: readonly CompiledDerivedField[] | undefined,
+): ReadonlySet<string> {
+  const out = new Set<string>();
+  const visit = (term: CompiledDerivedField['expression']): void => {
+    if (term.kind === 'field') out.add(term.fieldId);
+    else if (term.kind === 'arithmetic') {
+      visit(term.left);
+      visit(term.right);
+    }
+  };
+  for (const field of derived ?? []) visit(field.expression);
+  return out;
 }
 
 function verificationDecimalValue(
