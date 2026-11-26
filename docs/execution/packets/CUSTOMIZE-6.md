@@ -67,7 +67,7 @@ The same test proves:
 ## Slice 2 · The same kinds on line tables, with line money in the header currency — record
 Status: built to the approved design note (option i, `CUSTOMIZE-6-s2.result.txt`); awaiting its independent review. Branch `packet/CUSTOMIZE-6-s2`, cut from `origin/main` 54e8ef7c2 (TRAIN-O). Surface rung LINE_LOGICAL_FIELD_READER = 50 is PROVISIONAL: REPORTS-1 s2 takes 50 and 51 and WORKFLOW-2 takes 52 in TRAIN-Q, so the integrator assigns the final number (likely 53). No migration. No Critical path touched. Stops taken: one named narrowing, adding these kinds to an EXISTING line table (below), reported to the orchestrator.
 
-CI tier: full RUN_URL
+Full CI: dispatched on the pushed tip; its URL and status are recorded in `CUSTOMIZE-6-s2.result.txt` (this file cannot name a run on its own commit).
 
 **Claims.**
 1. `addLineTable` admits decimal, money, quantity, long-text and currency line fields on a tenant record type, declared through the same `logicalFields` key as slice 1. The compiler no longer refuses a tenant line table; first-party record types are still refused by name.
@@ -88,7 +88,7 @@ CI tier: full RUN_URL
 
 **Rule 12.** The drafter's tool schema says, through the generated `.describe()` on the stored currency, that a line field's label is looked up on the line first and then on its header; the `addLineTable`, `addRecordType` and `addField` guidance names the kinds. AI-BUILD-1 adds L05 (work orders: hours in h, a rate in the work order's currency, line notes; dev) and L06 (invoice lines: whole-number quantity, CAD amount, 2-decimal discount; test). The IDs are free in BUILD_CASES, RECORD_TEMPLATE_CASES and every set the runner loads, on main and every packet branch. The scorer reads a path-read currency as "header"; a scripted L05 pair passes the header draft and fails a line-stored draft by name. The fail-closed kinds test is unchanged (no new patch kind). No live AI spend.
 
-**Controls** (`test/evidence/CUSTOMIZE-6-s2.expected-red.json`, each with its own test and message, reproduced with `check-expected-red.sh --run`): REDS_LIST. The slice-1 manifest's two activation entries now name their own test, so a slice-2 test in the same file is not an undeclared kill. No red for the serving loader's allowed-values call, for the reason slice 1 gives for its loader call.
+**Controls** (`test/evidence/CUSTOMIZE-6-s2.expected-red.json`, each with its own test and message, reproduced with `check-expected-red.sh --run`): 22 reds, all reproduced: `line-currency-path-not-parent`; `line-currency-path-reference-link`; `line-currency-path-foreign-source`; `line-currency-path-retired-link`; `line-header-currency-undeclared`; `line-path-amount-undeclared`; `line-retired-currency-any-type`; `line-retired-currency-validated`; `line-floor-line-declaration-ignored`; `line-floor-path-ignored`; `line-rung-unexplained`; `line-allowed-texts-contract-unchecked`; `line-allowed-texts-activation-unchecked`; `line-header-suffix-ignored`; `line-editor-header-dropped`; `line-source-not-joined`; `line-v1-report-reads-path`; `line-header-path-not-written`; `line-ambiguous-currency-label`; `line-long-text-not-multiline`; `line-approval-text-generic`; `line-activation-rung-unexplained`. The slice-1 manifest's two activation entries now name their own test, so a slice-2 test in the same file is not an undeclared kill. No red for the serving loader's allowed-values call, for the reason slice 1 gives for its loader call.
 
 **Rule 10 proof.** On a line type, with line money active; with the header currency retired while the line rate reading it stays live; with the line currency retired while the line duty stays live; and with money, both currencies and a quantity retired: adding a header field and arranging both the header and line lists still compile. A label-only base change (the header currency and the line rate relabelled) replays those changes clean through the upgrade path, active and retired. Retired declarations keep the line rung.
 
@@ -108,13 +108,61 @@ CI tier: full RUN_URL
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-6",
-  "base": "d8aad66b3e6ee6231b0580f2702c26d116f5a68c",
-  "head": "cf78b2dd1e1651eadad83fd9284d48b624faed59",
-  "changedPaths": ["apps/web/src/component-registry.ts", "apps/web/src/surface-composition.ts", "apps/web/src/surface-contract.ts", "package.json", "packages/canonical-model/src/calculated-display-bindings.ts", "packages/canonical-model/src/formula-validation-bindings.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/logical-field-bindings.ts", "packages/canonical-model/src/logical-field.ts", "packages/canonical-model/src/normalize.ts", "packages/canonical-model/src/schemas.ts", "packages/canonical-model/src/surface-presentation.ts", "packages/compiler/src/compiler.ts", "packages/compiler/src/logical-fields.ts", "packages/compiler/src/projections.ts", "packages/customization/src/ai-draft-kinds.ts", "packages/customization/src/apply.ts", "packages/customization/src/patch.ts", "packages/customization/src/targets.ts", "packages/postgres-provider/src/logical-field-admission.ts", "packages/postgres-provider/src/release-repository.ts", "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/runtime/src/request-runtime-view.ts", "test/agent/build-eval-cases.ts", "test/agent/build-eval.ts", "test/architecture/repository-hygiene.test.ts", "test/evidence/CUSTOMIZE-6.expected-red.json", "test/helpers/reachability-producers.ts", "test/postgres/logical-fields.test.ts", "test/postgres/request-runtime-view.test.ts", "test/unit/logical-field.test.ts"],
+  "base": "54e8ef7c2d3e781d223408a28c96c043cbbe5efd",
+  "head": "3c1311757e52ffbb25638651bbe5ca4435ab3a78",
+  "changedPaths": [
+    "apps/web/src/component-registry.ts",
+    "apps/web/src/document-editor.ts",
+    "apps/web/src/editor-controls.ts",
+    "apps/web/src/surface-composition.ts",
+    "docs/execution/packets/CUSTOMIZE-6.md",
+    "package.json",
+    "packages/canonical-model/src/declared-report.ts",
+    "packages/canonical-model/src/logical-field-bindings.ts",
+    "packages/canonical-model/src/logical-field.ts",
+    "packages/canonical-model/src/normalize.ts",
+    "packages/canonical-model/src/schemas.ts",
+    "packages/compiler/src/logical-fields.ts",
+    "packages/compiler/src/projections.ts",
+    "packages/customization/src/ai-draft-kinds.ts",
+    "packages/customization/src/apply.ts",
+    "packages/customization/src/patch.ts",
+    "packages/customization/src/render.ts",
+    "packages/postgres-provider/src/logical-field-admission.ts",
+    "packages/postgres-provider/src/release-repository.ts",
+    "packages/postgres-provider/src/request-runtime-view-service.ts",
+    "packages/runtime/src/request-runtime-view.ts",
+    "test/agent/build-eval-cases.ts",
+    "test/agent/build-eval.ts",
+    "test/architecture/repository-hygiene.test.ts",
+    "test/evidence/CUSTOMIZE-6-s2.expected-red.json",
+    "test/evidence/CUSTOMIZE-6.expected-red.json",
+    "test/fixtures/g2/language-conformance/coverage-decisions.json",
+    "test/helpers/reachability-producers.ts",
+    "test/postgres/build-eval.test.ts",
+    "test/postgres/line-logical-fields.test.ts",
+    "test/postgres/releases.test.ts",
+    "test/postgres/request-runtime-view.test.ts",
+    "test/unit/line-logical-field.test.ts",
+    "test/unit/logical-field.test.ts"
+  ],
   "symbols": [
-    {"path": "packages/canonical-model/src/logical-field-bindings.ts", "name": "deriveLogicalFieldBindings"},
-    {"path": "packages/compiler/src/logical-fields.ts", "name": "compileLogicalFields"},
-    {"path": "packages/postgres-provider/src/logical-field-admission.ts", "name": "logicalFieldBindingsProblem"}
+    {
+      "path": "packages/canonical-model/src/logical-field-bindings.ts",
+      "name": "currencyHolderEntity"
+    },
+    {
+      "path": "packages/canonical-model/src/logical-field-bindings.ts",
+      "name": "logicalFieldReaderFloor"
+    },
+    {
+      "path": "packages/postgres-provider/src/logical-field-admission.ts",
+      "name": "allowedTextsContractProblem"
+    },
+    {
+      "path": "apps/web/src/document-editor.ts",
+      "name": "headerCurrencyFieldIds"
+    }
   ]
 }
 ```
