@@ -10,10 +10,13 @@
 
 CI tier: quick https://github.com/AnserBeg/2rain-greenfield/actions/runs/45652542352
 
+**Slice 1a-i · Journal core, BUILD 2026-11-25.** Migration 0070 (provisional; renumbered at merge), no rung, no member, no principal write path. Eight platform tables: two global catalogs (currencies CAD/USD/EUR at exponent 2; the 30 core roles, control owners as subledger IDs) with no grants, changed only by migration and read only through definer functions; six tenant tables (company dates, entry counter, accounts, entries, lines, monthly balances with their recordedAt horizon) with forced RLS, no policy and no grant. One internal writer `ledger_write_entry` (READ COMMITTED guard, company closed-through FOR SHARE, books-start, closed-through and company-calendar dating, account kind as the manual line's role, control and class checks, ascending balance upsert, counter last, in-transaction projection check); four internal one-row setters; two company-scoped reads for `north_star_runtime` (lines paged by keyset at 500 or fewer). Controls: 37 entries in [`ACCOUNTING-1-s1a-i.expected-red.json`](../../../test/evidence/ACCOUNTING-1-s1a-i.expected-red.json), one per storage check, writer refusal, lock position, race and company scope. Design read: Fable AMEND, rulings R4-R7 and A1-A8 applied (`/home/rvham/2rain-missions/ACCOUNTING-1-s1a-design-read.result.txt`).
+
 ## Dependency packets (not yet chartered; each needs an owner lane before the slice that needs it)
 
 | Packet | Owner | Needed by |
 | --- | --- | --- |
+| COMPANY-CALENDAR-1: a business calendar per owning scope, tenant default plus per-company override; `ledger_business_day(company, instant)` keeps its signature | Platform | Slice 1b and the first tenant (hard) |
 | TAX-EVIDENCE-1: tax codes with components and a recoverable flag; code and frozen component amounts on invoice and bill lines and charges; credits with lines and tax evidence | Receivables/Payables | Slice 1b |
 | OPEN-ITEM-1: any record type declares an open item of a subledger | Receivables/Payables | Slice 4 proofs |
 | TAX-DETERMINATION-1: platform tax determination on a tenant money field | Platform tax | Slice 4 taxable proofs |
@@ -27,10 +30,14 @@ Slices that write the journal run one after the other (AGENTS §3). Each slice e
 
 | Slice | What the business gets | Entry conditions |
 | --- | --- | --- |
-| 1a · Ledger core | Journal, Canadian starter chart, account map with validation, books-start date, manual journal, trial balance and GL detail. An accountant can keep books by hand. | ADR-0093 accepted |
-| 1b · Built-in documents post | Invoices, payments, credits, voids and bills post themselves through the poster; Unposted worklist; reconcile caller. | 1a, TAX-EVIDENCE-1 |
+| 1a-i · Journal core | Storage, the one entry writer, company-scoped reads; every ADR storage invariant refuses. | ADR-0093 accepted |
+| 1a-ii · Books by hand | Ledger operation binding (rung): books start, chart with the Canadian starter, manual journal, opening entry, confirmation-class. | 1a-i |
+| 1a-iii · Account map | Binding v2 (rung): role bindings with class and control-kind agreement; unmapped roles named. | 1a-ii |
+| 1a-iv · Trial balance and GL detail | Two first-party read-model Semantic Queries (one binding, one rung); no report variant. | 1a-iii |
+| 1b-0 · Source-version reader | Reader-only rung for `createSourceVersionTrigger` (contype-t shape), deployed while 1b waits. | 1a-iv |
+| 1b · Built-in documents post | Invoices, payments, credits, voids and bills post themselves; hold catalog, held queue and Unposted worklist; reconcile caller. | 1b-0 deployed, TAX-EVIDENCE-1, COMPANY-CALENDAR-1 |
 | 1c · Custom types post | `addPostingRule`, `endPostingRule`, re-post, reclass, `addAccountRole`, with drafter cases. | 1b, CUSTOMIZE-6 s1 |
-| 2 · Statements and close | P&L, balance sheet, close and reopen, AR and AP aging, GST/HST/PST summary, vendor payment totals. | 1b, REPORTS-1 s2 |
+| 2 · Statements and close | P&L, balance sheet, close and reopen, AR and AP aging, GST/HST/PST summary, vendor payment totals. The two general report variants (read-model source; subtotal and computed rows) land one at a time after REPORTS-1 s2 merges (charter §9's "built in slice 1a" changed). | 1b, REPORTS-1 s2 |
 | 3 · QBO connector on fakes | External-ledger map, human-confirmed batch send, retry, exits, reconciliation. | 1a, 2, CONNECT-OUTBOUND-1 |
 | 4 · Any shape of custom type | Line legs, role-reference fields, qualifiers; rental, clinic and field-service proofs. | 1c, CUSTOMIZE-6 s2, OPEN-ITEM-1, TAX-DETERMINATION-1 |
 | 5 · Billing cases | Billing-origin posting, deferral and recognition, credit notes, deposits, refunds. | 4, BILLING s3, Receivables v2, B3 |
@@ -40,7 +47,8 @@ Slices that write the journal run one after the other (AGENTS §3). Each slice e
 
 | Slice | Try it after the slice ships | Expected observation |
 | --- | --- | --- |
-| 1a | Bind roles in the account map, set a books-start date, post a manual journal of CAD 105.00 against cash and revenue, then try one that does not balance. | Trial balance shows 105.00 each side. The unbalanced entry refuses. A role left unmapped is named. |
+| 1a-i | `NORTH_STAR_TEST_LOCK_TIMEOUT_SECONDS=5400 node scripts/run-with-test-lock.mjs exclusive -- node --import tsx --test test/postgres/ledger-journal-core.test.ts`, then `bash scripts/check-expected-red.sh --run ledger-balance-sum`. | 35 tests pass (two companies, one tenant). The control removes the balance check, the unbalanced-entry test fails as declared, and the file is restored. |
+| 1a (after 1a-iv) | Bind roles in the account map, set a books-start date, post a manual journal of CAD 105.00 against cash and revenue, then try one that does not balance. | Trial balance shows 105.00 each side. The unbalanced entry refuses. A role left unmapped is named. |
 | 1b | Issue and void a CAD invoice with GST and PST in two companies of one tenant. | Each company posts only its own entries. The void nets to zero by a reversing entry. An unmapped role leaves the invoice in Unposted with its reason. |
 | 1c | Customize an Expense claim with a rule: Approved posts Dr Travel expense 100.00, Dr GST recoverable 5.00, Cr Reimbursements owed 105.00. | The review previews those legs. Approving the claim posts them. Editing the amount posts only the difference. |
 | 2 | Close through a date, then edit an earlier record. Run the trial balance. | The change holds as closed books. The report shows posted-through time and the Unposted count. |
@@ -48,7 +56,7 @@ Slices that write the journal run one after the other (AGENTS §3). Each slice e
 
 ## Discriminating proofs for executable slices
 
-- Storage (rule 8): each of the deferred balance/currency/positivity trigger, the append-only trigger, revoked privileges, both `NULLS NOT DISTINCT` keys (with a two-poster race) and the closed-through and books-start refusals has a red that fails when only that check is removed. [ADR-0093 Enforcement](../../decisions/ADR-0093-ledger-and-posting-rules.md#enforcement)
+- Storage (rule 8): each of the deferred balance and line-count trigger, the one-currency and same-company foreign keys and the positivity check (ADR §4 note, R7a), the append-only trigger, revoked privileges, both `NULLS NOT DISTINCT` keys (with a two-poster race) and the closed-through and books-start refusals has a red that fails when only that check is removed. [ADR-0093 Enforcement](../../decisions/ADR-0093-ledger-and-posting-rules.md#enforcement)
 - Two companies in one tenant with a company-scoped principal (rule 2): remove only the company predicate on the poster and observe the other company's entry.
 - Poster: a held version never computes against a later position; a pre-start invoice voided after books start moves the opening position; a billing-origin invoice holds as "awaiting slice 5".
 - Release (rule 13): an older reader refuses the posting-rule element by name, fed the recorded change, through the archived loader; a rollback below the first rule-bearing release is refused while positions exist.
@@ -57,6 +65,8 @@ Slices that write the journal run one after the other (AGENTS §3). Each slice e
 
 ## Rule 17
 
+**Slice 1a-i blocks.** (1) *Balanced append-only journal*: integer facts in a declared unit per owning scope that net to zero per entry; unchanged for rentals (deposits), field service (cash sales), clinics (patient payments), distribution and nonprofits; narrower: the unit is an ISO currency only (stock stays in the inventory ledger, ADR-0017), company is the only dimension (columns reserved), no conversion (owner). (2) *Period lock*: a closed-through civil date per scope, read FOR SHARE by every writer and moved FOR UPDATE by one operation, the inventory-lock mechanism; rentals, hotels, clinics; narrower: per company, not per subledger. (3) *Business-day resolver*: an instant becomes a date only through the owning scope's calendar; ledger, reports, inventory, booking for rentals, hotels, logistics; narrower: the tenant calendar until COMPANY-CALENDAR-1. (4) *Company-scoped bounded read*: a keyset page behind a company-scoped grant; distribution, clinics, field service; narrower: two ledger reads only, lines at 500 per page.
+
 **Most general form:** a typed, versioned rule maps any record's stored money facts, while a declared condition holds, to balanced role-level legs; a per-company map binds roles to accounts; one append-only journal stores the differences. **Used unchanged by** first-party invoices, payments, credits and bills; with OPEN-ITEM-1 and TAX-DETERMINATION-1, every tenant type; and both destinations (native and QBO). **Narrower in v1:** control roles reserved to their subledgers; no tenant receivable or taxPayable credit until its dependency; no inventory value, COGS or currency conversion (owner); company is the only dimension; months are the reporting calendar only; no unbilled-revenue accrual or cash basis; one destination per company, home-currency entries only to QBO, sends human-confirmed until N5; no bank feeds or tax filing. Full list: charter §12.
 
 ## Decisions
@@ -64,3 +74,5 @@ Slices that write the journal run one after the other (AGENTS §3). Each slice e
 - Desired position, post the difference (not event rules): voids, edits and replays need no extra rules.
 - QBO option A (clearing accounts); native financial statements are not offered in QBO mode.
 - ADR number 0093 was free on main at the packet base, so it is kept.
+- 1a-i: manual and opening lines take the account's stored kind as their role; control-kind accounts refuse them (R6); `ledger_lines.role_id` has no FK so 1c tenant roles fit.
+- 1a-i: entry numbers count per company (tested, no separate control: the unique key backs them). `journal_read` is hand-seeded in tests until 1a-ii declares it.
