@@ -10,6 +10,7 @@ import {
   runMigrations,
 } from '../../packages/postgres-provider/src/migrations.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
+import { seedBusinessCalendar } from '../helpers/business-calendar-seed.js';
 
 const discussion = 'staffDiscussion/v1';
 const email = 'email/v1';
@@ -97,6 +98,15 @@ test('shared communication writer', async (t) => {
         await admin.query(
           await readFile('test/fixtures/booking-commitments.sql', 'utf8'),
         );
+        await seedBusinessCalendar(admin, {
+          tenantId: (
+            await admin.query<{ id: string }>(
+              "SELECT md5('tenant')::uuid AS id",
+            )
+          ).rows[0]!.id,
+          timeZone: 'America/Denver',
+          boundary: '08:00',
+        });
         // The serving head, whatever the envelope: a one-entry v1 lineage
         // (ADR-0066 re-baseline) or an appended v2 lineage.
         const envelope = JSON.parse(
