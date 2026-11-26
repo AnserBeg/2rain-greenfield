@@ -327,6 +327,72 @@ function assertPeriodLockComposition(
 }
 
 /**
+ * The company page (ACCOUNTING-1 1a-ii): Books adds its one books-start Task
+ * to Inventory's legal-entity record, binding only the record, its revision
+ * and the operation's two `arguments`; it adds no rows and only the slots
+ * that render it.
+ */
+function assertCompanyBooksComposition(
+  namespace: string,
+  source: Value,
+  composition: unknown,
+  slots: unknown,
+): void {
+  const id = (kind: string, local: string) => `${namespace}:${kind}.${local}`;
+  record(composition);
+  assert.equal(composition.kind, 'surfaceComposition');
+  assert.deepEqual(composition.children, [], 'the company page shows no rows');
+  assert.deepEqual(
+    (composition.actions as Value[]).map((action) =>
+      (action.steps as Value[]).map((step) => [
+        (step.operation as Value).targetId,
+        (step.bindings as Value[]).map((binding) => [
+          (binding.path as string[]).join('.'),
+          (binding.value as Value).source,
+        ]),
+      ]),
+    ),
+    [
+      [
+        [
+          id('operation', 'bookkeeping_books_start_set'),
+          [
+            ['recordId', 'record'],
+            ['expectedRevision', 'record'],
+            ['arguments.date', 'input'],
+            ['arguments.expectedPrior', 'input'],
+          ],
+        ],
+      ],
+    ],
+    "the company page's only command is Books' books start",
+  );
+  const original = source.slots as Value[];
+  const slotId = `${String(source.surfaceId).replace(':surface.', ':slot.')}`;
+  const content = original[0]!.content;
+  const slot = (name: string, suffix: string, orderKey: number) => ({
+    kind: 'surfaceSlot',
+    schemaVersion: 'v6',
+    slot: name,
+    slotId: `${slotId}_${suffix}`,
+    orderKey,
+    content,
+  });
+  assert.deepEqual(
+    slots,
+    [
+      ...original.map((value) =>
+        value.slot === 'keyFacts' ? { ...value, orderKey: 90 } : value,
+      ),
+      slot('sections', 'sections', 50),
+      slot('commandBar', 'command_bar', 30),
+      slot('childTables', 'children', 60),
+    ],
+    'the company composition may only add the slots that render it',
+  );
+}
+
+/**
  * The stock document editor, pinned by what makes it this document's: its
  * pages, lines, draft state and the values its first save writes -- the draft
  * state, the document itself as its posting source, the save's time and the
@@ -589,6 +655,8 @@ export function assertComposedInventoryCollection(
       assertDocumentComposition(namespace, local, source, composition, slots);
     else if (local === 'inventory_period_lock_detail')
       assertPeriodLockComposition(namespace, source, composition, slots);
+    else if (local === 'legal_entity_detail')
+      assertCompanyBooksComposition(namespace, source, composition, slots);
     else {
       assert.equal(
         composition,

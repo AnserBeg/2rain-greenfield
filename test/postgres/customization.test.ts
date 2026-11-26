@@ -17,7 +17,10 @@ import {
   openComposedApplicationRuntime,
   openCustomizeService,
 } from '../../apps/api/src/composition-root.js';
-import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
+import {
+  narrowAcknowledgementToDeclared,
+  readUnboundPermissionAcknowledgementFor,
+} from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import {
   createComposedApplicationRuntime,
   ensureScope,
@@ -775,9 +778,18 @@ function platformLabelVariant(
   }
   const original = parseCompiledApplication(previous);
   const parent = baseline ? original.bootstrap : original.application;
-  const checkedIn = readUnboundPermissionAcknowledgementFor(
-    authoredPath,
-    'northstar.app:package.application',
+  // Narrowed to this base's permissions: an earlier base (the compatibility
+  // fixture) leaves out a later module's binding (Books).
+  const checkedIn = narrowAcknowledgementToDeclared(
+    readUnboundPermissionAcknowledgementFor(
+      authoredPath,
+      'northstar.app:package.application',
+    ),
+    new Set(
+      (authored.permissions as { permissionId: string }[]).map(
+        (p) => p.permissionId,
+      ),
+    ),
   );
   const originalBinding = checkedIn.evaluatorBindings![0]!;
   const newId = 'northstar.app:permission.upgrade_review';
