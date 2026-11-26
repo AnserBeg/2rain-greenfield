@@ -214,6 +214,12 @@ versions, shown as "waiting on held version n", until cleared. A re-post or free
   company closed-through row FOR SHARE; the company account-map row (slice 1a-iii); the entry's account rows ascending
   FOR SHARE; balance rows ascending, upserted in key order including rows that do not exist yet; the counter row last.
   Close, books start, provisioning and an account edit each lock one row FOR UPDATE and nothing else.
+  **Corrected 2026-11-26 (1a-i review, R4):** this order is acyclic only for a transaction that makes ONE writer
+  call. "Counter last" holds per call, not per transaction: after entry 1 a transaction holds the counter, and entry
+  2's balance (or record) rows can be held by a writer that waits on that counter, so two entries in one transaction
+  can deadlock. Until the fix, no caller makes two writer calls in one transaction. The fix lands before the first
+  multi-entry write (slice 1b: one entry per currency; re-post's reversal and replacement): every lock that precedes
+  the counter is taken for the whole transaction, in this order, before its first counter take.
 - **Holds, never drops.** All 15 reasons, classified:
   - *Input-derived (superseded by a later version):* unbalanced, unsupported currency, unrepresentable amount, source
     unreadable, tax evidence missing, rule ended, date moves across books start, predates rule.

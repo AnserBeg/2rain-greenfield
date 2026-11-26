@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "packet": "ACCOUNTING-1-s1a-ii",
+  "entries": [
+    {
+      "name": "ledger-balanced-definer",
+      "claim": "The deferred balance check runs as its owner, so a write committed as the runtime role is not refused at COMMIT (review R5).",
+      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "original": "ALTER FUNCTION north_star_internal.ledger_entry_balanced() SECURITY DEFINER SET search_path = pg_catalog, pg_temp;",
+      "replacement": "ALTER FUNCTION north_star_internal.ledger_entry_balanced() SECURITY INVOKER SET search_path = pg_catalog, pg_temp;",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "a writer call committed as the runtime role passes the deferred balance check",
+          "expected": "a runtime-originated entry was refused at commit: permission denied"
+        }
+      ]
+    },
+    {
+      "name": "ledger-instant-offset",
+      "claim": "An instant without Z or a numeric offset is refused, never read in the session time zone (review R2).",
+      "file": "db/migrations/0071_ledger_books_by_hand.sql",
+      "original": "IF date_basis ? 'instant' AND (jsonb_typeof(date_basis->'instant') IS DISTINCT FROM 'string'",
+      "replacement": "IF false AND date_basis ? 'instant' AND (jsonb_typeof(date_basis->'instant') IS DISTINCT FROM 'string'",
+      "test": {
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "an instant without Z or a numeric offset is refused",
+          "expected": "Missing expected rejection: an instant without an offset was read in the session time zone"
+        }
+      ]
+    },
+    {
+      "name": "ledger-date-pin-cast",
+      "claim": "The structural date pin catches CAST(x AS date) outside the resolver (review R3).",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "RETURN make_date(substr(civil, 1, 4)::integer, substr(civil, 6, 2)::integer, substr(civil, 9, 2)::integer); END $$;",
+      "replacement": "RETURN CAST(civil AS date); END $$$$;",
+      "test": {
+        "files": ["test/architecture/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ledger-journal-core.test.ts",
+          "name": "accounting dates come only from the company business-day resolver",
+          "expected": "ledger SQL outside the resolver contains a CAST to date"
+        }
+      ]
+    },
+    {
+      "name": "ledger-date-pin-call",
+      "claim": "The structural date pin catches date(x) outside the resolver (review R3).",
+      "file": "db/migrations/0070_ledger_journal_core.sql",
+      "original": "RETURN make_date(substr(civil, 1, 4)::integer, substr(civil, 6, 2)::integer, substr(civil, 9, 2)::integer); END $$;",
+      "replacement": "RETURN date(civil); END $$$$;",
+      "test": {
+        "files": ["test/architecture/ledger-journal-core.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ledger-journal-core.test.ts",
+          "name": "accounting dates come only from the company business-day resolver",
+          "expected": "ledger SQL outside the resolver contains a date() call"
+        }
+      ]
+    }
+  ]
+}

@@ -728,6 +728,99 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
             },
           );
           await t.test(
+            'an instant without Z or a numeric offset is refused',
+            async () => {
+              const c = await company();
+              // Without an offset PostgreSQL would read this in the session
+              // time zone, a hidden zone input (review R2).
+              await assert.rejects(
+                write(
+                  w1,
+                  c.id,
+                  'manual',
+                  { instant: '2026-02-10T20:00:00' },
+                  pair(c.cash, c.revenue),
+                ),
+                /ledger\.instantWithoutOffset/u,
+                'an instant without an offset was read in the session time zone',
+              );
+              for (const instant of [
+                '2026-02-10T20:00:00 America/Vancouver',
+                'now',
+                '2026-02-10',
+                1770753600,
+              ])
+                await assert.rejects(
+                  write(
+                    w1,
+                    c.id,
+                    'manual',
+                    { instant },
+                    pair(c.cash, c.revenue),
+                  ),
+                  /ledger\.instantWithoutOffset/u,
+                  `an instant was admitted: ${String(instant)}`,
+                );
+              await write(
+                w1,
+                c.id,
+                'manual',
+                { instant: '2026-02-10T12:00:00.250-08:00' },
+                pair(c.cash, c.revenue),
+              );
+            },
+          );
+          await t.test(
+            'a writer call committed as the runtime role passes the deferred balance check',
+            async () => {
+              const c = await company();
+              // TEST-ONLY stand-in for a 1a-ii operation: an owner-owned
+              // definer that calls the writer, executable by the runtime role.
+              // The runtime session commits, so the deferred balance trigger
+              // fires as north_star_runtime (review R5). Every other test
+              // commits as the owner.
+              await admin.query(
+                `CREATE FUNCTION north_star_internal.ledger_test_runtime_write(company uuid, lines jsonb) RETURNS uuid
+                 LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+                   SELECT north_star_internal.ledger_write_entry(company, 'manual', '{"civil":"2026-02-10"}', 'CAD', lines,
+                     jsonb_build_object('operationReceiptId', gen_random_uuid(), 'entryOrdinal', 1)) $$`,
+              );
+              await admin.query(
+                'GRANT EXECUTE ON FUNCTION north_star_internal.ledger_test_runtime_write(uuid,jsonb) TO north_star_runtime',
+              );
+              const client = await runtime.connect();
+              try {
+                await client.query(
+                  "SELECT set_config('north_star.tenant_id',$1,false),set_config('north_star.environment_id',$2,false)",
+                  [tenant, environment],
+                );
+                await client.query('BEGIN');
+                await client.query(
+                  'SELECT north_star_internal.ledger_test_runtime_write($1,$2)',
+                  [c.id, JSON.stringify(pair(c.cash, c.revenue))],
+                );
+                const outcome = await settled(client.query('COMMIT'));
+                assert.equal(
+                  outcome,
+                  'admitted',
+                  `a runtime-originated entry was refused at commit: ${outcome}`,
+                );
+              } finally {
+                await client.query('ROLLBACK').catch(() => undefined);
+                client.release();
+                await admin.query(
+                  'DROP FUNCTION north_star_internal.ledger_test_runtime_write(uuid,jsonb)',
+                );
+              }
+              assert.equal(
+                await count('platform.ledger_entries WHERE company_id=$1', [
+                  c.id,
+                ]),
+                1,
+              );
+            },
+          );
+          await t.test(
             'a projection row that drifts from its lines refuses the next write',
             async () => {
               const c = await company();
@@ -777,20 +870,25 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
                   provenance,
                 );
                 const blocked = await waitUntilBlocked(w2);
-                const second = write(
-                  w2,
-                  c.id,
-                  'posting',
-                  { instant: '2026-02-10T20:00:00Z' },
-                  postingLines(c),
-                  provenance,
+                // The handler is attached at creation (review R1): a refusal
+                // that reaches Node before COMMIT's reply is never unhandled.
+                const second = settled(
+                  write(
+                    w2,
+                    c.id,
+                    'posting',
+                    { instant: '2026-02-10T20:00:00Z' },
+                    postingLines(c),
+                    provenance,
+                  ),
                 );
                 await blocked();
                 await w1.query('COMMIT');
-                await assert.rejects(
-                  second,
+                const outcome = await second;
+                assert.match(
+                  outcome,
                   /ledger_entries_posting_key/u,
-                  'a raced duplicate posting was admitted',
+                  `a raced duplicate posting was admitted: ${outcome}`,
                 );
               } finally {
                 await w1.query('ROLLBACK').catch(() => undefined);
@@ -821,20 +919,23 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
                   receipt,
                 );
                 const blocked = await waitUntilBlocked(w2);
-                const second = write(
-                  w2,
-                  c.id,
-                  'manual',
-                  { civil: '2026-02-10' },
-                  pair(c.cash, c.revenue),
-                  receipt,
+                const second = settled(
+                  write(
+                    w2,
+                    c.id,
+                    'manual',
+                    { civil: '2026-02-10' },
+                    pair(c.cash, c.revenue),
+                    receipt,
+                  ),
                 );
                 await blocked();
                 await w1.query('COMMIT');
-                await assert.rejects(
-                  second,
+                const outcome = await second;
+                assert.match(
+                  outcome,
                   /ledger_entries_operation_key/u,
-                  'a raced duplicate operation entry was admitted',
+                  `a raced duplicate operation entry was admitted: ${outcome}`,
                 );
               } finally {
                 await w1.query('ROLLBACK').catch(() => undefined);
@@ -853,10 +954,10 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
                   [c.id],
                 );
                 const blocked = await waitUntilBlocked(w2);
-                const writer = manual(w2, c, '2026-03-31');
+                const writer = settled(manual(w2, c, '2026-03-31'));
                 await blocked();
                 await w1.query('COMMIT');
-                const outcome = await settled(writer);
+                const outcome = await writer;
                 assert.match(
                   outcome,
                   /ledger\.closedBooks/u,
@@ -878,15 +979,12 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
                   [c.id, c.bank, role('cash')],
                 );
                 const blocked = await waitUntilBlocked(w2);
-                const writer = manual(
-                  w2,
-                  c,
-                  '2026-02-10',
-                  pair(c.bank, c.revenue),
+                const writer = settled(
+                  manual(w2, c, '2026-02-10', pair(c.bank, c.revenue)),
                 );
                 await blocked();
                 await w1.query('COMMIT');
-                const outcome = await settled(writer);
+                const outcome = await writer;
                 assert.match(
                   outcome,
                   /ledger\.accountInactive/u,
@@ -894,6 +992,48 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
                 );
               } finally {
                 await w1.query('ROLLBACK').catch(() => undefined);
+              }
+            },
+          );
+          await t.test(
+            'HAZARD R4: two writer calls in one transaction can deadlock (fixed before slice 1b)',
+            async () => {
+              // This pins a known hazard, not a guarantee (review R4). "Counter
+              // last" is per writer call: T1's first entry holds the counter,
+              // T2 holds balance row Y and waits on the counter, and T1's
+              // second entry asks for Y. Until the 1b fix, no caller makes two
+              // writer calls in one transaction. The fix inverts this test.
+              const c = await company();
+              await w1.query('BEGIN');
+              await w2.query('BEGIN');
+              try {
+                await manual(w1, c, '2026-02-10', pair(c.cash, c.revenue));
+                const t2Blocked = await waitUntilBlocked(w2);
+                const t2 = settled(
+                  manual(w2, c, '2026-02-10', pair(c.bank, c.opening)),
+                );
+                await t2Blocked();
+                const t1Second = settled(
+                  manual(w1, c, '2026-02-10', pair(c.bank, c.cash)),
+                );
+                // The victim's transaction keeps its locks until it rolls
+                // back, so the survivor finishes only after that ROLLBACK.
+                const victim = await Promise.race([
+                  t1Second.then(() => w1),
+                  t2.then(() => w2),
+                ]);
+                await victim.query('ROLLBACK');
+                const outcomes = await Promise.all([t1Second, t2]);
+                assert.equal(
+                  outcomes.filter((outcome) =>
+                    /deadlock detected/u.test(outcome),
+                  ).length,
+                  1,
+                  `the R4 hazard no longer deadlocks; invert this test: ${outcomes.join(' | ')}`,
+                );
+              } finally {
+                await w1.query('ROLLBACK').catch(() => undefined);
+                await w2.query('ROLLBACK').catch(() => undefined);
               }
             },
           );
@@ -911,6 +1051,7 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
                 );
                 const firstBlocked = await waitUntilBlocked(w1);
                 const first = manual(w1, c, '2026-02-11', pair(low!, high!, 7));
+                first.catch(() => undefined); // handled at creation (review R1)
                 await firstBlocked();
                 const secondBlocked = await waitUntilBlocked(w2);
                 const second = manual(
@@ -919,6 +1060,7 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
                   '2026-02-12',
                   pair(high!, low!, 9),
                 );
+                second.catch(() => undefined);
                 await secondBlocked();
                 await w3.query('COMMIT');
                 const outcomes = await Promise.allSettled([first, second]);
