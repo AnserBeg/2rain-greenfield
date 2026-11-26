@@ -88,6 +88,7 @@ import {
   type RuntimeProjection,
 } from '../../packages/runtime/src/request-runtime-view.js';
 import { createSurfaceRuntimeServer } from '../../apps/web/src/app-server.js';
+import { COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION } from '../../apps/web/src/sales-section.js';
 import { renderSurfaceDataComponent } from '../../apps/web/src/component-registry.js';
 import {
   declaredListArguments,
@@ -16063,4 +16064,311 @@ test('a tenant record button opens, reviews its bound field, and submits one ord
   const refused = await submit({ taskToken: stale, taskStage: 'prepare' });
   assert.match(refused.html, /COMPOSITION_TASK_UNAVAILABLE/u);
   assert.equal(executor.operationCalls.length, 1);
+});
+
+/**
+ * SECTION-BLOCKS S1 parity. The product installs the application extension
+ * (apps/api composition roots), so these renders install it too. The
+ * purchase order, sales order and shipment pages carry a composition, which
+ * never calls the extension's loaders; the goldens pin their rendered pages
+ * and the responses to a command sent from each, so removing the dead
+ * hand-built sections cannot change what the owner sees. Normalized only for
+ * generated identifiers (record, company and key values, and the ids a
+ * command mints), timestamps and the clock; the file is committed beside this
+ * test and regenerated only with SECTION_BLOCKS_GOLDEN_WRITE=1.
+ */
+const SECTION_BLOCKS_GOLDEN =
+  'test/fixtures/section-blocks-s1/golden-renders.json';
+async function sectionBlocksRenders(): Promise<Record<string, string>> {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const names = new Map<string, string>([[scope, '<scope-1>']]);
+  names.set(f.scopes[1]!, '<scope-2>');
+  const named = (recordId: string, label: string) => {
+    names.set(recordId, label);
+    return recordId;
+  };
+  named(f.party, '<party>');
+  named(f.item, '<item>');
+  const po = named(seedPurchaseOrder(f, ['5', '3']).order, '<purchase-order>');
+  const so = named(
+    f.executor.seed(
+      'sales_order',
+      {
+        [id('field', 'sales_order_number')]: 'SO-000042',
+        [id('field', 'sales_order_customer_party_id')]: f.party,
+        [id('field', 'sales_order_order_date')]: '2026-09-20T12:00:00.000Z',
+        [id('field', 'sales_order_currency')]: 'CAD',
+        [id('derived_state_field', 'machine.sales_order_lifecycle')]: id(
+          'state',
+          'sales_order_released',
+        ),
+      },
+      scope,
+    ),
+    '<sales-order>',
+  );
+  const soLines = ['4', '2'].map((ordered, index) =>
+    named(
+      f.executor.seed(
+        'sales_order_line',
+        {
+          [id('field', 'sales_order_line_line_number')]: String(index + 1),
+          [id('field', 'sales_order_line_item_id')]: f.item,
+          [id('field', 'sales_order_line_ordered_quantity')]: ordered,
+          [id('field', 'sales_order_line_unit_id')]: 'EA',
+          [id('relation', 'sales_order_line_order')]: so,
+        },
+        scope,
+      ),
+      `<sales-order-line-${index + 1}>`,
+    ),
+  );
+  void soLines;
+  const shipment = named(
+    f.executor.seed(
+      'shipment',
+      {
+        [id('field', 'shipment_number')]: 'SHP-000042',
+        [id('field', 'shipment_state')]: id('option', 'shipment_state_posted'),
+        [id('field', 'shipment_effective_at')]: '2026-09-21T09:00:00.000Z',
+        [id('field', 'shipment_external_reference')]: null,
+        [id('field', 'shipment_location_id')]: 'Main warehouse',
+        [id('relation', 'shipment_order')]: so,
+      },
+      scope,
+    ),
+    '<shipment>',
+  );
+  for (const [index, quantity] of ['3', '1'].entries())
+    named(
+      f.executor.seed(
+        'shipment_line',
+        {
+          [id('field', 'shipment_line_line_number')]: String(index + 1),
+          [id('field', 'shipment_line_item_id')]: f.item,
+          [id('field', 'shipment_line_quantity')]: quantity,
+          [id('field', 'shipment_line_unit_id')]: 'EA',
+          [id('relation', 'shipment_line_shipment')]: shipment,
+        },
+        scope,
+      ),
+      `<shipment-line-${index + 1}>`,
+    );
+  const receipt = named(
+    f.executor.seed(
+      'goods_receipt',
+      { [id('field', 'goods_receipt_number')]: 'RCV-000042' },
+      scope,
+    ),
+    '<goods-receipt>',
+  );
+  const stated = statingGateways(f, {
+    commercial: () => '8.5',
+    fulfillment: (key, row) =>
+      key === 'short'
+        ? '0'
+        : key === 'available_now'
+          ? '10'
+          : key === 'shipped' || key === 'coverage'
+            ? '1'
+            : String(
+                row.values[id('field', 'sales_order_line_ordered_quantity')] ??
+                  '0',
+              ),
+  });
+  const capability = (
+    capabilityId: string,
+  ): RegisteredCapabilityOperationExecutor => ({
+    capabilityId,
+    async prepareAuthorization(request) {
+      return {
+        decisionInput: request.input,
+        legalEntityReadScopeIds: [scope],
+        readBackArguments: {
+          recordId: asRecord(request.input).recordId as string,
+          includeArchived: false,
+          [request.readBackDefinition.legalEntityScope!.operand.parameterId]:
+            scope,
+        },
+      };
+    },
+    async execute(request) {
+      const target = f.executor.rows.get(
+        String(asRecord(request.input).recordId),
+      )!;
+      const moved: SemanticRecordDto = {
+        ...target,
+        revision: target.revision + 1,
+      };
+      f.executor.rows.set(moved.recordId, moved);
+      return {
+        kind: 'semanticOperationResult',
+        schemaVersion: SEMANTIC_OPERATION_RESULT_VERSION,
+        operationId: request.definition.operationId,
+        outcome: 'succeeded',
+        readBack: moved,
+        unsupportedReason: null,
+        trust: {
+          changeDocumentId: randomUUID(),
+          domainEventId: randomUUID(),
+          invocationId: randomUUID(),
+          outboxId: randomUUID(),
+        },
+      };
+    },
+  });
+  const gateways: SurfaceRuntimeGateways = {
+    ...stated,
+    applicationExtension: COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION,
+    clock: () => new Date('2026-10-02T12:00:00.000Z'),
+    operationGateway: new SemanticOperationGateway(
+      f.policy,
+      f.executor,
+      stated.operationMediation,
+      undefined,
+      [capability('northstar.sales:capability.fulfillment')],
+    ),
+  };
+  const normalize = (html: string) => {
+    let text = html;
+    for (const [value, label] of names) {
+      text = text.replaceAll(value, label);
+      // The page also names a record by its shortened identity.
+      text = text.replaceAll(`${value.slice(0, 8)}…${value.slice(-4)}`, label);
+    }
+    const generated = new Map<string, string>();
+    return text
+      .replace(
+        /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gu,
+        (uuid) => {
+          if (!generated.has(uuid))
+            generated.set(uuid, `<generated-${generated.size + 1}>`);
+          return generated.get(uuid)!;
+        },
+      )
+      .replace(/nonce="[^"]*"/gu, 'nonce="<nonce>"')
+      .replace(
+        /name="confirmationGrant" value="[^"]*"/gu,
+        'name="confirmationGrant" value="<grant>"',
+      )
+      .replace(
+        /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/gu,
+        '<timestamp>',
+      );
+  };
+  const pageUrl = (local: string, recordId: string, parameter: string) =>
+    `/?${new URLSearchParams({
+      surface: id('surface', local),
+      record: recordId,
+      [id('parameter', parameter)]: scope,
+    })}`;
+  const pages = {
+    purchase_order_detail: pageUrl(
+      'purchase_order_detail',
+      po,
+      'commercial_purchase_order_get_legal_entity_scope',
+    ),
+    sales_order_detail: pageUrl(
+      'sales_order_detail',
+      so,
+      'commercial_order_get_legal_entity_scope',
+    ),
+    shipment_detail: pageUrl(
+      'shipment_detail',
+      shipment,
+      'shipment_get_legal_entity_scope',
+    ),
+  };
+  const out: Record<string, string> = {};
+  for (const [local, url] of Object.entries(pages)) {
+    const page = await renderSurfaceRuntimeWithData(f.view, url, gateways);
+    out[`${local}.page.${page.statusCode}`] = normalize(page.html);
+  }
+  // A page the extension still serves (the receipt's link panel) proves the
+  // extension is installed and live in these renders.
+  const receiptPage = await renderSurfaceRuntimeWithData(
+    f.view,
+    pageUrl(
+      'goods_receipt_detail',
+      receipt,
+      'goods_receipt_get_legal_entity_scope',
+    ),
+    gateways,
+  );
+  assert.match(receiptPage.html, /data-receiving-navigation/u);
+  out[`goods_receipt_detail.page.${receiptPage.statusCode}`] = normalize(
+    receiptPage.html,
+  );
+  // A command sent from each page, through its confirmation and its commit.
+  for (const [local, recordId] of [
+    ['purchase_order_detail', po],
+    ['sales_order_detail', so],
+    ['shipment_detail', shipment],
+  ] as const) {
+    const surface = f.surfaces.find(
+      (candidate) => candidate.surfaceId === id('surface', local),
+    )!;
+    const operation = readCompiledSurfaceDataBinding(
+      f.view,
+      surface,
+    ).operations.find(
+      (candidate) =>
+        candidate.intent === 'command' &&
+        (local === 'shipment_detail'
+          ? candidate.capabilityId === 'northstar.sales:capability.fulfillment'
+          : candidate.capabilityId === null),
+    )!;
+    const body = {
+      operationId: operation.operationId,
+      recordId,
+      expectedRevision: String(f.executor.rows.get(recordId)!.revision),
+      idempotencyKey: `5ec7b10c-0000-4000-8000-00000000000${['purchase_order_detail', 'sales_order_detail', 'shipment_detail'].indexOf(local) + 1}`,
+    };
+    const confirmation = await submitSurfaceRuntimeIntent(
+      f.view,
+      pages[local],
+      body,
+      gateways,
+    );
+    out[`${local}.command.confirm.${confirmation.statusCode}`] = normalize(
+      confirmation.html,
+    );
+    const committed = await submitSurfaceRuntimeIntent(
+      f.view,
+      pages[local],
+      {
+        ...body,
+        confirmationGrant: hiddenValue(confirmation.html, 'confirmationGrant'),
+      },
+      gateways,
+    );
+    out[`${local}.command.done.${committed.statusCode}`] = normalize(
+      committed.html,
+    );
+  }
+  return out;
+}
+
+test('SECTION-BLOCKS-s1: the purchase order, sales order and shipment pages and their command responses render byte-identically to the recorded goldens', async () => {
+  const { readFile, writeFile } = await import('node:fs/promises');
+  const first = await sectionBlocksRenders();
+  const second = await sectionBlocksRenders();
+  assert.deepEqual(first, second, 'the renders are deterministic');
+  const text = `${JSON.stringify(
+    Object.fromEntries(
+      Object.entries(first).sort(([a], [b]) => (a < b ? -1 : 1)),
+    ),
+    null,
+    2,
+  )}\n`;
+  if (process.env.SECTION_BLOCKS_GOLDEN_WRITE === '1')
+    await writeFile(SECTION_BLOCKS_GOLDEN, text);
+  assert.equal(
+    text,
+    await readFile(SECTION_BLOCKS_GOLDEN, 'utf8'),
+    'a change to these pages or to a command response from them must be deliberate: regenerate with SECTION_BLOCKS_GOLDEN_WRITE=1',
+  );
 });
