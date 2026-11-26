@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -2124,4 +2125,58 @@ test('name law refuses a missing input or a vocabulary without its required name
       );
     },
   );
+});
+
+test('name law: guard:lower-baseline refuses a rise and writes nothing, and lowers a fall', () => {
+  const cli = join(
+    process.cwd(),
+    'packages/dev-tooling/src/lower-first-party-baseline.ts',
+  );
+  const baselinePath = 'test/architecture/first-party-names.baseline.json';
+  const run = (root: string) =>
+    spawnSync(process.execPath, ['--import', 'tsx', cli, '--root', root], {
+      encoding: 'utf8',
+    });
+
+  const rising = nameLawFixture(
+    {
+      [genericFile]:
+        "export const a = 'sales_order';\nexport const b = 'sales_order';\n",
+    },
+    { [genericFile]: nameLawRow({ 'name:sales_order': 1 }) },
+  );
+  try {
+    const before = readFileSync(join(rising, baselinePath), 'utf8');
+    const result = run(rising);
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /refused/u);
+    assert.match(result.stderr, /PRESS015_BASELINE_RISE/u);
+    assert.equal(readFileSync(join(rising, baselinePath), 'utf8'), before);
+  } finally {
+    removeArchitectureFixture(rising);
+  }
+
+  const falling = nameLawFixture(
+    { [genericFile]: "export const a = 'sales_order';\n" },
+    {
+      [genericFile]: nameLawRow({ 'name:sales_order': 2 }),
+      'packages/postgres-provider/src/gone.ts': nameLawRow({
+        'name:sales_order': 1,
+      }),
+    },
+  );
+  try {
+    const result = run(falling);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(
+      JSON.parse(readFileSync(join(falling, baselinePath), 'utf8')),
+      {
+        version: 1,
+        measuredOn: 'fixture',
+        files: { [genericFile]: nameLawRow({ 'name:sales_order': 1 }) },
+      },
+    );
+  } finally {
+    removeArchitectureFixture(falling);
+  }
 });
