@@ -10,6 +10,7 @@ import {
   salesWorkspaceQueries,
   packingWorkspace,
 } from '../sales/workspace.js';
+import { bookkeepingModuleDefinition } from '../bookkeeping/definition.js';
 import { catalogModuleDefinition } from '../catalog/definition.js';
 import { priceListWorkspace } from '../catalog/workspace.js';
 import { inventoryModuleDefinition } from '../inventory/definition.js';
@@ -125,6 +126,16 @@ const MODULE_REGISTRY = Object.freeze([
         inventoryStatus: true,
       }),
     moduleName: 'location',
+  }),
+  Object.freeze({
+    // Books by hand (ACCOUNTING-1 slice 1a-ii): ledger operations on a
+    // company, the legal-entity record the inventory module declares.
+    create: (namespace: string) =>
+      bookkeepingModuleDefinition(namespace, {
+        entityId: `${namespace}:entity.legal_entity`,
+        getQueryId: `${namespace}:query.legal_entity_get`,
+      }),
+    moduleName: 'bookkeeping',
   }),
 ] as const);
 

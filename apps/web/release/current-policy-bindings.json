@@ -4,6 +4,11 @@
     "northstar.app:package.application": [
       {
         "action": "transition",
+        "permissionId": "northstar.app:permission.bookkeeping_books_start_set",
+        "resource": "northstar.app:entity.legal_entity"
+      },
+      {
+        "action": "transition",
         "permissionId": "northstar.app:permission.purchase_order_approve",
         "resource": "northstar.app:entity.purchase_order_approval"
       },
