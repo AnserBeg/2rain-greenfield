@@ -184,7 +184,7 @@ LANGUAGE sql STABLE SET search_path = pg_catalog, pg_temp AS $$
     WHERE (m.tenant_id, m.environment_id, m.principal_id) = (north_star_internal.trusted_tenant_id(),
           north_star_internal.trusted_environment_id(), nullif(current_setting('north_star.principal_id', true), '')::uuid)
       AND m.revoked_at IS NULL AND r.revoked_at IS NULL AND g.revoked_at IS NULL
-      AND (g.permission_id, g.resource_id) = (permission, 'northstar.tax:capability.catalog')
+      AND (g.permission_id, g.resource_id) = (permission, 'northstar.tax:capability.tax_catalog')
       AND CASE scope WHEN 'any' THEN true
         WHEN 'tenant' THEN m.legal_entity_id IS NULL
         ELSE (m.legal_entity_id IS NULL OR m.legal_entity_id = company) END)
@@ -347,7 +347,7 @@ CREATE FUNCTION north_star_internal.tax_may_write(requested_action text, proposa
 LANGUAGE plpgsql STABLE SET search_path = pg_catalog, pg_temp AS $$
 DECLARE company uuid; BEGIN
   IF requested_action = 'putCode' THEN
-    RETURN north_star_internal.tax_granted(NULL, 'northstar.tax:permission.catalog_write', 'tenant'); END IF;
+    RETURN north_star_internal.tax_granted(NULL, 'northstar.tax:permission.tax_catalog_write', 'tenant'); END IF;
   IF proposal ? 'registrationId' THEN
     IF pg_input_is_valid(proposal->>'registrationId', 'uuid') THEN
       SELECT g.company_id INTO company FROM platform.tax_registrations g
@@ -422,7 +422,7 @@ CREATE FUNCTION platform.tax_read_codes(at date)
 RETURNS TABLE (code_id uuid, code text, label text, version integer, effective_from date, components jsonb)
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE t uuid := north_star_internal.trusted_tenant_id(); e uuid := north_star_internal.trusted_environment_id(); BEGIN
-  IF at IS NULL OR NOT north_star_internal.tax_granted(NULL, 'northstar.tax:permission.catalog_read', 'any') THEN
+  IF at IS NULL OR NOT north_star_internal.tax_granted(NULL, 'northstar.tax:permission.tax_catalog_read', 'any') THEN
     RAISE EXCEPTION 'tax.readUnavailable' USING ERRCODE = '42501'; END IF;
   RETURN QUERY SELECT c.code_id, c.code, c.label, v.version, v.effective_from,
       coalesce((SELECT jsonb_agg(jsonb_build_object('componentId', k.component_id, 'jurisdictionId', x.jurisdiction_id,
@@ -444,7 +444,7 @@ RETURNS TABLE (code_id uuid, code text, label text, version integer, effective_f
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE t uuid := north_star_internal.trusted_tenant_id(); e uuid := north_star_internal.trusted_environment_id();
   held platform.tax_catalog_codes; BEGIN
-  IF NOT north_star_internal.tax_granted(NULL, 'northstar.tax:permission.catalog_read', 'any') OR at IS NULL THEN
+  IF NOT north_star_internal.tax_granted(NULL, 'northstar.tax:permission.tax_catalog_read', 'any') OR at IS NULL THEN
     RAISE EXCEPTION 'tax.readUnavailable' USING ERRCODE = '42501'; END IF;
   SELECT * INTO held FROM platform.tax_catalog_codes c WHERE (c.tenant_id, c.environment_id, c.code_id) = (t, e, chosen);
   IF NOT FOUND THEN RAISE EXCEPTION 'tax.codeUnavailable'; END IF;

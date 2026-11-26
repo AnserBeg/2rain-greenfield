@@ -27,7 +27,7 @@ CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/45841982
   - A picker's list and exact get must read one declared entity (surface-workspace.ts `selects` and `reads`), and platform tax rows are not a declared entity.
   - No first-party field is rewired; the declared `tax_code` record stays the only code that affects documents.
 - Rule 13, NO rung. Nothing compiled or stored changes; `check:app-release` passes with no release diff.
-  - The permissions are fixed platform IDs on `northstar.tax:capability.catalog`. Unlike the address connector, they have no `CurrentPolicyPermissionBinding` or TS caller yet, so no real tenant can hold them (fail-closed); s2 adds both and re-asks the rung question.
+  - The permissions are fixed platform IDs on `northstar.tax:capability.tax_catalog`. Unlike the address connector, they have no `CurrentPolicyPermissionBinding` or TS caller yet, so no real tenant can hold them (fail-closed); s2 adds both and re-asks the rung question.
   - The operations are SQL review and confirm, so no parsed chunk gains a key. The design read's rung assumed declared operations.
 - The confirmation shape follows migration 0069's review-then-confirm, so ledger 1a-ii can reuse it or say why not.
 - GUARD-WIDEN was not run. A token scan of the migration against the 723 names in app.authored.json finds only the ordinary words catalog and sales (statute text). Table names avoid `tax_code` by design.

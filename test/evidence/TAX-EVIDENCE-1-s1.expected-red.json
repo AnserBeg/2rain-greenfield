@@ -380,8 +380,8 @@
       "name": "tax-code-write-grant",
       "claim": "A code change needs the catalog WRITE grant, not the read grant.",
       "file": "db/migrations/0071_tax_catalog.sql",
-      "original": "tax_granted(NULL, 'northstar.tax:permission.catalog_write', 'tenant')",
-      "replacement": "tax_granted(NULL, 'northstar.tax:permission.catalog_read', 'tenant')",
+      "original": "tax_granted(NULL, 'northstar.tax:permission.tax_catalog_write', 'tenant')",
+      "replacement": "tax_granted(NULL, 'northstar.tax:permission.tax_catalog_read', 'tenant')",
       "test": {
         "files": ["test/postgres/tax-catalog.test.ts"]
       },
@@ -553,7 +553,7 @@
       "name": "tax-read-codes-grant",
       "claim": "Reading the codes needs the catalog read grant.",
       "file": "db/migrations/0071_tax_catalog.sql",
-      "original": "IF at IS NULL OR NOT north_star_internal.tax_granted(NULL, 'northstar.tax:permission.catalog_read', 'any') THEN",
+      "original": "IF at IS NULL OR NOT north_star_internal.tax_granted(NULL, 'northstar.tax:permission.tax_catalog_read', 'any') THEN",
       "replacement": "IF at IS NULL THEN",
       "test": {
         "files": ["test/postgres/tax-catalog.test.ts"]
@@ -570,7 +570,7 @@
       "name": "tax-read-code-grant",
       "claim": "Reading one code needs the catalog read grant.",
       "file": "db/migrations/0071_tax_catalog.sql",
-      "original": "IF NOT north_star_internal.tax_granted(NULL, 'northstar.tax:permission.catalog_read', 'any') OR at IS NULL THEN",
+      "original": "IF NOT north_star_internal.tax_granted(NULL, 'northstar.tax:permission.tax_catalog_read', 'any') OR at IS NULL THEN",
       "replacement": "IF at IS NULL THEN",
       "test": {
         "files": ["test/postgres/tax-catalog.test.ts"]

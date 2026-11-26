@@ -14,10 +14,10 @@ import { withEphemeralPostgres } from '../helpers/postgres.js';
 // tenant boundary. Storage checks insert directly as the table owner inside a
 // rolled-back transaction; setter checks go through platform.tax_review and
 // platform.tax_confirm as north_star_runtime. The tax permissions are fixed
-// platform IDs on northstar.tax:capability.catalog (no compiled release
+// platform IDs on northstar.tax:capability.tax_catalog (no compiled release
 // declares them), so their grant rows are seeded here.
 
-const RESOURCE = 'northstar.tax:capability.catalog';
+const RESOURCE = 'northstar.tax:capability.tax_catalog';
 const permission = (name: string) => `northstar.tax:permission.${name}`;
 const SYSTEM_PRINCIPAL = '00000000-0000-4000-8000-000000000001';
 const GLOBAL_TABLES = [
@@ -249,14 +249,14 @@ async function world(t: TestContext) {
       await seedTenant(a, [releaseA, alternateA]);
       await seedTenant(b, [releaseB]);
       const everything = [
-        'catalog_read',
-        'catalog_write',
+        'tax_catalog_read',
+        'tax_catalog_write',
         'registration_read',
         'registration_write',
       ];
       const adminRole = await role(a, 'tax-admin', everything);
       const readerRole = await role(a, 'tax-reader', [
-        'catalog_read',
+        'tax_catalog_read',
         'registration_read',
       ]);
       await member(a, writer, adminRole, null);
