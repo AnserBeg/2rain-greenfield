@@ -19,7 +19,7 @@ Known gap (writer, for a later writer packet): due dates are the posting instant
 
 Ride-alongs, slice 3's first task: the ceiling multiplies by every declared currency plus one where the fill uses only the partitions present, so it over-refuses; `REPORT_GROUP_CEILING` duplicates the reader's 500; `REPORT_MINOR_UNITS` hard-codes CAD, USD and EUR and belongs in (c); a stored-body rule-10 proof through `test/unit/customization-upgrade.test.ts`; typed-equals controls for the instant, date and boolean branches; `targetList` should fall back when a tenant-scoped list fails on a company-owned type; distinct kill text for the six provider-witness entries; one browser form-post per new control; the pop-up 39-reader item.
 
-CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/45634455515
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/45735236800
 
 ## Slice plan
 
