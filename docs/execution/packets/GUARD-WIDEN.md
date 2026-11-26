@@ -40,6 +40,10 @@ The fix round re-measured from `e112d58ff` with the new matchers: **4,270 uses i
 | WORKFLOW-2 (C9) | 5 | 11 | 8 | 0 | 0 | 3 |
 | AGENT-CATALOG (C10, incl. `apps/api` agent-cli.ts) | 2 | 8 | 3 | 0 | 0 | 5 |
 
+## MAIN-COMPAT round (2026-11-26)
+
+Merged main through TRAIN-T and re-measured with the guard: 4,379 uses in 89 files became 4,389 in 91, then 4,221 after `guard:lower-baseline` took SECTION-BLOCKS' falls. New rows: WORKFLOW-2 s4b's `goodsReceiptPosted` trigger (`goods_receipt`, owner WORKFLOW-2), and two ledger role IDs in the applied migration 0071. **Applied migrations get frozen rows:** owner HISTORY, no expiry, pinned to the file's sha256. A changed file or a non-frozen migration row is PRESS010, and a new migration still has no row, so a first-party name in it is PRESS011. Admitting one is a Critical-pathspec edit. Control: `guard-widen-frozen-migration-off`. Classification table: `2rain-missions/GUARD-WIDEN-compat.result.txt`.
+
 ## Rule 8: one control per layer (`test/evidence/GUARD-WIDEN.expected-red.json`)
 
 Each control runs the `^GUARD-WIDEN` tests of the press-law file (ten reds and the real-tree test) and must kill exactly its own red with its own text: name layer off, field layer off, relative domain import off, the cross-engine branch off, the rise comparison off, and from the fix round kebab paths off (F1), kebab text off (F1), static constructions off (F2), per-binding imports off (F3), the unclassified-root refusal off (F4). The name-layer control kills all four name-layer reds (plain, kebab path, kebab text, constructed) and none in another layer; every other control kills exactly one. Locally the first round's five and the kebab-path control reproduced; the four others ran on CI by evidence dispatch, because the shared lock was reserved for TRAIN-R. The other name-law tests (spellings, ID position, comments, file names, platform-owned names, lowering, the `guard:lower-baseline` CLI, inputs) are outside that set, because most of them also depend on the name layer. Results: see "Rule 8 reds" in the result file.
