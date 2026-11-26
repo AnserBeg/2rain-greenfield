@@ -38,6 +38,21 @@ import {
   withTrustedRequestTransaction,
 } from './request-context.js';
 
+/** B7: the agreed band's commercial quantity is the record's own quantity
+ * field (seats, desks, units) when the plan binds one, else 1. A missing or
+ * non-numeric value is undefined, and the caller refuses; the evidence schema
+ * then requires an exact nonnegative decimal. */
+export function agreedQuantity(
+  values: Readonly<Record<string, ImmutableJsonValue>>,
+  quantityFieldId: string | undefined,
+): string | undefined {
+  if (quantityFieldId === undefined) return '1';
+  const value = values[quantityFieldId];
+  return typeof value === 'string' || typeof value === 'number'
+    ? String(value)
+    : undefined;
+}
+
 export function billingPlansIn(payload: unknown) {
   if (!payload || typeof payload !== 'object' || !('billingPlans' in payload))
     return [];
@@ -114,11 +129,7 @@ export function billingQuoteReadModel(
       currency = row.values[fields.currencyFieldId],
       anchor = row.values[fields.startFieldId],
       end = row.values[fields.endFieldId];
-    // B7: the record's own quantity (seats, desks, units) when the plan binds
-    // one; the evidence schema checks it is an exact nonnegative decimal.
-    const quantity = fields.quantityFieldId
-      ? row.values[fields.quantityFieldId]
-      : '1';
+    const quantity = agreedQuantity(row.values, fields.quantityFieldId);
     // Both reads attest the same revision, company and commercial identity.
     if (
       typeof customerId !== 'string' ||
@@ -128,7 +139,7 @@ export function billingQuoteReadModel(
       base.values[fields.currencyFieldId] !== currency ||
       typeof anchor !== 'string' ||
       (typeof end !== 'string' && !(b.arrearsSource && end === null)) ||
-      (typeof quantity !== 'string' && typeof quantity !== 'number')
+      quantity === undefined
     )
       throw new Error(
         'Billing source identity, currency or interval disagrees',
@@ -190,7 +201,7 @@ export function billingQuoteReadModel(
       bands: [
         {
           id: row.recordId,
-          quantity: String(quantity),
+          quantity,
           intervals: [{ id: row.recordId, revision, start: anchor, end }],
         },
       ],

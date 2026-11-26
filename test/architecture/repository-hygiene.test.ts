@@ -112,6 +112,7 @@ const suiteDefinitions = [
       'test/integration/billing-booking-possession.test.ts',
       'test/integration/billing-quote.test.ts',
       'test/integration/billing-release.test.ts',
+      'test/integration/billing-rules.test.ts',
       'test/integration/catalog-runtime.test.ts',
       'test/integration/disclosure-tier-round-trip.test.ts',
       'test/integration/document-http.test.ts',

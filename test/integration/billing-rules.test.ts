@@ -26,6 +26,7 @@ import {
 } from '../../packages/domain/src/billing/quote.js';
 import { serviceUseCoverage } from '../../packages/domain/src/billing/service-use.js';
 import { compileRatePlan } from '../../packages/domain/src/billing/terms.js';
+import { agreedQuantity } from '../../packages/postgres-provider/src/billing-quote.js';
 
 // BILLING-1 slice 3a-i: rate rules (B1), per-quantity fees (B7), early
 // return (B9) and the checks the slice 2 review found without a test.
@@ -784,4 +785,92 @@ test('a service-use engagement carries only its own facts in its own unit', () =
     /unambiguous commercial quantity/,
   );
   assert.equal(truncateBookingInstant(roll(1)), roll(1));
+});
+
+test('B1: each rule prices each pricing window on its own (34 days cross a month window)', () => {
+  // 31 days in the first window, 3 in the second, at 20 a day or 100 a week.
+  for (const [name, extra, expected] of [
+    // 31/7 weeks pro rata (442.86) then three days (60).
+    ['prorate', { rule: 'prorate' }, 50286],
+    // Four weeks and three days (460) then three days (60).
+    ['ladder', { rule: 'ladder', capAtNextTier: false }, 52000],
+    ['capped ladder', { rule: 'ladder', capAtNextTier: true }, 52000],
+    ['bestPrice', { rule: 'bestPrice' }, 52000],
+  ] as const)
+    assert.deepEqual(
+      cents(timePlan({ combination: extra }), 34),
+      [expected],
+      name,
+    );
+});
+
+test('the persisted reader-45 bound plan keeps its digest (rate tables are keyed by it)', () => {
+  // Measured on origin/main 3c1c0c270 before the protocol existed.
+  const bound = {
+    ...timePlan({}, { day: 'daily' }),
+    id: 'hire',
+    slots: [{ id: 'daily', kind: 'money', currency: 'CAD', scale: 2 }],
+    pricingWindow: undefined,
+    schedule: { kind: 'fixedDays', days: 10 },
+    bindings: {
+      quoteQueryId: 'q',
+      evidenceQueryId: 'e',
+      agreedInterval: {
+        customerFieldId: 'c',
+        currencyFieldId: 'k',
+        startFieldId: 's',
+        endFieldId: 'n',
+        zone: 'America/Edmonton',
+      },
+      arrearsSource: {
+        kind: 'bookingActuals',
+        queryId: 'u',
+        slotId: 'example:slot.equipment',
+      },
+      publishOperationId: 'p',
+      overrideOperationId: 'o',
+      assignmentOperationId: 'a',
+      termsQueryId: 't',
+      termsFieldId: 'f',
+    },
+  };
+  assert.equal(
+    compileRatePlan(JSON.parse(JSON.stringify(bound))).digest,
+    'a5cdb6dfcd90684a6d7702b0c5acdf3174c8374cb84d62a6df5923f1dde53b5a',
+  );
+});
+
+test('the service-use protocol shape is enforced where Billing consumes it', () => {
+  const snapshot = useSnapshot(3);
+  const review = (value: unknown) =>
+    reviewArrearsCharges(dailyHire, hireEvidence(20), {
+      snapshot: value as typeof snapshot,
+      subjectId: subject,
+      owner,
+    });
+  assert.equal(review(snapshot).status, 'due');
+  for (const [reason, value] of [
+    ['an undeclared key', { ...snapshot, extra: true }],
+    [
+      'an instant finer than a millisecond',
+      { ...snapshot, asOf: '2025-02-17T16:00:00.000001Z' },
+    ],
+    [
+      'another protocol version',
+      { ...snapshot, schemaVersion: 'northstar.service-use/v2' },
+    ],
+  ] as const)
+    assert.throws(
+      () => review(value),
+      /invalid|Unrecognized|expected/iu,
+      reason,
+    );
+});
+
+test('B7: the agreed band reads the record quantity field, 1 when none is bound', () => {
+  assert.equal(agreedQuantity({ seats: '5' }, 'seats'), '5');
+  assert.equal(agreedQuantity({ seats: 5 }, 'seats'), '5');
+  assert.equal(agreedQuantity({ seats: '5' }, undefined), '1');
+  assert.equal(agreedQuantity({ seats: null }, 'seats'), undefined);
+  assert.equal(agreedQuantity({}, 'seats'), undefined);
 });

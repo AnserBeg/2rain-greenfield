@@ -5,7 +5,6 @@
  * its amount); any other slot (a cap or a minimum the model added) gets a
  * value that never binds. Then the released calculator quotes each case.
  */
-import type { BillingPlan } from '../../packages/canonical-model/src/billing.js';
 import { quoteBillingService } from '../../packages/domain/src/billing/quote.js';
 import { compileRatePlan } from '../../packages/domain/src/billing/terms.js';
 
@@ -29,9 +28,16 @@ const roll = (days: number) =>
 /** The cents each quote charges, or the first reason the plan cannot be
  * priced as requested. */
 export function ratePlanCharges(
-  plan: BillingPlan,
+  input: unknown,
   prices: RatePlanPrices,
 ): string[] | string {
+  let compiled;
+  try {
+    compiled = compileRatePlan(input);
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  const { plan, digest } = compiled;
   const values: Record<string, string> = {};
   for (const slot of plan.slots)
     values[slot.id] = slot.kind === 'money' ? '1000000' : '0';
@@ -48,7 +54,6 @@ export function ratePlanCharges(
     }
   }
   try {
-    const { digest } = compileRatePlan(plan);
     return prices.quotes.map(({ days, quantity = '1' }) => {
       const quote = quoteBillingService(plan, {
         schemaVersion: 'northstar.billing-quote-evidence/v1',
@@ -103,7 +108,7 @@ export function ratePlanCharges(
 }
 
 /** Whether the plan charges exactly the request's cents for every quote. */
-export function ratePlanPriced(plan: BillingPlan, prices: RatePlanPrices) {
+export function ratePlanPriced(plan: unknown, prices: RatePlanPrices) {
   const charges = ratePlanCharges(plan, prices);
   return (
     Array.isArray(charges) &&

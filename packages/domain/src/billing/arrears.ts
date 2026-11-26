@@ -3,6 +3,7 @@ import type {
   BillingPlan,
 } from '../../../canonical-model/src/billing.js';
 import type { BillingQuoteEvidence } from '../../../canonical-model/src/billing-evidence.js';
+import { ServiceUseSnapshotSchema } from '../../../canonical-model/src/service-evidence.js';
 import {
   BillingCalendar,
   hourMs,
@@ -57,8 +58,14 @@ export function dueArrearsCycle(
 export function reviewArrearsCharges(
   plan: BillingPlan,
   evidence: BillingQuoteEvidence,
-  use?: ServiceUseInput,
+  input?: ServiceUseInput,
 ) {
+  // The protocol shape is enforced where it is consumed, so any provider's
+  // decoder is held to it (northstar.service-use/v1).
+  const use = input && {
+    ...input,
+    snapshot: ServiceUseSnapshotSchema.parse(input.snapshot),
+  };
   if (use) {
     const term = use.earlyReturn?.minimumTerm;
     evidence.serviceEnd = serviceUseEnd(

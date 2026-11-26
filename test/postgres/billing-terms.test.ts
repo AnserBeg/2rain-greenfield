@@ -632,7 +632,10 @@ test('period meter bindings require distinct selected boundaries, canonical unit
       billingBindingProblem({
         ...pkg,
         billingPlans: [
-          { ...rate, components: components as typeof rate.components },
+          {
+            ...rate,
+            components: components as unknown as typeof rate.components,
+          },
         ],
       }),
       'BILLING_METER_SOURCE_REQUIRED',
@@ -870,7 +873,10 @@ test('any read model implementing the service-use protocol is an evidence source
           readModel: {
             ...model,
             queries: {
-              owner: { ...model.queries.owner!, targetId: quoteId },
+              owner: {
+                ...model.queries.owner!,
+                targetId: CanonicalIdSchema.parse(quoteId),
+              },
             },
           },
         }),
@@ -995,6 +1001,40 @@ test('the quote and terms permissions are bound by their declared role, not by n
     [
       'the terms grant is a write',
       withPermission(publishPermission, { action: 'read' }),
+    ],
+    [
+      'no other query reads under the quote grant',
+      billingBindingProblem({
+        ...pkg,
+        queries: [
+          ...pkg.queries,
+          {
+            ...source,
+            queryId: CanonicalIdSchema.parse(id('query.other_reader')),
+            permission: {
+              ...source.permission,
+              targetId: CanonicalIdSchema.parse(readPermission),
+            },
+          },
+        ],
+      }),
+    ],
+    [
+      'no operation outside the terms writes holds the terms grant',
+      billingBindingProblem({
+        ...pkg,
+        operations: pkg.operations.map((o) =>
+          o.operationId === id('operation.sales_order_release')
+            ? {
+                ...o,
+                permission: {
+                  ...o.permission,
+                  targetId: CanonicalIdSchema.parse(publishPermission),
+                },
+              }
+            : o,
+        ),
+      }),
     ],
     [
       'the quote has its own grant, not the source query grant',

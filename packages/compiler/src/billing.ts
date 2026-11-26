@@ -47,11 +47,20 @@ export function billingBindingProblem(
       def.permissions.find(
         (a) => a.permissionId === permissionId && a.lifecycle === 'active',
       );
+    // Each grant is dedicated, as the old names forced: no other active query
+    // reads under the quote grant, and no operation outside the plan's three
+    // terms writes holds the terms grant.
     const quotePermission = (permissionId: string) =>
       declared(permissionId)?.action === 'read' &&
       declared(permissionId)?.resource.targetId ===
         source?.sourceEntity.targetId &&
-      permissionId !== source?.permission.targetId;
+      permissionId !== source?.permission.targetId &&
+      !def.queries.some(
+        (q) =>
+          q.queryId !== b.quoteQueryId &&
+          q.lifecycle === 'active' &&
+          q.permission.targetId === permissionId,
+      );
     const termsPermissionId = def.operations.find(
       (o) => o.operationId === b.publishOperationId,
     )?.permission.targetId;
@@ -61,7 +70,13 @@ export function billingBindingProblem(
         declared(permissionId)?.action ?? 'read',
       ) &&
       declared(permissionId)?.resource.targetId ===
-        terms?.sourceEntity.targetId;
+        terms?.sourceEntity.targetId &&
+      !def.operations.some(
+        (o) =>
+          !writes.includes(o.operationId) &&
+          o.lifecycle === 'active' &&
+          o.permission.targetId === permissionId,
+      );
     const arrears = b.arrearsSource;
     if (arrears?.kind === 'periodMeter') {
       const boundFields = [
