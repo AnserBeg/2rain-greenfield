@@ -61,6 +61,34 @@ async function tableHolding(pool: Pool, recordId: string): Promise<string> {
   throw new Error(`no module table holds ${recordId}`);
 }
 
+/**
+ * The database's detected-deadlock count. With `previous`, it waits out the
+ * statistics flush (backends report within ten seconds of going idle) and
+ * returns as soon as the count moves, or the unchanged count after 12 s.
+ */
+async function deadlocks(pool: Pool, previous?: number): Promise<number> {
+  const read = async () => {
+    const client = await pool.connect();
+    try {
+      await client.query('SELECT pg_stat_clear_snapshot()');
+      const result = await client.query<{ n: string }>(
+        `SELECT deadlocks::text AS n FROM pg_stat_database
+          WHERE datname = current_database()`,
+      );
+      return Number(result.rows[0]?.n ?? 0);
+    } finally {
+      client.release();
+    }
+  };
+  if (previous === undefined) return read();
+  for (let attempt = 0; attempt < 24; attempt += 1) {
+    const count = await read();
+    if (count !== previous) return count;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return read();
+}
+
 /** Wait until at least `count` sessions of this database wait on a lock. */
 async function lockWaiters(pool: Pool, count: number): Promise<void> {
   for (let attempt = 0; attempt < 400; attempt += 1) {
@@ -465,7 +493,10 @@ test(
         );
 
         // Two concurrent creates at maximum - 1 under a parent-path
-        // validation: exactly one is refused by name, and none deadlocks.
+        // validation: exactly one is refused by name, and none deadlocks. A
+        // deadlock is retried once by the write path, so it is observed in
+        // the database's own deadlock counter, not in the outcome.
+        const before = await deadlocks(pool);
         for (let round = 0; round < 6; round += 1) {
           const header = await contract();
           for (let index = 0; index < 2; index += 1)
@@ -479,21 +510,33 @@ test(
               outcome(line(header.recordId, { days: '1', daily_rate: '1' })),
             ),
           );
-          assert.doesNotMatch(raced.join('\n'), /40P01|deadlock/u);
           assert.equal(
             raced.filter((entry) => /"outcome":"succeeded"/u.test(entry))
               .length,
             1,
             `two concurrent creates at max-1 did not serialize: ${raced.join(' | ')}`,
           );
+          assert.ok(
+            raced.some((entry) =>
+              /^MODULE_LINE_MAXIMUM_EXCEEDED /u.test(entry),
+            ),
+            `two concurrent creates at max-1 did not serialize: ${raced.join(' | ')}`,
+          );
         }
+        assert.equal(
+          await deadlocks(pool, before),
+          before,
+          'concurrent line creates under a parent-path validation deadlocked',
+        );
 
         // A shared line's update and its archive never deadlock: both lock
         // the line before the header. Made deterministic: a third session
         // holds the line FOR SHARE, the update queues for the line first, the
-        // archive second, and then the line is released. Had the archive
-        // taken the header first, the update would hold the line and wait on
-        // the header while the archive held the header and waited on the line.
+        // archive second (and has waited past deadlock_timeout), and then the
+        // line is released. Had the archive taken the header first, the
+        // update would hold the line and wait on the header while the archive
+        // held the header and waited on the line; the update, detecting it,
+        // would lose and find the line archived on its retry.
         const header = await contract();
         const created = await line(header.recordId, {
           days: '2',
@@ -502,6 +545,7 @@ test(
         assert.equal(created.outcome, 'succeeded');
         const record = created.readBack!;
         const table = await tableHolding(pool, record.recordId);
+        const ordered = await deadlocks(pool);
         const holder = await pool.connect();
         let settled: string[];
         try {
@@ -516,20 +560,26 @@ test(
           await lockWaiters(pool, 1);
           const archiving = outcome(lifecycle('archive', record));
           await lockWaiters(pool, 2);
+          await new Promise((resolve) => setTimeout(resolve, 1_500));
           await holder.query('COMMIT');
           settled = await Promise.all([updating, archiving]);
         } finally {
+          await holder.query('ROLLBACK').catch(() => undefined);
           holder.release();
         }
-        assert.doesNotMatch(
-          settled.join('\n'),
-          /40P01|deadlock/u,
+        assert.equal(
+          await deadlocks(pool, ordered),
+          ordered,
           `a shared update and an archive of one line deadlocked: ${settled.join(' | ')}`,
         );
-        assert.match(settled[0]!, /"outcome":"succeeded"/u, settled[0]);
+        assert.match(
+          settled[0]!,
+          /"outcome":"succeeded"/u,
+          `a shared update and an archive of one line deadlocked: ${settled.join(' | ')}`,
+        );
+        assert.match(settled[1]!, /^MODULE_REVISION_CONFLICT /u, settled[1]);
 
-        // The operands verification wrote (one) fit; the amount is derived
-        // from what a caller sends.
+        // The amount is derived from what a caller sends.
         assert.equal(
           canonical((await read(lines[1]!.recordId)).values[AMOUNT]),
           '1',

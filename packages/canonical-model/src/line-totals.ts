@@ -599,6 +599,24 @@ function predicateFieldIds(
 }
 
 /**
+ * The queries that carry a record type's on-read totals: its active, direct
+ * (q0, no read model) gets. One predicate for the compiler's emission and the
+ * binder's refusal, so nothing compiles that the reader would refuse.
+ */
+export function readsRollups(query: {
+  readonly queryType: string;
+  readonly lifecycle: string;
+  readonly tier: string;
+}): boolean {
+  return (
+    query.queryType === 'get' &&
+    query.lifecycle === 'active' &&
+    query.tier === 'q0' &&
+    !('readModel' in query && (query as { readModel?: unknown }).readModel)
+  );
+}
+
+/**
  * Binds every ADR-0094 declaration of a revision, refusing by name anything
  * the runtime could not honour. A revision without declarations binds to an
  * empty result, and nothing is emitted for it.
@@ -957,6 +975,18 @@ export function bindLineTotals(
         id,
         'A total holds at most 38 digits: lower the line maximum or the amount precision.',
       );
+    if (
+      !v6.queries.some(
+        (query) =>
+          query.sourceEntity.targetId === declaration.entityId &&
+          readsRollups(query),
+      )
+    )
+      return refuse(
+        path,
+        id,
+        'A total is read by an active direct get of its record type.',
+      );
     const lineQuery = v6.queries.find(
       (query) =>
         query.lifecycle === 'active' &&
@@ -968,7 +998,8 @@ export function bindLineTotals(
           (selection) => selection.field.targetId === aggregand.fieldId,
         ),
     );
-    if (!lineQuery)
+    const lineQueryId = lineQuery?.queryId;
+    if (!lineQueryId)
       return refuse(
         path,
         id,
@@ -1021,7 +1052,7 @@ export function bindLineTotals(
         aggregandFieldId: aggregand.fieldId,
         precision,
         scale: aggregandType.scale,
-        lineQueryId: lineQuery.queryId,
+        lineQueryId,
       }),
     );
     rollups.set(declaration.entityId, list);

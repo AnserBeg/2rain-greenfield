@@ -704,3 +704,119 @@ test('LINE-TOTALS-s1 binder: a totalled relation that a record template fills re
     'a template larger than the line maximum was admitted',
   );
 });
+
+test('LINE-TOTALS-s1 binder: a derivation whose unit differs from its target refuses', () => {
+  const units = variantAuthored([
+    { label: 'Hours', type: 'quantity', scale: 2, unit: 'h' },
+    { label: 'Billed hours', type: 'quantity', scale: 2, unit: 'h' },
+  ]);
+  const injected = rentalContractAuthored();
+  for (const key of ['createOnlyFields', 'formulaRules'])
+    units[key] = injected[key];
+  units.derivedDecimals = [
+    {
+      schemaVersion: 'v6',
+      fieldId: l('billed_hours'),
+      entityId: LINES,
+      expression: op('multiply', f(l('days')), lit('8')),
+      rounding: 'halfAwayFromZero',
+    },
+  ];
+  refuses(
+    units,
+    'The derivation and its target have the same unit.',
+    'a unitless derivation was admitted into a quantity with a unit',
+  );
+});
+
+test('LINE-TOTALS-s1 binder: an absence default must name an operand of its derivation', () => {
+  const stray = rentalContractAuthored();
+  stray.derivedDecimals = [
+    {
+      ...amountDerivation,
+      absentAs: [{ fieldId: l('item'), value: '0' }],
+    },
+  ];
+  refuses(
+    stray,
+    'An absence default names one operand of this derivation once.',
+    'an absence default on a non-operand was admitted',
+  );
+});
+
+test('LINE-TOTALS-s1 binder: a total sums a derived value or a required decimal, never an optional one', () => {
+  const optional = rentalContractAuthored();
+  optional.rollups = [
+    { ...totalRollup(1_000), aggregandFieldId: l('daily_rate') },
+  ];
+  refuses(
+    optional,
+    'A total sums a derived value or a required stored decimal of its lines.',
+    'a total over an optional stored amount was admitted',
+  );
+});
+
+test('LINE-TOTALS-s1 binder: totals over one relation declare one maximum', () => {
+  const two = rentalContractAuthored();
+  two.rollups = [
+    totalRollup(1_000),
+    { ...totalRollup(500), fieldId: h('total_again'), label: 'Total again' },
+  ];
+  refuses(
+    two,
+    'Every total over one relation declares the same line maximum.',
+    'two maxima on one relation were admitted',
+  );
+});
+
+test('LINE-TOTALS-s1 binder: a total needs the lines list query and a direct get to read it', () => {
+  const noList = structuredClone(
+    normalizeApplicationPackage(rentalContractAuthored()),
+  ) as unknown as Authored;
+  noList.queries = noList.queries.filter(
+    (query: { queryId: string }) =>
+      query.queryId !== `${NS}:query.custom_rental_contract_lines_list`,
+  );
+  const listless = bindLineTotals(noList as never);
+  assert.equal(
+    listless.status === 'refused' && listless.message,
+    "A total is read under its lines' list query, which selects the summed field.",
+    'a total with no lines list query was admitted',
+  );
+  const noGet = structuredClone(
+    normalizeApplicationPackage(rentalContractAuthored()),
+  ) as unknown as Authored;
+  noGet.queries = noGet.queries.filter(
+    (query: { queryId: string }) =>
+      query.queryId !== `${NS}:query.custom_rental_contract_get`,
+  );
+  const getless = bindLineTotals(noGet as never);
+  assert.equal(
+    getless.status === 'refused' && getless.message,
+    'A total is read by an active direct get of its record type.',
+    'a total with no direct get was admitted',
+  );
+});
+
+test('LINE-TOTALS-s1 binder: duplicate declarations and a total reusing a field ID refuse', () => {
+  const twice = rentalContractAuthored();
+  twice.derivedDecimals = [amountDerivation, amountDerivation];
+  refuses(twice, 'Derive a field once.', 'a field derived twice was admitted');
+  const doubled = rentalContractAuthored();
+  doubled.createOnlyFields = [
+    ...doubled.createOnlyFields,
+    ...doubled.createOnlyFields,
+  ];
+  refuses(
+    doubled,
+    'Declare a field create-only once.',
+    'a field declared create-only twice was admitted',
+  );
+  const reused = rentalContractAuthored();
+  reused.rollups = [{ ...totalRollup(1_000), fieldId: h('name') }];
+  refuses(
+    reused,
+    'A total has its own field ID, used by nothing else.',
+    "a total reusing a stored field's ID was admitted",
+  );
+});

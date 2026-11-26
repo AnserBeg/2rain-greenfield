@@ -793,6 +793,168 @@
           "expected": "a template larger than the line maximum was admitted"
         }
       ]
+    },
+    {
+      "name": "line-totals-s1-target-unit",
+      "claim": "A derivation and its target have the same unit.",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "    if (resultType.unit !== targetType.unit)",
+      "replacement": "    if (false)",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 binder: a derivation whose unit differs from its target refuses$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 binder: a derivation whose unit differs from its target refuses",
+          "expected": "a unitless derivation was admitted into a quantity with a unit"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-absent-as-operand",
+      "claim": "An absence default names an operand of its derivation.",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "        !operands.has(entry.fieldId) ||",
+      "replacement": "        false ||",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 binder: an absence default must name an operand of its derivation$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 binder: an absence default must name an operand of its derivation",
+          "expected": "an absence default on a non-operand was admitted"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-aggregand-required",
+      "claim": "A total sums a derived value or a required stored decimal.",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "      (!derivedTargets.has(aggregand.fieldId) &&\n        aggregand.presence !== 'required')",
+      "replacement": "      false",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 binder: a total sums a derived value or a required decimal, never an optional one$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 binder: a total sums a derived value or a required decimal, never an optional one",
+          "expected": "a total over an optional stored amount was admitted"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-one-maximum",
+      "claim": "Totals over one relation declare one maximum.",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "    if (prior && prior.maximumLines !== declaration.maximumLines)",
+      "replacement": "    if (false)",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 binder: totals over one relation declare one maximum$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 binder: totals over one relation declare one maximum",
+          "expected": "two maxima on one relation were admitted"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-lines-list-query",
+      "claim": "A total is read under its lines' list query.",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "    if (!lineQueryId)",
+      "replacement": "    if (false)",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 binder: a total needs the lines list query and a direct get to read it$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 binder: a total needs the lines list query and a direct get to read it",
+          "expected": "a total with no lines list query was admitted"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-direct-get",
+      "claim": "A total is read by an active direct get of its record type (the compiler emits only there).",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "    if (\n      !v6.queries.some(",
+      "replacement": "    if (\n      false &&\n      !v6.queries.some(",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 binder: a total needs the lines list query and a direct get to read it$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 binder: a total needs the lines list query and a direct get to read it",
+          "expected": "a total with no direct get was admitted"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-derive-once",
+      "claim": "A field is derived once.",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "    if (derived.get(declaration.entityId)?.some((d) => d.fieldId === id))",
+      "replacement": "    if (false)",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 binder: duplicate declarations and a total reusing a field ID refuse$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 binder: duplicate declarations and a total reusing a field ID refuse",
+          "expected": "a field derived twice was admitted"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-create-only-once",
+      "claim": "A field is declared create-only once.",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "    if (createOnlyIds.has(declaration.fieldId))",
+      "replacement": "    if (false)",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 binder: duplicate declarations and a total reusing a field ID refuse$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 binder: duplicate declarations and a total reusing a field ID refuse",
+          "expected": "a field declared create-only twice was admitted"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-total-own-id",
+      "claim": "A total has its own field ID.",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "    if (declaredIds.has(id))",
+      "replacement": "    if (false)",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 binder: duplicate declarations and a total reusing a field ID refuse$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 binder: duplicate declarations and a total reusing a field ID refuse",
+          "expected": "a total reusing a stored field's ID was admitted"
+        }
+      ]
     }
   ]
 }

@@ -64,6 +64,7 @@ import { compileCalculatedDisplayFields } from './calculated-display-plan.js';
 import {
   bindLineTotals,
   lineTotalsReaderFloors,
+  readsRollups,
   LINE_TOTALS_OPERATION_READER,
   ROLLUP_QUERY_READER,
 } from '../../canonical-model/src/line-totals.js';
@@ -1712,10 +1713,9 @@ function decorateV3ProjectionPlans(
       // totals; emitted only when declared.
       const rollups = lineTotalsOf(packageRevision).rollups;
       const rollupsOf = (query: (typeof packageRevision.queries)[number]) => {
-        const declared =
-          query.queryType === 'get' && query.lifecycle === 'active'
-            ? rollups.get(query.sourceEntity.targetId)
-            : undefined;
+        const declared = readsRollups(query)
+          ? rollups.get(query.sourceEntity.targetId)
+          : undefined;
         return declared?.length ? { rollups: declared } : {};
       };
       return {
