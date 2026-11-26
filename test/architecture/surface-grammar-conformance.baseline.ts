@@ -109,4 +109,15 @@ export const PRODUCT_SURFACE_GRAMMAR_BASELINE = Object.freeze([
     // the form's missing sections slot adds 2: 95 + 2 = 97.
     violationCount: 97,
   }),
+  Object.freeze({
+    moduleId: 'northstar.bookkeeping:module.bookkeeping_books',
+    packageId: 'northstar.bookkeeping:package.bookkeeping_books',
+    sourceDirectory: 'bookkeeping',
+    // MEASURED from the composed release (ACCOUNTING-1 1a-ii). Books declares
+    // no surface of its own (its books-start Task sits on Inventory's company
+    // record page), so the 6 are the empty module's: SG001 (zero surfaces)
+    // and SG002 for each of the five archetypes. They close when Books
+    // declares its first screens (the 1a-iv read models).
+    violationCount: 6,
+  }),
 ] as const satisfies readonly ProductSurfaceGrammarBaselineEntry[]);
