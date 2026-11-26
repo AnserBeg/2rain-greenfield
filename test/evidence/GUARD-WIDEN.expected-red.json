@@ -4,7 +4,7 @@
   "entries": [
     {
       "name": "guard-widen-name-layer-off",
-      "claim": "A first-party entity, module, operation, query or capability name newly written in a generic file is refused (PRESS011).",
+      "claim": "A first-party entity, module, operation, query or capability name newly written in a generic file is refused (PRESS011). Turning the whole name layer off kills every name-layer red (plain, kebab path, kebab text, constructed) and none in another layer.",
       "file": "packages/dev-tooling/src/module-press-law.ts",
       "original": "      return 'name';",
       "replacement": "      return undefined;",
@@ -17,6 +17,21 @@
           "file": "test/architecture/module-press-law.test.ts",
           "name": "GUARD-WIDEN red: a new first-party name in a generic file",
           "expected": "a new first-party name in a generic file must be refused by PRESS011"
+        },
+        {
+          "file": "test/architecture/module-press-law.test.ts",
+          "name": "GUARD-WIDEN red: a new kebab-named file or directory",
+          "expected": "a kebab-named file or directory must be refused by PRESS011"
+        },
+        {
+          "file": "test/architecture/module-press-law.test.ts",
+          "name": "GUARD-WIDEN red: a new kebab spelling in a string",
+          "expected": "a kebab spelling in a string must be refused by PRESS011"
+        },
+        {
+          "file": "test/architecture/module-press-law.test.ts",
+          "name": "GUARD-WIDEN red: a statically concatenated first-party name",
+          "expected": "a statically concatenated name must be refused by PRESS011"
         }
       ]
     },
