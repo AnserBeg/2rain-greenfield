@@ -210,6 +210,12 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
             assert.fail('the second session never waited on a lock');
           };
         };
+        /** The refusal text, or "admitted", so a red names what happened. */
+        const settled = (pending: Promise<unknown>) =>
+          pending.then(
+            () => 'admitted',
+            (error: unknown) => String((error as Error).message),
+          );
         const count = async (sql: string, params: unknown[]) =>
           Number(
             (
@@ -850,10 +856,11 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
                 const writer = manual(w2, c, '2026-03-31');
                 await blocked();
                 await w1.query('COMMIT');
-                await assert.rejects(
-                  writer,
+                const outcome = await settled(writer);
+                assert.match(
+                  outcome,
                   /ledger\.closedBooks/u,
-                  'a writer posted into a period closed while it waited',
+                  `a writer posted into a period closed while it waited: ${outcome}`,
                 );
               } finally {
                 await w1.query('ROLLBACK').catch(() => undefined);
@@ -879,10 +886,11 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
                 );
                 await blocked();
                 await w1.query('COMMIT');
-                await assert.rejects(
-                  writer,
+                const outcome = await settled(writer);
+                assert.match(
+                  outcome,
                   /ledger\.accountInactive/u,
-                  'a writer posted to an account deactivated while it waited',
+                  `a writer posted to an account deactivated while it waited: ${outcome}`,
                 );
               } finally {
                 await w1.query('ROLLBACK').catch(() => undefined);

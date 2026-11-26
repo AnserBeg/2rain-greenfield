@@ -292,7 +292,7 @@
         {
           "file": "test/postgres/ledger-journal-core.test.ts",
           "name": "a writer waiting on a deactivation re-reads the account and refuses",
-          "expected": "Missing expected rejection: a writer posted to an account deactivated while it waited"
+          "expected": "a writer posted to an account deactivated while it waited: admitted"
         }
       ]
     },
@@ -370,7 +370,7 @@
         {
           "file": "test/postgres/ledger-journal-core.test.ts",
           "name": "a writer waiting on a close re-reads closed-through and refuses",
-          "expected": "Missing expected rejection: a writer posted into a period closed while it waited"
+          "expected": "a writer posted into a period closed while it waited: admitted"
         }
       ]
     },
@@ -531,7 +531,7 @@
         {
           "file": "test/postgres/ledger-journal-core.test.ts",
           "name": "a writer waiting on a close re-reads closed-through and refuses",
-          "expected": "Missing expected rejection: a writer posted into a period closed while it waited"
+          "expected": "a writer posted into a period closed while it waited: admitted"
         }
       ]
     },
@@ -548,7 +548,7 @@
         {
           "file": "test/postgres/ledger-journal-core.test.ts",
           "name": "a writer waiting on a deactivation re-reads the account and refuses",
-          "expected": "Missing expected rejection: a writer posted to an account deactivated while it waited"
+          "expected": "a writer posted to an account deactivated while it waited: admitted"
         }
       ]
     },
