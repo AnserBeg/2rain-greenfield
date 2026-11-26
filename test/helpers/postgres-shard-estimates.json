@@ -66,6 +66,7 @@
     "test/postgres/staff-signin.test.ts": 8,
     "test/postgres/storage-payload-family.test.ts": 0,
     "test/postgres/table-behavior.test.ts": 7,
+    "test/postgres/tax-catalog.test.ts": 5,
     "test/postgres/tenant-isolation.test.ts": 3,
     "test/postgres/trust-substrate.test.ts": 9,
     "test/postgres/workflow-consumer.test.ts": 456,
