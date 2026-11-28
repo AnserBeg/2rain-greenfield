@@ -152,6 +152,11 @@
           "file": "test/unit/workflow-triggers.test.ts",
           "name": "engineFactChanged admits only declared, command-entered values on a company-owned owner type",
           "expected": "Missing expected exception: northstar\\.booking:value\\.cancelled"
+        },
+        {
+          "file": "test/unit/workflow-triggers.test.ts",
+          "name": "the drafter offers only the command-entered values an engine binding declares",
+          "expected": "the drafter offers exactly the command-entered values"
         }
       ]
     }

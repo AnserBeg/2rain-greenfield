@@ -900,6 +900,7 @@ test('the drafter offers only the command-entered values an engine binding decla
   assert.deepEqual(
     [...offered.values.keys()].sort(),
     [value.confirmed, value.inUse, value.returned].sort(),
+    'the drafter offers exactly the command-entered values',
   );
   const lines = workflowTriggerDrafterLines(
     [rental],

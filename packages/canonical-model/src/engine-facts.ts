@@ -89,11 +89,12 @@ export function engineFactDeclarations(
       assertDeclaration(declaration);
       return declaration;
     })
-    .sort((left, right) =>
-      `${left.factId}\u0000${left.ownerTypeId}`.localeCompare(
-        `${right.factId}\u0000${right.ownerTypeId}`,
-      ),
-    );
+    .sort((left, right) => {
+      // Code-point order: no locale is an input to a canonical contract.
+      const a = `${left.factId}\u0000${left.ownerTypeId}`;
+      const b = `${right.factId}\u0000${right.ownerTypeId}`;
+      return a < b ? -1 : a > b ? 1 : 0;
+    });
 }
 
 /**
