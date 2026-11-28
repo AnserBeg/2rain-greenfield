@@ -30,6 +30,12 @@ interface StateWriter {
   readonly machines?: readonly string[];
   /** The generic transition writer: it names each move it makes. */
   readonly names?: true;
+  /**
+   * Fills only NULL state cells with a newly declared machine's initial state,
+   * outside any governed command: no transition runs, so no move is named
+   * (orchestrator confirmation, 2026-11-28).
+   */
+  readonly initialStateBackfill?: true;
   /** Why its UPDATEs move no machine. */
   readonly reason?: string;
 }
@@ -88,6 +94,7 @@ export const RECORD_STATE_WRITERS: Readonly<Record<string, StateWriter>> =
     },
     'packages/postgres-provider/src/module-storage-materializer.ts': {
       updates: 2,
+      initialStateBackfill: true,
       reason:
         'Storage backfill fills only NULL cells of a new column (a new machine starts at its initial state, which is no declared transition) and archives a balance projection row, outside any governed command.',
     },
@@ -147,6 +154,25 @@ test('every UPDATE of a managed table is classified by the machines it moves', (
         `${path} names a machine state field: list the machines it moves`,
       );
   }
+});
+
+test('only the storage backfill may write an initial state without naming a move', () => {
+  assert.deepEqual(
+    Object.entries(RECORD_STATE_WRITERS)
+      .filter(([, writer]) => writer.initialStateBackfill)
+      .map(([path]) => path),
+    ['packages/postgres-provider/src/module-storage-materializer.ts'],
+    'exactly one writer is an allowed initial-state backfill',
+  );
+  const materializer = readFileSync(
+    'packages/postgres-provider/src/module-storage-materializer.ts',
+    'utf8',
+  );
+  assert.match(
+    materializer,
+    /AND \$\{quoted\(located\.column\.physicalName\)\} IS NULL/u,
+    'the backfill fills only NULL cells, so it never changes a stored state',
+  );
 });
 
 test('every SQL UPDATE of a run-time table is classified', () => {
