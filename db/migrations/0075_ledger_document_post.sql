@@ -117,15 +117,15 @@ DECLARE catalog jsonb; storage jsonb; BEGIN
 -- tenant, for the gateway's policy scope. Missing, archived and another
 -- tenant's draft are one answer (null), which the executor refuses as
 -- ledger.unavailable. The apply re-derives the company under the lock.
-CREATE FUNCTION platform.ledger_document_company(released uuid, operation text, record uuid) RETURNS uuid
+CREATE FUNCTION platform.ledger_document_company(released uuid, operation text, draft uuid) RETURNS uuid
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE b record; company uuid; BEGIN
-  IF record IS NULL THEN RETURN NULL; END IF;
+  IF draft IS NULL THEN RETURN NULL; END IF;
   SELECT * INTO b FROM north_star_internal.ledger_document_binding(released, operation);
   EXECUTE format('SELECT legal_entity_id FROM north_star_module.%I WHERE tenant_id = $1 AND environment_id = $2'
       ' AND %I = $3 AND %I IS NULL',
       b.header->>'physicalTableName', b.header#>>'{recordIdentity,column}', b.header#>>'{archive,archivedAtColumn}')
-    INTO company USING north_star_internal.trusted_tenant_id(), north_star_internal.trusted_environment_id(), record;
+    INTO company USING north_star_internal.trusted_tenant_id(), north_star_internal.trusted_environment_id(), draft;
   RETURN company;
 EXCEPTION WHEN raise_exception THEN RETURN NULL; END $$;
 
@@ -142,7 +142,7 @@ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp
 DECLARE tenant uuid := north_star_internal.trusted_tenant_id(); environment uuid := north_star_internal.trusted_environment_id();
   draft_id uuid; invocation uuid; locked text; b record; company uuid; doc record; minor smallint;
   line jsonb; account uuid; side text; lines jsonb := '[]'; entry uuid; entry_no bigint; changed integer;
-  constraint_name text;
+  violated text;
   state_col text; revision_col text; archived_col text; identity_col text; parent_col text; BEGIN
   PERFORM north_star_internal.ledger_require_writer();
   IF jsonb_typeof(input) IS DISTINCT FROM 'object' OR input - 'recordId' - 'expectedRevision' - 'arguments' <> '{}'
@@ -220,8 +220,8 @@ DECLARE tenant uuid := north_star_internal.trusted_tenant_id(); environment uuid
       doc.currency, lines, jsonb_build_object('operationReceiptId', invocation, 'entryOrdinal', 1,
         'sourceTypeId', b.header->>'entityId', 'recordId', draft_id, 'sourceHeaderRevision', doc.revision));
   EXCEPTION WHEN unique_violation THEN
-    GET STACKED DIAGNOSTICS constraint_name = CONSTRAINT_NAME;
-    IF constraint_name = 'ledger_entries_document_key' THEN RAISE EXCEPTION 'ledger.documentPosted'; END IF;
+    GET STACKED DIAGNOSTICS violated = CONSTRAINT_NAME;
+    IF violated = 'ledger_entries_document_key' THEN RAISE EXCEPTION 'ledger.documentPosted'; END IF;
     RAISE; END;
   -- The state flip: exactly one row, pinned by record, company, revision,
   -- state and liveness.
