@@ -11,8 +11,8 @@ import {
 } from './request-context.js';
 import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents.js';
 import { REVERSIBILITY_AGENT_READER } from '../../canonical-model/src/reversibility.js';
-import { LINE_LOGICAL_FIELD_READER } from '../../canonical-model/src/logical-field.js';
 import {
+  RECORD_TRANSITIONED_TRIGGER_READER,
   WORKFLOW_PROJECTION_FAMILY,
   WORKFLOW_RUNTIME_CAPABILITY,
 } from '../../canonical-model/src/workflows.js';
@@ -258,7 +258,9 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // assigned at its main-compat merge).
     // 53 reads logical fields on line tables and an amount whose currency
     // is read from the line header (CUSTOMIZE-6 s2; assigned at TRAIN-S).
-    maximumSupportedVersion: LINE_LOGICAL_FIELD_READER,
+    // 54 reads the recordTransitioned workflow trigger member (ADR-0073 A1;
+    // WORKFLOW-3 s1, provisional until merge).
+    maximumSupportedVersion: RECORD_TRANSITIONED_TRIGGER_READER,
   },
 });
 

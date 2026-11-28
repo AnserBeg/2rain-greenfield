@@ -3268,13 +3268,29 @@ export const RecordCreatedTriggerSchema = z.strictObject({
   triggerVersion: z.literal('v1'),
   recordTypeId: CanonicalIdSchema,
 });
+/**
+ * ADR-0073 A1 lifecycle member (WORKFLOW-3 s1): a record of the type entering
+ * `toStateId`, optionally only from `fromStateId`. Admission (compiler
+ * workflows.ts) requires a declared machine every transition of which a
+ * generic transition operation performs, so its governed writer names each
+ * move; a machine any other writer moves is refused by name.
+ */
+export const RecordTransitionedTriggerSchema = z.strictObject({
+  kind: z.literal('recordTransitioned'),
+  triggerVersion: z.literal('v1'),
+  recordTypeId: CanonicalIdSchema,
+  toStateId: CanonicalIdSchema,
+  fromStateId: CanonicalIdSchema.optional(),
+});
 export const WORKFLOW_TRIGGER_MEMBERS = Object.freeze({
   goodsReceiptPosted: z.literal('goodsReceiptPosted'),
   recordCreated: RecordCreatedTriggerSchema,
+  recordTransitioned: RecordTransitionedTriggerSchema,
 });
 export const WorkflowTriggerSchema = z.union([
   WORKFLOW_TRIGGER_MEMBERS.goodsReceiptPosted,
   WORKFLOW_TRIGGER_MEMBERS.recordCreated,
+  WORKFLOW_TRIGGER_MEMBERS.recordTransitioned,
 ]);
 export type WorkflowTrigger = z.infer<typeof WorkflowTriggerSchema>;
 export type WorkflowTriggerMember = keyof typeof WORKFLOW_TRIGGER_MEMBERS;

@@ -46,6 +46,15 @@ export type WorkflowEvent =
       readonly recordTypeId: string;
       readonly recordId: string;
       readonly legalEntityId: string;
+    }
+  | {
+      readonly type: 'recordTransitioned';
+      readonly eventId: string;
+      readonly recordTypeId: string;
+      readonly recordId: string;
+      readonly fromStateId: string;
+      readonly toStateId: string;
+      readonly legalEntityId: string;
     };
 
 export type WorkflowCall =

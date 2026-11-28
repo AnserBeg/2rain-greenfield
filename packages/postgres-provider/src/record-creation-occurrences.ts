@@ -37,3 +37,45 @@ export async function recordCreations(
     ],
   );
 }
+
+/**
+ * ADR-0073 A1 recordTransitioned, owner ruling O1 (2026-11-27). The generic
+ * transition writer names each move it makes, after its UPDATE and inside its
+ * governed write, so a `recordTransitioned` subscription never misses one. The
+ * company is the one the UPDATE wrote (RETURNING); the definer re-reads the
+ * stored row in that company and requires it to be in `toStateId` (B2). The
+ * from-state is the compiled constant the UPDATE pinned in its WHERE (B3).
+ *
+ * Only the generic writer calls this. A machine any other writer moves is
+ * refused at admission (compiler workflows.ts); the writers are listed in
+ * `test/architecture/record-state-writers.test.ts`.
+ */
+export async function recordTransitions(
+  client: PoolClient,
+  entity: {
+    readonly entityId: string;
+    readonly physicalTableName: string;
+    readonly legalEntity?: unknown;
+    readonly recordIdentity?: { readonly column: string };
+  },
+  stateColumn: string,
+  company: string,
+  recordId: string,
+  fromStateId: string,
+  toStateId: string,
+): Promise<void> {
+  if (!entity.legalEntity) return;
+  await client.query(
+    'SELECT north_star_internal.record_transitions($1, $2, $3, $4, $5::uuid, $6::uuid, $7, $8)',
+    [
+      entity.physicalTableName,
+      entity.recordIdentity?.column ?? 'record_id',
+      stateColumn,
+      entity.entityId,
+      company,
+      recordId,
+      fromStateId,
+      toStateId,
+    ],
+  );
+}

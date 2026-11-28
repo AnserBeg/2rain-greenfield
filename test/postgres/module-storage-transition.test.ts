@@ -220,6 +220,7 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
           '0071_ledger_journal_core.sql',
           '0072_tax_catalog.sql',
           '0073_business_calendar.sql',
+          '0074_record_transition_occurrences.sql',
         ]);
         assert.equal(migrationResult.verified.length, allMigrations.length);
         await seedScope(admin);
