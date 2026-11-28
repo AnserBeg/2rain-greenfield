@@ -1050,6 +1050,8 @@ async function inventoryNavigationJourney(
     'Price lists',
     'Tax codes',
     'Locations',
+    // DOCUMENT-POSTING: Books' Journal drafts, a one-destination group.
+    'Books',
     // LOOK-1 round 3: the groups' occasional destinations, in one Settings.
     'Purchasing settings',
     'Stock movements',

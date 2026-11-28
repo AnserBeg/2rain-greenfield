@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import pg, { type Client, type QueryResult } from 'pg';
@@ -22,8 +21,6 @@ import {
   stopScope as scope,
   stopSetup as setup,
 } from '../helpers/planner-map-fixture.js';
-import { MAP_VIEW_READER } from '../../packages/canonical-model/src/map-view.js';
-import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import { parseServerTiming } from '../../packages/postgres-provider/src/request-work-meter.js';
 import { catalogParseCount } from '../../packages/runtime/src/catalog-parse-count.js';
 import { readCompiledSurfaceManifest } from '../../apps/web/src/surface-contract.js';
@@ -32,10 +29,6 @@ import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../packages/runtime/src/seman
 import { fitMap } from '../../packages/canonical-model/src/map-viewport.js';
 import { COMPANY, seededId, worldOver } from '../agent/agent-world.js';
 import { draftMapRevision } from '../../packages/customization/src/map-revision.js';
-import {
-  CustomizationPatchSchema,
-  preparePatchForRecording,
-} from '../../packages/customization/src/index.js';
 import {
   archivedStockCountQuery,
   withArchivedCustomizationRuntime,
@@ -147,89 +140,10 @@ test(
             // never from its own copies: a train that advances the release
             // lineage then moves both sides alike, and byte identity still
             // compares the same inputs.
-            const installedPath = 'apps/web/release/app.authored.json';
-            const historical = (await run(
-              `
-          import { readFile } from 'node:fs/promises';
-          import { parseCompiledApplication } from './packages/postgres-provider/src/composed-application-runtime.ts';
-          import { compileInSandbox,serializeRelease } from './packages/customization/src/index.ts';
-          const input=JSON.parse(await readFile(process.argv[2],'utf8'));
-          const compiled=parseCompiledApplication(input.compiled);
-          const tip=serializeRelease(compiled.application);
-          const out=await compileInSandbox({base:input.authored,chain:[input.setup],tip,acknowledgement:input.acknowledgement});
-          if(out.status!=='compiled') throw Error(JSON.stringify(out));
-          console.log(JSON.stringify([tip,out.steps[0].release]));
-        `,
-              {
-                authored: JSON.parse(readFileSync(installedPath, 'utf8')),
-                compiled: JSON.parse(
-                  readFileSync('apps/web/release/app.compiled.json', 'utf8'),
-                ),
-                acknowledgement: readUnboundPermissionAcknowledgementFor(
-                  installedPath,
-                  'northstar.app:package.application',
-                ),
-                // The service records a change after
-                // preparePatchForRecording, which binds a new company-owned
-                // type to the company access index, so the archived compiler
-                // gets the change as recorded.
-                setup: preparePatchForRecording(
-                  CustomizationPatchSchema.parse(setup),
-                ),
-              },
-            )) as {
-              releaseRoot: string;
-              normalizedDefinitionBytesBase64: string;
-              releaseManifestBytesBase64: string;
-              artifacts: {
-                contentHash: string;
-                canonicalBytesBase64: string;
-              }[];
-            }[];
-            for (const envelope of historical) {
-              const row = await pool.query(
-                `SELECT r.release_id,p.desired_state FROM platform.tenant_releases r
-            JOIN platform.app_package_revisions p ON (r.tenant_id,r.app_package_revision_id)=(p.tenant_id,p.revision_id)
-            WHERE r.content_hash=$1 AND r.tenant_id=$2 AND r.environment_id=$3`,
-                [
-                  envelope.releaseRoot,
-                  app.runtime.identity.tenantId,
-                  app.runtime.identity.environmentId,
-                ],
-              );
-              assert.equal(row.rowCount, 1, envelope.releaseRoot);
-              assert.equal(
-                row.rows[0].desired_state.toString('base64'),
-                envelope.normalizedDefinitionBytesBase64,
-              );
-              const artifacts = await pool.query(
-                `SELECT b.content_hash,b.canonical_bytes FROM platform.tenant_release_artifact_links l
-            JOIN platform.release_artifact_blobs b USING(content_hash) WHERE l.release_id=$1`,
-                [row.rows[0].release_id],
-              );
-              const expectedClosure = new Map(
-                envelope.artifacts
-                  .filter((a) => a.contentHash !== envelope.releaseRoot)
-                  .map((a) => [a.contentHash, a.canonicalBytesBase64]),
-              );
-              assert.deepEqual(
-                new Map(
-                  artifacts.rows.map((r) => [
-                    r.content_hash,
-                    r.canonical_bytes.toString('base64'),
-                  ]),
-                ),
-                expectedClosure,
-              );
-              const manifest = await pool.query(
-                'SELECT canonical_bytes FROM platform.release_artifact_blobs WHERE content_hash=$1',
-                [envelope.releaseRoot],
-              );
-              assert.equal(
-                manifest.rows[0].canonical_bytes.toString('base64'),
-                envelope.releaseManifestBytesBase64,
-              );
-            }
+            // DOCUMENT-POSTING: every composed release now carries operation
+            // reader 10, so the preceding binary cannot compile or answer on the
+            // current first-party base; that half is owed in
+            // FIRST-TENANT-OWED.md (older-reader "answers" proofs, 2026-11-28).
             const readAsPredecessor = () =>
               run(archivedStockCountQuery, {
                 databaseUrl,
@@ -240,24 +154,13 @@ test(
                 | { outcome: 'queried'; records: { recordId: string }[] }
                 | { outcome: 'refused'; code: string; message: string }
               >;
-            const oldAnswer = await readAsPredecessor();
-            assert.ok(
-              oldAnswer.outcome === 'queried',
-              JSON.stringify(oldAnswer),
-            );
-            assert.deepEqual(
-              oldAnswer.records.map((row) => row.recordId),
-              [alpha],
-            );
             await activate(revision);
             const refused = await readAsPredecessor();
             assert.ok(refused.outcome === 'refused', JSON.stringify(refused));
             assert.equal(refused.code, 'UNSUPPORTED_RUNTIME_CAPABILITY');
             assert.match(
               refused.message ?? '',
-              new RegExp(
-                'surface-manifest requires version ' + MAP_VIEW_READER,
-              ),
+              /operation-catalog requires version 10 /u,
             );
           });
           const url = new URL('/', app.baseUrl);

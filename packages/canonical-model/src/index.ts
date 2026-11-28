@@ -237,3 +237,6 @@ export type {
 } from './formula-validation.js';
 export * from './line-totals.js';
 export * from './open-item.js';
+export * from './document-posting.js';
+export * from './document-posting-engines.js';
+export * from './ledger-document-posting.js';

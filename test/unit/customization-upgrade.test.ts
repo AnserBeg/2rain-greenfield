@@ -23,7 +23,7 @@ import {
   type SurfaceLayout,
 } from '../../packages/canonical-model/src/index.js';
 import { VALIDATION_NODE_VERSION } from '../../packages/canonical-model/src/formula-validation.js';
-import { RECORD_TEMPLATE_OPERATION_READER } from '../../packages/canonical-model/src/record-template.js';
+import { DOCUMENT_POSTING_OPERATION_READER } from '../../packages/canonical-model/src/document-posting.js';
 import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 
@@ -875,9 +875,11 @@ test('a record template binding compiles beside a validation rule in either orde
     const operation = manifest.projections.find((p) =>
       p.familyId.endsWith('operation-catalog'),
     )!;
+    // The highest operation reader present wins: the composed base carries
+    // Books' document-posting block (DOCUMENT-POSTING), above templates.
     assert.equal(
       operation.requiredRuntimeCapability.minimumVersion,
-      RECORD_TEMPLATE_OPERATION_READER,
+      DOCUMENT_POSTING_OPERATION_READER,
       label,
     );
   }

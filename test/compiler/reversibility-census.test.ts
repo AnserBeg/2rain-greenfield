@@ -64,7 +64,9 @@ const local = (id: string) => id.split(/[.:]/u).pop()!;
 
 test('every first-party operation carries a declaration, and the canonical reader parses it', () => {
   const declaration = firstPartyDeclaration();
-  assert.equal(declaration.operations.length, 173);
+  // DOCUMENT-POSTING: Books' journal draft and lines (eight record
+  // operations), Mark ready, Reopen and the post (none/outward).
+  assert.equal(declaration.operations.length, 184);
   assert.deepEqual(parseReversibilityDeclaration(declaration), declaration);
   const classes: Record<string, number> = {};
   for (const operation of declaration.operations) {
@@ -72,11 +74,11 @@ test('every first-party operation carries a declaration, and the canonical reade
     classes[key] = (classes[key] ?? 0) + 1;
   }
   assert.deepEqual(classes, {
-    'exact/internal': 35,
-    'exact/record': 69,
+    'exact/internal': 39,
+    'exact/record': 73,
     'none/internal': 2,
-    'none/outward': 33,
-    'residue/record': 34,
+    'none/outward': 34,
+    'residue/record': 36,
   });
   // A capability declares nothing yet, so it is the worst case.
   for (const operation of declaration.operations)
@@ -379,7 +381,8 @@ test('census: the plain edits the derivation alone would let act at once, per op
           local(field.fieldId),
         ]);
   const total = [...act.values()].reduce((sum, list) => sum + list.length, 0);
-  assert.equal(total, 233);
+  // DOCUMENT-POSTING adds the journal draft's and its lines' plain edits.
+  assert.equal(total, 241);
   // Today's eleven pairs are all inside it.
   for (const [operation, field] of [
     ['item_update', 'item_description'],

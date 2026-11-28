@@ -11,6 +11,7 @@ import { RecordTemplateBindingSchema } from './record-template.js';
 import { SurfaceMapSchema } from './map-view.js';
 import { SurfaceBoardSchema } from './board.js';
 import { BookingOperationBinding } from './booking.js';
+import { DocumentPostingBinding } from './document-posting-schema.js';
 import { SurfaceLayoutSchema } from './layout.js';
 import { z } from 'zod';
 import { DOCUMENTS_PAYLOAD_VERSION } from './documents.js';
@@ -3023,10 +3024,13 @@ const operationLabel = LabelSchema.optional();
 const normalizedV6OperationDefinition = normalizedV3OperationDefinition.extend({
   label: operationLabel,
   booking: BookingOperationBinding.optional(),
+  // DOCUMENT-POSTING: the general document-posting binding (slice 1).
+  documentPosting: DocumentPostingBinding.optional(),
 });
 const authoredV6OperationDefinition = authoredV3OperationDefinition.extend({
   label: operationLabel,
   booking: BookingOperationBinding.optional(),
+  documentPosting: DocumentPostingBinding.optional(),
 });
 // A whole settings record, or one policy field, can require the person's yes.
 const assistantConfirmation = {

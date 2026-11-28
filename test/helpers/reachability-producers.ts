@@ -86,6 +86,7 @@ export const reachabilityProducers = [
     'test/compiler/compiler-semantic-profile.test.ts',
     'test/compiler/determinism.test.ts',
     'test/compiler/disclosure-tier-projection.test.ts',
+    'test/compiler/document-posting.test.ts',
     'test/compiler/field-kind-projection.test.ts',
     'test/compiler/freeze-b.test.ts',
     'test/compiler/g2-module-conformance.test.ts',
@@ -131,7 +132,7 @@ export const reachabilityProducers = [
     'test/postgres/report-company-reader.test.ts',
   ]),
   nodeProducer('postgres-3', 'postgres', 'test:postgres:3', [
-    'test/postgres/{!(address-connector|agent-dev-tasks|agent-tasks|billing-terms|board-policy|booking-serving|boot-capabilities|build-eval|build-eval-rate-plans|catalog-extras|commercial-totals|composed-application|counter-sale|customer-credit|customization|customization-display|customization-formulas|customization-governed-reads|customization-inspection|customization-live|customization-validation|customization-world|date-time-field|declared-list|document-attachments|document-numbering|document-templates|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-stock-counts|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|ledger-books-by-hand|ledger-journal-core|line-logical-fields|line-totals|locations|logical-fields|module-storage-transition|open-items|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|period-lock-commands|planner-map|presentation-list|price-lists|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|record-template-library|replenishment|report-admission|report-analysis|report-analysis-reader|report-company-reader|report-v2-provider|request-runtime-view|stock-serializer|workflow-consumer|workflow-record-created|workflow-record-transitioned),*/**/*}.test.ts',
+    'test/postgres/{!(address-connector|agent-dev-tasks|agent-tasks|billing-terms|board-policy|booking-serving|boot-capabilities|build-eval|build-eval-rate-plans|catalog-extras|commercial-totals|composed-application|counter-sale|customer-credit|customization|customization-display|customization-formulas|customization-governed-reads|customization-inspection|customization-live|customization-validation|customization-world|date-time-field|declared-list|document-attachments|document-numbering|document-templates|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-stock-counts|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|ledger-books-by-hand|ledger-journal-core|line-logical-fields|line-totals|locations|logical-fields|migrations|module-index-conformance|module-storage-transition|open-items|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|period-lock-commands|planner-map|presentation-list|price-lists|purchase-approvals|purchase-order-ending|query-filter-lowering|receivables|receiving-authorization|record-template-library|replenishment|report-admission|report-analysis|report-analysis-reader|report-company-reader|report-v2-provider|request-runtime-view|stock-serializer|workflow-consumer|workflow-record-created|workflow-record-transitioned),*/**/*}.test.ts',
   ]),
   nodeProducer('postgres-4', 'postgres', 'test:postgres:4', [
     'test/postgres/customization-live.test.ts',
@@ -159,6 +160,7 @@ export const reachabilityProducers = [
     'test/postgres/boot-capabilities.test.ts',
     'test/postgres/customization-world.test.ts',
     'test/postgres/ledger-journal-core.test.ts',
+    'test/postgres/module-index-conformance.test.ts',
   ]),
   nodeProducer('postgres-10', 'postgres', 'test:postgres:10', [
     'test/postgres/booking-serving.test.ts',
@@ -167,6 +169,7 @@ export const reachabilityProducers = [
   nodeProducer('postgres-11', 'postgres', 'test:postgres:11', [
     'test/postgres/agent-dev-tasks.test.ts',
     'test/postgres/customization-governed-reads.test.ts',
+    'test/postgres/migrations.test.ts',
     'test/postgres/report-admission.test.ts',
   ]),
   nodeProducer('postgres-12', 'postgres', 'test:postgres:12', [
@@ -188,6 +191,7 @@ export const reachabilityProducers = [
     'test/postgres/catalog-extras.test.ts',
     'test/postgres/line-logical-fields.test.ts',
     'test/postgres/logical-fields.test.ts',
+    'test/postgres/query-filter-lowering.test.ts',
     'test/postgres/report-v2-provider.test.ts',
   ]),
   nodeProducer('postgres-16', 'postgres', 'test:postgres:16', [

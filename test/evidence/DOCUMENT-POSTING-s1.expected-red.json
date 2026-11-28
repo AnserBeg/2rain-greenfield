@@ -1,0 +1,159 @@
+{
+  "version": 1,
+  "packet": "DOCUMENT-POSTING-s1",
+  "entries": [
+    {
+      "name": "document-post-line-freeze",
+      "claim": "A line create, update or archive on a Ready or Posted journal is refused: every line write applies the header's update guard through the declared parent-scoped relation.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "  if (relation.ownership === 'parentScopedChild') {",
+      "replacement": "  if (false) {",
+      "test": {
+        "files": ["test/postgres/ledger-document-post.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-document-post.test.ts",
+          "name": "line create, update and archive are refused once the draft is Ready, and once it is Posted",
+          "expected": "on a Ready draft was admitted"
+        }
+      ]
+    },
+    {
+      "name": "document-post-header-lock",
+      "claim": "The post holds the journal header FOR NO KEY UPDATE before its one read, so a line change committed while it waited is posted, never missed.",
+      "file": "db/migrations/0077_ledger_document_post.sql",
+      "original": "      ' AND %I = $3 AND %I IS NULL FOR NO KEY UPDATE',",
+      "replacement": "      ' AND %I = $3 AND %I IS NULL',",
+      "test": {
+        "files": ["test/postgres/ledger-document-post.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-document-post.test.ts",
+          "name": "the post reads every line committed while it waited on the header",
+          "expected": "the post missed a line change committed while it waited"
+        }
+      ]
+    },
+    {
+      "name": "document-post-backstop",
+      "claim": "One manual entry per journal: a journal forced back to Ready meets the record-ID unique index (ledger.documentPosted), whatever its state field says.",
+      "file": "db/migrations/0077_ledger_document_post.sql",
+      "original": "CREATE UNIQUE INDEX ledger_entries_document_key ON platform.ledger_entries",
+      "replacement": "CREATE INDEX ledger_entries_document_key ON platform.ledger_entries",
+      "test": {
+        "files": ["test/postgres/ledger-document-post.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-document-post.test.ts",
+          "name": "a draft forced back to Ready cannot post a second entry",
+          "expected": "a draft forced back to Ready posted a second entry: admitted"
+        }
+      ]
+    },
+    {
+      "name": "document-post-grant-capability",
+      "claim": "The post consumes a grant only under its own capability constant: a grant attested for books start is refused.",
+      "file": "db/migrations/0077_ledger_document_post.sql",
+      "original": "  invocation := north_star_internal.ledger_consume_grant(grant_key, 'northstar.ledger:capability.general_ledger',",
+      "replacement": "  invocation := north_star_internal.ledger_consume_grant(grant_key, (SELECT g.capability_id FROM platform.ledger_approval_grants g WHERE g.grant_id = grant_key),",
+      "test": {
+        "files": ["test/postgres/ledger-document-post.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-document-post.test.ts",
+          "name": "a grant attested for books start never applies in the post",
+          "expected": "the post consumed a grant attested for books start"
+        }
+      ]
+    },
+    {
+      "name": "document-post-permission",
+      "claim": "journal_post is the money gate in SQL: books_configure alone cannot post a journal (the control admits books_configure beside journal_post).",
+      "file": "db/migrations/0077_ledger_document_post.sql",
+      "original": "  IF NOT north_star_internal.ledger_may(company, 'northstar.ledger:permission.journal_post', 'northstar.ledger:capability.journal')",
+      "replacement": "  IF NOT (north_star_internal.ledger_may(company, 'northstar.ledger:permission.journal_post', 'northstar.ledger:capability.journal') OR north_star_internal.ledger_may(company, 'northstar.ledger:permission.books_configure', 'northstar.ledger:capability.books'))",
+      "test": {
+        "files": ["test/postgres/ledger-document-post.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-document-post.test.ts",
+          "name": "journal_post is the money gate: books_configure alone cannot post, and each layer refuses without its grant",
+          "expected": "books_configure alone posted a journal"
+        }
+      ]
+    },
+    {
+      "name": "document-post-company-scope",
+      "claim": "Authority is checked for the journal's stored company, never the caller's: a principal scoped to company A cannot post company B's journal.",
+      "file": "db/migrations/0077_ledger_document_post.sql",
+      "original": "  IF NOT north_star_internal.ledger_may(company, 'northstar.ledger:permission.journal_post', 'northstar.ledger:capability.journal')",
+      "replacement": "  IF NOT north_star_internal.ledger_may(coalesce((SELECT m.legal_entity_id FROM platform.current_policy_memberships m WHERE m.principal_id = nullif(current_setting('north_star.principal_id', true), '')::uuid AND m.legal_entity_id IS NOT NULL LIMIT 1), company), 'northstar.ledger:permission.journal_post', 'northstar.ledger:capability.journal')",
+      "test": {
+        "files": ["test/postgres/ledger-document-post.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-document-post.test.ts",
+          "name": "a principal of company A cannot post company B's journal, nor book to B's account codes",
+          "expected": "a principal of company A posted company B's journal"
+        }
+      ]
+    },
+    {
+      "name": "document-post-minor-units",
+      "claim": "Amounts convert to whole minor units exactly: a fraction of the minor unit refuses (ledger.unrepresentableAmount) and is never rounded.",
+      "file": "db/migrations/0077_ledger_document_post.sql",
+      "original": "  IF amount <> trunc(amount, exponent) THEN RAISE EXCEPTION 'ledger.unrepresentableAmount'; END IF;",
+      "replacement": "  NULL;",
+      "test": {
+        "files": ["test/postgres/ledger-document-post.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-document-post.test.ts",
+          "name": "amounts are whole minor units: 0, -1.00 and 0.001 CAD refuse, and the conversion is exact at exponents 0, 2, 3 and 4",
+          "expected": "is not exact"
+        }
+      ]
+    },
+    {
+      "name": "document-post-revision",
+      "claim": "The post pins the Ready revision the person confirmed: after a reopen, edit and Ready again, the earlier confirmation refuses (ledger.staleRevision).",
+      "file": "db/migrations/0077_ledger_document_post.sql",
+      "original": "  IF doc.revision IS DISTINCT FROM (input->>'expectedRevision')::bigint THEN",
+      "replacement": "  IF false AND (input->>'expectedRevision') IS NOT NULL THEN",
+      "test": {
+        "files": ["test/postgres/ledger-document-post.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/ledger-document-post.test.ts",
+          "name": "a confirmation of the Ready revision before a reopen, edit and Ready again is refused",
+          "expected": "a post confirmed on an earlier Ready revision applied"
+        }
+      ]
+    },
+    {
+      "name": "document-post-posted-unreachable",
+      "claim": "No declared or customized transition reaches Posted: only the ledger's definer posts, so the compiler refuses a package that adds one.",
+      "file": "packages/canonical-model/src/document-posting.ts",
+      "original": "      return refuse('postedReachable');",
+      "replacement": "      void 0;",
+      "test": {
+        "files": ["test/compiler/document-posting.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/compiler/document-posting.test.ts",
+          "name": "DOCUMENT-POSTING: Customize cannot unfreeze a posted document; the compiler refuses by name",
+          "expected": "a customized package with a transition into Posted compiled"
+        }
+      ]
+    }
+  ]
+}

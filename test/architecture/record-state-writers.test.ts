@@ -105,9 +105,16 @@ export const RECORD_STATE_WRITERS: Readonly<Record<string, StateWriter>> =
     },
   });
 
-/** SQL definers that UPDATE a table named at run time: none today. */
+/** SQL definers that UPDATE a table named at run time. */
 export const SQL_STATE_WRITERS: Readonly<Record<string, StateWriter>> =
-  Object.freeze({});
+  Object.freeze({
+    'db/migrations/0077_ledger_document_post.sql': {
+      updates: 1,
+      machines: ['bookkeeping_draft_lifecycle'],
+      reason:
+        "platform.ledger_apply_document_post flips the bound header's state from the binding's from-state to its to-state (Books' journal draft: Ready to Posted) after the entry is written. That move is no declared transition, so recordTransitioned admission refuses every machine an operation's documentPosting block binds (amendment 10, TRAIN-AA).",
+    },
+  });
 
 function sources(directory: string): string[] {
   return readdirSync(directory).flatMap((name) => {
@@ -202,9 +209,10 @@ test('every SQL UPDATE of a run-time table is classified', () => {
 test('every machine another writer moves is refused by recordTransitioned admission', () => {
   const admissible = workflowTransitionTargets(authored);
   const moved = new Set(
-    Object.values(RECORD_STATE_WRITERS).flatMap(
-      (writer) => writer.machines ?? [],
-    ),
+    [
+      ...Object.values(RECORD_STATE_WRITERS),
+      ...Object.values(SQL_STATE_WRITERS),
+    ].flatMap((writer) => writer.machines ?? []),
   );
   assert.ok(moved.size > 0, 'the census lists the machines kernels move');
   for (const local of moved) {

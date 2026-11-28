@@ -121,6 +121,14 @@ const recognizedDispatches: Readonly<Record<string, readonly PredicateKind[]>> =
     // registered for exactly the same reason. `PUR-1` authors an
     // `all(not(equals), not(equals), not(equals))` editing guard, which is
     // three kinds.
+    // DOCUMENT-POSTING: Books' journal draft builds its state guards (the
+    // Draft-only header guard and the transitions' from-state checks); it
+    // evaluates none. The binding's freeze check evaluates through the kernel.
+    'packages/domain/src/bookkeeping/draft.ts': signature([
+      'fieldComparisonPredicate',
+      'allPredicate',
+      'notPredicate',
+    ]),
     'packages/domain/src/purchasing/definition.ts': signature([
       'notPredicate',
       'fieldComparisonPredicate',

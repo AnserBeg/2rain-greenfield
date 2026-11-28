@@ -102,6 +102,7 @@ interface MachineSource {
     readonly entity: { readonly targetId: string };
     readonly lifecycle?: string;
     readonly machineId: string;
+    readonly stateField?: { readonly fieldId: string };
     readonly states: readonly {
       readonly stateId: string;
       readonly label: string;
@@ -118,7 +119,51 @@ interface MachineSource {
       readonly kind: string;
       readonly transition?: { readonly targetId: string };
     };
+    /**
+     * A declared block that writes a header's state outside the generic
+     * transition writer (DOCUMENT-POSTING: the engine's definer moves the
+     * header from `state.from` to `state.to`).
+     */
+    readonly documentPosting?:
+      | {
+          readonly header?: { readonly entity?: string | undefined };
+          readonly state?: { readonly field?: string | undefined };
+        }
+      | undefined;
   }[];
+}
+
+/**
+ * Amendment 10 (DOCUMENT-POSTING, TRAIN-AA): the record types and state fields
+ * an active operation's declared block moves outside the generic transition
+ * writer. Such a move is not a declared transition, so "every transition is
+ * generic" cannot see it; the machine is refused here instead.
+ */
+function blockMovedMachines(revision: MachineSource): {
+  readonly entities: ReadonlySet<string>;
+  readonly stateFields: ReadonlySet<string>;
+} {
+  const entities = new Set<string>();
+  const stateFields = new Set<string>();
+  for (const operation of revision.operations ?? []) {
+    if (operation.lifecycle === 'retired' || !operation.documentPosting)
+      continue;
+    const { header, state } = operation.documentPosting;
+    if (header?.entity) entities.add(header.entity);
+    if (state?.field) stateFields.add(state.field);
+  }
+  return { entities, stateFields };
+}
+
+function isBlockMoved(
+  machine: NonNullable<MachineSource['stateMachines']>[number],
+  moved: ReturnType<typeof blockMovedMachines>,
+): boolean {
+  return (
+    moved.entities.has(machine.entity.targetId) ||
+    (machine.stateField !== undefined &&
+      moved.stateFields.has(machine.stateField.fieldId))
+  );
 }
 
 /**
@@ -129,6 +174,8 @@ interface MachineSource {
  * by some other writer (the purchase and sales order lifecycles are moved by
  * capability executors: test/architecture/record-state-writers.test.ts), and a
  * workflow on it would silently miss those moves, so it is refused by name.
+ * A machine whose header an operation's declared block moves (a document
+ * posting's ready -> posted, amendment 10) is refused for the same reason.
  * Returns, per admissible machine's record type, the states an admitted
  * transition ends in and the states each is entered from.
  */
@@ -151,6 +198,7 @@ export function workflowTransitionTargets(revision: MachineSource): ReadonlyMap<
       )
       .map((operation) => operation.effect.transition?.targetId),
   );
+  const moved = blockMovedMachines(revision);
   const result = new Map<
     string,
     {
@@ -160,6 +208,7 @@ export function workflowTransitionTargets(revision: MachineSource): ReadonlyMap<
   >();
   for (const machine of revision.stateMachines ?? []) {
     if (machine.lifecycle === 'retired') continue;
+    if (isBlockMoved(machine, moved)) continue;
     if (
       machine.transitions.length === 0 ||
       !machine.transitions.every(({ transitionId }) =>
@@ -215,9 +264,11 @@ export function assertWorkflowTriggers(
       throw new WorkflowTriggerBindingError(
         trigger.recordTypeId,
         machine?.machineId ?? trigger.recordTypeId,
-        machine
-          ? 'Workflow trigger machine has a transition no generic transition operation performs, so another writer moves it.'
-          : 'Workflow trigger record type declares no state machine.',
+        !machine
+          ? 'Workflow trigger record type declares no state machine.'
+          : isBlockMoved(machine, blockMovedMachines(revision))
+            ? 'Workflow trigger machine is moved by a declared operation block (a document posting), so another writer moves it.'
+            : 'Workflow trigger machine has a transition no generic transition operation performs, so another writer moves it.',
       );
     }
     const state = target.states.get(trigger.toStateId);

@@ -37,7 +37,12 @@ test(
 
 function bookingSource() {
   const source = composedApplicationDefinition();
-  const ops = source.operations as Record<string, unknown>[];
+  // Books' journal post carries a document-posting block, whose reader tops
+  // the operation ladder (DOCUMENT-POSTING); these floors are measured
+  // without it.
+  const ops = (source.operations as Record<string, unknown>[]).filter(
+    (op) => !('documentPosting' in op),
+  );
   const capabilityRequirements = source.capabilityRequirements as Record<
     string,
     unknown

@@ -62,6 +62,7 @@ import {
   authorizeSharedListFields,
   parseSharedListArguments,
 } from '../../packages/runtime/src/list-behavior/index.js';
+import { DOCUMENT_POSTING_OPERATION_READER } from '../../packages/canonical-model/src/document-posting.js';
 
 const authoredPath = resolve('apps/web/release/app.authored.json');
 const authored = JSON.parse(readFileSync(authoredPath, 'utf8')) as Record<
@@ -1154,7 +1155,12 @@ test('permission narrowing compiles an exact active action on one role', async (
     (projection) =>
       projection.familyId === PROJECTION_FAMILY_IDS.operationCatalog,
   )!;
-  assert.equal(catalog.requiredRuntimeCapability.minimumVersion, 2);
+  // The narrowing reader is 2; the composed base also carries Books'
+  // document-posting block, whose reader tops the ladder (DOCUMENT-POSTING).
+  assert.equal(
+    catalog.requiredRuntimeCapability.minimumVersion,
+    DOCUMENT_POSTING_OPERATION_READER,
+  );
   assert.equal(
     unsupportedRuntimeCapability(
       catalog.familyId,

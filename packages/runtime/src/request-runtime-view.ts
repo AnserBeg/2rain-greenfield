@@ -1,5 +1,5 @@
 import { ROLLUP_QUERY_READER } from '../../canonical-model/src/line-totals.js';
-import { OPEN_ITEM_OPERATION_READER } from '../../canonical-model/src/open-item.js';
+import { DOCUMENT_POSTING_OPERATION_READER } from '../../canonical-model/src/document-posting.js';
 import { CONNECTOR_FAMILY } from '@north-star/canonical-model';
 import {
   assertTrustedRequestContext,
@@ -188,8 +188,9 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     capabilityId: 'northstar.runtime:capability.operation-catalog',
     // 8 reads derived fields, create-only fields, money compared with zero
     // and a totalled relation's maximum and header lock (ADR-0094); 9 an
-    // operation's open-item binding (OPEN-ITEM-1).
-    maximumSupportedVersion: OPEN_ITEM_OPERATION_READER,
+    // operation's open-item binding (OPEN-ITEM-1); 10 reads the
+    // document-posting binding (DOCUMENT-POSTING).
+    maximumSupportedVersion: DOCUMENT_POSTING_OPERATION_READER,
   },
   [REQUEST_RUNTIME_FORMULA_RULE_FAMILY]: {
     capabilityId: 'northstar.runtime:capability.formula-rule',

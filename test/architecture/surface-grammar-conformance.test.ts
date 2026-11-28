@@ -318,8 +318,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // WAREHOUSE-MODE's Warehouse, + VALUATION's Inventory value List, +
   // APPROVALS' approval requests and settings (five), + SALES-EXTRAS' price
   // list, its prices and customers (nine) and its Counter sales worklist
-  // (one; INTEGRATION, decision I-M8(a)), + LOOP-1's Today launcher.
-  assert.equal(groupedManifest.surfaces.length, 124);
+  // (one; INTEGRATION, decision I-M8(a)), + LOOP-1's Today launcher, +
+  // DOCUMENT-POSTING's journal draft and its lines (six).
+  assert.equal(groupedManifest.surfaces.length, 130);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -437,7 +438,8 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // Inventory value List. APPROVALS: approvals and settings join Purchasing.
   // SALES-EXTRAS: the Price lists join the masters, and Counter sales
   // joins Sales beside its orders (INTEGRATION, decision I-M8(a)).
-  assert.equal(navigationSurfaceIds(grouped.entries).length, 25);
+  // DOCUMENT-POSTING: Books' Journal drafts list.
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 26);
   // Business destinations lead; supporting masters share the overflow entry.
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),

@@ -8,6 +8,13 @@ import {
   declaresOpenItems,
   OPEN_ITEM_OPERATION_READER,
 } from '../../canonical-model/src/open-item.js';
+import {
+  DOCUMENT_POSTING_OPERATION_READER,
+  documentPostingCatalogTerms,
+  documentPostingDeclarationProblem,
+  hasDocumentPosting,
+} from '../../canonical-model/src/document-posting.js';
+import { DOCUMENT_POSTING_ENGINES } from '../../canonical-model/src/document-posting-engines.js';
 import { lowerDeclaredReports } from '../../compiler/src/declared-reports.js';
 import { DECLARED_REPORT_READER } from '../../canonical-model/src/declared-report.js';
 import {
@@ -759,6 +766,9 @@ function verifyCompiledRelease(
         : 'Declared logical fields and the surface reader floor disagree.',
     );
   const reportInputs = new Map<string, unknown>();
+  // DOCUMENT-POSTING: the operation catalog and storage plan, checked together
+  // after every projection is read.
+  const documentPostingPayloads = new Map<string, Record<string, unknown>>();
   const sourceTerms = (value: unknown, activeOnly: boolean) => {
     if (!isRecord(value) || !Array.isArray(value.entities)) return [];
     return value.entities.flatMap((e: unknown) =>
@@ -901,6 +911,18 @@ function verifyCompiledRelease(
       projectionManifest,
       projectionPayloadBytes,
     );
+    if (
+      revision.languageVersion === 'v6' &&
+      (reference.familyId === PROJECTION_FAMILY_IDS.operationCatalog ||
+        reference.familyId === PROJECTION_FAMILY_IDS.storageTarget)
+    )
+      documentPostingPayloads.set(
+        reference.familyId,
+        decodeCanonicalObject(
+          projectionPayloadBytes[0]!,
+          'PROJECTION_CHUNK_NOT_CANONICAL',
+        ),
+      );
     if (
       revision.languageVersion === 'v6' &&
       [
@@ -1087,6 +1109,34 @@ function verifyCompiledRelease(
     }
   }
 
+  if (revision.languageVersion === 'v6') {
+    const catalog = documentPostingPayloads.get(
+      PROJECTION_FAMILY_IDS.operationCatalog,
+    );
+    const declared = documentPostingCatalogTerms(layoutDefinition);
+    if (
+      canonicalize(declared) !==
+        canonicalize(documentPostingCatalogTerms(catalog)) ||
+      (declared.length > 0 &&
+        documentPostingDeclarationProblem(
+          parseNormalizedApplicationPackageJson(revision.desiredState),
+          {
+            engines: DOCUMENT_POSTING_ENGINES,
+            companyScopedRelation: (relationId) =>
+              storageRelationCarriesCompany(
+                documentPostingPayloads.get(
+                  PROJECTION_FAMILY_IDS.storageTarget,
+                ),
+                relationId,
+              ),
+          },
+        ))
+    )
+      throw integrity(
+        'DOCUMENT_POSTING_PROJECTION_CONTRACT_MISMATCH',
+        'document-posting operations disagree with the released declarations',
+      );
+  }
   if (hasReports) {
     const def = parseNormalizedApplicationPackageJson(revision.desiredState);
     if (def.languageVersion !== 'v6')
@@ -1254,7 +1304,8 @@ function verifyFormulaProjectionReference(
           parseNormalizedApplicationPackageJson(revision.desiredState),
         )
       : { operation: false, query: false };
-  // OPEN-ITEM-1: the open-item reader is the highest operation floor.
+  // OPEN-ITEM-1: the open-item reader is the operation floor below the
+  // document-posting reader.
   const openItems =
     isRecord(normalized) &&
     ['openItems', 'openItemApplications'].some((key) =>
@@ -1265,18 +1316,21 @@ function verifyFormulaProjectionReference(
     );
   if (
     references.length !== Number(Boolean(declaring)) ||
-    (openItems
-      ? operationFloor !== OPEN_ITEM_OPERATION_READER
-      : lineTotals.operation
-        ? operationFloor !== LINE_TOTALS_OPERATION_READER
-        : hasRecordTemplateBinding(normalized)
-          ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
-          : hasBookingOperations(normalized)
-            ? operationFloor !== bookingReaderFloor(normalized)
-            : rules.length
-              ? operationFloor !==
-                requiredFormulaValidationOperationReader(rules)
-              : operationFloor >= LITERAL_VALIDATION_OPERATION_READER) ||
+    // DOCUMENT-POSTING: the document-posting reader tops the ladder.
+    (hasDocumentPosting(normalized)
+      ? operationFloor !== DOCUMENT_POSTING_OPERATION_READER
+      : openItems
+        ? operationFloor !== OPEN_ITEM_OPERATION_READER
+        : lineTotals.operation
+          ? operationFloor !== LINE_TOTALS_OPERATION_READER
+          : hasRecordTemplateBinding(normalized)
+            ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
+            : hasBookingOperations(normalized)
+              ? operationFloor !== bookingReaderFloor(normalized)
+              : rules.length
+                ? operationFloor !==
+                  requiredFormulaValidationOperationReader(rules)
+                : operationFloor >= LITERAL_VALIDATION_OPERATION_READER) ||
     // The query floor is the highest catalog feature present.
     (lineTotals.query
       ? queryFloor !== ROLLUP_QUERY_READER
@@ -1888,4 +1942,39 @@ function lineTotalsFloors(
       'release declares line totals that do not bind',
     );
   return floors;
+}
+
+/**
+ * DOCUMENT-POSTING: the released storage plan gives the line relation a
+ * foreign key that carries the company, between two company-owned entities.
+ */
+function storageRelationCarriesCompany(
+  storage: unknown,
+  relationId: string,
+): boolean {
+  if (
+    !isRecord(storage) ||
+    !Array.isArray(storage.relations) ||
+    !Array.isArray(storage.entities)
+  )
+    return false;
+  const relation = storage.relations.find(
+    (r: unknown) => isRecord(r) && r.relationId === relationId,
+  ) as Record<string, unknown> | undefined;
+  const key =
+    relation && isRecord(relation.foreignKey) ? relation.foreignKey : null;
+  const owned = (entityId: unknown) =>
+    (storage.entities as unknown[]).some(
+      (e) => isRecord(e) && e.entityId === entityId && isRecord(e.legalEntity),
+    );
+  return (
+    !!relation &&
+    !!key &&
+    Array.isArray(key.sourceColumns) &&
+    key.sourceColumns.includes('legal_entity_id') &&
+    Array.isArray(key.targetColumns) &&
+    key.targetColumns.includes('legal_entity_id') &&
+    owned(relation.sourceEntityId) &&
+    owned(relation.targetEntityId)
+  );
 }

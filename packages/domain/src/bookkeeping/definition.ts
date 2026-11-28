@@ -1,3 +1,5 @@
+import { bookkeepingDraftDeclarations } from './draft.js';
+
 const version = 'v6' as const;
 const normalizationProfileVersion = 'northstar.normalization/v6' as const;
 
@@ -95,6 +97,12 @@ export function bookkeepingModuleDefinition(
   company: BookkeepingCompanyRecord,
 ): Record<string, unknown> {
   const definitionIds = ids(namespace);
+  // DOCUMENT-POSTING slice 1: the staged manual journal and its post.
+  const draft = bookkeepingDraftDeclarations(
+    namespace,
+    definitionIds.moduleId,
+    definitionIds.contentCapabilityId,
+  );
   /** A confirmation-class operation on the company record, run by a ledger capability. */
   const ledgerOperation = (
     operationId: string,
@@ -126,17 +134,18 @@ export function bookkeepingModuleDefinition(
     schemaVersion: version,
   });
   return {
-    assertions: [],
+    assertions: draft.assertions,
     capabilityRequirements: [
       standardSurfaceCapability(namespace),
       ...[
         LEDGER_BOOKS_START_CAPABILITY_ID,
         LEDGER_ACCOUNT_PUT_CAPABILITY_ID,
         LEDGER_CHART_SETUP_CAPABILITY_ID,
+        draft.capabilityId,
       ].map(ledgerCapability),
     ],
-    entities: [],
-    fields: [],
+    entities: draft.entities,
+    fields: draft.fields,
     hashAlgorithm: 'sha256',
     impactAnalyses: [],
     kind: 'applicationPackageRevision',
@@ -176,6 +185,7 @@ export function bookkeepingModuleDefinition(
         LEDGER_CHART_SETUP_CAPABILITY_ID,
         definitionIds.permissionIds.chartSetup,
       ),
+      ...draft.operations,
     ],
     package: {
       kind: 'packageDefinition',
@@ -192,13 +202,14 @@ export function bookkeepingModuleDefinition(
       ),
       ledgerPermission(definitionIds.permissionIds.accountPut, 'Put account'),
       ledgerPermission(definitionIds.permissionIds.chartSetup, 'Set up chart'),
+      ...draft.permissions,
     ],
-    queries: [],
-    relations: [],
+    queries: draft.queries,
+    relations: draft.relations,
     schemaVersion: version,
-    stateMachines: [],
-    storageMappings: [],
-    surfaces: [],
+    stateMachines: draft.stateMachines,
+    storageMappings: draft.storageMappings,
+    surfaces: draft.surfaces,
   };
 }
 

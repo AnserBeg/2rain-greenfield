@@ -20,6 +20,11 @@ export const COMPILER_DIAGNOSTIC_COPY = Object.freeze({
       'compile under a profile version that emits the disclosure tier, or remove the explicit declaration',
     rule: 'a declared disclosure tier is emitted or refused, never silently dropped by the selected profile',
   },
+  COMPILER_DOCUMENT_POSTING_INVALID: {
+    acceptedAlternative:
+      "bind every role the engine declares to a field of its value class, keep the posted state reachable only by the engine, and freeze the document's header and lines outside its initial state",
+    rule: 'a document-posting block binds exactly its registered engine and a frozen document by canonical ID',
+  },
   COMPILER_DEFINITION_INVALID: {
     acceptedAlternative:
       'supply canonical normalized bytes accepted by the frozen application language',

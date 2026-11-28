@@ -5,6 +5,7 @@ import {
   type CompiledDerivedField,
   type CompiledTotalledRelation,
 } from '../../canonical-model/src/line-totals.js';
+import { DocumentPostingBinding } from '../../canonical-model/src/document-posting.js';
 import {
   BOOKING_CAPABILITY,
   BookingOperationBinding,
@@ -121,6 +122,8 @@ export interface RegisteredCapabilityOperationDefinition extends RegisteredOpera
   readonly booking?: BookingOperationBinding;
   /** OPEN-ITEM-1: the compiled binding an issue or apply executes by. */
   readonly openItem?: OpenItemOperationBinding;
+  /** DOCUMENT-POSTING: the released document-posting binding. */
+  readonly documentPosting?: DocumentPostingBinding;
   readonly effect: {
     readonly capability: {
       readonly kind: string;
@@ -1509,6 +1512,7 @@ export function assertPinnedOperationDefinition(
       ...(hasLabel ? ['label'] : []),
       ...(Object.hasOwn(value, 'booking') ? ['booking'] : []),
       ...(Object.hasOwn(value, 'openItem') ? ['openItem'] : []),
+      ...(Object.hasOwn(value, 'documentPosting') ? ['documentPosting'] : []),
       ...(hasExcludedRoles ? ['excludedRoleKeys'] : []),
     ],
     invalid,
@@ -1587,6 +1591,22 @@ export function assertPinnedOperationDefinition(
     )
       throw invalid(
         'open-item operation requires its released binding and the declared approval',
+      );
+  }
+  if (Object.hasOwn(value, 'documentPosting')) {
+    // DOCUMENT-POSTING: a block rides only its engine's confirmation-class
+    // capability operation.
+    const binding = DocumentPostingBinding.safeParse(value.documentPosting);
+    if (
+      !binding.success ||
+      value.effect.kind !== 'registeredCapabilityEffect' ||
+      !isRecord(value.effect.capability) ||
+      value.effect.capability.targetId !== binding.data.engine ||
+      value.confirmation !== 'humanRequired' ||
+      value.tier !== 'o1'
+    )
+      throw invalid(
+        'document-posting operation requires its engine capability and the declared approval',
       );
   }
   if (value.effect.kind === 'registeredCapabilityEffect') {

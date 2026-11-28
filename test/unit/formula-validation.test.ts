@@ -29,6 +29,7 @@ import {
   type ValidationPredicate,
   type ValidationScalar,
 } from '../../packages/canonical-model/src/formula-validation.js';
+import { withoutDocumentPosting } from '../helpers/without-document-posting.js';
 
 test('calendar witnesses cross month and year boundaries without a clock', () => {
   assert.deepEqual(adjacentCalendarDates('2024-02-29'), [
@@ -170,8 +171,10 @@ test('a text-length operand counts Unicode code points', () => {
 });
 
 test('a literal guard binds to the actual typed create and update operations', () => {
-  const authored = parseVersionedAuthoredApplicationPackageJson(
-    readFileSync('apps/web/release/app.authored.json', 'utf8'),
+  const authored = withoutDocumentPosting(
+    parseVersionedAuthoredApplicationPackageJson(
+      readFileSync('apps/web/release/app.authored.json', 'utf8'),
+    ),
   );
   assert.ok(authored.languageVersion === 'v6');
   const revision = normalizeApplicationPackage(authored);

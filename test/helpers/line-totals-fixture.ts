@@ -25,6 +25,7 @@ import {
 } from '../../packages/compiler/src/index.js';
 import * as customization from '../../packages/customization/src/index.js';
 import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
+import { withoutDocumentPosting } from './without-document-posting.js';
 
 export const NS = 'northstar.app';
 export const CONTRACT = `${NS}:entity.custom_rental_contract`;
@@ -206,9 +207,11 @@ let bindings: readonly unknown[] = [];
 export function patchedAuthored(shared = false): Authored {
   const key = shared ? 'shared' : 'owned';
   if (!applied.has(key)) {
-    const base = JSON.parse(
-      readFileSync(resolve('apps/web/release/app.authored.json'), 'utf8'),
-    ) as Record<string, unknown>;
+    const base = withoutDocumentPosting(
+      JSON.parse(
+        readFileSync(resolve('apps/web/release/app.authored.json'), 'utf8'),
+      ) as Record<string, unknown>,
+    );
     const result = customization.applyCustomizationPatches(
       base,
       [
@@ -232,9 +235,11 @@ export function patchedAuthored(shared = false): Authored {
  */
 export function variantAuthored(extraLineFields: readonly unknown[]): Authored {
   patchedAuthored();
-  const base = JSON.parse(
-    readFileSync(resolve('apps/web/release/app.authored.json'), 'utf8'),
-  ) as Record<string, unknown>;
+  const base = withoutDocumentPosting(
+    JSON.parse(
+      readFileSync(resolve('apps/web/release/app.authored.json'), 'utf8'),
+    ) as Record<string, unknown>,
+  );
   const result = customization.applyCustomizationPatches(
     base,
     [

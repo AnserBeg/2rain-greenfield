@@ -23,6 +23,10 @@ const invoiceLines = child(
 );
 const billLines = child('vendor_bill_line', 'vendor_bill_line_bill');
 const countLines = child('stock_count_line', 'stock_count_line_session');
+const journalLines = child(
+  'bookkeeping_draft_line',
+  'bookkeeping_draft_line_draft',
+);
 const reads: Record<string, readonly ChildRead[]> = {
   goods_receipt_post: [
     child('goods_receipt_line', 'goods_receipt_line_receipt'),
@@ -73,6 +77,10 @@ const reads: Record<string, readonly ChildRead[]> = {
   bookkeeping_account_put: [],
   // Setting up a chart acts on the company record alone (1a-ii).
   bookkeeping_chart_setup: [],
+  // Posting a staged journal reads its lines (DOCUMENT-POSTING slice 1).
+  bookkeeping_draft_post: [journalLines],
+  bookkeeping_draft_ready: [journalLines],
+  bookkeeping_draft_reopen: [journalLines],
 };
 export function capabilityChildren(operation: string): readonly ChildRead[] {
   const declared = reads[operation];

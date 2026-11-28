@@ -144,6 +144,13 @@ New platform tables in `db/migrations` (number taken at merge per MIGRATION-RULE
   debits equal credits. Each is stricter than the trigger wording and has its own red. Both §6 keys are partial unique
   indexes (posting kinds; operation kinds) with exactly the stated columns and `NULLS NOT DISTINCT`, so one kind's
   null columns never collide on the other kind's key; the partial predicate is part of the unchangeable key shape.
+- **Amended 2026-11-28 (DOCUMENT-POSTING slice 1, design read amendment 8).** A manual or opening entry posted from a
+  staged document stores that document: its header entity as source type ID, its record ID and the header revision the
+  person confirmed. A unique partial index on (company, source type ID, record ID, entry ordinal) for those two kinds
+  is the backstop behind the document's state field (`ledger.documentPosted`): one document makes at most one entry per
+  ordinal. Manual and opening entries made without a document keep a null record ID. Staged amounts are exact decimals
+  (precision 18, scale 4) converted once in SQL to whole minor units; zero, negative and finer-than-minor-unit amounts
+  refuse by name and are never rounded.
 - **Alongside:** posted position per (company, record, rule, role, qualifier, currency, account), held queue, chart,
   map, closed-through date, books-start date and the balance projection (§9).
 
@@ -217,6 +224,11 @@ versions, shown as "waiting on held version n", until cleared. A re-post or free
   put, chart setup; migration 0074) lock, ahead of this order: the grant row FOR UPDATE; the active release pointer FOR
   SHARE; the policy epoch FOR SHARE; the company's legal-entity master row FOR SHARE; then the company row (FOR UPDATE
   for books start only, FOR SHARE otherwise); then account rows in account-code order.
+  **Amended 2026-11-28 (DOCUMENT-POSTING slice 1).** The document post (migration 0077) locks: the grant row
+  FOR UPDATE; the active release pointer FOR SHARE; the policy epoch FOR SHARE; the posted document's header FOR NO KEY
+  UPDATE (which a line writer's parent FOR SHARE conflicts with, so the line set is fixed to commit); the header
+  company's legal-entity master row FOR SHARE; then the journal order above. "The record" before the master row is
+  this section's position; no writer takes a master row and then a document header.
   **Corrected 2026-11-26 (1a-i review, R4):** this order is acyclic only for a transaction that makes ONE writer
   call. "Counter last" holds per call, not per transaction: after entry 1 a transaction holds the counter, and entry
   2's balance (or record) rows can be held by a writer that waits on that counter, so two entries in one transaction

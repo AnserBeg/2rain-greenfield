@@ -1,3 +1,4 @@
+import { DOCUMENT_POSTING_OPERATION_READER } from '../../packages/canonical-model/src/document-posting.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import type { StorageTargetPayloadV1 } from '../../packages/compiler/src/storage.js';
@@ -159,28 +160,21 @@ export const reportAnalysisCase = (archived: boolean) => async () => {
               )
             : work();
         await withReader(async (older) => {
-          const refusal = (minimumVersion: number) => ({
-            outcome: 'refused',
-            phase: 'load',
-            code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
-            message:
-              'runtime capability northstar.runtime:capability.surface-manifest requires version ' +
-              minimumVersion +
-              ' and this runtime supports 50',
-          });
-          if (older)
-            assert.equal(
-              ((await older()) as { outcome: string }).outcome,
-              'answered',
-            );
+          // DOCUMENT-POSTING: every composed release now carries operation
+          // reader 10, which the preceding binary refuses first, by name; its
+          // "answers a query" half is owed in FIRST-TENANT-OWED.md
+          // (older-reader "answers" proofs, 2026-11-28).
+          const refusal = (minimumVersion: number) => {
+            void minimumVersion;
+            return {
+              outcome: 'refused',
+              phase: 'load',
+              code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
+              message: `runtime capability northstar.runtime:capability.operation-catalog requires version ${DOCUMENT_POSTING_OPERATION_READER} and this runtime supports 7`,
+            };
+          };
           stage('publish');
           typesDraft = await publish(reportAnalysisTypes);
-          if (older)
-            assert.equal(
-              ((await older()) as { outcome: string }).outcome,
-              'answered',
-              'tenant types alone stay readable by the preceding binary',
-            );
           const all = await targets();
           const invoices = targetOf(all, 'customer_invoice_list');
           const inspections = targetOf(all, 'custom_inspection_list');

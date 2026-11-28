@@ -1,4 +1,8 @@
 import {
+  DOCUMENT_POSTING_OPERATION_READER,
+  hasDocumentPosting,
+} from '../../canonical-model/src/document-posting.js';
+import {
   lineTotalsReaderFloors,
   LINE_TOTALS_OPERATION_READER,
   ROLLUP_QUERY_READER,
@@ -1082,21 +1086,27 @@ function definitionFromSnapshotRows(
   const openItems = declaresOpenItems(
     declarations.definition as unknown as VersionedNormalizedApplicationPackage,
   );
+  // DOCUMENT-POSTING: the document-posting reader tops the ladder, then the
+  // open-item reader (OPEN-ITEM-1).
+  const documentPosting = hasDocumentPosting(operation.payload);
   if (
-    openItems
-      ? operationFloor !== OPEN_ITEM_OPERATION_READER
-      : lineTotals.operation
-        ? operationFloor !== LINE_TOTALS_OPERATION_READER
-        : templates
-          ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
-          : booking
-            ? operationFloor !== expectedBookingFloor
-            : operationFloor >= BOOKING_OPERATION_READER
+    documentPosting
+      ? operationFloor !== DOCUMENT_POSTING_OPERATION_READER
+      : openItems
+        ? operationFloor !== OPEN_ITEM_OPERATION_READER
+        : lineTotals.operation
+          ? operationFloor !== LINE_TOTALS_OPERATION_READER
+          : templates
+            ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
+            : booking
+              ? operationFloor !== expectedBookingFloor
+              : operationFloor >= BOOKING_OPERATION_READER
   )
     throw malformedProjection(
       'booking operations and the mandatory reader floor disagree',
     );
   const consumesRules =
+    !documentPosting &&
     !openItems &&
     !lineTotals.operation &&
     !booking &&
@@ -1140,7 +1150,8 @@ function definitionFromSnapshotRows(
   const consumesFormula =
     consumesRules ||
     consumesDisplays ||
-    ((templates ||
+    ((documentPosting ||
+      templates ||
       booking ||
       usage ||
       lineTotals.operation ||
@@ -1163,7 +1174,8 @@ function definitionFromSnapshotRows(
         ({ rule }) => rule,
       );
       if (
-        (!templates &&
+        (!documentPosting &&
+          !templates &&
           !booking &&
           !lineTotals.operation &&
           Boolean(rules.length) !== consumesRules) ||

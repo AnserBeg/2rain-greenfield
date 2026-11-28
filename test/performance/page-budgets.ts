@@ -62,20 +62,24 @@ export const PAGE_BUDGETS: Readonly<Record<PageBudgetName, PageBudget>> =
     // CI 44510567072 / job 135513434195 measured both warm loads at
     // 4 transactions, 43 statements, 6 authorization reads, 0 repeats and
     // 50 bindings. The registry-only formatting repair changes no reads.
-    home: budget([4, 43, 6, 0], [0, 0, 0, 50]),
-    'purchase order list': budget([2, 35, 3, 0], [0, 0, 0, 92]),
-    'purchase order detail': budget([2, 38, 3, 0], [0, 0, 0, 95]),
-    'new purchase order': budget([2, 23, 3, 0], [0, 0, 0, 100]),
-    'stock by item': budget([2, 28, 3, 0], [0, 0, 0, 70]),
-    'sales order detail': budget([2, 56, 3, 0], [0, 0, 0, 99]),
+    // DOCUMENT-POSTING slice 1: Books' journal draft and lines add six
+    // surfaces to the composed manifest, so every page parses more surface
+    // bindings (+2 to +6); no statement, transaction or authorization read
+    // changes. Measured by CI 46149784858 (full run on 7f9d7e0a9).
+    home: budget([4, 43, 6, 0], [0, 0, 0, 52]),
+    'purchase order list': budget([2, 35, 3, 0], [0, 0, 0, 98]),
+    'purchase order detail': budget([2, 38, 3, 0], [0, 0, 0, 100]),
+    'new purchase order': budget([2, 23, 3, 0], [0, 0, 0, 106]),
+    'stock by item': budget([2, 28, 3, 0], [0, 0, 0, 76]),
+    'sales order detail': budget([2, 56, 3, 0], [0, 0, 0, 104]),
     // A task step's page shows the day's queues too (orchestrator ruling):
     // their counts are read in the step's snapshot, +5 statements, no
     // transaction (ADR-0071 as amended: a read-only step reads in one).
     // INTERACT-1 slice 2: stock position and location reads add 5 statements,
     // no transactions, authorization reads or repeats. Measured by CI
     // 44426260000 / job 135231781159 on the same warm fixture.
-    'task: open': budget([2, 46, 3, 0], [0, 0, 0, 75]),
-    'task: review': budget([2, 46, 3, 0], [0, 0, 0, 75]),
+    'task: open': budget([2, 46, 3, 0], [0, 0, 0, 78]),
+    'task: review': budget([2, 46, 3, 0], [0, 0, 0, 78]),
     // Raised once, by the security fix round (S1, orchestrator-ruled): every
     // decision on Confirm's write path is now read live in its own transaction.
     // Then +5 statements: its page's queues, read after the posting in its
@@ -85,7 +89,7 @@ export const PAGE_BUDGETS: Readonly<Record<PageBudgetName, PageBudget>> =
     // occurrence (+2), and the posting kernel records its companion
     // transaction and line (+2), for the per-record occurrence writer
     // (ADR-0073 A1 owner ruling). Measured by CI 45624214462 and 45637187547.
-    'task: confirm': budget([21, 299, 17, 17], [0, 0, 0, 75]),
+    'task: confirm': budget([21, 299, 17, 17], [0, 0, 0, 78]),
   });
 
 /**

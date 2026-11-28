@@ -1415,6 +1415,8 @@ test('the composed application carries the Purchasing and Sales machines', () =>
   assert.deepEqual(
     composed.stateMachines.map((machine) => machine.machineId),
     [
+      // Books' journal draft (DOCUMENT-POSTING slice 1); normalized order.
+      'northstar.app:machine.bookkeeping_draft_lifecycle',
       'northstar.app:machine.purchase_order_lifecycle',
       'northstar.app:machine.sales_order_lifecycle',
     ],
