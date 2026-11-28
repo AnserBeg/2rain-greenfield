@@ -438,7 +438,8 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // Inventory value List. APPROVALS: approvals and settings join Purchasing.
   // SALES-EXTRAS: the Price lists join the masters, and Counter sales
   // joins Sales beside its orders (INTEGRATION, decision I-M8(a)).
-  assert.equal(navigationSurfaceIds(grouped.entries).length, 25);
+  // DOCUMENT-POSTING: Books' Journal drafts list.
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 26);
   // Business destinations lead; supporting masters share the overflow entry.
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),
