@@ -21,11 +21,23 @@ import test from 'node:test';
 import { workflowTransitionTargets } from '../../packages/compiler/src/workflows.js';
 import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 
-const UPDATE = /UPDATE\s+(?:north_star_module\.|\$\{)/gu;
+const UPDATE = /UPDATE\s+(?:north_star_module\.|\$\{)/giu;
+/**
+ * An upsert of a managed table writes columns as an UPDATE does (s1 review
+ * finding 1): `INSERT INTO <managed> ... ON CONFLICT ... DO UPDATE SET`,
+ * within one SQL template.
+ */
+const UPSERT =
+  /INSERT\s+INTO\s+(?:north_star_module\.|\$\{)[^`;]*?ON\s+CONFLICT\b[^`;]*?DO\s+UPDATE\s+SET/giu;
+/** A machine's derived state field named in source (s1 review finding 2). */
+const MACHINE_LITERAL =
+  /derived_state_field\.machine\.(?:([a-z][a-z0-9_]*)|\$\{spec\.entities\.order\}_lifecycle)/gu;
 const SQL_UPDATE = /UPDATE\s+(?:north_star_module\.|%I|%s|%\d\$I)/gu;
 
 interface StateWriter {
   readonly updates: number;
+  /** Upserts (`ON CONFLICT ... DO UPDATE SET`) of a managed table. */
+  readonly upserts?: number;
   /** Local names of the machines whose state column this file writes. */
   readonly machines?: readonly string[];
   /** The generic transition writer: it names each move it makes. */
@@ -61,9 +73,10 @@ export const RECORD_STATE_WRITERS: Readonly<Record<string, StateWriter>> =
     },
     'packages/postgres-provider/src/fulfillment-lifecycle.ts': {
       updates: 4,
+      upserts: 1,
       machines: ['sales_order_lifecycle'],
       reason:
-        'Close and cancel of a sales order; the other three write reservation_state, a choice field.',
+        'Close and cancel of a sales order; the other three write reservation_state, a choice field; the upsert writes a fulfilment balance projection.',
     },
     'packages/postgres-provider/src/settlement-capability-executor.ts': {
       updates: 1,
@@ -73,8 +86,9 @@ export const RECORD_STATE_WRITERS: Readonly<Record<string, StateWriter>> =
     },
     'packages/postgres-provider/src/inventory-posting-service.ts': {
       updates: 6,
+      upserts: 2,
       reason:
-        'Receipt, shipment, reservation, stock count and transaction state are choice fields, not machine state; the sales order machine is only read (assertReleasedSalesOrder).',
+        'Receipt, shipment, reservation, stock count and transaction state are choice fields, not machine state; the sales order machine is only read (assertReleasedSalesOrder); the upserts write shipped-progress and balance projections.',
     },
     'packages/postgres-provider/src/stock-count-route.ts': {
       updates: 2,
@@ -86,17 +100,28 @@ export const RECORD_STATE_WRITERS: Readonly<Record<string, StateWriter>> =
     },
     'packages/postgres-provider/src/fulfillment-projections.ts': {
       updates: 1,
-      reason: 'Archives a fulfilment progress projection row.',
+      upserts: 1,
+      reason:
+        'Archives a fulfilment progress projection row; the upsert writes that projection.',
     },
     'packages/postgres-provider/src/received-quantity-projection.ts': {
       updates: 1,
-      reason: 'Archives a received-quantity projection row.',
+      upserts: 1,
+      reason:
+        'Archives a received-quantity projection row; the upsert writes that projection.',
+    },
+    'packages/postgres-provider/src/goods-receipt.ts': {
+      updates: 0,
+      upserts: 1,
+      reason:
+        'The upsert (goods-receipt.ts ~536) writes a received quantity and unit on the received-progress projection; the purchase order machine is only read (released check).',
     },
     'packages/postgres-provider/src/module-storage-materializer.ts': {
       updates: 2,
+      upserts: 1,
       initialStateBackfill: true,
       reason:
-        'Storage backfill fills only NULL cells of a new column (a new machine starts at its initial state, which is no declared transition) and archives a balance projection row, outside any governed command.',
+        'Storage backfill fills only NULL cells of a new column (a new machine starts at its initial state, which is no declared transition) and archives and rebuilds a balance projection row, outside any governed command.',
     },
   });
 
@@ -124,30 +149,65 @@ const authored = JSON.parse(
   }[];
 };
 
-test('every UPDATE of a managed table is classified by the machines it moves', () => {
-  const found: Record<string, number> = {};
-  for (const path of sources('packages')) {
-    const count = readFileSync(path, 'utf8').match(UPDATE)?.length ?? 0;
-    if (count) found[path.replaceAll('\\', '/')] = count;
+/** Settlement builds its machine from spec.entities.order: every family. */
+function settlementFamilies(): string[] {
+  return ['receivables', 'payables'].map((family) => {
+    const order = /order: '([a-z_]+)'/u.exec(
+      readFileSync(
+        `packages/postgres-provider/src/${family}-capability-executor.ts`,
+        'utf8',
+      ),
+    )?.[1];
+    assert.ok(order, `${family} names its order entity`);
+    return `${order}_lifecycle`;
+  });
+}
+
+/** The machines whose derived state field a source file names. */
+function namedMachines(text: string): string[] {
+  const found = new Set<string>();
+  for (const match of text.matchAll(MACHINE_LITERAL))
+    for (const machine of match[1] ? [match[1]] : settlementFamilies())
+      found.add(machine);
+  return [...found].sort();
+}
+
+test('every UPDATE or upsert of a managed table is classified by the machines it moves', () => {
+  const found: Record<string, [number, number]> = {};
+  for (const path of [...sources('packages'), ...sources('apps')]) {
+    const text = readFileSync(path, 'utf8');
+    const counts: [number, number] = [
+      text.match(UPDATE)?.length ?? 0,
+      text.match(UPSERT)?.length ?? 0,
+    ];
+    if (counts[0] || counts[1]) found[path.replaceAll('\\', '/')] = counts;
   }
   assert.deepEqual(
     Object.fromEntries(Object.entries(found).sort()),
     Object.fromEntries(
       Object.entries(RECORD_STATE_WRITERS)
-        .map(([path, writer]) => [path, writer.updates] as const)
+        .map(
+          ([path, writer]) =>
+            [path, [writer.updates, writer.upserts ?? 0]] as const,
+        )
         .sort(),
     ),
-    'a managed-table UPDATE was added or removed: classify it in RECORD_STATE_WRITERS',
+    'a managed-table UPDATE or upsert was added or removed: classify it in RECORD_STATE_WRITERS',
   );
   for (const [path, writer] of Object.entries(RECORD_STATE_WRITERS)) {
     assert.ok(writer.reason, `${path} says what its UPDATEs write`);
+    const named = namedMachines(readFileSync(path, 'utf8'));
+    // The machines a writer moves are derived from the state fields it names,
+    // so a listed writer that starts naming a second machine reds here.
+    if (writer.machines)
+      assert.deepEqual(
+        named,
+        [...writer.machines].sort(),
+        `${path} names the state fields of exactly the machines it lists`,
+      );
     // A file that names a machine state field and is not listed as moving
     // one must say why it only reads it.
-    if (
-      !writer.machines &&
-      !writer.names &&
-      readFileSync(path, 'utf8').includes('derived_state_field')
-    )
+    else if (!writer.names && named.length)
       assert.match(
         writer.reason,
         /only read/u,
