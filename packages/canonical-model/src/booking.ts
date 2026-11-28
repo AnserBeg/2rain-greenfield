@@ -351,14 +351,17 @@ export function bookingCatalogTerms(value: unknown): [unknown, unknown][] {
 export function truncateBookingInstant(value: string) {
   return new Date(value.replace(/(\.\d{3})\d+/u, '$1')).toISOString();
 }
-const effectiveInstant = z.iso
-  .datetime({ offset: true })
-  .transform(truncateBookingInstant);
+const bookingInstant = z.iso.datetime({ offset: true });
+/** Validates a Booking instant, then truncates it. Canonical contracts only
+ * validate (no schema transform), so the truncation is an explicit step. */
+function effectiveInstant(value: unknown) {
+  return truncateBookingInstant(bookingInstant.parse(value));
+}
 const ownerUsage = z.object({
   schemaVersion: z.literal('booking.ownerUsage/v1'),
   ownerRef: z.object({ entityId: z.string(), recordId: z.string() }),
   ownerScope: z.object({ kind: z.literal('company'), companyId: z.string() }),
-  asOf: effectiveInstant,
+  asOf: bookingInstant,
   cursor: z.string().regex(/^(0|[1-9]\d*)$/u),
   highWater: z.string(),
   hasMore: z.literal(false),
@@ -398,14 +401,14 @@ export function bookingServiceUse(value: unknown): ServiceUseSnapshot {
   const span = (r: (typeof usage.evidence)[number]) => ({
     id: r.id,
     revision: String(r.revision),
-    start: effectiveInstant.parse(r.effectiveStart),
+    start: effectiveInstant(r.effectiveStart),
     end:
-      r.effectiveEnd === null ? null : effectiveInstant.parse(r.effectiveEnd),
+      r.effectiveEnd === null ? null : effectiveInstant(r.effectiveEnd),
   });
   return {
     schemaVersion: SERVICE_USE_SNAPSHOT_VERSION,
     owner: { ...usage.ownerRef, companyId: usage.ownerScope.companyId },
-    asOf: usage.asOf,
+    asOf: effectiveInstant(usage.asOf),
     cursor: usage.cursor,
     complete: usage.cursor === usage.highWater,
     engagements: usage.bookings.map((b) => ({

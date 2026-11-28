@@ -42,8 +42,8 @@
       "name": "billing-booking-microseconds",
       "claim": "Booking hands Billing its microsecond instants through the service-use protocol truncated to the millisecond.",
       "file": "packages/canonical-model/src/booking.ts",
-      "original": "  .transform(truncateBookingInstant);",
-      "replacement": "  .refine((s) => !/\\.\\d{3}\\d*[1-9]/u.test(s), 'Booking time exceeds the Billing precision')\n  .transform(truncateBookingInstant);",
+      "original": "  return truncateBookingInstant(bookingInstant.parse(value));",
+      "replacement": "  const text = bookingInstant.parse(value);\n  if (/\\.\\d{3}\\d*[1-9]/u.test(text))\n    throw new Error('Booking time exceeds the Billing precision');\n  return truncateBookingInstant(text);",
       "test": {
         "files": ["test/integration/billing-booking-possession.test.ts"],
         "namePattern": "^Booking microsecond instants truncate toward the past to the Billing millisecond$"
