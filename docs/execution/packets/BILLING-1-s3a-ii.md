@@ -3,7 +3,7 @@
 Status: built on packet/BILLING-1-s3a-ii (base main 63826f6c0). Tier: **Critical** (money; rule 18), build mode (rule 24). Stops: none. No migration.
 Design: note `notes/BILLING-1-s3a-ii` (bbf546e1) and its Mythos design read (APPROVE WITH AMENDMENTS 1-11). This record covers ONLY the read's THIN FIRST SLICE (s3a-ii-a). Not built: (b) the minimum charge from the agreed start, (c) percent discount, (d) percentage component, (e) time in advance, (f) amount discount.
 Rung: surface reader 55 provisional (`BILLING_TIMING_READER`) and calculation v5; the integrator renumbers (WORKFLOW-3 s1 also holds a provisional 54). Rule 21(c): no preceding-binary proof; listed in FIRST-TENANT-OWED.md.
-CI tier: pending full
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/46150749521
 
 ## Claims
 1. `timing {when: advance | arrears, earlyEnd?: keepPaidPeriod | prorateAndRefund}` on `time` and recurring `fixed` components. Absent = arrears, so v2-v4 bytes, digests and calculations are unchanged (no normalization default). Any timing key selects calculation v5 and reader 55; v5 also rates the v4 rule keys.
