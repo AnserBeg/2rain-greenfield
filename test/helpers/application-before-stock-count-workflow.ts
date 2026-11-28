@@ -62,11 +62,26 @@ function withoutBooks(authored: Record<string, unknown>) {
     module?: { targetId: string };
     permission?: { targetId: string };
     effect?: { capability?: { targetId: string } };
+    entity?: { targetId: string };
   };
-  const operations = authored.operations as Entry[];
-  const removed = operations.filter((operation) =>
-    operation.module?.targetId.endsWith(books),
+  const list = (key: string) => (authored[key] as Entry[] | undefined) ?? [];
+  const ofBooks = (entry: Entry) =>
+    entry.module?.targetId.endsWith(books) ?? false;
+  const operations = list('operations');
+  const removed = operations.filter(ofBooks);
+  // DOCUMENT-POSTING: Books also declares the journal draft and its lines.
+  const entities = new Set(
+    list('entities')
+      .filter(ofBooks)
+      .map((entity) => entity.entityId as string),
   );
+  const queries = new Set(
+    list('queries')
+      .filter(ofBooks)
+      .map((query) => query.queryId as string),
+  );
+  const inEntity = (entry: Entry) =>
+    entry.entity !== undefined && entities.has(entry.entity.targetId);
   const permissions = new Set(removed.map((o) => o.permission?.targetId));
   const capabilities = new Set(
     removed.map((o) => o.effect?.capability?.targetId),
@@ -79,21 +94,54 @@ function withoutBooks(authored: Record<string, unknown>) {
   );
   return {
     ...authored,
-    capabilityRequirements: (authored.capabilityRequirements as Entry[]).filter(
+    assertions: list('assertions').filter(
+      (assertion) =>
+        !queries.has(
+          String(
+            (assertion.invocation as { query?: { targetId?: string } })?.query
+              ?.targetId,
+          ),
+        ),
+    ),
+    capabilityRequirements: list('capabilityRequirements').filter(
       (requirement) => !capabilities.has(requirement.capabilityId as string),
     ),
-    modules: (authored.modules as Entry[]).filter(
+    entities: list('entities').filter((entity) => !ofBooks(entity)),
+    fields: list('fields').filter((field) => !inEntity(field)),
+    modules: list('modules').filter(
       (module) => !String(module.moduleId).endsWith(books),
     ),
     operations: operations.filter((operation) => !removed.includes(operation)),
-    permissions: (authored.permissions as Entry[]).filter(
-      (permission) => !permissions.has(permission.permissionId as string),
+    permissions: list('permissions').filter(
+      (permission) =>
+        !permissions.has(permission.permissionId as string) &&
+        !entities.has(
+          String((permission.resource as { targetId?: string })?.targetId),
+        ),
     ),
-    surfaces: (authored.surfaces as Entry[]).map((surface) =>
-      JSON.stringify(surface).includes(':operation.bookkeeping_')
-        ? archivedSurfaces.get(surface.surfaceId)!
-        : surface,
+    queries: list('queries').filter((query) => !ofBooks(query)),
+    relations: list('relations').filter(
+      (relation) =>
+        !entities.has(
+          String((relation.sourceEntity as { targetId?: string })?.targetId),
+        ) &&
+        !entities.has(
+          String((relation.targetEntity as { targetId?: string })?.targetId),
+        ),
     ),
+    stateMachines: list('stateMachines').filter(
+      (machine) => !inEntity(machine),
+    ),
+    storageMappings: list('storageMappings').filter(
+      (mapping) => !inEntity(mapping),
+    ),
+    surfaces: list('surfaces')
+      .filter((surface) => !ofBooks(surface))
+      .map((surface) =>
+        JSON.stringify(surface).includes(':operation.bookkeeping_')
+          ? archivedSurfaces.get(surface.surfaceId)!
+          : surface,
+      ),
   };
 }
 

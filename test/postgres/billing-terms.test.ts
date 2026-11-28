@@ -68,7 +68,6 @@ import {
   compiledApplication,
 } from '../helpers/customization-fixture.js';
 import { withOrderEntryFixture } from '../helpers/order-entry-fixture.js';
-import { DECLARED_REPORT_READER } from '../../packages/canonical-model/src/declared-report.js';
 import { truncateBookingInstant } from '../../packages/canonical-model/src/booking.js';
 import type { ImmutableJsonValue } from '../../packages/runtime/src/request-runtime-view.js';
 import {
@@ -77,6 +76,7 @@ import {
   archivedBillingMigration,
   archivedBillingQuery,
 } from '../helpers/archived-billing-probes.js';
+import { DOCUMENT_POSTING_OPERATION_READER } from '../../packages/canonical-model/src/document-posting.js';
 
 const id = (name: string) => 'northstar.app:' + name;
 const ref = (kind: string, targetId: string) => ({
@@ -1830,7 +1830,8 @@ test('a period meter reviews the first earned cycle through its company-scoped g
         assert.deepEqual(await probeArchivedBilling(run, f), {
           outcome: 'refused',
           code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
-          message: `runtime capability northstar.runtime:capability.surface-manifest requires version ${BILLING_ARREARS_READER} and this runtime supports ${DECLARED_REPORT_READER}`,
+          // DOCUMENT-POSTING: operation reader 9 is refused first, by name.
+          message: `runtime capability northstar.runtime:capability.operation-catalog requires version ${DOCUMENT_POSTING_OPERATION_READER} and this runtime supports 6`,
         });
       });
     },

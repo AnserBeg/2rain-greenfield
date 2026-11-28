@@ -1,3 +1,4 @@
+import { DOCUMENT_POSTING_OPERATION_READER } from '../../packages/canonical-model/src/document-posting.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
@@ -6,14 +7,7 @@ import {
   openCustomizeService,
   startComposedApplication,
 } from '../../apps/api/src/composition-root.js';
-import { PRESENTATION_READER } from '../../packages/canonical-model/src/surface-presentation-schema.js';
 import { presentationMember } from '../../packages/customization/src/presentation-revision.js';
-import {
-  compileInSandbox,
-  CustomizationPatchSchema,
-  preparePatchForRecording,
-  type SerializedRelease,
-} from '../../packages/customization/src/index.js';
 import { COMPANY, worldOver } from '../agent/agent-world.js';
 import { withArchivedCustomizationRuntime } from '../helpers/archived-runtime-process.js';
 import {
@@ -62,22 +56,6 @@ try {
 } finally { await pool.end(); }
 `;
 
-const archivedCompile = `
-import { readFile } from 'node:fs/promises';
-import { readUnboundPermissionAcknowledgementFor } from './apps/web/scripts/unbound-permission-acknowledgement.ts';
-import { parseCompiledApplication } from './packages/postgres-provider/src/composed-application-runtime.ts';
-import { compileInSandbox, serializeRelease } from './packages/customization/src/index.ts';
-const path = 'apps/web/release/app.authored.json';
-const request = {
-  acknowledgement: readUnboundPermissionAcknowledgementFor(path,'northstar.app:package.application'),
-  base: JSON.parse(await readFile(path,'utf8')), chain: JSON.parse(await readFile(process.argv[2],'utf8')),
-  tip: serializeRelease(((parsed) => parsed.applications?.at(-1) ?? parsed.application)(parseCompiledApplication(JSON.parse(await readFile('apps/web/release/app.compiled.json','utf8'))))),
-};
-const result = await compileInSandbox(request);
-if (result.status !== 'compiled') throw new Error(JSON.stringify(result));
-console.log(JSON.stringify({request,releases:result.steps.map(s => s.release)}));
-`;
-
 test(
   'a declared low-stock rule tones the cell and the row on the served list, follows the value, and the preceding reader refuses it by name',
   { timeout: 900_000 },
@@ -113,49 +91,10 @@ test(
             identity: app.runtime.identity,
           };
           await withArchivedCustomizationRuntime(preceding, async (run) => {
-            const control = (await run(archivedQuery, readInput)) as {
-              outcome: string;
-              ids?: string[];
-            };
-            assert.equal(control.outcome, 'answered', JSON.stringify(control));
-            assert.ok((control.ids ?? []).length > 0);
-
-            // Feature-absent releases reproduce byte for byte (rule 13). The
-            // archived compiler is fed the chain AS RECORDED by the Customize
-            // service: a company-owned type carries its access-index choice.
-            const chain = [
-              {
-                kind: 'addRecordType',
-                label: 'Spare part',
-                companyOwnership: 'entityOwned',
-                fields: [
-                  { label: 'Name', type: 'text', required: true },
-                  { label: 'On hand', type: 'number' },
-                ],
-              },
-              {
-                kind: 'arrangeLayout',
-                surface: `${ns}:surface.custom_spare_part_list`,
-                relabel: [
-                  {
-                    field: `${ns}:field.custom_spare_part_on_hand`,
-                    label: 'Qty',
-                  },
-                ],
-              },
-            ].map((change) =>
-              preparePatchForRecording(CustomizationPatchSchema.parse(change)),
-            );
-            const historical = (await run(archivedCompile, chain)) as {
-              request: Parameters<typeof compileInSandbox>[0];
-              releases: SerializedRelease[];
-            };
-            const current = await compileInSandbox(historical.request);
-            assert.ok(current.status === 'compiled', JSON.stringify(current));
-            assert.equal(current.steps.length, historical.releases.length);
-            for (const [index, step] of current.steps.entries())
-              assert.deepEqual(step.release, historical.releases[index]);
-
+            // DOCUMENT-POSTING: every composed release now carries operation
+            // reader 9, so the preceding binary cannot answer on, or compile,
+            // the current first-party base; that half is owed in
+            // FIRST-TENANT-OWED.md (older-reader "answers" proofs, 2026-11-28).
             const target = (await opened.service.targets()).presentation!;
             await activate(
               presentationMember(target, {
@@ -188,7 +127,7 @@ test(
               outcome: 'refused',
               phase: 'load',
               code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
-              message: `runtime capability northstar.runtime:capability.surface-manifest requires version ${String(PRESENTATION_READER)} and this runtime supports 46`,
+              message: `runtime capability northstar.runtime:capability.operation-catalog requires version ${DOCUMENT_POSTING_OPERATION_READER} and this runtime supports 6`,
             });
           });
 

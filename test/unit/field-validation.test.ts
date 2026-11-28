@@ -22,6 +22,7 @@ import {
   VALIDATION_NODE_VERSION,
 } from '../../packages/canonical-model/src/formula-validation.js';
 import { compilerInput, mustCompile } from '../compiler/helpers.js';
+import { withoutDocumentPosting } from '../helpers/without-document-posting.js';
 
 const entityId = 'northstar.app:entity.location';
 const name = 'northstar.app:field.location_name';
@@ -29,8 +30,10 @@ const code = 'northstar.app:field.location_code';
 const parent = 'northstar.app:relation.location_parent';
 
 test('v6 guards bind existing fields and one declared relation and raise the operation reader floor', () => {
-  const authored = parseVersionedAuthoredApplicationPackageJson(
-    readFileSync('apps/web/release/app.authored.json', 'utf8'),
+  const authored = withoutDocumentPosting(
+    parseVersionedAuthoredApplicationPackageJson(
+      readFileSync('apps/web/release/app.authored.json', 'utf8'),
+    ),
   );
   assert.ok(authored.languageVersion === 'v6');
   const revision = normalizeApplicationPackage(authored);

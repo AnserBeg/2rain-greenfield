@@ -17,7 +17,6 @@ import {
   openCustomizeService,
   startComposedApplication,
 } from '../../apps/api/src/composition-root.js';
-import { OPTIONAL_DEPENDENCY_QUERY_READER } from '../../packages/canonical-model/src/read-model-dependencies.js';
 import type { DocumentMetadata } from '../../packages/runtime/src/document-gateway.js';
 import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../packages/runtime/src/semantic-query-gateway.js';
 import { worldOver, seededId } from '../agent/agent-world.js';
@@ -30,6 +29,7 @@ import {
   LINEAGE_INSTALL_VOLUME,
   withEphemeralPostgres,
 } from '../helpers/postgres.js';
+import { DOCUMENT_POSTING_OPERATION_READER } from '../../packages/canonical-model/src/document-posting.js';
 
 const id = (kind: string, name: string) => `northstar.app:${kind}.${name}`;
 const companyId = COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId;
@@ -316,7 +316,9 @@ test(
                   outcome: 'refused',
                   stage: 'load',
                   code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
-                  message: `runtime capability northstar.runtime:capability.query-catalog requires version ${OPTIONAL_DEPENDENCY_QUERY_READER} and this runtime supports ${OPTIONAL_DEPENDENCY_QUERY_READER - 1}`,
+                  // DOCUMENT-POSTING: the base now carries operation reader 9, which
+                  // the archived binary refuses first, by name.
+                  message: `runtime capability northstar.runtime:capability.operation-catalog requires version ${DOCUMENT_POSTING_OPERATION_READER} and this runtime supports 6`,
                 };
                 assert.deepEqual(await served(), refusal);
                 await service.activate(draft.patchId);

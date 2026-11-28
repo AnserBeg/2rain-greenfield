@@ -1,3 +1,4 @@
+import { DOCUMENT_POSTING_OPERATION_READER } from '../../packages/canonical-model/src/document-posting.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Pool, PoolClient } from 'pg';
@@ -337,12 +338,8 @@ test(
                   outcome: 'refused',
                   phase: 'load',
                   code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
-                  message:
-                    'runtime capability northstar.runtime:capability.surface-manifest requires version ' +
-                    (
-                      await import('../../packages/canonical-model/src/constants.js')
-                    ).REPORT_SOURCE_READER +
-                    ' and this runtime supports 41',
+                  // DOCUMENT-POSTING: operation reader 9 is refused first.
+                  message: `runtime capability northstar.runtime:capability.operation-catalog requires version ${DOCUMENT_POSTING_OPERATION_READER} and this runtime supports 6`,
                 });
                 await assertStoredBytes(pool, app.runtime.activeReleaseId, tip);
               } finally {
@@ -402,6 +399,8 @@ test(
             withArchivedCustomizationRuntime(
               reportsPredecessor,
               async (run) => {
+                // The surface floor is no longer what refuses first.
+                void minimumVersion;
                 const result = await run(archivedQuery, {
                   databaseUrl: options.databaseUrl,
                   identity: app.runtime.identity,
@@ -410,10 +409,9 @@ test(
                   outcome: 'refused',
                   phase: 'load',
                   code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
-                  message:
-                    'runtime capability northstar.runtime:capability.surface-manifest requires version ' +
-                    minimumVersion +
-                    ' and this runtime supports 41',
+                  // DOCUMENT-POSTING: operation reader 9 is refused first,
+                  // whatever surface floor the release also needs.
+                  message: `runtime capability northstar.runtime:capability.operation-catalog requires version ${DOCUMENT_POSTING_OPERATION_READER} and this runtime supports 6`,
                 });
               },
             );

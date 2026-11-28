@@ -439,7 +439,8 @@ test(
                 );
                 assert.match(
                   refused.message ?? '',
-                  /northstar\.runtime:capability\.agent-discovery requires version 5 and this runtime supports 4/u,
+                  // DOCUMENT-POSTING: operation reader 9 is refused first, by name.
+                  /northstar\.runtime:capability\.operation-catalog requires version 9 and this runtime supports 6/u,
                 );
               },
             );
