@@ -209,6 +209,31 @@ export function bindOpenItems(
     operations: new Map(),
     protectedFields: new Map(),
   };
+  // A number assigned at a transition is the number role of an open item
+  // issued across it: without one, nothing would ever issue that number.
+  const declaredItems = declarationsOf(revision).items;
+  for (const field of revision.fields) {
+    const numbering =
+      'numbering' in field
+        ? (field.numbering as
+            { assignOn?: { transitionId: string } } | undefined)
+        : undefined;
+    if (
+      numbering?.assignOn &&
+      !declaredItems.some(
+        (item) =>
+          item.numberFieldId === field.fieldId &&
+          item.issue.transitionId === numbering.assignOn?.transitionId,
+      )
+    )
+      return {
+        status: 'refused',
+        path: '$.fields.numbering',
+        subjectId: field.fieldId,
+        message:
+          'A number assigned at a transition is the number role of an open item issued across it.',
+      };
+  }
   if (!declaresOpenItems(revision)) {
     // An open-item operation with no declaration would reach the core unbound.
     const stray = revision.operations.find(
@@ -391,11 +416,15 @@ export function bindOpenItems(
         );
     }
     const currency = fieldOf(item.entityId, item.currencyFieldId);
-    if (!currency || currency.fieldType.kind !== 'textFieldType')
+    if (
+      !currency ||
+      currency.fieldType.kind !== 'textFieldType' ||
+      currency.presence !== 'required'
+    )
       return refuse(
         path,
         item.currencyFieldId,
-        "The currency role is a text field of the open item's record type.",
+        "The currency role is a required text field of the open item's record type.",
       );
     if (!createOnly.has(item.currencyFieldId))
       return refuse(
@@ -607,23 +636,6 @@ export function bindOpenItems(
       bindingVersion: 'openItem.issue/v1',
       item: binding,
     });
-  }
-  // A number assigned at a transition is assigned by an open-item issue.
-  for (const field of v6.fields) {
-    const numbering = numberingOf(field);
-    if (
-      numbering?.assignOn &&
-      !items.some(
-        (item) =>
-          item.numberFieldId === field.fieldId &&
-          item.issue.transitionId === numbering.assignOn?.transitionId,
-      )
-    )
-      return refuse(
-        '$.fields.numbering',
-        field.fieldId,
-        'A number assigned at a transition is the number role of an open item issued across it.',
-      );
   }
 
   const applicationEntities = new Set<string>();

@@ -35,6 +35,7 @@ import {
   auditFieldId,
   withModuleRuntimeRole,
 } from './module-runtime-interpreter.js';
+import { currentPolicyVersionOf } from './current-policy.js';
 import { recordCreations } from './record-creation-occurrences.js';
 import { withTrustedRequestTransaction } from './request-context.js';
 import { PostgresTrustService } from './trust/postgres-trust-service.js';
@@ -446,6 +447,18 @@ class OpenItemCapabilityExecutor implements RegisteredCapabilityOperationExecuto
         const invocationId = consumed.rows[0]?.invocation;
         if (typeof invocationId !== 'string' || !UUID.test(invocationId))
           throw new Error('open-item grant consumption returned no invocation');
+        // The policy the gateway decided under still holds: its epoch row is
+        // held FOR SHARE to commit, so a revoked permission or membership
+        // waits behind this write or refuses it.
+        const epoch = await client.query<{ policy_version: string }>(
+          'SELECT platform.lock_current_policy_epoch($1,$2) AS policy_version',
+          [request.context.tenantId, request.context.environmentId],
+        );
+        if (
+          currentPolicyVersionOf(epoch.rows[0]?.policy_version) !==
+          request.policyVersion
+        )
+          return refused('openItem.policyChanged');
         const applied =
           binding.bindingVersion === 'openItem.issue/v1'
             ? await this.#issue(client, request, prepared, binding, grant)
@@ -815,6 +828,16 @@ class OpenItemCapabilityExecutor implements RegisteredCapabilityOperationExecuto
         String(row[unquote(item.counterparty)]);
       if (partyOf(source, sourceRow) !== counterparty)
         return refused('openItem.recordChanged');
+      // Amendment 4 at run time too: one direction, credit to debit.
+      if (
+        binding.source.direction !== binding.target.direction ||
+        binding.source.side !== 'credit' ||
+        binding.target.side !== 'debit'
+      )
+        return refused('openItem.directionMismatch');
+      const sourceCurrency = currencyOf(source, sourceRow);
+      if (typeof sourceCurrency !== 'string' || sourceCurrency === '')
+        return refused('openItem.currencyMissing');
       const figure = (item: ItemStorage, row: Row, fieldId: string) => {
         const value = units(row[unquote(item.column(fieldId))] ?? null, scale);
         if (value === null) return refused('openItem.figureMissing');

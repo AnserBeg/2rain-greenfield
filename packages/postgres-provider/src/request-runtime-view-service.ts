@@ -1097,6 +1097,7 @@ function definitionFromSnapshotRows(
       'booking operations and the mandatory reader floor disagree',
     );
   const consumesRules =
+    !openItems &&
     !lineTotals.operation &&
     !booking &&
     !templates &&

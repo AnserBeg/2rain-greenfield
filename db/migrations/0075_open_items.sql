@@ -95,6 +95,10 @@ CREATE FUNCTION platform.open_item_consume_grant(grant_key uuid, capability text
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE g platform.open_item_approval_grants; invocation uuid := gen_random_uuid();
   tenant uuid := north_star_internal.trusted_tenant_id(); environment uuid := north_star_internal.trusted_environment_id(); BEGIN
+  -- The line freeze reads the lines after the header lock; only READ
+  -- COMMITTED re-reads what a line writer committed before that lock.
+  IF current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'openItem.isolationUnsupported'; END IF;
   SELECT * INTO g FROM platform.open_item_approval_grants a
     WHERE (a.tenant_id, a.environment_id, a.grant_id) = (tenant, environment, grant_key) FOR UPDATE;
   IF NOT FOUND
