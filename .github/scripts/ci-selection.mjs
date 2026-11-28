@@ -33,11 +33,42 @@ export const sourceCoverage = new Map([
   ],
 ]);
 
-// Documents read by tests outside the fixed quick suites. Unit, compiler and
-// architecture already run on every quick tier.
+// Documents read by tests outside the fixed quick suites. Architecture runs
+// whole on every quick tier. Unit and compiler run whole too, except on a
+// docs-only pull request (CI-10), so every unit or compiler reader of a
+// Markdown document is listed here; ci-tiers.test.ts refuses an unlisted one.
 export const documentReaders = [
   ['docs/decisions/', ['test/integration/trust-substrate.test.ts']],
+  [
+    'docs/decisions/ADR-0032-feedback-ladder-and-loading-states.md',
+    ['test/unit/observability.test.ts'],
+  ],
+  [
+    'docs/greenfield-north-star-erp-platform-plan.md',
+    ['test/unit/observability.test.ts'],
+  ],
 ];
+
+// CI-10: a pull request that adds or edits only Markdown documents skips the
+// unit, compiler, lint, typecheck and build steps and scans only its own
+// commits for secrets. Main pushes never take this path, so main still runs
+// every fixed suite over each docs change.
+export const documentPath = (path) =>
+  /^docs\/(?:[\w.-]+\/)*[\w.-]+\.md$/u.test(path) ||
+  ['README.md', 'learnings.md'].includes(path);
+export function docsOnlyChanges(changes) {
+  return (
+    changes.length > 0 &&
+    changes.every(
+      ({ path, status }) => ['A', 'M'].includes(status) && documentPath(path),
+    )
+  );
+}
+export function docsFastPath({ mainPush, forced, plan, changes }) {
+  return (
+    !mainPush && !forced && plan.tier === 'quick' && docsOnlyChanges(changes)
+  );
+}
 
 const shared =
   /(?:^|\/)(?:package\.json|pnpm-lock\.yaml|fixtures?|helpers?|[^/]*[-.]fixture(?:\.[^/]*)?)(?:\/|$)|^(?:\.github|db|scripts|packages\/(?:canonical-model|compiler|runtime))\//u;
@@ -195,7 +226,7 @@ function selectMainPush(event, head) {
   return { tier: 'quick', files: [...files].sort() };
 }
 
-export function selectRange(base, tip, packetRef = false) {
+export function rangeChanges(base, tip) {
   const fields = git(
     'diff',
     '--no-renames',
@@ -207,6 +238,11 @@ export function selectRange(base, tip, packetRef = false) {
   const changes = [];
   for (let i = 0; i < fields.length - 1; i += 2)
     changes.push({ status: fields[i], path: fields[i + 1] });
+  return changes;
+}
+
+export function selectRange(base, tip, packetRef = false) {
+  const changes = rangeChanges(base, tip);
   const plan = selectPaths(changes);
   if (!packetRef && plan.tier === 'quick' && criticalDiff(base, tip))
     return { tier: 'full', reason: 'Critical diff' };
@@ -255,15 +291,25 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       );
     }
   }
+  const base =
+    forced || mainPush
+      ? undefined
+      : (pr?.base.sha ?? git('merge-base', 'origin/main', head).trim());
   const plan = forced
     ? { tier: 'full', reason: 'full requested' }
     : mainPush
       ? selectMainPush(event, head)
       : selectRange(
-          pr?.base.sha ?? git('merge-base', 'origin/main', head).trim(),
+          base,
           head,
           (pr?.head.ref ?? process.env.GITHUB_REF_NAME)?.startsWith('packet/'),
         );
+  const docs = docsFastPath({
+    mainPush,
+    forced,
+    plan,
+    changes: base ? rangeChanges(base, head) : [],
+  });
   const promote = !mainPush && !forced && plan.tier === 'full';
   // A lane opened before CI-3 may still have CI-2 on its head. Dispatch
   // from the parent that supplies the workflow GitHub actually selected.
@@ -284,13 +330,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     dispatchHead = parent.sha;
   }
   const files = plan.files ?? [];
-  console.log(JSON.stringify({ ...plan, head, promote }));
+  console.log(JSON.stringify({ ...plan, head, promote, docs }));
   appendFileSync(
     process.env.GITHUB_OUTPUT,
-    `ref=${dispatchRef}\nhead=${dispatchHead}\ntier=${plan.tier}\npromote=${Boolean(promote)}\nfiles=${JSON.stringify(files)}\nbrowser=${files.some((path) => browserFile.test(path))}\n`,
+    `ref=${dispatchRef}\nhead=${dispatchHead}\ntier=${plan.tier}\npromote=${Boolean(promote)}\nfiles=${JSON.stringify(files)}\nbrowser=${files.some((path) => browserFile.test(path))}\ndocs=${docs}\nbase=${base ?? ''}\n`,
   );
   appendFileSync(
     process.env.GITHUB_STEP_SUMMARY,
-    `CI **${plan.tier}** at \`${head}\`\n\n${JSON.stringify(plan)}\n`,
+    `CI **${plan.tier}**${docs ? ' (docs only)' : ''} at \`${head}\`\n\n${JSON.stringify(plan)}\n`,
   );
 }

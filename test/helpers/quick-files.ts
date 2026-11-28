@@ -1,8 +1,12 @@
 export const contractFile = 'apps/web/test/surface-runtime-contract.test.ts';
-export function fixedQuickFile(path: string): boolean {
+// CI-10: a docs-only pull request runs architecture as its only fixed suite.
+export const docsOnlyRun = () => process.env.CI_DOCS === 'true';
+export function fixedQuickFile(path: string, docs = docsOnlyRun()): boolean {
   return (
-    /^test\/(?:architecture|compiler|unit)\//u.test(path) &&
-    path !== 'test/compiler/performance-budget.test.ts'
+    (docs
+      ? /^test\/architecture\//u
+      : /^test\/(?:architecture|compiler|unit)\//u
+    ).test(path) && path !== 'test/compiler/performance-budget.test.ts'
   );
 }
 export function quickFiles() {

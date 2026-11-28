@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdtempSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -597,4 +598,154 @@ test('main pushes run in parallel per commit while packet refs cancel superseded
     cancel: 'true',
   });
   assert.equal(policy(main, 'b', promoted).group, 'ci-CI-pr-7-auto');
+});
+
+test('CI-10: only a docs-only pull request takes the docs fast path', () => {
+  const plan = { tier: 'quick' };
+  const docs = [
+    { status: 'M', path: 'docs/greenfield-north-star-erp-platform-plan.md' },
+    { status: 'A', path: 'docs/execution/packets/X-1.md' },
+    { status: 'M', path: 'README.md' },
+  ];
+  const fast = (changes: unknown, extra = {}) =>
+    probe(
+      selector,
+      `m.docsFastPath(${JSON.stringify({ mainPush: false, forced: false, plan, changes, ...extra })})`,
+    );
+  assert.equal(fast(docs), true);
+  // Main pushes stay the safety net: every fixed suite runs over docs there.
+  assert.equal(
+    fast(docs, { mainPush: true }),
+    false,
+    'a main push never takes the docs fast path',
+  );
+  assert.equal(fast(docs, { forced: true }), false);
+  assert.equal(fast(docs, { plan: { tier: 'full' } }), false);
+  assert.equal(fast([]), false);
+  for (const change of [
+    { status: 'M', path: 'docs/operations/publish-path-breadth-envelope.json' },
+    { status: 'M', path: 'test/unit/observability.test.ts' },
+    { status: 'M', path: 'AGENTS.md' },
+    { status: 'M', path: '.agents/skills/ux-grammar/SKILL.md' },
+    { status: 'D', path: 'docs/execution/ledger.md' },
+  ])
+    assert.equal(fast([...docs, change]), false, change.path);
+});
+
+test('CI-10: every unit or compiler reader of a Markdown document is in documentReaders', () => {
+  const readers = probe(selector, 'm.documentReaders') as [string, string[]][];
+  const literal =
+    /['"`]((?:docs\/(?:[\w.-]+\/)*[\w.-]+|README|learnings)\.md)['"`]/gu;
+  const unlisted: string[] = [];
+  for (const root of ['test/unit', 'test/compiler'])
+    for (const name of readdirSync(root, { recursive: true }) as string[]) {
+      const file = `${root}/${name}`;
+      if (!file.endsWith('.ts')) continue;
+      for (const [, document = ''] of readFileSync(file, 'utf8').matchAll(
+        literal,
+      ))
+        if (
+          !readers.some(
+            ([prefix, tests]) =>
+              document.startsWith(prefix) && tests.includes(file),
+          )
+        )
+          unlisted.push(`${file} reads ${document}`);
+    }
+  assert.deepEqual(unlisted, []);
+});
+
+test('CI-10: a docs-only quick run keeps architecture whole and runs the document readers by name', () => {
+  assert.deepEqual(
+    probe(
+      selector,
+      "m.selectPaths([{status:'M',path:'docs/greenfield-north-star-erp-platform-plan.md'}])",
+    ),
+    { tier: 'quick', files: ['test/unit/observability.test.ts'] },
+  );
+  const old = { files: process.env.CI_FILES, docs: process.env.CI_DOCS };
+  try {
+    process.env.CI_FILES = JSON.stringify(['test/unit/observability.test.ts']);
+    process.env.CI_DOCS = 'true';
+    const docsRun = quickSelection();
+    assert.deepEqual(
+      docsRun.producers.map((producer) => producer.id),
+      ['architecture', 'quick-node'],
+      'a docs-only run keeps architecture as its only fixed suite',
+    );
+    assert.deepEqual(docsRun.nodeFiles, ['test/unit/observability.test.ts']);
+    process.env.CI_DOCS = 'false';
+    assert.deepEqual(
+      quickSelection().producers.map((producer) => producer.id),
+      ['unit', 'compiler', 'architecture'],
+    );
+  } finally {
+    if (old.files === undefined) delete process.env.CI_FILES;
+    else process.env.CI_FILES = old.files;
+    if (old.docs === undefined) delete process.env.CI_DOCS;
+    else process.env.CI_DOCS = old.docs;
+  }
+});
+
+test('CI-10: the docs flag skips only the steps a Markdown change cannot affect', () => {
+  const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
+  const quality = workflow.match(
+    /^ {2}quality:\n([\s\S]*?)^ {2}performance:/mu,
+  )?.[1];
+  assert.ok(quality);
+  const steps = new Map(
+    [...quality.matchAll(/^ {6}- name: (.+)\n((?: {8}.*\n)*)/gmu)].map((m) => [
+      m[1],
+      m[2],
+    ]),
+  );
+  const gate = "if: needs.select.outputs.docs != 'true'";
+  for (const name of [
+    'Lint',
+    'Typecheck',
+    'Build',
+    'Check mutation manifests still name live production text',
+    'Prove the expected-red gate can fail',
+    'Run unit tests',
+    'Run compiler tests',
+    'Check compiled demo release freshness',
+    'Check compiled application release freshness',
+    'Retain compiled scaffold',
+  ])
+    assert.ok(steps.get(name)?.includes(gate), name);
+  // What a docs change can break still runs on the fast path.
+  for (const name of [
+    'Check packet CI tier declarations',
+    'Check formatting',
+    'Run architecture and hygiene tests',
+    'Run the selected node tests',
+    'Check patch whitespace and repository cleanliness',
+  ]) {
+    assert.ok(steps.has(name), name);
+    assert.doesNotMatch(
+      steps.get(name) ?? '',
+      /^ {8}if: .*outputs\.docs/mu,
+      name,
+    );
+  }
+  assert.match(
+    steps.get('Run the selected node tests') ?? '',
+    /CI_DOCS: \$\{\{ needs\.select\.outputs\.docs \}\}/u,
+  );
+  assert.match(
+    steps.get('Check the record layer') ?? '',
+    /if: needs\.select\.outputs\.docs == 'true'\n {8}run: bash scripts\/check-records\.sh/u,
+  );
+  const security = workflow.match(
+    /^ {2}security:\n([\s\S]*?)^ {2}observability:/mu,
+  )?.[1];
+  assert.ok(security);
+  assert.match(
+    security,
+    /history: \$\{\{ fromJSON\(needs\.select\.outputs\.docs == 'true' && '\["range"\]' \|\| '\["ancestry","remainder"\]'\) \}\}/u,
+  );
+  assert.match(
+    security,
+    /SECURITY_RANGE_BASE: \$\{\{ needs\.select\.outputs\.base \}\}/u,
+  );
 });

@@ -53,6 +53,8 @@ jobs:
       promote: ${{ steps.select.outputs.promote }}
       files: ${{ steps.select.outputs.files }}
       browser: ${{ steps.select.outputs.browser }}
+      docs: ${{ steps.select.outputs.docs }}
+      base: ${{ steps.select.outputs.base }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -175,18 +177,25 @@ jobs:
       - name: Check formatting
         run: corepack pnpm format
       - name: Lint
+        if: needs.select.outputs.docs != 'true'
         run: corepack pnpm lint
       - name: Typecheck
+        if: needs.select.outputs.docs != 'true'
         run: corepack pnpm typecheck
       - name: Build
+        if: needs.select.outputs.docs != 'true'
         run: corepack pnpm build
       - name: Check mutation manifests still name live production text
+        if: needs.select.outputs.docs != 'true'
         run: corepack pnpm check:expected-red
       - name: Prove the expected-red gate can fail
+        if: needs.select.outputs.docs != 'true'
         run: corepack pnpm check:expected-red-controls
       - name: Run unit tests
+        if: needs.select.outputs.docs != 'true'
         run: corepack pnpm test:unit
       - name: Run compiler tests
+        if: needs.select.outputs.docs != 'true'
         run: corepack pnpm test:compiler
       - name: Run integration tests
         if: needs.select.outputs.tier == 'full'
@@ -196,9 +205,16 @@ jobs:
         run: corepack pnpm test:agent
       - name: Run architecture and hygiene tests
         run: corepack pnpm test:architecture
+      # CI-10: AGENTS.md section 5 has docs-only commits re-run the record
+      # checks; a docs-only pull request runs them here.
+      - name: Check the record layer
+        if: needs.select.outputs.docs == 'true'
+        run: bash scripts/check-records.sh
       - name: Check compiled demo release freshness
+        if: needs.select.outputs.docs != 'true'
         run: corepack pnpm check:demo-release
       - name: Check compiled application release freshness
+        if: needs.select.outputs.docs != 'true'
         run: corepack pnpm check:app-release
       - name: Run web surface contracts
         if: needs.select.outputs.tier == 'full' || contains(fromJSON(needs.select.outputs.files), 'apps/web/test/surface-runtime-contract.test.ts')
@@ -210,6 +226,7 @@ jobs:
         if: needs.select.outputs.tier == 'quick'
         env:
           CI_FILES: ${{ needs.select.outputs.files }}
+          CI_DOCS: ${{ needs.select.outputs.docs }}
         run: node --import tsx .github/scripts/run-quick-node.mjs
       - name: Install Chromium for selected specs
         if: needs.select.outputs.browser == 'true'
@@ -248,6 +265,7 @@ jobs:
           git diff --exit-code
           test -z "$(git status --porcelain --untracked-files=all)"
       - name: Retain compiled scaffold
+        if: needs.select.outputs.docs != 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: scaffold-dist-${{ github.sha }}
@@ -781,7 +799,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        history: [ancestry, remainder]
+        # CI-10: a docs-only pull request scans only its own commits.
+        history: ${{ fromJSON(needs.select.outputs.docs == 'true' && '["range"]' || '["ancestry","remainder"]') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -797,11 +816,13 @@ jobs:
       - name: Enable Corepack
         run: corepack enable
       - name: Install frozen dependencies
+        if: matrix.history != 'range'
         run: corepack pnpm install --frozen-lockfile --reporter=append-only
       - name: Run dependency and secret gates
         env:
           SECURITY_EVIDENCE_DIR: test-results/security
           SECURITY_HISTORY_SCOPE: ${{ matrix.history }}
+          SECURITY_RANGE_BASE: ${{ needs.select.outputs.base }}
         run: .github/scripts/run-security-scans.sh
       - name: Retain security evidence
         if: always()
@@ -862,6 +883,7 @@ jobs:
     env:
       CI_TIER: ${{ needs.select.outputs.tier }}
       CI_FILES: ${{ needs.select.outputs.files }}
+      CI_DOCS: ${{ needs.select.outputs.docs }}
     needs:
       - select
       - promote
