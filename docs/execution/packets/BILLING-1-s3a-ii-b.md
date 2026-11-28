@@ -3,7 +3,7 @@
 Status: built on packet/BILLING-1-s3a-ii-b (base main 8104e7498). Tier: **Critical** (money), build mode (rule 24). No migration.
 Design: note `notes/BILLING-1-s3a-ii` and its Mythos design read (amendments 1-11). This record covers slices (b), (c) and (d) in the read's order. **Not built:** (e) time billed in advance and (f) amount discounts. (e) rewrites the cumulative time line and gets its own packet and review; (f) comes after it in the read's order.
 Rung: surface reader 57, `BILLING_PRICING_READER`, provisional. WORKFLOW-3 s1b also holds a provisional 57, and the integrator renumbers. Calculation stays v5. Rung 56 admits timing only, so the new keys take their own rung (ADR-0083: rungs are never shared across slices). Rule 21(c): no preceding-binary proof; the gap is listed in FIRST-TENANT-OWED.md.
-CI tier: pending
+CI tier: pending full
 
 ## Claims
 1. **Minimum charge from the agreed start (b).** On `time` it is `minimumDuration` with `perEnrollment`. E2 already held on main, measured before any change: CAD 30 a day, minimum 7 days, `actualEnd`, returned on day 3 gives 210.00 due on day 3. A pickup on day 1 still gives 210.00. Under v5, a minimum duration that can never fit its pricing window is refused at parse.
