@@ -49,6 +49,9 @@ import {
 } from '../helpers/postgres.js';
 
 const NS = 'northstar.app:';
+/** An input decimal in canonical spelling ("40.00" is sent as "40"). */
+const canonical = (value: string) =>
+  value.includes('.') ? value.replace(/0+$/u, '').replace(/\.$/u, '') : value;
 const MANAGER = { headers: { cookie: 'northstar-demo-actor=manager' } };
 const outcome = (promise: Promise<{ outcome: string }>) =>
   promise.then(
@@ -237,7 +240,7 @@ async function run(
       values: {
         [line('line_number')]: String(++lineNumber),
         [line('item')]: 'Service',
-        [line('amount')]: amount,
+        [line('amount')]: canonical(amount),
       },
       relations: { [NOTE_LINES_PARENT]: noteId },
     });
@@ -294,7 +297,7 @@ async function run(
       values: {
         [receipt('name')]: 'Bank transfer',
         [receipt('currency')]: options.currency ?? 'CAD',
-        [receipt('amount')]: amount,
+        [receipt('amount')]: canonical(amount),
       },
       relations: { [RECEIPT_ACCOUNT]: options.party ?? accountA },
     });
@@ -432,7 +435,7 @@ async function run(
         world.invoke('custom_fee_note_update', {
           recordId: draft,
           expectedRevision: (await stored('fee_note', draft)).revision,
-          patch: { [note('balance')]: '0.00' },
+          patch: { [note('balance')]: '0' },
         }),
       );
       assert.notEqual(
@@ -447,8 +450,8 @@ async function run(
           values: {
             [receipt('name')]: 'Forged',
             [receipt('currency')]: 'CAD',
-            [receipt('amount')]: '10.00',
-            [receipt('applied')]: '10.00',
+            [receipt('amount')]: '10',
+            [receipt('applied')]: '10',
           },
           relations: { [RECEIPT_ACCOUNT]: accountA },
         }),
@@ -505,7 +508,7 @@ async function run(
         const result = await world.invoke('custom_fee_note_lines_update', {
           recordId: entry.recordId,
           expectedRevision: entry.revision,
-          patch: { [line('amount')]: '25.00' },
+          patch: { [line('amount')]: '25' },
         });
         assert.equal(result.outcome, 'succeeded', JSON.stringify(result));
       }
@@ -526,7 +529,7 @@ async function run(
           values: {
             [line('line_number')]: String(++lineNumber),
             [line('item')]: 'Late',
-            [line('amount')]: '1.00',
+            [line('amount')]: '1',
           },
           relations: { [NOTE_LINES_PARENT]: draft },
         }),
