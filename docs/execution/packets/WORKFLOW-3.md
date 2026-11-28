@@ -2,7 +2,7 @@
 
 **Slice 1 · recordTransitioned, BUILD 2026-11-28.** Critical (migration, activation-adjacent definers, grant SQL; rule 18). Design: `/home/rvham/2rain-missions/WORKFLOW-3-design.result.txt`; Fable design read APPROVE WITH AMENDMENTS (B1-B8 and STOP checks 1-6 for s1). Owner rulings O1-O4 (2026-11-27) and orchestrator ruling Q3 (2026-11-28) are recorded in ADR-0073 A1. Migration 0074 and surface rung 54 are provisional (assigned at merge). One Customize member widened (saveWorkflow's trigger union).
 
-CI tier: pending full
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/46133712994
 
 ## What slice 1 adds
 
