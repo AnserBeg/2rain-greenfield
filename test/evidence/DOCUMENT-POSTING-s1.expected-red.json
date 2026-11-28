@@ -72,10 +72,10 @@
     },
     {
       "name": "document-post-permission",
-      "claim": "journal_post is the money gate in SQL: books_configure alone cannot post a journal.",
+      "claim": "journal_post is the money gate in SQL: books_configure alone cannot post a journal (the control admits books_configure beside journal_post).",
       "file": "db/migrations/0075_ledger_document_post.sql",
       "original": "  IF NOT north_star_internal.ledger_may(company, 'northstar.ledger:permission.journal_post', 'northstar.ledger:capability.journal')",
-      "replacement": "  IF NOT north_star_internal.ledger_may(company, 'northstar.ledger:permission.books_configure', 'northstar.ledger:capability.books')",
+      "replacement": "  IF NOT (north_star_internal.ledger_may(company, 'northstar.ledger:permission.journal_post', 'northstar.ledger:capability.journal') OR north_star_internal.ledger_may(company, 'northstar.ledger:permission.books_configure', 'northstar.ledger:capability.books'))",
       "test": {
         "files": ["test/postgres/ledger-document-post.test.ts"]
       },

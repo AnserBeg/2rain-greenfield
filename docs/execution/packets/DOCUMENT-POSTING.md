@@ -70,6 +70,22 @@ customized transition (compiler). Ordinary tests: the thin path with its evidenc
 requiresReadCommitted, inactive and control accounts, function grants, the gateway's own permission refusal, and
 each misbound block refused with its reason.
 
+## Fallout of rung 9 on every composed release (full run 46149784858)
+
+- The older-reader fixture (`withoutBooks`) strips Books' journal draft with the module.
+- Tests that measure a lower feature's operation floor on the composed application strip the post
+  (`test/helpers/without-document-posting.ts`): field and formula validation, line totals, booking. Two Customize
+  sandbox tests whose base is the compiled composed release now expect reader 9 (the narrowing floor 2 and the template
+  floor 7 are still proved by their own feature tests, not on that base).
+- Re-measured: composed surfaces 124 -> 130, navigation 25 -> 26 (and the browser journey's "Books"), surface-grammar
+  debt for Books 6 -> 23, page-budget surface-binding parses (+2 to +6 per page; no statement, transaction or policy
+  read changed), the reversibility census (184 operations), the inventory-contract golden.
+- Preceding-binary tests that expected a refusal of the current base at another family now pin the operation-catalog-9
+  refusal (document-templates, report-company-reader, billing-terms, request-runtime-view).
+- Orchestrator ruling (build mode, 2026-11-28): the "preceding binary answers on, or compiles, the current base" halves
+  of presentation-list, line-logical-fields, logical-fields, report-analysis-reader and planner-map are removed and
+  listed in FIRST-TENANT-OWED; their refusal halves pin the operation-catalog-9 refusal.
+
 ## Rule 16 and 17
 
 Most general form: "a confirmed hand-off of a staged header-with-lines document to a registered engine, which reads
