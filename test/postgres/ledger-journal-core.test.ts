@@ -8,6 +8,7 @@ import {
   runMigrations,
 } from '../../packages/postgres-provider/src/migrations.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
+import { seedBusinessCalendar } from '../helpers/business-calendar-seed.js';
 
 // ACCOUNTING-1 slice 1a-i (ADR-0093 sections 4, 6, 8 and 9). Two companies
 // share ONE tenant and environment throughout. Storage checks insert directly
@@ -92,10 +93,11 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
           "INSERT INTO platform.environments(tenant_id,id,slug) VALUES ($1,$2,'ledger')",
           [tenant, environment],
         );
-        await admin.query(
-          "INSERT INTO platform.inventory_tenant_calendars(tenant_id,time_zone,business_day_boundary) VALUES ($1,'America/Vancouver','00:00')",
-          [tenant],
-        );
+        await seedBusinessCalendar(admin, {
+          tenantId: tenant,
+          timeZone: 'America/Vancouver',
+          boundary: '00:00',
+        });
         const [w1, w2, w3] = [
           await session(),
           await session(),
@@ -785,6 +787,7 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
                   postingLines(c),
                   provenance,
                 );
+                second.catch(() => undefined); // handled at creation (review R1)
                 await blocked();
                 await w1.query('COMMIT');
                 await assert.rejects(
@@ -829,6 +832,7 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
                   pair(c.cash, c.revenue),
                   receipt,
                 );
+                second.catch(() => undefined); // handled at creation (review R1)
                 await blocked();
                 await w1.query('COMMIT');
                 await assert.rejects(
@@ -853,10 +857,10 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
                   [c.id],
                 );
                 const blocked = await waitUntilBlocked(w2);
-                const writer = manual(w2, c, '2026-03-31');
+                const writer = settled(manual(w2, c, '2026-03-31'));
                 await blocked();
                 await w1.query('COMMIT');
-                const outcome = await settled(writer);
+                const outcome = await writer;
                 assert.match(
                   outcome,
                   /ledger\.closedBooks/u,
@@ -878,15 +882,12 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
                   [c.id, c.bank, role('cash')],
                 );
                 const blocked = await waitUntilBlocked(w2);
-                const writer = manual(
-                  w2,
-                  c,
-                  '2026-02-10',
-                  pair(c.bank, c.revenue),
+                const writer = settled(
+                  manual(w2, c, '2026-02-10', pair(c.bank, c.revenue)),
                 );
                 await blocked();
                 await w1.query('COMMIT');
-                const outcome = await settled(writer);
+                const outcome = await writer;
                 assert.match(
                   outcome,
                   /ledger\.accountInactive/u,
@@ -911,6 +912,7 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
                 );
                 const firstBlocked = await waitUntilBlocked(w1);
                 const first = manual(w1, c, '2026-02-11', pair(low!, high!, 7));
+                first.catch(() => undefined); // handled at creation (review R1)
                 await firstBlocked();
                 const secondBlocked = await waitUntilBlocked(w2);
                 const second = manual(
@@ -919,6 +921,7 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
                   '2026-02-12',
                   pair(high!, low!, 9),
                 );
+                second.catch(() => undefined);
                 await secondBlocked();
                 await w3.query('COMMIT');
                 const outcomes = await Promise.allSettled([first, second]);

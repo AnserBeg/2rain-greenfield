@@ -39,7 +39,6 @@ BEGIN
   UPDATE platform.active_release_pointers SET release_id=r,fence=fence+1 WHERE tenant_id=t AND environment_id=e;
   INSERT INTO platform.current_policy_roles(tenant_id,environment_id,role_id,role_key) VALUES(t,e,role,'dispatcher');
   INSERT INTO platform.current_policy_memberships(tenant_id,environment_id,membership_id,principal_id,role_id) VALUES(t,e,gen_random_uuid(),p,role);
-  INSERT INTO platform.inventory_tenant_calendars(tenant_id,time_zone,business_day_boundary) VALUES(t,'America/Denver','08:00');
   INSERT INTO north_star_module.test_booking_owners(tenant_id,environment_id,record_id,legal_entity_id)
     SELECT t,e,md5('owner'||n)::uuid,md5('company'||(n%2))::uuid FROM generate_series(1,90) n;
   INSERT INTO north_star_module.test_booking_parents

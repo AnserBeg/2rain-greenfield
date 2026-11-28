@@ -19,6 +19,7 @@ import {
   runMigrations,
 } from '../../packages/postgres-provider/src/migrations.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
+import { seedBusinessCalendar } from '../helpers/business-calendar-seed.js';
 
 function fixtureId(label: string): string {
   return createHash('md5')
@@ -131,6 +132,11 @@ test('booking commitment writer', async (t) => {
       await admin.query(
         await readFile('test/fixtures/booking-commitments.sql', 'utf8'),
       );
+      await seedBusinessCalendar(admin, {
+        tenantId: tenant,
+        timeZone: 'America/Denver',
+        boundary: '08:00',
+      });
       await issuer.query('SET ROLE north_star_approval_issuer');
       const policy =
         'northstar.current-policy/' +
