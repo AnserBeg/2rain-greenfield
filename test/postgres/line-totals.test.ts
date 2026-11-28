@@ -11,6 +11,7 @@ import test from 'node:test';
 
 import { escapeIdentifier, type Pool } from 'pg';
 
+import type { RequestRuntimeView } from '../../packages/runtime/src/request-runtime-view.js';
 import {
   registeredSemanticQueryFromPinnedView,
   SEMANTIC_QUERY_REQUEST_VERSION,
@@ -23,6 +24,7 @@ import {
   l,
   NS,
   PARENT,
+  TEMPLATE_FORM,
   TOTAL,
   rentalApplication,
   rentalContractAuthored,
@@ -529,6 +531,50 @@ test(
           'concurrent line creates under a parent-path validation deadlocked',
         );
 
+        // The header lock is taken before the path read (prepareMutation's
+        // FOR SHARE on the parent). Made deterministic: a third session holds
+        // the header FOR UPDATE, both creates queue on it, then it is
+        // released. Locked first, the two creates serialize on the header;
+        // had the lock come after the path read, both would hold FOR SHARE
+        // and each ask for NO KEY UPDATE, which deadlocks.
+        const placed = await contract();
+        for (let index = 0; index < 2; index += 1)
+          assert.equal(
+            (await line(placed.recordId, { days: '1', daily_rate: '1' }))
+              .outcome,
+            'succeeded',
+          );
+        const headerTable = await tableHolding(pool, placed.recordId);
+        const unplaced = await deadlocks(pool);
+        const blocker = await pool.connect();
+        let queued: string[];
+        try {
+          await blocker.query('BEGIN');
+          await blocker.query(
+            `SELECT 1 FROM north_star_module.${escapeIdentifier(headerTable)} WHERE record_id = $1 FOR UPDATE`,
+            [placed.recordId],
+          );
+          const racing = [0, 1].map(() =>
+            outcome(line(placed.recordId, { days: '1', daily_rate: '1' })),
+          );
+          await lockWaiters(pool, 2);
+          await blocker.query('COMMIT');
+          queued = await Promise.all(racing);
+        } finally {
+          await blocker.query('ROLLBACK').catch(() => undefined);
+          blocker.release();
+        }
+        assert.equal(
+          await deadlocks(pool, unplaced),
+          unplaced,
+          `line creates took the header lock after the path read and deadlocked: ${queued.join(' | ')}`,
+        );
+        assert.equal(
+          queued.filter((entry) => /"outcome":"succeeded"/u.test(entry)).length,
+          1,
+          queued.join(' | '),
+        );
+
         // A shared line's update and its archive never deadlock: both lock
         // the line before the header. Made deterministic: a third session
         // holds the line FOR SHARE, the update queues for the line first, the
@@ -583,6 +629,101 @@ test(
         assert.equal(
           canonical((await read(lines[1]!.recordId)).values[AMOUNT]),
           '1',
+        );
+      },
+    );
+  },
+);
+
+test(
+  'LINE-TOTALS-s1 template: a template member line and an entered line each store their derived amount, and the header total is their sum',
+  { timeout: 900_000 },
+  async () => {
+    // A record-template binding on the contract form (maximum 200, the
+    // compile minimum for a templated relation). Template columns carry no
+    // decimal, so the amount's operands default when blank: one day at 40.00.
+    await withRental(
+      'line-totals-template',
+      { template: true, maximumLines: 200 },
+      async (world) => {
+        const { read, header } = arrange(world);
+        const library = world.runtime.recordTemplates;
+        const run = <T>(work: (view: RequestRuntimeView) => Promise<T>) =>
+          world.runtime.entry.run(
+            { headers: { cookie: 'northstar-demo-actor=manager' } },
+            work,
+          );
+        const target = { company: COMPANY, form: TEMPLATE_FORM };
+        const review = await run((view) =>
+          library.review(view, target, null, 0, {
+            version: 1,
+            label: 'Standard hire',
+            columns: [{ fieldId: l('item'), caption: 'Item' }],
+            members: [
+              {
+                key: 'delivery',
+                kind: 'row',
+                caption: 'Delivery',
+                cells: { [l('item')]: 'Delivery' },
+              },
+            ],
+          }),
+        );
+        const published = await run((view) =>
+          library.publish(view, review.reviewId, review.digest),
+        );
+        await run((view) =>
+          library.assign(view, target, 'wholeType', 0, published.revisionId),
+        );
+
+        // One create inserts the template's member line (insert site one)
+        // and one entered line (insert site two) under the new header.
+        const entered = randomUUID();
+        const input = {
+          recordId: randomUUID(),
+          legalEntityId: COMPANY,
+          relations: {},
+          values: { [h('name')]: 'Templated hire', [h('currency')]: 'USD' },
+          templateLines: [
+            {
+              recordId: entered,
+              values: {
+                [l('item')]: 'Excavator',
+                [l('days')]: '2',
+                [l('daily_rate')]: '15',
+              },
+            },
+          ],
+        };
+        const key = randomUUID();
+        await run((view) =>
+          library.prepareCreate(view, TEMPLATE_FORM, key, input),
+        );
+        const created = await world.invoke(
+          'custom_rental_contract_create',
+          input,
+          { idempotencyKey: key },
+        );
+        assert.equal(created.outcome, 'succeeded', JSON.stringify(created));
+        const pin = await run((view) =>
+          library.application(view, target, input.recordId),
+        );
+        const member = pin?.memberRows.delivery;
+        assert.ok(member, JSON.stringify(pin));
+        assert.equal(
+          canonical((await read(member)).values[AMOUNT]),
+          '40',
+          'a template member line did not derive its amount',
+        );
+        assert.equal(
+          canonical((await read(entered)).values[AMOUNT]),
+          '30',
+          'an entered template line did not derive its amount',
+        );
+        assert.equal(
+          canonical((await header(input.recordId)).values[TOTAL]),
+          '70',
+          'the header total is not the sum of its template lines',
         );
       },
     );

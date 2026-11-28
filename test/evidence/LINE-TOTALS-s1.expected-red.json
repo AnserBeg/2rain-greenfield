@@ -973,6 +973,60 @@
           "expected": "a total under a filtered lines query was admitted"
         }
       ]
+    },
+    {
+      "name": "line-totals-s1-template-member-derive",
+      "claim": "A template member line stores its derived amount (the first template insert site writes the derived input).",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "                    derivedSeed.input,\n                    request.parentGuards,",
+      "replacement": "                    seed,\n                    request.parentGuards,",
+      "test": {
+        "files": ["test/postgres/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 template: a template member line and an entered line each store their derived amount, and the header total is their sum$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 template: a template member line and an entered line each store their derived amount, and the header total is their sum",
+          "expected": "a template member line did not derive its amount"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-template-entered-derive",
+      "claim": "An entered line of a template create stores its derived amount (the second template insert site writes the derived input).",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "                      derivedSeed.input,\n                      request.parentGuards,",
+      "replacement": "                      seed,\n                      request.parentGuards,",
+      "test": {
+        "files": ["test/postgres/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 template: a template member line and an entered line each store their derived amount, and the header total is their sum$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 template: a template member line and an entered line each store their derived amount, and the header total is their sum",
+          "expected": "an entered template line did not derive its amount"
+        }
+      ]
+    },
+    {
+      "name": "line-totals-s1-header-lock-before-path-read",
+      "claim": "A line create takes the header lock before prepareMutation's path read, so two creates queued on the header serialize instead of deadlocking.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "              await lockTotalledParents(\n                client,\n                currentStorage,\n                currentEntity,\n                request.definition,\n                entered,\n              );\n              const input = derived.input;\n              const preparation = await prepareMutation(\n                client,\n                request,\n                currentStorage,\n                currentEntity,\n                input,\n                this.#documentNumbers === 'verificationSentinel',\n                authorizedValidationReads,\n                this.#boundWriteInvariants(currentStorage),\n              );",
+      "replacement": "              const input = derived.input;\n              const preparation = await prepareMutation(\n                client,\n                request,\n                currentStorage,\n                currentEntity,\n                input,\n                this.#documentNumbers === 'verificationSentinel',\n                authorizedValidationReads,\n                this.#boundWriteInvariants(currentStorage),\n              );\n              await lockTotalledParents(\n                client,\n                currentStorage,\n                currentEntity,\n                request.definition,\n                entered,\n              );",
+      "test": {
+        "files": ["test/postgres/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 maximum: a shared contract with unconstrained operands verifies, refuses line N\\+1 on create and restore, and its concurrent line writes serialize without deadlock$"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 maximum: a shared contract with unconstrained operands verifies, refuses line N+1 on create and restore, and its concurrent line writes serialize without deadlock",
+          "expected": "line creates took the header lock after the path read and deadlocked"
+        }
+      ]
     }
   ]
 }

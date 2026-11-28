@@ -15,6 +15,7 @@ import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/
 import {
   canonicalize,
   normalizeApplicationPackage,
+  recordTemplateOffers,
 } from '../../packages/canonical-model/src/index.js';
 import {
   compileApplicationRelease,
@@ -24,6 +25,7 @@ import {
   type CompileResult,
 } from '../../packages/compiler/src/index.js';
 import * as customization from '../../packages/customization/src/index.js';
+import { draftTemplateBinding } from '../../packages/customization/src/record-template-binding.js';
 import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 
 export const NS = 'northstar.app';
@@ -257,6 +259,40 @@ export interface RentalOptions {
   readonly shared?: boolean;
   /** A line validation that reads the contract through its parent link. */
   readonly pathValidation?: boolean;
+  /**
+   * A record-template binding on the contract form (whole type, optional),
+   * so a create inserts template member lines and entered lines. Template
+   * columns carry no decimal, so the amount's operands default when blank
+   * (one day at 40.00) and a member line still derives an amount.
+   */
+  readonly template?: boolean;
+}
+
+export const TEMPLATE_FORM = `${NS}:surface.custom_rental_contract_form`;
+
+/** The patched package with an active record-template binding on its form. */
+function templatedAuthored(): Authored {
+  const authored = patchedAuthored();
+  const offers = recordTemplateOffers(
+    normalizeApplicationPackage(authored) as never,
+  );
+  const offer = offers.find((entry) => entry.frame.formId === TEMPLATE_FORM);
+  assert.ok(offer, 'the rental form offers no template binding');
+  const binding = draftTemplateBinding(offers, {
+    formId: TEMPLATE_FORM,
+    contextId: null,
+    required: false,
+    lifecycle: 'active',
+    fields: offer.columns.map((column) => ({
+      fieldId: column.fieldId,
+      copyEligible: true,
+    })),
+  });
+  const result = customization.applyCustomizationPatches(authored, [
+    customization.CustomizationPatchSchema.parse(binding),
+  ]);
+  assert.ok(result.status === 'applied', JSON.stringify(result));
+  return result.authored as Authored;
 }
 
 /** A line's item may not repeat its contract's name (read through the parent). */
@@ -274,10 +310,24 @@ export const itemNotContractName = rule(
 
 /** The patched package with the ADR-0094 declarations injected. */
 export function rentalContractAuthored(options: RentalOptions = {}): Authored {
-  const authored = patchedAuthored(options.shared === true);
+  const authored = options.template
+    ? templatedAuthored()
+    : patchedAuthored(options.shared === true);
   if (options.createOnly !== false)
     authored.createOnlyFields = [currencyCreateOnly];
-  if (options.derive !== false) authored.derivedDecimals = [amountDerivation];
+  if (options.derive !== false)
+    authored.derivedDecimals = [
+      options.template
+        ? {
+            ...amountDerivation,
+            absentAs: [
+              ...amountDerivation.absentAs,
+              { fieldId: l('days'), value: '1' },
+              { fieldId: l('daily_rate'), value: '40' },
+            ],
+          }
+        : amountDerivation,
+    ];
   if (options.rollup !== false)
     authored.rollups = [totalRollup(options.maximumLines ?? 1_000)];
   if (options.validations !== false)
