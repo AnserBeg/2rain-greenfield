@@ -3,7 +3,7 @@
 ## Slice 1 · Draft -> issue (numbered per company) -> one payment applied, two companies — record
 Status: built to the thin first slice of the design read (`OPEN-ITEM-1-core-v2-design-read.result.txt`, APPROVE WITH AMENDMENTS) over design note `notes/OPEN-ITEM-1-core-v2`; Critical (money, rule 24): one Mythos silent-harm review in parallel with CI. Branch `packet/OPEN-ITEM-1-s1`, cut from `origin/main` 63826f6c0 (TRAIN-X). Floor: operation catalog 8 -> 9 (`OPEN_ITEM_OPERATION_READER`, provisional; DOCUMENT-POSTING s1 also claims 9, so one renumbers at merge). Migration `0075_open_items.sql` (provisional; 0076 likely at merge). Stops taken: none.
 
-CI tier: pending full
+CI tier: full https://github.com/AnserBeg/2rain-greenfield/actions/runs/46152264620
 
 **Claims.**
 1. Two optional v6 keys (`openItems`, `openItemApplications`; emitted only when declared, first-party and demo releases byte-identical). An open item names `direction` (receivable/payable), `side` (debit/credit), counterparty relation, create-only currency, number, optional document and due dates, subtotal, total, applied, balance, either a parent-scoped line relation with its amount or an entered amount, a five-state map over its own machine, and its issue operation and transition.
