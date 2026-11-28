@@ -72,6 +72,7 @@
     "test/postgres/tenant-isolation.test.ts": 3,
     "test/postgres/trust-substrate.test.ts": 9,
     "test/postgres/workflow-consumer.test.ts": 456,
-    "test/postgres/workflow-record-created.test.ts": 448
+    "test/postgres/workflow-record-created.test.ts": 448,
+    "test/postgres/workflow-record-transitioned.test.ts": 170
   }
 }

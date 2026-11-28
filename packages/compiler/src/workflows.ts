@@ -102,7 +102,10 @@ interface MachineSource {
     readonly entity: { readonly targetId: string };
     readonly lifecycle?: string;
     readonly machineId: string;
-    readonly states: readonly { readonly stateId: string; readonly label: string }[];
+    readonly states: readonly {
+      readonly stateId: string;
+      readonly label: string;
+    }[];
     readonly transitions: readonly {
       readonly transitionId: string;
       readonly fromState: { readonly targetId: string };
@@ -111,7 +114,10 @@ interface MachineSource {
   }[];
   readonly operations?: readonly {
     readonly lifecycle?: string;
-    readonly effect: { readonly kind: string; readonly transition?: { readonly targetId: string } };
+    readonly effect: {
+      readonly kind: string;
+      readonly transition?: { readonly targetId: string };
+    };
   }[];
 }
 
@@ -126,9 +132,7 @@ interface MachineSource {
  * Returns, per admissible machine's record type, the states an admitted
  * transition ends in and the states each is entered from.
  */
-export function workflowTransitionTargets(
-  revision: MachineSource,
-): ReadonlyMap<
+export function workflowTransitionTargets(revision: MachineSource): ReadonlyMap<
   string,
   {
     readonly machineId: string;

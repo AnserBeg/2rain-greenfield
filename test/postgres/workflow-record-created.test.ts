@@ -242,6 +242,30 @@ test(
             ).rows,
             [{ binding: appointment }],
           );
+          // WORKFLOW-3 s1 B4: a recordCreated binding gains no key.
+          assert.deepEqual(
+            (
+              await pool.query<{ keys: string[] }>(
+                `SELECT array_agg(k ORDER BY k) AS keys
+                   FROM platform.workflow_activation_watermarks AS w
+                   JOIN platform.active_release_pointers AS p USING (tenant_id, environment_id, pointer_id, fence, release_id)
+                   CROSS JOIN LATERAL jsonb_object_keys(w.definition_bindings->'appointment-follow-up') AS k
+                  WHERE w.tenant_id = $1 AND w.environment_id = $2`,
+                [tenantId, environmentId],
+              )
+            ).rows,
+            [
+              {
+                keys: [
+                  'digest',
+                  'eventType',
+                  'recordType',
+                  'unattendedOperations',
+                ],
+              },
+            ],
+            'a recordCreated approval binding keeps exactly its keys',
+          );
           assert.deepEqual(
             await occurrenceDispositions(pool, tenantId, [early]),
             [[early, 'PRE_ACTIVATION']],

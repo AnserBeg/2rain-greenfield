@@ -73,8 +73,7 @@ export function workflowEventTypeName(trigger: WorkflowTrigger): string {
  */
 export function workflowEventDeclaration(trigger: WorkflowTrigger): string {
   const member = typeof trigger === 'string' ? trigger : trigger.kind;
-  const literal = (value: string) =>
-    JSON.stringify(value).replaceAll('"', "'");
+  const literal = (value: string) => JSON.stringify(value).replaceAll('"', "'");
   const pinned = (field: string): string | undefined => {
     if (typeof trigger === 'string') return undefined;
     if (field === 'recordTypeId') return trigger.recordTypeId;
@@ -133,7 +132,10 @@ export function fixtureEventMatchesTrigger(
   trigger: WorkflowTrigger,
 ): boolean {
   if (typeof trigger === 'string') return event.type === trigger;
-  if (event.type !== trigger.kind || event.recordTypeId !== trigger.recordTypeId)
+  if (
+    event.type !== trigger.kind ||
+    event.recordTypeId !== trigger.recordTypeId
+  )
     return false;
   return (
     trigger.kind !== 'recordTransitioned' ||

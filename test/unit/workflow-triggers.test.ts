@@ -393,7 +393,11 @@ test('recordTransitioned is a strict member with its own event fields and declar
   for (const trigger of [
     { ...failed, label: 'Failed' },
     { ...failed, triggerVersion: 'v2' },
-    { kind: 'recordTransitioned', triggerVersion: 'v1', recordTypeId: inspection },
+    {
+      kind: 'recordTransitioned',
+      triggerVersion: 'v1',
+      recordTypeId: inspection,
+    },
   ])
     assert.throws(() => WorkflowDefinitionSchema.parse(save(trigger).workflow));
   const event = {
@@ -403,10 +407,15 @@ test('recordTransitioned is a strict member with its own event fields and declar
     toStateId: state('failed'),
   };
   const parsed = WorkflowDefinitionSchema.parse(save(failed).workflow).trigger;
-  const parsedAny = WorkflowDefinitionSchema.parse(save(anyFrom).workflow).trigger;
+  const parsedAny = WorkflowDefinitionSchema.parse(
+    save(anyFrom).workflow,
+  ).trigger;
   assert.ok(fixtureEventMatchesTrigger(event, parsed));
   assert.ok(
-    !fixtureEventMatchesTrigger({ ...event, toStateId: state('passed') }, parsed),
+    !fixtureEventMatchesTrigger(
+      { ...event, toStateId: state('passed') },
+      parsed,
+    ),
     'a fixture into another state does not replay this trigger',
   );
   assert.ok(
@@ -578,14 +587,24 @@ test('an occurrence starts only the definitions its kind and states match', () =
   );
   assert.ok(
     !occurrenceMatchesDefinition(
-      { record_type: inspection, kind: 'created', from_state: null, to_state: null },
+      {
+        record_type: inspection,
+        kind: 'created',
+        from_state: null,
+        to_state: null,
+      },
       definition,
     ),
     'a creation does not start a transition workflow',
   );
   assert.ok(
     occurrenceMatchesDefinition(
-      { record_type: inspection, kind: 'created', from_state: null, to_state: null },
+      {
+        record_type: inspection,
+        kind: 'created',
+        from_state: null,
+        to_state: null,
+      },
       { record_type: inspection, to_state: null, from_state: null },
     ),
   );
@@ -606,8 +625,14 @@ test('recordTransitioned replays clean over a state label rename and names a ret
   )!;
   (machine.states as Json[]).find((s) => s.stateId === state('failed'))!.label =
     'Did not pass';
-  const origin = [{ parent: inspections, differentBase: true, patchId: 'saved' }];
-  const clean = replayCustomizationPatches(renamed, [patch(save(failed))], origin);
+  const origin = [
+    { parent: inspections, differentBase: true, patchId: 'saved' },
+  ];
+  const clean = replayCustomizationPatches(
+    renamed,
+    [patch(save(failed))],
+    origin,
+  );
   assert.notEqual(clean.status, 'replayConflict', JSON.stringify(clean));
   const retired = structuredClone(inspections);
   (retired.entities as Json[]).find(
@@ -643,5 +668,25 @@ test('each recordTransitioned eval case names a state an admitted transition ent
         target.fromStateIds.includes(id(`state.${c.expect.fromState}`)),
         `${c.id} names an admitted from-state`,
       );
+  }
+});
+
+test('every reader-floor gate reads the per-member rung table (B6)', () => {
+  for (const path of [
+    'packages/compiler/src/workflows.ts',
+    'packages/postgres-provider/src/release-verification-service.ts',
+    'packages/postgres-provider/src/request-runtime-view-service.ts',
+  ]) {
+    const source = readFileSync(path, 'utf8');
+    assert.match(
+      source,
+      /workflowTriggerReaderFloor\(/u,
+      `${path} gates each member at its own rung`,
+    );
+    assert.doesNotMatch(
+      source,
+      /RECORD_CREATED_TRIGGER_READER/u,
+      `${path} maps a member to one fixed rung`,
+    );
   }
 });
