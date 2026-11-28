@@ -81,9 +81,9 @@ export const RECORD_STATE_WRITERS: Readonly<Record<string, StateWriter>> =
       reason: 'Stock count state is a choice field; lines take counts.',
     },
     'packages/postgres-provider/src/open-item-capability-executor.ts': {
-      updates: 1,
+      updates: 2,
       reason:
-        "Issue and settlement move an open item's own tenant-declared machine (draft to open, then partially settled or settled) with its figures. Open-item normalization refuses any active generic transition on that machine, so recordTransitioned admission (every transition generic) never admits it; no first-party release declares an open item, so no machine is listed (TRAIN-Z).",
+        "Issue, settlement, void and unapply move an open item's own tenant-declared machine (draft to open, then partially settled, settled or void, and back on unapply) with its figures; the second UPDATE archives application lines (no machine). Open-item normalization refuses any active generic transition on that machine, so recordTransitioned admission (every transition generic) never admits it; no first-party release declares an open item, so no machine is listed (TRAIN-Z).",
     },
     'packages/postgres-provider/src/receiving-order-capability.ts': {
       updates: 1,
