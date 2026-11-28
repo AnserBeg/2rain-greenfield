@@ -1346,8 +1346,8 @@
       "name": "billing-v5-key-states-timing",
       "claim": "Any calculation v5 key, not only a timing key, requires stated timing on every time and recurring fixed component.",
       "file": "packages/canonical-model/src/billing.ts",
-      "original": "        if (!t) {",
-      "replacement": "        if (!t && hasBillingTiming(plan)) {",
+      "original": "        if (!t) {\n          issue(",
+      "replacement": "        if (!t) {\n          if (hasBillingTiming(plan)) issue(",
       "test": {
         "files": ["test/integration/billing-rules.test.ts"],
         "namePattern": "^B2 minimum: refusals and the pricing reader$"
