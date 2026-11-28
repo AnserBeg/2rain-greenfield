@@ -12,7 +12,7 @@ try {
   const required = quick
     ? new Set(
         [...discoverRepositoryTests()]
-          .filter(fixedQuickFile)
+          .filter((path) => fixedQuickFile(path))
           .concat(quick.files),
       )
     : undefined;

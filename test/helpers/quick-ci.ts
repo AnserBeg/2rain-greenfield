@@ -3,15 +3,13 @@ import {
   type ReachabilityProducer,
 } from './reachability-producers.js';
 
-import { quickFiles, contractFile } from './quick-files.js';
+import { quickFiles, contractFile, docsOnlyRun } from './quick-files.js';
 
 export function quickSelection() {
   const { files, browserFiles } = quickFiles();
-  const producers: ReachabilityProducer[] = [
-    'unit',
-    'compiler',
-    'architecture',
-  ].map(getReachabilityProducer);
+  const producers: ReachabilityProducer[] = (
+    docsOnlyRun() ? ['architecture'] : ['unit', 'compiler', 'architecture']
+  ).map(getReachabilityProducer);
   // Architecture discovers new tests by glob. Unit and compiler have
   // reviewed explicit argv, so a new file also needs the selected-file runner.
   const covered = new Set(producers.flatMap((producer) => producer.argv));

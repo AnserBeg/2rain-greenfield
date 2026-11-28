@@ -41,6 +41,15 @@ case "$history_scope" in
     printf 'Security history scope %s covers one part of %d commits.\n' \
       "$history_scope" "$total_commits"
     ;;
+  range)
+    # CI-10: a docs-only pull request scans only the commits it adds after its
+    # base. When the base is main, main's full-history runs covered it.
+    range_base=${SECURITY_RANGE_BASE:?range scope needs SECURITY_RANGE_BASE}
+    git merge-base --is-ancestor "$range_base" HEAD
+    history_options="$range_base..HEAD"
+    printf 'Security history scope range covers %d commits after %s.\n' \
+      "$(git rev-list --count "$range_base..HEAD")" "$range_base"
+    ;;
   *)
     printf 'Unknown security history scope %s.\n' "$history_scope" >&2
     exit 1
@@ -89,8 +98,15 @@ run_gitleaks() {
 }
 
 set +e
-corepack pnpm audit --audit-level=high --json >"$dependency_report" 2>"$dependency_stderr"
-dependency_status=$?
+if [[ $history_scope == range ]]; then
+  # A docs-only change cannot change dependencies; main's runs audit them.
+  printf '{"skipped": "docs-only range scan"}\n' >"$dependency_report"
+  : >"$dependency_stderr"
+  dependency_status=0
+else
+  corepack pnpm audit --audit-level=high --json >"$dependency_report" 2>"$dependency_stderr"
+  dependency_status=$?
+fi
 
 run_gitleaks "$repository_root" "$clean_report" "$history_options"
 clean_status=$?

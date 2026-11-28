@@ -1,0 +1,150 @@
+{
+  "version": 1,
+  "packet": "CI-10",
+  "entries": [
+    {
+      "name": "ci10-fast-path-accepts-non-docs",
+      "claim": "Only an added or edited Markdown document qualifies a pull request for the docs fast path; any other file or a deletion sends it down the normal quick path.",
+      "file": ".github/scripts/ci-selection.mjs",
+      "original": "['A', 'M'].includes(status) && documentPath(path),",
+      "replacement": "['A', 'M'].includes(status) || documentPath(path),",
+      "test": {
+        "files": ["test/architecture/ci-tiers.test.ts"],
+        "namePattern": "CI-10: only a docs-only pull request takes the docs fast path"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ci-tiers.test.ts",
+          "name": "CI-10: only a docs-only pull request takes the docs fast path",
+          "expected": "publish-path-breadth-envelope\\.json"
+        }
+      ]
+    },
+    {
+      "name": "ci10-main-push-takes-fast-path",
+      "claim": "A main push never takes the docs fast path, so main still runs every fixed suite over each docs change.",
+      "file": ".github/scripts/ci-selection.mjs",
+      "original": "!mainPush && !forced && plan.tier === 'quick' && docsOnlyChanges(changes)",
+      "replacement": "mainPush === mainPush && !forced && plan.tier === 'quick' && docsOnlyChanges(changes)",
+      "test": {
+        "files": ["test/architecture/ci-tiers.test.ts"],
+        "namePattern": "CI-10: only a docs-only pull request takes the docs fast path"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ci-tiers.test.ts",
+          "name": "CI-10: only a docs-only pull request takes the docs fast path",
+          "expected": "a main push never takes the docs fast path"
+        }
+      ]
+    },
+    {
+      "name": "ci10-unlisted-document-reader",
+      "claim": "A unit or compiler test that reads a Markdown document must be listed in documentReaders, or a docs-only pull request would skip it.",
+      "file": ".github/scripts/ci-selection.mjs",
+      "original": "  [\n    'docs/greenfield-north-star-erp-platform-plan.md',\n    ['test/unit/observability.test.ts'],\n  ],\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/architecture/ci-tiers.test.ts"],
+        "namePattern": "CI-10: every unit or compiler reader of a Markdown document is in documentReaders"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ci-tiers.test.ts",
+          "name": "CI-10: every unit or compiler reader of a Markdown document is in documentReaders",
+          "expected": "test/unit/observability\\.test\\.ts reads docs/greenfield-north-star-erp-platform-plan\\.md"
+        }
+      ]
+    },
+    {
+      "name": "ci10-docs-run-keeps-unit-suite",
+      "claim": "A docs-only quick run keeps architecture as its only fixed suite and runs document readers by name.",
+      "file": "test/helpers/quick-ci.ts",
+      "original": "docsOnlyRun() ? ['architecture'] :",
+      "replacement": "docsOnlyRun() ? ['unit', 'architecture'] :",
+      "test": {
+        "files": ["test/architecture/ci-tiers.test.ts"],
+        "namePattern": "CI-10: a docs-only quick run keeps architecture whole and runs the document readers by name"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ci-tiers.test.ts",
+          "name": "CI-10: a docs-only quick run keeps architecture whole and runs the document readers by name",
+          "expected": "a docs-only run keeps architecture as its only fixed suite"
+        }
+      ]
+    },
+    {
+      "name": "ci10-unit-step-ungated",
+      "claim": "The docs flag gates the unit suite step, so a docs-only pull request skips it.",
+      "file": ".github/workflows/ci.yml",
+      "original": "      - name: Run unit tests\n        if: needs.select.outputs.docs != 'true'\n",
+      "replacement": "      - name: Run unit tests\n",
+      "test": {
+        "files": ["test/architecture/ci-tiers.test.ts"],
+        "namePattern": "CI-10: the docs flag skips only the steps a Markdown change cannot affect"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ci-tiers.test.ts",
+          "name": "CI-10: the docs flag skips only the steps a Markdown change cannot affect",
+          "expected": "^Run unit tests$"
+        }
+      ]
+    },
+    {
+      "name": "ci10-range-scans-nothing",
+      "claim": "The docs-only security scan covers the pull request's own commits, from its base to HEAD.",
+      "file": ".github/scripts/run-security-scans.sh",
+      "original": "history_options=\"$range_base..HEAD\"",
+      "replacement": "history_options=\"HEAD..$range_base\"",
+      "test": {
+        "files": ["test/integration/security-scan-contract.test.ts"],
+        "namePattern": "scan runner pins the scanner and exercises a real negative Git fixture"
+      },
+      "kills": [
+        {
+          "file": "test/integration/security-scan-contract.test.ts",
+          "name": "scan runner pins the scanner and exercises a real negative Git fixture",
+          "expected": "the range scope scans the pull request commits"
+        }
+      ]
+    },
+    {
+      "name": "ci10-base-output-is-head",
+      "claim": "The selector writes the pull request base as the range base, so the scan cannot silently cover zero commits.",
+      "file": ".github/scripts/ci-selection.mjs",
+      "original": "\\nbase=${base ?? ''}\\n",
+      "replacement": "\\nbase=${head}\\n",
+      "test": {
+        "files": ["test/architecture/ci-main-push.test.ts"],
+        "namePattern": "CI-10: a docs-only pull request writes docs=true and its own base; code does not"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ci-main-push.test.ts",
+          "name": "CI-10: a docs-only pull request writes docs=true and its own base; code does not",
+          "expected": "the base output is the pull request base"
+        }
+      ]
+    },
+    {
+      "name": "ci10-extra-docs-gate",
+      "claim": "Only the listed quality steps carry a docs condition; gating any other step, such as the evidence upload, is refused.",
+      "file": ".github/workflows/ci.yml",
+      "original": "      - name: Retain quality executed-file evidence\n        uses:",
+      "replacement": "      - name: Retain quality executed-file evidence\n        if: needs.select.outputs.docs != 'true'\n        uses:",
+      "test": {
+        "files": ["test/architecture/ci-tiers.test.ts"],
+        "namePattern": "CI-10: the docs flag skips only the steps a Markdown change cannot affect"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ci-tiers.test.ts",
+          "name": "CI-10: the docs flag skips only the steps a Markdown change cannot affect",
+          "expected": "only the listed steps carry a docs condition"
+        }
+      ]
+    }
+  ]
+}

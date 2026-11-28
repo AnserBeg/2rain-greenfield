@@ -12,7 +12,15 @@ test('CI runs dependency and secret gates and always retains their evidence', ()
   assert.match(workflow, /^ {2}security:$/mu);
   assert.ok(workflow.includes('.github/scripts/run-security-scans.sh'));
   assert.ok(workflow.includes('SECURITY_EVIDENCE_DIR'));
-  assert.match(workflow, /^ {8}history: \[ancestry, remainder\]$/mu);
+  // CI-10: a docs-only pull request scans only its own commits.
+  assert.ok(
+    workflow.includes(
+      `history: \${{ fromJSON(needs.select.outputs.docs == 'true' && '["range"]' || '["ancestry","remainder"]') }}`,
+    ),
+  );
+  assert.ok(
+    workflow.includes('SECURITY_RANGE_BASE: ${{ needs.select.outputs.base }}'),
+  );
   assert.ok(workflow.includes('SECURITY_HISTORY_SCOPE: ${{ matrix.history }}'));
   assert.ok(
     workflow.includes(
@@ -39,6 +47,11 @@ test('scan runner pins the scanner and exercises a real negative Git fixture', (
   assert.ok(runner.includes('dependency_status -ne 0'));
   assert.ok(runner.includes('clean_status -ne 0'));
   assert.ok(runner.includes(syntheticRuleId));
+  assert.ok(
+    runner.includes('history_options="$range_base..HEAD"'),
+    'the range scope scans the pull request commits',
+  );
+  assert.ok(runner.includes('git merge-base --is-ancestor "$range_base" HEAD'));
   assert.ok(config.includes(`id = "${syntheticRuleId}"`));
   assert.ok(config.includes('useDefault = true'));
 });
