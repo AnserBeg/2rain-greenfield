@@ -4,6 +4,10 @@ import {
   ROLLUP_QUERY_READER,
 } from '../../canonical-model/src/line-totals.js';
 import type { StorageTargetPayloadV1 } from '../../compiler/src/storage.js';
+import {
+  declaresOpenItems,
+  OPEN_ITEM_OPERATION_READER,
+} from '../../canonical-model/src/open-item.js';
 import { lowerDeclaredReports } from '../../compiler/src/declared-reports.js';
 import { DECLARED_REPORT_READER } from '../../canonical-model/src/declared-report.js';
 import {
@@ -1250,9 +1254,20 @@ function verifyFormulaProjectionReference(
           parseNormalizedApplicationPackageJson(revision.desiredState),
         )
       : { operation: false, query: false };
+  // OPEN-ITEM-1: the open-item reader is the highest operation floor.
+  const openItems =
+    isRecord(normalized) &&
+    ['openItems', 'openItemApplications'].some((key) =>
+      Object.hasOwn(normalized, key),
+    ) &&
+    declaresOpenItems(
+      parseNormalizedApplicationPackageJson(revision.desiredState),
+    );
   if (
     references.length !== Number(Boolean(declaring)) ||
-    (lineTotals.operation
+    (openItems
+      ? operationFloor !== OPEN_ITEM_OPERATION_READER
+      : lineTotals.operation
       ? operationFloor !== LINE_TOTALS_OPERATION_READER
       : hasRecordTemplateBinding(normalized)
         ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER

@@ -70,6 +70,11 @@ import {
 } from '../../canonical-model/src/line-totals.js';
 import { lineTotalsOf } from './projections.js';
 import {
+  bindOpenItems,
+  declaresOpenItems,
+  OPEN_ITEM_OPERATION_READER,
+} from '../../canonical-model/src/open-item.js';
+import {
   compileLiteralFormulaRules,
   FORMULA_RULE_PAYLOAD_VERSION,
 } from './formula-validation-plan.js';
@@ -570,6 +575,21 @@ function compileApplicationInternal(
     );
     return failure(
       [{ ...diagnostic, rule: lineTotals.message }],
+      maximumDiagnostics,
+    );
+  }
+
+  // OPEN-ITEM-1: the open-item role and its application type.
+  const openItems = bindOpenItems(packageRevision);
+  if (openItems.status === 'refused') {
+    const diagnostic = compilerDiagnostic(
+      'COMPILER_TYPE_INVALID',
+      'typeCheck',
+      openItems.path,
+      openItems.subjectId,
+    );
+    return failure(
+      [{ ...diagnostic, rule: openItems.message }],
       maximumDiagnostics,
     );
   }
@@ -2433,7 +2453,10 @@ function verifyCompleteness(
       Number(Boolean(declaredRules || declaredDisplays)) ||
     // The line-totals reader (ADR-0094) is the highest operation floor, then
     // the record template reader; each claims every reader below it.
-    (lineTotalsRaiseOperationFloor(packageRevision)
+    // The open-item reader is the highest operation floor.
+    (declaresOpenItems(packageRevision)
+      ? operationFloor !== OPEN_ITEM_OPERATION_READER
+      : lineTotalsRaiseOperationFloor(packageRevision)
       ? operationFloor !== LINE_TOTALS_OPERATION_READER
       : hasRecordTemplateBinding(packageRevision)
         ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER

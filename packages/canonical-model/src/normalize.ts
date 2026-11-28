@@ -365,6 +365,19 @@ export function normalizeApplicationPackage(
           compareCodeUnits(left.fieldId, right.fieldId),
         ),
       }),
+    // OPEN-ITEM-1: emitted only when declared, so omission keeps every byte.
+    ...(authored.languageVersion === 'v6' &&
+      authored.openItems && {
+        openItems: [...authored.openItems].sort((left, right) =>
+          compareCodeUnits(left.entityId, right.entityId),
+        ),
+      }),
+    ...(authored.languageVersion === 'v6' &&
+      authored.openItemApplications && {
+        openItemApplications: [...authored.openItemApplications].sort(
+          (left, right) => compareCodeUnits(left.entityId, right.entityId),
+        ),
+      }),
     ...(roleNarrowings && {
       operationRoleNarrowings: [...roleNarrowings].sort((left, right) => {
         const a = `${left.operationId}/${left.roleKey}`;
