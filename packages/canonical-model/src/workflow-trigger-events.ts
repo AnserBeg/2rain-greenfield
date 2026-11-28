@@ -36,15 +36,15 @@ export const WORKFLOW_TRIGGER_EVENT_FIELDS = Object.freeze({
 } satisfies Record<WorkflowTriggerMember, readonly string[]>);
 
 /**
- * The reader rung each member needs (rule 13). Every floor gate (compiler,
- * release verification, serving) reads this one table, so a member is never
- * served to a reader below its own rung.
+ * The reader rung each general member needs (rule 13); the bare string member
+ * predates rungs. Every floor gate (compiler, release verification, serving)
+ * reads this one table, so a member is never served to a reader below its own
+ * rung.
  */
 export const WORKFLOW_TRIGGER_READER = Object.freeze({
-  goodsReceiptPosted: 0,
   recordCreated: RECORD_CREATED_TRIGGER_READER,
   recordTransitioned: RECORD_TRANSITIONED_TRIGGER_READER,
-} satisfies Record<WorkflowTriggerMember, number>);
+} satisfies Record<Exclude<WorkflowTrigger, string>['kind'], number>);
 
 /** The highest member rung a set of workflow triggers needs. */
 export function workflowTriggerReaderFloor(
@@ -52,11 +52,8 @@ export function workflowTriggerReaderFloor(
 ): number {
   return Math.max(
     0,
-    ...triggers.map(
-      (trigger) =>
-        WORKFLOW_TRIGGER_READER[
-          typeof trigger === 'string' ? trigger : trigger.kind
-        ],
+    ...triggers.map((trigger) =>
+      typeof trigger === 'string' ? 0 : WORKFLOW_TRIGGER_READER[trigger.kind],
     ),
   );
 }

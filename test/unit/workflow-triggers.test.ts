@@ -436,7 +436,11 @@ test('recordTransitioned is a strict member with its own event fields and declar
 test('each member raises the reader floor to its own rung', () => {
   const parse = (trigger: unknown) =>
     WorkflowDefinitionSchema.parse(save(trigger).workflow).trigger;
-  assert.equal(WORKFLOW_TRIGGER_READER.goodsReceiptPosted, 0);
+  assert.deepEqual(Object.keys(WORKFLOW_TRIGGER_READER).sort(), [
+    'recordCreated',
+    'recordTransitioned',
+  ]);
+  assert.equal(workflowTriggerReaderFloor(['goodsReceiptPosted']), 0);
   assert.equal(
     workflowTriggerReaderFloor([parse(recordCreated)]),
     RECORD_CREATED_TRIGGER_READER,
