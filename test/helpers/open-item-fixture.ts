@@ -322,6 +322,10 @@ export function openItemAuthored(options: OpenItemOptions = {}): {
           (entry: Authored) => !written.has(entry.fieldId),
         );
   }
+  // Only the core writes an application, so its name is optional.
+  authored.fields.find(
+    (entry: Authored) => entry.fieldId === applied('name'),
+  ).presence = 'optional';
   // The application type is capability owned: its create becomes the apply,
   // and its other generic writes go.
   const generic = ['update', 'archive', 'restore'].map((verb) =>

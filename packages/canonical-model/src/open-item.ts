@@ -707,6 +707,21 @@ export function bindOpenItems(
         application.amountFieldId,
         "The applied amount is an exact decimal at both items' scale.",
       );
+    // The core writes the company, both ends and the amount, nothing else:
+    // any other required field would refuse every application at insert.
+    const unwritten = v6.fields.find(
+      (field) =>
+        field.entity.targetId === application.entityId &&
+        field.lifecycle === 'active' &&
+        field.presence === 'required' &&
+        field.fieldId !== application.amountFieldId,
+    );
+    if (unwritten)
+      return refuse(
+        path,
+        unwritten.fieldId,
+        'The core writes only the company, both ends and the amount of an application: every other field is optional.',
+      );
     const generic = entityOperations(application.entityId)[0];
     if (generic)
       return refuse(
