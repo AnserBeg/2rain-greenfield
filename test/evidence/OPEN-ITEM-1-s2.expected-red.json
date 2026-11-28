@@ -33,6 +33,11 @@
           "file": "test/postgres/open-items.test.ts",
           "name": "unapply returns the amounts to both ends; a line is unapplied once, by its own source",
           "expected": "a fully unapplied fee note did not return to open"
+        },
+        {
+          "file": "test/postgres/open-items.test.ts",
+          "name": "a credit note, its own document and series, settles a fee note beside a receipt",
+          "expected": "a fully unapplied credit note did not return to open"
         }
       ]
     },

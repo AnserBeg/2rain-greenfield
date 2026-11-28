@@ -1103,6 +1103,7 @@ async function run(
           (await stored('credit_note', note1)).balance,
         ],
         ['open', '50.00'],
+        'a fully unapplied credit note did not return to open',
       );
     },
   );
