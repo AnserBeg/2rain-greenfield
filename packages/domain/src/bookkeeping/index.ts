@@ -11,3 +11,8 @@ export {
   bookkeepingCompanyWorkspace,
   type BookkeepingCompanyColumn,
 } from './workspace.js';
+export {
+  bookkeepingDraftDeclarations,
+  bookkeepingDraftIds,
+  LEDGER_GENERAL_LEDGER_CAPABILITY_ID,
+} from './draft.js';

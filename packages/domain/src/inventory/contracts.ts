@@ -204,6 +204,11 @@ export const LEGAL_ENTITY_FAMILY_MAP_V1 = Object.freeze([
   { classification: 'entityOwned', familyId: 'vendor_credit' },
   { classification: 'entityOwned', familyId: 'stock_count' },
   { classification: 'entityOwned', familyId: 'stock_count_line' },
+  // DOCUMENT-POSTING slice 1: Books' staged journal and its lines, owned by
+  // one company (a compiler list naming first-party families, rule 20; the
+  // declared company-ownership key for first-party entities is queued).
+  { classification: 'entityOwned', familyId: 'bookkeeping_draft' },
+  { classification: 'entityOwned', familyId: 'bookkeeping_draft_line' },
 ] as const satisfies readonly LegalEntityFamilyRuleV1[]);
 
 export const LEGAL_ENTITY_RELATION_SEMANTICS_V1 = Object.freeze([
@@ -419,6 +424,13 @@ export const LEGAL_ENTITY_RELATION_SEMANTICS_V1 = Object.freeze([
     semantics: 'crossEntityAllowed',
     sourceFamilyId: 'location',
     targetFamilyId: 'location',
+  },
+  // DOCUMENT-POSTING slice 1: a staged journal line belongs to its journal's
+  // company.
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'bookkeeping_draft_line',
+    targetFamilyId: 'bookkeeping_draft',
   },
 ] as const satisfies readonly LegalEntityRelationRuleV1[]);
 

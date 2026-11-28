@@ -405,6 +405,8 @@
         "field:stock_count_recorded_at": 1,
         "field:stock_count_state": 14,
         "name:advance_period_lock": 4,
+        "name:bookkeeping_draft": 2,
+        "name:bookkeeping_draft_line": 2,
         "name:customer_credit": 2,
         "name:customer_invoice": 5,
         "name:customer_invoice_line": 3,

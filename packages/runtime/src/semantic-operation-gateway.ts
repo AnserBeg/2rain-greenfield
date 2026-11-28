@@ -5,6 +5,7 @@ import {
   type CompiledDerivedField,
   type CompiledTotalledRelation,
 } from '../../canonical-model/src/line-totals.js';
+import { DocumentPostingBinding } from '../../canonical-model/src/document-posting.js';
 import {
   BOOKING_CAPABILITY,
   BookingOperationBinding,
@@ -114,6 +115,8 @@ export interface RegisteredRecordOperationDefinition extends RegisteredOperation
 
 export interface RegisteredCapabilityOperationDefinition extends RegisteredOperationDefinitionBase {
   readonly booking?: BookingOperationBinding;
+  /** DOCUMENT-POSTING: the released document-posting binding. */
+  readonly documentPosting?: DocumentPostingBinding;
   readonly effect: {
     readonly capability: {
       readonly kind: string;
@@ -1501,6 +1504,7 @@ export function assertPinnedOperationDefinition(
       ...(hasInputContract ? ['inputContract'] : []),
       ...(hasLabel ? ['label'] : []),
       ...(Object.hasOwn(value, 'booking') ? ['booking'] : []),
+      ...(Object.hasOwn(value, 'documentPosting') ? ['documentPosting'] : []),
       ...(hasExcludedRoles ? ['excludedRoleKeys'] : []),
     ],
     invalid,
@@ -1557,6 +1561,22 @@ export function assertPinnedOperationDefinition(
     )
       throw invalid(
         'booking operation requires a released binding and the declared approval',
+      );
+  }
+  if (Object.hasOwn(value, 'documentPosting')) {
+    // DOCUMENT-POSTING: a block rides only its engine's confirmation-class
+    // capability operation.
+    const binding = DocumentPostingBinding.safeParse(value.documentPosting);
+    if (
+      !binding.success ||
+      value.effect.kind !== 'registeredCapabilityEffect' ||
+      !isRecord(value.effect.capability) ||
+      value.effect.capability.targetId !== binding.data.engine ||
+      value.confirmation !== 'humanRequired' ||
+      value.tier !== 'o1'
+    )
+      throw invalid(
+        'document-posting operation requires its engine capability and the declared approval',
       );
   }
   if (value.effect.kind === 'registeredCapabilityEffect') {

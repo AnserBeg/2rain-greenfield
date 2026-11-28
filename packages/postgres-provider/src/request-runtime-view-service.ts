@@ -1,4 +1,8 @@
 import {
+  DOCUMENT_POSTING_OPERATION_READER,
+  hasDocumentPosting,
+} from '../../canonical-model/src/document-posting.js';
+import {
   lineTotalsReaderFloors,
   LINE_TOTALS_OPERATION_READER,
   ROLLUP_QUERY_READER,
@@ -1075,19 +1079,24 @@ function definitionFromSnapshotRows(
   );
   if (!lineTotals)
     throw malformedProjection('line-total declarations do not bind');
+  // DOCUMENT-POSTING: the document-posting reader tops the ladder.
+  const documentPosting = hasDocumentPosting(operation.payload);
   if (
-    lineTotals.operation
-      ? operationFloor !== LINE_TOTALS_OPERATION_READER
-      : templates
-        ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
-        : booking
-          ? operationFloor !== expectedBookingFloor
-          : operationFloor >= BOOKING_OPERATION_READER
+    documentPosting
+      ? operationFloor !== DOCUMENT_POSTING_OPERATION_READER
+      : lineTotals.operation
+        ? operationFloor !== LINE_TOTALS_OPERATION_READER
+        : templates
+          ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
+          : booking
+            ? operationFloor !== expectedBookingFloor
+            : operationFloor >= BOOKING_OPERATION_READER
   )
     throw malformedProjection(
       'booking operations and the mandatory reader floor disagree',
     );
   const consumesRules =
+    !documentPosting &&
     !lineTotals.operation &&
     !booking &&
     !templates &&
@@ -1130,7 +1139,8 @@ function definitionFromSnapshotRows(
   const consumesFormula =
     consumesRules ||
     consumesDisplays ||
-    ((templates ||
+    ((documentPosting ||
+      templates ||
       booking ||
       usage ||
       lineTotals.operation ||
@@ -1153,7 +1163,8 @@ function definitionFromSnapshotRows(
         ({ rule }) => rule,
       );
       if (
-        (!templates &&
+        (!documentPosting &&
+          !templates &&
           !booking &&
           !lineTotals.operation &&
           Boolean(rules.length) !== consumesRules) ||

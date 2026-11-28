@@ -70,6 +70,13 @@ import {
 } from '../../canonical-model/src/line-totals.js';
 import { lineTotalsOf } from './projections.js';
 import {
+  DOCUMENT_POSTING_OPERATION_READER,
+  documentPostingCatalogTerms,
+  documentPostingDeclarationProblem,
+  hasDocumentPosting,
+} from '../../canonical-model/src/document-posting.js';
+import { DOCUMENT_POSTING_ENGINES } from '../../canonical-model/src/document-posting-engines.js';
+import {
   compileLiteralFormulaRules,
   FORMULA_RULE_PAYLOAD_VERSION,
 } from './formula-validation-plan.js';
@@ -2433,15 +2440,18 @@ function verifyCompleteness(
       Number(Boolean(declaredRules || declaredDisplays)) ||
     // The line-totals reader (ADR-0094) is the highest operation floor, then
     // the record template reader; each claims every reader below it.
-    (lineTotalsRaiseOperationFloor(packageRevision)
-      ? operationFloor !== LINE_TOTALS_OPERATION_READER
-      : hasRecordTemplateBinding(packageRevision)
-        ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
-        : hasBookingOperations(packageRevision)
-          ? operationFloor !== bookingReaderFloor(packageRevision)
-          : declaredRules &&
-            operationFloor !==
-              requiredFormulaValidationOperationReader(declaredRules)) ||
+    // The document-posting reader tops the ladder (DOCUMENT-POSTING).
+    (hasDocumentPosting(packageRevision)
+      ? operationFloor !== DOCUMENT_POSTING_OPERATION_READER
+      : lineTotalsRaiseOperationFloor(packageRevision)
+        ? operationFloor !== LINE_TOTALS_OPERATION_READER
+        : hasRecordTemplateBinding(packageRevision)
+          ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
+          : hasBookingOperations(packageRevision)
+            ? operationFloor !== bookingReaderFloor(packageRevision)
+            : declaredRules &&
+              operationFloor !==
+                requiredFormulaValidationOperationReader(declaredRules)) ||
     // The query floor is the highest catalog feature present, so a lower
     // feature's floor is exact only when no higher feature rides the catalog.
     (lineTotalsOf(packageRevision).rollups.size > 0
@@ -2501,6 +2511,37 @@ function verifyCompleteness(
   const emittedStorage = byFamily.get(
     PROJECTION_FAMILY_IDS.storageTarget,
   ) as StorageTargetPayload;
+  // DOCUMENT-POSTING: every block checked against its registered engine, and
+  // carried into the operation catalog byte-equal.
+  const documentPostingProblem = documentPostingDeclarationProblem(
+    packageRevision,
+    {
+      engines: DOCUMENT_POSTING_ENGINES,
+      companyScopedRelation: (relationId) =>
+        isStorageTargetV1(emittedStorage) &&
+        companyScopedRelation(emittedStorage, relationId),
+    },
+  );
+  if (
+    documentPostingProblem ||
+    canonicalize(documentPostingCatalogTerms(packageRevision)) !==
+      canonicalize(
+        documentPostingCatalogTerms(
+          byFamily.get(PROJECTION_FAMILY_IDS.operationCatalog),
+        ),
+      )
+  ) {
+    diagnostics.push({
+      ...compilerDiagnostic(
+        'COMPILER_DOCUMENT_POSTING_INVALID',
+        'verifyCompleteness',
+        '$.operations.documentPosting',
+        documentPostingProblem?.operationId ??
+          packageRevision.package.packageId,
+      ),
+      rule: documentPostingProblem?.reason ?? 'catalog',
+    });
+  }
   const storageFieldIds = isStorageTargetV1(emittedStorage)
     ? emittedStorage.entities.flatMap((entity) =>
         entity.columns.map((field) => field.canonicalFieldId),
@@ -2946,4 +2987,26 @@ function lineTotalsRaiseOperationFloor(
   revision: VersionedNormalizedApplicationPackage,
 ): boolean {
   return lineTotalsReaderFloors(revision)?.operation ?? false;
+}
+
+/**
+ * DOCUMENT-POSTING check 3: the compiled line relation's foreign key carries
+ * the company, and both ends are company-owned, so a line's company is its
+ * header's by construction (storage.ts, `sameEntity`).
+ */
+function companyScopedRelation(
+  storage: StorageTargetPayloadV1,
+  relationId: string,
+): boolean {
+  const relation = storage.relations.find((r) => r.relationId === relationId);
+  if (!relation) return false;
+  const owned = (entityId: string) =>
+    storage.entities.find((e) => e.entityId === entityId)?.legalEntity !==
+    undefined;
+  return (
+    relation.foreignKey.sourceColumns.includes('legal_entity_id') &&
+    relation.foreignKey.targetColumns.includes('legal_entity_id') &&
+    owned(relation.sourceEntityId) &&
+    owned(relation.targetEntityId)
+  );
 }

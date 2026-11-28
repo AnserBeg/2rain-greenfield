@@ -18,6 +18,71 @@
         "resource": "northstar.app:entity.legal_entity"
       },
       {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.bookkeeping_draft_archive",
+        "resource": "northstar.app:entity.bookkeeping_draft"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.bookkeeping_draft_create",
+        "resource": "northstar.app:entity.bookkeeping_draft"
+      },
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.bookkeeping_draft_line_archive",
+        "resource": "northstar.app:entity.bookkeeping_draft_line"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.bookkeeping_draft_line_create",
+        "resource": "northstar.app:entity.bookkeeping_draft_line"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.bookkeeping_draft_line_read",
+        "resource": "northstar.app:entity.bookkeeping_draft_line"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.bookkeeping_draft_line_restore",
+        "resource": "northstar.app:entity.bookkeeping_draft_line"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.bookkeeping_draft_line_update",
+        "resource": "northstar.app:entity.bookkeeping_draft_line"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.bookkeeping_draft_post",
+        "resource": "northstar.app:entity.bookkeeping_draft"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.bookkeeping_draft_read",
+        "resource": "northstar.app:entity.bookkeeping_draft"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.bookkeeping_draft_ready",
+        "resource": "northstar.app:entity.bookkeeping_draft"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.bookkeeping_draft_reopen",
+        "resource": "northstar.app:entity.bookkeeping_draft"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.bookkeeping_draft_restore",
+        "resource": "northstar.app:entity.bookkeeping_draft"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.bookkeeping_draft_update",
+        "resource": "northstar.app:entity.bookkeeping_draft"
+      },
+      {
         "action": "transition",
         "permissionId": "northstar.app:permission.purchase_order_approve",
         "resource": "northstar.app:entity.purchase_order_approval"

@@ -1,5 +1,9 @@
 import { lowerDeclaredReports } from './declared-reports.js';
 import {
+  DOCUMENT_POSTING_OPERATION_READER,
+  hasDocumentPosting,
+} from '../../canonical-model/src/document-posting.js';
+import {
   bindLineTotals,
   LINE_TOTALS_OPERATION_READER,
   ROLLUP_QUERY_READER,
@@ -358,11 +362,13 @@ export function lowerBaseProjectionPayloads(
   // ADR-0094: the line-totals reader is the highest operation floor; it
   // claims every reader below it.
   const lineTotals = lineTotalsOf(verificationPackageRevision);
-  const operationFloor =
-    lineTotals.derived.size ||
-    lineTotals.createOnly.size ||
-    lineTotals.totalled.size ||
-    zeroComparesStoredMoney(verificationPackageRevision)
+  // DOCUMENT-POSTING: the document-posting reader tops the ladder.
+  const operationFloor = hasDocumentPosting(verificationPackageRevision)
+    ? DOCUMENT_POSTING_OPERATION_READER
+    : lineTotals.derived.size ||
+        lineTotals.createOnly.size ||
+        lineTotals.totalled.size ||
+        zeroComparesStoredMoney(verificationPackageRevision)
       ? LINE_TOTALS_OPERATION_READER
       : hasRecordTemplateBinding(verificationPackageRevision)
         ? RECORD_TEMPLATE_OPERATION_READER
@@ -1122,6 +1128,9 @@ function operationCatalogPayload(
       confirmation: operation.confirmation,
       ...('booking' in operation && operation.booking
         ? { booking: operation.booking }
+        : {}),
+      ...('documentPosting' in operation && operation.documentPosting
+        ? { documentPosting: operation.documentPosting }
         : {}),
       effect: resolvedEffect(operation.effect, packageRevision),
       // Declared command words (presentation only); absent, the reader derives
