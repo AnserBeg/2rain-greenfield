@@ -383,7 +383,12 @@ test('recordTransitioned is a strict member with its own event fields and declar
     workflowEventDeclaration(general.trigger),
     "type TriggerEvent = Readonly<{ type: 'recordTransitioned'; eventId: string; recordTypeId: 'northstar.app:entity.custom_inspection'; recordId: string; fromStateId: 'northstar.app:state.custom_inspection_scheduled'; toStateId: 'northstar.app:state.custom_inspection_failed'; legalEntityId: string }>;",
   );
-  const { fromStateId: _from, ...anyFrom } = failed;
+  const anyFrom = {
+    kind: 'recordTransitioned',
+    triggerVersion: 'v1',
+    recordTypeId: inspection,
+    toStateId: state('failed'),
+  } as const;
   assert.match(
     workflowEventDeclaration(
       WorkflowDefinitionSchema.parse(save(anyFrom).workflow).trigger,

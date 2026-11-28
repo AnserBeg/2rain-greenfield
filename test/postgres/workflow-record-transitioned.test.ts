@@ -638,13 +638,9 @@ test(
                   randomUUID(),
                   randomUUID(),
                 ];
+                // Only the north company holds this record, and it made the
+                // move: the company predicate alone refuses the south claim.
                 await store(tenant, north, record, failedState);
-                await store(
-                  tenant,
-                  south,
-                  record,
-                  'northstar.test:state.scheduled',
-                );
                 await assert.rejects(
                   attempt(() => transition(south, record, failedState)),
                   /a claimed record transition is not stored in this scope/u,

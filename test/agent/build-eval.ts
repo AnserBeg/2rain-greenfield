@@ -892,9 +892,12 @@ export async function scoreWorkflow(
     );
   const stateOf = (value: unknown) =>
     typeof value === 'string' ? localOf(value) : null;
+  // A from-state is scored only when the case names one: pinning a correct
+  // from-state on a case that names none is not a miss.
   if (
     (expected.toState ?? null) !== stateOf(general?.toStateId) ||
-    (expected.fromState ?? null) !== stateOf(general?.fromStateId)
+    (expected.fromState !== undefined &&
+      expected.fromState !== stateOf(general?.fromStateId))
   )
     reasons.push(
       `trigger states ${String(stateOf(general?.fromStateId))} to ${String(stateOf(general?.toStateId))}; expected ${String(expected.fromState ?? null)} to ${String(expected.toState ?? null)}`,

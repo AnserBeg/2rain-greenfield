@@ -83,7 +83,7 @@
         {
           "file": "test/postgres/workflow-record-transitioned.test.ts",
           "name": "a move outside a governed write is refused by name",
-          "expected": "The input did not match the regular expression"
+          "expected": "a move outside a governed write was named"
         }
       ]
     },
