@@ -1,5 +1,9 @@
 import type { WorkflowDefinition } from '../../canonical-model/src/schemas.js';
 import { workflowTriggerReaderFloor } from '../../canonical-model/src/workflow-trigger-events.js';
+import {
+  engineFactDeclarations,
+  engineFactTriggerValues,
+} from '../../canonical-model/src/engine-facts.js';
 import { hashCanonical } from './hash.js';
 
 type CatalogEntry = Record<string, unknown>;
@@ -189,6 +193,33 @@ export function workflowTransitionTargets(revision: MachineSource): ReadonlyMap<
   return result;
 }
 
+/**
+ * ADR-0073 A1 engineFactChanged, WORKFLOW-3 s1b. Per (fact, owner type) an
+ * active engine binding of the revision declares, the values a trigger may
+ * name: entered by a declared move and by no timer move (E3; a timer move runs
+ * under the arming command's older release and would never start a run), each
+ * with the values it is entered from.
+ */
+export function workflowEngineFactTargets(revision: unknown): ReadonlyMap<
+  string,
+  {
+    readonly factId: string;
+    readonly recordTypeId: string;
+    readonly values: ReturnType<typeof engineFactTriggerValues>;
+  }
+> {
+  return new Map(
+    engineFactDeclarations(revision).map((declaration) => [
+      `${declaration.factId} ${declaration.ownerTypeId}`,
+      {
+        factId: declaration.factId,
+        recordTypeId: declaration.ownerTypeId,
+        values: engineFactTriggerValues(declaration),
+      },
+    ]),
+  );
+}
+
 export function assertWorkflowTriggers(
   workflows: readonly WorkflowDefinition[],
   storagePayload: unknown,
@@ -204,6 +235,52 @@ export function assertWorkflowTriggers(
     if (typeof trigger === 'string') continue;
     if (!admitted.has(trigger.recordTypeId))
       throw new WorkflowTriggerBindingError(trigger.recordTypeId);
+    if (trigger.kind === 'engineFactChanged') {
+      const declaration = engineFactDeclarations(revision).find(
+        (candidate) =>
+          candidate.factId === trigger.factId &&
+          candidate.ownerTypeId === trigger.recordTypeId,
+      );
+      if (!declaration)
+        throw new WorkflowTriggerBindingError(
+          trigger.recordTypeId,
+          trigger.factId,
+          'Workflow trigger fact is not declared on this record type by an active engine binding.',
+        );
+      const declared = new Set(
+        declaration.values.map(({ valueId }) => valueId),
+      );
+      for (const value of [trigger.toValueId, trigger.fromValueId])
+        if (value !== undefined && !declared.has(value))
+          throw new WorkflowTriggerBindingError(
+            trigger.recordTypeId,
+            value,
+            'Workflow trigger value is not declared by the fact.',
+          );
+      const target = engineFactTriggerValues(declaration).get(
+        trigger.toValueId,
+      );
+      if (!target)
+        throw new WorkflowTriggerBindingError(
+          trigger.recordTypeId,
+          trigger.toValueId,
+          declaration.moves.some(
+            ({ to, via }) => to === trigger.toValueId && via === 'timer',
+          )
+            ? 'Workflow trigger value is entered by an engine timer, which runs under an older release (owed: a timer-release ruling).'
+            : 'Workflow trigger value is entered by no declared move.',
+        );
+      if (
+        trigger.fromValueId !== undefined &&
+        !target.fromValueIds.includes(trigger.fromValueId)
+      )
+        throw new WorkflowTriggerBindingError(
+          trigger.recordTypeId,
+          trigger.fromValueId,
+          'Workflow trigger from-value has no declared move into its value.',
+        );
+      continue;
+    }
     if (trigger.kind !== 'recordTransitioned') continue;
     const target = transitions.get(trigger.recordTypeId);
     if (!target) {

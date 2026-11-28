@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import type { VersionedNormalizedApplicationPackage } from './schemas.js';
 import {
+  registerEngineFactProvider,
+  type EngineFactDeclaration,
+} from './engine-facts.js';
+import {
   registerServiceUseProvider,
   SERVICE_USE_SNAPSHOT_VERSION,
   type ServiceUseProvider,
@@ -341,6 +345,98 @@ export function bookingCatalogTerms(value: unknown): [unknown, unknown][] {
       : [],
   );
 }
+
+// ---- Booking declares its commitment state as an engine fact ----
+
+/**
+ * ADR-0073 A1 engineFactChanged (WORKFLOW-3 s1b). A commitment's state is a
+ * Booking fact, not a declared record machine. Every state change ends in one
+ * of Booking's two history writers, which name it (migration
+ * 0077_booking_engine_facts.sql): one occurrence per commitment and revision,
+ * owned by the binding's owner record. A create (a new hold, or an import of a
+ * confirmed or in-use commitment) is not a change and names nothing.
+ */
+export const BOOKING_COMMITMENT_STATE_FACT =
+  'northstar.booking:fact.commitment-state';
+export const BOOKING_COMMITMENT_SUBJECT = 'northstar.booking:entity.booking';
+/** Stored state to value ID; the SQL emit maps the same seven states. */
+export const BOOKING_COMMITMENT_VALUES = Object.freeze({
+  hold: 'northstar.booking:value.hold',
+  confirmed: 'northstar.booking:value.confirmed',
+  inUse: 'northstar.booking:value.in-use',
+  returned: 'northstar.booking:value.returned',
+  completed: 'northstar.booking:value.completed',
+  noShow: 'northstar.booking:value.no-show',
+  cancelled: 'northstar.booking:value.cancelled',
+});
+type CommitmentState = keyof typeof BOOKING_COMMITMENT_VALUES;
+const COMMITMENT_LABELS: Readonly<Record<CommitmentState, string>> = {
+  hold: 'Hold',
+  confirmed: 'Confirmed',
+  inUse: 'In use',
+  returned: 'Returned',
+  completed: 'Completed',
+  noShow: 'No-show',
+  cancelled: 'Cancelled',
+};
+/**
+ * Every move a Booking writer makes (0059/0062 booking_fulfil, booking_apply,
+ * booking_apply_kit, booking_finalize_due, the hold expiry). Timer moves run
+ * under the arming command's release, so a value any timer enters is refused
+ * as a trigger (E3): cancelled, completed and no-show.
+ */
+const COMMITMENT_MOVES: readonly (readonly [
+  CommitmentState,
+  CommitmentState,
+  'command' | 'timer',
+])[] = [
+  ['hold', 'confirmed', 'command'],
+  ['hold', 'cancelled', 'command'],
+  ['hold', 'cancelled', 'timer'],
+  ['confirmed', 'cancelled', 'command'],
+  ['confirmed', 'inUse', 'command'],
+  ['confirmed', 'noShow', 'command'],
+  ['confirmed', 'noShow', 'timer'],
+  ['confirmed', 'completed', 'timer'],
+  ['noShow', 'inUse', 'command'],
+  ['inUse', 'returned', 'command'],
+  ['completed', 'noShow', 'command'],
+  ['noShow', 'completed', 'command'],
+];
+
+/** One commitment-state fact per owner type an active binding names. */
+export function bookingEngineFacts(
+  value: unknown,
+): readonly EngineFactDeclaration[] {
+  if (!record(value) || !Array.isArray(value.operations)) return [];
+  const owners = new Set<string>();
+  for (const operation of value.operations) {
+    if (!record(operation) || operation.lifecycle === 'retired') continue;
+    const parsed = BookingOperationBinding.safeParse(operation.booking);
+    if (parsed.success && parsed.data.operation !== 'setCapacity')
+      owners.add(parsed.data.ownerEntity);
+  }
+  const states = Object.keys(BOOKING_COMMITMENT_VALUES) as CommitmentState[];
+  return [...owners].sort().map((ownerTypeId) => ({
+    factId: BOOKING_COMMITMENT_STATE_FACT,
+    subjectId: BOOKING_COMMITMENT_SUBJECT,
+    ownerTypeId,
+    values: states.map((state) => ({
+      valueId: BOOKING_COMMITMENT_VALUES[state],
+      label: COMMITMENT_LABELS[state],
+    })),
+    moves: COMMITMENT_MOVES.map(([from, to, via]) => ({
+      from: BOOKING_COMMITMENT_VALUES[from],
+      to: BOOKING_COMMITMENT_VALUES[to],
+      via,
+    })),
+  }));
+}
+
+registerEngineFactProvider({
+  provider: 'northstar.booking',
+  declarations: bookingEngineFacts,
+});
 
 // ---- Booking implements the service-use evidence protocol ----
 

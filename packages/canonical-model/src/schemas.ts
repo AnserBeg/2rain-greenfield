@@ -3290,15 +3290,32 @@ export const RecordTransitionedTriggerSchema = z.strictObject({
   toStateId: CanonicalIdSchema,
   fromStateId: CanonicalIdSchema.optional(),
 });
+/**
+ * ADR-0073 A1 engine-fact member (WORKFLOW-3 s1b): a fact an engine declares
+ * (engine-facts.ts) changing to `toValueId` on a subject owned by a record of
+ * `recordTypeId`, optionally only from `fromValueId`. Admission (compiler
+ * workflows.ts) requires an active engine binding of the release to declare
+ * the fact on that owner type, and refuses a value any timer move enters.
+ */
+export const EngineFactChangedTriggerSchema = z.strictObject({
+  kind: z.literal('engineFactChanged'),
+  triggerVersion: z.literal('v1'),
+  factId: CanonicalIdSchema,
+  recordTypeId: CanonicalIdSchema,
+  toValueId: CanonicalIdSchema,
+  fromValueId: CanonicalIdSchema.optional(),
+});
 export const WORKFLOW_TRIGGER_MEMBERS = Object.freeze({
   goodsReceiptPosted: z.literal('goodsReceiptPosted'),
   recordCreated: RecordCreatedTriggerSchema,
   recordTransitioned: RecordTransitionedTriggerSchema,
+  engineFactChanged: EngineFactChangedTriggerSchema,
 });
 export const WorkflowTriggerSchema = z.union([
   WORKFLOW_TRIGGER_MEMBERS.goodsReceiptPosted,
   WORKFLOW_TRIGGER_MEMBERS.recordCreated,
   WORKFLOW_TRIGGER_MEMBERS.recordTransitioned,
+  WORKFLOW_TRIGGER_MEMBERS.engineFactChanged,
 ]);
 export type WorkflowTrigger = z.infer<typeof WorkflowTriggerSchema>;
 export type WorkflowTriggerMember = keyof typeof WORKFLOW_TRIGGER_MEMBERS;

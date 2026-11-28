@@ -62,6 +62,7 @@ import {
 } from '@north-star/customization';
 import {
   PROJECTION_FAMILY_IDS,
+  workflowEngineFactTargets,
   workflowTransitionTargets,
   type StorageTransitionEnvelope,
   compilerAttestationFromManifest,
@@ -1406,6 +1407,18 @@ export class PostgresCustomizationService {
                   fromStateIds: state.fromStateIds,
                 })),
               })),
+              // The compiler's own engineFactChanged admission rule.
+              workflowEngineFactTargets: [
+                ...workflowEngineFactTargets(definition).values(),
+              ].map(({ factId, recordTypeId, values }) => ({
+                factId,
+                recordTypeId,
+                values: [...values].map(([valueId, value]) => ({
+                  valueId,
+                  label: value.label,
+                  fromValueIds: value.fromValueIds,
+                })),
+              })),
             }
           : {}),
       },
@@ -1448,6 +1461,7 @@ export class PostgresCustomizationService {
             recordType: string | null;
             toState: string | null;
             fromState: string | null;
+            factId: string | null;
             body: string;
             grants: {
               queries: readonly string[];
@@ -1455,7 +1469,7 @@ export class PostgresCustomizationService {
             };
           }>(
             `SELECT d.workflow_id AS "workflowId", d.event_type AS "eventType", d.record_type AS "recordType",
-                  d.to_state AS "toState", d.from_state AS "fromState",
+                  d.to_state AS "toState", d.from_state AS "fromState", d.fact_id AS "factId",
                   convert_from(b.bundle, 'UTF8')::jsonb->>'body' AS body, d.grants
              FROM platform.release_activation_verification_receipts AS v
              JOIN platform.release_activation_swap_receipts AS s
@@ -1494,16 +1508,18 @@ export class PostgresCustomizationService {
         ).rows,
     );
     return workflows.map(
-      ({ eventType, recordType, toState, fromState, ...workflow }) => ({
+      ({ eventType, recordType, toState, fromState, factId, ...workflow }) => ({
         ...workflow,
         trigger:
           eventType === RECEIPT_POSTED_EVENT.eventType
             ? RECEIPT_POSTED_EVENT.label
-            : recordType && toState
-              ? `Record moved${fromState ? ` from ${fromState}` : ''} to ${toState}: ${recordType}`
-              : recordType
-                ? `Record created: ${recordType}`
-                : eventType,
+            : recordType && factId && toState
+              ? `${factId} changed${fromState ? ` from ${fromState}` : ''} to ${toState}: ${recordType}`
+              : recordType && toState
+                ? `Record moved${fromState ? ` from ${fromState}` : ''} to ${toState}: ${recordType}`
+                : recordType
+                  ? `Record created: ${recordType}`
+                  : eventType,
       }),
     );
   }

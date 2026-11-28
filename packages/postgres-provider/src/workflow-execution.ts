@@ -70,10 +70,13 @@ interface TriggerScope {
   readonly trigger_record_id: string;
   readonly record_type: string | null;
   readonly event_id: string;
-  /** 'created' or 'transitioned' for a record occurrence; null for a receipt. */
+  /** 'created', 'transitioned' or 'engineFact' for an occurrence; null for a receipt. */
   readonly kind: string | null;
   readonly from_state: string | null;
   readonly to_state: string | null;
+  /** An engine fact's ID and subject; null otherwise. */
+  readonly fact_id: string | null;
+  readonly subject_id: string | null;
 }
 
 export interface WorkflowRunPin extends WorkflowScope, TriggerScope {
@@ -102,6 +105,7 @@ interface Run extends Omit<WorkflowRunPin, keyof TriggerScope> {
   readonly definition_record_type: string | null;
   readonly definition_to_state: string | null;
   readonly definition_from_state: string | null;
+  readonly definition_fact_id: string | null;
   readonly retry_authorized: boolean;
   readonly workflow_id: string;
   readonly status:
@@ -721,23 +725,35 @@ export class PostgresWorkflowExecution {
       if (sha256(sdk.declarations) !== run.sdk_digest)
         throw new WorkflowEffectRefusal('unavailable-sdk-artifact');
       const event: WorkflowEvent = run.record_type
-        ? run.kind === 'transitioned'
+        ? run.kind === 'engineFact'
           ? {
-              type: 'recordTransitioned',
+              type: 'engineFactChanged',
               eventId: run.event_id,
+              factId: run.fact_id!,
               recordTypeId: run.record_type,
               recordId: run.trigger_record_id,
-              fromStateId: run.from_state!,
-              toStateId: run.to_state!,
+              subjectId: run.subject_id!,
+              fromValueId: run.from_state!,
+              toValueId: run.to_state!,
               legalEntityId: run.legal_entity_id,
             }
-          : {
-              type: 'recordCreated',
-              eventId: run.event_id,
-              recordTypeId: run.record_type,
-              recordId: run.trigger_record_id,
-              legalEntityId: run.legal_entity_id,
-            }
+          : run.kind === 'transitioned'
+            ? {
+                type: 'recordTransitioned',
+                eventId: run.event_id,
+                recordTypeId: run.record_type,
+                recordId: run.trigger_record_id,
+                fromStateId: run.from_state!,
+                toStateId: run.to_state!,
+                legalEntityId: run.legal_entity_id,
+              }
+            : {
+                type: 'recordCreated',
+                eventId: run.event_id,
+                recordTypeId: run.record_type,
+                recordId: run.trigger_record_id,
+                legalEntityId: run.legal_entity_id,
+              }
         : {
             type: 'goodsReceiptPosted',
             eventId: run.event_id,
@@ -904,11 +920,26 @@ async function persistEffectResult(
 function runTrigger(
   run: Pick<
     Run,
-    'definition_record_type' | 'definition_to_state' | 'definition_from_state'
+    | 'definition_record_type'
+    | 'definition_to_state'
+    | 'definition_from_state'
+    | 'definition_fact_id'
   >,
 ): WorkflowTrigger {
   if (!run.definition_record_type) return 'goodsReceiptPosted';
   const recordTypeId = CanonicalIdSchema.parse(run.definition_record_type);
+  // E4: an engine fact is told by its fact ID, never by having a target.
+  if (run.definition_fact_id !== null)
+    return {
+      kind: 'engineFactChanged',
+      triggerVersion: 'v1',
+      factId: CanonicalIdSchema.parse(run.definition_fact_id),
+      recordTypeId,
+      toValueId: CanonicalIdSchema.parse(run.definition_to_state),
+      ...(run.definition_from_state === null
+        ? {}
+        : { fromValueId: CanonicalIdSchema.parse(run.definition_from_state) }),
+    };
   if (run.definition_to_state === null)
     return { kind: 'recordCreated', triggerVersion: 'v1', recordTypeId };
   return {
@@ -933,7 +964,7 @@ async function loadRun(
     (
       await client.query<Run>(
         `SELECT r.*, d.record_type AS definition_record_type, d.to_state AS definition_to_state,
-             d.from_state AS definition_from_state, d.executable, d.sdk_digest, d.grants, d.engine_build, d.host_version, d.sdk_version,
+             d.from_state AS definition_from_state, d.fact_id AS definition_fact_id, d.executable, d.sdk_digest, d.grants, d.engine_build, d.host_version, d.sdk_version,
              d.automation_principal_id,
              (r.execution_fence = r.initial_fence OR retry.fence IS NOT NULL) AS retry_authorized,
              CASE WHEN change.record_id IS NOT NULL THEN jsonb_build_object(
@@ -942,7 +973,8 @@ async function loadRun(
                'record_type', NULL,
                'event_id', event.domain_event_id,
                'trigger_principal_id', change.execution_principal_id,
-               'kind', NULL, 'from_state', NULL, 'to_state', NULL
+               'kind', NULL, 'from_state', NULL, 'to_state', NULL,
+               'fact_id', NULL, 'subject_id', NULL
              ) WHEN created.trigger_record_id IS NOT NULL THEN jsonb_build_object(
                'legal_entity_id', created.legal_entity_id,
                'trigger_record_id', created.trigger_record_id,
@@ -951,7 +983,9 @@ async function loadRun(
                'trigger_principal_id', created.trigger_principal_id,
                'kind', created.kind,
                'from_state', created.from_state,
-               'to_state', created.to_state
+               'to_state', created.to_state,
+               'fact_id', created.fact_id,
+               'subject_id', created.subject_id
              ) END AS trigger_scope,
              w.approver_id, w.approver_grants,
              CASE WHEN w.verified_approval_binding AND active.verified_approval_binding

@@ -186,6 +186,7 @@ export type { FormulaValidationRule } from './formula-validation-schema.js';
 export * from './address.js';
 
 export * from './booking.js';
+export * from './engine-facts.js';
 export {
   ReportBodySchema,
   ReportChoicesSchema,

@@ -1,5 +1,8 @@
 import { mapTargets, type MapTarget } from './map-revision.js';
-import type { WorkflowTransitionTarget } from '../../canonical-model/src/workflow-trigger-events.js';
+import type {
+  WorkflowEngineFactTarget,
+  WorkflowTransitionTarget,
+} from '../../canonical-model/src/workflow-trigger-events.js';
 import {
   presentationTargets,
   type PresentationTarget,
@@ -94,6 +97,12 @@ export interface CustomizationTargets {
    * computed by the compiler's own admission rule (workflowTransitionTargets).
    */
   readonly workflowTransitionTargets?: readonly WorkflowTransitionTarget[];
+  /**
+   * Per (fact, owner type) an engine binding declares, the values an
+   * engineFactChanged trigger may name: the compiler's own admission rule
+   * (workflowEngineFactTargets).
+   */
+  readonly workflowEngineFactTargets?: readonly WorkflowEngineFactTarget[];
   readonly linkTargets?: readonly {
     readonly entityId: string;
     readonly label: string;

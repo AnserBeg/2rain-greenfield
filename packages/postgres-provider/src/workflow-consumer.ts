@@ -5,6 +5,7 @@ import type { Pool, PoolClient } from 'pg';
 import { RECEIPT_POSTED_EVENT } from '../../domain/src/purchasing/receipt-posted-event.js';
 import type { WorkflowTrigger } from '../../canonical-model/src/schemas.js';
 import {
+  ENGINE_FACT_CHANGED_EVENT_TYPE,
   RECORD_CREATED_EVENT_TYPE,
   RECORD_TRANSITIONED_EVENT_TYPE,
 } from '../../canonical-model/src/workflows.js';
@@ -15,14 +16,16 @@ export const WORKFLOW_MAX_CAUSATION_DEPTH = 3;
 
 /**
  * The persisted source of a trigger member. The receipt member keeps its
- * event type and no record type, and a recordCreated member no states, so
- * their definitions and digests are unchanged.
+ * event type and no record type, a recordCreated member no states and a
+ * record member no fact, so their definitions and digests are unchanged. An
+ * engine fact's values are stored in the state columns.
  */
 export function workflowTriggerSource(trigger: WorkflowTrigger): {
   readonly eventType: string;
   readonly recordType: string | null;
   readonly toState: string | null;
   readonly fromState: string | null;
+  readonly factId: string | null;
 } {
   if (typeof trigger === 'string')
     return {
@@ -30,6 +33,7 @@ export function workflowTriggerSource(trigger: WorkflowTrigger): {
       recordType: null,
       toState: null,
       fromState: null,
+      factId: null,
     };
   if (trigger.kind === 'recordCreated')
     return {
@@ -37,19 +41,38 @@ export function workflowTriggerSource(trigger: WorkflowTrigger): {
       recordType: trigger.recordTypeId,
       toState: null,
       fromState: null,
+      factId: null,
+    };
+  if (trigger.kind === 'engineFactChanged')
+    return {
+      eventType: ENGINE_FACT_CHANGED_EVENT_TYPE,
+      recordType: trigger.recordTypeId,
+      toState: trigger.toValueId,
+      fromState: trigger.fromValueId ?? null,
+      factId: trigger.factId,
     };
   return {
     eventType: RECORD_TRANSITIONED_EVENT_TYPE,
     recordType: trigger.recordTypeId,
     toState: trigger.toStateId,
     fromState: trigger.fromStateId ?? null,
+    factId: null,
   };
 }
 
+/** The occurrence kind each record event type starts on (E4: by event type,
+ * never by whether the definition has a target state). */
+export const OCCURRENCE_KIND_BY_EVENT_TYPE: Readonly<Record<string, string>> =
+  Object.freeze({
+    [RECORD_CREATED_EVENT_TYPE]: 'created',
+    [RECORD_TRANSITIONED_EVENT_TYPE]: 'transitioned',
+    [ENGINE_FACT_CHANGED_EVENT_TYPE]: 'engineFact',
+  });
+
 /**
- * B5: an occurrence starts a definition only when its record type, kind and
- * states match; the page is keyed by type alone, so a move of a subscribed
- * type into another state is resolved INELIGIBLE instead of rescanned.
+ * B5: an occurrence starts a definition only when its record type, kind,
+ * fact and states match; the page is keyed by type alone, so any other
+ * occurrence of a subscribed type is resolved INELIGIBLE instead of rescanned.
  */
 export function occurrenceMatchesDefinition(
   occurrence: {
@@ -57,17 +80,20 @@ export function occurrenceMatchesDefinition(
     readonly kind: string;
     readonly from_state: string | null;
     readonly to_state: string | null;
+    readonly fact_id?: string | null;
   },
   definition: {
+    readonly event_type: string;
     readonly record_type: string;
     readonly to_state: string | null;
     readonly from_state: string | null;
+    readonly fact_id: string | null;
   },
 ): boolean {
   return (
     definition.record_type === occurrence.record_type &&
-    occurrence.kind ===
-      (definition.to_state === null ? 'created' : 'transitioned') &&
+    occurrence.kind === OCCURRENCE_KIND_BY_EVENT_TYPE[definition.event_type] &&
+    (occurrence.fact_id ?? null) === definition.fact_id &&
     occurrence.to_state === definition.to_state &&
     (definition.from_state === null ||
       occurrence.from_state === definition.from_state)
@@ -88,6 +114,7 @@ interface RecordCreationCandidate {
   readonly kind: string;
   readonly from_state: string | null;
   readonly to_state: string | null;
+  readonly fact_id: string | null;
 }
 const FIRST_UUID = '00000000-0000-0000-0000-000000000000';
 export const WORKFLOW_POLL_BATCH_SIZE = 64;
@@ -359,11 +386,13 @@ async function claimRecordCreations(
   const scopeKeys = [scope.tenant_id, scope.environment_id];
   const definitions = await client.query<{
     workflow_id: string;
+    event_type: string;
     record_type: string;
     to_state: string | null;
     from_state: string | null;
+    fact_id: string | null;
   }>(
-    `SELECT d.workflow_id, d.record_type, d.to_state, d.from_state
+    `SELECT d.workflow_id, d.event_type, d.record_type, d.to_state, d.from_state, d.fact_id
         FROM platform.workflow_definitions AS d
         JOIN platform.workflow_activation_watermarks AS w USING (tenant_id, environment_id, release_id)
        WHERE d.tenant_id = $1 AND d.environment_id = $2 AND d.release_id = $3 AND d.event_type = ANY($4::text[])
@@ -372,11 +401,12 @@ async function claimRecordCreations(
          AND w.definition_bindings->d.workflow_id->>'recordType' = d.record_type
          AND w.definition_bindings->d.workflow_id->>'toState' IS NOT DISTINCT FROM d.to_state
          AND w.definition_bindings->d.workflow_id->>'fromState' IS NOT DISTINCT FROM d.from_state
+         AND w.definition_bindings->d.workflow_id->>'factId' IS NOT DISTINCT FROM d.fact_id
        ORDER BY d.workflow_id`,
     [
       ...scopeKeys,
       pointer.release_id,
-      [RECORD_CREATED_EVENT_TYPE, RECORD_TRANSITIONED_EVENT_TYPE],
+      Object.keys(OCCURRENCE_KIND_BY_EVENT_TYPE),
       pointer.pointer_id,
       pointer.fence,
     ],

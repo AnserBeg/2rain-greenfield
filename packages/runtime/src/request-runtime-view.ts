@@ -12,7 +12,7 @@ import {
 import { DOCUMENTS_PROJECTION_FAMILY } from '../../canonical-model/src/documents.js';
 import { REVERSIBILITY_AGENT_READER } from '../../canonical-model/src/reversibility.js';
 import {
-  RECORD_TRANSITIONED_TRIGGER_READER,
+  ENGINE_FACT_TRIGGER_READER,
   WORKFLOW_PROJECTION_FAMILY,
   WORKFLOW_RUNTIME_CAPABILITY,
 } from '../../canonical-model/src/workflows.js';
@@ -265,7 +265,9 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // (BILLING_RULES_READER, BILLING-1 s3a-i; assigned at TRAIN-X).
     // 55 reads the recordTransitioned workflow trigger member (ADR-0073 A1;
     // WORKFLOW-3 s1, assigned at TRAIN-Y).
-    maximumSupportedVersion: RECORD_TRANSITIONED_TRIGGER_READER,
+    // 56 reads the engineFactChanged workflow trigger member (ADR-0073 A1;
+    // WORKFLOW-3 s1b, provisional; assigned at merge).
+    maximumSupportedVersion: ENGINE_FACT_TRIGGER_READER,
   },
 });
 

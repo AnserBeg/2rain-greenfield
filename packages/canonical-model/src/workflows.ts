@@ -16,6 +16,14 @@ export const RECORD_TRANSITIONED_TRIGGER_READER = 55;
 /** The platform event type a recordTransitioned definition persists. */
 export const RECORD_TRANSITIONED_EVENT_TYPE =
   'northstar.runtime:event.record-transitioned';
+/**
+ * ADR-0073 A1 engineFactChanged (WORKFLOW-3 s1b). Its own rung, never
+ * reserved: provisional 56 (main's highest is 55); assigned at merge.
+ */
+export const ENGINE_FACT_TRIGGER_READER = 56;
+/** The platform event type an engineFactChanged definition persists. */
+export const ENGINE_FACT_CHANGED_EVENT_TYPE =
+  'northstar.runtime:event.engine-fact-changed';
 export const WORKFLOW_PAYLOAD_VERSION = 'northstar.workflow-payload/v1';
 export const WORKFLOW_PROJECTION_FAMILY =
   'northstar.compiler:projection-family.workflow';

@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { WorkflowDefinitionSchema } from '../../canonical-model/src/schemas.js';
 import {
   workflowTriggerDrafterLines,
+  type WorkflowEngineFactTarget,
   type WorkflowTransitionTarget,
 } from '../../canonical-model/src/workflow-trigger-events.js';
 import {
@@ -515,10 +516,11 @@ export function workflowPromptSection(
   rules: readonly string[] = [],
   recordTypes: readonly string[] = [],
   transitions: readonly WorkflowTransitionTarget[] = [],
+  engineFacts: readonly WorkflowEngineFactTarget[] = [],
 ): string {
   return [
     'For a workflow use saveWorkflow with workflow {schemaVersion:"v6", workflowId, trigger, grants:{operations,queries}}, a TypeScript body and fixtures. The trigger is one of these members:',
-    ...workflowTriggerDrafterLines(recordTypes, transitions).map(
+    ...workflowTriggerDrafterLines(recordTypes, transitions, engineFacts).map(
       (line) => `- ${line}`,
     ),
     `workflowId matches ${WORKFLOW_ID_PATTERN}: lowercase letters, digits and hyphens, starting with a letter (no underscores).`,
@@ -562,6 +564,18 @@ export async function draftPatchFromRequest<T = never>(
                 entityId === recordTypeId &&
                 (targets.workflowRecordTypeIds ?? []).includes(entityId),
             ),
+          ),
+          // Only facts an engine binding declares on such a type, and only
+          // values no timer enters: the compiler's rule.
+          (targets.workflowEngineFactTargets ?? []).filter(
+            ({ recordTypeId, values }) =>
+              values.length > 0 &&
+              (targets.linkTargets ?? []).some(
+                ({ companyOwned, entityId }) =>
+                  companyOwned &&
+                  entityId === recordTypeId &&
+                  (targets.workflowRecordTypeIds ?? []).includes(entityId),
+              ),
           ),
         )}`
       : '');

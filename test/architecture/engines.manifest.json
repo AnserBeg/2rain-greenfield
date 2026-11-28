@@ -21,7 +21,8 @@
         "db/migrations/0053_booking_authority.sql",
         "db/migrations/0056_booking_lock_order.sql",
         "db/migrations/0059_booking_fulfilment.sql",
-        "db/migrations/0062_booking_recovery.sql"
+        "db/migrations/0062_booking_recovery.sql",
+        "db/migrations/0077_booking_engine_facts.sql"
       ]
     },
     {

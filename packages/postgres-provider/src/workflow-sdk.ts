@@ -55,6 +55,17 @@ export type WorkflowEvent =
       readonly fromStateId: string;
       readonly toStateId: string;
       readonly legalEntityId: string;
+    }
+  | {
+      readonly type: 'engineFactChanged';
+      readonly eventId: string;
+      readonly factId: string;
+      readonly recordTypeId: string;
+      readonly recordId: string;
+      readonly subjectId: string;
+      readonly fromValueId: string;
+      readonly toValueId: string;
+      readonly legalEntityId: string;
     };
 
 export type WorkflowCall =

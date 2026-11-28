@@ -134,6 +134,7 @@ export {
 } from './storage.js';
 export { workflowTierBDependencies } from './workflow-dependencies.js';
 export {
+  workflowEngineFactTargets,
   workflowSdkBindingDigest,
   workflowTransitionTargets,
 } from './workflows.js';
