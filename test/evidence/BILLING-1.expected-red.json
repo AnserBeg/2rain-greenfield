@@ -978,8 +978,8 @@
       "name": "billing-advance-agreed-not-elapsed",
       "claim": "An advance fee bills the opened cycle on agreed coverage, not on time elapsed at the review.",
       "file": "packages/domain/src/billing/quote.ts",
-      "original": "          const ms = covered(\n            o.term ? held : o.start >= committedFrom ? committed : opened,\n            o.start,\n            o.fullEnd,\n          );",
-      "replacement": "          const ms = covered(\n            o.term ? held : o.start >= committedFrom ? committed : opened,\n            o.start,\n            Math.min(o.fullEnd, asOf),\n          );",
+      "original": "          const ms = covered(\n            o.term ? held : o.start >= committedFrom ? afterReturn : opened,\n            o.start,\n            o.fullEnd,\n          );",
+      "replacement": "          const ms = covered(\n            o.term ? held : o.start >= committedFrom ? afterReturn : opened,\n            o.start,\n            Math.min(o.fullEnd, asOf),\n          );",
       "test": {
         "files": ["test/integration/billing-rules.test.ts"],
         "namePattern": "^B2: an advance fee bills the opened cycle on agreed coverage, not on elapsed time$"
@@ -1022,7 +1022,7 @@
       "name": "billing-advance-final-no-rerate",
       "claim": "An opened advance cycle keeps its amount when it closes; it is never re-rated on the arrears coverage.",
       "file": "packages/domain/src/billing/quote.ts",
-      "original": "          const ms = covered(\n            o.term ? held : o.start >= committedFrom ? committed : opened,\n            o.start,\n            o.fullEnd,\n          );",
+      "original": "          const ms = covered(\n            o.term ? held : o.start >= committedFrom ? afterReturn : opened,\n            o.start,\n            o.fullEnd,\n          );",
       "replacement": "          const ms = covered(\n            o.term ? held : o.start >= committedFrom ? committed : o.fullEnd <= asOf\n                  ? coverage.eligible\n                  : opened,\n            o.start,\n            o.fullEnd,\n          );",
       "test": {
         "files": ["test/integration/billing-rules.test.ts"],
@@ -1238,8 +1238,8 @@
       "name": "billing-committed-cycle-clip",
       "claim": "Slice-a correction (ruling 2026-11-28): an advance cycle opening after the last return is rated on the committed interval only, so the early-return term form charges 900.00, not 1110.00.",
       "file": "packages/domain/src/billing/quote.ts",
-      "original": "o.start >= committedFrom ? committed",
-      "replacement": "o.start >= Number.POSITIVE_INFINITY ? committed",
+      "original": "o.start >= committedFrom ? afterReturn",
+      "replacement": "o.start >= Number.POSITIVE_INFINITY ? afterReturn",
       "test": {
         "files": ["test/integration/billing-rules.test.ts"],
         "namePattern": "^B2 minimum: the early-return term form charges exactly the term too \\(slice-a correction\\)$"
