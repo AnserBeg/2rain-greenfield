@@ -144,6 +144,26 @@
       "adr": "docs/decisions/ADR-0093-ledger-and-posting-rules.md",
       "adrNote": "ACCOUNTING-1 s0 landed the ADR only, so the ledger owns no files yet. Slice 1a-ii adds the local names of its registered capabilities (northstar.ledger:capability.<name>; the post is general_ledger): engine names, not first-party vocabulary. 'ledger' alone is ordinary English (the stock ledger, ledger styles), so it counts only in ID position (northstar.ledger).",
       "files": []
+    },
+    {
+      "id": "open-item",
+      "names": ["open_item", "openitem"],
+      "nameScope": "engines-only",
+      "businesses": [
+        "equipment rental",
+        "clinics",
+        "field service",
+        "distribution",
+        "subscriptions"
+      ],
+      "adr": null,
+      "adrNote": "OPEN-ITEM-1 slice 1: the order-free open-item core (design note notes/OPEN-ITEM-1-core-v2 and its binding read; the ADR follows with the receivable and payable adoption). Its names are its own capability IDs (northstar.openitem:capability.open_item_issue and open_item_apply) and the openItem declaration keys: engine vocabulary, not first-party vocabulary.",
+      "files": [
+        "packages/postgres-provider/src/open-item-capability-executor.ts",
+        "packages/canonical-model/src/open-item.ts",
+        "packages/canonical-model/src/open-item-schema.ts",
+        "db/migrations/0075_open_items.sql"
+      ]
     }
   ]
 }

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { z } from 'zod';
 
 import type { VersionedNormalizedApplicationPackage } from './schemas.js';
@@ -34,6 +36,33 @@ export const OPEN_ITEM_EVENT_SCHEMA_VERSION = 'northstar.open-item-event/v1';
 // Operation catalog reader 9: an operation's open-item binding (assigned at
 // merge; MIGRATION-RULE capability rung rule). It claims every reader below.
 export const OPEN_ITEM_OPERATION_READER = 9;
+
+/**
+ * The line set a person confirms an issue against: each live line's record ID
+ * and revision, sorted by record ID, hashed. A line write between the preview
+ * and the issue changes a revision (an archive, a restore or a new line
+ * changes the set), so the issue refuses it under the header lock. A line
+ * write does not move the header's revision, which is why the issue input
+ * carries this digest as well as the header's expected revision.
+ */
+export function openItemLineSetDigest(
+  lines: readonly { readonly recordId: string; readonly revision: number }[],
+): string {
+  return createHash('sha256')
+    .update(
+      [...lines]
+        .sort((left, right) =>
+          left.recordId < right.recordId
+            ? -1
+            : left.recordId > right.recordId
+              ? 1
+              : 0,
+        )
+        .map(({ recordId, revision }) => `${recordId}:${String(revision)}\n`)
+        .join(''),
+    )
+    .digest('hex');
+}
 
 export {
   openItemSchemas,

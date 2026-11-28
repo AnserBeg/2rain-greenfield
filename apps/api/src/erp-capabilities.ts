@@ -3,6 +3,7 @@ import { BOOKING_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provid
 import type { PostgresCapabilityOperationExecutorFactory } from '../../../packages/postgres-provider/src/capability-operation-executor-factory.js';
 import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/inventory-posting-capability-executor';
 import { LEDGER_CAPABILITY_EXECUTOR_FACTORIES } from '@north-star/postgres-provider/ledger-capability-executor';
+import { OPEN_ITEM_CAPABILITY_EXECUTOR_FACTORIES } from '@north-star/postgres-provider/open-item-capability-executor';
 import { FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/fulfillment-capability-executor';
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/receiving-capability-executor';
 import { RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/receivables-capability-executor';
@@ -20,4 +21,5 @@ export const CAPABILITY_EXECUTOR_FACTORIES: readonly PostgresCapabilityOperation
     PAYABLES_CAPABILITY_EXECUTOR_FACTORY,
     PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY,
     ...LEDGER_CAPABILITY_EXECUTOR_FACTORIES,
+    ...OPEN_ITEM_CAPABILITY_EXECUTOR_FACTORIES,
   ]);
