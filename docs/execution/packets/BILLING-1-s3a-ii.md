@@ -26,7 +26,7 @@ CI tier: pending full
 1. Money: advance on a service-use source with no earlyReturn kept opening whole cycles after the return (agreed Jun 10 to Aug 31, returned Jul 12: 810.00). Ruled: refuse it at parse (bookingActuals, or evidenceQuery without earlyReturn); ADR-0083 records it. Control timing-service-use-early-return.
 2. `earlyEnd` on an arrears component was admitted and never read: refused, with a test.
 Items 3 (an advance line's period end is the full cycle end when the agreed end is inside it) and 4 (no term pins: a backdated table re-rates an opened cycle) go to s3b.
-The first controls dispatch (46145546481, 12/12 green) had input ref=4f93f588916320dc98dc9483d8c9d77967f4d641. Full 46145541191 was cancelled for the fix (the tip moved), not red.
+The first controls dispatch (46145546481, 12/12 green) had input ref=4f93f588916320dc98dc9483d8c9d77967f4d641. Full 46145541191 was cancelled for the fix (the tip moved), not red. The fix-round full run (46147897052, at a6b196a90) was red only on module-press-law: the first form of finding 1 named the persisted Booking literal (PRESS015 baseline rise). The refusal now admits advance only on an agreed interval or an evidence source that declares earlyReturn; press-law 69/69 locally.
 
 ## Rules 16, 17
 (a) Advance period rent: rentals, storage, coworking, subscriptions, service contracts. (b) Any recurring fixed fee on any interval or service-use source takes it; the owed set and the agreed horizon are generic. (c) Narrower: fixed fees only; time in advance is slice (e).
