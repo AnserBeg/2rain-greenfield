@@ -214,6 +214,8 @@ The product mission is:
 The initial launch is an inventory-operations ERP, not a claim to be a complete
 financial ERP or universal no-code platform.
 
+<!-- CI-10 evidence: docs-only fast path probe; this pull request is closed unmerged. -->
+
 ### 2.1 Launch business loop
 
 ```text
