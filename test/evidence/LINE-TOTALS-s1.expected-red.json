@@ -960,7 +960,7 @@
       "name": "line-totals-s1-rollup-unfiltered-line-query",
       "claim": "A total is authorized only by an unfiltered list query of its lines, never by a filtered one that hides lines it sums.",
       "file": "packages/canonical-model/src/line-totals.ts",
-      "original": "    const lineQuery = lineLists.find(\n      (query) =>\n        query.filter.kind === 'booleanPredicate' && query.filter.value === true,\n    );",
+      "original": "    const lineQuery = lineLists.find(\n      (query) =>\n        inspectPredicateForExecution(query.filter).outcome === 'accepted',\n    );",
       "replacement": "    const lineQuery = lineLists[0];",
       "test": {
         "files": ["test/unit/line-totals.test.ts"],

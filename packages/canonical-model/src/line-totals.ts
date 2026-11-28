@@ -6,6 +6,7 @@ import {
   logicalDecimals,
   zeroComparesStoredMoney,
 } from './formula-validation-bindings.js';
+import { inspectPredicateForExecution } from './predicate-kernel.js';
 import type { VersionedNormalizedApplicationPackage } from './schemas.js';
 
 /**
@@ -1003,7 +1004,7 @@ export function bindLineTotals(
     // lines no query they hold can show (owner Q4).
     const lineQuery = lineLists.find(
       (query) =>
-        query.filter.kind === 'booleanPredicate' && query.filter.value === true,
+        inspectPredicateForExecution(query.filter).outcome === 'accepted',
     );
     const lineQueryId = lineQuery?.queryId;
     if (!lineQueryId)
