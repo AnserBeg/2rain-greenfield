@@ -2246,3 +2246,64 @@ test('B2 minimum: a term never bills a partly held cycle whole (feeProration non
     'the early-return term on an advance fee with feeProration none',
   );
 });
+
+test('B2 minimum: a fee term still binds on cycles opening between the return and a held agreed end (review finding 1)', () => {
+  // E1m with earlyReturn agreedEnd and an agreed end of Aug 20: returned
+  // Jul 12, the service is held to Aug 20, so August opens after the return
+  // and must still owe the term (300.00, not 183.87). Total 900.00.
+  const planInput = advancePlan({
+    source: 'use',
+    components: [termFee(advance)],
+  }) as { bindings: { arrearsSource: Record<string, unknown> } };
+  const earlyReturn = { bill: 'agreedEnd' } as const;
+  planInput.bindings.arrearsSource.earlyReturn = earlyReturn;
+  const asOf = '2027-09-15T06:00:00.000Z';
+  const lines = reviewLines(
+    reviewArrearsCharges(
+      compileRatePlan(planInput).plan,
+      {
+        ...e1Evidence(planInput, asOf, '2027-08-20T06:00:00.000Z'),
+        bands: [],
+      },
+      {
+        snapshot: e1Snapshot(e1Return, asOf),
+        subjectId: subject,
+        owner,
+        earlyReturn,
+      },
+    ),
+  );
+  assert.deepEqual(lines, [
+    ['rent', e1Start, '21000'],
+    ['rent', july, '30000'],
+    ['rent', august, '30000'],
+    ['rent', september, '9000'],
+  ]);
+});
+
+test('B2: a use leg cannot carry the reserved committed identity (review finding 2)', () => {
+  const snapshot = e1Snapshot(e1Return, '2027-09-15T06:00:00.000Z');
+  const engagement = snapshot.engagements[0]!;
+  const forged = {
+    ...snapshot,
+    engagements: [
+      {
+        ...engagement,
+        legs: engagement.legs.map((leg) => ({
+          ...leg,
+          id: JSON.stringify(['committed', engagement.id]),
+        })),
+      },
+    ],
+  };
+  assert.throws(
+    () =>
+      serviceUseCoverage(
+        { snapshot: forged, subjectId: subject, owner },
+        'each',
+        '2027-09-15T06:00:00.000Z',
+        e1Return,
+      ),
+    /reserved identity/,
+  );
+});

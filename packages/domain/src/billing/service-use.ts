@@ -109,6 +109,10 @@ export function serviceUseCoverage(
   // Under a declared early-return rule the time from the last return to the
   // service end (the agreed end, or the minimum term) is committed coverage:
   // it is charged like use once it has elapsed, never before (arrears).
+  // The committed identity is reserved: a use leg carrying it would be read
+  // as a declared hold and clip the cycles after it (quote.ts).
+  if (legs.some((r) => r.id === committedIntervalId(bandId)))
+    throw new Error('Billing service-use leg uses a reserved identity');
   const intervals = legs.map(interval);
   const lastReturn = legs.every((r) => r.end !== null)
     ? Math.max(...legs.map((r) => Date.parse(r.end!)))

@@ -644,13 +644,18 @@ function calculate(
           asOf,
           serviceEnd,
         );
+        // A fee term binds beside the committed interval too: a cycle that
+        // opens after the return but before the held end still owes the term.
         const held = binding ? [binding] : [];
         const opened = binding
           ? union([...advanceCoverage, binding])
           : advanceCoverage;
+        const afterReturn = binding
+          ? union([...committed, binding])
+          : committed;
         for (const o of owed) {
           const ms = covered(
-            o.term ? held : o.start >= committedFrom ? committed : opened,
+            o.term ? held : o.start >= committedFrom ? afterReturn : opened,
             o.start,
             o.fullEnd,
           );
