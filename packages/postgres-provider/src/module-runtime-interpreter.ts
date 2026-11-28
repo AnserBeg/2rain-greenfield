@@ -1,5 +1,9 @@
 import { z } from 'zod';
 import { recordCreations } from './record-creation-occurrences.js';
+import {
+  evaluateDerivedField,
+  sameDecimal,
+} from '../../canonical-model/src/line-totals.js';
 import type { TemplateApplicationSelection } from '../../runtime/src/record-template-library.js';
 import {
   declaresTemplateCreate,
@@ -226,6 +230,8 @@ interface RawRecord {
   recordId: string;
   /** The target record ids of the relations a get was asked to state. */
   relationTargets?: Readonly<Record<string, string | null>>;
+  /** ADR-0094: a get's on-read totals, read in the record's statement. */
+  rollupValues?: Readonly<Record<string, string | null>>;
   revision: number;
   values: Readonly<Record<string, ImmutableJsonValue>>;
 }
@@ -966,7 +972,7 @@ export class PostgresModuleRuntimeInterpreter
                   value: { ...value, revision: randomUUID() },
                 };
               });
-              const input = requests.length
+              const entered = requests.length
                 ? {
                     ...numbered,
                     patch: {
@@ -977,6 +983,28 @@ export class PostgresModuleRuntimeInterpreter
                     },
                   }
                 : numbered;
+              // ADR-0094 obligation 9: a line write on a totalled relation
+              // locks its existing row, then the header (after the company
+              // lock and dateTime resolution), before any path read; create
+              // and restore count the header's live lines under that lock.
+              // ADR-0094: derived values are computed before the change is
+              // prepared, so validations and write invariants see them. An
+              // update's one locked prior-row read is taken here, before the
+              // header lock, keeping the line-then-header order.
+              const derived = await deriveStoredDecimals(
+                client,
+                currentEntity,
+                request.definition,
+                entered,
+              );
+              await lockTotalledParents(
+                client,
+                currentStorage,
+                currentEntity,
+                request.definition,
+                entered,
+              );
+              const input = derived.input;
               const preparation = await prepareMutation(
                 client,
                 request,
@@ -987,6 +1015,9 @@ export class PostgresModuleRuntimeInterpreter
                 authorizedValidationReads,
                 this.#boundWriteInvariants(currentStorage),
               );
+              // An overflow is raised only after validations pass, so a
+              // validation's refusal is never masked by the same bad input.
+              refuseDerivedOverflow(derived.overflow);
               const ids = {
                 changeDocumentId: randomUUID(),
                 correlationId: randomUUID(),
@@ -1047,6 +1078,21 @@ export class PostgresModuleRuntimeInterpreter
                       },
                     },
                   );
+                  // ADR-0094 gap d: the template path derives, locks and
+                  // counts like any line create.
+                  await lockTotalledParents(
+                    client,
+                    currentStorage,
+                    line,
+                    create as RegisteredRecordOperationDefinition,
+                    seed,
+                  );
+                  const derivedSeed = await deriveStoredDecimals(
+                    client,
+                    line,
+                    create as RegisteredRecordOperationDefinition,
+                    seed,
+                  );
                   await prepareMutation(
                     client,
                     {
@@ -1055,16 +1101,17 @@ export class PostgresModuleRuntimeInterpreter
                     },
                     currentStorage,
                     line,
-                    seed,
+                    derivedSeed.input,
                     verifier,
                     new Set(),
                     this.#boundWriteInvariants(currentStorage),
                   );
+                  refuseDerivedOverflow(derivedSeed.overflow);
                   await insertRecord(
                     client,
                     currentStorage,
                     line,
-                    seed,
+                    derivedSeed.input,
                     request.parentGuards,
                   );
                   memberRows[member.key] = id;
@@ -1103,6 +1150,19 @@ export class PostgresModuleRuntimeInterpreter
                         },
                       },
                     );
+                    await lockTotalledParents(
+                      client,
+                      currentStorage,
+                      line,
+                      create as RegisteredRecordOperationDefinition,
+                      seed,
+                    );
+                    const derivedSeed = await deriveStoredDecimals(
+                      client,
+                      line,
+                      create as RegisteredRecordOperationDefinition,
+                      seed,
+                    );
                     await prepareMutation(
                       client,
                       {
@@ -1112,16 +1172,17 @@ export class PostgresModuleRuntimeInterpreter
                       },
                       currentStorage,
                       line,
-                      seed,
+                      derivedSeed.input,
                       verifier,
                       new Set(),
                       this.#boundWriteInvariants(currentStorage),
                     );
+                    refuseDerivedOverflow(derivedSeed.overflow);
                     await insertRecord(
                       client,
                       currentStorage,
                       line,
-                      seed,
+                      derivedSeed.input,
                       request.parentGuards,
                     );
                   }
@@ -1483,6 +1544,165 @@ function pinnedStorageTargetCacheIdentity(
     key.releaseId,
     key.contentHash,
   ]);
+}
+
+/**
+ * ADR-0094 Contract 1: the derived stored decimals a create or update input
+ * contract names. A create derives from its own values; an update derives
+ * from ONE locked read of the prior row merged with the patch, and writes the
+ * target in the same UPDATE only when its value changes. The evaluator is the
+ * only rounding site; an overflow is held for the caller to raise after
+ * validations pass.
+ */
+async function deriveStoredDecimals(
+  client: PoolClient,
+  entity: StorageEntity,
+  definition:
+    | RegisteredRecordOperationDefinition
+    | RegisteredTransitionOperationDefinition,
+  input: MutationInput,
+): Promise<{
+  readonly input: MutationInput;
+  readonly overflow: string | null;
+}> {
+  const derived = definition.inputContract?.derivedFields;
+  if (!derived?.length) return { input, overflow: null };
+  const update = definition.effect.kind === 'updateRecordEffect';
+  if (!update && definition.effect.kind !== 'createRecordEffect')
+    return { input, overflow: null };
+  const prior = update
+    ? await loadRawRecord(client, entity, input.recordId, false, [], true)
+    : null;
+  // A missing row is refused by name when the change is prepared.
+  if (update && !prior) return { input, overflow: null };
+  const values: Readonly<Record<string, ImmutableJsonValue>> = prior
+    ? { ...prior.values, ...input.patch }
+    : input.patch;
+  const patch: Record<string, ImmutableJsonValue> = { ...input.patch };
+  let overflow: string | null = null;
+  for (const field of derived) {
+    if (!entity.columns.some((c) => c.canonicalFieldId === field.fieldId))
+      throw failure(
+        'MODULE_STORAGE_TARGET_MALFORMED',
+        'a derived field has no storage column',
+        field.fieldId,
+      );
+    let outcome: ReturnType<typeof evaluateDerivedField>;
+    try {
+      outcome = evaluateDerivedField(field, values);
+    } catch {
+      throw failure(
+        'MODULE_FIELD_VALUE_INVALID',
+        'a derived value reads an operand that is not a decimal',
+        field.fieldId,
+      );
+    }
+    if (outcome.kind === 'overflow') overflow ??= field.fieldId;
+    const value = outcome.kind === 'value' ? outcome.value : null;
+    if (prior) {
+      if (sameDecimal(prior.values[field.fieldId] ?? null, value)) continue;
+    } else if (value === null) continue;
+    patch[field.fieldId] = value;
+  }
+  return {
+    input: Object.freeze({ ...input, patch: Object.freeze(patch) }),
+    overflow,
+  };
+}
+
+function refuseDerivedOverflow(fieldId: string | null): void {
+  if (fieldId !== null)
+    throw failure(
+      'MODULE_DERIVED_VALUE_OVERFLOW',
+      'the derived value does not fit its field',
+      fieldId,
+    );
+}
+
+/**
+ * ADR-0094 obligation 9. A write of a line on a totalled relation takes the
+ * header row FOR NO KEY UPDATE once, before any path read, so later FOR SHARE
+ * requests in this transaction are granted by the lock already held. The
+ * global order is: existing line row, company master row (already taken by
+ * the caller), header row, new line rows. An update, archive or restore locks
+ * its own row first, so no writer holds the header and waits on an existing
+ * line. Create and restore then count the header's LIVE lines under the lock
+ * and refuse line N+1 by name (obligation 1).
+ */
+async function lockTotalledParents(
+  client: PoolClient,
+  storage: StorageTargetPayloadV1,
+  entity: StorageEntity,
+  definition:
+    | RegisteredRecordOperationDefinition
+    | RegisteredTransitionOperationDefinition,
+  input: MutationInput,
+): Promise<void> {
+  const totalled = definition.inputContract?.totalledRelations;
+  if (!totalled?.length) return;
+  const kind = definition.effect.kind;
+  for (const { relationId, maximumLines } of totalled) {
+    const relation = storage.relations.find(
+      (candidate) =>
+        candidate.relationId === relationId &&
+        candidate.sourceEntityId === entity.entityId &&
+        candidate.ownership === 'parentScopedChild',
+    );
+    if (!relation)
+      throw failure(
+        'MODULE_STORAGE_TARGET_MALFORMED',
+        'a totalled relation is not a parent-scoped relation of its lines',
+        relationId,
+      );
+    const header = requiredEntity(storage, relation.targetEntityId);
+    const parentColumn = quoted(relation.relationColumn.physicalName);
+    let parentId: string | null;
+    if (kind === 'createRecordEffect') {
+      parentId = input.relations[relationId] ?? null;
+    } else {
+      // The existing line row first.
+      const row = await client.query<QueryResultRow>(
+        `SELECT ${parentColumn} AS parent_record_id
+           FROM north_star_module.${quoted(entity.physicalTableName)}
+          WHERE tenant_id = north_star_internal.trusted_tenant_id()
+            AND environment_id = north_star_internal.trusted_environment_id()
+            AND ${quoted(entity.recordIdentity.column)} = $1
+          FOR NO KEY UPDATE`,
+        [input.recordId],
+      );
+      // A missing row is refused by name when the change is prepared.
+      if (!row.rows[0]) return;
+      const value = row.rows[0].parent_record_id;
+      parentId = typeof value === 'string' ? value : null;
+    }
+    if (parentId === null) continue;
+    await client.query(
+      `SELECT 1
+         FROM north_star_module.${quoted(header.physicalTableName)}
+        WHERE tenant_id = north_star_internal.trusted_tenant_id()
+          AND environment_id = north_star_internal.trusted_environment_id()
+          AND ${quoted(header.recordIdentity.column)} = $1
+        FOR NO KEY UPDATE`,
+      [parentId],
+    );
+    if (kind !== 'createRecordEffect' && kind !== 'restoreRecordEffect')
+      continue;
+    const live = await client.query<{ lines: string }>(
+      `SELECT count(*)::text AS lines
+         FROM north_star_module.${quoted(entity.physicalTableName)}
+        WHERE tenant_id = north_star_internal.trusted_tenant_id()
+          AND environment_id = north_star_internal.trusted_environment_id()
+          AND ${parentColumn} = $1
+          AND ${quoted(entity.archive.archivedAtColumn)} IS NULL`,
+      [parentId],
+    );
+    if (Number(live.rows[0]?.lines ?? 0) >= maximumLines)
+      throw failure(
+        'MODULE_LINE_MAXIMUM_EXCEEDED',
+        `a record holds at most ${String(maximumLines)} lines`,
+        relationId,
+      );
+  }
 }
 
 /** Hold the ownership row through policy, idempotency replay and the write. */
@@ -2915,6 +3135,12 @@ async function executeQueryOnClient(
     definition.queryType === 'list' && list
       ? searchChildrenPlan(storage, entity, list)
       : null;
+  // ADR-0094: a get's authorized on-read totals; their lines join the
+  // verified read entities, so the totals read under the request's scope.
+  const rollupPlans =
+    definition.queryType === 'get' && 'rollups' in request
+      ? rollupReadPlans(storage, entity, definition, request.rollups)
+      : [];
   let readScope = await verifyLegalEntityReadScope(
     client,
     snapshot,
@@ -2927,6 +3153,7 @@ async function executeQueryOnClient(
       ...(progressPlan?.supply?.entities ?? []),
       ...(figuresPlan?.entities ?? []),
       ...(searchChildPlans ?? []).map((plan) => plan.child),
+      ...rollupPlans.map((plan) => plan.lines),
     ],
   );
   const companyListScope =
@@ -2983,16 +3210,21 @@ async function executeQueryOnClient(
         filterPlans,
         readScope,
         targets,
+        rollupPlans,
       );
       records = record ? [record] : [];
       return queryResult(
         definition.queryId,
         records.length === 1 ? 'exact' : 'not-found',
         records.map((entry) =>
-          withRelationTargets(
-            toDto(entity, entry, definition.selections),
+          withRollups(
+            withRelationTargets(
+              toDto(entity, entry, definition.selections),
+              entry,
+              targets,
+            ),
             entry,
-            targets,
+            'rollups' in request ? request.rollups : undefined,
           ),
         ),
         null,
@@ -6958,6 +7190,7 @@ async function loadScopedRawRecord(
   filterPlans: readonly QueryFilterLoweringPlan[],
   readScope: VerifiedLegalEntityReadScope | null,
   relationTargets: readonly RelationTargetPlan[] = [],
+  rollups: readonly RollupReadPlan[] = [],
 ): Promise<RawRecord | null> {
   const values: unknown[] = [];
   const predicates = archivePredicate(entity, includeArchived);
@@ -6966,18 +7199,24 @@ async function loadScopedRawRecord(
     `${quoted(entity.recordIdentity.column)} = ${parameter(values, recordId)}`,
   );
   appendQueryFilterPredicates(entity, filterPlans, values, predicates);
+  // ADR-0094: each total is computed in the same statement as its record,
+  // so both read one snapshot.
+  const expressions = rollups.map((plan, index) =>
+    rollupExpression(entity, plan, index, readScope, values),
+  );
   const result = await client.query<QueryResultRow>(
     selectSql(
       entity,
       predicates,
       'LIMIT 1',
       relationTargets.map((target) => target.column),
+      expressions,
     ),
     values,
   );
   const row = result.rows[0];
   if (!row) return null;
-  const record = rawRecord(entity, row);
+  const record = withRollupValues(rawRecord(entity, row), rollups, row);
   // The stated targets are read in the same statement as the record itself.
   return relationTargets.length
     ? Object.freeze({
@@ -7066,6 +7305,10 @@ function selectSql(
   predicates: readonly string[],
   suffix: string,
   extraColumns: readonly string[] = [],
+  // ADR-0094: computed columns (a get's on-read totals). They read the
+  // record through ROLLUP_RECORD_ALIAS; without them the statement is
+  // unchanged.
+  extraExpressions: readonly string[] = [],
 ): string {
   const names = new Set([
     entity.recordIdentity.column,
@@ -7093,10 +7336,138 @@ function selectSql(
     names.add(column);
     columns.push(quoted(column));
   }
+  columns.push(...extraExpressions);
   return `SELECT ${columns.join(', ')}
-            FROM north_star_module.${quoted(entity.physicalTableName)}
+            FROM north_star_module.${quoted(entity.physicalTableName)}${
+              extraExpressions.length
+                ? ` AS ${quoted(ROLLUP_RECORD_ALIAS)}`
+                : ''
+            }
            WHERE ${predicates.length > 0 ? predicates.join(' AND ') : 'true'}
            ${suffix}`;
+}
+
+const ROLLUP_RECORD_ALIAS = 'rollup_record';
+
+interface RollupReadPlan {
+  readonly fieldId: string;
+  readonly lines: StorageEntity;
+  readonly parentColumn: string;
+  readonly aggregandColumn: string;
+  readonly precision: number;
+  readonly scale: number;
+}
+
+/**
+ * The authorized totals of a get, resolved against the PINNED storage: each
+ * sums one stored column of its lines over one parent-scoped relation of the
+ * queried record. Anything else is refused by name rather than read.
+ */
+function rollupReadPlans(
+  storage: StorageTargetPayloadV1,
+  entity: StorageEntity,
+  definition: SemanticQueryExecutionRequest['definition'],
+  authorized: SemanticQueryExecutionRequest['rollups'],
+): readonly RollupReadPlan[] {
+  if (!definition.rollups?.length || !authorized) return [];
+  const allowed = new Set(authorized.authorized);
+  return definition.rollups
+    .filter((rollup) => allowed.has(rollup.fieldId))
+    .map((rollup) => {
+      const relation = storage.relations.find(
+        (candidate) =>
+          candidate.relationId === rollup.relationId &&
+          candidate.sourceEntityId === rollup.lineEntityId &&
+          candidate.targetEntityId === entity.entityId &&
+          candidate.ownership === 'parentScopedChild',
+      );
+      const lines = relation && requiredEntity(storage, rollup.lineEntityId);
+      const aggregand = lines?.columns.find(
+        (column) => column.canonicalFieldId === rollup.aggregandFieldId,
+      );
+      if (!relation || !lines || !aggregand)
+        throw failure(
+          'MODULE_QUERY_CONTRACT_INVALID',
+          'a total must sum a stored field of the lines of a parent-scoped relation',
+          rollup.fieldId,
+        );
+      return Object.freeze({
+        fieldId: rollup.fieldId,
+        lines,
+        parentColumn: relation.relationColumn.physicalName,
+        aggregandColumn: aggregand.physicalName,
+        precision: rollup.precision,
+        scale: rollup.scale,
+      });
+    });
+}
+
+/**
+ * F5-a obligations 2-4: the sum of the record's LIVE lines, in its tenant,
+ * environment and company and under the request's verified company scope;
+ * a typed zero over no lines; and ABSENT when any live line's amount is
+ * absent (never a partial sum, unlike List figures' coalesce).
+ */
+function rollupExpression(
+  record: StorageEntity,
+  plan: RollupReadPlan,
+  index: number,
+  readScope: VerifiedLegalEntityReadScope | null,
+  values: unknown[],
+): string {
+  const line = `rollup_line_${String(index)}`;
+  const amount = qualified(line, plan.aggregandColumn);
+  return `(SELECT CASE WHEN count(*) = count(${amount}) THEN coalesce(sum(${amount}), 0) END
+         FROM north_star_module.${quoted(plan.lines.physicalTableName)} AS ${quoted(line)}
+        WHERE ${qualified(line, 'tenant_id')} = ${qualified(ROLLUP_RECORD_ALIAS, 'tenant_id')}
+          AND ${qualified(line, 'environment_id')} = ${qualified(ROLLUP_RECORD_ALIAS, 'environment_id')}
+          AND ${qualified(line, plan.parentColumn)} = ${qualified(ROLLUP_RECORD_ALIAS, record.recordIdentity.column)}
+          AND ${qualified(line, plan.lines.archive.archivedAtColumn)} IS NULL${sameCompanySql(line, plan.lines, ROLLUP_RECORD_ALIAS, record)}${legalEntityReadScopeJoinConjunction(plan.lines, readScope, values, line)})::text AS ${quoted(`rollup_total_${String(index)}`)}`;
+}
+
+function withRollupValues(
+  record: RawRecord,
+  rollups: readonly RollupReadPlan[],
+  row: QueryResultRow,
+): RawRecord {
+  if (!rollups.length) return record;
+  const totals = Object.fromEntries(
+    rollups.map((plan, index) => {
+      const value = row[`rollup_total_${String(index)}`];
+      if (value === null || value === undefined) return [plan.fieldId, null];
+      const text = String(value);
+      const whole = text.replace(/^-/u, '').split('.')[0]!.replace(/^0+/u, '');
+      // Obligation 5: a total that does not fit its declared precision is
+      // refused by name, never shown truncated.
+      if (whole.length > plan.precision - plan.scale)
+        throw failure(
+          'MODULE_ROLLUP_VALUE_OVERFLOW',
+          'the total does not fit its declared precision',
+          plan.fieldId,
+        );
+      return [plan.fieldId, text];
+    }),
+  );
+  return Object.freeze({ ...record, rollupValues: Object.freeze(totals) });
+}
+
+/** The get's totals: a value, absent (`null`), or withheld (named). */
+function withRollups(
+  dto: SemanticRecordDto,
+  record: RawRecord,
+  rollups: SemanticQueryExecutionRequest['rollups'],
+): SemanticRecordDto {
+  if (!rollups) return dto;
+  const values = { ...dto.values };
+  for (const fieldId of rollups.authorized)
+    values[fieldId] = record.rollupValues?.[fieldId] ?? null;
+  return Object.freeze({
+    ...dto,
+    values: Object.freeze(values),
+    ...(rollups.withheld.length
+      ? { withheldFieldIds: Object.freeze([...rollups.withheld]) }
+      : {}),
+  });
 }
 
 function rawFieldSelection(
@@ -8190,7 +8561,8 @@ function fieldClassification(
     contract?.fields.find((candidate) => candidate.fieldId === fieldId) ??
     contract?.assignedFields?.find(
       (candidate) => candidate.fieldId === fieldId,
-    );
+    ) ??
+    contract?.derivedFields?.find((candidate) => candidate.fieldId === fieldId);
   if (!field) {
     throw failure(
       'MODULE_SEMANTIC_CONTRACT_UNSUPPORTED',

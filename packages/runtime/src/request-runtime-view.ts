@@ -1,8 +1,8 @@
 import {
-  RECORD_TEMPLATE_OPERATION_READER,
-  CONNECTOR_FAMILY,
-  OPTIONAL_DEPENDENCY_QUERY_READER,
-} from '@north-star/canonical-model';
+  LINE_TOTALS_OPERATION_READER,
+  ROLLUP_QUERY_READER,
+} from '../../canonical-model/src/line-totals.js';
+import { CONNECTOR_FAMILY } from '@north-star/canonical-model';
 import {
   assertTrustedRequestContext,
   type AuthenticatedRequestEntryAdapter,
@@ -188,7 +188,9 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.operation]: {
     capabilityId: 'northstar.runtime:capability.operation-catalog',
-    maximumSupportedVersion: RECORD_TEMPLATE_OPERATION_READER,
+    // 8 reads derived fields, create-only fields, money compared with zero
+    // and a totalled relation's maximum and header lock (ADR-0094).
+    maximumSupportedVersion: LINE_TOTALS_OPERATION_READER,
   },
   [REQUEST_RUNTIME_FORMULA_RULE_FAMILY]: {
     capabilityId: 'northstar.runtime:capability.formula-rule',
@@ -197,8 +199,9 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.query]: {
     capabilityId: 'northstar.runtime:capability.query-catalog',
     // 2 read models, 3 list sums, 4 calculated displays, 5 booking owner
-    // usage, 6 optional read-model dependencies.
-    maximumSupportedVersion: OPTIONAL_DEPENDENCY_QUERY_READER,
+    // usage, 6 optional read-model dependencies, 7 a get's on-read rollups
+    // (ADR-0094).
+    maximumSupportedVersion: ROLLUP_QUERY_READER,
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.surface]: {
     capabilityId: 'northstar.runtime:capability.surface-manifest',

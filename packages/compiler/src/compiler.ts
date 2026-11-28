@@ -62,6 +62,14 @@ import {
 } from '../../canonical-model/src/record-template.js';
 import { compileCalculatedDisplayFields } from './calculated-display-plan.js';
 import {
+  bindLineTotals,
+  lineTotalsReaderFloors,
+  readsRollups,
+  LINE_TOTALS_OPERATION_READER,
+  ROLLUP_QUERY_READER,
+} from '../../canonical-model/src/line-totals.js';
+import { lineTotalsOf } from './projections.js';
+import {
   compileLiteralFormulaRules,
   FORMULA_RULE_PAYLOAD_VERSION,
 } from './formula-validation-plan.js';
@@ -547,6 +555,21 @@ function compileApplicationInternal(
     );
     return failure(
       [{ ...diagnostic, rule: displays.message }],
+      maximumDiagnostics,
+    );
+  }
+
+  // ADR-0094: derived stored decimals, rollups and create-only fields.
+  const lineTotals = bindLineTotals(packageRevision);
+  if (lineTotals.status === 'refused') {
+    const diagnostic = compilerDiagnostic(
+      'COMPILER_TYPE_INVALID',
+      'typeCheck',
+      lineTotals.path,
+      lineTotals.subjectId,
+    );
+    return failure(
+      [{ ...diagnostic, rule: lineTotals.message }],
       maximumDiagnostics,
     );
   }
@@ -1686,9 +1709,18 @@ function decorateV3ProjectionPlans(
         queries: Array<Record<string, unknown>>;
         schemaVersion: string;
       };
+      // ADR-0094: each active get of a totalled record carries its on-read
+      // totals; emitted only when declared.
+      const rollups = lineTotalsOf(packageRevision).rollups;
+      const rollupsOf = (query: (typeof packageRevision.queries)[number]) => {
+        const declared = readsRollups(query)
+          ? rollups.get(query.sourceEntity.targetId)
+          : undefined;
+        return declared?.length ? { rollups: declared } : {};
+      };
       return {
         ...plan,
-        ...(hasReadModels || hasListSums
+        ...(hasReadModels || hasListSums || rollups.size > 0
           ? {
               requiredRuntimeCapability: {
                 capabilityId: 'northstar.runtime:capability.query-catalog',
@@ -1701,6 +1733,7 @@ function decorateV3ProjectionPlans(
                   hasOptionalDependencies
                     ? OPTIONAL_DEPENDENCY_QUERY_READER
                     : 0,
+                  rollups.size > 0 ? ROLLUP_QUERY_READER : 0,
                 ),
               },
             }
@@ -1781,6 +1814,7 @@ function decorateV3ProjectionPlans(
                     permissionId: query.permission.targetId,
                     queryId: query.queryId,
                     queryType: query.queryType,
+                    ...rollupsOf(query),
                     resolveMatchKeys: (query.resolveMatchKeys ?? []).map(
                       (matchKey) => ({
                         authority: matchKey.authority,
@@ -2397,24 +2431,28 @@ function verifyCompleteness(
   if (
     ruleProjection.length !==
       Number(Boolean(declaredRules || declaredDisplays)) ||
-    // The record template reader is the highest operation floor; it claims
-    // the Booking and validation readers below it (projections.ts).
-    (hasRecordTemplateBinding(packageRevision)
-      ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
-      : hasBookingOperations(packageRevision)
-        ? operationFloor !== bookingReaderFloor(packageRevision)
-        : declaredRules &&
-          operationFloor !==
-            requiredFormulaValidationOperationReader(declaredRules)) ||
+    // The line-totals reader (ADR-0094) is the highest operation floor, then
+    // the record template reader; each claims every reader below it.
+    (lineTotalsRaiseOperationFloor(packageRevision)
+      ? operationFloor !== LINE_TOTALS_OPERATION_READER
+      : hasRecordTemplateBinding(packageRevision)
+        ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
+        : hasBookingOperations(packageRevision)
+          ? operationFloor !== bookingReaderFloor(packageRevision)
+          : declaredRules &&
+            operationFloor !==
+              requiredFormulaValidationOperationReader(declaredRules)) ||
     // The query floor is the highest catalog feature present, so a lower
     // feature's floor is exact only when no higher feature rides the catalog.
-    (hasBookingUsage(packageRevision) ||
-    declaresOptionalReadModelDependency(packageRevision.queries)
-      ? queryFloor !==
-        (declaresOptionalReadModelDependency(packageRevision.queries)
-          ? OPTIONAL_DEPENDENCY_QUERY_READER
-          : BOOKING_USAGE_QUERY_READER)
-      : declaredDisplays && queryFloor !== CALCULATED_DISPLAY_QUERY_READER) ||
+    (lineTotalsOf(packageRevision).rollups.size > 0
+      ? queryFloor !== ROLLUP_QUERY_READER
+      : hasBookingUsage(packageRevision) ||
+          declaresOptionalReadModelDependency(packageRevision.queries)
+        ? queryFloor !==
+          (declaresOptionalReadModelDependency(packageRevision.queries)
+            ? OPTIONAL_DEPENDENCY_QUERY_READER
+            : BOOKING_USAGE_QUERY_READER)
+        : declaredDisplays && queryFloor !== CALCULATED_DISPLAY_QUERY_READER) ||
     ((declaredRules || declaredDisplays) &&
       (ruleReference?.instanceId !==
         `${packageRevision.package.namespace}:projection.formula-rule` ||
@@ -2901,4 +2939,11 @@ function setsEqual(left: Set<string>, right: Set<string>): boolean {
 
 function compare(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/** ADR-0094: any declaration an older operation reader would skip or refuse. */
+function lineTotalsRaiseOperationFloor(
+  revision: VersionedNormalizedApplicationPackage,
+): boolean {
+  return lineTotalsReaderFloors(revision)?.operation ?? false;
 }

@@ -1,4 +1,10 @@
 import {
+  lineTotalsReaderFloors,
+  LINE_TOTALS_OPERATION_READER,
+  ROLLUP_QUERY_READER,
+} from '../../canonical-model/src/line-totals.js';
+import type { VersionedNormalizedApplicationPackage } from '../../canonical-model/src/schemas.js';
+import {
   hasRecordTemplateBinding,
   RECORD_TEMPLATE_OPERATION_READER,
 } from '@north-star/canonical-model';
@@ -1063,17 +1069,26 @@ function definitionFromSnapshotRows(
   const templates = hasRecordTemplateBinding(declarations.definition);
   const expectedBookingFloor = bookingReaderFloor(operation.payload);
   const booking = expectedBookingFloor > 0;
+  // ADR-0094: the line-totals readers are the highest floors present.
+  const lineTotals = lineTotalsReaderFloors(
+    declarations.definition as unknown as VersionedNormalizedApplicationPackage,
+  );
+  if (!lineTotals)
+    throw malformedProjection('line-total declarations do not bind');
   if (
-    templates
-      ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
-      : booking
-        ? operationFloor !== expectedBookingFloor
-        : operationFloor >= BOOKING_OPERATION_READER
+    lineTotals.operation
+      ? operationFloor !== LINE_TOTALS_OPERATION_READER
+      : templates
+        ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
+        : booking
+          ? operationFloor !== expectedBookingFloor
+          : operationFloor >= BOOKING_OPERATION_READER
   )
     throw malformedProjection(
       'booking operations and the mandatory reader floor disagree',
     );
   const consumesRules =
+    !lineTotals.operation &&
     !booking &&
     !templates &&
     operationFloor >= LITERAL_VALIDATION_OPERATION_READER;
@@ -1086,11 +1101,13 @@ function definitionFromSnapshotRows(
   const optionalDependencies = declaresOptionalReadModelDependency(
     isRecord(query.payload) ? query.payload.queries : undefined,
   );
-  const featureFloor = optionalDependencies
-    ? OPTIONAL_DEPENDENCY_QUERY_READER
-    : usage
-      ? BOOKING_USAGE_QUERY_READER
-      : 0;
+  const featureFloor = lineTotals.query
+    ? ROLLUP_QUERY_READER
+    : optionalDependencies
+      ? OPTIONAL_DEPENDENCY_QUERY_READER
+      : usage
+        ? BOOKING_USAGE_QUERY_READER
+        : 0;
   if (
     featureFloor
       ? queryFloor !== featureFloor
@@ -1113,7 +1130,12 @@ function definitionFromSnapshotRows(
   const consumesFormula =
     consumesRules ||
     consumesDisplays ||
-    ((templates || booking || usage) && declaresRuleProjection);
+    ((templates ||
+      booking ||
+      usage ||
+      lineTotals.operation ||
+      lineTotals.query) &&
+      declaresRuleProjection);
   if (
     declaresRuleProjection !== consumesFormula ||
     hasRuleProjectionLink !== consumesFormula
@@ -1131,7 +1153,10 @@ function definitionFromSnapshotRows(
         ({ rule }) => rule,
       );
       if (
-        (!templates && !booking && Boolean(rules.length) !== consumesRules) ||
+        (!templates &&
+          !booking &&
+          !lineTotals.operation &&
+          Boolean(rules.length) !== consumesRules) ||
         (consumesRules &&
           operationFloor !== requiredFormulaValidationOperationReader(rules))
       )

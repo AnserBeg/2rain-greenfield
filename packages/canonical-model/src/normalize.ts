@@ -346,6 +346,25 @@ export function normalizeApplicationPackage(
           }))
           .sort((left, right) => compareCodeUnits(left.fieldId, right.fieldId)),
       }),
+    // ADR-0094: emitted only when declared, so omission keeps every byte.
+    ...(authored.languageVersion === 'v6' &&
+      authored.derivedDecimals && {
+        derivedDecimals: [...authored.derivedDecimals].sort((left, right) =>
+          compareCodeUnits(left.fieldId, right.fieldId),
+        ),
+      }),
+    ...(authored.languageVersion === 'v6' &&
+      authored.rollups && {
+        rollups: [...authored.rollups].sort((left, right) =>
+          compareCodeUnits(left.fieldId, right.fieldId),
+        ),
+      }),
+    ...(authored.languageVersion === 'v6' &&
+      authored.createOnlyFields && {
+        createOnlyFields: [...authored.createOnlyFields].sort((left, right) =>
+          compareCodeUnits(left.fieldId, right.fieldId),
+        ),
+      }),
     ...(roleNarrowings && {
       operationRoleNarrowings: [...roleNarrowings].sort((left, right) => {
         const a = `${left.operationId}/${left.roleKey}`;

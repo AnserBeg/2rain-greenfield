@@ -1,4 +1,13 @@
 import { lowerDeclaredReports } from './declared-reports.js';
+import {
+  bindLineTotals,
+  LINE_TOTALS_OPERATION_READER,
+  ROLLUP_QUERY_READER,
+  type BoundLineTotals,
+  type CompiledDerivedField,
+  type CompiledTotalledRelation,
+} from '../../canonical-model/src/line-totals.js';
+import { zeroComparesStoredMoney } from '../../canonical-model/src/formula-validation-bindings.js';
 import { DECLARED_REPORT_READER } from '../../canonical-model/src/declared-report.js';
 import {
   REPORT_ANALYSIS_READER,
@@ -302,6 +311,7 @@ export function lowerBaseProjectionPayloads(
     currentStorageTarget,
     compilerSemanticProfileVersion,
     verificationPackageRevision,
+    lineTotalsOf(verificationPackageRevision),
   );
   // The reversibility declaration (AI-UNDO-1) needs the compiled input
   // contracts, which only current-language releases carry. The dispatch
@@ -345,18 +355,27 @@ export function lowerBaseProjectionPayloads(
     hasSavedListLayouts(verificationPackageRevision) ? 3 : 1,
     hasMetrics(verificationPackageRevision) ? 4 : 1,
   );
-  const operationFloor = hasRecordTemplateBinding(verificationPackageRevision)
-    ? RECORD_TEMPLATE_OPERATION_READER
-    : hasBookingOperations(verificationPackageRevision)
-      ? bookingReaderFloor(verificationPackageRevision)
-      : formulaRules
-        ? requiredFormulaValidationOperationReader(
-            formulaRules.bindings.map(({ rule }) => rule),
-          )
-        : 'operationRoleNarrowings' in verificationPackageRevision &&
-            verificationPackageRevision.operationRoleNarrowings
-          ? 2
-          : 1;
+  // ADR-0094: the line-totals reader is the highest operation floor; it
+  // claims every reader below it.
+  const lineTotals = lineTotalsOf(verificationPackageRevision);
+  const operationFloor =
+    lineTotals.derived.size ||
+    lineTotals.createOnly.size ||
+    lineTotals.totalled.size ||
+    zeroComparesStoredMoney(verificationPackageRevision)
+      ? LINE_TOTALS_OPERATION_READER
+      : hasRecordTemplateBinding(verificationPackageRevision)
+        ? RECORD_TEMPLATE_OPERATION_READER
+        : hasBookingOperations(verificationPackageRevision)
+          ? bookingReaderFloor(verificationPackageRevision)
+          : formulaRules
+            ? requiredFormulaValidationOperationReader(
+                formulaRules.bindings.map(({ rule }) => rule),
+              )
+            : 'operationRoleNarrowings' in verificationPackageRevision &&
+                verificationPackageRevision.operationRoleNarrowings
+              ? 2
+              : 1;
   const plans = [
     plan(
       PROJECTION_FAMILY_IDS.semanticModel,
@@ -377,10 +396,13 @@ export function lowerBaseProjectionPayloads(
       packageScope,
       queryCatalogPayload(packageRevision, currentStorageTarget),
       undefined,
-      calculatedFields.length > 0
+      calculatedFields.length > 0 || lineTotals.rollups.size > 0
         ? {
             ...runtimeCapabilities[PROJECTION_FAMILY_IDS.queryCatalog],
-            minimumVersion: CALCULATED_DISPLAY_QUERY_READER,
+            minimumVersion: Math.max(
+              calculatedFields.length > 0 ? CALCULATED_DISPLAY_QUERY_READER : 0,
+              lineTotals.rollups.size > 0 ? ROLLUP_QUERY_READER : 0,
+            ),
           }
         : undefined,
     ),
@@ -1015,11 +1037,32 @@ function resolvedEffect(
   };
 }
 
+/**
+ * The bound ADR-0094 declarations. The compiler refuses a revision whose
+ * declarations do not bind before any projection is lowered, so a refusal
+ * here is unreachable for a compiled release and reads as none.
+ */
+export function lineTotalsOf(
+  revision: VersionedNormalizedApplicationPackage,
+): BoundLineTotals {
+  const bound = bindLineTotals(revision);
+  return bound.status === 'bound'
+    ? bound.binding
+    : {
+        derived: new Map(),
+        totalled: new Map(),
+        rollups: new Map(),
+        createOnly: new Map(),
+        declared: false,
+      };
+}
+
 function operationCatalogPayload(
   packageRevision: NormalizedApplicationPackage,
   storageTarget: StorageTargetPayloadV1 | null,
   compilerSemanticProfileVersion: CompilerSemanticProfileVersion,
   original: VersionedNormalizedApplicationPackage,
+  lineTotals: BoundLineTotals,
 ): unknown {
   // Only authored capability Task bindings introduce this envelope. Existing
   // record/revision-only commands retain their exact closed contracts and bytes.
@@ -1125,6 +1168,19 @@ function operationCatalogPayload(
               'booking' in operation ||
                 argumentOperations.has(operation.operationId),
               templateOperations.has(operation.operationId),
+              'entity' in operation.effect
+                ? {
+                    derived: lineTotals.derived.get(
+                      operation.effect.entity.targetId,
+                    ),
+                    createOnly: lineTotals.createOnly.get(
+                      operation.effect.entity.targetId,
+                    ),
+                    totalled: lineTotals.totalled.get(
+                      operation.effect.entity.targetId,
+                    ),
+                  }
+                : {},
             ),
             infrastructure: {
               archiveRepresentation: 'nullableArchivedAt',
@@ -2663,6 +2719,11 @@ function operationInputContract(
   compilerSemanticProfileVersion: CompilerSemanticProfileVersion,
   capabilityArguments: boolean,
   templateCreate: boolean,
+  lineTotals: {
+    readonly derived?: readonly CompiledDerivedField[] | undefined;
+    readonly createOnly?: readonly string[] | undefined;
+    readonly totalled?: readonly CompiledTotalledRelation[] | undefined;
+  },
 ): unknown {
   const effectKind = operation.effect.kind;
   const capabilityRecordScope = effectKind === 'registeredCapabilityEffect';
@@ -2674,7 +2735,21 @@ function operationInputContract(
       ? (field.numbering as FieldNumbering | undefined)
       : undefined;
   const allFields = allEntityFields;
-  const fields = allFields.filter((field) => !numberingOf(field));
+  // ADR-0094: a derived value is nobody's input, on create or update; a
+  // create-only field leaves the update's writable set. Each is named by its
+  // own key, emitted only when declared.
+  const derivedIds = new Set(
+    (lineTotals.derived ?? []).map(({ fieldId }) => fieldId),
+  );
+  const createOnlyIds = new Set(
+    effectKind === 'updateRecordEffect' ? (lineTotals.createOnly ?? []) : [],
+  );
+  const fields = allFields.filter(
+    (field) =>
+      !numberingOf(field) &&
+      !derivedIds.has(field.fieldId) &&
+      !createOnlyIds.has(field.fieldId),
+  );
   const assignedFields = allFields.flatMap((field) => {
     const numbering = numberingOf(field);
     return numbering
@@ -2809,6 +2884,18 @@ function operationInputContract(
     ...(systemInput ? { systemInput } : {}),
     ...(effectKind === 'createRecordEffect' && assignedFields.length > 0
       ? { assignedFields }
+      : {}),
+    ...(writesFields && lineTotals.derived?.length
+      ? { derivedFields: lineTotals.derived }
+      : {}),
+    ...(createOnlyIds.size > 0
+      ? { createOnlyFieldIds: [...createOnlyIds].sort(compare) }
+      : {}),
+    ...((writesFields ||
+      effectKind === 'archiveRecordEffect' ||
+      effectKind === 'restoreRecordEffect') &&
+    lineTotals.totalled?.length
+      ? { totalledRelations: lineTotals.totalled }
       : {}),
     writableFieldIds: writesFields
       ? fields.map((field) => field.fieldId).sort(compare)

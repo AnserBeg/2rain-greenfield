@@ -264,6 +264,88 @@ export function formulaFieldType(
   }
 }
 
+const ORDERED_OPERATORS = new Set([
+  'lessThan',
+  'lessThanOrEqual',
+  'greaterThan',
+  'greaterThanOrEqual',
+]);
+
+/**
+ * A comparison of a stored-currency money field's value against a decimal
+ * literal zero with an ordered operator (ADR-0094, amendment 10); `null` for
+ * anything else. The bound type carries no currency: zero is zero in every
+ * currency, and that is the only bound admitted.
+ */
+function storedMoneyZeroComparison(
+  predicate: Extract<ValidationPredicate, { kind: 'comparison' }>,
+  fields: ReadonlyMap<string, Field>,
+  revision: LogicalTypeRevision,
+): { fieldId: string; type: FormulaValidationFieldType } | null {
+  const { left, right } = predicate;
+  if (
+    !ORDERED_OPERATORS.has(predicate.operator) ||
+    left.kind !== 'field' ||
+    left.select !== 'value' ||
+    right.kind !== 'literal' ||
+    right.scalar.kind !== 'decimal' ||
+    right.scalar.value !== '0' ||
+    right.scalar.currency !== null ||
+    right.scalar.unit !== null
+  )
+    return null;
+  const field = fields.get(left.fieldId);
+  const logical = field && logicalDecimals(revision).get(field.fieldId);
+  if (
+    !field ||
+    field.fieldType.kind !== 'exactDecimalFieldType' ||
+    logical?.logicalType !== 'money' ||
+    logical.currency !== null
+  )
+    return null;
+  return {
+    fieldId: field.fieldId,
+    type: {
+      kind: 'decimal',
+      precision: field.fieldType.precision,
+      scale: field.fieldType.scale,
+      currency: null,
+      unit: null,
+    },
+  };
+}
+
+/**
+ * True when a revision's validations compare stored-currency money against
+ * zero: an older operation reader would refuse the rule's shape, so the
+ * operation floor rises (ADR-0094), even with no derived value declared.
+ */
+export function zeroComparesStoredMoney(
+  revision: VersionedNormalizedApplicationPackage,
+): boolean {
+  if (revision.languageVersion !== 'v6' || !revision.formulaRules) return false;
+  const fields = new Map<string, Field>(
+    (revision as Revision).fields.map((field) => [field.fieldId, field]),
+  );
+  const visit = (predicate: ValidationPredicate): boolean => {
+    switch (predicate.kind) {
+      case 'all':
+      case 'any':
+        return predicate.terms.some(visit);
+      case 'not':
+        return visit(predicate.term);
+      case 'required':
+        return false;
+      case 'comparison':
+        return (
+          storedMoneyZeroComparison(predicate, fields, revision as Revision) !==
+          null
+        );
+    }
+  };
+  return revision.formulaRules.some((rule) => visit(rule.predicate));
+}
+
 function sameType(
   left: FormulaValidationFieldType,
   right: ValidationScalar | FormulaValidationFieldType,
@@ -371,6 +453,15 @@ export function bindLiteralValidation(
         }
         return null;
       case 'comparison': {
+        // ADR-0094 (amendment 10): money whose currency each record stores
+        // compares against the literal ZERO only, with an ordered operator.
+        // It has no single currency, so any other bound or field still
+        // refuses below.
+        const zero = storedMoneyZeroComparison(predicate, fields, revision);
+        if (zero) {
+          dependencies.set(zero.fieldId, zero.type);
+          return null;
+        }
         const left = fieldType(predicate.left);
         if (!left || left.kind === 'address' || left.kind === 'dateTime')
           return 'Compare a supported field on this record with a typed value.';

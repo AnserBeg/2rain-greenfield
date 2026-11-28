@@ -235,3 +235,4 @@ export type {
   ValidationPredicate,
   ValidationScalar,
 } from './formula-validation.js';
+export * from './line-totals.js';
