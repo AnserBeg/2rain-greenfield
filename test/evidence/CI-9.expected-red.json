@@ -42,8 +42,8 @@
       "name": "ci9-shard-budget-real-layout",
       "claim": "The checked-in shard layout is measured against the recorded budget, so a layout over it fails.",
       "file": "test/helpers/postgres-shard-estimates.json",
-      "original": "\"budgetSeconds\": 1100,",
-      "replacement": "\"budgetSeconds\": 900,",
+      "original": "\"budgetSeconds\": 650,",
+      "replacement": "\"budgetSeconds\": 500,",
       "test": {
         "files": ["test/architecture/test-reachability.test.ts"],
         "namePattern": "no general PostgreSQL shard is estimated over its time budget"
@@ -52,7 +52,7 @@
         {
           "file": "test/architecture/test-reachability.test.ts",
           "name": "no general PostgreSQL shard is estimated over its time budget",
-          "expected": "over the 900 s budget"
+          "expected": "over the 500 s budget"
         }
       ]
     },
