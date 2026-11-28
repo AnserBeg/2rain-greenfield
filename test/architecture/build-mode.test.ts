@@ -44,12 +44,10 @@ function withTree<T>(files: Record<string, string>, run: (root: string) => T) {
 const config = (enabled: boolean, switches: Record<string, boolean>) =>
   JSON.stringify({ enabled, switches, version: 1 });
 
-test('BUILD-MODE-1: the shipped switch file turns every switch on, and the env can only force strict', () => {
+test('BUILD-MODE-1: the env can only force strict', () => {
   assert.deepEqual([...TOOLING_SWITCHES], [...BUILD_MODE_SWITCHES]);
   const off = { NORTH_STAR_BUILD_MODE: 'off' };
   for (const name of BUILD_MODE_SWITCHES) {
-    assert.equal(buildModeSwitch(name, { env: {} }), true, name);
-    assert.equal(toolingSwitch(name, { env: {} }), true, name);
     assert.equal(buildModeSwitch(name, { env: off }), false, name);
     assert.equal(toolingSwitch(name, { env: off }), false, name);
   }

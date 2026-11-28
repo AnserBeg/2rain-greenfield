@@ -61,7 +61,11 @@ export interface ModulePressLawOptions {
 export function isNameLawObservationRule(
   ruleId: ModulePressLawRuleId,
 ): boolean {
-  return isNameLawRule(ruleId) && ruleId !== 'PRESS010_NAME_LAW_INPUT';
+  return (
+    isNameLawRule(ruleId) &&
+    ruleId !== 'PRESS010_NAME_LAW_INPUT' &&
+    ruleId !== 'PRESS013_DOMAIN_IMPORT'
+  );
 }
 
 interface ModuleDescriptor {
@@ -1205,7 +1209,15 @@ export function isNameLawRule(ruleId: ModulePressLawRuleId): boolean {
  */
 function blankRatified(text: string, ids: readonly string[]): string {
   let result = text;
-  for (const id of ids) result = result.replaceAll(id, ' '.repeat(id.length));
+  for (const id of ids) {
+    // Whole IDs only: a longer ID that merely starts with a ratified one is
+    // not exempt.
+    const whole = new RegExp(
+      `(?<![A-Za-z0-9_.:-])${id.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}(?![A-Za-z0-9_.-])`,
+      'gu',
+    );
+    result = result.replace(whole, (found) => ' '.repeat(found.length));
+  }
   return result;
 }
 

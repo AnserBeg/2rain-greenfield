@@ -263,12 +263,14 @@ esac
 `,
     { mode: 0o755 },
   );
-  const check = (tip: string, green = tip) =>
+  const check = (tip: string, green = tip, env: Record<string, string> = {}) =>
     spawnSync(process.execPath, [windowGate, 'TRAIN-fixture', tip], {
       cwd: repo,
       encoding: 'utf8',
       env: {
         ...process.env,
+        NORTH_STAR_BUILD_MODE: undefined,
+        ...env,
         PATH: `${dir}:${process.env.PATH}`,
         GREEN_SHA: green,
         MERGE_WINDOW_FILE: join(dir, 'token'),
@@ -358,16 +360,9 @@ test('BUILD-MODE-1: with the train switch off the fourth merge is refused again'
   const { start, packet, merge, check } = train(t, trainCapLifted);
   let tip = start;
   for (const path of ['a', 'b', 'c', 'd']) tip = merge(tip, packet(path));
-  const previous = process.env.NORTH_STAR_BUILD_MODE;
-  process.env.NORTH_STAR_BUILD_MODE = 'off';
-  try {
-    const forced = check(tip);
-    assert.equal(forced.status, 1, 'fourth merge admitted with build mode off');
-    assert.match(forced.stderr, /at most three/u);
-  } finally {
-    if (previous === undefined) delete process.env.NORTH_STAR_BUILD_MODE;
-    else process.env.NORTH_STAR_BUILD_MODE = previous;
-  }
+  const forced = check(tip, tip, { NORTH_STAR_BUILD_MODE: 'off' });
+  assert.equal(forced.status, 1, 'fourth merge admitted with build mode off');
+  assert.match(forced.stderr, /at most three/u);
 });
 
 test('an octopus is refused even with a full green', (t) => {

@@ -8,6 +8,7 @@ import test from 'node:test';
 import {
   checkModulePressLaw,
   formatModulePressLaw,
+  isNameLawObservationRule,
   isNameLawRule,
   lowerNameLawBaseline,
   type ModulePressLawResult,
@@ -2414,7 +2415,9 @@ test('name law: guard:lower-baseline refuses a rise or a moved file and writes n
   }
 });
 
-// BUILD-MODE-1, switch `nameGuardReportOnly`.
+// BUILD-MODE-1, switch `nameGuardReportOnly`. These tests assume build mode is
+// on; NORTH_STAR_BUILD_MODE=off would force strict, so clear it for this file.
+delete process.env.NORTH_STAR_BUILD_MODE;
 const buildModeOn = JSON.stringify({
   enabled: true,
   switches: { nameGuardReportOnly: true },
@@ -2529,6 +2532,37 @@ test('BUILD-MODE-1: a ratified engine ID is exempt in every mode; the same name 
       );
     },
   );
+  const widened = {
+    ...nameLawPolicy,
+    ratifiedEngineIds: [
+      { id: 'acme.ledger:role.sales_order', reason: 'fixture ratification' },
+      {
+        id: 'acme.ledger:role.sales_order_line',
+        reason: 'fixture ratification',
+      },
+    ],
+  };
+  withNameLawFixture(
+    {
+      [policyPath]: JSON.stringify(widened),
+      'db/migrations/0072_new.sql':
+        "SELECT 'acme.ledger:role.sales_order', 'acme.ledger:role.sales_order_line';\n",
+    },
+    (result) => assert.deepEqual(nameLawViolations(result), []),
+  );
+  withNameLawFixture(
+    {
+      [policyPath]: JSON.stringify(ratified),
+      'db/migrations/0072_new.sql':
+        "SELECT 'northstar.ledger:role.customer_credit_note', 'acme.ledger:role.sales_order_line';\n",
+    },
+    (result) => {
+      assert.deepEqual(
+        nameLawViolations(result).map((violation) => violation.ruleId),
+        ['PRESS011_FIRST_PARTY_NAME'],
+      );
+    },
+  );
   withNameLawFixture(
     {
       [policyPath]: JSON.stringify({
@@ -2556,4 +2590,9 @@ test('BUILD-MODE-1: the real policy ratifies exactly the reviewed ledger roles',
       'northstar.ledger:role.inventory_asset',
     ],
   );
+});
+
+test('BUILD-MODE-1: a domain import (PRESS013) is never report-only', () => {
+  assert.equal(isNameLawObservationRule('PRESS013_DOMAIN_IMPORT'), false);
+  assert.equal(isNameLawObservationRule('PRESS011_FIRST_PARTY_NAME'), true);
 });

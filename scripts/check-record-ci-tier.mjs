@@ -5,6 +5,8 @@ import console from 'node:console';
 import { git } from '../.github/scripts/ci-selection.mjs';
 import { buildModeSwitch } from './build-mode.mjs';
 
+// The repository moved from AnserBeg to rainerp-com; run URLs under either owner
+// (exactly those two) are valid, and rainerp-com is the canonical form.
 // Legacy records predate tiers. Resolve the introduction on the current
 // first-parent lineage, so other packets that landed before rollout are legacy.
 const main = git('branch', '--remotes', '--list', 'origin/main').trim();
@@ -32,10 +34,10 @@ const modified = new Set(
 );
 const runLinks = (text) =>
   text.match(
-    /https:\/\/github\.com\/AnserBeg\/2rain-greenfield\/actions\/runs\/\d+/gu,
+    /https:\/\/github\.com\/(?:AnserBeg|rainerp-com)\/2rain-greenfield\/actions\/runs\/\d+/gu,
   ) ?? [];
 const line =
-  /^CI tier: (?:quick|full) https:\/\/github\.com\/AnserBeg\/2rain-greenfield\/actions\/runs\/[1-9]\d*(?:\/attempts\/[1-9]\d*)?$/gmu;
+  /^CI tier: (?:quick|full) https:\/\/github\.com\/(?:AnserBeg|rainerp-com)\/2rain-greenfield\/actions\/runs\/[1-9]\d*(?:\/attempts\/[1-9]\d*)?$/gmu;
 // CI-8: a lane declares `CI tier: pending quick|full` in its first commit and
 // replaces it with the run URL when the run exists, so no second docs-only
 // commit is needed after the first dispatch. Only a packet branch may carry the
@@ -80,11 +82,11 @@ for (const path of readdirSync(directory, { recursive: true }).map((path) =>
   const pending = [...body.matchAll(pendingLine)].length;
   if ([...body.matchAll(line)].length + pending !== 1) {
     report(
-      `${path}: expected one "CI tier: quick|full https://github.com/AnserBeg/2rain-greenfield/actions/runs/<id>" line (or "CI tier: pending quick|full" on a packet/* branch)`,
+      `${path}: expected one "CI tier: quick|full https://github.com/rainerp-com/2rain-greenfield/actions/runs/<id>" line (or "CI tier: pending quick|full" on a packet/* branch)`,
     );
   } else if (pending === 1 && !pendingAllowed) {
     report(
-      `${path}: "CI tier: pending" is allowed only on a packet/* branch (this is "${branch}"); replace it with the real run URL: CI tier: <quick|full> https://github.com/AnserBeg/2rain-greenfield/actions/runs/<id>`,
+      `${path}: "CI tier: pending" is allowed only on a packet/* branch (this is "${branch}"); replace it with the real run URL: CI tier: <quick|full> https://github.com/rainerp-com/2rain-greenfield/actions/runs/<id>`,
     );
   }
 }
