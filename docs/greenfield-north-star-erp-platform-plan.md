@@ -259,6 +259,7 @@ Launch includes:
 - the AI agent for discovery, query, planning, confirmation, execution,
   read-back, and verification;
 - basic compiled customization described in section 10;
+- onboarding discovery before opening data is imported (section 11.11.1);
 - immutable releases, candidate preview, approval, activation, rollback, audit,
   backup/restore, observability, and tenant isolation.
 
@@ -3041,18 +3042,21 @@ Launch steps:
    identities, managed secrets, backup/PITR, monitoring, alerting, and tested
    rollback.
 3. Create the first tenant release from the immutable launch package.
-4. Import opening masters and opening stock through validated onboarding
+4. Offer every tenant onboarding discovery (section 11.11.1). When it runs,
+   configuration starts from its approved report: workflow traces, information
+   map, and role cards.
+5. Import opening masters and opening stock through validated onboarding
    operations:
    - master-data dry run and diagnostics;
    - opening stock expressed as attributable opening-balance movements;
    - reconciliation report approved before normal operations.
-5. Run a production smoke journey with dedicated test records, then correct or
+6. Run a production smoke journey with dedicated test records, then correct or
    archive them through normal lifecycle operations.
-6. Onboard tenants progressively; observe error rate, latency, queue health,
+7. Onboard tenants progressively; observe error rate, latency, queue health,
    agent success, reconciliation, and support demand before widening.
-7. Keep release rollback and model/tool-profile rollback independently
+8. Keep release rollback and model/tool-profile rollback independently
    operable.
-8. Hold a launch review after the first real closed-loop cycles and convert
+9. Hold a launch review after the first real closed-loop cycles and convert
    observed gaps into capability-support work rather than tenant-specific code
    forks.
 
@@ -3069,6 +3073,10 @@ Launch steps:
 
 Launch is complete only when a production tenant can:
 
+- start onboarding from a discovery report its staff approved, with discovery's
+  raw content and event data deleted on schedule, or from a recorded reason it
+  did not apply: no prior system, or the customer or its staff declined
+  (section 11.11.1);
 - configure roles and inventory policy;
 - create/import parties, items, locations, and opening stock safely;
 - operate trustworthy inventory independently;
@@ -3079,6 +3087,114 @@ Launch is complete only when a production tenant can:
 - recover from a tested failure mode; and
 - receive support without engineers editing its tables or maintaining a
   customer-specific application fork.
+
+### 11.11.1 Onboarding discovery (L-05)
+
+*Added 2026-11-28 at the owner's request.* Before a customer's data is imported, a
+discovery tool learns how the company actually works: what information each person
+enters, when, how, where it came from, and who it goes to next. A data export shows
+the records people create. Discovery shows the steps that produced them, including
+the email, chat, document and spreadsheet work the old system never saw. Workarounds
+usually live in that last group: an availability sheet, a pricing workbook, a
+checklist kept in a word-processing document. Configuration then
+starts from that picture instead of from interviews alone. Support status: planned.
+
+**What it produces.** Three outputs, all built automatically from one stream of events:
+
+- **workflow traces**: each recurring kind of work (a rental request, a parts order)
+  followed step by step across people and tools;
+- **an information map**: for each piece of information, where it is created, where
+  it is typed in again, and who uses it; and
+- **role cards**: each person's share of work, tools, and handoffs.
+
+**How it captures.** Capture runs on company-owned work devices and work accounts for
+a bounded period (default two weeks, work hours only):
+
+- a browser add-on records field-level entry in web-based systems (which field, what
+  kind of value, typed or pasted and from where), the screens used, and categorized
+  searches;
+- email and work-chat content is read by an automated extraction step that keeps only
+  structured events (who, what was asked, what information it carried) and deletes
+  the raw text right after;
+- documents and spreadsheets are a first-class source, because that is where
+  workarounds live: Google Docs and Sheets in the browser, Word and Excel on the
+  desktop, and the like. Extraction reads each file's content to describe what it
+  is for and which workflow step it stands in for ("tracks equipment availability
+  by date; checked before every booking"), then discards the content. It keeps that
+  description, the file's structure (tabs, column headers, formulas, the kind of
+  value in each column, section headings), who opens and edits it and when, and
+  which work items it touches. Files stored in Microsoft 365 or Google Drive are
+  read through an admin-approved connection, whichever app edited them. The
+  connection is limited to files that enrolled staff open or edit during the
+  capture window, minus folders the customer excludes; it never reads the drive's
+  history or files nobody touched. Files kept only on a laptop or a network share
+  need the desktop app;
+- identifiers (PO, contract, serial, customer account) are replaced by keyed codes,
+  stable within one customer, so one work item joins up across tools without keeping
+  the values; and
+- desktop business programs need the desktop app as well. Phone calls and
+  text messages are not captured; a short interview per role fills them in.
+
+**Automation.** Discovery runs without people in the loop except where consent needs
+one. Per-message extraction uses the small, fast model tier (Claude Haiku 5.5,
+`claude-haiku-5-5`, when this section was written) through the Messages API. It does
+not use the Batch API, because batches are kept for 29 days and are not covered by
+zero data retention. Assembling the traces, map and role cards is automated
+too. People act at three points only: each employee reviews their own events and may
+delete a line or mark it personal; the customer approves the final report; and a
+short interview per role covers phone and text work.
+
+**Binding rules.**
+
+1. Company-owned devices and work accounts only. Personal accounts, browser profiles
+   and phones are excluded by configuration, not filtered afterwards.
+2. Staff get written notice before install, reviewed by counsel: what is read, what
+   is kept, for how long, where it is processed, and who sees the results. A visible
+   indicator shows capture is running, with a pause.
+3. Never kept: raw message text, attachment contents, document body text,
+   spreadsheet cell values, screenshots, keystrokes, passwords, or identifier values.
+   Document and spreadsheet content is read only to describe what the file is for,
+   then discarded; its structure and activity are kept.
+4. Results are for system design, never for performance evaluation. The customer
+   agreement says so.
+5. Customers' and suppliers' details in scanned content are kept only as codes and
+   categories.
+6. Raw content is deleted right after extraction. Event data is deleted when setup
+   completes. Only the report survives, and the customer owns it.
+7. Event data is held by our discovery service, hosted in Canada. Extraction runs
+   outside Canada: as of 2026-11-28 the Claude API runs inference either globally or
+   in the US only, and has no Canada-only option. The model workspace runs under zero
+   data retention (Haiku 5.5 is listed as eligible; confirmed with Anthropic before
+   the pilot). The staff notice says where content is processed. A Canadian-region
+   option is adopted when one becomes available.
+
+**Boundary with the platform.** Discovery is an onboarding tool outside the tenant
+runtime. It reads nothing from and writes nothing to a tenant release. Its report may
+seed a draft revision prepared by the customization agent, but that draft reaches the
+tenant only through the ordinary draft, compile, approve and activate path (section 3
+rule 11, section 10.1). After switch-over, the ERP observes its own use through stable
+canonical IDs (section 8.4), so discovery is not reinstalled on a live tenant. Its
+capture clients and extraction service are separate deployables because they run on
+customer devices and handle content the ERP never stores; that does not split the ERP
+monolith (section 3 rule 12).
+
+**Versions.** Version 1 (pilot): the browser add-on; email, work-chat, document and
+spreadsheet extraction for files in Microsoft 365 or Google Drive; identifier codes;
+self-review; and automatic traces, map and role cards. Version 2: matching against the
+customer's data export; a desktop app for desktop business programs and for documents
+and spreadsheets kept only on a laptop or network share; extraction on the laptop
+itself if it runs well on ordinary office hardware. If the pilot customer keeps key
+spreadsheets outside Microsoft 365 or Google Drive, the desktop app's file capture
+moves into version 1.
+
+**Evidence (L-05).** A pilot at one customer produces:
+
+- a discovery report the customer approved;
+- traces whose steps link across at least email, a spreadsheet or document, and the
+  current system;
+- logs showing that raw content and event data were deleted on schedule;
+- a staff notice reviewed by counsel; and
+- a record that staff used the self-review.
 
 ## 12. Post-launch path to the full north star
 
@@ -3654,7 +3770,8 @@ stable planning references, not service names.
 | L-01 | Search/report/export/onboarding jobs              | D-01,I-03,P-02,S-03      | scope/retry/artifact tests                           |
 | L-02 | Security/accessibility/performance hardening      | all prior                | specialist evidence                                  |
 | L-03 | Backup/restore/rebuild/reconciliation drill       | all prior                | timed recovery evidence                              |
-| L-04 | Pilot and production release packet               | L-01,L-02,L-03,C-04,A-03 | gate decision                                        |
+| L-04 | Pilot and production release packet               | L-01,L-02,L-03,C-04,A-03,L-05 | gate decision                                   |
+| L-05 | Onboarding discovery (section 11.11.1)            | none; outside the tenant runtime | approved pilot report, deletion evidence, counsel-reviewed notice |
 | X-01 | Current-architecture productivity/agent benchmark | F-01,A-01                | reproducible comparative baseline and target ledger  |
 
 ### 13.1 Critical-path guidance
@@ -4135,6 +4252,9 @@ re-ratifies the target before promotion.
 | Agent approval fatigue       | approval on every write makes the agent useless at volume, so users route around it | risk-classed confirmation, one approval per bounded bulk plan (section 9.4) |
 | Customized tenant cannot upgrade | each tenant becomes a fork, and platform releases stall | customization only at declared extension points; section 12.14's customized-tenant upgrade proof |
 | Derived-store sprawl         | search, graph and formula engines drift from PostgreSQL, and two permission models disagree | one PostgreSQL authority; a new store needs a measured reason and must be a rebuildable read model under the same policy |
+| Discovery read as surveillance | staff refuse it or work differently while it runs, and the customer's trust is lost | section 11.11.1's rules: work devices only, written notice, self-review, no performance use, a bounded period |
+| Discovery content exposure   | raw email, chat, document or spreadsheet content leaks from the extraction step or the model provider | deletion right after extraction, identifier codes, zero data retention, processing location disclosed in the notice |
+| Discovery as configuration authority | a discovery report is applied to a tenant without review | the report only seeds drafts; the normal release path and human activation (section 10.1) |
 | False gate confidence        | implementer-approved tests miss real behavior                     | evidence packets, independent review, real-model and recovery drills |
 
 ## 17. Stop, revise, and promotion rules
