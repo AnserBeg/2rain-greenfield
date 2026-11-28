@@ -359,6 +359,7 @@ test('sales leads compiled business navigation and fulfillment is registered beh
     'party',
     'catalog',
     'location',
+    'bookkeeping',
   ]);
   const composed = composedApplicationDefinition() as unknown as Definition & {
     modules: Array<{ label: string; orderKey: number }>;

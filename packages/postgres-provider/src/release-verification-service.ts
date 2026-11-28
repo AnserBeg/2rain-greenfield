@@ -1,3 +1,4 @@
+import type { CompiledDerivedField } from '../../canonical-model/src/line-totals.js';
 import { templateCreateSurface } from '../../runtime/src/record-template-library.js';
 import {
   assertWorkflowEvidence,
@@ -1244,6 +1245,8 @@ interface VerificationOperationContract {
     /** A create's server-assigned document numbers: never a caller's input. */
     readonly assignedFields?: readonly { readonly fieldId: string }[];
     readonly fields: readonly VerificationFieldContract[];
+    /** ADR-0094: derived targets the server computes; never an input. */
+    readonly derivedFields?: readonly CompiledDerivedField[];
     readonly relationInputs: readonly {
       readonly relationId: string;
       readonly required: boolean;
@@ -2389,8 +2392,26 @@ class SemanticVerificationExecutor {
     const arranged = this.#arrangedRecord(entityId, operation, input);
     const created = await this.#invokeOperation(operation, input);
     const registered = this.#createdRecords.push(arranged) - 1;
+    // ADR-0094: a derived value is not in the input either; the probes that
+    // read it use the value the create derived and stored.
+    const derived = operation.inputContract.derivedFields ?? [];
+    let base = arranged;
+    if (derived.length) {
+      const readBack = isRecord(created.readBack) ? created.readBack : null;
+      const stored = isRecord(readBack?.values) ? readBack.values : {};
+      base = Object.freeze({
+        ...arranged,
+        values: Object.freeze({
+          ...arranged.values,
+          ...Object.fromEntries(
+            derived.map(({ fieldId }) => [fieldId, stored[fieldId] ?? null]),
+          ),
+        }),
+      });
+      this.#createdRecords[registered] = base;
+    }
     const assignedFields = operation.inputContract.assignedFields ?? [];
-    if (assignedFields.length === 0) return arranged;
+    if (assignedFields.length === 0) return base;
     // A server-assigned number is not in the input; the probes that search,
     // resolve or compare it use the value the create stored.
     const assignedValues: Record<string, string> = {};
@@ -2404,8 +2425,8 @@ class SemanticVerificationExecutor {
       assignedValues[assigned.fieldId] = value;
     }
     const record = Object.freeze({
-      ...arranged,
-      values: Object.freeze({ ...arranged.values, ...assignedValues }),
+      ...base,
+      values: Object.freeze({ ...base.values, ...assignedValues }),
     });
     this.#createdRecords[registered] = record;
     return record;
@@ -2560,6 +2581,15 @@ class SemanticVerificationExecutor {
         `A fixture override cannot be supplied to ${operation.operationId}.`,
       );
     const storageEntity = this.#requiredStorageEntity(entityId);
+    // ADR-0094 amendment 4: an operand of a derived value gets a value that
+    // keeps the derivation inside its target. Generic decimals carry up to
+    // nine integer digits, and two of them overflow a scale-2, precision-18
+    // amount in most arrangements. A validation's own witness still wins.
+    const operands = derivedOperandValues(
+      operation.inputContract.derivedFields,
+      writable,
+      token,
+    );
     const values = Object.fromEntries(
       writable.map((field) => [
         field.fieldId,
@@ -2569,7 +2599,9 @@ class SemanticVerificationExecutor {
               field.fieldId,
               inputOverrides[field.fieldId],
             )
-          : verificationFieldValue(field, token, storageEntity),
+          : operands.has(field.fieldId)
+            ? operands.get(field.fieldId)
+            : verificationFieldValue(field, token, storageEntity),
       ]),
     );
     const fieldOriginRelations = this.#relations.filter(
@@ -3438,6 +3470,70 @@ function verificationNumericValue(fieldId: string, token: string): string {
     .digest('hex')
     .slice(0, 12);
   return BigInt(`0x${hex}`).toString(10);
+}
+
+/**
+ * The values release verification writes into the operands of a derived
+ * value (ADR-0094 amendment 4). Each is small and token-distinct: one digit
+ * and one decimal place (`4.7`) when the operand has a scale, so no sentinel
+ * text can contain it (the search probes look for it as a substring), or a
+ * four-digit whole number at scale 0. Every derivation is bounded with all its
+ * operands at their largest such magnitude; if that bound does not fit the
+ * target, its operands get `1`, which keeps any product, sum or difference as
+ * small as the declaration's own literals.
+ */
+function derivedOperandValues(
+  derived: readonly CompiledDerivedField[] | undefined,
+  fields: readonly VerificationFieldContract[],
+  token: string,
+): ReadonlyMap<string, string> {
+  const out = new Map<string, string>();
+  if (!derived?.length) return out;
+  const scaleOf = (fieldId: string) =>
+    fields.find((field) => field.fieldId === fieldId)?.bounds.scale ?? 0;
+  const digest = (fieldId: string) =>
+    createHash('sha256')
+      .update(token, 'utf8')
+      .update(Uint8Array.of(0))
+      .update(fieldId, 'utf8')
+      .digest();
+  const candidate = (fieldId: string) => {
+    const bytes = digest(fieldId);
+    return scaleOf(fieldId) > 0
+      ? `${String((bytes[0]! % 9) + 1)}.${String((bytes[1]! % 9) + 1)}`
+      : String(1000 + (bytes.readUInt16BE(0) % 9000));
+  };
+  const largest = (fieldId: string) => (scaleOf(fieldId) > 0 ? 10 : 10_000);
+  const bound = (term: CompiledDerivedField['expression']): number => {
+    if (term.kind === 'field') return largest(term.fieldId);
+    if (term.kind === 'decimalLiteral') return Math.abs(Number(term.value));
+    const left = bound(term.left);
+    const right = bound(term.right);
+    return term.operator === 'multiply' ? left * right : left + right;
+  };
+  const operandsOf = (
+    term: CompiledDerivedField['expression'],
+    into: Set<string>,
+  ): Set<string> => {
+    if (term.kind === 'field') into.add(term.fieldId);
+    else if (term.kind === 'arithmetic') {
+      operandsOf(term.left, into);
+      operandsOf(term.right, into);
+    }
+    return into;
+  };
+  const fallback = new Set<string>();
+  for (const field of derived) {
+    const operands = operandsOf(field.expression, new Set());
+    const fits =
+      bound(field.expression) < 10 ** (field.precision - field.scale);
+    for (const fieldId of operands) {
+      if (!fits) fallback.add(fieldId);
+      out.set(fieldId, candidate(fieldId));
+    }
+  }
+  for (const fieldId of fallback) out.set(fieldId, '1');
+  return out;
 }
 
 function verificationDecimalValue(

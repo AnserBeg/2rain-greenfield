@@ -64,7 +64,7 @@ const local = (id: string) => id.split(/[.:]/u).pop()!;
 
 test('every first-party operation carries a declaration, and the canonical reader parses it', () => {
   const declaration = firstPartyDeclaration();
-  assert.equal(declaration.operations.length, 170);
+  assert.equal(declaration.operations.length, 173);
   assert.deepEqual(parseReversibilityDeclaration(declaration), declaration);
   const classes: Record<string, number> = {};
   for (const operation of declaration.operations) {
@@ -75,7 +75,7 @@ test('every first-party operation carries a declaration, and the canonical reade
     'exact/internal': 35,
     'exact/record': 69,
     'none/internal': 2,
-    'none/outward': 30,
+    'none/outward': 33,
     'residue/record': 34,
   });
   // A capability declares nothing yet, so it is the worst case.

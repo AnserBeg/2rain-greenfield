@@ -105,6 +105,8 @@ At `eda6d12f`, the regression tests caught direct grants, the notes binding, the
 3. Rule 16 follow-up seen in this round: the quote query's permission must still be named `<namespace>:permission.billing_quote` (`packages/compiler/src/billing.ts`). Replace the name with a declared binding.
 4. A second booking for the same owner in the slot inside the review window refuses the review. Decide how several bookings in one slot are billed: in turn, or as separate services.
 
+Slice 3a-i built tasks 1 to 4 above and the B8 rename, B1 and B7 ([record](BILLING-1-s3a-i.md)). Task 4 is a ruling proposal there; the free-text meter unit in finding 5 stays open.
+
 ## Test it yourself
 
 Run `node --import tsx --test test/integration/billing-quote.test.ts`. The three-business test expects CAD 100.00 for hire after a pause, CAD 8.25 for usage above allowance and CAD 15.50 for a prorated contract.

@@ -1,4 +1,11 @@
 import {
+  parseCompiledDerivedFields,
+  parseCompiledTotalledRelations,
+  parseCreateOnlyFieldIds,
+  type CompiledDerivedField,
+  type CompiledTotalledRelation,
+} from '../../canonical-model/src/line-totals.js';
+import {
   BOOKING_CAPABILITY,
   BookingOperationBinding,
 } from '@north-star/canonical-model';
@@ -208,6 +215,12 @@ export interface RegisteredOperationInputContract {
   readonly systemInput?: RegisteredOperationSystemInput;
   /** Fields a create assigns on the server; none of them is an input. */
   readonly assignedFields?: readonly RegisteredOperationAssignedField[];
+  /** ADR-0094: derived targets the server computes on create and update. */
+  readonly derivedFields?: readonly CompiledDerivedField[];
+  /** ADR-0094: fields an update refuses, named for the editor (update only). */
+  readonly createOnlyFieldIds?: readonly string[];
+  /** ADR-0094: a line write's totalled parent: header lock and maximum. */
+  readonly totalledRelations?: readonly CompiledTotalledRelation[];
   readonly writableFieldIds: readonly string[];
 }
 
@@ -1884,10 +1897,14 @@ function assertOperationInputContract(
   }
   const hasSystemInput = Object.hasOwn(value, 'systemInput');
   const hasAssignedFields = Object.hasOwn(value, 'assignedFields');
+  const lineTotalKeys = (
+    ['createOnlyFieldIds', 'derivedFields', 'totalledRelations'] as const
+  ).filter((key) => Object.hasOwn(value, key));
   assertExactKeys(
     value,
     [
       ...(hasAssignedFields ? ['assignedFields'] : []),
+      ...lineTotalKeys,
       'closedArgumentKeys',
       'fields',
       'relationInputs',
@@ -1934,6 +1951,16 @@ function assertOperationInputContract(
         throw invalid('pinned assigned field has an invalid shape');
     }
   }
+  // ADR-0094 keys, each read exactly by the one shared reader.
+  if (
+    (Object.hasOwn(value, 'derivedFields') &&
+      parseCompiledDerivedFields(value.derivedFields) === null) ||
+    (Object.hasOwn(value, 'createOnlyFieldIds') &&
+      parseCreateOnlyFieldIds(value.createOnlyFieldIds) === null) ||
+    (Object.hasOwn(value, 'totalledRelations') &&
+      parseCompiledTotalledRelations(value.totalledRelations) === null)
+  )
+    throw invalid('pinned line-total contract has an invalid shape');
   if (
     (value.schemaVersion !== 'northstar.module-input-contract/v1' &&
       value.schemaVersion !== 'northstar.module-input-contract/v2' &&

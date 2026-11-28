@@ -1,3 +1,8 @@
+import {
+  lineTotalsReaderFloors,
+  LINE_TOTALS_OPERATION_READER,
+  ROLLUP_QUERY_READER,
+} from '../../canonical-model/src/line-totals.js';
 import type { StorageTargetPayloadV1 } from '../../compiler/src/storage.js';
 import { lowerDeclaredReports } from '../../compiler/src/declared-reports.js';
 import { DECLARED_REPORT_READER } from '../../canonical-model/src/declared-report.js';
@@ -26,14 +31,7 @@ import {
   RECORD_TEMPLATE_OPERATION_READER,
 } from '@north-star/canonical-model';
 import { recordTemplateDeclarationProblem } from './record-template-admission.js';
-import {
-  BILLING_ALLOCATION_READER,
-  BILLING_ARREARS_READER,
-  BILLING_CYCLE_CALCULATION,
-  BILLING_CALCULATION_VERSION,
-  BILLING_READER,
-  BILLING_INTERVAL_READER,
-} from '../../canonical-model/src/billing.js';
+import { billingReleaseMismatch } from '../../canonical-model/src/billing.js';
 import {
   popupDeclarationProblem,
   popupBindingsProblem,
@@ -789,16 +787,6 @@ function verifyCompiledRelease(
   const billingPlans = isRecord(layoutDefinition)
     ? layoutDefinition.billingPlans
     : undefined;
-  const hasAgreedBillingInterval =
-    Array.isArray(billingPlans) &&
-    billingPlans.some(
-      (p) => isRecord(p) && isRecord(p.bindings) && p.bindings.agreedInterval,
-    );
-  const hasArrears =
-    Array.isArray(billingPlans) &&
-    billingPlans.some(
-      (p) => isRecord(p) && isRecord(p.bindings) && p.bindings.arrearsSource,
-    );
   if (billingPlans && !surfaceReference)
     throw integrity(
       'BILLING_PLAN_MISMATCH',
@@ -1025,38 +1013,12 @@ function verifyCompiledRelease(
       );
       if (popupProblem)
         throw integrity('POPUP_PROJECTION_CONTRACT_MISMATCH', popupProblem);
-      const hasBillingCalculation = Object.hasOwn(
-        payload,
-        'billingCalculationVersion',
-      );
-      const surfaceFloor = reference.requiredRuntimeCapability.minimumVersion;
-      const billingFloor = hasArrears
-        ? BILLING_ARREARS_READER
-        : hasBillingCalculation
-          ? BILLING_ALLOCATION_READER
-          : hasAgreedBillingInterval
-            ? BILLING_INTERVAL_READER
-            : BILLING_READER;
       if (
-        canonicalize(payload.billingPlans ?? null) !==
-          canonicalize(billingPlans ?? null) ||
-        (hasBillingCalculation &&
-          (!hasAgreedBillingInterval ||
-            payload.billingCalculationVersion !==
-              (hasArrears
-                ? BILLING_CYCLE_CALCULATION
-                : BILLING_CALCULATION_VERSION))) ||
-        (hasAgreedBillingInterval &&
-          surfaceFloor >= BILLING_ALLOCATION_READER &&
-          !hasBillingCalculation) ||
-        (billingPlans && surfaceFloor < billingFloor) ||
-        (!billingPlans &&
-          [
-            BILLING_READER,
-            BILLING_INTERVAL_READER,
-            BILLING_ALLOCATION_READER,
-            BILLING_ARREARS_READER,
-          ].includes(surfaceFloor))
+        billingReleaseMismatch(
+          billingPlans,
+          payload,
+          reference.requiredRuntimeCapability.minimumVersion,
+        )
       )
         throw integrity(
           'BILLING_PLAN_MISMATCH',
@@ -1278,25 +1240,39 @@ function verifyFormulaProjectionReference(
   const operationFloor = floorOf(PROJECTION_FAMILY_IDS.operationCatalog);
   const queryFloor = floorOf(PROJECTION_FAMILY_IDS.queryCatalog);
   const reference = references[0];
+  // ADR-0094: the line-totals readers are the highest floors present.
+  const lineTotals =
+    isRecord(normalized) &&
+    ['derivedDecimals', 'rollups', 'createOnlyFields', 'formulaRules'].some(
+      (key) => Object.hasOwn(normalized, key),
+    )
+      ? lineTotalsFloors(
+          parseNormalizedApplicationPackageJson(revision.desiredState),
+        )
+      : { operation: false, query: false };
   if (
     references.length !== Number(Boolean(declaring)) ||
-    (hasRecordTemplateBinding(normalized)
-      ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
-      : hasBookingOperations(normalized)
-        ? operationFloor !== bookingReaderFloor(normalized)
-        : rules.length
-          ? operationFloor !== requiredFormulaValidationOperationReader(rules)
-          : operationFloor >= LITERAL_VALIDATION_OPERATION_READER) ||
+    (lineTotals.operation
+      ? operationFloor !== LINE_TOTALS_OPERATION_READER
+      : hasRecordTemplateBinding(normalized)
+        ? operationFloor !== RECORD_TEMPLATE_OPERATION_READER
+        : hasBookingOperations(normalized)
+          ? operationFloor !== bookingReaderFloor(normalized)
+          : rules.length
+            ? operationFloor !== requiredFormulaValidationOperationReader(rules)
+            : operationFloor >= LITERAL_VALIDATION_OPERATION_READER) ||
     // The query floor is the highest catalog feature present.
-    (declaresOptionalReadModelDependency(
-      isRecord(normalized) ? normalized.queries : undefined,
-    )
-      ? queryFloor !== OPTIONAL_DEPENDENCY_QUERY_READER
-      : hasBookingUsage(normalized)
-        ? queryFloor !== BOOKING_USAGE_QUERY_READER
-        : displays.length
-          ? queryFloor !== CALCULATED_DISPLAY_QUERY_READER
-          : queryFloor >= CALCULATED_DISPLAY_QUERY_READER) ||
+    (lineTotals.query
+      ? queryFloor !== ROLLUP_QUERY_READER
+      : declaresOptionalReadModelDependency(
+            isRecord(normalized) ? normalized.queries : undefined,
+          )
+        ? queryFloor !== OPTIONAL_DEPENDENCY_QUERY_READER
+        : hasBookingUsage(normalized)
+          ? queryFloor !== BOOKING_USAGE_QUERY_READER
+          : displays.length
+            ? queryFloor !== CALCULATED_DISPLAY_QUERY_READER
+            : queryFloor >= CALCULATED_DISPLAY_QUERY_READER) ||
     (declaring &&
       (reference?.instanceId !==
         `${declaring.package.namespace}:projection.formula-rule` ||
@@ -1883,4 +1859,17 @@ function integrity(
   message: string,
 ): ReleasePersistenceIntegrityError {
   return new ReleasePersistenceIntegrityError(code, message);
+}
+
+/** Which floors a revision's ADR-0094 declarations raise. */
+function lineTotalsFloors(
+  definition: ReturnType<typeof parseNormalizedApplicationPackageJson>,
+): { readonly operation: boolean; readonly query: boolean } {
+  const floors = lineTotalsReaderFloors(definition);
+  if (!floors)
+    throw integrity(
+      'FORMULA_PROJECTION_CONTRACT_MISMATCH',
+      'release declares line totals that do not bind',
+    );
+  return floors;
 }

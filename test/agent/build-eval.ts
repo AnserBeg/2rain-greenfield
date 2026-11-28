@@ -12,6 +12,7 @@
  * it. Behaviour is scored separately against the case's hand-written
  * expectation (`build-eval-cases.ts`), never against the model's own words.
  */
+import { ratePlanPriced } from './rate-plan-pricing.js';
 import { billingPlansIn } from '../../packages/postgres-provider/src/billing-quote.js';
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
@@ -1403,6 +1404,8 @@ export async function runBuildCase(
           component.kind !== expect.kind
         )
           return false;
+        // A priced case is scored by what the plan charges (B04-B06).
+        if (expect.prices) return ratePlanPriced(p, expect.prices);
         if (component.kind === 'time')
           return (
             p.schedule.kind === 'calendarMonth' &&

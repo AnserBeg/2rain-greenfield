@@ -389,7 +389,9 @@ process.stdout.write(JSON.stringify(applicationBeforeStockCountWorkflow().releas
       };
       const item = seedId('Field notebook');
       const summary = 'Escalate the pending inspection';
-      const start = new Date('2026-11-19T17:30:00.000Z');
+      // Anchored to the wall clock: the receipt posts at the database's own
+      // date, and a fixed date falls out of the 7-day backdate window.
+      const start = new Date();
       let instant = start;
       const operationInput = (receiptId: string) => ({
         legalEntityId: company,

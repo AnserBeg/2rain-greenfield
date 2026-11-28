@@ -5,11 +5,12 @@
  * names the one check whose removal reds it (rule 8; the record lists them).
  */
 import assert from 'node:assert/strict';
-import { resolve } from 'node:path';
 import test from 'node:test';
 
-import { readReportsPredecessor } from '../helpers/reports-preceding-release.js';
-import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
+import {
+  acknowledgementForBase,
+  readReportsPredecessor,
+} from '../helpers/reports-preceding-release.js';
 import {
   LOGICAL_FIELD_READER,
   canonicalize,
@@ -33,17 +34,13 @@ import type {
   CompiledSurfaceField,
 } from '../../apps/web/src/surface-contract.js';
 
-const authoredPath = resolve('apps/web/release/app.authored.json');
 const base = readReportsPredecessor(
   'apps/web/release/app.authored.json',
 ) as Record<string, unknown>;
 const tip = parseCompiledApplication(
   readReportsPredecessor('apps/web/release/app.compiled.json'),
 ).application;
-const acknowledgement = readUnboundPermissionAcknowledgementFor(
-  authoredPath,
-  'northstar.app:package.application',
-);
+const acknowledgement = acknowledgementForBase(base);
 const NS = 'northstar.app';
 const shipment = `${NS}:entity.custom_shipment`;
 const f = (local: string) => `${NS}:field.custom_shipment_${local}`;

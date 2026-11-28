@@ -1,5 +1,5 @@
 {
-  "description": "Estimated CI seconds per test/postgres file, the median of the observed full-run times on GitHub, two or three per file (TRAIN-R b536cf1f run 45783784449; TRAIN-S e339a77c4 run 45836077621 attempts 1 and 2; line-logical-fields, report-analysis and report-analysis-reader have two). Runner speed varies up to about 1.7 times between runs, so the budget is a typical-run guard, not a worst-case bound. A shard job runs its files back to back, so a shard estimate is the sum. budgetSeconds keeps a shard under about 1200 s of wall time (the job limit is 1800 s): setup and teardown add roughly 40 s. A file not listed counts unrecordedFileSeconds. Re-measure from the reachability artifacts (reachability-postgres-N, files[].durationMs) when a file changes a lot; docs/execution/evidence-on-demand.md says how.",
+  "description": "Estimated CI seconds per test/postgres file, the median of the observed full-run times on GitHub, two or three per file (TRAIN-R b536cf1f run 45783784449; TRAIN-S e339a77c4 run 45836077621 attempts 1 and 2; line-logical-fields, report-analysis and report-analysis-reader have two). line-totals ran 239 s with three tests in its first full run (619a457d, run 46118863525); its 420 adds an estimate for the fourth (template) test, which installs a release at boot and activates a second through the Customize service (276 s on the lane's laptop); customization-inspection moved from shard 1 to shard 6 to make room; re-measure it from the next full run. Runner speed varies up to about 1.7 times between runs, so the budget is a typical-run guard, not a worst-case bound. A shard job runs its files back to back, so a shard estimate is the sum. budgetSeconds keeps a shard under about 1200 s of wall time (the job limit is 1800 s): setup and teardown add roughly 40 s. A file not listed counts unrecordedFileSeconds. Re-measure from the reachability artifacts (reachability-postgres-N, files[].durationMs) when a file changes a lot; docs/execution/evidence-on-demand.md says how.",
   "budgetSeconds": 1100,
   "unrecordedFileSeconds": 120,
   "files": {
@@ -13,6 +13,7 @@
     "test/postgres/booking-commitments.test.ts": 15,
     "test/postgres/booking-serving.test.ts": 201,
     "test/postgres/boot-capabilities.test.ts": 141,
+    "test/postgres/build-eval-rate-plans.test.ts": 250,
     "test/postgres/build-eval.test.ts": 724,
     "test/postgres/business-calendar-reader.test.ts": 55,
     "test/postgres/business-calendar.test.ts": 12,
@@ -33,8 +34,10 @@
     "test/postgres/document-attachments.test.ts": 321,
     "test/postgres/document-numbering.test.ts": 95,
     "test/postgres/document-templates.test.ts": 349,
+    "test/postgres/ledger-books-by-hand.test.ts": 45,
     "test/postgres/ledger-journal-core.test.ts": 7,
     "test/postgres/line-logical-fields.test.ts": 230,
+    "test/postgres/line-totals.test.ts": 420,
     "test/postgres/location-runtime.test.ts": 11,
     "test/postgres/locations.test.ts": 44,
     "test/postgres/logical-fields.test.ts": 311,

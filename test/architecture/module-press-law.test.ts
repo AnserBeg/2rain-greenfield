@@ -320,6 +320,7 @@ test('one auto-discovered guard covers every definition-backed product module', 
   const result = checkModulePressLaw(process.cwd());
   console.log(formatModulePressLaw(result));
   assert.deepEqual(result.moduleDirectories, [
+    'bookkeeping',
     'catalog',
     'inventory',
     'location',
@@ -328,7 +329,7 @@ test('one auto-discovered guard covers every definition-backed product module', 
     'purchasing',
     'sales',
   ]);
-  assert.equal(result.modulesRead, 7);
+  assert.equal(result.modulesRead, 8);
   assert.ok(
     result.productionFilesRead > 0,
     'press-law guard read zero production files',

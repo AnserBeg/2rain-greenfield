@@ -26,7 +26,10 @@ import {
   BILLING_CYCLE_CALCULATION,
   BILLING_TERMS_CAPABILITY,
   BILLING_QUOTE_CAPABILITY,
+  BILLING_RULES_CALCULATION,
+  BILLING_RULES_READER,
 } from '../../packages/canonical-model/src/billing.js';
+import { SERVICE_USE_PROTOCOL } from '../../packages/canonical-model/src/service-evidence.js';
 import {
   BOOKING_CAPABILITY,
   BOOKING_USAGE_BINDING,
@@ -66,7 +69,7 @@ import {
 } from '../helpers/customization-fixture.js';
 import { withOrderEntryFixture } from '../helpers/order-entry-fixture.js';
 import { DECLARED_REPORT_READER } from '../../packages/canonical-model/src/declared-report.js';
-import { truncateBookingInstant } from '../../packages/postgres-provider/src/billing-booking-usage.js';
+import { truncateBookingInstant } from '../../packages/canonical-model/src/booking.js';
 import type { ImmutableJsonValue } from '../../packages/runtime/src/request-runtime-view.js';
 import {
   archivedBillingBase,
@@ -195,6 +198,7 @@ type FixtureMode =
   | 'arrears'
   | 'interval'
   | 'booking'
+  | 'evidence'
   | 'wrongSlot';
 function billingFixture(
   mode: FixtureMode,
@@ -216,7 +220,8 @@ function billingFixture(
   const requirement = p.capabilityRequirements.find(
     (c) => c.capabilityId === 'northstar.sales:capability.fulfillment',
   )!;
-  const booking = mode === 'booking' || mode === 'wrongSlot';
+  const booking =
+    mode === 'booking' || mode === 'wrongSlot' || mode === 'evidence';
   const usagePermission = id('permission.read_service_usage');
   const usage = {
     ...source,
@@ -348,20 +353,33 @@ function billingFixture(
               ...plan,
               bindings: { ...b, arrearsSource: { kind: 'agreedInterval' } },
             }
-          : booking
+          : mode === 'evidence'
             ? {
                 ...plan,
                 bindings: {
                   ...b,
                   arrearsSource: {
-                    kind: 'bookingActuals',
+                    kind: 'evidenceQuery',
                     queryId: usageQuery,
-                    slotId:
-                      mode === 'wrongSlot' ? id('slot.other') : trackedSlot,
+                    protocol: SERVICE_USE_PROTOCOL,
+                    subjectId: trackedSlot,
                   },
                 },
               }
-            : plan,
+            : booking
+              ? {
+                  ...plan,
+                  bindings: {
+                    ...b,
+                    arrearsSource: {
+                      kind: 'bookingActuals',
+                      queryId: usageQuery,
+                      slotId:
+                        mode === 'wrongSlot' ? id('slot.other') : trackedSlot,
+                    },
+                  },
+                }
+              : plan,
     ],
     fields: [
       ...p.fields,
@@ -515,7 +533,7 @@ function release(mode: FixtureMode = 'bound', base?: BillingFixtureBase) {
     assert.ok(
       compiled.status !== 'compiled' &&
         compiled.diagnostics.some(
-          (d) => d.rule === 'BILLING_BOOKING_SOURCE_REQUIRED',
+          (d) => d.rule === 'BILLING_EVIDENCE_SOURCE_REQUIRED',
         ),
       JSON.stringify(compiled.diagnostics),
     );
@@ -579,6 +597,66 @@ test('period meter bindings require distinct selected boundaries, canonical unit
       'BILLING_METER_SOURCE_REQUIRED',
     );
   }
+  // A meter source rates usage only: no time component, and its allowance is
+  // granted per invoice cycle (BILLING-1.md finding 3).
+  const [overage] = rate.components;
+  assert.ok(overage?.kind === 'meter');
+  for (const [reason, components] of [
+    [
+      'a meter source has no time component',
+      [
+        overage,
+        {
+          id: 'time',
+          kind: 'time',
+          stage: 'beforeMinimum',
+          taxClassification: 'untaxed',
+          base: 'serviceInterval',
+          rates: { day: 'rate' },
+          minimumScope: 'perEnrollment',
+          partialTime: 'wholeStarted',
+        },
+      ],
+    ],
+    [
+      'a meter source has no per-quantity fee',
+      [
+        overage,
+        {
+          id: 'seat_fee',
+          kind: 'fixed',
+          base: 'enrollment',
+          stage: 'afterCapBeforeTax',
+          taxClassification: 'untaxed',
+          amount: 'included',
+          perQuantity: true,
+          occurrence: { kind: 'oneOff', at: 'serviceStart' },
+        },
+      ],
+    ],
+    [
+      'a meter source uses a per-cycle allowance',
+      [
+        {
+          ...overage,
+          allowanceBasis: { kind: 'perPricingWindow', quantity: 'included' },
+        },
+      ],
+    ],
+  ] as const)
+    assert.equal(
+      billingBindingProblem({
+        ...pkg,
+        billingPlans: [
+          {
+            ...rate,
+            components: components as unknown as typeof rate.components,
+          },
+        ],
+      }),
+      'BILLING_METER_SOURCE_REQUIRED',
+      reason,
+    );
   for (const wrong of [
     { openingReadingFieldId: meter.closingReadingFieldId },
     { closingReadingFieldId: notesField },
@@ -624,6 +702,8 @@ test('each arrears source kind compiles at the arrears reader with the cycle cal
     reader: Math.max(BILLING_ALLOCATION_READER, baseFloor),
     calculation: BILLING_CALCULATION_VERSION,
   });
+  // The reader-45 Booking declaration keeps its reader and calculation
+  // through the replay rule; the protocol form takes the rules reader.
   for (const mode of ['interval', 'arrears', 'booking'] as const) {
     assert.deepEqual(
       surface(mode),
@@ -634,6 +714,10 @@ test('each arrears source kind compiles at the arrears reader with the cycle cal
       mode,
     );
   }
+  assert.deepEqual(surface('evidence'), {
+    reader: BILLING_RULES_READER,
+    calculation: BILLING_RULES_CALCULATION,
+  });
   const pkg = parseNormalizedApplicationPackageJson(
     billingFixture('interval').bytes,
   );
@@ -756,6 +840,297 @@ test('the plan binds its customer and currency by declared role, not by field na
 test('a released tracked slot and its scoped usage query must agree with the billing plan', () => {
   assert.ok(release('booking'));
   release('wrongSlot');
+});
+
+test('any read model implementing the service-use protocol is an evidence source, and its provider checks the subject', () => {
+  for (const mode of ['evidence', 'booking'] as const) {
+    const pkg = parseNormalizedApplicationPackageJson(
+      billingFixture(mode).bytes,
+    );
+    assert.ok(pkg.languageVersion === 'v6');
+    assert.equal(billingBindingProblem(pkg), undefined, mode);
+    const usage = pkg.queries.find((q) => q.queryId === usageQuery)!;
+    assert.ok(usage.queryType === 'get' && usage.readModel);
+    const model = usage.readModel;
+    const withQuery = (change: Partial<typeof usage>) =>
+      billingBindingProblem({
+        ...pkg,
+        queries: pkg.queries.map((q) =>
+          q.queryId === usageQuery ? ({ ...usage, ...change } as typeof q) : q,
+        ),
+      });
+    const withSlot = (change: Record<string, unknown>) =>
+      billingBindingProblem({
+        ...pkg,
+        operations: pkg.operations.map((o) =>
+          'booking' in o && o.booking
+            ? ({ ...o, booking: { ...o.booking, ...change } } as typeof o)
+            : o,
+        ),
+      });
+    const refusals: [string, string | undefined][] = [
+      // The declared protocol: a binding no provider implements is refused.
+      [
+        'the query implements the service-use protocol',
+        withQuery({
+          readModel: {
+            ...model,
+            binding: CanonicalIdSchema.parse(id('protocol.unregistered')),
+          },
+        }),
+      ],
+      [
+        'the usage query is scoped to one company',
+        withQuery({ legalEntityScope: undefined }),
+      ],
+      [
+        'the usage query reads the billing owner query',
+        withQuery({
+          readModel: {
+            ...model,
+            queries: {
+              owner: {
+                ...model.queries.owner!,
+                targetId: CanonicalIdSchema.parse(quoteId),
+              },
+            },
+          },
+        }),
+      ],
+      [
+        'the slot owner is the billing entity',
+        withSlot({ ownerEntity: id('entity.other') }),
+      ],
+      ['the slot is tracked', withSlot({ fulfilmentMode: 'scheduled' })],
+    ];
+    for (const [reason, problem] of refusals)
+      assert.equal(
+        problem,
+        'BILLING_EVIDENCE_SOURCE_REQUIRED',
+        `${mode}: ${reason}`,
+      );
+  }
+});
+
+test('a bound record quantity is a required exact number on the billed record', () => {
+  const load = (mode: FixtureMode) => {
+    const loaded = parseNormalizedApplicationPackageJson(
+      billingFixture(mode).bytes,
+    );
+    assert.ok(loaded.languageVersion === 'v6');
+    return loaded;
+  };
+  const pkg = load('bound');
+  const source = pkg.queries.find((q) => q.queryId === sourceId)!;
+  assert.ok(source.queryType === 'get');
+  const notes = pkg.fields.find((f) => f.fieldId === notesField)!;
+  const seats = CanonicalIdSchema.parse(id('field.sales_order_seats'));
+  const withSeats = (
+    fieldType: (typeof notes)['fieldType'],
+    presence: 'required' | 'optional' = 'required',
+    base: typeof pkg = pkg,
+  ) => {
+    const rate = base.billingPlans![0]!;
+    return billingBindingProblem({
+      ...base,
+      fields: [
+        ...base.fields,
+        { ...notes, fieldId: seats, presence, fieldType },
+      ],
+      queries: base.queries.map((q) =>
+        q.queryId === sourceId && q.queryType === 'get'
+          ? {
+              ...q,
+              selections: [
+                ...q.selections,
+                {
+                  ...q.selections[0]!,
+                  field: { ...q.selections[0]!.field, targetId: seats },
+                  selectionId: CanonicalIdSchema.parse(
+                    id('selection.sales_order_seats'),
+                  ),
+                },
+              ],
+            }
+          : q,
+      ),
+      billingPlans: [
+        {
+          ...rate,
+          bindings: {
+            ...rate.bindings!,
+            agreedInterval: {
+              ...rate.bindings!.agreedInterval!,
+              quantityFieldId: seats,
+            },
+          },
+        },
+      ],
+    });
+  };
+  const integer = {
+    kind: 'integerFieldType',
+    representation: 'canonicalString',
+    schemaVersion: 'v6',
+  } as (typeof notes)['fieldType'];
+  assert.equal(withSeats(integer), undefined);
+  assert.equal(
+    withSeats(integer, 'optional'),
+    'BILLING_SOURCE_FIELDS_REQUIRED',
+    'an optional quantity cannot bind',
+  );
+  assert.equal(
+    withSeats(notes.fieldType),
+    'BILLING_SOURCE_FIELDS_REQUIRED',
+    'free text cannot be a quantity',
+  );
+  // Only the agreed band reads the record quantity. Beside an evidence source
+  // (its legs carry the quantity) or a meter (readings) it is refused.
+  assert.equal(
+    withSeats(integer, 'required', load('interval')),
+    undefined,
+    'an agreed-interval source reads the record quantity',
+  );
+  for (const [mode, reason] of [
+    ['evidence', 'an evidence source rates its legs, not a record quantity'],
+    ['arrears', 'a meter source rates readings, not a record quantity'],
+  ] as const) {
+    assert.equal(billingBindingProblem(load(mode)), undefined, mode);
+    assert.equal(
+      withSeats(integer, 'required', load(mode)),
+      'BILLING_SOURCE_FIELDS_REQUIRED',
+      reason,
+    );
+  }
+});
+
+test('the quote and terms permissions are bound by their declared role, not by name', () => {
+  const pkg = parseNormalizedApplicationPackageJson(
+    billingFixture('bound').bytes,
+  );
+  assert.ok(pkg.languageVersion === 'v6');
+  assert.equal(billingBindingProblem(pkg), undefined);
+  const refused =
+    'Billing requires distinct registered operations and exact scoped source, terms and explanation queries under the Billing grants.';
+  // Another business names both grants differently.
+  const renamed = JSON.parse(
+    JSON.stringify(pkg)
+      .replaceAll(`"${readPermission}"`, `"${id('permission.see_charges')}"`)
+      .replaceAll(`"${publishPermission}"`, `"${id('permission.set_prices')}"`),
+  ) as typeof pkg;
+  assert.equal(billingBindingProblem(renamed), undefined);
+  const withPermission = (permissionId: string, change: object) =>
+    billingBindingProblem({
+      ...pkg,
+      permissions: pkg.permissions.map((a) =>
+        a.permissionId === permissionId ? { ...a, ...change } : a,
+      ),
+    });
+  const source = pkg.queries.find((q) => q.queryId === sourceId)!;
+  for (const [reason, problem] of [
+    [
+      'the quote grant is a read',
+      withPermission(readPermission, { action: 'update' }),
+    ],
+    [
+      'the quote grant reads the billed record type',
+      withPermission(readPermission, {
+        resource: { ...source.sourceEntity, targetId: id('entity.other') },
+      }),
+    ],
+    [
+      'the terms grant is a write',
+      withPermission(publishPermission, { action: 'read' }),
+    ],
+    [
+      'no other query reads under the quote grant',
+      billingBindingProblem({
+        ...pkg,
+        queries: [
+          ...pkg.queries,
+          {
+            ...source,
+            queryId: CanonicalIdSchema.parse(id('query.other_reader')),
+            permission: {
+              ...source.permission,
+              targetId: CanonicalIdSchema.parse(readPermission),
+            },
+          },
+        ],
+      }),
+    ],
+    [
+      'no operation outside the terms writes holds the terms grant',
+      billingBindingProblem({
+        ...pkg,
+        operations: pkg.operations.map((o) =>
+          o.operationId === id('operation.sales_order_release')
+            ? {
+                ...o,
+                permission: {
+                  ...o.permission,
+                  targetId: CanonicalIdSchema.parse(publishPermission),
+                },
+              }
+            : o,
+        ),
+      }),
+    ],
+    [
+      'the quote has its own grant, not the source query grant',
+      billingBindingProblem({
+        ...pkg,
+        queries: pkg.queries.map((q) =>
+          q.queryId === quoteId ? { ...q, permission: source.permission } : q,
+        ),
+      }),
+    ],
+  ] as const)
+    assert.equal(problem, refused, reason);
+  // Two bound plans on one record type share the grant pair: each plan's
+  // quote and terms writes are inside the grants, not "another" reader.
+  const rate = pkg.billingPlans![0]!;
+  const bound = rate.bindings!;
+  const second = (local: string) => CanonicalIdSchema.parse(id(local));
+  const copied = {
+    [bound.publishOperationId]: second('operation.second_publish_terms'),
+    [bound.overrideOperationId]: second('operation.second_override_terms'),
+    [bound.assignmentOperationId]: second('operation.second_assign_list'),
+  };
+  const quote = pkg.queries.find((q) => q.queryId === quoteId)!;
+  assert.equal(
+    billingBindingProblem({
+      ...pkg,
+      queries: [
+        ...pkg.queries,
+        { ...quote, queryId: second('query.second_billable_quote') },
+      ],
+      operations: [
+        ...pkg.operations,
+        ...pkg.operations.flatMap((o) =>
+          copied[o.operationId]
+            ? [{ ...o, operationId: copied[o.operationId]! }]
+            : [],
+        ),
+      ],
+      billingPlans: [
+        rate,
+        {
+          ...rate,
+          id: 'second_plan',
+          bindings: {
+            ...bound,
+            quoteQueryId: second('query.second_billable_quote'),
+            publishOperationId: copied[bound.publishOperationId]!,
+            overrideOperationId: copied[bound.overrideOperationId]!,
+            assignmentOperationId: copied[bound.assignmentOperationId]!,
+          },
+        },
+      ],
+    }),
+    undefined,
+    'two bound plans share the quote and terms grants',
+  );
 });
 
 test('the serving role has no direct billing table privileges', async () => {

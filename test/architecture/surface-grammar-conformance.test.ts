@@ -48,6 +48,10 @@ import {
   partyModuleDefinition,
   platformModuleDefinition,
 } from '../../packages/domain/src/index.js';
+import {
+  BOOKKEEPING_NAMESPACE,
+  bookkeepingModuleDefinition,
+} from '../../packages/domain/src/bookkeeping/index.js';
 import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/index.js';
 import { withoutStockCountWorkflow } from '../helpers/application-before-stock-count-workflow.js';
 import { purchasingModuleDefinition } from '../../packages/domain/src/purchasing/index.js';
@@ -74,6 +78,14 @@ const seamPaths = [
   'apps/web/src/surface-runtime.ts',
 ] as const;
 
+// Books acts on Inventory's legal-entity record, so, like Purchasing and
+// Sales, it is measured in the composed release.
+const bookkeepingStandaloneIdentity = () =>
+  bookkeepingModuleDefinition(BOOKKEEPING_NAMESPACE, {
+    entityId: 'northstar.app:entity.legal_entity',
+    getQueryId: 'northstar.app:query.legal_entity_get',
+  });
+
 const productModuleDefinitions = [
   { create: catalogModuleDefinition, sourceDirectory: 'catalog' },
   { create: inventoryModuleDefinition, sourceDirectory: 'inventory' },
@@ -82,6 +94,7 @@ const productModuleDefinitions = [
   { create: platformModuleDefinition, sourceDirectory: 'platform' },
   { create: purchasingModuleDefinition, sourceDirectory: 'purchasing' },
   { create: salesModuleDefinition, sourceDirectory: 'sales' },
+  { create: bookkeepingStandaloneIdentity, sourceDirectory: 'bookkeeping' },
 ] as const;
 
 test('compiled production modules match the reviewed surface-grammar debt baseline', () => {
@@ -98,7 +111,7 @@ test('compiled production modules match the reviewed surface-grammar debt baseli
   );
 
   console.log(formatProductSurfaceGrammarRatchet(result));
-  assert.equal(result.modulesRead, 7);
+  assert.equal(result.modulesRead, 8);
   assert.deepEqual(
     result.observations.map((observation) => ({
       moduleId: observation.moduleId,
@@ -878,9 +891,11 @@ function compileProductSurfaceGrammarObservations(): ProductSurfaceGrammarObserv
     // Purchasing and Sales declare registered Inventory boundaries and cannot
     // compile as false standalone modules. Compile either in the real composed
     // dependency context, then select exactly its authored surface locals.
-    const needsComposedContext = ['purchasing', 'sales'].includes(
-      sourceDirectory,
-    );
+    const needsComposedContext = [
+      'bookkeeping',
+      'purchasing',
+      'sales',
+    ].includes(sourceDirectory);
     const normalized = normalizeApplicationPackage(
       needsComposedContext ? composedApplicationDefinition() : definition,
     );
@@ -1084,6 +1099,15 @@ function composedApplicationWithInventory(): Record<string, unknown> {
  */
 function composedApplicationBelowNavigationBudget(): Record<string, unknown> {
   let composed = composedApplicationWithInventory();
+  // Books acts on Inventory's legal-entity record, so it goes with Inventory.
+  composed = withoutModule(
+    composed,
+    bookkeepingModuleDefinition('northstar.app', {
+      entityId: 'northstar.app:entity.legal_entity',
+      getQueryId: 'northstar.app:query.legal_entity_get',
+    }),
+    'bookkeeping_books',
+  );
   composed = withoutModule(
     composed,
     inventoryModuleDefinition('northstar.app', {

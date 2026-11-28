@@ -10,7 +10,10 @@ import {
   BOOKING_USAGE_QUERY_READER,
   parseAuthoredApplicationPackageJson,
 } from '../../packages/canonical-model/src/index.js';
-import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
+import {
+  narrowAcknowledgementToDeclared,
+  readUnboundPermissionAcknowledgementFor,
+} from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import {
   compileApplicationRelease,
   expectedActiveReleaseFrom,
@@ -147,9 +150,13 @@ export function bookingRelease(
     bytes,
     expectedActiveReleaseFrom(prior.application.compiled),
   );
-  const ack = readUnboundPermissionAcknowledgementFor(
-    authoredPath,
-    source.package.packageId,
+  // Narrowed to the fixture's permissions, which leave out Books.
+  const ack = narrowAcknowledgementToDeclared(
+    readUnboundPermissionAcknowledgementFor(
+      authoredPath,
+      source.package.packageId,
+    ),
+    new Set(source.permissions.map((p) => p.permissionId)),
   );
   const compiled = compileApplicationRelease(
     {

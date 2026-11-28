@@ -6,6 +6,7 @@ import {
 import { composedApplicationDefinition } from '../../packages/domain/src/app/builder.js';
 import { calculatedDisplayDraft } from '../../packages/customization/src/calculated-display-draft.js';
 import { platformModuleDefinition } from '../../packages/domain/src/platform/definition.js';
+import { rentalContractAuthored } from './line-totals-fixture.js';
 import {
   fieldComparisonValidationDraft,
   literalValidationDraft,
@@ -171,5 +172,9 @@ export function languageCoverageApplicationPackages() {
     platformModuleDefinition(),
     validationFixture,
     fieldComparisonFixture,
+    // ADR-0074 for ADR-0094: a positive v6 fixture declaring a derived stored
+    // decimal, an on-read rollup, a create-only field and a stored-currency
+    // money compared with zero.
+    rentalContractAuthored(),
   ];
 }

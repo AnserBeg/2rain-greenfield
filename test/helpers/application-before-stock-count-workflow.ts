@@ -3,7 +3,10 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
+import {
+  narrowAcknowledgementToDeclared,
+  readUnboundPermissionAcknowledgementFor,
+} from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import {
   canonicalize,
   normalizeApplicationPackage,
@@ -43,7 +46,55 @@ function compileFixture() {
   // Older-reader witnesses must reach the feature they exercise.
   for (const entity of authored.entities as { reportSource?: unknown }[])
     delete entity.reportSource;
-  return singleTransitionApplication(authored);
+  return singleTransitionApplication(withoutBooks(authored));
+}
+
+/**
+ * Books (ACCOUNTING-1 1a-ii) postdates every archived reader these fixtures
+ * feed: its permission is bound only in today's current-policy bindings, so
+ * an archived compiler would refuse it as unbound. The fixture keeps the
+ * features it isolates and leaves the Books module out, with the company
+ * page it composes restored to the archived declaration.
+ */
+function withoutBooks(authored: Record<string, unknown>) {
+  const books = ':module.bookkeeping_books';
+  type Entry = Record<string, unknown> & {
+    module?: { targetId: string };
+    permission?: { targetId: string };
+    effect?: { capability?: { targetId: string } };
+  };
+  const operations = authored.operations as Entry[];
+  const removed = operations.filter((operation) =>
+    operation.module?.targetId.endsWith(books),
+  );
+  const permissions = new Set(removed.map((o) => o.permission?.targetId));
+  const capabilities = new Set(
+    removed.map((o) => o.effect?.capability?.targetId),
+  );
+  const archivedSurfaces = new Map(
+    (historical!.surfaces as Entry[]).map((surface) => [
+      surface.surfaceId,
+      surface,
+    ]),
+  );
+  return {
+    ...authored,
+    capabilityRequirements: (authored.capabilityRequirements as Entry[]).filter(
+      (requirement) => !capabilities.has(requirement.capabilityId as string),
+    ),
+    modules: (authored.modules as Entry[]).filter(
+      (module) => !String(module.moduleId).endsWith(books),
+    ),
+    operations: operations.filter((operation) => !removed.includes(operation)),
+    permissions: (authored.permissions as Entry[]).filter(
+      (permission) => !permissions.has(permission.permissionId as string),
+    ),
+    surfaces: (authored.surfaces as Entry[]).map((surface) =>
+      JSON.stringify(surface).includes(':operation.bookkeeping_')
+        ? archivedSurfaces.get(surface.surfaceId)!
+        : surface,
+    ),
+  };
 }
 
 /** Install a test's chosen first-party source directly after the retained bootstrap. */
@@ -100,9 +151,13 @@ function compileAfter(
         normalizationProfileVersion: normalized.normalizationProfileVersion,
       },
     },
-    readUnboundPermissionAcknowledgementFor(
-      authoredPath,
-      normalized.package.packageId,
+    // Narrowed to what this first party declares (it may leave Books out).
+    narrowAcknowledgementToDeclared(
+      readUnboundPermissionAcknowledgementFor(
+        authoredPath,
+        normalized.package.packageId,
+      ),
+      new Set(normalized.permissions.map((p) => p.permissionId)),
     ),
   );
   assert.ok(

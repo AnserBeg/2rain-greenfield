@@ -482,6 +482,8 @@ export function currentPolicyBindingsFromPermissions(
 const REUSABLE_READ_DECISION_KINDS: ReadonlySet<string> = new Set([
   COMPANY_LIST_QUERY.policyInputKind,
   'legalEntityReadScopePolicyInput',
+  // ADR-0094: a get's on-read total, read under its lines' list query.
+  'registeredSemanticDependentReadPolicyInput',
   'registeredSemanticListFiguresPolicyInput',
   'registeredSemanticListProgressPolicyInput',
   'registeredSemanticListReferencePolicyInput',

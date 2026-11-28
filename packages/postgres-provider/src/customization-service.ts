@@ -2342,6 +2342,7 @@ export class PostgresCustomizationService {
           admin,
           this.connection.identities,
           desiredState,
+          this.options.capabilityOperationExecutorFactories ?? [],
         );
       }
       return this.#swap(

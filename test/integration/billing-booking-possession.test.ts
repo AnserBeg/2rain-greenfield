@@ -1,16 +1,38 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
-import {
-  dueArrearsCycle,
-  reviewArrearsCharges,
-} from '../../packages/domain/src/billing/arrears.js';
+import { reviewArrearsCharges } from '../../packages/domain/src/billing/arrears.js';
 import { compileRatePlan } from '../../packages/domain/src/billing/terms.js';
 import type { BillingQuoteEvidence } from '../../packages/canonical-model/src/billing-evidence.js';
 import {
-  billingBookingUsage,
-  bookingPossessionServiceEnd,
+  bookingServiceUse,
   truncateBookingInstant,
-} from '../../packages/postgres-provider/src/billing-booking-usage.js';
+} from '../../packages/canonical-model/src/booking.js';
+import {
+  serviceUseCoverage,
+  serviceUseEnd,
+} from '../../packages/domain/src/billing/service-use.js';
+
+// Booking now hands Billing its owner usage through the service-use evidence
+// protocol (BILLING-1 s3a-i, B8). These helpers keep the old call shapes so
+// each assertion below still reads as it did against the Booking adapter.
+const bookingPossessionServiceEnd = (
+  value: unknown,
+  slot: string,
+  agreedEnd: string | null,
+) => serviceUseEnd(bookingServiceUse(value), slot, agreedEnd);
+const billingBookingUsage = (
+  value: unknown,
+  who: { entityId: string; recordId: string; companyId: string },
+  slot: string,
+  unit: string,
+  cycleEnd: string,
+) =>
+  serviceUseCoverage(
+    { snapshot: bookingServiceUse(value), subjectId: slot, owner: who },
+    unit,
+    cycleEnd,
+  );
 
 // Booking stamps clock_timestamp() in microseconds and renders it with an
 // offset. These are the shapes production Booking writes, not whole seconds.
@@ -134,18 +156,15 @@ function agreedEvidence(agreedEnd: string | null): BillingQuoteEvidence {
 }
 
 // The production order in the released quote query: possession sets the
-// service end, the cycle follows, then the adapter supplies the actuals.
+// service end, the cycle follows, then the engagement supplies the actuals.
 function review(value: unknown, agreedEnd: string | null) {
   const evidence = agreedEvidence(agreedEnd);
-  evidence.serviceEnd = bookingPossessionServiceEnd(value, slotId, agreedEnd);
-  const cycle = dueArrearsCycle(plan, evidence);
-  if (!cycle) return { status: 'notDue' as const, evidence };
-  Object.assign(
-    evidence,
-    billingBookingUsage(value, owner, slotId, 'each', cycle.end),
-  );
-  const result = reviewArrearsCharges(plan, evidence);
-  assert.ok(result.status === 'due');
+  const result = reviewArrearsCharges(plan, evidence, {
+    snapshot: bookingServiceUse(value),
+    subjectId: slotId,
+    owner,
+  });
+  if (result.status !== 'due') return { status: result.status, evidence };
   return {
     status: result.status,
     cycle: result.cycle,
@@ -154,8 +173,39 @@ function review(value: unknown, agreedEnd: string | null) {
       0n,
     ),
     evidence,
+    json: JSON.stringify(result),
   };
 }
+const sha256 = (text: string) =>
+  createHash('sha256').update(text).digest('hex');
+
+// Measured on origin/main 3c1c0c270 through the Booking-named adapter
+// (bookingPossessionServiceEnd, dueArrearsCycle, billingBookingUsage, then
+// reviewArrearsCharges) under Node 22.22.2 (zone data 2025c). The protocol
+// path must reproduce every byte of each review, digests included.
+test('the service-use protocol reproduces the Booking-adapter review byte for byte', () => {
+  for (const [name, value, expected] of [
+    [
+      'overrun',
+      snapshot([[at(0), at(9)]]),
+      'ba02856a00e5811292dba31dc47f35ea02c2eeee99ef90af8b7a3a3ed094ec40',
+    ],
+    [
+      'early return',
+      snapshot([[at(0), at(3)]]),
+      'ebfc95b63558f55afaad46568ef27ee4528bc3314b737090cb3c399dc10bb435',
+    ],
+    [
+      'pause',
+      snapshot([[at(0), at(9)]], [[at(2), at(4, '000001')]]),
+      '2f368a6f9709c89c7ab21ba22c72d82ad1239b934cd7ce9511a63d3e069b5257',
+    ],
+  ] as const) {
+    const result = review(value, agreed(5));
+    assert.ok(result.status === 'due');
+    assert.equal(sha256(result.json), expected, name);
+  }
+});
 
 test('Booking microsecond instants truncate toward the past to the Billing millisecond', () => {
   assert.equal(

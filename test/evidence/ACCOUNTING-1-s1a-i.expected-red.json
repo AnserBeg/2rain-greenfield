@@ -226,7 +226,7 @@
     {
       "name": "ledger-role-from-account",
       "claim": "A person-entered line's role is the stored account kind, never caller input.",
-      "file": "db/migrations/0071_ledger_journal_core.sql",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
       "original": "line_role := acct.kind_role_id;",
       "replacement": "line_role := coalesce(line->>'roleId', acct.kind_role_id);",
       "test": {
@@ -243,7 +243,7 @@
     {
       "name": "ledger-control-refusal",
       "claim": "A manual or opening line never reaches a control-role account.",
-      "file": "db/migrations/0071_ledger_journal_core.sql",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
       "original": "IF acct.control_subledger_id IS NOT NULL THEN RAISE",
       "replacement": "IF false AND acct.control_subledger_id IS NOT NULL THEN RAISE",
       "test": {
@@ -260,7 +260,7 @@
     {
       "name": "ledger-role-misfit",
       "claim": "A source leg's role class fits its account's class.",
-      "file": "db/migrations/0071_ledger_journal_core.sql",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
       "original": "IF line_class IS DISTINCT FROM acct.role_class THEN",
       "replacement": "IF false AND line_class IS DISTINCT FROM acct.role_class THEN",
       "test": {
@@ -277,7 +277,7 @@
     {
       "name": "ledger-inactive-account",
       "claim": "An inactive account is refused at entry.",
-      "file": "db/migrations/0071_ledger_journal_core.sql",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
       "original": "IF NOT acct.active THEN",
       "replacement": "IF false AND NOT acct.active THEN",
       "test": {
@@ -299,9 +299,9 @@
     {
       "name": "ledger-writer-account-company",
       "claim": "The writer resolves accounts inside the entry's company only.",
-      "file": "db/migrations/0071_ledger_journal_core.sql",
-      "original": "WHERE (a.tenant_id, a.environment_id, a.company_id, a.account_id) = (t, e, company, account);",
-      "replacement": "WHERE (a.tenant_id, a.environment_id, a.account_id) = (t, e, account);",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "WHERE (a.tenant_id, a.environment_id, a.company_id, a.account_id) = (t, e, company, account)\n      FOR SHARE OF a;",
+      "replacement": "WHERE (a.tenant_id, a.environment_id, a.account_id) = (t, e, account)\n      FOR SHARE OF a;",
       "test": {
         "files": ["test/postgres/ledger-journal-core.test.ts"]
       },
@@ -333,7 +333,7 @@
     {
       "name": "ledger-books-not-started",
       "claim": "No entry posts while books start is unset.",
-      "file": "db/migrations/0071_ledger_journal_core.sql",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
       "original": "IF period.books_start IS NULL THEN",
       "replacement": "IF false AND period.books_start IS NULL THEN",
       "test": {
@@ -350,7 +350,7 @@
     {
       "name": "ledger-closed-through-boundary",
       "claim": "The closed-through date itself is closed.",
-      "file": "db/migrations/0071_ledger_journal_core.sql",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
       "original": "entry_day <= period.closed_through",
       "replacement": "entry_day < period.closed_through",
       "test": {
@@ -377,7 +377,7 @@
     {
       "name": "ledger-books-start",
       "claim": "A manual entry before books start is refused.",
-      "file": "db/migrations/0071_ledger_journal_core.sql",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
       "original": "IF entry_day < period.books_start AND kind <> 'opening' THEN",
       "replacement": "IF false AND entry_day < period.books_start AND kind <> 'opening' THEN",
       "test": {
@@ -394,7 +394,7 @@
     {
       "name": "ledger-opening-exception",
       "claim": "Only an opening entry may predate books start.",
-      "file": "db/migrations/0071_ledger_journal_core.sql",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
       "original": "AND kind <> 'opening' THEN RAISE",
       "replacement": "AND kind <> 'no-such-kind' THEN RAISE",
       "test": {
@@ -411,7 +411,7 @@
     {
       "name": "ledger-civil-basis-kinds",
       "claim": "A caller-typed civil date is admitted only for person-entered kinds.",
-      "file": "db/migrations/0071_ledger_journal_core.sql",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
       "original": "ELSIF date_basis ? 'civil' AND kind IN ('manual','opening') THEN",
       "replacement": "ELSIF date_basis ? 'civil' THEN",
       "test": {
@@ -428,32 +428,24 @@
     {
       "name": "ledger-company-calendar",
       "claim": "An instant is dated by the company business calendar, never its UTC date.",
-      "file": "db/migrations/0071_ledger_journal_core.sql",
-      "original": "RETURN north_star_internal.inventory_business_period(t, instant); END $$;",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "RETURN north_star_internal.business_day(t, e, company, instant); END $$;",
       "replacement": "RETURN (instant AT TIME ZONE 'UTC')::date; END $$$$;",
       "test": {
-        "files": [
-          "test/postgres/ledger-journal-core.test.ts",
-          "test/architecture/ledger-journal-core.test.ts"
-        ]
+        "files": ["test/postgres/ledger-journal-core.test.ts"]
       },
       "kills": [
         {
           "file": "test/postgres/ledger-journal-core.test.ts",
           "name": "an instant is dated by the company calendar, not the UTC date",
           "expected": "Missing expected rejection: an instant was dated by its UTC date into closed books"
-        },
-        {
-          "file": "test/architecture/ledger-journal-core.test.ts",
-          "name": "accounting dates come only from the company business-day resolver",
-          "expected": "the resolver converts by itself"
         }
       ]
     },
     {
       "name": "ledger-projection-assertion",
       "claim": "A balance row that drifts from its lines refuses the next write.",
-      "file": "db/migrations/0071_ledger_journal_core.sql",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
       "original": "RAISE EXCEPTION 'ledger.projectionMismatch'; END IF;",
       "replacement": "NULL; END IF;",
       "test": {
@@ -497,7 +489,7 @@
         {
           "file": "test/postgres/ledger-journal-core.test.ts",
           "name": "two posters racing on one source version commit one entry",
-          "expected": "Missing expected rejection: a raced duplicate posting was admitted"
+          "expected": "a raced duplicate posting was admitted: admitted"
         }
       ]
     },
@@ -514,14 +506,14 @@
         {
           "file": "test/postgres/ledger-journal-core.test.ts",
           "name": "two operations racing on one receipt and ordinal commit one entry",
-          "expected": "Missing expected rejection: a raced duplicate operation entry was admitted"
+          "expected": "a raced duplicate operation entry was admitted: admitted"
         }
       ]
     },
     {
       "name": "ledger-close-lock",
       "claim": "A writer takes the closed-through row FOR SHARE, so it re-reads a close it waited for.",
-      "file": "db/migrations/0071_ledger_journal_core.sql",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
       "original": "WHERE (tenant_id, environment_id, company_id) = (t, e, company) FOR SHARE;",
       "replacement": "WHERE (tenant_id, environment_id, company_id) = (t, e, company);",
       "test": {
@@ -537,10 +529,10 @@
     },
     {
       "name": "ledger-account-lock",
-      "claim": "A writer takes its account rows FOR SHARE, so it re-reads a deactivation it waited for.",
-      "file": "db/migrations/0071_ledger_journal_core.sql",
-      "original": "ORDER BY a.account_id FOR SHARE;",
-      "replacement": "ORDER BY a.account_id;",
+      "claim": "A writer reads its account rows under a share lock (the ascending lock and, since review R6, the per-line read), so it waits for a deactivation and re-reads it. Either lock alone holds the re-read, so the control removes both.",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
+      "original": "    ORDER BY a.account_id FOR SHARE;\n  FOR line, n IN SELECT value, ordinality FROM jsonb_array_elements(lines) WITH ORDINALITY LOOP\n    account := (line->>'accountId')::uuid;\n    SELECT a.kind_role_id, a.active, r.role_class, r.control_subledger_id INTO acct\n      FROM platform.ledger_accounts a JOIN platform.ledger_core_roles r ON r.role_id = a.kind_role_id\n      WHERE (a.tenant_id, a.environment_id, a.company_id, a.account_id) = (t, e, company, account)\n      FOR SHARE OF a;",
+      "replacement": "    ORDER BY a.account_id;\n  FOR line, n IN SELECT value, ordinality FROM jsonb_array_elements(lines) WITH ORDINALITY LOOP\n    account := (line->>'accountId')::uuid;\n    SELECT a.kind_role_id, a.active, r.role_class, r.control_subledger_id INTO acct\n      FROM platform.ledger_accounts a JOIN platform.ledger_core_roles r ON r.role_id = a.kind_role_id\n      WHERE (a.tenant_id, a.environment_id, a.company_id, a.account_id) = (t, e, company, account);",
       "test": {
         "files": ["test/postgres/ledger-journal-core.test.ts"]
       },
@@ -548,14 +540,19 @@
         {
           "file": "test/postgres/ledger-journal-core.test.ts",
           "name": "a writer waiting on a deactivation re-reads the account and refuses",
-          "expected": "a writer posted to an account deactivated while it waited: admitted"
+          "expected": "a writer posted to an account deactivated while it waited: admitted|the second session never waited on a lock"
+        },
+        {
+          "file": "test/postgres/ledger-journal-core.test.ts",
+          "name": "an account created while a writer waits is held by its line read (R6)",
+          "expected": "the second session never waited on a lock|a deactivation committed under an uncommitted writer.s line"
         }
       ]
     },
     {
       "name": "ledger-balance-lock-order",
       "claim": "Balance rows are locked in ascending key order, so two writers never deadlock.",
-      "file": "db/migrations/0071_ledger_journal_core.sql",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
       "original": "ORDER BY (a->>'accountId')::uuid",
       "replacement": "ORDER BY min((a->>'n')::integer)",
       "test": {
@@ -572,7 +569,7 @@
     {
       "name": "ledger-period-company",
       "claim": "A company's closed-through row is found by its company, so closing one never refuses another.",
-      "file": "db/migrations/0071_ledger_journal_core.sql",
+      "file": "db/migrations/0074_ledger_books_by_hand.sql",
       "original": "WHERE (tenant_id, environment_id, company_id) = (t, e, company) FOR SHARE;",
       "replacement": "WHERE (tenant_id, environment_id) = (t, e) ORDER BY closed_through IS NULL, company_id FOR SHARE;",
       "test": {
