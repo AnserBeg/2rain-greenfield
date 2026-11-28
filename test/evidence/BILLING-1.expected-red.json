@@ -1359,6 +1359,24 @@
           "expected": "a minimum term with no stated timing"
         }
       ]
+    },
+    {
+      "name": "billing-term-after-return",
+      "claim": "A fee minimum term still binds on a cycle that opens between the last return and a held agreed end (review finding 1): August 300.00, not 183.87.",
+      "file": "packages/domain/src/billing/quote.ts",
+      "original": "? union([...committed, binding])",
+      "replacement": "? committed",
+      "test": {
+        "files": ["test/integration/billing-rules.test.ts"],
+        "namePattern": "^B2 minimum: a fee term still binds on cycles opening between the return and a held agreed end \\(review finding 1\\)$"
+      },
+      "kills": [
+        {
+          "file": "test/integration/billing-rules.test.ts",
+          "name": "B2 minimum: a fee term still binds on cycles opening between the return and a held agreed end (review finding 1)",
+          "expected": "\\+\\s+'18387'\\n\\s*-\\s+'30000'"
+        }
+      ]
     }
   ]
 }
