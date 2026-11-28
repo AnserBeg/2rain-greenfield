@@ -2129,3 +2129,120 @@ test('B13: discount and percentage refusals, and the pricing reader', () => {
     false,
   );
 });
+
+test('B13: a meter discounts its overage, never its allowance; a one-off is discounted once', () => {
+  const planInput = {
+    schemaVersion: 'v6',
+    id: 'usage',
+    version: '1',
+    currency: 'CAD',
+    serviceUnit: 'each',
+    schedule: { kind: 'anniversary', months: 1 },
+    slots: [
+      { id: 'rate', kind: 'money', currency: 'CAD', scale: 2 },
+      { id: 'included', kind: 'quantity', unit: 'copy', scale: 2 },
+      { id: 'off', kind: 'percentage', scale: 2 },
+    ],
+    components: [
+      {
+        id: 'overage',
+        kind: 'meter',
+        stage: 'afterCapBeforeTax',
+        taxClassification: 'untaxed',
+        streamId: 'copies',
+        unit: 'copy',
+        overageRate: 'rate',
+        discount: off,
+        allowanceBasis: { kind: 'perCycle', quantity: 'included' },
+      },
+    ],
+  };
+  const meter = compileRatePlan(planInput).plan;
+  const review = reviewArrearsCharges(meter, {
+    ...evidence(planInput, 31, { rate: '2', included: '10', off: '10' }),
+    basis: 'usageOnly',
+    bands: [],
+    serviceEnd: null,
+    asOf: roll(40),
+    periodMeter: {
+      streamId: 'copies',
+      unit: 'copy',
+      opening: { at: start, reading: '100' },
+      closing: { at: '2025-02-28T16:00:00.000Z', reading: '120' },
+    },
+  } as BillingQuoteEvidence);
+  assert.ok(review.status === 'due');
+  assert.equal(review.quote.algorithm, BILLING_TIMING_CALCULATION);
+  const [line] = review.quote.lines;
+  // 20 copies, 10 included at full allowance, 10 x 2.00 = 20.00, 10% off.
+  assert.equal(line!.differenceCents, '1800');
+  assert.equal(line!.discount?.grossCents, '2000');
+  assert.equal((line!.derivation[0] as { allowance: string }).allowance, '10');
+  // A one-off set-up fee of 25.00 at 10% off: 22.50, once.
+  const oneOff = advancePlan({
+    components: [
+      feeComponent('rent', 'rent', advance),
+      {
+        kind: 'fixed',
+        id: 'setup',
+        base: 'enrollment',
+        stage: 'afterCapBeforeTax',
+        taxClassification: 'untaxed',
+        amount: 'setup',
+        discount: off,
+        occurrence: { kind: 'oneOff', at: 'serviceStart' },
+      },
+    ],
+  }) as { slots: unknown[] };
+  oneOff.slots = slotList(['rent', 'setup'], ['off']);
+  const lines = reviewArrearsCharges(
+    compileRatePlan(oneOff).plan,
+    e1Evidence(oneOff, '2027-07-15T06:00:00.000Z', null, {
+      rent: '300',
+      setup: '25',
+      off: '10',
+    }),
+  );
+  assert.ok(lines.status === 'due');
+  assert.deepEqual(
+    lines.quote.lines
+      .filter((l) => l.componentId === 'setup')
+      .map((l) => [l.differenceCents, l.discount?.discountCents]),
+    [['2250', '250']],
+  );
+});
+
+test('B2 minimum: a term never bills a partly held cycle whole (feeProration none refuses)', () => {
+  const refused = (planInput: unknown, reason: string) => {
+    const parsed = BillingPlanSchema.safeParse(planInput);
+    assert.equal(parsed.success, false, reason);
+    assert.match(
+      JSON.stringify(parsed.error?.issues),
+      /minimum term prorates its last cycle/,
+      reason,
+    );
+  };
+  const whole = (fee: Authored) => ({
+    ...fee,
+    occurrence: {
+      ...(fee.occurrence as Authored),
+      feeProration: 'none',
+    },
+  });
+  refused(
+    advancePlan({ source: 'use', components: [whole(termFee(advance))] }),
+    'a fee term with feeProration none',
+  );
+  const use = advancePlan({
+    source: 'use',
+    components: [whole(feeComponent('rent', 'rent', advance))],
+  }) as { bindings: { arrearsSource: Record<string, unknown> } };
+  use.bindings.arrearsSource.earlyReturn = {
+    bill: 'actualEnd',
+    minimumTerm: threeMonths,
+  };
+  refused(
+    use,
+    'the early-return term on an advance fee with feeProration none',
+  );
+});

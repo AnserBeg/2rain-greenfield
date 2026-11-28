@@ -386,6 +386,19 @@ export const BillingPlanSchema = z
           arrears.earlyReturn?.minimumTerm
         )
           issue('A plan states one minimum term form');
+        // A minimum term charges exactly the term, prorated, never more
+        // (ruling 2026-11-28). feeProration none would bill a partly held
+        // cycle whole, so it refuses beside either term form on a fee.
+        if (
+          c.kind === 'fixed' &&
+          c.occurrence.kind === 'recurring' &&
+          c.occurrence.feeProration === 'none' &&
+          (c.minimumTerm ||
+            (t?.when === 'advance' &&
+              arrears?.kind === 'evidenceQuery' &&
+              arrears.earlyReturn?.minimumTerm))
+        )
+          issue('A minimum term prorates its last cycle');
         if (!t) {
           issue(
             'A plan that states billing timing states it on every component',
