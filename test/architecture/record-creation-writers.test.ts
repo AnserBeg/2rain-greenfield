@@ -74,6 +74,10 @@ export const RECORD_CREATION_WRITERS: Readonly<Record<string, Writer>> =
       inserts: 1,
       records: 1,
     },
+    'packages/postgres-provider/src/open-item-capability-executor.ts': {
+      inserts: 1,
+      records: 1,
+    },
     'packages/postgres-provider/src/goods-receipt.ts': {
       inserts: 1,
       records: 0,

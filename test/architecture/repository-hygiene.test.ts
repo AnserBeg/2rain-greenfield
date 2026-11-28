@@ -192,6 +192,7 @@ const suiteDefinitions = [
       'test/postgres/customer-credit.test.ts',
       'test/postgres/expected-receipts.test.ts',
       'test/postgres/fulfillment.test.ts',
+      'test/postgres/open-items.test.ts',
       'test/postgres/order-lists-supply.test.ts',
       'test/postgres/order-lists.test.ts',
       'test/postgres/order-pages.test.ts',
@@ -318,11 +319,12 @@ const suiteDefinitions = [
     // SPEED-1: the page budget serves the composed application beside the
     // commercial workflows.
     discoveryPattern:
-      '{test/postgres/**/@(commercial-totals|expected-receipts|payables|purchase-approvals|purchase-order-ending|receiving-authorization).test.ts,test/performance/page-budget.test.ts}',
+      '{test/postgres/**/@(commercial-totals|expected-receipts|open-items|payables|purchase-approvals|purchase-order-ending|receiving-authorization).test.ts,test/performance/page-budget.test.ts}',
     expectedFiles: [
       'test/performance/page-budget.test.ts',
       'test/postgres/commercial-totals.test.ts',
       'test/postgres/expected-receipts.test.ts',
+      'test/postgres/open-items.test.ts',
       'test/postgres/payables.test.ts',
       'test/postgres/purchase-approvals.test.ts',
       'test/postgres/purchase-order-ending.test.ts',
