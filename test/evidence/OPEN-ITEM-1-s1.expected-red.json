@@ -1,0 +1,159 @@
+{
+  "version": 1,
+  "packet": "OPEN-ITEM-1-s1",
+  "entries": [
+    {
+      "name": "open-item-s1-protected-figures",
+      "claim": "A core-written figure leaves every generic create and update input.",
+      "file": "packages/compiler/src/projections.ts",
+      "original": "      !lineTotals.protectedIds?.has(field.fieldId),",
+      "replacement": "      true,",
+      "test": {
+        "files": ["test/postgres/open-items.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/open-items.test.ts",
+          "name": "generic writes stay on drafts: core figures are nobody's input",
+          "expected": "a generic update wrote a draft fee note's balance"
+        }
+      ]
+    },
+    {
+      "name": "open-item-s1-number-at-issue",
+      "claim": "A number assigned at issue is never assigned by the create.",
+      "file": "packages/compiler/src/projections.ts",
+      "original": "    return numbering && !numbering.assignOn",
+      "replacement": "    return numbering",
+      "test": {
+        "files": ["test/postgres/open-items.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/open-items.test.ts",
+          "name": "an issue numbers per company and series, freezes the figures, and a receipt applies",
+          "expected": "a draft fee note carries a number"
+        }
+      ]
+    },
+    {
+      "name": "open-item-s1-number-per-company",
+      "claim": "Issued numbers count per company and series.",
+      "file": "packages/postgres-provider/src/open-item-capability-executor.ts",
+      "original": "        grant,\n        prepared.company,\n        prepared.recordId,",
+      "replacement": "        grant,\n        request.context.tenantId,\n        prepared.recordId,",
+      "test": {
+        "files": ["test/postgres/open-items.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/open-items.test.ts",
+          "name": "an issue numbers per company and series, freezes the figures, and a receipt applies",
+          "expected": "company B did not start its own series"
+        }
+      ]
+    },
+    {
+      "name": "open-item-s1-line-set",
+      "claim": "An issue freezes exactly the line set the person confirmed.",
+      "file": "packages/postgres-provider/src/open-item-capability-executor.ts",
+      "original": "          return refused('openItem.linesChanged');",
+      "replacement": "          void 0;",
+      "test": {
+        "files": ["test/postgres/open-items.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/open-items.test.ts",
+          "name": "the line set is frozen: a changed line refuses the issue, a line write after issue refuses",
+          "expected": "an issue froze a line set other than the one confirmed"
+        }
+      ]
+    },
+    {
+      "name": "open-item-s1-target-balance",
+      "claim": "No application takes a target below zero, even when two race.",
+      "file": "packages/postgres-provider/src/open-item-capability-executor.ts",
+      "original": "        if (amount > figure(target, row, binding.target.balanceFieldId))\n          return refused('openItem.exceedsBalance');",
+      "replacement": "        if (amount > figure(target, row, binding.target.balanceFieldId))\n          void 0;",
+      "test": {
+        "files": ["test/postgres/open-items.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/open-items.test.ts",
+          "name": "two receipts over-applying one fee note: exactly one succeeds",
+          "expected": "two receipts over-applied one fee note"
+        }
+      ]
+    },
+    {
+      "name": "open-item-s1-source-open",
+      "claim": "Only an open or partly settled source gives an amount.",
+      "file": "packages/postgres-provider/src/open-item-capability-executor.ts",
+      "original": "      if (!live(source, sourceRow)) return refused('openItem.sourceNotOpen');",
+      "replacement": "      if (!live(source, sourceRow)) void 0;",
+      "test": {
+        "files": ["test/postgres/open-items.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/open-items.test.ts",
+          "name": "only an open receipt applies, within one currency, counterparty and direction",
+          "expected": "a draft receipt was applied"
+        }
+      ]
+    },
+    {
+      "name": "open-item-s1-currency",
+      "claim": "An application stays within one currency.",
+      "file": "packages/postgres-provider/src/open-item-capability-executor.ts",
+      "original": "          return refused('openItem.currencyMismatch');",
+      "replacement": "          void 0;",
+      "test": {
+        "files": ["test/postgres/open-items.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/open-items.test.ts",
+          "name": "only an open receipt applies, within one currency, counterparty and direction",
+          "expected": "a receipt settled a fee note in another currency"
+        }
+      ]
+    },
+    {
+      "name": "open-item-s1-counterparty",
+      "claim": "An application stays within one counterparty.",
+      "file": "packages/postgres-provider/src/open-item-capability-executor.ts",
+      "original": "          return refused('openItem.counterpartyMismatch');",
+      "replacement": "          void 0;",
+      "test": {
+        "files": ["test/postgres/open-items.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/open-items.test.ts",
+          "name": "only an open receipt applies, within one currency, counterparty and direction",
+          "expected": "a receipt settled another counterparty's fee note"
+        }
+      ]
+    },
+    {
+      "name": "open-item-s1-grant-request",
+      "claim": "A grant is consumed only by the exact request it was attested for.",
+      "file": "db/migrations/0075_open_items.sql",
+      "original": "\n     OR g.request_key IS DISTINCT FROM request_key",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/open-items.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/open-items.test.ts",
+          "name": "one grant confirms one request, and a request needs a grant",
+          "expected": "one confirmation was consumed by a second request"
+        }
+      ]
+    }
+  ]
+}

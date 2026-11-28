@@ -31,8 +31,7 @@ export interface OpenItemDeclaration {
   readonly balanceFieldId: string;
   /** An item with lines: their parent-scoped relation and stored amount. */
   readonly lines?:
-    | { readonly relationId: string; readonly amountFieldId: string }
-    | undefined;
+    { readonly relationId: string; readonly amountFieldId: string } | undefined;
   /** A line-less item: the entered, draft-editable amount issue copies. */
   readonly amountFieldId?: string | undefined;
   readonly states: OpenItemStates;
@@ -85,15 +84,16 @@ export function openItemSchemas(canonicalId: z.ZodType<string>) {
       transitionId: canonicalId,
     }),
   });
-  const application: z.ZodType<OpenItemApplicationDeclaration> =
-    z.strictObject({
+  const application: z.ZodType<OpenItemApplicationDeclaration> = z.strictObject(
+    {
       schemaVersion: z.literal('v6'),
       entityId: canonicalId,
       sourceRelationId: canonicalId,
       targetRelationId: canonicalId,
       amountFieldId: canonicalId,
       applyOperationId: canonicalId,
-    });
+    },
+  );
   return {
     openItems: z.array(declaration).min(1).max(64).optional(),
     openItemApplications: z.array(application).min(1).max(64).optional(),

@@ -59,7 +59,10 @@ export const ISSUE_NOTE = operation('fee_note_action_issue');
 export const ISSUE_RECEIPT = operation('receipt_action_issue');
 export const APPLY = operation('receipt_application_create');
 
-const money = { type: 'money', currency: { kind: 'stored', fieldLabel: 'Currency' } };
+const money = {
+  type: 'money',
+  currency: { kind: 'stored', fieldLabel: 'Currency' },
+};
 const figures = ['Subtotal', 'Total', 'Applied', 'Balance'].map((label) => ({
   label,
   ...money,
@@ -102,9 +105,18 @@ export const patches = [
     kind: 'addLineTable',
     entity: NOTE,
     label: 'Lines',
-    fields: [{ label: 'Item', type: 'text' }, { label: 'Amount', ...money }],
+    fields: [
+      { label: 'Item', type: 'text' },
+      { label: 'Amount', ...money },
+    ],
   },
-  { kind: 'addLink', entity: NOTE, label: 'Account', target: ACCOUNT, required: true },
+  {
+    kind: 'addLink',
+    entity: NOTE,
+    label: 'Account',
+    target: ACCOUNT,
+    required: true,
+  },
   {
     kind: 'addRecordType',
     label: 'Receipt',
@@ -118,7 +130,13 @@ export const patches = [
     ],
   },
   lifecycle('receipt'),
-  { kind: 'addLink', entity: RECEIPT, label: 'Account', target: ACCOUNT, required: true },
+  {
+    kind: 'addLink',
+    entity: RECEIPT,
+    label: 'Account',
+    target: ACCOUNT,
+    required: true,
+  },
   {
     kind: 'addRecordType',
     label: 'Receipt application',
@@ -155,7 +173,9 @@ function patched(): { authored: Authored; bindings: readonly unknown[] } {
     ) as Record<string, unknown>;
     const result = customization.applyCustomizationPatches(
       base,
-      patches.map((patch) => customization.CustomizationPatchSchema.parse(patch)),
+      patches.map((patch) =>
+        customization.CustomizationPatchSchema.parse(patch),
+      ),
     );
     assert.ok(result.status === 'applied', JSON.stringify(result));
     cached = {
@@ -172,11 +192,18 @@ const ref = (kind: string, targetId: string) => ({
   targetId,
 });
 const draftOnly = (local: string) => ({
-  field: ref('fieldReference', `${NS}:derived_state_field.machine.custom_${local}`),
+  field: ref(
+    'fieldReference',
+    `${NS}:derived_state_field.machine.custom_${local}`,
+  ),
   kind: 'fieldComparisonPredicate',
   operator: 'equals',
   schemaVersion: 'v6',
-  value: { kind: 'textValue', schemaVersion: 'v6', value: state(`${local}_draft`) },
+  value: {
+    kind: 'textValue',
+    schemaVersion: 'v6',
+    value: state(`${local}_draft`),
+  },
 });
 const capabilityRequirement = (capabilityId: string) => ({
   capabilityId,
@@ -259,7 +286,8 @@ export function openItemAuthored(options: OpenItemOptions = {}): {
     for (const verb of ['update', 'archive', 'restore'])
       if (!options.looseArchive)
         authored.operations.find(
-          (entry: Authored) => entry.operationId === operation(`${local}_${verb}`),
+          (entry: Authored) =>
+            entry.operationId === operation(`${local}_${verb}`),
         ).precondition = draftOnly(local);
     if (!options.genericIssue) {
       // The generated transition becomes the core's person-confirmed issue.

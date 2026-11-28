@@ -359,7 +359,7 @@ export function bindOpenItems(
         return refuse(
           path,
           fieldId,
-          "Every amount of an open item has the same scale.",
+          'Every amount of an open item has the same scale.',
         );
       scale = fieldScale;
     }
@@ -542,7 +542,7 @@ export function bindOpenItems(
       return refuse(
         '$.operations',
         loose.operationId,
-        "A generic update, archive or restore of an open item is draft-only.",
+        'A generic update, archive or restore of an open item is draft-only.',
       );
     // The number: assigned at this issue, counted per company.
     const numberField = fieldOf(item.entityId, item.numberFieldId)!;
@@ -568,7 +568,7 @@ export function bindOpenItems(
       return refuse(
         path,
         item.issue.operationId,
-        "Issue is an active, person-confirmed open-item issue operation that reads the item back.",
+        'Issue is an active, person-confirmed open-item issue operation that reads the item back.',
       );
     if (operationBindings.has(item.issue.operationId))
       return refuse(path, item.issue.operationId, 'An issue issues one type.');
@@ -676,11 +676,13 @@ export function bindOpenItems(
       );
     const sourceParty = relations.get(source.counterpartyRelationId);
     const targetParty = relations.get(target.counterpartyRelationId);
-    if (sourceParty?.targetEntity.targetId !== targetParty?.targetEntity.targetId)
+    if (
+      sourceParty?.targetEntity.targetId !== targetParty?.targetEntity.targetId
+    )
       return refuse(
         path,
         subject,
-        "Both ends name their counterparty from the same record type.",
+        'Both ends name their counterparty from the same record type.',
       );
     const amount = fieldOf(application.entityId, application.amountFieldId);
     if (

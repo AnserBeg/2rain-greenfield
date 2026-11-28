@@ -211,7 +211,9 @@ class OpenItemCapabilityExecutor implements RegisteredCapabilityOperationExecuto
     private readonly kind: Kind,
   ) {
     this.capabilityId =
-      kind === 'issue' ? OPEN_ITEM_ISSUE_CAPABILITY : OPEN_ITEM_APPLY_CAPABILITY;
+      kind === 'issue'
+        ? OPEN_ITEM_ISSUE_CAPABILITY
+        : OPEN_ITEM_APPLY_CAPABILITY;
     this.#storage = new Storage(storage);
   }
 
@@ -248,7 +250,8 @@ class OpenItemCapabilityExecutor implements RegisteredCapabilityOperationExecuto
       const lines = binding.item.lines !== undefined;
       if (
         Object.keys(args).some(
-          (key) => !['total', ...(lines ? ['lineSetDigest'] : [])].includes(key),
+          (key) =>
+            !['total', ...(lines ? ['lineSetDigest'] : [])].includes(key),
         ) ||
         typeof args.total !== 'string' ||
         !AMOUNT.test(args.total) ||
@@ -533,7 +536,8 @@ class OpenItemCapabilityExecutor implements RegisteredCapabilityOperationExecuto
         queryId: request.readBackDefinition.queryId,
         arguments: request.authorization.readBackArguments,
       });
-      record = result.records.find((row) => row.recordId === readBackId) ?? null;
+      record =
+        result.records.find((row) => row.recordId === readBackId) ?? null;
     } catch (error) {
       if (!(error instanceof SemanticQueryPolicyDeniedError)) throw error;
     }
@@ -605,7 +609,10 @@ class OpenItemCapabilityExecutor implements RegisteredCapabilityOperationExecuto
     client: PoolClient,
     request: Execution,
     prepared: Prepared,
-    binding: Extract<OpenItemOperationBinding, { bindingVersion: 'openItem.issue/v1' }>,
+    binding: Extract<
+      OpenItemOperationBinding,
+      { bindingVersion: 'openItem.issue/v1' }
+    >,
     grant: string,
   ): Promise<Applied> {
     const item = this.#storage.item(binding.item);
@@ -717,7 +724,8 @@ class OpenItemCapabilityExecutor implements RegisteredCapabilityOperationExecuto
         const before = header.row[unquote(item.column(fieldId))];
         return {
           fieldId,
-          before: before === null || before === undefined ? null : String(before),
+          before:
+            before === null || before === undefined ? null : String(before),
           after,
         };
       }),
@@ -729,11 +737,16 @@ class OpenItemCapabilityExecutor implements RegisteredCapabilityOperationExecuto
     client: PoolClient,
     request: Execution,
     prepared: Prepared,
-    binding: Extract<OpenItemOperationBinding, { bindingVersion: 'openItem.apply/v1' }>,
+    binding: Extract<
+      OpenItemOperationBinding,
+      { bindingVersion: 'openItem.apply/v1' }
+    >,
   ): Promise<Applied> {
     const source = this.#storage.item(binding.source);
     const target = this.#storage.item(binding.target);
-    const applicationEntity = this.#storage.entity(binding.application.entityId);
+    const applicationEntity = this.#storage.entity(
+      binding.application.entityId,
+    );
     const applicationTable = `north_star_module.${quote(applicationEntity.physicalTableName)}`;
     const sourceColumn = this.#storage.relation(
       applicationEntity,
@@ -770,11 +783,19 @@ class OpenItemCapabilityExecutor implements RegisteredCapabilityOperationExecuto
       // cycle. The second writer re-reads the balance the first committed.
       const touched = [
         { id: prepared.recordId, item: source },
-        ...prepared.applications.map((line) => ({ id: line.target, item: target })),
-      ].sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
+        ...prepared.applications.map((line) => ({
+          id: line.target,
+          item: target,
+        })),
+      ].sort((left, right) =>
+        left.id < right.id ? -1 : left.id > right.id ? 1 : 0,
+      );
       const rows = new Map<string, Row>();
       for (const { id, item } of touched)
-        rows.set(id, await this.#lock(client, request, item, prepared.company, id));
+        rows.set(
+          id,
+          await this.#lock(client, request, item, prepared.company, id),
+        );
       const sourceRow = rows.get(prepared.recordId)!;
       if (Number(sourceRow.revision) !== prepared.expectedRevision)
         return refused('openItem.recordChanged');
@@ -862,7 +883,8 @@ class OpenItemCapabilityExecutor implements RegisteredCapabilityOperationExecuto
         const stateBefore = String(
           update.row[unquote(update.item.column(b.stateFieldId))],
         );
-        const state = balance === 0n ? b.states.settled : b.states.partiallySettled;
+        const state =
+          balance === 0n ? b.states.settled : b.states.partiallySettled;
         const revision = await this.#update(
           client,
           request,
@@ -897,7 +919,10 @@ class OpenItemCapabilityExecutor implements RegisteredCapabilityOperationExecuto
       for (const update of updates) {
         const relationColumn =
           update.id === prepared.recordId ? sourceColumn : targetColumn;
-        const sums = await client.query<{ sum: string | null; applied: string | null }>(
+        const sums = await client.query<{
+          sum: string | null;
+          applied: string | null;
+        }>(
           `SELECT (SELECT coalesce(sum(${amountColumn}), 0)::text FROM ${applicationTable}
                     WHERE tenant_id=$1 AND environment_id=$2 AND ${relationColumn}=$3
                       AND archived_at IS NULL) AS sum,
@@ -907,7 +932,11 @@ class OpenItemCapabilityExecutor implements RegisteredCapabilityOperationExecuto
           [...scope, update.id],
         );
         const row = sums.rows[0];
-        if (!row || units(row.sum, scale) === null || units(row.sum, scale) !== units(row.applied, scale))
+        if (
+          !row ||
+          units(row.sum, scale) === null ||
+          units(row.sum, scale) !== units(row.applied, scale)
+        )
           return refused('openItem.appliedDiverged');
       }
       return {
@@ -926,7 +955,9 @@ class OpenItemCapabilityExecutor implements RegisteredCapabilityOperationExecuto
 const factory = (kind: Kind): PostgresCapabilityOperationExecutorFactory =>
   Object.freeze({
     capabilityId:
-      kind === 'issue' ? OPEN_ITEM_ISSUE_CAPABILITY : OPEN_ITEM_APPLY_CAPABILITY,
+      kind === 'issue'
+        ? OPEN_ITEM_ISSUE_CAPABILITY
+        : OPEN_ITEM_APPLY_CAPABILITY,
     singleUseConfirmation: true,
     verificationRefusal: {
       code: 'SEMANTIC_OPERATION_INPUT_INVALID',

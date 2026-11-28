@@ -368,9 +368,9 @@ export function lowerBaseProjectionPayloads(
   const operationFloor = declaresOpenItems(verificationPackageRevision)
     ? OPEN_ITEM_OPERATION_READER
     : lineTotals.derived.size ||
-    lineTotals.createOnly.size ||
-    lineTotals.totalled.size ||
-    zeroComparesStoredMoney(verificationPackageRevision)
+        lineTotals.createOnly.size ||
+        lineTotals.totalled.size ||
+        zeroComparesStoredMoney(verificationPackageRevision)
       ? LINE_TOTALS_OPERATION_READER
       : hasRecordTemplateBinding(verificationPackageRevision)
         ? RECORD_TEMPLATE_OPERATION_READER
