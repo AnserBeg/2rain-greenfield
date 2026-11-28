@@ -15,7 +15,7 @@
         {
           "file": "test/postgres/workflow-engine-fact.test.ts",
           "name": "a confirmed booking starts one linked task per company through its owner record",
-          "expected": "a\\ confirm\\ before\\ activation\\ is\\ sealed\\ out\\ at\\ the\\ watermark"
+          "expected": "a confirm before activation is sealed out at the watermark"
         }
       ]
     },
@@ -32,7 +32,7 @@
         {
           "file": "test/postgres/workflow-engine-fact.test.ts",
           "name": "a fact whose receipt is never written refuses commit",
-          "expected": "Missing\\ expected\\ rejection:\\ a\\ fact\\ with\\ no\\ receipt\\ committed"
+          "expected": "Missing expected rejection: a fact with no receipt committed"
         }
       ]
     },
@@ -49,7 +49,7 @@
         {
           "file": "test/postgres/workflow-engine-fact.test.ts",
           "name": "one occurrence per fact, subject and revision",
-          "expected": "Missing\\ expected\\ rejection:\\ a\\ second\\ occurrence\\ of\\ one\\ revision\\ was\\ named"
+          "expected": "Missing expected rejection: a second occurrence of one revision was named"
         }
       ]
     },
@@ -66,7 +66,7 @@
         {
           "file": "test/postgres/workflow-engine-fact.test.ts",
           "name": "the timer sweep with no tenant scope expires every due hold and names each change",
-          "expected": "a\\ claimed\\ engine\\ fact\\ owner\\ is\\ not\\ stored\\ in\\ this\\ company"
+          "expected": "a claimed engine fact owner is not stored in this company"
         }
       ]
     },
@@ -83,7 +83,7 @@
         {
           "file": "test/postgres/workflow-engine-fact.test.ts",
           "name": "no runtime role may name an engine fact",
-          "expected": "Missing\\ expected\\ rejection:\\ north_star_runtime\\ named\\ an\\ engine\\ fact\\ directly"
+          "expected": "Missing expected rejection: north_star_runtime named an engine fact directly"
         }
       ]
     },
@@ -100,7 +100,7 @@
         {
           "file": "test/postgres/workflow-engine-fact.test.ts",
           "name": "a confirmed booking starts one linked task per company through its owner record",
-          "expected": "one\\ confirm\\ per\\ company\\ starts\\ exactly\\ one\\ run"
+          "expected": "one confirm per company starts exactly one run"
         }
       ]
     },
@@ -117,7 +117,7 @@
         {
           "file": "test/postgres/workflow-engine-fact.test.ts",
           "name": "a confirmed booking starts one linked task per company through its owner record",
-          "expected": "each\\ run\\ completes\\ on\\ its\\ re\\-derived\\ trigger\\ scope"
+          "expected": "each run completes on its re-derived trigger scope"
         }
       ]
     },
@@ -134,7 +134,7 @@
         {
           "file": "test/unit/workflow-triggers.test.ts",
           "name": "an engine fact starts only definitions of its own kind and fact (E4)",
-          "expected": "a\\ fact\\ starts\\ a\\ definition\\ of\\ its\\ own\\ kind,\\ fact\\ and\\ value"
+          "expected": "a fact starts a definition of its own kind, fact and value"
         }
       ]
     },
@@ -151,7 +151,7 @@
         {
           "file": "test/unit/workflow-triggers.test.ts",
           "name": "engineFactChanged admits only declared, command-entered values on a company-owned owner type",
-          "expected": "Missing\\ expected\\ exception:\\ northstar\\.booking:value\\.cancelled"
+          "expected": "Missing expected exception: northstar\\.booking:value\\.cancelled"
         }
       ]
     }
