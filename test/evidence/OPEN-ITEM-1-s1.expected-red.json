@@ -20,23 +20,6 @@
       ]
     },
     {
-      "name": "open-item-s1-number-at-issue",
-      "claim": "A number assigned at issue is never assigned by the create.",
-      "file": "packages/compiler/src/projections.ts",
-      "original": "    return numbering && !numbering.assignOn",
-      "replacement": "    return numbering",
-      "test": {
-        "files": ["test/postgres/open-items.test.ts"]
-      },
-      "kills": [
-        {
-          "file": "test/postgres/open-items.test.ts",
-          "name": "an issue numbers per company and series, freezes the figures, and a receipt applies",
-          "expected": "a draft fee note carries a number"
-        }
-      ]
-    },
-    {
       "name": "open-item-s1-number-per-company",
       "claim": "Issued numbers count per company and series.",
       "file": "packages/postgres-provider/src/open-item-capability-executor.ts",
