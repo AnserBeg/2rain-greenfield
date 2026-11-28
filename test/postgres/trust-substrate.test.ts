@@ -150,6 +150,7 @@ test('migrations upgrade accepted G1 and converge with the checked-in snapshot',
         '0071_ledger_journal_core.sql',
         '0072_tax_catalog.sql',
         '0073_business_calendar.sql',
+        '0074_record_transition_occurrences.sql',
       ]);
       assert.equal(upgraded.verified.length, migrations.length);
       await assertSchemaMatchesSnapshot(admin, checkedInSnapshot);

@@ -389,7 +389,11 @@ process.stdout.write(JSON.stringify(applicationBeforeStockCountWorkflow().releas
       };
       const item = seedId('Field notebook');
       const summary = 'Escalate the pending inspection';
-      const start = new Date('2026-11-19T17:30:00.000Z');
+      // An hour ago, to the minute: a fixed date leaves the 7-day backdate
+      // window as the calendar moves (it failed from 2026-11-27).
+      const start = new Date(
+        Math.floor(Date.now() / 60_000) * 60_000 - 3_600_000,
+      );
       let instant = start;
       const operationInput = (receiptId: string) => ({
         legalEntityId: company,
