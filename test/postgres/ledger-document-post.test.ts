@@ -397,8 +397,6 @@ test(
             capability?: string;
             fence?: string;
             isolation?: string;
-            /** Commits an admitted post (the SQL reds roll back). */
-            commit?: boolean;
           }
           /**
            * One attested post as `who` (the unscoped poster by default), in a
@@ -452,8 +450,6 @@ test(
                   ],
                 ),
               );
-              if (outcome === 'admitted' && call.commit)
-                await client.query('COMMIT');
               return outcome;
             });
           };
@@ -580,7 +576,11 @@ test(
                     WHERE (tenant_id, environment_id) = ($1,$2) AND ${quoted(relationColumn)} = $3`,
                   [tenant, environment, draft],
                 );
-                const posted = tryPost({ draft, commit: true });
+                // Through the gateway, so the post commits with its receipt.
+                const posted = viaGateway('bookkeeping_draft_post', {
+                  recordId: draft,
+                  expectedRevision: await revisionOf(draft),
+                });
                 for (let i = 0; i < 100; i += 1) {
                   const waiting = await pool.query(
                     `SELECT 1 FROM pg_stat_activity WHERE wait_event_type = 'Lock'
@@ -590,7 +590,7 @@ test(
                   await new Promise((resolve) => setTimeout(resolve, 100));
                 }
                 await writer.query('COMMIT');
-                assert.equal(await posted, 'admitted');
+                assert.equal(await posted, 'succeeded');
                 assert.equal(
                   (await entriesOf(draft))[0]?.amounts ?? 'none',
                   'D15000,C15000',
