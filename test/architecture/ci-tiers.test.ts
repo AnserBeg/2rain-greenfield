@@ -259,6 +259,57 @@ test('check-records rejects a new packet missing the tier attached to its CI run
   }
 });
 
+test('a CI tier run URL names the AnserBeg or rainerp-com owner and no other (REPO-MOVE)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'repo-move-'));
+  const record = join(dir, 'docs/execution/packets/new.md');
+  const script = resolve('scripts/check-record-ci-tier.mjs');
+  const run = () =>
+    spawnSync(process.execPath, [script], { cwd: dir, encoding: 'utf8' });
+  const url = (owner: string, suffix = '') =>
+    `https://github.com/${owner}/2rain-greenfield/actions/runs/123${suffix}`;
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: dir });
+    execFileSync(
+      'git',
+      [
+        '-c',
+        'user.name=Fixture',
+        '-c',
+        'user.email=fixture@example.invalid',
+        'commit',
+        '--allow-empty',
+        '-qm',
+        'baseline',
+      ],
+      { cwd: dir },
+    );
+    mkdirSync(join(dir, 'docs/execution/packets'), { recursive: true });
+    for (const accepted of [
+      url('rainerp-com'),
+      url('rainerp-com', '/attempts/2'),
+      url('AnserBeg'),
+    ]) {
+      writeFileSync(record, `CI tier: full ${accepted}\n`);
+      assert.equal(run().status, 0, accepted);
+    }
+    for (const refused of [
+      url('someone-else'),
+      url('rainerp-comx'),
+      url('rainerp'),
+    ]) {
+      writeFileSync(record, `CI tier: full ${refused}\n`);
+      const result = run();
+      assert.equal(result.status, 1, refused);
+      assert.match(
+        result.stderr,
+        /https:\/\/github\.com\/rainerp-com\/2rain-greenfield\/actions\/runs\/<id>/u,
+      );
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('a pending CI tier marker is accepted on a packet branch only (CI-8)', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ci-8-pending-'));
   const record = join(dir, 'docs/execution/packets/new.md');
