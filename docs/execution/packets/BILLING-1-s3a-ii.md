@@ -3,7 +3,7 @@
 Status: built on packet/BILLING-1-s3a-ii (base main 63826f6c0). Tier: **Critical** (money; rule 18), build mode (rule 24). Stops: none. No migration.
 Design: note `notes/BILLING-1-s3a-ii` (bbf546e1) and its Mythos design read (APPROVE WITH AMENDMENTS 1-11). This record covers ONLY the read's THIN FIRST SLICE (s3a-ii-a). Not built: (b) the minimum charge from the agreed start, (c) percent discount, (d) percentage component, (e) time in advance, (f) amount discount.
 Rung: surface reader 55 provisional (`BILLING_TIMING_READER`) and calculation v5; the integrator renumbers (WORKFLOW-3 s1 also holds a provisional 54). Rule 21(c): no preceding-binary proof; listed in FIRST-TENANT-OWED.md.
-CI tier: pending.
+CI tier: pending full
 
 ## Claims
 1. `timing {when: advance | arrears, earlyEnd?: keepPaidPeriod | prorateAndRefund}` on `time` and recurring `fixed` components. Absent = arrears, so v2-v4 bytes, digests and calculations are unchanged (no normalization default). Any timing key selects calculation v5 and reader 55; v5 also rates the v4 rule keys.
@@ -35,3 +35,7 @@ advance-agreed-not-elapsed, advance-keep-paid-period (domain + PG), advance-fina
 1. The overrun rule (agreed coverage united with actual use) and its effect on "final" amounts.
 2. The advance-only review: `cycle: null`, arrears boundary = period start, arrears components skipped.
 3. The snapshot guard at the review instant when advance is owed.
+
+```record-claim
+{"schemaVersion": "northstar.record-claim/v1", "packet": "BILLING-1-s3a-ii", "base": "63826f6c075eff7acfe1c32fad43b4081b8bb493", "head": "f425090404bfa1190f4efa7d2798eb8bded9f18d", "changedPaths": ["docs/decisions/ADR-0083-period-and-usage-billing.md", "docs/decisions/ADR-0084-receivables-billing-origin-drafts.md", "docs/execution/packets/BILLING-1-s3a-ii.md", "docs/execution/packets/BILLING-1.md", "packages/canonical-model/src/billing-evidence.ts", "packages/canonical-model/src/billing.ts", "packages/domain/src/billing/arrears.ts", "packages/domain/src/billing/occurrences.ts", "packages/domain/src/billing/quote.ts", "packages/postgres-provider/src/billing-quote.ts", "packages/runtime/src/request-runtime-view.ts", "test/evidence/BILLING-1.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/integration/billing-quote.test.ts", "test/integration/billing-rules.test.ts", "test/postgres/billing-terms.test.ts", "test/postgres/request-runtime-view.test.ts"], "symbols": [{"path": "packages/canonical-model/src/billing.ts", "name": "hasBillingTiming"}, {"path": "packages/domain/src/billing/arrears.ts", "name": "dueAdvanceCycles"}, {"path": "packages/domain/src/billing/occurrences.ts", "name": "openedOccurrences"}, {"path": "packages/domain/src/billing/quote.ts", "name": "isAdvanceFee"}]}
+```
