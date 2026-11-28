@@ -762,8 +762,8 @@
       "name": "billing-rules-version-selection",
       "claim": "A plan with a rule key is quoted under calculation v4, and calculate refuses it under any other version.",
       "file": "packages/domain/src/billing/quote.ts",
-      "original": "    hasBillingRules(planInput)",
-      "replacement": "    false",
+      "original": "    : hasBillingRules(plan)\n      ? BILLING_RULES_CALCULATION\n      : otherwise;",
+      "replacement": "    : hasBillingRules(plan)\n      ? otherwise\n      : otherwise;",
       "test": {
         "files": ["test/integration/billing-rules.test.ts"],
         "namePattern": "^B1: each combination rule prices 3, 10 and 13 days at 20 a day or 100 a week$"
@@ -906,8 +906,8 @@
       "name": "billing-early-return-last-return",
       "claim": "Committed early-return time runs from the last return to the service end, never the agreed interval in full (120 under agreedEnd, 180 under a one-week minimum, for a day-one pickup).",
       "file": "packages/domain/src/billing/arrears.ts",
-      "original": "      serviceUseCoverage(use, plan.serviceUnit, cycle.end, evidence.serviceEnd),\n    );",
-      "replacement": "      serviceUseCoverage(use, plan.serviceUnit, cycle.end, evidence.serviceEnd),\n      use.earlyReturn && {\n        bands: [\n          {\n            id: 'agreed',\n            quantity: '1',\n            intervals: [\n              {\n                id: 'agreed',\n                revision: '1',\n                start: evidence.periodStart,\n                end: evidence.serviceEnd!,\n              },\n            ],\n          },\n        ],\n      },\n    );",
+      "original": "        advance.length ? evidence.asOf : cycle!.end,\n        evidence.serviceEnd,\n      ),\n    );",
+      "replacement": "        advance.length ? evidence.asOf : cycle!.end,\n        evidence.serviceEnd,\n      ),\n      use.earlyReturn && {\n        bands: [\n          {\n            id: 'agreed',\n            quantity: '1',\n            intervals: [\n              {\n                id: 'agreed',\n                revision: '1',\n                start: evidence.periodStart,\n                end: evidence.serviceEnd!,\n              },\n            ],\n          },\n        ],\n      },\n    );",
       "test": {
         "files": ["test/integration/billing-rules.test.ts"],
         "namePattern": "^B9: committed time runs from the last return, not from pickup$"
