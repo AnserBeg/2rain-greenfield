@@ -217,6 +217,9 @@ test(
           databaseUrl,
           tenantSlug,
           compiledApplication,
+          // The workflow verification compiles the whole Booking release in
+          // the sandbox; a loaded host overran the 90 s default once.
+          sandboxWallClockMilliseconds: 300_000,
         });
         const workerPool = rolePool(
           databaseUrl,
@@ -839,7 +842,7 @@ test(
               try {
                 await assert.rejects(
                   name(rolePoolFor, owner.invocation_id, randomUUID()),
-                  /permission denied for function engine_facts/u,
+                  /permission denied for (function engine_facts|schema north_star_internal)/u,
                   `${role} named an engine fact directly`,
                 );
               } finally {

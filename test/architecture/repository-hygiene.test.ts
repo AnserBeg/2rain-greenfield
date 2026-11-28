@@ -203,6 +203,7 @@ const suiteDefinitions = [
       'test/postgres/purchase-order-ending.test.ts',
       'test/postgres/receivables.test.ts',
       'test/postgres/receiving-authorization.test.ts',
+      'test/postgres/workflow-engine-fact.test.ts',
       'test/postgres/inventory-backdate-policy.test.ts',
       'test/postgres/inventory-backup-restore.test.ts',
       'test/postgres/inventory-dimension-set-replay.test.ts',
@@ -293,7 +294,6 @@ const suiteDefinitions = [
       'test/postgres/tenant-isolation.test.ts',
       'test/postgres/trust-substrate.test.ts',
       'test/postgres/workflow-consumer.test.ts',
-      'test/postgres/workflow-engine-fact.test.ts',
       'test/postgres/workflow-record-created.test.ts',
       'test/postgres/workflow-record-transitioned.test.ts',
     ],
@@ -319,9 +319,10 @@ const suiteDefinitions = [
   },
   {
     // SPEED-1: the page budget serves the composed application beside the
-    // commercial workflows.
+    // commercial workflows. WORKFLOW-3 s1b: every general shard is at its
+    // budget, so the engine-fact journey runs in this job.
     discoveryPattern:
-      '{test/postgres/**/@(commercial-totals|expected-receipts|payables|purchase-approvals|purchase-order-ending|receiving-authorization).test.ts,test/performance/page-budget.test.ts}',
+      '{test/postgres/**/@(commercial-totals|expected-receipts|payables|purchase-approvals|purchase-order-ending|receiving-authorization|workflow-engine-fact).test.ts,test/performance/page-budget.test.ts}',
     expectedFiles: [
       'test/performance/page-budget.test.ts',
       'test/postgres/commercial-totals.test.ts',
@@ -330,6 +331,7 @@ const suiteDefinitions = [
       'test/postgres/purchase-approvals.test.ts',
       'test/postgres/purchase-order-ending.test.ts',
       'test/postgres/receiving-authorization.test.ts',
+      'test/postgres/workflow-engine-fact.test.ts',
     ],
     script: 'test:postgres:commercial',
   },
