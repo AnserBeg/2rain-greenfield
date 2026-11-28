@@ -32,7 +32,7 @@ const UPSERT =
 /** A machine's derived state field named in source (s1 review finding 2). */
 const MACHINE_LITERAL =
   /derived_state_field\.machine\.(?:([a-z][a-z0-9_]*)|\$\{spec\.entities\.order\}_lifecycle)/gu;
-const SQL_UPDATE = /UPDATE\s+(?:north_star_module\.|%I|%s|%\d\$I)/gu;
+const SQL_UPDATE = /UPDATE\s+(?:north_star_module\.|%I|%s|%\d\$I)/giu;
 
 interface StateWriter {
   readonly updates: number;
@@ -165,6 +165,15 @@ function settlementFamilies(): string[] {
 
 /** The machines whose derived state field a source file names. */
 function namedMachines(text: string): string[] {
+  // Only settlement's family template is expanded; any other run-time machine
+  // name cannot be derived, so it fails closed here.
+  assert.equal(
+    text.match(/derived_state_field\.machine\.\$\{/gu)?.length ?? 0,
+    text.match(
+      /derived_state_field\.machine\.\$\{spec\.entities\.order\}_lifecycle/gu,
+    )?.length ?? 0,
+    'a writer names a machine state field by a template the census cannot expand',
+  );
   const found = new Set<string>();
   for (const match of text.matchAll(MACHINE_LITERAL))
     for (const machine of match[1] ? [match[1]] : settlementFamilies())
