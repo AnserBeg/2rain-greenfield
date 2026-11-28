@@ -189,8 +189,7 @@ DECLARE tenant uuid := north_star_internal.trusted_tenant_id(); environment uuid
     ON CONFLICT (tenant_id, environment_id, legal_entity_id, sequence_id)
     DO UPDATE SET last_value = c.last_value + 1
     RETURNING c.last_value INTO next_value;
-  issued := prefix || '-' || lpad(next_value::text, greatest(digits, length(next_value::text)), '0');
-  BEGIN
+  issued := prefix || '-' || lpad(next_value::text, greatest(digits, length(next_value::text)), '0'); BEGIN
     INSERT INTO platform.open_item_issued_numbers (tenant_id, environment_id, legal_entity_id, sequence_id, value,
         number, record_id, invocation_id)
       VALUES (tenant, environment, company, sequence, next_value, issued, record, g.invocation_id);
