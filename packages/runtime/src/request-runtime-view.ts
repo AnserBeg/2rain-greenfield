@@ -265,10 +265,13 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // WORKFLOW-3 s1, assigned at TRAIN-Y).
     // 56 reads per-component billing timing: a recurring fixed fee in
     // advance under keepPaidPeriod (BILLING_TIMING_READER, BILLING-1 s3a-ii;
-    // assigned at TRAIN-Z). A literal, because the name law keeps engine
-    // names out of this generic file; request-runtime-view.test.ts pins it
-    // to the constant.
-    maximumSupportedVersion: 56,
+    // assigned at TRAIN-Z).
+    // 57 reads billing pricing adjustments: a fee's minimum term, percent
+    // discounts and percentage components (BILLING_PRICING_READER, BILLING-1
+    // s3a-ii-b; provisional, assigned at merge). A literal, because the name
+    // law keeps engine names out of this generic file;
+    // request-runtime-view.test.ts pins it to the constant.
+    maximumSupportedVersion: 57,
   },
 });
 

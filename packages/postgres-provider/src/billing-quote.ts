@@ -7,8 +7,10 @@ import {
   BILLING_ARREARS_READER,
   BILLING_RULES_READER,
   BILLING_TIMING_READER,
+  BILLING_PRICING_READER,
   billingEvidenceQuery,
   hasBillingRules,
+  hasBillingPricing,
   hasBillingTiming,
   type BillingEvidenceQuery,
 } from '../../canonical-model/src/billing.js';
@@ -72,13 +74,15 @@ export function billingQuoteReadModel(
     if (
       !p?.bindings ||
       (surface.requiredRuntimeCapability?.minimumVersion ?? 0) <
-        (hasBillingTiming(p)
-          ? BILLING_TIMING_READER
-          : hasBillingRules(p)
-            ? BILLING_RULES_READER
-            : p.bindings.arrearsSource
-              ? BILLING_ARREARS_READER
-              : BILLING_INTERVAL_READER) ||
+        (hasBillingPricing(p)
+          ? BILLING_PRICING_READER
+          : hasBillingTiming(p)
+            ? BILLING_TIMING_READER
+            : hasBillingRules(p)
+              ? BILLING_RULES_READER
+              : p.bindings.arrearsSource
+                ? BILLING_ARREARS_READER
+                : BILLING_INTERVAL_READER) ||
       definition.queryType !== 'get' ||
       result.records.length !== 1 ||
       !args ||
