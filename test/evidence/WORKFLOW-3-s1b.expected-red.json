@@ -16,6 +16,16 @@
           "file": "test/postgres/workflow-engine-fact.test.ts",
           "name": "a confirmed booking starts one linked task per company through its owner record",
           "expected": "a confirm before activation is sealed out at the watermark"
+        },
+        {
+          "file": "test/postgres/workflow-engine-fact.test.ts",
+          "name": "the timer sweep with no tenant scope expires every due hold and names each change",
+          "expected": "each timer change is named in its owner’s company, with no tenant scope"
+        },
+        {
+          "file": "test/postgres/workflow-engine-fact.test.ts",
+          "name": "every live writer of booking history names its state change",
+          "expected": "a history writer does not name its state change"
         }
       ]
     },
@@ -66,6 +76,16 @@
         {
           "file": "test/postgres/workflow-engine-fact.test.ts",
           "name": "the timer sweep with no tenant scope expires every due hold and names each change",
+          "expected": "a claimed engine fact owner is not stored in this company"
+        },
+        {
+          "file": "test/postgres/workflow-engine-fact.test.ts",
+          "name": "a fact whose receipt is never written refuses commit",
+          "expected": "a claimed engine fact owner is not stored in this company"
+        },
+        {
+          "file": "test/postgres/workflow-engine-fact.test.ts",
+          "name": "one occurrence per fact, subject and revision",
           "expected": "a claimed engine fact owner is not stored in this company"
         }
       ]

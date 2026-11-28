@@ -188,7 +188,7 @@ function engineFactRelease(): unknown {
 }
 
 test(
-  'a confirmed booking starts one linked task per company through its owner record',
+  'engine-fact workflow triggers on Booking commitment states, in one database',
   { timeout: 1_800_000 },
   async (t) => {
     await withEphemeralPostgres(
@@ -386,311 +386,327 @@ test(
             bookingRevision: b.revision,
           });
 
-          // Confirmed before any workflow subscribes: never fires later.
-          const early = await agreement(COMPANY);
-          await book('confirm', early, step(await hold(early)));
+          // The journey is one subtest, so each schema check below still runs
+          // (and is measured) when a mutation breaks the journey.
+          await t.test(
+            'a confirmed booking starts one linked task per company through its owner record',
+            async () => {
+              // Confirmed before any workflow subscribes: never fires later.
+              const early = await agreement(COMPANY);
+              await book('confirm', early, step(await hold(early)));
 
-          const gateways = new PostgresWorkflowGateway(
-            runtimePool,
-            INVENTORY_WRITE_INVARIANTS,
-          );
-          const view = await gateways.loadView(operator);
-          const grants = { queries: [], operations: [taskCreate] };
-          const sdk = generateWorkflowSdk(
-            view,
-            grants,
-            undefined,
-            undefined,
-            trigger,
-          );
-          assert.match(
-            sdk.declarations,
-            /type TriggerEvent = Readonly<\{ type: 'engineFactChanged'/u,
-          );
-          const taskLiteral = `{ recordId: event.subjectId, legalEntityId: event.legalEntityId, values: { ${JSON.stringify(taskName)}: 'Prep' }, relations: { ${JSON.stringify(toRental)}: event.recordId } }`;
-          // The body acts only on the change the event names, so a created
-          // task also proves the event carried the fact and both values.
-          const body = `if (event.factId === ${JSON.stringify(fact)} && event.fromValueId === ${JSON.stringify(value.hold)} && event.toValueId === ${JSON.stringify(value.confirmed)}) sdk.operation(${JSON.stringify(taskCreate)}, ${taskLiteral});`;
-          const fixtureEvent = {
-            type: 'engineFactChanged' as const,
-            eventId: randomUUID(),
-            factId: fact,
-            recordTypeId: order,
-            recordId: randomUUID(),
-            subjectId: randomUUID(),
-            fromValueId: value.hold,
-            toValueId: value.confirmed,
-            legalEntityId: COMPANY,
-          };
-          const bodyDigest = await withTrustedRequestTransaction(
-            runtimePool,
-            operator,
-            (client) =>
-              storeWorkflowBundle(client, operator, {
-                body,
-                executable: compileWorkflowBody(body, sdk).executable,
-                authoredBy: operator.principalId,
-                fixtures: [
-                  {
-                    event: fixtureEvent,
-                    effects: [
-                      {
-                        call: {
-                          kind: 'operation',
-                          id: taskCreate,
-                          input: {
-                            recordId: fixtureEvent.subjectId,
-                            legalEntityId: fixtureEvent.legalEntityId,
-                            values: { [taskName]: 'Prep' },
-                            relations: { [toRental]: fixtureEvent.recordId },
-                          },
-                        },
-                        result: {
-                          outcome: 'succeeded',
-                          readBack: {
-                            recordId: fixtureEvent.subjectId,
-                            revision: 1,
-                            values: {},
-                          },
-                        },
-                      },
-                    ],
-                  } as never,
-                ],
-              }),
-          );
-          await activate(
-            {
-              kind: 'saveWorkflow',
-              workflow: {
-                schemaVersion: 'v6',
-                workflowId: WORKFLOW,
-                trigger,
-                bodyDigest,
+              const gateways = new PostgresWorkflowGateway(
+                runtimePool,
+                INVENTORY_WRITE_INVARIANTS,
+              );
+              const view = await gateways.loadView(operator);
+              const grants = { queries: [], operations: [taskCreate] };
+              const sdk = generateWorkflowSdk(
+                view,
                 grants,
-              },
-            },
-            '',
-          );
-          assert.deepEqual(
-            (
-              await pool.query(
-                `SELECT w.definition_bindings->$3->>'recordType' AS record_type,
+                undefined,
+                undefined,
+                trigger,
+              );
+              assert.match(
+                sdk.declarations,
+                /type TriggerEvent = Readonly<\{ type: 'engineFactChanged'/u,
+              );
+              const taskLiteral = `{ recordId: event.subjectId, legalEntityId: event.legalEntityId, values: { ${JSON.stringify(taskName)}: 'Prep' }, relations: { ${JSON.stringify(toRental)}: event.recordId } }`;
+              // The body acts only on the change the event names, so a created
+              // task also proves the event carried the fact and both values.
+              const body = `if (event.factId === ${JSON.stringify(fact)} && event.fromValueId === ${JSON.stringify(value.hold)} && event.toValueId === ${JSON.stringify(value.confirmed)}) sdk.operation(${JSON.stringify(taskCreate)}, ${taskLiteral});`;
+              const fixtureEvent = {
+                type: 'engineFactChanged' as const,
+                eventId: randomUUID(),
+                factId: fact,
+                recordTypeId: order,
+                recordId: randomUUID(),
+                subjectId: randomUUID(),
+                fromValueId: value.hold,
+                toValueId: value.confirmed,
+                legalEntityId: COMPANY,
+              };
+              const bodyDigest = await withTrustedRequestTransaction(
+                runtimePool,
+                operator,
+                (client) =>
+                  storeWorkflowBundle(client, operator, {
+                    body,
+                    executable: compileWorkflowBody(body, sdk).executable,
+                    authoredBy: operator.principalId,
+                    fixtures: [
+                      {
+                        event: fixtureEvent,
+                        effects: [
+                          {
+                            call: {
+                              kind: 'operation',
+                              id: taskCreate,
+                              input: {
+                                recordId: fixtureEvent.subjectId,
+                                legalEntityId: fixtureEvent.legalEntityId,
+                                values: { [taskName]: 'Prep' },
+                                relations: {
+                                  [toRental]: fixtureEvent.recordId,
+                                },
+                              },
+                            },
+                            result: {
+                              outcome: 'succeeded',
+                              readBack: {
+                                recordId: fixtureEvent.subjectId,
+                                revision: 1,
+                                values: {},
+                              },
+                            },
+                          },
+                        ],
+                      } as never,
+                    ],
+                  }),
+              );
+              await activate(
+                {
+                  kind: 'saveWorkflow',
+                  workflow: {
+                    schemaVersion: 'v6',
+                    workflowId: WORKFLOW,
+                    trigger,
+                    bodyDigest,
+                    grants,
+                  },
+                },
+                '',
+              );
+              assert.deepEqual(
+                (
+                  await pool.query(
+                    `SELECT w.definition_bindings->$3->>'recordType' AS record_type,
                         w.definition_bindings->$3->>'factId' AS fact_id,
                         w.definition_bindings->$3->>'toState' AS to_state,
                         w.definition_bindings->$3 ? 'fromState' AS pinned_from
                    FROM platform.workflow_activation_watermarks AS w
                    JOIN platform.active_release_pointers AS p USING (tenant_id, environment_id, pointer_id, fence, release_id)
                   WHERE w.tenant_id = $1 AND w.environment_id = $2`,
-                [tenantId, environmentId, WORKFLOW],
-              )
-            ).rows,
-            [
-              {
-                record_type: order,
-                fact_id: fact,
-                to_state: value.confirmed,
-                pinned_from: false,
-              },
-            ],
-            'the approval binds the owner type, the fact and the value',
-          );
-          assert.deepEqual(
-            await factDispositions(pool, tenantId, [early.recordId]),
-            [[early.recordId, value.hold, value.confirmed, 'PRE_ACTIVATION']],
-            'a confirm before activation is sealed out at the watermark',
-          );
+                    [tenantId, environmentId, WORKFLOW],
+                  )
+                ).rows,
+                [
+                  {
+                    record_type: order,
+                    fact_id: fact,
+                    to_state: value.confirmed,
+                    pinned_from: false,
+                  },
+                ],
+                'the approval binds the owner type, the fact and the value',
+              );
+              assert.deepEqual(
+                await factDispositions(pool, tenantId, [early.recordId]),
+                [
+                  [
+                    early.recordId,
+                    value.hold,
+                    value.confirmed,
+                    'PRE_ACTIVATION',
+                  ],
+                ],
+                'a confirm before activation is sealed out at the watermark',
+              );
 
-          const home = await agreement(COMPANY);
-          const away = await agreement(otherCompany);
-          const dropped = await agreement(COMPANY);
-          const homeHold = await hold(home);
-          const replayKey = randomUUID();
-          const homeConfirm = await book(
-            'confirm',
-            home,
-            step(homeHold),
-            replayKey,
-          );
-          // A replayed confirm returns the stored receipt and writes nothing.
-          const replayed = await book(
-            'confirm',
-            home,
-            step(homeHold),
-            replayKey,
-          );
-          assert.deepEqual(
-            [replayed.bookingId, replayed.revision, replayed.state],
-            [homeConfirm.bookingId, homeConfirm.revision, 'confirmed'],
-          );
-          const awayHold = await hold(away);
-          await book('confirm', away, step(awayHold));
-          await book('cancel', dropped, step(await hold(dropped)));
+              const home = await agreement(COMPANY);
+              const away = await agreement(otherCompany);
+              const dropped = await agreement(COMPANY);
+              const homeHold = await hold(home);
+              const replayKey = randomUUID();
+              const homeConfirm = await book(
+                'confirm',
+                home,
+                step(homeHold),
+                replayKey,
+              );
+              // A replayed confirm returns the stored receipt and writes nothing.
+              const replayed = await book(
+                'confirm',
+                home,
+                step(homeHold),
+                replayKey,
+              );
+              assert.deepEqual(
+                [replayed.bookingId, replayed.revision, replayed.state],
+                [homeConfirm.bookingId, homeConfirm.revision, 'confirmed'],
+              );
+              const awayHold = await hold(away);
+              await book('confirm', away, step(awayHold));
+              await book('cancel', dropped, step(await hold(dropped)));
 
-          const consumer = new PostgresWorkflowConsumer(workerPool);
-          assert.equal(
-            await consumer.claim(scope),
-            2,
-            'one confirm per company starts exactly one run',
-          );
-          assert.equal(
-            await consumer.claim(scope),
-            0,
-            'a repeated poll starts no second run',
-          );
-          assert.deepEqual(
-            await factDispositions(pool, tenantId, [
-              home.recordId,
-              away.recordId,
-              dropped.recordId,
-            ]),
-            [
-              [home.recordId, value.hold, value.confirmed, 'CLAIMED'],
-              [away.recordId, value.hold, value.confirmed, 'CLAIMED'],
-              [dropped.recordId, value.hold, value.cancelled, 'INELIGIBLE'],
-            ].sort(byRow),
-            'each change is named once: confirms CLAIMED, a cancel INELIGIBLE, a hold and a replay name nothing',
-          );
-          const instances = (
-            await pool.query<{
-              trigger_record_id: string;
-              legal_entity_id: string;
-              record_type: string;
-              run_id: string;
-              instance_id: string;
-              trigger_principal_id: string;
-              event_id: string;
-            }>(
-              `SELECT i.trigger_record_id, i.legal_entity_id, i.record_type, r.run_id, i.instance_id,
+              const consumer = new PostgresWorkflowConsumer(workerPool);
+              assert.equal(
+                await consumer.claim(scope),
+                2,
+                'one confirm per company starts exactly one run',
+              );
+              assert.equal(
+                await consumer.claim(scope),
+                0,
+                'a repeated poll starts no second run',
+              );
+              assert.deepEqual(
+                await factDispositions(pool, tenantId, [
+                  home.recordId,
+                  away.recordId,
+                  dropped.recordId,
+                ]),
+                [
+                  [home.recordId, value.hold, value.confirmed, 'CLAIMED'],
+                  [away.recordId, value.hold, value.confirmed, 'CLAIMED'],
+                  [dropped.recordId, value.hold, value.cancelled, 'INELIGIBLE'],
+                ].sort(byRow),
+                'each change is named once: confirms CLAIMED, a cancel INELIGIBLE, a hold and a replay name nothing',
+              );
+              const instances = (
+                await pool.query<{
+                  trigger_record_id: string;
+                  legal_entity_id: string;
+                  record_type: string;
+                  run_id: string;
+                  instance_id: string;
+                  trigger_principal_id: string;
+                  event_id: string;
+                }>(
+                  `SELECT i.trigger_record_id, i.legal_entity_id, i.record_type, r.run_id, i.instance_id,
                       i.trigger_principal_id, i.event_id
                  FROM platform.workflow_instances AS i
                  JOIN platform.workflow_runs AS r USING (tenant_id, environment_id, instance_id, workflow_id)
                 WHERE i.tenant_id = $1 ORDER BY i.trigger_record_id`,
-              [tenantId],
-            )
-          ).rows;
-          assert.deepEqual(
-            instances.map((i) => [
-              i.trigger_record_id,
-              i.legal_entity_id,
-              i.record_type,
-            ]),
-            [
-              [home.recordId, COMPANY, order],
-              [away.recordId, otherCompany, order],
-            ].sort(byRow),
-            'each run is in its agreement’s own company',
-          );
-
-          const execution = new PostgresWorkflowExecution(
-            workerPool,
-            runtimePool,
-            gateways,
-          );
-          for (const { run_id } of instances) {
-            for (let attempt = 0; attempt < 4; attempt += 1) {
-              await execution.step(scope, run_id);
-              const status = (
-                await pool.query<{ status: string }>(
-                  'SELECT status FROM platform.workflow_runs WHERE run_id = $1',
-                  [run_id],
+                  [tenantId],
                 )
-              ).rows[0]!.status;
-              if (status !== 'RUNNABLE') break;
-            }
-          }
-          const runs = (
-            await pool.query<{ status: string; reason: string | null }>(
-              `SELECT status, reason FROM platform.workflow_runs
+              ).rows;
+              assert.deepEqual(
+                instances.map((i) => [
+                  i.trigger_record_id,
+                  i.legal_entity_id,
+                  i.record_type,
+                ]),
+                [
+                  [home.recordId, COMPANY, order],
+                  [away.recordId, otherCompany, order],
+                ].sort(byRow),
+                'each run is in its agreement’s own company',
+              );
+
+              const execution = new PostgresWorkflowExecution(
+                workerPool,
+                runtimePool,
+                gateways,
+              );
+              for (const { run_id } of instances) {
+                for (let attempt = 0; attempt < 4; attempt += 1) {
+                  await execution.step(scope, run_id);
+                  const status = (
+                    await pool.query<{ status: string }>(
+                      'SELECT status FROM platform.workflow_runs WHERE run_id = $1',
+                      [run_id],
+                    )
+                  ).rows[0]!.status;
+                  if (status !== 'RUNNABLE') break;
+                }
+              }
+              const runs = (
+                await pool.query<{ status: string; reason: string | null }>(
+                  `SELECT status, reason FROM platform.workflow_runs
                 WHERE tenant_id = $1 ORDER BY run_id`,
-              [tenantId],
-            )
-          ).rows;
-          assert.deepEqual(
-            runs.map((r) => r.status),
-            ['COMPLETED', 'COMPLETED'],
-            'each run completes on its re-derived trigger scope',
-          );
-          assert.deepEqual(
-            (
-              await pool.query<{ record_id: string; company_id: string }>(
-                // Scoped to the journey's two companies: the Customize
-                // verification rehearses fixtures in companies of its own,
-                // as the s1 suites' record-ID filters allow for.
-                `SELECT record_id, company_id FROM platform.record_creation_occurrences
+                  [tenantId],
+                )
+              ).rows;
+              assert.deepEqual(
+                runs.map((r) => r.status),
+                ['COMPLETED', 'COMPLETED'],
+                'each run completes on its re-derived trigger scope',
+              );
+              assert.deepEqual(
+                (
+                  await pool.query<{ record_id: string; company_id: string }>(
+                    // Scoped to the journey's two companies: the Customize
+                    // verification rehearses fixtures in companies of its own,
+                    // as the s1 suites' record-ID filters allow for.
+                    `SELECT record_id, company_id FROM platform.record_creation_occurrences
                   WHERE tenant_id = $1 AND record_type = $2 AND kind = 'created'
                     AND company_id = ANY($3::uuid[])`,
-                [tenantId, task, [COMPANY, otherCompany]],
-              )
-            ).rows
-              .map((r) => [r.record_id, r.company_id])
-              .sort(byRow),
-            [
-              [homeHold.bookingId, COMPANY],
-              [awayHold.bookingId, otherCompany],
-            ].sort(byRow),
-            'one prep task per confirmed booking, in the agreement’s own company',
-          );
+                    [tenantId, task, [COMPANY, otherCompany]],
+                  )
+                ).rows
+                  .map((r) => [r.record_id, r.company_id])
+                  .sort(byRow),
+                [
+                  [homeHold.bookingId, COMPANY],
+                  [awayHold.bookingId, otherCompany],
+                ].sort(byRow),
+                'one prep task per confirmed booking, in the agreement’s own company',
+              );
 
-          // E4/E5: the real run's scope comes through its own invocation; a
-          // worker-forged instance on the cancel (a value the definition does
-          // not name) has no scope, so it can neither run nor be approved.
-          const cancelled = (
-            await pool.query<{ occurrence_id: string; event_id: string }>(
-              `SELECT c.occurrence_id, i.domain_event_id AS event_id
+              // E4/E5: the real run's scope comes through its own invocation; a
+              // worker-forged instance on the cancel (a value the definition does
+              // not name) has no scope, so it can neither run nor be approved.
+              const cancelled = (
+                await pool.query<{ occurrence_id: string; event_id: string }>(
+                  `SELECT c.occurrence_id, i.domain_event_id AS event_id
                  FROM platform.record_creation_occurrences AS c
                  JOIN platform.trust_action_invocations AS i
                    USING (tenant_id, environment_id, invocation_id)
                 WHERE c.tenant_id = $1 AND c.record_id = $2 AND c.kind = 'engineFact'`,
-              [tenantId, dropped.recordId],
-            )
-          ).rows[0]!;
-          const scopes = await withScopedWorker(
-            workerPool,
-            scope,
-            async (client) => {
-              await client.query(
-                `INSERT INTO platform.workflow_instances (
+                  [tenantId, dropped.recordId],
+                )
+              ).rows[0]!;
+              const scopes = await withScopedWorker(
+                workerPool,
+                scope,
+                async (client) => {
+                  await client.query(
+                    `INSERT INTO platform.workflow_instances (
                    tenant_id, environment_id, instance_id, event_id, workflow_id, legal_entity_id,
                    trigger_principal_id, trigger_record_id, record_type, creation_occurrence_id)
                  VALUES ($1, $2, gen_random_uuid(), $3, $4, $5, $6, $7, $8, $9)`,
-                [
-                  tenantId,
-                  environmentId,
-                  cancelled.event_id,
-                  WORKFLOW,
-                  COMPANY,
-                  instances[0]!.trigger_principal_id,
-                  dropped.recordId,
-                  order,
-                  cancelled.occurrence_id,
-                ],
-              );
-              return (
-                await client.query(
-                  `SELECT s.trigger_record_id, s.kind, s.fact_id, s.subject_id, s.from_state, s.to_state
+                    [
+                      tenantId,
+                      environmentId,
+                      cancelled.event_id,
+                      WORKFLOW,
+                      COMPANY,
+                      instances[0]!.trigger_principal_id,
+                      dropped.recordId,
+                      order,
+                      cancelled.occurrence_id,
+                    ],
+                  );
+                  return (
+                    await client.query(
+                      `SELECT s.trigger_record_id, s.kind, s.fact_id, s.subject_id, s.from_state, s.to_state
                      FROM platform.workflow_instances AS i
                      CROSS JOIN LATERAL platform.workflow_record_trigger_scope(i.instance_id) AS s
                     WHERE i.trigger_record_id = ANY($1::uuid[])
                     ORDER BY s.trigger_record_id`,
-                  [[home.recordId, dropped.recordId]],
-                )
-              ).rows;
+                      [[home.recordId, dropped.recordId]],
+                    )
+                  ).rows;
+                },
+              );
+              assert.deepEqual(
+                scopes,
+                [
+                  {
+                    trigger_record_id: home.recordId,
+                    kind: 'engineFact',
+                    fact_id: fact,
+                    subject_id: homeHold.bookingId,
+                    from_state: value.hold,
+                    to_state: value.confirmed,
+                  },
+                ],
+                'a fact run’s scope names its own fact and value, and no other change has one',
+              );
             },
-          );
-          assert.deepEqual(
-            scopes,
-            [
-              {
-                trigger_record_id: home.recordId,
-                kind: 'engineFact',
-                fact_id: fact,
-                subject_id: homeHold.bookingId,
-                from_state: value.hold,
-                to_state: value.confirmed,
-              },
-            ],
-            'a fact run’s scope names its own fact and value, and no other change has one',
           );
 
           await t.test(
@@ -748,20 +764,23 @@ test(
             },
           );
 
+          // The schema checks name facts on an agreement of their own, so
+          // they never depend on the journey's rows.
+          const probe = await agreement(COMPANY);
           const owner = (
             await pool.query<{
               table_name: string;
               invocation_id: string;
             }>(
-              `SELECT c.invocation_id,
+              `SELECT (SELECT i.invocation_id FROM platform.trust_action_invocations AS i
+                        WHERE i.tenant_id = p.tenant_id AND i.outcome = 'SUCCEEDED' LIMIT 1) AS invocation_id,
                       (SELECT value->>'physicalTableName'
                          FROM jsonb_array_elements(north_star_internal.booking_projection(
-                           c.tenant_id, c.environment_id, i.release_id, 'storageTargetPayload')->'entities')
-                        WHERE value->>'entityId' = c.record_type) AS table_name
-                 FROM platform.record_creation_occurrences AS c
-                 JOIN platform.trust_action_invocations AS i USING (tenant_id, environment_id, invocation_id)
-                WHERE c.tenant_id = $1 AND c.record_id = $2 AND c.kind = 'engineFact'`,
-              [tenantId, home.recordId],
+                           p.tenant_id, p.environment_id, p.release_id, 'storageTargetPayload')->'entities')
+                        WHERE value->>'entityId' = $2) AS table_name
+                 FROM platform.active_release_pointers AS p
+                WHERE p.tenant_id = $1`,
+              [tenantId, order],
             )
           ).rows[0]!;
           const name = (
@@ -779,7 +798,7 @@ test(
                 owner.table_name,
                 order,
                 COMPANY,
-                home.recordId,
+                probe.recordId,
                 subject,
                 value.hold,
                 value.confirmed,
