@@ -23,10 +23,19 @@ import {
   workflowTriggerReaderFloor,
 } from '../../packages/canonical-model/src/workflow-trigger-events.js';
 import {
+  ENGINE_FACT_TRIGGER_READER,
   RECORD_CREATED_TRIGGER_READER,
   RECORD_TRANSITIONED_TRIGGER_READER,
 } from '../../packages/canonical-model/src/workflows.js';
-import { workflowTransitionTargets } from '../../packages/compiler/src/workflows.js';
+import {
+  BOOKING_COMMITMENT_STATE_FACT,
+  BOOKING_COMMITMENT_VALUES,
+} from '../../packages/canonical-model/src/booking.js';
+import {
+  assertWorkflowTriggers,
+  workflowEngineFactTargets,
+  workflowTransitionTargets,
+} from '../../packages/compiler/src/workflows.js';
 import { PROJECTION_FAMILY_IDS } from '../../packages/compiler/src/index.js';
 import {
   occurrenceMatchesDefinition,
@@ -98,7 +107,13 @@ const save = (trigger: unknown) => ({
  */
 const TRIGGER_EVAL_EXCEPTIONS: Readonly<
   Partial<Record<WorkflowTriggerMember, { since: string; owner: string }>>
-> = Object.freeze({});
+> = Object.freeze({
+  // No eval base can declare an engine binding: Customize cannot add a
+  // Booking operation, and the first-party release has none. EF01 scores the
+  // unsupported side on the plain base; a positive case is owed with an eval
+  // base that serves a Booking release.
+  engineFactChanged: { since: '2026-11-28', owner: 'WORKFLOW-3 s1b' },
+});
 test('every workflow trigger member has generated drafter text, fixtures and an eval case', () => {
   const members = Object.keys(
     WORKFLOW_TRIGGER_MEMBERS,
@@ -167,6 +182,7 @@ test('the receipt member keeps its bytes, declaration and persisted source', () 
     recordType: null,
     toState: null,
     fromState: null,
+    factId: null,
   });
   const general = WorkflowDefinitionSchema.parse(save(recordCreated).workflow);
   assert.equal(workflowTriggerMember(general.trigger), 'recordCreated');
@@ -175,6 +191,7 @@ test('the receipt member keeps its bytes, declaration and persisted source', () 
     recordType: appointment,
     toState: null,
     fromState: null,
+    factId: null,
   });
   // B4 at the SDK: the recordCreated declaration keeps its exact bytes.
   assert.equal(
@@ -378,6 +395,7 @@ test('recordTransitioned is a strict member with its own event fields and declar
     recordType: inspection,
     toState: state('failed'),
     fromState: state('scheduled'),
+    factId: null,
   });
   assert.equal(
     workflowEventDeclaration(general.trigger),
@@ -442,6 +460,7 @@ test('each member raises the reader floor to its own rung', () => {
   const parse = (trigger: unknown) =>
     WorkflowDefinitionSchema.parse(save(trigger).workflow).trigger;
   assert.deepEqual(Object.keys(WORKFLOW_TRIGGER_READER).sort(), [
+    'engineFactChanged',
     'recordCreated',
     'recordTransitioned',
   ]);
@@ -570,10 +589,14 @@ test('only machines every transition of which a generic operation performs offer
 });
 
 test('an occurrence starts only the definitions its kind and states match', () => {
+  const transitioned = 'northstar.runtime:event.record-transitioned';
+  const created = 'northstar.runtime:event.record-created';
   const definition = {
+    event_type: transitioned,
     record_type: inspection,
     to_state: state('failed'),
     from_state: state('scheduled'),
+    fact_id: null,
   };
   const occurrence = {
     record_type: inspection,
@@ -622,14 +645,22 @@ test('an occurrence starts only the definitions its kind and states match', () =
         from_state: null,
         to_state: null,
       },
-      { record_type: inspection, to_state: null, from_state: null },
+      {
+        event_type: created,
+        record_type: inspection,
+        to_state: null,
+        from_state: null,
+        fact_id: null,
+      },
     ),
   );
   assert.ok(
     !occurrenceMatchesDefinition(occurrence, {
+      event_type: created,
       record_type: inspection,
       to_state: null,
       from_state: null,
+      fact_id: null,
     }),
     'a transition does not start a creation workflow',
   );
@@ -706,4 +737,267 @@ test('every reader-floor gate reads the per-member rung table (B6)', () => {
       `${path} maps a member to one fixed rung`,
     );
   }
+});
+
+// ---- WORKFLOW-3 s1b: engineFactChanged ----
+
+const rental = id('entity.custom_rental');
+const fact = BOOKING_COMMITMENT_STATE_FACT;
+const value = BOOKING_COMMITMENT_VALUES;
+const confirmed = {
+  kind: 'engineFactChanged',
+  triggerVersion: 'v1',
+  factId: fact,
+  recordTypeId: rental,
+  toValueId: value.confirmed,
+} as const;
+/** A revision whose one engine binding names `owner`, plus the storage and
+ * operation catalogs the record-type rule reads. */
+function engineRelease(owner: string, companyOwned = true) {
+  const binding = {
+    bindingVersion: 'booking.commitment/v1',
+    declarationRevision: id('revision.bookable'),
+    slotRevision: id('revision.slot'),
+    slotId: id('slot.time'),
+    resourceEntity: owner,
+    ownerEntity: owner,
+    ownerReadPermission: id('permission.read'),
+    resourceReadPermission: id('permission.read'),
+    operation: 'confirm',
+    kind: 'unit',
+    fulfilmentMode: 'tracked',
+    maxBackdateDays: 1,
+    holdSeconds: 900,
+    unit: 'each',
+    scale: 0,
+  };
+  return {
+    revision: {
+      operations: [
+        {
+          operationId: id('operation.confirm'),
+          lifecycle: 'active',
+          booking: binding,
+          effect: { kind: 'registeredCapabilityEffect' },
+        },
+      ],
+    },
+    storage: {
+      entities: [
+        {
+          entityId: owner,
+          lifecycle: 'active',
+          storageClass: 'dedicatedTable',
+          ...(companyOwned ? { legalEntity: { nullable: false } } : {}),
+        },
+      ],
+    },
+    operations: {
+      operations: [
+        {
+          lifecycle: 'active',
+          effect: { kind: 'createRecordEffect', entity: { targetId: owner } },
+        },
+      ],
+    },
+  };
+}
+const admit = (trigger: unknown, release = engineRelease(rental)) =>
+  assertWorkflowTriggers(
+    [WorkflowDefinitionSchema.parse(save(trigger).workflow)],
+    release.storage,
+    release.operations,
+    release.revision as never,
+  );
+
+test('engineFactChanged is a strict member with its own event fields and declaration', () => {
+  const general = WorkflowDefinitionSchema.parse(save(confirmed).workflow);
+  assert.equal(workflowTriggerMember(general.trigger), 'engineFactChanged');
+  assert.deepEqual(workflowTriggerSource(general.trigger), {
+    eventType: 'northstar.runtime:event.engine-fact-changed',
+    recordType: rental,
+    toState: value.confirmed,
+    fromState: null,
+    factId: fact,
+  });
+  assert.equal(
+    workflowEventDeclaration(general.trigger),
+    "type TriggerEvent = Readonly<{ type: 'engineFactChanged'; eventId: string; factId: 'northstar.booking:fact.commitment-state'; recordTypeId: 'northstar.app:entity.custom_rental'; recordId: string; subjectId: string; fromValueId: string; toValueId: 'northstar.booking:value.confirmed'; legalEntityId: string }>;",
+  );
+  for (const trigger of [
+    { ...confirmed, label: 'Confirmed' },
+    { ...confirmed, triggerVersion: 'v2' },
+    { kind: 'engineFactChanged', triggerVersion: 'v1', recordTypeId: rental },
+  ])
+    assert.throws(() => WorkflowDefinitionSchema.parse(save(trigger).workflow));
+  const event = {
+    type: 'engineFactChanged',
+    factId: fact,
+    recordTypeId: rental,
+    fromValueId: value.hold,
+    toValueId: value.confirmed,
+  };
+  assert.ok(fixtureEventMatchesTrigger(event, general.trigger));
+  assert.ok(
+    !fixtureEventMatchesTrigger(
+      { ...event, toValueId: value.cancelled },
+      general.trigger,
+    ),
+  );
+});
+
+test('engineFactChanged admits only declared, command-entered values on a company-owned owner type', () => {
+  for (const toValueId of [value.confirmed, value.inUse, value.returned])
+    assert.equal(
+      admit({ ...confirmed, toValueId }),
+      ENGINE_FACT_TRIGGER_READER,
+    );
+  assert.equal(
+    admit({ ...confirmed, toValueId: value.inUse, fromValueId: value.noShow }),
+    ENGINE_FACT_TRIGGER_READER,
+    'a recovered handover (no-show to in use) is a command move',
+  );
+  const refused = (trigger: unknown, subject: string, release?: never) =>
+    assert.throws(
+      () => admit(trigger, release),
+      (error: Error & { subject?: string }) => error.subject === subject,
+      subject,
+    );
+  // E3: a value any timer enters runs under an older release: refused by name.
+  for (const toValueId of [value.cancelled, value.completed, value.noShow])
+    refused({ ...confirmed, toValueId }, toValueId);
+  refused(
+    { ...confirmed, factId: id('fact.undeclared') },
+    id('fact.undeclared'),
+  );
+  refused(
+    { ...confirmed, toValueId: id('value.undeclared') },
+    id('value.undeclared'),
+  );
+  refused({ ...confirmed, fromValueId: value.returned }, value.returned);
+  refused({ ...confirmed, fromValueId: value.confirmed }, value.confirmed);
+  // A shared owner (no company of its own) cannot be a trigger record.
+  refused(confirmed, rental, engineRelease(rental, false) as never);
+  // A stored, company-owned, created type no engine binding names.
+  refused({ ...confirmed, recordTypeId: id('entity.custom_other') }, fact, {
+    ...engineRelease(id('entity.custom_other')),
+    revision: { operations: [] },
+  } as never);
+});
+
+test('the drafter offers only the command-entered values an engine binding declares', () => {
+  const targets = [
+    ...workflowEngineFactTargets(engineRelease(rental).revision).values(),
+  ];
+  assert.equal(targets.length, 1);
+  const offered = targets[0]!;
+  assert.deepEqual(
+    [...offered.values.keys()].sort(),
+    [value.confirmed, value.inUse, value.returned].sort(),
+  );
+  const lines = workflowTriggerDrafterLines(
+    [rental],
+    [],
+    targets.map(({ factId, recordTypeId, values }) => ({
+      factId,
+      recordTypeId,
+      values: [...values].map(([valueId, v]) => ({
+        valueId,
+        label: v.label,
+        fromValueIds: v.fromValueIds,
+      })),
+    })),
+  ).join('\n');
+  assert.match(
+    lines,
+    /northstar\.booking:value\.confirmed \("Confirmed"; from /u,
+  );
+  assert.doesNotMatch(lines, /northstar\.booking:value\.cancelled \(/u);
+  assert.match(
+    workflowTriggerDrafterLines([]).join('\n'),
+    /No engine fact in this release can start a workflow yet\./u,
+  );
+});
+
+test('an engine fact starts only definitions of its own kind and fact (E4)', () => {
+  const engineEvent = 'northstar.runtime:event.engine-fact-changed';
+  const occurrence = {
+    record_type: rental,
+    kind: 'engineFact',
+    from_state: value.hold,
+    to_state: value.confirmed,
+    fact_id: fact,
+  };
+  const definition = {
+    event_type: engineEvent,
+    record_type: rental,
+    to_state: value.confirmed,
+    from_state: null,
+    fact_id: fact,
+  };
+  assert.ok(occurrenceMatchesDefinition(occurrence, definition));
+  assert.ok(
+    !occurrenceMatchesDefinition(occurrence, {
+      ...definition,
+      fact_id: id('fact.other'),
+    }),
+    'another fact does not match',
+  );
+  assert.ok(
+    !occurrenceMatchesDefinition(occurrence, {
+      ...definition,
+      event_type: 'northstar.runtime:event.record-transitioned',
+      fact_id: null,
+    }),
+    'a fact does not start a recordTransitioned workflow on its owner type',
+  );
+  assert.ok(
+    !occurrenceMatchesDefinition(
+      { ...occurrence, kind: 'transitioned', fact_id: null },
+      definition,
+    ),
+    'a record move into an equal ID does not start a fact workflow',
+  );
+  assert.ok(
+    !occurrenceMatchesDefinition(
+      {
+        record_type: rental,
+        kind: 'created',
+        from_state: null,
+        to_state: null,
+        fact_id: null,
+      },
+      definition,
+    ),
+  );
+});
+
+test("Booking's SQL emit maps exactly the seven stored states to the declared values", () => {
+  const states = /CHECK \(state IN \(([^)]*)\)\)/u
+    .exec(
+      readFileSync('db/migrations/0059_booking_fulfilment.sql', 'utf8'),
+    )![1]!
+    .split(',')
+    .map((s) => s.trim().replaceAll("'", ''))
+    .sort();
+  assert.deepEqual(states, Object.keys(value).sort());
+  const emit = readFileSync(
+    'db/migrations/0077_booking_engine_facts.sql',
+    'utf8',
+  );
+  const mapping =
+    /'northstar\.booking:value\.' \|\| CASE state ([^]*?) END/u.exec(emit)![1]!;
+  const mapped = (state: string) => {
+    const hit = new RegExp(`WHEN '${state}' THEN '([a-z-]+)'`, 'u').exec(
+      mapping,
+    );
+    return `northstar.booking:value.${hit ? hit[1] : state}`;
+  };
+  for (const state of states)
+    assert.equal(
+      mapped(state),
+      value[state as keyof typeof value],
+      `${state} maps to its declared value`,
+    );
+  assert.match(emit, new RegExp(`'${fact}'`, 'u'));
 });
