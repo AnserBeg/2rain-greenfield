@@ -547,7 +547,7 @@ test(
         assert.equal(
           queued.filter((entry) => /"outcome":"succeeded"/u.test(entry)).length,
           1,
-          queued.join(' | '),
+          `two concurrent creates at max-1 did not serialize: ${queued.join(' | ')}`,
         );
 
         // Two concurrent creates at maximum - 1 under a parent-path
