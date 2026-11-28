@@ -978,8 +978,8 @@
       "name": "billing-advance-agreed-not-elapsed",
       "claim": "An advance fee bills the opened cycle on agreed coverage, not on time elapsed at the review.",
       "file": "packages/domain/src/billing/quote.ts",
-      "original": "const ms = covered(advanceCoverage, o.start, o.fullEnd);",
-      "replacement": "const ms = covered(advanceCoverage, o.start, Math.min(o.fullEnd, asOf));",
+      "original": "          const ms = covered(\n            o.term ? held : o.start >= committedFrom ? committed : opened,\n            o.start,\n            o.fullEnd,\n          );",
+      "replacement": "          const ms = covered(\n            o.term ? held : o.start >= committedFrom ? committed : opened,\n            o.start,\n            Math.min(o.fullEnd, asOf),\n          );",
       "test": {
         "files": ["test/integration/billing-rules.test.ts"],
         "namePattern": "^B2: an advance fee bills the opened cycle on agreed coverage, not on elapsed time$"
@@ -1022,8 +1022,8 @@
       "name": "billing-advance-final-no-rerate",
       "claim": "An opened advance cycle keeps its amount when it closes; it is never re-rated on the arrears coverage.",
       "file": "packages/domain/src/billing/quote.ts",
-      "original": "const ms = covered(advanceCoverage, o.start, o.fullEnd);",
-      "replacement": "const ms = covered(o.fullEnd <= asOf ? coverage.eligible : advanceCoverage, o.start, o.fullEnd);",
+      "original": "          const ms = covered(\n            o.term ? held : o.start >= committedFrom ? committed : opened,\n            o.start,\n            o.fullEnd,\n          );",
+      "replacement": "          const ms = covered(\n            o.term ? held : o.start >= committedFrom ? committed : o.fullEnd <= asOf\n                  ? coverage.eligible\n                  : opened,\n            o.start,\n            o.fullEnd,\n          );",
       "test": {
         "files": ["test/integration/billing-rules.test.ts"],
         "namePattern": "^B2: an opened advance cycle is not rated again when it closes$"
