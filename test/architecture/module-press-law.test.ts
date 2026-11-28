@@ -2417,90 +2417,104 @@ test('name law: guard:lower-baseline refuses a rise or a moved file and writes n
 });
 
 // BUILD-MODE-1, switch `nameGuardReportOnly`. These tests assume build mode is
-// on; NORTH_STAR_BUILD_MODE=off would force strict, so clear it for this file.
-delete process.env.NORTH_STAR_BUILD_MODE;
+// on; NORTH_STAR_BUILD_MODE=off would force strict, so each one clears it for
+// its own run and restores it (the real-tree tests above stay strict under off).
+function withBuildModeEnvCleared(run: () => void): void {
+  const saved = process.env.NORTH_STAR_BUILD_MODE;
+  delete process.env.NORTH_STAR_BUILD_MODE;
+  try {
+    run();
+  } finally {
+    if (saved === undefined) delete process.env.NORTH_STAR_BUILD_MODE;
+    else process.env.NORTH_STAR_BUILD_MODE = saved;
+  }
+}
 const buildModeOn = JSON.stringify({
   enabled: true,
   switches: { nameGuardReportOnly: true },
   version: 1,
 });
 
-test('BUILD-MODE-1: build mode reports a name-law rise and a new name as warnings, and nothing else', () => {
-  const files = {
-    'build-mode.json': buildModeOn,
-    [genericFile]:
-      "export const first = 'booking';\nexport const second = 'booking';\nexport const id = 'sales_order';\n",
-  };
-  const baselineFiles = { [genericFile]: nameLawRow({ 'engine:booking': 1 }) };
-  withNameLawFixture(
-    files,
-    (result) => {
-      assert.deepEqual(nameLawViolations(result), []);
-      assert.deepEqual(
-        result.warnings.map((warning) => warning.ruleId).toSorted(),
-        ['PRESS011_FIRST_PARTY_NAME', 'PRESS015_BASELINE_RISE'],
-      );
-      assert.match(formatModulePressLaw(result), /WARNING .*PRESS015/u);
-      // Rises keep their allowance; nothing is raised or added.
-      assert.deepEqual(
-        lowerNameLawBaseline(
-          { files: baselineFiles, measuredOn: 'fixture', version: 1 },
-          result.nameLaw.observations,
-          'report',
-        ).files,
-        baselineFiles,
-      );
-    },
-    baselineFiles,
-  );
-  // The same tree with the switch off (env, or no build-mode.json) is strict.
-  const previous = process.env.NORTH_STAR_BUILD_MODE;
-  process.env.NORTH_STAR_BUILD_MODE = 'off';
-  try {
+test('BUILD-MODE-1: build mode reports a name-law rise and a new name as warnings, and nothing else', () =>
+  withBuildModeEnvCleared(() => {
+    const files = {
+      'build-mode.json': buildModeOn,
+      [genericFile]:
+        "export const first = 'booking';\nexport const second = 'booking';\nexport const id = 'sales_order';\n",
+    };
+    const baselineFiles = {
+      [genericFile]: nameLawRow({ 'engine:booking': 1 }),
+    };
     withNameLawFixture(
       files,
       (result) => {
-        assert.deepEqual(result.warnings, []);
+        assert.deepEqual(nameLawViolations(result), []);
         assert.deepEqual(
-          nameLawViolations(result)
-            .map((violation) => violation.ruleId)
-            .toSorted(),
+          result.warnings.map((warning) => warning.ruleId).toSorted(),
           ['PRESS011_FIRST_PARTY_NAME', 'PRESS015_BASELINE_RISE'],
+        );
+        assert.match(formatModulePressLaw(result), /WARNING .*PRESS015/u);
+        // Rises keep their allowance; nothing is raised or added.
+        assert.deepEqual(
+          lowerNameLawBaseline(
+            { files: baselineFiles, measuredOn: 'fixture', version: 1 },
+            result.nameLaw.observations,
+            'report',
+          ).files,
+          baselineFiles,
         );
       },
       baselineFiles,
     );
-  } finally {
-    if (previous === undefined) delete process.env.NORTH_STAR_BUILD_MODE;
-    else process.env.NORTH_STAR_BUILD_MODE = previous;
-  }
-  withNameLawFixture(
-    { [genericFile]: files[genericFile] },
-    (result) => {
-      assert.deepEqual(result.warnings, []);
-      assert.equal(nameLawViolations(result).length, 2);
-    },
-    baselineFiles,
-  );
-});
-
-test('BUILD-MODE-1: build mode never reports away a malformed input or a changed frozen migration', () => {
-  withNameLawFixture(
-    { 'build-mode.json': buildModeOn, [appliedMigration]: 'SELECT 2;\n' },
-    (result) => {
-      assert.deepEqual(result.warnings, []);
-      assert.deepEqual(
-        nameLawViolations(result).map((violation) => violation.ruleId),
-        ['PRESS010_NAME_LAW_INPUT'],
+    // The same tree with the switch off (env, or no build-mode.json) is strict.
+    const previous = process.env.NORTH_STAR_BUILD_MODE;
+    process.env.NORTH_STAR_BUILD_MODE = 'off';
+    try {
+      withNameLawFixture(
+        files,
+        (result) => {
+          assert.deepEqual(result.warnings, []);
+          assert.deepEqual(
+            nameLawViolations(result)
+              .map((violation) => violation.ruleId)
+              .toSorted(),
+            ['PRESS011_FIRST_PARTY_NAME', 'PRESS015_BASELINE_RISE'],
+          );
+        },
+        baselineFiles,
       );
-    },
-    {
-      [appliedMigration]: frozenMigrationRow(appliedMigrationSql, {
-        'name:sales_order': 1,
-      }),
-    },
-  );
-});
+    } finally {
+      if (previous === undefined) delete process.env.NORTH_STAR_BUILD_MODE;
+      else process.env.NORTH_STAR_BUILD_MODE = previous;
+    }
+    withNameLawFixture(
+      { [genericFile]: files[genericFile] },
+      (result) => {
+        assert.deepEqual(result.warnings, []);
+        assert.equal(nameLawViolations(result).length, 2);
+      },
+      baselineFiles,
+    );
+  }));
+
+test('BUILD-MODE-1: build mode never reports away a malformed input or a changed frozen migration', () =>
+  withBuildModeEnvCleared(() => {
+    withNameLawFixture(
+      { 'build-mode.json': buildModeOn, [appliedMigration]: 'SELECT 2;\n' },
+      (result) => {
+        assert.deepEqual(result.warnings, []);
+        assert.deepEqual(
+          nameLawViolations(result).map((violation) => violation.ruleId),
+          ['PRESS010_NAME_LAW_INPUT'],
+        );
+      },
+      {
+        [appliedMigration]: frozenMigrationRow(appliedMigrationSql, {
+          'name:sales_order': 1,
+        }),
+      },
+    );
+  }));
 
 test('BUILD-MODE-1: a ratified engine ID is exempt in every mode; the same name outside it is not', () => {
   const policyPath = 'test/architecture/first-party-names.policy.json';
@@ -2592,6 +2606,34 @@ test('BUILD-MODE-1: the real policy ratifies exactly the reviewed ledger roles',
     ],
   );
 });
+
+test('BUILD-MODE-1: a rise on a baselined import key is PRESS013 and still fails in build mode', () =>
+  withBuildModeEnvCleared(() => {
+    const importKey = 'import:packages/domain/src/widget/terms#terms';
+    const baselineFiles = { [genericFile]: nameLawRow({ [importKey]: 1 }) };
+    withNameLawFixture(
+      {
+        'build-mode.json': buildModeOn,
+        [genericFile]: [
+          "import { terms } from '../../domain/src/widget/terms.js';",
+          "import { terms as again } from '../../domain/src/widget/terms.js';",
+          'export const used = [terms, again];',
+        ].join('\n'),
+      },
+      (result) => {
+        assert.deepEqual(result.warnings, []);
+        assert.deepEqual(
+          nameLawViolations(result).map((violation) => violation.ruleId),
+          ['PRESS013_DOMAIN_IMPORT'],
+        );
+        assert.match(
+          nameLawViolations(result)[0]?.message ?? '',
+          /rose from 1 to 2/u,
+        );
+      },
+      baselineFiles,
+    );
+  }));
 
 test('BUILD-MODE-1: a domain import (PRESS013) is never report-only', () => {
   assert.equal(isNameLawObservationRule('PRESS013_DOMAIN_IMPORT'), false);

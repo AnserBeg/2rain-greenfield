@@ -1443,7 +1443,11 @@ function checkNameLaw(
           violations,
           file,
           observation.line,
-          'PRESS015_BASELINE_RISE',
+          // A rise on an import key stays refused in build mode, like a new
+          // import (PRESS013 is never report-only).
+          key.startsWith('import:')
+            ? 'PRESS013_DOMAIN_IMPORT'
+            : 'PRESS015_BASELINE_RISE',
           null,
           `${key} rose from ${String(allowance)} to ${String(observation.count)}; the baseline only shrinks`,
         );
