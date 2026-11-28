@@ -619,6 +619,22 @@ test('period meter bindings require distinct selected boundaries, canonical unit
       ],
     ],
     [
+      'a meter source has no per-quantity fee',
+      [
+        overage,
+        {
+          id: 'seat_fee',
+          kind: 'fixed',
+          base: 'enrollment',
+          stage: 'afterCapBeforeTax',
+          taxClassification: 'untaxed',
+          amount: 'included',
+          perQuantity: true,
+          occurrence: { kind: 'oneOff', at: 'serviceStart' },
+        },
+      ],
+    ],
+    [
       'a meter source uses a per-cycle allowance',
       [
         {
@@ -897,11 +913,14 @@ test('any read model implementing the service-use protocol is an evidence source
 });
 
 test('a bound record quantity is a required exact number on the billed record', () => {
-  const pkg = parseNormalizedApplicationPackageJson(
-    billingFixture('bound').bytes,
-  );
-  assert.ok(pkg.languageVersion === 'v6');
-  const rate = pkg.billingPlans![0]!;
+  const load = (mode: FixtureMode) => {
+    const loaded = parseNormalizedApplicationPackageJson(
+      billingFixture(mode).bytes,
+    );
+    assert.ok(loaded.languageVersion === 'v6');
+    return loaded;
+  };
+  const pkg = load('bound');
   const source = pkg.queries.find((q) => q.queryId === sourceId)!;
   assert.ok(source.queryType === 'get');
   const notes = pkg.fields.find((f) => f.fieldId === notesField)!;
@@ -909,14 +928,16 @@ test('a bound record quantity is a required exact number on the billed record', 
   const withSeats = (
     fieldType: (typeof notes)['fieldType'],
     presence: 'required' | 'optional' = 'required',
-  ) =>
-    billingBindingProblem({
-      ...pkg,
+    base: typeof pkg = pkg,
+  ) => {
+    const rate = base.billingPlans![0]!;
+    return billingBindingProblem({
+      ...base,
       fields: [
-        ...pkg.fields,
+        ...base.fields,
         { ...notes, fieldId: seats, presence, fieldType },
       ],
-      queries: pkg.queries.map((q) =>
+      queries: base.queries.map((q) =>
         q.queryId === sourceId && q.queryType === 'get'
           ? {
               ...q,
@@ -946,6 +967,7 @@ test('a bound record quantity is a required exact number on the billed record', 
         },
       ],
     });
+  };
   const integer = {
     kind: 'integerFieldType',
     representation: 'canonicalString',
@@ -962,6 +984,24 @@ test('a bound record quantity is a required exact number on the billed record', 
     'BILLING_SOURCE_FIELDS_REQUIRED',
     'free text cannot be a quantity',
   );
+  // Only the agreed band reads the record quantity. Beside an evidence source
+  // (its legs carry the quantity) or a meter (readings) it is refused.
+  assert.equal(
+    withSeats(integer, 'required', load('interval')),
+    undefined,
+    'an agreed-interval source reads the record quantity',
+  );
+  for (const [mode, reason] of [
+    ['evidence', 'an evidence source rates its legs, not a record quantity'],
+    ['arrears', 'a meter source rates readings, not a record quantity'],
+  ] as const) {
+    assert.equal(billingBindingProblem(load(mode)), undefined, mode);
+    assert.equal(
+      withSeats(integer, 'required', load(mode)),
+      'BILLING_SOURCE_FIELDS_REQUIRED',
+      reason,
+    );
+  }
 });
 
 test('the quote and terms permissions are bound by their declared role, not by name', () => {
@@ -1047,6 +1087,50 @@ test('the quote and terms permissions are bound by their declared role, not by n
     ],
   ] as const)
     assert.equal(problem, refused, reason);
+  // Two bound plans on one record type share the grant pair: each plan's
+  // quote and terms writes are inside the grants, not "another" reader.
+  const rate = pkg.billingPlans![0]!;
+  const bound = rate.bindings!;
+  const second = (local: string) => CanonicalIdSchema.parse(id(local));
+  const copied = {
+    [bound.publishOperationId]: second('operation.second_publish_terms'),
+    [bound.overrideOperationId]: second('operation.second_override_terms'),
+    [bound.assignmentOperationId]: second('operation.second_assign_list'),
+  };
+  const quote = pkg.queries.find((q) => q.queryId === quoteId)!;
+  assert.equal(
+    billingBindingProblem({
+      ...pkg,
+      queries: [
+        ...pkg.queries,
+        { ...quote, queryId: second('query.second_billable_quote') },
+      ],
+      operations: [
+        ...pkg.operations,
+        ...pkg.operations.flatMap((o) =>
+          copied[o.operationId]
+            ? [{ ...o, operationId: copied[o.operationId]! }]
+            : [],
+        ),
+      ],
+      billingPlans: [
+        rate,
+        {
+          ...rate,
+          id: 'second_plan',
+          bindings: {
+            ...bound,
+            quoteQueryId: second('query.second_billable_quote'),
+            publishOperationId: copied[bound.publishOperationId]!,
+            overrideOperationId: copied[bound.overrideOperationId]!,
+            assignmentOperationId: copied[bound.assignmentOperationId]!,
+          },
+        },
+      ],
+    }),
+    undefined,
+    'two bound plans share the quote and terms grants',
+  );
 });
 
 test('the serving role has no direct billing table privileges', async () => {

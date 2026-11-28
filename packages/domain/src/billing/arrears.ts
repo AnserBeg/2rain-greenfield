@@ -1,6 +1,7 @@
-import type {
-  BillingPeriod,
-  BillingPlan,
+import {
+  hasBillingRules,
+  type BillingPeriod,
+  type BillingPlan,
 } from '../../../canonical-model/src/billing.js';
 import type { BillingQuoteEvidence } from '../../../canonical-model/src/billing-evidence.js';
 import { ServiceUseSnapshotSchema } from '../../../canonical-model/src/service-evidence.js';
@@ -66,6 +67,10 @@ export function reviewArrearsCharges(
     ...input,
     snapshot: ServiceUseSnapshotSchema.parse(input.snapshot),
   };
+  // Early return is a rule key: it is rated under calculation v4 only, so a
+  // plan that does not declare it cannot be handed one.
+  if (use?.earlyReturn && !hasBillingRules(plan))
+    throw new Error('Early return requires calculation v4');
   if (use) {
     const term = use.earlyReturn?.minimumTerm;
     evidence.serviceEnd = serviceUseEnd(

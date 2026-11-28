@@ -182,10 +182,12 @@ export const BillingPlanSchema = z
               protocol: z.literal(SERVICE_USE_PROTOCOL),
               subjectId: id,
               // Absent keeps calculation v3: the agreed end still closes the
-              // service and only use inside it is rated. agreedEnd bills the
-              // agreed interval in full; actualEnd ends the service at the
-              // last return. A minimum term in periods from service start is
-              // billed even when use ends sooner.
+              // service and only use inside it is rated. agreedEnd keeps the
+              // service open to the agreed end; actualEnd ends it at the last
+              // return. A minimum term in periods from service start holds
+              // the service end at least that late. Committed time runs from
+              // the LAST RETURN to the service end: time before the first
+              // pickup and gaps between legs are not committed.
               earlyReturn: z
                 .strictObject({
                   bill: z.enum(['agreedEnd', 'actualEnd']),
@@ -259,6 +261,14 @@ export const BillingPlanSchema = z
           issue('A cap multiple must name an offered rate');
         if (Object.keys(c.partial ?? {}).some((p) => !(p in c.rates)))
           issue('A partial rule must name an offered rate');
+        // A ladder charges a partial block only in its shortest offered rate;
+        // a partial rule on a longer rate would be declared and never read.
+        const shortest = billingPeriods.find((p) => p in c.rates);
+        if (
+          c.combination?.rule === 'ladder' &&
+          Object.keys(c.partial ?? {}).some((p) => p !== shortest)
+        )
+          issue('Under ladder a partial rule names only the shortest rate');
         if (
           c.partialTime === 'prorateShortestTail' &&
           (c.combination || c.partial)

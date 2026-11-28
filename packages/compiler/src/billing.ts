@@ -15,6 +15,18 @@ export function billingBindingProblem(
   const plans = def.billingPlans ?? [];
   const owners = new Set<string>(),
     publishers = new Set<string>();
+  // Every bound plan's quote query and terms writes sit inside the Billing
+  // grants: several plans may share one grant pair, as the old names forced.
+  const boundQuotes = new Set<string>(),
+    boundWrites = new Set<string>();
+  for (const { bindings } of plans)
+    if (bindings) {
+      boundQuotes.add(bindings.quoteQueryId);
+      boundWrites
+        .add(bindings.publishOperationId)
+        .add(bindings.overrideOperationId)
+        .add(bindings.assignmentOperationId);
+    }
   for (const p of plans) {
     const b = p.bindings;
     if (!b) continue;
@@ -47,9 +59,9 @@ export function billingBindingProblem(
       def.permissions.find(
         (a) => a.permissionId === permissionId && a.lifecycle === 'active',
       );
-    // Each grant is dedicated, as the old names forced: no other active query
-    // reads under the quote grant, and no operation outside the plan's three
-    // terms writes holds the terms grant.
+    // Each grant is dedicated, as the old names forced: no active query but a
+    // bound quote reads under the quote grant, and no operation but a bound
+    // plan's terms writes holds the terms grant.
     const quotePermission = (permissionId: string) =>
       declared(permissionId)?.action === 'read' &&
       declared(permissionId)?.resource.targetId ===
@@ -57,7 +69,7 @@ export function billingBindingProblem(
       permissionId !== source?.permission.targetId &&
       !def.queries.some(
         (q) =>
-          q.queryId !== b.quoteQueryId &&
+          !boundQuotes.has(q.queryId) &&
           q.lifecycle === 'active' &&
           q.permission.targetId === permissionId,
       );
@@ -73,7 +85,7 @@ export function billingBindingProblem(
         terms?.sourceEntity.targetId &&
       !def.operations.some(
         (o) =>
-          !writes.includes(o.operationId) &&
+          !boundWrites.has(o.operationId) &&
           o.lifecycle === 'active' &&
           o.permission.targetId === permissionId,
       );
@@ -113,6 +125,9 @@ export function billingBindingProblem(
         )
       )
         return 'BILLING_METER_SOURCE_REQUIRED';
+      // A meter rates readings: it has no commercial quantity to multiply by.
+      if (p.components.some((c) => c.kind === 'fixed' && c.perQuantity))
+        return 'BILLING_METER_SOURCE_REQUIRED';
     }
     const evidence = billingEvidenceQuery(arrears);
     if (evidence) {
@@ -134,6 +149,15 @@ export function billingBindingProblem(
         return 'BILLING_EVIDENCE_SOURCE_REQUIRED';
     }
     const interval = b.agreedInterval;
+    // B7: a record quantity is read only where the agreed band is billed. An
+    // evidence source rates its legs' quantity and a meter its readings, so a
+    // record quantity bound beside either would be declared and never read.
+    if (
+      interval?.quantityFieldId !== undefined &&
+      arrears !== undefined &&
+      arrears.kind !== 'agreedInterval'
+    )
+      return 'BILLING_SOURCE_FIELDS_REQUIRED';
     // The plan declares which source field holds each commercial role. The
     // role is checked by the field's declaration, never by its name: both are
     // required stored text on the billed entity, and a currency holds exactly

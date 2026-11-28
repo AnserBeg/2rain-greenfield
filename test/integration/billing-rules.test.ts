@@ -244,12 +244,28 @@ test('B1: partial rules name offered rates and replace the legacy shortest-tail 
       'the legacy switch beside a partial rule',
       { partialTime: 'prorateShortestTail', partial: { day: 'whole' } },
     ],
+    [
+      'a longer rate under ladder',
+      {
+        combination: { rule: 'ladder', capAtNextTier: true },
+        partial: { week: 'prorate' },
+      },
+    ],
   ] as const)
     assert.equal(
       BillingPlanSchema.safeParse(timePlan(extra)).success,
       false,
       reason,
     );
+  // A ladder's shortest rate takes a partial rule.
+  assert.ok(
+    BillingPlanSchema.safeParse(
+      timePlan({
+        combination: { rule: 'ladder', capAtNextTier: true },
+        partial: { day: 'prorate' },
+      }),
+    ).success,
+  );
 });
 
 test('rule keys, and only rule keys, select calculation v4 and the rules reader', () => {
@@ -356,7 +372,7 @@ test('B7: a per-quantity fee charges 5 seats x the monthly fee', () => {
 // ---- B9: early return, over the service-use protocol ----
 const owner = { entityId: 'hire', recordId: 'h1', companyId: 'company' };
 const subject = 'slot.equipment';
-function useSnapshot(returnedDay: number | null, asOfDay = 20) {
+function useSnapshot(returnedDay: number | null, asOfDay = 20, pickupDay = 0) {
   return bookingServiceUse({
     schemaVersion: 'booking.ownerUsage/v1',
     ownerRef: { entityId: owner.entityId, recordId: owner.recordId },
@@ -381,7 +397,7 @@ function useSnapshot(returnedDay: number | null, asOfDay = 20) {
         revision: 1,
         kind: 'use',
         voided: false,
-        effectiveStart: start,
+        effectiveStart: roll(pickupDay),
         effectiveEnd: returnedDay === null ? null : roll(returnedDay),
         quantity: '1',
         unit: 'each',
@@ -389,25 +405,65 @@ function useSnapshot(returnedDay: number | null, asOfDay = 20) {
     ],
   });
 }
+type EarlyReturn = NonNullable<
+  ReturnType<typeof billingEvidenceQuery>
+>['earlyReturn'];
 const dailyHire = compileRatePlan(timePlan({}, { day: 'd' })).plan;
-function hireEvidence(asOfDay: number, agreedDays = 5) {
+// A plan declares its early-return rule on its bound evidence source, so it
+// is rated under calculation v4; the unbound plan is the v3 baseline.
+function boundHire(earlyReturn: NonNullable<EarlyReturn>) {
+  return compileRatePlan({
+    ...timePlan({}, { day: 'd' }),
+    bindings: {
+      quoteQueryId: 'quote',
+      evidenceQueryId: 'source',
+      agreedInterval: {
+        customerFieldId: 'customer',
+        currencyFieldId: 'currency',
+        startFieldId: 'start',
+        endFieldId: 'end',
+        zone: 'America/Edmonton',
+      },
+      arrearsSource: {
+        kind: 'evidenceQuery',
+        queryId: 'usage',
+        protocol: SERVICE_USE_PROTOCOL,
+        subjectId: subject,
+        earlyReturn,
+      },
+      publishOperationId: 'publish',
+      overrideOperationId: 'override',
+      assignmentOperationId: 'assign',
+      termsQueryId: 'terms',
+      termsFieldId: 'termsField',
+    },
+  }).plan;
+}
+function hireEvidence(plan: unknown, asOfDay: number, agreedDays = 5) {
   return {
-    ...evidence(dailyHire, agreedDays, { d: '30' }),
+    ...evidence(plan, agreedDays, { d: '30' }),
     asOf: roll(asOfDay),
     bands: [],
   } as BillingQuoteEvidence;
 }
-type EarlyReturn = NonNullable<
-  ReturnType<typeof billingEvidenceQuery>
->['earlyReturn'];
-function earlyReview(earlyReturn: EarlyReturn, returnedDay = 3, asOfDay = 20) {
-  const result = reviewArrearsCharges(dailyHire, hireEvidence(asOfDay), {
-    snapshot: useSnapshot(returnedDay, asOfDay),
+function earlyReview(
+  earlyReturn: EarlyReturn,
+  returnedDay = 3,
+  asOfDay = 20,
+  pickupDay = 0,
+) {
+  const plan = earlyReturn ? boundHire(earlyReturn) : dailyHire;
+  const result = reviewArrearsCharges(plan, hireEvidence(plan, asOfDay), {
+    snapshot: useSnapshot(returnedDay, asOfDay, pickupDay),
     subjectId: subject,
     owner,
     ...(earlyReturn ? { earlyReturn } : {}),
   });
   if (result.status !== 'due') return { status: result.status };
+  assert.equal(
+    result.quote.algorithm,
+    earlyReturn ? BILLING_RULES_CALCULATION : BILLING_CYCLE_CALCULATION,
+  );
   return {
     status: result.status,
     end: result.cycle.end,
@@ -473,6 +529,39 @@ test('B9: a minimum term in periods holds the service open until it elapses', ()
       40,
     ),
     { status: 'due', end: '2025-02-28T16:00:00.000Z', cents: '93000' },
+  );
+});
+
+test('B9: committed time runs from the last return, not from pickup', () => {
+  // Agreed five days at CAD 30, picked up on day one, returned on day three:
+  // two days held, then committed time from the return to the service end.
+  assert.deepEqual(earlyReview({ bill: 'agreedEnd' }, 3, 20, 1), {
+    status: 'due',
+    end: roll(5),
+    cents: '12000',
+  });
+  assert.deepEqual(
+    earlyReview(
+      { bill: 'actualEnd', minimumTerm: { period: 'week', count: 1 } },
+      3,
+      20,
+      1,
+    ),
+    { status: 'due', end: roll(7), cents: '18000' },
+  );
+});
+
+test('B9: early return is rated under calculation v4 only', () => {
+  // A plan that does not declare the rule cannot be handed one.
+  assert.throws(
+    () =>
+      reviewArrearsCharges(dailyHire, hireEvidence(dailyHire, 20), {
+        snapshot: useSnapshot(3),
+        subjectId: subject,
+        owner,
+        earlyReturn: { bill: 'agreedEnd' },
+      }),
+    /Early return requires calculation v4/,
   );
 });
 
@@ -688,7 +777,7 @@ test('boundary readings refuse every shape that is not one unpaused meter cycle'
 });
 
 test('an arrears review refuses an invalid service period', () => {
-  const e = hireEvidence(20);
+  const e = hireEvidence(dailyHire, 20);
   for (const [name, change] of [
     ['a period before the anchor', { periodStart: roll(-1) }],
     ['a service end at the anchor', { serviceEnd: start }],
@@ -843,7 +932,7 @@ test('the persisted reader-45 bound plan keeps its digest (rate tables are keyed
 test('the service-use protocol shape is enforced where Billing consumes it', () => {
   const snapshot = useSnapshot(3);
   const review = (value: unknown) =>
-    reviewArrearsCharges(dailyHire, hireEvidence(20), {
+    reviewArrearsCharges(dailyHire, hireEvidence(dailyHire, 20), {
       snapshot: value as typeof snapshot,
       subjectId: subject,
       owner,
