@@ -299,8 +299,8 @@
       "name": "wf3-floor-own-rung",
       "claim": "A recordTransitioned release raises the floor to its own rung.",
       "file": "packages/canonical-model/src/workflow-trigger-events.ts",
-      "original": "  recordTransitioned: RECORD_TRANSITIONED_TRIGGER_READER,\n} satisfies",
-      "replacement": "  recordTransitioned: RECORD_CREATED_TRIGGER_READER,\n} satisfies",
+      "original": "  recordTransitioned: RECORD_TRANSITIONED_TRIGGER_READER,\n  engineFactChanged: ENGINE_FACT_TRIGGER_READER,",
+      "replacement": "  recordTransitioned: RECORD_CREATED_TRIGGER_READER,\n  engineFactChanged: ENGINE_FACT_TRIGGER_READER,",
       "test": {
         "files": ["test/unit/workflow-triggers.test.ts"]
       },

@@ -1,0 +1,159 @@
+{
+  "version": 1,
+  "packet": "WORKFLOW-3-s1b",
+  "entries": [
+    {
+      "name": "wf3b-history-writer-names-state-change",
+      "claim": "Booking's single history writer names each commitment state change in its own transaction.",
+      "file": "db/migrations/0077_booking_engine_facts.sql",
+      "original": "  PERFORM north_star_internal.booking_emit_state_fact(previous.state,fact,owner_row,r,receipt);",
+      "replacement": "  PERFORM 1;",
+      "test": {
+        "files": ["test/postgres/workflow-engine-fact.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-engine-fact.test.ts",
+          "name": "a confirmed booking starts one linked task per company through its owner record",
+          "expected": "a\\ confirm\\ before\\ activation\\ is\\ sealed\\ out\\ at\\ the\\ watermark"
+        }
+      ]
+    },
+    {
+      "name": "wf3b-fact-receipt-seal",
+      "claim": "A fact whose receipt (invocation) is never written refuses commit.",
+      "file": "db/migrations/0076_engine_fact_occurrences.sql",
+      "original": "  ADD CONSTRAINT record_occurrences_fact_invocation FOREIGN KEY (tenant_id, environment_id, invocation_id)\n    REFERENCES platform.trust_action_invocations (tenant_id, environment_id, invocation_id)\n    DEFERRABLE INITIALLY DEFERRED;",
+      "replacement": "  ADD CONSTRAINT record_occurrences_fact_invocation CHECK (kind <> 'engineFact' OR invocation_id IS NOT NULL);",
+      "test": {
+        "files": ["test/postgres/workflow-engine-fact.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-engine-fact.test.ts",
+          "name": "a fact whose receipt is never written refuses commit",
+          "expected": "Missing\\ expected\\ rejection:\\ a\\ fact\\ with\\ no\\ receipt\\ committed"
+        }
+      ]
+    },
+    {
+      "name": "wf3b-fact-revision-key",
+      "claim": "One occurrence per fact, subject and subject revision.",
+      "file": "db/migrations/0076_engine_fact_occurrences.sql",
+      "original": "  ADD CONSTRAINT record_occurrences_fact_key UNIQUE\n    (tenant_id, environment_id, fact_id, subject_id, subject_revision),",
+      "replacement": "  ADD CONSTRAINT record_occurrences_fact_key CHECK (subject_revision IS NULL OR subject_revision > 0),",
+      "test": {
+        "files": ["test/postgres/workflow-engine-fact.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-engine-fact.test.ts",
+          "name": "one occurrence per fact, subject and revision",
+          "expected": "Missing\\ expected\\ rejection:\\ a\\ second\\ occurrence\\ of\\ one\\ revision\\ was\\ named"
+        }
+      ]
+    },
+    {
+      "name": "wf3b-fact-scope-from-engine-rows",
+      "claim": "The emit takes tenant and environment from the engine row, so the timer sweep with no tenant scope never aborts (E2).",
+      "file": "db/migrations/0076_engine_fact_occurrences.sql",
+      "original": "      WHERE r.tenant_id = $8\n        AND r.environment_id = $9",
+      "replacement": "      WHERE r.tenant_id = north_star_internal.trusted_tenant_id() AND $$8::uuid IS NOT NULL\n        AND r.environment_id = $$9",
+      "test": {
+        "files": ["test/postgres/workflow-engine-fact.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-engine-fact.test.ts",
+          "name": "the timer sweep with no tenant scope expires every due hold and names each change",
+          "expected": "a\\ claimed\\ engine\\ fact\\ owner\\ is\\ not\\ stored\\ in\\ this\\ company"
+        }
+      ]
+    },
+    {
+      "name": "wf3b-engine-facts-no-runtime-grant",
+      "claim": "No runtime role may call engine_facts directly; only engine definer SQL names a fact (E2).",
+      "file": "db/migrations/0076_engine_fact_occurrences.sql",
+      "original": "  uuid, uuid, text, uuid, text, text, text, uuid, uuid, uuid, integer, text, text) FROM PUBLIC;",
+      "replacement": "  uuid, uuid, text, uuid, text, text, text, uuid, uuid, uuid, integer, text, text) FROM PUBLIC;\nGRANT EXECUTE ON FUNCTION north_star_internal.engine_facts(\n  uuid, uuid, text, uuid, text, text, text, uuid, uuid, uuid, integer, text, text) TO north_star_runtime;",
+      "test": {
+        "files": ["test/postgres/workflow-engine-fact.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-engine-fact.test.ts",
+          "name": "no runtime role may name an engine fact",
+          "expected": "Missing\\ expected\\ rejection:\\ north_star_runtime\\ named\\ an\\ engine\\ fact\\ directly"
+        }
+      ]
+    },
+    {
+      "name": "wf3b-page-reaches-fact-event",
+      "claim": "The claim page reaches a fact's event through its own invocation (E5).",
+      "file": "db/migrations/0076_engine_fact_occurrences.sql",
+      "original": "          COALESCE(b.outbox_id, fact_source.outbox_id),\n          COALESCE(b.domain_event_id, fact_source.domain_event_id),",
+      "replacement": "          b.outbox_id,\n          COALESCE(b.domain_event_id, fact_source.domain_event_id),",
+      "test": {
+        "files": ["test/postgres/workflow-engine-fact.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-engine-fact.test.ts",
+          "name": "a confirmed booking starts one linked task per company through its owner record",
+          "expected": "one\\ confirm\\ per\\ company\\ starts\\ exactly\\ one\\ run"
+        }
+      ]
+    },
+    {
+      "name": "wf3b-scope-kind-by-event-type",
+      "claim": "The trigger scope tells an engine fact run by its definition's event type, so loadRun re-derives it (E4).",
+      "file": "db/migrations/0076_engine_fact_occurrences.sql",
+      "original": "     AND c.kind = CASE d.event_type\n                    WHEN 'northstar.runtime:event.record-created' THEN 'created'\n                    WHEN 'northstar.runtime:event.record-transitioned' THEN 'transitioned'\n                    WHEN 'northstar.runtime:event.engine-fact-changed' THEN 'engineFact' END",
+      "replacement": "     AND c.kind = CASE WHEN d.to_state IS NULL THEN 'created' ELSE 'transitioned' END",
+      "test": {
+        "files": ["test/postgres/workflow-engine-fact.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-engine-fact.test.ts",
+          "name": "a confirmed booking starts one linked task per company through its owner record",
+          "expected": "each\\ run\\ completes\\ on\\ its\\ re\\-derived\\ trigger\\ scope"
+        }
+      ]
+    },
+    {
+      "name": "wf3b-consumer-kind-by-event-type",
+      "claim": "The consumer matches an occurrence kind by the definition event type, never by having a target state (E4).",
+      "file": "packages/postgres-provider/src/workflow-consumer.ts",
+      "original": "    occurrence.kind === OCCURRENCE_KIND_BY_EVENT_TYPE[definition.event_type] &&",
+      "replacement": "    occurrence.kind ===\n      (definition.to_state === null ? 'created' : 'transitioned') &&",
+      "test": {
+        "files": ["test/unit/workflow-triggers.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/workflow-triggers.test.ts",
+          "name": "an engine fact starts only definitions of its own kind and fact (E4)",
+          "expected": "a\\ fact\\ starts\\ a\\ definition\\ of\\ its\\ own\\ kind,\\ fact\\ and\\ value"
+        }
+      ]
+    },
+    {
+      "name": "wf3b-timer-value-refused",
+      "claim": "Admission refuses a value any engine timer enters, which would silently never start (E3).",
+      "file": "packages/canonical-model/src/engine-facts.ts",
+      "original": "    if (timed.has(valueId)) continue;",
+      "replacement": "    if (timed.has(valueId) && Math.random() > 2) continue;",
+      "test": {
+        "files": ["test/unit/workflow-triggers.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/workflow-triggers.test.ts",
+          "name": "engineFactChanged admits only declared, command-entered values on a company-owned owner type",
+          "expected": "Missing\\ expected\\ exception:\\ northstar\\.booking:value\\.cancelled"
+        }
+      ]
+    }
+  ]
+}
