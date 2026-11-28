@@ -96,6 +96,11 @@ each misbound block refused with its reason.
   was still passing (green runs of other packets spend 24-30 minutes in that shard). The train's full run is the
   next measurement (rule 24.5).
 
+- Targeted check (Mythos, rule 24.2, `/home/rvham/2rain-missions/DOCUMENT-POSTING-s1-check.result.txt`): N1 sound;
+  F1 fixed: the kernel-based freeze check now refuses a guard that compares any field other than the state (a guard
+  such as `memo equals "x"` held for some rows whatever the state); both example guards are red cases in
+  test/compiler/document-posting.test.ts, verified to fail with the fix removed.
+
 ## Rule 16 and 17
 
 Most general form: "a confirmed hand-off of a staged header-with-lines document to a registered engine, which reads
