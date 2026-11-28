@@ -8,6 +8,7 @@ import {
   runMigrations,
 } from '../../packages/postgres-provider/src/migrations.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
+import { seedBusinessCalendar } from '../helpers/business-calendar-seed.js';
 
 // ACCOUNTING-1 slice 1a-i (ADR-0093 sections 4, 6, 8 and 9). Two companies
 // share ONE tenant and environment throughout. Storage checks insert directly
@@ -99,10 +100,11 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
           "INSERT INTO platform.environments(tenant_id,id,slug) VALUES ($1,$2,'ledger')",
           [tenant, environment],
         );
-        await admin.query(
-          "INSERT INTO platform.inventory_tenant_calendars(tenant_id,time_zone,business_day_boundary) VALUES ($1,'America/Vancouver','00:00')",
-          [tenant],
-        );
+        await seedBusinessCalendar(admin, {
+          tenantId: tenant,
+          timeZone: 'America/Vancouver',
+          boundary: '00:00',
+        });
         const [w1, w2, w3] = [
           await session(),
           await session(),
@@ -904,6 +906,7 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
                     provenance,
                   ),
                 );
+                second.catch(() => undefined); // handled at creation (review R1)
                 await blocked();
                 await w1.query('COMMIT');
                 const outcome = await second;
@@ -951,6 +954,7 @@ async function world(t: TestContext, part: 'core' | 'isolation') {
                     receipt,
                   ),
                 );
+                second.catch(() => undefined); // handled at creation (review R1)
                 await blocked();
                 await w1.query('COMMIT');
                 const outcome = await second;

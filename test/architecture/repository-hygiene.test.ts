@@ -139,6 +139,7 @@ const suiteDefinitions = [
   {
     discoveryPattern: 'test/architecture/**/*.test.ts',
     expectedFiles: [
+      'test/architecture/business-calendar.test.ts',
       'test/architecture/canonical-contracts-purity.test.ts',
       'test/architecture/ci-main-push.test.ts',
       'test/architecture/ci-tiers.test.ts',
@@ -228,6 +229,8 @@ const suiteDefinitions = [
       'test/postgres/booking-serving.test.ts',
       'test/postgres/boot-capabilities.test.ts',
       'test/postgres/build-eval.test.ts',
+      'test/postgres/business-calendar-reader.test.ts',
+      'test/postgres/business-calendar.test.ts',
       'test/postgres/catalog-extras.test.ts',
       'test/postgres/catalog-runtime.test.ts',
       'test/postgres/communication-threads.test.ts',

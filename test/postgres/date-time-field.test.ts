@@ -25,6 +25,7 @@ import {
   LINEAGE_INSTALL_VOLUME,
   withEphemeralPostgres,
 } from '../helpers/postgres.js';
+import { seedBusinessCalendar } from '../helpers/business-calendar-seed.js';
 
 const equipment = `${NS}:entity.custom_equipment`;
 const appointment = {
@@ -339,9 +340,10 @@ test(
             `[date-time] database checks verified ${new Date().toISOString()}`,
           );
           // Company-sourced field: the current company calendar decides.
-          await pool.query(
-            `UPDATE platform.inventory_tenant_calendars SET time_zone = 'America/Toronto'`,
-          );
+          await seedBusinessCalendar(pool, {
+            tenantId: null,
+            timeZone: 'America/Toronto',
+          });
           const duePatch = await ship(due);
           await opened.service.activate(duePatch);
           console.error(
@@ -374,9 +376,10 @@ test(
           );
           assert.equal(companyGap?.details.reason, 'DATE_TIME_NONEXISTENT');
           // A calendar change leaves an untouched value intact.
-          await pool.query(
-            `UPDATE platform.inventory_tenant_calendars SET time_zone = 'America/Edmonton'`,
-          );
+          await seedBusinessCalendar(pool, {
+            tenantId: null,
+            timeZone: 'America/Edmonton',
+          });
           const reread = await world.read(
             'custom_equipment',
             company.readBack!.recordId,
@@ -951,9 +954,10 @@ test(
           assert.equal(change.status, 'drafted', JSON.stringify(change));
           await opened.service.approve(change.patchId);
           await opened.service.activate(change.patchId);
-          await pool.query(
-            "UPDATE platform.inventory_tenant_calendars SET time_zone = 'America/Toronto'",
-          );
+          await seedBusinessCalendar(pool, {
+            tenantId: null,
+            timeZone: 'America/Toronto',
+          });
           const createCompany = async (
             code: string,
             status: 'active' | 'archived',

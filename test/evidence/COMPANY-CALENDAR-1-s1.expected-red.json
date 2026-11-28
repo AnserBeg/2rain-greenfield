@@ -1,0 +1,655 @@
+{
+  "version": 1,
+  "packet": "COMPANY-CALENDAR-1-s1",
+  "entries": [
+    {
+      "name": "calendar-arithmetic-flip",
+      "claim": "The business-day arithmetic subtracts the day boundary exactly as 0033 did.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "    requested_at AT TIME ZONE requested_time_zone\n    - make_interval(",
+      "replacement": "    requested_at AT TIME ZONE requested_time_zone\n    + make_interval(",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "business period is unchanged by the calendar resolver",
+          "expected": "the resolver dates an instant differently from the 0033 business period"
+        }
+      ]
+    },
+    {
+      "name": "calendar-company-branch",
+      "claim": "A company with an override is dated by its own calendar, not the tenant default.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "     AND ((c.environment_id = requested_environment_id AND c.company_id = requested_company_id)\n          OR (c.company_id IS NULL))",
+      "replacement": "     AND ((c.company_id IS NULL))",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "company B on its override and company A on the tenant default date one instant apart",
+          "expected": "company B was dated by the tenant default"
+        },
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "a calendar version applies only from its effective start",
+          "expected": "a version answered an instant before its effective start"
+        },
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "an instant before an override's first version resolves the tenant default",
+          "expected": "an instant before the override did not fall back to the tenant default"
+        }
+      ]
+    },
+    {
+      "name": "calendar-effective-from",
+      "claim": "A version answers only instants at or after its effective start.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "     AND v.effective_from <= requested_at\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "a calendar version applies only from its effective start",
+          "expected": "a version answered an instant before its effective start"
+        },
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "an instant before an override's first version resolves the tenant default",
+          "expected": "an instant before the override did not fall back to the tenant default"
+        }
+      ]
+    },
+    {
+      "name": "calendar-default-fallback",
+      "claim": "An instant before an override's first version resolves the tenant default.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "          OR (c.company_id IS NULL))",
+      "replacement": "          OR (c.company_id IS NULL AND NOT EXISTS (SELECT FROM platform.business_calendars AS o WHERE o.tenant_id = requested_tenant_id AND o.environment_id = requested_environment_id AND o.company_id = requested_company_id)))",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "an instant before an override's first version resolves the tenant default",
+          "expected": "an instant before the override did not fall back to the tenant default"
+        }
+      ]
+    },
+    {
+      "name": "calendar-versions-append-only",
+      "claim": "A stored calendar version is never rewritten or deleted.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "BEFORE UPDATE OR DELETE OR TRUNCATE ON platform.business_calendar_versions",
+      "replacement": "BEFORE TRUNCATE ON platform.business_calendar_versions",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "calendar versions and calendars are append-only",
+          "expected": "Missing expected rejection: a version was rewritten"
+        }
+      ]
+    },
+    {
+      "name": "calendar-mirror-frozen",
+      "claim": "The old calendar table is a frozen mirror: UPDATE and DELETE refuse.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "BEFORE UPDATE OR DELETE OR TRUNCATE ON platform.inventory_tenant_calendars",
+      "replacement": "BEFORE TRUNCATE ON platform.inventory_tenant_calendars",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "the frozen mirror refuses UPDATE and DELETE",
+          "expected": "Missing expected rejection: the mirror was rewritten"
+        }
+      ]
+    },
+    {
+      "name": "calendar-provision-both-stores",
+      "claim": "Provisioning writes the authoritative default and the mirror in one transaction.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "      requested_business_day_boundary\n    );\n    PERFORM north_star_internal.business_calendar_put(\n      requested_tenant_id, NULL, NULL, '-infinity'::timestamptz,\n      requested_time_zone, requested_business_day_boundary, 1::smallint, 1::smallint\n    ); END IF;",
+      "replacement": "      requested_business_day_boundary\n    ); END IF;",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "provisioning declares the tenant default in both stores",
+          "expected": "provisioning wrote the mirror without the authoritative default"
+        }
+      ]
+    },
+    {
+      "name": "calendar-no-utc-default",
+      "claim": "An undeclared calendar refuses; nothing answers for it, UTC or otherwise.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "  IF NOT FOUND THEN\n    RAISE EXCEPTION 'calendar.undeclared'\n      USING ERRCODE = 'P0001', DETAIL = format('tenantId=%s', requested_tenant_id); END IF;\n  RETURN north_star_internal.business_day_of(declared_zone, declared_boundary, requested_at);",
+      "replacement": "  IF false THEN\n    RAISE EXCEPTION 'calendar.undeclared'\n      USING ERRCODE = 'P0001', DETAIL = format('tenantId=%s', requested_tenant_id); END IF;\n  RETURN north_star_internal.business_day_of(declared_zone, declared_boundary, requested_at);",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "an undeclared calendar refuses with no UTC default",
+          "expected": "Missing expected rejection: an undeclared calendar dated an instant"
+        }
+      ]
+    },
+    {
+      "name": "calendar-session-scope",
+      "claim": "A runtime session dates only its own tenant.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "  IF session_user IN ('north_star_runtime', 'north_star_module_runtime')",
+      "replacement": "  IF false AND session_user IN ('north_star_runtime', 'north_star_module_runtime')",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "a runtime session cannot read another tenant's business period",
+          "expected": "Missing expected rejection: a runtime session dated another tenant's instant"
+        }
+      ]
+    },
+    {
+      "name": "calendar-null-instant",
+      "claim": "A NULL instant on a declared tenant is dated NULL, as in 0033.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "      requested_tenant_id, NULL, NULL,\n      coalesce(requested_effective_at, '-infinity'::timestamptz)\n    ) AS version;",
+      "replacement": "      requested_tenant_id, NULL, NULL,\n      requested_effective_at\n    ) AS version;",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "business period is unchanged by the calendar resolver",
+          "expected": "INVENTORY_TENANT_CALENDAR_UNDECLARED"
+        },
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "a declared tenant dates a NULL instant as NULL",
+          "expected": "INVENTORY_TENANT_CALENDAR_UNDECLARED"
+        }
+      ]
+    },
+    {
+      "name": "calendar-setter-read-committed",
+      "claim": "The calendar setter writes only under READ COMMITTED.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "  IF current_setting('transaction_isolation') <> 'read committed' THEN\n    RAISE EXCEPTION 'calendar.requiresReadCommitted'; END IF;",
+      "replacement": "  IF false THEN\n    RAISE EXCEPTION 'calendar.requiresReadCommitted'; END IF;",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "the calendar setter refuses outside READ COMMITTED",
+          "expected": "Missing expected rejection: the setter wrote under REPEATABLE READ"
+        }
+      ]
+    },
+    {
+      "name": "calendar-default-single-version",
+      "claim": "A tenant default keeps one version while its frozen mirror exists.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "  IF FOUND AND requested_company_id IS NULL THEN",
+      "replacement": "  IF false AND FOUND AND requested_company_id IS NULL THEN",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "a tenant default keeps one version while its mirror exists",
+          "expected": "Missing expected rejection: a second tenant-default version was written beside the mirror"
+        }
+      ]
+    },
+    {
+      "name": "calendar-override-backdated",
+      "claim": "An override may not start unbounded once its company has a ledger company row.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "      EXISTS (SELECT FROM platform.ledger_companies AS company",
+      "replacement": "      false AND EXISTS (SELECT FROM platform.ledger_companies AS company",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "an override cannot start unbounded once its company has dated facts",
+          "expected": "Missing expected rejection: an override re-dated a company with ledger facts"
+        }
+      ]
+    },
+    {
+      "name": "calendar-no-runtime-grant",
+      "claim": "No runtime role reads a calendar table directly.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "REVOKE ALL ON platform.business_calendars, platform.business_calendar_versions FROM PUBLIC;",
+      "replacement": "REVOKE ALL ON platform.business_calendars, platform.business_calendar_versions FROM PUBLIC;\nGRANT SELECT ON platform.business_calendar_versions TO north_star_runtime;",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "no runtime role holds a calendar table or an internal calendar function",
+          "expected": "a runtime role holds a calendar privilege"
+        }
+      ]
+    },
+    {
+      "name": "calendar-read-company-scope",
+      "claim": "A principal scoped to company A cannot read company B's calendar, even with B's correct IDs.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "        AND (m.legal_entity_id IS NULL OR m.legal_entity_id = company)) THEN",
+      "replacement": "        AND true) THEN",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "a principal scoped to company A is refused company B's calendar",
+          "expected": "Missing expected rejection: a principal scoped to company A read company B's calendar"
+        }
+      ]
+    },
+    {
+      "name": "calendar-backfill-verbatim",
+      "claim": "The backfill copies each mirror row verbatim, recorded when the mirror row was created.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "         mirror.business_day_boundary, mirror.created_at\n    FROM platform.inventory_tenant_calendars AS mirror;",
+      "replacement": "         mirror.business_day_boundary, transaction_timestamp()\n    FROM platform.inventory_tenant_calendars AS mirror;",
+      "test": {
+        "files": ["test/postgres/business-calendar-reader.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar-reader.test.ts",
+          "name": "upgrading to the calendar resolver leaves every stored row byte-identical",
+          "expected": "a tenant default differs from its mirror row"
+        }
+      ]
+    },
+    {
+      "name": "calendar-override-backdated-posting",
+      "claim": "An override may not start unbounded once its company has a stock posting configuration.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "      OR EXISTS (SELECT FROM platform.inventory_posting_configurations AS configuration",
+      "replacement": "      OR false AND EXISTS (SELECT FROM platform.inventory_posting_configurations AS configuration",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "an override cannot start unbounded once its company has a stock posting configuration",
+          "expected": "Missing expected rejection: an override re-dated a company with stock facts"
+        }
+      ]
+    },
+    {
+      "name": "calendar-version-number-order",
+      "claim": "A calendar version takes the next version number.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "  IF NEW.version <> coalesce(latest_version, 0) + 1 OR NEW.effective_from <= latest_start THEN",
+      "replacement": "  IF false OR NEW.effective_from <= latest_start THEN",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "calendar versions append in number and start order",
+          "expected": "Missing expected rejection: a version number was skipped"
+        }
+      ]
+    },
+    {
+      "name": "calendar-version-start-order",
+      "claim": "A calendar version starts strictly after the one before it.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "  IF NEW.version <> coalesce(latest_version, 0) + 1 OR NEW.effective_from <= latest_start THEN",
+      "replacement": "  IF NEW.version <> coalesce(latest_version, 0) + 1 OR false THEN",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "calendar versions append in number and start order",
+          "expected": "Missing expected rejection: a version started before its predecessor"
+        }
+      ]
+    },
+    {
+      "name": "calendar-default-first-unbounded",
+      "claim": "A tenant default's first version starts at -infinity, which keeps the NULL-instant lookup safe.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "  IF owner_company IS NULL AND NEW.version = 1 AND NEW.effective_from <> '-infinity'::timestamptz THEN",
+      "replacement": "  IF false AND owner_company IS NULL AND NEW.version = 1 AND NEW.effective_from <> '-infinity'::timestamptz THEN",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "a tenant default's first version starts unbounded",
+          "expected": "Missing expected rejection: a tenant default started at a finite instant"
+        }
+      ]
+    },
+    {
+      "name": "calendar-calendars-append-only",
+      "claim": "A stored calendar row is never rewritten or deleted.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "BEFORE UPDATE OR DELETE OR TRUNCATE ON platform.business_calendars\n",
+      "replacement": "BEFORE TRUNCATE ON platform.business_calendars\n",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "calendar versions and calendars are append-only",
+          "expected": "Missing expected rejection: a calendar was rewritten"
+        }
+      ]
+    },
+    {
+      "name": "calendar-inventory-undeclared",
+      "claim": "The business period refuses an undeclared tenant by its 0033 name.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "  IF NOT FOUND THEN\n    RAISE EXCEPTION 'INVENTORY_TENANT_CALENDAR_UNDECLARED'",
+      "replacement": "  IF false THEN\n    RAISE EXCEPTION 'INVENTORY_TENANT_CALENDAR_UNDECLARED'",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "business period is unchanged by the calendar resolver",
+          "expected": "Missing expected rejection: north_star_internal.inventory_business_period accepted an undeclared tenant"
+        }
+      ]
+    },
+    {
+      "name": "calendar-business-day-null",
+      "claim": "business_day dates a NULL instant NULL for a declared calendar.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "      requested_company_id, coalesce(requested_at, '-infinity'::timestamptz)) AS version;",
+      "replacement": "      requested_company_id, requested_at) AS version;",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "a declared tenant dates a NULL instant as NULL",
+          "expected": "calendar.undeclared"
+        }
+      ]
+    },
+    {
+      "name": "calendar-future-day-start",
+      "claim": "A calendar change starts exactly at a business-day start, never mid-day.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "    IF ((start_day + prior_boundary) AT TIME ZONE prior_zone) IS DISTINCT FROM requested_effective_from\n",
+      "replacement": "    IF false\n",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "a calendar change starts a future business day",
+          "expected": "Missing expected rejection: a mid-day change was accepted"
+        }
+      ]
+    },
+    {
+      "name": "calendar-future-day-future",
+      "claim": "A calendar change starts a future business day, never today.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "       OR start_day <= north_star_internal.business_day_of(prior_zone, prior_boundary, transaction_timestamp()) THEN",
+      "replacement": "       OR false THEN",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "a calendar change starts a future business day",
+          "expected": "Missing expected rejection: a change effective today was accepted"
+        }
+      ]
+    },
+    {
+      "name": "calendar-setter-scope",
+      "claim": "The setter refuses an environment without a company, and the reverse.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "     OR (requested_environment_id IS NULL) <> (requested_company_id IS NULL) THEN",
+      "replacement": "     OR false THEN",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "the calendar setter refuses a mismatched scope and an unknown zone",
+          "expected": "the setter accepted a mismatched scope"
+        }
+      ]
+    },
+    {
+      "name": "calendar-setter-zone",
+      "claim": "The setter refuses a zone PostgreSQL does not know.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "  IF NOT EXISTS (SELECT FROM pg_catalog.pg_timezone_names WHERE name = requested_time_zone) THEN\n    RAISE EXCEPTION 'calendar.timeZoneUnknown'",
+      "replacement": "  IF false THEN\n    RAISE EXCEPTION 'calendar.timeZoneUnknown'",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "the calendar setter refuses a mismatched scope and an unknown zone",
+          "expected": "Missing expected rejection: the setter accepted an unknown time zone"
+        }
+      ]
+    },
+    {
+      "name": "calendar-read-membership-revoked",
+      "claim": "A revoked membership reads no calendar.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "        AND m.revoked_at IS NULL AND r.revoked_at IS NULL",
+      "replacement": "        AND true AND r.revoked_at IS NULL",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "a revoked membership or a revoked role reads no calendar",
+          "expected": "Missing expected rejection: a revoked membership read a calendar"
+        }
+      ]
+    },
+    {
+      "name": "calendar-read-role-revoked",
+      "claim": "A membership on a revoked role reads no calendar.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "        AND m.revoked_at IS NULL AND r.revoked_at IS NULL",
+      "replacement": "        AND m.revoked_at IS NULL AND true",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "a revoked membership or a revoked role reads no calendar",
+          "expected": "Missing expected rejection: a revoked role read a calendar"
+        }
+      ]
+    },
+    {
+      "name": "calendar-check-scope",
+      "claim": "The table CHECK CHECK ((environment_id IS NULL) = (company_id IS NULL)) refuses its violation on its own.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "CHECK ((environment_id IS NULL) = (company_id IS NULL))",
+      "replacement": "CHECK ((environment_id IS NULL) = (company_id IS NULL) OR true)",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "each calendar table CHECK refuses its own violation",
+          "expected": "Missing expected rejection: a calendar with an environment and no company was stored"
+        }
+      ]
+    },
+    {
+      "name": "calendar-check-default-id",
+      "claim": "The table CHECK CHECK (company_id IS NOT NULL OR calendar_id = tenant_id) refuses its violation on its own.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "CHECK (company_id IS NOT NULL OR calendar_id = tenant_id)",
+      "replacement": "CHECK (company_id IS NOT NULL OR calendar_id = tenant_id OR true)",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "each calendar table CHECK refuses its own violation",
+          "expected": "Missing expected rejection: a tenant default's id differs from its tenant"
+        }
+      ]
+    },
+    {
+      "name": "calendar-check-version-positive",
+      "claim": "The table CHECK CHECK (version >= 1) refuses its violation on its own.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "CHECK (version >= 1)",
+      "replacement": "CHECK (version >= 1 OR true)",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "each calendar table CHECK refuses its own violation",
+          "expected": "Missing expected rejection: a version numbered zero was stored"
+        }
+      ]
+    },
+    {
+      "name": "calendar-check-start-bounded",
+      "claim": "The table CHECK CHECK (effective_from <> 'infinity'::timestamptz) refuses its violation on its own.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "CHECK (effective_from <> 'infinity'::timestamptz)",
+      "replacement": "CHECK (effective_from <> 'infinity'::timestamptz OR true)",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "each calendar table CHECK refuses its own violation",
+          "expected": "Missing expected rejection: a version starting at infinity was stored"
+        }
+      ]
+    },
+    {
+      "name": "calendar-check-unbounded-first",
+      "claim": "The table CHECK CHECK (effective_from <> '-infinity'::timestamptz OR version = 1) refuses its violation on its own.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "CHECK (effective_from <> '-infinity'::timestamptz OR version = 1)",
+      "replacement": "CHECK (effective_from <> '-infinity'::timestamptz OR version = 1 OR true)",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "each calendar table CHECK refuses its own violation",
+          "expected": "Missing expected rejection: a second version starting unbounded was stored"
+        }
+      ]
+    },
+    {
+      "name": "calendar-check-zone-not-blank",
+      "claim": "The table CHECK CHECK (btrim(time_zone) <> '') refuses its violation on its own.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "CHECK (btrim(time_zone) <> '')",
+      "replacement": "CHECK (btrim(time_zone) <> '' OR true)",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "each calendar table CHECK refuses its own violation",
+          "expected": "Missing expected rejection: a blank zone was stored"
+        }
+      ]
+    },
+    {
+      "name": "calendar-check-week-start",
+      "claim": "The table CHECK CHECK (week_start BETWEEN 1 AND 7) refuses its violation on its own.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "CHECK (week_start BETWEEN 1 AND 7)",
+      "replacement": "CHECK (week_start BETWEEN 1 AND 7 OR true)",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "each calendar table CHECK refuses its own violation",
+          "expected": "Missing expected rejection: a week start outside 1-7 was stored"
+        }
+      ]
+    },
+    {
+      "name": "calendar-check-fiscal-month",
+      "claim": "The table CHECK CHECK (fiscal_year_start_month BETWEEN 1 AND 12) refuses its violation on its own.",
+      "file": "db/migrations/0073_business_calendar.sql",
+      "original": "CHECK (fiscal_year_start_month BETWEEN 1 AND 12)",
+      "replacement": "CHECK (fiscal_year_start_month BETWEEN 1 AND 12 OR true)",
+      "test": {
+        "files": ["test/postgres/business-calendar.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/business-calendar.test.ts",
+          "name": "each calendar table CHECK refuses its own violation",
+          "expected": "Missing expected rejection: a fiscal month outside 1-12 was stored"
+        }
+      ]
+    }
+  ]
+}
