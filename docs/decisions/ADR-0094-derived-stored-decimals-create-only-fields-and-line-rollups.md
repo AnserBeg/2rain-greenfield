@@ -262,6 +262,9 @@ editor's update save is apps/web/src/document-editor.ts:3445-3451. The phase-0 S
   create-only and required; create-only on a numbered field, a derived target or a rollup field; a template larger than
   `maximumLines`; result precision over 38; `materialize: 'stored'` in s1 (named not-yet diagnostic); a writable input
   that offers a derived target; a money-with-stored-currency comparison against a non-zero literal or another field.
+- Compiler refusal (s1 review fix): a rollup with no UNFILTERED list query of its lines that selects the aggregand. The
+  total sums every live line, so the query that authorizes it must show every live line; a filtered query never
+  authorizes it, even when it comes first (Q4).
 - Runtime: the derive, overflow and maximum refusals by name; rollup overflow refuses by name at read; the header lock
   and the lock order; the withheld state; the create-only refusal on update.
 - s2 admission site: gaps b and c, verified before s2 starts.

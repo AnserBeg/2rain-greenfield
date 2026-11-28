@@ -987,7 +987,7 @@ export function bindLineTotals(
         id,
         'A total is read by an active direct get of its record type.',
       );
-    const lineQuery = v6.queries.find(
+    const lineLists = v6.queries.filter(
       (query) =>
         query.lifecycle === 'active' &&
         query.queryType === 'list' &&
@@ -998,12 +998,21 @@ export function bindLineTotals(
           (selection) => selection.field.targetId === aggregand.fieldId,
         ),
     );
+    // The total sums every live line, so the query that authorizes it must
+    // show every live line: a filtered one would let a reader see a sum over
+    // lines no query they hold can show (owner Q4).
+    const lineQuery = lineLists.find(
+      (query) =>
+        query.filter.kind === 'booleanPredicate' && query.filter.value === true,
+    );
     const lineQueryId = lineQuery?.queryId;
     if (!lineQueryId)
       return refuse(
         path,
         id,
-        "A total is read under its lines' list query, which selects the summed field.",
+        lineLists.length > 0
+          ? 'A total is read under an unfiltered list query of its lines, so it never sums a line that query hides.'
+          : "A total is read under its lines' list query, which selects the summed field.",
       );
     const relations = totalled.get(lineEntityId) ?? [];
     const prior = relations.find(

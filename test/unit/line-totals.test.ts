@@ -769,6 +769,46 @@ test('LINE-TOTALS-s1 binder: totals over one relation declare one maximum', () =
   );
 });
 
+test('LINE-TOTALS-s1 binder: a total is authorized only by an unfiltered lines list query', () => {
+  const listId = `${NS}:query.custom_rental_contract_lines_list`;
+  const filterLines = (queries: { queryId: string; filter: unknown }[]) => {
+    const list = queries.find((query) => query.queryId === listId)!;
+    list.filter = {
+      ...(list.filter as Record<string, unknown>),
+      value: false,
+    };
+    return list;
+  };
+  const filtered = structuredClone(
+    normalizeApplicationPackage(rentalContractAuthored()),
+  ) as unknown as Authored;
+  filterLines(filtered.queries);
+  const refused = bindLineTotals(filtered as never);
+  assert.equal(
+    refused.status === 'refused' && refused.message,
+    'A total is read under an unfiltered list query of its lines, so it never sums a line that query hides.',
+    'a total under a filtered lines query was admitted',
+  );
+  // A filtered list ahead of an unfiltered one: the total binds the
+  // unfiltered one, never the first.
+  const both = structuredClone(
+    normalizeApplicationPackage(rentalContractAuthored()),
+  ) as unknown as Authored;
+  const unfiltered = structuredClone(
+    both.queries.find((query: { queryId: string }) => query.queryId === listId),
+  );
+  unfiltered.queryId = `${listId}_all`;
+  filterLines(both.queries);
+  both.queries.push(unfiltered);
+  const bound = bindLineTotals(both as never);
+  assert.ok(bound.status === 'bound', JSON.stringify(bound));
+  assert.equal(
+    bound.binding.rollups.get(CONTRACT)?.[0]?.lineQueryId,
+    `${listId}_all`,
+    'a total under a filtered lines query was admitted',
+  );
+});
+
 test('LINE-TOTALS-s1 binder: a total needs the lines list query and a direct get to read it', () => {
   const noList = structuredClone(
     normalizeApplicationPackage(rentalContractAuthored()),

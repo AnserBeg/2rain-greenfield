@@ -955,6 +955,24 @@
           "expected": "a total reusing a stored field's ID was admitted"
         }
       ]
+    },
+    {
+      "name": "line-totals-s1-rollup-unfiltered-line-query",
+      "claim": "A total is authorized only by an unfiltered list query of its lines, never by a filtered one that hides lines it sums.",
+      "file": "packages/canonical-model/src/line-totals.ts",
+      "original": "    const lineQuery = lineLists.find(\n      (query) =>\n        query.filter.kind === 'booleanPredicate' && query.filter.value === true,\n    );",
+      "replacement": "    const lineQuery = lineLists[0];",
+      "test": {
+        "files": ["test/unit/line-totals.test.ts"],
+        "namePattern": "^LINE-TOTALS-s1 binder: a total is authorized only by an unfiltered lines list query$"
+      },
+      "kills": [
+        {
+          "file": "test/unit/line-totals.test.ts",
+          "name": "LINE-TOTALS-s1 binder: a total is authorized only by an unfiltered lines list query",
+          "expected": "a total under a filtered lines query was admitted"
+        }
+      ]
     }
   ]
 }
