@@ -6,6 +6,7 @@ const DOCUMENT_LIST_LABELS: Readonly<Record<string, string>> = {
   purchase_order: 'Purchase orders',
   inventory_transaction: 'Inventory transactions',
   stock_count: 'Stock counts',
+  bookkeeping_draft: 'Journal drafts',
 };
 
 /** Product declarations for the shared draft document renderer. */
@@ -976,8 +977,82 @@ export function orderEntrySurfaces(
       ],
     };
   };
+  /**
+   * A staged journal (DOCUMENT-POSTING slice 1): kind, currency, date and
+   * memo, and its lines -- account code, side and amount. Editable while
+   * Draft; Mark ready freezes it, Post is the ledger's confirmed command.
+   */
+  const journalDraft = () => {
+    const field = (
+      name: string,
+      label: string,
+      declared: Record<string, unknown> = {},
+    ) => ({ fieldId: id('field', name), label, ...declared });
+    const option = (name: string) => id('option', name);
+    const choice = (
+      options: readonly (readonly [value: string, label: string])[],
+      defaultValue?: string,
+    ) => ({
+      presentation: {
+        kind: 'choice',
+        options: options.map(([value, label]) => ({ value, label })),
+        ...(defaultValue ? { defaultValue } : {}),
+      },
+    });
+    return {
+      kind: 'draftDocumentEditor',
+      headerLabel: 'Journal draft',
+      linesLabel: 'Lines',
+      saveDescription:
+        'Saving keeps the journal as a draft; the books do not change until it is marked ready and posted.',
+      saveMode: 'sequential',
+      headerFormSurfaceId: id('surface', 'bookkeeping_draft_form'),
+      recordSurfaceId: id('surface', 'bookkeeping_draft_detail'),
+      lineFormSurfaceId: id('surface', 'bookkeeping_draft_line_form'),
+      lineQueryId: id('query', 'bookkeeping_draft_line_list'),
+      parentRelationId: id('relation', 'bookkeeping_draft_line_draft'),
+      stateFieldId: id(
+        'derived_state_field',
+        'machine.bookkeeping_draft_lifecycle',
+      ),
+      editableStateIds: [id('state', 'bookkeeping_draft_state_draft')],
+      lineNumberFieldId: id('field', 'bookkeeping_draft_line_number'),
+      headerFields: [
+        // Opening balances post in slice 2; slice 1 offers manual only.
+        field(
+          'bookkeeping_draft_kind',
+          'Kind',
+          choice(
+            [[option('bookkeeping_draft_kind_manual'), 'Manual']],
+            option('bookkeeping_draft_kind_manual'),
+          ),
+        ),
+        field('bookkeeping_draft_currency', 'Currency (CAD, USD, EUR)'),
+        field('bookkeeping_draft_date', 'Date'),
+        field('bookkeeping_draft_memo', 'Memo', {
+          presentation: { kind: 'multiline' },
+        }),
+      ],
+      lineFields: [
+        field('bookkeeping_draft_line_account_code', 'Account code'),
+        field(
+          'bookkeeping_draft_line_side',
+          'Side',
+          choice(
+            [
+              [option('bookkeeping_draft_line_side_debit'), 'Debit'],
+              [option('bookkeeping_draft_line_side_credit'), 'Credit'],
+            ],
+            option('bookkeeping_draft_line_side_debit'),
+          ),
+        ),
+        field('bookkeeping_draft_line_amount', 'Amount'),
+      ],
+    };
+  };
   const documents = new Map<string, Record<string, unknown>>([
     ['inventory_transaction', stockDocument()],
+    ['bookkeeping_draft', journalDraft()],
     ['stock_count', stockCount()],
     [
       'sales_order',
@@ -1004,6 +1079,8 @@ export function orderEntrySurfaces(
   const lineOwners: Readonly<Record<string, string>> = {
     inventory_transaction_line: 'inventory_transaction',
     stock_count_line: 'stock_count',
+    // A journal's lines belong to its draft (DOCUMENT-POSTING).
+    bookkeeping_draft_line: 'bookkeeping_draft',
     // An invoice's lines, payments and credits belong to its workspace.
     customer_invoice_line: 'customer_invoice',
     customer_payment: 'customer_invoice',

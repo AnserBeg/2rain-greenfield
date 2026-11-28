@@ -18,6 +18,7 @@ import type {
   PostgresCapabilityOperationExecutorFactory,
 } from './capability-operation-executor-factory.js';
 import type { CurrentPolicyPermissionBinding } from './current-policy.js';
+import { withTrustedRequestTransaction } from './request-context.js';
 import { PostgresTrustService } from './trust/postgres-trust-service.js';
 
 /**
@@ -35,6 +36,9 @@ export const LEDGER_ACCOUNT_PUT_CAPABILITY =
   'northstar.ledger:capability.ledger_account_put';
 export const LEDGER_CHART_SETUP_CAPABILITY =
   'northstar.ledger:capability.ledger_chart_setup';
+/** The post of a staged document (DOCUMENT-POSTING slice 1). */
+export const LEDGER_GENERAL_LEDGER_CAPABILITY =
+  'northstar.ledger:capability.general_ledger';
 
 /**
  * The ledger's own permissions, checked in its SQL (`ledger_may`), as policy
@@ -43,8 +47,8 @@ export const LEDGER_CHART_SETUP_CAPABILITY =
  * books_configure: books start, account put and chart setup (0074
  * `ledger_operation_access`).
  * journal_read: the journal reads (0071), reached by no operation until the
- * read queries of slice 1a-iv. journal_post has no SQL check yet; its binding
- * is born with the post.
+ * read queries of slice 1a-iv. journal_post: the document post (0075
+ * `ledger_apply_document_post`), never books_configure.
  */
 export const LEDGER_BOOKS_CONFIGURE_GRANT = Object.freeze({
   action: 'configure',
@@ -58,6 +62,12 @@ export const LEDGER_JOURNAL_READ_GRANT = Object.freeze({
   resourceId: 'northstar.ledger:capability.journal',
 } as const satisfies CurrentPolicyPermissionBinding);
 
+export const LEDGER_JOURNAL_POST_GRANT = Object.freeze({
+  action: 'post',
+  permissionId: 'northstar.ledger:permission.journal_post',
+  resourceId: 'northstar.ledger:capability.journal',
+} as const satisfies CurrentPolicyPermissionBinding);
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const object = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -67,6 +77,11 @@ interface LedgerAction {
   readonly apply: string;
   readonly argumentKeys: readonly string[];
   readonly engineGrants: readonly CurrentPolicyPermissionBinding[];
+  /**
+   * What the operation targets: the company record itself, or a staged
+   * document whose stored company the ledger reads (the post).
+   */
+  readonly target: 'company' | 'document';
 }
 
 const BOOKS_START: LedgerAction = Object.freeze({
@@ -74,6 +89,7 @@ const BOOKS_START: LedgerAction = Object.freeze({
   apply: 'platform.ledger_apply_books_start',
   argumentKeys: Object.freeze(['date', 'expectedPrior']),
   engineGrants: Object.freeze([LEDGER_BOOKS_CONFIGURE_GRANT]),
+  target: 'company',
 });
 
 const ACCOUNT_PUT: LedgerAction = Object.freeze({
@@ -88,6 +104,7 @@ const ACCOUNT_PUT: LedgerAction = Object.freeze({
     'expectedActive',
   ]),
   engineGrants: Object.freeze([LEDGER_BOOKS_CONFIGURE_GRANT]),
+  target: 'company',
 });
 
 const CHART_SETUP: LedgerAction = Object.freeze({
@@ -95,6 +112,20 @@ const CHART_SETUP: LedgerAction = Object.freeze({
   apply: 'platform.ledger_apply_chart_setup',
   argumentKeys: Object.freeze(['starter', 'version', 'jurisdiction']),
   engineGrants: Object.freeze([LEDGER_BOOKS_CONFIGURE_GRANT]),
+  target: 'company',
+});
+
+/**
+ * The post of a staged document through the general document-posting binding
+ * (DOCUMENT-POSTING slice 1): the target is the draft, the ledger resolves its
+ * company, tables and columns from the released binding and storage plan.
+ */
+const DOCUMENT_POST: LedgerAction = Object.freeze({
+  capabilityId: LEDGER_GENERAL_LEDGER_CAPABILITY,
+  apply: 'platform.ledger_apply_document_post',
+  argumentKeys: Object.freeze([]),
+  engineGrants: Object.freeze([LEDGER_JOURNAL_POST_GRANT]),
+  target: 'document',
 });
 
 function refused(reason = 'ledger.invalidOperation'): never {
@@ -106,6 +137,8 @@ function refused(reason = 'ledger.invalidOperation'): never {
 class LedgerCapabilityExecutor implements RegisteredCapabilityOperationExecutor {
   readonly capabilityId: string;
   readonly #prepared = new WeakMap<Authorization, Preparation>();
+  /** The company each prepared authorization is scoped to. */
+  readonly #companies = new WeakMap<Authorization, string>();
   constructor(
     private readonly service: PostgresCapabilityOperationExecutorContext,
     private readonly action: LedgerAction,
@@ -113,7 +146,7 @@ class LedgerCapabilityExecutor implements RegisteredCapabilityOperationExecutor 
     this.capabilityId = action.capabilityId;
   }
 
-  prepareAuthorization(request: Preparation): Promise<Authorization> {
+  async prepareAuthorization(request: Preparation): Promise<Authorization> {
     const input = request.input;
     const args = object(input) ? input.arguments : undefined;
     if (
@@ -128,19 +161,36 @@ class LedgerCapabilityExecutor implements RegisteredCapabilityOperationExecutor 
       typeof input.expectedRevision !== 'number' ||
       !Number.isSafeInteger(input.expectedRevision) ||
       input.expectedRevision < 1 ||
-      !object(args) ||
-      Object.keys(args).some((key) => !this.action.argumentKeys.includes(key))
+      (this.action.argumentKeys.length === 0
+        ? args !== undefined &&
+          !(object(args) && Object.keys(args).length === 0)
+        : !object(args) ||
+          Object.keys(args).some(
+            (key) => !this.action.argumentKeys.includes(key),
+          ))
     )
       return refused();
-    // The company is the target record. Policy scopes by it; the ledger's
-    // SQL refuses it unless it is a live record of the legal-entity master.
-    const company = input.recordId;
+    const record = input.recordId;
+    // A company operation targets the company: policy scopes by it and the
+    // ledger's SQL refuses it unless it is a live legal-entity record. A
+    // document's company is its stored one, read through the ledger's
+    // binding (missing, archived and foreign drafts are one refusal); the
+    // apply re-derives it under the header lock.
+    const company =
+      this.action.target === 'company'
+        ? record
+        : await this.#documentCompany(request, record);
     const scope = request.readBackDefinition.legalEntityScope;
+    if (
+      this.action.target === 'document' &&
+      (!scope || scope.cardinality !== 'exactlyOne')
+    )
+      return refused();
     const authorization: Authorization = Object.freeze({
       decisionInput: Object.freeze({ legalEntityId: company }),
       legalEntityReadScopeIds: Object.freeze([company]),
       readBackArguments: Object.freeze({
-        recordId: company,
+        recordId: record,
         ...(scope
           ? {
               [scope.operand.parameterId]:
@@ -150,12 +200,39 @@ class LedgerCapabilityExecutor implements RegisteredCapabilityOperationExecutor 
       }),
     });
     this.#prepared.set(authorization, request);
-    return Promise.resolve(authorization);
+    this.#companies.set(authorization, company);
+    return authorization;
+  }
+
+  async #documentCompany(
+    request: Preparation,
+    record: string,
+  ): Promise<string> {
+    const company = await withTrustedRequestTransaction(
+      this.service.pool,
+      request.context,
+      async (client) =>
+        (
+          await client.query<{ company: string | null }>(
+            'SELECT platform.ledger_document_company($1,$2,$3)::text AS company',
+            [
+              request.view.release.releaseId,
+              request.definition.operationId,
+              record,
+            ],
+          )
+        ).rows[0]?.company ?? null,
+    );
+    return company && UUID.test(company)
+      ? company
+      : refused('ledger.unavailable');
   }
 
   async execute(request: Execution): Promise<SemanticOperationResultEnvelope> {
     const prepared = this.#prepared.get(request.authorization);
+    const scopedCompany = this.#companies.get(request.authorization);
     this.#prepared.delete(request.authorization);
+    this.#companies.delete(request.authorization);
     if (
       !prepared ||
       prepared.context !== request.context ||
@@ -164,10 +241,13 @@ class LedgerCapabilityExecutor implements RegisteredCapabilityOperationExecutor 
       prepared.inputDigest !== request.inputDigest ||
       prepared.readBackDefinition !== request.readBackDefinition ||
       prepared.view !== request.view ||
-      !object(request.input)
+      !object(request.input) ||
+      !scopedCompany
     )
       return refused();
-    const company = String(request.input.recordId);
+    // The record the change document is of: the company, or the document.
+    const record = String(request.input.recordId);
+    const company = scopedCompany;
     // The person's confirmation: the gateway grant, verified here and attested
     // for the ledger, which consumes it inside the apply.
     const grant = this.service.verifyConfirmation?.(
@@ -246,7 +326,7 @@ class LedgerCapabilityExecutor implements RegisteredCapabilityOperationExecutor 
           },
         };
         return {
-          mutationResult: { recordId: company, applied },
+          mutationResult: { recordId: record, applied },
           command: {
             actionId: request.definition.operationId,
             causationId: null,
@@ -268,10 +348,12 @@ class LedgerCapabilityExecutor implements RegisteredCapabilityOperationExecutor 
             },
             change: {
               changeDocumentId: randomUUID(),
-              recordId: company,
+              // The receipt check binds this to the grant's input.recordId.
+              recordId: record,
               recordType: request.readBackDefinition.sourceEntityId,
-              // The company record's revision as the apply read it, under
-              // its lock, equal to the one the person confirmed against.
+              // A company operation: the company record's revision as the
+              // apply read it under its lock, equal to the one confirmed. A
+              // document post: the draft's revision after its state flip.
               revision: applied.revision,
               changes: applied.changes.map((change) => ({
                 classification: 'INTERNAL' as const,
@@ -297,14 +379,14 @@ class LedgerCapabilityExecutor implements RegisteredCapabilityOperationExecutor 
         };
       },
     );
-    let record: SemanticOperationResultEnvelope['readBack'] = null;
+    let readBack: SemanticOperationResultEnvelope['readBack'] = null;
     try {
       const result = await this.service.queryGateway.invoke(request.view, {
         schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
         queryId: request.readBackDefinition.queryId,
         arguments: request.authorization.readBackArguments,
       });
-      record = result.records.find((row) => row.recordId === company) ?? null;
+      readBack = result.records.find((row) => row.recordId === record) ?? null;
     } catch (error) {
       if (!(error instanceof SemanticQueryPolicyDeniedError)) throw error;
     }
@@ -313,7 +395,7 @@ class LedgerCapabilityExecutor implements RegisteredCapabilityOperationExecutor 
       schemaVersion: SEMANTIC_OPERATION_RESULT_VERSION,
       operationId: request.definition.operationId,
       outcome: 'succeeded',
-      readBack: record,
+      readBack,
       trust: {
         changeDocumentId: trust.changeDocumentId,
         domainEventId: trust.domainEventId,
@@ -385,4 +467,5 @@ export const LEDGER_CAPABILITY_EXECUTOR_FACTORIES: readonly PostgresCapabilityOp
     ledgerFactory(BOOKS_START),
     ledgerFactory(ACCOUNT_PUT),
     ledgerFactory(CHART_SETUP),
+    ledgerFactory(DOCUMENT_POST),
   ]);
