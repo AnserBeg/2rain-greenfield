@@ -496,6 +496,36 @@ run's definition. The event is `TriggerEvent` with `fromStateId` and
 literals. Reader rung: 55 (assigned at TRAIN-Y); each floor gate reads
 one per-member rung table.
 
+**As built in WORKFLOW-3 slice 1b (2026-11-28): engine facts.** A fourth
+member `{kind: 'engineFactChanged', triggerVersion: 'v1', factId, recordTypeId,
+toValueId, fromValueId?}` starts a run when a fact an engine declares changes
+value on a subject owned by a company-owned record. An engine declares its facts
+in its own contract and registers a provider (`engine-facts.ts`); admission
+reads the declarations the provider derives from the release's own engine
+bindings, so no release byte changes. Booking declares
+`northstar.booking:fact.commitment-state` on each binding's owner type, with
+seven values and every move marked command or timer. Admission refuses an
+undeclared fact, value or move, a shared owner, and any value a timer enters
+(cancelled, completed, no-show): timer moves run under the arming command's
+release and would never start (owed: a timer-release ruling). The 0070
+occurrence gains kind `engineFact`, the fact, subject and subject revision and
+the invocation (migration 0076, provisional): writer columns are NULL for that
+kind only, a deferred FK to the invocation seals it, and one occurrence exists
+per (fact, subject, revision). The generic definer `engine_facts` takes tenant,
+environment and company from the engine's stored rows, never from a session
+setting, because Booking's timer sweep runs with no tenant scope over every
+tenant; it re-reads the owner row in that company (exactly one) and no runtime
+role may call it. Booking's two history writers call it once per state change
+(migration 0077, provisional); a create (a hold, an import) names nothing. The
+page and trigger scope reach a fact's event through its own invocation with the
+same equalities, and match the kind by the definition's event type and the fact
+by IS NOT DISTINCT FROM. The definition row adds `fact_id`, appended to the
+digest and the approval binding only when present. Reader rung 56
+(provisional). **Merge gate (design read E9):** the emit sits in a capability
+writer, which owner ruling O1 does not cover and ruling Q3 left with the owner;
+migration 0077 does not merge until an owner or delegated line is recorded
+here as an amendment.
+
 **Exactly-once firing, and the occurrence key.** The existing unique start key
 (tenant, environment, source event, stable workflow identity) stays the
 mechanism. What changes is what the "source event" is for each member:

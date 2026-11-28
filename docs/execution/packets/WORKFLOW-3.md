@@ -53,3 +53,32 @@ Not re-proved, because unchanged by this slice: the occurrence start-key index a
 ## Rule 13 / 21(c)
 
 Rung 55 (assigned at TRAIN-Y; provisional 54). No preceding-binary proof was built; a FIRST-TENANT-OWED row was added.
+
+**Slice 1b · engineFactChanged (Booking commitment states), BUILD 2026-11-28.** Critical (migration, a definer in a capability writer, grant SQL; rule 24). Design: `notes/WORKFLOW-3-s1b` design note; Mythos design read APPROVE WITH AMENDMENTS E1-E9. Migrations 0076 (generic) and 0077 (Booking) and rung 56 are provisional. **Merge gate E9:** 0077 needs an owner or delegated ADR-0073 line.
+
+## What slice 1b adds
+
+- E1 (s1 review findings 1-2, test-only): the state-writer census counts managed-table upserts, matches case-insensitively, scans `apps/`, lists `goods-receipt.ts`, and derives each writer's machines from its state-field literals (settlement's family template expanded; any other template reds).
+- Member `{kind: 'engineFactChanged', triggerVersion: 'v1', factId, recordTypeId, toValueId, fromValueId?}`; event `TriggerEvent` with `factId`, `subjectId`, `fromValueId`, `toValueId`; fact, type and value are literals.
+- Engine-owned declarations (`engine-facts.ts` registry; Booking's provider in `booking.ts`), derived from the release's own Booking bindings: no catalog byte changes.
+- Admission: the owner type passes the record-type rule; the fact is declared on it; both values are declared; a declared move connects them; a value any timer enters is refused (E3).
+- 0076: kind `engineFact`, fact/subject/revision/invocation columns, the source-shape CHECK (writer columns stay NOT NULL for created and transitioned), the deferred invocation FK, the (fact, subject, revision) key, `engine_facts` (no runtime grant), definitions `fact_id` with the third CHECK arm, digest and binding appended only when present (E6), and page and scope invocation arms with kind by event type (E4/E5).
+- 0077: Booking's `booking_record_change` and `booking_record_kit` call `booking_emit_state_fact` after each history row; tenant, environment and company come from the commitment and owner cursor, and the owner table from the handed release's storage target (E2).
+- Consumer, run event, `runTrigger`, admission storage, the Customize label and drafter line switch on event type and fact ID (E4).
+
+## Test it yourself
+
+| Slice | Try it | Expected observation |
+| --- | --- | --- |
+| 1b | `node --import tsx --test test/unit/workflow-triggers.test.ts test/architecture/record-state-writers.test.ts`, then (PostgreSQL) `node --import tsx --test test/postgres/workflow-engine-fact.test.ts`. | A rental agreement (sales order) in each of two companies holds and confirms a booking: exactly two runs, each creating a Prep task linked to its agreement in that agreement's company. A hold, a cancel, a replayed confirm and a confirm before activation start nothing. The timer sweep, run with no tenant scope, expires holds in both companies and names each change. |
+
+## Discriminating proofs (rule 24.4)
+
+Nine controls in [`WORKFLOW-3-s1b.expected-red.json`](../../../test/evidence/WORKFLOW-3-s1b.expected-red.json): the history writer's emit, the receipt seal, the revision key, the engine-row scope under the sweep (E2), the missing runtime grant, the page's invocation arm, the scope's and the consumer's kind by event type (E4), and the timer-value refusal (E3).
+
+## Named, not fixed (E7)
+
+- Imports insert a confirmed or in-use commitment and name nothing (a create is not a change).
+- The Booking actor carries no cause, so self-cause and depth do not apply to facts (FIRST-TENANT-OWED).
+- Deploy the worker with or before 0077; occurrence pruning (FIRST-TENANT-OWED).
+- No eval base can serve a Booking binding, so the positive member eval is a dated exception; EF01 scores "unsupported" on a base with no fact.

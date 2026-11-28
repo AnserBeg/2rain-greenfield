@@ -810,6 +810,18 @@ export const BUILD_CASES: readonly BuildCase[] = [
     expect: { outcome: 'unsupported', capabilities: ['email', 'trigger'] },
   },
   {
+    // WORKFLOW-3 s1b: with no engine binding in the release, a booking state
+    // has no listed fact, so the drafter says unsupported rather than guessing
+    // a recordTransitioned trigger.
+    id: 'EF01',
+    split: 'dev',
+    category: 'unsupported',
+    request:
+      'Whenever a booking for a rental is confirmed, automatically create a prep task for that rental.',
+    expect: { outcome: 'unsupported', capabilities: ['booking'] },
+  },
+
+  {
     id: 'H01',
     split: 'dev',
     category: 'hostile',
