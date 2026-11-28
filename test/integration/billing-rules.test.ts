@@ -973,8 +973,7 @@ test('B7: the agreed band reads the record quantity field, 1 when none is bound'
 // E1: CAD 300 a month, calendar months, advance, active coverage, agreed from
 // Jun 10 2027 (Edmonton midnight), open-ended.
 const e1Start = '2027-06-10T06:00:00.000Z';
-const june = '2027-06-01T06:00:00.000Z',
-  july = '2027-07-01T06:00:00.000Z',
+const july = '2027-07-01T06:00:00.000Z',
   august = '2027-08-01T06:00:00.000Z';
 const e1Return = '2027-07-12T18:00:00.000Z';
 type Timing = { when: 'advance' | 'arrears'; earlyEnd?: string };

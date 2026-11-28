@@ -264,7 +264,10 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // (BILLING_RULES_READER, BILLING-1 s3a-i; assigned at TRAIN-X). A
     // literal, because the name law keeps engine names out of this
     // generic file; request-runtime-view.test.ts pins it to the constant.
-    maximumSupportedVersion: 54,
+    // 55 reads per-component billing timing: a recurring fixed fee in
+    // advance under keepPaidPeriod (BILLING_TIMING_READER, BILLING-1 s3a-ii;
+    // provisional, assigned at merge).
+    maximumSupportedVersion: 55,
   },
 });
 
