@@ -114,10 +114,10 @@ function enumOptionIds(field: Field): readonly string[] {
 }
 
 /**
- * Whether a header guard is false while the header is in `state`, evaluated
- * by the one predicate kernel against an image that holds only the state
- * field (every other comparison is absent, which the kernel owns). A guard
- * the kernel cannot evaluate is treated as not proved false.
+ * Whether a header guard is false while the header is in `state`, for every
+ * stored row: evaluated by the one predicate kernel on the state field alone.
+ * A guard that compares any other field, or that the kernel cannot evaluate,
+ * is treated as not proved false.
  */
 function guardRefusesState(
   precondition: unknown,
@@ -128,8 +128,10 @@ function guardRefusesState(
     const receipt = inspectPredicateForExecution(precondition, {
       bindingPosition: 'operationPrecondition',
       resolveComparison: (comparison) => {
+        // A comparison on any other field could hold for some stored row,
+        // so the guard is not proved false by the state alone.
         if (comparison.field.targetId !== fieldId)
-          return { presence: 'absent' };
+          throw new TypeError('guard compares a field other than the state');
         const value = comparison.value as { value?: unknown };
         if (comparison.operator === 'equals')
           return { presence: 'present', result: value.value === state };

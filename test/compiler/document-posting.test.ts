@@ -56,6 +56,18 @@ const machine = (app: Json) =>
     (m) => m.machineId === id('machine', 'bookkeeping_draft_lifecycle'),
   )! as Json & { transitions: Json[] };
 
+/** `memo equals "x"`: true for some stored rows whatever the state. */
+const memoEqualsX = {
+  field: {
+    kind: 'fieldReference',
+    schemaVersion: 'v6',
+    targetId: id('field', 'bookkeeping_draft_memo'),
+  },
+  kind: 'fieldComparisonPredicate',
+  operator: 'equals',
+  schemaVersion: 'v6',
+  value: { kind: 'textValue', schemaVersion: 'v6', value: 'x' },
+};
 const context = (companyScoped = true): DocumentPostingContext => ({
   engines: DOCUMENT_POSTING_ENGINES,
   companyScopedRelation: () => companyScoped,
@@ -277,6 +289,29 @@ test('DOCUMENT-POSTING: each misbound block is refused with its reason', () => {
         )!;
         const guard = update.precondition as Json & { terms: Json[] };
         update.precondition = { ...guard, terms: guard.terms.slice(1) };
+      },
+      'freeze',
+    ],
+    [
+      'a header guard on another field (memo equals x)',
+      (app) => {
+        app.operations.find(
+          (o) => o.operationId === id('operation', 'bookkeeping_draft_update'),
+        )!.precondition = memoEqualsX;
+      },
+      'freeze',
+    ],
+    [
+      'a header guard that another field can open (any(Draft-only, memo equals x))',
+      (app) => {
+        const update = app.operations.find(
+          (o) => o.operationId === id('operation', 'bookkeeping_draft_update'),
+        )!;
+        update.precondition = {
+          kind: 'anyPredicate',
+          schemaVersion: 'v6',
+          terms: [update.precondition, memoEqualsX],
+        };
       },
       'freeze',
     ],
