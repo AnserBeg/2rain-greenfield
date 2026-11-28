@@ -84,6 +84,9 @@ continues. Mechanics: `mission-cadence`.
 `packages/postgres-provider/src/release-verification-service.ts`
 `packages/platform-runtime/src/trust/**`
 `db/migrations/**`
+`test/architecture/first-party-names.baseline.json`
+`test/architecture/first-party-names.policy.json`
+`test/architecture/engines.manifest.json`
 <!-- end-critical-pathspecs -->
 
 - **A read is owed** — one fresh-naive Codex arm the orchestrator launches over
@@ -99,6 +102,7 @@ continues. Mechanics: `mission-cadence`.
 ## 5. Gates
 
 - [Tiered CI](docs/execution/evidence-on-demand.md#packet-and-main-ci) runs quick on docs-only main ranges and full on executable, Critical or unbound ranges. Before pushing, run `node scripts/check-merge-window.mjs <owner> <tip>`. Executable or Critical integrations need an exact full green on that tip.
+- Lanes run no local PostgreSQL, so a migration or release change gets its schema snapshots from CI, never by hand: `gh workflow run evidence.yml --ref <branch carrying the workflow> -f mode=snapshots -f ref=<branch or full sha>`, then `gh run download <run-id> -n schema-snapshots-<full sha> -D <dir>` and copy `db/schema.snapshot.json` and `test/postgres/fresh-tenant-full-replay-schema.snapshot.json` in. [Details](docs/execution/evidence-on-demand.md#regenerating-the-schema-snapshots-without-postgresql-ci-9). The PostgreSQL shards each stay under an estimated time budget, checked by `pnpm preflight` ([how](docs/execution/evidence-on-demand.md#postgresql-shard-time-budget-ci-9)).
 - Integrate up to three consecutive `--no-ff` merges on current main. Record each second parent in its own review-log row as `merged — no Critical path` or `merged — unread`.
 - **Evidence depth is proportionate.** One discriminating red per claim that a
   silent harm cannot happen. Elsewhere: tests. Nothing else is owed.

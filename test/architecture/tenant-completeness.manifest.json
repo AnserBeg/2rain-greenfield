@@ -1,7 +1,7 @@
 {
   "schemaVersion": "northstar.tenant-completeness-manifest/v1",
   "tenantIndependentDefinition": "A table is tenant-independent only when its rows represent a database-wide kernel mechanism or immutable content deliberately shared across tenants; business records are never tenant-independent, and absence of a tenant column is not evidence.",
-  "expectedTableCount": 143,
+  "expectedTableCount": 156,
   "tables": [
     {
       "schema": "north_star_internal",
@@ -161,6 +161,18 @@
     {
       "schema": "platform",
       "table": "billing_rate_tables",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "business_calendar_versions",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "business_calendars",
       "classification": "tenant-scoped",
       "tenantColumn": "tenant_id"
     },
@@ -870,6 +882,76 @@
     {
       "schema": "platform",
       "table": "ledger_balances",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "tax_jurisdictions",
+      "classification": "tenant-independent",
+      "reasonCode": "shared-immutable-catalog",
+      "reason": "Tax jurisdictions (country and subdivision) are migration-only reference data shared by every tenant; no tenant row is ever written here."
+    },
+    {
+      "schema": "platform",
+      "table": "tax_starter_codes",
+      "classification": "tenant-independent",
+      "reasonCode": "shared-immutable-catalog",
+      "reason": "The starter tax-code template is migration-only reference data; provisioning copies it into tenant tables, so no tenant fact is stored here."
+    },
+    {
+      "schema": "platform",
+      "table": "tax_starter_components",
+      "classification": "tenant-independent",
+      "reasonCode": "shared-immutable-catalog",
+      "reason": "The starter tax components carry fixed ledger-qualifier IDs identical in every tenant; migration-only reference data."
+    },
+    {
+      "schema": "platform",
+      "table": "tax_starter_rates",
+      "classification": "tenant-independent",
+      "reasonCode": "shared-immutable-catalog",
+      "reason": "Starter rates with their statute citations; migration-only reference data copied per tenant at provisioning."
+    },
+    {
+      "schema": "platform",
+      "table": "tax_catalog_codes",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "tax_catalog_receipts",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "tax_catalog_reviews",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "tax_catalog_version_components",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "tax_catalog_versions",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "tax_components",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "tax_registrations",
       "classification": "tenant-scoped",
       "tenantColumn": "tenant_id"
     }

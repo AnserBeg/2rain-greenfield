@@ -33,6 +33,11 @@ import {
   creditableNodeResultPath,
 } from '../helpers/node-reporter-core.mjs';
 import {
+  estimateShards,
+  shardsOverBudget,
+  type ShardEstimates,
+} from '../helpers/postgres-shard-budget.js';
+import {
   getPlaywrightReachabilityProducer,
   getReachabilityProducer,
   reachabilityProducers,
@@ -529,6 +534,84 @@ test('declared unfiltered producers are wired to CI and their evidence paths', (
       );
     }
   }
+});
+
+const postgresShardIds = Array.from(
+  { length: 12 },
+  (_, index) => `postgres-${String(index + 1)}`,
+);
+const postgresShardEstimates = JSON.parse(
+  readFileSync('test/helpers/postgres-shard-estimates.json', 'utf8'),
+) as ShardEstimates;
+
+function postgresShardLayout(): Map<string, string[]> {
+  const shards = postgresShardIds.map(getReachabilityProducer);
+  const layout = new Map<string, string[]>(
+    shards.map(({ id }) => [id, [] as string[]]),
+  );
+  for (const file of globSync('test/postgres/**/*.test.ts')) {
+    for (const { id, argv } of shards) {
+      if (argv.some((pattern) => matchesGlob(file, pattern))) {
+        layout.get(id)?.push(file);
+      }
+    }
+  }
+  return layout;
+}
+
+test('no general PostgreSQL shard is estimated over its time budget', () => {
+  const layout = postgresShardLayout();
+  assert.ok(
+    [...layout.values()].every((files) => files.length > 0),
+    'a shard selected no file',
+  );
+  // The 120 s default belongs to the pure helper. The real layout must record
+  // every file, and no record may name a file that is gone, so the table cannot
+  // drift from the tree.
+  const placed = new Set([...layout.values()].flat());
+  const unrecorded = [...placed].filter(
+    (file) => postgresShardEstimates.files[file] === undefined,
+  );
+  assert.deepEqual(
+    unrecorded,
+    [],
+    'a file in shards 1-12 has no recorded estimate in test/helpers/postgres-shard-estimates.json',
+  );
+  const stale = Object.keys(postgresShardEstimates.files).filter(
+    (file) => !placed.has(file),
+  );
+  assert.deepEqual(
+    stale,
+    [],
+    'an estimate in test/helpers/postgres-shard-estimates.json names a file no shard runs',
+  );
+  assert.deepEqual(shardsOverBudget(layout, postgresShardEstimates), []);
+});
+
+test('a shard whose recorded estimates sum past the budget is refused by name', () => {
+  const overloaded = new Map([
+    ['postgres-x', ['test/postgres/a.test.ts', 'test/postgres/b.test.ts']],
+    ['postgres-y', ['test/postgres/c.test.ts']],
+  ]);
+  const refusals = shardsOverBudget(overloaded, {
+    budgetSeconds: 100,
+    unrecordedFileSeconds: 90,
+    files: { 'test/postgres/a.test.ts': 60, 'test/postgres/b.test.ts': 50 },
+  });
+  assert.equal(refusals.length, 1, 'only the overloaded shard is refused');
+  assert.match(
+    refusals[0] ?? '',
+    /^postgres-x is estimated at 110 s, over the 100 s budget/u,
+  );
+  // An unrecorded file counts the stated default, never zero.
+  assert.equal(
+    estimateShards(overloaded, {
+      budgetSeconds: 100,
+      unrecordedFileSeconds: 90,
+      files: {},
+    })[1]?.seconds,
+    90,
+  );
 });
 
 test('every file selected by the former general PostgreSQL glob belongs to exactly one shard', () => {

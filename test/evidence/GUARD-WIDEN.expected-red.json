@@ -1,0 +1,219 @@
+{
+  "version": 1,
+  "packet": "GUARD-WIDEN",
+  "entries": [
+    {
+      "name": "guard-widen-name-layer-off",
+      "claim": "A first-party entity, module, operation, query or capability name newly written in a generic file is refused (PRESS011). Turning the whole name layer off kills every name-layer red (plain, kebab path, kebab text, constructed) and none in another layer.",
+      "file": "packages/dev-tooling/src/module-press-law.ts",
+      "original": "      return 'name';",
+      "replacement": "      return undefined;",
+      "test": {
+        "files": ["test/architecture/module-press-law.test.ts"],
+        "namePattern": "^GUARD-WIDEN"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/module-press-law.test.ts",
+          "name": "GUARD-WIDEN red: a new first-party name in a generic file",
+          "expected": "a new first-party name in a generic file must be refused by PRESS011"
+        },
+        {
+          "file": "test/architecture/module-press-law.test.ts",
+          "name": "GUARD-WIDEN red: a new kebab-named file or directory",
+          "expected": "a kebab-named file or directory must be refused by PRESS011"
+        },
+        {
+          "file": "test/architecture/module-press-law.test.ts",
+          "name": "GUARD-WIDEN red: a new kebab spelling in a string",
+          "expected": "a kebab spelling in a string must be refused by PRESS011"
+        },
+        {
+          "file": "test/architecture/module-press-law.test.ts",
+          "name": "GUARD-WIDEN red: a statically concatenated first-party name",
+          "expected": "a statically concatenated name must be refused by PRESS011"
+        }
+      ]
+    },
+    {
+      "name": "guard-widen-field-layer-off",
+      "claim": "A first-party field name newly written in a generic file is refused (PRESS012).",
+      "file": "packages/dev-tooling/src/module-press-law.ts",
+      "original": "    case 'field':\n      return 'field';",
+      "replacement": "    case 'field':\n      return undefined;",
+      "test": {
+        "files": ["test/architecture/module-press-law.test.ts"],
+        "namePattern": "^GUARD-WIDEN"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/module-press-law.test.ts",
+          "name": "GUARD-WIDEN red: a new first-party field name in a generic file",
+          "expected": "a new first-party field name in a generic file must be refused by PRESS012"
+        }
+      ]
+    },
+    {
+      "name": "guard-widen-domain-import-off",
+      "claim": "A new relative import into packages/domain in a generic file is refused (PRESS013).",
+      "file": "packages/dev-tooling/src/module-press-law.ts",
+      "original": "    return resolved.startsWith('packages/domain/')\n      ? resolved.replace(/\\.[a-z]+$/u, '')\n      : undefined;",
+      "replacement": "    return undefined;",
+      "test": {
+        "files": ["test/architecture/module-press-law.test.ts"],
+        "namePattern": "^GUARD-WIDEN"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/module-press-law.test.ts",
+          "name": "GUARD-WIDEN red: a new import from packages/domain in a generic file",
+          "expected": "a new import from packages/domain must be refused by PRESS013"
+        }
+      ]
+    },
+    {
+      "name": "guard-widen-cross-engine-off",
+      "claim": "One engine naming another inside its own files is refused (PRESS014).",
+      "file": "packages/dev-tooling/src/module-press-law.ts",
+      "original": "  if (owner !== undefined) return false;",
+      "replacement": "  if (owner !== undefined) return true;",
+      "test": {
+        "files": ["test/architecture/module-press-law.test.ts"],
+        "namePattern": "^GUARD-WIDEN"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/module-press-law.test.ts",
+          "name": "GUARD-WIDEN red: one engine naming another",
+          "expected": "one engine naming another must be refused by PRESS014"
+        }
+      ]
+    },
+    {
+      "name": "guard-widen-baseline-rise-off",
+      "claim": "A count above its baseline allowance is refused; the baseline only shrinks (PRESS015).",
+      "file": "packages/dev-tooling/src/module-press-law.ts",
+      "original": "} else if (observation.count > allowance) {",
+      "replacement": "} else if (false) {",
+      "test": {
+        "files": ["test/architecture/module-press-law.test.ts"],
+        "namePattern": "^GUARD-WIDEN"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/module-press-law.test.ts",
+          "name": "GUARD-WIDEN red: a count above its baseline allowance",
+          "expected": "a count above its baseline allowance must be refused by PRESS015"
+        }
+      ]
+    },
+    {
+      "name": "guard-widen-kebab-path-off",
+      "claim": "A file or directory named in kebab case for a first-party name is refused (F1, paths).",
+      "file": "packages/dev-tooling/src/module-press-law.ts",
+      "original": ".replaceAll('-', '_');",
+      "replacement": ".replaceAll('-', ' ');",
+      "test": {
+        "files": ["test/architecture/module-press-law.test.ts"],
+        "namePattern": "^GUARD-WIDEN"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/module-press-law.test.ts",
+          "name": "GUARD-WIDEN red: a new kebab-named file or directory",
+          "expected": "a kebab-named file or directory must be refused by PRESS011"
+        }
+      ]
+    },
+    {
+      "name": "guard-widen-kebab-text-off",
+      "claim": "A kebab spelling of a first-party name in a string is refused (F1, text).",
+      "file": "packages/dev-tooling/src/module-press-law.ts",
+      "original": ".split(/[\\s_-]+/u)",
+      "replacement": ".split(/[\\s_]+/u)",
+      "test": {
+        "files": ["test/architecture/module-press-law.test.ts"],
+        "namePattern": "^GUARD-WIDEN"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/module-press-law.test.ts",
+          "name": "GUARD-WIDEN red: a new kebab spelling in a string",
+          "expected": "a kebab spelling in a string must be refused by PRESS011"
+        }
+      ]
+    },
+    {
+      "name": "guard-widen-construction-off",
+      "claim": "A statically concatenated first-party name is refused (F2).",
+      "file": "packages/dev-tooling/src/module-press-law.ts",
+      "original": "nameHits(construction.value, vocabulary, true)",
+      "replacement": "nameHits('', vocabulary, true)",
+      "test": {
+        "files": ["test/architecture/module-press-law.test.ts"],
+        "namePattern": "^GUARD-WIDEN"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/module-press-law.test.ts",
+          "name": "GUARD-WIDEN red: a statically concatenated first-party name",
+          "expected": "a statically concatenated name must be refused by PRESS011"
+        }
+      ]
+    },
+    {
+      "name": "guard-widen-import-binding-off",
+      "claim": "A binding added to a baselined domain import is refused; imports are counted per binding (F3).",
+      "file": "packages/dev-tooling/src/module-press-law.ts",
+      "original": "for (const element of named.elements) {",
+      "replacement": "for (const element of named.elements.slice(0, 1)) {",
+      "test": {
+        "files": ["test/architecture/module-press-law.test.ts"],
+        "namePattern": "^GUARD-WIDEN"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/module-press-law.test.ts",
+          "name": "GUARD-WIDEN red: widening a baselined domain import",
+          "expected": "a binding added to a baselined domain import must be refused by PRESS013"
+        }
+      ]
+    },
+    {
+      "name": "guard-widen-unclassified-root-off",
+      "claim": "A packages/*/src or apps/*/src in neither the scope nor the excluded list is refused (F4).",
+      "file": "packages/dev-tooling/src/module-press-law.ts",
+      "original": "if (unclassified.length > 0) {",
+      "replacement": "if (false) {",
+      "test": {
+        "files": ["test/architecture/module-press-law.test.ts"],
+        "namePattern": "^GUARD-WIDEN"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/module-press-law.test.ts",
+          "name": "GUARD-WIDEN red: an unclassified source root",
+          "expected": "a source root in neither the scope nor the excluded list must be refused by PRESS010"
+        }
+      ]
+    },
+    {
+      "name": "guard-widen-frozen-migration-off",
+      "claim": "A frozen migration row admits only the applied file's exact bytes; a changed migration is refused (PRESS010).",
+      "file": "packages/dev-tooling/src/module-press-law.ts",
+      "original": "if (fileSha256(path) !== row.sha256) {",
+      "replacement": "if (false) {",
+      "test": {
+        "files": ["test/architecture/module-press-law.test.ts"],
+        "namePattern": "^GUARD-WIDEN"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/module-press-law.test.ts",
+          "name": "GUARD-WIDEN red: an edited frozen migration",
+          "expected": "a frozen migration row must refuse a file that is not the applied bytes"
+        }
+      ]
+    }
+  ]
+}

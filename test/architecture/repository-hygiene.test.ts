@@ -140,6 +140,7 @@ const suiteDefinitions = [
   {
     discoveryPattern: 'test/architecture/**/*.test.ts',
     expectedFiles: [
+      'test/architecture/business-calendar.test.ts',
       'test/architecture/canonical-contracts-purity.test.ts',
       'test/architecture/ci-main-push.test.ts',
       'test/architecture/ci-tiers.test.ts',
@@ -229,6 +230,8 @@ const suiteDefinitions = [
       'test/postgres/booking-serving.test.ts',
       'test/postgres/boot-capabilities.test.ts',
       'test/postgres/build-eval.test.ts',
+      'test/postgres/business-calendar-reader.test.ts',
+      'test/postgres/business-calendar.test.ts',
       'test/postgres/catalog-extras.test.ts',
       'test/postgres/catalog-runtime.test.ts',
       'test/postgres/communication-threads.test.ts',
@@ -282,6 +285,7 @@ const suiteDefinitions = [
       'test/postgres/staff-signin.test.ts',
       'test/postgres/storage-payload-family.test.ts',
       'test/postgres/table-behavior.test.ts',
+      'test/postgres/tax-catalog.test.ts',
       'test/postgres/tenant-isolation.test.ts',
       'test/postgres/trust-substrate.test.ts',
       'test/postgres/workflow-consumer.test.ts',
@@ -633,9 +637,10 @@ test('shared gate holders coexist and exclude an exclusive gate', async () => {
   holder.stderr.on('data', (chunk: string) => {
     holderError += chunk;
   });
-  await waitForOutput(holder.stdout, 'LOCK_READY');
-
   try {
+    // Inside the try so a holder that was slow to start (or never did) is
+    // still released by the finally below instead of hanging the runner.
+    await waitForOutput(holder.stdout, 'LOCK_READY');
     const sharedOutput = execFileSync(
       process.execPath,
       [
@@ -669,8 +674,7 @@ test('shared gate holders coexist and exclude an exclusive gate', async () => {
         String(error.stderr).includes('TEST_GATE_LOCK_BUSY'),
     );
   } finally {
-    holder.stdin.end();
-    const [exitCode] = (await once(holder, 'exit')) as [number | null];
+    const exitCode = await releaseHolder(holder);
     assert.equal(exitCode, 0, holderError);
   }
 
@@ -725,8 +729,7 @@ test('matrix lock and legacy-process waits fail busy at their bounded deadline',
       );
     })
     .finally(async () => {
-      holder.stdin.end();
-      const [exitCode] = (await once(holder, 'exit')) as [number | null];
+      const exitCode = await releaseHolder(holder);
       assert.equal(exitCode, 0);
       rmSync(lockPath, { force: true });
     })
@@ -934,7 +937,11 @@ function containsGlob(value: string): boolean {
 function waitForOutput(
   stream: NodeJS.ReadableStream,
   expected: string,
-  timeoutMilliseconds = 5_000,
+  // Only a backstop against a holder that never starts: the wait resolves on
+  // the event itself, so an idle machine pays nothing for the generous bound
+  // and a loaded one (a child node process can take over 5 s to start at a
+  // load average near 20) is not mistaken for a broken lock.
+  timeoutMilliseconds = 60_000,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     let output = '';
@@ -1001,6 +1008,33 @@ function waitForKernelLockWait(
       }
     }, 10);
   });
+}
+
+/**
+ * Ends a lock holder's stdin and waits for it to exit. A holder that already
+ * exited is not waited for again, and one still alive after a bounded wait is
+ * sent SIGTERM (its exit code is then not 0, so the caller's assertion names
+ * it) instead of hanging the runner.
+ */
+async function releaseHolder(
+  holder: ReturnType<typeof spawn>,
+): Promise<number | null> {
+  if (holder.exitCode !== null || holder.signalCode !== null) {
+    return holder.exitCode;
+  }
+  const exited = once(holder, 'exit');
+  holder.stdin?.end();
+  const bound = setTimeout(() => {
+    if (holder.exitCode === null && holder.signalCode === null) {
+      holder.kill('SIGTERM');
+    }
+  }, 10_000);
+  try {
+    const [exitCode] = (await exited) as [number | null];
+    return exitCode;
+  } finally {
+    clearTimeout(bound);
+  }
 }
 
 function waitForProcessClose(

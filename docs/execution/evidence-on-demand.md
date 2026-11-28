@@ -41,7 +41,7 @@ gh workflow run evidence.yml --ref <branch carrying the workflow> -f ref=<branch
 gh run list --workflow evidence.yml --limit 3
 ```
 
-A dispatch runs only the controls, never `regen-snapshot`. Each dispatch has its
+Unless `-f mode=snapshots` is given (CI-9, below), a dispatch runs only the controls, never `regen-snapshot`. Each dispatch has its
 own concurrency group, so two lanes never cancel each other. GitHub accepts a
 dispatch only for a workflow file that exists on the ref it runs from, so
 until this workflow is on `main`, run it from the branch that carries it.
@@ -156,3 +156,40 @@ Every control job checks out the whole history (`fetch-depth: 0`), whatever its
 name. Tests read history (`git show SHA:file`, archived worktrees, the reports
 predecessor), and from a one-commit checkout they fail as "the mutated run
 executed no test". `test/architecture/evidence-on-demand.test.ts` pins it.
+
+## Regenerating the schema snapshots without PostgreSQL (CI-9)
+
+A lane has no local PostgreSQL, so it does not hand-patch `db/schema.snapshot.json`
+or the fresh-tenant replay snapshot. `.github/workflows/evidence.yml` dispatched with
+`-f mode=snapshots` (a dispatch runs only that job; read-only token, never pushes or commits) checks out the `ref`, applies the
+migrations on the pinned PostgreSQL image, regenerates both files with their
+documented commands (`test/helpers/regenerate-schema-snapshot.ts`, which also runs
+Prettier, then `test/helpers/generate-fresh-tenant-full-replay-schema.ts`), prints and
+annotates whether each is IDENTICAL to or DIFFERS from the committed file, and
+uploads both as the artifact `schema-snapshots-<full sha>` (kept 7 days).
+
+```bash
+gh workflow run evidence.yml --ref <branch that carries the workflow> -f mode=snapshots -f ref=<your branch or full sha>
+gh run list --workflow evidence.yml --limit 3
+gh run download <run-id> -n schema-snapshots-<full sha> -D "$dir"
+cp "$dir/db/schema.snapshot.json" db/
+cp "$dir/test/postgres/fresh-tenant-full-replay-schema.snapshot.json" test/postgres/
+```
+
+Commit the files yourself, with the change that needed them. The full run's
+schema step checks them. Until the workflow is on `main`, dispatch it from the branch that
+carries it. The `ref` should already contain the migration or release change, so
+push first.
+
+## PostgreSQL shard time budget (CI-9)
+
+`test/helpers/postgres-shard-estimates.json` records an estimated CI time per
+`test/postgres` file (the median of two or three full runs) and a budget for the
+sum of one shard. `test/architecture/test-reachability.test.ts` (the `reachability`
+step of `pnpm preflight`) fails by shard name when a shard's files sum past the
+budget. A file with no recorded estimate counts the stated default, never zero.
+When a packet adds or grows a `test/postgres` file, record its seconds from the
+`reachability-postgres-N` artifact of a full run (`files[].durationMs`), and if its
+shard is full, move a file to a lighter shard in `package.json` and
+`test/helpers/reachability-producers.ts`, identically (shard 3 is the catch-all
+glob: a file moved out of it is added to its exclusion list in both).
