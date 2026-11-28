@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "packet": "REPO-MOVE",
+  "entries": [
+    {
+      "name": "repo-move-owner-rainerp-com-dropped",
+      "claim": "A CI tier run URL under the rainerp-com owner is accepted beside the legacy AnserBeg owner.",
+      "file": "scripts/check-record-ci-tier.mjs",
+      "original": "/^CI tier: (?:quick|full) https:\\/\\/github\\.com\\/(?:AnserBeg|rainerp-com)\\/",
+      "replacement": "/^CI tier: (?:quick|full) https:\\/\\/github\\.com\\/AnserBeg\\/",
+      "test": {
+        "files": ["test/architecture/ci-tiers.test.ts"],
+        "namePattern": "a CI tier run URL names the AnserBeg or rainerp-com owner and no other"
+      },
+      "kills": [
+        {
+          "file": "test/architecture/ci-tiers.test.ts",
+          "name": "a CI tier run URL names the AnserBeg or rainerp-com owner and no other (REPO-MOVE)",
+          "expected": "1 !== 0"
+        }
+      ]
+    }
+  ]
+}
