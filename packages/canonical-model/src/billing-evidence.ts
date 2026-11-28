@@ -38,6 +38,9 @@ export const BillingQuoteEvidenceSchema = z.strictObject({
   // Arrears can be reviewed after close, using terms published by the review.
   coverageThrough: time.optional(),
   serviceEnd: time.nullable(),
+  // The agreed end before actual use moves the service end (calculation v5).
+  // Advance fees are rated on agreed coverage; absent on earlier plans.
+  agreedEnd: time.nullable().optional(),
   periodStart: time,
   basis: z.enum(['actual', 'agreed', 'usageOnly']),
   // Each band follows the same commercial quantity through swaps and returns.

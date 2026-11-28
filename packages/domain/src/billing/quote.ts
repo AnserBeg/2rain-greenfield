@@ -2,7 +2,9 @@ import {
   BILLING_CALCULATION_VERSION,
   BILLING_CYCLE_CALCULATION,
   BILLING_RULES_CALCULATION,
+  BILLING_TIMING_CALCULATION,
   hasBillingRules,
+  hasBillingTiming,
   type BillingPlan,
 } from '../../../canonical-model/src/billing.js';
 import {
@@ -27,7 +29,12 @@ import {
   type CoverBlock,
 } from './cover.js';
 import { decimal, type Fraction, integer, one, zero } from './fraction.js';
-import { occurrences, pricingWindows, type Occurrence } from './occurrences.js';
+import {
+  occurrences,
+  openedOccurrences,
+  pricingWindows,
+  type Occurrence,
+} from './occurrences.js';
 import {
   compileRatePlan,
   digest,
@@ -113,12 +120,41 @@ export interface BillingQuoteLine {
   derivation: readonly unknown[];
 }
 const occurrenceId = (...parts: string[]) => JSON.stringify(parts);
+type Component = BillingPlan['components'][number];
+/** B2: a recurring fixed fee declared in advance (calculation v5). */
+export function isAdvanceFee(c: Component): c is Extract<
+  Component,
+  { kind: 'fixed' }
+> & {
+  occurrence: Extract<
+    Extract<Component, { kind: 'fixed' }>['occurrence'],
+    { kind: 'recurring' }
+  >;
+} {
+  return (
+    c.kind === 'fixed' &&
+    c.occurrence.kind === 'recurring' &&
+    c.timing?.when === 'advance'
+  );
+}
+/** The newest calculation a plan's declared keys require. */
+function planCalculation<T extends CalculationVersion>(
+  plan: unknown,
+  otherwise: T,
+) {
+  return hasBillingTiming(plan)
+    ? BILLING_TIMING_CALCULATION
+    : hasBillingRules(plan)
+      ? BILLING_RULES_CALCULATION
+      : otherwise;
+}
 const legacyCalculation = 'northstar.billing-calculation/v1';
 type CalculationVersion =
   | typeof legacyCalculation
   | typeof BILLING_CALCULATION_VERSION
   | typeof BILLING_CYCLE_CALCULATION
-  | typeof BILLING_RULES_CALCULATION;
+  | typeof BILLING_RULES_CALCULATION
+  | typeof BILLING_TIMING_CALCULATION;
 
 function termPin(at: number, selection: ReturnType<typeof selectTable>) {
   const { publishedAt, ...table } = selection.table;
@@ -139,9 +175,7 @@ export function quoteBillingService(
     planInput,
     evidenceInput,
     undefined,
-    hasBillingRules(planInput)
-      ? BILLING_RULES_CALCULATION
-      : BILLING_CALCULATION_VERSION,
+    planCalculation(planInput, BILLING_CALCULATION_VERSION),
   );
 }
 
@@ -154,9 +188,7 @@ export function quoteBillingCycle(
     plan,
     { ...evidence, coverageThrough: through },
     undefined,
-    hasBillingRules(plan)
-      ? BILLING_RULES_CALCULATION
-      : BILLING_CYCLE_CALCULATION,
+    planCalculation(plan, BILLING_CYCLE_CALCULATION),
   );
 }
 export function replayBillingQuote(
@@ -207,13 +239,26 @@ function calculate(
   // keeps the version it was first quoted under.
   const cycle = e.coverageThrough !== undefined;
   if (
-    algorithm === BILLING_RULES_CALCULATION
+    algorithm === BILLING_RULES_CALCULATION ||
+    algorithm === BILLING_TIMING_CALCULATION
       ? false
       : (algorithm === BILLING_CYCLE_CALCULATION) !== cycle
   )
     throw new Error('Billing cycle requires its coverage boundary');
-  if (hasBillingRules(plan) !== (algorithm === BILLING_RULES_CALCULATION))
+  // Calculation v5 rates timing beside any rule key; v4 only rule keys.
+  const timed = hasBillingTiming(plan);
+  if (timed !== (algorithm === BILLING_TIMING_CALCULATION))
+    throw new Error('Billing timing requires calculation v5');
+  if (
+    !timed &&
+    hasBillingRules(plan) !== (algorithm === BILLING_RULES_CALCULATION)
+  )
     throw new Error('Billing rate rules require calculation v4');
+  const advance = plan.components.filter(isAdvanceFee);
+  if (advance.length && (!cycle || e.agreedEnd === undefined))
+    throw new Error(
+      'Advance billing requires a cycle review and its agreed end',
+    );
   const coverageThrough = e.coverageThrough ? instant(e.coverageThrough) : asOf;
   if (coverageThrough > asOf)
     throw new Error('Billing coverage is not delivered');
@@ -221,7 +266,14 @@ function calculate(
     periodStart = instant(e.periodStart);
   if (through - anchor > 3660 * 86_400_000)
     throw new Error('Billing service exceeds the calendar horizon');
-  if (through <= anchor || periodStart < anchor || periodStart >= through)
+  // An advance review may owe opened cycles before any cycle has closed; its
+  // arrears prefix is then empty and only advance fees are rated.
+  const advanceOnly = advance.length > 0 && through === periodStart;
+  if (
+    advanceOnly
+      ? periodStart < anchor
+      : through <= anchor || periodStart < anchor || periodStart >= through
+  )
     throw new Error('Invalid billing prefix');
   const order = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
   e.bands.sort((a, b) => order(a.id, b.id));
@@ -359,7 +411,9 @@ function calculate(
     string,
     { quantity: Fraction; blocks: CoverBlock[] }[]
   >();
-  for (const c of plan.components.filter((c) => c.kind === 'time')) {
+  for (const c of advanceOnly
+    ? []
+    : plan.components.filter((c) => c.kind === 'time')) {
     if (e.basis === 'usageOnly')
       throw new Error('Time component requires service intervals');
     for (const band of coverage.bands) {
@@ -427,7 +481,22 @@ function calculate(
     }
   }
   const cycles = occurrences(calendar, plan.schedule, through, serviceEnd);
-  for (const c of plan.components) {
+  // Advance horizon (B2): the agreed interval is billed whole for each opened
+  // cycle, never clipped to the review instant, together with any actual use
+  // through it (an overrun past the agreed end is billed on top). An early
+  // end never reduces an opened cycle (keepPaidPeriod).
+  const agreedEnd =
+    e.agreedEnd === null || e.agreedEnd === undefined
+      ? Number.POSITIVE_INFINITY
+      : instant(e.agreedEnd);
+  const advanceCoverage = advance.length
+    ? union([
+        { start: anchor, end: agreedEnd },
+        ...deriveCoverage(e, anchor, Math.min(serviceEnd ?? asOf, asOf))
+          .eligible,
+      ])
+    : [];
+  for (const c of advanceOnly ? advance : plan.components) {
     if (c.kind === 'fixed') {
       const fee = c.occurrence;
       // A per-quantity fee multiplies by the service's one commercial
@@ -459,6 +528,37 @@ function calculate(
             },
           ],
         );
+        continue;
+      }
+      if (isAdvanceFee(c)) {
+        for (const o of openedOccurrences(
+          calendar,
+          fee.cadence,
+          asOf,
+          serviceEnd,
+        )) {
+          const ms = covered(advanceCoverage, o.start, o.fullEnd);
+          const fraction = prorate(ms, o, fee.feeProration),
+            t = terms(o.start).table;
+          line(
+            c,
+            occurrenceId('fee', iso(o.fullStart)),
+            o.start,
+            o.fullEnd,
+            decimal(t.values[c.amount]!).times(fraction).times(quantity),
+            [
+              {
+                timing: 'advance',
+                rateVersion: t.version,
+                rate: t.values[c.amount],
+                eligibleMs: ms,
+                basisMs: o.fullEnd - o.fullStart,
+                fraction: fraction.toString(),
+                ...perQuantity,
+              },
+            ],
+          );
+        }
         continue;
       }
       for (const o of occurrences(

@@ -1,5 +1,6 @@
 import {
   hasBillingRules,
+  hasBillingTiming,
   type BillingPeriod,
   type BillingPlan,
 } from '../../../canonical-model/src/billing.js';
@@ -13,8 +14,8 @@ import {
   monthShift,
 } from './calendar.js';
 import { periodDays } from './cover.js';
-import { occurrences } from './occurrences.js';
-import { quoteBillingCycle } from './quote.js';
+import { occurrences, openedOccurrences } from './occurrences.js';
+import { isAdvanceFee, quoteBillingCycle } from './quote.js';
 import { digest } from './terms.js';
 import {
   serviceUseCoverage,
@@ -54,8 +55,39 @@ export function dueArrearsCycle(
   return next.closed ? { start: iso(next.start), end: iso(next.end) } : null;
 }
 
+/** B2: the advance cycles owed at the review instant, for every advance fee.
+ * They are owed whether or not an earlier review saw them (a late first
+ * review still owes every opened cycle), and none opens at or after the
+ * service end (keepPaidPeriod). */
+export function dueAdvanceCycles(
+  plan: BillingPlan,
+  evidence: Pick<
+    BillingQuoteEvidence,
+    'zone' | 'anchor' | 'asOf' | 'serviceEnd'
+  >,
+) {
+  const calendar = new BillingCalendar(instant(evidence.anchor), evidence.zone);
+  const end =
+    evidence.serviceEnd === null ? null : instant(evidence.serviceEnd);
+  return plan.components.flatMap((c) =>
+    isAdvanceFee(c)
+      ? openedOccurrences(
+          calendar,
+          c.occurrence.cadence,
+          instant(evidence.asOf),
+          end,
+        ).map((o) => ({
+          componentId: c.id,
+          start: iso(o.start),
+          end: iso(o.fullEnd),
+        }))
+      : [],
+  );
+}
+
 /** With service-use evidence, actual use first sets the service end, the
- * due cycle follows, then the engagement supplies the actual coverage. */
+ * due cycle follows, then the engagement supplies the actual coverage. An
+ * advance fee is due for each opened cycle even before any cycle closes. */
 export function reviewArrearsCharges(
   plan: BillingPlan,
   evidence: BillingQuoteEvidence,
@@ -71,6 +103,10 @@ export function reviewArrearsCharges(
   // plan that does not declare it cannot be handed one.
   if (use?.earlyReturn && !hasBillingRules(plan))
     throw new Error('Early return requires calculation v4');
+  // Advance fees are rated on the agreed interval, so its end is kept before
+  // actual use moves the service end.
+  if (hasBillingTiming(plan) && evidence.agreedEnd === undefined)
+    evidence.agreedEnd = evidence.serviceEnd;
   if (use) {
     const term = use.earlyReturn?.minimumTerm;
     evidence.serviceEnd = serviceUseEnd(
@@ -82,23 +118,36 @@ export function reviewArrearsCharges(
     );
   }
   const cycle = dueArrearsCycle(plan, evidence);
-  if (!cycle) return { status: 'notDue' as const };
+  const timed = plan.components.some(isAdvanceFee);
+  const advance = timed ? dueAdvanceCycles(plan, evidence) : [];
+  if (!cycle && !advance.length) return { status: 'notDue' as const };
+  // Advance coverage reads actual use through the review instant, so the
+  // snapshot must be complete through it, not only through a closed cycle.
   if (use)
     Object.assign(
       evidence,
-      serviceUseCoverage(use, plan.serviceUnit, cycle.end, evidence.serviceEnd),
+      serviceUseCoverage(
+        use,
+        plan.serviceUnit,
+        advance.length ? evidence.asOf : cycle!.end,
+        evidence.serviceEnd,
+      ),
     );
-  const quote = quoteBillingCycle(plan, evidence, cycle.end);
-  return {
-    status: 'due' as const,
+  // With no closed cycle the arrears prefix is empty: only advance is rated.
+  const quote = quoteBillingCycle(
+    plan,
+    evidence,
+    cycle?.end ?? evidence.periodStart,
+  );
+  const quoteDigest = digest({
     cycle,
-    quote,
-    quoteDigest: digest({
-      cycle,
-      inputDigest: quote.inputDigest,
-      resultDigest: quote.resultDigest,
-    }),
-  };
+    inputDigest: quote.inputDigest,
+    resultDigest: quote.resultDigest,
+  });
+  // Plans without an advance fee keep their review bytes.
+  return timed
+    ? { status: 'due' as const, cycle, advance, quote, quoteDigest }
+    : { status: 'due' as const, cycle, quote, quoteDigest };
 }
 
 /** The end of a minimum term counted in periods from service start, on the

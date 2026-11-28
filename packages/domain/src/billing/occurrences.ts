@@ -99,3 +99,18 @@ export function occurrences(
   }
   return out;
 }
+
+/** B2 advance billing: the cycles owed at `asOf`. A cycle is owed once it has
+ * opened (its start, clamped to the service anchor, is at or before `asOf`)
+ * and only if it opened before the service end; an open service owes every
+ * opened cycle. One rule for a timely and a late review. */
+export function openedOccurrences(
+  calendar: BillingCalendar,
+  cadence: Exclude<BillingSchedule, { kind: 'onServiceEnd' }>,
+  asOf: number,
+  serviceEnd: number | null,
+): Occurrence[] {
+  return occurrences(calendar, cadence, asOf + 1, serviceEnd).filter(
+    (o) => o.start <= asOf && (serviceEnd === null || o.start < serviceEnd),
+  );
+}

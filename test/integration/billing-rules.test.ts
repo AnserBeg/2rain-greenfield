@@ -466,7 +466,7 @@ function earlyReview(
   );
   return {
     status: result.status,
-    end: result.cycle.end,
+    end: result.cycle!.end,
     cents: result.quote.lines.map((l) => l.differenceCents).join(),
   };
 }
