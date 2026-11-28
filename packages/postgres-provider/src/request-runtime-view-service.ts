@@ -51,9 +51,9 @@ import {
 import {
   WORKFLOW_PAYLOAD_VERSION,
   WORKFLOW_PROJECTION_FAMILY,
-  RECORD_CREATED_TRIGGER_READER,
   WORKFLOW_SURFACE_FLOOR,
 } from '../../canonical-model/src/workflows.js';
+import { workflowTriggerReaderFloor } from '../../canonical-model/src/workflow-trigger-events.js';
 import {
   CHUNK_DESCRIPTOR_VERSION,
   CHUNKING_SCHEME_VERSION,
@@ -1037,10 +1037,10 @@ function definitionFromSnapshotRows(
       const floor = surface.requiredRuntimeCapability?.minimumVersion ?? 0;
       if (
         floor < WORKFLOW_SURFACE_FLOOR ||
-        (workflow.workflows.some(
-          ({ trigger }) => typeof trigger !== 'string',
-        ) &&
-          floor < RECORD_CREATED_TRIGGER_READER) ||
+        floor <
+          workflowTriggerReaderFloor(
+            workflow.workflows.map(({ trigger }) => trigger),
+          ) ||
         workflow.workflows.some(
           ({ grants, sdkDigest }) =>
             workflowSdkBindingDigest(

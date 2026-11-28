@@ -16,10 +16,8 @@ import {
   WorkflowProjectionSchema,
   type WorkflowDefinition,
 } from '../../canonical-model/src/schemas.js';
-import {
-  RECORD_CREATED_TRIGGER_READER,
-  WORKFLOW_SURFACE_FLOOR,
-} from '../../canonical-model/src/workflows.js';
+import { WORKFLOW_SURFACE_FLOOR } from '../../canonical-model/src/workflows.js';
+import { workflowTriggerReaderFloor } from '../../canonical-model/src/workflow-trigger-events.js';
 import { workflowSdkBindingDigest } from '@north-star/compiler';
 import { createHash, randomUUID } from 'node:crypto';
 
@@ -875,8 +873,8 @@ export function releaseVerificationBinding(
     );
     if (
       surfaceFloor < WORKFLOW_SURFACE_FLOOR ||
-      (workflows.some(({ trigger }) => typeof trigger !== 'string') &&
-        surfaceFloor < RECORD_CREATED_TRIGGER_READER) ||
+      surfaceFloor <
+        workflowTriggerReaderFloor(workflows.map(({ trigger }) => trigger)) ||
       workflows.some(
         ({ grants, sdkDigest }) =>
           workflowSdkBindingDigest(grants, operations, queries) !== sdkDigest,

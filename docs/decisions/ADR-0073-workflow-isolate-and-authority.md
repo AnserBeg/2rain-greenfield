@@ -445,6 +445,57 @@ start key for a creation is (occurrence, workflow), so one command that creates
 N records starts N runs; the receipt keeps (event, workflow). The script's
 event is `TriggerEvent`, generated with the record type as a literal.
 
+**Owner rulings, 2026-11-27 ("Yes, approve all four"; WORKFLOW-3 design note
+and its Fable read).** These replace the stops this section names for the owner.
+
+- O1. The generic transition writer and the posting kernel name transition
+  occurrences, as the 2026-11-21 ruling has create writers name creations. The
+  change document is not parsed: it carries no company and its event type is per
+  operation.
+- O2. The generic update writer emits a date-edit hint for `scheduledOnField`
+  (slice 2), with the Fable read's B10 (no hint is resolved by the activation
+  capture) and B11 (admission refuses date fields written outside the generic
+  writers). This amends "nothing is added to a record writer" under *A scheduled
+  trigger has two phases* for that hint only.
+- O3. The bare `goodsReceiptPosted` trigger is retired in slice 3, pre-tenant,
+  by converting the receipt into a first-party machine the kernel moves (route
+  L, B14-B18). Until then it keeps its bytes.
+- O4. The past-date ruling under *Dates already past* stands.
+
+**Limit, orchestrator ruling Q3 (2026-11-28).** O1 authorizes the generic
+writer and the posting kernel only. Four capability executors also write a
+machine's state (the purchase and sales order lifecycles: close, reopen, cancel,
+approval release, settlement confirm and reopen) and do not name the move. So a
+`recordTransitioned` trigger is admitted only on a machine EVERY declared
+transition of which an active generic transition operation performs; a machine
+any other writer moves is refused by name at compile
+(`COMPILER_TYPE_INVALID` naming the machine). The writers are listed, with the
+machines they move, in `test/architecture/record-state-writers.test.ts`, which
+fails closed on an unlisted managed-table UPDATE and on a listed machine that
+admission would admit. Having those executors name their moves is the owner's
+decision and is not part of WORKFLOW-3.
+
+**As built in WORKFLOW-3 slice 1 (2026-11-28).** The 0070 occurrence gains a
+kind (`created` or `transitioned`) and both states; migration 0075 adds the
+definer `record_transitions`, which the generic transition writer calls after
+its UPDATE with the company that UPDATE returned, and which requires the stored
+row in that company to be in the target state (exactly one row). The from-state
+is the compiled constant the UPDATE pins in its WHERE. The member persists
+`{kind: 'recordTransitioned', triggerVersion: 'v1', recordTypeId, toStateId,
+fromStateId?}`; the definition row adds `to_state` and `from_state`, appended to
+the digest and the approval binding only when present, so a `recordCreated`
+definition keeps its exact digest and binding bytes. The start key is the
+occurrence, as for creations (the transition's own row, so each real transition
+is its own occurrence; one command runs one effect on one record, so the
+per-command key (kind, record) cannot collapse two). The claim page stays keyed
+by record type; the consumer matches kind and states and resolves the rest
+INELIGIBLE. The trigger scope that loadRun, the approval worklist and staff
+Retry re-derive through also matches the occurrence's kind and states with the
+run's definition. The event is `TriggerEvent` with `fromStateId` and
+`toStateId`, the record type and target state (and a pinned from-state) as
+literals. Reader rung: 55 (assigned at TRAIN-Y); each floor gate reads
+one per-member rung table.
+
 **Exactly-once firing, and the occurrence key.** The existing unique start key
 (tenant, environment, source event, stable workflow identity) stays the
 mechanism. What changes is what the "source event" is for each member:

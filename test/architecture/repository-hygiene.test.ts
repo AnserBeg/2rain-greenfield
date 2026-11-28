@@ -156,6 +156,7 @@ const suiteDefinitions = [
       'test/architecture/preflight.test.ts',
       'test/architecture/record-claim-fidelity.test.ts',
       'test/architecture/record-creation-writers.test.ts',
+      'test/architecture/record-state-writers.test.ts',
       'test/architecture/release-activation-boundary.test.ts',
       'test/architecture/release-persistence-boundary.test.ts',
       'test/architecture/repository-hygiene.test.ts',
@@ -293,6 +294,7 @@ const suiteDefinitions = [
       'test/postgres/trust-substrate.test.ts',
       'test/postgres/workflow-consumer.test.ts',
       'test/postgres/workflow-record-created.test.ts',
+      'test/postgres/workflow-record-transitioned.test.ts',
     ],
     scripts: [
       'test:postgres:1',

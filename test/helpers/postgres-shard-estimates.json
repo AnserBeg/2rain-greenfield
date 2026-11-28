@@ -1,5 +1,5 @@
 {
-  "description": "Estimated CI seconds per test/postgres file, the median of the observed full-run times on GitHub, two or three per file (TRAIN-R b536cf1f run 45783784449; TRAIN-S e339a77c4 run 45836077621 attempts 1 and 2; line-logical-fields, report-analysis and report-analysis-reader have two). line-totals ran 239 s with three tests in its first full run (619a457d, run 46118863525); its 420 adds an estimate for the fourth (template) test, which installs a release at boot and activates a second through the Customize service (276 s on the lane's laptop); customization-inspection moved from shard 1 to shard 6 to make room; re-measure it from the next full run. Runner speed varies up to about 1.7 times between runs, so the budget is a typical-run guard, not a worst-case bound. A shard job runs its files back to back, so a shard estimate is the sum. budgetSeconds keeps a shard under about 1200 s of wall time (the job limit is 1800 s): setup and teardown add roughly 40 s. A file not listed counts unrecordedFileSeconds. Re-measure from the reachability artifacts (reachability-postgres-N, files[].durationMs) when a file changes a lot; docs/execution/evidence-on-demand.md says how.",
+  "description": "Estimated CI seconds per test/postgres file, the median of the observed full-run times on GitHub, two or three per file (TRAIN-R b536cf1f run 45783784449; TRAIN-S e339a77c4 run 45836077621 attempts 1 and 2; line-logical-fields, report-analysis and report-analysis-reader have two). line-totals ran 239 s with three tests in its first full run (619a457d, run 46118863525); its 420 adds an estimate for the fourth (template) test, which installs a release at boot and activates a second through the Customize service (276 s on the lane's laptop); customization-inspection moved from shard 1 to shard 6 to make room; re-measure it from the next full run. workflow-record-transitioned (182 s, the lane's measured shard-1 time) went to shard 11 at TRAIN-Y, with ledger-books-by-hand moved to shard 2 and module-storage-transition to shard 4 to make room. Runner speed varies up to about 1.7 times between runs, so the budget is a typical-run guard, not a worst-case bound. A shard job runs its files back to back, so a shard estimate is the sum. budgetSeconds keeps a shard under about 1200 s of wall time (the job limit is 1800 s): setup and teardown add roughly 40 s. A file not listed counts unrecordedFileSeconds. Re-measure from the reachability artifacts (reachability-postgres-N, files[].durationMs) when a file changes a lot; docs/execution/evidence-on-demand.md says how.",
   "budgetSeconds": 1100,
   "unrecordedFileSeconds": 120,
   "files": {
@@ -75,6 +75,7 @@
     "test/postgres/tenant-isolation.test.ts": 3,
     "test/postgres/trust-substrate.test.ts": 9,
     "test/postgres/workflow-consumer.test.ts": 456,
-    "test/postgres/workflow-record-created.test.ts": 448
+    "test/postgres/workflow-record-created.test.ts": 448,
+    "test/postgres/workflow-record-transitioned.test.ts": 182
   }
 }

@@ -4,7 +4,10 @@ import type { Pool, PoolClient } from 'pg';
 
 import { RECEIPT_POSTED_EVENT } from '../../domain/src/purchasing/receipt-posted-event.js';
 import type { WorkflowTrigger } from '../../canonical-model/src/schemas.js';
-import { RECORD_CREATED_EVENT_TYPE } from '../../canonical-model/src/workflows.js';
+import {
+  RECORD_CREATED_EVENT_TYPE,
+  RECORD_TRANSITIONED_EVENT_TYPE,
+} from '../../canonical-model/src/workflows.js';
 
 export const RECEIPT_POSTED_TYPE = RECEIPT_POSTED_EVENT.eventType;
 /** ADR-0073 A1: a run started by a run of depth 3 starts nothing. */
@@ -12,18 +15,63 @@ export const WORKFLOW_MAX_CAUSATION_DEPTH = 3;
 
 /**
  * The persisted source of a trigger member. The receipt member keeps its
- * event type and no record type, so its definitions and digests are unchanged.
+ * event type and no record type, and a recordCreated member no states, so
+ * their definitions and digests are unchanged.
  */
 export function workflowTriggerSource(trigger: WorkflowTrigger): {
   readonly eventType: string;
   readonly recordType: string | null;
+  readonly toState: string | null;
+  readonly fromState: string | null;
 } {
-  return typeof trigger === 'string'
-    ? { eventType: RECEIPT_POSTED_TYPE, recordType: null }
-    : {
-        eventType: RECORD_CREATED_EVENT_TYPE,
-        recordType: trigger.recordTypeId,
-      };
+  if (typeof trigger === 'string')
+    return {
+      eventType: RECEIPT_POSTED_TYPE,
+      recordType: null,
+      toState: null,
+      fromState: null,
+    };
+  if (trigger.kind === 'recordCreated')
+    return {
+      eventType: RECORD_CREATED_EVENT_TYPE,
+      recordType: trigger.recordTypeId,
+      toState: null,
+      fromState: null,
+    };
+  return {
+    eventType: RECORD_TRANSITIONED_EVENT_TYPE,
+    recordType: trigger.recordTypeId,
+    toState: trigger.toStateId,
+    fromState: trigger.fromStateId ?? null,
+  };
+}
+
+/**
+ * B5: an occurrence starts a definition only when its record type, kind and
+ * states match; the page is keyed by type alone, so a move of a subscribed
+ * type into another state is resolved INELIGIBLE instead of rescanned.
+ */
+export function occurrenceMatchesDefinition(
+  occurrence: {
+    readonly record_type: string;
+    readonly kind: string;
+    readonly from_state: string | null;
+    readonly to_state: string | null;
+  },
+  definition: {
+    readonly record_type: string;
+    readonly to_state: string | null;
+    readonly from_state: string | null;
+  },
+): boolean {
+  return (
+    definition.record_type === occurrence.record_type &&
+    occurrence.kind ===
+      (definition.to_state === null ? 'created' : 'transitioned') &&
+    occurrence.to_state === definition.to_state &&
+    (definition.from_state === null ||
+      occurrence.from_state === definition.from_state)
+  );
 }
 
 interface RecordCreationCandidate {
@@ -37,6 +85,9 @@ interface RecordCreationCandidate {
   readonly trigger_principal_id: string | null;
   readonly cause_workflow_id: string | null;
   readonly cause_depth: number | null;
+  readonly kind: string;
+  readonly from_state: string | null;
+  readonly to_state: string | null;
 }
 const FIRST_UUID = '00000000-0000-0000-0000-000000000000';
 export const WORKFLOW_POLL_BATCH_SIZE = 64;
@@ -292,8 +343,9 @@ async function startRun(
 }
 
 /**
- * ADR-0073 A1 recordCreated. Each occurrence of a subscribed record type gets
- * one disposition and, when eligible, one start per matching definition, all
+ * ADR-0073 A1 recordCreated and recordTransitioned. Each occurrence of a
+ * subscribed record type gets one disposition and, when eligible, one start
+ * per matching definition (record type, kind and states), all
  * in the claim transaction. The start key is the occurrence, so a command that
  * creates N records starts N runs. Company and record come from the verified
  * source chain, never from the script or the worker.
@@ -308,19 +360,23 @@ async function claimRecordCreations(
   const definitions = await client.query<{
     workflow_id: string;
     record_type: string;
+    to_state: string | null;
+    from_state: string | null;
   }>(
-    `SELECT d.workflow_id, d.record_type
+    `SELECT d.workflow_id, d.record_type, d.to_state, d.from_state
         FROM platform.workflow_definitions AS d
         JOIN platform.workflow_activation_watermarks AS w USING (tenant_id, environment_id, release_id)
-       WHERE d.tenant_id = $1 AND d.environment_id = $2 AND d.release_id = $3 AND d.event_type = $4
+       WHERE d.tenant_id = $1 AND d.environment_id = $2 AND d.release_id = $3 AND d.event_type = ANY($4::text[])
          AND w.pointer_id = $5 AND w.fence = $6
          AND w.definition_bindings->d.workflow_id->>'digest' = platform.workflow_definition_digest(d)
          AND w.definition_bindings->d.workflow_id->>'recordType' = d.record_type
+         AND w.definition_bindings->d.workflow_id->>'toState' IS NOT DISTINCT FROM d.to_state
+         AND w.definition_bindings->d.workflow_id->>'fromState' IS NOT DISTINCT FROM d.from_state
        ORDER BY d.workflow_id`,
     [
       ...scopeKeys,
       pointer.release_id,
-      RECORD_CREATED_EVENT_TYPE,
+      [RECORD_CREATED_EVENT_TYPE, RECORD_TRANSITIONED_EVENT_TYPE],
       pointer.pointer_id,
       pointer.fence,
     ],
@@ -332,7 +388,11 @@ async function claimRecordCreations(
   );
   let count = 0;
   for (const occurrence of candidates.rows) {
+    const matching = definitions.rows.filter((definition) =>
+      occurrenceMatchesDefinition(occurrence, definition),
+    );
     const eligible =
+      matching.length > 0 &&
       occurrence.release_id === pointer.release_id &&
       occurrence.release_content_hash === watermark.release_root &&
       [
@@ -356,8 +416,7 @@ async function claimRecordCreations(
     if (!eligible) continue;
     const depth =
       occurrence.cause_depth === null ? 0 : occurrence.cause_depth + 1;
-    for (const { workflow_id, record_type } of definitions.rows) {
-      if (record_type !== occurrence.record_type) continue;
+    for (const { workflow_id } of matching) {
       const skip = recordStartSkip(occurrence, workflow_id);
       if (skip) {
         await client.query(

@@ -862,18 +862,46 @@ export async function scoreWorkflow(
   expected: {
     operations: readonly string[];
     calls: readonly WorkflowCallSpec[];
+    triggerMember?: 'recordCreated' | 'recordTransitioned';
     trigger?: string;
+    toState?: string;
+    fromState?: string;
   },
 ): Promise<Score & { overGranted: boolean }> {
   const reasons: string[] = [];
   const trigger = drafted.trigger ?? 'goodsReceiptPosted';
-  const recordType =
+  const general =
     typeof trigger === 'object' && trigger !== null
-      ? String((trigger as { recordTypeId?: unknown }).recordTypeId)
+      ? (trigger as {
+          kind?: unknown;
+          recordTypeId?: unknown;
+          toStateId?: unknown;
+          fromStateId?: unknown;
+        })
       : null;
+  const recordType = general ? String(general.recordTypeId) : null;
+  const member = general ? String(general.kind) : 'goodsReceiptPosted';
+  // WORKFLOW-3 s1: the member, the record type and, for a lifecycle trigger,
+  // the target and from states are each scored.
+  if (member !== (expected.triggerMember ?? 'goodsReceiptPosted'))
+    reasons.push(
+      `trigger member ${member}; expected ${expected.triggerMember ?? 'goodsReceiptPosted'}`,
+    );
   if ((expected.trigger ?? null) !== (recordType && localOf(recordType)))
     reasons.push(
       `trigger ${recordType ? localOf(recordType) : String(trigger)}; expected ${expected.trigger ?? 'goodsReceiptPosted'}`,
+    );
+  const stateOf = (value: unknown) =>
+    typeof value === 'string' ? localOf(value) : null;
+  // A from-state is scored only when the case names one: pinning a correct
+  // from-state on a case that names none is not a miss.
+  if (
+    (expected.toState ?? null) !== stateOf(general?.toStateId) ||
+    (expected.fromState !== undefined &&
+      expected.fromState !== stateOf(general?.fromStateId))
+  )
+    reasons.push(
+      `trigger states ${String(stateOf(general?.fromStateId))} to ${String(stateOf(general?.toStateId))}; expected ${String(expected.fromState ?? null)} to ${String(expected.toState ?? null)}`,
     );
   const granted = drafted.grants.operations.map(localOf).sort();
   const wanted = [...expected.operations].sort();
@@ -887,13 +915,26 @@ export async function scoreWorkflow(
     );
   const triggerRecordId = randomUUID();
   const event: WorkflowEvent = recordType
-    ? {
-        type: 'recordCreated',
-        eventId: randomUUID(),
-        recordTypeId: recordType,
-        recordId: triggerRecordId,
-        legalEntityId: COMPANY,
-      }
+    ? member === 'recordTransitioned'
+      ? {
+          type: 'recordTransitioned',
+          eventId: randomUUID(),
+          recordTypeId: recordType,
+          recordId: triggerRecordId,
+          fromStateId:
+            typeof general?.fromStateId === 'string'
+              ? general.fromStateId
+              : `${recordType.split(':')[0]!}:state.any`,
+          toStateId: String(general?.toStateId),
+          legalEntityId: COMPANY,
+        }
+      : {
+          type: 'recordCreated',
+          eventId: randomUUID(),
+          recordTypeId: recordType,
+          recordId: triggerRecordId,
+          legalEntityId: COMPANY,
+        }
     : {
         type: 'goodsReceiptPosted',
         eventId: randomUUID(),

@@ -37,6 +37,7 @@ import { withAgentWorlds } from './agent-world.js';
 import {
   BUILD_CASES,
   RECORD_TEMPLATE_CASES,
+  WORKFLOW_TRANSITION_CASES,
   WORKFLOW_TRIGGER_CASES,
   type BuildCase,
 } from './build-eval-cases.js';
@@ -120,7 +121,13 @@ async function main(): Promise<void> {
   // Dated sets outside the 40 run only when named by --cases.
   const cases = [
     ...BUILD_CASES,
-    ...(wanted ? [...RECORD_TEMPLATE_CASES, ...WORKFLOW_TRIGGER_CASES] : []),
+    ...(wanted
+      ? [
+          ...RECORD_TEMPLATE_CASES,
+          ...WORKFLOW_TRIGGER_CASES,
+          ...WORKFLOW_TRANSITION_CASES,
+        ]
+      : []),
   ]
     .filter(
       (c) =>

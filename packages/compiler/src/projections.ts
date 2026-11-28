@@ -74,7 +74,6 @@ import {
 import { LINE_CREATE_VALUES_SURFACE_FLOOR } from '../../canonical-model/src/surface-workspace.js';
 import type { compileDocuments } from './documents.js';
 import {
-  RECORD_CREATED_TRIGGER_READER,
   WORKFLOW_PAYLOAD_VERSION,
   WORKFLOW_RUNTIME_CAPABILITY,
   WORKFLOW_SURFACE_FLOOR,
@@ -726,19 +725,21 @@ export function appendWorkflowProjection(
   const surface = plans.find(
     ({ familyId }) => familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
   )!;
-  const generalTrigger = assertWorkflowTriggers(
+  // Each member raises the floor to its own rung (B6), never "any object".
+  const triggerFloor = assertWorkflowTriggers(
     revision.workflows,
     plans.find(
       ({ familyId }) => familyId === PROJECTION_FAMILY_IDS.storageTarget,
     )?.payload,
     operations,
+    revision,
   );
   surface.requiredRuntimeCapability = {
     ...surface.requiredRuntimeCapability,
     minimumVersion: Math.max(
       surface.requiredRuntimeCapability.minimumVersion,
       WORKFLOW_SURFACE_FLOOR,
-      generalTrigger ? RECORD_CREATED_TRIGGER_READER : 0,
+      triggerFloor,
     ),
   };
   plans.push(

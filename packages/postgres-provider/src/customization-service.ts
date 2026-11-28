@@ -62,6 +62,7 @@ import {
 } from '@north-star/customization';
 import {
   PROJECTION_FAMILY_IDS,
+  workflowTransitionTargets,
   type StorageTransitionEnvelope,
   compilerAttestationFromManifest,
   type ReleaseManifestEnvelope,
@@ -1392,6 +1393,19 @@ export class PostgresCustomizationService {
                     ? operation.effect.entity.targetId
                     : '',
                 ),
+              // The compiler's own recordTransitioned admission rule.
+              workflowTransitionTargets: [
+                ...workflowTransitionTargets(
+                  definition as Parameters<typeof workflowTransitionTargets>[0],
+                ),
+              ].map(([recordTypeId, { states }]) => ({
+                recordTypeId,
+                states: [...states].map(([stateId, state]) => ({
+                  stateId,
+                  label: state.label,
+                  fromStateIds: state.fromStateIds,
+                })),
+              })),
             }
           : {}),
       },
@@ -1432,6 +1446,8 @@ export class PostgresCustomizationService {
             workflowId: string;
             eventType: string;
             recordType: string | null;
+            toState: string | null;
+            fromState: string | null;
             body: string;
             grants: {
               queries: readonly string[];
@@ -1439,6 +1455,7 @@ export class PostgresCustomizationService {
             };
           }>(
             `SELECT d.workflow_id AS "workflowId", d.event_type AS "eventType", d.record_type AS "recordType",
+                  d.to_state AS "toState", d.from_state AS "fromState",
                   convert_from(b.bundle, 'UTF8')::jsonb->>'body' AS body, d.grants
              FROM platform.release_activation_verification_receipts AS v
              JOIN platform.release_activation_swap_receipts AS s
@@ -1476,15 +1493,19 @@ export class PostgresCustomizationService {
           )
         ).rows,
     );
-    return workflows.map(({ eventType, recordType, ...workflow }) => ({
-      ...workflow,
-      trigger:
-        eventType === RECEIPT_POSTED_EVENT.eventType
-          ? RECEIPT_POSTED_EVENT.label
-          : recordType
-            ? `Record created: ${recordType}`
-            : eventType,
-    }));
+    return workflows.map(
+      ({ eventType, recordType, toState, fromState, ...workflow }) => ({
+        ...workflow,
+        trigger:
+          eventType === RECEIPT_POSTED_EVENT.eventType
+            ? RECEIPT_POSTED_EVENT.label
+            : recordType && toState
+              ? `Record moved${fromState ? ` from ${fromState}` : ''} to ${toState}: ${recordType}`
+              : recordType
+                ? `Record created: ${recordType}`
+                : eventType,
+      }),
+    );
   }
 
   /** What a change may target on the live release (plan §10.6 rules). */

@@ -1,5 +1,8 @@
 import { z } from 'zod';
-import { recordCreations } from './record-creation-occurrences.js';
+import {
+  recordCreations,
+  recordTransitions,
+} from './record-creation-occurrences.js';
 import {
   evaluateDerivedField,
   sameDecimal,
@@ -2808,10 +2811,31 @@ async function transitionRecordState(
       WHERE ${quoted(entity.recordIdentity.column)} = ${parameter(values, input.recordId)}
         AND ${quoted(entity.optimisticRevision.column)} = ${parameter(values, input.expectedRevision)}
         AND ${quoted(column.physicalName)} = ${parameter(values, effect.fromStateId)}
-        AND ${quoted(entity.archive.archivedAtColumn)} IS NULL`,
+        AND ${quoted(entity.archive.archivedAtColumn)} IS NULL
+      ${entity.legalEntity ? `RETURNING ${quoted(entity.legalEntity.column)} AS company` : ''}`,
     values,
   );
   requireMutation(result.rowCount);
+  if (entity.legalEntity) {
+    // ADR-0073 A1 (O1): name this move with the company the row was written in.
+    const company = (result.rows[0] as { company?: unknown } | undefined)
+      ?.company;
+    if (typeof company !== 'string')
+      throw failure(
+        'MODULE_STORAGE_COLUMN_AUTHORITY_CONFLICT',
+        'a company-owned transition names no company',
+        entity.entityId,
+      );
+    await recordTransitions(
+      client,
+      entity,
+      column.physicalName,
+      company,
+      input.recordId,
+      effect.fromStateId,
+      effect.toStateId,
+    );
+  }
 }
 
 async function setArchiveState(

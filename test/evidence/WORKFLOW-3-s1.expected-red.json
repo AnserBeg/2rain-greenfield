@@ -1,0 +1,372 @@
+{
+  "version": 1,
+  "packet": "WORKFLOW-3-s1",
+  "entries": [
+    {
+      "name": "wf3-generic-writer-names-move",
+      "claim": "The generic transition writer names each move it makes.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "    await recordTransitions(\n      client,\n      entity,\n      column.physicalName,",
+      "replacement": "    if (Math.random() > 2) await recordTransitions(\n      client,\n      entity,\n      column.physicalName,",
+      "test": {
+        "files": ["test/postgres/workflow-record-transitioned.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-record-transitioned.test.ts",
+          "name": "a tenant lifecycle move starts one pinned run per matching move, in its own company",
+          "expected": "a move before activation is sealed out at the watermark"
+        }
+      ]
+    },
+    {
+      "name": "wf3-definer-stored-state",
+      "claim": "The definer names a move only when the stored row is already in the target state.",
+      "file": "db/migrations/0075_record_transition_occurrences.sql",
+      "original": "        AND r.%1$I = $4\n        AND r.%3$I = $6', identity_column, physical_table, state_column)",
+      "replacement": "        AND r.%1$I = $4\n        AND $6 IS NOT NULL', identity_column, physical_table, state_column)",
+      "test": {
+        "files": ["test/postgres/workflow-record-transitioned.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-record-transitioned.test.ts",
+          "name": "the definer names a move only when the stored row is in the target state",
+          "expected": "Missing expected rejection: a move the stored row has not made was named"
+        }
+      ]
+    },
+    {
+      "name": "wf3-definer-company",
+      "claim": "The company is the stored row's, never another company's record with the same ID.",
+      "file": "db/migrations/0075_record_transition_occurrences.sql",
+      "original": "        AND r.legal_entity_id = $3\n        AND r.%1$I = $4",
+      "replacement": "        AND $3::uuid IS NOT NULL\n        AND r.%1$I = $4",
+      "test": {
+        "files": ["test/postgres/workflow-record-transitioned.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-record-transitioned.test.ts",
+          "name": "the company is the stored row’s own, never another company’s record with the same ID",
+          "expected": "Missing expected rejection: a move was named in a company whose record never made it"
+        }
+      ]
+    },
+    {
+      "name": "wf3-occurrence-key-kind",
+      "claim": "The per-command occurrence key separates a creation from a move of one record (B1).",
+      "file": "db/migrations/0075_record_transition_occurrences.sql",
+      "original": "(tenant_id, environment_id, writer_xid, request_id, action_id, kind, record_type, company_id, record_id);",
+      "replacement": "(tenant_id, environment_id, writer_xid, request_id, action_id, record_type, company_id, record_id);",
+      "test": {
+        "files": ["test/postgres/workflow-record-transitioned.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-record-transitioned.test.ts",
+          "name": "one command naming a creation and a move of one record keeps both occurrences",
+          "expected": "duplicate key value violates unique constraint \"record_occurrences_command_key\""
+        }
+      ]
+    },
+    {
+      "name": "wf3-definer-governed-write",
+      "claim": "A move outside a governed write is refused by name.",
+      "file": "db/migrations/0075_record_transition_occurrences.sql",
+      "original": "  IF action IS NULL THEN\n    RAISE EXCEPTION 'record transition outside a governed write'",
+      "replacement": "  IF false THEN\n    RAISE EXCEPTION 'record transition outside a governed write'",
+      "test": {
+        "files": ["test/postgres/workflow-record-transitioned.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-record-transitioned.test.ts",
+          "name": "a move outside a governed write is refused by name",
+          "expected": "a move outside a governed write was named"
+        }
+      ]
+    },
+    {
+      "name": "wf3-created-digest-bytes",
+      "claim": "A recordCreated definition hashes exactly the bytes it hashed before (B4).",
+      "file": "db/migrations/0075_record_transition_occurrences.sql",
+      "original": "    || CASE WHEN definition.to_state IS NULL THEN '[]'::jsonb",
+      "replacement": "    || CASE WHEN false THEN '[]'::jsonb",
+      "test": {
+        "files": ["test/postgres/workflow-record-transitioned.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-record-transitioned.test.ts",
+          "name": "a recordCreated definition hashes exactly the bytes it hashed before",
+          "expected": "a recordCreated definition hashes exactly the bytes it hashed before"
+        }
+      ]
+    },
+    {
+      "name": "wf3-created-binding-keys",
+      "claim": "A recordCreated approval binding gains no key (B4).",
+      "file": "db/migrations/0075_record_transition_occurrences.sql",
+      "original": "           || CASE WHEN d.to_state IS NULL THEN '{}'::jsonb",
+      "replacement": "           || CASE WHEN false THEN '{}'::jsonb",
+      "test": {
+        "files": ["test/postgres/workflow-record-created.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-record-created.test.ts",
+          "name": "a tenant record type starts one pinned run per created record, in its own company",
+          "expected": "a recordCreated approval binding keeps exactly its keys"
+        }
+      ]
+    },
+    {
+      "name": "wf3-scope-public-execute",
+      "claim": "A recreated definer is not executable by PUBLIC (STOP check 5).",
+      "file": "db/migrations/0075_record_transition_occurrences.sql",
+      "original": "REVOKE ALL ON FUNCTION platform.workflow_record_trigger_scope(uuid) FROM PUBLIC;\n",
+      "replacement": "SELECT 1;\n",
+      "test": {
+        "files": ["test/postgres/workflow-record-transitioned.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-record-transitioned.test.ts",
+          "name": "the changed definers grant no PUBLIC execute and keep their role grants",
+          "expected": "a changed definer is executable by PUBLIC"
+        }
+      ]
+    },
+    {
+      "name": "wf3-scope-definition-match",
+      "claim": "A run's trigger scope requires its occurrence to match its definition's kind and states (B7).",
+      "file": "db/migrations/0075_record_transition_occurrences.sql",
+      "original": "     AND c.kind = CASE WHEN d.to_state IS NULL THEN 'created' ELSE 'transitioned' END\n     AND c.to_state IS NOT DISTINCT FROM d.to_state\n     AND (d.from_state IS NULL OR c.from_state = d.from_state)\n",
+      "replacement": "     AND true\n",
+      "test": {
+        "files": ["test/postgres/workflow-record-transitioned.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-record-transitioned.test.ts",
+          "name": "a tenant lifecycle move starts one pinned run per matching move, in its own company",
+          "expected": "a run on a move its definition does not name has no trigger scope"
+        }
+      ]
+    },
+    {
+      "name": "wf3-consumer-kind-state-match",
+      "claim": "The consumer starts a definition only for an occurrence whose kind and states match (B5).",
+      "file": "packages/postgres-provider/src/workflow-consumer.ts",
+      "original": "    const matching = definitions.rows.filter((definition) =>\n      occurrenceMatchesDefinition(occurrence, definition),\n    );",
+      "replacement": "    const matching = definitions.rows.filter(\n      (definition) => definition.record_type === occurrence.record_type,\n    );",
+      "test": {
+        "files": ["test/postgres/workflow-record-transitioned.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-record-transitioned.test.ts",
+          "name": "a tenant lifecycle move starts one pinned run per matching move, in its own company",
+          "expected": "one matching move per company starts exactly one run"
+        }
+      ]
+    },
+    {
+      "name": "wf3-consumer-from-state",
+      "claim": "A from-pinned definition starts only for a move from that state.",
+      "file": "packages/postgres-provider/src/workflow-consumer.ts",
+      "original": "    (definition.from_state === null ||\n      occurrence.from_state === definition.from_state)",
+      "replacement": "    (definition.from_state === null || true)",
+      "test": {
+        "files": [
+          "test/postgres/workflow-record-transitioned.test.ts",
+          "test/unit/workflow-triggers.test.ts"
+        ]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-record-transitioned.test.ts",
+          "name": "a tenant lifecycle move starts one pinned run per matching move, in its own company",
+          "expected": "one matching move per company starts exactly one run"
+        },
+        {
+          "file": "test/unit/workflow-triggers.test.ts",
+          "name": "an occurrence starts only the definitions its kind and states match",
+          "expected": "a move from another state does not match a from-pinned definition"
+        }
+      ]
+    },
+    {
+      "name": "wf3-consumer-ineligible",
+      "claim": "An occurrence of a subscribed type that matches no definition resolves INELIGIBLE (B5).",
+      "file": "packages/postgres-provider/src/workflow-consumer.ts",
+      "original": "      matching.length > 0 &&\n",
+      "replacement": "      matching.length >= 0 &&\n",
+      "test": {
+        "files": ["test/postgres/workflow-record-transitioned.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-record-transitioned.test.ts",
+          "name": "a tenant lifecycle move starts one pinned run per matching move, in its own company",
+          "expected": "each occurrence resolves once: matching moves CLAIMED, every other occurrence of the type INELIGIBLE"
+        }
+      ]
+    },
+    {
+      "name": "wf3-capture-seeds-moves",
+      "claim": "The activation capture stays keyed by record type, so a move before activation is sealed out (B5).",
+      "file": "db/migrations/0070_record_creation_occurrences.sql",
+      "original": "     AND c.record_type = ANY(COALESCE(subscribed_records, '{}'::text[])) AND NOT c.resolved;",
+      "replacement": "     AND c.record_type = ANY(COALESCE(subscribed_records, '{}'::text[])) AND c.kind = 'created' AND NOT c.resolved;",
+      "test": {
+        "files": ["test/postgres/workflow-record-transitioned.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-record-transitioned.test.ts",
+          "name": "a tenant lifecycle move starts one pinned run per matching move, in its own company",
+          "expected": "a move before activation is sealed out at the watermark"
+        }
+      ]
+    },
+    {
+      "name": "wf3-admission-generic-machine",
+      "claim": "Admission refuses a machine that has a transition no generic operation performs (ruling Q3).",
+      "file": "packages/compiler/src/workflows.ts",
+      "original": "    if (\n      machine.transitions.length === 0 ||\n      !machine.transitions.every(({ transitionId }) =>\n        generic.has(transitionId),\n      )\n    )\n      continue;",
+      "replacement": "    if (machine.transitions.length === 0) continue;",
+      "test": {
+        "files": [
+          "test/architecture/record-state-writers.test.ts",
+          "test/unit/workflow-triggers.test.ts"
+        ]
+      },
+      "kills": [
+        {
+          "file": "test/architecture/record-state-writers.test.ts",
+          "name": "every machine another writer moves is refused by recordTransitioned admission",
+          "expected": "is moved outside the generic writer but admission admits it"
+        },
+        {
+          "file": "test/unit/workflow-triggers.test.ts",
+          "name": "recordTransitioned admission refuses by name what no generic writer alone moves",
+          "expected": "northstar.app:machine.purchase_order_lifecycle"
+        },
+        {
+          "file": "test/unit/workflow-triggers.test.ts",
+          "name": "only machines every transition of which a generic operation performs offer states",
+          "expected": "a machine another writer moves offers no state"
+        }
+      ]
+    },
+    {
+      "name": "wf3-admission-to-state",
+      "claim": "Admission refuses a target state no admitted transition enters.",
+      "file": "packages/compiler/src/workflows.ts",
+      "original": "    if (!state)\n      throw new WorkflowTriggerBindingError(",
+      "replacement": "    if (!state && Math.random() > 2)\n      throw new WorkflowTriggerBindingError(",
+      "test": {
+        "files": ["test/unit/workflow-triggers.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/workflow-triggers.test.ts",
+          "name": "recordTransitioned admission refuses by name what no generic writer alone moves",
+          "expected": "northstar.app:state.custom_inspection_scheduled"
+        }
+      ]
+    },
+    {
+      "name": "wf3-admission-from-state",
+      "claim": "Admission refuses a from-state with no admitted transition into the target.",
+      "file": "packages/compiler/src/workflows.ts",
+      "original": "      !state.fromStateIds.includes(trigger.fromStateId)",
+      "replacement": "      state.fromStateIds.includes('') ",
+      "test": {
+        "files": ["test/unit/workflow-triggers.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/workflow-triggers.test.ts",
+          "name": "recordTransitioned admission refuses by name what no generic writer alone moves",
+          "expected": "northstar.app:state.custom_inspection_passed"
+        }
+      ]
+    },
+    {
+      "name": "wf3-floor-own-rung",
+      "claim": "A recordTransitioned release raises the floor to its own rung.",
+      "file": "packages/canonical-model/src/workflow-trigger-events.ts",
+      "original": "  recordTransitioned: RECORD_TRANSITIONED_TRIGGER_READER,\n} satisfies",
+      "replacement": "  recordTransitioned: RECORD_CREATED_TRIGGER_READER,\n} satisfies",
+      "test": {
+        "files": ["test/unit/workflow-triggers.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/workflow-triggers.test.ts",
+          "name": "each member raises the reader floor to its own rung",
+          "expected": "a recordTransitioned release needs the recordTransitioned reader"
+        },
+        {
+          "file": "test/unit/workflow-triggers.test.ts",
+          "name": "a recordTransitioned workflow compiles at its own rung on a machine only generic operations move",
+          "expected": "the compiled floor is the recordTransitioned rung"
+        }
+      ]
+    },
+    {
+      "name": "wf3-verification-gate",
+      "claim": "Release verification refuses a member below its own rung (B6).",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "      surfaceFloor <\n        workflowTriggerReaderFloor(workflows.map(({ trigger }) => trigger)) ||",
+      "replacement": "      (workflows.some(({ trigger }) => typeof trigger !== 'string') &&\n        surfaceFloor < 50) ||",
+      "test": {
+        "files": ["test/integration/workflow-admission.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/integration/workflow-admission.test.ts",
+          "name": "release verification refuses a member below its own reader rung (WORKFLOW-3 s1 B6)",
+          "expected": "Missing expected exception: a recordTransitioned release at the recordCreated rung passed verification"
+        }
+      ]
+    },
+    {
+      "name": "wf3-serving-gate",
+      "claim": "The serving gate reads the per-member rung table (B6).",
+      "file": "packages/postgres-provider/src/request-runtime-view-service.ts",
+      "original": "        floor <\n          workflowTriggerReaderFloor(\n            workflow.workflows.map(({ trigger }) => trigger),\n          ) ||",
+      "replacement": "        (workflow.workflows.some(({ trigger }) => typeof trigger !== 'string') &&\n          floor < 50) ||",
+      "test": {
+        "files": ["test/unit/workflow-triggers.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/unit/workflow-triggers.test.ts",
+          "name": "every reader-floor gate reads the per-member rung table (B6)",
+          "expected": "packages/postgres-provider/src/request-runtime-view-service.ts gates each member at its own rung"
+        }
+      ]
+    },
+    {
+      "name": "wf3-census-unlisted-writer",
+      "claim": "The state-writer census reds on an unlisted managed-table UPDATE (B8).",
+      "file": "packages/postgres-provider/src/goods-receipt.ts",
+      "original": "import type { PoolClient } from 'pg';\n",
+      "replacement": "import type { PoolClient } from 'pg';\n// UPDATE ${unlisted}\n",
+      "test": {
+        "files": ["test/architecture/record-state-writers.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/architecture/record-state-writers.test.ts",
+          "name": "every UPDATE of a managed table is classified by the machines it moves",
+          "expected": "a managed-table UPDATE was added or removed: classify it in RECORD_STATE_WRITERS"
+        }
+      ]
+    }
+  ]
+}

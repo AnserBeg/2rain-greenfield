@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
 import { canonicalize } from '../../packages/canonical-model/src/index.js';
-import { WORKFLOW_SURFACE_FLOOR } from '../../packages/canonical-model/src/workflows.js';
+import {
+  RECORD_CREATED_TRIGGER_READER,
+  WORKFLOW_SURFACE_FLOOR,
+} from '../../packages/canonical-model/src/workflows.js';
 import { PROJECTION_FAMILY_IDS } from '../../packages/compiler/src/index.js';
 import { executeVerificationPlan } from '../../packages/compiler/src/verification.js';
 import { releaseVerificationBinding } from '../../packages/postgres-provider/src/release-verification-service.js';
@@ -213,5 +216,95 @@ test('a workflow release pins the declarations, SDK catalog and required reader'
         ],
       }),
     /Workflow grant does not resolve/,
+  );
+});
+
+test('release verification refuses a member below its own reader rung (WORKFLOW-3 s1 B6)', () => {
+  const { definition } = compilePartyFixture();
+  const draft = compilePartyFixture({
+    ...definition,
+    workflows: [
+      {
+        workflowId: 'after-receiving',
+        schemaVersion: 'v6',
+        trigger: 'goodsReceiptPosted',
+        bodyDigest: 'a'.repeat(64),
+        grants: { queries: [], operations: [] },
+      },
+    ],
+  }).compiled;
+  const workflowReference = draft.bundle.releaseManifest.projections.find(
+    ({ familyId }) => familyId === PROJECTION_FAMILY_IDS.workflow,
+  );
+  const manifest = draft.bundle.artifacts.find(
+    ({ contentHash }) => contentHash === workflowReference?.artifactRoot,
+  );
+  assert.ok(manifest);
+  const [chunk] = (
+    JSON.parse(Buffer.from(manifest.canonicalBytes).toString()) as {
+      chunks: { contentHash: string }[];
+    }
+  ).chunks;
+  assert.ok(chunk);
+  // The release claims the recordCreated rung and declares a member.
+  const forged = (trigger: unknown) => ({
+    ...draft,
+    bundle: {
+      ...draft.bundle,
+      releaseManifest: {
+        ...draft.bundle.releaseManifest,
+        projections: draft.bundle.releaseManifest.projections.map(
+          (projection) =>
+            projection.familyId === PROJECTION_FAMILY_IDS.surfaceManifest
+              ? {
+                  ...projection,
+                  requiredRuntimeCapability: {
+                    ...projection.requiredRuntimeCapability,
+                    minimumVersion: RECORD_CREATED_TRIGGER_READER,
+                  },
+                }
+              : projection,
+        ),
+      },
+      artifacts: draft.bundle.artifacts.map((artifact) => {
+        if (artifact.contentHash !== chunk.contentHash) return artifact;
+        const payload = JSON.parse(
+          Buffer.from(artifact.canonicalBytes).toString(),
+        ) as { workflows: Record<string, unknown>[] };
+        return {
+          ...artifact,
+          canonicalBytes: Buffer.from(
+            canonicalize({
+              ...payload,
+              workflows: payload.workflows.map((workflow) => ({
+                ...workflow,
+                trigger,
+              })),
+            }),
+          ),
+        };
+      }),
+    },
+  });
+  const recordTypeId = 'northstar.party:entity.party';
+  // The recordCreated rung serves recordCreated...
+  assert.doesNotThrow(() =>
+    releaseVerificationBinding(
+      forged({ kind: 'recordCreated', triggerVersion: 'v1', recordTypeId }),
+    ),
+  );
+  // ...and refuses recordTransitioned, whose rung is higher.
+  assert.throws(
+    () =>
+      releaseVerificationBinding(
+        forged({
+          kind: 'recordTransitioned',
+          triggerVersion: 'v1',
+          recordTypeId,
+          toStateId: 'northstar.party:state.party_closed',
+        }),
+      ),
+    { code: 'WORKFLOW_PROJECTION_MISMATCH' },
+    'a recordTransitioned release at the recordCreated rung passed verification',
   );
 });

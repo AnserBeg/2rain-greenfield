@@ -1,4 +1,5 @@
 import { mapTargets, type MapTarget } from './map-revision.js';
+import type { WorkflowTransitionTarget } from '../../canonical-model/src/workflow-trigger-events.js';
 import {
   presentationTargets,
   type PresentationTarget,
@@ -88,6 +89,11 @@ export interface CustomizationTargets {
   readonly workflowSdk?: string;
   /** Record types whose creations the release's create operations record (ADR-0073 A1). */
   readonly workflowRecordTypeIds?: readonly string[];
+  /**
+   * Per admissible machine, the states a recordTransitioned trigger may name:
+   * computed by the compiler's own admission rule (workflowTransitionTargets).
+   */
+  readonly workflowTransitionTargets?: readonly WorkflowTransitionTarget[];
   readonly linkTargets?: readonly {
     readonly entityId: string;
     readonly label: string;

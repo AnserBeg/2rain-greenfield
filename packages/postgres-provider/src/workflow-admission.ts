@@ -163,10 +163,10 @@ export async function persistWorkflowDefinitions(
         tenant_id, environment_id, release_id, workflow_id, event_type,
         body_digest, executable, executable_digest, sdk_digest, engine_build,
         host_version, sdk_version, automation_principal_id, authored_by, grants,
-        record_type
+        record_type, to_state, from_state
       ) SELECT $1::uuid, $2::uuid, $3::uuid, $4::text, $5::text, $6::text,
                $7::bytea, $8::text, $9::text, $10::text, $11::text, $12::text,
-               $13::uuid, $14::uuid, $15::jsonb, $16::text
+               $13::uuid, $14::uuid, $15::jsonb, $16::text, $17::text, $18::text
         WHERE NOT EXISTS (
           SELECT 1 FROM platform.workflow_definitions
            WHERE (tenant_id, environment_id, release_id, workflow_id) = ($1, $2, $3, $4)
@@ -186,6 +186,8 @@ export async function persistWorkflowDefinitions(
         author,
         JSON.stringify(binding.grants),
         source.recordType,
+        source.toState,
+        source.fromState,
       ],
     );
     // Only the verifier's connection can read the authoritative digest.
@@ -196,7 +198,9 @@ export async function persistWorkflowDefinitions(
        WHERE (tenant_id, environment_id, release_id, workflow_id) = ($1, $2, $3, $4)
          AND (event_type, body_digest, executable_digest, sdk_digest, engine_build, host_version, sdk_version, automation_principal_id, authored_by, grants) =
              ($5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb)
-         AND record_type IS NOT DISTINCT FROM $15::text`,
+         AND record_type IS NOT DISTINCT FROM $15::text
+         AND to_state IS NOT DISTINCT FROM $16::text
+         AND from_state IS NOT DISTINCT FROM $17::text`,
       [
         ...scope,
         binding.workflowId,
@@ -211,6 +215,8 @@ export async function persistWorkflowDefinitions(
         author,
         JSON.stringify(binding.grants),
         source.recordType,
+        source.toState,
+        source.fromState,
       ],
     );
     if (!rows[0])
@@ -264,6 +270,8 @@ export async function assertWorkflowEvidence(
     workflow_id: string;
     event_type: string;
     record_type: string | null;
+    to_state: string | null;
+    from_state: string | null;
     body_digest: string;
     executable_digest: string;
     sdk_digest: string;
@@ -271,7 +279,7 @@ export async function assertWorkflowEvidence(
     result_bytes: Buffer;
     matches: boolean;
   }>(
-    `SELECT e.workflow_id, d.body_digest, d.event_type, d.record_type, d.executable_digest, d.sdk_digest, d.grants,
+    `SELECT e.workflow_id, d.body_digest, d.event_type, d.record_type, d.to_state, d.from_state, d.executable_digest, d.sdk_digest, d.grants,
        e.result_bytes, e.binding_digest = platform.workflow_definition_digest(d) AS matches
      FROM platform.workflow_verification_evidence e
      JOIN platform.workflow_definitions d
@@ -290,6 +298,8 @@ export async function assertWorkflowEvidence(
         row.body_digest !== binding.bodyDigest ||
         row.event_type !== workflowTriggerSource(binding.trigger).eventType ||
         row.record_type !== workflowTriggerSource(binding.trigger).recordType ||
+        row.to_state !== workflowTriggerSource(binding.trigger).toState ||
+        row.from_state !== workflowTriggerSource(binding.trigger).fromState ||
         canonicalize(row.grants) !== canonicalize(binding.grants) ||
         !row.result_bytes.equals(
           workflowEvidenceBytes(binding, row.executable_digest, row.sdk_digest),

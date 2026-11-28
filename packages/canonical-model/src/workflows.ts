@@ -7,6 +7,15 @@ export const RECORD_CREATED_TRIGGER_READER = 50;
 /** The platform event type a recordCreated definition persists. */
 export const RECORD_CREATED_EVENT_TYPE =
   'northstar.runtime:event.record-created';
+/**
+ * ADR-0073 A1 recordTransitioned (WORKFLOW-3 s1). Its own rung: a rung-50
+ * reader strict-parses the trigger union and would refuse the member without
+ * naming it. 55, assigned at TRAIN-Y (main's highest was BILLING's 54).
+ */
+export const RECORD_TRANSITIONED_TRIGGER_READER = 55;
+/** The platform event type a recordTransitioned definition persists. */
+export const RECORD_TRANSITIONED_EVENT_TYPE =
+  'northstar.runtime:event.record-transitioned';
 export const WORKFLOW_PAYLOAD_VERSION = 'northstar.workflow-payload/v1';
 export const WORKFLOW_PROJECTION_FAMILY =
   'northstar.compiler:projection-family.workflow';
