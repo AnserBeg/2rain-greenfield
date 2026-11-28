@@ -62,6 +62,7 @@ import {
 } from '@north-star/customization';
 import {
   PROJECTION_FAMILY_IDS,
+  workflowTransitionTargets,
   type StorageTransitionEnvelope,
   compilerAttestationFromManifest,
   type ReleaseManifestEnvelope,
@@ -1392,6 +1393,19 @@ export class PostgresCustomizationService {
                     ? operation.effect.entity.targetId
                     : '',
                 ),
+              // The compiler's own recordTransitioned admission rule.
+              workflowTransitionTargets: [
+                ...workflowTransitionTargets(
+                  definition as Parameters<typeof workflowTransitionTargets>[0],
+                ),
+              ].map(([recordTypeId, { states }]) => ({
+                recordTypeId,
+                states: [...states].map(([stateId, state]) => ({
+                  stateId,
+                  label: state.label,
+                  fromStateIds: state.fromStateIds,
+                })),
+              })),
             }
           : {}),
       },
