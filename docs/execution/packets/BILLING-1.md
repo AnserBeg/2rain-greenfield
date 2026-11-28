@@ -109,6 +109,8 @@ Slice 3a-i built tasks 1 to 4 above and the B8 rename, B1 and B7 ([record](BILLI
 
 Slice 3a-ii-a adds per-component timing: a recurring fixed fee billed in advance under keepPaidPeriod, calculation v5 ([record](BILLING-1-s3a-ii.md)). The minimum charge, discounts, percentage components and time in advance are later 3a-ii slices.
 
+Slice 3a-ii-b adds the minimum charge from the agreed start (a fee minimum term), percent discounts and percentage components, pricing reader 57 provisional ([record](BILLING-1-s3a-ii-b.md)). Time in advance (e) and amount discounts (f) remain.
+
 ## Test it yourself
 
 Run `node --import tsx --test test/integration/billing-quote.test.ts`. The three-business test expects CAD 100.00 for hire after a pause, CAD 8.25 for usage above allowance and CAD 15.50 for a prorated contract.

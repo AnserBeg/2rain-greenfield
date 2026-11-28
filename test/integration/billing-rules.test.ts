@@ -2074,7 +2074,7 @@ test('B13: discount and percentage refusals, and the pricing reader', () => {
   for (const [componentId, reason] of [
     ['missing', 'an unknown base'],
     ['waiver', 'itself as its base'],
-  ])
+  ] as const)
     refused(
       e3Plan(
         [{ ...waiver('net'), base: { componentId, stage: 'net' } }],

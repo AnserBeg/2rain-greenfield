@@ -54,7 +54,9 @@ function plan(
           ]
         : c.kind === 'fixed'
           ? [c.amount]
-          : [c.overageRate];
+          : c.kind === 'meter'
+            ? [c.overageRate]
+            : [];
     for (const id of money)
       if (id) slots.set(id, { id, kind: 'money', currency: 'CAD', scale: 6 });
     if (c.kind === 'meter') {
