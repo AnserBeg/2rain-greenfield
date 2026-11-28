@@ -293,6 +293,7 @@ const suiteDefinitions = [
       'test/postgres/tenant-isolation.test.ts',
       'test/postgres/trust-substrate.test.ts',
       'test/postgres/workflow-consumer.test.ts',
+      'test/postgres/workflow-engine-fact.test.ts',
       'test/postgres/workflow-record-created.test.ts',
       'test/postgres/workflow-record-transitioned.test.ts',
     ],
