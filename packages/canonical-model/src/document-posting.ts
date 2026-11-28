@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { inspectPredicateForExecution } from './predicate-kernel.js';
 import type { VersionedNormalizedApplicationPackage } from './schemas.js';
 
 /**
@@ -16,35 +16,17 @@ import type { VersionedNormalizedApplicationPackage } from './schemas.js';
  * registered declaration of its engine. The ledger is the first engine; the
  * inventory posting kernel and invoices are later users of the same block.
  */
-export const DOCUMENT_POSTING_BINDING_VERSION = 'documentPosting/v1' as const;
+export {
+  DOCUMENT_POSTING_BINDING_VERSION,
+  DocumentPostingBinding,
+} from './document-posting-schema.js';
+import { DocumentPostingBinding } from './document-posting-schema.js';
 
 /**
  * The operation-catalog reader that understands the block. Assigned at merge
  * (charter rungs rule): the next free operation reader above line totals.
  */
 export const DOCUMENT_POSTING_OPERATION_READER = 9;
-
-const id = z
-  .string()
-  .max(180)
-  .regex(
-    /^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+:[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/u,
-  );
-const roleKey = z.string().regex(/^[a-z][A-Za-z0-9]{0,63}$/u);
-const roleMap = z
-  .record(roleKey, id)
-  .refine((value) => Object.keys(value).length <= 64);
-
-export const DocumentPostingBinding = z.strictObject({
-  bindingVersion: z.literal(DOCUMENT_POSTING_BINDING_VERSION),
-  engine: id,
-  header: z.strictObject({ entity: id }),
-  lines: z.strictObject({ relation: id }),
-  state: z.strictObject({ field: id, from: id, to: id }),
-  roles: roleMap.refine((value) => Object.keys(value).length >= 1),
-  options: roleMap,
-});
-export type DocumentPostingBinding = z.infer<typeof DocumentPostingBinding>;
 
 /** The value a role accepts, independent of any one engine. */
 export type DocumentPostingValueClass =
@@ -131,42 +113,35 @@ function enumOptionIds(field: Field): readonly string[] {
     : [];
 }
 
-/** `state equals <stateId>` on the given field, exactly. */
-function stateEquals(term: unknown, fieldId: string): string | undefined {
-  if (
-    !record(term) ||
-    term.kind !== 'fieldComparisonPredicate' ||
-    term.operator !== 'equals' ||
-    !record(term.field) ||
-    term.field.targetId !== fieldId ||
-    !record(term.value) ||
-    term.value.kind !== 'textValue' ||
-    typeof term.value.value !== 'string'
-  )
-    return undefined;
-  return term.value.value;
-}
-
 /**
- * The states a header guard provably refuses: the `not(state equals S)` terms
- * of a lone `notPredicate` or of an `allPredicate` (any further term only
- * narrows it). The negative spelling is the one a create can share
- * (`purchasing/definition.ts`, `editableStates`).
+ * Whether a header guard is false while the header is in `state`, evaluated
+ * by the one predicate kernel against an image that holds only the state
+ * field (every other comparison is absent, which the kernel owns). A guard
+ * the kernel cannot evaluate is treated as not proved false.
  */
-function refusedStates(precondition: unknown, fieldId: string): Set<string> {
-  const terms =
-    record(precondition) && precondition.kind === 'allPredicate'
-      ? Array.isArray(precondition.terms)
-        ? precondition.terms
-        : []
-      : [precondition];
-  const refused = new Set<string>();
-  for (const term of terms) {
-    if (!record(term) || term.kind !== 'notPredicate') continue;
-    const state = stateEquals(term.term, fieldId);
-    if (state) refused.add(state);
+function guardRefusesState(
+  precondition: unknown,
+  fieldId: string,
+  state: string,
+): boolean {
+  try {
+    const receipt = inspectPredicateForExecution(precondition, {
+      bindingPosition: 'operationPrecondition',
+      resolveComparison: (comparison) => {
+        if (comparison.field.targetId !== fieldId)
+          return { presence: 'absent' };
+        const value = comparison.value as { value?: unknown };
+        if (comparison.operator === 'equals')
+          return { presence: 'present', result: value.value === state };
+        if (comparison.operator === 'notEquals')
+          return { presence: 'present', result: value.value !== state };
+        throw new TypeError('state comparison is not an equality');
+      },
+    });
+    return receipt.outcome === 'evaluated' && receipt.result === false;
+  } catch {
+    return false;
   }
-  return refused;
 }
 
 /**
@@ -325,7 +300,7 @@ export function documentPostingDeclarationProblem(
     )
       return refuse('postedReachable');
     // 6. Freeze: every header update, archive and restore is refused in every
-    // state except the initial one, spelled not(state equals S); the line
+    // state except the initial one (proved by the predicate kernel); the line
     // writers inherit the update guard through the declared relation.
     const initial = machine.initialState.targetId;
     if (initial === b.state.from) return refuse('freeze');
@@ -343,10 +318,14 @@ export function documentPostingDeclarationProblem(
     const frozen = machine.states
       .map((s) => s.stateId)
       .filter((s) => s !== initial);
-    for (const edit of headerEdits) {
-      const refused = refusedStates(edit.precondition, b.state.field);
-      if (frozen.some((s) => !refused.has(s))) return refuse('freeze');
-    }
+    for (const edit of headerEdits)
+      if (
+        frozen.some(
+          (state) =>
+            !guardRefusesState(edit.precondition, b.state.field, state),
+        )
+      )
+        return refuse('freeze');
     // 7. Permission: a transition permission on the header.
     const permission = pkg.permissions.find(
       (p) => p.permissionId === operation.permission.targetId,

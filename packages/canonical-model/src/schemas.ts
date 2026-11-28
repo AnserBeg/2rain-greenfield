@@ -11,7 +11,7 @@ import { RecordTemplateBindingSchema } from './record-template.js';
 import { SurfaceMapSchema } from './map-view.js';
 import { SurfaceBoardSchema } from './board.js';
 import { BookingOperationBinding } from './booking.js';
-import { DocumentPostingBinding } from './document-posting.js';
+import { DocumentPostingBinding } from './document-posting-schema.js';
 import { SurfaceLayoutSchema } from './layout.js';
 import { z } from 'zod';
 import { DOCUMENTS_PAYLOAD_VERSION } from './documents.js';
