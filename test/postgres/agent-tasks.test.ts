@@ -422,6 +422,15 @@ test(
         // Context, no guessing: the business date and default currency come
         // from erp_discover; a currency the request and context never gave is
         // never written.
+        // Most recent 05:30Z in the past; the Edmonton business date is the prior UTC day.
+        const clockInstant = new Date();
+        clockInstant.setUTCHours(5, 30, 0, 0);
+        if (clockInstant.getTime() > Date.now()) {
+          clockInstant.setUTCDate(clockInstant.getUTCDate() - 1);
+        }
+        const businessDate = new Date(clockInstant.getTime() - 86_400_000)
+          .toISOString()
+          .slice(0, 10);
         const planPurchaseOrder = async (withCurrency: boolean) => {
           const agent = new OperationsAgentSession({
             immediateEdits: firstPartyImmediateEdits(),
@@ -431,7 +440,7 @@ test(
             personHeaders: { cookie: 'northstar-demo-actor=buyer' },
             companyId: COMPANY,
             businessCalendar: BUSINESS_CALENDAR,
-            clock: () => new Date('2026-11-17T05:30:00Z'),
+            clock: () => clockInstant,
             approve: () => Promise.resolve(true),
           });
           await lookUp(agent);
@@ -503,7 +512,7 @@ test(
           };
         };
         const withContext = await planPurchaseOrder(true);
-        assert.equal(withContext.context.today.date, '2026-11-16');
+        assert.equal(withContext.context.today.date, businessDate);
         assert.equal(withContext.context.currency.default, 'CAD');
         assert.equal(
           withContext.record!.values[f('purchase_order_currency')],
@@ -511,7 +520,7 @@ test(
         );
         assert.equal(
           withContext.record!.values[f('purchase_order_order_date')],
-          '2026-11-16T00:00:00.000Z',
+          `${businessDate}T00:00:00.000Z`,
         );
         // The currency is required and nobody gave one: the plan is refused,
         // nothing is created, and the session supplied none of its own.

@@ -1686,8 +1686,9 @@ test(
             'a restarted worker wakes a durable timer once at its business deadline',
             async () => {
               const workflowId = 'receipt-timer';
-              const start = '2026-11-19T17:30:00.000Z';
-              const due = '2026-11-21T17:30:00.000Z';
+              const startMs = Date.now();
+              const start = new Date(startMs).toISOString();
+              const due = new Date(startMs + 172_800_000).toISOString();
               let instant = new Date(start);
               const worker = () =>
                 new PostgresWorkflowExecution(
@@ -1730,7 +1731,7 @@ test(
               );
 
               const rebooted = worker();
-              instant = new Date('2026-11-21T17:29:59.999Z');
+              instant = new Date(startMs + 172_800_000 - 1);
               await rebooted.tick(scope);
               assert.equal(await journalCount(pool, run, 'RESULT'), 1);
               assert.equal(await runStatus(pool, run), 'WAITING');
