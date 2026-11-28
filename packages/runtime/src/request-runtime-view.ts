@@ -188,7 +188,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     capabilityId: 'northstar.runtime:capability.operation-catalog',
     // 8 reads derived fields, create-only fields, money compared with zero
     // and a totalled relation's maximum and header lock (ADR-0094); 9 an
-    // operation's open-item binding (OPEN-ITEM-1).
+    // operation's open-item binding (OPEN-ITEM-1); 10 its void, unapply and
+    // ledger bindings (OPEN-ITEM-1 s2).
     maximumSupportedVersion: OPEN_ITEM_OPERATION_READER,
   },
   [REQUEST_RUNTIME_FORMULA_RULE_FAMILY]: {

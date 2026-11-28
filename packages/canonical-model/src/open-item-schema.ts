@@ -39,6 +39,13 @@ export interface OpenItemDeclaration {
     readonly operationId: string;
     readonly transitionId: string;
   };
+  /**
+   * Withdraw an issued item nothing is applied to: the machine's transition
+   * from open to void, moved only by the core. It keeps its number.
+   */
+  readonly void?:
+    | { readonly operationId: string; readonly transitionId: string }
+    | undefined;
 }
 
 export interface OpenItemApplicationDeclaration {
@@ -50,6 +57,8 @@ export interface OpenItemApplicationDeclaration {
   readonly targetRelationId: string;
   readonly amountFieldId: string;
   readonly applyOperationId: string;
+  /** Withdraw application lines of one source: the amounts return. */
+  readonly unapplyOperationId?: string | undefined;
 }
 
 export function openItemSchemas(canonicalId: z.ZodType<string>) {
@@ -83,6 +92,9 @@ export function openItemSchemas(canonicalId: z.ZodType<string>) {
       operationId: canonicalId,
       transitionId: canonicalId,
     }),
+    void: z
+      .strictObject({ operationId: canonicalId, transitionId: canonicalId })
+      .optional(),
   });
   const application: z.ZodType<OpenItemApplicationDeclaration> = z.strictObject(
     {
@@ -92,6 +104,7 @@ export function openItemSchemas(canonicalId: z.ZodType<string>) {
       targetRelationId: canonicalId,
       amountFieldId: canonicalId,
       applyOperationId: canonicalId,
+      unapplyOperationId: canonicalId.optional(),
     },
   );
   return {

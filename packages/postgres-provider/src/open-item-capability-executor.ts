@@ -6,7 +6,10 @@ import {
   OPEN_ITEM_APPLY_CAPABILITY,
   OPEN_ITEM_EVENT_SCHEMA_VERSION,
   OPEN_ITEM_ISSUE_CAPABILITY,
+  OPEN_ITEM_UNAPPLY_CAPABILITY,
+  OPEN_ITEM_VOID_CAPABILITY,
   openItemLineSetDigest,
+  type OpenItemLedger,
   type OpenItemOperationBinding,
   type OpenItemTypeBinding,
 } from '../../canonical-model/src/open-item.js';
@@ -35,14 +38,18 @@ import {
   auditFieldId,
   withModuleRuntimeRole,
 } from './module-runtime-interpreter.js';
-import { currentPolicyVersionOf } from './current-policy.js';
+import {
+  currentPolicyVersionOf,
+  isCurrentPolicyVersion,
+} from './current-policy.js';
 import { recordCreations } from './record-creation-occurrences.js';
 import { withTrustedRequestTransaction } from './request-context.js';
 import { PostgresTrustService } from './trust/postgres-trust-service.js';
 
 /**
- * The open-item core (OPEN-ITEM-1 slice 1): issue and apply, executed by the
- * compiled binding an operation carries, over the release's generated tables.
+ * The open-item core (OPEN-ITEM-1 slices 1 and 2): issue, apply, void and
+ * unapply, executed by the compiled binding an operation carries, over the
+ * release's generated tables.
  * It names no record type, field or module: every name comes from the
  * binding, every column from the active storage target.
  *
@@ -51,7 +58,11 @@ import { PostgresTrustService } from './trust/postgres-trust-service.js';
  * amount), applied zero and balance the total. Apply: amounts move from one
  * credit-side source to debit-side targets of the same company, counterparty,
  * currency and direction; each item's applied is the sum of its application
- * lines, re-read under the locks before commit.
+ * lines across every application type naming it (its ledger), re-read under
+ * the locks before commit. Void: an open item nothing is applied to becomes
+ * void, keeping its number, with nothing left owed (balance zero). Unapply:
+ * application lines of one source are archived (kept, never deleted) and
+ * their amounts return to the source and each target.
  *
  * A person confirms each one: the gateway's grant is verified here, attested
  * as the approval issuer, and consumed once in SQL (lock position 0), whose
@@ -65,7 +76,24 @@ const INVALID = 'openItem.invalidOperation';
 
 type Entity = StorageTargetPayloadV1['entities'][number];
 type Row = Record<string, unknown>;
-type Kind = 'issue' | 'apply';
+type Kind = 'issue' | 'apply' | 'void' | 'unapply';
+type Version = OpenItemOperationBinding['bindingVersion'];
+const CAPABILITY: Readonly<Record<Kind, string>> = Object.freeze({
+  issue: OPEN_ITEM_ISSUE_CAPABILITY,
+  apply: OPEN_ITEM_APPLY_CAPABILITY,
+  void: OPEN_ITEM_VOID_CAPABILITY,
+  unapply: OPEN_ITEM_UNAPPLY_CAPABILITY,
+});
+const VERSION: Readonly<Record<Kind, Version>> = Object.freeze({
+  issue: 'openItem.issue/v1',
+  apply: 'openItem.apply/v1',
+  void: 'openItem.void/v1',
+  unapply: 'openItem.unapply/v1',
+});
+type Bound<V extends Version> = Extract<
+  OpenItemOperationBinding,
+  { bindingVersion: V }
+>;
 
 const object = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -187,6 +215,8 @@ interface Prepared {
     readonly target: string;
     readonly amount: string;
   }[];
+  /** An unapply's application lines, by record ID. */
+  readonly unapplied: readonly string[];
 }
 
 interface Change {
@@ -211,10 +241,7 @@ class OpenItemCapabilityExecutor implements RegisteredCapabilityOperationExecuto
     storage: StorageTargetPayloadV1,
     private readonly kind: Kind,
   ) {
-    this.capabilityId =
-      kind === 'issue'
-        ? OPEN_ITEM_ISSUE_CAPABILITY
-        : OPEN_ITEM_APPLY_CAPABILITY;
+    this.capabilityId = CAPABILITY[kind];
     this.#storage = new Storage(storage);
   }
 
@@ -225,8 +252,7 @@ class OpenItemCapabilityExecutor implements RegisteredCapabilityOperationExecuto
     const scope = request.readBackDefinition.legalEntityScope;
     if (
       !binding ||
-      binding.bindingVersion !==
-        (this.kind === 'issue' ? 'openItem.issue/v1' : 'openItem.apply/v1') ||
+      binding.bindingVersion !== VERSION[this.kind] ||
       request.definition.effect.capability.targetId !== this.capabilityId ||
       request.readBackDefinition.queryType !== 'get' ||
       !scope ||
@@ -245,9 +271,29 @@ class OpenItemCapabilityExecutor implements RegisteredCapabilityOperationExecuto
       return refused();
     const recordId = input.recordId;
     let applications: Prepared['applications'] = [];
+    let unapplied: readonly string[] = [];
     let source: OpenItemTypeBinding;
     let readBackEntityId: string;
-    if (binding.bindingVersion === 'openItem.issue/v1') {
+    if (binding.bindingVersion === 'openItem.void/v1') {
+      if (Object.keys(args).length !== 0) return refused();
+      source = binding.item;
+      readBackEntityId = binding.item.entityId;
+    } else if (binding.bindingVersion === 'openItem.unapply/v1') {
+      const ids = args.applicationIds;
+      if (
+        Object.keys(args).some((key) => key !== 'applicationIds') ||
+        !Array.isArray(ids) ||
+        ids.length === 0 ||
+        ids.length > MAXIMUM_APPLICATION_LINES ||
+        ids.some((id) => typeof id !== 'string' || !UUID.test(id))
+      )
+        return refused();
+      unapplied = Object.freeze([...(ids as string[])]);
+      if (new Set(unapplied).size !== unapplied.length)
+        return refused('openItem.duplicateLine');
+      source = binding.source;
+      readBackEntityId = binding.application.entityId;
+    } else if (binding.bindingVersion === 'openItem.issue/v1') {
       const lines = binding.item.lines !== undefined;
       if (
         Object.keys(args).some(
@@ -302,6 +348,17 @@ class OpenItemCapabilityExecutor implements RegisteredCapabilityOperationExecuto
     }
     if (request.readBackDefinition.sourceEntityId !== readBackEntityId)
       return refused();
+    // Amendment 4 at run time too: amounts move within one direction, from
+    // a credit-side item to a debit-side one. Decided on the binding alone,
+    // before any record is read.
+    if (
+      (binding.bindingVersion === 'openItem.apply/v1' ||
+        binding.bindingVersion === 'openItem.unapply/v1') &&
+      (binding.source.direction !== binding.target.direction ||
+        binding.source.side !== 'credit' ||
+        binding.target.side !== 'debit')
+    )
+      return refused('openItem.directionMismatch');
     // The company is the STORED company of the source and of every target,
     // never an input (prior rule 3): a principal of one company naming
     // another company's records is decided for the records' company.
@@ -322,6 +379,45 @@ class OpenItemCapabilityExecutor implements RegisteredCapabilityOperationExecuto
             ).rows.map((row) => row.company);
           const owner = await stored(this.#storage.item(source), [recordId]);
           if (owner.length !== 1) return refused('openItem.recordMissing');
+          if (binding.bindingVersion === 'openItem.unapply/v1') {
+            // The targets and the lines' company come from the STORED lines.
+            const lines = this.#application(binding.application);
+            const rows = (
+              await client.query<{
+                company: string;
+                source: string;
+                target: string;
+              }>(
+                `SELECT ${lines.company}::text AS company, ${lines.source}::text AS source,
+                        ${lines.target}::text AS target
+                   FROM ${lines.table}
+                  WHERE tenant_id=$1 AND environment_id=$2 AND record_id = ANY($3::uuid[])
+                    AND archived_at IS NULL`,
+                [
+                  request.context.tenantId,
+                  request.context.environmentId,
+                  unapplied,
+                ],
+              )
+            ).rows;
+            if (rows.length !== unapplied.length)
+              return refused('openItem.recordMissing');
+            if (rows.some((row) => row.source !== recordId))
+              return refused('openItem.applicationMismatch');
+            const targets = [...new Set(rows.map((row) => row.target))];
+            const companies = await stored(
+              this.#storage.item(binding.target),
+              targets,
+            );
+            if (companies.length !== targets.length)
+              return refused('openItem.recordMissing');
+            if (
+              [...companies, ...rows.map((row) => row.company)].some(
+                (value) => value !== owner[0],
+              )
+            )
+              return refused('openItem.companyMismatch');
+          }
           if (binding.bindingVersion === 'openItem.apply/v1') {
             const targets = await stored(
               this.#storage.item(binding.target),
@@ -337,9 +433,11 @@ class OpenItemCapabilityExecutor implements RegisteredCapabilityOperationExecuto
       },
     );
     const readBackRecordId =
-      binding.bindingVersion === 'openItem.issue/v1'
-        ? recordId
-        : applications[0]!.applicationId;
+      binding.bindingVersion === 'openItem.apply/v1'
+        ? applications[0]!.applicationId
+        : binding.bindingVersion === 'openItem.unapply/v1'
+          ? unapplied[0]!
+          : recordId;
     const authorization: Authorization = Object.freeze({
       decisionInput: Object.freeze({ legalEntityId: company }),
       legalEntityReadScopeIds: Object.freeze([company]),
@@ -358,6 +456,7 @@ class OpenItemCapabilityExecutor implements RegisteredCapabilityOperationExecuto
         expectedRevision: input.expectedRevision,
         arguments: args,
         applications,
+        unapplied,
       }),
     );
     return authorization;
@@ -411,7 +510,8 @@ class OpenItemCapabilityExecutor implements RegisteredCapabilityOperationExecuto
     );
     const binding = prepared.binding;
     const recordType =
-      binding.bindingVersion === 'openItem.issue/v1'
+      binding.bindingVersion === 'openItem.issue/v1' ||
+      binding.bindingVersion === 'openItem.void/v1'
         ? binding.item.entityId
         : binding.source.entityId;
     const trust = await new PostgresTrustService(
@@ -450,6 +550,11 @@ class OpenItemCapabilityExecutor implements RegisteredCapabilityOperationExecuto
         // The policy the gateway decided under still holds: its epoch row is
         // held FOR SHARE to commit, so a revoked permission or membership
         // waits behind this write or refuses it.
+        // Only a version this provider's live policy issued names an epoch;
+        // any other cannot be checked, so a money write refuses it by name
+        // rather than skip the check.
+        if (!isCurrentPolicyVersion(request.policyVersion))
+          return refused('openItem.policyUnverifiable');
         const epoch = await client.query<{ policy_version: string }>(
           'SELECT platform.lock_current_policy_epoch($1,$2) AS policy_version',
           [request.context.tenantId, request.context.environmentId],
@@ -462,7 +567,11 @@ class OpenItemCapabilityExecutor implements RegisteredCapabilityOperationExecuto
         const applied =
           binding.bindingVersion === 'openItem.issue/v1'
             ? await this.#issue(client, request, prepared, binding, grant)
-            : await this.#apply(client, request, prepared, binding);
+            : binding.bindingVersion === 'openItem.apply/v1'
+              ? await this.#apply(client, request, prepared, binding)
+              : binding.bindingVersion === 'openItem.void/v1'
+                ? await this.#void(client, request, prepared, binding)
+                : await this.#unapply(client, request, prepared, binding);
         const metadata = {
           legalEntityId: {
             classification: 'INTERNAL' as const,
@@ -618,14 +727,102 @@ class OpenItemCapabilityExecutor implements RegisteredCapabilityOperationExecuto
     return Number(updated.rows[0]!.revision);
   }
 
+  /** The physical names of one application type. */
+  #application(application: Bound<'openItem.apply/v1'>['application']) {
+    const entity = this.#storage.entity(application.entityId);
+    return {
+      entity,
+      table: `north_star_module.${quote(entity.physicalTableName)}`,
+      company: quote(entity.legalEntity!.column),
+      source: this.#storage.relation(entity, application.sourceRelationId),
+      target: this.#storage.relation(entity, application.targetRelationId),
+      amount: this.#storage.column(entity, application.amountFieldId),
+    };
+  }
+
+  /**
+   * The counterparty lock (the core's own namespace), read from the item the
+   * request names before any row lock; callers re-check it under the row
+   * lock.
+   */
+  async #counterparty(
+    client: PoolClient,
+    request: Execution,
+    item: ItemStorage,
+    prepared: Prepared,
+  ): Promise<string> {
+    const scope = [request.context.tenantId, request.context.environmentId];
+    const party = await client.query<{ party: string | null }>(
+      `SELECT ${item.counterparty}::text AS party FROM ${item.table}
+        WHERE tenant_id=$1 AND environment_id=$2 AND record_id=$3`,
+      [...scope, prepared.recordId],
+    );
+    const counterparty = party.rows[0]?.party;
+    if (typeof counterparty !== 'string')
+      return refused('openItem.recordMissing');
+    await client.query(
+      `SELECT pg_advisory_xact_lock(hashtextextended(
+         'northstar.openitem:counterparty:' || $1::text || ':' || $2::text || ':' || $3::text || ':' || $4::text, 0))`,
+      [...scope, prepared.company, counterparty],
+    );
+    return counterparty;
+  }
+
+  /** An item's live applied amount across every application type naming it. */
+  async #ledgerSum(
+    client: PoolClient,
+    request: Execution,
+    ledger: OpenItemLedger,
+    recordId: string,
+    scale: number,
+  ): Promise<bigint> {
+    let sum = 0n;
+    for (const entry of ledger) {
+      const entity = this.#storage.entity(entry.entityId);
+      const result = await client.query<{ sum: string | null }>(
+        `SELECT coalesce(sum(${this.#storage.column(entity, entry.amountFieldId)}), 0)::text AS sum
+           FROM north_star_module.${quote(entity.physicalTableName)}
+          WHERE tenant_id=$1 AND environment_id=$2
+            AND ${this.#storage.relation(entity, entry.relationId)}=$3
+            AND archived_at IS NULL`,
+        [request.context.tenantId, request.context.environmentId, recordId],
+      );
+      const value = units(result.rows[0]?.sum ?? null, scale);
+      if (value === null) return refused('openItem.appliedDiverged');
+      sum += value;
+    }
+    return sum;
+  }
+
+  /** Refused unless the item's stored applied equals its ledger's live sum. */
+  async #gate(
+    client: PoolClient,
+    request: Execution,
+    item: ItemStorage,
+    ledger: OpenItemLedger,
+    recordId: string,
+  ): Promise<void> {
+    const scale = item.binding.scale;
+    const stored = await client.query<{ applied: string | null }>(
+      `SELECT ${item.column(item.binding.appliedFieldId)}::text AS applied
+         FROM ${item.table}
+        WHERE tenant_id=$1 AND environment_id=$2 AND record_id=$3`,
+      [request.context.tenantId, request.context.environmentId, recordId],
+    );
+    const applied = units(stored.rows[0]?.applied ?? null, scale);
+    if (
+      applied === null ||
+      applied !==
+        (await this.#ledgerSum(client, request, ledger, recordId, scale))
+    )
+      return refused('openItem.appliedDiverged');
+  }
+
   async #issue(
     client: PoolClient,
     request: Execution,
     prepared: Prepared,
-    binding: Extract<
-      OpenItemOperationBinding,
-      { bindingVersion: 'openItem.issue/v1' }
-    >,
+    binding: Bound<'openItem.issue/v1'>,
     grant: string,
   ): Promise<Applied> {
     const item = this.#storage.item(binding.item);
@@ -750,46 +947,24 @@ class OpenItemCapabilityExecutor implements RegisteredCapabilityOperationExecuto
     client: PoolClient,
     request: Execution,
     prepared: Prepared,
-    binding: Extract<
-      OpenItemOperationBinding,
-      { bindingVersion: 'openItem.apply/v1' }
-    >,
+    binding: Bound<'openItem.apply/v1'>,
   ): Promise<Applied> {
     const source = this.#storage.item(binding.source);
     const target = this.#storage.item(binding.target);
-    const applicationEntity = this.#storage.entity(
-      binding.application.entityId,
-    );
-    const applicationTable = `north_star_module.${quote(applicationEntity.physicalTableName)}`;
-    const sourceColumn = this.#storage.relation(
-      applicationEntity,
-      binding.application.sourceRelationId,
-    );
-    const targetColumn = this.#storage.relation(
-      applicationEntity,
-      binding.application.targetRelationId,
-    );
-    const amountColumn = this.#storage.column(
-      applicationEntity,
-      binding.application.amountFieldId,
-    );
+    const lines = this.#application(binding.application);
+    const applicationEntity = lines.entity;
+    const applicationTable = lines.table;
+    const sourceColumn = lines.source;
+    const targetColumn = lines.target;
+    const amountColumn = lines.amount;
     const scale = binding.source.scale;
     const scope = [request.context.tenantId, request.context.environmentId];
     return withModuleRuntimeRole(client, async () => {
-      // The counterparty lock (the core's own namespace), read from the
-      // source before any row lock and re-checked under the row locks.
-      const party = await client.query<{ party: string | null }>(
-        `SELECT ${source.counterparty}::text AS party FROM ${source.table}
-          WHERE tenant_id=$1 AND environment_id=$2 AND record_id=$3`,
-        [...scope, prepared.recordId],
-      );
-      const counterparty = party.rows[0]?.party;
-      if (typeof counterparty !== 'string')
-        return refused('openItem.recordMissing');
-      await client.query(
-        `SELECT pg_advisory_xact_lock(hashtextextended(
-           'northstar.openitem:counterparty:' || $1::text || ':' || $2::text || ':' || $3::text || ':' || $4::text, 0))`,
-        [...scope, prepared.company, counterparty],
+      const counterparty = await this.#counterparty(
+        client,
+        request,
+        source,
+        prepared,
       );
       // Every touched item, sorted by record ID, so one source across many
       // targets and two sources on one target never wait on each other in a
@@ -828,13 +1003,6 @@ class OpenItemCapabilityExecutor implements RegisteredCapabilityOperationExecuto
         String(row[unquote(item.counterparty)]);
       if (partyOf(source, sourceRow) !== counterparty)
         return refused('openItem.recordChanged');
-      // Amendment 4 at run time too: one direction, credit to debit.
-      if (
-        binding.source.direction !== binding.target.direction ||
-        binding.source.side !== 'credit' ||
-        binding.target.side !== 'debit'
-      )
-        return refused('openItem.directionMismatch');
       const sourceCurrency = currencyOf(source, sourceRow);
       if (typeof sourceCurrency !== 'string' || sourceCurrency === '')
         return refused('openItem.currencyMissing');
@@ -938,30 +1106,18 @@ class OpenItemCapabilityExecutor implements RegisteredCapabilityOperationExecuto
         }
       }
       // The gate observes the fact: each touched item's applied equals the
-      // sum of its live application lines, re-read under the held locks.
-      for (const update of updates) {
-        const relationColumn =
-          update.id === prepared.recordId ? sourceColumn : targetColumn;
-        const sums = await client.query<{
-          sum: string | null;
-          applied: string | null;
-        }>(
-          `SELECT (SELECT coalesce(sum(${amountColumn}), 0)::text FROM ${applicationTable}
-                    WHERE tenant_id=$1 AND environment_id=$2 AND ${relationColumn}=$3
-                      AND archived_at IS NULL) AS sum,
-                  (SELECT ${update.item.column(update.item.binding.appliedFieldId)}::text
-                     FROM ${update.item.table}
-                    WHERE tenant_id=$1 AND environment_id=$2 AND record_id=$3) AS applied`,
-          [...scope, update.id],
+      // sum of its live application lines across its whole ledger, re-read
+      // under the held locks.
+      for (const update of updates)
+        await this.#gate(
+          client,
+          request,
+          update.item,
+          update.id === prepared.recordId
+            ? binding.sourceLedger
+            : binding.targetLedger,
+          update.id,
         );
-        const row = sums.rows[0];
-        if (
-          !row ||
-          units(row.sum, scale) === null ||
-          units(row.sum, scale) !== units(row.applied, scale)
-        )
-          return refused('openItem.appliedDiverged');
-      }
       return {
         revision: sourceRevision,
         changes: sourceChanges,
@@ -973,14 +1129,273 @@ class OpenItemCapabilityExecutor implements RegisteredCapabilityOperationExecuto
       };
     });
   }
+
+  /**
+   * Void: apply's locks in apply's order (counterparty, then the item row),
+   * so a void racing an apply either sees the apply committed and refuses,
+   * or commits first and the apply finds the item void. Only an open item
+   * with nothing applied (its stored applied AND its live ledger) is voided;
+   * it keeps its number, and nothing is owed on it (balance zero).
+   */
+  async #void(
+    client: PoolClient,
+    request: Execution,
+    prepared: Prepared,
+    binding: Bound<'openItem.void/v1'>,
+  ): Promise<Applied> {
+    const item = this.#storage.item(binding.item);
+    const { scale, states } = binding.item;
+    return withModuleRuntimeRole(client, async () => {
+      const counterparty = await this.#counterparty(
+        client,
+        request,
+        item,
+        prepared,
+      );
+      const row = await this.#lock(
+        client,
+        request,
+        item,
+        prepared.company,
+        prepared.recordId,
+      );
+      if (
+        Number(row.revision) !== prepared.expectedRevision ||
+        String(row[unquote(item.counterparty)]) !== counterparty
+      )
+        return refused('openItem.recordChanged');
+      const stateColumn = item.column(binding.item.stateFieldId);
+      const balanceColumn = item.column(binding.item.balanceFieldId);
+      if (row[unquote(stateColumn)] !== states.open)
+        return refused('openItem.notOpen');
+      const applied = units(
+        row[unquote(item.column(binding.item.appliedFieldId))] ?? null,
+        scale,
+      );
+      if (applied === null) return refused('openItem.figureMissing');
+      if (
+        applied !== 0n ||
+        (await this.#ledgerSum(
+          client,
+          request,
+          binding.ledger,
+          prepared.recordId,
+          scale,
+        )) !== 0n
+      )
+        return refused('openItem.applied');
+      const zero = decimal(0n, scale);
+      const balanceBefore = row[unquote(balanceColumn)];
+      const revision = await this.#update(
+        client,
+        request,
+        item,
+        prepared.recordId,
+        prepared.expectedRevision,
+        [
+          [balanceColumn, zero],
+          [stateColumn, states.void],
+        ],
+      );
+      const number = row[unquote(item.column(binding.item.numberFieldId))];
+      return {
+        revision,
+        changes: [
+          {
+            fieldId: binding.item.balanceFieldId,
+            before:
+              balanceBefore === null || balanceBefore === undefined
+                ? null
+                : String(balanceBefore),
+            after: zero,
+          },
+          {
+            fieldId: binding.item.stateFieldId,
+            before: states.open,
+            after: states.void,
+          },
+        ],
+        metadata: { number: String(number) },
+      };
+    });
+  }
+
+  /**
+   * Unapply: application lines of one source are archived (kept, never
+   * deleted; the archive and this change document are the reversal) and
+   * their amounts return to the source and each target. The lines' targets
+   * come from the stored lines, read once to sort the item locks and again
+   * under them (locks: counterparty, items by record ID, then the lines,
+   * after the items as apply's inserts are).
+   */
+  async #unapply(
+    client: PoolClient,
+    request: Execution,
+    prepared: Prepared,
+    binding: Bound<'openItem.unapply/v1'>,
+  ): Promise<Applied> {
+    const source = this.#storage.item(binding.source);
+    const target = this.#storage.item(binding.target);
+    const lines = this.#application(binding.application);
+    const scale = binding.source.scale;
+    const scope = [request.context.tenantId, request.context.environmentId];
+    const read = async (lock: boolean) =>
+      (
+        await client.query<{
+          record_id: string;
+          company: string;
+          source: string;
+          target: string;
+          amount: string | null;
+          archived: boolean;
+        }>(
+          `SELECT record_id::text, ${lines.company}::text AS company,
+                  ${lines.source}::text AS source, ${lines.target}::text AS target,
+                  ${lines.amount}::text AS amount, archived_at IS NOT NULL AS archived
+             FROM ${lines.table}
+            WHERE tenant_id=$1 AND environment_id=$2 AND record_id = ANY($3::uuid[])
+            ORDER BY record_id${lock ? ' FOR NO KEY UPDATE' : ''}`,
+          [...scope, prepared.unapplied],
+        )
+      ).rows;
+    return withModuleRuntimeRole(client, async () => {
+      const counterparty = await this.#counterparty(
+        client,
+        request,
+        source,
+        prepared,
+      );
+      const seen = await read(false);
+      if (seen.length !== prepared.unapplied.length)
+        return refused('openItem.recordMissing');
+      const targets = [...new Set(seen.map((line) => line.target))];
+      const touched = [
+        { id: prepared.recordId, item: source },
+        ...targets.map((id) => ({ id, item: target })),
+      ].sort((left, right) =>
+        left.id < right.id ? -1 : left.id > right.id ? 1 : 0,
+      );
+      const rows = new Map<string, Row>();
+      for (const { id, item } of touched)
+        rows.set(
+          id,
+          await this.#lock(client, request, item, prepared.company, id),
+        );
+      const sourceRow = rows.get(prepared.recordId)!;
+      if (
+        Number(sourceRow.revision) !== prepared.expectedRevision ||
+        String(sourceRow[unquote(source.counterparty)]) !== counterparty
+      )
+        return refused('openItem.recordChanged');
+      // Under the item locks: each line still live, of this source, in this
+      // company, naming a target that is locked.
+      const moved = new Map<string, bigint>();
+      for (const line of await read(true)) {
+        if (line.archived) return refused('openItem.alreadyUnapplied');
+        if (line.source !== prepared.recordId)
+          return refused('openItem.applicationMismatch');
+        if (line.company !== prepared.company)
+          return refused('openItem.companyMismatch');
+        if (!rows.has(line.target) || line.target === prepared.recordId)
+          return refused('openItem.recordChanged');
+        const amount = units(line.amount, scale);
+        if (amount === null || amount <= 0n)
+          return refused('openItem.figureMissing');
+        moved.set(line.target, (moved.get(line.target) ?? 0n) + amount);
+      }
+      const given = [...moved.values()].reduce((sum, value) => sum + value, 0n);
+      const archived = await client.query(
+        `UPDATE ${lines.table} SET archived_at=clock_timestamp(), revision=revision+1
+          WHERE tenant_id=$1 AND environment_id=$2 AND record_id = ANY($3::uuid[])
+            AND archived_at IS NULL`,
+        [...scope, prepared.unapplied],
+      );
+      if (archived.rowCount !== prepared.unapplied.length)
+        return refused('openItem.alreadyUnapplied');
+      const figure = (item: ItemStorage, row: Row, fieldId: string) => {
+        const value = units(row[unquote(item.column(fieldId))] ?? null, scale);
+        if (value === null) return refused('openItem.figureMissing');
+        return value;
+      };
+      let sourceRevision = 0;
+      let sourceChanges: Change[] = [];
+      for (const { id, item } of touched) {
+        const row = rows.get(id)!;
+        const b = item.binding;
+        const stateBefore = String(row[unquote(item.column(b.stateFieldId))]);
+        if (
+          stateBefore !== b.states.open &&
+          stateBefore !== b.states.partiallySettled &&
+          stateBefore !== b.states.settled
+        )
+          return refused('openItem.notApplied');
+        const amount = id === prepared.recordId ? given : moved.get(id)!;
+        const appliedBefore = figure(item, row, b.appliedFieldId);
+        const balanceBefore = figure(item, row, b.balanceFieldId);
+        const applied = appliedBefore - amount;
+        const balance = balanceBefore + amount;
+        if (applied < 0n) return refused('openItem.appliedDiverged');
+        const state =
+          applied === 0n
+            ? b.states.open
+            : balance === 0n
+              ? b.states.settled
+              : b.states.partiallySettled;
+        const revision = await this.#update(
+          client,
+          request,
+          item,
+          id,
+          Number(row.revision),
+          [
+            [item.column(b.appliedFieldId), decimal(applied, scale)],
+            [item.column(b.balanceFieldId), decimal(balance, scale)],
+            [item.column(b.stateFieldId), state],
+          ],
+        );
+        if (id === prepared.recordId) {
+          sourceRevision = revision;
+          sourceChanges = [
+            {
+              fieldId: b.appliedFieldId,
+              before: decimal(appliedBefore, scale),
+              after: decimal(applied, scale),
+            },
+            {
+              fieldId: b.balanceFieldId,
+              before: decimal(balanceBefore, scale),
+              after: decimal(balance, scale),
+            },
+            { fieldId: b.stateFieldId, before: stateBefore, after: state },
+          ];
+        }
+      }
+      for (const { id, item } of touched)
+        await this.#gate(
+          client,
+          request,
+          item,
+          id === prepared.recordId
+            ? binding.sourceLedger
+            : binding.targetLedger,
+          id,
+        );
+      return {
+        revision: sourceRevision,
+        changes: sourceChanges,
+        metadata: {
+          targets,
+          unapplied: [...prepared.unapplied],
+          amount: decimal(given, scale),
+        },
+      };
+    });
+  }
 }
 
 const factory = (kind: Kind): PostgresCapabilityOperationExecutorFactory =>
   Object.freeze({
-    capabilityId:
-      kind === 'issue'
-        ? OPEN_ITEM_ISSUE_CAPABILITY
-        : OPEN_ITEM_APPLY_CAPABILITY,
+    capabilityId: CAPABILITY[kind],
     singleUseConfirmation: true,
     verificationRefusal: {
       code: 'SEMANTIC_OPERATION_INPUT_INVALID',
@@ -995,6 +1410,11 @@ const factory = (kind: Kind): PostgresCapabilityOperationExecutorFactory =>
     },
   });
 
-/** The open-item core's two capabilities, each a general engine (rule 19). */
+/** The open-item core's capabilities, each a general engine (rule 19). */
 export const OPEN_ITEM_CAPABILITY_EXECUTOR_FACTORIES: readonly PostgresCapabilityOperationExecutorFactory[] =
-  Object.freeze([factory('issue'), factory('apply')]);
+  Object.freeze([
+    factory('issue'),
+    factory('apply'),
+    factory('void'),
+    factory('unapply'),
+  ]);

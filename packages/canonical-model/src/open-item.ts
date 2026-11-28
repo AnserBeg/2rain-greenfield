@@ -31,11 +31,24 @@ export const OPEN_ITEM_ISSUE_CAPABILITY =
   'northstar.openitem:capability.open_item_issue';
 export const OPEN_ITEM_APPLY_CAPABILITY =
   'northstar.openitem:capability.open_item_apply';
+export const OPEN_ITEM_VOID_CAPABILITY =
+  'northstar.openitem:capability.open_item_void';
+export const OPEN_ITEM_UNAPPLY_CAPABILITY =
+  'northstar.openitem:capability.open_item_unapply';
+/** Every capability the core executes. */
+export const OPEN_ITEM_CAPABILITIES: readonly string[] = Object.freeze([
+  OPEN_ITEM_ISSUE_CAPABILITY,
+  OPEN_ITEM_APPLY_CAPABILITY,
+  OPEN_ITEM_VOID_CAPABILITY,
+  OPEN_ITEM_UNAPPLY_CAPABILITY,
+]);
 /** The event every core operation emits. */
 export const OPEN_ITEM_EVENT_SCHEMA_VERSION = 'northstar.open-item-event/v1';
-// Operation catalog reader 9: an operation's open-item binding (assigned at
-// merge; MIGRATION-RULE capability rung rule). It claims every reader below.
-export const OPEN_ITEM_OPERATION_READER = 9;
+// Operation catalog reader 9 read an operation's open-item binding (issue and
+// apply, OPEN-ITEM-1 s1); 10 adds void, unapply and each end's ledger (s2).
+// Assigned at merge (MIGRATION-RULE capability rung rule); it claims every
+// reader below.
+export const OPEN_ITEM_OPERATION_READER = 10;
 
 /**
  * The line set a person confirms an issue against: each live line's record ID
@@ -109,7 +122,24 @@ const itemBinding = z.strictObject({
 });
 export type OpenItemTypeBinding = z.infer<typeof itemBinding>;
 
-/** The compiled key an issue or apply operation carries. */
+/**
+ * An item type's ledger: every application type that names it at one end,
+ * with that end's relation. An item's applied is the sum of its live lines
+ * across ALL of them (a fee note settled by a receipt and by a credit note),
+ * so each core gate sums the whole ledger, never one application type.
+ */
+const ledger = z
+  .array(z.strictObject({ entityId: id, relationId: id, amountFieldId: id }))
+  .max(128);
+export type OpenItemLedger = z.infer<typeof ledger>;
+const applicationBinding = z.strictObject({
+  entityId: id,
+  sourceRelationId: id,
+  targetRelationId: id,
+  amountFieldId: id,
+});
+
+/** The compiled key an issue, apply, void or unapply operation carries. */
 export const OpenItemOperationBinding = z.discriminatedUnion('bindingVersion', [
   z.strictObject({
     bindingVersion: z.literal('openItem.issue/v1'),
@@ -117,21 +147,40 @@ export const OpenItemOperationBinding = z.discriminatedUnion('bindingVersion', [
   }),
   z.strictObject({
     bindingVersion: z.literal('openItem.apply/v1'),
-    application: z.strictObject({
-      entityId: id,
-      sourceRelationId: id,
-      targetRelationId: id,
-      amountFieldId: id,
-    }),
+    application: applicationBinding,
     source: itemBinding,
     target: itemBinding,
+    sourceLedger: ledger,
+    targetLedger: ledger,
+  }),
+  z.strictObject({
+    bindingVersion: z.literal('openItem.void/v1'),
+    item: itemBinding,
+    ledger,
+  }),
+  z.strictObject({
+    bindingVersion: z.literal('openItem.unapply/v1'),
+    application: applicationBinding,
+    source: itemBinding,
+    target: itemBinding,
+    sourceLedger: ledger,
+    targetLedger: ledger,
   }),
 ]);
+/** The capability each binding version is executed by. */
+export const OPEN_ITEM_BINDING_CAPABILITY: Readonly<
+  Record<OpenItemOperationBinding['bindingVersion'], string>
+> = Object.freeze({
+  'openItem.issue/v1': OPEN_ITEM_ISSUE_CAPABILITY,
+  'openItem.apply/v1': OPEN_ITEM_APPLY_CAPABILITY,
+  'openItem.void/v1': OPEN_ITEM_VOID_CAPABILITY,
+  'openItem.unapply/v1': OPEN_ITEM_UNAPPLY_CAPABILITY,
+});
 export type OpenItemOperationBinding = z.infer<typeof OpenItemOperationBinding>;
 
 export interface BoundOpenItems {
   readonly declared: boolean;
-  /** The compiled binding by operation ID (issue and apply operations). */
+  /** The compiled binding by operation ID (every core operation). */
   readonly operations: ReadonlyMap<string, OpenItemOperationBinding>;
   /** Core-written role fields by entity: out of every create and update. */
   readonly protectedFields: ReadonlyMap<string, ReadonlySet<string>>;
@@ -240,9 +289,7 @@ export function bindOpenItems(
       (operation) =>
         operation.lifecycle === 'active' &&
         operation.effect.kind === 'registeredCapabilityEffect' &&
-        [OPEN_ITEM_ISSUE_CAPABILITY, OPEN_ITEM_APPLY_CAPABILITY].includes(
-          operation.effect.capability.targetId,
-        ),
+        OPEN_ITEM_CAPABILITIES.includes(operation.effect.capability.targetId),
     );
     return stray
       ? {
@@ -345,6 +392,10 @@ export function bindOpenItems(
   const bound = new Map<string, OpenItemTypeBinding>();
   const protectedFields = new Map<string, ReadonlySet<string>>();
   const operationBindings = new Map<string, OpenItemOperationBinding>();
+  // Void and application bindings carry ledgers, known once every
+  // application type is read: claimed here, bound after both loops.
+  const claimed = new Set<string>();
+  const voids = new Map<string, string>();
   for (const item of items) {
     const path = '$.openItems';
     const subject = item.entityId;
@@ -601,6 +652,36 @@ export function bindOpenItems(
       );
     if (operationBindings.has(item.issue.operationId))
       return refuse(path, item.issue.operationId, 'An issue issues one type.');
+    if (item.void) {
+      const voidTransition = machine.transitions.find(
+        (transition) => transition.transitionId === item.void?.transitionId,
+      );
+      if (
+        !voidTransition ||
+        voidTransition.fromState.targetId !== item.states.open ||
+        voidTransition.toState.targetId !== item.states.void
+      )
+        return refuse(
+          path,
+          item.void.transitionId,
+          "Void is the machine's transition from open to void.",
+        );
+      if (
+        !capabilityOperation(
+          item.void.operationId,
+          OPEN_ITEM_VOID_CAPABILITY,
+          item.entityId,
+        ) ||
+        claimed.has(item.void.operationId)
+      )
+        return refuse(
+          path,
+          item.void.operationId,
+          'Void is an active, person-confirmed open-item void operation that reads the item back, for one type.',
+        );
+      claimed.add(item.void.operationId);
+      voids.set(item.void.operationId, item.entityId);
+    }
     const binding: OpenItemTypeBinding = {
       entityId: item.entityId,
       direction: item.direction,
@@ -639,6 +720,11 @@ export function bindOpenItems(
   }
 
   const applicationEntities = new Set<string>();
+  const pending: {
+    readonly application: OpenItemApplicationDeclaration;
+    readonly source: OpenItemTypeBinding;
+    readonly target: OpenItemTypeBinding;
+  }[] = [];
   for (const application of applications) {
     const path = '$.openItemApplications';
     const subject = application.entityId;
@@ -722,6 +808,20 @@ export function bindOpenItems(
         unwritten.fieldId,
         'The core writes only the company, both ends and the amount of an application: every other field is optional.',
       );
+    const link = v6.relations.find(
+      (relation) =>
+        relation.lifecycle === 'active' &&
+        relation.sourceEntity.targetId === application.entityId &&
+        relation.required &&
+        relation.relationId !== application.sourceRelationId &&
+        relation.relationId !== application.targetRelationId,
+    );
+    if (link)
+      return refuse(
+        path,
+        link.relationId,
+        'The core writes only the company, both ends and the amount of an application: every other link is optional.',
+      );
     const generic = entityOperations(application.entityId)[0];
     if (generic)
       return refuse(
@@ -735,15 +835,56 @@ export function bindOpenItems(
         OPEN_ITEM_APPLY_CAPABILITY,
         application.entityId,
       ) ||
-      operationBindings.has(application.applyOperationId)
+      claimed.has(application.applyOperationId)
     )
       return refuse(
         path,
         application.applyOperationId,
         'Apply is an active, person-confirmed open-item apply operation that reads an application back.',
       );
-    operationBindings.set(application.applyOperationId, {
-      bindingVersion: 'openItem.apply/v1',
+    claimed.add(application.applyOperationId);
+    if (application.unapplyOperationId !== undefined) {
+      if (
+        !capabilityOperation(
+          application.unapplyOperationId,
+          OPEN_ITEM_UNAPPLY_CAPABILITY,
+          application.entityId,
+        ) ||
+        claimed.has(application.unapplyOperationId)
+      )
+        return refuse(
+          path,
+          application.unapplyOperationId,
+          'Unapply is an active, person-confirmed open-item unapply operation that reads an application back.',
+        );
+      claimed.add(application.unapplyOperationId);
+    }
+    pending.push({ application, source, target });
+  }
+  // Each item type's ledger: every application type naming it at one end.
+  const ledgerOf = (entityId: string): OpenItemLedger =>
+    pending.flatMap(({ application, source, target }) => [
+      ...(source.entityId === entityId
+        ? [
+            {
+              entityId: application.entityId,
+              relationId: application.sourceRelationId,
+              amountFieldId: application.amountFieldId,
+            },
+          ]
+        : []),
+      ...(target.entityId === entityId
+        ? [
+            {
+              entityId: application.entityId,
+              relationId: application.targetRelationId,
+              amountFieldId: application.amountFieldId,
+            },
+          ]
+        : []),
+    ]);
+  for (const { application, source, target } of pending) {
+    const ends = {
       application: {
         entityId: application.entityId,
         sourceRelationId: application.sourceRelationId,
@@ -752,16 +893,31 @@ export function bindOpenItems(
       },
       source,
       target,
+      sourceLedger: ledgerOf(source.entityId),
+      targetLedger: ledgerOf(target.entityId),
+    };
+    operationBindings.set(application.applyOperationId, {
+      bindingVersion: 'openItem.apply/v1',
+      ...ends,
     });
+    if (application.unapplyOperationId !== undefined)
+      operationBindings.set(application.unapplyOperationId, {
+        bindingVersion: 'openItem.unapply/v1',
+        ...ends,
+      });
   }
+  for (const [operationId, entityId] of voids)
+    operationBindings.set(operationId, {
+      bindingVersion: 'openItem.void/v1',
+      item: bound.get(entityId)!,
+      ledger: ledgerOf(entityId),
+    });
   // A core operation is bound by exactly one declaration.
   for (const operation of v6.operations)
     if (
       operation.lifecycle === 'active' &&
       operation.effect.kind === 'registeredCapabilityEffect' &&
-      [OPEN_ITEM_ISSUE_CAPABILITY, OPEN_ITEM_APPLY_CAPABILITY].includes(
-        operation.effect.capability.targetId,
-      ) &&
+      OPEN_ITEM_CAPABILITIES.includes(operation.effect.capability.targetId) &&
       !operationBindings.has(operation.operationId)
     )
       return refuse(

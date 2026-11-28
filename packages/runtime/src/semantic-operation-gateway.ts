@@ -10,8 +10,8 @@ import {
   BookingOperationBinding,
 } from '@north-star/canonical-model';
 import {
-  OPEN_ITEM_APPLY_CAPABILITY,
-  OPEN_ITEM_ISSUE_CAPABILITY,
+  OPEN_ITEM_BINDING_CAPABILITY,
+  OPEN_ITEM_CAPABILITIES,
   OpenItemOperationBinding,
 } from '../../canonical-model/src/open-item.js';
 import { authorizedDateTimeWorkingCompany } from './date-time-working-company.js';
@@ -1571,8 +1571,8 @@ export function assertPinnedOperationDefinition(
   // binding rides only the person-confirmed core operation it was compiled for.
   const openItemCapability =
     isRecord(value.effect.capability) &&
-    (value.effect.capability.targetId === OPEN_ITEM_ISSUE_CAPABILITY ||
-      value.effect.capability.targetId === OPEN_ITEM_APPLY_CAPABILITY);
+    typeof value.effect.capability.targetId === 'string' &&
+    OPEN_ITEM_CAPABILITIES.includes(value.effect.capability.targetId);
   if (Object.hasOwn(value, 'openItem') || openItemCapability) {
     const binding = OpenItemOperationBinding.safeParse(value.openItem);
     if (
@@ -1580,9 +1580,7 @@ export function assertPinnedOperationDefinition(
       value.effect.kind !== 'registeredCapabilityEffect' ||
       !isRecord(value.effect.capability) ||
       value.effect.capability.targetId !==
-        (binding.data.bindingVersion === 'openItem.issue/v1'
-          ? OPEN_ITEM_ISSUE_CAPABILITY
-          : OPEN_ITEM_APPLY_CAPABILITY) ||
+        OPEN_ITEM_BINDING_CAPABILITY[binding.data.bindingVersion] ||
       value.confirmation !== 'humanRequired'
     )
       throw invalid(

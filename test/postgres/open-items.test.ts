@@ -1,9 +1,10 @@
 /**
- * OPEN-ITEM-1 slice 1 on PostgreSQL: a tenant-declared receivable pair (a fee
- * note with lines, a line-less receipt, a receipt application) goes draft ->
- * issue (numbered per company and series) -> one receipt applied, on two
- * companies of one tenant. Each assertion message names the check whose
- * removal reds it (rule 8; test/evidence/OPEN-ITEM-1-s1.expected-red.json).
+ * OPEN-ITEM-1 slices 1 and 2 on PostgreSQL: tenant-declared receivables (a
+ * fee note with lines, a line-less receipt, a credit note with lines, and an
+ * application type for each credit-side type) go draft -> issue (numbered
+ * per company and series) -> applied -> unapplied or void, on two companies
+ * of one tenant. Each assertion message names the check whose removal reds
+ * it (rule 8; test/evidence/OPEN-ITEM-1-s1.expected-red.json and -s2).
  * One install, self-contained subtests: each creates its own records.
  */
 import assert from 'node:assert/strict';
@@ -13,21 +14,36 @@ import test, { type TestContext } from 'node:test';
 import { escapeIdentifier, type Pool } from 'pg';
 
 import { COMPOSED_APPLICATION_INVENTORY_SCOPE } from '../../apps/api/src/composition-root.js';
-import { openItemLineSetDigest } from '../../packages/canonical-model/src/index.js';
+import {
+  OPEN_ITEM_APPLY_CAPABILITY,
+  openItemLineSetDigest,
+} from '../../packages/canonical-model/src/index.js';
 import { createComposedApplicationRuntime } from '../../packages/postgres-provider/src/composed-application-runtime.js';
+import type { PostgresCapabilityOperationExecutorContext } from '../../packages/postgres-provider/src/capability-operation-executor-factory.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
 import { INVENTORY_WRITE_INVARIANTS } from '../../packages/postgres-provider/src/inventory-write-invariants.js';
 import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/inventory-posting-capability-executor.js';
 import { OPEN_ITEM_CAPABILITY_EXECUTOR_FACTORIES } from '../../packages/postgres-provider/src/open-item-capability-executor.js';
 import { PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/purchase-order-approval-executor.js';
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receiving-capability-executor.js';
-import { SEMANTIC_OPERATION_REQUEST_VERSION } from '../../packages/runtime/src/semantic-operation-gateway.js';
+import {
+  parsePinnedOperationCatalog,
+  SEMANTIC_OPERATION_REQUEST_VERSION,
+  type RegisteredCapabilityOperationAuthorizationRequest,
+} from '../../packages/runtime/src/semantic-operation-gateway.js';
 import { COMPANY, worldOver } from '../agent/agent-world.js';
 import { migrationsDirectory } from '../helpers/customization-fixture.js';
 import {
   APPLICATION,
   APPLICATION_SOURCE,
   APPLICATION_TARGET,
+  APPLY,
+  CREDIT,
+  CREDIT_ACCOUNT,
+  CREDIT_APPLICATION,
+  CREDIT_LINES,
+  CREDIT_LINES_PARENT,
+  CREDIT_TARGET,
   ISSUE_NOTE,
   NOTE,
   NOTE_ACCOUNT,
@@ -37,6 +53,9 @@ import {
   RECEIPT_ACCOUNT,
   applied,
   compileOpenItems,
+  credit,
+  creditLine,
+  credited,
   line,
   note,
   openItemApplication,
@@ -156,9 +175,11 @@ async function run(
   const stateField = (local: string) =>
     `${NS}derived_state_field.machine.custom_${local}`;
   /** An item's stored figures, revision and state, read straight from storage. */
-  const stored = async (kind: 'fee_note' | 'receipt', recordId: string) => {
-    const entity = kind === 'fee_note' ? NOTE : RECEIPT;
-    const f = kind === 'fee_note' ? note : receipt;
+  type Kind = 'fee_note' | 'receipt' | 'credit_note';
+  const stored = async (kind: Kind, recordId: string) => {
+    const entity =
+      kind === 'fee_note' ? NOTE : kind === 'receipt' ? RECEIPT : CREDIT;
+    const f = kind === 'fee_note' ? note : kind === 'receipt' ? receipt : credit;
     const p = physical(entity);
     const row = (
       await pool.query<Record<string, string | null>>(
@@ -178,29 +199,40 @@ async function run(
       state: String(row.state).replace(`${NS}state.custom_${kind}_`, ''),
     };
   };
-  /** The live lines of a fee note: record ID and revision. */
-  const liveLines = async (noteId: string) => {
-    const p = physical(NOTE_LINES);
+  /** The live lines of a fee note (or a credit note): ID and revision. */
+  const liveLines = async (
+    noteId: string,
+    lines = NOTE_LINES,
+    parent = NOTE_LINES_PARENT,
+  ) => {
+    const p = physical(lines);
     return (
       await pool.query<{ recordId: string; revision: number }>(
         `SELECT record_id::text AS "recordId", revision::int AS revision FROM ${p.table}
-          WHERE (tenant_id, environment_id) = ($1,$2) AND ${p.relation(NOTE_LINES_PARENT)} = $3
+          WHERE (tenant_id, environment_id) = ($1,$2) AND ${p.relation(parent)} = $3
             AND archived_at IS NULL`,
         [tenant, environment, noteId],
       )
     ).rows;
   };
   /** Sum of the live application amounts naming `recordId` on one end. */
-  const appliedSum = async (end: string, recordId: string) => {
-    const p = physical(APPLICATION);
+  const appliedSum = async (
+    end: string,
+    recordId: string,
+    entity = APPLICATION,
+    amount = applied('amount'),
+  ) => {
+    const p = physical(entity);
     return (
       await pool.query<{ sum: string }>(
-        `SELECT coalesce(sum(${p.column(applied('amount'))}), 0)::text AS sum FROM ${p.table}
+        `SELECT coalesce(sum(${p.column(amount)}), 0)::text AS sum FROM ${p.table}
           WHERE (tenant_id, environment_id) = ($1,$2) AND ${p.relation(end)} = $3 AND archived_at IS NULL`,
         [tenant, environment, recordId],
       )
     ).rows[0]!.sum;
   };
+  const creditSum = (end: string, recordId: string) =>
+    appliedSum(end, recordId, CREDIT_APPLICATION, credited('amount'));
 
   // A second company of the same tenant and environment.
   const companyB = randomUUID();
@@ -748,6 +780,498 @@ async function run(
         `a company-B receipt settled a company-A fee note: ${across}`,
       );
       assert.equal((await stored('fee_note', target)).applied, '0.00');
+    },
+  );
+
+  // ---- OPEN-ITEM-1 s2: void, unapply, credit notes, named refusals ----
+  const voidInput = async (kind: Kind, recordId: string) => ({
+    recordId,
+    expectedRevision: (await stored(kind, recordId)).revision,
+    arguments: {},
+  });
+  const voidItem = async (kind: Kind, recordId: string) =>
+    outcome(
+      world.invoke(
+        `custom_${kind}_action_void`,
+        await voidInput(kind, recordId),
+      ),
+    );
+  /** Apply with chosen application IDs (unapply names them later). */
+  const applyLines = async (
+    local: 'receipt' | 'credit_note',
+    sourceId: string,
+    lines: readonly { applicationId: string; target: string; amount: string }[],
+  ) =>
+    outcome(
+      world.invoke(
+        local === 'receipt'
+          ? 'custom_receipt_application_create'
+          : 'custom_credit_application_create',
+        {
+          recordId: sourceId,
+          expectedRevision: (await stored(local, sourceId)).revision,
+          arguments: { lines },
+        },
+      ),
+    );
+  const unapply = async (
+    local: 'receipt' | 'credit_note',
+    sourceId: string,
+    applicationIds: readonly string[],
+  ) =>
+    outcome(
+      world.invoke(
+        local === 'receipt'
+          ? 'custom_receipt_application_archive'
+          : 'custom_credit_application_archive',
+        {
+          recordId: sourceId,
+          expectedRevision: (await stored(local, sourceId)).revision,
+          arguments: { applicationIds },
+        },
+      ),
+    );
+  /** A draft credit note with lines. */
+  const draftCredit = async (amounts: readonly string[]) => {
+    const result = await world.invoke('custom_credit_note_create', {
+      recordId: randomUUID(),
+      legalEntityId: COMPANY,
+      values: {
+        [credit('name')]: 'Returned service',
+        [credit('currency')]: 'CAD',
+      },
+      relations: { [CREDIT_ACCOUNT]: accountA },
+    });
+    assert.equal(result.outcome, 'succeeded', JSON.stringify(result));
+    const creditId = result.readBack!.recordId;
+    for (const amount of amounts) {
+      const added = await world.invoke('custom_credit_note_lines_create', {
+        recordId: randomUUID(),
+        legalEntityId: COMPANY,
+        values: {
+          [creditLine('line_number')]: String(++lineNumber),
+          [creditLine('item')]: 'Returned',
+          [creditLine('amount')]: canonical(amount),
+        },
+        relations: { [CREDIT_LINES_PARENT]: creditId },
+      });
+      assert.equal(added.outcome, 'succeeded', JSON.stringify(added));
+    }
+    return creditId;
+  };
+  const issueCredit = async (creditId: string, total: string) =>
+    outcome(
+      world.invoke('custom_credit_note_action_issue', {
+        recordId: creditId,
+        expectedRevision: (await stored('credit_note', creditId)).revision,
+        arguments: {
+          total,
+          lineSetDigest: openItemLineSetDigest(
+            await liveLines(creditId, CREDIT_LINES, CREDIT_LINES_PARENT),
+          ),
+        },
+      }),
+    );
+  const issuedNote = async (amount: string) => {
+    const id = await draftNote([amount]);
+    assert.equal(await issueNote(id, amount), 'succeeded');
+    return id;
+  };
+  const issuedReceipt = async (amount: string) => {
+    const id = await draftReceipt(amount);
+    assert.equal(await issueReceipt(id, amount), 'succeeded');
+    return id;
+  };
+
+  await t.test(
+    'void: an open item with nothing applied is voided and keeps its number; an applied one is refused',
+    async () => {
+      const draft = await draftNote(['15.00']);
+      assert.match(await voidItem('fee_note', draft), /openItem\.notOpen/u);
+      assert.equal(await issueNote(draft, '15.00'), 'succeeded');
+      const number = (await stored('fee_note', draft)).number;
+      assert.equal(await voidItem('fee_note', draft), 'succeeded');
+      const voided = await stored('fee_note', draft);
+      assert.deepEqual(
+        [voided.state, voided.number, voided.total, voided.applied],
+        ['void', number, '15.00', '0.00'],
+        'a voided fee note lost its number or its figures',
+      );
+      assert.equal(
+        voided.balance,
+        '0.00',
+        'a voided fee note still owes its balance',
+      );
+      assert.match(await voidItem('fee_note', draft), /openItem\.notOpen/u);
+      const money = await issuedReceipt('5.00');
+      const onVoid = await apply(money, [{ target: draft, amount: '5.00' }]);
+      assert.match(
+        onVoid,
+        /openItem\.targetNotOpen/u,
+        `a receipt was applied to a void fee note: ${onVoid}`,
+      );
+      const paid = await issuedNote('20.00');
+      assert.equal(
+        await apply(money, [{ target: paid, amount: '5.00' }]),
+        'succeeded',
+      );
+      const appliedVoid = await voidItem('fee_note', paid);
+      assert.match(
+        appliedVoid,
+        /openItem\.notOpen/u,
+        `a fee note with an applied amount was voided: ${appliedVoid}`,
+      );
+      const spentVoid = await voidItem('receipt', money);
+      assert.match(
+        spentVoid,
+        /openItem\.notOpen/u,
+        `a receipt with an applied amount was voided: ${spentVoid}`,
+      );
+      const after = await stored('fee_note', paid);
+      assert.deepEqual(
+        [after.state, after.applied],
+        ['partially_settled', '5.00'],
+      );
+    },
+  );
+
+  await t.test(
+    'void racing apply: exactly one succeeds, never a void item with applied != 0',
+    async () => {
+      for (let round = 0; round < 3; round += 1) {
+        const target = await issuedNote('10.00');
+        const money = await issuedReceipt('10.00');
+        const [voiding, applying] = await Promise.all([
+          voidInput('fee_note', target),
+          applyInput(money, [{ target, amount: '10.00' }]),
+        ]);
+        const results = await Promise.all([
+          outcome(world.invoke('custom_fee_note_action_void', voiding)),
+          outcome(world.invoke('custom_receipt_application_create', applying)),
+        ]);
+        assert.equal(
+          results.filter((result) => result === 'succeeded').length,
+          1,
+          `void and apply both ran or both refused: ${results.join(' | ')}`,
+        );
+        const item = await stored('fee_note', target);
+        const live = await appliedSum(APPLICATION_TARGET, target);
+        assert.ok(
+          item.state !== 'void' || (item.applied === '0.00' && live === '0.00'),
+          `a void fee note carries an applied amount: ${JSON.stringify(item)} live ${live}`,
+        );
+        assert.equal(live, item.applied);
+      }
+    },
+  );
+
+  await t.test(
+    'unapply returns the amounts to both ends; a line is unapplied once, by its own source',
+    async () => {
+      const target = await issuedNote('100.00');
+      const money = await issuedReceipt('60.00');
+      const first = randomUUID();
+      const second = randomUUID();
+      assert.equal(
+        await applyLines('receipt', money, [
+          { applicationId: first, target, amount: '40.00' },
+        ]),
+        'succeeded',
+      );
+      assert.equal(
+        await applyLines('receipt', money, [
+          { applicationId: second, target, amount: '20.00' },
+        ]),
+        'succeeded',
+      );
+      assert.equal(await unapply('receipt', money, [first]), 'succeeded');
+      const note1 = await stored('fee_note', target);
+      assert.deepEqual(
+        [note1.applied, note1.balance, note1.state],
+        ['20.00', '80.00', 'partially_settled'],
+        'an unapply did not return the amount to the target',
+      );
+      const receipt1 = await stored('receipt', money);
+      assert.deepEqual(
+        [receipt1.applied, receipt1.balance, receipt1.state],
+        ['20.00', '40.00', 'partially_settled'],
+        'an unapply did not return the amount to the source',
+      );
+      assert.equal(await appliedSum(APPLICATION_TARGET, target), '20.00');
+      assert.equal(await appliedSum(APPLICATION_SOURCE, money), '20.00');
+      const twice = await unapply('receipt', money, [first]);
+      assert.notEqual(twice, 'succeeded', 'one line was unapplied twice');
+      assert.equal((await stored('fee_note', target)).applied, '20.00');
+      // Another source's line cannot be unapplied through this one.
+      const other = await issuedReceipt('5.00');
+      const foreignLine = randomUUID();
+      assert.equal(
+        await applyLines('receipt', other, [
+          { applicationId: foreignLine, target, amount: '5.00' },
+        ]),
+        'succeeded',
+      );
+      const foreign = await unapply('receipt', money, [foreignLine]);
+      assert.match(
+        foreign,
+        /openItem\.applicationMismatch/u,
+        `a source unapplied another source's line: ${foreign}`,
+      );
+      assert.equal(await unapply('receipt', other, [foreignLine]), 'succeeded');
+      assert.equal(await unapply('receipt', money, [second]), 'succeeded');
+      const cleared = await stored('fee_note', target);
+      assert.deepEqual(
+        [cleared.applied, cleared.balance, cleared.state],
+        ['0.00', '100.00', 'open'],
+      );
+      assert.deepEqual(
+        [
+          (await stored('receipt', money)).state,
+          (await stored('receipt', money)).balance,
+        ],
+        ['open', '60.00'],
+      );
+      // Nothing applied any more, so it may be voided now.
+      assert.equal(await voidItem('fee_note', target), 'succeeded');
+    },
+  );
+
+  await t.test(
+    'a credit note, its own document and series, settles a fee note beside a receipt',
+    async () => {
+      const target = await issuedNote('100.00');
+      const money = await issuedReceipt('30.00');
+      assert.equal(
+        await apply(money, [{ target, amount: '30.00' }]),
+        'succeeded',
+      );
+      const note1 = await draftCredit(['20.00', '30.00']);
+      assert.equal((await stored('credit_note', note1)).number, null);
+      assert.equal(await issueCredit(note1, '50.00'), 'succeeded');
+      const issued = await stored('credit_note', note1);
+      assert.deepEqual(
+        [issued.number, issued.total, issued.balance, issued.state],
+        ['CN-000001', '50.00', '50.00', 'open'],
+        'a credit note is not numbered in its own series',
+      );
+      const line1 = randomUUID();
+      const credit1 = await applyLines('credit_note', note1, [
+        { applicationId: line1, target, amount: '50.00' },
+      ]);
+      assert.equal(
+        credit1,
+        'succeeded',
+        `a credit note could not settle a fee note a receipt part-settled: ${credit1}`,
+      );
+      const after = await stored('fee_note', target);
+      assert.deepEqual(
+        [after.applied, after.balance, after.state],
+        ['80.00', '20.00', 'partially_settled'],
+        "a fee note's applied is not the sum across both application types",
+      );
+      assert.equal(await appliedSum(APPLICATION_TARGET, target), '30.00');
+      assert.equal(await creditSum(CREDIT_TARGET, target), '50.00');
+      const spent = await stored('credit_note', note1);
+      assert.deepEqual(
+        [spent.applied, spent.balance, spent.state],
+        ['50.00', '0.00', 'settled'],
+      );
+      // The receipt's and the credit note's amounts share one balance.
+      const note2 = await draftCredit(['30.00']);
+      assert.equal(await issueCredit(note2, '30.00'), 'succeeded');
+      const over = await applyLines('credit_note', note2, [
+        { applicationId: randomUUID(), target, amount: '30.00' },
+      ]);
+      assert.match(
+        over,
+        /openItem\.exceedsBalance/u,
+        `a credit note over-applied a fee note a receipt part-settled: ${over}`,
+      );
+      assert.equal(await unapply('credit_note', note1, [line1]), 'succeeded');
+      const back = await stored('fee_note', target);
+      assert.deepEqual(
+        [back.applied, back.balance, back.state],
+        ['30.00', '70.00', 'partially_settled'],
+      );
+      assert.equal(await creditSum(CREDIT_TARGET, target), '0.00');
+      assert.deepEqual(
+        [
+          (await stored('credit_note', note1)).state,
+          (await stored('credit_note', note1)).balance,
+        ],
+        ['open', '50.00'],
+      );
+    },
+  );
+
+  await t.test(
+    'named refusals: currency missing, policy changed, isolation, direction mismatch',
+    async () => {
+      // A stored source with no currency settles nothing.
+      const target = await issuedNote('10.00');
+      const blank = await issuedReceipt('10.00');
+      const r = physical(RECEIPT);
+      await pool.query(
+        `UPDATE ${r.table} SET ${r.column(receipt('currency'))} = ''
+          WHERE (tenant_id, environment_id, record_id) = ($1,$2,$3)`,
+        [tenant, environment, blank],
+      );
+      const noCurrency = await apply(blank, [{ target, amount: '10.00' }]);
+      assert.match(
+        noCurrency,
+        /openItem\.currencyMissing/u,
+        `a receipt with no stored currency was applied: ${noCurrency}`,
+      );
+      assert.equal((await stored('fee_note', target)).applied, '0.00');
+      // The policy moves after the gateway decided: the write refuses.
+      const draft = await draftNote(['4.00']);
+      await pool.query(`CREATE FUNCTION public.open_item_test_policy_moves() RETURNS trigger
+        LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $$ BEGIN
+          UPDATE platform.current_policy_epochs SET policy_version = policy_version + 1
+           WHERE (tenant_id, environment_id) = (NEW.tenant_id, NEW.environment_id);
+          RETURN NULL; END $$`);
+      await pool.query(`CREATE TRIGGER open_item_test_policy_moves
+        AFTER INSERT ON platform.open_item_approval_grants
+        FOR EACH ROW EXECUTE FUNCTION public.open_item_test_policy_moves()`);
+      let moved: string;
+      try {
+        moved = await issueNote(draft, '4.00');
+      } finally {
+        await pool.query(
+          'DROP TRIGGER open_item_test_policy_moves ON platform.open_item_approval_grants',
+        );
+        await pool.query('DROP FUNCTION public.open_item_test_policy_moves()');
+      }
+      assert.match(
+        moved,
+        /openItem\.policyChanged/u,
+        `an issue ran under a policy that moved after the decision: ${moved}`,
+      );
+      assert.equal((await stored('fee_note', draft)).number, null);
+      assert.equal(await issueNote(draft, '4.00'), 'succeeded');
+      // The line freeze holds only under READ COMMITTED.
+      const client = await pool.connect();
+      let isolation: string;
+      try {
+        await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
+        isolation = await client
+          .query(
+            'SELECT platform.open_item_consume_grant($1,$2,$3,$4,$5,$6,$7::jsonb,$8)',
+            [
+              randomUUID(),
+              'northstar.openitem:capability.open_item_issue',
+              randomUUID(),
+              1,
+              ISSUE_NOTE,
+              randomUUID(),
+              '{}',
+              'UI',
+            ],
+          )
+          .then(
+            () => 'consumed',
+            (error: Error) => error.message,
+          );
+      } finally {
+        await client.query('ROLLBACK');
+        client.release();
+      }
+      assert.match(
+        isolation,
+        /openItem\.isolationUnsupported/u,
+        `a grant was consumed outside READ COMMITTED: ${isolation}`,
+      );
+      // A binding whose ends differ in direction refuses before any read
+      // (the binder never compiles one; the executor holds it too).
+      const definition = await runtime.entry.run(MANAGER, (view) =>
+        Promise.resolve(
+          parsePinnedOperationCatalog(view.projections.operation.payload).find(
+            (entry) => entry.operationId === APPLY,
+          )!,
+        ),
+      );
+      const binding = definition.openItem!;
+      assert.equal(binding.bindingVersion, 'openItem.apply/v1');
+      if (binding.bindingVersion !== 'openItem.apply/v1') return;
+      const applyFactory = OPEN_ITEM_CAPABILITY_EXECUTOR_FACTORIES.find(
+        (factory) => factory.capabilityId === OPEN_ITEM_APPLY_CAPABILITY,
+      )!;
+      const executor = applyFactory.create({
+        projection: () => ({
+          payload: { kind: 'storageTargetPayload', entities: [], relations: [] },
+        }),
+      } as unknown as PostgresCapabilityOperationExecutorContext);
+      const crossed = await executor
+        .prepareAuthorization({
+          definition: {
+            ...definition,
+            openItem: {
+              ...binding,
+              target: { ...binding.target, direction: 'payable' },
+            },
+          },
+          input: {
+            recordId: randomUUID(),
+            expectedRevision: 1,
+            arguments: {
+              lines: [
+                {
+                  applicationId: randomUUID(),
+                  target: randomUUID(),
+                  amount: '1',
+                },
+              ],
+            },
+          },
+          readBackDefinition: {
+            queryType: 'get',
+            sourceEntityId: APPLICATION,
+            legalEntityScope: {
+              cardinality: 'exactlyOne',
+              operand: { parameterId: `${NS}parameter.scope` },
+            },
+          },
+        } as unknown as RegisteredCapabilityOperationAuthorizationRequest)
+        .then(
+          () => 'authorized',
+          (error: Error) => error.message,
+        );
+      assert.equal(
+        crossed,
+        'openItem.directionMismatch',
+        'a receivable item could be settled by a payable item at run time',
+      );
+    },
+  );
+
+  await t.test(
+    'compile refusals name their reason',
+    () => {
+      const reasons = (options: Parameters<typeof openItemAuthored>[0]) => {
+        const { authored, bindings } = openItemAuthored(options);
+        const compiled = compileOpenItems(authored, bindings);
+        return compiled.status === 'compiled'
+          ? 'compiled'
+          : JSON.stringify(compiled.diagnostics);
+      };
+      assert.match(
+        reasons({ requiredApplicationLink: true }),
+        /every other link is optional/u,
+        'a required link the core never writes compiled on an application type',
+      );
+      assert.match(
+        reasons({ requiredApplicationName: true }),
+        /every other field is optional/u,
+        'a required field the core never writes compiled on an application type',
+      );
+      assert.match(
+        reasons({ genericIssue: true }),
+        /Only the open-item core moves/u,
+      );
+      assert.match(
+        reasons({ payableReceipt: true }),
+        /stays within one direction/u,
+      );
     },
   );
 }

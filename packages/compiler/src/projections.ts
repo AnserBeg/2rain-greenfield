@@ -2672,7 +2672,8 @@ function verificationPlanPayload(
   );
   const coreWrittenEntityIds = new Set(
     [...openItems.operations.values()].flatMap((binding) =>
-      binding.bindingVersion === 'openItem.apply/v1'
+      binding.bindingVersion === 'openItem.apply/v1' ||
+      binding.bindingVersion === 'openItem.unapply/v1'
         ? [binding.application.entityId]
         : [],
     ),
